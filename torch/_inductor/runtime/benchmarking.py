@@ -1,6 +1,8 @@
 import contextlib
 import functools
 import inspect
+import logging
+import threading
 import time
 from collections.abc import Callable, Iterator
 from functools import cached_property, wraps
@@ -16,10 +18,11 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters
 from torch.utils._debug_mode import DebugMode
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._triton import triton_compile_iq_collect_enabled
 
 
+log = logging.getLogger(__name__)
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
-GPU_BENCHMARK_DEVICE_TYPES = ("cuda", "xpu", "mtia")
 _CALLABLE_PROFILE_EVENT_NAME = "_CALLABLE"
 
 
@@ -30,16 +33,9 @@ T = TypeVar("T")
 
 
 def _get_default_gpu_device_type() -> str:
-    avail_gpus = [
-        device_type
-        for device_type in GPU_BENCHMARK_DEVICE_TYPES
-        if getattr(torch, device_type).is_available()
-    ]
-    if len(avail_gpus) > 1:
-        raise AssertionError(
-            f"expected at most one available GPU type, got {avail_gpus}"
-        )
-    return "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+    from torch._inductor.utils import get_gpu_type
+
+    return get_gpu_type()
 
 
 def _normalize_gpu_device_type(device_type: str | torch.device | None) -> str:
@@ -174,13 +170,41 @@ def may_ban_benchmarking() -> None:
         """)
 
 
+@functools.cache
+def _triton_benchmarking_context() -> Callable[
+    [], contextlib.AbstractContextManager[Any]
+]:
+    # fbtriton's compile_iq collector skips launches inside this context, so it only collects
+    # the autotune winner. Only looked up when collection is enabled. The result is cached, so
+    # TRITON_COMPILE_IQ_COLLECT is read once per process.
+    if triton_compile_iq_collect_enabled():
+        try:
+            from triton.magnon.collector import benchmarking
+
+            return benchmarking
+        except ImportError as e:
+            log.warning(
+                "TRITON_COMPILE_IQ_COLLECT is enabled but triton.magnon.collector.benchmarking "
+                "is unavailable (%s); compile_iq will also collect autotune candidates.",
+                e,
+            )
+    return contextlib.nullcontext
+
+
 def time_and_count(
     fn: Callable[Concatenate[Any, P], T],
 ) -> Callable[Concatenate[Any, P], T]:
     """
-    Wraps `fn` to increment the appropriate dynamo counters. It is expected that `fn`
-    is a method of `Benchmarker` or one of its subclasses; typing limitations prevent
-    us from declaring this directly.
+    Wraps `fn` to increment the appropriate dynamo counters and to run it inside the
+    compile_iq benchmarking context (see `_triton_benchmarking_context`), so fbtriton's
+    collector skips the candidate launches it makes. It is expected that `fn` is a method
+    of `Benchmarker` or one of its subclasses; typing limitations prevent us from
+    declaring this directly.
+
+    NOTE: A new benchmarking entry point that is not wrapped with this decorator (or
+    does not enter `_triton_benchmarking_context()()` itself, as
+    `torch._inductor.utils.do_bench_using_profiling` does) leaks its candidate launches
+    into compile_iq collection.
 
     NOTE: If you're tempted to add a dynamo_timed call here, this function can be
     called enough that the dynamo_timed overhead is not negligible.
@@ -190,7 +214,8 @@ def time_and_count(
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
         fn_qual_name = f"{self.__class__.__name__}.{fn.__name__}"
         counters["inductor"][f"benchmarking.{fn_qual_name}"] += 1
-        return fn(self, *args, **kwargs)
+        with _triton_benchmarking_context()():
+            return fn(self, *args, **kwargs)
 
     return wrapper
 
@@ -359,6 +384,7 @@ class Benchmarker:
         self: Self,
         _callable: Callable[[], Any],
         grad_to_none: list[torch.Tensor] | None = None,
+        cudagraph_unroll: int | None = None,
         **kwargs: Any,
     ) -> float:
         """Benchmark a GPU callable using CUDA graph capture and replay.
@@ -367,6 +393,22 @@ class Benchmarker:
         which eliminates kernel launch overhead for fair comparison between different
         implementations.
         """
+
+        def clear_grads() -> None:
+            if grad_to_none is not None:
+                for x in grad_to_none:
+                    x.grad = None
+
+        if cudagraph_unroll is None:
+            # Preserve the historical config behavior: invalid global values
+            # fall back to one replay. Per-call overrides are a stricter API
+            # and reject invalid values below.
+            n_iters = max(1, inductor_config.autotune_cudagraph_benchmarking_iters)
+        else:
+            n_iters = cudagraph_unroll
+            if n_iters < 1:
+                raise ValueError("cudagraph_unroll must be at least 1")
+
         # Warmup
         torch.cuda.synchronize()
         _callable()
@@ -376,9 +418,7 @@ class Benchmarker:
         stream = torch.cuda.Stream()
         stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(stream):
-            if grad_to_none is not None:
-                for x in grad_to_none:
-                    x.grad = None
+            clear_grads()
             _callable()
         stream.synchronize()
 
@@ -386,16 +426,18 @@ class Benchmarker:
         with torch.cuda.graph(
             cuda_graph, stream=stream, capture_error_mode="thread_local"
         ):
-            if grad_to_none is not None:
-                for x in grad_to_none:
-                    x.grad = None
-            _callable()
+            for _ in range(n_iters):
+                clear_grads()
+                _callable()
 
         torch.cuda.current_stream().wait_stream(stream)
         torch.cuda.synchronize()
 
         # grad clearing is captured in the graph, don't pass it through.
-        return self.benchmark_gpu(cuda_graph.replay, **kwargs)
+        result = self.benchmark_gpu(cuda_graph.replay, **kwargs)
+        if isinstance(result, list):
+            return [t / n_iters for t in result]  # type: ignore[return-value]
+        return result / n_iters
 
 
 # Make built-in defaults explicit via the registry
@@ -561,7 +603,11 @@ class TritonBenchmarker(Benchmarker):
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     def __init__(self: Self) -> None:
         super().__init__()
-        self._in_cudagraph_benchmark = False
+        self._cudagraph_benchmark_state = threading.local()
+
+    @property
+    def _in_cudagraph_benchmark(self: Self) -> bool:
+        return getattr(self._cudagraph_benchmark_state, "depth", 0) > 0
 
     @cached_property
     def L2_cache_size(self: Self) -> int:
@@ -616,17 +662,22 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         self: Self,
         _callable: Callable[[], Any],
         grad_to_none: list[torch.Tensor] | None = None,
+        cudagraph_unroll: int | None = None,
         **kwargs: Any,
     ) -> float:
         # Prevent benchmark_gpu from re-entering this method
         # when autotune_cudagraph_benchmarking is enabled.
-        self._in_cudagraph_benchmark = True
+        previous_depth = getattr(self._cudagraph_benchmark_state, "depth", 0)
+        self._cudagraph_benchmark_state.depth = previous_depth + 1
         try:
             result = super().benchmark_gpu_with_cuda_graph(
-                _callable, grad_to_none=grad_to_none, **kwargs
+                _callable,
+                grad_to_none=grad_to_none,
+                cudagraph_unroll=cudagraph_unroll,
+                **kwargs,
             )
         finally:
-            self._in_cudagraph_benchmark = False
+            self._cudagraph_benchmark_state.depth = previous_depth
         return result
 
     @may_distort_benchmarking_result

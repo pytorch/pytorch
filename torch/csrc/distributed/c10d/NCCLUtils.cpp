@@ -1,9 +1,10 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 
 #ifdef USE_C10D_NCCL
+#include <c10/util/irange.h>
 #include <fmt/format.h>
-#include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace c10d {
@@ -33,6 +34,7 @@ NCCLComm::NCCLComm(NCCLComm&& other) {
   LockType lock(other.mutex_);
   std::swap(ncclComm_, other.ncclComm_);
   std::swap(aborted_, other.aborted_);
+  std::swap(preInvalidateHook_, other.preInvalidateHook_);
   std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
   std::swap(initialized_, other.initialized_);
   std::swap(nonBlocking_, other.nonBlocking_);
@@ -44,7 +46,7 @@ void NCCLComm::setUniqueHash(ncclUniqueId ncclId) {
 
   fmt::memory_buffer buf;
   buf.reserve(NCCL_UNIQUE_ID_BYTES * 2); // 2 hex chars per byte
-  for (int i = 0; i < NCCL_UNIQUE_ID_BYTES; ++i) {
+  for (const auto i : c10::irange(NCCL_UNIQUE_ID_BYTES)) {
     fmt::format_to(
         std::back_inserter(buf), "{:02x}", static_cast<int>(bytes[i]));
   }
@@ -247,7 +249,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   if (color_id >= 0) {
     // Waiting for parent comm above still does not seem to guarantee the child
     // comm ptr is valid. Therefore we add a manual wait here for safety.
-    // TODO: remove this wait after NCCL fix the semantics.
+    // TODO: remove this wait after NCCL fixes the semantics.
     auto startTime = std::chrono::steady_clock::now();
     auto timeout = nccl_nonblocking_timeout();
     while (!comm->ncclComm_) {
@@ -262,6 +264,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   // Child comm should be on the same device as parent comm
   comm->deviceIndex_ = source->deviceIndex_;
   comm->nonBlocking_ = config.blocking == 0;
+  comm->initialized_ = !comm->nonBlocking_;
   comm->setUniqueHash(
       source->getUniqueHash() + ":" +
       std::to_string(source->ncclCommSplitCounter_));
@@ -329,6 +332,20 @@ std::shared_ptr<NCCLComm> NCCLComm::shrink(
 }
 #endif // NCCL_HAS_COMM_SHRINK
 
+void NCCLComm::runPreInvalidateHook() {
+  auto hook = std::exchange(preInvalidateHook_, nullptr);
+  if (!hook) {
+    return;
+  }
+  try {
+    hook();
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Rank " << rank_
+                 << ": NCCL communicator pre-invalidate hook failed: "
+                 << e.what();
+  }
+}
+
 void NCCLComm::finalize() {
   LockType lock(mutex_);
   if (aborted_) {
@@ -343,6 +360,9 @@ void NCCLComm::finalize() {
 
 void NCCLComm::destroy() {
   LockType lock(mutex_);
+#ifdef USE_ROCM
+  runPreInvalidateHook();
+#endif
   if (aborted_) {
     LOG(INFO) << "Rank " << rank_
               << ": NCCL communicator already Invalidated. Skip destroy.";
@@ -357,6 +377,9 @@ void NCCLComm::destroy() {
 
 void NCCLComm::abort(std::optional<std::string> commFailureReason) {
   LockType lock(mutex_);
+#ifdef USE_ROCM
+  runPreInvalidateHook();
+#endif
   at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
   if (aborted_ && !initialized_) {
     // Should not abort twice.
@@ -697,7 +720,7 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
         // get the collective finished if launched on GPU and hash its output.
         AT_CUDA_CHECK(
             cudaMemcpy(dst.data(), src, data_size, cudaMemcpyDeviceToHost));
-        for (size_t i = 0; i < data_size; ++i) {
+        for (const auto i : c10::irange(data_size)) {
           // Update the hash for each byte in the tensor
           hash = c10::hash_combine(hash, c10::get_hash(dst[i], data_size));
         }

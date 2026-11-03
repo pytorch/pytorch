@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 
+#include <c10/util/irange.h>
 #include <functional>
 #include <queue>
 #include <unordered_map>
@@ -54,7 +55,7 @@ struct DinicFlowGraph {
     size_t vertex_count = 0;
 
     auto get_idx = [&vertex_count, this](const std::string& name) {
-      if (!mapping.count(name)) {
+      if (!mapping.contains(name)) {
         TORCH_CHECK(vertex_count == vertex_names.size());
         vertex_names.push_back(name);
         size_t idx = vertex_count;
@@ -224,7 +225,7 @@ struct DinicFlowGraph {
     //   the behavior of networkx.
     auto can_reach_t = reverse_bfs_reachable(t);
     std::vector<size_t> reachable, unreachable;
-    for (size_t i = 0; i < graph_size; ++i) {
+    for (const auto i : c10::irange(graph_size)) {
       if (can_reach_t[i]) {
         unreachable.push_back(i);
       } else {
@@ -236,7 +237,7 @@ struct DinicFlowGraph {
   }
 
   MinCutResult minimum_cut(const std::string& s, const std::string& t) {
-    if (mapping.find(s) == mapping.end() || mapping.find(t) == mapping.end()) {
+    if (!mapping.contains(s) || !mapping.contains(t)) {
       return {
           MinCutStatus::INVALID, // status
           0, // max_flow

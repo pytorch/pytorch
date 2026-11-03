@@ -120,7 +120,7 @@ bool checkHasValidSetGetState(const c10::ClassType& cls);
 using BackendMetaPtr = std::function<
     void(const at::Tensor&, std::unordered_map<std::string, bool>&)>;
 
-// A allowlist of device type, currently available is PrivateUse1
+// An allowlist of device type, currently available is PrivateUse1
 TORCH_API std::unordered_set<c10::DeviceType>& GetBackendMetaAllowlist();
 
 // Dynamically obtain serialization function pairs
@@ -201,6 +201,22 @@ inline void setTensorMetadata(
     metadata[key] = pair.value().toBool();
   }
   setTensorMetadata(t, std::move(metadata));
+}
+
+// Copy backend metadata (c10::BackendMeta) from src to dst: via
+// BackendMeta::clone_for_fake() when for_fake (copying onto a FakeTensor), else
+// BackendMeta::clone(). A no-op when src has none or the backend declines the
+// fake copy; other tensor metadata on dst is left untouched.
+inline void copyBackendMeta(
+    const at::Tensor& src,
+    const at::Tensor& dst,
+    bool for_fake = false) {
+  if (auto meta = src.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr()) {
+    auto copied = for_fake ? meta->clone_for_fake(meta) : meta->clone(meta);
+    if (copied) {
+      dst.unsafeGetTensorImpl()->set_backend_meta(copied);
+    }
+  }
 }
 
 // Register function pointer of Tensor BackendMetadata for serialization.

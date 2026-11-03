@@ -104,7 +104,7 @@ def report_compile_source_on_error():
                     # get the augmented line/col numbers.  Objects/codeobject.c,
                     # specifically _PyCode_InitAddressRange, reveals that
                     # this iterator is initialized from co_linetable and
-                    # co_firstfileno.  So copy these we must!
+                    # co_firstlineno.  So copy these we must!
                     code = code.replace(  # type: ignore[call-arg]
                         co_linetable=frame.f_code.co_linetable,  # type: ignore[attr-defined]
                         co_firstlineno=frame.f_code.co_firstlineno,  # type: ignore[attr-defined]
@@ -219,7 +219,7 @@ class CapturedTraceback:
         """
         Formats a single torch._C._profiler.CapturedTraceback into a list of
         strings equivalent to the output of traceback.format_list.  Note that if
-        pass it CapturedTraceback with C++ traces,  it is better not to use this
+        you pass it CapturedTraceback with C++ traces,  it is better not to use this
         function and use the batch formatting API format_captured_tbs to amortize
         the cost of symbolization
         """

@@ -10,12 +10,14 @@ import torch
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch._dynamo.eval_frame import is_dynamo_supported
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.fx.passes.tools_common import legalize_graph
 from torch.fx.passes.utils.source_matcher_utils import (
     check_subgraphs_connected,
     get_source_partitions,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     raise_on_run_directly,
@@ -29,6 +31,8 @@ def _get_node_names(nodes: list[torch.fx.Node]) -> list[str]:
 
 
 class TestSourceMatcher(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_module_partitioner_linear_relu_linear(self):
         class M(torch.nn.Module):
@@ -235,10 +239,11 @@ class TestSourceMatcher(JitTestCase):
             node.meta["val"] for node in ep.graph.nodes if node.op == "placeholder"
         ]
         gm = ep.module()
-        with fake_inputs[0].fake_mode:
+        fake_mode = maybe_get_fake_mode(fake_inputs[0])
+        with fake_mode:
             torch.fx.Interpreter(gm).run(*fake_inputs)
         legalized_gm = legalize_graph(gm)
-        with fake_inputs[0].fake_mode:
+        with fake_mode:
             torch.fx.Interpreter(legalized_gm).run(*fake_inputs)
 
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")

@@ -2,16 +2,19 @@
 
 import json
 import os
+import subprocess
 import tempfile
 from typing import Any
 from unittest import main, mock, TestCase
 
 import yaml
 from filter_test_configs import (
+    enforce_lf_allowlist,
     filter,
     filter_selected_test_configs,
     get_ghstack_below_count,
     get_labels,
+    get_reenabled_issues,
     mark_unstable_jobs,
     parse_reenabled_issues,
     perform_misc_tasks,
@@ -292,6 +295,13 @@ class TestConfigFilter(TestCase):
                 yaml.safe_load(case["test_matrix"]), mocked_labels
             )
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
+
+    def test_filter_ignores_test_config_labels(self) -> None:
+        test_matrix = {"include": [{"config": "default"}]}
+        self.assertEqual(
+            filter(test_matrix, {f"{PREFIX}cfg"}, ignore_test_config_labels=True),
+            test_matrix,
+        )
 
     def test_filter_selected_test_configs(self) -> None:
         testcases = [
@@ -833,6 +843,31 @@ class TestConfigFilter(TestCase):
         pr_body = None
         self.assertEqual(parse_reenabled_issues(pr_body), [])
 
+    @mock.patch("subprocess.check_output")
+    def test_get_reenabled_issues(self, mocked_subprocess: Any) -> None:
+        mocked_subprocess.return_value = b"Fixes #123\nUnrelated commit\nCloses #456\n"
+        self.assertEqual(
+            get_reenabled_issues(pr_body="Resolves #789"), ["789", "123", "456"]
+        )
+
+        # Must stay on a command that reads commit objects only: git cherry
+        # computes patch-ids, which makes a treeless CI checkout (--filter=tree:0)
+        # lazily fetch every tree off the default branch.
+        args, kwargs = mocked_subprocess.call_args
+        self.assertEqual(args[0][:3], ["git", "log", "--format=%s"])
+        self.assertTrue(args[0][3].endswith("..HEAD"))
+        self.assertIsNotNone(kwargs.get("timeout"))
+
+    @mock.patch("subprocess.check_output")
+    def test_get_reenabled_issues_when_git_fails(self, mocked_subprocess: Any) -> None:
+        # A broken git lookup must not lose the issues named in the PR body.
+        for err in (
+            subprocess.CalledProcessError(128, "git"),
+            subprocess.TimeoutExpired("git", 60),
+        ):
+            mocked_subprocess.side_effect = err
+            self.assertEqual(get_reenabled_issues(pr_body="Fixes #123"), ["123"])
+
     def test_get_ghstack_below_count(self) -> None:
         # Not a ghstack body.
         self.assertEqual(get_ghstack_below_count(""), 0)
@@ -855,6 +890,66 @@ class TestConfigFilter(TestCase):
             "Stack from ghstack (oldest at bottom):\n* #4\n* #3\n* #2\n* __->__ #1\n"
         )
         self.assertEqual(get_ghstack_below_count(bottom_body), 0)
+
+    def test_enforce_lf_allowlist_empty_include_passes_through(self) -> None:
+        matrix = {"include": []}
+        self.assertEqual(enforce_lf_allowlist(matrix, ""), {"include": []})
+
+    def test_enforce_lf_allowlist_non_lf_entry_untouched(self) -> None:
+        """An entry not currently on 'lf-' (already 'mt-', or a ROCm/XPU-style
+        passthrough label) needs no enforcement and must be left completely
+        alone -- even under a restricted allowlist that would reject its bare
+        pod name if it were checked."""
+        matrix = {
+            "include": [
+                {"config": "default", "runner": "mt-l-x86iamx-22-225-h100"},
+                {"config": "default", "runner": "linux.rocm.gpu.2"},
+            ]
+        }
+        result = enforce_lf_allowlist(matrix, "l-x86aavx2-11-41-a10g")
+        runners = [e["runner"] for e in result["include"]]
+        self.assertEqual(runners, ["mt-l-x86iamx-22-225-h100", "linux.rocm.gpu.2"])
+
+    def test_enforce_lf_allowlist_mixed_hardcoded_mt_alongside_dynamic_lf(
+        self,
+    ) -> None:
+        """Regression guard: a job that builds on a dynamically-resolved 'lf-'
+        but hardcodes 'mt-' on specific entries (e.g. H100, as in
+        inductor-periodic.yml) must not have that hardcoded entry re-prefixed
+        to 'mt-mt-...' just because a sibling 'lf-' entry gets force-routed."""
+        matrix = {
+            "include": [
+                {"config": "default", "runner": "lf-l-x86iavx512-8-64"},
+                {"config": "default", "runner": "mt-l-x86iamx-22-225-h100"},
+            ]
+        }
+        result = enforce_lf_allowlist(matrix, "l-x86aavx2-11-41-a10g")
+        runners = [e["runner"] for e in result["include"]]
+        self.assertEqual(runners, ["mt-l-x86iavx512-8-64", "mt-l-x86iamx-22-225-h100"])
+
+    def test_enforce_lf_allowlist_lf_runners_flag_restricts_unlisted_runner(
+        self,
+    ) -> None:
+        matrix = {
+            "include": [{"config": "default", "runner": "lf-l-x86iavx512-16-128"}]
+        }
+        result = enforce_lf_allowlist(matrix, "l-x86aavx2-29-113-a10g")
+        self.assertEqual(result["include"][0]["runner"], "mt-l-x86iavx512-16-128")
+
+    def test_enforce_lf_allowlist_lf_runners_flag_allows_listed_runner(self) -> None:
+        matrix = {
+            "include": [{"config": "default", "runner": "lf-l-x86aavx2-29-113-a10g"}]
+        }
+        result = enforce_lf_allowlist(matrix, "l-x86aavx2-29-113-a10g")
+        self.assertEqual(result["include"][0]["runner"], "lf-l-x86aavx2-29-113-a10g")
+
+    def test_enforce_lf_allowlist_empty_string_is_unrestricted(self) -> None:
+        """An explicit empty --lf-runners means unrestricted."""
+        matrix = {
+            "include": [{"config": "default", "runner": "lf-l-x86iavx512-16-128"}]
+        }
+        result = enforce_lf_allowlist(matrix, "")
+        self.assertEqual(result["include"][0]["runner"], "lf-l-x86iavx512-16-128")
 
 
 if __name__ == "__main__":

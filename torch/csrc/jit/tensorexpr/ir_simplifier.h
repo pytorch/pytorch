@@ -42,9 +42,7 @@ Dtype promoteTypesVec(const ExprPtr& s, const std::vector<ExprType>& v) {
 
 template <class ExprType>
 Dtype promoteTypesVec(const std::vector<ExprType>& v) {
-  if (v.empty()) {
-    throw malformed_input("empty list of types");
-  }
+  TORCH_CHECK(!v.empty(), "MALFORMED INPUT: empty list of types");
 
   Dtype t = v[0]->dtype();
   for (const auto& e : v) {
@@ -516,7 +514,7 @@ class TORCH_API TermExpander : public PolynomialBase {
   // Expand MinTerms to a series of Min ops.
   ExprPtr mutate(const MinTermPtr& v) override;
 
-  // Expand RoundOff to it's component: Mul(Div(lhs, rhs), rhs).
+  // Expand RoundOff to its component: Mul(Div(lhs, rhs), rhs).
   ExprPtr mutate(const RoundOffPtr& v) override;
 
   // Eliminate zero length allocations.

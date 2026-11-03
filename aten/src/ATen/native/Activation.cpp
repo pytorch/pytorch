@@ -1,17 +1,21 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Activation.h>
 
+#include <ATen/CPUGeneratorImpl.h>
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/OpMathType.h>
-#include <ATen/Parallel.h>
 #include <ATen/ScalarOps.h>
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
 #include <ATen/native/xnnpack/Engine.h>
 #endif
 #include <ATen/core/DistributionsHelper.h>
+#include <ATen/native/Resize.h>
+#include <ATen/MemoryOverlap.h>
 
 #include <c10/util/irange.h>
 #include <c10/core/ScalarType.h>
@@ -396,13 +400,13 @@ TORCH_IMPL_FUNC(gelu_out_cpu) (
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
   if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
-    const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
+    const ideep::tensor& x = itensor_from_const_tensor(self);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
 #ifdef __aarch64__
   } else if (use_mkldnn(self) && (approximate_type == GeluType::Tanh)) {
-    const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
+    const ideep::tensor& x = itensor_from_const_tensor(self);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_gelu_tanh, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
@@ -421,8 +425,8 @@ TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
   if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
-    const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
-    ideep::tensor grady = itensor_from_tensor(grad, /*from_const_data_ptr*/true);
+    const ideep::tensor& x = itensor_from_const_tensor(self);
+    ideep::tensor grady = itensor_from_const_tensor(grad);
     ideep::tensor gradx = itensor_from_tensor(grad_input);
     ideep::eltwise_backward::compute(x, grady, gradx,
       ideep::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
@@ -440,15 +444,13 @@ Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
 }
 
 Tensor& hardtanh_out(const Tensor& self, const Scalar& min, const Scalar& max, Tensor& result) {
-  TORCH_CHECK(self.scalar_type() != at::kBool,
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != at::kBool,
   "Bool inputs not supported for hardtanh");
   //preserve legacy behavior of boundaries not causing type promotion
   Scalar min_, max_;
   if (at::isIntegralType(self.scalar_type(), /*include_bool*/false)) {
     int64_t minval = min.toLong();
     int64_t maxval = max.toLong();
-    TORCH_CHECK(self.dtype() != at::kByte || (minval >= 0 &&
-       maxval >=0), "cannot do hardtanh on an unsigned type with negative limits");
     min_ = minval;
     max_ = maxval;
   } else {
@@ -513,12 +515,12 @@ Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
 }
 
 Tensor relu(const Tensor & self) {
-  TORCH_CHECK(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
   return at::clamp_min(self, 0);
 }
 
 Tensor & relu_(Tensor & self) {
-  TORCH_CHECK(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
   return at::clamp_min_(self, 0);
 }
 
@@ -585,12 +587,14 @@ static void _rrelu_with_noise_train(
     const Scalar& upper_,
     const std::optional<Generator>& generator) {
   using opmath_t = at::opmath_type<scalar_t>;
+  at::assert_no_internal_overlap(noise);
   opmath_t lower = lower_.to<opmath_t>();
   opmath_t upper = upper_.to<opmath_t>();
   Tensor tmp_tensor = output.contiguous();
   scalar_t* output_data = tmp_tensor.mutable_data_ptr<scalar_t>();
   const scalar_t* input_data = input.const_data_ptr<scalar_t>();
-  scalar_t* noise_data = noise.mutable_data_ptr<scalar_t>();
+  Tensor tmp_noise = noise.contiguous();
+  scalar_t* noise_data = tmp_noise.mutable_data_ptr<scalar_t>();
   auto gen  = at::get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   std::lock_guard<std::mutex> lock(gen->mutex_);
   for (const auto i : c10::irange(input.numel())) {
@@ -607,6 +611,9 @@ static void _rrelu_with_noise_train(
   if (!output.is_contiguous()) {
     output.copy_(tmp_tensor);
   }
+  if (!noise.is_contiguous()) {
+    noise.copy_(tmp_noise);
+  }
 }
 
 Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
@@ -618,6 +625,8 @@ Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
     Tensor& output) {
   TORCH_CHECK(self.sym_sizes() == noise.sym_sizes(), "noise tensor shape must match self tensor shape. Got self.shape = ", self.sym_sizes(), " noise.shape = ", noise.sym_sizes());
   if (training) {
+    // Not a structured op, so nothing else has sized output for us.
+    resize_output(output, self.sizes());
     AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
       _rrelu_with_noise_train<scalar_t>(output, self.contiguous(), noise, lower, upper, generator);
     });

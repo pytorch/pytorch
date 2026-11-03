@@ -180,5 +180,8 @@ jobs:
     if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
     uses: pytorch/test-infra/.github/workflows/validate-docker-images.yml@main
     with:
-      channel: nightly
+      # Must match what `build` above actually pushed, otherwise validate pulls a
+      # tag that was never built: RC tags publish pytorch-test, final release tags
+      # pytorch, and the nightly branch pytorch-nightly.
+      channel: ${{ contains(github.event.ref, '-rc') && 'test' || (startsWith(github.event.ref, 'refs/tags/v') && 'release' || 'nightly') }}
       ref: main

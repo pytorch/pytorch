@@ -141,8 +141,10 @@ bool isDict(Value* v) {
 
 class PeepholeOptimizeDictIdiomsImpl {
  public:
-  explicit PeepholeOptimizeDictIdiomsImpl(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)), aliasDb_(std::make_unique<AliasDb>(graph_)) {}
+  PeepholeOptimizeDictIdiomsImpl(
+      std::shared_ptr<Graph> graph,
+      const AliasDb& alias_db)
+      : graph_(std::move(graph)), aliasDb_(alias_db) {}
 
   bool run() {
     collectMutatedDicts(graph_->block());
@@ -151,7 +153,7 @@ class PeepholeOptimizeDictIdiomsImpl {
 
  private:
   void checkForMutatedDicts(Value* v) {
-    if (isDict(v) && aliasDb_->hasWriters(v)) {
+    if (isDict(v) && aliasDb_.hasWriters(v)) {
       mutated_dicts_.insert(v);
     }
   }
@@ -171,13 +173,7 @@ class PeepholeOptimizeDictIdiomsImpl {
   }
 
   const DictNode& getDictNode(Node* creation_node) {
-    auto cached = dict_cache_.find(creation_node);
-    if (cached == dict_cache_.end()) {
-      cached =
-          dict_cache_.emplace(creation_node, DictNode(creation_node)).first;
-    }
-
-    return cached->second;
+    return dict_cache_.try_emplace(creation_node, creation_node).first->second;
   }
 
   std::optional<Value*> getValueFromDict(Node* dict_creation_node, Value* key) {
@@ -241,7 +237,7 @@ class PeepholeOptimizeDictIdiomsImpl {
       auto first_input = node->input(0);
 
       // only optimizing ops with unmutated inputs
-      if (mutated_dicts_.count(first_input)) {
+      if (mutated_dicts_.contains(first_input)) {
         continue;
       }
 
@@ -256,15 +252,22 @@ class PeepholeOptimizeDictIdiomsImpl {
 
   std::shared_ptr<Graph> graph_;
   std::unordered_set<Value*> mutated_dicts_;
-  std::unique_ptr<AliasDb> aliasDb_;
+  const AliasDb& aliasDb_;
   std::unordered_map<Node*, DictNode> dict_cache_;
 };
 
 } // namespace
 
-bool PeepholeOptimizeDictIdioms(const std::shared_ptr<Graph>& graph) {
-  PeepholeOptimizeDictIdiomsImpl opt(graph);
+bool PeepholeOptimizeDictIdioms(
+    const std::shared_ptr<Graph>& graph,
+    const AliasDb& alias_db) {
+  PeepholeOptimizeDictIdiomsImpl opt(graph, alias_db);
   return opt.run();
+}
+
+bool PeepholeOptimizeDictIdioms(const std::shared_ptr<Graph>& graph) {
+  AliasDb alias_db(graph);
+  return PeepholeOptimizeDictIdioms(graph, alias_db);
 }
 
 } // namespace torch::jit

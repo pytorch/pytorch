@@ -14,7 +14,7 @@ namespace torch::jit::tensorexpr {
 // It was picked for two reasons: 1) it should be generic enough to represent
 // most of the ops we might want to call, 2) it should be possible to generate a
 // code for this call in LLVM codegen.
-// The first 5 parameters allow to pass any number of contiguous CPU tensors in
+// The first 5 parameters allow passing any number of contiguous CPU tensors in
 // case we need to run aten ops (TODO: support different devices). The first
 // buffer in the array is assumed to be the output buffer. We couldn't use
 // `at::Tensor` (or `c10::IValue`) type there directly as it would mean that
@@ -23,7 +23,7 @@ namespace torch::jit::tensorexpr {
 // concatenated into a single array buf_dims. We do not need to pass its length,
 // since it can be deduced from total number of buffers and their ranks.
 //
-// The last 2 arguments allow to pass any non-tensor arguments encoded as an
+// The last 2 arguments allow passing any non-tensor arguments encoded as an
 // array of int64_t values. The way they are encoded is not specified and could
 // be arbitrary - whatever the most convenient for the specific bridge function
 // is.

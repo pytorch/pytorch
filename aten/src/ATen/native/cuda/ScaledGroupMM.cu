@@ -120,7 +120,6 @@ int round_up_to_nearest_multiple(int a, int b) {
 
 template <
     typename FastAccum,
-    typename BiasType,
     typename Pong,
     typename TB_M,
     typename TB_N,
@@ -419,7 +418,7 @@ void f8f8bf16_grouped_gemm_impl_sm90(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-template <typename FastAccum, typename BiasType>
+template <typename FastAccum>
 void dispatch_fp8_grouped_gemm_on_tile_size(
     at::Tensor mat_a, // FP8
     at::Tensor mat_b, // FP8
@@ -454,7 +453,6 @@ void dispatch_fp8_grouped_gemm_on_tile_size(
   if (small) {
     f8f8bf16_grouped_gemm_impl_sm90<
         FastAccum,
-        BiasType,
         /*Pong*/ std::true_type,
         cute::_64,
         cute::_128,
@@ -463,7 +461,6 @@ void dispatch_fp8_grouped_gemm_on_tile_size(
   } else if (large && FastAccum::value) {
     f8f8bf16_grouped_gemm_impl_sm90<
         FastAccum,
-        BiasType,
         /*Pong*/ std::false_type,
         cute::_256,
         cute::_128,
@@ -472,7 +469,6 @@ void dispatch_fp8_grouped_gemm_on_tile_size(
   } else if (large) { // use smaller tile for slow accum to avoid spilling
     f8f8bf16_grouped_gemm_impl_sm90<
         FastAccum,
-        BiasType,
         /*Pong*/ std::false_type,
         cute::_128,
         cute::_128,
@@ -482,7 +478,6 @@ void dispatch_fp8_grouped_gemm_on_tile_size(
   } else
     f8f8bf16_grouped_gemm_impl_sm90<
         FastAccum,
-        BiasType,
         /*Pong*/ std::false_type,
         cute::_128,
         cute::_256,
@@ -490,7 +485,6 @@ void dispatch_fp8_grouped_gemm_on_tile_size(
         mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
 }
 
-template <typename BiasType>
 void dispatch_fp8_grouped_gemm_on_fast_accum(
     at::Tensor mat_a, // FP8
     at::Tensor mat_b, // FP8
@@ -501,28 +495,10 @@ void dispatch_fp8_grouped_gemm_on_fast_accum(
     bool use_fast_accum,
     at::Tensor& out) {
   if (use_fast_accum) {
-    dispatch_fp8_grouped_gemm_on_tile_size<std::true_type, BiasType>(
+    dispatch_fp8_grouped_gemm_on_tile_size<std::true_type>(
         mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
   } else {
-    dispatch_fp8_grouped_gemm_on_tile_size<std::false_type, BiasType>(
-        mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
-  }
-}
-
-void dispatch_fp8_grouped_gemm_on_bias_dtype(
-    at::Tensor mat_a, // FP8
-    at::Tensor mat_b, // FP8
-    at::Tensor scale_a, // FP32
-    at::Tensor scale_b, // FP32
-    std::optional<at::Tensor> offs,
-    std::optional<at::Tensor> bias, // BF16
-    bool use_fast_accum,
-    at::Tensor& out) {
-  if (bias.has_value() && bias->dtype() == at::kBFloat16) {
-    dispatch_fp8_grouped_gemm_on_fast_accum<cutlass::bfloat16_t>(
-        mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
-  } else {
-    dispatch_fp8_grouped_gemm_on_fast_accum<float>(
+    dispatch_fp8_grouped_gemm_on_tile_size<std::false_type>(
         mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
   }
 }
@@ -542,7 +518,7 @@ void f8f8bf16_grouped_mm(
     bool use_fast_accum,
     at::Tensor& out) {
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
-  dispatch_fp8_grouped_gemm_on_bias_dtype(
+  dispatch_fp8_grouped_gemm_on_fast_accum(
       mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
 #else
   TORCH_CHECK(false, "grouped mm is not supported on your system");

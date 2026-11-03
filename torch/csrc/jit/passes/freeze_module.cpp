@@ -241,7 +241,7 @@ class AttributePropagator {
       const Iter& end) {
     for (Iter it = begin; it != end; ++it) {
       const std::string& moduleName = *it;
-      if (preservedAttrs_.count(attrModule.attr(moduleName))) {
+      if (preservedAttrs_.contains(attrModule.attr(moduleName))) {
         return false;
       }
       attrModule = attrModule.attr(moduleName).toModule();
@@ -312,10 +312,10 @@ class AttributePropagator {
     auto attr = attrModule.attr(name);
     if (!AliasDb::isMutableType(attr.type())) {
       auto it = preservedScalarAttrs_.find(attrModule._ivalue());
-      return it == preservedScalarAttrs_.end() || !it->second.count(name);
+      return it == preservedScalarAttrs_.end() || !it->second.contains(name);
     }
 
-    if (preservedAttrs_.count(attr)) {
+    if (preservedAttrs_.contains(attr)) {
       return false;
     }
     if (!attr.type()->cast<ClassType>()) {
@@ -395,11 +395,9 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
-              // NOLINTNEXTLINE(modernize-avoid-bind)
-              std::bind(
-                  &AttributePropagator::recordMutableAttrs,
-                  *this,
-                  std::placeholders::_1));
+              // TODO: Determine if passing `this` by copy is intentional
+              // github.com/pytorch/pytorch/pull/195598#issuecomment-5497079717
+              std::bind_front(&AttributePropagator::recordMutableAttrs, *this));
         }
       }
     }
@@ -440,14 +438,14 @@ class AttributePropagator {
       for (const auto i : c10::irange(elems.size())) {
         elems.set(i, overrideGradient(elems.extract(i)));
       }
-      attr = elems;
+      attr = std::move(elems);
     } else if (attr.isGenericDict()) {
       auto dict = std::move(attr).toGenericDict();
       for (const auto& pair : dict) {
         auto val = pair.value();
         val = overrideGradient(std::move(val));
       }
-      attr = dict;
+      attr = std::move(dict);
     } else if (attr.isObject() && !attr.toObjectRef().type()->is_module()) {
       auto obj_type = attr.type()->expect<ClassType>();
       auto obj_value = std::move(attr).toObject();
@@ -687,7 +685,7 @@ class AttributePropagator {
               attr = overrideGradient(attr);
             }
             if (attr.isObject()) {
-              if (object_memo_.count(attr.toObject())) {
+              if (object_memo_.contains(attr.toObject())) {
                 attr = object_memo_[attr.toObject()];
               } else {
                 auto weak_class_obj =
@@ -724,11 +722,10 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
-              // NOLINTNEXTLINE(modernize-avoid-bind)
-              std::bind(
-                  &AttributePropagator::propagateAttributes,
-                  *this,
-                  std::placeholders::_1));
+              // TODO: Determine if passing `this` by copy is intentional
+              // github.com/pytorch/pytorch/pull/195598#issuecomment-5497079717
+              std::bind_front(
+                  &AttributePropagator::propagateAttributes, *this));
         }
       }
     }
@@ -767,7 +764,7 @@ class AttributePropagator {
         return true;
       }
     }
-    return preservedSubModule_.count(subModule._ivalue());
+    return preservedSubModule_.contains(subModule._ivalue());
   }
 
   void removeExtraWaitCalls(Block* b) {
@@ -779,7 +776,7 @@ class AttributePropagator {
       }
       TORCH_INTERNAL_ASSERT(node->inputs().size() == 1);
       TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
-      // If input type is not a from aten::fork call then the
+      // If input type is not from an aten::fork call then the
       // aten::wait operator can be deleted.
       if (node->input()->type()->kind() != TypeKind::FutureType) {
         node->output()->replaceAllUsesWith(node->input());
@@ -851,11 +848,10 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
-              // NOLINTNEXTLINE(modernize-avoid-bind)
-              std::bind(
-                  &AttributePropagator::recordReferencedAttrs,
-                  *this,
-                  std::placeholders::_1));
+              // TODO: Determine if passing `this` by copy is intentional
+              // github.com/pytorch/pytorch/pull/195598#issuecomment-5497079717
+              std::bind_front(
+                  &AttributePropagator::recordReferencedAttrs, *this));
         }
       }
     }
@@ -895,10 +891,10 @@ class AttributePropagator {
 
       bool isMutable = false;
       if (AliasDb::isMutableType(attrTy)) {
-        isMutable = preservedAttrs_.count(attr);
+        isMutable = preservedAttrs_.contains(attr);
       } else {
         isMutable =
-            it2 != preservedScalarAttrs_.end() && it2->second.count(name);
+            it2 != preservedScalarAttrs_.end() && it2->second.contains(name);
       }
       if (isMutable) {
         attrsToKeep_[type].insert(i);
@@ -924,16 +920,16 @@ class AttributePropagator {
     for (auto& it : attrsToKeep_) {
       auto& type = it.first;
       size_t N = type->numAttributes();
-      if (it.second.count(N)) {
+      if (it.second.contains(N)) {
         continue;
       }
       for (const auto i : c10::irange(N)) {
-        if (it.second.count(i) == 0) {
+        if (!it.second.contains(i)) {
           attrsToRemove.push_back(type->getAttributeName(i));
         }
       }
       for (auto& fn : type->methods()) {
-        if (preservedMethods_.count(fn)) {
+        if (preservedMethods_.contains(fn)) {
           continue;
         }
         funcsToRemove.push_back(fn);

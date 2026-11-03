@@ -89,7 +89,7 @@ bool SubgraphMatcher::isOutput(const Value* v) {
  */
 bool SubgraphMatcher::matchValues(const Value* v1, Value* v2) {
   // Check if we've already visited these values.
-  if (values_map_.count(v1)) {
+  if (values_map_.contains(v1)) {
     if (values_map_.at(v1) != v2) {
       GRAPH_DEBUG(
           "Values %",
@@ -231,7 +231,7 @@ bool SubgraphMatcher::matchAttributes(const Node* n1, Node* n2) {
  */
 bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
   // Check if we've already visited these nodes.
-  if (nodes_map_.count(n1)) {
+  if (nodes_map_.contains(n1)) {
     return nodes_map_.at(n1) == n2;
   }
 

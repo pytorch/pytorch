@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO, run_tests
 
 __TestCase = CPythonTestCase
 
@@ -27,10 +27,12 @@ from fractions import Fraction
 
 from test import support
 from test.support import import_helper
+import operator
 
 
 py_operator = import_helper.import_fresh_module('operator',
                                                 blocked=['_operator'])
+
 c_operator = import_helper.import_fresh_module('operator',
                                                fresh=['_operator'])
 
@@ -552,7 +554,7 @@ class OperatorTestCase:
             operator.index(1.5)
         with self.assertRaises((AttributeError, TypeError)):
             operator.index(Fraction(3, 7))
-        with self.assertRaises((AttributeError, TypeError)):
+        with torch._dynamo.error_on_graph_break(False), self.assertRaises((AttributeError, TypeError)):
             operator.index(Decimal(1))
         with self.assertRaises((AttributeError, TypeError)):
             operator.index(None)
@@ -653,7 +655,10 @@ class PyOperatorTestCase(OperatorTestCase, __TestCase):
 
 @unittest.skipUnless(c_operator, 'requires _operator')
 class COperatorTestCase(OperatorTestCase, __TestCase):
-    module = c_operator
+    if TEST_WITH_TORCHDYNAMO:
+        module = operator
+    else:
+        module = c_operator
 
 
 class OperatorPickleTestCase:
@@ -744,17 +749,27 @@ class PyPyOperatorPickleTestCase(OperatorPickleTestCase, __TestCase):
 @unittest.skipUnless(c_operator, 'requires _operator')
 class PyCOperatorPickleTestCase(OperatorPickleTestCase, __TestCase):
     module = py_operator
-    module2 = c_operator
+    if TEST_WITH_TORCHDYNAMO:
+        module2 = operator
+    else:
+        module2 = c_operator
 
 @unittest.skipUnless(c_operator, 'requires _operator')
 class CPyOperatorPickleTestCase(OperatorPickleTestCase, __TestCase):
-    module = c_operator
+    if TEST_WITH_TORCHDYNAMO:
+        module = operator
+    else:
+        module = c_operator
     module2 = py_operator
 
 @unittest.skipUnless(c_operator, 'requires _operator')
 class CCOperatorPickleTestCase(OperatorPickleTestCase, __TestCase):
-    module = c_operator
-    module2 = c_operator
+    if TEST_WITH_TORCHDYNAMO:
+        module = operator
+        module2 = operator
+    else:
+        module = c_operator
+        module2 = c_operator
 
 
 if __name__ == "__main__":

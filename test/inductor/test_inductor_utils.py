@@ -2,14 +2,27 @@
 
 import functools
 import logging
+from types import SimpleNamespace
 from unittest import mock
 
+import sympy
+
 import torch
-from torch._inductor import utils
+from torch._dynamo.source import ConstantSource
+from torch._inductor import config, ir, utils
+from torch._inductor.ir import get_stride_order
+from torch._inductor.ops_handler import MockHandler
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import do_bench_using_profiling
+from torch._inductor.virtualized import NullHandler, V
 from torch.autograd import DeviceType
+from torch.fx.experimental._constant_symnode import ConstantIntNode
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -20,6 +33,16 @@ device_type = (
     if (acc := torch.accelerator.current_accelerator(check_available=True))
     else "cpu"
 )
+
+
+class TestFallbackByDefault(TestCase):
+    def test_sym_size_uses_inductor_lowering_in_lite_mode(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        sym_size = graph.call_function(torch.ops.aten.sym_size.int, (x, 0))
+
+        with config.patch({"fallback_by_default": True}):
+            self.assertFalse(utils.should_fallback_by_default(sym_size))
 
 
 class FakeKinetoEvent:
@@ -195,6 +218,59 @@ class TestBench(TestCase):
                 1,
                 DeviceType.CUDA,
             )
+
+
+class TestStrideOrder(TestCase):
+    def test_symbolic_stride_order_uses_current_graph_shape_env(self):
+        shape_env = ShapeEnv()
+        stride = shape_env.create_symbol(
+            42,
+            source=ConstantSource("stride"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+        )
+        graph = SimpleNamespace(
+            sizevars=SimpleNamespace(shape_env=shape_env),
+            _shape_env=shape_env,
+        )
+
+        with V.set_graph_handler(graph):
+            self.assertEqual(
+                get_stride_order([stride, 1, stride, stride]), [3, 0, 2, 1]
+            )
+
+    def test_constant_symint_stride_order_without_shape_env(self):
+        stride = torch.SymInt(ConstantIntNode(3))
+        self.assertEqual(get_stride_order([stride, 1]), [1, 0])
+
+
+@instantiate_parametrized_tests
+class TestReinterpretView(TestCase):
+    @parametrize(
+        "dtype,expected",
+        (
+            (torch.float32, "ops.load(input, 19)"),
+            (
+                torch.int32,
+                "ops.to_dtype_bitcast(ops.load(input, 19), torch.int32, torch.float32)",
+            ),
+        ),
+        name_fn=lambda dtype, expected: str(dtype).removeprefix("torch."),
+    )
+    def test_loader_without_graph(self, dtype, expected):
+        device = torch.device("cpu")
+        data = ir.InputBuffer(
+            name="input", layout=ir.FixedLayout(device, torch.float32, [32])
+        )
+        view = ir.ReinterpretView(
+            data=ir.StorageBox(data),
+            layout=ir.FixedLayout(device, dtype, [2, 3], [1, 8], offset=2),
+        )
+
+        # Helion evaluates loaders without an active Inductor graph.
+        with V.set_graph_handler(NullHandler()), V.set_ops_handler(MockHandler()):
+            result = view.make_loader()([sympy.Integer(1), sympy.Integer(2)])
+
+        self.assertEqual(str(result), expected)
 
 
 if __name__ == "__main__":

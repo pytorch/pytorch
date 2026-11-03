@@ -28,7 +28,11 @@ from torch.fx.experimental.dynamic_spec import (
     TensorSpec as T,
 )
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def _reset_uid_counter():
@@ -104,6 +108,8 @@ class _ModBranch(torch.nn.Module):
 
 class _TestExportDynamicSpecBase(TestCase):
     """torch.export.export support for the new ShapesSpec/ParamsSpec API."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -986,10 +992,12 @@ class <lambda>(torch.nn.Module):
 
 
 class TestExportDynamicSpecStrict(_TestExportDynamicSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = True
 
 
 class TestExportDynamicSpecNonStrict(_TestExportDynamicSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = False
 
 
@@ -997,6 +1005,8 @@ del _TestExportDynamicSpecBase
 
 
 class _TestContainerSpecBase(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -1553,10 +1563,12 @@ class _TestContainerSpecBase(TestCase):
 
 
 class TestContainerSpecStrict(_TestContainerSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = True
 
 
 class TestContainerSpecNonStrict(_TestContainerSpecBase):
+    hw_classification = HardwareClassification.GENERIC
     strict = False
 
 

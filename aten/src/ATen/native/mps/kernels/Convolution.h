@@ -1,6 +1,23 @@
 #pragma once
 #include <c10/metal/common.h>
 
+// Outputs each conv1d_depthwise thread keeps in registers, so every weight
+// tap is loaded once per 8 outputs.
+C10_METAL_CONSTEXPR int32_t kConv1dDepthwiseOutputsPerThread = 8;
+
+// Source element strides of the OIDHW weight view (may be non-contiguous).
+struct ConvWeightPermuteParams {
+  uint32_t output_channels;
+  uint32_t input_channels_per_group;
+  uint32_t kernel_height;
+  uint32_t kernel_width;
+  uint32_t output_channel_stride;
+  uint32_t input_channel_stride;
+  uint32_t depth_stride;
+  uint32_t height_stride;
+  uint32_t width_stride;
+};
+
 struct Conv2DParams {
   int32_t N;
   int32_t C_in;

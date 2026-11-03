@@ -7,9 +7,12 @@ from unittest import mock
 
 from torch._inductor.runtime import cache_dir_utils
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestCacheDirUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_cache_dir_resolves_relative_env(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             old_cwd = os.getcwd()

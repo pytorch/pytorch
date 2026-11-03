@@ -517,7 +517,7 @@ std::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
       shape_ratio /= static_cast<uint64_t>(target_shape.static_size());
     } else {
       auto value = target_shape.value();
-      if (sym_map.find(value) == sym_map.end()) {
+      if (!sym_map.contains(value)) {
         return std::nullopt;
       }
       sym_map[value]--;
@@ -930,9 +930,9 @@ void ProcessReduceNode(Node* n) {
       std::iota(axes_vector.begin(), axes_vector.end(), 0);
     }
 
-    for (auto idx : c10::irange(axes_vector.size())) {
-      if (axes_vector[idx] < 0) {
-        axes_vector[idx] += rank_0;
+    for (auto& axis : axes_vector) {
+      if (axis < 0) {
+        axis += rank_0;
       }
     }
     final_shape.reserve(rank_0);
@@ -1202,8 +1202,9 @@ void ProcessTimeSeriesNode(Node* n) {
           hidden_size = c10::ShapeSymbol::fromStaticSize(input1_value / 3);
           break;
         default:
-          throw std::runtime_error(
-              std::string() + "This is not a valid TimeSeries Node with type " +
+          TORCH_CHECK(
+              false,
+              "This is not a valid TimeSeries Node with type ",
               n->kind().toDisplayString());
       }
     } else {
@@ -1479,9 +1480,9 @@ void ComputeConstant(Node* n, int opset_version) {
           const auto& input0_shape_value = input0_shape_size.value();
           int64_t total_size = 1;
           auto is_full_static = true;
-          for (const auto i : c10::irange(input0_shape_value.size())) {
-            if (input0_shape_value[i].is_static()) {
-              total_size *= input0_shape_value[i].static_size();
+          for (const auto& shape_symbol : input0_shape_value) {
+            if (shape_symbol.is_static()) {
+              total_size *= shape_symbol.static_size();
             } else {
               is_full_static = false;
               break;
@@ -1893,7 +1894,8 @@ void ONNXShapeTypeInference(
       const_val_copy.copy_(const_val);
       ConstantValueMap::SetValue(value.first, const_val_copy);
     } else {
-      throw std::runtime_error(
+      TORCH_CHECK(
+          false,
           "ONNXShapeTypeInference - Unsupported kind of constant node found.");
     }
   }
@@ -1942,14 +1944,13 @@ std::pair<bool, bool> AreInputsReliableOrStatic(Node* n) {
   auto complete = true;
   auto input_size = n->inputs().size();
   std::unordered_set<int64_t> non_required_idx = {};
-  if (non_required_shape_inference_idx_map.find(n->kind().toDisplayString()) !=
-      non_required_shape_inference_idx_map.end()) {
+  if (non_required_shape_inference_idx_map.contains(
+          n->kind().toDisplayString())) {
     non_required_idx =
         non_required_shape_inference_idx_map[n->kind().toDisplayString()];
   }
   for (auto idx : c10::irange(input_size)) {
-    if (!non_required_idx.empty() &&
-        non_required_idx.find(idx) != non_required_idx.end()) {
+    if (!non_required_idx.empty() && non_required_idx.contains(idx)) {
       continue;
     }
     auto input = n->inputs()[idx];
@@ -1985,10 +1986,8 @@ void UpdateReliable(
     bool no_type_warning) {
   auto inferred =
       ConstantValueMap::GetUseInferredType(output->debugName()).value_or(false);
-  auto isTypeReliableForTracer =
-      nodeTypeReliableForTracer.find(
-          output->node()->kind().toDisplayString()) !=
-      nodeTypeReliableForTracer.end();
+  auto isTypeReliableForTracer = nodeTypeReliableForTracer.contains(
+      output->node()->kind().toDisplayString());
   if (!inferred && !isTypeReliableForTracer &&
       !output->node()->kind().is_onnx() && no_type_warning) {
     TORCH_WARN(
@@ -2225,7 +2224,7 @@ void ONNXSetDynamicInputShape(
 
   for (const auto i : c10::irange(input_names.size())) {
     const auto& input_name = input_names[i];
-    if (dynamic_axes.find(input_name) != dynamic_axes.end()) {
+    if (dynamic_axes.contains(input_name)) {
       auto axes_names = dynamic_axes.find(input_name)->second;
       TORCH_INTERNAL_ASSERT(i < graph->inputs().size());
       auto input_tensor_type = graph->inputs()[i]->type()->cast<TensorType>();
@@ -2241,7 +2240,7 @@ void ONNXSetDynamicInputShape(
       for (const auto& pair : axes_names) {
         const auto axis = pair.first;
         const auto name = pair.second;
-        if (name_to_sym.find(name) == name_to_sym.end()) {
+        if (!name_to_sym.contains(name)) {
           name_to_sym[name] = ::c10::ShapeSymbol::newSymbol();
         }
         TORCH_CHECK(
@@ -2417,7 +2416,7 @@ static size_t ONNXAssignOutputShape(
         "Model output has unsupported type. See "
         "https://pytorch.org/docs/stable/onnx.html#types. Got type: ";
     msg += THPUtils_typename(output_obj);
-    throw std::runtime_error(msg);
+    TORCH_CHECK(false, msg);
   }
 
   index_check();

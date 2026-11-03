@@ -1,8 +1,8 @@
 diff --git a/test/cpython/v3_13/test_sort.py b/test/cpython/v3_13/test_sort.py
-index 2a7cfb7affa..024367452a7 100644
+index 2a7cfb7affaa21ba14e1b841db89cbe76103f259..f482d96f44c9777226e8226dc2b89bacb4e8df2c 100644
 --- a/test/cpython/v3_13/test_sort.py
 +++ b/test/cpython/v3_13/test_sort.py
-@@ -1,3 +1,57 @@
+@@ -1,3 +1,61 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
@@ -17,7 +17,11 @@ index 2a7cfb7affa..024367452a7 100644
 +import torch._dynamo.test_case
 +import unittest
 +from torch._dynamo.test_case import CPythonTestCase
-+from torch.testing._internal.common_utils import run_tests, slowTest
++from torch.testing._internal.common_utils import (
++    run_tests,
++    slowTest,
++    TEST_WITH_TORCHDYNAMO,
++)
 +
 +__TestCase = CPythonTestCase
 +
@@ -60,7 +64,7 @@ index 2a7cfb7affa..024367452a7 100644
  from test import support
  import random
  import unittest
-@@ -39,7 +93,7 @@ def check(tag, expected, raw, compare=None):
+@@ -39,7 +97,7 @@ def check(tag, expected, raw, compare=None):
              nerrors += 1
              return
  
@@ -69,7 +73,7 @@ index 2a7cfb7affa..024367452a7 100644
      def testStressfully(self):
          # Try a variety of sizes at and around powers of 2, and at powers of 10.
          sizes = [0]
-@@ -128,6 +182,7 @@ class TestBase(unittest.TestCase):
+@@ -128,6 +186,7 @@ class TestBase(unittest.TestCase):
              x = [e for e, i in augmented] # a stable sort of s
              check("stability", x, s)
  
@@ -77,16 +81,32 @@ index 2a7cfb7affa..024367452a7 100644
      def test_small_stability(self):
          from itertools import product
          from operator import itemgetter
-@@ -151,7 +206,7 @@ class TestBase(unittest.TestCase):
+@@ -151,8 +210,12 @@ class TestBase(unittest.TestCase):
                  self.assertEqual(forced, native)
  #==============================================================================
  
 -class TestBugs(unittest.TestCase):
 +class TestBugs(__TestCase):
  
++    @unittest.skipIf(
++        TEST_WITH_TORCHDYNAMO,
++        "__build_class__ with closed over objects not supported",
++    )
      def test_bug453523(self):
          # bug 453523 -- list.sort() crasher.
-@@ -188,7 +243,7 @@ class TestBugs(unittest.TestCase):
+         # If this fails, the most likely outcome is a core dump.
+@@ -169,6 +232,10 @@ class TestBugs(unittest.TestCase):
+         L = [C() for i in range(50)]
+         self.assertRaises(ValueError, L.sort)
+ 
++    @unittest.skipIf(
++        TEST_WITH_TORCHDYNAMO,
++        "__build_class__ with closed over objects not supported",
++    )
+     def test_undetected_mutation(self):
+         # Python 2.4a1 did not always detect mutation
+         memorywaster = []
+@@ -188,7 +255,7 @@ class TestBugs(unittest.TestCase):
  
  #==============================================================================
  
@@ -95,7 +115,29 @@ index 2a7cfb7affa..024367452a7 100644
  
      def test_decorated(self):
          data = 'The quick Brown fox Jumped over The lazy Dog'.split()
-@@ -309,7 +364,7 @@ def check_against_PyObject_RichCompareBool(self, L):
+@@ -218,6 +285,10 @@ class TestDecorateSortUndecorate(unittest.TestCase):
+         self.assertRaises(ZeroDivisionError, data.sort, key=lambda x: 1/x)
+         self.assertEqual(data, dup)
+ 
++    @unittest.skipIf(
++        TEST_WITH_TORCHDYNAMO,
++        "__build_class__ with closed over objects not supported",
++    )
+     def test_key_with_mutation(self):
+         data = list(range(10))
+         def k(x):
+@@ -226,6 +297,10 @@ class TestDecorateSortUndecorate(unittest.TestCase):
+             return x
+         self.assertRaises(ValueError, data.sort, key=k)
+ 
++    @unittest.skipIf(
++        TEST_WITH_TORCHDYNAMO,
++        "__build_class__ with closed over objects not supported",
++    )
+     def test_key_with_mutating_del(self):
+         data = list(range(10))
+         class SortKiller(object):
+@@ -309,7 +384,7 @@ def check_against_PyObject_RichCompareBool(self, L):
              self.assertIs(opt, ref)
              #note: not assertEqual! We want to ensure *identical* behavior.
  
@@ -104,9 +146,12 @@ index 2a7cfb7affa..024367452a7 100644
      def test_safe_object_compare(self):
          heterogeneous_lists = [[0, 'foo'],
                                 [0.0, 'foo'],
-@@ -408,4 +463,4 @@ class TestOptimizedCompares(unittest.TestCase):
- #==============================================================================
+@@ -405,7 +480,5 @@ class TestOptimizedCompares(unittest.TestCase):
+         actual = sorted([(None, 2), (None, 1)])
+         self.assertEqual(actual, expected)
  
+-#==============================================================================
+-
  if __name__ == "__main__":
 -    unittest.main()
 +    run_tests()

@@ -16,14 +16,10 @@ PyNodeCreationHook::PyNodeCreationHook(c10::SafePyObject hook)
 void PyNodeCreationHook::operator()(const c10::intrusive_ptr<Node>& node) {
   pybind11::gil_scoped_acquire gil;
   THPObjectPtr py_node(functionToPyObject(node));
-  if (!py_node) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(py_node);
   THPObjectPtr result(PyObject_CallFunctionObjArgs(
       hook_.ptr(getPyInterpreter()), py_node.get(), nullptr));
-  if (!result) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(result);
   // Reserve non-None returns for future semantics.
   TORCH_CHECK(
       result.get() == Py_None,

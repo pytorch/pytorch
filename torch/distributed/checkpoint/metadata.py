@@ -3,7 +3,7 @@ import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch.distributed.checkpoint.stateful import StatefulT
@@ -115,13 +115,14 @@ class TensorProperties:
 
     @staticmethod
     def create_from_tensor(tensor: torch.Tensor) -> "TensorProperties":
+        stride = getattr(tensor, "stride", None)
         return TensorProperties(
             dtype=tensor.dtype,
             layout=tensor.layout,
             requires_grad=tensor.requires_grad,
             memory_format=torch.contiguous_format,
             pin_memory=tensor.is_pinned(),
-            strides=tensor.stride(),
+            strides=cast(tuple[int, ...], stride()) if callable(stride) else None,
         )
 
 

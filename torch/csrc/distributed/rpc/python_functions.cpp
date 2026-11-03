@@ -114,7 +114,7 @@ c10::intrusive_ptr<JitFuture> sendPythonRemoteCall(
   auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
       std::move(serializedPyObj), rrefId, forkId, isAsyncExecution);
 
-  // set forceGradRecording to true as even if the args does not contain any
+  // set forceGradRecording to true as even if the args do not contain any
   // tensor, the return value might still contain tensors.
   auto agent = RpcAgent::getCurrentRpcAgent();
   return torch::distributed::autograd::sendMessageWithAutograd(

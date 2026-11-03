@@ -48,12 +48,12 @@ from torch.testing._internal.common_utils import (
     scoped_load_inline,
     skipIfWindows,
     skipIfXpu,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
-    HAS_CUDA_AND_TRITON,
     HAS_GPU,
     HAS_GPU_AND_TRITON,
 )
@@ -1180,6 +1180,67 @@ main()
         finally:
             handle.remove()
         self.assertEqual(param.grad, active * 2)
+
+    @parametrize("container", ["tensor", "dict", "object"])
+    def test_inputs_aliasing_nested_graph_break(self, container):
+        observed = []
+        input_lists = []
+
+        class SavedTensor:
+            pass
+
+        def get_tensor(payload):
+            if container == "tensor":
+                return payload
+            if container == "dict":
+                return payload["tensor"]
+            return payload.tensor
+
+        @torch._dynamo.disable
+        def record_payload(payload):
+            observed.append(get_tensor(payload))
+
+        def backward_helper(payload, grad):
+            record_payload(payload)
+            return 2 * grad * get_tensor(payload)
+
+        class MySquare(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.square()
+
+            @staticmethod
+            def backward(ctx, grad):
+                (x,) = ctx.saved_tensors
+                if container == "tensor":
+                    payload = x
+                elif container == "dict":
+                    payload = {"tensor": x}
+                else:
+                    payload = SavedTensor()
+                    payload.tensor = x
+                return backward_helper(payload, grad)
+
+        def compile_backward(gm):
+            opt_fn = make_compiler_fn(fullgraph=False)(gm)
+
+            def invoke(inputs, *args):
+                input_lists.append(inputs)
+                return opt_fn(inputs, *args)
+
+            return invoke
+
+        with compiled_autograd._enable(compile_backward):
+            for i in range(2):
+                x = (torch.arange(4.0) + i).requires_grad_()
+                (grad,) = torch.autograd.grad(MySquare.apply(x).sum(), x)
+                self.assertEqual(grad, 2 * x)
+                self.assertEqual(len(observed), i + 1)
+                self.assertIs(observed[-1], x)
+
+        self.assertEqual(input_lists, [[], []])
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
     def test_inputs_aliasing_bytecode_stack_restore(self):
         logging.getLogger().setLevel(logging.WARNING)
@@ -3195,6 +3256,32 @@ main()
                 b.sum().backward()
 
     @requires_cuda_and_triton
+    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
+    def test_chained_cudnn_lstm(self):
+        # https://github.com/pytorch/pytorch/issues/198652
+        # _cudnn_rnn_backward has no meta kernel, so it only traces through the fake
+        # tensor fallback that runs the real kernel, which rejects SymInt arguments.
+        # Compiled autograd feeds the first node its SymInt hidden_size as a dynamic
+        # size, so that node graph breaks; the second one is lowered as an inductor
+        # fallback, which hands the kernel a contiguous copy of the transposed saved
+        # output. miopen_rnn_backward takes a plain int, so on ROCm both nodes lower.
+        def fn():
+            enc = nn.LSTM(8, 8, batch_first=True, device="cuda")
+            dec = nn.LSTM(8, 8, batch_first=True, device="cuda")
+            x = torch.randn(2, 4, 8, device="cuda")
+            target = torch.randn(2, 4, 8, device="cuda")
+            loss = nn.functional.mse_loss(dec(enc(x)[0])[0], target)
+            loss.backward()
+            yield from (p.grad for p in enc.parameters())
+            yield from (p.grad for p in dec.parameters())
+
+        self.check_output_and_recompiles(
+            fn,
+            count=[1, 1] if TEST_WITH_ROCM else [1, 2],
+            compiler_fn=make_compiler_fn(fullgraph=False, dynamic=False),
+        )
+
+    @requires_cuda_and_triton
     def test_cudagraphs_cpu_division(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
 
@@ -4111,14 +4198,14 @@ class CompiledAutograd0(torch.nn.Module):
                 compiler_fn=make_compiler_fn(backend="ca_eager", gm_hook=check),
             )
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_cpu_offloading(self):
         def fn():
             def pack(x):
                 return x.cpu()
 
             def unpack(x):
-                return x.cuda()
+                return x.to(GPU_TYPE)
 
             class MyMatMul(torch.autograd.Function):
                 @staticmethod
@@ -4133,7 +4220,7 @@ class CompiledAutograd0(torch.nn.Module):
 
             with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
                 for i in [10, 100, 10, 20, 30]:
-                    x = torch.randn(i, requires_grad=True).cuda()
+                    x = torch.randn(i, requires_grad=True).to(GPU_TYPE)
                     MyMatMul.apply(x).sum().backward()
                     yield x.grad
 
@@ -4157,12 +4244,12 @@ class CompiledAutograd1(torch.nn.Module):
         getitem_3 = sizes[1]
         getitem_4 = sizes[2];  sizes = None
 
-        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cuda', index=0), 6, 0, None), [], False)]);  getitem = None
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type=GPU_TYPE, index=0), 6, 0, None), [], False)]);  getitem = None
         getitem_5 = validate_outputs[0];  validate_outputs = None
 
         sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_5], [True], []);  getitem_5 = None
         getitem_6 = sum_backward0[0];  sum_backward0 = None
-        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_6], [((None, None, device(type='cuda', index=0), 6, 0, None), [], False)]);  getitem_6 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_6], [((None, None, device(type=GPU_TYPE, index=0), 6, 0, None), [], False)]);  getitem_6 = None
         getitem_7 = validate_outputs_1[0];  validate_outputs_1 = None
 
         getitem_8 = hooks[0]
@@ -4171,7 +4258,7 @@ class CompiledAutograd1(torch.nn.Module):
         call_hook = torch__dynamo_external_utils_call_hook(getitem_8, getitem_9, hook_type = 'unpack_hook');  getitem_8 = getitem_9 = None
         call_backward = torch__dynamo_external_utils_call_backward(getitem_10, (call_hook,), getitem_7);  getitem_10 = call_hook = getitem_7 = None
         getitem_12 = call_backward[0];  call_backward = None
-        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_12], [((None, None, device(type='cuda', index=0), 6, 0, None), [getitem_3], False)]);  getitem_12 = getitem_3 = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_12], [((None, None, device(type=GPU_TYPE, index=0), 6, 0, None), [getitem_3], False)]);  getitem_12 = getitem_3 = None
         getitem_13 = validate_outputs_2[0];  validate_outputs_2 = None
 
         to_copy_backward0 = torch__dynamo_compiled_autograd_ops_ToCopyBackward0([getitem_13], [True], (None, None, device(type='cpu'), 6, 0, None));  getitem_13 = None
@@ -5335,7 +5422,7 @@ def wrap_test_class(orig_cls):
             dct[name] = unittest.expectedFailure
         elif name.startswith("test_"):
             backend = lookup_backend(name)
-            if not HAS_CUDA_AND_TRITON and backend == "inductor":
+            if not HAS_GPU_AND_TRITON and backend == "inductor":
                 continue
             compiler_fn = make_compiler_fn(
                 backend=backend,
@@ -5549,7 +5636,6 @@ xfail_by_backend = {
         "test_reentrant_with_callbacks_both_depths",  # queue_callback
         "test_reentrant_with_callbacks_depth_0",  # queue_callback
         "test_reentrant_with_callbacks_depth_1",  # queue_callback
-        "test_checkpoint_graph_execution_group",  # Attempted to call function marked as skipped
         "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
         "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
         "test_post_accumulate_grad_hook_ordering",  # accuracy error
@@ -5651,8 +5737,9 @@ xfail_divergence_from_eager = {
 }
 
 skipped_tests = set()
+skipped_tests.add("test_graph_queue_callback")
 
-if not HAS_CUDA_AND_TRITON:
+if not HAS_GPU_AND_TRITON:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler
     skipped_tests.add("test_type_conversions")
 
@@ -5662,7 +5749,6 @@ if IS_S390X:
 # clear_saved_tensors_on_access is incompatible with compiled autograd
 skipped_tests.add("test_clear_saved_tensors_on_access")
 skipped_tests.add("test_clear_saved_tensors_on_access_double_access_error")
-skipped_tests.add("test_forward_traceback_preserves_exception_with_checkpoint")
 skipped_tests.add("test_checkpoint_error_suggests_mark_dynamic")
 skipped_tests.add("test_checkpoint_automatic_dynamic_graph_shadowing")
 skipped_tests.add("test_checkpoint_automatic_dynamic_mark_dynamic_workaround")
@@ -5698,6 +5784,14 @@ skipped_tests.add("test_compile_dtensor_local_tensor_act_backward_passthrough")
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
 test_higher_order_ops = load_test_module("dynamo/test_higher_order_ops")
+
+# grad_dtype is not supported in compile (every eager test here is already
+# skipIfTorchDynamo). Most of them also report the dtype they observed by
+# setattr-ing on the Function class, which dynamo cannot trace once compiled
+# autograd inlines the backward.
+for name in dir(test_autograd.TestAutograd):
+    if name.startswith("test_ctx_output_grad_dtype"):
+        skipped_tests.add(name)
 
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
 TestNestedCheckpointWithCompiledAutograd = wrap_test_class(

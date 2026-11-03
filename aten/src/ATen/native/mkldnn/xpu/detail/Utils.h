@@ -1,7 +1,5 @@
 #pragma once
-#include <ATen/ATen.h>
 #include <ATen/Tensor.h>
-#include <ATen/core/Tensor.h>
 #include <iostream>
 #include <optional>
 
@@ -14,6 +12,7 @@
 #include <oneapi/dnnl/dnnl_version.h>
 
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
+#include <ATen/ops/empty.h>
 
 #define ONEDNN_SUPPORT_DETERMINISTIC \
   (DNNL_VERSION_MAJOR >= 3 && DNNL_VERSION_MINOR >= 4)
@@ -130,7 +129,7 @@ dnnl::memory dnnl_memory_from_host_scalar(
                      .device(kXPU);
   holder = at::empty({1}, options).fill_(host_value);
   dnnl::memory::desc md = get_onednn_md(holder);
-  dnnl::memory mem = make_onednn_memory(md, engine, holder.data_ptr());
+  dnnl::memory mem = make_onednn_memory(md, engine, holder.const_data_ptr());
   return mem;
 }
 

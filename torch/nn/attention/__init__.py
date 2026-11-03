@@ -3,6 +3,7 @@
 
 import contextlib
 from collections.abc import Iterable
+from contextvars import ContextVar
 from typing import Union
 from warnings import warn
 
@@ -37,23 +38,10 @@ __all__: list[str] = [
 WARN_FOR_UNFUSED_KERNELS = False
 
 
-r"""An enum-like class that contains the different backends for scaled dot product attention.
-    This backend class is designed to be used with the sdpa_kernel context manager.
-
-    The following Enums are available:
-        - ERROR: An error occurred when trying to determine the backend.
-        - MATH: The math backend for scaled dot product attention.
-        - FLASH_ATTENTION: The flash attention backend for scaled dot product attention.
-        - EFFICIENT_ATTENTION: The efficient attention backend for scaled dot product attention.
-        - CUDNN_ATTENTION: The cuDNN backend for scaled dot product attention.
-        - OVERRIDEABLE: The overridable backend for extension.
-
-    See :func:`torch.nn.attention.sdpa_kernel` for more details.
-
-    .. warning:: This class is in beta and subject to change.
-"""
+# SDPBackend is defined and documented in torch/csrc/Module.cpp.
 SDPBackend.__module__ = __name__
 SDPBackend.__name__ = "SDPBackend"
+SDPBackend.__qualname__ = "SDPBackend"
 
 
 def _raise_kernel_warnings(params: SDPAParams) -> None:
@@ -77,6 +65,12 @@ _backend_names = {
     "math": "MATH",
     "overrideable": "OVERRIDEABLE",
 }
+_sdpa_kernel_uses_priority = ContextVar("sdpa_kernel_uses_priority", default=False)
+
+
+def _is_sdp_priority_order_active() -> bool:
+    """Return whether an enclosing sdpa_kernel context set backend priority."""
+    return _sdpa_kernel_uses_priority.get()
 
 
 def _backend_from_string(name: str):
@@ -156,10 +150,14 @@ def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = Fa
     backends = list(dict.fromkeys(backends))
 
     previous_backends = _cur_sdpa_kernel_backends(with_priority=set_priority)
+    priority_token = _sdpa_kernel_uses_priority.set(
+        set_priority or _sdpa_kernel_uses_priority.get()
+    )
     try:
         _sdpa_kernel(backends, set_priority)
         yield {}
     finally:
+        _sdpa_kernel_uses_priority.reset(priority_token)
         _sdpa_kernel(previous_backends, set_priority)
 
 

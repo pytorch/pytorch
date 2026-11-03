@@ -1,3 +1,4 @@
+#include <ATen/core/functional.h>
 #include <torch/csrc/python_headers.h>
 
 #include <ATen/NodeCreationHooks.h>
@@ -8,8 +9,9 @@
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/record_function.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/GraphExecGroupState.h>
 #include <c10/core/InferenceMode.h>
-#include <c10/core/ScalarType.h>
+#include <c10/core/SafePyObject.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
@@ -26,7 +28,6 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/autograd/saved_variable.h>
-#include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
@@ -35,13 +36,13 @@
 #include <ActivityType.h>
 #include <ITraceActivity.h>
 #endif
-#include <torch/csrc/utils.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
 
+#include <optional>
 #include <set>
 #include <unordered_set>
 #include <utility>
@@ -262,15 +263,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def(
           "concrete_inputs",
           [](const KinetoEvent& e) {
-            std::vector<py::object> as_pyobj;
-            std::transform(
-                e.concreteInputs().begin(),
-                e.concreteInputs().end(),
-                std::back_inserter(as_pyobj),
-                [](const c10::IValue& val) {
-                  return torch::jit::toPyObject(val);
-                });
-            return as_pyobj;
+            return c10::fmap(e.concreteInputs(), [](const c10::IValue& val) {
+              return torch::jit::toPyObject(val);
+            });
           })
       .def(
           "kwinputs",
@@ -335,6 +330,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
                 static_cast<libkineto::ActivityType>(e.activityType()));
           })
       .def("extra_meta", [](const KinetoEvent& e) { return e.extraMeta(); })
+      .def(
+          "typed_metadata",
+          [](const KinetoEvent& e) {
+            py::dict metadata;
+            for (const auto& [key, value] : e.typedMetadata()) {
+              metadata[py::str(key)] = torch::jit::toPyObject(value);
+            }
+            return metadata;
+          })
       // Like shapes/strides, but also contains TensorList input shapes.
       .def(
           "structured_input_shapes",
@@ -446,10 +450,17 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       py::call_guard<py::gil_scoped_release>());
   m.def(
       "_prepare_profiler",
-      prepareProfiler,
+      [](const ProfilerConfig& config,
+         const std::set<ActivityType>& activities,
+         const ActivityFilter& activity_filter,
+         const ProfilerExtensionMap& profiler_extensions) {
+        prepareProfiler(
+            config, activities, activity_filter, profiler_extensions);
+      },
       py::arg("config"),
       py::arg("activities"),
-      py::arg("activity_filter") = torch::autograd::profiler::ActivityFilter{},
+      py::arg("activity_filter") = ActivityFilter{},
+      py::arg("profiler_extensions") = ProfilerExtensionMap{},
       py::call_guard<py::gil_scoped_release>());
   m.def(
       "_toggle_collection_dynamic",
@@ -716,19 +727,18 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             // of the hook functions for us
             s.register_hooks(
                 std::make_unique<torch::autograd::PySavedVariableHooks>(
-                    pack_hook, unpack_hook));
+                    std::move(pack_hook), std::move(unpack_hook)));
           })
       .def_property_readonly(
           "data",
           [](const torch::autograd::SavedVariable& s) -> py::object {
             if (s.has_hooks()) {
+              // has_hooks() guarantees a value here (or a throw).
               auto opt = s.retrieve_unpack_hook_data();
-              TORCH_INTERNAL_ASSERT(opt.has_value());
               py::gil_scoped_acquire gil;
               const auto& [_unpack_fn, data_obj] = *opt;
-              PyObject* raw = data_obj.ptr(getPyInterpreter());
-              TORCH_INTERNAL_ASSERT(raw != nullptr);
-              return py::reinterpret_borrow<py::object>(raw);
+              return py::reinterpret_borrow<py::object>(
+                  data_obj.ptr(getPyInterpreter()));
             } else {
               return py::cast(s.get_raw_data().value());
             }
@@ -736,14 +746,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def_property_readonly(
           "unpack_hook",
           [](const torch::autograd::SavedVariable& s) -> py::object {
-            auto opt = s.retrieve_unpack_hook_data();
+            auto opt = s.retrieve_unpack_hook();
             if (!opt.has_value()) {
               return py::none();
             }
             py::gil_scoped_acquire gil;
-            const auto& [unpack_safe, _unused_data] = *opt;
-            auto* unpack_ptr = unpack_safe.ptr(getPyInterpreter());
-            return py::reinterpret_borrow<py::function>(unpack_ptr);
+            return py::reinterpret_borrow<py::function>(
+                opt->ptr(getPyInterpreter()));
           });
 
   m.def(
@@ -1260,7 +1269,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
     if (!cp) {
       return false;
     }
-    if (s.find(cp) != s.end()) {
+    if (s.contains(cp)) {
       ret = true;
       return true;
     }
@@ -1394,10 +1403,10 @@ static PyObject* is_grad_layout_enforcement_enabled(
 static PyObject* set_graph_exec_group(PyObject* self, PyObject* obj) {
   HANDLE_TH_ERRORS
   if (Py_IsNone(obj)) {
-    c10::AutogradState::get_tls_state().set_graph_exec_group(std::nullopt);
+    c10::GraphExecGroupState::set_tls_state(std::nullopt);
   } else {
     Py_INCREF(obj);
-    c10::AutogradState::get_tls_state().set_graph_exec_group(
+    c10::GraphExecGroupState::set_tls_state(
         c10::SafePyObject(obj, getPyInterpreter()));
   }
   Py_RETURN_NONE;
@@ -1406,8 +1415,7 @@ static PyObject* set_graph_exec_group(PyObject* self, PyObject* obj) {
 
 static PyObject* get_graph_exec_group(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  const auto& group =
-      c10::AutogradState::get_tls_state().get_graph_exec_group();
+  const auto& group = c10::GraphExecGroupState::get_tls_state();
   if (group.has_value()) {
     PyObject* obj = group->ptr(getPyInterpreter());
     return Py_NewRef(obj);

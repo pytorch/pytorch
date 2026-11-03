@@ -1,8 +1,7 @@
 #pragma once
 
 #include <c10/util/irange.h>
-#include <memory>
-#include <mutex>
+#include <cstring>
 #include <type_traits>
 
 namespace at::native {
@@ -24,7 +23,7 @@ struct ParamsHash {
       value ^= ptr[i];
       value *= 0x01000193;
     }
-    return (size_t)value;
+    return static_cast<size_t>(value);
   }
 };
 
@@ -35,11 +34,11 @@ struct ParamsEqual {
   static_assert(std::is_standard_layout_v<Params>, "Params is not POD");
 
   bool operator()(const Params& a, const Params& b) const noexcept {
-    return memcmp(&a, &b, sizeof(Params)) == 0;
+    return std::memcmp(&a, &b, sizeof(Params)) == 0;
   }
 };
 
-// Provide explicit byte-for-byte constructors to avoid uwittingly leaving
+// Provide explicit byte-for-byte constructors to avoid unwittingly leaving
 // padding bytes uninitialized (e.g., when passing Params by value)
 template <typename T>
 struct ParamsWrapper {
@@ -51,34 +50,35 @@ struct ParamsWrapper {
       "ParamsWrapper requires trivially copyable T");
 
   ParamsWrapper() noexcept {
-    memset(&(this->pod), 0, sizeof(this->pod));
+    std::memset(&(this->pod), 0, sizeof(this->pod));
   }
 
   ParamsWrapper(const ParamsWrapper& other) noexcept {
-    memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
+    std::memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
   }
 
   ParamsWrapper& operator=(const ParamsWrapper& other) noexcept {
-    memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
+    std::memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
     return *this;
   }
 
   ParamsWrapper(ParamsWrapper&& other) = delete;
   ParamsWrapper& operator=(ParamsWrapper&& other) = delete;
+  ~ParamsWrapper() = default;
 
   inline friend bool operator==(
       const ParamsWrapper& lhs,
       const ParamsWrapper& rhs) noexcept {
-    return memcmp(&lhs.pod, &rhs.pod, sizeof(T)) == 0;
+    return std::memcmp(&lhs.pod, &rhs.pod, sizeof(T)) == 0;
   }
 };
 
 // Wrapped version: this allows the outer struct to have custom copy and move
 // constructors for additional safety
-template <typename ParamsWrapper>
+template <typename WrapperT>
 struct ParamsWrapperHash {
-  size_t operator()(const ParamsWrapper& params_wrapper) const noexcept {
-    ParamsHash<decltype(ParamsWrapper::pod)> hasher;
+  size_t operator()(const WrapperT& params_wrapper) const noexcept {
+    ParamsHash<decltype(WrapperT::pod)> hasher;
     return hasher(params_wrapper.pod);
   }
 };

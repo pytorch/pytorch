@@ -372,9 +372,8 @@ static const std::unordered_set<Symbol> activation_ops = []() {
 }();
 
 bool InplaceToFunctionalActivation(const std::shared_ptr<Graph>& graph) {
-  return RemoveTensorMutation(graph, [](Node* node) {
-    return activation_ops.count(node->kind()) != 0;
-  });
+  return RemoveTensorMutation(
+      graph, [](Node* node) { return activation_ops.contains(node->kind()); });
 }
 
 } // namespace torch::jit

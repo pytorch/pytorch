@@ -50,15 +50,14 @@ namespace at::native {
 
 template <typename scalar_t, template <class> class Op>
 std::vector<Tensor> foreach_unary_op(TensorList tensors) {
-  std::vector<std::vector<at::Tensor>> tensor_lists;
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(tensors.size());
   for (const auto& t : tensors) {
     vec_res.emplace_back(at::native::empty_like(t));
   }
 
-  tensor_lists.emplace_back(tensors.vec());
-  tensor_lists.emplace_back(std::move(vec_res));
+  auto tensor_lists =
+      c10::make_nested<Tensor>(tensors.vec(), std::move(vec_res));
 
   using opmath_t = typename at::opmath_type<scalar_t>;
   multi_tensor_apply<2>(
@@ -75,8 +74,7 @@ std::vector<Tensor> foreach_unary_op(TensorList tensors) {
 
 template <typename scalar_t, template <class> class Op>
 void foreach_unary_op_(TensorList tensors) {
-  std::vector<std::vector<at::Tensor>> tensor_lists;
-  tensor_lists.emplace_back(tensors.vec());
+  auto tensor_lists = c10::make_nested<Tensor>(tensors.vec());
   using opmath_t = typename at::opmath_type<scalar_t>;
   multi_tensor_apply<1>(
       tensor_lists,
@@ -350,7 +348,7 @@ std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
     return at::native::foreach_tensor_neg_slow(tensors);
   }
 
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       tensors[0].scalar_type() != kBool,
       "Negation, the `-` operator, on a bool tensor is not supported. "
       "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
@@ -364,7 +362,7 @@ void foreach_tensor_neg_cuda_(TensorList tensors) {
     return at::native::foreach_tensor_neg_slow_(tensors);
   }
 
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       tensors[0].scalar_type() != kBool,
       "Negation, the `-` operator, on a bool tensor is not supported. "
       "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
@@ -414,8 +412,7 @@ void foreach_tensor_zero_cuda_(TensorList tensors) {
     return at::native::foreach_tensor_zero_slow_(tensors);
   }
 
-  std::vector<std::vector<at::Tensor>> tensor_lists;
-  tensor_lists.emplace_back(tensors.vec());
+  auto tensor_lists = c10::make_nested<Tensor>(tensors.vec());
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Half,

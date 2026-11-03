@@ -44,7 +44,12 @@ from ..exc import (
     UnspecializeRestartAnalysis,
     Unsupported,
 )
-from ..guards import GuardBuilder, install_guard, make_dupe_guard
+from ..guards import (
+    GuardBuilder,
+    install_guard,
+    install_not_in_instance_dict_guard,
+    make_dupe_guard,
+)
 from ..mutation_guard import GenerationTracker
 from ..source import (
     AttrSource,
@@ -117,7 +122,10 @@ def initialize_lazy_module(
                         s.node.hint if isinstance(s, torch.SymInt) else s
                         for s in fake.shape
                     ]
-                    assert all(isinstance(s, int) for s in shape), shape  # noqa: S101
+                    if not all(isinstance(s, int) for s in shape):
+                        raise AssertionError(
+                            f"expected all shape entries to be int, got {shape}"
+                        )
                     return torch.empty(  # pyrefly: ignore[no-matching-overload]
                         shape, dtype=fake.dtype, device=fake.device
                     )
@@ -168,7 +176,7 @@ def guard_to_detect_forward_monkeypatching(
 ) -> None:
     # Users sometimes patch the forward method of a nn module instance to
     # perform optimizations like quantization. Though this is not a good
-    # software practice, but python allows this and Dynamo needs to detect
+    # software practice, python allows this and Dynamo needs to detect
     # this patching.
     #
     # One way to do this is to add an ID_MATCH guard on every function
@@ -300,7 +308,7 @@ class NNModuleVariable(VariableTracker):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
-    def bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """nb_bool for nn.Module.
 
         nn.Module itself has no __bool__ or __len__, so bare modules are always
@@ -313,7 +321,7 @@ class NNModuleVariable(VariableTracker):
         mod = tx.output.get_submodule(self.module_key)
         return ConstantVariable.create(bool(mod))
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         mod = tx.output.get_submodule(self.module_key)
         return VariableTracker.build(tx, repr(mod))
 
@@ -394,6 +402,8 @@ class NNModuleVariable(VariableTracker):
         obj_source: Source,
     ) -> VariableTracker | None:
         """Check for a __getattr__ and handle it specially if it is implemented"""
+        from .builder import VariableBuilder
+
         if object_has_getattribute(base):
             getattribute_fn = inspect.getattr_static(type(base), "__getattribute__")
             new_source = (
@@ -401,7 +411,17 @@ class NNModuleVariable(VariableTracker):
             )
             try:
                 return variables.UserMethodVariable(
-                    getattribute_fn,
+                    # Keep this off VariableTracker.build. The builder installs
+                    # a guard on the accessor eagerly, which made the module's
+                    # guard manager tag-unsafe
+                    # (test/dynamo/test_guard_manager.py,
+                    # test_nn_module_tag_overridden_getattr_safe).
+                    # Constructing directly records the source and leaves the
+                    # guard to whoever consumes it.
+                    VariableBuilder.create_internal_user_function(
+                        getattribute_fn,
+                        source=new_source and AttrSource(new_source, "__func__"),
+                    ),
                     self,
                     source=new_source,
                 ).call_function(tx, [variables.ConstantVariable.create(name)], {})
@@ -410,7 +430,7 @@ class NNModuleVariable(VariableTracker):
             except Unsupported:
                 unimplemented(
                     gb_type="Custom __getattribute__ in nn.Module attribute access",
-                    context=f"getattro_impl {self} {name}",
+                    context=f"tp_getattro_impl {self} {name}",
                     explanation="Dynamo could not trace through the custom "
                     "`__getattribute__` method on this `nn.Module`.",
                     hints=[
@@ -427,7 +447,7 @@ class NNModuleVariable(VariableTracker):
         if not isinstance(getattr_fn, types.FunctionType):
             unimplemented(
                 gb_type="torch.nn.Module with a non-function custom __getattr__",
-                context=f"getattro_impl {self} {name}",
+                context=f"tp_getattro_impl {self} {name}",
                 explanation=(
                     "Dynamo detected a nn.Module object with a custom "
                     "`__getattr__` method, but this method is not a standard "
@@ -443,15 +463,23 @@ class NNModuleVariable(VariableTracker):
                 ],
             )
 
-        options = {"source": AttrSource(obj_source, "__getattr__")}
+        source = AttrSource(obj_source, "__getattr__")
 
-        return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
-            tx, [VariableTracker.build(tx, name)], {}
-        )
+        return variables.UserMethodVariable(
+            # See the note in _custom_getattr_fallback above: off the builder
+            # so the accessor guard is not installed eagerly.
+            VariableBuilder.create_internal_user_function(
+                getattr_fn, source=AttrSource(source, "__func__")
+            ),
+            self,
+            source=source,
+        ).call_function(tx, [VariableTracker.build(tx, name)], {})
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         source = self.source and AttrSource(self.source, name)
 
         base = tx.output.get_submodule(self.module_key)
@@ -467,7 +495,7 @@ class NNModuleVariable(VariableTracker):
         if not self.source:
             unimplemented(
                 gb_type="getattr with no source",
-                context=f"getattro_impl {self} {name}",
+                context=f"tp_getattro_impl {self} {name}",
                 explanation="Dynamo does not know how to access an attribute "
                 "on an `nn.Module` instance that lacks a source. This is "
                 "usually an internal error in Dynamo.",
@@ -500,6 +528,9 @@ class NNModuleVariable(VariableTracker):
                     base=base, tx=tx, name=name, obj_source=self.source
                 )
                 if result is not None:
+                    # __getattr__ only runs after the normal lookup misses, so a
+                    # later instance dict write would shadow what it returned.
+                    install_not_in_instance_dict_guard(self.source, name)
                     return result
                 # if we can't find a __getattr__, we can't parse this, raise attribute error
                 raise_observed_exception(
@@ -508,11 +539,12 @@ class NNModuleVariable(VariableTracker):
                     args=[f"'{type(base).__name__}' object has no attribute '{name}'"],
                 )
 
+        if object_member and name not in base_dict:
+            # A registered entry is only visible while the instance dict lacks it.
+            install_not_in_instance_dict_guard(self.source, name)
+
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
-
-        if name == "__class__" and not object_member:
-            return VariableTracker.build(tx, base.__class__, source=source)
 
         if object_member:
             out = VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]
@@ -533,23 +565,41 @@ class NNModuleVariable(VariableTracker):
                     source = AttrSource(AttrSource(self.source, "__class__"), name)
                     # Get the getter function
                     source = AttrSource(source, "fget")
-                return variables.UserFunctionVariable(
+                # A builder would eagerly resolve this source through the metaclass.
+                return VariableBuilder.create_internal_user_function(
                     subobj.fget,  # pyrefly: ignore[bad-argument-type]
                     source=source,
-                ).call_function(tx, [(self)], {})
+                ).call_function(tx, [self], {})
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
-                    subobj.__func__,
-                    variables.UserDefinedObjectVariable(type(base)),
+                    VariableBuilder.create_internal_user_function(
+                        subobj.__func__,
+                        source=source and AttrSource(source, "__func__"),
+                    ),
+                    VariableTracker.build(tx, type(base)),
                     source=source,
                 )
             elif istype(subobj, staticmethod):
-                return variables.UserFunctionVariable(
-                    subobj.__get__(base),
-                    source=source,
+                # Preserve eager fallback for non-Python staticmethod callables.
+                return VariableBuilder.create_internal_user_function(
+                    subobj.__get__(base), source=source
                 )
             elif istype(subobj, types.FunctionType):
-                return variables.UserMethodVariable(subobj, self, source=source)
+                if inspect.getattr_static(subobj, "_torchdynamo_inline", False):
+                    func_source = source and AttrSource(source, "__func__")
+                    fn_vt = VariableBuilder.create_internal_wrapper_user_function(
+                        subobj, "_torchdynamo_inline", source=func_source
+                    )
+                    return variables.WrapperUserMethodVariable.create(
+                        fn_vt, self, source=source
+                    )
+                return variables.UserMethodVariable(
+                    VariableBuilder.create_internal_user_function(
+                        subobj, source=source and AttrSource(source, "__func__")
+                    ),
+                    self,
+                    source=source,
+                )
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
                 return VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]
@@ -566,7 +616,7 @@ class NNModuleVariable(VariableTracker):
                     ],
                 )
 
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def call_function(
         self,
@@ -574,6 +624,8 @@ class NNModuleVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         mod = tx.output.get_submodule(self.module_key)
 
         with record_nn_module_stack(
@@ -587,7 +639,7 @@ class NNModuleVariable(VariableTracker):
                 if nnmodule_has_hooks(mod):
                     # We do not want to unroll sequential if it has hooks, since evaporating it
                     # will cause hooks to not fire!
-                    # This terminates and restart the tracing process
+                    # This terminates and restarts the tracing process
                     self.convert_to_unspecialized(tx)
 
                 # Unroll sequential
@@ -674,7 +726,7 @@ class NNModuleVariable(VariableTracker):
                     if not istype(fn, types.FunctionType):
                         raise AssertionError(f"Expected FunctionType, got {type(fn)}")
                 return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, source=fn_source),
+                    VariableBuilder.create_internal_user_function(fn, source=fn_source),
                     args,
                     kwargs,
                     allow_nested_graph_breaks=True,
@@ -687,6 +739,7 @@ class NNModuleVariable(VariableTracker):
     ) -> "VariableTracker":
         # nn.Module containers (ModuleList/Dict/Sequential/ParameterDict/ParameterList)
         # These are Python-level __getitem__, not CPython C slots.
+        from .builder import VariableBuilder
         from .lists import SliceVariable
         from .tensor import SymNodeVariable
 
@@ -719,7 +772,7 @@ class NNModuleVariable(VariableTracker):
 
             src = AttrSource(AttrSource(self.source, "__getitem__"), "__func__")  # type: ignore[arg-type]
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, source=src),
+                VariableBuilder.create_internal_user_function(fn, source=src),
                 [self, key],
                 {},
                 allow_nested_graph_breaks=True,
@@ -1097,6 +1150,92 @@ class NNModuleVariable(VariableTracker):
             result.append(self._named_embed(tx, n, submod))
         return variables.ListIteratorVariable(result, mutation_type=ValueMutationNew())
 
+    def _inline_nn_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import VariableBuilder
+
+        module = tx.output.get_submodule(self.module_key)
+        fn = getattr(module, name).__func__
+        fn_source = AttrSource(AttrSource(self.source, name), "__func__")  # type: ignore[arg-type]
+        return tx.inline_user_function_return(
+            VariableBuilder.create_internal_user_function(fn, source=fn_source),
+            [self] + list(args),
+            kwargs,
+        )
+
+    def _check_input_dim(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        from .constant import ConstantVariable
+
+        module = tx.output.get_submodule(self.module_key)
+        check = getattr(type(module), "_check_input_dim", None)
+        if check is None:
+            return None
+        try:
+            filename = inspect.getfile(check)
+        except TypeError:
+            return None
+        if not trace_rules.is_torch_inline_allowed(filename):
+            return None
+        return ConstantVariable.create(True)
+
+    def _module_contains(
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
+    ) -> VariableTracker | None:
+        module = tx.output.get_submodule(self.module_key)
+        if not isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict)):
+            return None
+        if not item.is_python_constant():
+            return None
+        return VariableTracker.build(tx, item.as_python_constant() in module)
+
+    def sq_contains_impl(
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
+    ) -> VariableTracker:
+        result = self._module_contains(tx, item)
+        if result is not None:
+            return result
+        return super().sq_contains_impl(tx, item)
+
+    def _get_abs_string_index(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._inline_nn_method(tx, "_get_abs_string_index", args, kwargs)
+
+    def _conv_forward(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        module = tx.output.get_submodule(self.module_key)
+        if not isinstance(module, torch.nn.modules.conv._ConvNd):
+            return None
+        return self._inline_nn_method(tx, "_conv_forward", args, kwargs)
+
+    def _output_padding(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        module = tx.output.get_submodule(self.module_key)
+        if not isinstance(module, torch.nn.modules.conv._ConvTransposeNd):
+            return None
+        return self._inline_nn_method(tx, "_output_padding", args, kwargs)
+
     tp_methods = {
         "_call_impl": Method(_call_impl),
         "_wrapped_call_impl": Method(_call_impl),
@@ -1113,6 +1252,10 @@ class NNModuleVariable(VariableTracker):
         "keys": Method(keys),
         "values": Method(values),
         "items": Method(items),
+        "_check_input_dim": Method(_check_input_dim),
+        "_get_abs_string_index": Method(_get_abs_string_index),
+        "_conv_forward": Method(_conv_forward),
+        "_output_padding": Method(_output_padding),
     }
 
     def call_method(
@@ -1123,64 +1266,30 @@ class NNModuleVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
         constant: bool = False,
     ) -> VariableTracker:
-        from .constant import ConstantVariable
-
         module = tx.output.get_submodule(self.module_key)
 
-        if name == "_check_input_dim" and trace_rules.is_torch_inline_allowed(
-            inspect.getfile(module.__class__._check_input_dim)  # type: ignore[union-attr]
-        ):
-            return ConstantVariable.create(True)
-
+        # `constant=` is a Dynamo-internal extra arg from UserMethodVariable,
+        # not a Python method. Base call_method cannot take it.
         if constant:
             fn = getattr(module, name)
             const_name = f"{module.__class__.__name__}_{name}_result"
             return invoke_and_store_as_constant(tx, fn, const_name, args, kwargs)
 
-        if name == "__iter__":
-            return self.tp_iter_impl(tx)
-        elif (
-            name == "__contains__"
-            and isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict))
-            and args
-            and args[0].is_python_constant()
-        ):
-            return VariableTracker.build(
-                tx, args[0].as_python_constant() in module._modules
-            )
-        elif (
-            name == "_get_abs_string_index"
-            or (
-                isinstance(module, torch.nn.modules.conv._ConvNd)
-                and name == "_conv_forward"
-            )
-            or (
-                isinstance(module, torch.nn.modules.conv._ConvTransposeNd)
-                and name == "_output_padding"
-            )
-        ):
-            # Inline the function
-            fn = getattr(module, name).__func__
-            fn_source = AttrSource(AttrSource(self.source, name), "__func__")  # type: ignore[arg-type]
-            return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, source=fn_source),
-                [self] + list(args),
-                kwargs,
-            )
-        # A loose heuristic, but seems to be generally good before we drop into
-        # the manual handling of inputs. Skip tp_methods names so they reach the
-        # declarative dispatch in the base call_method.
-        elif (
+        # Loose heuristic for remaining class methods with all-tensor args.
+        # Skip tp_methods and slot names so they reach base call_method.
+        # Empty-args calls (e.g. __iter__) would otherwise match
+        # `all(x.is_tensor() for x in ())`.
+        if (
             name not in self.tp_methods
+            and self.lookup_slotdefs(name) is None
             and name in module.__class__.__dict__
             and callable(module.__class__.__dict__[name])
             and all(x.is_tensor() for x in itertools.chain(args, kwargs.values()))
         ):
             return self._generic_call_method_helper(tx, name, args, kwargs)
-        else:
-            return super().call_method(tx, name, list(args), kwargs)
+        return super().call_method(tx, name, list(args), kwargs)
 
-    def sq_length(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         """Sequence length for container modules (e.g., nn.Sequential)."""
         module = tx.output.get_submodule(self.module_key)
         return VariableTracker.build(tx, len(module))  # type: ignore[arg-type]
@@ -1282,6 +1391,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         mod = self.value
         # see comment on lazy module handling in NNModuleVariable.call_function for context
         if is_lazy_module(mod):  # type: ignore[arg-type]
@@ -1312,7 +1423,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 globals_vt = tx.nn_modules_globals_vt
 
                 def _hooks_dict_len(obj: VariableTracker, attr: str) -> int:
-                    vt = obj.getattro_impl(tx, attr)
+                    vt = obj.tp_getattro_impl(tx, attr)
                     vt = vt.realize() if hasattr(vt, "realize") else vt
                     return vt.len()  # type: ignore[union-attr]
 
@@ -1366,9 +1477,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # source=source) but that introduces guard on the
                 # `forward.__code__` object. Given that we already guard on the
                 # forward not present in generic dict, we don't need this guard.
-                return variables.UserFunctionVariable(fn, source=source).call_function(
-                    tx, [self] + list(args), kwargs
-                )
+                return VariableBuilder.create_internal_user_function(
+                    fn, source=source
+                ).call_function(tx, [self] + list(args), kwargs)
 
     def call_method(
         self,
@@ -1467,14 +1578,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def getattr_helper(
         self, tx: "InstructionTranslatorBase", field: str, name_vt: VariableTracker
     ) -> VariableTracker | None:
-        dict_vt = self.getattro_impl(tx, field)
-        if isinstance(dict_vt, variables.UserDefinedDictVariable):
-            dict_vt = dict_vt._base_vt
+        dict_vt = self.tp_getattro_impl(tx, field)
         if isinstance(dict_vt, variables.ConstDictVariable):
             return dict_vt.maybe_getitem_const(name_vt)
         return None
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if (
@@ -1568,8 +1677,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 for i, k, v in enumerate_items_with_dict_position(hooks_dict)
             )
 
+            # noqa: RVT001
             return variables.NNModuleHooksDictVariable(result, source=hooks_dict_source)
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def manually_trace_nn_module_getattr(
         self, tx: "InstructionTranslatorBase", name: str

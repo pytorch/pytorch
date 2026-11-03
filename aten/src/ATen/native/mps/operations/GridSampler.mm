@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/GridSamplerUtils.h>
@@ -97,7 +98,7 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
                                                          idx_str,
                                                          scalarToMetalTypeString(input)));
 
-      getMPSProfiler().beginProfileKernel(pso, "grid_sampler_2d", {input, grid});
+      getMPSProfiler().beginProfileKernel(pso, "grid_sampler_2d", {input, grid}, mpsStream);
       [computeEncoder setComputePipelineState:pso];
       auto dispatch = [&](auto idx_tag) {
         using IDX_T = decltype(idx_tag);
@@ -111,7 +112,7 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
       }
 
       mtl_dispatch1DJob(computeEncoder, pso, num_threads);
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, mpsStream);
     }
   });
 }
@@ -130,7 +131,7 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
       check_grid_sampler_2d(input, grid);
       break;
     case 3:
-      check_grid_sampler_3d(input, grid, _interpolation_mode);
+      check_grid_sampler_3d(input, grid);
       break;
     default:
       TORCH_INTERNAL_ASSERT(false, "Only 2D and 3D sampling are supported, but got: ", sampler_dims);
@@ -175,7 +176,7 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
                                                          idx_str,
                                                          scalarToMetalTypeString(input)));
 
-      getMPSProfiler().beginProfileKernel(pso, op_name, {input, grid});
+      getMPSProfiler().beginProfileKernel(pso, op_name, {input, grid}, mpsStream);
       [computeEncoder setComputePipelineState:pso];
       auto dispatch = [&](auto idx_tag) {
         using IDX_T = decltype(idx_tag);
@@ -189,7 +190,7 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
       }
 
       mtl_dispatch1DJob(computeEncoder, pso, num_threads);
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, mpsStream);
     }
   });
 }
@@ -244,6 +245,17 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
   TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
                               "grid_sampler_2d_backward is not supported for complex on MPS");
 
+  if (output_mask[0] && at::globalContext().deterministicAlgorithms() && input.scalar_type() != kFloat) {
+    auto [grad_input_float, grad_grid_float] = grid_sampler_2d_backward_mps(grad_output.to(kFloat),
+                                                                            input.to(kFloat),
+                                                                            grid.to(kFloat),
+                                                                            _interpolation_mode,
+                                                                            _padding_mode,
+                                                                            align_corners,
+                                                                            output_mask);
+    return std::make_tuple(grad_input_float.to(input.scalar_type()), grad_grid_float.to(grid.scalar_type()));
+  }
+
   auto input_requires_grad = output_mask[0];
   auto grad_input = input_requires_grad ? at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : Tensor();
   auto interpolation_mode = static_cast<GridSamplerInterpolation>(_interpolation_mode);
@@ -278,14 +290,14 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-      auto set_args = [&](id<MTLComputeCommandEncoder> enc, auto&&... args) {
+      auto set_args = [&](id<MTLComputeCommandEncoder> enc, bool use_i32, auto&&... args) {
         auto with_idx = [&](auto idx_tag) {
           using IDX_T = decltype(idx_tag);
           GridSamplerBackwardParams<4, IDX_T> params(
               grad_output, input, grid, grad_input, grad_grid, align_corners, padding_mode, interpolation_mode);
           mtl_setArgs(enc, std::forward<decltype(args)>(args)..., params);
         };
-        if (i32) {
+        if (use_i32) {
           with_idx(int32_t{});
         } else {
           with_idx(int64_t{});
@@ -293,15 +305,24 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
       };
 
       if (input_requires_grad) {
+        // See Note [Enabling Deterministic Operations]
+        // The operation is normally nondeterministic because of atomic
+        // accumulation across multiple threads. To make it deterministic,
+        // dispatch only one thread per batch, so the accumulations are
+        // serialized.
+        bool serial = at::globalContext().deterministicAlgorithms();
+        auto input_idx_str = serial ? "i64" : idx_str;
         auto input_name = interpolation_mode == GridSamplerInterpolation::Bicubic
-            ? fmt::format("grid_sampler_2d_backward_bicubic_input_{}_{}_{}", pad_str, idx_str, type_str)
-            : fmt::format("grid_sampler_2d_backward_{}_input_{}_{}", interp_str, idx_str, type_str);
-        auto input_pso = lib.getPipelineStateForFunc(input_name);
-        getMPSProfiler().beginProfileKernel(input_pso, "grid_sampler_2d_backward_input", {grad_output, grid});
+            ? fmt::format("grid_sampler_2d_backward_bicubic_input_{}_{}_{}", pad_str, input_idx_str, type_str)
+            : fmt::format("grid_sampler_2d_backward_{}_input_{}_{}", interp_str, input_idx_str, type_str);
+        auto input_pso = lib.getPipelineStateForFunc(input_name + (serial ? "_serial" : ""));
+        getMPSProfiler().beginProfileKernel(
+            input_pso, "grid_sampler_2d_backward_input", {grad_output, grid}, mpsStream);
         [computeEncoder setComputePipelineState:input_pso];
-        set_args(computeEncoder, grad_input, grad_output, grid);
-        mtl_dispatch1DJob(computeEncoder, input_pso, num_threads);
-        getMPSProfiler().endProfileKernel(input_pso);
+        set_args(computeEncoder, i32 && !serial, grad_input, grad_output, grid);
+        auto numThreadsInput = serial ? N : num_threads;
+        mtl_dispatch1DJob(computeEncoder, input_pso, numThreadsInput);
+        getMPSProfiler().endProfileKernel(input_pso, mpsStream);
       }
 
       if (interpolation_mode != GridSamplerInterpolation::Nearest) {
@@ -309,11 +330,12 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
             ? fmt::format("grid_sampler_2d_backward_bicubic_grid_{}_{}_{}", pad_str, idx_str, type_str)
             : fmt::format("grid_sampler_2d_backward_bilinear_grid_{}_{}", idx_str, type_str);
         auto grid_pso = lib.getPipelineStateForFunc(grid_name);
-        getMPSProfiler().beginProfileKernel(grid_pso, "grid_sampler_2d_backward_grid", {grad_output, input, grid});
+        getMPSProfiler().beginProfileKernel(
+            grid_pso, "grid_sampler_2d_backward_grid", {grad_output, input, grid}, mpsStream);
         [computeEncoder setComputePipelineState:grid_pso];
-        set_args(computeEncoder, grad_grid, grad_output, input, grid);
+        set_args(computeEncoder, i32, grad_grid, grad_output, input, grid);
         mtl_dispatch1DJob(computeEncoder, grid_pso, num_threads);
-        getMPSProfiler().endProfileKernel(grid_pso);
+        getMPSProfiler().endProfileKernel(grid_pso, mpsStream);
       }
     }
   });
@@ -329,7 +351,7 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
                                                         bool align_corners,
                                                         std::array<bool, 2> output_mask) {
   using namespace mps;
-  check_grid_sampler_3d_backward(input, grid, grad_output, interpolation_mode);
+  check_grid_sampler_3d_backward(input, grid, grad_output);
 
   TORCH_CHECK_NOT_IMPLEMENTED(interpolation_mode == 0 || interpolation_mode == 1,
                               "grid_sampler_3d backward on MPS only supports bilinear and nearest interpolation");
@@ -339,6 +361,17 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
               input.scalar_type(),
               " and ",
               grid.scalar_type());
+
+  if (output_mask[0] && at::globalContext().deterministicAlgorithms() && input.scalar_type() != kFloat) {
+    auto [grad_input_float, grad_grid_float] = grid_sampler_3d_backward_mps(grad_output.to(kFloat),
+                                                                            input.to(kFloat),
+                                                                            grid.to(kFloat),
+                                                                            interpolation_mode,
+                                                                            padding_mode,
+                                                                            align_corners,
+                                                                            output_mask);
+    return std::make_tuple(grad_input_float.to(input.scalar_type()), grad_grid_float.to(grid.scalar_type()));
+  }
 
   auto input_requires_grad = output_mask[0];
   auto interp_mode = static_cast<GridSamplerInterpolation>(interpolation_mode);
@@ -375,7 +408,12 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
   // queries below remain in range.
   auto grad_input_buf = run_grad_input ? grad_input : at::zeros({1, 1, 1, 1, 1}, input.options());
 
-  const bool i32 = at::native::canUse32BitIndexMath(grad_output_contiguous) &&
+  // See Note [Enabling Deterministic Operations]
+  // The operation is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  const bool serial = run_grad_input && at::globalContext().deterministicAlgorithms();
+  const bool i32 = !serial && at::native::canUse32BitIndexMath(grad_output_contiguous) &&
       at::native::canUse32BitIndexMath(input_contiguous) && at::native::canUse32BitIndexMath(grid_contiguous) &&
       at::native::canUse32BitIndexMath(grad_input_buf) && at::native::canUse32BitIndexMath(grad_grid);
   const auto idx_str = i32 ? "i32" : "i64";
@@ -386,13 +424,14 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-      auto pso = lib.getPipelineStateForFunc(
-          fmt::format("grid_sampler_3d_backward_{}_{}", idx_str, scalarToMetalTypeString(input)));
+      auto pso = lib.getPipelineStateForFunc(fmt::format(
+          "grid_sampler_3d_backward_{}_{}{}", idx_str, scalarToMetalTypeString(input), serial ? "_serial" : ""));
 
       getMPSProfiler().beginProfileKernel(
           pso,
           "grid_sampler_3d_backward",
-          {grad_output_contiguous, input_contiguous, grid_contiguous, grad_input_buf, grad_grid});
+          {grad_output_contiguous, input_contiguous, grid_contiguous, grad_input_buf, grad_grid},
+          mpsStream);
 
       [computeEncoder setComputePipelineState:pso];
 
@@ -420,11 +459,22 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
         dispatch(int64_t{});
       }
 
-      MTLSize threadsPerThreadgroup = MTLSizeMake(16, 16, 1);
-      MTLSize threadsPerGrid = MTLSizeMake(out_W, out_H * out_D, N);
+      MTLSize threadsPerGrid, threadsPerThreadgroup;
+      if (serial) {
+        // See Note [Enabling Deterministic Operations]
+        // The operation is normally nondeterministic because of atomic
+        // accumulation across multiple threads. To make it deterministic,
+        // dispatch only one thread per batch, so the accumulations are
+        // serialized.
+        threadsPerGrid = MTLSizeMake(1, 1, N);
+        threadsPerThreadgroup = MTLSizeMake(1, 1, std::clamp<NSUInteger>(N, 1, [pso maxTotalThreadsPerThreadgroup]));
+      } else {
+        threadsPerGrid = MTLSizeMake(out_W, out_H * out_D, N);
+        threadsPerThreadgroup = MTLSizeMake(16, 16, 1);
+      }
       [computeEncoder dispatchThreads:threadsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
 
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, mpsStream);
     }
   });
 

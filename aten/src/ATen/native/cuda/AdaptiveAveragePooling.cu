@@ -444,16 +444,7 @@ namespace {
               output_arg{ output, "output", 2 };
     checkAllSameGPU(__func__, {input_arg, output_arg});
 
-    TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
-    int64_t ndim = input.dim();
-    TORCH_CHECK((ndim == 3 || ndim == 4),
-      "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ", input.sizes());
-    for (const auto i : {-2, -1}) {
-      TORCH_CHECK(input.size(i) > 0,
-        "adaptive_avg_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
-        "but input has sizes ", input.sizes(), " with dimension ", i + ndim, " being "
-        "empty");
-    }
+    adaptive_avg_pool_check(input, output, output_size, /*pooling_dims=*/2, "adaptive_avg_pool2d()");
 
     Tensor input_ = input;
     switch (input.suggest_memory_format()) {
@@ -613,9 +604,8 @@ namespace {
               grad_output_arg{ gradOutput_, "gradOutput_", 2 },
               input_arg{ input, "input", 3 };
 
-    adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool2d_backward");
-    TORCH_CHECK(input.dim() == gradOutput_.dim(),
-      __func__, ": Expected dimensions ", input.dim(), " for `gradOutput_` but got dimensions ", gradOutput_.dim());
+    adaptive_avg_pool_backward_check(
+      gradInput, gradOutput_, input, /*pooling_dims=*/2, "adaptive_avg_pool2d_backward()");
 
     checkAllSameGPU(__func__, {grad_input_arg, grad_output_arg, input_arg});
 

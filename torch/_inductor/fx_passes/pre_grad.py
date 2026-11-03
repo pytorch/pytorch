@@ -396,7 +396,8 @@ def pre_grad_passes(
                 )
                 # we support run same pattern multiple times, the default is to run only once
                 counter_raw = fusion_options[pass_name].get("counter", 1)
-                assert isinstance(counter_raw, int)  # noqa: S101
+                if not isinstance(counter_raw, int):
+                    raise AssertionError(f"expected int, got {type(counter_raw)}")
                 for _ in range(counter_raw):
                     pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
                 if not is_same_dict(counters["inductor"], inductor_before_change):
@@ -498,7 +499,9 @@ def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
     graph = gm.graph
     work_done = False
-    for module_name, module in gm.named_modules():
+    # remove_duplicate=False so every attribute path to a shared Identity
+    # instance is visited, not just the first one.
+    for module_name, module in gm.named_modules(remove_duplicate=False):
         if type(module) is nn.Identity:
             for node in list(graph.find_nodes(op="call_module", target=module_name)):
                 if len(node.args) != 1:

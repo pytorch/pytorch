@@ -238,7 +238,7 @@ struct PythonResolver : public Resolver {
 
   /**
    * While compiling classes, the class type we're compiling will not be
-   * available in Python, since we haven't fowner_ defining the class yet. So
+   * available in Python, since we haven't finished defining the class yet. So
    * in order to make the class type available to its own methods, we need to
    * explicitly resolve it.
    *
@@ -493,7 +493,7 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     adjusted_params.push_back(overload_params[i]);
   }
   for (size_t i = overload_params.size(); i < impl_params.size(); ++i) {
-    if (!defaults.count(impl_params[i].ident().name())) {
+    if (!defaults.contains(impl_params[i].ident().name())) {
       throw(
           ErrorReport(impl_decl.range())
           << "Expected to find default parameter on argument"
@@ -648,7 +648,7 @@ static bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       //          << *item.b.type() << ") " << item.b.internalToPointer() <<
       //          "\n";
 
-      if (visited.count(item.a.internalToPointer())) {
+      if (visited.contains(item.a.internalToPointer())) {
         continue;
       }
       visited.emplace(item.a.internalToPointer());
@@ -1052,7 +1052,7 @@ void initJitScriptBindings(PyObject* module) {
                       err << qualname->qualifiedName() << ' ';
                     }
                     err << "which does not have a __setstate__ method defined!";
-                    throw std::runtime_error(std::move(err).str());
+                    TORCH_CHECK(false, std::move(err).str());
                   }
                 }
 
@@ -1062,7 +1062,7 @@ void initJitScriptBindings(PyObject* module) {
                   err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __getstate__ method defined!";
-                throw std::runtime_error(std::move(err).str());
+                TORCH_CHECK(false, std::move(err).str());
               })
           .def(py::pickle(
               [](const Object& self)
@@ -1079,7 +1079,7 @@ void initJitScriptBindings(PyObject* module) {
                   err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __getstate__ method defined!";
-                throw std::runtime_error(std::move(err).str());
+                TORCH_CHECK(false, std::move(err).str());
               },
               [](const std::tuple<py::object, std::string>& state_tup)
                   -> Object {
@@ -1116,7 +1116,7 @@ void initJitScriptBindings(PyObject* module) {
                   err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __setstate__ method defined!";
-                throw std::runtime_error(std::move(err).str());
+                TORCH_CHECK(false, std::move(err).str());
               }));
 
   py::class_<Object::Property>(m, "ScriptObjectProperty")
@@ -1163,7 +1163,7 @@ void initJitScriptBindings(PyObject* module) {
       });
 
   for (const char* mm_name : magic_method_names) {
-    if (special_magic_methods.count(mm_name)) {
+    if (special_magic_methods.contains(mm_name)) {
       object_class.def(mm_name, special_magic_methods[mm_name]);
     } else {
       object_class.def(
@@ -1178,7 +1178,7 @@ void initJitScriptBindings(PyObject* module) {
                   "'{}' is not implemented for {}",
                   mm_name,
                   self.type()->str());
-              throw c10::NotImplementedError(msg);
+              TORCH_CHECK_NOT_IMPLEMENTED(false, msg);
             }
             return invokeScriptMethodFromPython(*method, args, kwargs);
           });
@@ -1321,7 +1321,8 @@ void initJitScriptBindings(PyObject* module) {
             if (auto m = self.find_method("forward")) {
               return m->get_executor().getDebugState();
             }
-            throw std::runtime_error(
+            TORCH_CHECK(
+                false,
                 "Attempted to call get_debug_state on a Module without a compiled forward()");
           })
       .def(

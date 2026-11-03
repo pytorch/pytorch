@@ -296,7 +296,7 @@ def shard_module(module: nn.Module, plan: ShardingPlan, src_rank=0, process_grou
                 raise TypeError(
                     f"Only `ShardingSpec` is supported as output_plan for '{module_path}'"
                 )
-    # convert the output back to data parallel for the modules appears in
+    # convert the output back to data parallel for the modules that appear in
     # `return_local_tensor` of the plan, we will call `_collect_local_shard`
     # to collect the local tensor for output of modules
     if plan.return_local_tensor is not None:

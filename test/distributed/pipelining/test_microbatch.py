@@ -1,5 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+from contextlib import nullcontext
+
 from model_registry import ModelWithKwargs
 
 import torch
@@ -12,10 +14,14 @@ from torch.distributed.pipelining.microbatch import (
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    skipCPUIf,
-    skipXPUIf,
+    onlyAccelerator,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    DeterministicGuard,
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 d_hid = 512
@@ -23,6 +29,8 @@ torch.manual_seed(0)
 
 
 class MicrobatchTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_split_and_merge(self):
         x0 = torch.randn(128, d_hid)
         x1 = torch.randn(256, d_hid)
@@ -84,7 +92,11 @@ class MicrobatchTests(TestCase):
         torch.testing.assert_close(merged_kwargs, kwargs)
         print("Microbatch test passed")
 
-    @skipCPUIf(True, "Flex attention backward is not supported on CPU")
+
+class MicrobatchTestsDevices(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
     def test_split_block_mask(self, device):
         B = 6
         H = 1
@@ -135,11 +147,7 @@ class MicrobatchTests(TestCase):
             KV_LEN=SEQ_LEN,
             device=device,
         )
-        if device == "cuda":
-            flex_fn = torch.compile(flex_attention)
-        else:
-            # It's unclear why CPU + torch.compile + flex_attention can cause an issue.
-            flex_fn = flex_attention
+        flex_fn = torch.compile(flex_attention)
         out = flex_fn(q, k, v, block_mask=block_mask)
         out.sum().backward()
 
@@ -245,11 +253,11 @@ class MicrobatchTests(TestCase):
             KV_LEN=SEQ_LEN,
             device=device,
         )
-        if device == "cuda":
-            flex_fn = torch.compile(flex_attention)
-        else:
+        if device == "cpu":
             # It's unclear why CPU + torch.compile + flex_attention can cause an issue.
             flex_fn = flex_attention
+        else:
+            flex_fn = torch.compile(flex_attention)
         out = flex_fn(q, k, v, block_mask=block_mask)
 
         q_clone, k_clone, v_clone = (target.clone().detach() for target in (q, k, v))
@@ -297,44 +305,42 @@ class MicrobatchTests(TestCase):
             self.assertIsNone(arg_split[i][3])
             self.assertIsNone(kwarg_split[i]["attention_mask"])
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_chunk_spec(self, device):
-        mod = ModelWithKwargs().to(device)
-        batch_size = ModelWithKwargs.DEFAULT_BATCH_SIZE
+        # oneDNN is nondeterministic on XPU: https://github.com/intel/torch-xpu-ops/issues/1682
+        with DeterministicGuard(True) if self.device_type == "xpu" else nullcontext():
+            mod = ModelWithKwargs().to(device)
+            batch_size = ModelWithKwargs.DEFAULT_BATCH_SIZE
 
-        x = torch.randn(batch_size, d_hid, device=device)
-        y = torch.randn(batch_size, d_hid, device=device)
+            x = torch.randn(batch_size, d_hid, device=device)
+            y = torch.randn(batch_size, d_hid, device=device)
 
-        num_chunks = 4
+            num_chunks = 4
 
-        args_chunk_spec = TensorChunkSpec.from_tuple((0,))
-        kwargs_chunk_spec = TensorChunkSpec.from_dict({"y": 0})
+            args_chunk_spec = TensorChunkSpec.from_tuple((0,))
+            kwargs_chunk_spec = TensorChunkSpec.from_dict({"y": 0})
 
-        args_split, kwargs_split = split_args_kwargs_into_chunks(
-            (x,),
-            {"y": y},
-            num_chunks,
-            args_chunk_spec,
-            kwargs_chunk_spec,
-        )
+            args_split, kwargs_split = split_args_kwargs_into_chunks(
+                (x,),
+                {"y": y},
+                num_chunks,
+                args_chunk_spec,
+                kwargs_chunk_spec,
+            )
 
-        pipe = pipeline(
-            mod,
-            mb_args=args_split[0],
-            mb_kwargs=kwargs_split[0],
-        ).to(device)
+            pipe = pipeline(
+                mod,
+                mb_args=args_split[0],
+                mb_kwargs=kwargs_split[0],
+            ).to(device)
 
-        ref = mod(x, y)
-        out = pipe(x, y)[0]
+            ref = mod(x, y)
+            out = pipe(x, y)[0]
 
-        torch.testing.assert_close(out, ref)
-        print(f"equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
+            torch.testing.assert_close(out, ref)
+            print(f"equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
 
-devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(
-    MicrobatchTests, globals(), only_for=devices, allow_xpu=True
-)
+instantiate_device_type_tests(MicrobatchTestsDevices, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

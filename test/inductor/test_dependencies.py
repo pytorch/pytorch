@@ -16,6 +16,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -179,6 +180,42 @@ class TestDependencies(InductorTestCase):
         normalized_loop_order1 = loop_order1.normalize_with_stride_order()
         normalized_loop_order2 = loop_order2.normalize_with_stride_order()
         self.assertTrue(normalized_loop_order1 == normalized_loop_order2)
+
+    def test_normalize_with_ranges(self):
+        d0 = sympy_index_symbol("d0")
+        d1 = sympy_index_symbol("d1")
+        x = sympy_index_symbol("x")
+        r = sympy_index_symbol("r")
+        dep = MemoryDep("buf", 100 * d0 + 2 * d1 + 1, (d0, d1), (4, 8))
+
+        normalized = dep.normalize_with_ranges((x, r), (2, 16))
+        self.assertIsNotNone(normalized)
+        for x_value in range(2):
+            for r_value in range(16):
+                flat = 16 * x_value + r_value
+                expected = 100 * (flat // 8) + 2 * (flat % 8) + 1
+                self.assertEqual(
+                    normalized.index.subs({x: x_value, r: r_value}), expected
+                )
+
+        broadcast = MemoryDep("buf", d0, (d0,), (64,))
+        self.assertIsNone(broadcast.normalize_with_ranges((x, r), (64, 64)))
+
+        indirect = MemoryDep("buf", sympy_index_symbol("tmp0"), (d0,), (64,))
+        self.assertIsNone(indirect.normalize_with_ranges((x, r), (8, 8)))
+
+        aligned = MemoryDep("buf", 128 * d0 + 2 * d1 + 1, (d0, d1), (4, 128))
+        normalized_aligned = aligned.normalize_with_ranges((x, r), (64, 8))
+        self.assertIsNotNone(normalized_aligned)
+        self.assertEqual(
+            normalized_aligned.index,
+            128 * FloorDiv(x, 16) + 16 * ModularIndexing(x, 1, 16) + 2 * r + 1,
+        )
+
+        scalar = MemoryDep("buf", d0 - d0 + 5, (), ())
+        normalized_scalar = scalar.normalize_with_ranges((x, r), (64, 64))
+        self.assertIsNotNone(normalized_scalar)
+        self.assertEqual(normalized_scalar.index, 5)
 
     def test_normalize_with_stride_order_unequal(self):
         x = sympy_index_symbol("x")

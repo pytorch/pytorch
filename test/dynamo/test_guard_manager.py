@@ -17,6 +17,7 @@ from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     set_default_dtype,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
@@ -32,6 +33,7 @@ OBJECT_ALIASING = guards.OBJECT_ALIASING
 install_object_aliasing_guard = guards.install_object_aliasing_guard
 NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
 install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
+install_storage_overlapping_guard = guards.install_storage_overlapping_guard
 
 
 x = torch.tensor(4)
@@ -78,6 +80,8 @@ def less_match_verbose_code_parts(expected):
 
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_cpp_shape_guard_missing_windows_compiler_falls_back(self):
         from torch._inductor.codecache import CppCodeCache
         from torch._inductor.cpp_builder import check_compiler_exist_windows
@@ -191,6 +195,27 @@ user_stack=None)
             self.assertEqual(guard.reason(), "autocast_cache_enabled ")
         finally:
             torch.set_autocast_cache_enabled(old_cache)
+
+    def test_global_state_reason_autocast(self):
+        guard = GlobalStateGuard()
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            self.assertIs(guard.check(), False)
+            self.assertEqual(guard.reason(), "autocast(cpu)_enabled ")
+            guard = GlobalStateGuard()
+            self.assertIs(guard.check(), True)
+            with torch.autocast("cpu", dtype=torch.float16):
+                self.assertIs(guard.check(), False)
+                self.assertEqual(guard.reason(), "autocast(cpu)_dtype ")
+        self.assertIs(guard.check(), False)
+
+    def test_global_state_autocast_round_trip(self):
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            state = GlobalStateGuard().__getstate__()
+        guard = GlobalStateGuard()
+        guard.__setstate__(state)
+        self.assertIs(guard.check(), False)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            self.assertIs(guard.check(), True)
 
     def test_python_lambda_leaf_guard(self):
         root = RootGuardManager()
@@ -314,12 +339,8 @@ user_stack=None)
         guard = guards.DEFAULT_DEVICE(root, ["cpu device"], None)
         self.assertTrue(guard(foo))
 
-        if not torch.accelerator.is_available():
-            self.skipTest("Accelerator is not available")
-
         try:
-            device = torch.accelerator.current_accelerator()
-            torch.set_default_device(device)
+            torch.set_default_device("meta")
             self.assertFalse(guard(foo))
         finally:
             torch.set_default_device(None)
@@ -507,6 +528,7 @@ user_stack=None)
             None,
             type(x),
             torch._C._dispatch_keys(x),
+            False,
         )
         self.assertTrue(guard_manager.check(x))
         self.assertTrue(guard_manager.check_verbose(x).result)
@@ -521,6 +543,43 @@ user_stack=None)
         self.assertTrue(
             "tensor 'x' stride mismatch" in debug_info.verbose_code_parts[0]
         )
+
+    def test_tensor_match_guard_throw_restores_torch_function(self):
+        # The root disables the TorchFunction TLS while its accessors run and
+        # restores it on scope exit, so a C++ throw out of an accessor leaves
+        # the state as it found it. TENSOR_MATCH on a strided nested tensor is
+        # such a throw: it fires a TORCH_CHECK reading the strides (check) or
+        # sizes (check_verbose). The guard is built from explicit size and
+        # stride lists because building it from the tensor reads the same
+        # strides, and the accessor is the root's own so nothing else can
+        # reject the input first.
+        nested = torch.nested.nested_tensor(
+            [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
+        )
+        root = RootGuardManager()
+        manager = root.dict_getitem_manager("x", "L['x']", nested, default_mgr_enum)
+        manager.add_tensor_match_guard(
+            nested,
+            [None] * 3,
+            [None] * 3,
+            "x",
+            ["check_tensor(x)"],
+            None,
+            type(nested),
+            torch._C._dispatch_keys(nested),
+        )
+        # Under a non-default state, so restoring the captured old state is
+        # told apart from resetting to ENABLED.
+        err = "NestedTensorImpl doesn't support"
+        with torch._C.DisableTorchFunctionSubclass():
+            state = torch._C._get_torch_function_state()
+            self.assertEqual(state, torch._C._TorchFunctionState.SUBCLASSES_DISABLED)
+            with self.assertRaisesRegex(RuntimeError, err):
+                root.check({"x": nested})
+            self.assertEqual(torch._C._get_torch_function_state(), state)
+            with self.assertRaisesRegex(RuntimeError, err):
+                root.check_verbose({"x": nested})
+            self.assertEqual(torch._C._get_torch_function_state(), state)
 
     def test_no_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
@@ -555,6 +614,9 @@ user_stack=None)
         self.assertTrue(isinstance(x_guards[0], NO_TENSOR_ALIASING))
         self.assertTrue(isinstance(y_guards[0], NO_TENSOR_ALIASING))
         self.assertTrue(isinstance(z_guards[0], NO_TENSOR_ALIASING))
+        self.assertFalse(x_guard_mgr.has_unoptimized_relational_guard())
+        self.assertFalse(y_guard_mgr.has_unoptimized_relational_guard())
+        self.assertFalse(z_guard_mgr.has_unoptimized_relational_guard())
         # Check that the two guards are the same object
         self.assertTrue(x_guards[0] is y_guards[0] is z_guards[0])
         self.assertFalse(guard_manager.check(f_locals))
@@ -589,17 +651,12 @@ user_stack=None)
         self.assertFalse(guard(weakref_x()))
 
     def test_call_function_no_args_guard(self):
-        if not torch.accelerator.is_available():
-            self.skipTest("Accelerator is not available")
-
         root = RootGuardManager()
-        device = torch.accelerator.current_accelerator()
-        # Use device.index which is device-agnostic (works on all accelerators)
-        x = device.index if device.index is not None else 0
+        x = 0
         guard = guards.EQUALS_MATCH(root, x, [0], None)
-        self.assertTrue(guard(0))
-        self.assertFalse(guard(1))
-        self.assertFalse(guard(2))
+        self.assertTrue(guard(x))
+        self.assertFalse(guard(x + 1))
+        self.assertFalse(guard(x + 2))
 
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()
@@ -763,6 +820,26 @@ user_stack=None)
             guard_str,
         )
 
+    def test_code_parts_include_epilogue_lambda_guards(self):
+        def fn(x):
+            if x.numel() >= 1024:
+                return x + 5
+            return x * 2
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(2)
+        torch._dynamo.mark_dynamic(x, 0)
+        opt_fn(x)
+
+        cache_entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(cache_entries), 1)
+        guard_manager = cache_entries[0].guard_manager
+        self.assertIn("L['x'].size()[0]", str(guard_manager))
+        self.assertTrue(
+            any("L['x'].size()[0]" in part for part in guard_manager.code_parts),
+            guard_manager.code_parts,
+        )
+
     def test_dict_getitem_accessor(self):
         foo = {
             "a": 1,
@@ -781,6 +858,72 @@ user_stack=None)
         self.assertTrue(guards_manager.check(foo))
         self.assertFalse(guards_manager.check({"a": 1, "b": 3}))
 
+    def test_dict_getitem_accessor_with_object_aliasing_guard(self):
+        a = tuple(range(1000, 1002))
+        b = tuple(range(1000, 1002))
+        d = {"a": a}
+
+        guards_manager = RootGuardManager()
+        x_mgr = guards_manager.framelocals_manager(("x", 0), "x", a, default_mgr_enum)
+        d_mgr = guards_manager.framelocals_manager(("d", 1), "d", d, default_mgr_enum)
+        d_a_mgr = d_mgr.dict_getitem_manager("a", "d['a']", a, default_mgr_enum)
+        install_object_aliasing_guard(x_mgr, d_a_mgr, ["x is d['a']"], None)
+
+        self.assertTrue(d_a_mgr.has_object_aliasing_guard())
+        self.assertTrue(d_a_mgr.has_unoptimized_relational_guard())
+        self.assertTrue(guards_manager.check({"x": a, "d": d}))
+        self.assertFalse(guards_manager.check({"x": b, "d": d}))
+
+    def test_nested_framelocals_accessor_with_object_aliasing_guard(self):
+        a = tuple(range(1000, 1002))
+        b = tuple(range(1000, 1002))
+        d = {"t": (a,)}
+
+        guards_manager = RootGuardManager()
+        x_mgr = guards_manager.framelocals_manager(("x", 0), "x", a, default_mgr_enum)
+        d_mgr = guards_manager.framelocals_manager(("d", 1), "d", d, default_mgr_enum)
+        # This synthetic nested FrameLocals accessor directly exercises the
+        # descendant-accessor condition; production installs it only at root.
+        d_t_mgr = d_mgr.framelocals_manager(
+            ("t", 0), "d['t']", d["t"], default_mgr_enum
+        )
+        d_t_item_mgr = d_t_mgr.tuple_getitem_manager(
+            0, "d['t'][0]", a, default_mgr_enum
+        )
+        install_object_aliasing_guard(x_mgr, d_t_item_mgr, ["x is d['t'][0]"], None)
+
+        self.assertTrue(guards_manager.check({"x": a, "d": d}))
+        self.assertFalse(guards_manager.check({"x": b, "d": d}))
+
+    def test_storage_overlapping_guard_not_tag_safe(self):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        storage = torch.randn(6)
+        a = storage[:2]
+        overlapping = storage[1:3]
+        non_overlapping = storage[3:5]
+        d = {"a": a}
+
+        guards_manager = RootGuardManager()
+        x_mgr = guards_manager.framelocals_manager(
+            ("x", 0), "x", overlapping, default_mgr_enum
+        )
+        d_mgr = guards_manager.framelocals_manager(("d", 1), "d", d, default_mgr_enum)
+        d_a_mgr = d_mgr.dict_getitem_manager("a", "d['a']", a, default_mgr_enum)
+        install_storage_overlapping_guard(
+            [x_mgr, d_a_mgr], [], ["x overlaps d['a']"], None
+        )
+
+        GuardManagerWrapper(guards_manager).find_tag_safe_roots()
+
+        self.assertTrue(x_mgr.has_unoptimized_relational_guard())
+        self.assertTrue(d_a_mgr.has_unoptimized_relational_guard())
+        self.assertFalse(x_mgr.is_tag_safe())
+        self.assertFalse(d_mgr.is_tag_safe())
+        self.assertFalse(d_a_mgr.is_tag_safe())
+        self.assertTrue(guards_manager.check({"x": overlapping, "d": d}))
+        self.assertFalse(guards_manager.check({"x": non_overlapping, "d": d}))
+
     def test_globals(self):
         global global_pair, Pair
         guard_manager = RootGuardManager()
@@ -789,9 +932,11 @@ user_stack=None)
         ).getitem_manager("global_pair", "", global_pair, default_mgr_enum)
 
         gpair_mgr.add_lambda_guard(
-            lambda x: isinstance(x, Pair)
-            and isinstance(x.x, torch.Tensor)
-            and isinstance(x.y, int),
+            lambda x: (
+                isinstance(x, Pair)
+                and isinstance(x.x, torch.Tensor)
+                and isinstance(x.y, int)
+            ),
             "global guard fail",
             None,
         )
@@ -1119,6 +1264,8 @@ user_stack=None)
 
 
 class TypePropagationTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @torch._dynamo.config.patch(skip_tensor_guards_with_matching_dict_tags=True)
     def test_basic_types(self):
         class Foo:
@@ -1180,6 +1327,8 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
 
 
 class DuplicateGuardTest(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_duplicate_guard(self):
         class Foo:
             def __init__(self):
@@ -1226,6 +1375,8 @@ class RecursiveDictTagTests(torch._dynamo.test_case.TestCase):
 
 
 class TagSafetyChecks(RecursiveDictTagTests):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
@@ -1406,6 +1557,145 @@ class TagSafetyChecks(RecursiveDictTagTests):
         with install_guard_manager_testing_hook(hook):
             opt_fn(torch.randn(4, 4))
 
+    def test_unoptimized_relational_guard_not_tag_safe(self):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        a = tuple(range(1000, 1002))
+        d = {"a": a}
+        root = RootGuardManager()
+        x_mgr = root.framelocals_manager(("x", 0), "x", a, default_mgr_enum)
+        d_mgr = root.framelocals_manager(("d", 1), "d", d, default_mgr_enum)
+        d_a_mgr = d_mgr.dict_getitem_manager("a", "d['a']", a, default_mgr_enum)
+        install_object_aliasing_guard(x_mgr, d_a_mgr, ["x is d['a']"], None)
+
+        GuardManagerWrapper(root).find_tag_safe_roots()
+
+        self.assertTrue(x_mgr.has_unoptimized_relational_guard())
+        self.assertTrue(d_a_mgr.has_unoptimized_relational_guard())
+        self.assertFalse(x_mgr.is_tag_safe())
+        self.assertFalse(d_mgr.is_tag_safe())
+        self.assertFalse(d_a_mgr.is_tag_safe())
+
+    def test_nested_relational_guard_not_tag_safe(self):
+        from torch._dynamo.testing import CompileCounter
+
+        class Mod(torch.nn.Module):
+            def __init__(self, value):
+                super().__init__()
+                self.a = (value,)
+
+        base = torch.randn(2)
+        different = base.clone()
+        mod = Mod(base)
+
+        def fn(t, x, m):
+            if x is m.a[0]:
+                return t + 1
+            return t - 1
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        checked_matching_graph = False
+
+        def hook(guard_wrapper, f_locals, builder):
+            nonlocal checked_matching_graph
+
+            if f_locals["x"] is not f_locals["m"].a[0]:
+                return
+
+            from torch._dynamo.source import AttrSource, GetItemSource, LocalSource
+
+            checked_matching_graph = True
+            m_source = LocalSource("m")
+            m_a_source = AttrSource(m_source, "a")
+            m_a_item_source = GetItemSource(m_a_source, 0)
+
+            m_mgr = builder.get_guard_manager_from_source(m_source)
+            m_a_mgr = builder.get_guard_manager_from_source(m_a_source)
+            m_a_item_mgr = builder.get_guard_manager_from_source(m_a_item_source)
+
+            self.assertTrue(m_a_item_mgr.has_unoptimized_relational_guard())
+            self.assertFalse(m_a_item_mgr.is_tag_safe())
+            self.assertFalse(m_a_mgr.is_tag_safe())
+            self.assertFalse(m_mgr.is_tag_safe())
+
+        with torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=True):
+            counter = CompileCounter()
+            opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+            t = torch.tensor(0)
+
+            with install_guard_manager_testing_hook(hook):
+                self.assertEqual(
+                    [
+                        opt_fn(t, base, mod).item(),
+                        opt_fn(t, base, mod).item(),
+                        opt_fn(t, different, mod).item(),
+                    ],
+                    [1, 1, -1],
+                )
+            self.assertEqual(counter.frame_count, 2)
+            self.assertTrue(checked_matching_graph)
+
+    def test_custom_metaclass_mro_first_item_source(self):
+        from torch._dynamo.testing import CompileCounter
+
+        class Meta(type):
+            def mro(cls):
+                return [object, cls]
+
+        class Foo(metaclass=Meta):
+            pass
+
+        def fn(x):
+            if type(x).__mro__[0] is object:
+                return torch.ones(1)
+            return torch.zeros(1)
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        foo = Foo()
+        expected = fn(foo)
+
+        self.assertEqual(opt_fn(foo), expected)
+        self.assertEqual(opt_fn(foo), expected)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_custom_metaclass_mro_first_item_mutation(self):
+        from torch._dynamo.testing import CompileCounter
+
+        use_object_first = False
+
+        class Meta(type):
+            def mro(cls):
+                return [object, cls] if use_object_first else [cls, object]
+
+        class Foo(metaclass=Meta):
+            pass
+
+        def fn(x):
+            if type(x).__mro__[0] is object:
+                return torch.ones(1)
+            return torch.zeros(1)
+
+        counter = CompileCounter()
+        with torch._dynamo.config.patch(
+            assume_dunder_attributes_remain_unchanged=False
+        ):
+            opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+            foo = Foo()
+
+            self.assertEqual(opt_fn(foo), torch.zeros(1))
+            self.assertEqual(counter.frame_count, 1)
+
+            use_object_first = True
+            Foo.__bases__ = Foo.__bases__
+
+            self.assertEqual(opt_fn(foo), torch.ones(1))
+            self.assertEqual(counter.frame_count, 2)
+
     def test_nn_module_tag_safe(self):
         class Foo(torch.nn.Module):
             c = 2
@@ -1448,9 +1738,15 @@ class TagSafetyChecks(RecursiveDictTagTests):
             from utils import install_guard_manager_testing_hook
 
         def hook(guard_wrapper, f_locals, builder):
-            from torch._dynamo.source import LocalSource
+            from torch._dynamo.source import LocalSource, TypeSource
 
             baz_source = LocalSource("baz")
+
+            # type(baz).__mro__[0] and type(baz) are the same object. Their
+            # sources should be canonicalized rather than related by a
+            # redundant object-aliasing guard, which would make baz tag-unsafe.
+            baz_type_mgr = builder.get_guard_manager_from_source(TypeSource(baz_source))
+            self.assertFalse(baz_type_mgr.has_unoptimized_relational_guard())
 
             # Check tagness of baz
             baz_mgr = builder.get_guard_manager_from_source(baz_source)
@@ -1502,6 +1798,8 @@ class TagSafetyChecks(RecursiveDictTagTests):
 
 
 class RecursiveDictGuardTests(RecursiveDictTagTests):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_disabling(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -1617,6 +1915,8 @@ class RecursiveDictGuardTests(RecursiveDictTagTests):
 
 
 class SourceCloneTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_clone_identity_transform(self):
         """Identity transform should produce a source with the same name."""
         from torch._dynamo.source import AttrSource, GetItemSource, LocalSource
@@ -1732,6 +2032,8 @@ class SourceCloneTests(torch._dynamo.test_case.TestCase):
 class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
     """Tests for the GuardCheckSpec get_metadata_fn/eval_fn handlers on GuardBuilder."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def _get_handler(self, name):
         from torch._dynamo.guards import GUARD_VALUE_DISPATCH
 
@@ -1773,6 +2075,13 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         expected = handler.get_metadata_fn(guard, [1, 2, 3])
         self.assertTrue(handler.eval_fn([1, 2, 3], expected))
         self.assertFalse(handler.eval_fn([1, 2], expected))
+
+        expected = handler.get_metadata_fn(guard, [(0.0,), frozenset({0.0})])
+        self.assertFalse(handler.eval_fn([(-0.0,), frozenset({0.0})], expected))
+        self.assertFalse(handler.eval_fn([(0.0,), frozenset({-0.0})], expected))
+
+        expected = handler.get_metadata_fn(guard, [float("nan")])
+        self.assertTrue(handler.eval_fn([float("nan")], expected))
 
     def test_id_match(self):
         from torch._dynamo.guards import GuardBuilder
@@ -2127,6 +2436,18 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         )
         self.assertFalse(handler.eval_fn(types.MappingProxyType({"x": 1}), expected))
 
+        expected = handler.get_metadata_fn(guard, types.MappingProxyType({0.0: None}))
+        self.assertFalse(
+            handler.eval_fn(types.MappingProxyType({-0.0: None}), expected)
+        )
+
+        expected = handler.get_metadata_fn(
+            guard, types.MappingProxyType({float("nan"): None})
+        )
+        self.assertTrue(
+            handler.eval_fn(types.MappingProxyType({float("nan"): None}), expected)
+        )
+
     @unittest.skipIf(
         sys.platform != "linux",
         "Only support mem leak checking on Linux.",
@@ -2177,6 +2498,12 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(handler.eval_fn({"a": 10, "b": 20, "c": 30}, expected))
         self.assertFalse(handler.eval_fn({"a": 1, "b": 2}, expected))
         self.assertFalse(handler.eval_fn({"x": 1, "y": 2, "z": 3}, expected))
+
+        expected = handler.get_metadata_fn(guard, {0.0: None})
+        self.assertFalse(handler.eval_fn({-0.0: None}, expected))
+
+        expected = handler.get_metadata_fn(guard, {float("nan"): None})
+        self.assertTrue(handler.eval_fn({float("nan"): None}, expected))
 
 
 if __name__ == "__main__":

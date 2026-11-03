@@ -60,6 +60,7 @@
     "AllToAllOptions",
     "AllreduceCoalescedOptions",
     "AllreduceOptions",
+    "BackendBase",
     "BarrierOptions",
     "BroadcastOptions",
     "BuiltinCommHookType",
@@ -714,8 +715,6 @@
     "add_quant_dequant",
     "_assert_valid_qconfig",
     "convert",
-    "convert_dynamic_jit",
-    "convert_jit",
     "default_fixed_qparams_range_0to1_fake_quant",
     "default_affine_fixed_qparams_fake_quant",
     "default_debug_observer",
@@ -740,7 +739,6 @@
     "enable_fake_quant",
     "enable_observer",
     "fuse_conv_bn",
-    "fuse_conv_bn_jit",
     "fuse_conv_bn_relu",
     "fuse_linear_bn",
     "fuse_modules",
@@ -760,19 +758,13 @@
     "load_observer_state_dict",
     "no_observer_set",
     "prepare",
-    "prepare_dynamic_jit",
-    "prepare_jit",
     "prepare_qat",
     "propagate_qconfig_",
     "qconfig_equals",
     "_get_quant_type_to_str",
     "quantize",
     "quantize_dynamic",
-    "quantize_dynamic_jit",
-    "quantize_jit",
     "quantize_qat",
-    "script_qconfig",
-    "script_qconfig_dict",
     "swap_module"
   ],
   "torch.quantization.fake_quantize": [
@@ -867,17 +859,6 @@
     "quantize_dynamic",
     "quantize_qat",
     "swap_module"
-  ],
-  "torch.quantization.quantize_jit": [
-    "convert_dynamic_jit",
-    "convert_jit",
-    "fuse_conv_bn_jit",
-    "prepare_dynamic_jit",
-    "prepare_jit",
-    "quantize_dynamic_jit",
-    "quantize_jit",
-    "script_qconfig",
-    "script_qconfig_dict"
   ],
   "torch.quantization.stubs": [
     "DeQuantStub",
@@ -2626,23 +2607,6 @@
   ],
   "torch.export.graph_signature": [
     "TokenArgument"
-  ],
-  "torch.fx.experimental.shape_inference.infer_shape": [
-    "DimDynamic",
-    "FakeTensorMode",
-    "LocalSource",
-    "ShapeEnv",
-    "defaultdict",
-    "infer_symbol_values",
-    "make_fx"
-  ],
-  "torch.fx.experimental.shape_inference.infer_symbol_values": [
-    "Any",
-    "DefaultDict",
-    "Dict",
-    "List",
-    "Tuple",
-    "Union"
   ],
   "torch.fx.passes.runtime_assert": [
     "Any",

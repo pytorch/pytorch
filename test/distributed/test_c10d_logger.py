@@ -41,7 +41,7 @@ def with_comms(func=None):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         if torch.get_device_module(device_type).device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
         self.create_pg(device_type)
         func(self)
         self.destroy_comms()

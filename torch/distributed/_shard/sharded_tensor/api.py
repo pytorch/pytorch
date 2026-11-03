@@ -108,6 +108,7 @@ class ShardedTensorBase(torch.Tensor):
         r = torch.Tensor._make_wrapper_subclass(
             cls,
             sizes,
+            strides=strides,
             dtype=dtype,
             layout=layout,
             pin_memory=pin_memory,
@@ -195,7 +196,7 @@ class ShardedTensorBase(torch.Tensor):
 
 class ShardedTensor(ShardedTensorBase):
     """
-    ShardedTensor is an torch.Tensor subclass to represent Tensors that are sharded
+    ShardedTensor is a torch.Tensor subclass to represent Tensors that are sharded
     across multiple devices and multiple processes.
 
     ShardedTensor is initialized in an SPMD like fashion where each rank
@@ -864,7 +865,7 @@ class ShardedTensor(ShardedTensorBase):
         Examples:
             >>> # xdoctest: +SKIP
             >>> # All tensors below are of torch.int64 type.
-            >>> # We have 2 process groups, 2 ranks.
+            >>> # We have 2 ranks.
             >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
             >>> local_tensor = torch.unsqueeze(torch.cat([tensor, tensor + 2]))
             >>> local_tensor
@@ -1103,7 +1104,7 @@ class ShardedTensor(ShardedTensorBase):
 
         Examples:
             >>> # xdoctest: +SKIP
-            >>> # We have 2 process groups, 2 ranks.
+            >>> # We have 2 ranks.
             >>> tensor = torch.arange(4, dtype=torch.int64) + 1 + 2 * rank
             >>> tensor = torch.stack([tensor, tensor])
             >>> tensor
