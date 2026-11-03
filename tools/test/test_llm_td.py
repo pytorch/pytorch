@@ -141,30 +141,35 @@ class TestSelection(unittest.TestCase):
             "cpython/v3_13/test_set.py": "    class TestSet(unittest.TestCase):\n",
             "inductor/test_torchinductor.py": "class TestSetCopy:\n",
         }
-        candidates = CANDIDATES | {"inductor/test_compiled_autograd"}
         for changed, files, sweeps in [
             ("test/dynamo_expected_failures/TestNNCPU.test_x", {"test_nn"}, set()),
             ("test/dynamo_skips/TestNN.test_x_cuda", {"test_nn"}, set()),
             ("test/inductor_skips/TestNNCUDA.test_x", {"test_nn"}, set()),
             ("test/dynamo_skips/CPython313-test_set-TestSet.test_x", {"cpython/v3_13/test_set"}, set()),
             ("test/dynamo_skips/TestGone.test_x", set(), {"dynamo_wrapped"}),
-            ("test/compiled_autograd_skips/TestNN.test_x", {"inductor/test_compiled_autograd", "test_nn"}, set()),
-            ("test/compiled_autograd_skips/TestGone.test_x", {"inductor/test_compiled_autograd"}, {"dynamo_wrapped"}),
+            ("test/compiled_autograd_skips/TestNN.test_x", {"test_nn"}, set()),
+            ("test/compiled_autograd_skips/TestGone.test_x", set(), {"dynamo_wrapped"}),
             ("test/dynamo_skips/.gitkeep", set(), set()),
+            # dynamo_test_failures.py rejects these names at import.
+            ("test/dynamo_skips/TestNN_test_x", set(), {"dynamo_wrapped"}),
+            ("test/dynamo_expected_failures/TestNN.test_x.y", set(), {"dynamo_wrapped"}),
+            ("test/compiled_autograd_skips/TestNN", set(), {"dynamo_wrapped"}),
         ]:  # fmt: skip
-            sel = self.select_in_tree(sources, candidates, [changed])
+            sel = self.select_in_tree(sources, CANDIDATES, [changed])
             self.assertFalse(sel.run_all, changed)
             self.assertEqual((sel.files, sel.sweeps), (files, sweeps), changed)
-        for changed in ("test/inductor_expected_failures/TestGone.test_x", "test/inductor_skips/TestGone.test_x"):  # fmt: skip
-            self.assertTrue(self.select_in_tree(sources, candidates, [changed]).run_all)
+        for changed in ("test/inductor_expected_failures/TestGone.test_x", "test/inductor_skips/TestGone.test_x", "test/inductor_skips/TestNN.test_x.y"):  # fmt: skip
+            self.assertTrue(self.select_in_tree(sources, CANDIDATES, [changed]).run_all)
         many = [f"test/dynamo_skips/TestNN{i}.test_x" for i in range(selection.MAX_FAILURE_LIST_CLASSES + 1)]  # fmt: skip
-        self.assertEqual(self.select_in_tree(sources, candidates, many).sweeps, {"dynamo_wrapped"})  # fmt: skip
+        self.assertEqual(self.select_in_tree(sources, CANDIDATES, many).sweeps, {"dynamo_wrapped"})  # fmt: skip
         # Without a grep, the classes cannot be looked up.
-        sel = Selection.from_model_output({"tests": []}, candidates, ["test/dynamo_skips/TestNN.test_x"])  # fmt: skip
+        sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/dynamo_skips/TestNN.test_x"])  # fmt: skip
         self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
-        sel = Selection.from_model_output({"tests": []}, candidates, ["test/inductor_skips/TestNN.test_x"])  # fmt: skip
+        sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/inductor_skips/TestNN.test_x"])  # fmt: skip
         self.assertTrue(sel.run_all)
-        sel = Selection.from_model_output({"tests": []}, candidates, ["test/compiled_autograd_skips/TestNN.test_x"])  # fmt: skip
+        sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/compiled_autograd_skips/TestNN.test_x"])  # fmt: skip
+        self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
+        sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/dynamo_skips/TestNN_test_x"])  # fmt: skip
         self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
 
     def test_fallbacks_run_all(self) -> None:
@@ -225,9 +230,13 @@ class TestSelection(unittest.TestCase):
             ".github/scripts/filter_test_configs.py",
             ".github/ci_commit_pins/vision.txt",
             ".github/ci_commit_pins/audio.txt",
+            ".github/ci_commit_pins/spmd_types.txt",
             "torch/testing/_internal/torchci/plugin.py",
             "test/run_test.py",
             "test/conftest.py",
+            "test/torch_np/conftest.py",
+            "test/slow_tests.json",
+            "torch/testing/_internal/dynamo_test_failures.py",
             "test/pytest_shard_custom.py",
             "pytest.ini",
             "torch/testing/_internal/common_utils.py",
