@@ -2152,6 +2152,11 @@ class ByteArrayVariable(VariableTracker):
     def python_type(self) -> type[bytearray]:  # type: ignore[type-arg]
         return bytearray
 
+    @staticmethod
+    def create(data: bytearray) -> "ByteArrayVariable":
+        """Wrap a bytearray freshly allocated by the operation being traced."""
+        return ByteArrayVariable(data, mutation_type=ValueMutationNew())
+
     def as_python_constant(self) -> bytearray:
         return bytearray(self.data)
 
@@ -2685,7 +2690,7 @@ class ByteArrayVariable(VariableTracker):
                     ],
                 )
         try:
-            return VariableTracker.build(tx, self.data.join(parts))
+            return ByteArrayVariable.create(self.data.join(parts))
         except (MemoryError, OverflowError, TypeError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 

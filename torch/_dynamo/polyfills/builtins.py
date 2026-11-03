@@ -17,6 +17,7 @@ from ..decorators import substitute_in_graph
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from types import NotImplementedType
 
 
 __all__ = [
@@ -108,6 +109,16 @@ class _SequenceIterator:
 
     def __iter__(self) -> _SequenceIterator:
         return self
+
+    def __length_hint__(self) -> int | NotImplementedType:
+        if self.exhausted:
+            return 0
+        # Length slots come from type dictionaries, not metaclass attribute
+        # lookup, which can hide __len__ or invoke a descriptor.
+        for cls in type.__dict__["__mro__"].__get__(type(self.iterable)):
+            if "__len__" in type.__dict__["__dict__"].__get__(cls):
+                return max(len(self.iterable) - self.index, 0)
+        return NotImplemented
 
     def __next__(self) -> object:
         if self.exhausted:
