@@ -359,10 +359,18 @@ class TestMetaConverter(TestCase):
         coo = torch.randn(4, 4).to_sparse()
         csr = torch.randn(4, 4).to_sparse_csr()
         describer = MetaTensorDescriber()
+        from torch.testing._internal.two_tensor import TwoTensor
+
         with torch._C._IncludeDispatchKeyGuard(fake):
             coo_desc = describer.describe_tensor(coo)
             csr_desc = describer.describe_tensor(csr)
+            # Also inside a functional wrapper or a traceable wrapper subclass
+            functional = torch._to_functional_tensor(coo)
+            functional_desc = describer.describe_tensor(functional)
+            subclass_desc = describer.describe_tensor(TwoTensor(coo, coo))
             self.assertTrue(torch._C._dispatch_tls_is_dispatch_key_included(fake))
+        self.assertTrue(functional_desc.is_functional)
+        self.assertTrue(subclass_desc.is_traceable_wrapper_subclass)
         self.assertEqual(coo_desc.sparse_dim, coo.sparse_dim())
         self.assertEqual(coo_desc.dense_dim, coo.dense_dim())
         self.assertEqual(coo_desc.is_coalesced, coo.is_coalesced())
@@ -395,6 +403,8 @@ class TestMetaConverter(TestCase):
                 desc = MetaTensorDescriber().describe_tensor(t)
         self.assertEqual(set(calls), {"sparse_dim", "dense_dim", "is_coalesced"})
         self.assertEqual(desc.sparse_dim, 2)
+        self.assertEqual(desc.dense_dim, 0)
+        self.assertTrue(desc.is_coalesced)
 
 
 aten = torch.ops.aten
