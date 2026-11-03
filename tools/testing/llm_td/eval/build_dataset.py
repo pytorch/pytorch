@@ -8,11 +8,13 @@ Three kinds of sample, each a JSON file under DIR/samples:
               ground truth is every (test file, CI config) that failed on the
               earliest failing head. These runs are censored: pull/trunk jobs
               already skip 75% of files through TD, so truth is a lower bound.
-  rev_<sha>   a commit that landed and was auto-reverted because it broke a
-              test on main, where every test runs. The truth is the reverting
-              signal plus whatever else failed on main before the revert.
-  neu_<sha>   an ordinary main commit, with no truth, used only to measure
-              how much a selector runs on typical traffic.
+  rev_<sha>   a commit that landed and was auto-reverted between --start and
+              --end because it broke a test on main, where every test runs.
+              The truth is the test files of the reverting signal, in every
+              config they failed in on main between landing and the revert.
+  neu_<sha>   an ordinary main commit from the 25 days before --end, with no
+              truth, used only to measure how much a selector runs on typical
+              traffic. Reverts and relands are left out.
 
 A PR failure is attributed to the PR only if the same test did not fail on
 main within four days and did not fail on another author's PR. PR truths that
@@ -33,10 +35,10 @@ import re
 import subprocess
 from pathlib import Path
 
+from tools.testing.llm_td.eval import REPO
 from tools.testing.llm_td.eval.clickhouse import query
 
 
-REPO = Path(__file__).resolve().parents[4]
 MAIN_WINDOW = dt.timedelta(days=4)
 
 
@@ -47,7 +49,38 @@ def git(*args: str, check: bool = True) -> str:
 
 
 def ts(s: str) -> dt.datetime:
-    return dt.datetime.fromisoformat(s[:19])
+    """ClickHouse DateTimes are UTC."""
+    return dt.datetime.fromisoformat(s[:19]).replace(tzinfo=dt.timezone.utc)
+
+
+def commit_time(sha: str) -> dt.datetime:
+    return dt.datetime.fromtimestamp(
+        int(git("log", "-1", "--format=%ct", sha)), tz=dt.timezone.utc
+    )
+
+
+def fetch(shas: list[str]) -> None:
+    for i in range(0, len(shas), 100):
+        p = subprocess.run(
+            ["git", "fetch", "-q", "origin", *shas[i : i + 100]],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+        )
+        if p.returncode:
+            print(
+                f"git fetch of {len(shas[i : i + 100])} shas failed: {p.stderr.strip()[-500:]}",
+                flush=True,
+            )
+
+
+def has_commit(sha: str) -> bool:
+    if subprocess.run(
+        ["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=REPO, capture_output=True
+    ).returncode:
+        print(f"skipping {sha}: not fetched", flush=True)
+        return False
+    return True
 
 
 def is_main(branch: str) -> bool:
@@ -215,18 +248,16 @@ def pr_samples(keep: list[dict], main: dict, out: Path, jobs: int) -> None:
     for r in keep:
         if r["sha"] == first[r["pr"]]["sha"]:
             by[r["pr"]][r["tf"]].add(r["job"])
-    shas = sorted({f["sha"] for f in first.values()})
-    for i in range(0, len(shas), 100):
-        subprocess.run(["git", "fetch", "-q", "origin", *shas[i : i + 100]], cwd=REPO)
+    fetch(sorted({f["sha"] for f in first.values()}))
 
     def go(pr: int) -> None:
         sha = first[pr]["sha"]
-        if subprocess.run(["git", "cat-file", "-e", sha], cwd=REPO).returncode:
+        if not has_commit(sha):
             return
         base = git("merge-base", "origin/main", sha, check=False).strip()
         if not base:
             return
-        base_t = dt.datetime.fromtimestamp(int(git("log", "-1", "--format=%ct", base)))
+        base_t = commit_time(base)
         # A file broken on main around the merge base is not this PR's fault.
         truth = sorted(
             tf
@@ -243,36 +274,51 @@ def pr_samples(keep: list[dict], main: dict, out: Path, jobs: int) -> None:
         list(ex.map(go, sorted(first)))
 
 
-def revert_samples(out: Path, jobs: int) -> None:
-    rows = query("""
-        SELECT toString(ts) ts, commit_sha, source_signal_keys FROM misc.autorevert_events_v2
+def revert_truth_jobs(
+    signal: set[str], landed: dt.datetime, reverted: str
+) -> dict[str, list[str]]:
+    """The main-branch jobs each signal test file failed in between landing and the revert."""
+    files = ",".join(f"'{t}.py'" for t in signal)
+    t0 = landed.strftime("%Y-%m-%d %H:%M:%S")
+    failed = query(f"""
+        SELECT DISTINCT replaceRegexpOne(file, '\\.py$', '') tf, j.name job FROM tests.all_test_runs t
+        JOIN (SELECT id, name FROM default.workflow_job
+              WHERE created_at >= toDateTime('{t0}') - INTERVAL 1 HOUR
+                AND created_at <= parseDateTimeBestEffort('{reverted}') + INTERVAL 1 HOUR
+                AND repository_full_name = 'pytorch/pytorch' AND head_branch = 'main'
+                AND name NOT LIKE '%rerun_disabled_tests%' AND name NOT LIKE '%mem_leak_check%') j ON j.id = t.job_id
+        WHERE time_inserted >= toDateTime('{t0}') AND time_inserted <= parseDateTimeBestEffort('{reverted}') + INTERVAL 2 HOUR
+          AND file IN ({files}) AND (failure_count > 0 OR error_count > 0)""")
+    truth_jobs: dict[str, set] = collections.defaultdict(set)
+    for f in failed:
+        truth_jobs[f["tf"]].add(f["job"])
+    return {k: sorted(v) for k, v in truth_jobs.items()}
+
+
+def revert_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
+    rows = query(f"""
+        SELECT toString(ts) reverted_at, commit_sha, source_signal_keys FROM misc.autorevert_events_v2
         WHERE repo = 'pytorch/pytorch' AND action = 'revert' AND dry_run = 0
+          AND ts >= toDateTime('{start}') AND ts < toDateTime('{end}')
           AND arrayExists(k -> position(k, '::') > 0, source_signal_keys)""")
+    fetch(sorted({r["commit_sha"] for r in rows}))
 
     def go(r: dict) -> None:
         sha = r["commit_sha"]
+        if not has_commit(sha):
+            return
         signal = {
             k.split("::")[0].removesuffix(".py")
             for k in r["source_signal_keys"]
             if "::" in k
         }
-        commit_t = git("log", "-1", "--format=%cI", sha).strip()[:19].replace("T", " ")
-        files = ",".join(f"'{t}.py'" for t in signal)
-        # Configs each signal file failed in on main between landing and the revert.
-        failed = query(f"""
-            SELECT DISTINCT replaceRegexpOne(file, '\\.py$', '') tf, j.name job FROM tests.all_test_runs t
-            JOIN (SELECT id, name FROM default.workflow_job WHERE created_at >= '{commit_t}' - INTERVAL 1 HOUR
-                  AND created_at <= parseDateTimeBestEffort('{r["ts"]}') + INTERVAL 1 HOUR
-                  AND repository_full_name = 'pytorch/pytorch') j ON j.id = t.job_id
-            WHERE time_inserted >= '{commit_t}' AND time_inserted <= parseDateTimeBestEffort('{r["ts"]}') + INTERVAL 2 HOUR
-              AND file IN ({files}) AND (failure_count > 0 OR error_count > 0)""")
-        truth_jobs: dict[str, set] = {}
-        for f in failed:
-            truth_jobs.setdefault(f["tf"], set()).add(f["job"])
-        msg = git("log", "-1", "--format=%B", sha)
-        title, _, body = msg.partition("\n")
-        write_sample(out, f"rev_{sha[:12]}", "revert", sha, sha + "^", title, strip_trailers(body), date=r["ts"],
-                     truth=sorted(signal), truth_jobs={k: sorted(v) for k, v in truth_jobs.items()})  # fmt: skip
+        try:
+            truth_jobs = revert_truth_jobs(signal, commit_time(sha), r["reverted_at"])
+            title, _, body = git("log", "-1", "--format=%B", sha).partition("\n")
+            write_sample(out, f"rev_{sha[:12]}", "revert", sha, sha + "^", title, strip_trailers(body), date=r["reverted_at"],
+                         truth=sorted(signal), truth_jobs=truth_jobs)  # fmt: skip
+        except (subprocess.CalledProcessError, RuntimeError) as e:
+            print(f"skipping revert {sha}: {e}", flush=True)
 
     with cf.ThreadPoolExecutor(jobs) as ex:
         list(ex.map(go, rows))
@@ -319,7 +365,7 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     keep, main_fail = pr_caused_failures(pull_failures(args.start, args.end))
     pr_samples(keep, main_fail, out, args.jobs)
-    revert_samples(out, args.jobs)
+    revert_samples(out, args.jobs, args.start, args.end)
     neutral_samples(out, args.end - dt.timedelta(days=25), args.end, args.neutral)
 
 
