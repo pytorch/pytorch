@@ -58,6 +58,7 @@ __all__ = [
     "emit_cpp_launch",
     "export_cutedsl_kernel",
     "export_for_link",
+    "host_target_option",
     "parse_exported_header",
     "scalar_ctype",
     "validate_exported_abi",
@@ -164,9 +165,10 @@ _INT_CTYPE_RANGES: dict[str, tuple[int, int]] = {
 
 def scalar_ctype(annotation: type) -> str:
     """C type the exported wrapper uses for a scalar with this cutlass annotation."""
+    from torch._higher_order_ops.cutedsl_kernel_wrap import _is_cutlass_type
+
     name = getattr(annotation, "__name__", None)
-    module = getattr(annotation, "__module__", "") or ""
-    if not module.startswith("cutlass") or name not in _SCALAR_CTYPES:
+    if not _is_cutlass_type(annotation) or name not in _SCALAR_CTYPES:
         raise CuteDSLExportError(
             f"scalar annotation {annotation!r} is not supported by CuTeDSL export_to_c "
             f"(supported: {', '.join(_SCALAR_CTYPES)})"
@@ -494,6 +496,7 @@ def _stable_repr(value: object, inside: frozenset[int] = frozenset()) -> str:
     A value inside itself (``inside`` holds the ids of the values being walked) is
     refused: constant_key does not walk a frozenset, so a cycle through one gets
     here."""
+    from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
     from torch._higher_order_ops.user_kernel_hop import _object_state
 
     if value is None or isinstance(value, (bool, int, float, str, bytes, torch.dtype)):
@@ -519,7 +522,7 @@ def _stable_repr(value: object, inside: frozenset[int] = frozenset()) -> str:
     ):
         return "fn(" + "\n".join(_dsl_function_closure(value)) + ")"
     name = f"{type(value).__module__}.{type(value).__qualname__}"
-    state = _object_state(value)
+    state = _object_state(value, CUTEDSL_CONSTANT_RULES)
     if state is not None:
         return f"{name}({rec(state)})"
     return f"{name}:{_OBJECT_ADDRESS.sub('', repr(value))}"
@@ -657,6 +660,21 @@ def _check_specs(host_fn: Callable[..., Any], specs: Sequence[ParamSpec]) -> Non
             scalar_ctype(s.annotation)  # fail before a compile the export would reject
 
 
+def host_target_option() -> str | None:
+    """The cute.compile option that compiles an export's host code (its module load
+    and launch wrapper) for the generic CPU of this machine's architecture
+    (torch._native.cutedsl.export.host_target), so that it also runs on hosts with
+    older CPUs; None for a DSL without --host-target (nvidia-cutlass-dsl 4.6.1 and
+    later have it), which compiles it for this machine's CPU."""
+    import cutlass.base_dsl.compiler
+
+    from torch._native.cutedsl.export import host_target
+
+    if getattr(cutlass.base_dsl.compiler, "HostTarget", None) is None:
+        return None
+    return f"--host-target {shlex.quote(host_target())}"
+
+
 def export_cutedsl_kernel(
     host_fn: Callable[..., Any],
     specs: Sequence[ParamSpec],
@@ -667,6 +685,9 @@ def export_cutedsl_kernel(
 ) -> CuteDSLExportedKernel:
     """Compile ``host_fn`` for ``specs`` and ``arch`` and export it as
     ``out_dir/<prefix>.h`` + ``out_dir/<prefix>.o``.
+
+    The object's host code is compiled for the generic CPU of this machine's
+    architecture where the DSL can do so (see host_target_option).
 
     Files are written to a private temporary directory, validated (header ABI vs
     specs, object symbols vs prefix) and only then moved into ``out_dir``, the header
@@ -684,13 +705,19 @@ def export_cutedsl_kernel(
     import cutlass.cute as cute
 
     from torch._inductor.codegen.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
+    from torch._native.cutedsl.export import warm_up_exporter
 
+    options = f"--gpu-arch {arch}"
+    host_opt = host_target_option()
+    if host_opt is not None:
+        options += f" {host_opt}"
+    warm_up_exporter()
     os.makedirs(out_dir, exist_ok=True)
     tmp_dir = tempfile.mkdtemp(prefix=f".{prefix}.", dir=out_dir)
     try:
         args = _fake_args(specs)
         with CUTEDSL_COMPILE_LOCK:
-            compiled = cute.compile[cute.GPUArch(arch)](host_fn, *args)
+            compiled = cute.compile(host_fn, *args, options=options)
             compiled.export_to_c(
                 file_path=tmp_dir, file_name=prefix, function_prefix=prefix
             )
@@ -715,12 +742,13 @@ _exports_lock = threading.Lock()
 
 
 def _export_key(specs: Sequence[ParamSpec], arch: str) -> tuple[Any, ...]:
+    from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
     from torch._higher_order_ops.user_kernel_hop import constant_key
 
     return (
         arch,
         *(
-            (s.name, constant_key(s.value))
+            (s.name, constant_key(s.value, CUTEDSL_CONSTANT_RULES))
             if isinstance(s, ConstantParamSpec)
             else _spec_key(s)
             for s in specs
@@ -1097,9 +1125,13 @@ def cutedsl_runtime_archive() -> str:
     """The DSL's static CUDA-runtime shim archive for the imported cutlass.
 
     Exported objects call ``_cudaLaunchKernelEx``-style shims defined in it; the
-    shims call cudart. Searched in ``lib/`` and ``nvidia_cutlass_dsl/lib/`` of every
-    ancestor of the cutlass package (as found and with symlinks resolved): pip wheels
-    ship ``nvidia_cutlass_dsl/lib/libcuda_dialect_runtime_static.a``; fbcode pars put
+    shims call cudart. Searched in ``nvidia_cutlass_dsl/cu<N>/lib/``, ``lib/`` and
+    ``nvidia_cutlass_dsl/lib/`` of every ancestor of the cutlass package (as found and
+    with symlinks resolved), N being torch's CUDA major version. From
+    nvidia-cutlass-dsl 4.6.1, wheels (and fbcode pars) ship
+    ``nvidia_cutlass_dsl/cu<N>/lib/libcuda_dialect_runtime_static.a`` for each CUDA
+    version installed. Before, wheels shipped
+    ``nvidia_cutlass_dsl/lib/libcuda_dialect_runtime_static.a``, and fbcode pars put
     the libs-base archive in ``<root>/lib/`` and the libs-cu13 one, renamed
     ``libcuda_dialect_cu13_runtime_static.a``, in ``<root>/nvidia_cutlass_dsl/lib/``.
     The variant matching torch's CUDA major version is preferred.
@@ -1107,16 +1139,15 @@ def cutedsl_runtime_archive() -> str:
     import cutlass
 
     names = [RUNTIME_ARCHIVE]
+    subdirs = ["lib", "nvidia_cutlass_dsl/lib"]
     if torch.version.cuda:
-        names.insert(
-            0, f"libcuda_dialect_cu{torch.version.cuda.split('.')[0]}_runtime_static.a"
-        )
+        major = torch.version.cuda.split(".")[0]
+        names.insert(0, f"libcuda_dialect_cu{major}_runtime_static.a")
+        subdirs.insert(0, f"nvidia_cutlass_dsl/cu{major}/lib")
     roots: list[Path] = []
     for start in (cutlass.__file__, os.path.realpath(cutlass.__file__)):
         roots.extend(a for a in Path(start).parents if a not in roots)
-    dirs = [
-        d for root in roots for d in (root / "lib", root / "nvidia_cutlass_dsl" / "lib")
-    ]
+    dirs = [root / sub for root in roots for sub in subdirs]
     for name in names:
         for d in dirs:
             if (d / name).is_file():

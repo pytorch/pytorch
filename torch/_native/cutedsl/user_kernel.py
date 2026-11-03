@@ -4,7 +4,8 @@ Used by the eager impl of ``cutedsl_kernel_wrapper_mutation`` and by Inductor's
 Python wrapper, where each kernel becomes a CuteDSLKernelLauncher: the counterpart
 of the CachingAutotuner a user Triton kernel becomes in generated code. Eager
 launches go through launchers too, one per host function, argument names and
-constants.
+constants. It lives outside torch._inductor so that an eager launch imports neither
+Inductor nor Dynamo.
 
 A compiled CuTeDSL kernel is specialized to the argument layouts it was compiled for
 and checks nothing at launch, so compiles are cached per argument signature: dtype,
@@ -91,7 +92,10 @@ def launch_cutedsl_kernel(
     """Launch host function ``fn`` with ``args`` (every parameter but the stream,
     by name; missing ones take their defaults) on ``stream``, a raw CUDA stream
     (default: the current stream of the tensors' device)."""
-    from torch._higher_order_ops.cutedsl_kernel_wrap import get_host_fn_info
+    from torch._higher_order_ops.cutedsl_kernel_wrap import (
+        CUTEDSL_CONSTANT_RULES,
+        get_host_fn_info,
+    )
     from torch._higher_order_ops.user_kernel_hop import _snapshot, constant_key
 
     info = get_host_fn_info(fn)
@@ -111,11 +115,12 @@ def launch_cutedsl_kernel(
     # Keyed on every launch, as the caller may change a constant between launches;
     # the launcher binds snapshots, which keep matching the key.
     names = tuple(runtime_args)
-    key = (names, tuple((k, constant_key(v)) for k, v in constant_args.items()))
+    rules = CUTEDSL_CONSTANT_RULES
+    key = (names, tuple((k, constant_key(v, rules)) for k, v in constant_args.items()))
     launchers = _eager_launchers.setdefault(fn, {})
     launcher = launchers.get(key)
     if launcher is None:
-        snapshots = {k: _snapshot(v) for k, v in constant_args.items()}
+        snapshots = {k: _snapshot(v, rules) for k, v in constant_args.items()}
         launcher = launchers[key] = CuteDSLKernelLauncher(fn, names, snapshots)
     launcher.run(*runtime_args.values(), stream=stream)
 
@@ -141,6 +146,7 @@ class CuteDSLKernelLauncher:
         constant_args: Mapping[str, Any],
     ) -> None:
         from torch._higher_order_ops.cutedsl_kernel_wrap import (
+            CUTEDSL_CONSTANT_RULES,
             get_host_fn_info,
             python_scalar,
         )
@@ -165,10 +171,11 @@ class CuteDSLKernelLauncher:
             else:
                 value = info.defaults[name]
             if info.is_runtime_scalar(name, value):
-                value = python_scalar(value)
-                fixed_key.append((name, info.numeric_params.get(name, type(value))))
+                annotation = info.numeric_params.get(name)
+                value = python_scalar(value, annotation)
+                fixed_key.append((name, annotation or type(value)))
             else:
-                fixed_key.append((name, constant_key(value)))
+                fixed_key.append((name, constant_key(value, CUTEDSL_CONSTANT_RULES)))
             self._fixed_args[name] = value
         self._fixed_key = tuple(fixed_key)
         # The compiled function takes every parameter but the Constexpr ones, in
@@ -221,8 +228,9 @@ class CuteDSLKernelLauncher:
                 else:
                     # The DSL converts only exact bool/int/float (not an IntEnum or
                     # a numpy float) and takes a cutlass Numeric value as a Python one.
-                    value = python_scalar(value)
-                    key.append((name, self._numeric_params.get(name, type(value))))
+                    annotation = self._numeric_params.get(name)
+                    value = python_scalar(value, annotation)
+                    key.append((name, annotation or type(value)))
                 values.append(value)
                 if index is not None:
                     call_args[index] = value
@@ -239,8 +247,9 @@ class CuteDSLKernelLauncher:
         ``values`` and ``stream`` if it is missing."""
         import cutlass.cute as cute
 
+        from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
         from torch._higher_order_ops.user_kernel_hop import _snapshot
-        from torch._inductor.codegen.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
+        from torch._native.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
 
         capability = torch.cuda.get_device_capability(device)
         shared_key = (capability, self._fixed_key, *key[1:])
@@ -254,7 +263,10 @@ class CuteDSLKernelLauncher:
                     # (cache a layout on a kernel object, say), so it compiles
                     # copies: the bound constants, in generated code the side
                     # table's own snapshots, keep the contents they were keyed by.
-                    fixed = {k: _snapshot(v) for k, v in self._fixed_args.items()}
+                    rules = CUTEDSL_CONSTANT_RULES
+                    fixed = {
+                        k: _snapshot(v, rules) for k, v in self._fixed_args.items()
+                    }
                     compile_args = dict(zip(self.arg_names, values))
                     compile_args[self._stream_param] = stream
                     compiled = cute.compile(self.fn, **fixed, **compile_args)

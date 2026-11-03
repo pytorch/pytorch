@@ -336,16 +336,38 @@ class BenchmarkStorageGroup:
 
 
 class _ScriptPickler(pickle.Pickler):
-    """Pickles for a run of the generated module as a script, in which __main__ is
-    that module: refuses the classes and functions of the compiling process's
-    __main__, which that run cannot import."""
+    """Pickles a CuTeDSL launcher for a run of the generated module as a script, in
+    which __main__ is that module: refuses a host function of the compiling
+    process's __main__, which that run cannot import."""
 
     @staticmethod
     def reducer_override(obj: Any, /) -> Any:
-        by_reference = inspect.isclass(obj) or inspect.isfunction(obj)
-        if by_reference and obj.__module__ == "__main__":
+        if inspect.isfunction(obj) and obj.__module__ == "__main__":
             raise pickle.PicklingError(f"{obj.__qualname__} is defined in __main__")
         return NotImplemented
+
+
+def _non_plain_data_type(value: Any) -> type | None:
+    """The type of the first value in ``value`` that is not plain data, or None if
+    all of it is. Plain data, whose pickling runs no user code, is None, a bool,
+    int, float, str or bytes, a cutlass value keyed by its Python scalar (see
+    CUTEDSL_CONSTANT_RULES.scalar_value) such as a Numeric, or a tuple, list, dict
+    or frozenset of plain data, each of exactly that type (a subclass can define its
+    own pickling)."""
+    from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
+
+    cls = type(value)
+    if cls in (type(None), bool, int, float, str, bytes):
+        return None
+    if CUTEDSL_CONSTANT_RULES.scalar_value(value) is not None:
+        return None
+    if cls is dict:
+        items = [*value.keys(), *value.values()]
+    elif cls in (tuple, list, frozenset):
+        items = list(value)
+    else:
+        return cls
+    return next((t for t in map(_non_plain_data_type, items) if t is not None), None)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -4357,8 +4379,6 @@ class PythonWrapperCodegen(CodeGen):
                 output.writeline(f"{name} = None")
                 return
 
-            import pickle
-
             try:
                 output.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
             except (TypeError, AttributeError, pickle.PicklingError) as e:
@@ -4368,25 +4388,37 @@ class PythonWrapperCodegen(CodeGen):
 
         def add_cutedsl_launcher(name, launcher):
             # Run as a script, the module is not loaded with its launchers: unpickling
-            # rebuilds each, importing its host function by module and qualname. The
-            # process that loaded it with them may call get_args() too
-            # (profile_bandwidth_output) and keeps them.
+            # rebuilds each one whose constants are plain data, importing its host
+            # function by module and qualname. Pickling any other constant could run
+            # user code, and would write it (and any tensor it holds) into the module.
+            # The process that loaded the module with its launchers may call
+            # get_args() too (profile_bandwidth_output) and keeps them.
             output.writeline(f"if {name!r} not in globals():")
             with output.indent():
+                reason = None
+                for k, v in launcher.constant_args.items():
+                    if (cls := _non_plain_data_type(v)) is not None:
+                        reason = f"its constant {k!r} is or holds a {cls.__name__}"
+                        break
                 data = io.BytesIO()
-                try:
-                    _ScriptPickler(data).dump(launcher)
-                except Exception as e:
+                if reason is None:
+                    try:
+                        _ScriptPickler(data).dump(launcher)
+                    except Exception as e:
+                        reason = f"{type(e).__name__}: {e}"
+                if reason is None:
+                    output.writeline(f"{name} = pickle.loads({data.getvalue()!r})")
+                else:
                     msg = (
                         f"{name}: a run of this module as a script cannot rebuild the "
-                        f"launcher of this CuTeDSL kernel ({type(e).__name__}: {e}); "
-                        "its host function and the classes of its constants must be "
-                        "importable by module and qualname, not defined in __main__ "
-                        "or inside a function"
+                        f"launcher of this CuTeDSL kernel ({reason}); its host "
+                        "function must be importable by module and qualname, not "
+                        "defined in __main__ or inside a function, and its constants "
+                        "plain data: None, bool, int, float, str, bytes, cutlass "
+                        "Numeric values, and tuples, lists, dicts and frozensets of "
+                        "these"
                     )
                     output.writeline(f"raise RuntimeError({msg!r})")
-                else:
-                    output.writeline(f"{name} = pickle.loads({data.getvalue()!r})")
 
         # Preserve shared non-empty input storages so benchmark code does not
         # explode large aliased views into separate allocations.
@@ -4432,19 +4464,17 @@ class PythonWrapperCodegen(CodeGen):
                     name, value.size(), value.stride(), value.device, value.dtype
                 )
 
-            if len(V.graph.torchbind_constants) > 0:
+            if V.graph.torchbind_constants or self.user_defined_cutedsl_launchers:
                 output.writeline("import pickle")
-                for name, torchbind_obj in V.graph.torchbind_constants.items():
-                    # all the constants are global variables, that's why we need
-                    # these 'global var_name' lines
-                    output.writeline(f"global {name}")
-                    add_torchbind_input(name, torchbind_obj)
+            for name, torchbind_obj in V.graph.torchbind_constants.items():
+                # all the constants are global variables, that's why we need
+                # these 'global var_name' lines
+                output.writeline(f"global {name}")
+                add_torchbind_input(name, torchbind_obj)
 
-            if self.user_defined_cutedsl_launchers:
-                output.writeline("import pickle")
-                for name, launcher in self.user_defined_cutedsl_launchers.items():
-                    output.writeline(f"global {name}")
-                    add_cutedsl_launcher(name, launcher)
+            for name, launcher in self.user_defined_cutedsl_launchers.items():
+                output.writeline(f"global {name}")
+                add_cutedsl_launcher(name, launcher)
 
             # Generate shared storage buffers for aliased inputs
             for group in storage_groups.values():
@@ -5148,6 +5178,7 @@ class PythonWrapperCodegen(CodeGen):
     def define_user_defined_cutedsl_kernel(
         self,
         kernel,
+        *,
         constant_args: dict[str, Any],
         runtime_args: dict[str, Any],
     ) -> str:
@@ -5163,11 +5194,11 @@ class PythonWrapperCodegen(CodeGen):
         gets a ``CuteDSLKernelLauncher`` object under that name when it is loaded
         (``user_defined_cutedsl_launchers``); its ``run(*args, stream=...)`` takes
         the runtime arguments positionally. A run of the module as a script rebuilds
-        it in get_args() (benchmark_compiled_module).
+        it in get_args() (benchmark_compiled_module) if its constants are plain data.
         """
+        from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
         from torch._higher_order_ops.user_kernel_hop import constant_key
-
-        from ..runtime.cutedsl_user_kernel import CuteDSLKernelLauncher
+        from torch._native.cutedsl.user_kernel import CuteDSLKernelLauncher
 
         arg_names = tuple(runtime_args)
         # Every constant is a snapshot (a passed one is the side table's, a default
@@ -5175,7 +5206,10 @@ class PythonWrapperCodegen(CodeGen):
         cache_key = (
             id(kernel),
             arg_names,
-            tuple((k, constant_key(v)) for k, v in constant_args.items()),
+            tuple(
+                (k, constant_key(v, CUTEDSL_CONSTANT_RULES))
+                for k, v in constant_args.items()
+            ),
         )
         if cache_key in self.user_defined_cutedsl_kernel_cache:
             return self.user_defined_cutedsl_kernel_cache[cache_key]
@@ -5199,6 +5233,7 @@ class PythonWrapperCodegen(CodeGen):
         self,
         kernel_name: str,
         kernel,
+        *,
         runtime_args: dict[str, Any],
         device: torch.device,
     ) -> None:
@@ -5222,8 +5257,17 @@ class PythonWrapperCodegen(CodeGen):
         stream_name = self._get_kernel_call_stream_name(
             device, V.graph.name, V.graph.scheduler.current_stream_idx
         )
-        args = ", ".join(arg_str(arg) for arg in runtime_args.values())
-        self.writeline(f"{kernel_name}.run({args}, stream={stream_name})")
+        arg_strs = {name: arg_str(arg) for name, arg in runtime_args.items()}
+        tensors = [
+            arg_strs[name]
+            for name, arg in runtime_args.items()
+            if isinstance(arg, ir.IRNode)
+        ]
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(tensors, kernel_name, None, None)
+        args = ", ".join(arg_strs.values())
+        with debug_printer_manager:
+            self.writeline(f"{kernel_name}.run({args}, stream={stream_name})")
 
     def cutedsl_link_args(self) -> list[str]:
         """Link arguments for the user CuTeDSL kernels the C++ wrapper exported (see

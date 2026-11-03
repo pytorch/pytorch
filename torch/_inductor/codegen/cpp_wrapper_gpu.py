@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 import os
 import re
 import sys
@@ -66,6 +67,8 @@ from .wrapper import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+
+log = logging.getLogger(__name__)
 
 _cpp_string_literal_escapes = {
     "\\": "\\\\",
@@ -2157,6 +2160,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
     def define_user_defined_cutedsl_kernel(
         self,
         kernel: Any,
+        *,
         constant_args: dict[str, Any],
         runtime_args: dict[str, Any],
     ) -> str:
@@ -2178,6 +2182,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
             cutedsl_cache_dir,
             emit_cpp_declarations,
             export_for_link,
+            host_target_option,
         )
 
         if V.graph.aot_mode:
@@ -2195,6 +2200,17 @@ static inline void ensure_triton_kernel_compiles_started() {{
                     raise NotImplementedError(
                         f"User-defined CuTeDSL kernels are not supported with {what}"
                     )
+            if host_target_option() is None:
+                import cutlass
+
+                torch._logging.warning_once(
+                    log,
+                    "nvidia-cutlass-dsl %s has no --host-target (4.6.1 and later have "
+                    "it), so the host code of CuTeDSL kernels in AOTInductor packages "
+                    "is compiled for this machine's CPU: a package may fail with "
+                    "SIGILL on another host",
+                    cutlass.__version__,
+                )
         specs, check_align = cutedsl_param_specs(kernel, runtime_args, constant_args)
         arch = f"sm_{_aoti_cuda_target_arch()}"
         exported = export_for_link(
@@ -2247,6 +2263,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
         self,
         kernel_name: str,
         kernel: Any,
+        *,
         runtime_args: dict[str, Any],
         device: torch.device,
     ) -> None:
