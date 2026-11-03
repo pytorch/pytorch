@@ -1527,8 +1527,8 @@ class TestGitHubPRGhstackDependencies(TestCase):
         )
 
     # The stack has since merged, so pin the state this test describes: the two
-    # bottom PRs merged, the top two open. The merge-rule check on stacked PRs is
-    # mocked here and covered by the tests below.
+    # bottom PRs merged, the top two open. The merge-rule check is mocked; the
+    # tests below cover how its errors and waivers are handled.
     @mock.patch.object(
         GitHubPR,
         "is_closed",
@@ -1566,9 +1566,10 @@ class TestGitHubPRGhstackDependencies(TestCase):
         mock_repo.amend_commit_message.return_value = None
 
         # Call the method under test
-        res = pr.merge_ghstack_into(mock_repo, True)
+        res = pr.merge_ghstack_into(mock_repo, False)
 
         self.assertEqual(res, [pr2, pr])
+        mock_get_ghstack_prs.assert_called_once_with(mock_repo, pr, open_only=False)
 
         self.assertEqual(
             mock_repo.cherry_pick.call_args_list,
@@ -1576,10 +1577,19 @@ class TestGitHubPRGhstackDependencies(TestCase):
         )
 
         # Only the open PR below the one being merged gets the stacked rule check
-        mock_find_matching_merge_rule.assert_called_once()
-        self.assertIs(mock_find_matching_merge_rule.call_args.args[0], pr2)
+        mock_find_matching_merge_rule.assert_called_once_with(
+            pr2,
+            mock_repo,
+            skip_mandatory_checks=False,
+            skip_internal_checks=False,
+            ignore_current_checks=None,
+        )
 
-        self.assertEqual(mock_repo.amend_commit_message.call_count, 2)
+        # Each cherry-pick is followed by the amend of its own message
+        self.assertEqual(
+            [name for name, _, _ in mock_repo.method_calls],
+            ["cherry_pick", "amend_commit_message"] * 2,
+        )
 
         # Verify the first call
         message = mock_repo.amend_commit_message.call_args_list[0].args[0]
