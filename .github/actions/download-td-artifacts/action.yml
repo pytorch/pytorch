@@ -25,16 +25,36 @@ runs:
     - name: Find the LLM test selection
       id: llm-td
       # Written by llm-td.yml for internal PRs; without it the tests run as today.
+      # Any workflow run can upload an artifact with this name, so only accept one
+      # from llm-td.yml's pull_request_target run for this head in this repo.
+      if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
       continue-on-error: true
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       run: |
-        curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
-          "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=1&name=llm_td_selection_${HEAD_SHA}" \
-          | python3 -c 'import json, sys; a = json.load(sys.stdin)["artifacts"]; a and print("run-id=%d" % a[0]["workflow_run"]["id"])' \
-          >> "$GITHUB_OUTPUT"
+        python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+        import json, os, urllib.request
+
+        def get(path):
+            url = f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/{path}"
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.load(r)
+
+        sha = os.environ["HEAD_SHA"]
+        for a in get(f"actions/artifacts?per_page=10&name=llm_td_selection_{sha}")["artifacts"]:
+            run = get(f"actions/runs/{a['workflow_run']['id']}")
+            if (
+                run["path"] == ".github/workflows/llm-td.yml"
+                and run["event"] == "pull_request_target"
+                and run["head_sha"] == sha
+                and run["head_repository"]["id"] == run["repository"]["id"]
+            ):
+                print(f"run-id={run['id']}")
+                break
+        EOF
 
     - name: Download the LLM test selection
       if: steps.llm-td.outputs.run-id != ''

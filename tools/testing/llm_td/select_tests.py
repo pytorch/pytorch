@@ -44,6 +44,9 @@ BODY_BUDGET = 4_000
 QUERY_TIMEOUT = 600
 # Room for the note that replaces a truncated file's tail.
 TRUNCATION_MARKER = 40
+# The PR text is wrapped in these tags and the prompt marks it as untrusted, so
+# the PR must not be able to close them.
+CLOSING_TAG_RE = re.compile(r"</(pr_title|pr_description|diff)\s*>", re.IGNORECASE)
 
 SCHEMA = {
     "type": "object",
@@ -84,7 +87,7 @@ def truncate_diff(diff: str, budget: int = DIFF_BUDGET) -> str:
 
     Files under the fair share are kept whole and the rest of the budget is
     split evenly among the larger ones. A truncated file always keeps its
-    `diff --git` line."""
+    `diff --git` line, so with hundreds of files the budget is soft."""
     if len(diff) <= budget:
         return diff
     parts = diff.split("\ndiff --git ")
@@ -128,6 +131,7 @@ def build_prompt(
     body = body.strip()
     if len(body) > BODY_BUDGET:
         body = body[:BODY_BUDGET] + "\n...[truncated]"
+    title, body, diff = (CLOSING_TAG_RE.sub(r"<\\/\1>", t) for t in (title, body, diff))
     return "\n".join(
         [
             f"# PR title\n<pr_title>\n{title}\n</pr_title>",
@@ -203,18 +207,22 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     merge_base = git("merge-base", args.base, args.head).strip()
     record["merge_base"] = merge_base
     record["head"] = git("rev-parse", args.head).strip()
-    changed = git("diff", "--name-only", merge_base, args.head).splitlines()
+    # Without renames a moved file is listed at both paths, and its new path is
+    # an added file below.
+    changed = git(
+        "diff", "--name-only", "--no-renames", merge_base, args.head
+    ).splitlines()
     if needs_run_all(changed) and not args.print_prompt:
         return Selection(run_all=True, reason="change touches test infrastructure")
     test_times = get_test_times()
     if not test_times and not args.print_prompt:
         return Selection(run_all=True, reason="no test times")
-    diffstat = git("diff", "--stat=200", merge_base, args.head)
+    diffstat = git("diff", "--stat=200", "--no-renames", merge_base, args.head)
     diff = git("diff", merge_base, args.head)
     # TESTS comes from the checkout this script runs from, which in CI is the
     # trusted default branch rather than the PR; add the test files the PR adds.
     added = git(
-        "diff", "--name-only", "--diff-filter=A", merge_base, args.head
+        "diff", "--name-only", "--no-renames", "--diff-filter=A", merge_base, args.head
     ).splitlines()
     candidates = sorted(
         set(TESTS)
