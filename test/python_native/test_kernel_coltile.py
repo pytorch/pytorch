@@ -461,17 +461,11 @@ def _sparse(x):
 
 
 def _with_nans(x):
-    x[..., ::7] = float("nan")
-    return x
+    # NaNs scattered along the reduced axis leave each column mixed.
+    return torch.where(torch.rand_like(x) < 0.1, float("nan"), x)
 
 
 _F32, _I32, _I64 = torch.float32, torch.int32, torch.int64
-
-
-def _norm2_fp32(name, dtype):
-    # Kernels round the fp32 x * x leaf either FMA-contracted or as a materialized
-    # square (an open contract; summation order agrees), so these may differ by 1 ulp.
-    return name == "norm2" and dtype == torch.float32
 
 
 # Traits kernel_general routes to ordered columns: factory, outputs (None = input dtype),
@@ -489,8 +483,9 @@ _ROUTED_TRAITS = {
     "amin": (lambda: T.AMinOps(), [None], lambda x: x),
     "absmax": (lambda: T.AbsMaxOps(), [None], lambda x: x),
     "absmin": (lambda: T.AbsMinOps(), [None], lambda x: x),
-    "all": (lambda: T.AllOps(), [_I32], lambda x: (x.abs() < 3).float()),
-    "any": (lambda: T.AnyOps(), [_I32], _sparse),
+    # Rare hits (|x| > 3.5 or |x| >= 3.9) leave columns mixed at R = 256 and R = 3000.
+    "all": (lambda: T.AllOps(), [_I32], lambda x: (x.abs() < 3.9).float()),
+    "any": (lambda: T.AnyOps(), [_I32], lambda x: (x.abs() > 3.5).float()),
     "count_nonzero": (lambda: T.CountNonzeroOps(), [_I64], _sparse),
     "argmax": (lambda: T.ArgMaxOps(), [_I64], lambda x: x),
     "argmin": (lambda: T.ArgMinOps(), [_I64], lambda x: x),
@@ -714,13 +709,10 @@ class TestOrderedColDevice(TestCase):
             )
         return got, served
 
-    def _assert_bitwise(self, got, want, *, ulp=False):
+    def _assert_bitwise(self, got, want):
         for a, b in zip(got, want, strict=True):
             a, b = a.contiguous().flatten(), b.contiguous().flatten()
-            if ulp:
-                self.assertEqual(a, b, atol=0, rtol=2**-23)
-            else:
-                self.assertEqual(a.view(torch.uint8), b.view(torch.uint8))
+            self.assertEqual(a.view(torch.uint8), b.view(torch.uint8))
 
     @parametrize("layout", ["3d", "offset", "2d", "transposed"])
     def test_inner_tree_columns_route_to_ordered_columns(self, device, layout):
@@ -740,7 +732,7 @@ class TestOrderedColDevice(TestCase):
         want, _ = self._reduce(device, trait, key, x, dim, outputs, route=False)
         self._assert_bitwise(got, want)
 
-    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    @parametrize("dtype", _DTYPES)
     @parametrize("name", list(_ROUTED_TRAITS))
     def test_routed_traits_match_the_indexed_tree(self, device, name, dtype):
         """Every trait the gate admits stays bitwise equal to the indexed tree."""
@@ -753,9 +745,11 @@ class TestOrderedColDevice(TestCase):
         self.assertEqual(len(served), 1)
         self.assertIsNotNone(served[0])
         want, _ = self._reduce(device, make(), key, x, 1, outputs, route=False)
-        self._assert_bitwise(got, want, ulp=_norm2_fp32(name, dtype))
+        if name in ("all", "any"):
+            self.assertEqual(want[0].unique().numel(), 2, "uniform flags test nothing")
+        self._assert_bitwise(got, want)
 
-    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    @parametrize("dtype", _DTYPES)
     @parametrize("name", list(_ROUTED_TRAITS))
     def test_routed_traits_with_padded_warps(self, device, name, dtype):
         """Padded warps and masked leaves keep every trait bitwise equal."""
@@ -778,7 +772,9 @@ class TestOrderedColDevice(TestCase):
             nouts,
         )
         self.assertIsNotNone(got)
-        self._assert_bitwise(got, want, ulp=_norm2_fp32(name, dtype))
+        if name in ("all", "any"):
+            self.assertEqual(want[0].unique().numel(), 2, "uniform flags test nothing")
+        self._assert_bitwise(got, want)
 
     def test_declined_ordered_columns_fall_back_to_the_indexed_tree(self, device):
         # The gate admits 4096 outputs, but the kernel declines fewer than 32 columns.
