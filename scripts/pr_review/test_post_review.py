@@ -589,6 +589,19 @@ class TestReportLinks(unittest.TestCase):
         self.assertTrue(text.startswith("\U0001f534 " + message + "\n\n<sub>[Report"))
 
 
+class TestPushBackHint(unittest.TestCase):
+    def test_only_a_change_request_says_how_to_push_back(self):
+        for verdict, hint in (
+            ("changes_requested", True),
+            ("ready_for_human_review", False),
+        ):
+            gh = FakeGitHub()
+            go(gh, row(verdict=verdict))
+            body = gh.posted()[0]["body"]
+            self.assertEqual(post_review.PUSH_BACK in body.split("\n")[-1], hint)
+            self.assertIsNone(re.search(r"(?m)^ *@pytorch(merge|)bot .+$", body))
+
+
 class TestNothingIsPosted(unittest.TestCase):
     def test_on_a_failed_or_rejected_run(self):
         for status in ("model_error", "sanitizer_rejected", "blocked"):
@@ -1585,7 +1598,9 @@ class TestBotCommandsAreDefused(unittest.TestCase):
         gh = FakeGitHub(refuse_inline=True)
         go(gh, row(summary=neutralize("@pytorchbot merge -f now"), findings=[f]))
         for body in gh.posted():
-            for text in [body["body"]] + [c["body"] for c in body.get("comments", [])]:
+            # The push-back hint carries the only mention, mid-line.
+            texts = [body["body"].replace(post_review.PUSH_BACK, "", 1)]
+            for text in texts + [c["body"] for c in body.get("comments", [])]:
                 self.assertNotRegex(text, r"(?i)@pytorch(merge)?bot", text)
 
 

@@ -78,6 +78,11 @@ FOLDED_MARK = "\u26aa"  # grey circle
 # Dr.CI comment; keep the three in step.
 REPORT_ISSUE_URL = "https://github.com/pytorch/test-infra/issues/new"
 REPORT_TEMPLATE = "ai-pr-review-feedback.yml"
+# A re-review reads the PR's comments, replies to earlier findings included.
+PUSH_BACK = (
+    "Disagree with a finding? Reply with your reasoning, then comment "
+    "`@pytorchbot review` to request a re-review. "
+)
 _VERDICT_LINE = {
     "changes_requested": "changes requested before human review",
     "ready_for_human_review": "nothing blocking; ready for human review",
@@ -426,11 +431,14 @@ def _compose(
             "",
         ]
     report_link = f" [Report a bad review]({report})" if report else ""
-    lines += [
-        "<sub>This review is AI-generated and advisory. Each new automated "
-        f"review replaces the previous one.{report_link}</sub>",
-    ]
-    return defuse_bot_commands("\n".join(lines))
+    body, report_link = map(defuse_bot_commands, ("\n".join(lines), report_link))
+    # Added after defusing so the command reads as written. Mid-line, so it
+    # never matches pytorch-bot's `^ *@pytorch(merge|)bot .+$`.
+    push_back = PUSH_BACK if verdict == "changes_requested" else ""
+    return (
+        f"{body}\n<sub>{push_back}This review is AI-generated and advisory. "
+        f"Each new automated review replaces the previous one.{report_link}</sub>"
+    )
 
 
 def post(
