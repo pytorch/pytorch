@@ -196,6 +196,16 @@ def pytest_unconfigure(config: Config) -> None:
 
 
 class _NodeReporterReruns(_NodeReporter):
+    """Writes captured output without pytest's per-stream header and omits it
+    when empty, so tests that print nothing don't each get <system-out> and
+    <system-err> elements (pytest.ini sets junit_logging_reruns = all). Also
+    escapes skip reasons, which pytest<8 leaves unescaped.
+
+    pytest constructs these reporters and LogXMLReruns.node_reporter only
+    reassigns __class__, so this class may override methods but must not add
+    state or change how instance data is represented.
+    """
+
     def _prepare_content(self, content: str, header: str) -> str:
         return content
 
@@ -262,43 +272,37 @@ class LogXMLReruns(LogXML):
                 report.longrepr = (fspath, lineno, reason)
 
     def node_reporter(self, report: TestReport | str) -> _NodeReporterReruns:
-        nodeid: str | TestReport = getattr(report, "nodeid", report)
-        # Local hack to handle xdist report order.
-        workernode = getattr(report, "node", None)
-
-        key = nodeid, workernode
-
-        if key in self.node_reporters:
-            # TODO: breaks for --dist=each
-            return self.node_reporters[key]
-
-        reporter = _NodeReporterReruns(nodeid, self)
-
-        self.node_reporters[key] = reporter
-        self.node_reporters_ordered.append(reporter)
-
+        # The reporter key type varies across pytest versions, so let pytest build it.
+        reporter = super().node_reporter(report)
+        if not issubclass(_NodeReporterReruns, type(reporter)):
+            raise AssertionError(f"unexpected node reporter type {type(reporter)}")
+        reporter.__class__ = _NodeReporterReruns
         return reporter
 
 
-# imitating summary_failures in pytest's terminal.py
-# both hookwrapper and tryfirst to make sure this runs before pytest's
+# pytest-rerunfailures only lists reruns, so print why each attempt failed, like
+# pytest's FAILURES section. hookwrapper and tryfirst so this runs before pytest's.
 @pytest.hookimpl(hookwrapper=True, tryfirst=True)
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    # prints stack traces for reruns
-    if terminalreporter.config.option.tbstyle != "no":
-        reports = terminalreporter.getreports("rerun")
-        if reports:
-            terminalreporter.write_sep("=", "RERUNS")
-            if terminalreporter.config.option.tbstyle == "line":
-                for rep in reports:
-                    line = terminalreporter._getcrashline(rep)
-                    terminalreporter.write_line(line)
-            else:
-                for rep in reports:
-                    msg = terminalreporter._getfailureheadline(rep)
-                    terminalreporter.write_sep("_", msg, red=True, bold=True)
-                    terminalreporter._outrep_summary(rep)
-                    terminalreporter._handle_teardown_sections(rep.nodeid)
+    reports = terminalreporter.getreports("rerun")
+    if reports and config.option.tbstyle != "no":
+        terminalreporter.write_sep("=", "RERUNS")
+        for rep in reports:
+            if config.option.tbstyle == "line":
+                # As in pytest's own --tb=line: an xdist worker crash's rerun report has a
+                # plain-string longrepr, and pytest 7.3.2 leaves reprcrash None for pytrace=False.
+                crash = getattr(rep.longrepr, "reprcrash", None)
+                terminalreporter.write_line(
+                    str(crash) if crash is not None else str(rep.longrepr)[:50]
+                )
+                continue
+            title = rep.head_line or rep.nodeid
+            terminalreporter.write_sep("_", title, red=True, bold=True)
+            rep.toterminal(config.get_terminal_writer())
+            for name, content in rep.sections:
+                if config.option.showcapture in ("all", *name.split()):
+                    terminalreporter.write_sep("-", name)
+                    terminalreporter.write_line(content.removesuffix("\n"))
     yield
 
 
