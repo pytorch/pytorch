@@ -2,6 +2,7 @@
 
 #include <ATen/BlasBackend.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/core/ScalarType.h>
@@ -185,7 +186,10 @@ inline int cublasLtMatmulScaleMode(
       TORCH_CHECK(scale_dtype == kFloat8_e8m0fnu);
       if (swizzle_type == at::blas::SwizzleType::SWIZZLE_32_8) {
 #if defined(USE_ROCM) && ROCM_VERSION >= 71300
-        return CUBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+        // Only gfx950 SWIZZLE_32_8 uses the SCALE_BLK32_UE8M0_32_8_EXT.
+        if (at::detail::getCUDAHooks().isGPUArch({"gfx950"})) {
+          return CUBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+        }
 #else
         TORCH_CHECK(
             false,
@@ -194,6 +198,7 @@ inline int cublasLtMatmulScaleMode(
 #endif
       }
 #if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && ROCM_VERSION >= 70000)
+      // gfx1250 SWIZZLE_128 and gfx950 NO_SWIZZLE enter here.
       return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
 #else
       TORCH_CHECK(
@@ -203,8 +208,13 @@ inline int cublasLtMatmulScaleMode(
 #endif
     case at::blas::ScalingType::BlockWise1x16:
       TORCH_CHECK(scale_dtype == kFloat8_e4m3fn);
-#if CUDA_VERSION >= 12080
+#if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && ROCM_VERSION >= 100000)
       return CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
+#elif defined(USE_ROCM)
+      TORCH_CHECK(
+          false,
+          "scaled_gemm with float8_e4m3fn scales of 1x16 blocks "
+          "requires ROCm 10.0 or above");
 #else
       TORCH_CHECK(
           false,
