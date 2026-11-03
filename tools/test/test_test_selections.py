@@ -447,7 +447,10 @@ class TestCalculateShards(unittest.TestCase):
         self.assertEqual([test.get_time() for test in tests], list(test_times.values()))
 
     def test_xdist_workers_divide_file_time(self) -> None:
-        test_times = {"xdist_test": THRESHOLD * 3, "plain_test": THRESHOLD * 3}
+        test_times: dict[str, float] = {
+            "xdist_test": THRESHOLD * 3,
+            "plain_test": THRESHOLD * 3,
+        }
         shards = calculate_shards(
             2,
             [TestRun(t) for t in test_times],
