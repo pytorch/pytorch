@@ -8,8 +8,8 @@ from collections.abc import Callable, Iterator
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Concatenate
-from typing_extensions import ParamSpec, Self, TypeVar
+from typing import Any, Concatenate, Self
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 import torch._inductor.config as inductor_config
