@@ -14940,6 +14940,38 @@ graph():
             )
         )
 
+    def test_stack_trace_helper_method(self):
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward_impl(self, x):
+                x = self.linear(x)
+                x *= 2.0
+                return x
+
+            def forward(self, x):
+                return self.forward_impl(x)
+
+        ep = export(Foo(), (torch.randn(4, 4),)).run_decompositions({})
+        trace_mul = [
+            node for node in ep.graph.nodes if node.target == torch.ops.aten.mul.Tensor
+        ][0].meta.get("stack_trace", "")
+        self.assertTrue(
+            re.search(r"in forward\n.*return self.forward_impl\(x\)", trace_mul)
+        )
+        self.assertTrue(re.search(r"in forward_impl\n.*x \*= 2.0", trace_mul))
+        trace_addmm = [
+            node
+            for node in ep.graph.nodes
+            if node.target
+            in (torch.ops.aten.addmm.default, torch.ops.aten.linear.default)
+        ][0].meta.get("stack_trace", "")
+        self.assertTrue(
+            re.search(r"in forward_impl\n.*x = self.linear\(x\)", trace_addmm)
+        )
+
     def test_stack_trace_make_fx(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
