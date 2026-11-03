@@ -409,6 +409,10 @@ static std::optional<WaitEventInfo> getWaitEventInfo(
 void CuptiActivityProfiler::handleCudaEventActivity(
     const CUpti_ActivityCudaEventType* activity,
     ActivityLogger* logger) {
+  if (CudaEventActivity(activity, nullptr).timestamp() == 0) {
+    return;
+  }
+
   VLOG(2) << ": CUPTI_ACTIVITY_KIND_CUDA_EVENT"
           << " corrId=" << activity->correlationId
           << " eventId=" << activity->eventId
