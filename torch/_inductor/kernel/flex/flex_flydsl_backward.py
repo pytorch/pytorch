@@ -10,7 +10,13 @@ from torch.nn.attention.flex_attention import _LARGE_SPARSE_BLOCK_SIZE
 
 from ...codegen.flydsl.flydsl_template import FlyDSLTemplate
 from ...codegen.flydsl.flydsl_utils import runtime_available
-from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
+from ...ir import (
+    fixed_layout_snapshot,
+    FixedLayout,
+    ShapeAsConstantBuffer,
+    Subgraph,
+    TensorBox,
+)
 from ...lowering import empty_strided
 from ...select_algorithm import autotune_select_algorithm
 from ...virtualized import V
@@ -210,7 +216,7 @@ def _get_flydsl_flex_attention_backward_config(
 def _empty_gradient(source, size, *, dtype, device):
     return empty_strided(
         size=size,
-        stride=infer_dense_strides(size, source.get_stride_hint()),
+        stride=infer_dense_strides(size, fixed_layout_snapshot(source).stride),
         dtype=dtype,
         device=device,
     )
