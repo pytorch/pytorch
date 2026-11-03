@@ -1419,6 +1419,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return CurrentDeviceVariable.create(device_arg.value)
 
         if self.can_constant_fold_through() and constant_args:
+            # Constant-folded constructors can consume mapping insertion order.
+            for arg in [*args, *kwargs.values()]:
+                if isinstance(arg, variables.ConstDictVariable):
+                    arg.install_dict_order_guard(tx)
             # constant fold
             return VariableTracker.build(
                 tx,
@@ -3928,7 +3932,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             source = mro_attr_source(
                 tx, type(self.value), self.cls_source, "__getattribute__"
             )
-            if source is not None:
+            if source is not None and not any(
+                guard.inner_create_fn() is GuardBuilder.FUNCTION_MATCH
+                for guard in tx.output.guards.get_guards_for_source(source)
+            ):
                 install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
@@ -4072,13 +4079,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             or getattr(type_attr, "_torchdynamo_disable", False)
         ):
             if isinstance(type_attr, types.MethodDescriptorType):
+                method = self.lookup_method_descriptor(type_attr)
                 if self.cls_source:
+                    # CallMethodVariable also specializes this C-method dispatch.
                     install_guard(
                         self.get_source_by_walking_mro(tx, name).make_guard(
                             GuardBuilder.FUNCTION_MATCH
                         )
                     )
-                if self.lookup_method_descriptor(type_attr) is not None:
+                if method is not None:
                     return variables.BoundBuiltinMethodVariable(
                         type_attr, self, source=source
                     )
