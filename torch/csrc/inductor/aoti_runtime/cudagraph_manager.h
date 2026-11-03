@@ -28,8 +28,8 @@ namespace torch::aot_inductor {
 struct CudaGraphOptions {
   // Eager calls per new key before capturing it, so lazy initialization,
   // e.g. kernel loading, happens outside the capture. Unless 0, each thread
-  // also makes one eager call before its first capture, since libraries such
-  // as cuBLAS set up per thread.
+  // also makes one eager call, of any key, before its first capture, since
+  // libraries such as cuBLAS set up per thread.
   int64_t warmup_calls = 1;
   // Calls with new keys run eagerly once this many graphs exist.
   int64_t max_graphs = 8;
@@ -53,12 +53,12 @@ inline void delete_cuda_mem_pool(void* ptr) {
 // Runs a capturable part of a model instance eagerly or as CUDA graphs, one
 // graph per input layout (dtypes, sizes, strides). The graphs share one
 // memory pool, so replays run one at a time; each copies the inputs in and
-// clones the outputs out. A key whose region fails to capture runs eagerly
-// from then on, and after kMaxCaptureFailures such failures in a row, so do new
-// keys. A capture that fails to set up or runs out of memory doesn't mark its
-// key; the next captures are put off instead, longer after each one in a row,
-// running out of memory also drops the graphs, and kMaxCaptureFailures in a
-// row stop new keys from capturing too.
+// clones the outputs out. After a capture fails, for whatever reason and even
+// if the call then fails eagerly too, keys without a graph run eagerly, until
+// reset(). While other graphs exist, the pool also keeps the failed capture's
+// memory until then. Unlike torch.cuda.graph, a capture doesn't empty the
+// allocator's cache first, so it can run out of memory where an eager call
+// wouldn't, and that too stops capturing.
 class CudaGraphManager {
  public:
   explicit CudaGraphManager(int32_t device_index, CudaGraphOptions options = {})
@@ -108,21 +108,23 @@ class CudaGraphManager {
   // CUDA tensor on the manager's device, and `stream` must not be capturing.
   // Replayed kernels run at default priority, whatever `stream`'s priority. fn
   // borrows `inputs`, writes new references into `outputs`, enqueues all its
-  // GPU work on `stream`, returns only CUDA tensors (or the layout runs
-  // eagerly), and must not mutate its inputs: a replay would only
+  // GPU work on `stream`, returns only tensors on the manager's device (or
+  // capturing stops), and must not mutate its inputs: a replay would only
   // mutate the graph's copies. fn may also see views over the graph's buffers,
   // at other storage offsets than the caller's inputs. Graphs have no random
   // number state, since replays would advance the generator without its lock,
-  // so a layout whose fn uses random numbers fails to capture and runs eagerly.
+  // so a capture of fn that uses random numbers fails.
   // Each output slot gets its own handle; replayed outputs never alias the
   // inputs, nor each other unless fn wrote the same handle twice. A graph keeps
   // reading everything else fn read at capture, e.g. constants, at the same
-  // addresses, so call reset() before replacing or freeing any of it. run(),
+  // addresses, so call reset() before replacing or freeing any of it, with no
+  // run() in flight or starting until the replacement is done. run(),
   // reset() and the destructor may delete the pool, which the shim forbids
   // while the calling thread has a capture open, or while any thread has a
   // global-mode capture open. Eager calls don't hold the manager's lock, so fn
   // must be safe to call from several threads at once, including while another
-  // thread captures it. A failed call leaves every slot null.
+  // thread captures it. On success the caller owns every non-null slot; a
+  // failed call leaves every slot null, deleting any handle fn wrote.
   template <typename Fn>
   void run(
       Fn&& fn,
@@ -138,19 +140,14 @@ class CudaGraphManager {
         !is_stream_capturing(stream),
         "CudaGraphManager can't run inside a CUDA graph capture");
 
-    std::unique_lock<std::mutex> lock(mutex_);
     auto key = make_key(inputs, num_inputs);
+    std::unique_lock<std::mutex> lock(mutex_);
     auto it = graphs_.find(key);
     if (it == graphs_.end()) {
-      bool eager = uncapturable_.count(key) > 0;
+      bool eager = capture_failed_;
       if (!eager &&
           graphs_.size() >= static_cast<size_t>(options_.max_graphs)) {
         warn_max_graphs();
-        eager = true;
-      }
-      eager = eager || capture_failures_ >= kMaxCaptureFailures;
-      if (!eager && cooldown_ > 0) {
-        --cooldown_;
         eager = true;
       }
       bool warming_up = false;
@@ -176,50 +173,53 @@ class CudaGraphManager {
       }
       warmup_counts_.erase(key);
       std::unique_ptr<Graph> graph;
-      std::string region_error;
       try {
-        graph =
-            capture(fn, inputs, num_inputs, num_outputs, stream, region_error);
-      } catch (const std::exception& e) {
-        // A failed capture ran nothing, so run eagerly; an error here is the
-        // caller's. Running out of memory may pass, so it doesn't mark the
-        // key, but the pool keeps the failed capture's memory, so free it
-        // for the eager call.
-        std::string error = region_error.empty() ? e.what() : region_error;
-        bool oom = error.find("out of memory") != std::string::npos;
-        if (oom && !graphs_.empty()) {
-          AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(last_replay_));
-          graphs_.clear();
-        }
+        graph = capture(fn, inputs, num_inputs, num_outputs, stream);
+      } catch (...) {
+        // A failed capture ran nothing, so run eagerly; an error there is the
+        // caller's. Without graphs, the pool only holds the failed capture's
+        // memory.
+        capture_failed_ = true;
         if (graphs_.empty()) {
-          release_pool();
+          pool_.reset();
         }
+        std::string error = "unknown error";
+        try {
+          throw;
+        } catch (const std::exception& e) {
+          error = e.what();
+        } catch (...) {
+        }
+        std::string msg =
+            "AOTInductor CUDA graphs: capturing failed, so calls with new "
+            "input layouts (dtypes, sizes or strides) run eagerly from now "
+            "on (code that uses random numbers, for one, can't be "
+            "captured): " +
+            error.substr(0, error.find('\n'));
+        aoti_torch_warn(
+            __func__, __FILE__, static_cast<uint32_t>(__LINE__), msg.c_str());
         lock.unlock();
         run_eagerly(fn, inputs, outputs, num_outputs, stream);
         lock.lock();
         mark_thread_warm();
-        capture_failed(std::move(key), error, !region_error.empty() && !oom);
         return;
       }
-      capture_failures_ = 0;
-      setup_failures_ = 0;
       it = graphs_.emplace(std::move(key), std::move(graph)).first;
     }
     replay(*it->second, inputs, outputs, num_outputs, stream);
   }
 
-  // Drops all graphs; the next capture starts a new pool.
+  // Drops all graphs and returns the pool's memory, including any a failed
+  // capture left; the next capture starts a new pool.
   void reset() {
     std::lock_guard<std::mutex> lock(mutex_);
+    AOTICudaGuard device_guard(device_index_);
     // The last replay may still be using the graphs' buffers.
     AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(last_replay_));
     graphs_.clear();
-    release_pool();
+    pool_.reset();
     warmup_counts_.clear();
-    uncapturable_.clear();
-    capture_failures_ = 0;
-    setup_failures_ = 0;
-    cooldown_ = 0;
+    capture_failed_ = false;
   }
 
   size_t num_graphs() {
@@ -228,13 +228,8 @@ class CudaGraphManager {
   }
 
   // Caps the keys and threads remembered for warm-up, so one-off shapes or
-  // threads can't grow the manager without bound. Failed captures are bounded
-  // by kMaxCaptureFailures per successful one. After the nth setup or out of
-  // memory failure in a row, the next kSetupFailureBackoff << min(n - 1, 6)
-  // calls that would warm up or capture a key run eagerly.
+  // threads can't grow the manager without bound.
   static constexpr size_t kMaxWarmupKeys = 1024;
-  static constexpr int kMaxCaptureFailures = 8;
-  static constexpr int64_t kSetupFailureBackoff = 16;
 
  private:
   static constexpr size_t kNoOutput = std::numeric_limits<size_t>::max();
@@ -247,11 +242,6 @@ class CudaGraphManager {
     return options;
   }
 
-  // How an input gets into its buffer: a dense one straight into the view,
-  // an overlapping one as a 1-D block of its extent, and one with gaps, e.g.
-  // a slice, element by element.
-  enum class InputCopy { kDense, kBlock, kElementwise };
-
   struct Graph {
     std::unique_ptr<CUDAGraphOpaque, DeleterFnPtr> graph{
         nullptr,
@@ -261,7 +251,8 @@ class CudaGraphManager {
     std::vector<RAIIAtenTensorHandle> input_buffers;
     std::vector<RAIIAtenTensorHandle> static_inputs;
     std::vector<int64_t> input_extents;
-    std::vector<InputCopy> input_copies;
+    // Whether each input overlaps itself, e.g. an expand.
+    std::vector<bool> input_overlaps;
     // Distinct outputs, and for each output slot its index into them, or
     // kNoOutput for a null output.
     std::vector<RAIIAtenTensorHandle> static_outputs;
@@ -298,11 +289,9 @@ class CudaGraphManager {
   }
 
   // Possible overlap counts as overlap, which only costs a block copy.
-  static InputCopy input_copy(const TensorLayout& layout) {
+  static bool overlaps(const TensorLayout& layout) {
     std::vector<std::pair<int64_t, int64_t>> dims; // (stride, size)
-    int64_t numel = 1;
     for (int64_t d = 0; d < layout.dim; ++d) {
-      numel *= layout.sizes[d];
       if (layout.sizes[d] > 1) {
         dims.emplace_back(layout.strides[d], layout.sizes[d]);
       }
@@ -311,18 +300,15 @@ class CudaGraphManager {
     int64_t max_offset = 0;
     for (const auto& [stride, size] : dims) {
       if (stride <= max_offset) {
-        return InputCopy::kBlock;
+        return true;
       }
       max_offset += (size - 1) * stride;
     }
-    return storage_extent(layout) > numel ? InputCopy::kElementwise
-                                          : InputCopy::kDense;
+    return false;
   }
 
   // An overlapping input's view overlaps itself, so copy the block it covers.
-  static RAIIAtenTensorHandle block_of(
-      AtenTensorHandle input,
-      int64_t& extent) {
+  static RAIIAtenTensorHandle block_of(AtenTensorHandle input, int64_t extent) {
     int64_t stride = 1;
     AtenTensorHandle block = nullptr;
     AOTI_TORCH_ERROR_CODE_CHECK(
@@ -331,8 +317,8 @@ class CudaGraphManager {
   }
 
   static void copy_inputs(Graph& graph, AtenTensorHandle* inputs) {
-    for (size_t i = 0; i < graph.input_copies.size(); ++i) {
-      if (graph.input_copies[i] == InputCopy::kBlock) {
+    for (size_t i = 0; i < graph.input_overlaps.size(); ++i) {
+      if (graph.input_overlaps[i]) {
         auto block = block_of(inputs[i], graph.input_extents[i]);
         AOTI_TORCH_ERROR_CODE_CHECK(
             aoti_torch_copy_(graph.input_buffers[i], block.get(), 0));
@@ -399,57 +385,6 @@ class CudaGraphManager {
     warm_threads_.insert(thread_token());
   }
 
-  void capture_failed(
-      std::vector<int64_t> key,
-      const std::string& error,
-      bool region_failed) {
-    bool gave_up = false;
-    if (!region_failed) {
-      cooldown_ = kSetupFailureBackoff
-          << std::min<int64_t>(setup_failures_++, 6);
-      gave_up = setup_failures_ == kMaxCaptureFailures;
-    } else if (!uncapturable_.insert(std::move(key)).second) {
-      return; // Another thread failed to capture it meanwhile.
-    } else {
-      gave_up = ++capture_failures_ == kMaxCaptureFailures;
-    }
-    capture_failures_ = gave_up ? kMaxCaptureFailures : capture_failures_;
-    bool& warned =
-        region_failed ? warned_capture_failure_ : warned_setup_failure_;
-    std::string msg;
-    if (gave_up) {
-      msg = "AOTInductor CUDA graphs: capturing failed " +
-          std::to_string(kMaxCaptureFailures) +
-          " times in a row, so calls with new input shapes run eagerly too";
-    } else if (!warned) {
-      warned = true;
-      msg = std::string("AOTInductor CUDA graphs: capturing failed, so ") +
-          (region_failed ? "calls with these input shapes run" : "this runs") +
-          " eagerly: " + error.substr(0, error.find('\n'));
-    } else {
-      return;
-    }
-    aoti_torch_warn(
-        __func__, __FILE__, static_cast<uint32_t>(__LINE__), msg.c_str());
-  }
-
-  // The error being handled, with the shim's message behind an
-  // AOTI_TORCH_ERROR_CODE_CHECK failure, which only names the call.
-  static std::string current_error() {
-    try {
-      throw;
-    } catch (const std::exception& e) {
-      std::string what(e.what());
-      const char* cause = torch_exception_get_what_without_backtrace();
-      if (what.find("API call failed") != std::string::npos && cause) {
-        what += std::string(": ") + cause;
-      }
-      return what;
-    } catch (...) {
-      return "unknown error";
-    }
-  }
-
   // Unlike AOTI_TORCH_ERROR_CODE_CHECK, keeps the shim's message, which the
   // capture-failure warning shows.
   static void check_shim(AOTITorchError error, const char* call) {
@@ -458,14 +393,6 @@ class CudaGraphManager {
       AOTI_RUNTIME_CHECK(
           false,
           std::string(call) + " failed: " + (what != nullptr ? what : ""));
-    }
-  }
-
-  // Deleting the pool returns its memory to the device.
-  void release_pool() {
-    if (pool_) {
-      AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(last_replay_));
-      pool_.reset();
     }
   }
 
@@ -488,7 +415,8 @@ class CudaGraphManager {
     warned_max_graphs_ = true;
     std::string msg = "AOTInductor CUDA graphs: reached max_graphs=" +
         std::to_string(options_.max_graphs) +
-        ", so calls with new input shapes run eagerly";
+        ", so calls with new input layouts (dtypes, sizes or strides) run "
+        "eagerly";
     aoti_torch_warn(
         __func__, __FILE__, static_cast<uint32_t>(__LINE__), msg.c_str());
   }
@@ -541,21 +469,13 @@ class CudaGraphManager {
       AtenTensorHandle* inputs,
       size_t num_inputs,
       size_t num_outputs,
-      cudaStream_t stream,
-      std::string& region_error) {
+      cudaStream_t stream) {
     // A pool can't take a capture once every graph captured into it is gone.
     if (graphs_.empty()) {
-      release_pool();
       CUDAMemPoolHandle pool = nullptr;
-      try {
-        check_shim(
-            aoti_torch_create_cuda_mem_pool(device_index_, &pool),
-            "aoti_torch_create_cuda_mem_pool");
-      } catch (...) {
-        // Not one to retry, e.g. under cudaMallocAsync.
-        region_error = current_error();
-        throw;
-      }
+      check_shim(
+          aoti_torch_create_cuda_mem_pool(device_index_, &pool),
+          "aoti_torch_create_cuda_mem_pool");
       pool_.reset(pool);
     }
     auto graph = std::make_unique<Graph>();
@@ -566,12 +486,11 @@ class CudaGraphManager {
         "aoti_torch_create_cuda_graph");
     graph->graph.reset(graph_handle);
 
-    AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(event_, stream));
-    AOTI_RUNTIME_CUDA_CHECK(cudaStreamWaitEvent(capture_stream_, event_, 0));
     std::vector<AtenTensorHandle> raw_outputs(num_outputs, nullptr);
     {
       // Allocated outside the capture, for copies outside the graph to write,
-      // and on the caller's stream, which outlives the manager's own.
+      // and on the caller's stream rather than the manager's, which is
+      // destroyed with it.
       AOTICudaStreamGuard stream_guard(stream, device_index_);
       std::vector<AtenTensorHandle> input_handles;
       input_handles.reserve(num_inputs);
@@ -596,7 +515,7 @@ class CudaGraphManager {
             buffer, layout.dim, layout.sizes, layout.strides, 0, &view));
         graph->static_inputs.emplace_back(view);
         graph->input_extents.push_back(extent);
-        graph->input_copies.push_back(input_copy(layout));
+        graph->input_overlaps.push_back(overlaps(layout));
         input_handles.push_back(view);
       }
 
@@ -614,11 +533,14 @@ class CudaGraphManager {
             aoti_torch_cuda_graph_capture_end(graph_handle),
             "aoti_torch_cuda_graph_capture_end");
       } catch (...) {
-        // Read first: the cleanup can replace the shim's message. A capture
-        // must end before its graph is deleted.
-        region_error = current_error();
+        // A capture must end before its graph is deleted. The region's error is
+        // the one to report.
         if (capturing) {
+          // A node, so ATen doesn't also warn that the graph is empty.
+          (void)cudaEventRecordWithFlags(
+              event_, capture_stream_, cudaEventRecordExternal);
           (void)aoti_torch_cuda_graph_capture_end(graph_handle);
+          (void)cudaGetLastError();
         }
         (void)aoti_torch_delete_cuda_graph(graph->graph.release());
         Graph discarded;
@@ -628,20 +550,18 @@ class CudaGraphManager {
     }
     steal_outputs(raw_outputs, *graph);
     for (auto& output : graph->static_outputs) {
+      // Work on another device would run only at capture.
       int32_t device_type = 0;
+      int32_t device_index = 0;
       AOTI_TORCH_ERROR_CODE_CHECK(
           aoti_torch_get_device_type(output, &device_type));
-      if (device_type != aoti_torch_device_type_cuda()) {
-        // Its host-side work would run only at capture.
-        region_error = "a region output is not a CUDA tensor";
-        AOTI_RUNTIME_CHECK(false, region_error);
-      }
+      AOTI_TORCH_ERROR_CODE_CHECK(
+          aoti_torch_get_device_index(output, &device_index));
+      AOTI_RUNTIME_CHECK(
+          device_type == aoti_torch_device_type_cuda() &&
+              device_index == device_index_,
+          "a region output is not on the manager's device");
     }
-
-    // capture_begin may allocate on the capture stream outside the pool, so
-    // the caller's stream waits for that work.
-    AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(event_, capture_stream_));
-    AOTI_RUNTIME_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
     return graph;
   }
 
@@ -688,6 +608,7 @@ class CudaGraphManager {
   int32_t device_index_;
   CudaGraphOptions options_;
   cudaStream_t capture_stream_ = nullptr;
+  // Recorded only into abandoned captures.
   cudaEvent_t event_ = nullptr;
   cudaEvent_t last_replay_ = nullptr;
   // Shared by all graphs, created with the first one.
@@ -696,13 +617,8 @@ class CudaGraphManager {
       delete_cuda_mem_pool};
   std::mutex mutex_;
   bool warned_max_graphs_ = false;
-  bool warned_capture_failure_ = false;
-  bool warned_setup_failure_ = false;
-  int capture_failures_ = 0;
-  int64_t setup_failures_ = 0;
-  int64_t cooldown_ = 0;
+  bool capture_failed_ = false;
   std::map<std::vector<int64_t>, int64_t> warmup_counts_;
-  std::set<std::vector<int64_t>> uncapturable_;
   std::set<uint64_t> warm_threads_;
   std::map<std::vector<int64_t>, std::unique_ptr<Graph>> graphs_;
 };
