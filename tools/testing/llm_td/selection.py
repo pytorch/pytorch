@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 SWEEPS = ("dynamo_wrapped", "crossref")
 LLM_TD_SELECTION_FILE = "llm_td_selection.json"
 # When enforcing, run_test.py also runs TD's top-ranked files up to this share of
-# the job's test time: TD and the model miss largely different failures.
+# the config's test time (all shards together): TD and the model miss largely different failures.
 LLM_TD_HEDGE = 0.05
 
 # Changes to these paths alter how every test is collected or run, so no
