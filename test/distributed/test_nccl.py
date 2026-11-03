@@ -1956,6 +1956,8 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         # Delays this rank's next collective on the device. A rank that skips
         # the collective instead would leave its peer blocked in RCCL's
         # host-side enqueue, so the peer's work would never reach wait().
+        # The first launch carries extra overhead; keep it out of the timing.
+        torch.cuda._sleep(10**7)
         torch.cuda.synchronize(self.device)
         start = time.monotonic()
         torch.cuda._sleep(10**7)
