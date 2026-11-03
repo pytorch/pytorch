@@ -8,7 +8,6 @@ import itertools
 import os
 import re
 import sys
-import types
 import unittest
 import warnings
 from collections import defaultdict
@@ -29,7 +28,12 @@ from torch._inductor.cudagraph_trees import (
     cudagraphify_impl as tree_cudagraphify_impl,
     ExecutionState,
 )
-from torch._inductor.cudagraph_utils import check_for_mutation, PlaceholderInfo
+from torch._inductor.cudagraph_utils import (
+    check_for_mutation,
+    FunctionID,
+    PlaceholderInfo,
+    WrappedFunction,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._ops import OpOverload
@@ -239,12 +243,17 @@ class CUDAGraphAPIOnlyTests(TestCase):
     def test_check_for_mutation_counts_a_user_input_without_trees(self):
         # Input 0 is a user input, 1 a static one; both are mutated, the static
         # one listed first, so its trace would be the one reported.
-        func = types.SimpleNamespace(
-            mutated_input_idxs=[1, 0],
+        func = WrappedFunction(
+            model=lambda inputs: inputs,
             static_input_idxs=[1],
+            id=FunctionID(0),
+            constants=(),
             placeholders=[
                 PlaceholderInfo(f"arg{i}", None, [], f"mutates arg{i}") for i in (0, 1)
             ],
+            mutated_input_idxs=[1, 0],
+            cudagraph_managed_input_rerecord_limit=0,
+            cudagraph_managed_input_rerecord_action="copy",
         )
         inputs = [torch.ones(4), torch.ones(4)]
         with config.patch("triton.cudagraph_trees", False):
@@ -911,17 +920,17 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(fn(x, y), torch.nn.functional.pad(x, (4, -4)))
 
-        @parametrize("trees_off_after_build", (False, True))
-        @parametrize("backend", ("inductor", "cudagraphs"))
+        # Not cudagraphs with trees off after the build: the backend's static
+        # inputs exclude an inlined module's tensor, so its mutation skips with
+        # trees on, before they turn off.
+        @parametrize(
+            "backend,trees_off_after_build",
+            [("inductor", False), ("inductor", True), ("cudagraphs", False)],
+        )
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
         @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", True)
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
         def test_mutation_on_inp(self, backend, trees_off_after_build):
-            if trees_off_after_build and backend == "cudagraphs":
-                # The backend's static inputs exclude an inlined module's tensor,
-                # so this mutation skips with trees on, before they turn off.
-                self.skipTest("nothing for trees_off_after_build to change")
-
             def foo(x):
                 x.add_(2)
                 return x
@@ -971,9 +980,10 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(mod.buf, mod2.buf)
 
             self.assertIsNotNone(self.get_manager())
-            if backend == "inductor":
-                # The buffer is a static input, whose mutation never skips.
-                self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            # Under inductor the buffer is a static input, whose mutation never
+            # skips; the cudagraphs backend skips it once.
+            skips = 1 if backend == "inductor" else 2
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], skips)
 
         def test_input_storage_mutation_skips_cudagraphs(self):
             class Mod(nn.Module):
@@ -6131,8 +6141,6 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(backwards(), 1)
             self.assertIsNone(self.get_manager())
 
-        # Under graph partition the backend ignores CPU ops when it checks for skips.
-        @torch._inductor.config.patch("graph_partition", False)
         @torch._inductor.config.patch("graph_partition", False)
         @torch._inductor.config.patch("triton.cudagraph_capture_sizes", (2,))
         def test_skipped_backward_without_partition_of_a_forward_without_graph(self):
@@ -6156,6 +6164,8 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(backwards(), 1)
             self.assertIsNone(self.get_manager())
 
+        # Under graph partition the backend ignores CPU ops when it checks for skips.
+        @torch._inductor.config.patch("graph_partition", False)
         @torch._functorch.config.patch("force_non_lazy_backward_lowering", True)
         def test_cudagraphs_backend_with_eagerly_lowered_skipped_backward(self):
             # The backward round-trips through the CPU, so it runs without a CUDA
