@@ -35,7 +35,7 @@ The sections up to Time to land compare old and new only. Other models, effort l
 | | Old | New |
 |---|---|---|
 | Selector | TD heuristics, top 25% per config | Opus 5.5, effort medium, no tools, plus TD's top files up to 20% of the config's test time |
-| Safety rules | none | edited or added test files, and files that already failed on the PR, always run; changes to test infrastructure run everything; a missing or malformed answer is a selector failure, which keeps TD's split |
+| Safety rules | none | edited or added test files, and files that already failed on the PR and that TD runs, always run; changes to test infrastructure run everything; a missing or malformed answer is a selector failure, which keeps TD's split |
 | Runs on | PRs in TD-enabled workflows | same-repo PRs in TD-enabled workflows; fork PRs keep TD |
 | Main pushes | everything | everything |
 
@@ -174,7 +174,7 @@ The overhead fraction dominates the uncertainty:
 - A test file the PR edits or adds is always selected.
 - The answer becomes run-all when the change touches anything that decides how tests run. That covers run_test.py, conftest, common_utils, common_device_type, tools/testing, the test shell scripts and actions, and the CI docker images. This run-all is enforced.
 - A missing or malformed answer, or any other selector error, is a selector failure: the selection is marked not enforced and CI keeps TD's own split. The harness's `final+tdN` policies score it the same way, as TD's top 25%; `model`, `final` and `final-hm` score it as run-all.
-- In CI, run_test.py also always runs the files that already failed on the PR.
+- In CI, run_test.py also always runs the files that already failed on the PR and that TD's split runs, charged first to the hedge budget. The other previous failures compete for the hedge like any TD-scored file.
 
 **Hedge.** The hedge adds TD's highest-ranked files with a positive score until they fill 20% of the config's test time, each file charged once. A file that does not fit is skipped and filling continues. The harness applies the same fill rule, per config summed over build environments rather than per job: CI fills 20% of one job's own test list (all its shards together) from that job's test times. The harness also leaves out TD's PR-history heuristic (see Caveats).
 
@@ -285,7 +285,7 @@ Saved per month at the 0.2 overhead, for Opus medium: $368k with no hedge, $334k
 ## Caveats
 
 - **The TD replay is optimistic.** It uses today's heuristic stats, which include these failures. PR truth is also censored toward TD's picks. Both favor old. Failures in jobs without TD (inductor unit tests, periodic, slow, ...) are left out because both policies run everything there.
-- **No PR history in the replay.** In CI, TD's "previously failed in this PR" heuristic ranks a push's earlier failures first, which matters on later pushes. The replay leaves it out for both policies. In production new gets at least the same boost: under enforcement run_test.py always runs the files that already failed on the PR, on top of the selection and the hedge. How much it moves either number is not measured here.
+- **No PR history in the replay.** In CI, TD's "previously failed in this PR" heuristic ranks a push's earlier failures first, which matters on later pushes. The replay leaves it out for both policies. In production new gets at least the same boost: under enforcement run_test.py always runs the files that already failed on the PR and that TD runs, on top of the selection and the hedge. How much it moves either number is not measured here.
 - **The flaky signals are approximations.** Like Dr.CI, a failure is matched by test, here within 14 days on either side. A real failure that another author also hit (two PRs breaking the same test, or a stack split across authors) is counted as flaky, and a flaky test that failed only on this PR is counted as real.
 - **Label noise.** About a quarter of the remaining revert misses look unrelated to the reverted change, so true revert recall is higher than reported.
 - **Training-data contamination.** Reverts before mid-2026 may predate the models' knowledge cutoff. The PR samples (October 2026) do not, and they show the same ordering of models.

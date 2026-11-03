@@ -16,8 +16,8 @@ Four kinds of sample, each a JSON file under DIR/samples:
   rev_<sha>   a commit the autorevert bot reverted between --start and --end
               because it broke a test on main, where every test runs. The
               truth is the test files of the reverting signal that failed on
-              main between landing and the revert, in every config they
-              failed in there.
+              main between landing and the revert, on the commits that
+              contain it, in every config they failed in there.
   neu_<sha>   an ordinary main commit from the 25 days before --end, with no
               truth, used only to measure how much a selector runs on typical
               traffic. Reverted commits and those whose title starts with
@@ -112,6 +112,7 @@ def has_commit(sha: str) -> bool:
 
 
 def is_main(branch: str) -> bool:
+    """pull_failures prefixes a fork's branches with its repository, so a fork's main is not main."""
     return branch == "main" or branch.startswith("trunk/")
 
 
@@ -127,12 +128,17 @@ def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
               FROM tests.all_test_runs
               WHERE time_inserted >= '{d}' AND time_inserted < '{n}' AND (failure_count > 0 OR error_count > 0)
               GROUP BY job_id, tf, classname, name)
+            , j AS (
+              SELECT id, run_id, head_sha, head_branch, workflow_name, name FROM default.workflow_job
+              WHERE id IN (SELECT job_id FROM f) AND repository_full_name = 'pytorch/pytorch')
             SELECT f.job_id job_id, tf, classname, f.name test, toString(t) t, j.head_sha sha,
-                   j.head_branch br, j.workflow_name wf, j.name job
-            FROM f JOIN (
-              SELECT id, head_sha, head_branch, workflow_name, name FROM default.workflow_job
-              WHERE id IN (SELECT job_id FROM f) AND repository_full_name = 'pytorch/pytorch') j
-            ON j.id = f.job_id""")
+                   if(r.hr = 'pytorch/pytorch', j.head_branch, concat(r.hr, ':', j.head_branch)) br,
+                   j.workflow_name wf, j.name job
+            FROM f JOIN j ON j.id = f.job_id
+            LEFT JOIN (
+              SELECT id, any(head_repository.full_name) hr FROM default.workflow_run
+              WHERE id IN (SELECT run_id FROM j) GROUP BY id) r
+            ON r.id = j.run_id""")
         print(d, len(rows), flush=True)
         d = n
     return [r for r in rows if not any(s in r["job"] for s in SKIP_JOBS)]
@@ -447,17 +453,23 @@ def head_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
 
 
 def revert_truth_jobs(
-    signal: set[str], landed: dt.datetime, reverted: str
+    signal: set[str], sha: str, landed: dt.datetime, reverted: str
 ) -> dict[str, list[tuple[str, str]]]:
-    """The main-branch (workflow, job)s each signal test file failed in between landing and the revert."""
+    """The main-branch (workflow, job)s each signal test file failed in between landing and the revert, on the main commits from `sha` up to the revert."""
     files = ",".join(f"'{t}.py'" for t in signal)
     t0 = landed.strftime("%Y-%m-%d %H:%M:%S")
+    with_change = git("rev-list", "--first-parent", "--ancestry-path", f"--until={reverted[:19]} +0000", "--invert-grep",
+                      f"--grep=This reverts commit {sha}", f"{sha}^..origin/main").split()  # fmt: skip
+    shas = ",".join(f"'{c}'" for c in with_change or [sha])
     failed = query(f"""
         SELECT DISTINCT replaceRegexpOne(file, '\\.py$', '') tf, j.workflow_name wf, j.name job FROM tests.all_test_runs t
         JOIN (SELECT id, workflow_name, name FROM default.workflow_job
               WHERE created_at >= toDateTime('{t0}') - INTERVAL 1 HOUR
                 AND created_at <= parseDateTimeBestEffort('{reverted}') + INTERVAL 1 HOUR
                 AND repository_full_name = 'pytorch/pytorch' AND (head_branch = 'main' OR head_branch LIKE 'trunk/%')
+                AND head_sha IN ({shas})
+                AND run_id IN (SELECT id FROM default.workflow_run WHERE head_repository.full_name = 'pytorch/pytorch'
+                               AND created_at >= toDateTime('{t0}') - INTERVAL 1 HOUR)
                 AND {" AND ".join(f"name NOT LIKE '%{s}%'" for s in SKIP_JOBS)}) j ON j.id = t.job_id
         WHERE time_inserted >= toDateTime('{t0}') AND time_inserted <= parseDateTimeBestEffort('{reverted}') + INTERVAL 2 HOUR
           AND file IN ({files}) AND (failure_count > 0 OR error_count > 0)""")
@@ -489,7 +501,7 @@ def revert_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
             if "::" in k
         }
         try:
-            truth_jobs = revert_truth_jobs(signal, commit_time(sha), r["reverted_at"])
+            truth_jobs = revert_truth_jobs(signal, sha, commit_time(sha), r["reverted_at"])  # fmt: skip
             if not truth_jobs:
                 print(f"skipping revert {sha}: no main job failed on its signal tests", flush=True)  # fmt: skip
                 return
@@ -525,8 +537,8 @@ def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
     ]
     # The autorevert bot's record and the rev_ samples also cover reverts whose
     # message differs, as does the title check for a revert or reland named
-    # anywhere in it. They filter the sample rather than the population so the
-    # checked-in neutral ids stay a subset of the earlier draw.
+    # anywhere in it. They filter the sample rather than the population, so a
+    # newer record only drops ids from the draw instead of reshuffling it.
     reverted |= {
         r["commit_sha"]
         for r in query(f"""

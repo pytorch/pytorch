@@ -14,6 +14,8 @@ from tools.testing.llm_td.eval import REPO
 
 
 GCX = REPO / ".agents/skills/ci-metrics/gcx-wrapper.sh"
+# The grafana-clickhouse-datasource UID (see the ci-metrics skill).
+CLICKHOUSE_UID = "ceczcsck1b20wb"
 
 
 def query(sql: str) -> list[dict]:
@@ -23,6 +25,8 @@ def query(sql: str) -> list[dict]:
             "datasources",
             "clickhouse",
             "query",
+            "-d",
+            CLICKHOUSE_UID,
             "--limit",
             "0",
             "-o",
