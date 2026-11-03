@@ -42,6 +42,7 @@ class _Engine:
     def __init__(self):
         self._registered: set[int] = set()
         self._port = 0
+        self._next_batch = 0
         self.options = None
 
     def initialize(self, host, metadata_server, protocol, device_name):
@@ -63,12 +64,17 @@ class _Engine:
         self._registered.discard(address)
         return 0
 
-    def transfer_sync(self, peer, buffer, peer_buffer, length, opcode, notify=None):
-        if opcode == _Opcode.Write:
-            ctypes.memmove(peer_buffer, buffer, length)
-        else:
-            ctypes.memmove(buffer, peer_buffer, length)
-        return 0
+    def batch_transfer_async(self, peer, buffers, peer_buffers, lengths, opcode):
+        for buffer, peer_buffer, length in zip(buffers, peer_buffers, lengths):
+            if opcode == _Opcode.Write:
+                ctypes.memmove(peer_buffer, buffer, length)
+            else:
+                ctypes.memmove(buffer, peer_buffer, length)
+        self._next_batch += 1
+        return self._next_batch
+
+    def transfer_check_status(self, batch_id):
+        return 1
 
 
 def _backend():
@@ -178,7 +184,7 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         remote = second.register_memory(
             torch.zeros(8, dtype=torch.uint8)
         ).to_remote_buffer()
-        with patch.object(_Engine, "transfer_sync", return_value=-1):
+        with patch.object(_Engine, "transfer_check_status", return_value=-1):
             with self.assertRaises(RuntimeError):
                 first.write(source.to_view(), remote)
         # The handled failure settled and was dropped; close must not resurface
@@ -194,7 +200,7 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         remote = second.register_memory(
             torch.zeros(8, dtype=torch.uint8)
         ).to_remote_buffer()
-        with patch.object(_Engine, "transfer_sync", return_value=-1):
+        with patch.object(_Engine, "transfer_check_status", return_value=-1):
             with self.assertRaisesRegex(RuntimeError, "may still be running"):
                 first.write(failed.to_view(), remote)
         with self.assertRaisesRegex(RuntimeError, "unusable after a failed transfer"):
@@ -216,7 +222,7 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         ).to_remote_buffer()
 
         async def run():
-            with patch.object(_Engine, "transfer_sync", return_value=-1):
+            with patch.object(_Engine, "transfer_check_status", return_value=-1):
                 with self.assertRaises(RuntimeError):
                     await first.write_async(source.to_view(), remote)
             self.assertEqual(first._pending, {})

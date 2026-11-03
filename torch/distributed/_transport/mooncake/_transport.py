@@ -4,11 +4,11 @@ import asyncio
 import os
 import socket
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future as _ThreadFuture
 from contextlib import contextmanager
 from datetime import timedelta
 from importlib import import_module
-from threading import RLock
+from threading import Condition, RLock, Thread
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
@@ -61,17 +61,14 @@ class MooncakeTransport(Transport):
     selected. Transfers require registered views; raw tensors are rejected rather
     than allocated or registered implicitly.
 
-    Mooncake has no completion callback or fd yet: every completion signal it
-    exposes (``transfer_sync``, ``get_batch_transfer_status``) is a status poll.
-    Each transfer runs the blocking ``transfer_sync`` on a worker thread, which
-    polls inside Mooncake until the transfer finishes, and settles its Work
-    through the thread future's done callback. Python code never polls:
-    ``write_async``/``read_async``/``close_async`` are woken by that callback
-    (via the asyncio future bridge) and never block the loop. The short
-    lock-guarded submit/cleanup sections are offloaded with ``asyncio.to_thread``
-    rather than spinning on the lock. The cost is one busy pooled worker thread
-    per in-flight transfer, bounded by ``max_concurrent_transfers``, until
-    Mooncake can notify completion.
+    Mooncake has no completion callback or fd yet, so transfers are submitted
+    with ``batch_transfer_async`` and a single poller thread per transport checks
+    them with ``transfer_check_status``, backing off while nothing completes and
+    sleeping while nothing is in flight. The poller settles each Work, which
+    wakes ``write_async``/``read_async``/``close_async`` through the asyncio
+    future bridge without blocking the loop. The short lock-guarded
+    submit/cleanup sections are offloaded with ``asyncio.to_thread`` rather than
+    spinning on the lock.
 
     """
 
@@ -84,7 +81,6 @@ class MooncakeTransport(Transport):
         device_name: str = "",
         metadata_server: str = "P2PHANDSHAKE",
         timeout: float = 30.0,
-        max_concurrent_transfers: int = 16,
     ) -> None:
         super().__init__(device)
         if self.device is not None and self.device.type not in ("cpu", "cuda"):
@@ -92,8 +88,6 @@ class MooncakeTransport(Transport):
         host = socket.gethostname() if host is None else host
         if not host or not protocol:
             raise ValueError("host and protocol cannot be empty")
-        if max_concurrent_transfers < 1:
-            raise ValueError("max_concurrent_transfers must be positive")
         _validate_timeout(timeout)
         host = _format_host(host)
         backend = _load_backend()
@@ -111,11 +105,10 @@ class MooncakeTransport(Transport):
         # In-flight transfers; each entry is pruned by a done callback when its
         # transfer settles (see _submit), so a completed work is never revisited.
         self._pending: dict[int, _MooncakeWork] = {}
-        # Async transfers run their blocking transfer_sync on this pool; the
-        # TransferEngine supports concurrent transfers across worker threads.
-        self._executor = ThreadPoolExecutor(
-            max_workers=max_concurrent_transfers, thread_name_prefix="mooncake-xfer"
-        )
+        self._batches: dict[int, tuple[_ThreadFuture[None], _Registration]] = {}
+        self._poll_cv = Condition()
+        self._poller: Thread | None = None
+        self._poller_stopped = False
         self._operation_lock = RLock()
         # Closing rejects new operations and is terminal.
         # Registrations are released only by unregister or close,
@@ -308,35 +301,65 @@ class MooncakeTransport(Transport):
             if opcode == "READ"
             else self._backend.TransferOpcode.Write
         )
-        endpoint = remote_buffer.endpoint
-        local_address = registration.address + local_buffer._offset
-        remote_address = remote_buffer.address
-
-        # transfer_sync polls inside Mooncake until completion, so run it on the
-        # executor; the Work settles via the thread future's callback when the
-        # worker returns.
-        def run() -> None:
-            status = engine.transfer_sync(
-                endpoint, local_address, remote_address, size, operation
-            )
-            if status != 0:
-                registration.pinned = True
-                self._failed = True
-                raise RuntimeError(
-                    f"Mooncake transfer failed: {status}; the transfer may still "
-                    "be running, so its local memory stays pinned and must not "
-                    "be reused"
-                )
-
-        future = self._executor.submit(run)
+        batch_id = engine.batch_transfer_async(
+            remote_buffer.endpoint,
+            [registration.address + local_buffer._offset],
+            [remote_buffer.address],
+            [size],
+            operation,
+        )
+        if batch_id == 0:
+            raise RuntimeError("Mooncake transfer submission failed")
+        future: _ThreadFuture[None] = _ThreadFuture()
         work = _MooncakeWork(self, local_buffer, remote_buffer, future, timeout)
         self._pending[id(work)] = work
         # Prune on completion so a settled (including failed) transfer is not
-        # revisited by close(); fires on the worker thread, or inline here if the
-        # transfer already finished.
+        # revisited by close(); fires on the poller thread.
         future.add_done_callback(lambda _: self._prune(id(work)))
         _live_transports.add(self)
+        with self._poll_cv:
+            self._batches[batch_id] = (future, registration)
+            if self._poller is None:
+                self._poller = Thread(target=self._poll, name="mooncake", daemon=True)
+                self._poller.start()
+            self._poll_cv.notify()
         return work
+
+    def _poll(self) -> None:
+        engine = self._engine
+        delay = 0.0
+        while True:
+            with self._poll_cv:
+                if delay:
+                    self._poll_cv.wait(delay)
+                while not self._batches and not self._poller_stopped:
+                    self._poll_cv.wait()
+                    delay = 0.0
+                if self._poller_stopped:
+                    return
+                batches = list(self._batches.items())
+            settled = []
+            for batch_id, (future, registration) in batches:
+                status = engine.transfer_check_status(batch_id)
+                if status != 0:
+                    settled.append((batch_id, future, registration, status))
+            with self._poll_cv:
+                for batch_id, *_ in settled:
+                    del self._batches[batch_id]
+            for _, future, registration, status in settled:
+                if status == 1:
+                    future.set_result(None)
+                    continue
+                registration.pinned = True
+                self._failed = True
+                future.set_exception(
+                    RuntimeError(
+                        f"Mooncake transfer failed: {status}; the transfer may "
+                        "still be running, so its local memory stays pinned and "
+                        "must not be reused"
+                    )
+                )
+            delay = 0.0 if settled else min(max(delay * 2, 1e-6), 1e-3)
 
     def _prune(self, key: int) -> None:
         with self._operation_lock:
@@ -412,8 +435,7 @@ class MooncakeTransport(Transport):
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
         # Offload the lock-guarded submit to a thread so a contended lock never
-        # blocks the event loop; the blocking transfer itself already runs on the
-        # transport executor and settles the Work through its future callbacks.
+        # blocks the event loop; the poller settles the Work.
         work = await asyncio.to_thread(
             self._run_locked,
             lambda: self._submit(
@@ -519,10 +541,9 @@ class MooncakeTransport(Transport):
     def _release_resources(self) -> int:
         if self._closed:
             return 0
-        # Pending transfers were already drained by close()/close_async(), so the
-        # workers are idle; shut down without joining to keep close_async from
-        # blocking the event loop.
-        self._executor.shutdown(wait=False)
+        with self._poll_cv:
+            self._poller_stopped = True
+            self._poll_cv.notify()
         engine = self._engine
         for key, registration in list(self._registrations.items()):
             if registration.pinned:

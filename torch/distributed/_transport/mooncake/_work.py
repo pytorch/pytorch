@@ -21,11 +21,9 @@ _live_transports: set[MooncakeTransport] = set()
 
 
 class _MooncakeWork(Work):
-    """Completion handle for a transfer run on the transport's executor.
+    """Completion handle for a transfer settled by the transport's poller.
 
-    Each async transfer runs Mooncake's blocking ``transfer_sync`` on a worker
-    thread; this Work tracks that thread's future. A ``None`` future marks a
-    zero-length no-op that is already complete.
+    A ``None`` future marks a zero-length no-op that is already complete.
     """
 
     def __init__(
@@ -49,7 +47,7 @@ class _MooncakeWork(Work):
             future.add_done_callback(self._settle)
 
     def _settle(self, future: _ThreadFuture[None]) -> None:
-        # Runs on the worker thread once the blocking transfer returns.
+        # Runs on the poller thread once the transfer settles.
         error = future.exception()
         if error is None:
             self._result.set_result([])
