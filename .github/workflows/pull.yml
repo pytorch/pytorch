@@ -468,6 +468,7 @@ jobs:
       - linux-jammy-py3_14-clang21-build
       - job-filter
       - get-label-type
+      - target-determination
     with:
       build-environment: ${{ needs.linux-jammy-py3_14-clang21-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_14-clang21-build.outputs.docker-image }}

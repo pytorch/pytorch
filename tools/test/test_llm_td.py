@@ -1,20 +1,36 @@
 from __future__ import annotations
 
+import importlib.util
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
-from tools.testing.llm_td import select_tests
-from tools.testing.llm_td.selection import needs_run_all, normalize_test_name, Selection
+from tools.testing.llm_td import resolve_selection, select_tests, selection
+from tools.testing.llm_td.selection import (
+    apply_selection,
+    needs_run_all,
+    normalize_test_name,
+    previous_failures,
+    Selection,
+)
+from tools.testing.target_determination.heuristics import previously_failed_in_pr
+from tools.testing.target_determination.heuristics.interface import TestPrioritizations
+from tools.testing.test_run import TestRun
+
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 
 CANDIDATES = {
@@ -100,12 +116,38 @@ class TestSelection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "sel.json"
             self.assertIsNone(Selection.load(p))
-            for text in ("{", '{"sweeps": []}', "[]"):
+            for text in (
+                "{",
+                '{"sweeps": []}',
+                "[]",
+                "[" * 100_000,
+                '{"files": "test_nn", "sweeps": [], "run_all": false}',
+                '{"files": [1], "sweeps": [], "run_all": false}',
+                '{"files": [], "sweeps": [], "run_all": "false"}',
+                '{"files": [], "sweeps": [], "run_all": false, "enforce": "false"}',
+            ):
                 p.write_text(text)
                 self.assertIsNone(Selection.load(p))
             sel = Selection({"test_nn"}, set(), False)
             p.write_text(json.dumps(sel.to_json()))
             self.assertEqual(Selection.load(p), sel)
+
+    def test_previous_failures_tolerates_malformed_files(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.object(previously_failed_in_pr, "REPO_ROOT", Path(d)),
+        ):
+            folder = Path(d) / ".additional_ci_files"
+            folder.mkdir()
+            self.assertEqual(previous_failures(), set())
+            (folder / "previous_failures.json").write_text(
+                '{"test/test_nn.py::TestNN::test_a": true}'
+            )
+            (folder / "previous_failures_additional.json").write_text('["test_ops"]')
+            self.assertEqual(previous_failures(), {"test_nn", "test_ops"})
+            for text in ("{", "1", "[[1]]", "[" * 100_000):
+                (folder / "previous_failures_additional.json").write_text(text)
+                self.assertEqual(previous_failures(), set())
 
     def test_run_all_patterns(self) -> None:
         for f in [
@@ -208,6 +250,200 @@ class TestSelection(unittest.TestCase):
             self.assertEqual(sel.files, expected, changed)
 
 
+class TestSplit(unittest.TestCase):
+    def split(
+        self,
+        sel: Selection,
+        scores: dict[TestRun, float],
+        times: dict[str, float],
+        always: Collection[str] = (),
+    ) -> tuple[list[str], list[str], set[str]]:
+        tp = TestPrioritizations(times, scores)
+        include, exclude, hedged = sel.split(
+            tp.get_all_tests(), tp.get_score, times, "default", always
+        )
+        return [str(x) for x in include], [str(x) for x in exclude], hedged
+
+    def test_hedge_is_greedy_in_rank_order(self) -> None:
+        scores = {"a": 1, "b": 0.9, "c": 0.8, "d": 0.7, "untimed": 0.6, "neg": -0.5}
+        times: dict[str, float] = {"a": 10, "b": 150, "c": 52, "d": 48, "untimed": 0, "zero": 1, "neg": 1, "rest": 738}  # fmt: skip
+        # The budget is 20% of 1000s = 200s. b leaves 50s, so c (52s, fits
+        # alone) is skipped and d (48s) still fits, leaving 2s that the
+        # unscored and negatively scored 1s files may not use. With 19% d does
+        # not fit, with 21% c does.
+        include, exclude, hedged = self.split(
+            Selection(files={"a"}), {TestRun(f): s for f, s in scores.items()}, times
+        )
+        self.assertEqual(include, ["a", "b", "d"])
+        self.assertEqual(exclude, ["c", "untimed", "rest", "zero", "neg"])
+        self.assertEqual(hedged, {"b", "d"})
+
+    def test_partial_runs_of_a_file_are_charged_once(self) -> None:
+        f_a, f_rest = TestRun("f", included=["A"]), TestRun("f", excluded=["A"])
+        g_b = TestRun("g", included=["B"])
+        scores = {f_a: 1, g_b: 1, f_rest: 0.6, TestRun("h"): 0.5}
+        times: dict[str, float] = {"f": 40, "g": 30, "h": 130, "r": 800}
+        # f's two scored runs cost 40s once, and g's positive class pulls in
+        # its unscored rest, so h (130s) fits the 200s budget exactly.
+        include, exclude, hedged = self.split(Selection(), scores, times)
+        self.assertEqual(hedged, {"f", "g", "h"})
+        self.assertEqual(exclude, ["r"])
+        self.assertEqual(include, ["f, A", "g, B", "f, not (A)", "h", "g, not (B)"])
+
+    def test_previous_failures_run_outside_the_budget(self) -> None:
+        scores = {TestRun("p"): 1, TestRun("s"): 0.5}
+        times: dict[str, float] = {"a": 10, "p": 20, "s": 190, "big": 600, "rest": 180}
+        # Charging p would leave 180s, too little for s.
+        include, exclude, hedged = self.split(
+            Selection(files={"a"}), scores, times, always={"p", "big"}
+        )
+        self.assertEqual(include, ["p", "s", "a", "big"])
+        self.assertEqual(exclude, ["rest"])
+        self.assertEqual(hedged, {"s"})
+
+    def test_run_all_and_sweeps_take_everything(self) -> None:
+        for sel in (Selection(run_all=True), Selection(sweeps={"default"})):
+            include, exclude, hedged = self.split(sel, {}, {"a": 1, "b": 1})
+            self.assertEqual((include, exclude, hedged), (["a", "b"], [], set()))
+
+
+class TestApplySelection(unittest.TestCase):
+    TIMES: dict[str, float] = {"a": 10, "p": 20, "s": 190, "big": 600, "rest": 180}
+
+    def apply(
+        self,
+        sel: Selection,
+        td_enabled: bool = True,
+        pr_number: int | None = 1,
+        prev: Collection[str] = (),
+        times: dict[str, float] | None = None,
+    ) -> selection.AppliedSelection:
+        times = self.TIMES if times is None else times
+        tp = TestPrioritizations(list(self.TIMES), {TestRun("p"): 1, TestRun("s"): 0.5})
+        include, exclude = tp.get_top_per_tests(25)
+        with (
+            mock.patch.object(selection, "previous_failures", return_value=set(prev)),
+            mock.patch.object(selection, "get_pr_number", return_value=pr_number),
+            mock.patch("sys.stderr"),
+        ):
+            return apply_selection(sel, include, exclude, tp.get_score, times, "default", td_enabled)  # fmt: skip
+
+    def test_gate(self) -> None:
+        for td_enabled in (False, True):
+            for enforce in (False, True):
+                for pr_number in (None, 1):
+                    sel = Selection(files={"a"}, enforce=enforce)
+                    applied = self.apply(sel, td_enabled, pr_number)
+                    expected = td_enabled and enforce and pr_number is not None
+                    self.assertEqual(applied.enforced, expected, (td_enabled, enforce, pr_number))  # fmt: skip
+                    self.assertEqual(applied.selection_metric["enforced"], expected)
+
+    def test_not_enforced_keeps_td_split(self) -> None:
+        applied = self.apply(Selection(files={"a"}))
+        self.assertEqual([str(x) for x in applied.include], ["p", "s"])
+        self.assertEqual(applied.td_include, {"p", "s"})
+
+    def test_enforced_swaps_in_the_selection(self) -> None:
+        # Charging the previously failed p would leave too little for s.
+        applied = self.apply(Selection(files={"a"}, enforce=True), prev={"p", "big", "elsewhere"})  # fmt: skip
+        self.assertEqual([str(x) for x in applied.include], ["p", "s", "a", "big"])
+        self.assertEqual([str(x) for x in applied.exclude], ["rest"])
+        self.assertEqual(applied.hedged, {"s"})
+        self.assertEqual(
+            applied.selection_metric,
+            {
+                "enforced": True,
+                "td_enabled": True,
+                "run_all": False,
+                "num_tests": 5,
+                "num_covered": 1,
+                "num_td_include": 2,
+                "num_hedged": 1,
+                "num_previously_failed": 2,
+                "time_total": 1000,
+                "time_covered": 10,
+                "time_hedged": 190,
+            },
+        )
+
+    def test_no_test_times_falls_back_to_td(self) -> None:
+        applied = self.apply(Selection(files={"a"}, enforce=True), times={})
+        self.assertFalse(applied.enforced)
+        self.assertEqual([str(x) for x in applied.include], ["p", "s"])
+        self.assertEqual(applied.selection_metric["time_total"], 0)
+
+    def test_failure_metric(self) -> None:
+        applied = self.apply(Selection(files={"a"}, enforce=True), prev={"p", "big"})
+        expected = {
+            "a": (True, False, False, False),
+            "p": (False, True, False, True),
+            "s": (False, True, True, False),
+            "big": (False, False, False, True),
+        }
+        for f, (covered, in_td, hedged, prev) in expected.items():
+            self.assertEqual(
+                applied.failure_metric(TestRun(f)),
+                {
+                    "failure": f,
+                    "covered": covered,
+                    "enforced": True,
+                    "td_enabled": True,
+                    "in_td_include": in_td,
+                    "hedged": hedged,
+                    "previously_failed": prev,
+                },
+            )
+
+
+@unittest.skipIf(importlib.util.find_spec("boto3") is None, "needs boto3")
+class TestDashboardExclusions(unittest.TestCase):
+    def test_exclusions_are_grouped_by_source(self) -> None:
+        from tools.stats import test_dashboard
+
+        artifacts = {
+            "td_exclusions-1.json": {"included": [], "excluded": [{"test_file": "a"}]},
+            "td_exclusions-2.json": {
+                "included": [],
+                "excluded": [{"test_file": "b"}],
+                "source": "td",
+            },  # fmt: skip
+            "td_exclusions-3.json": {
+                "included": [],
+                "excluded": [{"test_file": "c"}],
+                "source": "llm_selection",
+            },  # fmt: skip
+        }
+
+        def unzip(_: object) -> None:
+            for name, content in artifacts.items():
+                Path(name).write_text(json.dumps(content))
+
+        cwd = os.getcwd()
+        try:
+            with (
+                mock.patch.object(
+                    test_dashboard, "download_s3_artifacts", return_value=["x"]
+                ),  # fmt: skip
+                mock.patch.object(test_dashboard, "unzip", unzip),
+                mock.patch.object(test_dashboard, "get_job_id", return_value=1),
+                mock.patch.object(
+                    test_dashboard,
+                    "get_job_name",
+                    return_value="linux / test (default, 1, 2, x)",
+                ),  # fmt: skip
+            ):
+                exclusions = test_dashboard.get_td_exclusions(1, 1)
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(
+            json.loads(json.dumps(exclusions)),
+            {
+                "td": {"linux": {"default": ["a", "b"]}},
+                "llm_selection": {"linux": {"default": ["c"]}},
+            },  # fmt: skip
+        )
+
+
 class TestPrompt(unittest.TestCase):
     def test_truncate_diff_keeps_every_file(self) -> None:
         diff = "\n".join(
@@ -284,7 +520,7 @@ class TestMain(unittest.TestCase):
         with mock.patch.object(select_tests, "git", side_effect=error):
             record = self.run_main("--enforce")
         self.assertTrue(record["run_all"])
-        self.assertTrue(record["enforce"])
+        self.assertFalse(record["enforce"])
         self.assertIn("selector failed", record["reason"])
 
     def test_no_test_times_runs_all(self) -> None:
@@ -322,6 +558,37 @@ class TestMain(unittest.TestCase):
             record = self.run_main()
         times.assert_not_called()
         self.assertTrue(record["run_all"])
+
+    def test_only_a_deliberate_run_all_is_enforced(self) -> None:
+        def run(changed: str, answer: dict, times: dict) -> dict:
+            with tempfile.TemporaryDirectory() as tmp:
+                output = Path(tmp) / "out.json"
+                with (
+                    mock.patch.object(select_tests, "git", return_value=changed),
+                    mock.patch.object(
+                        select_tests, "get_test_times", return_value=times
+                    ),
+                    mock.patch.object(select_tests, "query_model", return_value=answer),
+                ):
+                    select_tests.main(
+                        ["--title", "t", "--output", str(output), "--enforce"]
+                    )
+                return json.loads(output.read_text())
+
+        times = {"env": {"default": {"test_nn": 1.0}}}
+        model_run_all = {"structured_output": {"run_all": True, "reason": "", "sweeps": [], "dirs": [], "tests": []}}  # fmt: skip
+        error = {"is_error": True, "result": "overloaded"}
+        malformed = {"structured_output": {"run_all": False, "tests": "test_nn"}}
+        for changed, answer, t, enforced in [
+            ("test/run_test.py\n", error, times, True),
+            ("docs/a.md\n", model_run_all, times, True),
+            ("docs/a.md\n", error, times, False),
+            ("docs/a.md\n", malformed, times, False),
+            ("docs/a.md\n", model_run_all, {}, False),
+        ]:
+            record = run(changed, answer, t)
+            self.assertTrue(record["run_all"])
+            self.assertEqual(record["enforce"], enforced, (changed, answer, t))
 
     def run_in_repo(self, answer: dict) -> tuple[dict, str]:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
@@ -390,6 +657,181 @@ class TestMain(unittest.TestCase):
         record, _ = self.run_in_repo(answer)
         self.assertIn("malformed", record["error"])
         self.assertTrue(record["run_all"])
+
+
+SHA = "a" * 40
+REPO = "pytorch/pytorch"
+ARTIFACT = f"llm_td_selection_7_{SHA}"
+
+
+def selector_run(id: int, **kw: object) -> dict:
+    """An llm-td.yml run that passes every provenance check; higher ids are newer."""
+    run = {
+        "id": id,
+        "created_at": f"2026-11-0{id}T00:00:00Z",
+        "html_url": f"https://github.com/{REPO}/actions/runs/{id}",
+        "path": ".github/workflows/llm-td.yml",
+        "event": "pull_request_target",
+        "head_sha": SHA,
+        "head_repository": {"id": 1},
+        "repository": {"id": 1},
+        "status": "completed",
+        "conclusion": "success",
+    }
+    return {**run, **kw}
+
+
+def pending_run(id: int, status: str = "in_progress") -> dict:
+    return selector_run(id, status=status, conclusion=None)
+
+
+class TestResolveSelection(unittest.TestCase):
+    # What the last resolve() slept, downloaded and printed.
+    sleeps: list[float]
+    fetched: list[str]
+    logs: list[str]
+
+    def resolve(
+        self,
+        *polls: list[dict],
+        labels: tuple[str, ...] = ("ci-llm-td",),
+        head_repo: str = REPO,
+        selected_enforce: bool = True,
+        **env: str,
+    ) -> dict | None:
+        """Run main() against a fake API that lists the next of `polls` on each
+        poll (repeating the last), and return the selection it writes."""
+        polls_left = list(polls)
+        now = [0.0]
+        self.sleeps, self.fetched, self.logs = [], [], []
+        pr = {"head": {"repo": {"full_name": head_repo}}, "labels": [{"name": n} for n in labels]}  # fmt: skip
+
+        def get(path: str) -> dict:
+            if path == "pulls/7":
+                return pr
+            if path.startswith("actions/workflows/llm-td.yml/runs?"):
+                self.assertIn(f"head_sha={SHA}", path)
+                runs = polls_left.pop(0) if len(polls_left) > 1 else polls_left[0]
+                return {"workflow_runs": runs}
+            run_id = path.split("/")[2]
+            self.assertEqual(path, f"actions/runs/{run_id}/artifacts?name={ARTIFACT}")
+            url = f"zip/{run_id}"
+            return {"artifacts": [{"name": ARTIFACT, "expired": False, "archive_download_url": url}]}  # fmt: skip
+
+        def fetch(url: str) -> bytes:
+            self.fetched.append(url)
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as z:
+                sel = Selection({"test_nn"}, enforce=selected_enforce)
+                z.writestr("llm_td_selection.json", json.dumps(sel.to_json()))
+            return buf.getvalue()
+
+        def sleep(t: float) -> None:
+            self.sleeps.append(t)
+            now[0] += t
+
+        env = {"GITHUB_REPOSITORY": REPO, "HEAD_SHA": SHA, "PR_NUMBER": "7", "TD_ENABLED": "true", **env}  # fmt: skip
+        time = resolve_selection.time
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(resolve_selection, "get", get),
+            mock.patch.object(resolve_selection, "fetch", fetch),
+            mock.patch.object(time, "monotonic", lambda: now[0]),
+            mock.patch.object(time, "sleep", sleep),
+            mock.patch("builtins.print", self.logs.append),
+        ):
+            output = Path(tmp) / "out.json"
+            resolve_selection.main(output)
+            record = json.loads(output.read_text()) if output.exists() else None
+        return record
+
+    def selected(self, *polls: list[dict], **kw: Any) -> dict:
+        record = self.resolve(*polls, **kw)
+        if record is None:
+            raise AssertionError(f"no selection written; logs: {self.logs}")
+        return record
+
+    def test_enforce_takes_the_newest_run_not_the_first_listed(self) -> None:
+        record = self.selected([selector_run(1), selector_run(2)])
+        self.assertEqual(self.fetched, ["zip/2"])
+        self.assertTrue(record["enforce"])
+        self.assertEqual(record["files"], ["test_nn"])
+        self.assertEqual(self.sleeps, [])
+
+    def test_untrusted_runs_are_ignored(self) -> None:
+        for bad in [
+            {"path": ".github/workflows/pull.yml"},
+            {"event": "pull_request"},
+            {"head_sha": "b" * 40},
+            {"head_repository": {"id": 2}},
+            {"head_repository": None},
+        ]:
+            with self.subTest(bad=bad):
+                untrusted = selector_run(2, **bad)
+                self.resolve([selector_run(1), untrusted])
+                self.assertEqual(self.fetched, ["zip/1"])
+                self.assertIsNone(self.resolve([untrusted]))
+                self.assertEqual(self.fetched, [])
+
+    def test_waits_for_a_pending_run(self) -> None:
+        for status in ["queued", "in_progress", "waiting", "requested", "pending"]:
+            with self.subTest(status=status):
+                old, new = selector_run(1), pending_run(2, status)
+                record = self.selected([old, new], [old, new], [old, selector_run(2)])
+                self.assertEqual(self.fetched, ["zip/2"])
+                self.assertTrue(record["enforce"])
+                self.assertEqual(self.sleeps, [15, 30])
+
+    def test_skipped_runs_are_ignored(self) -> None:
+        skipped = selector_run(2, conclusion="skipped")
+        self.resolve([selector_run(1), skipped])
+        self.assertEqual(self.fetched, ["zip/1"])
+
+    def test_enforce_gives_up_at_the_deadline(self) -> None:
+        record = self.resolve([selector_run(1), pending_run(2)])
+        self.assertIsNone(record)
+        self.assertEqual(self.fetched, [])
+        self.assertEqual(sum(self.sleeps), resolve_selection.WAIT_SECONDS)
+        self.assertIn("Gave up", self.logs[-1])
+
+    def test_enforce_does_not_fall_back_to_an_older_run(self) -> None:
+        for conclusion in ["failure", "cancelled", "timed_out"]:
+            with self.subTest(conclusion=conclusion):
+                failed = selector_run(2, conclusion=conclusion)
+                record = self.resolve([selector_run(1), failed])
+                self.assertIsNone(record)
+                self.assertEqual(self.fetched, [])
+
+    def test_shadow_unless_labeled_and_td_enabled(self) -> None:
+        for labels, td_enabled in [
+            ((), "true"),
+            (("ci-llm-td", "ci-no-td"), "true"),
+            (("ci-llm-td",), "false"),
+        ]:
+            with self.subTest(labels=labels, td_enabled=td_enabled):
+                runs = [selector_run(1), pending_run(2, "queued")]
+                record = self.selected(runs, labels=labels, TD_ENABLED=td_enabled)
+                self.assertFalse(record["enforce"])
+                self.assertEqual(self.fetched, ["zip/1"])
+                self.assertEqual(self.sleeps, [])
+
+    def test_failed_selection_is_not_enforced(self) -> None:
+        # select_tests writes enforce=False when the model call failed.
+        record = self.selected([selector_run(1)], selected_enforce=False)
+        self.assertFalse(record["enforce"])
+
+    def test_pr_number(self) -> None:
+        runs = [selector_run(1)]
+        tag = "refs/tags/ciflow/trunk/7"
+        self.assertTrue(self.selected(runs, PR_NUMBER="", GITHUB_REF=tag)["enforce"])
+        branch = "refs/heads/main"
+        self.assertIsNone(self.resolve(runs, PR_NUMBER="", GITHUB_REF=branch))
+        self.assertIsNone(self.resolve(runs, HEAD_SHA=""))
+
+    def test_fork_pr_gets_nothing(self) -> None:
+        self.assertIsNone(self.resolve([selector_run(1)], head_repo="someone/pytorch"))
+        self.assertEqual(self.fetched, [])
 
 
 if __name__ == "__main__":
