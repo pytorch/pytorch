@@ -41,14 +41,10 @@ class Partition:
         )
 
 
-def _is_read_in_partition(attr: Any) -> bool:
-    # Submodules and pytree specs (such as the flat_apply specs export emits) are
-    # read with get_attr inside the partition instead of being passed to it.
-    # Export turns some partitions into the bodies of higher order ops, whose
-    # inputs it expects to be values, and a spec is not one.
-    return isinstance(
-        attr, torch.nn.Module
-    ) or torch.utils._pytree._is_pytreespec_instance(attr)
+def _is_read_in_partition(attr: Any, read_pytree_specs: bool) -> bool:
+    return isinstance(attr, torch.nn.Module) or (
+        read_pytree_specs and torch.utils._pytree._is_pytreespec_instance(attr)
+    )
 
 
 def _get_attr_from_qualname(mod: torch.nn.Module, qualname: str) -> Any:
@@ -73,6 +69,7 @@ def split_module(
     *,
     partition_affix: str | None = None,
     tuple_return: bool = False,
+    read_pytree_specs_in_partition: bool = False,
 ) -> GraphModule:
     """
     Creates subgraphs out of main graph
@@ -100,6 +97,11 @@ def split_module(
         tuple_return: bool: If True, submodule outputs are always wrapped in a tuple,
             even when there is only a single output value.  This makes all subgraphs
             conform to the convention expected by ``torch._inductor.compile_fx``.
+        read_pytree_specs_in_partition: bool: A partition reads each submodule it
+            uses with ``get_attr``, and takes other attributes as inputs. If True,
+            it also reads each pytree spec it uses with ``get_attr``. Export uses
+            this, because it turns some partitions into the bodies of higher order
+            ops, whose inputs must be values.
 
     Returns:
         GraphModule: the module after split.
@@ -481,7 +483,10 @@ def split_module(
             if (
                 orig_node.op == "get_attr"
                 and isinstance(orig_node.target, str)
-                and _is_read_in_partition(_get_attr_from_qualname(m, orig_node.target))
+                and _is_read_in_partition(
+                    _get_attr_from_qualname(m, orig_node.target),
+                    read_pytree_specs_in_partition,
+                )
             ):
                 get_attr_inputs.append(inp)
             else:
@@ -489,8 +494,6 @@ def split_module(
 
         for inp in placeholder_inputs + get_attr_inputs:
             orig_node = orig_nodes[inp]
-            # We don't pass in get_attr nodes as inputs to the partition, but
-            # instead set them as targets and use getattr within the module
 
             def add_placeholder() -> Node:
                 if keep_original_input_name:
@@ -513,7 +516,7 @@ def split_module(
                     )
 
                 orig_attr = _get_attr_from_qualname(m, orig_node.target)
-                if _is_read_in_partition(orig_attr):
+                if _is_read_in_partition(orig_attr, read_pytree_specs_in_partition):
                     placeholder = partition.graph.get_attr(orig_node.target)
                     partition.targets[orig_node.target] = orig_attr
                 else:

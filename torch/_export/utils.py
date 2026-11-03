@@ -676,6 +676,7 @@ def sequential_split(
         lambda node: split_map[node],
         keep_original_order=True,
         keep_original_node_name=True,
+        read_pytree_specs_in_partition=True,
     )
     # Keep the codegen from original graph module to preserve e.g. pytree info.
     new_gm.graph._codegen = gm.graph._codegen
