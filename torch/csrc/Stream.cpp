@@ -321,9 +321,10 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
       static_cast<c10::DeviceIndex>(self->device_index);
   c10::Stream cur_stream = at::accelerator::getCurrentStream(stream_device_idx);
 
-  // If the stream is already current, push None as a no-op sentinel.
+  // If the stream is already current on the current device, push None as a
+  // no-op sentinel.
   if (cur_stream.id() == self->stream_id &&
-      cur_stream.device_index() == stream_device_idx) {
+      stream_device_idx == cur_device_idx) {
     TORCH_CHECK_PYTHON(PyList_Append(self->context, Py_None) >= 0);
     return Py_NewRef(_self);
   }
