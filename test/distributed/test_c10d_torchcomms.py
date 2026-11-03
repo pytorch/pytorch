@@ -232,11 +232,6 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
             wait_all_ranks=True,
         )
 
-    @skipXPUIf(
-        True,
-        "a subgroup new_group() makes later new_group() calls hang under torchcomms: "
-        "https://github.com/intel/torch-xpu-ops/issues/6001",
-    )
     def test_new_group_delegates_to_split_group(self):
         # Under torchcomms, `new_group` routes through `split_group`. The
         # resulting subgroup must contain the requested ranks and be usable
@@ -268,6 +263,11 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
+    @skipXPUIf(
+        True,
+        "a subgroup new_group() makes later new_group() calls hang under torchcomms: "
+        "https://github.com/intel/torch-xpu-ops/issues/6001",
+    )
     @onlyAccelerator
     def test_new_group_qualified_backend_passes_through(self):
         ranks = list(range(self.world_size))
