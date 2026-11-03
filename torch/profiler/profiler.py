@@ -823,6 +823,14 @@ class _KinetoProfile:
         """
         if self.profiler is None:
             return
+        activities = set(activities)
+        if missing := activities - self.activities:
+            names = ", ".join(sorted(activity.name for activity in missing))
+            warn(
+                f"toggle_collection_dynamic has no effect on {names}, which this "
+                "profiler does not collect.",
+                stacklevel=2,
+            )
         self.profiler.toggle_collection_dynamic(enable, activities)
 
     def key_averages(

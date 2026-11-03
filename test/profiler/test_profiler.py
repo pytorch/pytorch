@@ -2422,6 +2422,15 @@ with open(sys.argv[1], "w") as f:
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
             p.stop()
 
+    def test_toggle_uncollected_activity_warns(self):
+        with profile(activities=[ProfilerActivity.CPU]) as p:
+            with self.assertWarnsRegex(UserWarning, "no effect on CUDA"):
+                p.toggle_collection_dynamic(False, [ProfilerActivity.CUDA])
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                p.toggle_collection_dynamic(False, [ProfilerActivity.CPU])
+                p.toggle_collection_dynamic(True, [ProfilerActivity.CPU])
+
 
 class SimpleNet(nn.Module):
     def __init__(self) -> None:
