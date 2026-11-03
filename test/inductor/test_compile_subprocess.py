@@ -74,6 +74,10 @@ test_failures = {
     "test_remove_noop_view_dtype": TestFailure(("xpu"), is_skip=True),
     # can not pickle ParametrizedConv2d
     "test_weight_norm_conv2d": TestFailure(("cpu", "cuda"), is_skip=True),
+    # The pinned tensor built from a constant comes back unpinned when compiled
+    # in a subprocess.
+    "test_constructors_pin_memory_tensor_constant": TestFailure(("cuda",)),
+    "test_constructors_pin_memory_tensor_inline": TestFailure(("cuda",)),
     # TypeError: cannot pickle '_thread._local' object.
     # nested_compile_region(options=...) hangs compiler callables off
     # NestedCompileRegionOptions. dill cannot resolve a module reference for that
