@@ -172,6 +172,9 @@ class MinCutOptions:
     ban_if_materialized_backward: bool
     ban_if_not_in_allowlist: bool
     ban_if_reduction: bool
+    # Set by the memory-budget solves: user Triton kernels go to the knapsack instead
+    # of being recomputed for free once the allowlist ban is lifted.
+    ban_if_user_triton_kernel: bool = False
 
 
 def must_recompute(node: fx.Node) -> bool:
@@ -709,8 +712,12 @@ def _extract_graph_with_inputs_outputs(
 def is_non_builtin_to_include(node: fx.Node) -> bool:
     return config.is_non_builtin_to_include and (
         (isinstance(node.target, torch._ops.OpOverload) and not is_builtin(node.target))
-        or node.target == torch.ops.higher_order.triton_kernel_wrapper_functional
+        or _is_user_triton_kernel(node)
     )
+
+
+def _is_user_triton_kernel(node: fx.Node) -> bool:
+    return node.target is torch.ops.higher_order.triton_kernel_wrapper_functional
 
 
 def _is_backward_state(node: fx.Node) -> bool:
@@ -2607,6 +2614,9 @@ def solve_min_cut(
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return None
 
+        if min_cut_options.ban_if_user_triton_kernel and _is_user_triton_kernel(node):
+            return "user triton kernel"
+
         if min_cut_options.ban_if_not_in_allowlist:
             if not op_types.is_recomputable(node):
                 return "not in recomputable allowlist"
@@ -3496,6 +3506,10 @@ def estimate_runtime(node: fx.Node) -> float:
             # pyrefly: ignore[not-callable]
             node.target(*args, **kwargs)
         counted_flops = mode.get_total_flops()
+        if _is_user_triton_kernel(node) and not mode.get_flop_counts().get("Global"):
+            # No flop formula registered (a registered one records an entry even
+            # when it returns 0). The caller prices this above everything else.
+            return math.inf
         return max(counted_flops, 1)
 
     elif isinstance(RUNTIME_MODE, CustomRuntimeEstimator):
@@ -3503,6 +3517,16 @@ def estimate_runtime(node: fx.Node) -> float:
 
     else:
         raise RuntimeError(f"Not aware of runtime estimator: {RUNTIME_MODE}")
+
+
+def _price_unknown_runtimes(runtimes: list[float]) -> list[float]:
+    """Replace unknown (inf) runtimes with twice all known runtimes combined, so
+    those nodes are recomputed only as a last resort. A huge constant instead
+    would swamp the other runtimes in the float32 DP knapsack, and a +1 margin
+    can round away in float32.
+    """
+    unknown = 1 + 2 * sum(r for r in runtimes if r != math.inf)
+    return [unknown if r == math.inf else r for r in runtimes]
 
 
 def choose_saved_values_set(
@@ -3567,6 +3591,7 @@ def choose_saved_values_set(
         ban_if_used_far_apart=False,
         ban_if_long_fusible_chains=False,
         ban_if_materialized_backward=False,
+        ban_if_user_triton_kernel=True,
     )
     more_aggressive_saved_values, _ = solve_min_cut(
         joint_graph, node_info, more_aggressive_options
@@ -3605,6 +3630,7 @@ def choose_saved_values_set(
                 and (
                     get_node_storage(i) not in input_storages
                     or is_non_builtin_to_include(i)
+                    or _is_user_triton_kernel(i)
                 )
             )
         ]
@@ -3633,9 +3659,9 @@ def choose_saved_values_set(
     memories_banned_nodes = [
         get_normalized_size(_size_of(i)) for i in all_recomputable_banned_nodes
     ]
-    runtimes_banned_nodes = [
-        estimate_runtime(node) for node in all_recomputable_banned_nodes
-    ]
+    runtimes_banned_nodes = _price_unknown_runtimes(
+        [estimate_runtime(node) for node in all_recomputable_banned_nodes]
+    )
     from torch.utils._mode_utils import no_dispatch
 
     def get_saved_values_knapsack(

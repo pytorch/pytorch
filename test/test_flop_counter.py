@@ -762,6 +762,62 @@ class TestFlopCounterDevice(TestCase):
         self.assertExpectedInline(get_total_flops(m2), """2""")
 
     @requires_triton()
+    @parametrize("budget", [0.5, 1.0])
+    def test_memory_budget_keeps_user_triton_kernel(self, device, budget):
+        import triton
+        import triton.language as tl
+
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._functorch.partitioners import min_cut_rematerialization_partition
+
+        @triton.jit
+        def heavy_kernel(x_ptr, out_ptr, N: tl.constexpr):
+            offsets = tl.program_id(0) * N + tl.arange(0, N)
+            tl.store(out_ptr + offsets, tl.sin(tl.load(x_ptr + offsets)))
+
+        @torch._library.triton.triton_op("mylib::heavy_op", mutates_args=())
+        def heavy_op(x_inp: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x_inp)
+            grid = (x_inp.shape[0],)
+            torch.library.wrap_triton(heavy_kernel)[grid](x_inp, output, x_inp.shape[1])
+            return output
+
+        def setup_context(ctx, inputs, output):
+            ctx.save_for_backward(inputs[0], output)
+
+        def backward(ctx, grad_output):
+            x_inp, out = ctx.saved_tensors
+            return grad_output * (out - x_inp).sigmoid()
+
+        heavy_op.register_autograd(backward, setup_context=setup_context)
+
+        lin1 = torch.nn.Linear(256, 256, device=device)
+        lin2 = torch.nn.Linear(256, 256, device=device)
+
+        def fn(x_inp):
+            h = lin1(torch.nn.functional.layer_norm(x_inp, x_inp.shape[-1:]))
+            return lin2(torch.ops.mylib.heavy_op(h)).sum()
+
+        kernels_in_bw = []
+
+        def bw_compiler(gm, _):
+            target = torch.ops.higher_order.triton_kernel_wrapper_functional
+            kernels_in_bw.append(sum(n.target is target for n in gm.graph.nodes))
+            return make_boxed_func(gm)
+
+        backend = aot_autograd(
+            fw_compiler=lambda gm, _: make_boxed_func(gm),
+            bw_compiler=bw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        x = torch.randn(512, 256, device=device, requires_grad=True)
+        with torch._functorch.config.patch(activation_memory_budget=budget):
+            torch.compile(fn, backend=backend)(x).backward()
+        # No flop formula and the budget fits its output: don't rerun it in backward.
+        self.assertEqual(kernels_in_bw, [0])
+
+    @requires_triton()
     @torch._functorch.config.patch("activation_memory_budget", 0.1)
     @torch._functorch.config.patch("activation_memory_budget_solver", "dp")
     @torch._functorch.config.patch("is_non_builtin_to_include", True)

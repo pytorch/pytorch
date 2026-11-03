@@ -15,6 +15,7 @@ from torch._functorch._activation_checkpointing.knapsack_evaluator import (
     KnapsackEvaluator,
 )
 from torch._functorch._activation_checkpointing.min_cut import minimum_cut
+from torch._functorch.partitioners import _price_unknown_runtimes
 from torch.fx.graph import Graph
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -424,6 +425,24 @@ class TestActivationCheckpointingKnapsack(TestCase):
                     expected_saved,
                     expected_recomputable,
                 )
+
+    def test_unknown_runtime_does_not_swamp_knapsack(self):
+        # An unknown-cost node (e.g. a user Triton kernel without a flop formula)
+        # is priced relative to the others, so the DP still keeps the budget
+        # used: item 3 fits next to item 0 and must be saved, not recomputed.
+        memory = [0.3, 0.2, 0.2, 0.1]
+        runtimes = _price_unknown_runtimes([math.inf, 1e6, 2e6, 3e6])
+        self.assertEqual(runtimes, [1 + 12e6, 1e6, 2e6, 3e6])
+        # Only one of two equal-memory items fits; the unknown one must win even
+        # where a +1 margin over 2**26 would round to a tie in float32.
+        tie_runtimes = _price_unknown_runtimes([2.0**26, math.inf])
+        for knapsack in (dp_knapsack, dp_knapsack_sliding_hirschberg):
+            _, saved, recomputed = knapsack(memory, runtimes, 0.55)
+            self.assertEqual(sorted(saved), [0, 3])
+            self.assertEqual(sorted(recomputed), [1, 2])
+            _, saved, _ = knapsack([1 / 3, 1 / 3], tie_runtimes, 0.5)
+            self.assertEqual(saved, [1])
+        self.assertEqual(_price_unknown_runtimes([math.inf, math.inf]), [1, 1])
 
 
 @instantiate_parametrized_tests
