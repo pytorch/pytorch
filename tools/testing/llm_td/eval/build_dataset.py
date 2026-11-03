@@ -132,7 +132,7 @@ def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
               SELECT id, run_id, head_sha, head_branch, workflow_name, name FROM default.workflow_job
               WHERE id IN (SELECT job_id FROM f) AND repository_full_name = 'pytorch/pytorch')
             SELECT f.job_id job_id, tf, classname, f.name test, toString(t) t, j.head_sha sha,
-                   if(r.hr = 'pytorch/pytorch', j.head_branch, concat(r.hr, ':', j.head_branch)) br,
+                   if(r.hr IN ('', 'pytorch/pytorch'), j.head_branch, concat(r.hr, ':', j.head_branch)) br,
                    j.workflow_name wf, j.name job
             FROM f JOIN j ON j.id = f.job_id
             LEFT JOIN (
@@ -341,12 +341,12 @@ def pr_samples(
 
 
 def landed_times(since: dt.date) -> dict[int, dt.datetime]:
-    """PR number -> when it first landed on main, from the merge bot's `Pull Request resolved:` line."""
+    """PR number -> when it first landed on main, from the merge bot's `Pull Request resolved:` line, the last one of a body that quotes others."""
     out: dict[int, dt.datetime] = {}
     for c in git("log", "origin/main", f"--since={since} 00:00 +0000", "--format=%ct %b%x00").split("\0"):
-        if m := re.search(r"^\s*(\d+) .*?Pull Request resolved: \S+/pull/(\d+)", c, re.DOTALL):
-            t = dt.datetime.fromtimestamp(int(m.group(1)), tz=dt.timezone.utc)
-            out[int(m.group(2))] = min(t, out.get(int(m.group(2)), t))
+        if (m := re.match(r"\s*(\d+) ", c)) and (prs := re.findall(r"Pull Request resolved: \S+/pull/(\d+)", c)):
+            t, pr = dt.datetime.fromtimestamp(int(m.group(1)), tz=dt.timezone.utc), int(prs[-1])
+            out[pr] = min(t, out.get(pr, t))
     return out
 
 
@@ -402,7 +402,7 @@ def head_failures(prs: list[int], start: dt.date, end: dt.date) -> list[dict]:
         jobs += query(f"""
             SELECT id, head_sha, workflow_name, name, run_attempt, conclusion FROM default.workflow_job FINAL
             WHERE head_sha IN ({chunk}) AND repository_full_name = 'pytorch/pytorch'""")
-    green = {(j["head_sha"], j["workflow_name"], j["name"], j["run_attempt"]) for j in jobs if j["conclusion"] == "success"}
+    green = {(j["head_sha"], j["workflow_name"], j["name"]) for j in jobs if j["conclusion"] == "success"}
     by_id = {j["id"]: j for j in jobs if job_runs_td(j["name"], j["workflow_name"]) and not any(s in j["name"] for s in SKIP_JOBS)}
     ids, rows = [str(i) for i in by_id], []
     for i in range(0, len(ids), 2000):
@@ -415,7 +415,7 @@ def head_failures(prs: list[int], start: dt.date, end: dt.date) -> list[dict]:
         for r in query(sql):
             j = by_id[int(r["job_id"])]
             sha, wf, name = j["head_sha"], j["workflow_name"], j["name"]
-            passed = any((sha, wf, name, a) in green for a in range(1, 10))
+            passed = (sha, wf, name) in green
             rows.append({**r, "sha": sha, "pr": sha2pr[sha], "wf": wf, "job": name, "job_green": passed})
     return rows
 
@@ -455,7 +455,11 @@ def head_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
 def revert_truth_jobs(
     signal: set[str], sha: str, landed: dt.datetime, reverted: str
 ) -> dict[str, list[tuple[str, str]]]:
-    """The main-branch (workflow, job)s each signal test file failed in between landing and the revert, on the main commits from `sha` up to the revert."""
+    """The main-branch (workflow, job)s each signal test file failed in between landing and the revert, on the main commits from `sha` up to the revert.
+
+    `reverted` is when autorevert decided to revert, so the main commits that
+    landed between that and the revert commit are left out: truth is only
+    lost, never added."""
     files = ",".join(f"'{t}.py'" for t in signal)
     t0 = landed.strftime("%Y-%m-%d %H:%M:%S")
     with_change = git("rev-list", "--first-parent", "--ancestry-path", f"--until={reverted[:19]} +0000", "--invert-grep",
