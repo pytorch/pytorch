@@ -30,7 +30,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCPU, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
     precisionOverride, skipXPUIf)
 from torch.testing._internal.common_methods_invocations import (
-    ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
+    ReductionOpInfo, reduction_ops, reference_masked_ops)
 
 
 
@@ -319,13 +319,8 @@ class TestReductionsDevice(TestCase):
                 self.assertEqual(result, torch.full_like(result, torch.nan))
             else:
                 # Reducing along empty slice should raise an error
-                if isinstance(op, ReductionPythonRefInfo):
-                    # ref reductions throw RuntimeError for this
-                    with self.assertRaises(RuntimeError):
-                        op(t, *args, dim=dim, **kwargs)
-                else:
-                    with self.assertRaises(IndexError):
-                        op(t, *args, dim=dim, **kwargs)
+                with self.assertRaises(IndexError):
+                    op(t, *args, dim=dim, **kwargs)
 
     @skipIfMPS
     @ops(reduction_ops, dtypes=OpDTypes.none)
