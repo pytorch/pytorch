@@ -5738,6 +5738,152 @@ class TestRemoteAOTAutogradCache(TestCase):
             self.assertEqual(b.grad, b2.grad)
 
 
+class TestDeviceCodeCacheRegistry(TestCase):
+    def setUp(self):
+        super().setUp()
+        from torch._inductor.codecache import _DEVICE_CODECACHE_REGISTRY
+
+        self._registry = _DEVICE_CODECACHE_REGISTRY
+        self._saved = dict(self._registry)
+
+    def tearDown(self):
+        self._registry.clear()
+        self._registry.update(self._saved)
+        super().tearDown()
+
+    def test_unregistered_device_raises(self):
+        from torch._inductor.codecache import get_device_codecache
+
+        with self.assertRaisesRegex(
+            NotImplementedError, "No CodeCache registered for device type 'npu'"
+        ):
+            get_device_codecache("npu")
+
+    def test_register_and_lookup_custom_class(self):
+        from torch._inductor.codecache import (
+            get_device_codecache,
+            register_device_codecache,
+        )
+
+        class MyCodeCache:
+            aot_kernels_o = []
+
+            @classmethod
+            def write(cls, source_code, dst_file_ext):
+                return "key", "path"
+
+            @classmethod
+            def compile(cls, source_code, dst_file_ext, extra_args=None):
+                return "dst", "key", "path"
+
+        register_device_codecache("npu", MyCodeCache)
+        self.assertIs(get_device_codecache("npu"), MyCodeCache)
+        # the standalone register entry point is idempotent on re-registration
+        register_device_codecache("npu", MyCodeCache)
+        self.assertIs(get_device_codecache("npu"), MyCodeCache)
+
+    def test_register_via_register_backend_for_device(self):
+        from torch._inductor.codecache import get_device_codecache
+        from torch._inductor.codegen.common import register_backend_for_device
+        from torch._inductor.codegen.triton import TritonScheduling
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        class MyScheduling(TritonScheduling):
+            pass
+
+        class MyCodeCache:
+            aot_kernels_o = []
+
+        register_backend_for_device(
+            "npu",
+            MyScheduling,
+            PythonWrapperCodegen,
+            device_codecache=MyCodeCache,
+        )
+        # the code cache must be reachable through the device registry
+        self.assertIs(get_device_codecache("npu"), MyCodeCache)
+        # and stored on the DeviceCodegen entry like the other extension fields
+        from torch._inductor.codegen.common import device_codegens
+
+        self.assertIs(device_codegens["npu"].device_codecache, MyCodeCache)
+
+    def test_builtin_devices_resolve(self):
+        from torch._inductor.codecache import (
+            CUDACodeCache,
+            get_device_codecache,
+            ROCmCodeCache,
+            XPUCodeCache,
+        )
+        from torch._inductor.codegen.common import init_backend_registration
+
+        init_backend_registration()
+        self.assertEqual(
+            get_device_codecache("cuda"),
+            ROCmCodeCache if torch.version.hip else CUDACodeCache,
+        )
+        self.assertIs(get_device_codecache("xpu"), XPUCodeCache)
+        # "rocm" itself stays registered for direct lookups
+        self.assertIs(get_device_codecache("rocm"), ROCmCodeCache)
+
+    def test_registered_class_satisfies_protocol(self):
+        from typing import runtime_checkable  # noqa: F401
+
+        from torch._inductor.codecache import (
+            CUDACodeCache,
+            DeviceCodeCacheProtocol,
+            ROCmCodeCache,
+            XPUCodeCache,
+        )
+
+        for cls in (CUDACodeCache, XPUCodeCache, ROCmCodeCache):
+            with self.subTest(cls=cls):
+                self.assertIsInstance(cls, DeviceCodeCacheProtocol)
+
+    def test_cutlass_probe_raises_for_unsupported_device(self):
+        from torch._inductor.codegen.cutlass.utils import (
+            cutlass_arch,
+            toolkit_version,
+        )
+
+        for device_type in ("npu", "hpu", "privateuseone"):
+            with self.subTest(device_type=device_type):
+                with self.assertRaisesRegex(
+                    NotImplementedError,
+                    f"CUTLASS codegen is not implemented for device type '{device_type}'",
+                ):
+                    cutlass_arch(device_type)
+                with self.assertRaisesRegex(
+                    NotImplementedError,
+                    f"CUTLASS codegen is not implemented for device type '{device_type}'",
+                ):
+                    toolkit_version(device_type)
+
+    def test_cutlass_probe_raises_runtime_error_on_missing_env(self):
+        # A recognized device whose arch/toolkit cannot be detected is an
+        # environment problem (RuntimeError), not a missing feature.
+        from torch._inductor.codegen.cutlass import utils as cutlass_utils
+
+        cutlass_utils.cutlass_arch.cache_clear()
+        cutlass_utils.toolkit_version.cache_clear()
+        try:
+            with mock.patch.object(
+                cutlass_utils, "get_cuda_arch", return_value=None
+            ), mock.patch.object(
+                cutlass_utils, "get_cuda_version", return_value=""
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Unable to determine the CUDA architecture"
+                ):
+                    cutlass_utils.cutlass_arch("cuda")
+                with self.assertRaisesRegex(
+                    RuntimeError, "Unable to determine the cuda toolkit version"
+                ):
+                    cutlass_utils.toolkit_version("cuda")
+        finally:
+            cutlass_utils.cutlass_arch.cache_clear()
+            cutlass_utils.toolkit_version.cache_clear()
+
+
 class TestUtils(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     def test_fresh_cache(self):

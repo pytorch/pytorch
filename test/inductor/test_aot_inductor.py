@@ -12185,6 +12185,19 @@ class TestCheckLowerboundConfig(TestCase):
 class AOTInductorCompileTimeTests(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_aoti_cpu_compile_no_gpu_codecache(self):
+        # Regression test: the AOTI link step used to look up a device code
+        # cache unconditionally, which raised NotImplementedError for CPU
+        # graphs once the lookup stopped falling back to CUDACodeCache.
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.nn.functional.relu(x + y)
+
+        inputs = (torch.randn(4, 4), torch.randn(4, 4))
+        path = torch._inductor.aot_compile(Model(), inputs)
+        aot_model = torch._export.aot_load(path, device="cpu")
+        torch.testing.assert_close(aot_model(*inputs), Model()(*inputs))
+
     def test_fx_gm_return_tuple_validation(self):
         from torch.fx.experimental.proxy_tensor import make_fx
 

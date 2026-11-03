@@ -322,6 +322,7 @@ class DeviceCodegen:
     wrapper_codegen: WrapperConstructor
     cpp_wrapper_codegen: WrapperConstructor | None = None
     fx_wrapper_codegen: WrapperConstructor | None = None
+    device_codecache: type | None = None
 
 
 KernelArgType = WorkspaceArg | TensorArg | SizeArg | TMADescriptorArg | ConstexprArg
@@ -489,12 +490,14 @@ def register_backend_for_device(
     device_fx_wrapper_codegen: WrapperConstructor | None = None,
     device_custom_pass: CustomGraphModulePass | None = None,
     device_custom_config: ConfigModule | None = None,
+    device_codecache: type | None = None,
 ) -> None:
     device_codegens[device] = DeviceCodegen(
         device_scheduling,
         device_wrapper_codegen,
         device_cpp_wrapper_codegen,
         device_fx_wrapper_codegen,
+        device_codecache,
     )
     custom_backend_passes[device] = device_custom_pass
     if device_custom_config:
@@ -506,6 +509,10 @@ def register_backend_for_device(
                 f"{device_custom_config=} cannot be the same as the default inductor config {config=}"
             )
     custom_backend_codegen_configs[device] = device_custom_config
+    if device_codecache is not None:
+        from ..codecache import register_device_codecache
+
+        register_device_codecache(device, device_codecache)
 
 
 class BackendFeature(Enum):
@@ -682,12 +689,24 @@ def _init_builtin_backend_registration() -> None:
             "halide": HalideScheduling,
             "pallas": PallasScheduling,
         }
+        # "rocm" is a build flavor, not a device type: on a HIP build the cuda
+        # device is served by the ROCm code cache, and get_device_codecache
+        # resolves that remap internally.
+        if torch.version.hip is not None:
+            from ..codecache import ROCmCodeCache
+
+            cuda_codecache: type | None = ROCmCodeCache
+        else:
+            from ..codecache import CUDACodeCache
+
+            cuda_codecache = CUDACodeCache
         register_backend_for_device(
             "cuda",
             lambda scheduling: cuda_backends[config.cuda_backend](scheduling),
             PythonWrapperCodegen,
             CppWrapperGpu,
             WrapperFxCodegen,
+            device_codecache=cuda_codecache,
         )
 
     if get_scheduling_for_device("tpu") is None:
@@ -700,12 +719,15 @@ def _init_builtin_backend_registration() -> None:
         )
 
     if get_scheduling_for_device("xpu") is None:
+        from ..codecache import XPUCodeCache
+
         register_backend_for_device(
             "xpu",
             XPUCombinedScheduling,
             PythonWrapperCodegen,
             CppWrapperGpu,
             WrapperFxCodegen,
+            device_codecache=XPUCodeCache,
         )
 
     if get_scheduling_for_device("tpu") is None:

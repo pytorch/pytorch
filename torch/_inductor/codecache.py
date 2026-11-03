@@ -41,7 +41,18 @@ from types import (
     MethodType,
     ModuleType,
 )
-from typing import Any, cast, Generic, Literal, NoReturn, Self, TYPE_CHECKING, TypeVar
+from typing import (
+    Any,
+    cast,
+    Generic,
+    Literal,
+    NoReturn,
+    Protocol,
+    runtime_checkable,
+    Self,
+    TYPE_CHECKING,
+    TypeVar,
+)
 from typing_extensions import override, TypedDict
 
 import torch
@@ -3506,14 +3517,17 @@ end
                     f.write(json.dumps(qual_name_to_id))
                 generated_files.append(constants_config_json)
 
-            cache_cls = get_device_codecache(
-                "rocm" if torch.version.hip else device_type
-            )
-
-            gpu_codecache = cache_cls()
-            gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
-            # clear the list of aot kernels after each linking
-            gpu_codecache.aot_kernels_o.clear()
+            # CPU/MPS graphs have no GPU code cache; skip the GPU-kernel link
+            # step instead of raising (the old dict.get() default treated them
+            # as CUDA with an empty aot_kernels_o, i.e. a no-op link).
+            cache_cls = _lookup_device_codecache(device_type)
+            if cache_cls is not None:
+                gpu_codecache = cache_cls()
+                gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
+                # clear the list of aot kernels after each linking
+                gpu_codecache.aot_kernels_o.clear()
+            else:
+                gpu_kernels_o = []
 
             if gpu_kernels_o:
                 if config.aot_inductor.emit_multi_arch_kernel:
@@ -5890,33 +5904,83 @@ class ROCmCodeCache:
 
 # Registry of the CodeCache class used to compile kernels for a given device type.
 # Out-of-tree backends should call register_device_codecache() from their backend
-# registration hook (see codegen.common.register_backend_for_device).
+# registration hook (see codegen.common.register_backend_for_device, which accepts
+# the code-cache class as its device_codecache parameter).
+#
+# The protocol below is the contract a registered class must satisfy; see
+# CUDACodeCache / XPUCodeCache / ROCmCodeCache for concrete implementations.
+@runtime_checkable
+class DeviceCodeCacheProtocol(Protocol):
+    """Contract for device code caches registered via register_device_codecache().
+
+    The registry stores classes (all methods are classmethods on the existing
+    implementations), so implementers must provide these as class-/static-methods
+    or plain class attributes:
+
+    - ``write(source_code, dst_file_ext)``: writes source to disk, returns
+      ``(hash_key, source_code_path)``.
+    - ``compile(source_code, dst_file_ext, extra_args=None)``: compiles the
+      source, returns ``(dst_file_path, hash_key, source_code_path)``.
+    - ``aot_kernels_o``: list of extra ``.o`` files to link into an AOTInductor
+      ``.so``; the AOTI link step copies and clears it after each linking.
+    """
+
+    aot_kernels_o: list[str]
+
+    def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]: ...
+
+    def compile(
+        cls, source_code: str, dst_file_ext: str, extra_args: list[str] | None = None
+    ) -> tuple[str, str, str]: ...
+
+
 _DEVICE_CODECACHE_REGISTRY: dict[str, type] = {}
 
 
 def register_device_codecache(device_type: str, codecache_cls: type) -> None:
-    """Register the CodeCache class used to compile kernels for ``device_type``."""
+    """Register the CodeCache class used to compile kernels for ``device_type``.
+
+    This is normally called via codegen.common.register_backend_for_device(...,
+    device_codecache=...); the standalone entry point exists for callers that
+    only patch the code-cache layer.
+    """
     _DEVICE_CODECACHE_REGISTRY[device_type] = codecache_cls
+
+
+def _lookup_device_codecache(device_type: str) -> type | None:
+    """Resolve ``device_type`` to its registered CodeCache class, or None.
+
+    Applies the HIP build remap ("cuda" -> "rocm") and returns None for device
+    types without a registered code cache (e.g. cpu, mps) instead of raising.
+    """
+    if device_type == "cuda" and torch.version.hip is not None:
+        device_type = "rocm"
+    return _DEVICE_CODECACHE_REGISTRY.get(device_type)
 
 
 def get_device_codecache(device_type: str) -> type:
     """
     Return the CodeCache class registered for ``device_type``.
 
+    "cuda" on a HIP build resolves to the ROCm code cache, so callers can pass
+    the raw ``V.graph.device_type`` / ``device_type`` without remapping
+    ``torch.version.hip`` themselves.
+
     This deliberately fails loudly for unregistered devices instead of falling back
     to CUDACodeCache: silently handing back a CUDA code cache makes the kernel get
     compiled for the wrong device, which surfaces as a confusing error from the
     generated C++ rather than as a device dispatch problem.
     """
-    try:
-        return _DEVICE_CODECACHE_REGISTRY[device_type]
-    except KeyError:
+    codecache_cls = _lookup_device_codecache(device_type)
+    if codecache_cls is None:
         raise NotImplementedError(
             f"No CodeCache registered for device type {device_type!r}. "
             f"Registered device types: {sorted(_DEVICE_CODECACHE_REGISTRY)}. "
-            "Out-of-tree backends must call register_device_codecache() from their "
-            "backend registration hook."
-        ) from None
+            "Out-of-tree backends must pass their CodeCache class to "
+            "register_backend_for_device(device_codecache=...) or call "
+            "register_device_codecache() from their backend registration hook."
+        )
+    return codecache_cls
 
 
 register_device_codecache("cuda", CUDACodeCache)

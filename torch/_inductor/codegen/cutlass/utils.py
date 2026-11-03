@@ -190,7 +190,7 @@ def try_import_cutlass() -> bool:
 
 def _normalize_xpu_arch(arch: str | None) -> str:
     if arch is None:
-        raise NotImplementedError(
+        raise RuntimeError(
             "Unable to determine the XPU architecture to generate CUTLASS kernels "
             "for: the device codename is not recognized."
         )
@@ -204,7 +204,7 @@ def _normalize_xpu_arch(arch: str | None) -> str:
 
 def _normalize_cuda_arch(arch: str | None) -> str:
     if arch is None:
-        raise NotImplementedError(
+        raise RuntimeError(
             "Unable to determine the CUDA architecture to generate CUTLASS kernels "
             "for. Set torch._inductor.config.cuda.arch or run on a CUDA device."
         )
@@ -262,7 +262,7 @@ def toolkit_version(device_type: str) -> str:
             f"CUTLASS codegen is not implemented for device type {device_type!r}"
         )
     if not version:
-        raise NotImplementedError(
+        raise RuntimeError(
             f"Unable to determine the {device_type} toolkit version to generate "
             "CUTLASS kernels for."
         )
@@ -325,16 +325,6 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
         raise AssertionError("Failed to import CUTLASS library")
     import cutlass_library.generator as cutlass_generator
     import cutlass_library.manifest as cutlass_manifest
-
-    if arch is None or version is None:
-        log.error(
-            "Cannot detect cuda arch %s or version %s. "
-            "Will discard all cutlass ops. "
-            "Please consider setting _inductor.cuda.arch and _inductor.cuda.version configs.",
-            arch,
-            version,
-        )
-        return {}
 
     # Some architectures share generators, but the CUTLASS manifest must keep
     # their architecture-specific baseline.
