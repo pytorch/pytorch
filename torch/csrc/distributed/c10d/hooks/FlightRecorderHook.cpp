@@ -2,8 +2,7 @@
 
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
 
-#include <c10/core/Stream.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <torch/csrc/distributed/c10d/hooks/HookUtils.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -20,58 +19,6 @@ namespace {
 // Hook ids must not collide with user-registered hooks; carve out a range
 // far above small hand-picked ids.
 std::atomic<int64_t> next_hook_id{0x46524543 /* 'FREC' */};
-
-// These must be spelled the way the trace analyzer spells them, i.e. match
-// COLLECTIVES / P2P in torch/distributed/flight_recorder/components/types.py
-// and the profiling titles the native backends use ("nccl:all_reduce",
-// "gloo:all_gather", ...). Anything else makes Op() reject the entry.
-std::string_view hookOpName(HookOpName name) {
-  switch (name) {
-    case HookOpName::SEND:
-      return "send";
-    case HookOpName::RECV:
-      return "recv";
-    case HookOpName::BROADCAST:
-      return "broadcast";
-    case HookOpName::ALLREDUCE:
-      return "all_reduce";
-    case HookOpName::ALLREDUCE_COALESCED:
-      return "allreduce_coalesced";
-    case HookOpName::REDUCE:
-      return "reduce";
-    case HookOpName::ALLGATHER:
-      return "all_gather";
-    case HookOpName::ALLGATHER_BASE:
-      return "_all_gather_base";
-    case HookOpName::ALLGATHER_COALESCED:
-      return "allgather_coalesced";
-    case HookOpName::ALLGATHER_INTO_TENSOR_COALESCED:
-      return "all_gather_into_tensor_coalesced";
-    case HookOpName::REDUCE_SCATTER:
-      return "reduce_scatter";
-    case HookOpName::REDUCE_SCATTER_BASE:
-      return "_reduce_scatter_base";
-    case HookOpName::REDUCE_SCATTER_TENSOR_COALESCED:
-      return "reduce_scatter_tensor_coalesced";
-    case HookOpName::ALLTOALL:
-      return "all_to_all";
-    case HookOpName::ALLTOALL_BASE:
-      return "all_to_all_single";
-    case HookOpName::BARRIER:
-      return "barrier";
-    case HookOpName::SCATTER:
-      return "scatter";
-    case HookOpName::GATHER:
-      return "gather";
-    case HookOpName::SPLIT:
-      return "split";
-    case HookOpName::NEW_WINDOW:
-      return "new_window";
-    case HookOpName::UNKNOWN:
-      break;
-  }
-  return "unknown";
-}
 
 bool isP2POp(HookOpName name) {
   return name == HookOpName::SEND || name == HookOpName::RECV;
@@ -107,7 +54,7 @@ std::string profilingName(
     const PreHookArgs& args,
     const std::string& backend,
     int rank) {
-  auto op = hookOpName(args.name);
+  auto op = detail::hookOpName(args.name);
   switch (args.name) {
     case HookOpName::SEND:
       return c10::str(backend, ":", op, " ", rank, "->", args.root);
@@ -131,17 +78,6 @@ std::string profilingName(
 std::string sanitizeBackendName(std::string name) {
   std::replace(name.begin(), name.end(), ':', '_');
   return name;
-}
-
-// PreHookArgs carries no device, so take it from the op's tensors.
-std::optional<c10::Device> opDevice(const PreHookArgs& args) {
-  if (!args.input_tensors.empty() && args.input_tensors.front().defined()) {
-    return args.input_tensors.front().device();
-  }
-  if (!args.output_tensors.empty() && args.output_tensors.front().defined()) {
-    return args.output_tensors.front().device();
-  }
-  return std::nullopt;
 }
 
 // FlightRecorder keys pg_id by a per-recorder monotonic id in the built-in
@@ -170,28 +106,6 @@ c10::intrusive_ptr<Backend::Options> tryGetOptions(
     return backend->getBackendOptions();
   } catch (const std::exception&) {
     return nullptr;
-  }
-}
-
-// Whether a CUDA graph capture (or the equivalent on another accelerator) is
-// active on the stream an op on this device would be issued on. Asked through
-// the device guard impl so the hook stays device agnostic.
-//
-// Both ways of answering false here are positive facts, not guesses: a device
-// type with no guard impl registered has no capture mechanism at all, and a
-// device whose current stream cannot even be obtained -- CUDA linked in but no
-// visible GPU, say -- has no stream for a capture to be running on. "I do not
-// know which device to ask" is a different answer and is not expressed here;
-// see captureActive.
-bool streamIsCapturing(c10::Device device) {
-  if (device.is_cpu() || !c10::impl::hasDeviceGuardImpl(device.type())) {
-    return false;
-  }
-  try {
-    auto* guard_impl = c10::impl::getDeviceGuardImpl(device.type());
-    return guard_impl->getStream(device).is_capturing();
-  } catch (const std::exception&) {
-    return false;
   }
 }
 
@@ -345,7 +259,7 @@ const FlightRecorderHook::BackendTarget& FlightRecorderHook::targetFor(
 std::optional<bool> FlightRecorderHook::captureActive(
     std::optional<c10::Device> device) const {
   if (device) {
-    return streamIsCapturing(*device);
+    return detail::streamIsCapturing(*device);
   }
   // barrier() is the one op that reaches the hook with no tensors: Ops.cpp
   // binds a dummy tensor to pick the dispatch key and does not forward it, so
@@ -364,7 +278,7 @@ std::optional<bool> FlightRecorderHook::captureActive(
     return std::nullopt;
   }
   for (const auto& [type, target] : targets_) {
-    if (streamIsCapturing(c10::Device(type))) {
+    if (detail::streamIsCapturing(c10::Device(type))) {
       return true;
     }
   }
@@ -439,7 +353,8 @@ void FlightRecorderHook::retireCompleted(
     // Only successful completion gets here, so this is the last op known to
     // have finished.
     pg_status_->lastCompletedSeq = op_id;
-    pg_status_->lastCompletedWorkName = std::string(hookOpName(op.name));
+    pg_status_->lastCompletedWorkName =
+        std::string(detail::hookOpName(op.name));
   }
   op.recorder->retire_completed(
       op.trace_id.id, op.trace_id.reset_epoch, duration);
@@ -460,7 +375,7 @@ std::optional<float> FlightRecorderHook::workDuration(const Work& work) {
 }
 
 void FlightRecorderHook::onPre(const PreHookArgs& args) {
-  auto device = opDevice(args);
+  auto device = detail::opDevice(args);
   const auto& target = targetFor(device);
   auto* recorder = target.recorder;
   if (recorder == nullptr) {
@@ -505,7 +420,8 @@ void FlightRecorderHook::onPre(const PreHookArgs& args) {
     collective_seq = is_p2p ? collective_seq_ : ++collective_seq_;
     p2p_seq = is_p2p ? ++p2p_seq_ : p2p_seq_;
     pg_status_->lastEnqueuedSeq = static_cast<int64_t>(args.op_id);
-    pg_status_->lastEnqueuedWorkName = std::string(hookOpName(args.name));
+    pg_status_->lastEnqueuedWorkName =
+        std::string(detail::hookOpName(args.name));
     pg_name = std::make_tuple(pg_->getGroupName(), pg_->getGroupDesc());
     rank = pg_->getRank();
   }

@@ -47,6 +47,7 @@ from torch._C._distributed_c10d import (
     BarrierOptions,
     BroadcastOptions,
     DebugLevel,
+    DesyncDebugHook,
     FlightRecorderHook,
     GatherOptions,
     get_debug_level,
@@ -2955,6 +2956,24 @@ def _maybe_attach_flight_recorder(
     _world.pg_flight_recorder_hooks[pg] = FlightRecorderHook.attach(pg, global_ranks)
 
 
+def _maybe_attach_desync_debug(pg: ProcessGroup) -> None:
+    if os.environ.get("TORCH_DIST_DESYNC_DEBUG", "0") != "1":
+        return
+    # The report is logged from the abort hook; without one it is only
+    # available through DesyncDebugHook.report(). A ProcessGroup subclass with
+    # no registered backend has no hook support.
+    if not pg._device_types or not pg.supports_abort_hooks:
+        warnings.warn(
+            "TORCH_DIST_DESYNC_DEBUG=1 ignored: the process group's backend "
+            "does not support abort hooks",
+            stacklevel=3,
+        )
+        return
+    # Attached at group creation, before any collective, so sequence numbers
+    # line up across ranks. The group owns the hook.
+    DesyncDebugHook.attach(pg)
+
+
 def _new_process_group_helper(
     group_size: int,
     group_rank: int | None,
@@ -3214,6 +3233,7 @@ def _new_process_group_helper(
         NanCheckHook.attach(pg)
 
     HealthCheckHook.attach(pg)
+    _maybe_attach_desync_debug(pg)
 
     # Backend-agnostic FlightRecorder recording, for backends with no native
     # integration. Attached here (rather than lazily) so a group is recorded
@@ -7243,6 +7263,7 @@ def split_group(
         )
 
     HealthCheckHook.attach(split_pg)
+    _maybe_attach_desync_debug(split_pg)
     _maybe_attach_flight_recorder(split_pg, backend_config, global_ranks_in_my_group)
 
     # update global state

@@ -193,6 +193,7 @@
   "test/distributed/test_c10d_collectives.py",
   "test/distributed/test_c10d_common.py",
   "test/distributed/test_c10d_cuda_graphs.py",
+  "test/distributed/test_c10d_desync_debug.py",
   "test/distributed/test_c10d_fault_tolerance.py",
   "test/distributed/test_c10d_fr_hook.py",
   "test/distributed/test_c10d_functional_native.py",
