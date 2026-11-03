@@ -23,8 +23,10 @@ import argparse
 import ast
 import copy
 import functools
+import inspect
 import io
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -86,7 +88,11 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch._environment import is_fbcode
-from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+from torch._higher_order_ops.triton_kernel_wrap import (
+    get_reset_to_zero_args,
+    get_restore_value_args,
+    kernel_side_table,
+)
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._ops import OpOverload
@@ -501,6 +507,52 @@ python_binary(
         return ""
 
 
+def _literal_source(value: Any) -> str | None:
+    """Python source that recreates ``value``, or None if it isn't a literal."""
+    if value is None or isinstance(value, bool):
+        return repr(value)
+    # Subclasses such as IntEnum members or numpy scalars don't repr as valid
+    # standalone source, so convert them to the base type first.
+    if isinstance(value, int):
+        return repr(int(value))
+    if isinstance(value, float):
+        value = float(value)
+        return repr(value) if math.isfinite(value) else f"float({str(value)!r})"
+    if isinstance(value, str):
+        return repr(str.__str__(value))
+    if isinstance(value, (tuple, list)):
+        items: list[str] = []
+        for item in value:
+            literal = _literal_source(item)
+            if literal is None:
+                return None
+            items.append(literal)
+        if isinstance(value, list):
+            return f"[{', '.join(items)}]"
+        return f"({', '.join(items)}{',' if len(items) == 1 else ''})"
+    return None
+
+
+def _generate_triton_config(config: Any, dropped: list[str]) -> str:
+    """Source for a triton.Config; appends options it can't write to ``dropped``."""
+    config_args = [str(config.kwargs)]
+    for name, param in inspect.signature(type(config).__init__).parameters.items():
+        if name in ("self", "kwargs") or param.kind in (
+            param.VAR_POSITIONAL,
+            param.VAR_KEYWORD,
+        ):
+            continue
+        value = getattr(config, name, param.default)
+        if name not in ("num_warps", "num_stages") and value == param.default:
+            continue
+        literal = _literal_source(value)
+        if literal is None:
+            dropped.append(f"Config.{name}")
+        else:
+            config_args.append(f"{name}={literal}")
+    return f"triton.Config({', '.join(config_args)})"
+
+
 def generate_custom_triton_kernel(kernel: Any) -> str:
     res = ""
     if isinstance(kernel, Autotuner):
@@ -510,24 +562,38 @@ def generate_custom_triton_kernel(kernel: Any) -> str:
             res += "triton.runtime.autotuner.Heuristics is not currently supported\n"
             return res
 
-        config_strs = []
-        # pyrefly: ignore [missing-attribute]
-        for kernel_config in kernel.configs:
-            config_strs.append(f"""triton.Config(
-                    {str(kernel_config.kwargs)},
-                    num_warps={kernel_config.num_warps},
-                    num_stages={kernel_config.num_stages},
-                )""")
+        dropped: list[str] = []
+        config_strs = [
+            f"        {_generate_triton_config(kernel_config, dropped)},\n"
+            # pyrefly: ignore [missing-attribute]
+            for kernel_config in kernel.configs
+        ]
+        if getattr(kernel, "user_defined_pre_hook", False):
+            dropped.append("pre_hook")
+        if getattr(kernel, "user_defined_post_hook", False):
+            dropped.append("post_hook")
+        if (
+            getattr(kernel, "early_config_prune", None) is not None
+            or getattr(kernel, "perf_model", None) is not None
+        ):
+            dropped.append("prune_configs_by")
 
-        config_str = ",".join(config_strs)
-        res += textwrap.dedent(f"""
-        @triton.autotune(
-            configs=[
-                {config_str}
-            ],
-            key=[]
-        )
-        """).strip()
+        autotune_args = [f"key={list(getattr(kernel, 'keys', None) or [])!r}"]
+        reset_to_zero = get_reset_to_zero_args(kernel)
+        if reset_to_zero:
+            autotune_args.append(f"reset_to_zero={reset_to_zero!r}")
+        restore_value = get_restore_value_args(kernel)
+        if restore_value:
+            autotune_args.append(f"restore_value={restore_value!r}")
+
+        if dropped:
+            dropped_str = ", ".join(dict.fromkeys(dropped))
+            res += f"# triton.autotune arguments not reproduced: {dropped_str}\n"
+        res += "@triton.autotune(\n    configs=[\n"
+        res += "".join(config_strs)
+        res += "    ],\n"
+        res += "".join(f"    {arg},\n" for arg in autotune_args)
+        res += ")"
 
     # pyrefly: ignore [missing-attribute]
     src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
@@ -686,10 +752,13 @@ if "__compile_source__" in globals():
                     written_triton_imports.add(import_line)
                 continue
 
-            if isinstance(val, TritonConstexpr) and getattr(val, "value", None):
-                result += f"{name} = tl.constexpr({val.value})\n"
+            if isinstance(val, TritonConstexpr):
+                literal = _literal_source(getattr(val, "value", None))
+                if literal is None:
+                    continue
+                result += f"{name} = tl.constexpr({literal})\n"
             elif isinstance(val, (int, float, str, bool)):
-                result += f"{name} = {val!r}\n"
+                result += f"{name} = {_literal_source(val)}\n"
             else:
                 continue
             written_constexpr_vars.add(name)
