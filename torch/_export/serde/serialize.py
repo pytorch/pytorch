@@ -752,7 +752,7 @@ def _find_imported(name: str) -> Any:
             )
         raise SerializeError(
             f"{name} cannot be found: module {module_name} is not imported. "
-            "Import it before loading. Load does not import modules, because "
+            "Import it first. Save and load do not import modules, because "
             "importing a module runs its code."
         )
     # Reading an attribute can run code: getattr calls a module __getattr__,
