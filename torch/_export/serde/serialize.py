@@ -3521,13 +3521,17 @@ class GraphModuleDeserializer(metaclass=Final):
         """
         inputs = serialized_node.inputs
         # The node name becomes part of attribute names, which FX writes into
-        # the code it generates, so it must be an identifier.
+        # the code it generates, so it must be an identifier. It must be ASCII
+        # too: Python normalizes other identifiers, so the generated code could
+        # read another node's attribute.
         if not (
             isinstance(serialized_node.name, str)
+            and serialized_node.name.isascii()
             and serialized_node.name.isidentifier()
         ):
             raise SerializeError(
-                f"flat_apply node name {serialized_node.name!r} is not an identifier"
+                f"flat_apply node name {serialized_node.name!r} is not an "
+                "ASCII identifier"
             )
         if (
             len(inputs) < 2

@@ -3320,7 +3320,13 @@ class TestPredispatchSerialization(TestCase):
         # FX writes attribute names into the code it generates.
         "name_not_identifier": (
             lambda node: node.update(name='x")\nimport os  # '),
-            "is not an identifier",
+            "is not an ASCII identifier",
+        ),
+        # Python reads the ligature \ufb01 as "fi", so the generated code would
+        # read the specs of a node named fi.
+        "name_not_ascii": (
+            lambda node: node.update(name="\ufb01"),
+            "is not an ASCII identifier",
         ),
         "no_function": (
             lambda node: node["inputs"].pop(0),
