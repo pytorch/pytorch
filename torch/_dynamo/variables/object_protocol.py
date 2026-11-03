@@ -2638,21 +2638,16 @@ def generic_hasattr_str(
     # tp_getattro_impl could not resolve the name. generic_getattr would defer
     # by wrapping it in a GetAttrVariable, which is indistinguishable from a
     # missing attribute, so ask the concrete object (or its type) instead.
-    found = None
-    try:
-        probe = obj.get_real_python_backed_value()
-    except (NotImplementedError, AttributeError):
-        probe = NO_SUCH_SUBOBJ
+    probe = NO_SUCH_SUBOBJ
+    for get_probe in (obj.get_real_python_backed_value, obj.python_type):
+        try:
+            probe = get_probe()
+        except (NotImplementedError, AttributeError):
+            continue
+        if probe is not NO_SUCH_SUBOBJ:
+            break
     if probe is not NO_SUCH_SUBOBJ:
         found = hasattr(probe, name)
-    else:
-        try:
-            # Not hasattr(type, name): that also sees metaclass attributes
-            # such as __dict__ or __mro__, which instances lack.
-            found = any(name in c.__dict__ for c in obj.python_type().__mro__)
-        except (NotImplementedError, AttributeError):
-            pass
-    if found is not None:
         if not found and obj.source:
             install_guard(
                 obj.source.make_guard(
