@@ -6,6 +6,7 @@ Only tests covering operations supported in PR 1 (read-only ops + wiring)
 are included; mutation, methods, and conversions will follow in later PRs.
 """
 
+import operator
 import sys
 
 import torch
@@ -13,7 +14,6 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
-from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import make_dynamo_test, run_tests
 
 
@@ -27,6 +27,14 @@ class Indexable:
 
 class ByteArrayTest(torch._dynamo.test_case.TestCase):
     """bytearray-specific tests, ported from CPython ByteArrayTest."""
+
+    def assertGraphBreakReason(self, reason):
+        # A break inside a try block is counted as unimplemented.
+        reasons = [
+            *torch._dynamo.utils.counters["graph_break"],
+            *torch._dynamo.utils.counters["unimplemented"],
+        ]
+        self.assertTrue(any(reason in r for r in reasons), reasons)
 
     type2test = bytearray
 
@@ -683,12 +691,7 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         )
         # Mutating the separator during join is left to eager.
         self.assertEqual(cnt.frame_count, 2)
-        self.assertTrue(
-            any(
-                "separator mutated during iteration" in m
-                for m in counters["graph_break"]
-            )
-        )
+        self.assertGraphBreakReason("separator mutated during iteration")
 
     def test_join_nonconstant_item_graph_break(self):
         cnt = CompileCounter()
@@ -701,9 +704,7 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         result = f(bytearray(b"-"), memoryview(b"ab"), torch.ones(1))
         self.assertEqual(result, (b"ab-c", torch.full((1,), 4.0)))
         self.assertEqual(cnt.frame_count, 2)
-        self.assertTrue(
-            any("join with an unsupported item" in m for m in counters["graph_break"])
-        )
+        self.assertGraphBreakReason("join with an unsupported item")
 
     def test_join_iterator_item_error(self):
         # Eager names the real iterator type in the error.
@@ -716,10 +717,31 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
 
         for make_item in (lambda: iter(b"ab"), lambda: iter("ab")):
             torch._dynamo.reset()
+            torch._dynamo.utils.counters.clear()
             compiled = torch.compile(f, backend="eager")
             self.assertEqual(
                 compiled(make_item, torch.ones(1)), f(make_item, torch.ones(1))
             )
+            self.assertGraphBreakReason("join with an unsupported item")
+
+    def test_join_buffer_subclass_item(self):
+        log = []
+
+        class BufStr(str):
+            __slots__ = ()
+
+            def __buffer__(self, flags):
+                log.append("buffer")
+                return memoryview(b"S")
+
+        def f(item, x):
+            return bytearray(b"-").join([item, b"c"]), x + 1
+
+        compiled = torch.compile(f, backend="eager")
+        for _ in range(2):
+            self.assertEqual(compiled(BufStr("q"), torch.ones(1))[0], b"S-c")
+        # __buffer__ runs on every call, as in eager.
+        self.assertEqual(log, ["buffer", "buffer"])
 
     def test_join_separator_mutation_then_raise(self):
         class NextRaises:
@@ -759,8 +781,73 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         for cls in (NextRaises, IterRaises):
             with self.subTest(cls=cls.__name__):
                 torch._dynamo.reset()
+                torch._dynamo.utils.counters.clear()
                 compiled = torch.compile(f, backend="eager")
                 self.assertEqual(run(compiled, cls), run(f, cls))
+                self.assertGraphBreakReason("separator mutated during iteration")
+
+    def test_join_separator_mutators(self):
+        class Items:
+            def __init__(self, sep, mutate):
+                self.sep = sep
+                self.mutate = mutate
+                self.items = [b"A", b"B"]
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                self.mutate(self.sep)
+                if not self.items:
+                    raise StopIteration
+                return self.items.pop(0)
+
+        def f(sep, mutate, x):
+            try:
+                return sep.join(Items(sep, mutate)), x + 1
+            except BufferError as e:
+                return str(e), x + 1
+
+        # A resize raises BufferError in eager while join holds the export.
+        mutators = {
+            "extend": lambda b: b.extend(b""),
+            "append": lambda b: b.append(0x2C),
+            "insert": lambda b: b.insert(0, 0x2C),
+            "pop": lambda b: b.pop(),
+            "iadd": lambda b: operator.iadd(b, b""),
+            "imul": lambda b: operator.imul(b, 1),
+        }
+        for name, mutate in mutators.items():
+            with self.subTest(mutator=name):
+                torch._dynamo.reset()
+                torch._dynamo.utils.counters.clear()
+                sep, compiled_sep = bytearray(b","), bytearray(b",")
+                compiled = torch.compile(f, backend="eager")
+                self.assertEqual(
+                    compiled(compiled_sep, mutate, torch.ones(1)),
+                    f(sep, mutate, torch.ones(1)),
+                )
+                self.assertEqual(compiled_sep, sep)
+                self.assertGraphBreakReason("separator mutated during iteration")
+
+    def test_join_other_iterables(self):
+        class Sequence:
+            def __getitem__(self, i):
+                if i >= 2:
+                    raise IndexError(i)
+                return (b"a", b"b")[i]
+
+        def f(x):
+            sep = bytearray(b",")
+            return (
+                sep.join({b"a": 1, b"b": 2}),
+                sep.join({b"a"}),
+                sep.join(Sequence()),
+                x + 1,
+            )
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
 
     def test_input_bytearray_join(self):
         @torch.compile(backend="eager", fullgraph=True)

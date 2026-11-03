@@ -1285,7 +1285,7 @@
     {
       "Gb_type": "bytearray.join with an unsupported item",
       "Context": "item: {item}",
-      "Explanation": "Dynamo only traces bytearray.join over items that are constants or bytearrays.",
+      "Explanation": "Dynamo only traces bytearray.join over items that are plain constants or bytearrays.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
