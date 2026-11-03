@@ -763,6 +763,9 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_unmapped", "2026-10-05 00:00:00", "a"),
             fail("test_unmapped", "2026-10-06 00:00:00", "u"),
             fail("test_rx", "2026-10-05 00:00:00", "a", wf="rocm-rx7900"),
+            # Disabled within FLAKY_WINDOW (14 days, exclusive), as in flaky_flags.
+            fail("test_disabled", "2026-10-05 00:00:00", "a"),
+            fail("test_disabled_out", "2026-10-05 00:00:00", "a"),
             # Its job passed on a rerun of the same head.
             fail(
                 "test_green",
@@ -772,7 +775,9 @@ class TestBuildDataset(unittest.TestCase):
             ),
         ]
         landed = {1: dt.datetime(2026, 10, 7, 12, tzinfo=dt.timezone.utc)}
+        disabled = [{"d": d, "name": f"{t} (__main__.TestA)"} for d, t in (("2026-09-22", "test_disabled"), ("2026-10-19", "test_disabled_out"))]  # fmt: skip
         with (
+            mock.patch.object(bd, "query", return_value=disabled) as query,
             patch_ci_jobs({True: {("pull", "pull", "default")}, False: {("rocm-rx7900", "pull", "default")}}),
             mock.patch.object(bd, "pr_of_shas", return_value={"a": 1, "b": 2, "c": 4}),
             mock.patch.object(bd, "pr_authors", return_value={1: "me", 2: "x", 4: "me"}),
@@ -780,7 +785,8 @@ class TestBuildDataset(unittest.TestCase):
         ):  # fmt: skip
             keep, main = bd.pr_caused_failures(rows, dt.date(2026, 10, 1), dt.date(2026, 10, 26), landed)  # fmt: skip
         green.assert_called_once_with(["a", "b", "c"])
-        self.assertEqual(sorted((r["test"], r["pr"]) for r in keep), [("test_broke", 1), ("test_broke_pr", 1), ("test_cls", 1), ("test_far", 1), ("test_main_out", 1), ("test_other_out", 1), ("test_other_out", 2), ("test_real", 1), ("test_same_author", 1), ("test_same_author", 4)])  # fmt: skip
+        self.assertIn("day >= '2026-09-17' AND day < '2026-11-09'", query.call_args.args[0])  # fmt: skip
+        self.assertEqual(sorted((r["test"], r["pr"]) for r in keep), [("test_broke", 1), ("test_broke_pr", 1), ("test_cls", 1), ("test_disabled_out", 1), ("test_far", 1), ("test_main_out", 1), ("test_other_out", 1), ("test_other_out", 2), ("test_real", 1), ("test_same_author", 1), ("test_same_author", 4)])  # fmt: skip
         self.assertEqual(len(main[("test_a", "TestA", "test_main")]), 1)
         self.assertNotIn(("test_a", "TestA", "test_unmapped"), main)
         self.assertNotIn(("test_a", "TestA", "test_fork_main"), main)
@@ -1152,8 +1158,8 @@ class TestBuildDataset(unittest.TestCase):
         self.assertEqual(s["changed_files"], ["test/my file.py", "test/run_test.py"])
         self.assertIn("test/run_test.py", s["diffstat"])
         self.assertIn("rename from test/run_test.py", s["diff"])
-        self.assertEqual((s["base"], s["merge_base"]), ("HEAD~2", "HEAD~2"))
-        self.assertEqual((s2["base"], s2["merge_base"], s2["changed_files"]), ("lower", "HEAD~1", ["test/test_x.py"]))  # fmt: skip
+        self.assertEqual((s["base"], s["merge_base"], s["main_base"]), ("HEAD~2", "HEAD~2", "HEAD~2"))  # fmt: skip
+        self.assertEqual((s2["base"], s2["merge_base"], s2["main_base"], s2["changed_files"]), ("lower", "HEAD~1", "HEAD~2", ["test/test_x.py"]))  # fmt: skip
         self.assertEqual(candidates.call_args_list, [mock.call("HEAD~2", "HEAD~1", "HEAD~2"), mock.call("HEAD~2", "HEAD", "HEAD~1")])  # fmt: skip
 
 

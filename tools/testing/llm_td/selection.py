@@ -536,7 +536,8 @@ def apply_selection(
     ranking, see load_previous_failures) is known, and only if the split
     chooses some file (otherwise it is TD's split anyway).
     run_test.py falls back to the default job's times for a config without its
-    own, so in practice the times are missing only without test-times.json.
+    own, so the times are missing when none of the call's files has a time
+    (for example without test-times.json, or a call of only new test files).
     call_id tells apart the run_test.py calls of one job, which run different
     test lists."""
     ranked = include + exclude
