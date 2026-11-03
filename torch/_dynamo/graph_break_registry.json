@@ -820,6 +820,16 @@
       ]
     }
   ],
+  "GB9684": [
+    {
+      "Gb_type": "int() with a base on non-constant arguments",
+      "Context": "int({args[0]}, {base})",
+      "Explanation": "Dynamo only traces int(x, base) when x and base are constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0052": [
     {
       "Gb_type": "Excessive RestartAnalysis() calls",
