@@ -47,7 +47,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .functions import BaseUserFunctionVariable, UserMethodVariable
-from .object_protocol import object_richcompare, python_constant_repr_impl, type_init
+from .object_protocol import object_richcompare, python_constant_repr_impl
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -230,8 +230,10 @@ class WrapperDescriptorVariable(DescriptorVariable):
                     else getattr(VariableTracker, sd.impl)
                 )
                 return sd.wrapper(obj, tx, impl, rest, kwargs)
-        elif objclass is type and name == "__init__":
-            return type_init(tx, rest, kwargs)
+        elif objclass is type:
+            sd = _compute_slotdefs(type)[name]
+            impl = getattr(variables.BuiltinTypeVariable, sd.impl)
+            return sd.wrapper(obj, tx, impl, rest, kwargs)
         elif isinstance(obj, UserDefinedObjectVariable):
             return obj.call_base_method(tx, name, rest, kwargs)
         sd = obj.lookup_slotdefs(name)
