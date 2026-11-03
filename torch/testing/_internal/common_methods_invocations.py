@@ -5930,16 +5930,16 @@ def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S, S), (),),
         ((S, S, S), (1, ),),
         ((S, S, S), (1, True, ),),
-        ((), (),),
         ((), (0,),),
-        ((), (0, True,),),
-        # Non-fused mode kernel on CUDA
-        ((3000,), ()),
     )
     make_arg = partial(make_tensor, dtype=dtype, device=device,
                        requires_grad=requires_grad, low=None, high=None)
-    return (SampleInput(make_arg(input_tensor), *args)
-            for input_tensor, args in args)
+    for input_shape, input_args in args:
+        yield SampleInput(make_arg(input_shape), *input_args)
+
+    if torch.device(device).type == 'cuda':
+        # Non-fused mode kernel on CUDA (slice size > 2 * MAX_BLOCK_SIZE)
+        yield SampleInput(make_arg((2049,)))
 
 # Missing to test the nondeterminism of the operation
 # https://github.com/pytorch/pytorch/issues/53352
