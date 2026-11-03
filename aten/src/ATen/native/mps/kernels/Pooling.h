@@ -10,12 +10,6 @@ C10_METAL_CONSTEXPR int32_t avg_pool2d_tile_rows = 2;
 // grad_input columns computed by each thread of the 2D pooling backward
 // kernels, which share the gradients and divisors of their covering outputs
 C10_METAL_CONSTEXPR int32_t pool2d_backward_tile_cols = 4;
-// Window widths with a register-resident specialization of the stride-1 NCHW
-// kernels (the common CNN kernel sizes), up to the per-op widest one. Keep in
-// sync with REGISTER_MAX_POOL2D_S1 and REGISTER_AVG_POOL2D_S1 in Pooling.metal
-C10_METAL_CONSTEXPR int32_t pool2d_s1_widths[] = {2, 3, 5, 7};
-C10_METAL_CONSTEXPR int32_t max_pool2d_s1_widest = 5;
-C10_METAL_CONSTEXPR int32_t avg_pool2d_s1_widest = 7;
 
 // N is the maximum allowed number of dimensions in the input and outputs. The
 // maximum allowed pooling dimensions is N-2, because the input may have up to 2

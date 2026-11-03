@@ -1312,8 +1312,8 @@ kernel void avg_pool2d_dense(
         params.padding[0],
         params.count_include_pad);
   }
-  input += channels_last ? int64_t(xy.n) * (IH * IW * C) + xy.c
-                         : int64_t(pos.z) * (IH * IW);
+  input +=
+      channels_last ? xy.n * (IH * IW * C) + xy.c : int32_t(pos.z) * (IH * IW);
 
   // Each input row is loaded once and added to every window of the tile that
   // covers it: windows overlap when stride < kernel, and the rows between two
@@ -1332,8 +1332,8 @@ kernel void avg_pool2d_dense(
       }
     }
   }
-  output += channels_last ? int64_t(xy.n) * (OH * OW * C) + xy.c
-                          : int64_t(pos.z) * (OH * OW);
+  output +=
+      channels_last ? xy.n * (OH * OW * C) + xy.c : int32_t(pos.z) * (OH * OW);
   output += (oh0 * OW + xy.w) * stride_w;
   for (int32_t u = 0; u < tile_rows && oh0 + u < OH; u++) {
     opmath_t<T> divisor = params.has_divisor_override ? params.divisor_override
@@ -1692,7 +1692,6 @@ kernel void avg_pool2d_backward(
       constant AvgPoolingParams<5>& p [[buffer(2)]],                         \
       uint3 pos [[thread_position_in_grid]]);
 
-// The stride-1 widths are pool2d_s1_widths up to max_pool2d_s1_widest
 #define REGISTER_POOL_OP(DTYPE)                                               \
   REGISTER_MAX_POOL(DTYPE, int32_t, "")                                       \
   REGISTER_MAX_POOL(DTYPE, int64_t, "_i64")                                   \
@@ -1781,8 +1780,6 @@ REGISTER_POOL_OP(char);
 REGISTER_POOL_OP(uchar);
 REGISTER_POOL_OP(bool);
 
-// The stride-1 widths are pool2d_s1_widths up to avg_pool2d_s1_widest, with
-// _vec variants for the odd ones
 #define REGISTER_AVG_POOL_OP(DTYPE)                \
   REGISTER_AVG_POOL(DTYPE, int32_t, "")            \
   REGISTER_AVG_POOL(DTYPE, int64_t, "_i64")        \
@@ -1810,6 +1807,8 @@ REGISTER_MAX_POOL_BACKWARD(bfloat, false);
 REGISTER_MAX_POOL_BACKWARD(float, true);
 
 REGISTER_AVG_POOL_BACKWARD(float, false);
+REGISTER_AVG_POOL_BACKWARD(half, false);
+REGISTER_AVG_POOL_BACKWARD(bfloat, false);
 REGISTER_AVG_POOL_BACKWARD(long, false);
 REGISTER_AVG_POOL_BACKWARD(float, true);
 
