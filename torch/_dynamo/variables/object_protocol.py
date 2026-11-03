@@ -2520,7 +2520,7 @@ def object_generic_getattr(
                 if obj.source
                 else any(py_type is candidate for candidate in modeled_types)
             )
-        except (AttributeError, KeyError, NameError):
+        except Exception:
             # Some sources require guard helpers unavailable to source evaluation.
             actual_type_matches = False
         if actual_type_matches:
