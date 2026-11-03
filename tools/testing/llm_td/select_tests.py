@@ -13,6 +13,7 @@ because the selector broke.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -26,8 +27,14 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.import_test_stats import get_test_times
-from tools.testing.discover_tests import TESTS
-from tools.testing.llm_td.selection import needs_run_all, Selection, SWEEPS
+from tools.testing.discover_tests import BLOCKLISTED_PATTERNS, TESTS
+from tools.testing.llm_td.selection import (
+    LLM_TD_SELECTION_FILE,
+    needs_run_all,
+    parse_model_output,
+    Selection,
+    SWEEPS,
+)
 
 
 sys.path.remove(str(REPO_ROOT))
@@ -47,7 +54,7 @@ TRUNCATION_MARKER = 40
 # The PR text is wrapped in these tags and the prompt marks it as untrusted, so
 # the PR must not be able to close them.
 CLOSING_TAG_RE = re.compile(
-    r"</(pr_title|pr_description|changed_files|diff)\s*>", re.IGNORECASE
+    r"<\s*/\s*(pr_title|pr_description|changed_files|diff)\s*>", re.IGNORECASE
 )
 
 SCHEMA = {
@@ -192,6 +199,19 @@ def git(*args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=REPO_ROOT, text=True)
 
 
+def git_grep(pattern: str, rev: str) -> list[str]:
+    """The paths under test/ at `rev` with a line matching the extended regex `pattern`."""
+    p = subprocess.run(
+        ["git", "grep", "-lE", pattern, rev, "--", "test/"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if p.returncode > 1:
+        raise RuntimeError(f"git grep failed: {p.stderr.strip()[-500:]}")
+    return [line.split(":", 1)[1] for line in p.stdout.splitlines()]
+
+
 def pr_text(args: argparse.Namespace) -> tuple[str, str]:
     if args.title is not None:
         return args.title, args.body or ""
@@ -218,23 +238,27 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     ).splitlines()
     if needs_run_all(changed) and not args.print_prompt:
         return Selection(run_all=True, reason="change touches test infrastructure")
-    test_times = get_test_times()
+    # get_test_times reports its download on stdout, where --print-prompt writes.
+    with contextlib.redirect_stdout(sys.stderr):
+        test_times = get_test_times()
     if not test_times and not args.print_prompt:
         return Selection(run_all=True, reason="no test times")
     diffstat = git("diff", "--stat=200", "--no-renames", merge_base, args.head)
     diff = git("diff", merge_base, args.head)
     # TESTS comes from the checkout this script runs from, which in CI is the
-    # trusted default branch rather than the PR; add the test files the PR adds.
+    # trusted default branch rather than the PR; add the test files the PR adds
+    # that run_test.py would discover.
     added = git(
         "diff", "--name-only", "--no-renames", "--diff-filter=A", merge_base, args.head
     ).splitlines()
+    added_tests = {
+        f.removeprefix("test/").removesuffix(".py")
+        for f in added
+        if re.match(r"test/([\w/]+/)?test_\w+\.py$", f)
+    }
     candidates = sorted(
         set(TESTS)
-        | {
-            f.removeprefix("test/").removesuffix(".py")
-            for f in added
-            if re.match(r"test/([\w/]+/)?test_\w+\.py$", f)
-        }
+        | {t for t in added_tests if not t.startswith(tuple(BLOCKLISTED_PATTERNS))}
     )
     title, body = pr_text(args)
     prompt = build_prompt(
@@ -250,7 +274,14 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     record["model_output"] = out
     if out is None:
         record["error"] = str(result.get("result"))[:2000]
-    return Selection.from_model_output(out, set(candidates), changed)
+    else:
+        try:
+            parse_model_output(out, set(candidates))
+        except ValueError as e:
+            record["error"] = f"malformed model output: {e}"[:2000]
+    return Selection.from_model_output(
+        out, set(candidates), changed, lambda p: git_grep(p, args.head)
+    )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -263,13 +294,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--title")
     parser.add_argument("--body")
+    # An unset repository variable reaches the workflow as an empty string.
+    parser.add_argument("--model", default=os.environ.get("LLM_TD_MODEL") or DEFAULT_MODEL)  # fmt: skip
     parser.add_argument(
-        "--model", default=os.environ.get("LLM_TD_MODEL", DEFAULT_MODEL)
+        "--effort",
+        default=os.environ.get("LLM_TD_EFFORT") or "medium",
+        choices=["low", "medium", "high", "xhigh", "max"],
     )
-    parser.add_argument("--effort", default=os.environ.get("LLM_TD_EFFORT", "medium"))
-    parser.add_argument(
-        "--output", type=Path, default=REPO_ROOT / "llm_td_selection.json"
-    )
+    parser.add_argument("--output", type=Path, default=REPO_ROOT / LLM_TD_SELECTION_FILE)  # fmt: skip
     parser.add_argument(
         "--enforce",
         action="store_true",
@@ -301,7 +333,8 @@ def main(argv: list[str] | None = None) -> None:
     print(
         f"LLM TD: run_all={selection.run_all} sweeps={sorted(selection.sweeps)} files={len(selection.files)}"
     )
-    print(f"LLM TD: {selection.reason}")
+    # json.dumps keeps a model-written newline from starting a workflow command.
+    print(f"LLM TD: {json.dumps(selection.reason)}")
 
 
 if __name__ == "__main__":
