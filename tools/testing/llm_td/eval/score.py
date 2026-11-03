@@ -17,10 +17,10 @@ run_test.py applies TD, and so the selection, only in the pull, trunk and
 ROCm workflows. Jobs of any other workflow (inductor's unit tests, periodic,
 slow, ...) run every test under every policy, so their failures are left out
 of the truth, and configs no TD job runs are left out of the cost share
-(dollars.py models the inductor ones separately). Jobs are classified from
-.github/workflows (see job_runs_td). test-times.json is merged over jobs per
-config, so a config that TD and non-TD jobs share (e.g. `default` in
-periodic) is priced as one.
+(the report's dollar model prices the inductor ones separately). Jobs are
+classified from .github/workflows (see job_runs_td). test-times.json is
+merged over jobs per config, so a config that TD and non-TD jobs share (e.g.
+`default` in periodic) is priced as one.
 CI applies the TD cut and the hedge per job over that job's own test list;
 this models a job as a config of test-times.json, and for a failure in a
 config missing from test-times.json falls back to a cut over all candidates.
