@@ -459,10 +459,9 @@ static MTLSize pool_grid(const Tensor& t,
   return channels_last ? MTLSizeMake(C, W, N * H) : MTLSizeMake(W, H, N * C);
 }
 
-// Window widths with a register-resident specialization, up to `widest`, see REGISTER_MAX_POOL2D_S1 and
-// REGISTER_AVG_POOL2D_S1
+// Width of the stride-1 kernel specialization for windows of width kw, or 0 for the generic one
 static int32_t pool2d_s1_kernel_width(int32_t kw, int32_t widest) {
-  return kw == 2 || kw == 3 || kw == 5 || kw == widest ? kw : 0;
+  return kw <= widest && std::ranges::find(pool2d_s1_widths, kw) != std::end(pool2d_s1_widths) ? kw : 0;
 }
 
 // Adaptive pooling window bounds need (in_size + 1) * (out_size + 1) to fit in the kernel index type
@@ -500,8 +499,8 @@ static void launch_max_pool_kernel(const Tensor& input,
       params.stride[1] == 1 && params.dilation[1] == 1;
   std::string kernel_name;
   if (use_s1) {
-    kernel_name =
-        fmt::format("max_pool2d_s1_nchw_k{}_{}", pool2d_s1_kernel_width(kw, 5), scalarToMetalTypeString(input));
+    const auto width = pool2d_s1_kernel_width(kw, max_pool2d_s1_widest);
+    kernel_name = fmt::format("max_pool2d_s1_nchw_k{}_{}", width, scalarToMetalTypeString(input));
   } else if (is_dense) {
     kernel_name = fmt::format("max_pool2d_dense_{}{}_{}",
                               channels_last ? "nhwc"sv : "nchw"sv,
@@ -836,7 +835,7 @@ static void avg_pool_out_mps_template(const Tensor& output,
   std::string kernel_name = "avg_pool_";
   auto grid = pool_grid(output, is_dense, params.channels_last, avg_pool2d_tile_rows);
   if (use_s1) {
-    const auto kw = pool2d_s1_kernel_width(kernel_size[1], 7);
+    const auto kw = pool2d_s1_kernel_width(kernel_size[1], avg_pool2d_s1_widest);
     const bool aligned = input.size(-1) % pool2d_s1_tile_cols == 0 && output.size(-1) % pool2d_s1_tile_cols == 0 &&
         input.storage_offset() % pool2d_s1_tile_cols == 0 && output.storage_offset() % pool2d_s1_tile_cols == 0;
     const bool vec = kw % 2 == 1 && padding[1] == kw / 2 && aligned;

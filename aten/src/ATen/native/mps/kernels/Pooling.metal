@@ -516,6 +516,16 @@ template <typename acc_t>
 using PoolS1Tile = ::metal::
     array<::metal::array<acc_t, pool2d_s1_tile_cols>, pool2d_s1_tile_rows>;
 
+// Lanes of the vector loads and stores of the _vec kernels (16 bytes for float)
+C10_METAL_CONSTEXPR int pool2d_s1_vec_width = 4;
+static_assert(
+    pool2d_s1_tile_cols % pool2d_s1_vec_width == 0,
+    "a tile row is loaded and stored as whole vectors");
+
+// The kCols + KW - 1 columns of an input row that a tile's windows cover
+template <typename acc_t, int KW>
+using PoolS1Row = ::metal::array<acc_t, pool2d_s1_tile_cols + KW - 1>;
+
 // Computes out[v] = reduce(row[c0 + v], ..., row[c0 + v + kw - 1]) for v < G,
 // assuming kw >= G. All G windows share [c0 + G - 1, c0 + kw), and each one
 // adds a suffix of the G - 1 columns before it and a prefix of the G - 1
@@ -544,6 +554,128 @@ inline void pool_windows(
   }
 }
 
+// Loads the columns of `row` that a tile's windows cover, through Op::load
+template <int KW, typename Op, typename T>
+inline void load_s1_row(
+    device const T* row,
+    int32_t c0,
+    int32_t IW,
+    thread PoolS1Row<typename Op::acc_t, KW>& vals,
+    bool_constant<false>) {
+  for (int i = 0; i < pool2d_s1_tile_cols + KW - 1; ++i) {
+    vals[i] = Op::load(row, c0 + i, IW);
+  }
+}
+
+// Same with the tile's own kCols columns loaded as vectors. The host picks
+// this only for odd KW with padding == KW / 2 and W and storage offsets that
+// are multiples of kCols, so the block starts at the tile's first output
+// column, aligned and inside the row
+template <int KW, typename Op, typename T>
+inline void load_s1_row(
+    device const T* row,
+    int32_t c0,
+    int32_t IW,
+    thread PoolS1Row<typename Op::acc_t, KW>& vals,
+    bool_constant<true>) {
+  using acc_t = typename Op::acc_t;
+  using vec_t = ::metal::vec<T, pool2d_s1_vec_width>;
+  constexpr int kCols = pool2d_s1_tile_cols;
+  constexpr int left = KW / 2;
+  static_assert(KW % 2 == 1, "the vector block starts at the first output");
+  auto block = reinterpret_cast<device const vec_t*>(row + c0 + left);
+  for (int i = 0; i < kCols / pool2d_s1_vec_width; ++i) {
+    const auto b = block[i];
+    for (int j = 0; j < pool2d_s1_vec_width; ++j) {
+      vals[left + pool2d_s1_vec_width * i + j] = acc_t(b[j]);
+    }
+  }
+  for (int i = 0; i < left; ++i) {
+    vals[i] = Op::load(row, c0 + i, IW);
+  }
+  for (int i = left + kCols; i < kCols + KW - 1; ++i) {
+    vals[i] = Op::load(row, c0 + i, IW);
+  }
+}
+
+// Reduces the kCols windows of one input row with Op, for a width KW known at
+// compile time, which keeps the row in registers
+template <int KW, bool VEC, typename Op, typename T>
+inline void reduce_s1_row(
+    device const T* row,
+    int32_t c0,
+    int32_t,
+    int32_t IW,
+    thread ::metal::array<typename Op::acc_t, pool2d_s1_tile_cols>& out,
+    bool_constant<true>) {
+  PoolS1Row<typename Op::acc_t, KW> vals;
+  load_s1_row<KW, Op>(row, c0, IW, vals, bool_constant<VEC>{});
+  for (int v = 0; v < pool2d_s1_tile_cols; ++v) {
+    out[v] = vals[v];
+    for (int j = 1; j < KW; ++j) {
+      out[v] = Op::reduce(out[v], vals[v + j]);
+    }
+  }
+}
+
+// Same for a runtime width kw, sharing the loads of overlapping windows
+template <int KW, bool VEC, typename Op, typename T>
+inline void reduce_s1_row(
+    device const T* row,
+    int32_t c0,
+    int32_t kw,
+    int32_t IW,
+    thread ::metal::array<typename Op::acc_t, pool2d_s1_tile_cols>& out,
+    bool_constant<false>) {
+  constexpr int kCols = pool2d_s1_tile_cols;
+  if (kw >= kCols) {
+    pool_windows<kCols, Op>(row, c0, kw, IW, out.data());
+  } else if (kw >= kCols / 2) {
+    pool_windows<kCols / 2, Op>(row, c0, kw, IW, out.data());
+    pool_windows<kCols / 2, Op>(
+        row, c0 + kCols / 2, kw, IW, out.data() + kCols / 2);
+  } else {
+    for (int v = 0; v < kCols; ++v) {
+      out[v] = Op::load(row, c0 + v, IW);
+    }
+    for (int32_t j = 1; j < kw; ++j) {
+      for (int v = 0; v < kCols; ++v) {
+        out[v] = Op::reduce(out[v], Op::load(row, c0 + v + j, IW));
+      }
+    }
+  }
+}
+
+// Stores the outputs of one tile row that lie inside the output row
+template <typename T>
+inline void store_s1_row(
+    device T* dst,
+    int32_t cols,
+    thread const ::metal::array<T, pool2d_s1_tile_cols>& out,
+    bool_constant<false>) {
+  for (int v = 0; v < pool2d_s1_tile_cols && v < cols; ++v) {
+    dst[v] = out[v];
+  }
+}
+
+// Same as whole vectors, for output rows that are multiples of kCols wide
+template <typename T>
+inline void store_s1_row(
+    device T* dst,
+    int32_t,
+    thread const ::metal::array<T, pool2d_s1_tile_cols>& out,
+    bool_constant<true>) {
+  using vec_t = ::metal::vec<T, pool2d_s1_vec_width>;
+  auto block = reinterpret_cast<device vec_t*>(dst);
+  for (int i = 0; i < pool2d_s1_tile_cols / pool2d_s1_vec_width; ++i) {
+    vec_t v;
+    for (int j = 0; j < pool2d_s1_vec_width; ++j) {
+      v[j] = out[pool2d_s1_vec_width * i + j];
+    }
+    block[i] = v;
+  }
+}
+
 // Stride-1 2D pooling of a dense NCHW plane without dilation along W, reduced
 // with Op. Each thread computes a tile of kCols x kRows windows, so each input
 // row is loaded once per tile and reduced along W before being combined into
@@ -552,7 +684,7 @@ inline void pool_windows(
 // without dilation along W the clamped column is always within the window; avg
 // loads zeros there. KW is the window width if known at compile time (which
 // lets the row be kept in registers), or 0. VEC loads the tile's own kCols
-// columns as vectors, for rows that are kCols-aligned.
+// columns as vectors, see load_s1_row.
 template <typename T, int KW, bool VEC, typename Op>
 __attribute__((always_inline)) inline void pool2d_s1_nchw_tile(
     device const T* input,
@@ -587,52 +719,8 @@ __attribute__((always_inline)) inline void pool2d_s1_nchw_tile(
   for (auto ih = ih_begin; ih < ih_end; ++ih) {
     const auto row = input + ih * IW;
     ::metal::array<acc_t, kCols> row_red;
-    if IF_CONSTEXPR (KW > 0) {
-      ::metal::array<acc_t, kCols + KW - 1> vals;
-      if IF_CONSTEXPR (VEC) {
-        constexpr int left = KW / 2;
-        auto block =
-            reinterpret_cast<device const ::metal::vec<T, 4>*>(row + c0 + left);
-        for (int i = 0; i < kCols / 4; ++i) {
-          const auto b = block[i];
-          vals[left + 4 * i] = acc_t(b.x);
-          vals[left + 4 * i + 1] = acc_t(b.y);
-          vals[left + 4 * i + 2] = acc_t(b.z);
-          vals[left + 4 * i + 3] = acc_t(b.w);
-        }
-        for (int i = 0; i < left; ++i) {
-          vals[i] = Op::load(row, c0 + i, IW);
-        }
-        for (int i = left + kCols; i < kCols + KW - 1; ++i) {
-          vals[i] = Op::load(row, c0 + i, IW);
-        }
-      } else {
-        for (int i = 0; i < kCols + KW - 1; ++i) {
-          vals[i] = Op::load(row, c0 + i, IW);
-        }
-      }
-      for (int v = 0; v < kCols; ++v) {
-        row_red[v] = vals[v];
-        for (int j = 1; j < KW; ++j) {
-          row_red[v] = Op::reduce(row_red[v], vals[v + j]);
-        }
-      }
-    } else if (kw >= kCols) {
-      pool_windows<kCols, Op>(row, c0, kw, IW, row_red.data());
-    } else if (kw >= kCols / 2) {
-      pool_windows<kCols / 2, Op>(row, c0, kw, IW, row_red.data());
-      pool_windows<kCols / 2, Op>(
-          row, c0 + kCols / 2, kw, IW, row_red.data() + kCols / 2);
-    } else {
-      for (int v = 0; v < kCols; ++v) {
-        row_red[v] = Op::load(row, c0 + v, IW);
-      }
-      for (int32_t j = 1; j < kw; ++j) {
-        for (int v = 0; v < kCols; ++v) {
-          row_red[v] = Op::reduce(row_red[v], Op::load(row, c0 + v + j, IW));
-        }
-      }
-    }
+    reduce_s1_row<KW, VEC, Op>(
+        row, c0, kw, IW, row_red, bool_constant<(KW > 0)>{});
     for (int u = 0; u < kRows; ++u) {
       const auto rel = ih - (oh0 + u - padding[0]);
       if (rel < 0 || rel > (kh - 1) * dh || (dh != 1 && rel % dh != 0)) {
@@ -672,9 +760,8 @@ kernel void max_pool2d_s1_nchw(
 
   const auto out_base = int64_t(pos.z) * (OH * OW) + (oh0 * OW + ow0);
   for (int u = 0; u < pool2d_s1_tile_rows && oh0 + u < OH; ++u) {
-    for (int v = 0; v < pool2d_s1_tile_cols && ow0 + v < OW; ++v) {
-      output[out_base + u * OW + v] = acc[u][v];
-    }
+    store_s1_row(
+        output + out_base + u * OW, OW - ow0, acc[u], bool_constant<false>{});
   }
 }
 
@@ -1229,15 +1316,21 @@ kernel void avg_pool2d_dense(
   input +=
       channels_last ? xy.n * (IH * IW * C) + xy.c : int32_t(pos.z) * (IH * IW);
 
+  // Each input row is loaded once and added to every window of the tile that
+  // covers it: windows overlap when stride < kernel, and the rows between two
+  // windows when stride > kernel are skipped
   opmath_t<T> value_sum[tile_rows] = {};
-  for (auto ih = h[0].start; ih < h[tile_rows - 1].end; ih++) {
-    auto row = input + ih * (IW * stride_w);
-    opmath_t<T> row_sum = 0;
-    for (auto iw = w.start; iw < w.end; iw++) {
-      row_sum += static_cast<opmath_t<T>>(row[iw * stride_w]);
-    }
-    for (int32_t u = 0; u < tile_rows; u++) {
-      value_sum[u] += h[u].start <= ih && ih < h[u].end ? row_sum : 0;
+  auto ih = h[0].start;
+  for (int32_t u = 0; u < tile_rows; u++) {
+    for (ih = max(ih, h[u].start); ih < h[u].end; ih++) {
+      auto row = input + ih * (IW * stride_w);
+      opmath_t<T> row_sum = 0;
+      for (auto iw = w.start; iw < w.end; iw++) {
+        row_sum += static_cast<opmath_t<T>>(row[iw * stride_w]);
+      }
+      for (int32_t v = u; v < tile_rows; v++) {
+        value_sum[v] += h[v].start <= ih ? row_sum : 0;
+      }
     }
   }
   output +=
@@ -1294,18 +1387,8 @@ kernel void avg_pool2d_s1_nchw(
           p.has_divisor_override ? p.divisor_override : h_count * w_count[v];
       out[v] = static_cast<T>(sum[u][v] / divisor);
     }
-    if IF_CONSTEXPR (VEC) {
-      auto block = reinterpret_cast<device ::metal::vec<T, 4>*>(
-          output + out_base + u * OW);
-      for (int i = 0; i < kCols / 4; ++i) {
-        block[i] = ::metal::vec<T, 4>(
-            out[4 * i], out[4 * i + 1], out[4 * i + 2], out[4 * i + 3]);
-      }
-    } else {
-      for (int v = 0; v < kCols && ow0 + v < OW; ++v) {
-        output[out_base + u * OW + v] = out[v];
-      }
-    }
+    store_s1_row(
+        output + out_base + u * OW, OW - ow0, out, bool_constant<VEC>{});
   }
 }
 
@@ -1607,6 +1690,7 @@ kernel void avg_pool2d_backward(
       constant AvgPoolingParams<5>& p [[buffer(2)]],                         \
       uint3 pos [[thread_position_in_grid]]);
 
+// The stride-1 widths are pool2d_s1_widths up to max_pool2d_s1_widest
 #define REGISTER_POOL_OP(DTYPE)                                               \
   REGISTER_MAX_POOL(DTYPE, int32_t, "")                                       \
   REGISTER_MAX_POOL(DTYPE, int64_t, "_i64")                                   \
@@ -1689,7 +1773,9 @@ REGISTER_POOL_OP(char);
 REGISTER_POOL_OP(uchar);
 REGISTER_POOL_OP(bool);
 
-// Avg pooling supports the dtypes of the CPU kernels: floating types and long
+// Avg pooling supports the dtypes of the CPU kernels: floating types and long.
+// The stride-1 widths are pool2d_s1_widths up to avg_pool2d_s1_widest, with
+// _vec variants for the odd ones
 #define REGISTER_AVG_POOL_OP(DTYPE)                                 \
   REGISTER_AVG_POOL(DTYPE, int32_t, "")                             \
   REGISTER_AVG_POOL2D_DENSE(DTYPE, false, "nchw")                   \
