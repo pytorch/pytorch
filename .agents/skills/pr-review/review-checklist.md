@@ -183,6 +183,9 @@ When a PR adds CI (a workflow, job, matrix or matrix entry) or changes a CI runn
 - [ ] **New test file is rare** - New test file should only be added when new major features are added
 - [ ] **Proper module ownership** - Test files must have a real `# Owner(s): ["module: ..."]` label, not `"module: unknown"`. The author should create a new module label if needed and add themselves as owner
 - [ ] **Use OpInfo** - Any testing for an operator or a cross-cutting feature must be done via OpInfo. Flag manual tests (e.g., `assertEqual(a + b, expected)`) for operators that already have OpInfo entries — these are redundant and will rot. When a PR adds dtype/device support to an operator, the testing should come from existing OpInfo infrastructure automatically (e.g., by adding the dtype to the operator's OpInfo `dtypes`), not from new manual tests
+- [ ] **Use @ops for operator tests** - PR writes manual per-operator test iterations instead of using the `@ops(op_db)` decorator which automatically parametrizes tests over OpInfo entries
+- [ ] **Use toleranceOverride** - PR hard-codes tolerance values in individual assertions instead of using `@toleranceOverride` / `@precisionOverride` decorators which set per-dtype tolerances
+- [ ] **Use DecorateInfo for OpInfo skips** - PR adds `@skipIf` conditionals inside OpInfo test methods instead of using `DecorateInfo` in the OpInfo's `skips` or `decorators` tuple
 - [ ] **Use ModuleInfo** - Manual forward/backward tests for `nn.Module` subclasses should use `ModuleInfo` from `torch/testing/_internal/common_modules.py` and the `@modules` decorator instead of hand-written per-module tests
 - [ ] **Use TestCase** - Tests inherit from `torch.testing._internal.common_utils.TestCase`
 - [ ] **Use run_tests** - Test file ends with `if __name__ == "__main__": run_tests()`
@@ -191,11 +194,8 @@ When a PR adds CI (a workflow, job, matrix or matrix entry) or changes a CI runn
 - [ ] **No device-agnostic tests in accelerator-specific files** - A regression test added to `test_mps.py`/`test_cuda.py`/`test_xpu.py`/... must exercise an accelerator-specific API or behavior. If it would pass verbatim on any backend, move it to a device-generic test (a generic test file using `instantiate_device_type_tests`, or an existing OpInfo/ModuleInfo). A hardcoded `device=`, `.to()`/`.cuda()`, or `torch.<device>.synchronize()` is incidental and does not count as accelerator-specific
 - [ ] **Use @dtypes** - PR writes separate test methods per dtype or manual `for dtype in [...]` loops instead of using the `@dtypes(...)` decorator from `common_device_type.py`
 - [ ] **Use @parametrize** - PR duplicates test methods that differ only in a parameter instead of using `@parametrize` from `common_utils.py`
-- [ ] **Use @ops for operator tests** - PR writes manual per-operator test iterations instead of using the `@ops(op_db)` decorator which automatically parametrizes tests over OpInfo entries
 - [ ] **Use make_tensor** - PR creates test tensors with `torch.rand(shape)` (implicit CPU, implicit dtype) instead of `make_tensor(shape, device=device, dtype=dtype)` from `torch.testing` which enforces explicit device/dtype
 - [ ] **Use common dtype groups** - PR manually lists dtypes like `[torch.float32, torch.float64]` instead of using helpers like `floating_types()`, `all_types_and_complex()`, etc. from `common_dtype.py`
-- [ ] **Use toleranceOverride** - PR hard-codes tolerance values in individual assertions instead of using `@toleranceOverride` / `@precisionOverride` decorators which set per-dtype tolerances
-- [ ] **Use DecorateInfo for OpInfo skips** - PR adds `@skipIf` conditionals inside OpInfo test methods instead of using `DecorateInfo` in the OpInfo's `skips` or `decorators` tuple
 - [ ] **Use largeTensorTest** - PR manually checks free memory before large-tensor tests instead of using `@largeTensorTest("4 GB")` decorator from `common_device_type.py`
 - [ ] **Descriptive test names** - Test method names describe what is being tested
 
