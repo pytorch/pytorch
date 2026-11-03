@@ -13,22 +13,27 @@ Four kinds of sample, each a JSON file under DIR/samples:
               every head of a pr_ sample's PR with a non-flaky test failure in a
               job that runs TD; the truth is those failures. A failure is flaky
               by Dr.CI's signals, with hindsight (see flaky_flags).
-  rev_<sha>   a commit that landed and was auto-reverted between --start and
-              --end because it broke a test on main, where every test runs.
-              The truth is the test files of the reverting signal, in every
-              config they failed in on main between landing and the revert.
+  rev_<sha>   a commit the autorevert bot reverted between --start and --end
+              because it broke a test on main, where every test runs. The
+              truth is the test files of the reverting signal that failed on
+              main between landing and the revert, in every config they
+              failed in there.
   neu_<sha>   an ordinary main commit from the 25 days before --end, with no
               truth, used only to measure how much a selector runs on typical
-              traffic. Reverts, relands and reverted commits are left out.
+              traffic. Reverted commits and those whose title starts with
+              Revert or Reland are left out.
 
 Each truth file's `truth_jobs` lists the [workflow, job] it failed in.
+Candidates are what select_tests would offer: TESTS at the base plus the test
+files the sample adds, and PR samples carry the raw PR body.
 Samples are only written once, so rebuilding into an existing DIR keeps them.
 PR and head samples carry the PR's title and body as of the build, which may
 have been edited after the failure; revert and neutral samples carry the
 landed commit message.
 
-A PR failure is attributed to the PR only if the same test did not fail on
-main within four days or on another author's PR, before the PR landed. PR
+A PR failure is attributed to the PR only if, before the PR landed, the same
+test did not fail on another author's PR, or on main within four days of the
+failure or of the PR's merge base. PR
 truths that reproduced (same test failing in two build environments, or on
 two heads of the PR) are kept in `truth_strong`. A one-off is not necessarily a flake:
 often only one environment runs the test, or the author fixed it in the next
@@ -49,9 +54,9 @@ import subprocess
 import time
 from pathlib import Path
 
-from tools.testing.llm_td.eval import REPO
+from tools.testing.llm_td.eval import REPO, write_json
 from tools.testing.llm_td.eval.clickhouse import query
-from tools.testing.llm_td.eval.score import job_runs_td, td_workflow
+from tools.testing.llm_td.eval.score import job_runs_td
 from tools.testing.llm_td.select_tests import changed_files, diffstat_and_diff
 
 
@@ -110,11 +115,6 @@ def is_main(branch: str) -> bool:
     return branch == "main" or branch.startswith("trunk/")
 
 
-def truth_workflow(workflow: str) -> bool:
-    """Whether run_test.py runs TD under `workflow`, which is not an unstable one (e.g. td-holdout-unstable)."""
-    return td_workflow(workflow) and "unstable" not in workflow
-
-
 def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
     """Every failing (job, test) in pytorch/pytorch CI, two days per query to stay under ClickHouse limits."""
     rows: list[dict] = []
@@ -163,19 +163,20 @@ def pr_authors(prs: list[int]) -> dict[int, str]:
 def pr_caused_failures(
     rows: list[dict], start: dt.date, end: dt.date, landed: dict[int, dt.datetime]
 ) -> tuple[list[dict], dict]:
-    """Split failures into main and PR runs and keep the PR failures in [start, end) attributable to the PR.
+    """Split failures into main and PR runs and keep the PR failures in [start, end), in TD jobs, attributable to the PR.
 
     `rows` may extend past the window on both sides, so failures near its edges
     are still checked against main and other authors. Failures after the PR
     landed (`landed`, see landed_times) may be its own breakage and are not
-    held against it."""
+    held against it. Failures on branches with no known PR count against PR
+    failures here like main's, but only main's are returned."""
     sha2pr = pr_of_shas(sorted({r["sha"] for r in rows if not is_main(r["br"])}))
-    main = collections.defaultdict(list)
+    main, unmapped = collections.defaultdict(list), collections.defaultdict(list)
     pr_rows: list[dict] = []
     for r in rows:
         k = (r["tf"], r["classname"], r["test"])
         if is_main(r["br"]) or r["sha"] not in sha2pr:
-            main[k].append(ts(r["t"]))
+            (main if is_main(r["br"]) else unmapped)[k].append(ts(r["t"]))
         else:
             pr_rows.append({**r, "pr": sha2pr[r["sha"]]})
     author = pr_authors(sorted({r["pr"] for r in pr_rows}))
@@ -187,17 +188,18 @@ def pr_caused_failures(
     for r in pr_rows:
         k, t, cutoff = (r["tf"], r["classname"], r["test"]), ts(r["t"]), landed.get(r["pr"], NEVER)  # fmt: skip
         others = {who for wt, who in authors[k] if wt < cutoff} - {author.get(r["pr"], r["pr"])}  # fmt: skip
-        if lo <= t < hi and truth_workflow(r["wf"]) and not others and not any(abs(t - m) < MAIN_WINDOW and m < cutoff for m in main[k]):  # fmt: skip
+        if lo <= t < hi and job_runs_td(r["job"], r["wf"]) and not others and not any(abs(t - m) < MAIN_WINDOW and m < cutoff for m in main.get(k, []) + unmapped.get(k, [])):  # fmt: skip
             keep.append(r)
     return keep, main
 
 
-def candidates_at(sha: str) -> list[str]:
-    """The test files run_test.py would consider at `sha`: discover_tests.TESTS, without importing that tree.
+def candidates_at(base: str, head: str | None = None) -> list[str]:
+    """The candidates select_tests offers for `head`: discover_tests.TESTS at `base`, without importing that tree,
+    plus the test files `head` adds that `base`'s BLOCKLISTED_PATTERNS do not exclude.
 
     TESTS's arguments are list literals, or names of module-level lists such
     as BLOCKLISTED_PATTERNS (older trees inline it)."""
-    tree = ast.parse(git("show", f"{sha}:tools/testing/discover_tests.py"))
+    tree = ast.parse(git("show", f"{base}:tools/testing/discover_tests.py"))
     assigned = {
         n.targets[0].id: n.value
         for n in tree.body
@@ -208,13 +210,23 @@ def candidates_at(sha: str) -> list[str]:
         v = assigned[k.value.id] if isinstance(k.value, ast.Name) else k.value
         if isinstance(v, ast.List):
             kw[k.arg] = [e.value for e in v.elts if isinstance(e, ast.Constant)]
+    patterns = tuple(kw.get("blocklisted_patterns", []))
     out = set(kw.get("extra_tests", []))
-    for f in git("ls-tree", "-r", "--name-only", sha, "test/").splitlines():
+    for f in git("ls-tree", "-r", "--name-only", base, "test/").splitlines():
         t = f.removeprefix("test/").removesuffix(".py")
         if f.rsplit("/", 1)[-1].startswith("test_") and f.endswith(".py"):
-            if not any(
-                t.startswith(p) for p in kw.get("blocklisted_patterns", [])
-            ) and t not in kw.get("blocklisted_tests", []):
+            if not t.startswith(patterns) and t not in kw.get("blocklisted_tests", []):
+                out.add(t)
+    if head is not None:
+        # As select_tests.select does.
+        added = git(
+            "diff", "--name-only", "--no-renames", "--diff-filter=A", base, head
+        )
+        for f in added.splitlines():
+            t = f.removeprefix("test/").removesuffix(".py")
+            if re.match(r"test/([\w/]+/)?test_\w+\.py$", f) and not t.startswith(
+                patterns
+            ):
                 out.add(t)
     return sorted(out)
 
@@ -227,14 +239,14 @@ def strip_trailers(msg: str) -> str:
 
 
 def pr_text(pr: int, tries: int = 4) -> tuple[str, str]:
-    """The PR's title and body; raises CalledProcessError if gh keeps failing (e.g. rate limited)."""
+    """The PR's title and raw body, as select_tests reads them from the event; raises CalledProcessError if gh keeps failing (e.g. rate limited)."""
     cmd = ["gh", "api", f"repos/pytorch/pytorch/pulls/{pr}", "--jq", "{title:.title, body:.body}"]  # fmt: skip
     for i in range(tries):
         p = subprocess.run(cmd, capture_output=True, text=True)
         if p.returncode == 0:
             try:
                 d = json.loads(p.stdout)
-                return d["title"], re.sub(r"(?s)Stack from \[ghstack\].*?(\n\n|$)", "", d["body"] or "")  # fmt: skip
+                return d["title"], d["body"] or ""
             except (ValueError, KeyError, TypeError):
                 pass
         if i + 1 == tries:
@@ -250,12 +262,12 @@ def write_sample(
     if path.exists():
         return
     diffstat, diff = diffstat_and_diff(base, sha)
-    path.write_text(json.dumps({
+    write_json(path, {
         "id": sid, "kind": kind, "sha": sha, "base": base, "title": title, "body": body,
         "diff": diff, "diffstat": diffstat, "changed_files": changed_files(base, sha),
-        "candidates": candidates_at(sha),
+        "candidates": candidates_at(base, sha),
         **extra,
-    }))  # fmt: skip
+    })  # fmt: skip
 
 
 def pr_samples(
@@ -266,9 +278,6 @@ def pr_samples(
     start: dt.date,
     landed: dict[int, dt.datetime],
 ) -> None:
-    main_by_file = collections.defaultdict(list)
-    for (tf, _, _), times in main.items():
-        main_by_file[tf] += times
     envs, heads = collections.defaultdict(set), collections.defaultdict(set)
     first: dict[int, dict] = {}
     for r in keep:
@@ -277,11 +286,11 @@ def pr_samples(
         heads[k].add(r["sha"])
         if r["pr"] not in first or r["t"] < first[r["pr"]]["t"]:
             first[r["pr"]] = r
-    reproduced = {(k[0], k[1]) for k in envs if len(envs[k]) >= 2 or len(heads[k]) >= 2}
-    by = collections.defaultdict(lambda: collections.defaultdict(set))
+    reproduced = {k for k in envs if len(envs[k]) >= 2 or len(heads[k]) >= 2}
+    first_rows = collections.defaultdict(list)
     for r in keep:
         if r["sha"] == first[r["pr"]]["sha"]:
-            by[r["pr"]][r["tf"]].add((r["wf"], r["job"]))
+            first_rows[r["pr"]].append(r)
     fetch(sorted({f["sha"] for f in first.values()}))
 
     def go(pr: int) -> None:
@@ -295,15 +304,24 @@ def pr_samples(
         if base_t - MAIN_WINDOW < ts(f"{start - MAIN_LOOKBACK} 00:00:00"):
             print(f"skipping PR {pr}: merge base before the loaded main failures", flush=True)  # fmt: skip
             return
-        # A file broken on main around the merge base, before this PR landed, is not its fault.
+        # A test broken on main around the merge base, before this PR landed, is not its fault.
         cutoff = landed.get(pr, NEVER)
-        truth = sorted(tf for tf in by[pr] if not any(abs(base_t - m) < MAIN_WINDOW and m < cutoff for m in main_by_file.get(tf, [])))  # fmt: skip
+        by, strong = collections.defaultdict(set), set()
+        for r in first_rows[pr]:
+            k = (r["tf"], r["classname"], r["test"])
+            if not any(
+                abs(base_t - m) < MAIN_WINDOW and m < cutoff for m in main.get(k, [])
+            ):
+                by[r["tf"]].add((r["wf"], r["job"]))
+                if (pr, *k) in reproduced:
+                    strong.add(r["tf"])
+        truth = sorted(by)
         if truth:
             try:
                 title, body = pr_text(pr)
                 write_sample(out, f"pr_{pr}", "pr", sha, base, title, body, pr=pr, date=first[pr]["t"][:19], truth=truth,
-                             truth_strong=[tf for tf in truth if (pr, tf) in reproduced],
-                             truth_jobs={tf: sorted(by[pr][tf]) for tf in truth})  # fmt: skip
+                             truth_strong=[tf for tf in truth if tf in strong],
+                             truth_jobs={tf: sorted(by[tf]) for tf in truth})  # fmt: skip
             except subprocess.CalledProcessError as e:
                 print(f"skipping PR {pr}: {e}", flush=True)
 
@@ -333,11 +351,12 @@ def flaky_flags(rows: list[dict], start: dt.date, end: dt.date) -> list[dict]:
     on main, before the PR landed and within FLAKY_WINDOW. A PR's own breakage
     that landed and failed on main or on PRs based on it until its revert does
     not make it flaky."""
-    w = FLAKY_WINDOW
-    others = pull_failures(start - w, end + w)
+    # `rows` start at start - FLAKY_WINDOW, so look back a full window from there.
+    w, lo = FLAKY_WINDOW, start - 2 * FLAKY_WINDOW
+    others = pull_failures(lo, end + w)
     sha2pr = pr_of_shas(sorted({r["sha"] for r in others if not is_main(r["br"])}))
     author = pr_authors(sorted(set(sha2pr.values()) | {r["pr"] for r in rows}))
-    landed = landed_times(start - w)
+    landed = landed_times(lo)
     seen = collections.defaultdict(list)
     for r in others:
         pr = sha2pr.get(r["sha"])
@@ -346,7 +365,7 @@ def flaky_flags(rows: list[dict], start: dt.date, end: dt.date) -> list[dict]:
     disabled = collections.defaultdict(list)
     sql = f"""
         SELECT toString(day) d, name FROM misc.disabled_tests_historical
-        WHERE day >= '{start - w}' AND day < '{end + w}'"""
+        WHERE day >= '{lo}' AND day < '{end + w}'"""
     for d in query(sql):
         # "test_foo (__main__.TestBar)"
         test, _, cls = d["name"].removesuffix(")").partition(" (")
@@ -375,7 +394,7 @@ def head_failures(prs: list[int], start: dt.date, end: dt.date) -> list[dict]:
             SELECT id, head_sha, workflow_name, name, run_attempt, conclusion FROM default.workflow_job FINAL
             WHERE head_sha IN ({chunk}) AND repository_full_name = 'pytorch/pytorch'""")
     green = {(j["head_sha"], j["workflow_name"], j["name"], j["run_attempt"]) for j in jobs if j["conclusion"] == "success"}
-    by_id = {j["id"]: j for j in jobs if truth_workflow(j["workflow_name"]) and job_runs_td(j["name"], j["workflow_name"]) and not any(s in j["name"] for s in SKIP_JOBS)}
+    by_id = {j["id"]: j for j in jobs if job_runs_td(j["name"], j["workflow_name"]) and not any(s in j["name"] for s in SKIP_JOBS)}
     ids, rows = [str(i) for i in by_id], []
     for i in range(0, len(ids), 2000):
         sql = f"""
@@ -446,12 +465,16 @@ def revert_truth_jobs(
 
 
 def revert_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
-    rows = query(f"""
+    sql = f"""
         SELECT toString(ts) reverted_at, commit_sha, source_signal_keys FROM misc.autorevert_events_v2
         WHERE repo = 'pytorch/pytorch' AND action = 'revert' AND dry_run = 0
           AND ts >= toDateTime('{start}') AND ts < toDateTime('{end}')
-          AND arrayExists(k -> position(k, '::') > 0, source_signal_keys)""")
-    fetch(sorted({r["commit_sha"] for r in rows}))
+          AND arrayExists(k -> position(k, '::') > 0, source_signal_keys)
+        ORDER BY ts"""
+    rows: dict[str, dict] = {}
+    for r in query(sql):
+        rows.setdefault(r["commit_sha"], r)
+    fetch(sorted(rows))
 
     def go(r: dict) -> None:
         sha = r["commit_sha"]
@@ -466,12 +489,12 @@ def revert_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
             truth_jobs = revert_truth_jobs(signal, commit_time(sha), r["reverted_at"])
             title, _, body = git("log", "-1", "--format=%B", sha).partition("\n")
             write_sample(out, f"rev_{sha[:12]}", "revert", sha, sha + "^", title, strip_trailers(body), date=r["reverted_at"],
-                         truth=sorted(signal), truth_jobs=truth_jobs)  # fmt: skip
+                         truth=sorted(truth_jobs), truth_jobs=truth_jobs)  # fmt: skip
         except (subprocess.CalledProcessError, RuntimeError) as e:
             print(f"skipping revert {sha}: {e}", flush=True)
 
     with cf.ThreadPoolExecutor(jobs) as ex:
-        list(ex.map(go, rows))
+        list(ex.map(go, rows.values()))
 
 
 def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
@@ -507,18 +530,11 @@ def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
     for sha in random.Random(0).sample(shas, min(n, len(shas))):
         if sha in reverted or sha[:12] in reverted_ids:
             continue
-        msg = git("log", "-1", "--format=%B", sha)
-        title, _, body = msg.partition("\n")
-        write_sample(
-            out,
-            f"neu_{sha[:12]}",
-            "neutral",
-            sha,
-            sha + "^",
-            title,
-            strip_trailers(body),
-            truth=[],
-        )
+        title, _, body = git("log", "-1", "--format=%B", sha).partition("\n")
+        try:
+            write_sample(out, f"neu_{sha[:12]}", "neutral", sha, sha + "^", title, strip_trailers(body), truth=[])  # fmt: skip
+        except subprocess.CalledProcessError as e:
+            print(f"skipping neutral {sha}: {e}", flush=True)
 
 
 def main() -> None:

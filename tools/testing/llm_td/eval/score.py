@@ -12,8 +12,13 @@ test files, the run-all rules), `final-hm` keeps only high/medium-confidence
 picks of a well-formed answer and otherwise falls back as `final` does, and
 `final+tdN` hedges `final` with TD's files that fit in N% of each config's
 test time (N defaults to 100*LLM_TD_HEDGE). `final+tdN` falls back
-to TD's own cut when the model call failed or its answer is malformed, as
-run_test.py does under enforcement (see the PR above this one in the stack).
+to TD's own cut when the model call failed or its answer is malformed, as CI
+does: select_tests never enforces such a selection, so
+selection.apply_selection keeps TD's split. Under enforcement
+Selection.split also always runs the files that already failed on the PR;
+the samples carry no such signal, so the hedge here has no `always` set,
+which understates both what enforcement runs and what it catches on a PR's
+later pushes.
 The tag `td` scores the replayed in-repo TD (see td_replay.py) under the
 single policy `td25`, its CI cut of the top 25% per config, and ignores
 --policies.
@@ -25,9 +30,9 @@ head; a sample whose head is not in this clone is scored without them and
 counted on stderr too.
 
 run_test.py applies TD, and so the selection, only in the pull, trunk and
-ROCm workflows, and not on macOS, in xpu or onnx builds or under NO_TD
-(test/run_test.py's --enable-td default; _linux-test.yml sets NO_TD from
-force-no-td). Other jobs (inductor's unit tests, periodic, slow, ...) run
+ROCm workflows, and not on macOS, in xpu or onnx builds, under NO_TD or with
+TESTS_TO_INCLUDE (test/run_test.py's --enable-td default and main(); see
+td_job). Other jobs (inductor's unit tests, periodic, slow, ...) run
 every test under every policy, so their failures are left out
 of the truth, and configs no TD job runs are left out of the cost share
 (the report's dollar model prices the inductor ones separately). Jobs are
@@ -64,6 +69,7 @@ from tools.testing.llm_td.select_tests import git_grep
 from tools.testing.llm_td.selection import (
     LLM_TD_HEDGE,
     needs_run_all,
+    normalize_test_name,
     parse_model_output,
     Selection,
 )
@@ -127,9 +133,22 @@ def td_workflow(name: str) -> bool:
     return name in ("trunk", "pull") or name.startswith(("rocm-", "periodic-rocm-"))
 
 
-def td_job(uses: str, build_environment: str, force_no_td: object) -> bool:
-    """The rest of run_test.py's --enable-td check: not IS_MACOS, no xpu/onnx BUILD_ENVIRONMENT, no NO_TD."""
-    return uses != "_mac-test.yml" and not re.search("xpu|onnx", build_environment) and force_no_td not in (True, "true")  # fmt: skip
+def td_job(
+    uses: str, build_environment: str, force_no_td: object, tests_to_include: str
+) -> bool:
+    """The job-level rest of run_test.py's TD check: not IS_MACOS, no xpu/onnx BUILD_ENVIRONMENT, no NO_TD from force-no-td, no TESTS_TO_INCLUDE.
+
+    A tests-to-include expression (pull's and trunk's workflow_dispatch input)
+    is empty on PRs. Not modelled, as no workflow file records them: NO_TD from
+    the PR's ci-no-td label, the PR-number check (every sample is scored as a
+    PR push), and TD switching off when it has no prioritizations."""
+    include = tests_to_include.strip()
+    return (
+        uses != "_mac-test.yml"
+        and not re.search("xpu|onnx", build_environment)
+        and force_no_td not in (True, "true")
+        and (not include or include.startswith("${{"))
+    )
 
 
 @functools.cache
@@ -160,7 +179,8 @@ def ci_jobs(
             if uses in wfs and not uses.startswith("_"):
                 out |= {(f"{name} / {n}", c, ok) for n, c, ok in test_jobs(uses)}
             elif "test" in uses:
-                ok = td_job(uses, arg(key, "build-environment"), (job.get("with") or {}).get("force-no-td"))  # fmt: skip
+                w = job.get("with") or {}
+                ok = td_job(uses, arg(key, "build-environment"), w.get("force-no-td"), str(w.get("tests-to-include", "")))  # fmt: skip
                 out |= {(name, c, ok) for c in MATRIX_CONFIG.findall(arg(key, "test-matrix"))}  # fmt: skip
         return out
 
@@ -205,20 +225,24 @@ def truth_jobs(s: dict, f: str) -> list[tuple[str | None, str]]:
     return [(None, j) if isinstance(j, str) else (j[0], j[1]) for j in s.get("truth_jobs", {}).get(f, [])]  # fmt: skip
 
 
-def truth_pairs(s: dict, strong: bool) -> list[tuple[str, str]]:
-    """The (file, config) failures of `s` in jobs that run TD.
-
-    A file with no recorded job counts as failing in `default`."""
+def truth_files(s: dict, strong: bool) -> list[str]:
+    """The truth files of `s` that are candidates, the reproduced ones only for a PR when `strong`."""
     truth: list[str] = s["truth"]
     if strong and s["kind"] == "pr":
         truth = s.get("truth_strong", truth)
     cands = set(s["candidates"])
+    return [f for f in truth if f in cands]
+
+
+def truth_pairs(s: dict, strong: bool) -> list[tuple[str, str]]:
+    """The (file, config) failures of `s` in jobs that run TD.
+
+    A file with no recorded job counts as failing in `default`."""
     pairs = set()
-    for f in truth:
-        if f in cands:
-            jobs = truth_jobs(s, f)
-            td_jobs = [j for wf, j in jobs if job_runs_td(j, wf)] if jobs else ["(default)"]  # fmt: skip
-            pairs |= {(f, config_of(j)) for j in td_jobs}
+    for f in truth_files(s, strong):
+        jobs = truth_jobs(s, f)
+        td_jobs = [j for wf, j in jobs if job_runs_td(j, wf)] if jobs else ["(default)"]  # fmt: skip
+        pairs |= {(f, config_of(j)) for j in td_jobs}
     return sorted(pairs)
 
 
@@ -231,10 +255,11 @@ def hedge(
 ) -> set[str]:
     """TD's positive-score files that fit in `share` of `seconds`' total, filled greedily in TD's order.
 
-    As in run_test.py's split (see the PR above), files the selection already
-    covers cost nothing, and a file that does not fit is skipped while smaller
-    ones after it may still fit. Files with no recorded time are skipped rather
-    than added for free."""
+    As in selection.Selection.split, files the selection already covers cost
+    nothing, and a file that does not fit is skipped while smaller ones after
+    it may still fit. Files with no recorded time are skipped rather than added
+    for free. Unlike split it takes any share and has no `always` files (see
+    the module docstring)."""
     budget = share * sum(seconds.values())
     out = set()
     for f in scored:
@@ -299,7 +324,7 @@ def policy(
         except ValueError:
             failed = True
         if failed and not needs_run_all(s["changed_files"]):
-            # As run_test.py does under enforcement, see the PR above.
+            # Not enforced, so apply_selection keeps TD's split.
             return policy("td25", s, r, td, seconds)
         sel = Selection.from_model_output(out, cands, s["changed_files"], grep)
         if sel.run_all:
@@ -318,10 +343,11 @@ def policy(
         return Choice(sel, per_config, hedge(sel, td["scored"], total, share, ""))
     if name == "final-hm":
         # A malformed answer is left for from_model_output to fall back on.
+        # Unmatched names go too, as a list of only those would be malformed.
         with contextlib.suppress(ValueError):
             parse_model_output(out, cands)
             if isinstance(out, dict):
-                out = {**out, "tests": [t for t in out["tests"] if t.get("confidence") in ("high", "medium")]}  # fmt: skip
+                out = {**out, "tests": [t for t in out["tests"] if t.get("confidence") in ("high", "medium") and normalize_test_name(t["file"], cands)]}  # fmt: skip
     elif name != "final":
         raise ValueError(f"unknown policy {name!r}")
     return Choice(Selection.from_model_output(out, cands, s["changed_files"], grep))
@@ -377,11 +403,11 @@ def score(
         dropped.update(missing)
         if missing:
             continue
-        for tag, (s, r, td) in loaded.items():
-            if any(wf is None for f in s["truth"] for wf, _ in truth_jobs(s, f)):
-                no_workflow.add(sid)
-            pairs = truth_pairs(s, strong)
-            cands = set(s["candidates"])
+        s = next(iter(loaded.values()))[0]
+        if any(wf is None for f in truth_files(s, strong) for wf, _ in truth_jobs(s, f)):  # fmt: skip
+            no_workflow.add(sid)
+        pairs, cands = truth_pairs(s, strong), set(s["candidates"])
+        for tag, (_, r, td) in loaded.items():
             for pol in ["td25"] if tag == "td" else policies:
                 choice = policy(pol, s, r, td, seconds, grep_head(s, sid, ungrepped))
                 if choice is None:
