@@ -12,6 +12,9 @@ test files, the run-all rules), `final-hm` keeps only high/medium-confidence
 picks, and `final+tdN` hedges `final` with TD's files that fit in N% of each
 config's test time (N defaults to LLM_TD_HEDGE). The tag `td` scores the
 replayed in-repo TD (see td_replay.py) at its CI cut of the top 25% per config.
+The inductor workflow has no TD and this stack does not wire the selection
+into it, so failures in its jobs count as caught by every policy and its
+configs are left out of the cost share (dollars.py models them separately).
 CI applies the TD cut and the hedge per job over that job's own test list;
 this models a job as a config of test-times.json, and for a failure in a
 config missing from test-times.json falls back to a cut over all candidates.
@@ -37,6 +40,8 @@ from tools.testing.llm_td.selection import LLM_TD_HEDGE, Selection
 GPU_ENV = re.compile(r"cuda|rocm|sm\d+|xpu|h100|b200|a100|gpu", re.IGNORECASE)
 CONFIDENCE = {"high": 0, "medium": 1, "low": 2}
 HEDGE = re.compile(r"final\+td(\d+(?:\.\d+)?)?")
+# Jobs of inductor.yml's unit-test (inductor-unittest.yml), which run every test.
+RUNS_EVERYTHING = re.compile(r"unit-test / ")
 
 # config -> file -> [cpu, gpu] seconds
 Seconds = dict[str, dict[str, list[float]]]
@@ -79,6 +84,20 @@ def test_seconds(path: Path) -> Seconds:
             for f, s in files.items():
                 out[c][f][gpu] += s
     return {c: dict(files) for c, files in out.items()}
+
+
+def is_inductor(config: str) -> bool:
+    return config.startswith("inductor")
+
+
+def runs_everything(s: dict) -> set[tuple[str, str]]:
+    """(file, config) pairs that some job running every test failed on."""
+    return {
+        (f, config_of(j))
+        for f, jobs in s.get("truth_jobs", {}).items()
+        for j in jobs
+        if RUNS_EVERYTHING.match(j)
+    }
 
 
 def truth_pairs(s: dict, strong: bool) -> list[tuple[str, str]]:
@@ -214,13 +233,16 @@ def score(
         if tag != "td" and r is None:
             continue
         pairs = truth_pairs(s, strong)
+        always = runs_everything(s)
         cands = set(s["candidates"])
         for pol in policies:
             choice = policy(pol, s, r, td, seconds)
             if choice is None:
                 continue
-            hit = [choice.covers(f, c) for f, c in pairs]
-            cpu, gpu = cost_fraction(choice, cands, seconds)
+            hit = [(f, c) in always or choice.covers(f, c) for f, c in pairs]
+            cpu, gpu = cost_fraction(
+                choice, cands, seconds, lambda c: not is_inductor(c)
+            )
             rows.append({
                 "tag": tag, "policy": pol, "id": sid, "kind": s["kind"], "pairs": len(pairs), "hit": sum(hit),
                 "cpu": cpu, "gpu": gpu, "run_all": choice.sel.run_all, "files": len(choice.files()),
