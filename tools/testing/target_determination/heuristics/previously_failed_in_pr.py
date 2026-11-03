@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,9 @@ from tools.testing.test_run import TestRun
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+# The key of td_results.json under which do_target_determination_for_s3.py
+# stores get_all_previous_failures(), so that they arrive with TD's ranking.
+PREVIOUS_FAILURES_KEY = "previous_failures"
 
 
 class PreviouslyFailedInPR(HeuristicInterface):
@@ -28,10 +32,23 @@ class PreviouslyFailedInPR(HeuristicInterface):
         super().__init__(**kwargs)
 
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
-        critical_tests = get_previous_failures() | read_additional_test_failures_file()
+        critical_tests = get_all_previous_failures()
+        if critical_tests is None:
+            raise RuntimeError("could not read the previous failures")
         return TestPrioritizations(
             tests, {TestRun(test): 1 for test in critical_tests if test in tests}
         )
+
+
+def get_all_previous_failures() -> set[str] | None:
+    """The test files that already failed on this PR, without the entries that
+    are not strings, or None if a failure file cannot be read."""
+    try:
+        failed = get_previous_failures() | read_additional_test_failures_file()
+    except (OSError, ValueError, TypeError, AttributeError, RecursionError) as e:
+        print(f"Ignoring the previous failures: {e!r}", file=sys.stderr)
+        return None
+    return {f for f in failed if isinstance(f, str)}
 
 
 def get_previous_failures() -> set[str]:

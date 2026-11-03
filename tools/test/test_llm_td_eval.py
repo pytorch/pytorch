@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import io
 import json
+import random
 import re
 import sys
 import tempfile
@@ -136,15 +138,50 @@ class TestRunEval(unittest.TestCase):
     def test_timeout_is_final(self) -> None:
         from subprocess import TimeoutExpired
 
+        from tools.testing.llm_td.eval.run_eval import TIMED_OUT
+
         r, query, _ = self.run_one([TimeoutExpired("claude", 1)])
-        self.assertEqual((r["out"], r["transient"], query.call_count), (None, False, 1))  # fmt: skip
+        self.assertEqual((r["out"], r["error"], r["transient"], query.call_count), (None, TIMED_OUT, False, 1))  # fmt: skip
+        # A timeout the CLI reports is as final as one query_model raises.
+        r, query, _ = self.run_one([{"type": "result", "is_error": True, "result": "Request timed out"}])  # fmt: skip
+        self.assertEqual((r["transient"], r["attempts"], query.call_count), (False, 1, 1))  # fmt: skip
+
+    def test_transient(self) -> None:
+        for text in ("API Error: 429 Too Many Requests", '{"type":"rate_limit_error"}', "ThrottlingException", "503"):  # fmt: skip
+            r, query, _ = self.run_one([{"type": "result", "is_error": True, "result": text}, {"type": "result", "structured_output": {"tests": []}}])  # fmt: skip
+            self.assertEqual((r["error"], r["attempts"]), (None, 2), text)
 
     def test_gives_up(self) -> None:
         r, query, sleep = self.run_one(
             [{"type": "result", "is_error": True, "result": "529 overloaded"}] * 4
         )
-        self.assertTrue(r["transient"])
+        self.assertEqual((r["out"], r["error"], r["transient"], r["attempts"]), (None, "529 overloaded", True, 4))  # fmt: skip
         self.assertEqual((query.call_count, sleep.call_count), (4, 3))
+
+    def test_main_writes_exhausted_and_resolves_data(self) -> None:
+        from tools.testing.llm_td.eval import run_eval
+
+        sample = {"id": "a", "sha": "f" * 40, "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a"], "changed_files": ["torch/foo.py"]}  # fmt: skip
+        with tempfile.TemporaryDirectory() as d:
+            data = write_data(d, {"samples/a.json": sample, "test-times.json": {}})
+            (data / "ids.txt").write_text("a")
+            argv = ["run_eval", "--data", data.name, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt"), "--jobs", "1", "--agentic"]  # fmt: skip
+            # --data is relative to this cwd.
+            with (
+                mock.patch("os.getcwd", return_value=str(data.parent)),
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(run_eval, "checkout", return_value="wt") as co,
+                mock.patch.object(run_eval, "query_model", return_value={"type": "result", "is_error": True, "result": "529"}),
+                mock.patch.object(run_eval.time, "sleep"),
+                mock.patch("sys.stdout", io.StringIO()),
+            ):  # fmt: skip
+                run_eval.main()
+            root = co.call_args.args[0]
+            self.assertEqual(root, data.resolve() / "worktrees/t")
+            r = json.loads((data / "results/t/a.json").read_text())
+        self.assertEqual(
+            (r["error"], r["transient"], r["agentic"]), ("529", True, True)
+        )
 
     def test_main_refuses_other_settings(self) -> None:
         from tools.testing.llm_td.eval import run_eval
@@ -233,7 +270,7 @@ class TestScore(unittest.TestCase):
                     uses: ./.github/workflows/_linux-test.yml
                     with:
                       test-matrix: |
-                        { include: [{ config: "dynamo_cpython", shard: 1 }] }
+                        { include: [{ config: "dynamo_cpython", shard: 1 }, { config: "dynamo_cpython_313", shard: 1 }] }
             """,
             "inductor.yml": """
                 name: inductor
@@ -355,6 +392,7 @@ class TestScore(unittest.TestCase):
                 ("pull", "linux-jammy-py3-clang12-onnx", "default"),
                 # test.sh exports NO_TD=1 for this config.
                 ("pull", "dynamo-cpython-test", "dynamo_cpython"),
+                ("pull", "dynamo-cpython-test", "dynamo_cpython_313"),
                 (
                     "trunk",
                     "linux-jammy-aarch64-cuda13.2-py3.12-gcc13-sm100",
@@ -414,7 +452,28 @@ class TestScore(unittest.TestCase):
         funcs = re.findall(r"^(\w+)\(\) \{\n(?:(?!^\}).*\n)*?\s*export NO_TD=1", text, re.MULTILINE)  # fmt: skip
         dispatch = dict(re.findall(r'"\$\{TEST_CONFIG\}" == \*(\w+)\* \]\]; then\n\s*(\w+)', text))  # fmt: skip
         self.assertEqual(funcs, ["test_dynamo_cpython"])
-        self.assertEqual({c for c, f in dispatch.items() if f in funcs}, score.NO_TD_CONFIGS)  # fmt: skip
+        self.assertEqual({c for c, f in dispatch.items() if f in funcs}, set(score.NO_TD_CONFIGS))  # fmt: skip
+
+    def test_td_check_matches_run_test(self) -> None:
+        # td_workflow, td_job and NO_TD_CONFIGS model this check; update them with it.
+        tree = ast.parse((REPO_ROOT / "test/run_test.py").read_text())
+        (default,) = [
+            k.value
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+            and n.args
+            and isinstance(n.args[0], ast.Constant)
+            and n.args[0].value == "--enable-td"  # fmt: skip
+            for k in n.keywords
+            if k.arg == "default"
+        ]
+        self.assertEqual(
+            ast.unparse(default),
+            "IS_CI and get_pr_number() is not None and (not strtobool(os.environ.get('NO_TD', 'False'))) and (not IS_MACOS) and ('xpu' not in BUILD_ENVIRONMENT) and ('onnx' not in BUILD_ENVIRONMENT) and (GITHUB_WORKFLOW in ('trunk', 'pull') or GITHUB_WORKFLOW.startswith(('rocm-', 'periodic-rocm-')))",
+        )
+        (main,) = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"]  # fmt: skip
+        (tti,) = [n for n in main.body if isinstance(n, ast.If) and ast.unparse(n.test) == "tests_to_include_env"]  # fmt: skip
+        self.assertEqual(ast.unparse(tti.body[-1]), "options.enable_td = False")
 
     def test_unasked(self) -> None:
         td = {"scored": ["test_a"], "top25": ["test_e"], "top25_cfg": {"default": ["test_a"]}}  # fmt: skip
@@ -439,7 +498,7 @@ class TestScore(unittest.TestCase):
             patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
         ):
             data = write_data(d, files)
-            rows = score.score(data, ["a"], ["m"], ["model"], True, data / "samples", data / "td")  # fmt: skip
+            rows = score.score(data, ["a"], ["m"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
         self.assertEqual([(x["run_all"], x["cost_usd"], x["error"]) for x in rows], [(True, 0.0, False)])  # fmt: skip
 
     def test_hedge(self) -> None:
@@ -469,9 +528,16 @@ class TestScore(unittest.TestCase):
         )
         self.assertTrue(choice.covers("test_a", "default"))
         self.assertFalse(choice.covers("test_a", "slow"))
-        # Unknown configs hedge over every config's time: 45% of 450s skips test_a (300s).
-        self.assertEqual(choice.other, {"test_b", "test_c"})
-        self.assertTrue(choice.covers("test_b", "unknown"))
+        # With no fallback job times, unknown configs hedge nothing and keep TD's cut.
+        self.assertEqual(choice.other, set())
+        # As in run_test.py, an unknown config is hedged over the candidates in default/<config>, else default/default.
+        fallback = {"default": {"test_a": 30.0, "test_b": 40.0, "test_d": 30.0, "test_x": 1.0}, "rare": {"test_b": 1.0, "test_c": 9.0}}  # fmt: skip
+        choice = policy("final+td45", SAMPLE, NOTHING, td, SECONDS, None, fallback)
+        if choice is None:
+            raise AssertionError("final+td45 chose nothing")
+        self.assertEqual((choice.other, choice.per_config["rare"]), ({"test_a"}, {"test_b"}))  # fmt: skip
+        self.assertEqual(choice.per_config["default"], {"test_a", "test_c"})
+        self.assertTrue(choice.covers("test_a", "unknown"))
         # Files the selection already covers cost no budget.
         r = {"out": {"tests": [{"file": "test_a"}]}}
         self.assertEqual(
@@ -482,6 +548,21 @@ class TestScore(unittest.TestCase):
         for bad in ("final+tdx", "final+td5x", "nonsense"):
             with self.assertRaisesRegex(ValueError, "unknown policy"):
                 policy(bad, SAMPLE, NOTHING, td, SECONDS)
+
+    def test_hedge_matches_split(self) -> None:
+        # hedge is Selection.split for any share; at LLM_TD_HEDGE they must agree.
+        rng = random.Random(0)
+        files = [f"test_{i}" for i in range(8)]
+        for _ in range(500):
+            scored = rng.sample(files, rng.randint(0, 8))
+            seconds = {f: float(rng.choice([0, 1, 5, 20, 60])) for f in files if rng.random() < 0.7}  # fmt: skip
+            untimed = [f for f in files if f not in seconds and rng.random() < 0.5]
+            job = [*seconds, *untimed]
+            sel = Selection(set(rng.sample(files, rng.randint(0, 2))), candidates=set(files))  # fmt: skip
+            ranked = [TestRun(f) for f in scored if f in job] + [TestRun(f) for f in job if f not in scored]  # fmt: skip
+            split = sel.split(ranked, lambda x: float(x.test_file in scored), seconds, "c")  # fmt: skip
+            got = score.hedge(sel, scored, seconds, score.LLM_TD_HEDGE, "c", {"TD"}, untimed)  # fmt: skip
+            self.assertEqual(got, {"TD"} if split.kept_td else split.hedged, (scored, seconds, untimed, sel))  # fmt: skip
 
     def test_hedge_failed_call_keeps_td(self) -> None:
         td = {"scored": ["test_a"], "top25": ["test_e"], "top25_cfg": {"default": ["test_a"], "slow": []}}  # fmt: skip
@@ -546,7 +627,7 @@ class TestScore(unittest.TestCase):
             data = write_data(d, files)
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
-                rows = score.score(data, ["a", "b", "c"], ["m1", "m2", "td"], ["model"], True, data / "samples", data / "td")  # fmt: skip
+                rows = score.score(data, ["a", "b", "c"], ["m1", "m2", "td"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
         self.assertEqual({(x["tag"], x["policy"], x["id"]) for x in rows}, {("m1", "model", "a"), ("m2", "model", "a"), ("td", "td25", "a")})  # fmt: skip
         self.assertEqual(err.getvalue(), "dropped 1 of 3 ids with no m2 result\ndropped 1 of 3 ids with no td replay\n")  # fmt: skip
         fields = ("pairs", "hit", "missed", "cpu", "gpu", "run_all", "files", "error")
@@ -594,7 +675,7 @@ class TestScore(unittest.TestCase):
                 data = write_data(d, files)
                 err = io.StringIO()
                 with contextlib.redirect_stderr(err):
-                    rows = score.score(data, ["a"], ["m"], ["final", "final-hm"], True, data / "samples", data / "td")  # fmt: skip
+                    rows = score.score(data, ["a"], ["m"], ["final", "final-hm"], True, data / "samples", data / "td", "")  # fmt: skip
             self.assertEqual([x["files"] for x in rows], n_files)
             self.assertEqual(err.getvalue(), msg)
             self.assertEqual(grep.call_args.args[1], "abc")
@@ -616,10 +697,30 @@ class TestScore(unittest.TestCase):
             (data / "samples/b.json").write_text(json.dumps({**SAMPLE, "title": "rebuilt"}))  # fmt: skip
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
-                rows = score.score(data, ["a", "b"], ["m"], ["model", "final"], True, data / "samples", data / "td")  # fmt: skip
+                rows = score.score(data, ["a", "b"], ["m"], ["model", "final"], True, data / "samples", data / "td", "")  # fmt: skip
+                # Replays of another STATS snapshot or TD code are stale too, even ones that record it.
+                (data / "td/a.json").write_text(json.dumps({**json.loads((data / "td/a.json").read_text()), "stats": "new"}))  # fmt: skip
+                stale = score.score(data, ["a", "b"], ["m"], ["model"], True, data / "samples", data / "td", "new")  # fmt: skip
         # A malformed answer runs everything and counts as an error, as select_tests records it.
         self.assertEqual([(x["id"], x["run_all"], x["error"]) for x in rows], [("a", True, True)] * 2)  # fmt: skip
-        self.assertEqual(err.getvalue(), "dropped 1 of 2 ids with no td replay of the current test-times.json and sample\n")  # fmt: skip
+        self.assertEqual(stale, [])
+        why = "td replay of the current test-times.json, sample, STATS and TD code"
+        self.assertEqual(err.getvalue(), f"dropped 1 of 2 ids with no {why}\ndropped 2 of 2 ids with no {why}\n")  # fmt: skip
+
+    def test_replay_stats(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            stats, code = Path(d) / "stats", Path(d) / "td"
+            for p in [*(stats / a for a in score.STATS_ARTIFACTS), code / "heuristics/h.py"]:  # fmt: skip
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text("1")
+            with mock.patch.object(score, "TD_CODE", code):
+                digests = [score.replay_stats(stats)]
+                (stats / score.STATS_ARTIFACTS[0]).write_text("2")
+                digests.append(score.replay_stats(stats))
+                (code / "heuristics/h.py").write_text("2")
+                digests += [score.replay_stats(stats), score.replay_stats(stats)]
+        self.assertEqual(len(set(digests)), 3)
+        self.assertEqual(digests[2], digests[3])
 
     def test_td25_per_config(self) -> None:
         cands = ["test_a", "test_b", "test_c", "test_d", "test_e"]
