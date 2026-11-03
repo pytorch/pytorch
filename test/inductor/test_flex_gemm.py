@@ -152,12 +152,21 @@ def nvfp4_e4m3_scale(amax: torch.Tensor, max_value: float = 6.0) -> torch.Tensor
 
 class TestFlexGemmRuntimeImport(TestCase):
     def test_import_does_not_load_vendored_quack(self):
-        for name in list(sys.modules):
-            if name == "torch._vendor.quack" or name.startswith("torch._vendor.quack."):
-                del sys.modules[name]
-        sys.modules.pop("torch._inductor.kernel.flex_gemm.runtime", None)
-        importlib.import_module("torch._inductor.kernel.flex_gemm.runtime")
-        self.assertNotIn("torch._vendor.quack", sys.modules)
+        script = """
+import importlib
+import sys
+importlib.import_module("torch._inductor.kernel.flex_gemm.runtime")
+loaded = [
+    name for name in sys.modules
+    if name == "torch._vendor.quack" or name.startswith("torch._vendor.quack.")
+]
+if loaded:
+    raise AssertionError(f"runtime import loaded vendored QuACK: {loaded}")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_quack_support_probe_requires_cutlass(self):
         with mock.patch.object(lowering.importlib.util, "find_spec", return_value=None):
@@ -289,6 +298,51 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         configs = [c for c in get_all_configs() if c.device_capacity == capacity]
         self.assertTrue(configs)
         self.assertIn(_default_config_for_cap(capacity), configs)
+
+    @parametrize("axis", ("m", "k"))
+    @parametrize("lengths", ((160, 0, 96, 256), (0, 0, 0)))
+    def test_scaled_grouped_scale_repack(self, axis, lengths):
+        total, mn, rk = sum(lengths), 272, 2
+        tiles = [(length + 127) // 128 for length in lengths]
+        outer = rk if axis == "m" else (mn + 127) // 128
+        scale = torch.randint(0, 256, (1, sum(tiles) * outer * 512), dtype=torch.uint8)
+        cu_seqlens = torch.tensor(
+            [0, *itertools.accumulate(lengths)], dtype=torch.int32
+        )
+        actual = lowering.repack_grouped_scale(scale, cu_seqlens, total, mn, rk, axis)
+        expected = torch.zeros_like(actual)
+        source, start = 0, 0
+        for group, (length, count) in enumerate(zip(lengths, tiles)):
+            dest = start // 128 + group
+            values = scale.flatten()[source : source + count * outer * 512]
+            if axis == "m":
+                expected[0, dest : dest + count] = values.reshape(count, rk, 32, 4, 4)
+            else:
+                expected[0, :, dest : dest + count] = values.reshape(
+                    outer, count, 32, 4, 4
+                )
+            source += count * outer * 512
+            start += length
+        self.assertEqual(actual, expected)
+
+    @parametrize("case", ("negative", "decreasing", "out_of_range", "undersized"))
+    def test_scaled_grouped_scale_repack_rejects_invalid_buffers(self, case):
+        offsets = {
+            "negative": [0, -1, 128],
+            "decreasing": [0, 96, 64],
+            "out_of_range": [0, 160, 256],
+            "undersized": [0, 64, 128],
+        }[case]
+        scale = torch.zeros(1, 512 if case == "undersized" else 2048, dtype=torch.uint8)
+        message = (
+            "scale buffer is too small"
+            if case == "undersized"
+            else "offsets must be nondecreasing and within"
+        )
+        with self.assertRaisesRegex(RuntimeError, message):
+            lowering.repack_grouped_scale(
+                scale, torch.tensor(offsets, dtype=torch.int32), 128, 128, 1, "m"
+            )
 
     @recover_orig_fp32_precision
     def test_quack_fp32_operands_follow_matmul_precision(self):
@@ -2069,7 +2123,8 @@ class TestFlexGemmAnalysis(TestCase):
 class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     def test_supported_op_names_match_dense_scope(self):
         self.assertEqual(
-            _SUPPORTED_FLEX_GEMM_OP_NAMES, "mm/addmm/bmm/baddbmm/scaled_mm/grouped_mm"
+            _SUPPORTED_FLEX_GEMM_OP_NAMES,
+            "mm/addmm/bmm/baddbmm/scaled_mm/scaled_grouped_mm/grouped_mm",
         )
 
     def test_scaled_mm_requires_functional_api(self):
@@ -2202,7 +2257,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 {"offs": offs},
                 "2-D A",
             ),
-            # TODO: Support scaled grouped GEMMs through FlexGEMM.
+            # The legacy scaled grouped op does not carry scale recipes.
             (
                 "scaled",
                 torch._scaled_grouped_mm,
@@ -3070,6 +3125,197 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 kernel_options=kernel_options,
             )
         self.assertIs(type(raised.exception), error)
+
+    @parametrize(
+        "case",
+        (
+            "offs_dtype",
+            "offs_rank",
+            "offs_stride",
+            "no_offs",
+            "output_dtype",
+            "a_rank",
+            "a_layout",
+            "k",
+            "n",
+            "scale_rank",
+            "scale_rows",
+            "scale_groups",
+            "scale_columns",
+            "scale_alignment",
+            "b_groups",
+            "recipe",
+            "swizzle",
+            "scale_dtype",
+            "backend",
+        ),
+    )
+    def test_scaled_grouped_mm_rejects_invalid_inputs(self, case):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            a = torch.empty(256, 256, device="cuda", dtype=torch.float8_e4m3fn)
+            b = torch.empty(3, 272, 256, device="cuda", dtype=a.dtype).mT
+            sa = torch.empty(256, 8, device="cuda", dtype=torch.float8_e8m0fnu)
+            sb = torch.empty(3, 3072, device="cuda", dtype=sa.dtype)
+            offs = torch.empty(3, device="cuda", dtype=torch.int32)
+            options = {
+                "scale_recipe_a": F.ScalingType.BlockWise1x32,
+                "scale_recipe_b": F.ScalingType.BlockWise1x32,
+                "swizzle_a": F.SwizzleType.SWIZZLE_32_4_4,
+                "swizzle_b": F.SwizzleType.SWIZZLE_32_4_4,
+                "offs": offs,
+            }
+            backend = "QUACK"
+            match case:
+                case "offs_dtype":
+                    options["offs"] = offs.to(torch.int64)
+                case "offs_rank":
+                    options["offs"] = offs.unsqueeze(0)
+                case "offs_stride":
+                    options["offs"] = torch.empty(6, device="cuda", dtype=torch.int32)[
+                        ::2
+                    ]
+                case "no_offs":
+                    options.pop("offs")
+                case "output_dtype":
+                    options["output_dtype"] = torch.float32
+                case "a_rank":
+                    a = a.unsqueeze(0)
+                case "a_layout":
+                    a = a.t()
+                case "k":
+                    a = a[:, :224]
+                case "n":
+                    b = b[..., :-1]
+                case "scale_rank":
+                    sa = sa.flatten()
+                case "scale_rows":
+                    sa = sa.reshape(128, 16)
+                case "scale_groups":
+                    sb = sb[:2]
+                case "scale_columns":
+                    sa = torch.empty(256, 16, device="cuda", dtype=sa.dtype)
+                case "scale_alignment":
+                    sa = torch.empty(257, 8, device="cuda", dtype=sa.dtype)
+                case "b_groups":
+                    b = b[:2]
+                case "recipe":
+                    options["scale_recipe_b"] = F.ScalingType.TensorWise
+                case "swizzle":
+                    options["swizzle_a"] = F.SwizzleType.NO_SWIZZLE
+                case "scale_dtype":
+                    sb = sb.float()
+                case "backend":
+                    backend = "TRITON"
+            error = (
+                NotImplementedError
+                if case in ("a_layout", "recipe", "swizzle", "scale_dtype", "backend")
+                else ValueError
+            )
+            messages = {
+                "offs_dtype": "scaled_grouped_mm offs must be nonempty contiguous 1-D int32",
+                "offs_rank": "scaled_grouped_mm offs must be nonempty contiguous 1-D int32",
+                "offs_stride": "scaled_grouped_mm offs must be nonempty contiguous 1-D int32",
+                "no_offs": "scaled_grouped_mm offs must be nonempty contiguous 1-D int32",
+                "output_dtype": "scaled_grouped_mm supports BF16 output only",
+                "a_rank": "scaled_grouped_mm requires 2-D A and 2-D or 3-D B",
+                "a_layout": "scaled_grouped_mm requires row-major A and column-major B",
+                "k": "scaled_grouped_mm requires matching storage K divisible by 32",
+                "n": "scaled_grouped_mm requires N and operand leading strides divisible by 16",
+                "scale_rank": "scaled_grouped_mm requires contiguous 2-D blocked scales",
+                "scale_rows": "scaled_grouped_mm blocked scale rows must cover the operand rows",
+                "scale_groups": "scaled_grouped_mm B and scale_b must match the offs groups",
+                "scale_columns": "scaled_grouped_mm scale_a columns must match padded K/block_size",
+                "scale_alignment": "scaled_grouped_mm scale rows must be multiples of 128",
+                "b_groups": "scaled_grouped_mm B and scale_b must match the offs groups",
+                "recipe": "scaled_grouped_mm requires matching BlockWise1x32 MXFP8",
+                "swizzle": "scaled_grouped_mm requires one SWIZZLE_32_4_4 block scale per operand",
+                "scale_dtype": "scaled_grouped_mm requires torch.float8_e4m3fn data and torch.float8_e8m0fnu scales",
+                "backend": "F.scaled_grouped_mm requires backend='QUACK'",
+            }
+            with (
+                mock.patch.object(
+                    importlib.import_module("torch._higher_order_ops.flex_gemm"),
+                    "flex_gemm_hop",
+                    side_effect=AssertionError("invalid input reached HOP dispatch"),
+                ),
+                self.assertRaisesRegex(error, re.escape(messages[case])) as raised,
+            ):
+                flex_gemm(
+                    F.scaled_grouped_mm,
+                    (a, b, sa, sb),
+                    torch.relu,
+                    gemm_kwargs=options,
+                    kernel_options={"backend": backend},
+                )
+
+            self.assertIs(type(raised.exception), error)
+
+    @parametrize(
+        "case", ("single_scale", "global_shape", "global_dtype", "global_stride")
+    )
+    def test_nvfp4_scaled_grouped_mm_rejects_invalid_globals(self, case):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            a = torch.empty(256, 128, device="cuda", dtype=torch.float4_e2m1fn_x2)
+            b = torch.empty(3, 256, 128, device="cuda", dtype=a.dtype).mT
+            sa = torch.empty(256, 16, device="cuda", dtype=torch.float8_e4m3fn)
+            sb = torch.empty(3, 4096, device="cuda", dtype=sa.dtype)
+            global_scale = torch.ones(3, device="cuda")
+            recipe = [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise]
+            swizzle = [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE]
+            if case == "global_shape":
+                global_scale = global_scale[:1]
+            elif case == "global_dtype":
+                global_scale = global_scale.bfloat16()
+            elif case == "global_stride":
+                global_scale = torch.ones(6, device="cuda")[::2]
+            if case == "single_scale":
+                scales = (sa, sb)
+                recipe, swizzle = recipe[:1], swizzle[:1]
+            else:
+                scales = ([sa, global_scale], [sb, global_scale])
+            with (
+                mock.patch.object(
+                    importlib.import_module("torch._higher_order_ops.flex_gemm"),
+                    "flex_gemm_hop",
+                    side_effect=AssertionError("invalid input reached HOP dispatch"),
+                ),
+                self.assertRaisesRegex(
+                    ValueError,
+                    "scaled_grouped_mm.*(requires BlockWise1x16 and TensorWise|TensorWise scales must)",
+                ) as raised,
+            ):
+                flex_gemm(
+                    F.scaled_grouped_mm,
+                    (a, b, *scales),
+                    torch.relu,
+                    gemm_kwargs=dict(
+                        offs=torch.empty(3, device="cuda", dtype=torch.int32),
+                        scale_recipe_a=recipe,
+                        scale_recipe_b=recipe,
+                        swizzle_a=swizzle,
+                        swizzle_b=swizzle,
+                    ),
+                    kernel_options={"backend": "QUACK"},
+                )
+            self.assertIs(type(raised.exception), ValueError)
+
+    def test_nvfp4_scaled_grouped_mm_rejects_grouped_k(self):
+        from torch._higher_order_ops.flex_gemm import validate_scaled_grouped_mm
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            a = torch.empty(256, 128, device="cuda", dtype=torch.float4_e2m1fn_x2)
+            b = torch.empty_like(a).t()
+            scale = torch.empty(256, 16, device="cuda", dtype=torch.float8_e4m3fn)
+            offs = torch.empty(2, device="cuda", dtype=torch.int32)
+            with self.assertRaisesRegex(NotImplementedError, "grouped-M only"):
+                validate_scaled_grouped_mm(
+                    a, b, scale, scale, offs, torch.bfloat16, "nvfp4"
+                )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -8499,6 +8745,294 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
         self.assertIn("config=((", code)
         self.assertNotIn("aten._scaled_mm_v2", code)
 
+    def copyScaledGroupedMmInputs(self, inputs, replacements):
+        for old, new in zip(inputs, replacements, strict=True):
+            old = old if isinstance(old, list) else [old]
+            new = new if isinstance(new, list) else [new]
+            for target, source in zip(old, new, strict=True):
+                target.copy_(source)
+
+    def makeScaledGroupedMm(
+        self, axis, lengths, device, *, format_name="mxfp8_e4m3", k=256, n=272, m=256
+    ):
+        nvfp4 = format_name == "nvfp4"
+        block_size = 16 if nvfp4 else 32
+        scale_dtype = torch.float8_e4m3fn if nvfp4 else torch.float8_e8m0fnu
+        total = sum(lengths)
+        a = self.makeTensor(
+            total if axis == "m" else m, k if axis == "m" else total, device=device
+        ).to(torch.float8_e4m3fn)
+        b = (
+            self.makeTensor(len(lengths), n, k, device=device)
+            if axis == "m"
+            else self.makeTensor(n, total, device=device)
+        )
+        b = b.to(torch.float8_e4m3fn)
+        if nvfp4:
+            # Integer values in [-3, 3] are exactly representable in E2M1.
+            a = torch.randint(-3, 4, a.shape, device=device).bfloat16()
+            b = torch.randint(-3, 4, b.shape, device=device).bfloat16()
+        a_scales, b_scales, reference = [], [], []
+        dense_a_scales = []
+        offs = torch.tensor(lengths, device=device, dtype=torch.int32).cumsum(
+            0, dtype=torch.int32
+        )
+        start = 0
+        for group, length in enumerate(lengths):
+            a_group = (
+                a[start : start + length]
+                if axis == "m"
+                else a[:, start : start + length]
+            )
+            b_group = b[group] if axis == "m" else b[:, start : start + length]
+            group_scales = []
+            for data in (a_group, b_group):
+                shape = (data.shape[0], data.shape[1] // block_size)
+                if nvfp4:
+                    scale = torch.rand(shape, device=device) * 0.2 + 0.1
+                else:
+                    scale = 2.0 ** torch.randint(-3, 3, shape, device=device)
+                group_scales.append(scale.to(scale_dtype))
+            sa, sb = group_scales
+            if axis == "m":
+                dense_a_scales.append(sa)
+            if length:
+                a_scales.append(to_blocked_reference(sa))
+                if axis == "k":
+                    b_scales.append(to_blocked_reference(sb))
+            if axis == "m":
+                b_scales.append(to_blocked_reference(sb))
+            a_ref = a_group.double() * sa.double().repeat_interleave(block_size, -1)
+            b_ref = b_group.double() * sb.double().repeat_interleave(block_size, -1)
+            reference.append(a_ref @ b_ref.t())
+            start += length
+        a_scales = (
+            torch.cat(a_scales)
+            if a_scales
+            else torch.empty(0, device=device, dtype=scale_dtype)
+        )
+        scale_a = (
+            a_scales.reshape(-1, ((k // block_size + 3) // 4) * 4)
+            if axis == "m"
+            else a_scales.reshape(((m + 127) // 128) * 128, -1)
+        )
+        b_scales = (
+            torch.stack(b_scales)
+            if axis == "m"
+            else torch.cat(b_scales)
+            if b_scales
+            else torch.empty(0, device=device, dtype=scale_dtype)
+        )
+        scale_b = (
+            b_scales if axis == "m" else b_scales.reshape(((n + 127) // 128) * 128, -1)
+        )
+        offs = torch.tensor(lengths, device=device, dtype=torch.int32).cumsum(
+            0, dtype=torch.int32
+        )
+        reference = torch.cat(reference) if axis == "m" else torch.stack(reference)
+        if nvfp4:
+            a = _bfloat16_to_float4_e2m1fn_x2(a)
+            b = _bfloat16_to_float4_e2m1fn_x2(b)
+            global_scales = torch.ones(len(lengths), device=device)
+            scale_a, scale_b = [scale_a, global_scales], [scale_b, global_scales]
+        return a, b.mT, scale_a, scale_b, offs, reference
+
+    @parametrize(
+        "case",
+        (("mxfp8_e4m3", "m"), ("mxfp8_e4m3", "k"), ("nvfp4", "m")),
+        name_fn=lambda case: "_".join(case),
+    )
+    def test_scaled_grouped_mm_empty(self, device, case):
+        format_name, axis = case
+        a, b, sa, sb, offs, reference = self.makeScaledGroupedMm(
+            axis, (0, 0, 0), device, format_name=format_name
+        )
+        recipe = (
+            [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise]
+            if format_name == "nvfp4"
+            else F.ScalingType.BlockWise1x32
+        )
+        swizzle = (
+            [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE]
+            if format_name == "nvfp4"
+            else F.SwizzleType.SWIZZLE_32_4_4
+        )
+        row = self.makeTensor(272, device=device)
+
+        def fn(a, b, sa, sb, offs, row):
+            return flex_gemm(
+                F.scaled_grouped_mm,
+                (a, b, sa, sb),
+                lambda acc: (acc + row).relu(),
+                gemm_kwargs={
+                    "scale_recipe_a": recipe,
+                    "scale_recipe_b": recipe,
+                    "swizzle_a": swizzle,
+                    "swizzle_b": swizzle,
+                    "offs": offs,
+                },
+                kernel_options={"backend": "QUACK"},
+            )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, fullgraph=True), a, b, sa, sb, offs, row
+        )
+        self.assertEqual(actual, (reference + row.double()).relu().bfloat16())
+        if axis == "k":
+            self.assertIn("scaled_grouped_mm offsets must be zero when K is zero", code)
+
+    @parametrize(
+        "case",
+        (("mxfp8_e4m3", "m"), ("mxfp8_e4m3", "k"), ("nvfp4", "m")),
+        name_fn=lambda case: "_".join(case),
+    )
+    @parametrize("autotune", (False, True))
+    def test_scaled_grouped_mm(self, device, case, autotune):
+        format_name, axis = case
+        lengths = (173, 0, 83, 256) if axis == "m" else (160, 0, 96, 256)
+        inputs = self.makeScaledGroupedMm(
+            axis, lengths, device, format_name=format_name
+        )
+        a, b, sa, sb, offs, reference = inputs
+        recipe = (
+            [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise]
+            if format_name == "nvfp4"
+            else F.ScalingType.BlockWise1x32
+        )
+        swizzle = (
+            [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE]
+            if format_name == "nvfp4"
+            else F.SwizzleType.SWIZZLE_32_4_4
+        )
+        row = self.makeTensor(272, device=device)
+        options = {
+            "scale_recipe_a": recipe,
+            "scale_recipe_b": recipe,
+            "swizzle_a": swizzle,
+            "swizzle_b": swizzle,
+        }
+
+        def fn(a, b, sa, sb, offs, row):
+            return flex_gemm(
+                F.scaled_grouped_mm,
+                (a, b, sa, sb),
+                lambda acc: (acc + row).relu(),
+                gemm_kwargs={**options, "offs": offs},
+                kernel_options={"backend": "QUACK", "autotune": autotune},
+            )
+
+        compiled = torch.compile(fn, fullgraph=True)
+        with self.limitEpiModAutotune() if autotune else contextlib.nullcontext():
+            actual, (code,) = run_and_get_code(compiled, a, b, sa, sb, offs, row)
+            warm = compiled(a, b, sa, sb, offs, row)
+        self.assertEqual(
+            actual, (reference + row.double()).relu().bfloat16(), rtol=0.02, atol=0.002
+        )
+        self.assertEqual(actual, warm, rtol=0, atol=0)
+        self.assertIn(f"blockscaled_format={format_name!r}", code)
+        self.assertIn(f"cu_seqlens_{axis}=", code)
+        self.assertNotIn("aten._scaled_grouped_mm", code)
+        new_inputs = self.makeScaledGroupedMm(
+            axis, (96, 160, 0, 256), device, format_name=format_name
+        )
+        new_a, new_b, new_sa, new_sb, new_offs, new_reference = new_inputs
+        changed = compiled(new_a, new_b, new_sa, new_sb, new_offs, row)
+        self.assertEqual(
+            changed,
+            (new_reference + row.double()).relu().bfloat16(),
+            rtol=0.02,
+            atol=0.002,
+        )
+        if not autotune:
+            torch.cuda.synchronize()
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                captured = compiled(a, b, sa, sb, offs, row)
+            graph.replay()
+            self.assertEqual(captured, actual, rtol=0, atol=0)
+            self.copyScaledGroupedMmInputs(
+                (a, b, sa, sb, offs), (new_a, new_b, new_sa, new_sb, new_offs)
+            )
+            graph.replay()
+            self.assertEqual(
+                captured,
+                (new_reference + row.double()).relu().bfloat16(),
+                rtol=0.02,
+                atol=0.002,
+            )
+            if axis == "m":
+                # Native grouped MM leaves rows after offs[-1] unspecified.
+                padded_a = torch.cat(
+                    (a, torch.zeros(32, a.shape[1], device=device, dtype=a.dtype))
+                )
+                padded = compiled(padded_a, b, sa, sb, offs, row)
+                self.assertEqual(padded[: a.shape[0]], captured, rtol=0, atol=0)
+
+    @parametrize(
+        "case",
+        (
+            (32, (1.0, 1.0), False),
+            (96, (0.5, 1.5), False),
+            (256, (1e37, 1e-37), False),
+            (256, (0.5, 0.5), True),
+        ),
+    )
+    def test_nvfp4_scaled_grouped_mm_global_scales(self, device, case):
+        k, global_values, shared_global_scale = case
+        a, b, sa, sb, offs, reference = self.makeScaledGroupedMm(
+            "m", (173, 0, 83, 256), device, format_name="nvfp4", k=k
+        )
+        recipes = [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise]
+        swizzles = [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE]
+        groups = offs.numel()
+        ga = (
+            torch.arange(1, groups + 1, device=device, dtype=torch.float32)
+            * global_values[0]
+        )
+        gb = ga if shared_global_scale else torch.full_like(ga, global_values[1])
+        scale_a, scale_b = [sa[0], ga], [sb[0], gb]
+        reference *= (
+            (ga * gb)
+            .repeat_interleave(torch.tensor((173, 0, 83, 256), device=device))
+            .unsqueeze(-1)
+            .double()
+        )
+        row = self.makeTensor(272, device=device)
+
+        def fn(a, b, scale_a, scale_b, offs, row):
+            return flex_gemm(
+                F.scaled_grouped_mm,
+                (a, b, scale_a, scale_b),
+                lambda acc: (acc + row).relu(),
+                gemm_kwargs={
+                    "scale_recipe_a": recipes,
+                    "scale_recipe_b": recipes,
+                    "swizzle_a": swizzles,
+                    "swizzle_b": swizzles,
+                    "offs": offs,
+                },
+                kernel_options={"backend": "QUACK"},
+            )
+
+        compiled = torch.compile(fn, fullgraph=True)
+        actual, (code,) = run_and_get_code(compiled, a, b, scale_a, scale_b, offs, row)
+        self.assertEqual(
+            actual, (reference + row.double()).relu().bfloat16(), rtol=0.02, atol=0.002
+        )
+        self.assertIn("blockscaled_format='nvfp4'", code)
+        self.assertNotIn("aten._scaled_grouped_mm", code)
+        if global_values is not None:
+            self.assertIn("(acc * (operand0 * operand1))", code)
+            scale_a[1].mul_(0.5)
+            updated = compiled(a, b, scale_a, scale_b, offs, row)
+            factor = 0.25 if shared_global_scale else 0.5
+            self.assertEqual(
+                updated,
+                (reference * factor + row.double()).relu().bfloat16(),
+                rtol=0.02,
+                atol=0.002,
+            )
+
     @parametrize(
         "case",
         ((False, (1,), True), (True, (), False), (True, (1, 1), True)),
@@ -8740,6 +9274,162 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
         self.assertMxScaleCode(code)
         self.assertIn("flex_gemm_output_layout.BLOCKED_128X4", code)
         self.assertNotIn("aten._scaled_mm_v2", code)
+
+    def test_scaled_grouped_mm_dynamic_m(self, device):
+        def fn(a, b, sa, sb, offs):
+            return flex_gemm(
+                F.scaled_grouped_mm,
+                (a, b, sa, sb),
+                lambda acc: acc,
+                gemm_kwargs=dict(
+                    offs=offs,
+                    scale_recipe_a=F.ScalingType.BlockWise1x32,
+                    scale_recipe_b=F.ScalingType.BlockWise1x32,
+                    swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
+                    swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
+                ),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        for lengths in ((128, 128), (173, 339)):
+            a, b, sa, sb, offs, reference = self.makeScaledGroupedMm(
+                "m", lengths, device, n=128
+            )
+            self.assertEqual(
+                compiled(a, b, sa, sb, offs),
+                reference.bfloat16(),
+                rtol=0.02,
+                atol=0.002,
+            )
+
+    @parametrize("axis", ("m", "k"))
+    @parametrize("dynamic", (False, True))
+    def test_scaled_grouped_mm_zero_k(self, device, axis, dynamic):
+        def fn(a, b, sa, sb, offs, row):
+            return flex_gemm(
+                F.scaled_grouped_mm,
+                (a, b, sa, sb),
+                lambda acc: acc + row,
+                gemm_kwargs={
+                    "offs": offs,
+                    "scale_recipe_a": F.ScalingType.BlockWise1x32,
+                    "scale_recipe_b": F.ScalingType.BlockWise1x32,
+                    "swizzle_a": F.SwizzleType.SWIZZLE_32_4_4,
+                    "swizzle_b": F.SwizzleType.SWIZZLE_32_4_4,
+                },
+                kernel_options={"backend": "QUACK"},
+            )
+
+        compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
+        for m, n in ((128, 128), (256, 256)):
+            a = torch.empty(m, 0, device=device, dtype=torch.float8_e4m3fn)
+            b = torch.empty(
+                (2, n, 0) if axis == "m" else (n, 0), device=device, dtype=a.dtype
+            ).mT
+            sa = torch.empty(m, 0, device=device, dtype=torch.float8_e8m0fnu)
+            sb = torch.empty(
+                (2, 0) if axis == "m" else (n, 0), device=device, dtype=sa.dtype
+            )
+            offs = torch.tensor(
+                [64, m] if axis == "m" else [0, 0], device=device, dtype=torch.int32
+            )
+            row = self.makeTensor(n, device=device)
+            actual = compiled(a, b, sa, sb, offs, row)
+            shape = (m, n) if axis == "m" else (2, m, n)
+            self.assertEqual(actual, row.expand(shape))
+
+    @parametrize("axis", ("m", "k"))
+    @parametrize("dynamic", (False, True))
+    def test_scaled_grouped_mm_zero_k_invalid_offsets(self, device, axis, dynamic):
+        script = """
+import sys
+import torch
+import torch.nn.functional as F
+from torch._higher_order_ops import flex_gemm
+
+axis, dynamic, device = sys.argv[1], sys.argv[2] == "True", sys.argv[3]
+a = torch.empty(128, 0, device=device, dtype=torch.float8_e4m3fn)
+b = torch.empty(2, 128, 0, device=device, dtype=a.dtype).mT if axis == "m" else a.mT
+scale = torch.empty(128, 0, device=device, dtype=torch.float8_e8m0fnu)
+scale_b = torch.empty(2, 0, device=device, dtype=scale.dtype) if axis == "m" else scale
+offs = torch.tensor([64, 129] if axis == "m" else [0, 1], device=device, dtype=torch.int32)
+
+def fn(a, b, scale, scale_b, offs):
+    return flex_gemm(
+        F.scaled_grouped_mm, (a, b, scale, scale_b), lambda acc: acc,
+        gemm_kwargs=dict(
+            offs=offs, scale_recipe_a=F.ScalingType.BlockWise1x32,
+            scale_recipe_b=F.ScalingType.BlockWise1x32,
+            swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
+        ),
+        kernel_options={"backend": "QUACK"},
+    )
+
+torch.compile(fn, fullgraph=True, dynamic=dynamic)(a, b, scale, scale_b, offs)
+torch.cuda.synchronize()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script, axis, str(dynamic), device],
+            env={**os.environ, "CUDA_LAUNCH_BLOCKING": "1"},
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        message = (
+            "scaled_grouped_mm offsets must be zero when K is zero"
+            if axis == "k"
+            else "scaled_grouped_mm offsets must be nondecreasing and within the grouped dimension"
+        )
+        self.assertIn(f"Assertion `{message}` failed.", result.stderr)
+
+    @parametrize("format_name", ("mxfp8_e4m3", "nvfp4"))
+    def test_scaled_grouped_mm_native_reference(self, device, format_name):
+        from torch.testing._internal.common_cuda import (
+            PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
+        )
+
+        if not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM:
+            self.skipTest("native block-scaled grouped MM is unavailable")
+        a, b, sa, sb, offs, _ = self.makeScaledGroupedMm(
+            "m", (128, 128), device, n=128, format_name=format_name
+        )
+        nvfp4 = format_name == "nvfp4"
+        recipe = (
+            [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise]
+            if nvfp4
+            else F.ScalingType.BlockWise1x32
+        )
+        swizzle = (
+            [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE]
+            if nvfp4
+            else F.SwizzleType.SWIZZLE_32_4_4
+        )
+        options = dict(
+            offs=offs,
+            scale_recipe_a=recipe,
+            scale_recipe_b=recipe,
+            swizzle_a=swizzle,
+            swizzle_b=swizzle,
+        )
+        expected = F.scaled_grouped_mm(a, b, scale_a=sa, scale_b=sb, **options)
+
+        def fn(a, b, sa, sb, offs):
+            return flex_gemm(
+                F.scaled_grouped_mm,
+                (a, b, sa, sb),
+                lambda acc: acc,
+                gemm_kwargs={**options, "offs": offs},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        self.assertEqual(
+            torch.compile(fn, fullgraph=True)(a, b, sa, sb, offs),
+            expected,
+            rtol=0.02,
+            atol=0.002,
+        )
 
     def test_scaled_mm_dynamic_m(self, device):
         n = k = 256
