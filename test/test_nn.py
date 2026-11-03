@@ -8374,6 +8374,44 @@ class TestNNDeviceType(NNTestCase):
                 with self.assertRaisesRegex(RuntimeError, "grad_output channel unexpected"):
                     backward(torch.ones(grad_output, device=device), torch.ones(inp, device=device), padding)
 
+    @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16)
+    def test_ReplicationPad_backward_strided_grad_input(self, device, dtype):
+        # Half-precision atomic adds can be packed with a neighbouring slot. A
+        # strided grad_input must get the right gradient without its gaps,
+        # which hold a signaling NaN that any add would quiet, being written.
+        # See https://github.com/pytorch/pytorch/issues/202905
+        signaling_nan = 0x7C01 if dtype == torch.half else 0x7F81
+        for ndim in (1, 2, 3):
+            backward = getattr(torch.ops.aten, f"replication_pad{ndim}d_backward")
+            shape = (2, 3) + (5,) * ndim
+            padding = [2, 3] * ndim
+            inp = torch.randn(shape, device=device, dtype=dtype)
+            grad_output = torch.ones(
+                (2, 3) + (10,) * ndim, device=device, dtype=dtype
+            )
+            expected = backward(grad_output, inp, padding)
+            numel = inp.numel()
+            layouts = {
+                "stride 2": lambda raw: raw[: 2 * numel : 2].view(shape),
+                "padded rows": lambda raw: raw[: numel // 5 * 7]
+                .view(-1, 7)[:, 1:6]
+                .view(shape),
+            }
+            for name, make in layouts.items():
+                raw = torch.full(
+                    (2 * numel,), signaling_nan, device=device, dtype=torch.int16
+                )
+                grad_input = make(raw.view(dtype))
+                backward.grad_input(grad_output, inp, padding, grad_input=grad_input)
+                self.assertEqual(grad_input, expected, msg=f"{ndim}d, {name}")
+                outside = torch.ones(2 * numel, device=device, dtype=torch.bool)
+                make(outside).fill_(False)
+                self.assertTrue(
+                    (raw[outside] == signaling_nan).all().item(),
+                    msg=f"{ndim}d, {name}: wrote outside grad_input",
+                )
+
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])
         pl, pr = 3, 4
