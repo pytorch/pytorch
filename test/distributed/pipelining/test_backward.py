@@ -26,6 +26,56 @@ d_hid = 512
 batch_size = 256
 
 
+class CustomMatmul(torch.autograd.Function):
+    """Matmul whose optional third input is stored only on the context."""
+
+    @staticmethod
+    def forward(ctx, a, b, saved=None):
+        ctx.save_for_backward(a, b)
+        ctx.saved = saved
+        return torch.matmul(a, b)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        a, b = ctx.saved_tensors
+        grad_a = grad_b = None
+        if ctx.needs_input_grad[0]:
+            grad_a = torch.matmul(grad_output, b.transpose(-1, -2))
+        if ctx.needs_input_grad[1]:
+            grad_b = torch.matmul(a.transpose(-1, -2), grad_output)
+        if len(ctx.needs_input_grad) == 2:
+            return grad_a, grad_b
+        return grad_a, grad_b, None
+
+
+class HoldAbove(torch.autograd.Function):
+    """Identity that retains ``saved`` only while this node stays alive."""
+
+    @staticmethod
+    def forward(ctx, activation, saved):
+        ctx.saved = saved
+        return activation.clone()
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad, None
+
+
+def _find_grad_node(root, name):
+    """Return a node under ``root`` whose type name contains ``name``."""
+    pending = [root]
+    seen_ids: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen_ids:
+            continue
+        seen_ids.add(id(current))
+        if name in type(current).__name__:
+            return current
+        pending.extend(fn for fn, _ in current.next_functions)
+    raise AssertionError(f"missing {name} under {type(root).__name__}")
+
+
 class StageBackwardTests(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -129,22 +179,6 @@ class StageBackwardTests(TestCase):
     def test_stage_backward_weight_custom_autograd_function(self, device):
         # Split dI/dW grads for a custom autograd.Function should match a
         # full backward().
-        class CustomMatmul(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, a, b):
-                ctx.save_for_backward(a, b)
-                return torch.matmul(a, b)
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                a, b = ctx.saved_tensors
-                grad_a = grad_b = None
-                if ctx.needs_input_grad[0]:
-                    grad_a = torch.matmul(grad_output, b.transpose(-1, -2))
-                if ctx.needs_input_grad[1]:
-                    grad_b = torch.matmul(a.transpose(-1, -2), grad_output)
-                return grad_a, grad_b
-
         class TestModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -177,22 +211,6 @@ class StageBackwardTests(TestCase):
     def test_stage_backward_weight_custom_function_under_cpp_root(self, device):
         # .sum() makes the loss root a C++ SumBackward0. The custom Function is
         # an intermediate, so the pin has to follow intermediates, not the root.
-        class CustomMatmul(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, a, b):
-                ctx.save_for_backward(a, b)
-                return torch.matmul(a, b)
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                a, b = ctx.saved_tensors
-                grad_a = grad_b = None
-                if ctx.needs_input_grad[0]:
-                    grad_a = torch.matmul(grad_output, b.transpose(-1, -2))
-                if ctx.needs_input_grad[1]:
-                    grad_b = torch.matmul(a.transpose(-1, -2), grad_output)
-                return grad_a, grad_b
-
         class TestModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -223,16 +241,6 @@ class StageBackwardTests(TestCase):
     def test_stage_backward_input_frees_tensor_above_builtin_intermediate(self, device):
         # The weight boundary is a built-in matmul, so no output pin is taken.
         # A tensor saved only above that boundary must die at detach.
-        class HoldAbove(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, activation, saved):
-                ctx.saved = saved
-                return activation.clone()
-
-            @staticmethod
-            def backward(ctx, grad):
-                return grad, None
-
         class TestModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -246,41 +254,78 @@ class StageBackwardTests(TestCase):
         mod = TestModel().to(device)
         x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
         loss = mod(x, saved)
-        hold = loss.grad_fn.next_functions[0][0]
+        hold = _find_grad_node(loss.grad_fn, "HoldAbove")
         self.assertIs(hold.saved, saved)
         del saved, hold
         self.assertIsNotNone(saved_ref())
 
-        stage_backward_input(
+        _dinputs, param_groups = stage_backward_input(
             stage_outputs_or_loss=(loss,),
             output_grads=None,
             input_values=[x],
             weights=mod.parameters(),
         )
-        del loss
         gc.collect()
         self.assertIsNone(saved_ref())
+        for param_group in param_groups:
+            self.assertNotIn("ownership_tokens", param_group)
+
+    def test_stage_backward_frees_tensor_above_cpp_consumer(self, device):
+        # The weight boundary is a custom Function, and relu is its C++ consumer.
+        # A tensor saved only above relu must die at detach. A tensor saved on
+        # relu itself stays until dW, because relu owns the custom Function.
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+
+            def forward(self, x, saved):
+                activation = CustomMatmul.apply(x, self.weight).relu()
+                return HoldAbove.apply(activation, saved).sum()
+
+        saved = torch.randn(batch_size, d_hid, device=device)
+        saved_ref = weakref.ref(saved)
+        mod = TestModel().to(device)
+        x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
+        ref_mod = copy.deepcopy(mod)
+        ref_x = x.detach().clone().requires_grad_(True)
+        ref_saved = saved.detach().clone()
+        loss = mod(x, saved)
+        # sum -> HoldAbove -> relu -> CustomMatmul. relu is the pin.
+        sum_node = loss.grad_fn
+        hold_node = _find_grad_node(sum_node, "HoldAbove")
+        relu_node = _find_grad_node(hold_node, "ReluBackward")
+        self.assertIs(hold_node.saved, saved)
+        del saved
+        self.assertIsNotNone(saved_ref())
+
+        dinputs, param_groups = stage_backward_input(
+            stage_outputs_or_loss=(loss,),
+            output_grads=None,
+            input_values=[x],
+            weights=mod.parameters(),
+        )
+        tokens = [
+            token
+            for param_group in param_groups
+            for token in param_group.get("ownership_tokens", ())
+        ]
+        self.assertIn(relu_node, tokens)
+        self.assertNotIn(sum_node, tokens)
+        self.assertNotIn(hold_node, tokens)
+        del sum_node, hold_node, relu_node, tokens
+        gc.collect()
+        self.assertIsNone(saved_ref())
+
+        stage_backward_weight(mod.parameters(), param_groups)
+        ref_mod(ref_x, ref_saved).backward()
+        torch.testing.assert_close(dinputs[0], ref_x.grad)
+        for name, p in mod.named_parameters():
+            torch.testing.assert_close(p.grad, ref_mod.get_parameter(name).grad)
 
     def test_stage_backward_weight_releases_ownership_token(self, device):
         # The pin keeps the custom Function alive across detach. dW must drop
         # that pin, the ctx, and any tensor saved only by the ctx.
-        class CustomMatmul(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, a, b, saved):
-                ctx.save_for_backward(a, b)
-                ctx.saved = saved
-                return torch.matmul(a, b)
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                a, b = ctx.saved_tensors
-                grad_a = grad_b = None
-                if ctx.needs_input_grad[0]:
-                    grad_a = torch.matmul(grad_output, b.transpose(-1, -2))
-                if ctx.needs_input_grad[1]:
-                    grad_b = torch.matmul(a.transpose(-1, -2), grad_output)
-                return grad_a, grad_b, None
-
         class TestModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -653,6 +698,48 @@ class StageBackwardTests(TestCase):
         self.assertEqual(dinputs[0], ref_x.grad)
         for name, p in mod.named_parameters():
             self.assertEqual(p.grad, ref_mod.get_parameter(name).grad)
+
+    def test_stage_backward_weight_from_released_cpp_root(self, device):
+        # Released outputs keep a GradientEdge. relu is a C++ root, so
+        # ownership_token is None. Dropping the edge after input backward
+        # must leave the custom Function alive for weight backward.
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+
+            def forward(self, x):
+                return CustomMatmul.apply(x, self.weight).relu()
+
+        mod = TestModel().to(device)
+        x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
+        output_grad = torch.randn(batch_size, d_hid, device=device)
+        ref_mod = copy.deepcopy(mod)
+        ref_x = x.detach().clone().requires_grad_(True)
+
+        out = mod(x)
+        edge = torch.autograd.graph.get_gradient_edge(out)
+        self.assertIsNone(edge.ownership_token)
+        released = weakref.ref(out)
+        del out
+        self.assertIsNone(released())
+
+        dinputs, param_groups = stage_backward_input(
+            stage_outputs_or_loss=[edge],
+            output_grads=[output_grad],
+            input_values=[x],
+            weights=mod.parameters(),
+        )
+        del edge
+        gc.collect()
+        for param_group in param_groups:
+            self.assertIn("ownership_tokens", param_group)
+        stage_backward_weight(mod.parameters(), param_groups)
+
+        ref_mod(ref_x).backward(output_grad)
+        torch.testing.assert_close(dinputs[0], ref_x.grad)
+        for name, p in mod.named_parameters():
+            torch.testing.assert_close(p.grad, ref_mod.get_parameter(name).grad)
 
     def test_stage_backward_input_edge_requires_output_grads(self, device):
         mod = MLPModule(d_hid).to(device)

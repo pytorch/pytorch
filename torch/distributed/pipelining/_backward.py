@@ -41,29 +41,92 @@ def _get_grad_fn_or_grad_acc(t: torch.Tensor | GradientEdge) -> Node | None:
         return t.grad_fn
 
 
-def _graph_ownership_tokens(
-    stage_outputs_or_loss: Sequence[torch.Tensor | GradientEdge | None],
-) -> list[Node]:
-    """Return C++ nodes that keep the autograd graph alive after outputs are detached.
+def _nearest_cpp_consumer(
+    node: Node, reverse_edges_dict: dict[Node, list[Node]]
+) -> tuple[Node | None, list[Node]]:
+    """Return the nearest C++ consumer, or the Python nodes up to the output.
 
-    Python ``grad_fn`` objects for custom ``autograd.Function`` nodes do not pin
-    the C++ graph. A view node's ``grad_fn`` is C++-owned and does.
-    ``get_gradient_edge`` tokens only a ``_FunctionBase`` root; this helper
-    tokens every tensor output that has a ``grad_fn``.
+    A C++ consumer's wrapper owns a Python ``autograd.Function`` through its
+    next edge. A Python wrapper does not own its own ``PyNode``, so it is not
+    a pin. With no C++ consumer the list runs from ``node`` through Python
+    consumers; the output root may be an ancestor of ``node``.
     """
-    tokens: list[Node] = []
+    seen = {node}
+    python_nodes = [node]
+    consumers = reverse_edges_dict.get(node, ())
+    pending: collections.deque[Node] = collections.deque(consumers)
+    while pending:
+        consumer = pending.popleft()
+        if consumer is None or consumer in seen:
+            continue
+        seen.add(consumer)
+        if not isinstance(consumer, torch._C._FunctionBase):
+            return consumer, python_nodes
+        python_nodes.append(consumer)
+        pending.extend(reverse_edges_dict.get(consumer, ()))
+    return None, python_nodes
+
+
+def _output_root_token(
+    root: Node,
+    stage_outputs_or_loss: Sequence[torch.Tensor | GradientEdge | None],
+) -> Node | None:
+    """Pin ``root`` when a stage output is that node and nothing above owns it.
+
+    ``get_gradient_edge`` only sets ``ownership_token`` for a ``_FunctionBase``
+    root. A released C++ root contributes its own node. A live tensor is pinned
+    with a view ``grad_fn``, which is C++-owned.
+    """
     for stage_output in stage_outputs_or_loss:
         if isinstance(stage_output, GradientEdge):
+            if stage_output.node is not root:
+                continue
             if stage_output.ownership_token is not None:
-                tokens.append(stage_output.ownership_token)
-        elif (
-            isinstance(stage_output, torch.Tensor) and stage_output.grad_fn is not None
-        ):
+                return stage_output.ownership_token
+            return stage_output.node
+        if isinstance(stage_output, torch.Tensor) and stage_output.grad_fn is root:
             with torch.enable_grad():
-                token = stage_output.view_as(stage_output).grad_fn
-            if token is not None:
+                return stage_output.view_as(stage_output).grad_fn
+    return None
+
+
+def _pin_python_intermediates(
+    param_groups: list[dict[str, Any]],
+    reverse_edges_dict: dict[Node, list[Node]],
+    stage_outputs_or_loss: Sequence[torch.Tensor | GradientEdge | None],
+) -> None:
+    """Keep Python weight-boundary nodes alive until weight backward.
+
+    The pin is the nearest C++ consumer. Saved tensors strictly above that
+    consumer are detached. Tensors saved on the consumer stay until weight
+    backward, because that node owns the ``PyNode``. A chain of only Python
+    nodes is pinned at whichever of those nodes is the output root.
+    """
+    root_tokens: dict[Node, Node | None] = {}
+    for param_group in param_groups:
+        tokens: list[Node] = []
+        seen_tokens: set[int] = set()
+        for node in param_group["intermediates"]:
+            if not isinstance(node, torch._C._FunctionBase):
+                continue
+            owner, python_nodes = _nearest_cpp_consumer(node, reverse_edges_dict)
+            if owner is None:
+                candidates = []
+                for python_node in python_nodes:
+                    if python_node not in root_tokens:
+                        root_tokens[python_node] = _output_root_token(
+                            python_node, stage_outputs_or_loss
+                        )
+                    candidates.append(root_tokens[python_node])
+            else:
+                candidates = [owner]
+            for token in candidates:
+                if token is None or id(token) in seen_tokens:
+                    continue
+                seen_tokens.add(id(token))
                 tokens.append(token)
-    return tokens
+        if tokens:
+            param_group["ownership_tokens"] = tokens
 
 
 def reverse_closure(
@@ -303,18 +366,13 @@ def stage_backward_input(
                 else:
                     inp.grad += dinput
 
-        # Pin only when a Python autograd node is a weight-boundary intermediate.
-        # C++ intermediates already own the subgraph below them, so a token on
-        # the output would keep saved tensors above that boundary until dW.
-        needs_ownership_token = any(
-            isinstance(node, torch._C._FunctionBase)
-            for param_group in param_groups
-            for node in param_group["intermediates"]
+        # C++ intermediates already own the subgraph below them. A Python
+        # intermediate is pinned by its nearest C++ consumer. Saved tensors
+        # above that consumer are freed here; tensors saved on the consumer
+        # itself stay until weight backward.
+        _pin_python_intermediates(
+            param_groups, reverse_edges_dict, stage_outputs_or_loss
         )
-        if needs_ownership_token:
-            ownership_tokens = _graph_ownership_tokens(stage_outputs_or_loss)
-            for param_group in param_groups:
-                param_group["ownership_tokens"] = ownership_tokens
 
         # Drop output-side graph state we no longer need. A view cannot be
         # detached in place (e.g. the output of an identity autograd.Function,
