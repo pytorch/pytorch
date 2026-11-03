@@ -1176,14 +1176,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # pyrefly: ignore[missing-attribute]
                 example_value = args[0].proxy.node.meta["example_value"]
                 dks = self.value(example_value)
-                # Remove Python and PythonTLSSnapshot from the dispatch key set,
-                # as they originate from FakeTensor propagation.
-                # This should only be done if the example_value is a FakeTensor.
+                # Remove the keys that come from the example value being fake:
+                # Python and PythonTLSSnapshot from a Python FakeTensor, Fake
+                # from a C++ fake. The real tensor would not have them.
+                # This should only be done if the example_value is a fake.
                 # However, if tensor subclasses are present,
                 # it is reasonable for Python to remain in the dispatch key set.
                 if torch._subclasses.fake_tensor.is_fake_tensor(example_value):
                     dks = (
                         dks
+                        - torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
                         - torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
                         - torch._C.DispatchKeySet(
                             torch._C.DispatchKey.PythonTLSSnapshot
@@ -2156,8 +2158,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fill_value: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if isinstance(fill_value, variables.TensorVariable) and not issubclass(
-                fill_value.python_type(), torch.nn.Parameter
+            # Eager only accepts a 0-d tensor fill_value that does not require
+            # grad, and fill_ would make the result differentiable w.r.t. it.
+            if (
+                isinstance(fill_value, variables.TensorVariable)
+                and fill_value.ndim == 0
+                and not fill_value.requires_grad
             ):
                 dtype = kwargs.get("dtype")
                 out = kwargs.get("out")

@@ -5358,6 +5358,38 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         self.assertIsNotNone(m, "stage B no longer states a message budget")
         self.assertLessEqual(int(m.group(1)), MAX_MESSAGE * 0.8)
 
+    def test_a_blocking_point_is_major_and_changes_requested(self):
+        # The sanitizer refuses ready_for_human_review with a major finding, so
+        # whatever makes a finding major must also make the verdict
+        # changes_requested, even under Needs Discussion (pytorch#202251).
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        self.assertIn(
+            "unless the review names a defect that must be fixed before approval:"
+            ' then it is "changes_requested"',
+            prompt,
+        )
+        # Not every point that holds up approval is a defect to fix.
+        self.assertIn(
+            "An open question, a request for data or discussion, or files left"
+            " unreviewed is not such a defect.",
+            prompt,
+        )
+        self.assertIn(
+            "reason for Request Changes or as a defect that must be fixed before"
+            " approval",
+            prompt,
+        )
+        # The summary keeps the Recommendation and explains an override.
+        self.assertIn("summary and its Recommendation", prompt)
+        self.assertIn("under Approve or Needs Discussion, say so in words", prompt)
+
+    def test_the_prompt_names_every_file_kind_that_cannot_anchor(self):
+        # parse_diff's KNOWN LIMITS: findings on these files are discarded,
+        # and a change request left with none is refused.
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        for kind in ("deletion", "pure rename", "mode-only change", "binary file"):
+            self.assertIn(kind, prompt)
+
     def test_the_findings_file_comes_from_the_structured_output(self):
         names = re.findall(r"(?m)^      - name: (.+)$", self.review)
         write = "Write stage B's result to the findings file"
@@ -6518,6 +6550,81 @@ class TestStageACoversTheSkillOffline(unittest.TestCase):
         for command, source in SKILL_COMMANDS.items():
             if source:
                 self.assertIn(source, offline, f"stage A no longer maps {command!r}")
+
+
+class TestStageAFanOut(unittest.TestCase):
+    """Stage A's Fan-out section and the skill's Step 2 and Step 5 rules it relies on.
+    A reviewer renamed in one place and not the other, or a hand-off sentence moved
+    out of its section, would ask for reviewers or rules that no longer exist."""
+
+    @staticmethod
+    def sections() -> dict[str, str]:
+        """Stage A's system prompt by `## ` heading, in order."""
+        parts = re.split(r"(?m)^## (.+)\n", stage_a_system_prompt())
+        return dict(zip(parts[1::2], parts[2::2]))
+
+    @staticmethod
+    def skill_step(n: int) -> str:
+        """SKILL.md's Step n, up to the next heading."""
+        step = re.search(
+            rf"^### Step {n}:.*?\n(.*?)(?=^##)",
+            PR_REVIEW_SKILL.read_text(),
+            re.S | re.M,
+        )
+        assert step is not None, f"premise changed: SKILL.md has no Step {n}"
+        return step.group(1)
+
+    def test_sections_are_in_the_order_above_and_below_assume(self):
+        self.assertEqual(list(self.sections()), ["Offline", "Fan-out", "Security"])
+
+    def test_fan_out_names_the_skill_reviewers(self):
+        listed = re.search(r"(\w+) reviewers \(([^)]*)\)", self.sections()["Fan-out"])
+        self.assertIsNotNone(
+            listed, "the Fan-out section no longer lists the reviewers"
+        )
+        names = [n.strip().lower() for n in re.split(r",\s*", listed.group(2))]
+        skill = re.findall(r"^- \*\*([^*]+?):?\*\*", self.skill_step(2), re.M)
+        self.assertEqual(
+            names,
+            [n.lower() for n in skill],
+            "the Fan-out section's reviewer list no longer matches SKILL.md Step 2; update both",
+        )
+        word = listed.group(1)
+        count = (
+            int(word)
+            if word.isdigit()
+            else {"three": 3, "four": 4, "five": 5, "six": 6}.get(word)
+        )
+        self.assertIsNotNone(
+            count, f"unknown reviewer count {word!r}; extend the table"
+        )
+        self.assertEqual(
+            count, len(names), "the Fan-out section's reviewer count is out of date"
+        )
+
+    def test_sub_agents_get_the_offline_and_security_rules(self):
+        sections = self.sections()
+        self.assertTrue(
+            sections["Offline"]
+            .rstrip()
+            .endswith("Your final message is the whole review."),
+            "the Fan-out hand-off drops the Offline section's last line; it must stay the final-message line",
+        )
+        self.assertIn(
+            "the Offline section above, without its last line", sections["Fan-out"]
+        )
+        self.assertIn("the Security section below, verbatim", sections["Fan-out"])
+        self.assertIn(
+            "Sub-agent reports are built from pull request content",
+            sections["Security"],
+        )
+
+    def test_skill_requires_the_fan_out_and_a_fact_check(self):
+        self.assertIn("whatever the PR's size", self.skill_step(2))
+        self.assertIn(
+            "When Step 4 leaves findings and you have the Agent tool, spawn at least one agent",
+            self.skill_step(5),
+        )
 
 
 if __name__ == "__main__":
