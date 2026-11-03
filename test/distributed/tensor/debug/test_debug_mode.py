@@ -38,7 +38,11 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    requires_gpu_with_enough_memory,
+)
 from torch.utils._debug_mode import (
     _OpCall,
     _RedistributeCall,
@@ -1172,12 +1176,9 @@ class TestDTensorDebugMode(TestCase):
             [call["call"] for call in mismatches], ["aten::sin", "aten::sum"]
         )
 
+    # Being conservative, test peak memory is 25MB?
+    @requires_gpu_with_enough_memory(2**26)
     def test_tensor_hash_redistribute(self):
-        device_props = torch.get_device_module(self.device_type).get_device_properties(
-            0
-        )
-        if device_props.total_memory < 2**26:
-            self.skipTest("Being conservative, test peak memory is 25MB?")
         # test that hashing collectives gives correct results
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
