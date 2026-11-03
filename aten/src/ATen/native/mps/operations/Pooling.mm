@@ -966,8 +966,13 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
                                                std::optional<int64_t> divisor_override,
                                                const int32_t pooling_dims,
                                                const std::string& op_name) {
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      supportedFloatingType(input), "\"", op_name, "\" not implemented for '", input.scalar_type(), "'");
+  const bool is_2d = pooling_dims == 2;
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(input) || (is_2d && input.scalar_type() == kLong),
+                              "\"",
+                              op_name,
+                              "\" not implemented for '",
+                              input.scalar_type(),
+                              "'");
   TORCH_CHECK_TYPE(grad_output.scalar_type() == input.scalar_type(),
                    op_name,
                    ": expected grad_output of dtype ",
@@ -984,7 +989,6 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
   // The other kernel is normally nondeterministic because of atomic accumulation
   // across multiple threads. To make it deterministic, dispatch only one thread
   // per batch, so the accumulations are serialized.
-  const bool is_2d = pooling_dims == 2;
   const bool serial = !is_2d && at::globalContext().deterministicAlgorithms();
   if (serial && input.scalar_type() != kFloat) {
     Tensor grad_input_float = at::empty({0}, grad_input.options().dtype(kFloat));
