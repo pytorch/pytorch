@@ -143,9 +143,7 @@ bool mkl_xf16_gemm(
   // dot-product kernel in cpu/BlasKernel.cpp splits the rows of A across threads,
   // so for transa/no-transb problems (the nn.Linear layout) the ATen kernel wins
   // below a column count that grows with the thread count and the size of A.
-  // Measured on AVX2 and AVX-512 without AMX, keeping problems below 5 columns per
-  // thread for a 4096x4096 A (scaled by sqrt(m * k)), or below 24 columns, on the
-  // ATen kernel avoids slowdowns while keeping most of MKL's speedup.
+  // The threshold is measured on AVX2 and AVX-512 without AMX
   const int64_t threads = at::in_parallel_region() ? 1 : at::get_num_threads();
   const double min_cols_transa = std::max(24.0, 5.0 * threads * std::sqrt(static_cast<double>(m) * k) / 4096);
   const bool skinny_transa = transa != TransposeType::NoTranspose &&

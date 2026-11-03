@@ -9628,9 +9628,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("alpha,beta", [(1, 0), (0.5, 2)])
     def test_addmm_reduced_precision_without_mkldnn(self, device, dtype, transpose_a, transpose_b, alpha, beta):
         # With oneDNN unavailable (ISA gate or disabled), bf16/fp16 gemm goes to MKL's
-        # bf16/f16 gemm when the build has it, otherwise to the ATen kernel. The row
-        # counts straddle the column threshold (24 at these sizes) that keeps skinny
-        # transa problems on the ATen kernel.
+        # bf16/f16 gemm when the build has it, otherwise to the ATen kernel, depending
+        # on column size and problem size
         def make(rows, cols, transpose):
             if transpose:
                 return make_tensor((cols, rows), dtype=dtype, device=device, low=-1, high=1).t()
