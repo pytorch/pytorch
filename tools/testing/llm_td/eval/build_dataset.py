@@ -11,20 +11,30 @@ Four kinds of sample, each a JSON file under DIR/samples:
               that head's own failures. These runs are censored: pull/trunk
               jobs already skip 75% of files through TD, so truth is a lower
               bound.
-  head_<N>_<sha>
+  head_<N>_<sha12>
               every head of a pr_ sample's PR with a failure that is the PR's
               own; the truth is those failures, so the pr_ sample's head gets
               the same truth here.
-  rev_<sha>   a commit the autorevert bot reverted between --start and --end
+              `previous_failures` are the test files that failed, flaky or
+              not, in a job that runs TD on another head of the PR before this
+              head's first job was created: what TD's PreviouslyFailedInPR
+              reads from the PR's pytest cache. It overstates that set, as a
+              test that passed again in the same job leaves the cache.
+  rev_<sha12> a commit the autorevert bot reverted between --start and --end
               because it broke a test on main, where every test runs. The
               truth is the test files of the reverting signal that failed on
               main between landing and the revert, on the commits that
               contain it, in every job that runs TD they failed in there. A
               revert with no such failure is skipped.
-  neu_<sha>   an ordinary main commit from the 25 days before --end, with no
-              truth, used only to measure how much a selector runs on typical
-              traffic. Reverted commits and those whose title starts with
-              Revert or Reland are left out.
+  neu_<sha12> an ordinary main commit from the 25 days before --end (--start
+              is ignored), with no truth, used only to measure how much a
+              selector runs on typical traffic. --neutral commits are drawn
+              from those whose title does not start with Revert or Reland, and
+              then the draw drops reverted commits (by a revert's message or
+              the autorevert bot), those with a rev_ sample and titles naming
+              a revert or reland anywhere, so fewer than --neutral come out.
+
+<sha12> is the first 12 hex digits of the sample's commit.
 
 Each truth file's `truth_jobs` lists the [workflow, job] it failed in.
 Samples are diffed as select_tests diffs them: against `merge_base`, the merge
@@ -53,9 +63,13 @@ not the PR's own, and is dropped, if
     author's PR within WINDOW of the failure, before the PR landed;
   - the same test failed on main within WINDOW of the head's `main_base`,
     before the PR landed;
-  - the same test failed on another PR's head that is this head's CI base or
-    one of its ancestors: in a ghstack stack that is the breakage of a PR
-    below, which the diff against the CI base does not contain.
+  - the same test failed on another PR's head that is below this head in a
+    stack (see below), which is the breakage of a PR below, and the diff
+    against the CI base does not contain it. In a GitHub-native stack that
+    head is the CI base or one of the head's ancestors. ghstack bases each
+    PR on a synthetic gh/USER/N/base commit with the tree of the PR below,
+    and the lower head is not an ancestor, so there it is a head with the CI
+    base's tree.
 WINDOW is 14 days, Dr.CI's flaky window: truth is a lower bound anyway, so a
 shorter window would buy a few more truths at the price of counting more
 flakes and parallel breakages as the PR's. The builder prints how many
@@ -78,12 +92,18 @@ import random
 import re
 import subprocess
 import time
+import traceback
 from pathlib import Path
+from typing import Any, TYPE_CHECKING
 
 from tools.testing.llm_td.eval import REPO, write_json
 from tools.testing.llm_td.eval.clickhouse import query
 from tools.testing.llm_td.eval.score import job_runs_td
 from tools.testing.llm_td.select_tests import changed_files, diffstat_and_diff
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 KINDS = ("pr", "head", "revert", "neutral")
@@ -217,6 +237,19 @@ def is_ancestor(a: str, b: str) -> bool:
     return not subprocess.run(["git", "merge-base", "--is-ancestor", a, b], cwd=REPO, capture_output=True).returncode  # fmt: skip
 
 
+def tree_of(sha: str) -> str:
+    """'' when `sha` is not fetched."""
+    return git("rev-parse", "-q", "--verify", f"{sha}^{{tree}}", check=False).strip()
+
+
+def below(other: str, base: str, head: str) -> bool:
+    """Whether PR head `other` is below PR head `head`, whose CI base is `base`, in a stack (see the module docstring)."""
+    if other == base or is_ancestor(other, head):
+        return True
+    tree = tree_of(base)
+    return bool(tree) and tree_of(other) == tree
+
+
 def key(r: dict) -> Key:
     return r["tf"], r["classname"], r["test"]
 
@@ -287,9 +320,13 @@ class History:
             return "other_failure"
         if base_t is not None and any(abs(base_t - m) < WINDOW and m < cutoff for m in self.main.get(k, [])):  # fmt: skip
             return "main_near_base"
-        if base is not None and any(pr not in (None, r["pr"]) and (sha == base or is_ancestor(sha, r["sha"])) for _, _, sha, pr in self.seen.get(k, [])):  # fmt: skip
+        if base is not None and any(pr not in (None, r["pr"]) and below(sha, base, r["sha"]) for _, _, sha, pr in self.seen.get(k, [])):  # fmt: skip
             return "stacked"
         return None
+
+    def other_heads(self, shas: set[str]) -> set[str]:
+        """The other PRs' heads that failed a test one of PR heads `shas` failed, which the stacked rule compares to them."""
+        return {o for sha in shas for r in self.heads.get(sha, []) for _, _, o, pr in self.seen.get(key(r), []) if pr not in (None, r["pr"])}  # fmt: skip
 
     def truth(self, sha: str, bases: dict[str, str], dropped: collections.Counter) -> list[dict] | None:  # fmt: skip
         """The failures on PR head `sha` that are the PR's own, counting the others in `dropped` by rule; None if its main_base is older than the loaded failures."""
@@ -456,6 +493,23 @@ def write_sample(
     })  # fmt: skip
 
 
+def run_each(kind: str, go: Callable[[Any], None], items: list, jobs: int) -> None:
+    """Run `go` on every item in `jobs` threads, printing, counting and skipping the items on which it raises."""
+    failed = []
+
+    def guarded(x: Any) -> None:
+        try:
+            go(x)
+        except Exception:
+            print(f"skipping {kind} {x}: {traceback.format_exc()}", flush=True)
+            failed.append(x)
+
+    with cf.ThreadPoolExecutor(jobs) as ex:
+        list(ex.map(guarded, items))
+    if failed:
+        print(f"{len(failed)} of {len(items)} {kind} samples raised and were skipped", flush=True)  # fmt: skip
+
+
 def by_file(rows: list[dict]) -> dict[str, list[tuple[str, str]]]:
     out = collections.defaultdict(set)
     for r in rows:
@@ -487,6 +541,7 @@ def pr_samples(h: History, out: Path, jobs: int) -> None:
             first[r["pr"]] = r
     reproduced = {k for k in envs if len(envs[k]) >= 2 or len(heads[k]) >= 2}
     fetch(sorted({f["sha"] for f in first.values()}))
+    fetch(sorted(h.other_heads({f["sha"] for f in first.values()})))
     ci = ci_bases({f["sha"]: pr for pr, f in first.items()})
     sources: list[str] = []
     dropped: list[collections.Counter] = []
@@ -510,8 +565,7 @@ def pr_samples(h: History, out: Path, jobs: int) -> None:
             except subprocess.CalledProcessError as e:
                 print(f"skipping PR {pr}: {e}", flush=True)
 
-    with cf.ThreadPoolExecutor(jobs) as ex:
-        list(ex.map(go, sorted(first)))
+    run_each("PR", go, sorted(first), jobs)
     print_dropped("pr", dropped)
     print(f"{sources.count('main')} of {len(sources)} PR samples have no CI base and are diffed against main", flush=True)  # fmt: skip
 
@@ -529,6 +583,17 @@ def landed_times(since: dt.date) -> dict[int, dt.datetime]:
     return out
 
 
+def head_created(shas: list[str]) -> dict[str, str]:
+    """Each head's first workflow job creation time, roughly when CI's target-determination job reads the PR's previous failures."""
+    out = {}
+    for i in range(0, len(shas), 200):
+        chunk = ",".join(f"'{s}'" for s in shas[i : i + 200])
+        out |= {r["head_sha"]: r["t"] for r in query(f"""
+            SELECT head_sha, toString(min(created_at)) t FROM default.workflow_job FINAL
+            WHERE head_sha IN ({chunk}) AND repository_full_name = 'pytorch/pytorch' GROUP BY head_sha""")}
+    return out
+
+
 def head_samples(h: History, out: Path, jobs: int) -> None:
     """One sample per head of each pr_ sample's PR with failures that are the PR's own, truth = those failures."""
     prs = {}
@@ -536,12 +601,20 @@ def head_samples(h: History, out: Path, jobs: int) -> None:
         s = json.loads(p.read_text())
         prs[s["pr"]] = s
     if not prs:
-        raise SystemExit(f"--kinds head needs the pr_ samples in {out}; build --kinds pr first")
+        print(f"no head samples: there are no pr_ samples in {out}", flush=True)
+        return
     shas = {sha for sha, rows in h.heads.items() if rows[0]["pr"] in prs}
     h.load_green(shas)
     shas = {sha for sha in shas if any(h.why_dropped(r) is None for r in h.heads[sha])}
     fetch(sorted(shas))
+    fetch(sorted(h.other_heads(shas)))
     ci = ci_bases({sha: h.heads[sha][0]["pr"] for sha in shas})
+    created = {sha: ts(t) for sha, t in head_created(sorted(shas)).items()}
+    failed = collections.defaultdict(list)
+    for other, rows in h.heads.items():
+        for r in rows:
+            if r["pr"] in prs and job_runs_td(r["job"], r["wf"]):
+                failed[r["pr"]].append((ts(r["t"]), other, r["tf"]))
     sources: list[str] = []
     dropped: list[collections.Counter] = []
 
@@ -552,15 +625,15 @@ def head_samples(h: History, out: Path, jobs: int) -> None:
         dropped.append(c := collections.Counter())
         if kept := h.truth(sha, bases, c):
             truth_jobs = by_file(kept)
+            previous = sorted({tf for t, other, tf in failed[pr] if other != sha and sha in created and t < created[sha]})
             try:
                 write_sample(out, f"head_{pr}_{sha[:12]}", "head", sha, title=prs[pr]["title"], body=prs[pr]["body"], **bases, pr=pr,
-                             truth=sorted(truth_jobs), truth_jobs=truth_jobs)
+                             truth=sorted(truth_jobs), truth_jobs=truth_jobs, previous_failures=previous)
                 sources.append(bases["base_source"])
             except subprocess.CalledProcessError as e:
                 print(f"skipping head {sha}: {e}", flush=True)
 
-    with cf.ThreadPoolExecutor(jobs) as ex:
-        list(ex.map(go, sorted(shas)))
+    run_each("head", go, sorted(shas), jobs)
     print_dropped("head", dropped)
     print(f"{sources.count('main')} of {len(sources)} head samples have no CI base and are diffed against main", flush=True)
 # fmt: on
@@ -610,8 +683,8 @@ def revert_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
         rows.setdefault(r["commit_sha"], r)
     fetch(sorted(rows))
 
-    def go(r: dict) -> None:
-        sha = r["commit_sha"]
+    def go(sha: str) -> None:
+        r = rows[sha]
         if not has_commit(sha):
             return
         signal = {
@@ -630,8 +703,7 @@ def revert_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
         except (subprocess.CalledProcessError, RuntimeError) as e:
             print(f"skipping revert {sha}: {e}", flush=True)
 
-    with cf.ThreadPoolExecutor(jobs) as ex:
-        list(ex.map(go, rows.values()))
+    run_each("revert", go, list(rows), jobs)
 
 
 def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
@@ -665,14 +737,17 @@ def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
             WHERE repo = 'pytorch/pytorch' AND action = 'revert' AND dry_run = 0 AND ts >= toDateTime('{start}')""")
     }
     reverted_ids = {p.stem.removeprefix("rev_") for p in out.glob("rev_*.json")}
-    for sha in random.Random(0).sample(shas, min(n, len(shas))):
+
+    def go(sha: str) -> None:
         title, _, body = git("log", "-1", "--format=%B", sha).partition("\n")
         if sha in reverted or sha[:12] in reverted_ids or re.search(r"\b(revert|reland)\b", title, re.IGNORECASE):  # fmt: skip
-            continue
+            return
         try:
             write_sample(out, f"neu_{sha[:12]}", "neutral", sha, sha + "^", title, strip_trailers(body), truth=[])  # fmt: skip
         except subprocess.CalledProcessError as e:
             print(f"skipping neutral {sha}: {e}", flush=True)
+
+    run_each("neutral", go, random.Random(0).sample(shas, min(n, len(shas))), 1)
 
 
 def main() -> None:

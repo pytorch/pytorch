@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
-from tools.testing.llm_td import select_tests
+from tools.testing.llm_td import select_tests, selection
 from tools.testing.llm_td.eval import build_dataset as bd, score
 from tools.testing.llm_td.eval.build_dataset import strip_trailers
 from tools.testing.llm_td.eval.run_eval import run_one
@@ -39,7 +39,7 @@ from tools.testing.llm_td.eval.score import (
     truth_pairs,
 )
 from tools.testing.llm_td.eval.td_replay import top25_per_config
-from tools.testing.llm_td.selection import Selection
+from tools.testing.llm_td.selection import apply_selection, Selection
 from tools.testing.target_determination.heuristics.interface import TestPrioritizations
 from tools.testing.test_run import TestRun
 
@@ -70,11 +70,13 @@ def pick(name: str, r: dict | None, td: dict | None, s: dict = SAMPLE) -> Choice
 
 
 def write_data(d: str, files: Mapping[str, object]) -> Path:
-    """Write `files` under `d`, stamping each TD replay with its sample's current inputs."""
+    """Write `files` under `d` (str values as is, others as JSON), stamping each TD replay with its sample's current inputs."""
     data = Path(d)
     for name, obj in files.items():
         (data / name).parent.mkdir(parents=True, exist_ok=True)
-        (data / name).write_text(json.dumps(obj))
+        (data / name).write_text(obj if isinstance(obj, str) else json.dumps(obj))
+    if not (data / "test-times.json").exists():
+        return data
     times = (data / "test-times.json").read_bytes()
     for p in (data / "td").glob("*.json"):
         if (sample := data / "samples" / p.name).exists():
@@ -232,6 +234,33 @@ class TestRunEval(unittest.TestCase):
             ):
                 run_eval.main()
         self.assertIn("1 results in", err.getvalue())
+
+    def test_main_refuses_another_prompt(self) -> None:
+        from tools.testing.llm_td.eval import run_eval
+
+        sample = {"id": "a", "sha": "f" * 40, "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a"], "changed_files": ["torch/foo.py"]}  # fmt: skip
+        sent = run_eval.prompt_sha(run_eval.sample_prompt(sample, {}))
+        result = {"model": "m", "effort": "medium", "agentic": False}
+        for prompt_sha, schema, refused in ((sent, run_eval.SCHEMA, False), (None, run_eval.SCHEMA, True), (sent, {}, True)):  # fmt: skip
+            with tempfile.TemporaryDirectory() as d:
+                data = write_data(d, {"samples/a.json": sample, "test-times.json": {}, "results/t/a.json": {**result, "prompt_sha": prompt_sha}})  # fmt: skip
+                (data / "ids.txt").write_text("a")
+                argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt")]  # fmt: skip
+                with (
+                    mock.patch.object(sys, "argv", argv),
+                    mock.patch.object(run_eval, "SCHEMA", schema),
+                    mock.patch("sys.stderr", io.StringIO()) as err,
+                    mock.patch("sys.stdout", io.StringIO()),
+                    mock.patch.object(run_eval, "query_model") as query,
+                ):
+                    try:
+                        run_eval.main()
+                    except SystemExit:
+                        self.assertTrue(refused)
+                        self.assertIn("another prompt", err.getvalue())
+                    else:
+                        self.assertFalse(refused)
+                query.assert_not_called()
 
 
 class TestScore(unittest.TestCase):
@@ -592,9 +621,50 @@ class TestScore(unittest.TestCase):
             job = [*seconds, *untimed]
             sel = Selection(set(rng.sample(files, rng.randint(0, 2))), candidates=set(files))  # fmt: skip
             ranked = [TestRun(f) for f in scored if f in job] + [TestRun(f) for f in job if f not in scored]  # fmt: skip
-            split = sel.split(ranked, lambda x: float(x.test_file in scored), seconds, "c")  # fmt: skip
-            got = score.hedge(sel, scored, seconds, score.LLM_TD_HEDGE, "c", {"TD"}, untimed)  # fmt: skip
-            self.assertEqual(got, {"TD"} if split.kept_td else split.hedged, (scored, seconds, untimed, sel))  # fmt: skip
+            cut = set(rng.sample(job, min(len(job), 2)))
+            prev = set(rng.sample(files, rng.randint(0, 2)))
+            split = sel.split(ranked, lambda x: float(x.test_file in scored), seconds, "c", previously_failed=prev, td_include=cut)  # fmt: skip
+            got = score.hedge(sel, scored, seconds, score.LLM_TD_HEDGE, "c", cut, untimed, prev)  # fmt: skip
+            want = cut if split.kept_td or not sum(seconds.values()) else split.previously_failed | split.hedged  # fmt: skip
+            self.assertEqual(got, want, (scored, seconds, untimed, sel, cut, prev))
+
+    def test_policy_matches_apply_selection(self) -> None:
+        # What final+td runs in a job is what apply_selection runs there, including a job with no test times.
+        rng = random.Random(0)
+        files = [f"test_{i}" for i in range(8)]
+        for _ in range(300):
+            seconds = {f: float(rng.choice([0, 0, 5, 20, 60])) for f in files if rng.random() < 0.6}  # fmt: skip
+            job = [*seconds, *(f for f in files if f not in seconds and rng.random() < 0.5)]  # fmt: skip
+            rng.shuffle(job)
+            n = rng.randint(0, len(job))
+            include, exclude = [TestRun(f) for f in job[:n]], [TestRun(f) for f in job[n:]]  # fmt: skip
+            scored = [f for f in job if rng.random() < 0.6]
+            picked = rng.sample(job, min(len(job), rng.randint(0, 2)))
+            prev = rng.sample(files, rng.randint(0, 2))
+            s = {**SAMPLE, "candidates": job, "truth": [], "previous_failures": prev}
+            td = {"scored": scored, "top25": [], "top25_cfg": {"c": job[:n]}}
+            r = {"out": {"tests": [{"file": f} for f in picked]}}
+            choice = policy("final+td", s, r, td, {"c": {f: [t, 0.0] for f, t in seconds.items()}})  # fmt: skip
+            if choice is None:
+                raise AssertionError("final+td chose nothing")
+            sel = Selection(set(picked), candidates=set(job), enforce=True)
+            with (
+                mock.patch.object(selection, "get_pr_number", return_value=1),
+                mock.patch("sys.stderr", io.StringIO()),
+            ):
+                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config="c", td_enabled=True, previously_failed=prev)  # fmt: skip
+            ran = {x.test_file for x in applied.include}
+            self.assertEqual({f for f in job if choice.covers(f, "c")}, ran, (seconds, job, n, scored, picked, prev))  # fmt: skip
+
+    def test_hedge_previous_failures(self) -> None:
+        # Previous failures in TD's cut run outside the budget; test_b is not in the cut.
+        td = {"scored": ["test_a", "test_c"], "top25": ["test_a"], "top25_cfg": {"default": ["test_a"], "slow": []}}  # fmt: skip
+        s = {**SAMPLE, "previous_failures": ["test_a", "test_b"]}
+        choice = pick("final+td5", NOTHING, td, s)
+        self.assertEqual(choice.per_config, {"default": {"test_a", "test_c"}, "slow": set()})  # fmt: skip
+        # Without fallback times other jobs are not enforced and run TD's cut.
+        self.assertEqual(choice.other, {"test_a"})
+        self.assertEqual(pick("final+td5", NOTHING, td).per_config["default"], {"test_c"})  # fmt: skip
 
     def test_hedge_failed_call_keeps_td(self) -> None:
         td = {"scored": ["test_a"], "top25": ["test_e"], "top25_cfg": {"default": ["test_a"], "slow": []}}  # fmt: skip
@@ -745,14 +815,22 @@ class TestScore(unittest.TestCase):
             for p in [*(stats / a for a in score.STATS_ARTIFACTS), code / "heuristics/h.py"]:  # fmt: skip
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text("1")
-            with mock.patch.object(score, "TD_CODE", code):
+            replay = Path(d) / "td_replay.py"
+            replay.write_text("1")
+            with (
+                mock.patch.object(score, "TD_CODE", code),
+                mock.patch.object(score, "REPLAY_CODE", [replay]),
+            ):
                 digests = [score.replay_stats(stats)]
                 (stats / score.STATS_ARTIFACTS[0]).write_text("2")
                 digests.append(score.replay_stats(stats))
                 (code / "heuristics/h.py").write_text("2")
                 digests += [score.replay_stats(stats), score.replay_stats(stats)]
-        self.assertEqual(len(set(digests)), 3)
+                replay.write_text("2")
+                digests.append(score.replay_stats(stats))
+        self.assertEqual(len(set(digests)), 4)
         self.assertEqual(digests[2], digests[3])
+        self.assertIn(Path(score.__file__).with_name("td_replay.py"), score.REPLAY_CODE)
 
     def test_td25_per_config(self) -> None:
         cands = ["test_a", "test_b", "test_c", "test_d", "test_e"]
@@ -767,10 +845,17 @@ class TestScore(unittest.TestCase):
         )
         # The cut is 25% + 1 of each config's own runs plus the files with no
         # recorded time (test_e, as if newly added); test_a's partial run counts.
-        cut = top25_per_config(tp, cands, SECONDS)
+        s = {"candidates": cands, "truth": []}
+        cut = top25_per_config(tp, score.job_files(s, SECONDS))
         self.assertEqual(cut, {"default": ["test_a", "test_e"], "slow": ["test_a", "test_e"]})  # fmt: skip
-        timed = top25_per_config(tp, ["test_a", "test_b", "test_c", "test_d"], SECONDS)
-        self.assertEqual(timed, {"default": ["test_a", "test_c"], "slow": ["test_a"]})
+        timed = {**s, "candidates": ["test_a", "test_b", "test_c", "test_d"]}
+        self.assertEqual(top25_per_config(tp, score.job_files(timed, SECONDS)), {"default": ["test_a", "test_c"], "slow": ["test_a"]})  # fmt: skip
+        # A file that failed in slow was in slow's job, though slow records no time of it.
+        failed = {**timed, "truth": ["test_d"], "truth_jobs": {"test_d": [["pull", "linux / test (slow, 1, 1)"]]}}  # fmt: skip
+        self.assertEqual(score.job_files(failed, SECONDS)["slow"], {"test_a", "test_c", "test_d"})  # fmt: skip
+        tp_d = TestPrioritizations(timed["candidates"], {TestRun("test_d"): 1.0})
+        self.assertNotIn("test_d", top25_per_config(tp_d, score.job_files(timed, SECONDS))["slow"])  # fmt: skip
+        self.assertEqual(top25_per_config(tp_d, score.job_files(failed, SECONDS))["slow"], ["test_d"])  # fmt: skip
         td = {"top25": ["test_a", "test_e"], "top25_cfg": cut}
         choice = pick("td25", None, td)
         self.assertTrue(choice.covers("test_a", "slow"))
@@ -792,6 +877,16 @@ class TestScore(unittest.TestCase):
         self.assertEqual(
             cost_fraction(Choice(Selection(run_all=True)), cands, SECONDS), (1.0, 1.0)
         )
+
+
+@contextlib.contextmanager
+def scratch_repo() -> Iterator[None]:
+    """A new git repo as bd.REPO, isolated from the caller's git environment and config."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="a", GIT_AUTHOR_EMAIL="a@a", GIT_COMMITTER_NAME="a", GIT_COMMITTER_EMAIL="a@a")  # fmt: skip
+    with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, env, clear=True), mock.patch.object(bd, "REPO", Path(d)):  # fmt: skip
+        bd.git("init", "-q")
+        yield
 
 
 class TestBuildDataset(unittest.TestCase):
@@ -886,44 +981,63 @@ class TestBuildDataset(unittest.TestCase):
         self.assertIsNone(after)
 
     def test_stacked(self) -> None:
-        # ghstack: U (pr 2) sits on L (pr 1), same author; L broke test_x, which U also fails.
-        # W (pr 3) is another PR of the author's that is not below U.
-        rows = [
-            fail("test_x", "2026-10-05 00:00:00", "l"),
-            fail("test_z", "2026-10-05 00:00:00", "l"),
-            fail("test_x", "2026-10-06 00:00:00", "u"),
-            fail("test_y", "2026-10-06 00:00:00", "u"),
-            fail("test_z", "2026-10-06 00:00:00", "w"),
-        ]
-        h = history(rows, {"l": 1, "u": 2, "w": 3}, {1: "me", 2: "me", 3: "me"})
+        # A ghstack stack, built as ghstack builds it: L (pr 1) below U (pr 2), both pushed twice. Each
+        # PR's head has its previous head and a synthetic gh/USER/N/base commit with the tree of
+        # the PR below as parents, so L's heads are neither U's CI base nor its ancestors.
+        # N (pr 4) is a GitHub-native PR on top of L's second head, W (pr 3) another PR of the author's.
+        with scratch_repo():
 
-        def truth(sha: str, base: str) -> tuple[list[str], dict]:
-            dropped: collections.Counter = collections.Counter()
-            kept = h.truth(sha, {"base": base, "merge_base": base, "main_base": "m", "base_source": "ci"}, dropped)  # fmt: skip
-            return sorted(r["test"] for r in kept or []), dict(dropped)
+            def piped(args: list[str], stdin: str) -> str:
+                return subprocess.run(["git", *args], cwd=bd.REPO, input=stdin, capture_output=True, text=True, check=True).stdout.strip()  # fmt: skip
 
-        with (
-            patch_ci_jobs(TD_JOBS),
-            mock.patch.object(bd, "green_jobs", return_value=set()),
-            mock.patch.object(bd, "commit_time", return_value=day(4)),
-            mock.patch.object(bd, "is_ancestor", lambda a, b: (a, b) == ("l", "u")),
-        ):  # fmt: skip
-            h.load_green({"l", "u", "w"})
-            # Diffed against L's head, as CI does, or against main with L's head below it.
-            self.assertEqual(truth("u", "l"), (["test_y"], {"stacked": 1}))
-            self.assertEqual(truth("u", "m"), (["test_y"], {"stacked": 1}))
-            self.assertEqual(truth("w", "m"), (["test_z"], {}))
-            self.assertEqual(truth("l", "m"), (["test_x", "test_z"], {}))
-            # Without the CI base, only ancestry tells.
-            self.assertEqual(truth("u", "b"), (["test_y"], {"stacked": 1}))
-            with mock.patch.object(bd, "is_ancestor", return_value=False):
-                self.assertEqual(truth("u", "b"), (["test_x", "test_y"], {}))
+            def commit(content: str, *parents: str) -> str:
+                """A commit of a tree holding `content`, so commits of equal content have equal trees."""
+                blob = piped(["hash-object", "-w", "--stdin"], content)
+                tree = piped(["mktree"], f"100644 blob {blob}\tf\n")
+                return bd.git("commit-tree", tree, *(a for p in parents for a in ("-p", p)), "-m", content).strip()  # fmt: skip
+
+            m = commit("main")
+            l_base = commit("main", m)
+            l1 = commit("L1", l_base)
+            l2 = commit("L2", l1, l_base)
+            u_base1 = commit("L1", m)
+            u1 = commit("U1", u_base1)
+            u_base2 = commit("L2", u_base1)
+            u2 = commit("U2", u1, u_base2)
+            n = commit("N", l2)
+            w = commit("W", m)
+            # L broke test_x in both versions and test_q only in its second; main broke test_v long ago on m.
+            rows = [
+                fail("test_x", "2026-10-05 00:00:00", l1),
+                fail("test_x", "2026-10-06 00:00:00", l2),
+                fail("test_q", "2026-10-06 00:00:00", l2),
+                fail("test_z", "2026-10-05 00:00:00", w),
+                fail("test_v", "2026-09-20 00:00:00", m, br="main"),
+            ] + [fail(t, "2026-10-07 00:00:00", u) for u in (u1, u2, n) for t in ("test_x", "test_q", "test_z", "test_v", "test_y")]  # fmt: skip
+            h = history(rows, {l1: 1, l2: 1, u1: 2, u2: 2, w: 3, n: 4}, {1: "me", 2: "me", 3: "me", 4: "me"})  # fmt: skip
+
+            def truth(sha: str, base: str) -> tuple[list[str], dict]:
+                dropped: collections.Counter = collections.Counter()
+                kept = h.truth(sha, {"base": base, "merge_base": m, "main_base": m, "base_source": "ci"}, dropped)  # fmt: skip
+                return sorted(r["test"] for r in kept or []), dict(dropped)
+
+            with (
+                patch_ci_jobs(TD_JOBS),
+                mock.patch.object(bd, "green_jobs", return_value=set()),
+                mock.patch.object(bd, "commit_time", return_value=day(20)),
+            ):  # fmt: skip
+                h.load_green({u1, u2, n, l2})
+                # Each U head drops what the L version below it broke; its own failures, W's and main's stay.
+                self.assertEqual(truth(u1, u_base1), (["test_q", "test_v", "test_y", "test_z"], {"stacked": 1}))  # fmt: skip
+                self.assertEqual(truth(u2, u_base2), (["test_v", "test_y", "test_z"], {"stacked": 2}))  # fmt: skip
+                # Diffed against L's head or against main, the native PR finds L below it by ancestry.
+                self.assertEqual(truth(n, l2), (["test_v", "test_y", "test_z"], {"stacked": 2}))  # fmt: skip
+                self.assertEqual(truth(n, m), (["test_v", "test_y", "test_z"], {"stacked": 2}))  # fmt: skip
+                self.assertEqual(truth(l2, l_base), (["test_q", "test_x"], {}))
+            self.assertEqual(h.other_heads({u1}), {l1, l2, w, n})
 
     def test_is_ancestor(self) -> None:
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="a", GIT_AUTHOR_EMAIL="a@a", GIT_COMMITTER_NAME="a", GIT_COMMITTER_EMAIL="a@a")  # fmt: skip
-        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, env, clear=True), mock.patch.object(bd, "REPO", Path(d)):  # fmt: skip
-            bd.git("init", "-q")
+        with scratch_repo():
             for msg in ("a", "b"):
                 bd.git("commit", "-q", "--allow-empty", "-m", msg)
             a, b = bd.git("rev-list", "HEAD").split()[::-1]
@@ -1001,6 +1115,30 @@ class TestBuildDataset(unittest.TestCase):
             bd.pr_samples(h, Path(out), 1)
         pr_text.assert_called_once_with(1)
         write.assert_not_called()
+
+    def test_unexpected_error_skips_only_its_sample(self) -> None:
+        h = history([fail("test_x", "2026-10-05 00:00:00", "s"), fail("test_x", "2026-10-05 00:00:00", "t", tf="test_b")], {"s": 1, "t": 2}, {1: "me", 2: "you"})  # fmt: skip
+        bad = UnicodeDecodeError("utf-8", b"", 0, 1, "bad")
+        with (
+            tempfile.TemporaryDirectory() as out,
+            patch_ci_jobs(TD_JOBS),
+            mock.patch.object(bd, "green_jobs", return_value=set()),
+            mock.patch.object(bd, "fetch"),
+            mock.patch.object(bd, "has_commit", return_value=True),
+            mock.patch.object(bd, "git", return_value="base\n"),
+            mock.patch.object(bd, "commit_time", return_value=day(4)),
+            mock.patch.object(bd, "ci_bases", return_value={}),
+            mock.patch.object(bd, "pr_text", side_effect=[bad, ("t", "b")]),
+            mock.patch.object(bd, "write_sample") as write,
+            contextlib.redirect_stdout(io.StringIO()) as stdout,
+        ):  # fmt: skip
+            bd.pr_samples(h, Path(out), 1)
+            # With no pr_ sample written, the head pass reports and returns, so later kinds still run.
+            bd.head_samples(h, Path(out), 1)
+        self.assertEqual([c.args[1] for c in write.call_args_list], ["pr_2"])
+        self.assertIn("1 of 2 PR samples raised and were skipped", stdout.getvalue())
+        self.assertIn("pr truth: dropped by rule over 2 heads", stdout.getvalue())
+        self.assertIn("no head samples", stdout.getvalue())
 
     def test_pr_samples(self) -> None:
         t = "2026-10-05 00:00:00"
@@ -1129,6 +1267,8 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "has_commit", return_value=True),
             mock.patch.object(bd, "commit_time", return_value=day(4)),
             mock.patch.object(bd, "ci_bases", return_value={"h1": ["b1"], "h2": ["b2"], "h3": ["b3"]}) as ci_bases,
+            # Every failure is at 10-05: h1's CI started before them, h2's after, h4's is unknown.
+            mock.patch.object(bd, "head_created", return_value={"h1": "2026-10-04 00:00:00", "h2": "2026-10-06 00:00:00"}),
             mock.patch.object(bd, "git", lambda *a, check=True: merge_bases[a[1:]] + "\n"),
             mock.patch.object(bd, "write_sample") as write,
             contextlib.redirect_stdout(io.StringIO()),
@@ -1138,6 +1278,8 @@ class TestBuildDataset(unittest.TestCase):
         ci_bases.assert_called_once_with({"h1": 1, "h2": 1, "h3": 1, "h4": 1})
         got = {c.args[1]: (c.args[2:], c.kwargs) for c in write.call_args_list}
         self.assertEqual(sorted(got), ["head_1_h1", "head_1_h2", "head_1_h4"])
+        # h2's previous failures are the other heads' (flaky or not, also of h3 and h5, which have no sample).
+        previous = {"head_1_h1": [], "head_1_h2": ["test_a", "test_c", "test_d", "test_e", "test_f"], "head_1_h4": []}  # fmt: skip
         want = {
             "head_1_h1": ("h1", "b1", "b1", "m1", "ci", {"test_c": [("pull", job_b)]}),
             "head_1_h2": ("h2", "b2", "mb2", "m2", "ci", {"test_b": [("pull", job_a)]}),
@@ -1154,7 +1296,7 @@ class TestBuildDataset(unittest.TestCase):
             args, kw = got[sid]
             self.assertEqual(args, ("head", sha))
             bases = {"base": base, "merge_base": merge_base, "main_base": main_base, "base_source": source}  # fmt: skip
-            self.assertEqual(kw, {"title": "t", "body": "b", **bases, "pr": 1, "truth": sorted(truth_jobs), "truth_jobs": truth_jobs})  # fmt: skip
+            self.assertEqual(kw, {"title": "t", "body": "b", **bases, "pr": 1, "truth": sorted(truth_jobs), "truth_jobs": truth_jobs, "previous_failures": previous[sid]})  # fmt: skip
 
     def test_revert_truth_is_truth_jobs(self) -> None:
         rows = [{"reverted_at": t, "commit_sha": "c" * 40, "source_signal_keys": ["test_a.py::x", "test_b.py::y"]} for t in ("1", "2")]  # fmt: skip
