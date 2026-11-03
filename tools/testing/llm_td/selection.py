@@ -13,6 +13,7 @@ files.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import re
 import sys
@@ -30,7 +31,7 @@ from tools.testing.target_determination.heuristics.utils import get_pr_number
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection
+    from collections.abc import Callable, Collection, Iterable
     from pathlib import Path
 
     from tools.testing.test_run import TestRun
@@ -38,6 +39,9 @@ if TYPE_CHECKING:
 
 SWEEPS = ("dynamo_wrapped", "crossref")
 LLM_TD_SELECTION_FILE = "llm_td_selection.json"
+# The selector runs from the default branch and run_test.py from the PR, so
+# bump this whenever an older reader would misread the selection file.
+SELECTION_VERSION = 1
 # Longest chain of test modules importing each other that importers() follows.
 MAX_IMPORT_HOPS = 8
 # More edited failure-list classes than this are not looked up one by one.
@@ -57,6 +61,11 @@ LLM_TD_HEDGE = 0.20
 # TD's ADDITIONAL_MAPPINGS.
 DRIVER_MAPPINGS = {
     **ADDITIONAL_MAPPINGS,
+    # run_test.py runs test_cpp_extensions_aot.py as both aot drivers.
+    **{
+        t: [*ADDITIONAL_MAPPINGS[t], r"^test/test_cpp_extensions_aot\.py$"]
+        for t in ("test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja")
+    },  # fmt: skip
     "test_ao_sparsity": [r"^test/ao/"],
     "test_autograd": [r"^test/autograd/"],
     "test_fx": [r"^test/fx/"],
@@ -74,6 +83,8 @@ FAILURE_LIST_DIR_RE = re.compile(
 FAILURE_LIST_RE = re.compile(FAILURE_LIST_DIR_RE.pattern + r"(?:.*-)?(\w+)\.[^./]+$")
 # instantiate_device_type_tests names TestFooCPU after TestFoo.
 DEVICE_SUFFIX_RE = re.compile(r"(CPU|CUDA|MPS|XPU|HPU|META|LAZY|PRIVATEUSE1)$")
+# assertExpected reads test/expect/<TestClass>.<test>[-<name>].expect.
+EXPECT_RE = re.compile(r"^test/expect/(\w+)\.")
 
 # Changes to these paths alter how every test is collected or run, so no
 # subset is safe whatever the model says.
@@ -89,7 +100,7 @@ RUN_ALL_PATTERNS = [
     r"^torch/testing/_internal/dynamo_test_failures\.py$",
     r"^tools/testing/",
     r"^test/pytest_shard_custom\.py$",
-    r"^tools/stats/(import_test_stats|upload_metrics)\.py$",
+    r"^tools/stats/(import_test_stats|upload_metrics|upload_test_stats|upload_stats_lib|test_dashboard)\.py$",
     r"^\.ci/pytorch/(test|multigpu-test|win-test|macos-test|macos-common|common|common-build|common_utils|torch_trace)\.sh$",
     r"^\.ci/pytorch/win-test-helpers/(setup_pytorch_env\.bat|test_python_shard\.bat|installation-helpers/activate_miniconda3\.bat)$",
     r"^\.github/workflows/_(linux|win|mac|rocm|xpu|s390x|tpu)-test(-no-dind)?\.yml$",
@@ -141,7 +152,7 @@ def importers(
     drivers: test/jit/test_freezing.py selects test_jit, which runs it, and
     test_jit_legacy, which does `from test_jit import *`. `grep` lists the paths
     under test/ that match a `git grep -E` pattern at the change's head. None if
-    the chain is longer than MAX_IMPORT_HOPS."""
+    a chain of importers reaches MAX_IMPORT_HOPS modules."""
     found: set[str] = set()
     seen: set[str] = set()
     frontier = {f for f in sources if f.startswith("test/") and f.endswith(".py")}
@@ -154,12 +165,51 @@ def importers(
         if hop == MAX_IMPORT_HOPS:
             return None
         seen |= frontier
-        mods = [f[5:-3] for f in frontier]
-        names = sorted({n for m in mods for n in (m.replace("/", "."), m.rsplit("/", 1)[-1])})  # fmt: skip
-        alt = "|".join(map(re.escape, names))
-        pattern = rf"^[[:space:]]*((from|import)[[:space:]]+\.*({alt})|from[[:space:]]+\.+[[:space:]]+import[[:space:]]+({alt}))([^[:alnum:]_]|$)"  # fmt: skip
+        # A module is imported by any dotted suffix of its path, a package by its
+        # directory, and load_test_module (a SourceFileLoader) takes the path.
+        # A parenthesized `from <package> import (` may span lines, so it counts
+        # as importing every frontier module of that package.
+        mods = sorted(f[5:-3].removesuffix("/__init__") for f in frontier)
+        parts = [m.split("/") for m in mods]
+        names = alts(".".join(p[i:]) for p in parts for i in range(len(p)))
+        bases = alts(p[-1] for p in parts)
+        parents = alts(".".join(p[i:-1]) for p in parts for i in range(len(p) - 1))
+        paths = alts(n for m in mods for n in (m, m.replace("/", ".")))
+        end = "([^[:alnum:]_]|$)"
+        forms = [
+            rf"(from|import)[[:space:]]+\.*({names}){end}",
+            rf"from[[:space:]]+\.+[[:space:]]+import[[:space:]]+(.*[^[:alnum:]_.])?({bases}){end}",
+        ]
+        if parents:
+            forms.append(rf"from[[:space:]]+\.*({parents})[[:space:]]+import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})")  # fmt: skip
+        pattern = rf"""^[[:space:]]*({"|".join(forms)})|load_test_module\(["']({paths})["']\)"""
         frontier = {f for f in grep(pattern) if f.endswith(".py")}
     return None
+
+
+def alts(names: Iterable[str]) -> str:
+    """An extended regex alternation of the literal `names`."""
+    return "|".join(re.sub(r"[.^$*+?()\[\]{}|\\]", r"\\\g<0>", n) for n in sorted(set(names)))  # fmt: skip
+
+
+def class_pattern(classes: Iterable[str]) -> str:
+    """A `git grep -E` pattern for the definition of one of `classes` or of
+    the generic class instantiate_device_type_tests made it from."""
+    names = alts(n for c in classes for n in (c, DEVICE_SUFFIX_RE.sub("", c)))
+    return rf"^[[:space:]]*class[[:space:]]+({names})([^[:alnum:]_]|$)"
+
+
+def data_file_readers(changed_files: list[str], grep: Callable[[str], list[str]]) -> list[str]:  # fmt: skip
+    """The paths under test/ that may read an edited non-.py file under test/
+    other than a failure list: those naming the file and, for an expect file
+    (see EXPECT_RE), those defining its test class. A file that no test file
+    names, such as a C++ test or a README, is taken to be read by none."""
+    data = [f for f in changed_files if f.startswith("test/") and not f.endswith(".py") and not FAILURE_LIST_DIR_RE.match(f)]  # fmt: skip
+    names = alts(f.rsplit("/", 1)[-1] for f in data)
+    readers = grep(rf"(^|[^[:alnum:]_.-])({names})([^[:alnum:]_.-]|$)") if data else []
+    if classes := {m[1] for f in data if (m := EXPECT_RE.match(f))}:
+        readers += grep(class_pattern(classes))
+    return readers
 
 
 def failure_list_sources(
@@ -184,17 +234,11 @@ def failure_list_sources(
     sources: list[str] = []
     missing = unparsed
     for c, lists in sorted(classes.items()):
-        alt = "|".join(sorted({c, DEVICE_SUFFIX_RE.sub("", c)}))
-        found = grep(rf"^[[:space:]]*class[[:space:]]+({alt})([^[:alnum:]_]|$)")
+        found = grep(class_pattern([c]))
         sources += found
         if not found:
             missing |= lists
     return sources, missing
-
-
-def unmatched_tests(out: dict, candidates: set[str]) -> list[str]:
-    """The `tests` names of a well-formed model answer that match no candidate."""
-    return [t["file"] for t in out["tests"] if normalize_test_name(t["file"], candidates) is None]  # fmt: skip
 
 
 def needs_run_all(changed_files: list[str]) -> bool:
@@ -218,8 +262,8 @@ def parse_model_output(out: object, candidates: set[str]) -> tuple[set[str], set
     """The files and sweeps a model answer names; ValueError if it is malformed.
 
     A `dirs` entry is a directory prefix such as "dynamo"; one that matches no
-    candidate is malformed, and so is a non-empty `tests` list none of whose
-    names matches a candidate, so misspelled names cannot select nothing."""
+    candidate is malformed, and so is a `tests` name that matches no
+    candidate: the model was told to copy the names from the candidate list."""
     if not isinstance(out, dict):
         raise ValueError("not an object")
     tests, dirs, sweeps = out.get("tests"), out.get("dirs", []), out.get("sweeps", [])
@@ -232,9 +276,10 @@ def parse_model_output(out: object, candidates: set[str]) -> tuple[set[str], set
         raise ValueError(f"unknown sweeps {sorted(unknown)}")
     if not isinstance(out.get("run_all", False), bool):
         raise ValueError("run_all is not a boolean")
-    files = {n for t in tests if (n := normalize_test_name(t["file"], candidates))}
-    if tests and not files:
-        raise ValueError("no tests entry matches a test file")
+    names = {t["file"]: normalize_test_name(t["file"], candidates) for t in tests}
+    if unmatched := sorted(t for t, n in names.items() if n is None):
+        raise ValueError(f"tests entries match no test file: {unmatched[:10]}")
+    files = {n for n in names.values() if n}
     for d in dirs:
         prefix = re.sub(r"(/\*\*?)?/*$", "", d.strip()).removeprefix("./").removeprefix("test/")  # fmt: skip
         in_dir = {c for c in candidates if c.startswith(prefix + "/")}
@@ -267,11 +312,13 @@ class Selection:
     ) -> Selection:
         """Turn the model's structured output into a Selection.
 
-        A missing or malformed output and a change to test infrastructure
-        all fall back to running everything. Test files the change edits and
-        their drivers are always selected, and with `grep` so are the test
-        files that import them (see importers) and those defining the tests
-        that an edited failure list names (see failure_list_sources)."""
+        A missing or malformed output, a change to test infrastructure, an
+        edited inductor failure list naming an unknown class, and too many
+        import hops all fall back to running everything. Test files the change
+        edits and their drivers are always selected, and with `grep` so are the
+        test files that import them (see importers), those defining the tests
+        that an edited failure list names (see failure_list_sources), and those
+        reading an edited data file (see data_file_readers), with their importers."""
         if out is None:
             return cls(run_all=True, reason="no model output; running everything")
         if needs_run_all(changed_files):
@@ -290,7 +337,8 @@ class Selection:
             sweeps.add("dynamo_wrapped")
         files |= edited_tests(changed_files, candidates)
         if grep is not None:
-            found = importers(changed_files + sources, candidates, grep)
+            readers = data_file_readers(changed_files, grep)
+            found = importers(changed_files + sources + readers, candidates, grep)
             if found is None:
                 return cls(run_all=True, reason="test modules import the change through too many hops")  # fmt: skip
             files |= found
@@ -325,7 +373,7 @@ class Selection:
         without a time are never hedged. Partial TestRuns of one file share
         its time, so a file is charged once and lands in one batch. If that
         chooses nothing, the files in `td_include` run (kept_td), so a call
-        never runs fewer files than TD's split, which keeps at least one."""
+        never runs zero files when TD's split runs some."""
         files = dict.fromkeys(x.test_file for x in ranked)
         covered = {f for f in files if self.covers(f, test_config)}
         prev = {f for f in files if f in previously_failed and f in td_include} - covered  # fmt: skip
@@ -348,6 +396,7 @@ class Selection:
 
     def to_json(self) -> dict:
         return {
+            "version": SELECTION_VERSION,
             "files": sorted(self.files),
             "sweeps": sorted(self.sweeps),
             "run_all": self.run_all,
@@ -358,9 +407,12 @@ class Selection:
 
     @classmethod
     def from_json(cls, d: dict) -> Selection:
-        files, sweeps = d["files"], d["sweeps"]
-        run_all, enforce = d["run_all"], d.get("enforce", False)
-        candidates = d.get("candidates")
+        """The selection in `d`; ValueError, KeyError or TypeError unless `d`
+        is a selection file of SELECTION_VERSION."""
+        if not isinstance(d, dict) or type(d.get("version")) is not int or d["version"] != SELECTION_VERSION:  # fmt: skip
+            raise ValueError(f"not a selection file of version {SELECTION_VERSION}")
+        files, sweeps, candidates = d["files"], d["sweeps"], d["candidates"]
+        run_all, enforce, reason = d["run_all"], d["enforce"], d["reason"]
         if not all(
             isinstance(v, list) and all(isinstance(x, str) for x in v)
             for v in (files, sweeps) + (() if candidates is None else (candidates,))
@@ -368,11 +420,13 @@ class Selection:
             raise TypeError("files, sweeps and candidates must be lists of strings")
         if not isinstance(run_all, bool) or not isinstance(enforce, bool):
             raise TypeError("run_all and enforce must be booleans")
+        if not isinstance(reason, str):
+            raise TypeError("reason must be a string")
         return cls(
             set(files),
             set(sweeps),
             run_all,
-            d.get("reason", ""),
+            reason,
             enforce,
             None if candidates is None else set(candidates),
         )
@@ -417,6 +471,7 @@ class AppliedSelection:
 
     selection: Selection
     test_config: str
+    call_id: str
     td_enabled: bool
     enforced: bool
     include: list[TestRun]
@@ -429,12 +484,14 @@ class AppliedSelection:
         f = test.test_file
         return {
             "failure": str(test),
+            "call_id": self.call_id,
             "covered": self.selection.covers(f, self.test_config),
             "enforced": self.enforced,
             "td_enabled": self.td_enabled,
             "in_td_include": f in self.td_include,
             "hedged": f in self.split.hedged,
             "previously_failed": f in self.split.previously_failed,
+            "kept_td": self.split.kept_td,
         }
 
 
@@ -451,15 +508,19 @@ def apply_selection(
     """Apply the selection to TD's (include, exclude) split.
 
     The selection replaces TD's split only on a PR with TD enabled and the
-    selection's enforce set, and only if some of the files have a test time.
+    selection's enforce set, only if some of the files have a test time, and
+    only if the split chooses some file (otherwise it is TD's split anyway).
     run_test.py falls back to the default job's times for a config without its
-    own, so in practice that fails only without test-times.json."""
+    own, so in practice the times are missing only without test-times.json.
+    call_id tells apart the run_test.py calls of one job, which run different
+    test lists."""
     ranked = include + exclude
     td_include = {x.test_file for x in include}
     # Partial TestRuns of one file share its time, so account per file.
     files = list(dict.fromkeys(x.test_file for x in ranked))
     file_time = {f: test_times.get(f, 0) for f in files}
     time_total = sum(file_time.values())
+    call_id = hashlib.sha256(" ".join(sorted(files)).encode()).hexdigest()[:12]
     enforced = td_enabled and selection.enforce and get_pr_number() is not None
     if enforced and not time_total:
         enforced = False
@@ -472,6 +533,9 @@ def apply_selection(
         previously_failed=previous_failures(),
         td_include=td_include,
     )
+    if enforced and split.kept_td:
+        enforced = False
+        print("LLM selection: chose no files, using TD", file=sys.stderr)
     if enforced:
         include, exclude = split.include, split.exclude
         print(
@@ -479,6 +543,7 @@ def apply_selection(
             file=sys.stderr,
         )
     metric: dict[str, object] = {
+        "call_id": call_id,
         "enforced": enforced,
         "td_enabled": td_enabled,
         "run_all": selection.run_all,
@@ -496,6 +561,7 @@ def apply_selection(
     return AppliedSelection(
         selection,
         test_config,
+        call_id,
         td_enabled,
         enforced,
         include,
