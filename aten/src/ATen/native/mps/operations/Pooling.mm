@@ -881,7 +881,7 @@ static bool fill_avg_pool_params(AvgPoolingParams<5>& params,
                                  const Tensor& output,
                                  const int32_t pooling_dims,
                                  const std::string& op_name) {
-  const bool use_32bit = canUse32BitIndexMath(input) && canUse32BitIndexMath(output);
+  const bool use_32bit = offsetsFitIn<int32_t>(input, output);
   TORCH_CHECK_NOT_IMPLEMENTED(use_32bit || (pooling_dims == 2 && !params.adaptive),
                               op_name,
                               ": MPS does not support tensors that require 64-bit indexing");
@@ -970,7 +970,7 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
                                                const int32_t pooling_dims,
                                                const std::string& op_name) {
   const bool is_2d = pooling_dims == 2;
-  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(input) || input.scalar_type() == kLong,
+  TORCH_CHECK_NOT_IMPLEMENTED(input.scalar_type() == kLong || supportedFloatingType(input),
                               "\"",
                               op_name,
                               "\" not implemented for '",
