@@ -47,12 +47,15 @@ MAX_IMPORT_HOPS = 8
 # More edited failure-list classes than this are not looked up one by one.
 MAX_FAILURE_LIST_CLASSES = 50
 # When enforcing, run_test.py also runs the files that already failed on the
-# PR and that TD runs, charged first to this share (20%) of the test time of
-# the call's test list (for a whole config, all its shards together; for a
-# targeted --include call, only those files), and then, greedily in rank order,
-# TD's positively scored files that have a known time and fit what is left: TD
-# and the model miss largely different failures.
+# PR and that TD runs, whatever their size, and, greedily in rank order, TD's
+# positively scored files that have a known time and fit in this share (20%)
+# of the test time of the call's test list (for a whole config, all its shards
+# together; for a targeted --include call, only those files): TD and the model
+# miss largely different failures.
 LLM_TD_HEDGE = 0.20
+# The key of td_results.json under which do_target_determination_for_s3.py
+# stores the previous failures, so that they arrive with TD's ranking.
+PREVIOUS_FAILURES_KEY = "previous_failures"
 
 
 # Tests that run the files a change matches although they do not import them:
@@ -263,6 +266,22 @@ def previous_failures() -> set[str]:
         return set()
 
 
+def load_previous_failures(td_results: Path) -> set[str] | None:
+    """The previous failures stored in td_results.json at `td_results`, or
+    None if they are missing (no TD results, or an older writer) or malformed."""
+    if not td_results.exists():
+        return None
+    try:
+        with open(td_results) as f:
+            failed = json.load(f)[PREVIOUS_FAILURES_KEY]
+        if not isinstance(failed, list) or not all(isinstance(x, str) for x in failed):
+            raise TypeError(f"previous failures must be a list of strings: {failed!r}")
+        return set(failed)
+    except (OSError, ValueError, KeyError, TypeError, RecursionError) as e:
+        print(f"Ignoring the previous failures in {td_results}: {e!r}", file=sys.stderr)
+        return None
+
+
 def parse_model_output(out: object, candidates: set[str]) -> tuple[set[str], set[str]]:
     """The files and sweeps a model answer names; ValueError if it is malformed.
 
@@ -367,23 +386,23 @@ class Selection:
     ) -> Split:
         """Split TD's ranked TestRuns into the covered files, the
         `previously_failed` files (those that already failed on the PR) that
-        are in `td_include` (TD's split runs them), which always run whatever
-        their size, and a hedge. The pool of previous failures spans the PR's
-        SHAs and configs, so running only those TD runs keeps their cost within
-        TD's. They are charged first to a budget of LLM_TD_HEDGE (20%) of the
-        test time of `ranked`; what is left (at least 0) is spent greedily in
-        rank order on the files with a positively scored TestRun, including
-        the other previous failures. One positive
-        class-level run hedges its whole file at the file's full time. Files
-        without a time are never hedged. Partial TestRuns of one file share
-        its time, so a file is charged once and lands in one batch. If that
-        chooses nothing, the files in `td_include` run (kept_td), so a call
+        are in `td_include` (TD's split runs them), and a hedge. Those previous
+        failures run whatever their size, as under TD, and are not charged to
+        the hedge: their pool spans the PR's SHAs, build environments and
+        configs, so one large earlier failure would otherwise use up the hedge
+        of every config, while TD's include bounds what they cost. The hedge is LLM_TD_HEDGE (20%) of
+        the test time of `ranked`, spent greedily in rank order on the other
+        files with a positively scored TestRun, including the other previous
+        failures. One positive class-level run hedges its whole file at the
+        file's full time. Files without a time are never hedged. Partial
+        TestRuns of one file share its time, so a file is charged once and
+        lands in one batch. If that chooses nothing, kept_td is set and
+        include is empty: apply_selection then keeps TD's split, so a call
         never runs zero files when TD's split runs some."""
         files = dict.fromkeys(x.test_file for x in ranked)
         covered = {f for f in files if self.covers(f, test_config)}
         prev = {f for f in files if f in previously_failed and f in td_include} - covered  # fmt: skip
-        budget = LLM_TD_HEDGE * sum(file_time.get(f, 0) for f in files)
-        left = max(0.0, budget - sum(file_time.get(f, 0) for f in prev))
+        left = budget = LLM_TD_HEDGE * sum(file_time.get(f, 0) for f in files)
         hedged: set[str] = set()
         chosen = covered | prev
         for x in ranked:
@@ -392,12 +411,9 @@ class Selection:
                 left -= t
                 hedged.add(f)
                 chosen.add(f)
-        kept_td = not chosen
-        if kept_td:
-            chosen = {f for f in files if f in td_include}
         include = [x for x in ranked if x.test_file in chosen]
         exclude = [x for x in ranked if x.test_file not in chosen]
-        return Split(include, exclude, covered, prev, hedged, budget, kept_td)
+        return Split(include, exclude, covered, prev, hedged, budget, not chosen)
 
     def to_json(self) -> dict:
         return {
@@ -455,8 +471,9 @@ class Selection:
 class Split:
     """Selection.split's result: the TestRuns to run and to skip, and which
     files run because they are covered, already failed on the PR and are in
-    TD's split, or are hedged (disjoint sets), the hedge budget in seconds, and
-    whether none of those ran so TD's split was kept."""
+    TD's split, or are hedged (disjoint sets), the hedge budget in seconds
+    (which the previous failures do not use), and whether it chose no file
+    (kept_td), in which case include is empty and TD's split is kept."""
 
     include: list[TestRun]
     exclude: list[TestRun]
@@ -469,7 +486,7 @@ class Split:
 
 @dataclass
 class AppliedSelection:
-    """A Selection applied to TD's split of one CI config in run_test.py.
+    """A Selection applied to TD's split of one run_test.py call's test list.
 
     include and exclude are the split to run: the selection's when enforced,
     TD's otherwise."""
@@ -509,12 +526,15 @@ def apply_selection(
     *,
     test_config: str,
     td_enabled: bool,
+    previously_failed: Collection[str] | None,
 ) -> AppliedSelection:
     """Apply the selection to TD's (include, exclude) split.
 
     The selection replaces TD's split only on a PR with TD enabled and the
-    selection's enforce set, only if some of the files have a test time, and
-    only if the split chooses some file (otherwise it is TD's split anyway).
+    selection's enforce set, only if some of the files have a test time, only
+    if `previously_failed` (the PR's previous failures stored with TD's
+    ranking, see load_previous_failures) is known, and only if the split
+    chooses some file (otherwise it is TD's split anyway).
     run_test.py falls back to the default job's times for a config without its
     own, so in practice the times are missing only without test-times.json.
     call_id tells apart the run_test.py calls of one job, which run different
@@ -530,12 +550,15 @@ def apply_selection(
     if enforced and not time_total:
         enforced = False
         print("LLM selection: no test times, using TD", file=sys.stderr)
+    if enforced and previously_failed is None:
+        enforced = False
+        print("LLM selection: no previous failures in the TD results, using TD", file=sys.stderr)  # fmt: skip
     split = selection.split(
         ranked,
         score,
         file_time,
         test_config,
-        previously_failed=previous_failures(),
+        previously_failed=previously_failed or (),
         td_include=td_include,
     )
     if enforced and split.kept_td:
@@ -544,7 +567,7 @@ def apply_selection(
     if enforced:
         include, exclude = split.include, split.exclude
         print(
-            f"LLM selection: running {len({x.test_file for x in include})} of {len(files)} test files ({len(split.covered)} selected; {len(split.previously_failed)} previously failed and {len(split.hedged)} hedged within {split.budget:.0f}s)",
+            f"LLM selection: running {len({x.test_file for x in include})} of {len(files)} test files ({len(split.covered)} selected; {len(split.previously_failed)} previously failed; {len(split.hedged)} hedged within {split.budget:.0f}s)",
             file=sys.stderr,
         )
     metric: dict[str, object] = {
@@ -558,6 +581,7 @@ def apply_selection(
         "num_hedged": len(split.hedged),
         "num_previously_failed": len(split.previously_failed),
         "kept_td": split.kept_td,
+        "previous_failures_known": previously_failed is not None,
         "time_total": time_total,
         "time_covered": sum(file_time[f] for f in split.covered),
         "time_hedged": sum(file_time[f] for f in split.hedged),

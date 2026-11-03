@@ -22,14 +22,6 @@ runs:
       with:
         name: td_results.json
 
-    - name: Download the previous failures
-      continue-on-error: true
-      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-      with:
-        pattern: previous_failures
-        merge-multiple: true
-        path: .additional_ci_files
-
     - name: Move artifacts to .additional_ci_files folder
       shell: bash
       run: |
