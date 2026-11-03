@@ -56,6 +56,7 @@ from torch.testing._internal.common_distributed import (
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_MACOS,
     retry_on_connect_failures,
     run_tests,
@@ -315,7 +316,7 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
         self._test_default_store_timeout("gloo")
 
 
-class ProcessGroupGlooTest(MultiProcessTestCase):
+class ProcessGroupGlooTestBase(MultiProcessTestCase):
     lazy_init = False
 
     def _create_process_group_gloo(self, store, rank, world_size, opts):
@@ -335,6 +336,76 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         opts.group_name = group_name
         return opts
 
+    def _test_broadcast_basics(self, fn):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+
+        def broadcast(xs, rootRank, rootTensor):
+            opts = c10d.BroadcastOptions()
+            opts.rootRank = rootRank
+            opts.rootTensor = rootTensor
+            fut = pg.broadcast(xs, opts).get_future()
+            fut.wait()
+            return fut.value()
+
+        # Every rank is root once
+        for i in range(self.world_size):
+            # Run with 1 input tensor
+            x = fn(torch.tensor([self.rank]))
+            output = broadcast([x], i, 0)
+            self.assertEqual(torch.tensor([i]), output[0])
+
+            # Run with 2 input tensors
+            num = 2
+            for j in range(num):
+                xs = [
+                    fn(torch.tensor([self.rank * num + 0.0])),
+                    fn(torch.tensor([self.rank * num + 1.0])),
+                ]
+
+                output = broadcast(xs, i, j)
+                self.assertEqual(
+                    torch.tensor([i * num + j], dtype=torch.float32), output[0]
+                )
+                self.assertEqual(
+                    torch.tensor([i * num + j], dtype=torch.float32), output[1]
+                )
+
+            # Run with 1 input tensor of cfloat dtype
+            x = fn(torch.tensor([complex(self.rank, self.rank)], dtype=torch.cfloat))
+            output = broadcast([x], i, 0)
+            self.assertEqual(
+                torch.tensor([complex(i, i)], dtype=torch.cfloat), output[0]
+            )
+
+        # Test overloaded convenience function
+        x = torch.tensor([self.rank + 1.0])
+        fut = pg.broadcast(x, root=0).get_future()
+        fut.wait()
+        result = fut.value()
+        self.assertEqual(torch.tensor([1.0]), result[0])
+
+    def _test_broadcast_stress(self, inputs):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts(threads=8)
+        )
+        work_handles = [
+            pg.broadcast(inputs[i], root=(i % self.world_size))
+            for i in range(len(inputs))
+        ]
+        for i, work_handle in enumerate(work_handles):
+            work_handle.wait()
+            self.assertEqual(
+                torch.tensor([(i * self.world_size) + (i % self.world_size)]),
+                inputs[i],
+                msg=(lambda msg: f"{msg}\nMismatch in iteration {i:d}"),
+            )
+
+
+class ProcessGroupGlooTest(ProcessGroupGlooTestBase):
     @requires_gloo()
     def test_multi_device_constructor(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -454,97 +525,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootTensor = 0
             pg.broadcast([t1, t3], opts)
 
-    def _test_broadcast_basics(self, fn):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts()
-        )
-
-        def broadcast(xs, rootRank, rootTensor):
-            opts = c10d.BroadcastOptions()
-            opts.rootRank = rootRank
-            opts.rootTensor = rootTensor
-            fut = pg.broadcast(xs, opts).get_future()
-            fut.wait()
-            return fut.value()
-
-        # Every rank is root once
-        for i in range(self.world_size):
-            # Run with 1 input tensor
-            x = fn(torch.tensor([self.rank]))
-            output = broadcast([x], i, 0)
-            self.assertEqual(torch.tensor([i]), output[0])
-
-            # Run with 2 input tensors
-            num = 2
-            for j in range(num):
-                xs = [
-                    fn(torch.tensor([self.rank * num + 0.0])),
-                    fn(torch.tensor([self.rank * num + 1.0])),
-                ]
-
-                output = broadcast(xs, i, j)
-                self.assertEqual(
-                    torch.tensor([i * num + j], dtype=torch.float32), output[0]
-                )
-                self.assertEqual(
-                    torch.tensor([i * num + j], dtype=torch.float32), output[1]
-                )
-
-            # Run with 1 input tensor of cfloat dtype
-            x = fn(torch.tensor([complex(self.rank, self.rank)], dtype=torch.cfloat))
-            output = broadcast([x], i, 0)
-            self.assertEqual(
-                torch.tensor([complex(i, i)], dtype=torch.cfloat), output[0]
-            )
-
-        # Test overloaded convenience function
-        x = torch.tensor([self.rank + 1.0])
-        fut = pg.broadcast(x, root=0).get_future()
-        fut.wait()
-        result = fut.value()
-        self.assertEqual(torch.tensor([1.0]), result[0])
-
     @requires_gloo()
     def test_broadcast_basics(self):
         self._test_broadcast_basics(lambda t: t.clone())
 
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_broadcast_basics_cuda(self):
-        self._test_broadcast_basics(lambda t: t.clone().cuda())
-
-    def _test_broadcast_stress(self, inputs):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts(threads=8)
-        )
-        work_handles = [
-            pg.broadcast(inputs[i], root=(i % self.world_size))
-            for i in range(len(inputs))
-        ]
-        for i, work_handle in enumerate(work_handles):
-            work_handle.wait()
-            self.assertEqual(
-                torch.tensor([(i * self.world_size) + (i % self.world_size)]),
-                inputs[i],
-                msg=(lambda msg: f"{msg}\nMismatch in iteration {i:d}"),
-            )
-
     @requires_gloo()
     def test_broadcast_stress(self):
         inputs = [torch.tensor([i * self.world_size + self.rank]) for i in range(1000)]
-        self._test_broadcast_stress(inputs)
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    @skipIfRocm(
-        msg="CLR execution-lock busy wait, see https://github.com/ROCm/rocm-systems/issues/11678"
-    )
-    def test_broadcast_stress_cuda(self):
-        inputs = [
-            torch.tensor([i * self.world_size + self.rank]).cuda() for i in range(1000)
-        ]
         self._test_broadcast_stress(inputs)
 
     @requires_gloo()
@@ -741,20 +728,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "unsupported layout"):
             opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([t3, t3.clone()], opts)
-
-    @skip_if_lt_x_gpu(1)
-    @requires_gloo()
-    def test_allreduce_coalesced_checks_cuda(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts()
-        )
-
-        t1 = torch.zeros(1, dtype=torch.float32)
-
-        with self.assertRaisesRegex(RuntimeError, "unsupported device type"):
-            opts = c10d.AllreduceCoalescedOptions()
-            pg.allreduce_coalesced([t1.cuda(), t1.cuda()], opts)
 
     def _test_allreduce_coalesced_basics(self, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1885,23 +1858,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         for i, tensor in enumerate(tensors):
             self.assertEqual(torch.full(size, float(i * self.world_size)), tensor)
 
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    @skipIfRocm(
-        msg="CLR execution-lock busy wait, see https://github.com/ROCm/rocm-systems/issues/11678"
-    )
-    def test_block_current_stream_cuda(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts()
-        )
-        t = torch.zeros(10, device="cuda")
-        work = pg.allreduce(t)
-        work.block_current_stream()
-        torch.cuda.current_stream().synchronize()
-
-        work.wait()
-
     @requires_gloo()
     def test_send_recv_complex(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2141,6 +2097,57 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_alltoall_multidim_cuda(self):
         self._test_alltoall_multidim(lambda t: t.clone().cuda())
+
+
+class ProcessGroupGlooTestCUDA(ProcessGroupGlooTestBase):
+    hw_classification = HardwareClassification.CUDA
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_broadcast_basics_cuda(self):
+        self._test_broadcast_basics(lambda t: t.clone().cuda())
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    @skipIfRocm(
+        msg="CLR execution-lock busy wait, see https://github.com/ROCm/rocm-systems/issues/11678"
+    )
+    def test_broadcast_stress_cuda(self):
+        inputs = [
+            torch.tensor([i * self.world_size + self.rank]).cuda() for i in range(1000)
+        ]
+        self._test_broadcast_stress(inputs)
+
+    @skip_if_lt_x_gpu(1)
+    @requires_gloo()
+    def test_allreduce_coalesced_checks_cuda(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+
+        t1 = torch.zeros(1, dtype=torch.float32)
+
+        with self.assertRaisesRegex(RuntimeError, "unsupported device type"):
+            opts = c10d.AllreduceCoalescedOptions()
+            pg.allreduce_coalesced([t1.cuda(), t1.cuda()], opts)
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    @skipIfRocm(
+        msg="CLR execution-lock busy wait, see https://github.com/ROCm/rocm-systems/issues/11678"
+    )
+    def test_block_current_stream_cuda(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+        t = torch.zeros(10, device="cuda")
+        work = pg.allreduce(t)
+        work.block_current_stream()
+        torch.cuda.current_stream().synchronize()
+
+        work.wait()
 
 
 class DistributedDataParallelTest(
@@ -3374,6 +3381,21 @@ class ProcessGroupGlooLazyInitTest(ProcessGroupGlooTest):
         return super().tearDown()
 
 
+@skip_if_win32()
+class ProcessGroupGlooLazyInitTestCUDA(ProcessGroupGlooTestCUDA):
+    hw_classification = HardwareClassification.CUDA
+
+    lazy_init = True
+
+    def setUp(self):
+        os.environ["TORCH_GLOO_LAZY_INIT"] = "1"
+        super().setUp()
+
+    def tearDown(self) -> None:
+        del os.environ["TORCH_GLOO_LAZY_INIT"]
+        return super().tearDown()
+
+
 class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
     def setUp(self):
         os.environ["TORCH_FR_BUFFER_SIZE"] = "10"
@@ -3488,6 +3510,18 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
         self.assertEqual(last["output_dtypes"], ["Float"])
         self.assertEqual(last["timeout_ms"], 50000)
         self.assertEqual(last["collective_seq_id"] - first["collective_seq_id"], 9)
+
+
+class ProcessGroupGlooFRTestCUDA(ProcessGroupGlooTestCUDA):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        os.environ["TORCH_FR_BUFFER_SIZE"] = "10"
+        super().setUp()
+
+    def tearDown(self) -> None:
+        del os.environ["TORCH_FR_BUFFER_SIZE"]
+        return super().tearDown()
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
