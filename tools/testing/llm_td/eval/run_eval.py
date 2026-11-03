@@ -4,7 +4,9 @@
         --model us.anthropic.claude-sonnet-5 --effort medium --ids tools/testing/llm_td/eval/ids/eval.txt
 
 Results go to DIR/results/<tag>/<id>.json and are never recomputed; rerun the
-same command to fill in samples whose call failed transiently. With
+same command to fill in samples whose call failed transiently. A tag's results
+must all come from one --model, --effort and --agentic. Samples that
+select_tests answers without the model (see score.unasked) are skipped. With
 --agentic, each worker checks the sample's head out into its own worktree
 under DIR/worktrees/<tag> and lets the model Read/Grep/Glob it.
 """
@@ -21,6 +23,7 @@ import traceback
 from pathlib import Path
 
 from tools.testing.llm_td.eval import REPO, write_json
+from tools.testing.llm_td.eval.score import unasked
 from tools.testing.llm_td.select_tests import (
     build_prompt,
     query_model,
@@ -122,7 +125,11 @@ def main() -> None:
     out = args.data / "results" / args.tag
     out.mkdir(parents=True, exist_ok=True)
     minutes = test_minutes(json.loads((args.data / "test-times.json").read_text()))
-    ids = [i for i in args.ids.read_text().split() if not (out / f"{i}.json").exists()]
+    want = {"model": args.model, "effort": args.effort, "agentic": args.agentic}
+    done = {x.stem: json.loads(x.read_text()) for x in out.glob("*.json")}
+    if other := sorted(i for i, r in done.items() if {k: r.get(k) for k in want} != want):  # fmt: skip
+        p.error(f"{len(other)} results in {out}, e.g. {other[0]}, were made with other settings than {want}; use another --tag")  # fmt: skip
+    ids = [i for i in args.ids.read_text().split() if i not in done]
     print(f"{args.tag}: {len(ids)} to run", flush=True)
 
     def worker(slot: int) -> None:
@@ -130,6 +137,8 @@ def main() -> None:
         for sid in ids[slot :: args.jobs]:
             try:
                 sample = json.loads((args.data / "samples" / f"{sid}.json").read_text())
+                if unasked(sample):
+                    continue
                 wt = (
                     checkout(args.data / "worktrees" / args.tag, slot, sample["sha"])
                     if args.agentic
