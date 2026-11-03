@@ -1800,11 +1800,25 @@ class GitHubPR:
         ignore_current_checks: set[tuple[int, str]] | None = None,
     ) -> list[GitHubPR]:
         """
+        Commits the PR, or the open PRs of its ghstack stack up to and including it,
+        onto `branch` (the default branch when None) in `repo`, without pushing them.
+
+        First fetches `branch` from the remote, which needs network access, and
+        force-resets the local `branch` to `<remote>/<branch>`, discarding any local
+        commits on it. merge() retries on the same repo, so this keeps the commits of
+        an attempt that failed before its push from landing again.
+
         :param skip_all_rule_checks: If true, skips all rule checks on ghstack PRs, useful for dry-running merge locally
         """
         branch_to_merge_into = self.default_branch() if branch is None else branch
-        if repo.current_branch() != branch_to_merge_into:
-            repo.checkout(branch_to_merge_into)
+        remote_tip = f"refs/remotes/{repo.remote}/{branch_to_merge_into}"
+        try:
+            repo.fetch(f"+refs/heads/{branch_to_merge_into}", remote_tip)
+        except RuntimeError as e:
+            raise RuntimeError(
+                f"Could not fetch {branch_to_merge_into} from {repo.remote}: {e}"
+            ) from e
+        repo._run_git("checkout", "-B", branch_to_merge_into, remote_tip)
 
         # It's okay to skip the commit SHA check for ghstack PRs since
         # authoring requires write access to the repo.
