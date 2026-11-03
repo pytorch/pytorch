@@ -20,6 +20,12 @@ from torch.testing._internal.common_utils import (
 )
 
 
+# CPython's test_translate builds this table with item assignment, so build
+# it once at import time instead.
+_rosetta = bytearray(range(256))
+_rosetta[ord("o")] = ord("e")
+
+
 class Indexable:
     def __init__(self, value=0):
         self.value = value
@@ -827,6 +833,102 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             torch.compile(f, backend="eager", fullgraph=True)(x, Items())[1],
             f(x, Items())[1],
+        )
+
+    @make_dynamo_test
+    def test_replace(self):
+        b = self.type2test(b"mississippi")
+        self.assertEqual(b.replace(b"i", b"a"), b"massassappa")
+        self.assertEqual(b.replace(b"ss", b"x"), b"mixixippi")
+        self.assertEqual(b.replace(b"i", b"a", 2), b"massassippi")
+        self.assertEqual(b.replace(b"i", b"a", 0), b"mississippi")
+        self.assertEqual(b.replace(b"i", b"a", -1), b"massassappa")
+        self.assertEqual(b.replace(b"", b"-"), b"-m-i-s-s-i-s-s-i-p-p-i-")
+        self.assertEqual(b.replace(b"x", b"y"), b"mississippi")
+        self.assertEqual(b.replace(bytearray(b"ss"), b"x"), b"mixixippi")
+        self.assertEqual(b, b"mississippi")
+        self.assertIsInstance(b.replace(b"i", b"a"), self.type2test)
+
+    @make_dynamo_test
+    def test_replace_errors(self):
+        b = self.type2test(b"a b")
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.replace(32, b"")
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.replace(b"a", 32)
+        with self.assertRaisesRegex(
+            TypeError, "'bytes' object cannot be interpreted as an integer"
+        ):
+            b.replace(b"a", b"b", b"0")
+
+    @make_dynamo_test
+    def test_translate(self):
+        b = self.type2test(b"hello")
+        self.assertEqual(b.translate(_rosetta), b"helle")
+        self.assertEqual(b.translate(_rosetta, b"l"), b"hee")
+        self.assertEqual(b.translate(_rosetta, delete=b"l"), b"hee")
+        self.assertEqual(b.translate(None, b"e"), b"hllo")
+        self.assertEqual(b, b"hello")
+        self.assertIsInstance(b.translate(_rosetta), self.type2test)
+        with self.assertRaisesRegex(
+            ValueError, "translation table must be 256 characters long"
+        ):
+            b.translate(bytes(range(255)))
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.translate(_rosetta, 1)
+        with self.assertRaisesRegex(
+            TypeError, r"translate\(\) takes at least 1 positional argument \(0 given\)"
+        ):
+            b.translate()
+        with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+            b.translate(None, None)
+
+    def test_replace_translate_returns_new_bytearrays(self):
+        def f(ba, table, x):
+            return ba.replace(b"a", b"z"), ba.translate(table), x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        table = bytearray(range(256))
+        ba = bytearray(b"ab")
+        result = compiled(ba, table, torch.ones(1))
+        self.assertEqual(result, f(bytearray(b"ab"), table, torch.ones(1)))
+        self.assertIsNot(result[0], ba)
+        self.assertIsNot(result[1], ba)
+        self.assertIsNot(result[0], result[1])
+        result[0][0] = ord("q")
+        self.assertEqual(ba, b"ab")
+        self.assertEqual(result[1], b"ab")
+
+    def test_replace_translate_nonconstant_buffer_graph_break(self):
+        class BytesSubclass(bytes):
+            pass
+
+        def replace(ba, arg):
+            return ba.replace(arg, b"z")
+
+        def translate(ba, arg):
+            return ba.translate(arg)
+
+        for fn, arg in ((replace, b"a"), (translate, _rosetta)):
+            name = fn.__name__
+            with self.subTest(method=name):
+                args = bytearray(b"ab"), BytesSubclass(arg)
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported,
+                    f"Dynamo does not know how to trace method `{name}` of class `bytearray`",
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=True)(*args)
+                self.assertEqual(torch.compile(fn, backend="eager")(*args), fn(*args))
+
+    def test_input_bytearray_replace_translate(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba, table):
+            return ba.replace(b"a", b"z"), ba.translate(table, b"b")
+
+        self.assertEqual(
+            fn(bytearray(b"ab"), bytearray(range(256))),
+            (bytearray(b"zb"), bytearray(b"a")),
         )
 
     def test_append_extend_arg_mutation(self):
