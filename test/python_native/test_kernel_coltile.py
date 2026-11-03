@@ -51,7 +51,7 @@ _VALUE_INDEX = {
 class TestKernelColTile(TestCase):
     def setUp(self):
         super().setUp()
-        # The batched and two-output column routes are measured, and enabled, on B200 only.
+        # Enable the batched and two-output column routes on the test GPU.
         current = (torch.cuda.get_device_capability(),)
         patcher = mock.patch.object(kg, "_BATCHED_COL_CCS", current)
         patcher.start()
@@ -85,10 +85,9 @@ class TestKernelColTile(TestCase):
     def test_stage2_combine_body(self):
         # Only wide, split inputs select the otherwise untested shared combine body.
         c = ct._C_THREAD_STAGE2 + 256  # over the thread-per-column crossover
-        x = torch.randn(4096, c, device="cuda")  # tall enough that _split_p splits it
-        self.assertGreater(
-            ct._split_p(4096), 1, "the shape no longer splits -- test is stale"
-        )
+        x = torch.randn(4096, c, device="cuda")  # tall enough that stage one splits it
+        npar, _ = ct._col_geometry(4096, c, 1, x.element_size(), 2**31 // c)
+        self.assertGreater(npar, 1, "the shape no longer splits -- test is stale")
         with mock.patch.object(tile, "TileReduce", wraps=tile.TileReduce) as built:
             out = ct.reduce_col_tile(
                 T.SumOps(acc=cutlass.Float32), "combine2", x, torch.float32
@@ -335,11 +334,12 @@ class TestColTileHost(TestCase):
     @parametrize("nouts", [1, 2])
     @parametrize("shape", [(1100, 8192), (4, 64, 16)], name_fn=lambda s: f"{len(s)}d")
     def test_route_gate_by_architecture(self, shape, nouts):
-        # Off B200, only 2D one-output column views leave the general kernel.
+        # Off H100 and B200, only 2D one-output column views leave the general kernel.
         view = torch.empty(shape, device="cuda")
+        self.assertTrue(kg._col_route_ok(view, nouts, (9, 0)))
         self.assertTrue(kg._col_route_ok(view, nouts, (10, 0)))
         self.assertEqual(
-            kg._col_route_ok(view, nouts, (9, 0)), view.dim() == 2 and nouts == 1
+            kg._col_route_ok(view, nouts, (12, 0)), view.dim() == 2 and nouts == 1
         )
 
     @parametrize(
@@ -385,21 +385,30 @@ class TestColTileHost(TestCase):
             col.tilemap
 
     def test_over_reported_split_stays_correct(self):
-        # A capped split can leave blocks empty; they must load nothing and combine identities.
-        r = ct._P_MAX * ct._Q_TARGET + 1  # the smallest R whose split over-reports
-        self.assertEqual(ct._split_p(r), ct._P_MAX, "shape no longer over-reports")
-        x = torch.randn(r, 8, device="cuda")
+        # 64 chunks of ceil(65 / 64) = 2 rows leave the last 31 empty; they must load
+        # nothing and combine identities.
+        x = torch.randn(65, 8, device="cuda")
         out = ct.reduce_col_tile(
-            T.SumOps(acc=cutlass.Float32), "overrep", x, torch.float32
+            T.SumOps(acc=cutlass.Float32), "overrep", x, torch.float32, npar=64
         )
         torch.testing.assert_close(
             out, x.double().sum(dim=0).float(), atol=2e-3, rtol=1e-4
         )
         # Index traits expose stray partials as wrong indices.
         idx = ct.reduce_col_tile(
-            T.ArgMaxOps(acc=cutlass.Float32), "overrep_idx", x, torch.int32
+            T.ArgMaxOps(acc=cutlass.Float32), "overrep_idx", x, torch.int32, npar=64
         )
         self.assertEqual(idx, x.argmax(dim=0).to(torch.int32))
+
+    def test_default_split_fits_grid_y(self):
+        # Two lanes would want 65536 chunks; the default caps npar at grid y's 65535.
+        x = torch.randn(1 << 20, 2, device="cuda")
+        out = ct.reduce_col_tile(
+            T.SumOps(acc=cutlass.Float32), "grid_y", x, torch.float32
+        )
+        torch.testing.assert_close(
+            out, x.double().sum(dim=0).float(), atol=2e-3, rtol=1e-4
+        )
 
     def test_explicit_vec_must_divide_the_column_count(self):
         # Explicit vec must divide C or trailing outputs remain uninitialized.

@@ -20,14 +20,22 @@ _compile = _L.compile_kernel
 _stream = _L.stream
 _CACHE = {}
 
-# About 64 reduced rows per chunk was consistently optimal; fixed P cut tall-narrow
-# throughput to one quarter.
-_Q_TARGET = 64
-_P_MAX = 4096
+# Stage one targets about _TARGET_LANES threads: (columns / vec) lanes per batch times
+# npar reduced-axis chunks of at least _Q_MIN rows. vec narrows, trading width for lanes,
+# until chunks keep _Q_VEC rows, and never leaves fewer than _MIN_LANES column lanes.
+# Views of at most _SHORT_R rows reduce in one stage at vec <= 2. Against ceil(R / 64)
+# chunks with vec <= 4, sum, argmax and var_mean (fp32/bf16; 1 and 64 MiB; C 16-4096;
+# B 1 and 16) ran at 1.38x geomean on B200 and 1.33x on H100 (worst 0.75x), within 5%
+# of the best (vec, npar) per shape.
+_TARGET_LANES = 131072
+_Q_MIN = 16
+_Q_VEC = 64
+_SHORT_R = 64
+_MIN_LANES = 64
+# Stage one launches chunks along grid y.
+_MAX_NPAR = 65535
 # Use blocks per column below the measured 4096-16384 crossover, then threads per column.
 _C_THREAD_STAGE2 = 8192
-# vec controls both load width and live accumulators; cap at 4 because bf16 vec 8 is 0.77-0.83x.
-_VEC_MAX = 4
 # Small blocks avoid idle threads on narrow columns; threads_per_block=256 took 17.3us versus 9.9us
 # at 64. Use 32 threads for 1-2 fields and 64 for register-heavy Welford. Against the
 # pre-shared kernel this is 0.92-1.01x, except (16384, 1024) sum/amax lose 7-9%,
@@ -65,18 +73,34 @@ def select_col_config(
     max_npar = (_INT32_LIMIT - 1) // max(1, outputs)
     if npar is not None and npar > max_npar:
         raise ValueError(f"npar={npar} overflows Int32 partials for {outputs} outputs")
+    if npar is not None and npar > _MAX_NPAR:
+        raise ValueError(f"npar={npar} exceeds grid y's {_MAX_NPAR} blocks")
+    auto_npar, auto_vec = _col_geometry(rows, columns, batches, itemsize, max_npar)
     cfg = ColConfig(
         "explicit" if explicit else "default",
         threads if threads_per_block is None else threads_per_block,
-        min(_split_p(rows), max_npar) if npar is None else npar,
-        min(tile.vec_size(columns, itemsize), _VEC_MAX) if vec is None else vec,
+        auto_npar if npar is None else npar,
+        auto_vec if vec is None else vec,
     )
     return cfg
 
 
-def _split_p(R: int) -> int:
-    """Split the reduced axis into about _Q_TARGET rows per chunk."""
-    return max(1, min(_P_MAX, -(-R // _Q_TARGET)))
+def _col_geometry(
+    rows: int, columns: int, batches: int, itemsize: int, max_npar: int
+) -> tuple[int, int]:
+    """Default (npar, vec) for stage one."""
+    vec = tile.vec_size(columns, itemsize)
+    while vec > 1 and batches * columns // vec < _MIN_LANES:
+        vec //= 2
+    if rows <= _SHORT_R:
+        return 1, min(vec, 2)
+    while True:
+        lanes = batches * columns // vec
+        npar = min(rows // _Q_MIN, -(-_TARGET_LANES // lanes), max_npar, _MAX_NPAR)
+        npar = max(1, npar)
+        if rows // npar >= _Q_VEC or vec == 1:
+            return npar, vec
+        vec //= 2
 
 
 def reduce_col_tile(
@@ -258,7 +282,7 @@ def _reduce_col_tile(
             _stream(),
         )
 
-    # _VEC_MAX decouples vec from compile-time alignment, so key both.
+    # vec can be narrower than the compile-time alignment, so key both.
     key = (
         "coltile",
         trait_key,
