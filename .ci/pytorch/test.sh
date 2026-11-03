@@ -959,7 +959,7 @@ test_inductor_cpp_wrapper_shard() {
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
+    --include inductor/test_torchinductor inductor/test_max_autotune \
               inductor/test_triton_kernels inductor/test_combo_kernels \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
@@ -2738,6 +2738,12 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
     collect_tlparse_output
   fi
+elif [[ "${TEST_CONFIG}" == inductor_cpp_wrapper_cpu ]]; then
+  # All of CPUReproTests under cpp_wrapper. The default CPU jobs run only the
+  # curated subset in test_cpu_cpp_wrapper.
+  setup_torch_trace
+  TORCHINDUCTOR_CPP_WRAPPER=1 python test/run_test.py --include inductor/test_cpu_repro --verbose
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchvision
   setup_torch_trace
