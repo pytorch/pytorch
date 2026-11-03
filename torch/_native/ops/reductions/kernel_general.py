@@ -313,15 +313,16 @@ def _physical_col_view(
     return x.reshape(B, R, C)
 
 
-# B200 CUDA-graph timings of the batched column kernel against the general kernel, for
-# sum and var_mean at 16 and 512 MiB: R <= 64 wins at every C (4-33x). Longer R needs
-# C >= 16 (sum 1.3x or better), and two outputs also need B * C >= 8192 kept outputs;
-# below that, general is up to 4x faster. For fp16 sum, amax, argmax, aminmax, max.dim
-# and fp16 var_mean, the gate accepts regressions on 8-16 MiB inputs at its boundaries
-# (0.82-0.86x one-output at R = 1024, C = 16, B * C = 4096; fp16 var_mean 0.70x at
-# B * C = 8192), which run 1.1-3.1x at 512 MiB.
-# Only B200 is measured, so other architectures keep the general kernel for these routes.
-_BATCHED_COL_CCS = ((10, 0),)
+# CUDA-graph timings of the batched column kernel against the general kernel (sum, amax,
+# argmax, var_mean, max.dim and aminmax; fp32/bf16/fp16; 8-512 MiB): R <= 64 wins at
+# every C (B200 2.3-21x, H100 2.5-18x). Longer R needs C >= 16, and two outputs also
+# need B * C >= 8192 kept outputs; past those, views of 16 MiB and up run 0.92-12x on
+# B200 and 1.2-12x on H100. Every admitted regression sits at R = 1024, C = 16: argmax,
+# amax and sum on 8 MiB inputs (B200 0.73-0.94x, H100 0.83-1.0x), and B200 fp32 argmax
+# and fp16 var_mean at 16 MiB (0.92-0.94x); the same shapes run 2.0-3.6x at 512 MiB.
+# Earlier B200 timings put narrower C at 0.24-1.0x. Other architectures keep the general
+# kernel.
+_BATCHED_COL_CCS = ((9, 0), (10, 0))
 _BATCHED_COL_SHORT_R = 64
 _BATCHED_COL_MIN_C = 16
 _BATCHED_COL_2OUT_MIN_OUTPUTS = 8192

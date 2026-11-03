@@ -281,12 +281,12 @@ class TestSumCuteDSLOverride(TestCase):
         self.assertEqual(out, ref)
 
     @unittest.skipIf(
-        torch.cuda.device_count() < 2,
-        "requires at least 2 visible CUDA devices",
+        torch.cuda.device_count() < 2 or torch.cuda.get_device_capability(1)[0] < 9,
+        "requires a second Hopper+ CUDA device",
     )
     @skipIfRocm
     def test_non_current_device(self):
-        """Launch functional and out variants on the input tensor's device."""
+        """Launch sum and prod, functional and out=, on the input tensor's device."""
         previous = torch.cuda.current_device()
         # A single-kernel plan and a split plan, whose two stages both key the device.
         shapes = ((17, 8192), (3, 262144))
@@ -313,16 +313,15 @@ class TestSumCuteDSLOverride(TestCase):
                     expected_prod = x.prod(dim=1)
 
                 with mock.patch.object(rt, "reduce_row_itree", side_effect=record):
-                    got_sum = x.sum(dim=1)
-                    got_prod = torch.empty(m, device="cuda:1")
-                    torch.prod(x, dim=1, out=got_prod)
+                    got = [x.sum(dim=1), x.prod(dim=1)]
+                    for op in (torch.sum, torch.prod):
+                        got.append(op(x, dim=1, out=torch.empty(m, device="cuda:1")))
 
-                self.assertEqual(got_sum.device, torch.device("cuda:1"))
-                self.assertEqual(got_prod.device, torch.device("cuda:1"))
-                self.assertEqual(got_sum, expected_sum)
-                self.assertEqual(got_prod, expected_prod)
+                for g, expected in zip(got, (expected_sum, expected_prod) * 2):
+                    self.assertEqual(g.device, torch.device("cuda:1"))
+                    self.assertEqual(g, expected)
 
-            self.assertEqual(launch_devices, [1] * 2 * len(shapes))
+            self.assertEqual(launch_devices, [1] * 4 * len(shapes))
             self.assertEqual(torch.cuda.current_device(), 0)
             tags = ("rowitree", "rowitree1", "rowitree2")
             keys = {(k[0], k[1], k[7]) for k in rt._CACHE if k[0] in tags}
