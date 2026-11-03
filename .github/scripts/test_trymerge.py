@@ -1708,14 +1708,12 @@ class TestGitHubPRGhstackDependencies(TestCase):
 
         top_pr.merge_ghstack_into(mock_repo, True, ignore_current_checks=waivers)
 
-        mock_find_matching_merge_rule.assert_called_once()
-        self.assertEqual(
-            mock_find_matching_merge_rule.call_args.kwargs["ignore_current_checks"],
-            waivers,
-        )
-        self.assertIs(
-            mock_find_matching_merge_rule.call_args.kwargs["skip_mandatory_checks"],
-            True,
+        mock_find_matching_merge_rule.assert_called_once_with(
+            parent_pr,
+            mock_repo,
+            skip_mandatory_checks=True,
+            skip_internal_checks=False,
+            ignore_current_checks=waivers,
         )
 
 
