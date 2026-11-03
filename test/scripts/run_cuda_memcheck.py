@@ -173,7 +173,7 @@ async def run1(coroutine_id):
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), args.timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             print("Timeout:", test, file=logfile)
             proc.kill()
             if args.ci and not args.nohang:
