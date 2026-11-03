@@ -19,6 +19,7 @@ from tools.stats.upload_stats_lib import (
     unzip,
     upload_workflow_stats_to_s3,
 )
+from tools.testing.target_determination.gen_artifact import LLM_SELECTION_SOURCE
 
 
 REGEX_JOB_INFO = r"(.*) \/ .*test \(([^,]*), .*\)"
@@ -60,7 +61,7 @@ def get_test_config(job_name: str) -> str:
 def get_td_exclusions(
     workflow_run_id: int, workflow_run_attempt: int
 ) -> dict[str, dict[str, Any]]:
-    """The excluded test files per source ("td" or "llm_selection"), build and test config."""
+    """The excluded test files per source ("td" or LLM_SELECTION_SOURCE), build and test config."""
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
         os.chdir(temp_dir)
@@ -121,10 +122,10 @@ def upload_additional_info(workflow_run_id: int, workflow_run_attempt: int) -> N
         "additional_info/td_exclusions",
         [exclusions["td"]],
     )
-    if "llm_selection" in exclusions:
+    if LLM_SELECTION_SOURCE in exclusions:
         upload_workflow_stats_to_s3(
             workflow_run_id,
             workflow_run_attempt,
             "additional_info/llm_td_exclusions",
-            [exclusions["llm_selection"]],
+            [exclusions[LLM_SELECTION_SOURCE]],
         )

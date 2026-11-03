@@ -6,7 +6,7 @@
 Results go to DIR/results/<tag>/<id>.json and are never recomputed; rerun the
 same command to fill in samples whose call failed transiently. With
 --agentic, each worker checks the sample's head out into its own worktree
-under DIR/worktrees and lets the model Read/Grep/Glob it.
+under DIR/worktrees/<tag> and lets the model Read/Grep/Glob it.
 """
 
 from __future__ import annotations
@@ -131,7 +131,7 @@ def main() -> None:
             try:
                 sample = json.loads((args.data / "samples" / f"{sid}.json").read_text())
                 wt = (
-                    checkout(args.data / "worktrees", slot, sample["sha"])
+                    checkout(args.data / "worktrees" / args.tag, slot, sample["sha"])
                     if args.agentic
                     else None
                 )
