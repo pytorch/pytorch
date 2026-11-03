@@ -2,12 +2,16 @@
 
     python -m tools.testing.llm_td.eval.build_dataset --data DIR --start 2026-09-20 --end 2026-10-26
 
-Three kinds of sample, each a JSON file under DIR/samples:
+Four kinds of sample, each a JSON file under DIR/samples:
 
   pr_<N>      a PR whose own CI failed tests that main did not fail. The
               ground truth is every (test file, CI config) that failed on the
               earliest failing head. These runs are censored: pull/trunk jobs
               already skip 75% of files through TD, so truth is a lower bound.
+  head_<N>_<sha>
+              every head of a pr_ sample's PR with a non-flaky test failure in a
+              job that runs TD; the truth is those failures. A failure is flaky
+              by Dr.CI's signals, with hindsight (see flaky_flags).
   rev_<sha>   a commit that landed and was auto-reverted between --start and
               --end because it broke a test on main, where every test runs.
               The truth is the test files of the reverting signal, in every
@@ -19,7 +23,9 @@ Three kinds of sample, each a JSON file under DIR/samples:
 A PR failure is attributed to the PR only if the same test did not fail on
 main within four days and did not fail on another author's PR. PR truths that
 reproduced (same test failing in two build environments, or on two heads of
-the PR) are kept in `truth_strong`; single-job one-offs are mostly flakes.
+the PR) are kept in `truth_strong`. A failure here survived run_test.py's
+in-job retries, so a one-off is not necessarily a flake: often only one
+environment runs the test, or the author fixed it in the next push.
 """
 
 from __future__ import annotations
@@ -37,6 +43,7 @@ from pathlib import Path
 
 from tools.testing.llm_td.eval import REPO
 from tools.testing.llm_td.eval.clickhouse import query
+from tools.testing.llm_td.eval.score import job_runs_td
 
 
 MAIN_WINDOW = dt.timedelta(days=4)
@@ -83,7 +90,7 @@ def has_commit(sha: str) -> bool:
     return True
 
 
-KINDS = ("pr", "revert", "neutral")
+KINDS = ("pr", "head", "revert", "neutral")
 
 
 def is_main(branch: str) -> bool:
@@ -277,6 +284,99 @@ def pr_samples(keep: list[dict], main: dict, out: Path, jobs: int) -> None:
         list(ex.map(go, sorted(first)))
 
 
+# fmt: off
+FLAKY_WINDOW = dt.timedelta(days=14)
+SKIP_JOBS = ("rerun_disabled_tests", "mem_leak_check")
+
+
+def flaky_flags(rows: list[dict], start: dt.date, end: dt.date) -> list[dict]:
+    """Dr.CI's flaky signals for each failing (job, test) of `rows`, with hindsight on both sides.
+
+    A failure is flaky if its job passed on a rerun of the same head, the job is
+    marked unstable, the test was disabled, or the same test failed on main or on
+    another author's PR within FLAKY_WINDOW."""
+    w = FLAKY_WINDOW
+    others = pull_failures(start - w, end + w)
+    sha2pr = pr_of_shas(sorted({r["sha"] for r in others if not is_main(r["br"])}))
+    author = pr_authors(sorted(set(sha2pr.values()) | {r["pr"] for r in rows}))
+    seen = collections.defaultdict(list)
+    for r in others:
+        who = "main" if is_main(r["br"]) else author.get(sha2pr.get(r["sha"], -1))
+        if who:
+            seen[(r["tf"], r["classname"], r["test"])].append((ts(r["t"]), who))
+    disabled = collections.defaultdict(list)
+    sql = f"""
+        SELECT toString(day) d, name FROM misc.disabled_tests_historical
+        WHERE day >= '{start - w}' AND day < '{end + w}'"""
+    for d in query(sql):
+        # "test_foo (__main__.TestBar)"
+        test, _, cls = d["name"].removesuffix(")").partition(" (")
+        disabled[(cls.rsplit(".", 1)[-1], test)].append(ts(d["d"] + " 00:00:00"))
+    for r in rows:
+        t, me = ts(r["t"]), author.get(r["pr"], r["pr"])
+        near = {who for wt, who in seen[(r["tf"], r["classname"], r["test"])] if abs(wt - t) < w}
+        was_disabled = any(abs(d - t) < w for d in disabled[(r["classname"], r["test"])])
+        r["flaky"] = r["rerun_green"] or "unstable" in r["job"] or bool(near - {me}) or was_disabled
+    return rows
+
+
+def head_failures(prs: list[int], start: dt.date) -> list[dict]:
+    """Every failing (job, test) in a job that runs TD, on every head of `prs`."""
+    numbers = ",".join(map(str, prs))
+    sql = f"SELECT DISTINCT number, head_sha FROM materialized_views.pr_by_sha WHERE number IN ({numbers})"
+    sha2pr = {r["head_sha"]: int(r["number"]) for r in query(sql)}
+    shas = sorted(sha2pr)
+    jobs = []
+    for i in range(0, len(shas), 200):
+        chunk = ",".join(f"'{s}'" for s in shas[i : i + 200])
+        jobs += query(f"""
+            SELECT id, head_sha, name, run_attempt, conclusion FROM default.workflow_job FINAL
+            WHERE head_sha IN ({chunk}) AND repository_full_name = 'pytorch/pytorch'""")
+    green = {(j["head_sha"], j["name"], j["run_attempt"]) for j in jobs if j["conclusion"] == "success"}
+    by_id = {j["id"]: j for j in jobs if job_runs_td(j["name"]) and not any(s in j["name"] for s in SKIP_JOBS)}
+    ids, rows = [str(i) for i in by_id], []
+    for i in range(0, len(ids), 2000):
+        sql = f"""
+            SELECT job_id, replaceRegexpOne(file, '\\.py$', '') tf, classname, name test, toString(min(time_inserted)) t
+            FROM tests.all_test_runs
+            WHERE time_inserted >= '{start - FLAKY_WINDOW}' AND job_id IN ({",".join(ids[i : i + 2000])})
+              AND (failure_count > 0 OR error_count > 0)
+            GROUP BY job_id, tf, classname, test"""
+        for r in query(sql):
+            j = by_id[int(r["job_id"])]
+            sha, name = j["head_sha"], j["name"]
+            rerun = any((sha, name, a) in green for a in range(1, 10) if a != j["run_attempt"])
+            rows.append({**r, "sha": sha, "pr": sha2pr[sha], "job": name, "rerun_green": rerun})
+    return rows
+
+
+def head_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
+    """One sample per failing head of each pr_ sample's PR, truth = its non-flaky failures in TD jobs."""
+    prs = {}
+    for p in out.glob("pr_*.json"):
+        s = json.loads(p.read_text())
+        prs[s["pr"]] = s
+    by = collections.defaultdict(lambda: collections.defaultdict(set))
+    for r in flaky_flags(head_failures(sorted(prs), start), start, end):
+        if not r["flaky"]:
+            by[(r["pr"], r["sha"])][r["tf"]].add(r["job"])
+    fetch(sorted({sha for _, sha in by}))
+
+    def go(k: tuple[int, str]) -> None:
+        (pr, sha), s = k, prs[k[0]]
+        if not has_commit(sha):
+            return
+        base = s["base"] if sha == s["sha"] else git("merge-base", "origin/main", sha, check=False).strip()
+        if base:
+            truth_jobs = {tf: sorted(js) for tf, js in by[k].items()}
+            write_sample(out, f"head_{pr}_{sha[:12]}", "head", sha, base, s["title"], s["body"], pr=pr,
+                         truth=sorted(truth_jobs), truth_jobs=truth_jobs)
+
+    with cf.ThreadPoolExecutor(jobs) as ex:
+        list(ex.map(go, by))
+# fmt: on
+
+
 def revert_truth_jobs(
     signal: set[str], landed: dt.datetime, reverted: str
 ) -> dict[str, list[str]]:
@@ -378,6 +478,8 @@ def main() -> None:
     if "pr" in args.kinds:
         keep, main_fail = pr_caused_failures(pull_failures(args.start, args.end))
         pr_samples(keep, main_fail, out, args.jobs)
+    if "head" in args.kinds:
+        head_samples(out, args.jobs, args.start, args.end)
     if "revert" in args.kinds:
         revert_samples(out, args.jobs, args.start, args.end)
     if "neutral" in args.kinds:

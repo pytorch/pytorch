@@ -124,8 +124,8 @@ class TestSplit(unittest.TestCase):
     def test_hedge_is_greedy_in_rank_order(self) -> None:
         ranked = [TestRun(f) for f in ("a", "big", "small", "unscored", "untimed")]
         scores = {"a": 1, "big": 0.9, "small": 0.8, "untimed": 0.7}
-        times = {"a": 10, "big": 60, "small": 20, "unscored": 910, "untimed": 0}
-        # Budget is 5% of 1000s = 50s: big does not fit, small still does.
+        times = {"a": 10, "big": 210, "small": 20, "unscored": 760, "untimed": 0}
+        # Budget is 20% of 1000s = 200s: big does not fit, small still does.
         include, exclude, hedged = self.split(
             Selection(files={"a"}), ranked, scores, times
         )
