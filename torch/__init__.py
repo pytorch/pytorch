@@ -1828,8 +1828,7 @@ def use_deterministic_algorithms(
           when called on an MPS tensor with floating or complex dtype
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
         * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, :func:`torch.nn.AdaptiveMaxPool2d`,
-          :func:`torch.nn.AvgPool2d`, and :func:`torch.nn.AvgPool3d` when attempting to differentiate
-          an MPS tensor
+          and :func:`torch.nn.AvgPool3d` when attempting to differentiate an MPS tensor
         * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
           in some cases
 

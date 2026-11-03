@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/ceil_div.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Pool.h>
@@ -606,6 +607,16 @@ static void adaptive_max_pool_out_mps_template(const Tensor& output,
   launch_max_pool_kernel(input, output, indices, params, op_name);
 }
 
+static int64_t pool_backward_num_threads(const Tensor& grad_output, int32_t dims, int32_t pooling_dims, bool serial) {
+  auto numThreads = grad_output.numel();
+  if (numThreads > 0 && serial) {
+    for (const auto dim : c10::irange(dims - pooling_dims, dims)) {
+      numThreads /= grad_output.size(dim);
+    }
+  }
+  return numThreads;
+}
+
 static void max_pool_backward_out_mps_template(Tensor& grad_input,
                                                const Tensor& indices,
                                                const Tensor& input,
@@ -639,17 +650,33 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
   params.dims = static_cast<int32_t>(input.dim());
   fill_pool_size_strides(params, grad_input, grad_output, indices);
 
+  // See Note [Enabling Deterministic Operations]
+  // The operation is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  const bool serial = at::globalContext().deterministicAlgorithms();
+  if (serial && input.scalar_type() != kFloat) {
+    Tensor grad_input_float = at::empty({0}, grad_input.options().dtype(kFloat));
+    max_pool_backward_out_mps_template(
+        grad_input_float, indices, input.to(kFloat), grad_output.to(kFloat), params, op_name);
+    grad_input.copy_(grad_input_float);
+    return;
+  }
+  grad_input.fill_(0);
+  const auto numThreads = pool_backward_num_threads(grad_output, params.dims, params.pooling_dims, serial);
+
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto maxPoolPSO = lib.getPipelineStateForFunc("max_pool_backward_" + scalarToMetalTypeString(input));
+      auto maxPoolPSO = lib.getPipelineStateForFunc("max_pool_backward_" + scalarToMetalTypeString(input) +
+                                                    (serial ? "_serial" : ""));
 
       getMPSProfiler().beginProfileKernel(maxPoolPSO, op_name, {input}, mpsStream);
       [computeEncoder setComputePipelineState:maxPoolPSO];
       mtl_setArgs(computeEncoder, grad_input, grad_output, indices, params);
 
-      mtl_dispatch1DJob(computeEncoder, maxPoolPSO, grad_input.numel());
+      mtl_dispatch1DJob(computeEncoder, maxPoolPSO, numThreads);
       getMPSProfiler().endProfileKernel(maxPoolPSO, mpsStream);
     }
   });
@@ -857,6 +884,32 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
 
   grad_input.resize_(input.sizes(), input.suggest_memory_format());
 
+  // The 2D kernel gathers and is deterministic. See Note [Enabling Deterministic Operations]
+  // The other kernel is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  const bool is_2d = pooling_dims == 2;
+  const bool serial = !is_2d && at::globalContext().deterministicAlgorithms();
+  if (serial && input.scalar_type() != kFloat) {
+    Tensor grad_input_float = at::empty({0}, grad_input.options().dtype(kFloat));
+    avg_pool_backward_out_mps_template(grad_input_float,
+                                       input.to(kFloat),
+                                       grad_output.to(kFloat),
+                                       _kernel_size,
+                                       _stride,
+                                       _padding,
+                                       ceil_mode,
+                                       count_include_pad,
+                                       divisor_override,
+                                       pooling_dims,
+                                       op_name);
+    grad_input.copy_(grad_input_float);
+    return;
+  }
+  if (!is_2d) {
+    grad_input.fill_(0);
+  }
+
   AvgPoolingParams<5> params{};
   fill_avg_pool_params(params, grad_input, grad_output, pooling_dims, op_name);
   params.count_include_pad = count_include_pad;
@@ -869,12 +922,13 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
   memcpy(params.stride.data(), stride.data(), pooling_dims * sizeof(int32_t));
   memcpy(params.padding.data(), padding.data(), pooling_dims * sizeof(int32_t));
 
-  const bool is_2d = pooling_dims == 2;
+  const auto numThreads = pool_backward_num_threads(grad_output, dims, pooling_dims, serial);
   launch_avg_pool_kernel(is_2d ? "avg_pool2d_backward_" : "avg_pool_backward_",
-                         "",
+                         serial ? "_serial" : "",
                          grad_input,
                          grad_output,
-                         pool_grid(grad_input, is_2d, params.channels_last, 1, pool2d_backward_tile_cols),
+                         is_2d ? pool_grid(grad_input, is_2d, params.channels_last, 1, pool2d_backward_tile_cols)
+                               : MTLSizeMake(numThreads, 1, 1),
                          params,
                          op_name);
 }
