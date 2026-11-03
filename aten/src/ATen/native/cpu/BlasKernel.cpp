@@ -102,7 +102,6 @@ auto sum(int64_t N, Func f) {
 
 // Half and BFloat16 have vectorized fp32-accumulating dot kernels (compute_dot
 // below), and gemm_core_ serves every layout of their gemm through gemm_transa_
-// on top of them. The naive kernels remain for the other reduced types.
 #if defined(C10_MOBILE)
 template <typename scalar_t>
 constexpr bool has_xf16_dot_kernel = false;
@@ -149,7 +148,6 @@ gemm_notrans_(
   }
 }
 
-// Reduced-precision types without a dot kernel (see has_xf16_dot_kernel).
 template <typename scalar_t, typename opmath_t, typename out_t>
 std::enable_if_t<!std::is_same_v<scalar_t, opmath_t>, void>
 gemm_notrans_(
@@ -381,9 +379,8 @@ gemm_transa_(
       c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
     }
   };
-  // Split the longer side of c across threads: c is column-major, so splitting
-  // rows when m is small has threads write interleaved bytes of the same cache
-  // lines. Grains are sized in dots so small problems skip the thread fork.
+  // Split the longer side of c across threads with grain size. c is column-major, so splitting
+  // rows when m is small has threads write interleaved bytes of the same cache lines
   if (n >= m) {
     const int64_t grain = std::max<int64_t>(1, at::internal::GRAIN_SIZE / std::max<int64_t>(1, m * k));
     parallel_for(0, n, grain, [&](int64_t begin, int64_t end) {
@@ -413,12 +410,10 @@ gemm_transa_(
   });
 }
 
-// Re-lays out a column-major (rows x k, leading dimension ld) operand so that each
-// row is contiguous over k, which is how gemm_transa_ reads both of its operands.
+// lay out a column-major (rows x k, leading dimension ld) operand so that gemm_transa_ can read
 template <typename scalar_t>
 std::unique_ptr<scalar_t[]> pack_k_contiguous(int64_t rows, int64_t k, const scalar_t* src, int64_t ld) {
   std::unique_ptr<scalar_t[]> dst(new scalar_t[rows * k]);
-  // 32 two-byte elements span one cache line on both the strided and the contiguous side.
   constexpr int64_t kBlock = 32;
   const int64_t grain = std::max<int64_t>(kBlock, at::internal::GRAIN_SIZE / std::max<int64_t>(1, k));
   parallel_for(0, rows, grain, [&](int64_t begin, int64_t end) {
@@ -454,10 +449,8 @@ void gemm_core_(
       }
     }
 #endif
-    // gemm_transa_ is the one vectorized, parallel kernel for these types. Repack the
-    // operands it cannot read directly and use it for every layout; the repack moves
-    // O(m*k + k*n) elements against O(m*n*k) compute. Below oneDNN's tiny-problem
-    // bound (see mkldnn_gemm) the naive loops are as fast, so leave them be.
+    // gemm_transa_ is the vectorized, parallel kernel for these types. Repack the operands
+    // it cannot read directly and use it for every layout. Leave tiny problems to naive loop.
     if (m * n * k > 16 * 16 * 16) {
       std::unique_ptr<scalar_t[]> a_packed, b_packed;
       if (transa == TransposeType::NoTranspose) {

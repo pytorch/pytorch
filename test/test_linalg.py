@@ -9626,8 +9626,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     def test_addmm_reduced_precision_without_mkldnn(self, device, dtype):
         # With oneDNN unavailable (ISA gate or disabled), bf16/fp16 gemm runs on the ATen
         # kernels in cpu/BlasKernel.cpp, which repack operands for every transpose layout.
-        # Cover all layouts, alpha/beta, size-1 dims and sizes that are not multiples of
-        # the repack block, against an fp32 reference.
         def make(rows, cols, transpose):
             if transpose:
                 return make_tensor((cols, rows), dtype=dtype, device=device, low=-1, high=1).t()
