@@ -4263,8 +4263,9 @@ class ShapeEnv:
         self._var_to_range_version_counter = 0
         # Separate counter tracking only replacement changes; also part of
         # _get_key(). Together with _var_to_range_version_counter it
-        # invalidates replace(), _find() and SymNode.expr; it also invalidates
-        # the symbolic op memo.
+        # invalidates replace(), _find() and SymNode.expr. The symbolic op memo
+        # is also emptied when it changes, to drop entries keyed on old
+        # resolved forms.
         self._replacements_version_counter = 0
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
@@ -4277,8 +4278,9 @@ class ShapeEnv:
         # computations. Memoize on (op, lhs.expr, rhs.expr), the operands
         # resolved through replace(), so a hit never depends on outdated
         # replacements or ranges. _get_symop_cache empties the memo whenever
-        # replacements change, only to bound its size. mod isn't memoized
-        # because it picks Mod or PythonMod from the operands' value ranges.
+        # replacements change; that drops entries keyed on outdated resolved
+        # forms and is not needed for correctness. mod isn't memoized because
+        # it picks Mod or PythonMod from the operands' value ranges.
         #
         # What is cached is the result sympy expression. Every call site still
         # builds its own SymNode around it, and must: see the comment in

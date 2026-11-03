@@ -7408,14 +7408,72 @@ class ShapeEnvReplacementCacheTest(TestCase):
         # s1 + s2 + 2.
         self.assertEqual((p + s2).node.expr, 2 * s1.node.expr + s2.node.expr)
 
+    def _count_symop_hits(self, shape_env):
+        class CountingDict(dict):
+            hits = 0
+
+            def get(self, key, default=None):
+                val = super().get(key, default)
+                if val is not None:
+                    self.hits += 1
+                return val
+
+        shape_env._symop_cache = CountingDict()
+        return shape_env._symop_cache
+
+    def test_symop_memo_hits_on_repeat(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 3, duck=False)
+        b = create_symint(shape_env, 5, duck=False)
+        memo = self._count_symop_hits(shape_env)
+        r1 = a * b
+        self.assertEqual(memo.hits, 0)
+        r2 = a * b
+        self.assertEqual(memo.hits, 1)
+        self.assertEqual(r1.node.expr, r2.node.expr)
+
+    def test_symop_memo_shared_by_equal_resolved_operands(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 3, duck=False)
+        s1 = create_symint(shape_env, 3, duck=False)
+        s2 = create_symint(shape_env, 5, duck=False)
+        p = s0 + s1
+        shape_env._set_replacement(s0.node.expr, s1.node.expr, "test")
+        q = s1 * 2
+        memo = self._count_symop_hits(shape_env)
+        expected = 2 * s1.node.expr + s2.node.expr
+        self.assertEqual((p + s2).node.expr, expected)
+        hits = memo.hits
+        # q has a different _expr but resolves to the same 2*s1, so it shares
+        # p + s2's entry.
+        self.assertEqual((q + s2).node.expr, expected)
+        self.assertEqual(memo.hits, hits + 1)
+
+    def test_optimized_summation_flag_survives_unrelated_replacement(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 3, duck=False)
+        s1 = create_symint(shape_env, 4, duck=False)
+        s2 = create_symint(shape_env, 5, duck=False)
+        s3 = create_symint(shape_env, 5, duck=False)
+        t = s0 + s1
+        self.assertTrue(t.node._optimized_summation)
+        shape_env._set_replacement(s3.node.expr, s2.node.expr, "test")
+        r = t + s2
+        self.assertTrue(r.node._optimized_summation)
+        self.assertEqual(r.node.expr, s0.node.expr + s1.node.expr + s2.node.expr)
+
     def test_replacement_change_clears_symop_memo(self):
         shape_env = ShapeEnv()
         a = shape_env.create_unbacked_symint()
         b = shape_env.create_unbacked_symint()
         _ = a + 1
-        self.assertGreater(len(shape_env._get_symop_cache()), 0)
+        self.assertIn(("add", a.node.expr, sympy.Integer(1)), shape_env._symop_cache)
         shape_env._set_replacement(b.node.expr, a.node.expr + 1, "test")
-        self.assertEqual(len(shape_env._get_symop_cache()), 0)
+        _ = a + 2
+        # Read the dict directly: only the entry from after the change remains.
+        self.assertEqual(
+            list(shape_env._symop_cache), [("add", a.node.expr, sympy.Integer(2))]
+        )
 
     @parametrize("method", ["replace", "_find"])
     def test_runtime_assert_preserves_cache_hit(self, method):
