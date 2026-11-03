@@ -1,6 +1,8 @@
 # Owner(s): ["module: unknown"]
 
 
+import warnings
+
 import torch
 from torch.testing._internal.autocast_test_lists import (
     AutocastCPUTestLists,
@@ -10,9 +12,11 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyMPS,
+    onlyXPU,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -241,6 +245,22 @@ class WeightDTypeCastCounterMode(TorchDispatchMode):
 
 class TestAutocastDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyXPU
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_xpu_autocast_float32(self, device, input_dtype):
+        x = torch.ones((2, 2), device=device, dtype=input_dtype)
+        device_type = torch.device(device).type
+        previous_enabled = torch.is_autocast_enabled(device_type)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with torch.autocast(device_type, dtype=torch.float32):
+                self.assertTrue(torch.is_autocast_enabled(device_type))
+                result = torch.mm(x, x)
+                self.assertEqual(result.dtype, torch.float32)
+                self.assertEqual(result, torch.mm(x.float(), x.float()))
+        self.assertEqual(caught, [])
+        self.assertEqual(torch.is_autocast_enabled(device_type), previous_enabled)
 
     @onlyAccelerator
     def test_cast_cache_is_global(self, device):
