@@ -4590,10 +4590,17 @@ def summarize_example_value(v: object) -> str:
             fields.append(f"dtype={v.dtype}")
         if v.device.type != torch._C._get_default_device():
             fields.append(f"device='{v.device}'")
-        if v.grad_fn is not None:
-            fields.append(f"grad_fn=<{type(v.grad_fn).__name__}>")
-        elif v.requires_grad:
-            fields.append("requires_grad=True")
+        try:
+            grad_fn = v.grad_fn
+        except RuntimeError:
+            # As in a tensor's repr: reading grad_fn raises for a view created
+            # and modified in place in no-grad mode (#99968)
+            fields.append("grad_fn=<Invalid>")
+        else:
+            if grad_fn is not None:
+                fields.append(f"grad_fn=<{type(grad_fn).__name__}>")
+            elif v.requires_grad:
+                fields.append("requires_grad=True")
         return f"{type(v).__name__}(..., {', '.join(fields)})"
     if isinstance(v, (list, tuple)):
         items = ", ".join(summarize_example_value(e) for e in v)
