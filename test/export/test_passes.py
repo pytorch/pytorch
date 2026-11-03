@@ -1015,14 +1015,16 @@ def forward(self, sin, cos):
         ep = export(m, (x,))
         target = getattr(torch.ops.higher_order, region)
         self.assertEqual(nodes_count(ep.graph.nodes, lambda n: n.target is target), 1)
-        expected = m(x)
-        self.assertEqual(ep.module()(x), expected)
         # The region body with its cond can be saved, loaded and decomposed.
         buffer = io.BytesIO()
         torch.export.save(ep, buffer)
         buffer.seek(0)
-        self.assertEqual(torch.export.load(buffer).module()(x), expected)
-        self.assertEqual(ep.run_decompositions().module()(x), expected)
+        modules = (ep.module(), torch.export.load(buffer).module())
+        modules += (ep.run_decompositions().module(),)
+        # x and -x take different branches.
+        for inp in (x, -x):
+            for module in modules:
+                self.assertEqual(module(inp), m(inp))
         return ep
 
     def test_set_grad_region_with_cond(self):
