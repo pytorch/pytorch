@@ -1294,7 +1294,7 @@ class _TorchDynamoContext:
                 # Skip nested compile during export (but not HOP internal compile)
                 # Only skip if there's an active TracingContext (nested), not for top-level export
                 if (
-                    torch.compiler.is_exporting()
+                    torch.compiler._export_session_active()
                     and not config.force_compile_during_fx_trace
                 ):
                     from torch._higher_order_ops.utils import _in_hop_compile
@@ -1637,7 +1637,7 @@ class DisableContext(_TorchDynamoContext):
                     _maybe_set_eval_frame(callback)
                 try:
                     # Only export needs the annotation work.
-                    if torch.compiler.is_exporting():
+                    if torch.compiler._export_session_active():
                         fn_name = getattr(fn, "__name__", type(fn).__name__)
                         # Skip annotation for __torch_dispatch__ (internal detail).
                         if fn_name != "__torch_dispatch__":

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import io
+import threading
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -592,6 +593,13 @@ _IS_KEY_IN_TLS = torch._C._is_key_in_tls
 _STASH_OBJ_IN_TLS = torch._C._stash_obj_in_tls
 _REMOVE_OBJ_FROM_TLS = torch._C._remove_obj_from_tls
 
+# Sessions entered and not yet exited, counted across all threads. At zero no
+# session exists anywhere, so every session flag reads False and a per-call
+# reader can skip the TLS probe entirely. A session generator that is never
+# closed can only leave this too high, which costs speed, not correctness.
+_SESSIONS_ACTIVE = 0
+_SESSIONS_ACTIVE_LOCK = threading.Lock()
+
 
 @contextlib.contextmanager
 def _session_flags(*keys: str):
@@ -601,14 +609,21 @@ def _session_flags(*keys: str):
     so nested sessions and inherited (at::ThreadLocalState-copied) flags are
     left alone.
     """
+    global _SESSIONS_ACTIVE
     newly_set = [k for k in keys if not _IS_KEY_IN_TLS(k)]
-    for k in newly_set:
-        _STASH_OBJ_IN_TLS(k, True)
+    with _SESSIONS_ACTIVE_LOCK:
+        _SESSIONS_ACTIVE += 1
     try:
+        for k in newly_set:
+            _STASH_OBJ_IN_TLS(k, True)
         yield
     finally:
-        for k in newly_set:
-            _REMOVE_OBJ_FROM_TLS(k)
+        try:
+            for k in newly_set:
+                _REMOVE_OBJ_FROM_TLS(k)
+        finally:
+            with _SESSIONS_ACTIVE_LOCK:
+                _SESSIONS_ACTIVE -= 1
 
 
 def is_compiling() -> bool:
@@ -775,6 +790,23 @@ def is_exporting() -> bool:
         return False
     else:
         return _IS_KEY_IN_TLS(_IS_EXPORTING)
+
+
+def _export_session_active() -> bool:
+    """Whether an export session may be running in the current thread.
+
+    For per-call hot paths, e.g. the dynamo runtime wrapper and the
+    ``torch._dynamo.disable`` wrapper, which both pay this read on every call
+    and only use it to decide on export-only work. The process-wide session
+    count short-circuits to False when no session is running in any thread, so
+    the common eager case costs a global load instead of a C++ TLS probe, and
+    the per-thread probe still runs (so it stays exact) while a session is
+    live. Unlike is_exporting(), this is not scriptable, and a session flag
+    that was not entered through _session_flags() (a stale
+    at::ThreadLocalState copy, or a direct _stash_obj_in_tls from out of tree)
+    reads False here once every session has exited.
+    """
+    return _SESSIONS_ACTIVE != 0 and _IS_KEY_IN_TLS(_IS_EXPORTING)
 
 
 def save_cache_artifacts() -> tuple[bytes, CacheInfo] | None:
