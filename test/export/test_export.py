@@ -1159,8 +1159,18 @@ class TestExport(TestCase):
                 return torch.func.jvp(torch.vmap(torch.sin), (x,), (x,))
 
         x = TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
+        add_batch_dim = torch._functorch.predispatch._add_batch_dim
         for m in (Vmap(), NestedVmap(), VmapInJvp()):
             with self.subTest(type(m).__name__):
+                # Saving and loading rebuild the values, so check a direct export.
+                graph = torch.export.export(m, (x,)).graph
+                batched = graph.find_nodes(op="call_function", target=add_batch_dim)
+                self.assertTrue(batched)
+                for node in batched:
+                    val = node.meta["val"]
+                    self.assertTrue(
+                        torch._C._functorch.is_batchedtensor(val), node.name
+                    )
                 self.assertEqual(export(m, (x,)).module()(x), m(x))
 
     @testing.expectedFailureStrictV2
