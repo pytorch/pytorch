@@ -109,7 +109,7 @@ def main(output: Path = Path(LLM_TD_SELECTION_FILE)) -> None:
     sha = os.environ.get("HEAD_SHA", "")
     # ciflow/<label>/<PR number> tag pushes carry the PR in the ref.
     tag = re.fullmatch(r"refs/tags/ciflow/.+/(\d+)", os.environ.get("GITHUB_REF", ""))
-    pr = os.environ.get("PR_NUMBER") or (tag and tag.group(1))
+    pr = os.environ.get("PR_NUMBER") or (tag.group(1) if tag else "")
     if not sha or not pr:
         return
     info = get(f"pulls/{pr}")
