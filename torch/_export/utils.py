@@ -19,7 +19,7 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_te
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import PreDispatchTorchFunctionMode
-from torch.fx.graph_module import _assign_attr, _get_attr, _has_attr
+from torch.fx.graph_module import _get_attr, _has_attr
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
@@ -894,7 +894,15 @@ def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
                         i += 1
                         new_target_name = f"submod_{i}"
                 if not _has_attr(gm, new_target_name):
-                    _assign_attr(attr, gm, new_target_name)
+                    *prefix, field = new_target_name.split(".")
+                    owner = gm
+                    for item in prefix:
+                        if not hasattr(owner, item):
+                            setattr(owner, item, torch.nn.Module())
+                        owner = getattr(owner, item)
+                    # setattr keeps a tensor a plain attribute, while
+                    # _assign_attr would add it to state_dict as a buffer.
+                    setattr(owner, field, attr)
                 new_node.target = new_target_name
             node_replace_(node, new_node)
 
