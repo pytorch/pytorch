@@ -960,22 +960,22 @@ def register_inductor_choices(key: str, factory: InductorChoicesFactory) -> None
     global _registered_inductor_choices
     registrations = dict(_registered_inductor_choices)
     registrations[key] = factory
-    handler = _create_inductor_choices(
+    # Validate before publishing; V.choices is built from the registry on use.
+    _create_inductor_choices(
         config.inductor_choices_class, tuple(registrations.items())
     )
     _registered_inductor_choices = registrations
-    V.set_choices_handler(handler)
 
 
 def unregister_inductor_choices(key: str) -> None:
     global _registered_inductor_choices
     registrations = dict(_registered_inductor_choices)
     registrations.pop(key, None)
-    handler = _create_inductor_choices(
+    # Validate before publishing; V.choices is built from the registry on use.
+    _create_inductor_choices(
         config.inductor_choices_class, tuple(registrations.items())
     )
     _registered_inductor_choices = registrations
-    V.set_choices_handler(handler)
 
 
 def inductor_choices_cache_key(factory: InductorChoicesFactoryConfig) -> Any:

@@ -138,6 +138,9 @@ class NullHandler:
 # from the parent.
 _PoisonedVirtual = object()
 
+# Marks a virtualized value that has not been set on this thread.
+_UNSET = object()
+
 
 class Virtualized(Generic[T]):
     """
@@ -158,7 +161,8 @@ class Virtualized(Generic[T]):
         self._default = default
 
     def _set_handler(self, value: T) -> AbstractContextManager[None]:
-        prior = self._get_handler(False)
+        # Read the raw slot: restoring a lazily built default would pin it.
+        prior = getattr(threadlocal, self._key, _UNSET)
         setattr(threadlocal, self._key, value)
 
         @contextmanager
@@ -166,7 +170,10 @@ class Virtualized(Generic[T]):
             try:
                 yield
             finally:
-                self._set_handler(prior)
+                if prior is _UNSET:
+                    vars(threadlocal).pop(self._key, None)
+                else:
+                    setattr(threadlocal, self._key, prior)
 
         return ctx()
 
@@ -250,9 +257,13 @@ _active_user_lowering_ops: Virtualized[OrderedSet[Any]] = Virtualized(
 
 def _choices_default():
     """
-    Lazy init the global choices handler
+    Build the choices handler from config when none is set on this thread.
 
     We virtualize InductorChoices to allow changing inductor heuristics from out of tree.
+
+    Not stored on the thread: inductor_choices_class and the registered choices
+    may change between compiles, and compile_fx_inner installs the resolved
+    handler for the duration of each compile.
     """
     from torch._inductor import config
     from torch._inductor.choices import create_inductor_choices
@@ -262,9 +273,7 @@ def _choices_default():
     # integration is what sets it.
     tlx.maybe_install()
 
-    rv = create_inductor_choices(config.inductor_choices_class)
-    setattr(threadlocal, _choices._key, rv)
-    return rv
+    return create_inductor_choices(config.inductor_choices_class)
 
 
 _choices: Virtualized[InductorChoices] = Virtualized("choices", _choices_default)

@@ -1076,6 +1076,9 @@ def compile_fx_inner(
                 stacklevel=2,
             )
         stack.enter_context(torch.utils._python_dispatch._disable_current_modes())
+        # Resolve the choices handler once per compile: an explicitly set handler
+        # is kept, otherwise it is built from the current config.
+        stack.enter_context(V.set_choices_handler(V.choices))
         stack.enter_context(_use_lazy_graph_module(dynamo_config.use_lazy_graph_module))
         stack.enter_context(
             dynamo_utils.dynamo_timed(

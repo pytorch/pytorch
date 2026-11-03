@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import unittest
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from typing import Any
 from unittest.mock import patch
 
+import torch
 from torch._inductor import config
 from torch._inductor.choices import (
     create_inductor_choices,
@@ -14,8 +17,16 @@ from torch._inductor.choices import (
     registered_inductor_choices,
     unregister_inductor_choices,
 )
-from torch._inductor.virtualized import _choices, threadlocal, V
+from torch._inductor.virtualized import (
+    _choices,
+    _PoisonedVirtual,
+    NullHandler,
+    threadlocal,
+    V,
+    Virtualized,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 _UNSET = object()
@@ -364,6 +375,68 @@ class ChoicesCompositionTest(TestCase):
             ("composed_inductor_choices", ("alpha:_alpha:7", "beta")),
         )
 
+    def test_reused_thread_follows_config_changes(self) -> None:
+        # Inductor config overrides are thread-local; the worker applies each
+        # factory itself, as AOTAutograd does when compiling a lazy backward on
+        # the reused autograd device thread.
+        def get_runtime_and_cache_uuid(name: str) -> tuple[Any, Any]:
+            with config.patch(inductor_choices_class=partial(UUIDChoices, name)):
+                return (
+                    V.choices.uuid(),
+                    config.save_config_portable(ignore_private_configs=False)[
+                        "inductor_choices_class"
+                    ],
+                )
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            for name in ("first", "second"):
+                runtime_uuid, cache_uuid = executor.submit(
+                    get_runtime_and_cache_uuid, name
+                ).result()
+                self.assertEqual(runtime_uuid, name)
+                self.assertEqual(cache_uuid, name)
+
+    def test_registered_choices_follow_config_patch(self) -> None:
+        register_inductor_choices("registered", lambda: UUIDChoices("registered"))
+        with config.patch(inductor_choices_class=partial(UUIDChoices, "patched")):
+            runtime_uuid = V.choices.uuid()
+            cache_uuid = config.save_config_portable(ignore_private_configs=False)[
+                "inductor_choices_class"
+            ]
+        self.assertEqual(runtime_uuid, cache_uuid)
+        self.assertIn("patched", str(cache_uuid))
+
+    def test_direct_handler_exit_does_not_pin_default(self) -> None:
+        with V.set_choices_handler(V.choices):
+            pass
+        self.assertFalse(hasattr(threadlocal, _choices._key))
+        with config.patch(inductor_choices_class=lambda: UUIDChoices("after")):
+            self.assertEqual(V.choices.uuid(), "after")
+
+    @unittest.skipUnless(HAS_GPU, "requires a GPU autograd device thread")
+    def test_lazy_backward_follows_config_choices(self) -> None:
+        seen: list[str] = []
+
+        class RecordingChoices(UUIDChoices):
+            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+                seen.append(self.value)
+                return kernel_kwargs
+
+        for name in ("first", "second"):
+            seen.clear()
+            torch._dynamo.reset()
+            x = torch.randn(64, device=GPU_TYPE, requires_grad=True)
+            with config.patch(
+                inductor_choices_class=partial(RecordingChoices, name),
+                force_disable_caches=True,
+            ):
+                out = torch.compile(lambda x: x.sin().cos().sum())(x)
+                # Record only the lazily compiled backward.
+                seen.clear()
+                out.backward()
+            self.assertIn(name, seen)
+            self.assertEqual(set(seen), {name})
+
     def test_inherited_default_is_used_when_nobody_overrides(self) -> None:
         register_inductor_choices("beta", BetaChoices)
         register_inductor_choices("uuid", lambda: UUIDChoices("uuid-only"))
@@ -437,6 +510,48 @@ class ChoicesCompositionTest(TestCase):
 
 def _as_choices(obj: Any) -> InductorChoices:
     return obj
+
+
+class VirtualizedHandlerTest(TestCase):
+    def test_restores_unset_slot_to_unset(self) -> None:
+        virtualized = Virtualized("test_restore_unset", NullHandler)
+        default = virtualized._get_handler()
+        with virtualized._set_handler("outer"):
+            self.assertEqual(virtualized._get_handler(), "outer")
+        self.assertFalse(hasattr(threadlocal, virtualized._key))
+        self.assertIsInstance(virtualized._get_handler(), NullHandler)
+        self.assertIsNot(virtualized._get_handler(), default)
+
+    def test_restores_nested_and_on_exception(self) -> None:
+        virtualized = Virtualized("test_restore_nested", NullHandler)
+        with virtualized._set_handler("outer"):
+            with self.assertRaises(ValueError):
+                with virtualized._set_handler("inner"):
+                    self.assertEqual(virtualized._get_handler(), "inner")
+                    raise ValueError
+            self.assertEqual(virtualized._get_handler(), "outer")
+        self.assertFalse(hasattr(threadlocal, virtualized._key))
+
+    def test_restores_poisoned_prior(self) -> None:
+        virtualized = Virtualized("test_restore_poisoned", NullHandler)
+        with virtualized._set_handler(_PoisonedVirtual):
+            with virtualized._set_handler("inner"):
+                pass
+            with self.assertRaisesRegex(RuntimeError, "poisoned"):
+                virtualized._get_handler()
+        self.assertFalse(hasattr(threadlocal, virtualized._key))
+
+    def test_restores_persisted_default(self) -> None:
+        def persisted_default() -> list[str]:
+            value: list[str] = []
+            setattr(threadlocal, virtualized._key, value)
+            return value
+
+        virtualized = Virtualized("test_restore_persisted", persisted_default)
+        persisted = virtualized._get_handler()
+        with virtualized._set_handler(["inner"]):
+            pass
+        self.assertIs(virtualized._get_handler(), persisted)
 
 
 if __name__ == "__main__":
