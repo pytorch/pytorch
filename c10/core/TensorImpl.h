@@ -258,11 +258,13 @@ struct C10_API FakeTensorMode {
   // so read this through PyInterpreterVTable::allow_non_fake_inputs().
   bool allow_non_fake_inputs_ = false;
 
-  // Initialized from
-  // torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access when the
-  // mode is created. Like Python's _allow_unsafe_data_ptr_access, it can be
-  // reassigned and applies to fakes created afterwards: set_fake_tensor_mode
-  // applies it to each fake's storage.
+  // Whether reading a fake's mutable data pointer only warns (true) or throws
+  // (false), as Python's _allow_unsafe_data_ptr_access. The _CppFakeTensorMode
+  // binding initializes it from
+  // torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access. It can
+  // be reassigned and applies to fakes created afterwards: at::mark_fake_storage
+  // marks a new fake's storage, which its views share. A storage's marking is
+  // never relaxed, and throwing takes precedence over warning.
   bool allow_unsafe_data_ptr_access_ = true;
 
   FakeTensorMode(
@@ -1568,16 +1570,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       TORCH_CHECK(
           mode->allow_meta_,
           "device.type must not be 'meta' when allow_meta is False");
-    }
-    // Same as Python FakeTensor.__new__: a fake has no real data, so reading a
-    // mutable data pointer warns or throws depending on the mode.
-    if (mode && has_storage()) {
-      auto* storage_impl = storage().unsafeGetStorageImpl();
-      if (mode->allow_unsafe_data_ptr_access_) {
-        storage_impl->set_warn_deprecated_on_mutable_data_ptr();
-      } else {
-        storage_impl->set_throw_on_mutable_data_ptr();
-      }
     }
     extra_meta.fake_tensor_mode_ = std::move(mode);
   }

@@ -305,23 +305,21 @@ class MetaTensorDescriber:
     def describe_tensor(
         self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False
     ) -> MetaTensorDesc[Any]:
-        # Under a C++ fake mode the Fake key is in the TLS include set, so every
-        # op reaches the fake fallback, which rejects non-fake inputs: metadata
-        # queries on a real tensor (e.g. sparse_dim) would fail. Take Fake out
-        # of the include set while describing. A real tensor then reaches its
-        # backend kernels, while a C++ fake, including one inside a wrapper or
-        # subclass, still reaches the fake fallback through its own Fake key,
-        # unless the caller excluded Fake (e.g. to_meta_tensor, no_dispatch()).
-        # The TLS exclude set is left as the caller set it. Python FakeTensor
-        # and FakeTensorMode never carry or include the Fake key, so this does
-        # not affect them.
+        # A C++ fake mode includes Fake in TLS, so every op, including a metadata
+        # query on a real tensor, reaches the fake fallback. Take Fake out of
+        # the include set while describing: a real tensor then reaches its
+        # backend kernels, while a C++ fake still reaches the fallback through
+        # its own key, unless the caller excluded Fake. Code run while
+        # describing, such as a subclass's __tensor_flatten__, also sees Fake
+        # not included.
         fake = torch._C.DispatchKey.Fake
-        included = torch._C._dispatch_tls_is_dispatch_key_included(fake)
+        if not torch._C._dispatch_tls_is_dispatch_key_included(fake):
+            return self._describe_tensor(t, recurse=recurse, trace=trace)
         torch._C._dispatch_tls_set_dispatch_key_included(fake, False)
         try:
             return self._describe_tensor(t, recurse=recurse, trace=trace)
         finally:
-            torch._C._dispatch_tls_set_dispatch_key_included(fake, included)
+            torch._C._dispatch_tls_set_dispatch_key_included(fake, True)
 
     def _describe_tensor(
         self, t: torch.Tensor, *, recurse: bool, trace: bool
