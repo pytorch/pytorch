@@ -2765,6 +2765,7 @@ def _lru_cache(
 
     With replacements_and_ranges=True, clear only when replacements or value
     ranges change (_replacements_version_counter, _var_to_range_version_counter).
+    Every write to replacements or var_to_range must bump the matching counter.
     """
     fn_cache = lru_cache(maxsize)(fn)
     prior_version = 0
@@ -4431,6 +4432,8 @@ class ShapeEnv:
                 self.replacements[axiom.lhs] = axiom.rhs
                 added_replacements[axiom.lhs] = axiom.rhs
         self.axioms.update(new_axioms)
+        self._replacements_version_counter += 1
+        self._update_version_counter()
 
         # We need to freeze the ShapeEnv because any additional modification of
         # the ShapeEnv will cause unsoundness for subsequent specialization calls.
@@ -4442,6 +4445,8 @@ class ShapeEnv:
                 self.axioms.pop(k, None)
             for k in added_replacements:
                 self.replacements.pop(k, None)
+            self._replacements_version_counter += 1
+            self._update_version_counter()
             self.frozen = False
 
     def check_equal(self, other: ShapeEnv) -> None:
@@ -4723,6 +4728,8 @@ class ShapeEnv:
                     raise AssertionError("constraining non-Symbols NYI")
                 new_var = self._find(a.node.expr)
                 self.replacements[b.node.expr] = new_var
+        self._replacements_version_counter += 1
+        self._update_version_counter()
 
     def _ignore_fresh_unbacked_symbols_tls(self) -> bool:
         return _ignore_fresh_unbacked_symbols_tls()
