@@ -3798,6 +3798,7 @@ def linear_cross_entropy(
     reduction: str = "mean",
     ignore_index: int | None = None,
     label_smoothing: float = 0.0,
+    logit_softcap: float | None = None,
     options: "LinearCrossEntropyOptions | None" = None,
 ) -> Tensor:
     r"""Compute the cross entropy loss between inputs, transformed linearly, and target.
@@ -3805,7 +3806,12 @@ def linear_cross_entropy(
     The statement::
 
       loss = linear_cross_entropy(
-          input, linear_weight, target, linear_bias=linear_bias, **kwargs
+          input,
+          linear_weight,
+          target,
+          linear_bias=linear_bias,
+          logit_softcap=logit_softcap,
+          **kwargs,
       )
 
     is equivalent to the following reference implementation of linear_cross_entropy::
@@ -3816,6 +3822,8 @@ def linear_cross_entropy(
           linear_weight.reshape(-1, in_features),
           None if linear_bias is None else linear_bias.reshape(-1),
       )
+      if logit_softcap is not None:
+          logits = logit_softcap * tanh(logits / logit_softcap)
       logits = logits.reshape(*input.shape[:-1], C, *out_features)
       loss = cross_entropy(logits, target, **kwargs)
 
@@ -3869,6 +3877,13 @@ def linear_cross_entropy(
             Architecture for Computer Vision
             <https://arxiv.org/abs/1512.00567>`__.
             Default: :math:`0.0`.
+        logit_softcap (float, optional): If set to a positive value
+            :math:`c`, the logits are capped to :math:`(-c, c)` as
+            :math:`c \tanh(\text{logits} / c)` before the softmax, as done
+            for the final logits of Gemma 2 models. With ``options != None``,
+            the chunked path needs one extra
+            ``(batch_chunk_size, C)`` buffer when gradients are computed.
+            Default: ``None``.
         options (LinearCrossEntropyOptions, optional): Specify
             chunking strategy options, see
             :class:`~torch.nn.LinearCrossEntropyOptions`
@@ -3944,7 +3959,14 @@ def linear_cross_entropy(
             reduction=reduction,
             ignore_index=ignore_index,
             label_smoothing=label_smoothing,
+            logit_softcap=logit_softcap,
             options=options,
+        )
+    if logit_softcap is not None and not (
+        logit_softcap > 0 and math.isfinite(logit_softcap)
+    ):
+        raise ValueError(
+            f"logit_softcap must be a positive finite number or None, got {logit_softcap}"
         )
     if input.dim() < 1 or input.dim() > 2:
         raise RuntimeError(
@@ -4031,6 +4053,7 @@ def linear_cross_entropy(
                 options.batch_chunk_size,
                 options.acc_policy,
                 options.acc_dtype,
+                logit_softcap,
             )
         else:
             # Force allow_retain_graph=True under torch.compile: the default
@@ -4065,6 +4088,7 @@ def linear_cross_entropy(
                 linear_bias is not None
                 and linear_bias.requires_grad
                 and torch.is_grad_enabled(),
+                logit_softcap,
             )[0]
 
         if not has_batches:
@@ -4081,6 +4105,8 @@ def linear_cross_entropy(
             )
 
     logits = linear(input, linear_weight, linear_bias)
+    if logit_softcap is not None:
+        logits = logit_softcap * torch.tanh(logits / logit_softcap)
     # recover logits shape that corresponds to the shape of specified
     # linear_weight:
     logits = logits.reshape(logits_shape)
