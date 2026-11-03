@@ -465,8 +465,9 @@ class HuggingfaceRunner(BenchmarkRunner):
         if args.tp_size > 1:
             supported = supported & TP_MODELS
         if args.only is not None and args.only not in supported:
+            tp = f"--tp-size={args.tp_size} with " if args.tp_size > 1 else ""
             raise ValueError(
-                f"--hf-inference-mode={mode} does not support {args.only}; "
+                f"{tp}--hf-inference-mode={mode} does not support {args.only}; "
                 f"supported models: {', '.join(sorted(supported))}"
             )
         whisper = HF_LLM_MODELS.get(args.only) is WhisperBenchmark
@@ -475,11 +476,7 @@ class HuggingfaceRunner(BenchmarkRunner):
                 f"--prompt-length does not apply to {args.only}, whose prompt is audio"
             )
         if args.decode_length is not None:
-            max_decode_length = (
-                self._download_config(args.only).max_target_positions - 2
-                if whisper
-                else TextGenerationBenchmark.OUTPUT_LENGTH - 1
-            )
+            max_decode_length = TextGenerationBenchmark.OUTPUT_LENGTH - 1
             if not 1 <= args.decode_length <= max_decode_length:
                 raise ValueError(
                     f"--decode-length must be between 1 and {max_decode_length}, "
@@ -499,6 +496,7 @@ class HuggingfaceRunner(BenchmarkRunner):
             "export_nativert",
             "find_batch_sizes",
             "fsdp",
+            "multiprocess",
             "recompile_profiler",
             "torchscript_jit_trace",
             "tolerance",
@@ -521,18 +519,6 @@ class HuggingfaceRunner(BenchmarkRunner):
             raise ValueError(
                 f"--hf-inference-mode={mode} requires --backend or --inductor"
             )
-        if args.prompt_length is not None and args.only:
-            # Each child validates its model so config fetches cannot abort a sweep.
-            output_length = HF_LLM_MODELS[args.only].OUTPUT_LENGTH
-            total_length = args.prompt_length + output_length
-            config = self._download_config(args.only).get_text_config(decoder=True)
-            context_length = getattr(config, "max_position_embeddings", None)
-            if context_length is not None and total_length > context_length:
-                raise ValueError(
-                    f"--prompt-length={args.prompt_length} plus {output_length} "
-                    f"generated-token slots exceeds {args.only}'s context length "
-                    f"{context_length}"
-                )
         if args.tp_size > 1:
             self.validate_tensor_parallel_args(args)
 
@@ -540,7 +526,6 @@ class HuggingfaceRunner(BenchmarkRunner):
         unsupported = [
             "--" + flag.replace("_", "-")
             for flag in (
-                "multiprocess",
                 "device_index",
                 "warm_start_latency",
                 "compare_backed_unbacked",
@@ -578,8 +563,8 @@ class HuggingfaceRunner(BenchmarkRunner):
         devices = args.devices or (["cuda"] if torch.cuda.is_available() else ["cpu"])
         if devices == ["cpu"] and torch.accelerator.current_accelerator() is not None:
             raise ValueError(
-                "CPU tensor parallelism requires a machine without an accelerator, "
-                "since Hugging Face places TP shards on the accelerator"
+                "CPU tensor parallelism requires a PyTorch build without accelerator "
+                "support, since Hugging Face places TP shards on the accelerator"
             )
         if devices == ["cpu"] and (
             args.inductor or args.backend not in ("eager", "aot_eager")
@@ -707,12 +692,21 @@ class HuggingfaceRunner(BenchmarkRunner):
         if self.args.hf_inference_mode != "generate" and batch_size <= 0:
             raise ValueError(f"--batch-size must be positive, got {batch_size}")
 
-        # Get model and example inputs
+        # Config downloads belong in the load path so failures produce model
+        # results, while invalid dimensions still fail before downloading weights.
         if model_name in HF_LLM_MODELS:
             benchmark_cls = HF_LLM_MODELS[model_name]
             mode = self.args.hf_inference_mode
             decode_length = self.args.decode_length or benchmark_cls.DECODE_LENGTH
             if benchmark_cls is WhisperBenchmark:
+                if mode == "decode":
+                    config = self._download_config(model_name)
+                    max_decode_length = config.max_target_positions - 2
+                    if not 1 <= decode_length <= max_decode_length:
+                        raise ValueError(
+                            f"--decode-length must be between 1 and {max_decode_length}, "
+                            f"got {decode_length}"
+                        )
                 model, example_inputs = WhisperBenchmark.get_model_and_inputs(
                     model_name,
                     device,
@@ -723,6 +717,21 @@ class HuggingfaceRunner(BenchmarkRunner):
                 )
             elif mode in ("prefill", "decode"):
                 prompt_length = self.args.prompt_length or benchmark_cls.INPUT_LENGTH
+                if self.args.prompt_length is not None:
+                    config = self._download_config(model_name).get_text_config(
+                        decoder=True
+                    )
+                    context_length = getattr(config, "max_position_embeddings", None)
+                    output_length = benchmark_cls.OUTPUT_LENGTH
+                    if (
+                        context_length is not None
+                        and prompt_length + output_length > context_length
+                    ):
+                        raise ValueError(
+                            f"--prompt-length={prompt_length} plus {output_length} "
+                            f"generated-token slots exceeds {model_name}'s context length "
+                            f"{context_length}"
+                        )
                 tp_kwargs = {}
                 if self.args.tp_size > 1:
                     tp_kwargs = {"tp_size": self.args.tp_size, "dtype": torch.float32}

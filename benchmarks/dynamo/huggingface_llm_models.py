@@ -13,8 +13,6 @@ try:
         AutoConfig,
         AutoModelForCausalLM,
         AutoTokenizer,
-        EncoderDecoderCache,
-        StaticCache,
         WhisperForConditionalGeneration,
         WhisperProcessor,
     )
@@ -26,8 +24,6 @@ finally:
         AutoConfig,
         AutoModelForCausalLM,
         AutoTokenizer,
-        EncoderDecoderCache,
-        StaticCache,
         WhisperForConditionalGeneration,
         WhisperProcessor,
     )
@@ -134,6 +130,8 @@ class WhisperDecodeModel(torch.nn.Module):
         self.encoder_hidden_states = None
 
     def prepare_for_decode(self, input_features, decoder_input_ids):
+        from transformers import EncoderDecoderCache, StaticCache
+
         config = self.model.config
         if self.cache is None:
             cache_shape = self.model._get_static_cache_init_shape()
@@ -291,7 +289,7 @@ def load_tensor_parallel_model(model_name, dtype, tp_size):
     return model
 
 
-# TextGenerationPrefillModel relies on StaticCache internals from this release.
+# The phase wrappers rely on StaticCache internals from this release.
 MIN_TRANSFORMERS_VERSION = "5.14.1"
 
 
@@ -313,6 +311,8 @@ class TextGenerationPrefillModel(torch.nn.Module):
         return copy.train(self.training)
 
     def prepare_for_prefill(self, input_ids):
+        from transformers import StaticCache
+
         expected_shape = (self.batch_size, self.prompt_length)
         if tuple(input_ids.shape) != expected_shape:
             raise ValueError(
