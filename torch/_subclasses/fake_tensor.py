@@ -33,7 +33,11 @@ from torch._subclasses.meta_utils import (
     is_sparse_compressed,
     MetaConverter,
 )
-from torch._utils import _is_privateuse1_backend_available, render_call
+from torch._utils import (
+    _is_privateuse1_backend_available,
+    _privateuse1_backend_avoids_device_init,
+    render_call,
+)
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -2048,6 +2052,10 @@ class FakeTensorMode(TorchDispatchMode):
     #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
     @property
     def avoid_device_init(self) -> bool:
+        # A PrivateUse1 backend can decide to enable/disable init for fake tensors
+        if _privateuse1_backend_avoids_device_init():
+            return True
+
         if torch.xpu._is_compiled():
             if torch.cuda._is_compiled():
                 raise AssertionError("Cannot have both xpu and cuda compiled")
