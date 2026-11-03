@@ -65,16 +65,8 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results, TD_RESULTS
-from tools.testing.llm_td.selection import (
-    apply_selection,
-    LLM_TD_SELECTION_FILE,
-    load_previous_failures,
-    Selection,
-)
-from tools.testing.target_determination.gen_artifact import (
-    gen_ci_artifact,
-    LLM_SELECTION_SOURCE,
-)
+from tools.testing.llm_td.selection import LLM_TD_SELECTION_FILE, split_tests
+from tools.testing.target_determination.gen_artifact import gen_ci_artifact
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
 )
@@ -2557,31 +2549,19 @@ def main():
     include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
 
     # Written by the llm-test-selection workflow; see tools/testing/llm_td.
-    llm_selection = Selection.load(
-        REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_TD_SELECTION_FILE
+    split = split_tests(
+        include,
+        exclude,
+        test_prioritizations.get_score,
+        test_file_times_dict,
+        selection_file=REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_TD_SELECTION_FILE,
+        td_results=TD_RESULTS,
+        test_config=TEST_CONFIG,
+        td_enabled=options.enable_td,
+        percent=percent_to_run,
+        emit=emit_metric if IS_CI else None,
     )
-    llm = None
-    if llm_selection is not None:
-        llm = apply_selection(
-            llm_selection,
-            include,
-            exclude,
-            test_prioritizations.get_score,
-            test_file_times_dict,
-            test_config=TEST_CONFIG,
-            td_enabled=options.enable_td,
-            previously_failed=load_previous_failures(TD_RESULTS),
-        )
-        include, exclude = llm.include, llm.exclude
-        if IS_CI:
-            emit_metric("llm_td_shadow_selection", llm.selection_metric)
-    llm_enforced = llm is not None and llm.enforced
-    if not llm_enforced:
-        print_to_stderr(
-            f"Running {percent_to_run}% of tests based on TD"
-            if options.enable_td
-            else "Running all tests"
-        )
+    include, exclude = split.include, split.exclude
 
     test_batch = TestBatch("tests to run", include, False)
     test_batch_exclude = TestBatch("excluded", exclude, True)
@@ -2589,7 +2569,7 @@ def main():
         gen_ci_artifact(
             [x.to_json() for x in include],
             [x.to_json() for x in exclude],
-            LLM_SELECTION_SOURCE if llm_enforced else "td",
+            split.source,
         )
 
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
@@ -2636,22 +2616,10 @@ def main():
 
         if IS_CI:
             for test, _ in all_failures:
-                test_stats = test_prioritizations.get_test_stats(test)
                 print_to_stderr("Emitting td_test_failure_stats_v2")
-                emit_metric(
-                    "td_test_failure_stats_v2",
-                    {
-                        "selected_tests": selected_tests,
-                        "failure": str(test),
-                        "llm_enforced": llm_enforced,
-                        **test_stats,
-                    },
+                split.report_failure(
+                    test, selected_tests, test_prioritizations.get_test_stats(test)
                 )
-                # Only tests that ran can fail, so with TD on these are failures in
-                # TD's include (shadow) or in the selection, the previous failures
-                # in TD's include and the hedge (enforced).
-                if llm is not None:
-                    emit_metric("llm_td_shadow_failure", llm.failure_metric(test))
             gen_additional_test_failures_file(
                 [test.test_file for test, _ in all_failures]
             )
