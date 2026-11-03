@@ -15520,6 +15520,32 @@ class TestComplex(TestCase):
 class TestCommon(TestCase):
     exact_dtype = True
 
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("op", [F.softmax, F.log_softmax])
+    @parametrize("margin", [17.0, 20.0])
+    @parametrize("max_col,other_col", [(0, 256), (255, 256), (2047, 2048), (4095, 4094)])
+    def test_softmax_split_tail(self, device, dtype, op, margin, max_col, other_col):
+        x = torch.full((1, 4096), -math.inf, dtype=dtype)
+        x[0, max_col] = 0
+        x[0, other_col] = -margin
+        expected = op(x.double(), dim=-1).to(dtype)
+        actual = op(x.to(device), dim=-1).cpu()
+        self.assertEqual(actual, expected)
+        rtol = 1e-6 if op is F.log_softmax else 0
+        self.assertEqual(actual[0, max_col], expected[0, max_col], atol=0, rtol=rtol)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("op", [F.softmax, F.log_softmax])
+    @parametrize("values", [
+        (0, 0, 0), (-math.inf, -math.inf, 0), (-math.inf, -math.inf, -math.inf),
+        (0, math.inf, 0), (0, math.nan, 0),
+    ])
+    def test_softmax_split_special_values(self, device, dtype, op, values):
+        x = torch.full((1, 4096), -math.inf, dtype=dtype)
+        x[0, [0, 256, 2048]] = torch.tensor(values, dtype=dtype)
+        expected = op(x.double(), dim=-1).to(dtype)
+        self.assertEqual(op(x.to(device), dim=-1).cpu(), expected)
+
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
     @classmethod
     def tearDownClass(cls):

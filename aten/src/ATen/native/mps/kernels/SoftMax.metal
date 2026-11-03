@@ -4,16 +4,17 @@
 using namespace metal;
 using c10::metal::simdgroup_size;
 
-template <bool log_softmax>
+template <bool log_softmax, bool exclude_max = false>
 struct SoftmaxEpilogue {
   float max_val;
   float normalizer;
 
   SoftmaxEpilogue(float max_val, float sum) : max_val(max_val) {
     if IF_CONSTEXPR (log_softmax) {
-      normalizer = precise::log(sum);
+      normalizer = exclude_max ? c10::metal::log1p(sum) : precise::log(sum);
     } else {
-      normalizer = 1.0f / sum;
+      const float inv = 1.0f / (exclude_max ? 1.0f + sum : sum);
+      normalizer = exclude_max && sum < 1.0f ? metal::fma(-sum, inv, 1.0f) : inv;
     }
   }
 
@@ -192,6 +193,7 @@ softmax_row(
 // First pass of the split path for long contiguous rows. Used when the
 // reduction width exceeds 2048 and there are at most 256 logical rows
 // and the input consists of contiguous rows.
+// Each partial stores its maximum and the sum excluding one occurrence of it.
 template <typename T, typename idx_t>
 [[max_total_threads_per_threadgroup(kSoftmaxThreads)]] [[kernel]] void
 softmax_partial(
@@ -207,22 +209,32 @@ softmax_partial(
   const uint lsize = tptg.x;
   threadgroup float shared_max[simdgroup_size];
   threadgroup float shared_sum[simdgroup_size];
+  threadgroup idx_t shared_idx[simdgroup_size];
   const idx_t in_base = idx_t(tgid.y) * dim_size;
   const idx_t chunk_begin = idx_t(tgid.x) * chunk_size;
   const idx_t chunk_end = min(chunk_begin + chunk_size, dim_size);
   float max_val = -INFINITY;
+  idx_t max_col = chunk_begin + ltid;
   for (idx_t col = chunk_begin + ltid; col < chunk_end; col += lsize) {
-    max_val = c10::metal::max(max_val, float(input[in_base + col]));
+    const float value = float(input[in_base + col]);
+    if (value > max_val || isnan(value)) {
+      max_val = value;
+      max_col = col;
+    }
   }
-  max_val = c10::metal::threadgroup_max(shared_max, max_val, ltid, lsize);
-  float sum = 0;
+  max_col = c10::metal::threadgroup_argmax(
+      shared_max, shared_idx, max_val, max_col, ltid, lsize);
+  max_val = float(input[in_base + max_col]);
+  float tail = 0;
   for (idx_t col = chunk_begin + ltid; col < chunk_end; col += lsize) {
-    sum += precise::exp(float(input[in_base + col]) - max_val);
+    if (col != max_col || !isfinite(max_val)) {
+      tail += precise::exp(float(input[in_base + col]) - max_val);
+    }
   }
-  sum = c10::metal::threadgroup_sum(shared_sum, sum, ltid, lsize);
+  tail = c10::metal::threadgroup_sum(shared_sum, tail, ltid, lsize);
   if (ltid == 0) {
     partials[idx_t(tgid.y) * params.n_chunks + tgid.x] =
-        float2(max_val, max_val == -INFINITY ? 0.f : sum);
+        float2(max_val, max_val == -INFINITY ? 0.f : tail);
   }
 }
 
@@ -246,18 +258,32 @@ softmax_finalize(
   const uint lsize = tptg.x;
   threadgroup float shared_max[simdgroup_size];
   threadgroup float shared_sum[simdgroup_size];
+  threadgroup idx_t shared_idx[simdgroup_size];
   device const float2* row_partials = partials + idx_t(tgid.y) * n_chunks;
   float max_val = -INFINITY;
+  idx_t max_chunk = ltid;
   for (idx_t i = ltid; i < n_chunks; i += lsize) {
-    max_val = c10::metal::max(max_val, row_partials[i].x);
+    const float value = row_partials[i].x;
+    if (value > max_val || isnan(value)) {
+      max_val = value;
+      max_chunk = i;
+    }
   }
-  max_val = c10::metal::threadgroup_max(shared_max, max_val, ltid, lsize);
-  float sum = 0;
+  max_chunk = c10::metal::threadgroup_argmax(
+      shared_max, shared_idx, max_val, max_chunk, ltid, lsize);
+  max_val = row_partials[max_chunk].x;
+  float tail = 0;
   for (idx_t i = ltid; i < n_chunks; i += lsize) {
-    sum += row_partials[i].y * precise::exp(row_partials[i].x - max_val);
+    const float2 partial = row_partials[i];
+    const float scale = precise::exp(partial.x - max_val);
+    tail = metal::fma(partial.y, scale, tail);
+    // Restore the other chunks' omitted maxima.
+    if (i != max_chunk) {
+      tail += scale;
+    }
   }
-  sum = c10::metal::threadgroup_sum(shared_sum, sum, ltid, lsize);
-  const SoftmaxEpilogue<log_softmax> epilogue(max_val, sum);
+  tail = c10::metal::threadgroup_sum(shared_sum, tail, ltid, lsize);
+  const SoftmaxEpilogue<log_softmax, true> epilogue(max_val, tail);
   const idx_t row_base = idx_t(tgid.y) * dim_size;
   const idx_t chunk_begin = idx_t(tgid.x) * chunk_size;
   const idx_t chunk_end = min(chunk_begin + chunk_size, dim_size);
