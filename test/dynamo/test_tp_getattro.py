@@ -1,12 +1,16 @@
 # Owner(s): ["module: dynamo"]
 """Tests for tp_getattro_impl: unified attribute access protocol in Dynamo."""
 
+import abc
 import collections
+import functools
 import inspect
 import sys
 import traceback
 import types
 import unittest
+from typing import Protocol, runtime_checkable
+from unittest import mock
 
 import torch
 import torch._dynamo.test_case
@@ -872,6 +876,256 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(result, expected)
         self.assertEqual(result, (True, True, True))
+
+    def test_classmethod_generic_payload_calls(self):
+        class Callable:
+            def __call__(self, cls, value):
+                return cls, value
+
+        class C:
+            pass
+
+        def fn():
+            partial = classmethod(
+                functools.partial(lambda cls, x, y: (cls, x + y), y=2)
+            )
+            return (
+                classmethod(getattr).__get__(None, C)("__name__"),
+                partial.__get__(None, C)(3),
+                classmethod(Callable()).__get__(None, C)(4),
+            )
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+    def test_classmethod_isabstractmethod(self):
+        @abc.abstractmethod
+        def abstract():
+            pass
+
+        class Truthy:
+            __isabstractmethod__ = 7
+
+        truthy = Truthy()
+
+        def fn():
+            abstract_cm = classmethod(abstract)
+
+            def concrete():
+                pass
+
+            concrete_cm = classmethod(concrete)
+
+            truthy_cm = classmethod(truthy)
+
+            set_error = False
+            try:
+                abstract_cm.__isabstractmethod__ = False
+            except AttributeError:
+                set_error = True
+
+            del_error = False
+            try:
+                del abstract_cm.__isabstractmethod__
+            except AttributeError:
+                del_error = True
+
+            return (
+                abstract_cm.__isabstractmethod__,
+                concrete_cm.__isabstractmethod__,
+                truthy_cm.__isabstractmethod__,
+                type(truthy_cm.__isabstractmethod__) is bool,
+                set_error,
+                del_error,
+                abstract_cm.__isabstractmethod__,
+            )
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+        def set_raises():
+            cm = classmethod(abstract)
+            cm.__isabstractmethod__ = False
+
+        def delete_raises():
+            cm = classmethod(abstract)
+            del cm.__isabstractmethod__
+
+        for raises in (set_raises, delete_raises):
+            with self.subTest(raises=raises.__name__):
+                with self.assertRaises(AttributeError):
+                    raises()
+                with self.assertRaises(torch._dynamo.exc.Unsupported):
+                    torch.compile(raises, backend="eager", fullgraph=True)()
+                with self.assertRaises(AttributeError):
+                    torch.compile(raises, backend="eager")()
+
+    def test_classmethod_isabstractmethod_exception(self):
+        class Raising:
+            @property
+            def __isabstractmethod__(self):
+                raise RuntimeError("boom")
+
+        def fn():
+            try:
+                classmethod(Raising()).__isabstractmethod__
+            except RuntimeError:
+                return True
+            return False
+
+        self.assertTrue(fn())
+        self.assertTrue(torch.compile(fn, backend="eager", fullgraph=True)())
+
+    def test_classmethod_synthetic_value_does_not_escape(self):
+        def f():
+            pass
+
+        @runtime_checkable
+        class HasFunction(Protocol):
+            __func__: object
+
+        @torch.compiler.assume_constant_result
+        def has_function(cm):
+            return cm.__func__ is f
+
+        def protocol_fn():
+            return isinstance(classmethod(f), HasFunction)
+
+        def constant_fn():
+            return has_function(classmethod(f))
+
+        class C:
+            @classmethod
+            def method(cls):
+                return cls
+
+        def source_backed_fn():
+            return C.method.__self__ is C
+
+        self.assertTrue(protocol_fn())
+        self.assertTrue(constant_fn())
+        for fn in (protocol_fn, constant_fn):
+            with self.subTest(fn=fn.__name__):
+                with self.assertRaises(torch._dynamo.exc.Unsupported):
+                    torch.compile(fn, backend="eager", fullgraph=True)()
+                self.assertTrue(torch.compile(fn, backend="eager")())
+        from torch._dynamo.variables.functions import (
+            ClassAttrClassMethodVariable,
+            ClassMethodVariable,
+        )
+
+        original = ClassMethodVariable.from_descriptor
+        source_backed = []
+
+        def checked_from_descriptor(tx, descriptor, name, source=None):
+            result = original(tx, descriptor, name, source)
+            self.assertIsInstance(result, ClassAttrClassMethodVariable)
+            self.assertIs(result.get_real_python_backed_value(), descriptor)
+            source_backed.append(result)
+            return result
+
+        with mock.patch.object(
+            ClassMethodVariable,
+            "from_descriptor",
+            side_effect=checked_from_descriptor,
+        ):
+            self.assertTrue(
+                torch.compile(source_backed_fn, backend="eager", fullgraph=True)()
+            )
+        self.assertTrue(source_backed)
+
+    def test_classmethod_descriptor_delegation_by_python_version(self):
+        class C:
+            pass
+
+        def f(*args):
+            return args
+
+        prop = property(lambda cls: cls.__name__)
+
+        def staticmethod_fn():
+            bound = classmethod(staticmethod(f)).__get__(None, C)
+            if sys.version_info < (3, 13):
+                return type(bound) is types.FunctionType, bound()
+            return bound.__self__ is C, bound.__func__.__func__ is f
+
+        expected = staticmethod_fn()
+        result = torch.compile(staticmethod_fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+        def property_fn():
+            bound = classmethod(prop).__get__(None, C)
+            if sys.version_info < (3, 13):
+                return bound
+            return bound.__self__ is C, bound.__func__ is prop
+
+        expected = property_fn()
+        result = torch.compile(property_fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+    def test_classmethod_super_disabled(self):
+        class Base:
+            @classmethod
+            @torch.compiler.disable
+            def cm(cls, value=0):
+                return cls, value
+
+        class Child(Base):
+            pass
+
+        def call_class():
+            return super(Child, Child).cm(1)
+
+        def call_instance():
+            return super(Child, Child()).cm(2)
+
+        def return_method():
+            return super(Child, Child).cm
+
+        for fn in (call_class, call_instance):
+            with self.subTest(fn=fn.__name__):
+                expected = fn()
+                with self.assertRaises(torch._dynamo.exc.Unsupported):
+                    torch.compile(fn, backend="eager", fullgraph=True)()
+                self.assertEqual(torch.compile(fn, backend="eager")(), expected)
+
+        expected_method = return_method()
+        fullgraph_method = torch.compile(
+            return_method, backend="eager", fullgraph=True
+        )()
+        self.assertIs(fullgraph_method.__self__, expected_method.__self__)
+        self.assertEqual(fullgraph_method(), expected_method())
+        result_method = torch.compile(return_method, backend="eager")()
+        self.assertIs(result_method.__self__, expected_method.__self__)
+        self.assertEqual(result_method(), expected_method())
+
+    def test_classmethod_super_attribute_reconstruct(self):
+        class Base:
+            @classmethod
+            def cm(cls):
+                return cls
+
+        class Child(Base):
+            pass
+
+        def class_receiver():
+            return super(Child, Child).cm
+
+        def instance_receiver():
+            return super(Child, Child()).cm
+
+        for fn in (class_receiver, instance_receiver):
+            with self.subTest(fn=fn.__name__):
+                expected = fn()
+                for fullgraph in (True, False):
+                    torch._dynamo.reset()
+                    result = torch.compile(
+                        fn, backend="eager", fullgraph=fullgraph
+                    )()
+                    self.assertIs(result.__self__, expected.__self__)
+                    self.assertIs(result(), expected())
 
     def test_classmethod_instance_state(self):
         def fn():
