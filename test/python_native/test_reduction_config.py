@@ -310,7 +310,7 @@ class TestReductionConfig(TestCase):
                 ct.ColConfig(
                     "b200_ragged_c4095_ordered",
                     32,
-                    32,
+                    33,
                     1,
                     "column",
                     kernel_order="inner_tree",
