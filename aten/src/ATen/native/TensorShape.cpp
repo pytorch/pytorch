@@ -4396,8 +4396,14 @@ Tensor view_symint(const Tensor& self, c10::SymIntArrayRef size) {
 }
 
 Tensor alias(const Tensor& self) {
-  return alias_with_sizes_and_strides(
-      self, self.sym_sizes(), self.sym_strides());
+  auto result =
+      alias_with_sizes_and_strides(self, self.sym_sizes(), self.sym_strides());
+  if (self.is_fake()) {
+    // As for Python FakeTensor's alias, keep the recorded dispatch keys
+    result.unsafeGetTensorImpl()->set_fake_dispatch_keys(
+        self.unsafeGetTensorImpl()->fake_dispatch_keys());
+  }
+  return result;
 }
 
 Tensor detach(const Tensor& self) {

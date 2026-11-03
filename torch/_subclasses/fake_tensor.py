@@ -14,8 +14,8 @@ import typing
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar, Union
-from typing_extensions import Self, TypedDict, Unpack
+from typing import Any, cast, Literal, Self, TYPE_CHECKING, TypeGuard, TypeVar, Union
+from typing_extensions import TypedDict, Unpack
 from weakref import ReferenceType
 
 import torch
@@ -698,14 +698,16 @@ class CppFakeTensorMode:
     # lives on the C++ mode, so a wrapper rebuilt by _from_cpp_mode is
     # equivalent. See Note [C++ FakeTensorMode Python wrapper lifetime] in
     # torch/csrc/FakeTensorMode.cpp.
+    __slots__ = ("_cpp_mode", "__weakref__")
+
     def __init__(
-        self,
-        fake_tensor_converter: FakeTensorConverter,
-        shape_env: ShapeEnv | None = None,
+        self, *, shape_env: ShapeEnv | None = None, export: bool = False
     ) -> None:
-        self._cpp_mode = torch._C._CppFakeTensorMode(
-            fake_tensor_converter, shape_env, self
-        )
+        import torch._functorch.config
+
+        copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
+        converter = FakeTensorConverter(copy_data=copy_data, export=export)
+        self._cpp_mode = torch._C._CppFakeTensorMode(converter, shape_env, self)
 
     @classmethod
     def _from_cpp_mode(cls, cpp_mode: torch._C._CppFakeTensorMode) -> Self:

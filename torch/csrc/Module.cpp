@@ -3048,6 +3048,9 @@ Call this whenever a new thread is created in order to propagate values from
           });
 
   // The C++ counterpart of Python's FakeTensorConverter.from_meta_and_device.
+  // It takes no pytype or dispatch_keys: a C++ fake is always a plain Tensor
+  // (a Parameter carries the _is_param marker instead), and callers record
+  // anything else on the result.
   py_module.def(
       "_from_meta_and_device",
       [](const at::Tensor& meta,
@@ -3061,18 +3064,15 @@ Call this whenever a new thread is created in order to propagate values from
         TORCH_CHECK(
             device.type() != c10::DeviceType::Meta || mode->allow_meta_,
             "device.type must not be 'meta' when allow_meta is False");
+        TORCH_CHECK(
+            !meta.key_set().has(c10::DispatchKey::Python),
+            "Expected a plain meta tensor");
         auto* impl = meta.unsafeGetTensorImpl();
         // A fake reads as meta on the meta device or inside a kernel, and
         // Python accepts it then too.
-        if (impl->is_fake()) {
-          TORCH_CHECK(
-              impl->fake_tensor_mode() == mode,
-              "Expected a fake of the given mode");
-        } else {
-          TORCH_CHECK(
-              !meta.key_set().has(c10::DispatchKey::Python),
-              "Expected a plain meta tensor");
-        }
+        TORCH_CHECK(
+            !impl->is_fake() || impl->fake_tensor_mode() == mode,
+            "Expected a fake of the given mode");
         // Like Python's FakeTensor(mode, meta, device), which goes through
         // _make_subclass: a new detached fake sharing meta's storage, made
         // without dispatching. meta itself is left unchanged.
