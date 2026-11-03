@@ -67,7 +67,88 @@ softmax_row(
     return;
   }
   const idx_t in_base = row * dim_size;
+  // Cache a bounded prefix to limit register pressure.
+  if IF_CONSTEXPR (!log_softmax) {
+    if (dim_size <= 2 * simdgroup_size) {
+      float first = lane < dim_size ? float(input[in_base + lane]) : -INFINITY;
+      float second = lane + simdgroup_size < dim_size
+          ? float(input[in_base + lane + simdgroup_size])
+          : -INFINITY;
+      const auto winner = c10::metal::simd_argmax(c10::metal::max(first, second));
+      const bool skip_max = isfinite(winner.first) && lane == winner.second;
+      const bool omit_first = skip_max && first == winner.first;
+      const bool omit_second = skip_max && !omit_first;
+      first = lane < dim_size ? precise::exp(first - winner.first) : 0.0f;
+      second = lane + simdgroup_size < dim_size
+          ? precise::exp(second - winner.first)
+          : 0.0f;
+      const float tail = c10::metal::simd_sum(
+          (omit_first ? 0.0f : first) + (omit_second ? 0.0f : second));
+      const float inv = 1.0f / (1.0f + tail);
+      const float normalizer = tail < 1.0f ? metal::fma(-tail, inv, 1.0f) : inv;
+      if (lane < dim_size) {
+        output[in_base + lane] = static_cast<T>(first * normalizer);
+      }
+      if (lane + simdgroup_size < dim_size) {
+        output[in_base + lane + simdgroup_size] =
+            static_cast<T>(second * normalizer);
+      }
+      return;
+    }
+    if (dim_size <= 8 * simdgroup_size) {
+      float4 values = -INFINITY;
+      float max_val = -INFINITY;
+#pragma unroll
+      for (uint i = 0; i < 4; ++i) {
+        const idx_t col = lane + i * simdgroup_size;
+        if (col < dim_size) {
+          values[i] = float(input[in_base + col]);
+        }
+        max_val = c10::metal::max(max_val, values[i]);
+      }
+      for (idx_t col = lane + 4 * simdgroup_size; col < dim_size;
+           col += simdgroup_size) {
+        max_val = c10::metal::max(max_val, float(input[in_base + col]));
+      }
+      const auto winner = c10::metal::simd_argmax(max_val);
+      max_val = winner.first;
+      bool skip_max = isfinite(max_val) && lane == winner.second;
+      float tail = 0.0f;
+#pragma unroll
+      for (uint i = 0; i < 4; ++i) {
+        const idx_t col = lane + i * simdgroup_size;
+        const bool omit = skip_max && values[i] == max_val;
+        skip_max = skip_max && !omit;
+        values[i] = col < dim_size ? precise::exp(values[i] - max_val) : 0.0f;
+        tail += omit ? 0.0f : values[i];
+      }
+      for (idx_t col = lane + 4 * simdgroup_size; col < dim_size;
+           col += simdgroup_size) {
+        const float value = float(input[in_base + col]);
+        const bool omit = skip_max && value == max_val;
+        skip_max = skip_max && !omit;
+        tail += omit ? 0.0f : precise::exp(value - max_val);
+      }
+      tail = c10::metal::simd_sum(tail);
+      const float inv = 1.0f / (1.0f + tail);
+      const float normalizer = tail < 1.0f ? metal::fma(-tail, inv, 1.0f) : inv;
+#pragma unroll
+      for (uint i = 0; i < 4; ++i) {
+        const idx_t col = lane + i * simdgroup_size;
+        if (col < dim_size) {
+          output[in_base + col] = static_cast<T>(values[i] * normalizer);
+        }
+      }
+      for (idx_t col = lane + 4 * simdgroup_size; col < dim_size;
+           col += simdgroup_size) {
+        const float value = precise::exp(float(input[in_base + col]) - max_val);
+        output[in_base + col] = static_cast<T>(value * normalizer);
+      }
+      return;
+    }
+  }
   float max_val = -INFINITY;
+#pragma unroll 4
   for (idx_t col = lane; col < dim_size; col += simdgroup_size) {
     max_val = c10::metal::max(max_val, float(input[in_base + col]));
   }
@@ -76,27 +157,29 @@ softmax_row(
   bool skip_max = isfinite(max_val) && lane == winner.second;
 
   float tail = 0.0f;
+#pragma unroll 4
   for (idx_t col = lane; col < dim_size; col += simdgroup_size) {
     const float value = float(input[in_base + col]);
     const bool omit = skip_max && value == max_val;
-    skip_max = skip_max && !omit; // if omit is true, then skip_max is set to false, prevents two calls in same lane in case of duplicates
+    skip_max = skip_max && !omit;
     tail += omit ? 0.0f : precise::exp(value - max_val);
   }
 
-  tail = c10::metal::simd_sum(tail); 
+  tail = c10::metal::simd_sum(tail);
 
   float normalizer;
-  if IF_CONSTEXPR(log_softmax) {
-    normalizer = c10::metal::log1p(tail); // compute log(1+tail), if tail is close to zero, this will preserve the tail
+  if IF_CONSTEXPR (log_softmax) {
+    normalizer = c10::metal::log1p(tail);
   } else {
     const float inv = 1.0f / (1.0f + tail);
-    normalizer = tail < 1.0f ? metal::fma(-tail, inv, 1.0f) :  inv; // fma does 1.0f -tail * inv , preserving precision close to zero
+    normalizer = tail < 1.0f ? metal::fma(-tail, inv, 1.0f) : inv;
   }
 
+#pragma unroll 4
   for (idx_t col = lane; col < dim_size; col += simdgroup_size) {
     const float shifted = float(input[in_base + col]) - max_val;
     float value;
-    if IF_CONSTEXPR(log_softmax) {
+    if IF_CONSTEXPR (log_softmax) {
       value = shifted - normalizer;
     } else {
       value = precise::exp(shifted) * normalizer;
