@@ -149,7 +149,7 @@ class TestSelection(unittest.TestCase):
             ("test/dynamo_skips/CPython313-test_set-TestSet.test_x", {"cpython/v3_13/test_set"}, set()),
             ("test/dynamo_skips/TestGone.test_x", set(), {"dynamo_wrapped"}),
             ("test/compiled_autograd_skips/TestNN.test_x", {"inductor/test_compiled_autograd", "test_nn"}, set()),
-            ("test/compiled_autograd_skips/TestGone.test_x", {"inductor/test_compiled_autograd"}, set()),
+            ("test/compiled_autograd_skips/TestGone.test_x", {"inductor/test_compiled_autograd"}, {"dynamo_wrapped"}),
             ("test/dynamo_skips/.gitkeep", set(), set()),
         ]:  # fmt: skip
             sel = self.select_in_tree(sources, candidates, [changed])
@@ -164,6 +164,8 @@ class TestSelection(unittest.TestCase):
         self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
         sel = Selection.from_model_output({"tests": []}, candidates, ["test/inductor_skips/TestNN.test_x"])  # fmt: skip
         self.assertTrue(sel.run_all)
+        sel = Selection.from_model_output({"tests": []}, candidates, ["test/compiled_autograd_skips/TestNN.test_x"])  # fmt: skip
+        self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
 
     def test_fallbacks_run_all(self) -> None:
         self.assertTrue(

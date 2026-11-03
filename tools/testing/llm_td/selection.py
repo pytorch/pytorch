@@ -242,7 +242,8 @@ class Selection:
         sources, missing = failure_list_sources(changed_files, grep)
         if "inductor" in missing:
             return cls(run_all=True, reason="an edited inductor failure list names an unknown test class")  # fmt: skip
-        if "dynamo" in missing:
+        # dynamo_wrapped also runs with compiled autograd on (see common_utils).
+        if missing & {"dynamo", "compiled_autograd"}:
             sweeps.add("dynamo_wrapped")
         files |= edited_tests(changed_files, candidates)
         if grep is not None:
