@@ -12509,6 +12509,43 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 self.assertEqual(x.grad, x_ref.grad)
                 self.assertEqual(y.grad, y_ref.grad)
 
+    @parametrize("op", ("select", "slice", "diagonal"))
+    @parametrize("src_shape", ((3,), (1, 3)))
+    def test_scatter_invalid_src_shape(self, op, src_shape):
+        def fn(x, src):
+            if op == "select":
+                return torch.select_scatter(x, src, dim=0, index=0)
+            if op == "slice":
+                return torch.slice_scatter(x, src, dim=0, start=0, end=1)
+            return torch.diagonal_scatter(x, src, dim1=0, dim2=1)
+
+        x = torch.zeros(3, 3, 3, device=self.device)
+        src = torch.ones(src_shape, device=self.device)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "expected src to have a size equal to the slice of self",
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(x, src)
+
+    @parametrize("op", ("select", "slice", "diagonal"))
+    def test_scatter_dynamic_valid_src_shape(self, op):
+        def fn(x, src):
+            if op == "select":
+                return torch.select_scatter(x, src, dim=0, index=0)
+            if op == "slice":
+                return torch.slice_scatter(x, src, dim=0, start=0, end=1)
+            return torch.diagonal_scatter(x, src, dim1=0, dim2=1)
+
+        compiled_fn = torch.compile(
+            fn, backend="inductor", fullgraph=True, dynamic=True
+        )
+        for size in (3, 5):
+            x = torch.randn(size, size, size, device=self.device)
+            src_shape = (1, size, size) if op == "slice" else (size, size)
+            src = torch.randn(src_shape, device=self.device)
+            self.assertEqual(compiled_fn(x, src), fn(x, src))
+
     def test_diagonal_scatter_overlap_input(self):
         # The decomposition for diagonal_scatter (and the other *_scatter ops)
         # uses clone_preserve_strides, which must materialize a contiguous
