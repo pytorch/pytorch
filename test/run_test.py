@@ -65,6 +65,11 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results
+from tools.testing.llm_td.selection import (
+    LLM_TD_HEDGE,
+    LLM_TD_SELECTION_FILE,
+    Selection,
+)
 from tools.testing.target_determination.gen_artifact import gen_ci_artifact
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
@@ -2552,6 +2557,49 @@ def main():
     )
     include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
 
+    llm_selection = Selection.load(
+        REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_TD_SELECTION_FILE
+    )
+    # Written by the llm-test-selection job of target_determination.yml; see tools/testing/llm_td.
+    if llm_selection is not None:
+        ranked = include + exclude
+        covered = [x for x in ranked if llm_selection.covers(x.test_file, TEST_CONFIG)]
+        if IS_CI:
+            emit_metric(
+                "llm_td_shadow_selection",
+                {
+                    "enforced": llm_selection.enforce,
+                    "run_all": llm_selection.run_all,
+                    "num_tests": len(ranked),
+                    "num_covered": len(covered),
+                    "num_td_include": len(include),
+                    "time_total": sum(
+                        test_file_times_dict.get(x.test_file, 0) for x in ranked
+                    ),
+                    "time_covered": sum(
+                        test_file_times_dict.get(x.test_file, 0) for x in covered
+                    ),
+                },
+            )
+        if llm_selection.enforce and get_pr_number() is not None:
+            # Hedge with TD's top-ranked files that fit in a small share of the job's time.
+            budget = LLM_TD_HEDGE * sum(
+                test_file_times_dict.get(x.test_file, 0) for x in ranked
+            )
+            include, exclude = [], []
+            for x in ranked:
+                t = test_file_times_dict.get(x.test_file, 0)
+                if llm_selection.covers(x.test_file, TEST_CONFIG):
+                    include.append(x)
+                elif t <= budget:
+                    budget -= t
+                    include.append(x)
+                else:
+                    exclude.append(x)
+            print_to_stderr(
+                f"LLM selection: running {len(include)} of {len(ranked)} tests ({len(covered)} selected)"
+            )
+
     test_batch = TestBatch("tests to run", include, False)
     test_batch_exclude = TestBatch("excluded", exclude, True)
     if IS_CI:
@@ -2611,6 +2659,18 @@ def main():
                         **test_stats,
                     },
                 )
+                if llm_selection is not None:
+                    emit_metric(
+                        "llm_td_shadow_failure",
+                        {
+                            "failure": str(test),
+                            "test_config": TEST_CONFIG,
+                            "covered": llm_selection.covers(
+                                test.test_file, TEST_CONFIG
+                            ),
+                            "enforced": llm_selection.enforce,
+                        },
+                    )
             gen_additional_test_failures_file(
                 [test.test_file for test, _ in all_failures]
             )
