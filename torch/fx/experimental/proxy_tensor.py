@@ -2341,6 +2341,11 @@ def _sym_register(
 def _compute_proxy(
     tracer: _ProxyTracer, func: OpOverload, args: tuple[object, ...], out: PySymType
 ) -> Proxy:
+    if out.node in tracer.symnodes_being_forced:
+        raise RuntimeError(
+            f"Cycle while computing the proxy for {out}: an untracked SymInt it "
+            "depends on was resolved to a value computed from it"
+        )
     tracer.symnodes_being_forced.add(out.node)
     try:
         # Handle torch.sym_sum

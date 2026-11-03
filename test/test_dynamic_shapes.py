@@ -1612,6 +1612,29 @@ Ne(Eq(u1, 1), Eq(u0, 1))""",
         gm = make_fx(f, tracing_mode="symbolic")(torch.randn(4), torch.randn(3))
         self.assertEqual(gm(torch.randn(6), torch.randn(2)).shape, (6,))
 
+    def test_build_proxy_untracked_symint_cycle_error(self):
+        """
+        half == s0 is computed from an untracked w == 2*s0 and becomes the s0
+        provider, so rebuilding w binds it to 2 * half. Forcing w then forces
+        half, whose operand is w: a cycle through symnode_tracker that the
+        sympy_expr_tracker lookup never sees. It must raise a clear error
+        instead of recursing forever.
+        """
+        from torch.fx.experimental.proxy_tensor import (
+            disable_proxy_modes_tracing,
+            maybe_enable_thunkify,
+        )
+
+        def f(x):
+            with maybe_enable_thunkify():
+                with disable_proxy_modes_tracing():
+                    w = x.shape[0] * 2
+                half = w // 2
+                return x.new_zeros(w), x.new_zeros(half)
+
+        with self.assertRaisesRegex(RuntimeError, "Cycle while computing the proxy"):
+            make_fx(f, tracing_mode="symbolic")(torch.randn(4))
+
     def test_build_proxy_untracked_symint_no_tangent_dependency(self):
         """
         AOTAutograd tracks the tangent placeholders before the forward runs, so
