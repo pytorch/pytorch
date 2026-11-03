@@ -7755,7 +7755,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             """
         ).format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
 
-    def _reduction_loop_unroll_hint(self, tree: IterationRangesRoot) -> str:
+    def _reduction_loop_unroll_hint(self, tree: IterationRangesRoot, /) -> str:
         """
         Unroll hint for the innermost reduction loop. When the block does not
         divide a static reduction size, Triton cannot prove the loop's bounds

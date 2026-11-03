@@ -445,6 +445,34 @@ class TestCodegenTriton(InductorTestCase):
         "requires CUDA and Triton",
     )
     @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.reduction_loop_unroll_factor": 8,
+            "triton.reduction_loop_unroll_max_loads": 3,
+        }
+    )
+    def test_reduction_loop_unroll_max_loads_per_loop(self):
+        def fn(x, y):
+            return torch.softmax(x + y, dim=-1)
+
+        # Each of the two loops over the row loads x and y, so each loop is
+        # judged by its own two loads rather than four for the kernel.
+        x = torch.randn(64, 17920, device=GPU_TYPE)
+        y = torch.randn(64, 17920, device=GPU_TYPE)
+        actual, codes = run_and_get_code(torch.compile(fn), x, y)
+        self.assertEqual(actual, fn(x, y), atol=1e-4, rtol=1e-4)
+        loop_headers = re.findall(
+            r"for r0_offset in tl\.range\(.*\):", "\n".join(codes)
+        )
+        self.assertEqual(len(loop_headers), 2)
+        for header in loop_headers:
+            self.assertIn("loop_unroll_factor=8 if (17920 % R0_BLOCK", header)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON and GPU_TYPE == "cuda" and not torch.version.hip,
+        "requires CUDA and Triton",
+    )
+    @inductor_config.patch(
         {"split_reductions": False, "triton.reduction_loop_unroll_factor": 8}
     )
     def test_reduction_loop_unroll_max_loads_counts_masked_loads(self):
