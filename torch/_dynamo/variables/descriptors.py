@@ -14,7 +14,7 @@ import functools
 import inspect
 import sys
 import types
-from typing import Any, cast, Generic, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
 from torch._C._dynamo import get_type_tp_name
 from torch._guards import Source
@@ -70,17 +70,11 @@ DescriptorTypes: TypeAlias = (
     | types.GetSetDescriptorType
 )
 
-_CallableDescriptor = TypeVar(
-    "_CallableDescriptor", types.MethodDescriptorType, types.WrapperDescriptorType
-)
-
 
 def _check_descriptor_obj_type(
     tx: "InstructionTranslatorBase",
     descriptor: DescriptorTypes,
     obj: "VariableTracker",
-    *,
-    is_wrapper_call: bool = False,
 ) -> None:
     """Check that obj's type is compatible with descriptor.__objclass__.
 
@@ -92,14 +86,6 @@ def _check_descriptor_obj_type(
     """
     obj_type = obj.python_type()
     if not issubclass(obj_type, descriptor.__objclass__):
-        if is_wrapper_call:
-            # wrapperdescr_call checks the receiver before wrapperdescr_raw_call.
-            raise_type_error(
-                tx,
-                f"descriptor '{descriptor.__name__}' requires a "
-                f"'{get_type_tp_name(descriptor.__objclass__)}' object "
-                f"but received a '{get_type_tp_name(obj_type)}'",
-            )
         raise_type_error(
             tx,
             f"descriptor '{descriptor.__name__}' for "
@@ -162,32 +148,9 @@ class DescriptorVariable(VariableTracker):
         )
 
 
-class CallableDescriptorVariable(DescriptorVariable, Generic[_CallableDescriptor]):
-    _nonvar_fields = {
-        "descriptor",
-        *VariableTracker._nonvar_fields,
-    }
-
-    def __init__(
-        self,
-        descriptor: _CallableDescriptor,
-        owner: VariableTracker,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(**kwargs)
-        self.descriptor = descriptor
-        self.owner = owner
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen(self.owner)
-        codegen.load_attr(self.descriptor.__name__)
-
-
 # descr_members: __objclass__ and __name__ are PyMemberDef on all descriptor
 # types. https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L641-L645
-class WrapperDescriptorVariable(
-    CallableDescriptorVariable[types.WrapperDescriptorType]
-):
+class WrapperDescriptorVariable(DescriptorVariable):
     """Unbound C slot wrapper (wrapper_descriptor on a type).
 
     CPython types define behavior through C-level slots on PyTypeObject
@@ -203,6 +166,21 @@ class WrapperDescriptorVariable(
     PyWrapper_New to produce a bound method-wrapper (_PyMethodWrapper_Type).
     The tp_descr_get_impl method on this class mirrors that binding step.
     """
+
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: types.WrapperDescriptorType,
+        owner: VariableTracker,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.descriptor = descriptor
+        self.owner = owner
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # wrapperdescr_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L71-L76
@@ -237,7 +215,15 @@ class WrapperDescriptorVariable(
                 f"'{get_type_tp_name(self.descriptor.__objclass__)}' object needs an argument",
             )
         obj, *rest = args
-        _check_descriptor_obj_type(tx, self.descriptor, obj, is_wrapper_call=True)
+        obj_type = obj.python_type()
+        if not issubclass(obj_type, self.descriptor.__objclass__):
+            # wrapperdescr_call validates its receiver before wrapperdescr_raw_call.
+            raise_type_error(
+                tx,
+                f"descriptor '{self.descriptor.__name__}' requires a "
+                f"'{get_type_tp_name(self.descriptor.__objclass__)}' object "
+                f"but received a '{get_type_tp_name(obj_type)}'",
+            )
         # Dispatch through the defining type's builtin or user-defined tracker rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses. Routing through the class
@@ -258,6 +244,10 @@ class WrapperDescriptorVariable(
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1489-L1505
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.owner)
+        codegen.load_attr(self.descriptor.__name__)
 
 
 class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
@@ -376,7 +366,7 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         return python_constant_richcompare_impl(self, tx, other, op)
 
 
-class MethodDescriptorVariable(CallableDescriptorVariable[types.MethodDescriptorType]):
+class MethodDescriptorVariable(DescriptorVariable):
     """Unbound C method descriptor (method_descriptor on a type).
 
     CPython types expose their PyMethodDef-based C methods as
@@ -391,6 +381,21 @@ class MethodDescriptorVariable(CallableDescriptorVariable[types.MethodDescriptor
     (PyCFunction_Type).  The tp_descr_get_impl method mirrors that step.
     https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
     """
+
+    _nonvar_fields = {
+        "descriptor",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        descriptor: types.MethodDescriptorType,
+        owner: VariableTracker,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.descriptor = descriptor
+        self.owner = owner
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # method_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L50-L55
@@ -434,7 +439,6 @@ class MethodDescriptorVariable(CallableDescriptorVariable[types.MethodDescriptor
                 rest,
                 kwargs,
                 descriptor=self.descriptor,
-                qualname=self.descriptor.__qualname__,
             )
             if result is not None:
                 return result
@@ -460,6 +464,10 @@ class MethodDescriptorVariable(CallableDescriptorVariable[types.MethodDescriptor
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         # PyCFunction_NewEx creates a fresh object; see ClassMethodDescriptorVariable.
         return BoundBuiltinMethodVariable(self.descriptor, obj)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.owner)
+        codegen.load_attr(self.descriptor.__name__)
 
 
 @functools.cache
@@ -709,7 +717,6 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
                 args,
                 kwargs,
                 descriptor=descriptor,
-                qualname=lambda: self._qualname(tx).as_python_constant(),
             )
             if result is not None:
                 return result

@@ -68,6 +68,7 @@ from torch._C._dynamo.guards import (
     GuardManager,
     install_nn_module_hook_membership_guard,
     install_no_tensor_aliasing_guard,
+    install_object_alias_pattern_guard,
     install_object_aliasing_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
@@ -580,6 +581,16 @@ class GuardManagerWrapper:
                 for accessor, mgr in zip(accessors, child_mgrs)
             )
 
+        def ordered_dict_tag_safe(node: GuardManager) -> bool:
+            # Subclass type changes do not update dictionary version tags.
+            return (
+                node.get_type_of_guarded_value() is collections.OrderedDict
+                or not any(
+                    isinstance(guard, ORDERED_DICT_ORDER_MATCH)
+                    for guard in node.get_leaf_guards()
+                )
+            )
+
         def visit_dict_manager(
             node: DictGuardManager,
         ) -> tuple[list[GuardManager], bool]:
@@ -615,15 +626,7 @@ class GuardManagerWrapper:
             if has_unoptimized_relational_guard:
                 return tag_safe_roots, has_unoptimized_relational_guard
 
-            # Native replay checks linked order on cache hits. Subclass type
-            # changes are not reflected in dict tags, so keep those conservative.
-            is_subtree_tag_safe = (
-                node.get_type_of_guarded_value() is collections.OrderedDict
-                or not any(
-                    isinstance(guard, ORDERED_DICT_ORDER_MATCH)
-                    for guard in node.get_leaf_guards()
-                )
-            )
+            is_subtree_tag_safe = ordered_dict_tag_safe(node)
             for key_mgr, val_mgr in node.get_key_value_managers().values():
                 if key_mgr:
                     is_subtree_tag_safe &= key_mgr.is_tag_safe()
@@ -681,13 +684,7 @@ class GuardManagerWrapper:
                 is_subtree_tag_safe = all(
                     isinstance(accessor, DictGetItemGuardAccessor) and mgr.is_tag_safe()
                     for accessor, mgr in zip(accessors, child_mgrs)
-                ) and (
-                    node.get_type_of_guarded_value() is collections.OrderedDict
-                    or not any(
-                        isinstance(guard, ORDERED_DICT_ORDER_MATCH)
-                        for guard in node.get_leaf_guards()
-                    )
-                )
+                ) and ordered_dict_tag_safe(node)
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
             elif issubclass(node.get_type_of_guarded_value(), torch.nn.Module):
@@ -3732,8 +3729,11 @@ class GuardBuilder(GuardBuilderBase):
         refs = ", ".join(self.arg_ref(source.name) for source in sources)
         code = [f"___receiver_alias_pattern(({refs},)) == {aliases!r}"]
         self._set_guard_export_info(guard, code)
-        self.add_python_lambda_leaf_guard_to_root(
-            code, get_verbose_code_parts(code, guard)
+        install_object_alias_pattern_guard(
+            [self.get_guard_manager_from_source(source) for source in sources],
+            aliases,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
         )
 
     # Multi-source guard (two inputs aliasing) — not expressible as a
@@ -3876,13 +3876,16 @@ class GuardBuilder(GuardBuilderBase):
         if not flags:
             # Empty flags make every membership false, independent of hook IDs.
             # Keep the logical relation for nested reuse, but use a tag-safe leaf.
-            code = [f"dict.__len__({flags_source.name}) == 0"]
+            code = f"dict.__len__({flags_source.name}) == 0"
+            if code in self.already_added_code_parts:
+                return
+            self.already_added_code_parts.add(code)
             self.get_guard_manager_from_source(
                 flags_source
             ).add_dict_length_check_guard(
-                0, get_verbose_code_parts(code, guard), guard.user_stack
+                0, get_verbose_code_parts([code], guard), guard.user_stack
             )
-            self._set_guard_export_info(guard, code)
+            self._set_guard_export_info(guard, [code])
             return
         membership = tuple(key in flags for key in dict.keys(self.get(hooks_source)))
         code = (
@@ -5057,9 +5060,9 @@ class GuardsStatePickler(FunctionPicklerBase):
     def _restore_ordered_dict_state(
         cls,
         value: collections.OrderedDict[Any, Any],
-        state: tuple[Any, tuple[int, ...]],
+        state: tuple[Any, tuple[int, ...], bool],
     ) -> None:
-        attrs, order = state
+        attrs, order, adopt_attrs = state
         keys = list(dict.keys(value))
         for index in order:
             collections.OrderedDict.move_to_end(value, keys[index])
@@ -5069,15 +5072,25 @@ class GuardsStatePickler(FunctionPicklerBase):
             setstate = cast(Any, value).__setstate__
         except AttributeError:
             slots = None
-            if isinstance(attrs, tuple):
-                attrs, slots = attrs
+            if isinstance(attrs, tuple) and tuple.__len__(attrs) == 2:
+                attrs, slots = tuple.__getitem__(attrs, 0), tuple.__getitem__(attrs, 1)
+            # Match CPython's Modules/_pickle.c:load_build, including bad states.
             if attrs is not None:
-                # Preserve constructor attributes and aliases to the saved state.
-                for name, item in value.__dict__.items():
-                    attrs.setdefault(name, item)
-                object.__setattr__(value, "__dict__", attrs)
-            if slots:
-                for name, item in slots.items():
+                if not isinstance(attrs, dict):
+                    raise pickle.UnpicklingError("state is not a dictionary") from None
+                if adopt_attrs:
+                    for name, item in dict.items(value.__dict__):
+                        dict.setdefault(attrs, name, item)
+                    object.__setattr__(value, "__dict__", attrs)
+                else:
+                    for name, item in dict.items(attrs):
+                        value.__dict__[name] = item
+            if slots is not None:
+                if not isinstance(slots, dict):
+                    raise pickle.UnpicklingError(
+                        "slot state is not a dictionary"
+                    ) from None
+                for name, item in dict.items(slots):
                     setattr(value, name, item)
         else:
             setstate(attrs)
@@ -5427,10 +5440,16 @@ class GuardsStatePickler(FunctionPicklerBase):
                 )
             reduced = obj.__reduce__()
             state = vars(obj) if type(obj) is collections.OrderedDict else reduced[2]
+            actual_attrs = vars(obj)
+            adopt_attrs = state is actual_attrs or (
+                isinstance(state, tuple)
+                and len(state) == 2
+                and state[0] is actual_attrs
+            )
             return (
                 reduced[0],
                 reduced[1],
-                (state, order if preserve_storage else ()),
+                (state, order if preserve_storage else (), adopt_attrs),
                 reduced[3],
                 iter(dict.items(obj)) if preserve_storage else reduced[4],
                 type(self)._restore_ordered_dict_state,
@@ -5591,9 +5610,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(
             obj, (types.MethodDescriptorType, types.ClassMethodDescriptorType)
         ):
+            from .variables.object_protocol import Py_TPFLAGS_IMMUTABLETYPE
+
             owner = obj.__objclass__
             flags = type.__dict__["__flags__"].__get__(owner, type(owner))
-            if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
+            if not flags & Py_TPFLAGS_IMMUTABLETYPE:
                 raise torch._dynamo.exc.PackageError(
                     f"Cannot serialize {type(obj).__name__} with a mutable owner"
                 )
@@ -5871,11 +5892,13 @@ def _resolves_by_reference(value: object) -> bool:
             and getattr(owner, value.name, None) is value
         )
     if isinstance(value, (types.MethodDescriptorType, types.ClassMethodDescriptorType)):
+        from .variables.object_protocol import Py_TPFLAGS_IMMUTABLETYPE
+
         owner = value.__objclass__
         # Match GuardsStatePickler's immutable-owner descriptor reducer.
         flags = type.__dict__["__flags__"].__get__(owner, type(owner))
         return (
-            bool(flags & (1 << 8))
+            bool(flags & Py_TPFLAGS_IMMUTABLETYPE)
             and _resolves_by_reference(owner)
             and any(
                 item is value for item in get_type_dict_no_user_code(owner).values()
