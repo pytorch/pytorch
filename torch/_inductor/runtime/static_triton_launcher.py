@@ -122,6 +122,10 @@ class StaticallyLaunchedTritonKernel:
 
     supports_global_scratch = False
 
+    @staticmethod
+    def supports_launch_pdl(target: Any) -> bool:
+        return False
+
     def __init__(self, kernel: CompiledKernel) -> None:
         # pyrefly: ignore [missing-attribute]
         self.name = kernel.src.fn.__name__
@@ -190,6 +194,10 @@ class StaticallyLaunchedTritonKernel:
         if self.profile_scratch_size and self.profile_scratch_size > 0:
             raise NotImplementedError("Profile scratch not yet supported")
         self.has_profile_scratch = self.profile_scratch_size is not None
+
+        self.launch_pdl = getattr(metadata, "launch_pdl", False)
+        if self.launch_pdl and not self.supports_launch_pdl(metadata.target):
+            raise NotImplementedError("PDL launch not supported")
 
         self.tensordesc_meta = getattr(metadata, "tensordesc_meta", None)
         self._has_tensordesc = False
@@ -511,6 +519,8 @@ class StaticallyLaunchedTritonKernel:
         if len(args) != len(arg_tys):
             raise AssertionError(f"Expected {len(arg_tys)} args, got {len(args)}")
 
+        # Only launchers with supports_launch_pdl take the trailing launch_pdl flag.
+        launch_pdl = (True,) if self.launch_pdl else ()
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
         self.C_impl._launch_kernel(
@@ -523,11 +533,16 @@ class StaticallyLaunchedTritonKernel:
             arg_tys,
             args,
             stream,
+            *launch_pdl,
         )
 
 
 class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
     supports_global_scratch = not is_rocm()
+
+    @staticmethod
+    def supports_launch_pdl(target: Any) -> bool:
+        return not is_rocm() and target.arch >= 90
 
     @cached_property
     def C_impl(self):
