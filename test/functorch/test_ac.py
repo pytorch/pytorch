@@ -278,6 +278,82 @@ class MemoryBudgetTestDevice(TestCase):
                 self.assertEqual(expected, f_compile())
 
     @onlyAccelerator
+    @unittest.skipIf(not has_triton(), "test needs triton")
+    def test_user_triton_kernel_not_free_to_recompute(self, device):
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._functorch.partitioners import min_cut_rematerialization_partition
+
+        @triton.jit
+        def sin_kernel(x_ptr, out_ptr, N: tl.constexpr):
+            offsets = tl.program_id(0) * N + tl.arange(0, N)
+            tl.store(out_ptr + offsets, tl.sin(tl.load(x_ptr + offsets)))
+
+        @triton.jit
+        def cheap_sin_kernel(x_ptr, out_ptr, N: tl.constexpr):
+            offsets = tl.program_id(0) * N + tl.arange(0, N)
+            tl.store(out_ptr + offsets, tl.sin(tl.load(x_ptr + offsets)))
+
+        @register_flop_formula(cheap_sin_kernel)
+        def cheap_sin_flops(*args, **kwargs):
+            return 1
+
+        def make_op(name, kernel):
+            @torch._library.triton_op(f"testac::{name}", mutates_args=())
+            def op(x: torch.Tensor) -> torch.Tensor:
+                y = torch.empty_like(x)
+                torch.library.wrap_triton(kernel)[(x.shape[0],)](x, y, x.shape[1])
+                return y
+
+            def setup_context(ctx, inputs, output):
+                ctx.save_for_backward(inputs[0], output)
+
+            def backward(ctx, grad_out):
+                x, y = ctx.saved_tensors
+                return grad_out * (y - x).sigmoid()
+
+            op.register_autograd(backward, setup_context=setup_context)
+            return op
+
+        ops = {
+            "no_formula": make_op("sin_no_formula", sin_kernel),
+            "cheap_formula": make_op("sin_cheap_formula", cheap_sin_kernel),
+        }
+        lin1 = torch.nn.Linear(256, 256, device=device)
+        lin2 = torch.nn.Linear(256, 256, device=device)
+        x = torch.randn(512, 256, device=device, requires_grad=True)
+
+        def kernels_in_backward(op, budget):
+            counts = []
+
+            def bw_compiler(gm, _):
+                target = torch.ops.higher_order.triton_kernel_wrapper_functional
+                counts.append(sum(n.target is target for n in gm.graph.nodes))
+                return make_boxed_func(gm)
+
+            def fn(x_inp):
+                h = lin1(torch.nn.functional.layer_norm(x_inp, x_inp.shape[-1:]))
+                return lin2(op(h)).sum()
+
+            backend = aot_autograd(
+                fw_compiler=lambda gm, _: make_boxed_func(gm),
+                bw_compiler=bw_compiler,
+                partition_fn=min_cut_rematerialization_partition,
+            )
+            torch._dynamo.reset()
+            with config.patch(activation_memory_budget=budget):
+                torch.compile(fn, backend=backend)(x).backward()
+            return counts
+
+        # Without a flop formula the kernel's cost is unknown, so it must not be
+        # recomputed while the budget can be met otherwise.
+        self.assertEqual(kernels_in_backward(ops["no_formula"], 0.5), [0])
+        # With a (cheap) registered formula the knapsack may recompute it.
+        self.assertEqual(kernels_in_backward(ops["cheap_formula"], 0.1), [1])
+        # Budget 1.0 keeps the default min-cut behavior.
+        self.assertEqual(kernels_in_backward(ops["no_formula"], 1.0), [0])
+
+    @onlyAccelerator
     def test_prioritize_cheaper_matmul(self, device):
         def f(xs, ws):
             xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
