@@ -5484,6 +5484,13 @@ class TestCppFakeTensorModeBindings(TestCase):
         with torch._functorch.config.patch(fake_tensor_allow_meta=False):
             mode, wrapper = self._make_mode(ShapeEnv())
         self.assertFalse(mode.allow_meta)
+        self.assertTrue(mode.allow_unsafe_data_ptr_access)
+        config = torch._functorch.config
+        with config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            mode, wrapper = self._make_mode()
+        self.assertFalse(mode.allow_unsafe_data_ptr_access)
+        mode.allow_unsafe_data_ptr_access = True
+        self.assertTrue(mode.allow_unsafe_data_ptr_access)
         with self.assertRaisesRegex(RuntimeError, "Expected a FakeTensorConverter"):
             torch._C._CppFakeTensorMode(None, None, self.Wrapper())
         with self.assertRaisesRegex(RuntimeError, "Expected the CppFakeTensorMode"):
@@ -5498,9 +5505,9 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertTrue(mode.allow_meta)
 
     def test_from_meta_and_device(self):
-        mode, wrapper = self._make_mode()
-        # A plain meta tensor gets a new detached fake on device, as in Python,
-        # and is itself left unchanged
+        mode, _ = self._make_mode()
+        # A plain meta tensor gets a new detached fake on device sharing its
+        # storage, as in Python, and keeps its own device and autograd state
         meta = torch.empty(2, 3, device="meta", requires_grad=True) * 2
         fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
         self.assertIsNot(fake, meta)
@@ -5509,11 +5516,15 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(fake.shape, (2, 3))
         self.assertTrue(fake.requires_grad)
         self.assertTrue(fake.is_leaf)
-        self.assertIs(torch._C._maybe_get_fake_mode(fake), wrapper)
-        self.assertIsNone(torch._C._maybe_get_fake_mode(torch.empty(2)))
+        self.assertEqual(
+            fake.untyped_storage()._cdata, meta.untyped_storage()._cdata
+        )
         self.assertFalse(torch._C._is_fake_tensor(meta))
         self.assertTrue(meta.is_meta)
         self.assertIsNotNone(meta.grad_fn)
+        no_grad_meta = torch.empty(2, device="meta")
+        no_grad = torch._C._from_meta_and_device(no_grad_meta, torch.device("cpu"), mode)
+        self.assertFalse(no_grad.requires_grad)
 
         # A fake of the same mode that reads as meta gets a new detached fake
         # on device, unseen by dispatch modes, and keeps its own device and
@@ -5537,7 +5548,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIsNot(moved, meta_fake)
         self.assertTrue(torch._C._is_fake_tensor(moved))
         self.assertEqual(moved.device, torch.device("cpu"))
-        self.assertIs(torch._C._maybe_get_fake_mode(moved), wrapper)
         self.assertIsNone(torch._C._get_real_tensor(moved))
         self.assertTrue(moved.requires_grad)
         self.assertTrue(moved.is_leaf)
@@ -5577,28 +5587,37 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertFalse(torch._C._is_fake_tensor(meta))
         self.assertTrue(meta.is_meta)
 
+    def test_maybe_get_fake_mode(self):
+        mode, wrapper = self._make_mode()
+        meta = torch.empty(2, device="meta")
+        fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+        self.assertIs(torch._C._maybe_get_fake_mode(fake), wrapper)
+        self.assertIsNone(torch._C._maybe_get_fake_mode(meta))
+        self.assertIsNone(torch._C._maybe_get_fake_mode(torch.empty(2)))
+
     def test_unsafe_data_ptr_access(self):
         def make_fake(mode):
             meta = torch.empty(2, device="meta")
             return torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
 
+        warning = "Accessing the data pointer of FakeTensor"
         config = torch._functorch.config
         with config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
             strict_mode, _ = self._make_mode()
-        self.assertFalse(strict_mode.allow_unsafe_data_ptr_access)
         with self.assertRaisesRegex(RuntimeError, "data pointer"):
             make_fake(strict_mode).data_ptr()
 
         mode, _ = self._make_mode()
-        self.assertTrue(mode.allow_unsafe_data_ptr_access)
         fake = make_fake(mode)
-        fake.data_ptr()
+        with self.assertWarnsOnceRegex(UserWarning, warning):
+            fake.data_ptr()
 
         # Reassigning applies to fakes created afterwards
         mode.allow_unsafe_data_ptr_access = False
         with self.assertRaisesRegex(RuntimeError, "data pointer"):
             make_fake(mode).data_ptr()
-        fake.data_ptr()
+        with self.assertWarnsOnceRegex(UserWarning, warning):
+            fake.data_ptr()
 
     def test_fake_dispatch_mode_slot(self):
         _, wrapper = self._make_mode()
