@@ -593,11 +593,13 @@ def build_reuse_condition(
 
     # Collect all guards for sources accessed during the subgraph trace
     # and for the flattened arg sources.
-    all_sources = set(traced_sources)
+    all_sources = OrderedSet(traced_sources)
     all_sources.update(s for s in fingerprint.arg_sources if s is not None)
-    all_relevant_guards: set[Guard] = set()
+    all_relevant_guards: OrderedSet[Guard] = OrderedSet()
     for source in all_sources:
-        all_relevant_guards.update(tx.output.guards.get_guards_for_source(source))
+        all_relevant_guards.update(
+            sorted(tx.output.guards.get_guards_for_source(source), key=Guard.sort_key)
+        )
 
     traced_sources = traced_sources.copy()
     guard_tuples: list[tuple[Source, GuardCheckSpec, object, Guard]] = []
@@ -618,9 +620,9 @@ def build_reuse_condition(
         try:
             value = tx.output.resolve_source_value(source)
             if handler.get_extra_sources_fn is not None:
-                extra_sources = handler.get_extra_sources_fn(guard)
+                extra_sources = OrderedSet(handler.get_extra_sources_fn(guard))
                 traced_sources.update(extra_sources)
-                if has_mutated_vars(tx, traced_sources):
+                if has_mutated_vars(tx, extra_sources):
                     return None
                 value = (
                     value,
@@ -646,6 +648,7 @@ def build_reuse_condition(
         guards=guard_tuples,
         treespec=fingerprint.treespec,
         traced_sources=traced_sources,
+        guard_on_key_order=tx.output.guard_on_key_order.intersection(traced_sources),
     )
 
 
@@ -665,6 +668,9 @@ def remap_guard(guard: Guard, remap_source: Callable[[Source], Source]) -> Guard
     def remap(value: Any) -> Any:
         if isinstance(value, Source):
             return remap_source(value)
+        if type(value) is tuple:
+            items = tuple(remap(item) for item in value)
+            return value if all(a is b for a, b in zip(value, items)) else items
         return value
 
     source = remap(guard.originating_source)
@@ -690,6 +696,35 @@ def remap_guard(guard: Guard, remap_source: Callable[[Source], Source]) -> Guard
     )
 
 
+def equivalent_guards(left: Guard, right: Guard) -> bool:
+    """Compare guard behavior, excluding the trace stack and export metadata."""
+
+    def same_payload(a: Any, b: Any) -> bool:
+        if a is b:
+            return True
+        if type(a) is not type(b):
+            return False
+        if isinstance(a, Source) or type(a) in (str, int, bool, bytes, type(None)):
+            return a == b
+        if type(a) is tuple:
+            return len(a) == len(b) and all(same_payload(x, y) for x, y in zip(a, b))
+        if type(a) is dict:
+            return a.keys() == b.keys() and all(same_payload(a[k], b[k]) for k in a)
+        return False
+
+    if (
+        left.originating_source != right.originating_source
+        or left._force_dict_keys_match != right._force_dict_keys_match
+    ):
+        return False
+    if left.inner_create_fn() is not right.inner_create_fn():
+        return False
+    a, b = left.create_fn, right.create_fn
+    return same_payload(
+        getattr(a, "args", ()), getattr(b, "args", ())
+    ) and same_payload(getattr(a, "keywords", {}), getattr(b, "keywords", {}))
+
+
 @dataclass
 class SubgraphReuseMatch:
     """Work shared by one reuse check and its stamp-out, never cached across calls."""
@@ -697,6 +732,7 @@ class SubgraphReuseMatch:
     entry: InvokeSubgraphReuseEntry
     source_replacement: dict[Source, Source]
     resolve_globals: dict[str, Any]
+    condition: InvokeSubgraphReuseCondition | None
     resolve_locals: dict[str, Any] = field(default_factory=dict)
     resolved_values: dict[Source, Any] = field(default_factory=dict)
     cloned_sources: dict[Source, Source] = field(default_factory=dict)
@@ -708,11 +744,13 @@ class SubgraphReuseMatch:
         tx: "InstructionTranslatorBase",
         entry: InvokeSubgraphReuseEntry,
         fingerprint: InputFingerprint,
+        condition: InvokeSubgraphReuseCondition | None = None,
     ) -> "SubgraphReuseMatch":
         return cls(
             entry,
             build_source_replacement(entry.arg_sources, fingerprint.arg_sources),
             {"G": tx.output.root_tx.f_globals, "L": tx.output.root_tx.f_locals},
+            condition,
         )
 
     def remap_source(self, source: Source) -> Source:
@@ -758,8 +796,8 @@ def is_reusable(
     (2) Check for mutations on the remapped traced_sources — if any source
         the subgraph read has been mutated since the original trace, the
         cached guards would evaluate against stale values.
-    (3) Build a source replacement mapping (old sources → new sources) and
-        re-evaluate the snapshotted guards under the new sources.
+    (3) Use the match's remapped sources to re-evaluate snapshotted guards.
+        Record them on this invocation's match for runtime replay on stamp-out.
     """
     # Structural check: treespec must match first.
     if condition.treespec is not None and (
@@ -972,7 +1010,7 @@ def find_reuse_match(
         cond: "InvokeSubgraphReuseCondition", entry: InvokeSubgraphReuseEntry
     ) -> bool:
         nonlocal match
-        candidate = SubgraphReuseMatch.create(tx, entry, fingerprint)
+        candidate = SubgraphReuseMatch.create(tx, entry, fingerprint, cond)
         if not is_reusable(tx, cond, fingerprint, candidate):
             return False
         match = candidate
@@ -1063,12 +1101,6 @@ def save_reuse_entry(
         # rewrite captured variable sources for the current invocation.
         arg_sources=fingerprint.arg_sources,
         num_user_outputs=num_user_outputs,
-        guard_on_key_order=tx.output.guard_on_key_order.intersection(
-            condition.traced_sources
-        )
-        if condition
-        else set(),
-        traced_sources=condition.traced_sources if condition else OrderedSet(),
     )
     if condition is not None:
         invoke_subgraph_cache.add_reuse_entry(
@@ -1152,14 +1184,20 @@ def stamp_out_subgraph(
             # and tensor alias guards through VariableBuilder's existing cache.
             source = guard.originating_source
             VariableBuilder(tx, source)(match.resolve(source))
-        else:
+        elif not any(
+            equivalent_guards(guard, existing)
+            for existing in tx.output.guards.get_guards_for_source(
+                guard.originating_source
+            )
+        ):
             install_guard(guard)
-    tx.output.guard_on_key_order.update(
-        match.remap_source(source) for source in cached.guard_on_key_order
-    )
-    tx.output.current_tracer.traced_sources.update(
-        match.remap_source(source) for source in cached.traced_sources
-    )
+    if match.condition is not None:
+        tx.output.guard_on_key_order.update(
+            match.remap_source(source) for source in match.condition.guard_on_key_order
+        )
+        tx.output.current_tracer.traced_sources.update(
+            match.remap_source(source) for source in match.condition.traced_sources
+        )
 
     new_lifted_args = []
     # Find the args for the about-to-be-inserted invoke_subgraph call.
@@ -1502,6 +1540,9 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 body_graph_output_vts,
                 tracing_info,
             ) = self.create_wrapped_node(tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME)
+
+        # Fresh child traces contribute dependencies just like stamped-out ones.
+        tx.output.current_tracer.traced_sources.update(tracing_info.traced_sources)
 
         if len(p_kwargs) > 0:
             unimplemented(
