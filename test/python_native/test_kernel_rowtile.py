@@ -88,6 +88,13 @@ class TestKernelRowTile(TestCase):
         for device in ("cuda:0", "cuda:1"):
             self.assertTrue(any(device in k for k in mine), f"no plan for {device}")
 
+    def test_plans_require_the_current_device(self):
+        # Plans compile on the current device, so the launchers refuse any other one.
+        rt._require_current(torch.device("cuda", torch.cuda.current_device()))
+        other = torch.device("cuda", torch.cuda.device_count())
+        with self.assertRaisesRegex(AssertionError, "current device"):
+            rt._require_current(other)
+
     def test_two_output_trait(self):
         # nouts=2 stores values and indices projected from one accumulator.
         x = torch.randn(64, 512, device="cuda")
