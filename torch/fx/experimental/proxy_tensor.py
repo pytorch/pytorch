@@ -26,12 +26,13 @@ from typing import (
     Literal,
     overload,
     Protocol,
+    Self,
     TYPE_CHECKING,
     TypeAlias,
     TypeVar,
     Union,
 )
-from typing_extensions import ParamSpec, Self, TypeVarTuple, Unpack
+from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 from weakref import WeakKeyDictionary
 
 import torch
@@ -1961,7 +1962,7 @@ def dispatch_trace(
 
 def wrap_key(
     f: Callable[[Unpack[_Ts]], R],
-    tensors: tuple[Unpack[_Ts]],
+    tensors: tuple[*_Ts],
     tracer: _ProxyTracer,
     pre_dispatch: bool,
 ) -> Callable[_P, R]:
