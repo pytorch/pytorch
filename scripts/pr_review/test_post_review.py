@@ -794,6 +794,35 @@ class TestATooLargePrGetsANotice(unittest.TestCase):
         post_review.restore_pending(gh, 1, AUTHOR, "77")
         self.assertEqual(gh.reviews[0]["body"], NOTICE)
 
+    def test_a_marked_verdict_is_replaced_not_overwritten(self):
+        gh = FakeGitHub(reviews=[old_review(5)])
+        post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
+        decline(gh)
+        self.assertEqual([p["body"] for p in gh.posted()], [NOTICE])
+        self.assertEqual(minimized(gh), ["N5"])
+        writes = len(gh.writes())
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(len(gh.writes()), writes)
+
+    def test_a_notice_that_cannot_be_put_back_is_replaced(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=NOTICE)])
+        post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
+        real, refused = gh.request, []
+
+        def refuse_once(method, path, body=None, idempotent=None):
+            if method == "PUT" and path.endswith("/reviews/5") and not refused:
+                refused.append(path)
+                raise GitHubError(500, "boom")
+            return real(method, path, body, idempotent)
+
+        gh.request = refuse_once
+        with redirect_stdout(io.StringIO()):
+            decline(gh)
+        self.assertEqual([p["body"] for p in gh.posted()], [NOTICE])
+        writes = len(gh.writes())
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(len(gh.writes()), writes)
+
     def test_a_notice_put_back_defused_is_replaced(self):
         """A smaller commit's failed review puts the notice back defused; once
         the PR is too large again, a working notice replaces it."""

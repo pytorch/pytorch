@@ -45,7 +45,8 @@ Invariants:
   dismisses no change request, and is not posted again while the newest
   visible review is that same notice, unmarked or marked in progress (a marked
   one gets its body back, whichever run marked it). A notice that differs,
-  such as one put back defused, is replaced.
+  such as one put back defused, is replaced. A change request it leaves
+  standing stays after an opt-out until a maintainer dismisses it.
 - API errors are warnings. The step fails only when an earlier change request
   may still stand after a clean verdict.
 """
@@ -1212,6 +1213,7 @@ def notice_stands(gh: GitHub, pr: int, review: dict, body: str) -> bool:
         )
     except GitHubError as exc:
         warn(f"could not put back too-large notice {review['id']}: {exc}")
+        return False
     return True
 
 
