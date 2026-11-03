@@ -698,6 +698,13 @@ def _build_proxy_for_sym_expr(
     return out
 
 
+def _unwrap_functorch(t: Tensor) -> Tensor:
+    functorch = torch._C._functorch
+    while functorch.is_batchedtensor(t) or functorch.is_gradtrackingtensor(t):
+        t = functorch.get_unwrapped(t)
+    return t
+
+
 def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     # val.detach() will also eventually call fast_detach(),
     # but this saves us a full trip into __torch_dispatch__
@@ -710,10 +717,7 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     # so passes still see which storage it aliases. Functorch is disabled so
     # that an outer jvp does not wrap the view again. A wrapped tensor subclass,
     # such as DTensor, may not support that view, so it keeps its wrapper.
-    functorch = torch._C._functorch
-    inner = val
-    while functorch.is_batchedtensor(inner) or functorch.is_gradtrackingtensor(inner):
-        inner = functorch.get_unwrapped(inner)
+    inner = _unwrap_functorch(val)
     # The view below is built from a Python FakeTensor's fields, as fast_detach
     # does, so a C++ fake keeps its wrapper.
     fake = inner if isinstance(inner, FakeTensor) else None  # noqa: ISINSTANCE_FAKE_TENSOR

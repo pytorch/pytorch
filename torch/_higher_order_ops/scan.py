@@ -49,6 +49,7 @@ from torch._subclasses.fake_tensor import (
     maybe_set_real_tensor,
 )
 from torch.fx.experimental.proxy_tensor import (
+    _unwrap_functorch,
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
@@ -507,16 +508,9 @@ def _scan_output_value(node: Any, value: Any) -> Any:
     # of scan must keep the functorch wrapper that the combine function returned.
     # Otherwise meta["val"] is the value to use. Either way, the output holds no
     # constant or real tensor from the one step that tracing ran.
-    functorch = torch._C._functorch
-    if isinstance(value, torch.Tensor) and (
-        functorch.is_batchedtensor(value) or functorch.is_gradtrackingtensor(value)
-    ):
+    if isinstance(value, torch.Tensor) and _unwrap_functorch(value) is not value:
         value = value.detach()
-        inner = value
-        while functorch.is_batchedtensor(inner) or functorch.is_gradtrackingtensor(
-            inner
-        ):
-            inner = functorch.get_unwrapped(inner)
+        inner = _unwrap_functorch(value)
         maybe_clear_fake_constant(inner)
         maybe_set_real_tensor(inner, None)
         return value
