@@ -2,7 +2,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/RNN.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/native/mps/operations/Matmul.h>
+#include <ATen/native/mps/operations/MatmulUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

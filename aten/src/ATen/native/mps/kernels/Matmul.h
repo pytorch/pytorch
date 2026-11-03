@@ -4,13 +4,19 @@
 
 C10_METAL_CONSTEXPR uint32_t kMatmulTileN = 64;
 C10_METAL_CONSTEXPR uint32_t kMatmulTileK = 16;
+C10_METAL_CONSTEXPR uint32_t kMatmulTileRowsSmall = 16;
+C10_METAL_CONSTEXPR uint32_t kMatmulTileRowsMedium = 32;
+C10_METAL_CONSTEXPR uint32_t kMatmulTileRowsLarge = 64;
+C10_METAL_CONSTEXPR uint32_t kMatmulWideTileCols = 256;
 
 // Tuned on M5 Pro: the 256-wide MPP tile wants eight SIMD groups, narrower
 // tiles two or four depending on their row count.
 inline constexpr uint32_t matmul_simdgroups(
     uint32_t tile_rows,
     uint32_t tile_cols) {
-  return tile_cols >= 256 ? 8 : tile_rows >= 64 ? 4 : 2;
+  return tile_cols >= kMatmulWideTileCols ? 8
+      : tile_rows >= kMatmulTileRowsLarge ? 4
+                                          : 2;
 }
 
 template <typename idx_t>
@@ -245,7 +251,7 @@ inline void matmul_mpp_gemm(
     op.run(a, b, accum);
   }
 
-  if constexpr (is_same_v<T, float>) {
+  if IF_CONSTEXPR (is_same_v<T, float>) {
     accum.store(out);
   } else {
     auto result = op.template get_destination_cooperative_tensor<

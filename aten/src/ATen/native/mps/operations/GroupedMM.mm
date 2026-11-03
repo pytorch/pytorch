@@ -5,7 +5,7 @@
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/GroupedMM.h>
-#include <ATen/native/mps/operations/Matmul.h>
+#include <ATen/native/mps/operations/MatmulUtils.h>
 #include <ATen/ops/bmm.h>
 #include <fmt/format.h>
 
@@ -45,7 +45,8 @@ GroupedMMParams<idx_t> grouped_mm_params(const Tensor& mat_a, const Tensor& mat_
 // Apple GPUs.
 uint32_t grouped_mm_mpp_tile_cols(uint32_t n, uint64_t mat_b_bytes, uint32_t bm) {
   const bool streams_weights_from_dram = n >= 1024 && mat_b_bytes >= (32ull << 20);
-  return streams_weights_from_dram ? (bm == 64 ? 256u : 128u) : kMatmulTileN;
+  return streams_weights_from_dram ? (bm == kMatmulTileRowsLarge ? kMatmulWideTileCols : kGroupedMMMediumTileCols)
+                                   : kMatmulTileN;
 }
 
 enum class GroupedMMKernel {
