@@ -8,6 +8,9 @@
 
 namespace at::native::mps {
 
+// out = a * b for float32, float16 and bfloat16. out must not overlap a or b.
+void metal_mm_out(const Tensor& a, const Tensor& b, const Tensor& out);
+
 template <typename idx_t>
 MatmulParams<idx_t> matmul_params(
     const Tensor& a,
