@@ -95,6 +95,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_CI,
     IS_FBCODE,
+    IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
@@ -2477,6 +2478,131 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device=self.device),
         )
         self.check_model(Model(), example_inputs)
+
+    @parametrize("op", ["sdpa", "custom_op"])
+    def test_unused_fallback_outputs_freed(self, op):
+        # Each layer uses only the first output of a multi-output fallback:
+        # flash attention through the C shim (logsumexp and RNG state are
+        # unused in inference), or a custom op through the proxy executor. The
+        # unused outputs must be freed right after the call, otherwise every
+        # layer's copy stays alive until the model returns.
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+        if op == "sdpa" and (
+            self.device != "cuda" or not PLATFORM_SUPPORTS_FLASH_ATTENTION
+        ):
+            raise unittest.SkipTest("requires CUDA flash attention")
+
+        b, s, d, n_heads = 8, 1024, 64, 8
+
+        class Model(torch.nn.Module):
+            def __init__(self, n_layers):
+                super().__init__()
+                self.qkv = torch.nn.ModuleList(
+                    torch.nn.Linear(d, 3 * d) for _ in range(n_layers)
+                )
+
+            def forward(self, x):
+                for qkv in self.qkv:
+                    if op == "sdpa":
+                        q, k, v = (
+                            qkv(x)
+                            .view(b, s, 3, n_heads, -1)
+                            .permute(2, 0, 3, 1, 4)
+                            .unbind(0)
+                        )
+                        # Call the flash kernel directly so that no other SDPA
+                        # backend gets picked.
+                        y = torch.ops.aten._scaled_dot_product_flash_attention(q, k, v)
+                        y = y[0].transpose(1, 2).reshape(b, s, d)
+                    else:
+                        y = torch.ops.aoti_unused_outputs.two(qkv(x))[0][..., :d]
+                    x = x + y
+                return x
+
+        if op == "sdpa":
+            # logsumexp, in float32
+            unused_bytes_per_layer = b * n_heads * s * 4
+            unused_regex = (
+                r"_scaled_dot_product_flash_attention\(.*?&\w+_handle, &(\w+)_handle"
+            )
+        else:
+            unused_bytes_per_layer = 4 * b * s * 3 * d * 2
+            unused_regex = r"proxy_executor_call_function\(.*, (\w+)\}\.data\(\)\)\);"
+
+        x = torch.randn(b, s, d, device=self.device, dtype=torch.half)
+        device_module = torch.get_device_module(self.device)
+
+        def run_and_get_peak(n_layers):
+            model = Model(n_layers).to(self.device).half().eval()
+            with torch.no_grad():
+                package_path, code = run_and_get_cpp_code(
+                    AOTIRunnerUtil.compile, model, (x,)
+                )
+                # Each unused output must be reset before the next call. The
+                # dual-wrapper mode emits each call twice with the same names, so
+                # keep the first one per name.
+                calls = {}
+                for line in code.splitlines():
+                    if m := re.search(unused_regex, line):
+                        calls.setdefault(m.group(1), line)
+                self.assertEqual(len(calls), n_layers)
+                lines = list(calls.values())
+                for i, (name, line) in enumerate(calls.items()):
+                    check = FileCheck().check(line).check(f"{name}.reset();")
+                    if i + 1 < len(lines):
+                        check = check.check(lines[i + 1])
+                    check.run(code)
+
+                runner = torch._inductor.aoti_load_package(package_path)
+                runner(x)
+                device_module.synchronize()
+                baseline = device_module.memory_allocated()
+                device_module.reset_peak_memory_stats()
+                actual = runner(x)
+                device_module.synchronize()
+                peak = device_module.max_memory_allocated() - baseline
+                self.assertEqual(actual, model(x), atol=1e-2, rtol=1e-2)
+            return peak
+
+        with torch.library._scoped_library("aoti_unused_outputs", "FRAGMENT") as lib:
+            lib.define("two(Tensor x) -> (Tensor, Tensor)")
+            lib.impl(
+                "two",
+                lambda x: (x.relu(), x.repeat(4, 1, 1)),
+                "CompositeExplicitAutograd",
+            )
+            torch.library.register_fake(
+                "aoti_unused_outputs::two",
+                lambda x: (
+                    torch.empty_like(x),
+                    x.new_empty(4 * x.shape[0], *x.shape[1:]),
+                ),
+                lib=lib,
+            )
+            # Without the frees, each extra layer adds one unused output to the peak.
+            self.assertLess(
+                run_and_get_peak(n_layers=6) - run_and_get_peak(n_layers=2),
+                unused_bytes_per_layer,
+            )
+
+    def test_unused_fallback_output_defines_unbacked_symbol(self):
+        # The unused unique values define the unbacked symbol for their length,
+        # which is read after the call, so they can only be freed after that.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                _, inverse = torch.unique(x, return_inverse=True)
+                return inverse + 1
+
+        x = torch.randint(0, 5, (16,), device=self.device)
+        _, code = run_and_get_cpp_code(self.check_model, Model(), (x,))
+
+        defs = re.findall(r"(u\d+) = (\w+)\.size\(0\);", code)
+        self.assertTrue(defs)
+        for symbol, values in defs:
+            FileCheck().check(f"{symbol} = {values}.size(0);").check(
+                f"{values}.reset();"
+            ).run(code)
 
     @skipIfNoFBGEMM
     def test_quantized_linear(self):
@@ -11014,6 +11140,43 @@ class AOTInductorTestsTemplate:
                     if "NEEDED" in line:
                         for lib in torch_libs:
                             self.assertTrue(lib not in line)
+
+    @unittest.skipUnless(IS_LINUX, "the flag it checks is passed to ELF linkers")
+    def test_libtorch_free_so_has_no_unused_openmp_dependency(self):
+        # _get_openmp_args adds OpenMP to every Linux link. A model that calls no
+        # OpenMP function must still not record libgomp, or the artifact fails to
+        # load on a machine without it. A compiler that links as needed by
+        # default, such as Ubuntu's GCC, passes this either way, so
+        # test_cpp_builder also checks the link command itself.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        def openmp_libraries(x, options):
+            so_path = AOTIRunnerUtil.legacy_compile(
+                Model(), (x,), options={"aot_inductor.link_libtorch": False, **options}
+            )
+            dynamic = subprocess.run(
+                ["readelf", "-d", so_path], check=True, capture_output=True, text=True
+            ).stdout
+            needed = re.findall(r"\(NEEDED\)\s+Shared library: \[(.+?)\]", dynamic)
+            self.assertTrue(needed, f"readelf reported no dependencies for {so_path}")
+            return [lib for lib in needed if "omp" in lib.lower()]
+
+        # assertFalse names the libraries that came back, assertEqual does not.
+        # dynamic_threads would put even this small kernel in a parallel region.
+        self.assertFalse(
+            openmp_libraries(
+                torch.randn(8, device=self.device), {"cpp.dynamic_threads": False}
+            )
+        )
+
+        # Large enough for Inductor to parallelize the kernel with OpenMP on two
+        # threads, so the library is used and has to stay. With
+        # fallback_by_default (lite mode) the op goes to ATen and no kernel is
+        # generated.
+        if self.device == "cpu" and not config.fallback_by_default:
+            self.assertTrue(openmp_libraries(torch.randn(4096), {"cpp.threads": 2}))
 
     def test_unbounded_expr_substitutions(self):
         class Model(torch.nn.Module):
