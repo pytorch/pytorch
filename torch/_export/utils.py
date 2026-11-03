@@ -825,6 +825,20 @@ def _update_gm_meta_if_possible(gm: torch.fx.GraphModule, mod: torch.nn.Module) 
         gm.meta.update({"custom": mod.meta["custom"]})
 
 
+def _is_free_attr_name(model: torch.nn.Module, name: str) -> bool:
+    # A dotted name can only be added under Modules, so a prefix that holds
+    # another object, such as a tensor, makes the name taken.
+    *prefix, field = name.split(".")
+    owner = model
+    for item in prefix:
+        owner = getattr(owner, item, None)
+        if owner is None:
+            return True
+        if not isinstance(owner, torch.nn.Module):
+            return False
+    return not hasattr(owner, field)
+
+
 def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
     """
     Inline the submodule of the given node into the parent module.
@@ -868,10 +882,10 @@ def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
                 attr = _get_attr(sub_gm, node.target)
                 new_target_name = new_node.target
                 # Several get_attr nodes can read one attribute, such as a pytree
-                # spec, so reuse it and rename only when the name holds another object.
-                if (
+                # spec, so reuse it and rename only when the name is taken.
+                if not _is_free_attr_name(gm, new_target_name) and not (
                     _has_attr(gm, new_target_name)
-                    and _get_attr(gm, new_target_name) is not attr
+                    and _get_attr(gm, new_target_name) is attr
                 ):
                     # Loop through and find the "submod_{i}" that have no name collision
                     i = 1
@@ -879,7 +893,7 @@ def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
                     while _has_attr(gm, new_target_name):
                         i += 1
                         new_target_name = f"submod_{i}"
-                if not _has_attr(gm, new_target_name):
+                if _is_free_attr_name(gm, new_target_name):
                     *prefix, field = new_target_name.split(".")
                     owner = gm
                     for item in prefix:

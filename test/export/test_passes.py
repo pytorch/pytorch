@@ -1167,35 +1167,43 @@ def forward(self, sin, cos):
     def test_node_inline_renames_colliding_attribute(self):
         # The inlined graph reads an attribute under a name that the outer
         # module uses for another object, so it is stored under a new name. A
-        # dotted name whose owner the outer module lacks, or holds as None, is
-        # added as it is. Neither becomes a buffer.
-        inner_root = torch.nn.Module()
-        inner_root.c = torch.tensor([1.0])
-        inner_root.sub = torch.nn.Module()
-        inner_root.sub.d = torch.tensor([2.0])
-        inner_graph = torch.fx.Graph()
-        x = inner_graph.placeholder("x")
-        y = inner_graph.call_function(torch.add, (x, inner_graph.get_attr("c")))
-        inner_graph.output(
-            inner_graph.call_function(torch.add, (y, inner_graph.get_attr("sub.d")))
-        )
-        root = torch.nn.Module()
-        root.inner = torch.fx.GraphModule(inner_root, inner_graph)
-        root.c = torch.tensor([10.0])
-        graph = torch.fx.Graph()
-        x = graph.placeholder("x")
-        call = graph.call_module("inner", (x,))
-        graph.output(graph.call_function(torch.mul, (call, graph.get_attr("c"))))
-        gm = torch.fx.GraphModule(root, graph)
-        gm.sub = None
-        node_inline_(call)
-        gm.recompile()
-        targets = [n.target for n in gm.graph.find_nodes(op="get_attr")]
-        self.assertEqual(len(set(targets)), 3)
-        self.assertIn("sub.d", targets)
-        self.assertIs(gm.c, root.c)
-        self.assertEqual([name for name, _ in gm.named_buffers()], ["c"])
-        self.assertEqual(gm(torch.ones(1)), torch.tensor([40.0]))
+        # dotted name whose owner the outer module holds as None is added as it
+        # is, while an owner that is not a Module makes the name taken. Neither
+        # becomes a buffer.
+        for owner in (None, torch.tensor([5.0])):
+            with self.subTest(owner=owner):
+                inner_root = torch.nn.Module()
+                inner_root.c = torch.tensor([1.0])
+                inner_root.sub = torch.nn.Module()
+                inner_root.sub.d = torch.tensor([2.0])
+                inner_graph = torch.fx.Graph()
+                x = inner_graph.placeholder("x")
+                y = inner_graph.call_function(torch.add, (x, inner_graph.get_attr("c")))
+                inner_graph.output(
+                    inner_graph.call_function(
+                        torch.add, (y, inner_graph.get_attr("sub.d"))
+                    )
+                )
+                root = torch.nn.Module()
+                root.inner = torch.fx.GraphModule(inner_root, inner_graph)
+                root.c = torch.tensor([10.0])
+                graph = torch.fx.Graph()
+                x = graph.placeholder("x")
+                call = graph.call_module("inner", (x,))
+                graph.output(
+                    graph.call_function(torch.mul, (call, graph.get_attr("c")))
+                )
+                gm = torch.fx.GraphModule(root, graph)
+                gm.sub = owner
+                node_inline_(call)
+                gm.recompile()
+                targets = [n.target for n in gm.graph.find_nodes(op="get_attr")]
+                self.assertEqual(len(set(targets)), 3)
+                self.assertEqual("sub.d" in targets, owner is None)
+                self.assertFalse(hasattr(owner, "d"))
+                self.assertIs(gm.c, root.c)
+                self.assertEqual([name for name, _ in gm.named_buffers()], ["c"])
+                self.assertEqual(gm(torch.ones(1)), torch.tensor([40.0]))
 
     def test_predispatch_autocast_and_set_grad(self):
         mod_orig, mod, args = self.MIXED_AUTOCAST_SET_GRAD_TESTS["multi_ctx_manager"]
