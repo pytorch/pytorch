@@ -513,7 +513,8 @@ class TestBenchmarkUtils(TestCase):
             # Subprocess raises AttributeError (from pickle),
             # _ValgrindWrapper re-raises as generic OSError.
             OSError,
-            "AttributeError: Can't get attribute 'MyModule'",
+            r"(?:AttributeError: Can't get attribute 'MyModule'|"
+            r"ModuleNotFoundError: No module named '.*test_benchmark_utils')",
         ):
             benchmark_utils.Timer(
                 "model(1)",
