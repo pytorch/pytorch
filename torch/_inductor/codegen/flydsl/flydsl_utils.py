@@ -9,8 +9,8 @@ from torch.backends import cuda as _cuda
 
 log = logging.getLogger(__name__)
 _pathfinder_find_spec = PathFinder.find_spec
-# FlyDSL 0.3.x ``@fx.struct`` values must expose ``__cache_signature__()``.
-_FLYDSL_SUPPORTED_RELEASE = (0, 3)
+# PyTorch validates its vendored gfx950 kernels against FlyDSL 0.4.x.
+_FLYDSL_SUPPORTED_RELEASE = (0, 4)
 
 
 def _flydsl_runtime_unavailable_reason() -> str | None:
