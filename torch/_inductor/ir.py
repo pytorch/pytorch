@@ -16,11 +16,14 @@ from functools import partial
 from numbers import Number
 from typing import (
     Any,
+    assert_never,
     cast,
     ClassVar,
     Literal,
+    Never,
     overload,
     Protocol,
+    Self,
     SupportsFloat,
     SupportsInt,
     TYPE_CHECKING,
@@ -28,15 +31,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import (
-    assert_never,
-    Never,
-    override,
-    ParamSpec,
-    Self,
-    TypedDict,
-    TypeIs,
-)
+from typing_extensions import override, ParamSpec, TypedDict, TypeIs
 from unittest.mock import patch
 
 import sympy

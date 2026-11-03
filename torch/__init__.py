@@ -28,7 +28,10 @@ from types import ModuleType as _ModuleType
 from typing import (
     Any as _Any,
     get_origin as _get_origin,
+    LiteralString as _LiteralString,
+    Never as _Never,
     overload as _overload,
+    Self as _Self,
     TYPE_CHECKING,
     TypeAlias as _TypeAlias,
     TypeGuard as _TypeGuard,
@@ -36,10 +39,7 @@ from typing import (
 )
 from typing_extensions import (
     deprecated as _deprecated,
-    LiteralString as _LiteralString,
-    Never as _Never,
     ParamSpec as _ParamSpec,
-    Self as _Self,
     TypeIs as _TypeIs,
 )
 
