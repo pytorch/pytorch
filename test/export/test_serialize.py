@@ -3508,6 +3508,37 @@ class TestPredispatchSerialization(TestCase):
 
         self._load_changed(self._index_in_vmap_artifact(), overload_after_keyword)
 
+    def test_predispatch_custom_autograd_operator_input(self):
+        # An operator overload is an input that save and load accept, so an
+        # autograd function that takes one saves, loads and runs.
+        Scale = self._scale_function()
+
+        class ApplyOp(Scale):
+            @staticmethod
+            def forward(x, op):
+                return op(x, x)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2, None
+
+        class UsesOp(torch.nn.Module):
+            def forward(self, x):
+                return ApplyOp.apply(x, torch.ops.aten.add.Tensor)
+
+        module = self._import_test_module(ApplyOp=ApplyOp)
+        ApplyOp.__module__, ApplyOp.__qualname__ = module.__name__, "ApplyOp"
+        x = torch.randn(4)
+        ep = export(UsesOp(), (x,), strict=False)
+        (node,) = ep.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.flat_apply
+        )
+        self.assertIn(torch.ops.aten.add.Tensor, node.args)
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        self.assertEqual(torch.export.load(buffer).module()(x), x + x)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeAccelerator(TestCase):
