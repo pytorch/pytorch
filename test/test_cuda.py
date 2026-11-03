@@ -3017,9 +3017,6 @@ raise RuntimeError("device assert did not fire")
 
     def test_mixed_dtype_binary_low_precision_out(self):
         # The float input must not be rounded to the output dtype before the op.
-        # gfx11 and gfx12 fuse the add and the fp16 conversion into v_fma_mix*_f16,
-        # which rounds the exact sum once instead of through float, so either
-        # rounding is accepted.
         for dtype in (torch.bfloat16, torch.half):
             for n in (1, 16383, 16384, 65537):
                 a = torch.randn(n, device="cuda").to(dtype)
@@ -3027,13 +3024,20 @@ raise RuntimeError("device assert did not fire")
                 out = torch.empty(n, device="cuda", dtype=dtype)
                 torch.add(a, b, out=out)
                 out, a, b = out.cpu(), a.cpu(), b.cpu()
-                via_float = (a.float() + b).to(dtype)
-                rounded_once = (a.double() + b.double()).to(dtype)
-                bad = (out != via_float) & (out != rounded_once)
-                self.assertFalse(
-                    bad.any(),
-                    f"{dtype} n={n}: {int(bad.sum())} elements match neither rounding",
-                )
+                expected = (a.float() + b).to(dtype)
+                if TEST_WITH_ROCM:
+                    # RDNA fuses the add and the conversion (v_fma_mix*), rounding the
+                    # exact sum once instead of through float. Accept that more accurate
+                    # result too. Rounding the double sum to float with round-to-odd
+                    # makes the final .to(dtype) a correct single rounding; a plain
+                    # double .to(dtype) would round through float again.
+                    s = a.double() + b.double()
+                    f = s.float()
+                    trunc = f.view(torch.int32) - (f.double().abs() > s.abs()).int()
+                    odd = torch.where(f.double() == s, f.view(torch.int32), trunc | 1)
+                    once = odd.view(torch.float32).to(dtype)
+                    expected = torch.where(out == once, once, expected)
+                self.assertEqual(out, expected, atol=0, rtol=0)
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     @gcIfJetson
