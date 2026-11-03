@@ -251,6 +251,137 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = torch.compile(f, backend="aot_eager")(*inputs)
         self.assertTrue(torch.allclose(res, f(*inputs)))
 
+    @skipIfTorchDynamo("test inspects inner torch.compile/AOT backend graph")
+    def test_pure_while_loop_empty_carry_with_unrelated_effect(self):
+        class M(torch.nn.Module):
+            def forward(self, matrix, post, count):
+                def cond(empty, i, out):
+                    return i < count
+
+                def body(empty, i, out):
+                    return empty.clone(), i + 1, out + 1
+
+                carries = (matrix.new_empty(0), torch.zeros_like(count), matrix)
+                out = torch.while_loop(cond, body, carries)[2]
+                return out + torch.linalg.inv(post)
+
+        inputs = (torch.eye(2), 2 * torch.eye(2), torch.tensor(2))
+        expected = inputs[0] + 2 + torch.linalg.inv(inputs[1])
+
+        backend = AotEagerAndRecordGraphs()
+        actual = torch.compile(M(), backend=backend, fullgraph=True)(*inputs)
+        self.assertEqual(actual, expected)
+        loop_op = torch.ops.higher_order.while_loop
+        aot_loop = backend.fw_graphs[0].graph.find_nodes(
+            op="call_function", target=loop_op
+        )[0]
+        self.assertNotIn("num_effect_tokens", aot_loop.kwargs)
+
+        ep = torch.export.export(M(), inputs).run_decompositions()
+        self.assertEqual(ep.module()(*inputs), expected)
+        export_loop = ep.graph_module.graph.find_nodes(
+            op="call_function", target=loop_op
+        )[0]
+        self.assertNotIn("num_effect_tokens", export_loop.kwargs)
+
+    def test_effectful_while_loop_aot_eager_and_functionalize(self):
+        # aot_eager keeps effect tokens lifted, and torch.func.functionalize
+        # runs effectful ops as plain ops; neither should need the token carry.
+        def f(matrix, count):
+            def cond(i, out):
+                return i < count
+
+            def body(i, out):
+                return i + 1, out + torch.linalg.inv(matrix)
+
+            carries = (torch.zeros_like(count), torch.zeros_like(matrix))
+            return torch.while_loop(cond, body, carries)[1]
+
+        inputs = (torch.tensor([[2.0, 1.0], [1.0, 3.0]]), torch.tensor(2))
+        expected = 2 * torch.linalg.inv(inputs[0])
+        compiled = torch.compile(f, backend="aot_eager", fullgraph=True)
+        self.assertEqual(compiled(*inputs), expected)
+        self.assertEqual(torch.func.functionalize(f)(*inputs), expected)
+
+    def test_effectful_while_loop_in_hop_subgraph(self):
+        # A loop traced inside another HOP's subgraph keeps the untokenized
+        # path. The token it would thread is the enclosing graph's, which the
+        # subgraph holds only as a constant, whether or not an effect in the
+        # subgraph used it first.
+        from torch._higher_order_ops.map import map as map_hop
+        from torch._higher_order_ops.scan import scan
+
+        def loop(m, n):
+            def body(i, out):
+                return i + 1, out + torch.linalg.inv(m)
+
+            carries = (torch.zeros_like(n), torch.zeros_like(m))
+            return torch.while_loop(lambda i, out: i < n, body, carries)[1]
+
+        def effect_then_loop(m, n):
+            return (torch.linalg.inv(m) + loop(m, n)).contiguous()
+
+        def nest(hop, branch):
+            def in_cond(m, n):
+                return torch.cond(n > 0, branch, lambda m, n: m.clone(), (m, n))
+
+            def in_map(m, n):
+                return map_hop(branch, torch.stack([m, 2 * m]), n).sum(0)
+
+            def in_scan(m, n):
+                def combine(carry, x):
+                    return carry + branch(x, n), carry.clone()
+
+                xs = torch.stack([m, 2 * m])
+                return scan(combine, torch.zeros_like(m), xs)[0]
+
+            return {"cond": in_cond, "map": in_map, "scan": in_scan}[hop]
+
+        inputs = (torch.tensor([[2.0, 1.0], [1.0, 3.0]]), torch.tensor(2))
+        for branch in (loop, effect_then_loop):
+            for hop in ("cond", "map", "scan"):
+                with self.subTest(hop=hop, branch=branch.__name__):
+                    f = nest(hop, branch)
+                    torch._dynamo.reset()
+                    compiled = torch.compile(f, backend="aot_eager", fullgraph=True)
+                    self.assertEqual(compiled(*inputs), f(*inputs))
+
+    @skipIfTorchDynamo("test inspects inner torch.compile/AOT backend graph")
+    def test_effectful_while_loop_force_saved(self):
+        # The partitioner runs before unlift_tokens rewrites the tokenized loop
+        # into with_effects, so it must already count the loop as effectful.
+        from torch._functorch.partitioners import (
+            CheckpointPolicy,
+            force_save_effectful_ops,
+        )
+
+        def f(matrix, count):
+            def cond(i, out):
+                return i < count
+
+            def body(i, out):
+                return i + 1, out + torch.linalg.inv(matrix)
+
+            carries = (torch.zeros_like(count), torch.zeros_like(matrix))
+            return torch.while_loop(cond, body, carries)[1]
+
+        backend = AotEagerAndRecordGraphs()
+        torch.compile(f, backend=backend, fullgraph=True)(torch.eye(2), torch.tensor(2))
+        gm = backend.fw_graphs[0]
+        (loop,) = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.while_loop
+        )
+        self.assertEqual(loop.kwargs["num_effect_tokens"], 1)
+
+        force_save_effectful_ops(gm)
+        self.assertTrue(loop.users)
+        for user in loop.users:
+            self.assertEqual(user.meta.get("recompute"), CheckpointPolicy.MUST_SAVE)
+
+        loop.meta["recompute"] = CheckpointPolicy.MUST_RECOMPUTE
+        with self.assertRaisesRegex(RuntimeError, "MUST_RECOMPUTE for effectful"):
+            force_save_effectful_ops(gm)
+
     @unittest.skipIf(IS_WINDOWS, "triton")
     def test_compile_inductor(self):
         def f(x):
