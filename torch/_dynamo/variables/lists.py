@@ -2217,12 +2217,23 @@ class ByteArrayVariable(VariableTracker):
             if any(self._has_python_index(member) for member in key.items):
                 unimplemented(
                     gb_type="bytearray slice store with Python __index__ bounds",
-                    context=f"slice: {key}",
-                    explanation="CPython calls the __index__ of bytearray slice "
-                    "store bounds in step, start, stop order, twice for a value "
-                    "that is not a bytearray. Dynamo does not model that order, so "
-                    "bounds that define __index__ in Python are left to eager.",
+                    context=f"slice: {key.debug_repr()}",
+                    explanation="CPython calls the __index__ of slice bounds in "
+                    "step, start, stop order, and again when it converts the "
+                    "stored value. Dynamo does not model that order, so bytearray "
+                    "slice stores and deletes whose bounds define __index__ in "
+                    "Python are left to eager.",
                     hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            # PySlice_Unpack checks the step before start and stop.
+            step = key.items[2]
+            if (
+                istype(step, ConstantVariable)
+                and istype(step.value, (int, bool))
+                and step.value == 0
+            ):
+                raise_observed_exception(
+                    ValueError, tx, args=["slice step cannot be zero"]
                 )
             index = key.as_index_slice(tx)
             if value is not None:
@@ -2303,20 +2314,22 @@ class ByteArrayVariable(VariableTracker):
         # frame. A bytearray that existed before the frame may share its buffer
         # with a memoryview, tensor or ndarray, which would read stale bytes,
         # and eager raises BufferError for a resize at the store itself.
+        # A pre-existing bytearray reached without a source is still wrapped as
+        # a new copy, as lists and dicts are; that is a SourcelessBuilder
+        # limitation.
         if isinstance(self.mutation_type, ValueMutationExisting):
             unimplemented(
                 gb_type="bytearray store to an existing bytearray",
-                context=f"bytearray: {self}",
+                context=f"bytearray: {self.debug_repr()}",
                 explanation="Dynamo traces bytearray item and slice stores only on "
-                "bytearrays created in the current graph. An existing bytearray "
-                "may share its buffer with a memoryview, tensor or array that "
-                "Dynamo cannot see, so the store is left to eager. After a graph "
-                "break, a bytearray created earlier in the function is existing.",
+                "bytearrays created in the same frame. An existing bytearray may "
+                "share its buffer with a memoryview, tensor or array that Dynamo "
+                "cannot see, so the store is left to eager. A bytearray created "
+                "before a graph break is treated as existing in the resume "
+                "function, so each later store breaks the graph again.",
                 hints=[
-                    "Store into a bytearray created in the compiled region, before "
-                    "any graph break.",
+                    "Store into a bytearray created in the compiled region.",
                     *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
-                    *graph_break_hints.SUPPORTABLE,
                 ],
             )
 
@@ -2342,10 +2355,11 @@ class ByteArrayVariable(VariableTracker):
     def _unsupported_store_value(value: VariableTracker) -> NoReturn:
         unimplemented(
             gb_type="bytearray store with an unsupported value",
-            context=f"value: {value}",
-            explanation="Dynamo only traces bytearray stores of constant values: "
-            "an integer for an item, and bytes, a bytearray, or a constant plain "
-            "list or tuple for a slice.",
+            context=f"value: {value.debug_repr()}",
+            explanation="Dynamo only traces bytearray stores whose value is known "
+            "at compile time: for an item, a value whose __index__ gives a "
+            "constant int; for a slice, bytes, a bytearray, or a constant plain "
+            "list or tuple.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 

@@ -14,11 +14,7 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import (
-    make_dynamo_test,
-    run_tests,
-    skipIfTorchDynamo,
-)
+from torch.testing._internal.common_utils import make_dynamo_test, run_tests
 
 
 class Indexable:
@@ -819,13 +815,23 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         b[-1] = Indexable(ord("z"))
         b[Indexable(1)] = 0xFF
         self.assertEqual(b, b"x\xffz")
-        self.assertRaises(IndexError, setitem, b, 3, 1)
-        self.assertRaises(IndexError, setitem, b, -4, 1)
+        out_of_range = "bytearray index out of range"
+        self.assertRaisesRegex(IndexError, out_of_range, setitem, b, 3, 1)
+        self.assertRaisesRegex(IndexError, out_of_range, setitem, b, -4, 1)
         self.assertRaises(IndexError, setitem, b, 2**64, 1)
         # The value is checked before the index.
-        self.assertRaises(ValueError, setitem, b, 10, 256)
+        self.assertRaisesRegex(
+            ValueError, r"byte must be in range\(0, 256\)", setitem, b, 10, 256
+        )
         self.assertRaises(TypeError, setitem, b, 0, b"a")
-        self.assertRaises(TypeError, setitem, b, "0", 1)
+        self.assertRaisesRegex(
+            TypeError,
+            "bytearray indices must be integers or slices, not str",
+            setitem,
+            b,
+            "0",
+            1,
+        )
         self.assertEqual(b, b"x\xffz")
 
     @make_dynamo_test
@@ -841,8 +847,12 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         del b[0]
         del b[-1]
         self.assertEqual(b, b"bc")
-        self.assertRaises(IndexError, delitem, b, 2)
-        self.assertRaises(IndexError, delitem, b, -3)
+        self.assertRaisesRegex(
+            IndexError, "bytearray index out of range", delitem, b, 2
+        )
+        self.assertRaisesRegex(
+            IndexError, "bytearray index out of range", delitem, b, -3
+        )
         self.assertEqual(b, b"bc")
 
     @make_dynamo_test
@@ -876,10 +886,20 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(b, b"df")
         self.assertRaises(ValueError, delitem, b, slice(None, None, 0))
 
+    @make_dynamo_test
+    def test_setslice_delslice_zero_step_first(self):
+        # PySlice_Unpack checks the step before the other bounds.
+        b = self.type2test(b"abc")
+        zero_step = "slice step cannot be zero"
+        self.assertRaisesRegex(ValueError, zero_step, setitem, b, slice("a", 1, 0), b"")
+        self.assertRaisesRegex(ValueError, zero_step, delitem, b, slice(1.5, None, 0))
+        self.assertEqual(b, b"abc")
+
     def test_store_to_existing_bytearray(self):
         cases = [
             (setitem, (0, ord("x"))),
             (setitem, (slice(1, 3), b"YZ")),
+            (setitem, (slice(1, 2), b"XY")),
             (delitem, (0,)),
             (delitem, (slice(None, None, 2),)),
         ]
@@ -916,7 +936,6 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 ):
                     torch.compile(fn, backend="eager", fullgraph=True)(*args)
 
-    @skipIfTorchDynamo("torch.frombuffer on a bytearray crashes Dynamo")
     def test_store_to_existing_bytearray_with_export(self):
         # The tensor and the memoryview share the buffer: they must see the
         # store, and a resize must raise BufferError inside the try.
@@ -937,11 +956,14 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             return result, ba
 
         self.assertEqual(run(torch.compile(f, backend="eager")), run(f))
-        torch._dynamo.reset()
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "bytearray store to an existing bytearray"
-        ):
-            run(torch.compile(f, backend="eager", fullgraph=True))
+        reasons = [
+            *torch._dynamo.utils.counters["graph_break"],
+            *torch._dynamo.utils.counters["unimplemented"],
+        ]
+        self.assertTrue(
+            any("bytearray store to an existing bytearray" in r for r in reasons),
+            reasons,
+        )
 
     def test_setslice_python_index_bounds(self):
         class Bound:
@@ -954,32 +976,39 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 self.log.append(self.name)
                 return self.value
 
-        def f(start, stop, step, value, x):
+        def store(start, stop, step, value, x):
             ba = bytearray(b"abcd")
             ba[start:stop:step] = value
             return ba, x + 1
 
-        def run(fn, value):
+        def delete(start, stop, step, x):
+            ba = bytearray(b"abcd")
+            del ba[start:stop:step]
+            return ba, x + 1
+
+        def run(fn, *args):
             log = []
             bounds = [
                 Bound(n, i, log) for n, i in (("start", 0), ("stop", 2), ("step", 1))
             ]
-            return fn(*bounds, value, torch.ones(1)), log
+            return fn(*bounds, *args, torch.ones(1)), log
 
-        # CPython unpacks the slice step first, and again for a value that
-        # is not a bytearray.
-        for value in (b"XY", bytearray(b"XY"), [88, 89]):
-            with self.subTest(value=value):
+        # CPython unpacks the slice step first, and again when it converts a
+        # value that is not a bytearray.
+        cases = [(store, (b"XY",)), (store, (bytearray(b"XY"),))]
+        cases += [(store, ([88, 89],)), (delete, ())]
+        for fn, args in cases:
+            with self.subTest(fn=fn.__name__, args=args):
                 torch._dynamo.reset()
                 self.assertEqual(
-                    run(torch.compile(f, backend="eager"), value), run(f, value)
+                    run(torch.compile(fn, backend="eager"), *args), run(fn, *args)
                 )
                 torch._dynamo.reset()
                 with self.assertRaisesRegex(
                     torch._dynamo.exc.Unsupported,
                     "bytearray slice store with Python __index__ bounds",
                 ):
-                    run(torch.compile(f, backend="eager", fullgraph=True), value)
+                    run(torch.compile(fn, backend="eager", fullgraph=True), *args)
 
     def test_setslice_input_values(self):
         # Static, so each input gets its own guarded graph.
@@ -1009,15 +1038,21 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             x = x * 2
             ba[:1] = (i for i in range(2))
             x = x - 1
-            ba[-1] = x[0].to(torch.int64)
+            ba[-1] = 3
             return ba, x * 3
 
         self.assertEqual(
             f(torch.ones(1)), (bytearray(b"\x00\x01\x03"), torch.full((1,), 9.0))
         )
-        # The constant store is traced. The generator value breaks the graph,
-        # and in the resume function ba already exists, so its store breaks too.
+        # The first store is traced. The generator value breaks the graph, and
+        # in the resume function ba is existing, so the next store breaks too.
         self.assertEqual(cnt.frame_count, 3)
+        reasons = list(torch._dynamo.utils.counters["graph_break"])
+        for reason in (
+            "bytearray store with an unsupported value",
+            "bytearray store to an existing bytearray",
+        ):
+            self.assertTrue(any(reason in r for r in reasons), reasons)
 
         def setitem_tensor(x):
             ba = bytearray(b"ab")
