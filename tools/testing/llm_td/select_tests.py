@@ -185,16 +185,11 @@ def query_model(
     if checkout:
         cmd += ["--allowed-tools", tools, "--add-dir", checkout]
         prompt = f"A checkout of the repository at this change is at {checkout}; use Read/Grep/Glob to find what exercises the changed code. Keep exploration focused.\n\n{prompt}"
-    # Without a checkout, an empty working directory keeps the CLI from picking
-    # up any project settings.
+    # An empty working directory keeps the CLI from picking up any project
+    # settings, also those of a checkout, which it reads only through --add-dir.
     with tempfile.TemporaryDirectory() as tmp:
         p = subprocess.run(
-            cmd,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            cwd=checkout or tmp,
-            timeout=timeout,
+            cmd, input=prompt, capture_output=True, text=True, cwd=tmp, timeout=timeout
         )
     try:
         return json.loads(p.stdout)
