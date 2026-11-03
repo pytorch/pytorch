@@ -1,7 +1,9 @@
 # Column-reduction driver for tile.TileReduce, with launch policy and plan cache, plus the
-# PartialColumns stage-two kernel.
-# Threads own vectorized kept-axis outputs without lane merging. Splitting the reduced
-# axis provides parallelism; unsplit (65536, 256) took 7830us versus ATen's 15.8us.
+# PartialColumns stage-two kernel and the ordered (inner-tree) column kernel.
+# TileReduce threads own vectorized kept-axis outputs without lane merging. Splitting the
+# reduced axis provides parallelism; unsplit (65536, 256) took 7830us versus ATen's 15.8us.
+# Ordered column threads each own one output and replay the row inner-tree DAG with loads
+# strided by C.
 
 from collections.abc import Sequence
 from typing import Any, Literal, NamedTuple
@@ -643,18 +645,14 @@ class _OrderedColReduce:
     def _leaf(self, rows, warp_base, k, active, bound, last):
         trait = self.trait
         red = warp_base + k
-        valid = active & (red < bound)
         if const_expr(self.full_tiles):
-            got = trait.leaf(rows[k], red)
-        else:
-            # Leaves past the bound read its last in-bounds row; the select below
-            # discards them. The clamp also keeps each address independent.
-            got = trait.leaf(
-                rows[cutlass.min(Int32(k), last)], red if valid else Int32(0)
-            )
+            # Every leaf is in bounds, and inactive lanes never store their outputs.
+            return trait.leaf(rows[k], red)
+        valid = active & (red < bound)
+        # Leaves past the bound read its last in-bounds row; the select below discards
+        # them. The clamp also keeps each address independent of the last one.
+        got = trait.leaf(rows[cutlass.min(Int32(k), last)], red if valid else Int32(0))
         ident = trait.init()
-        # Full tiles keep this select: without it norm2 leaves stop matching materialized
-        # squares bitwise (test_traits.test_norm2_leaf_rounding).
         return tuple(got[f] if valid else ident[f] for f in range(trait.nfields))
 
     @cute.jit
