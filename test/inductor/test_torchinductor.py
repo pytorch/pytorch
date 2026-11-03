@@ -2278,11 +2278,12 @@ class CommonTemplate:
         self.assertEqual(expect, actual)
 
     @unittest.skipIf(TEST_WITH_ASAN, "inf to int cast is UB under sanitizers")
-    @unittest.skipIf(
-        os.getenv("ATEN_CPU_CAPABILITY") == "default",
-        "inf to int cast is UB, and the scalar CPU code doesn't match eager",
-    )
     def test_index_propagation_to_dtype_inf(self):
+        if self.device == "cpu" and not cpu_vec_isa.pick_vec_isa():
+            raise unittest.SkipTest(
+                "inf to int cast is UB, and scalar CPU code doesn't match eager"
+            )
+
         def fn():
             x = torch.full((2,), 0.0, device=self.device)
             y = torch.log(x)

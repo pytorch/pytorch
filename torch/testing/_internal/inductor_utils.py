@@ -118,16 +118,14 @@ RUN_GPU = HAS_GPU and any(
     is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases
 )
 
-# With PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda but no CUDA device (the periodic
-# nogpu_* CI jobs), the CPU tests are the only ones left, so run them.
+# PYTORCH_TEST_INDUCTOR_RUN_CPU=1 runs the CPU tests even when
+# PYTORCH_TESTING_DEVICE_ONLY_FOR leaves CPU out. CI sets it for the nogpu_*
+# jobs, which run a CUDA build (so ONLY_FOR=cuda) on machines without a GPU.
 RUN_CPU = LazyVal(
     lambda: HAS_CPU
     and (
         any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
-        or (
-            os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "") == "cuda"
-            and not torch.cuda.is_available()
-        )
+        or os.environ.get("PYTORCH_TEST_INDUCTOR_RUN_CPU") == "1"
     )
 )
 
