@@ -372,10 +372,11 @@ def mark_warmup_incomplete() -> None:
 def mark_running_backward(device_index: int) -> None:
     """Tell the device's manager that a backward runs, if there is a manager.
 
-    See [Backward Generation Handling]: a backward that runs without a CUDA graph
-    must still end its forward's generation. There may be no manager yet (a
-    backward lowered with its forward, before the forward's first call) or at all
-    (a forward that never recorded a graph, or trees reset in between).
+    See [Backward Generation Handling]: clearing the pending-backward flag lets
+    the next invocation start a new generation. Post-compile can run before any
+    manager exists (a backward lowered with its forward), so the lookup happens
+    when the backward runs; even then there may be none (a forward that never
+    recorded a graph, or trees reset in between).
     """
     manager = get_manager(device_index, create_if_none_exists=False)
     if manager is not None:
