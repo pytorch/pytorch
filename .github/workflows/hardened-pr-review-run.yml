@@ -786,10 +786,11 @@ jobs:
       # edited or deleted and force-pushed heads are not guaranteed to survive.
       # The checkout itself is not kept, so a replay needs head_sha or
       # merge_base_sha still fetchable. The merge base plus pr-diff.txt rebuilds
-      # the reviewed commit only if the result hashes to head_tree_sha (a binary
-      # change cannot: the diff is plain text). The model read that commit minus
-      # the symlinks the scrub above removed, so after that check a replay
-      # re-runs the scrub before the review reads the tree.
+      # the reviewed tree (not the commit) only if the result hashes to
+      # head_tree_sha; a binary or `-diff`-attributed change cannot, since the
+      # diff is plain text. The model read that tree minus the symlinks the
+      # scrub above removed, so after that check a replay re-runs the scrub
+      # before the review reads the tree.
       # Before the model: everything it uploads is final by now, and this way
       # it does not depend on the credential outlasting both stages. Under
       # pr_review_traces/ because that is the one prefix this job's role may
@@ -806,24 +807,22 @@ jobs:
         run: |
           set -euo pipefail
           DEST="s3://${S3_BUCKET}/pr_review_traces/${{ github.repository }}/${{ github.run_id }}_${{ github.run_attempt }}_input/"
-          FILES=()
-          for f in pr-diff.txt pr-files.txt pr-comments.json; do
-            if [ -f "/tmp/$f" ]; then FILES+=("/tmp/$f"); fi
-          done
           # One `&&` chain inside `if`, so a failure at any stage, staging
           # included, reaches the warning instead of failing the job. The
-          # timeout keeps a slow S3 from eating the model's credential time.
+          # timeouts keep a slow S3 from eating the model's credential time.
+          # manifest.json goes up last and alone: a set without it is partial.
           if mkdir -p /tmp/pr-review-input \
-             && { [ "${#FILES[@]}" -eq 0 ] || cp -- "${FILES[@]}" /tmp/pr-review-input/; } \
+             && cp -- /tmp/pr-diff.txt /tmp/pr-files.txt /tmp/pr-comments.json /tmp/pr-review-input/ \
              && jq -n --arg repo "$REPO" --arg pr_number "$PR_NUMBER" \
                       --arg head_sha "$HEAD_SHA" --arg base_sha "$BASE_SHA" \
                       --arg merge_base_sha "$MERGE_BASE_SHA" --arg head_tree_sha "$HEAD_TREE_SHA" \
                       '{repo: $repo, pr_number: ($pr_number | tonumber), head_sha: $head_sha,
                         base_sha: $base_sha, merge_base_sha: $merge_base_sha,
                         head_tree_sha: $head_tree_sha}' \
-                      > /tmp/pr-review-input/manifest.json \
-             && timeout 120 aws s3 cp --recursive /tmp/pr-review-input "$DEST"; then
-            echo "uploaded ${#FILES[@]} input file(s) and the manifest to ${DEST}"
+                      > /tmp/pr-review-manifest.json \
+             && timeout 120 aws s3 cp --recursive /tmp/pr-review-input "$DEST" \
+             && timeout 30 aws s3 cp /tmp/pr-review-manifest.json "${DEST}manifest.json"; then
+            echo "uploaded the inputs, then the manifest, to ${DEST}"
           else
             echo "::warning::review input upload failed (best-effort)"
           fi

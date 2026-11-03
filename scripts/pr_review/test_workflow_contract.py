@@ -4907,23 +4907,23 @@ class TestTheReviewInputsAreKept(unittest.TestCase):
         self.assertLess(names.index("Write the PR conversation"), here)
         self.assertLess(here, names.index('"Stage A: pr-review"'))
 
-    def _run(self, aws_exit: int, present=INPUTS, block_staging=False):
+    def _run(self, aws_exit: int, block_staging=False):
         with tempfile.TemporaryDirectory() as td:
-            for f in present:
+            for f in self.INPUTS:
                 Path(td, f).write_text(f"content of {f}")
             if block_staging:
                 Path(td, "pr-review-input").write_text("a file, not a directory")
             log = Path(td) / "argv.log"
             # `timeout` records its limit and runs the rest; `aws` records what
-            # it was ASKED to upload: the source must be the staging directory,
-            # and each file is logged with its content.
+            # it was ASKED to upload: the recursive source must be the staging
+            # directory, and each file is logged with its content.
             stubs = {
                 "timeout": f'#!/bin/bash\necho "timeout $*" >> {log}\nshift\nexec "$@"\n',
                 "aws": (
                     f'#!/bin/bash\nprintf "%s\\n" "$*" >> {log}\n'
-                    f'[ "$4" = "{td}/pr-review-input" ] || exit 3\n'
+                    f'if [ "$3" = --recursive ]; then [ "$4" = "{td}/pr-review-input" ] || exit 3\n'
                     f'for f in "$4"/*; do printf "%s=%s\\n" "${{f##*/}}" "$(head -1 "$f")"; done >> {log}\n'
-                    f"exit {aws_exit}\n"
+                    f"fi\nexit {aws_exit}\n"
                 ),
             }
             proc, _ = run_step(
@@ -4945,26 +4945,36 @@ class TestTheReviewInputsAreKept(unittest.TestCase):
                 ),
             )
             staged = Path(td, "pr-review-input")
+            staged_manifest = Path(td, "pr-review-manifest.json")
             manifest, uploaded = None, []
             if staged.is_dir():
-                manifest = json.loads((staged / "manifest.json").read_text())
                 uploaded = sorted(p.name for p in staged.iterdir())
+            if staged_manifest.exists():
+                manifest = json.loads(staged_manifest.read_text())
             recorded = log.read_text() if log.exists() else ""
         return proc, manifest, uploaded, recorded
 
     def test_it_uploads_the_inputs_and_a_manifest(self):
         proc, manifest, uploaded, recorded = self._run(0)
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(uploaded, sorted([*self.INPUTS, "manifest.json"]))
+        self.assertEqual(uploaded, sorted(self.INPUTS))
         lines = recorded.splitlines()
-        # The upload itself runs under the timeout, not just after one.
+        # Each upload runs under a timeout, and the manifest goes last, alone.
         self.assertTrue(
             lines[0].startswith("timeout 120 aws s3 cp --recursive "), recorded
         )
-        self.assertIn("s3://b/pr_review_traces/CTX/CTX_CTX_input/", recorded)
+        self.assertEqual(
+            lines[-2:],
+            [f"timeout 30 aws {lines[-1]}", lines[-1]],
+            recorded,
+        )
+        dest = "s3://b/pr_review_traces/CTX/CTX_CTX_input/"
+        self.assertRegex(lines[1], rf"^s3 cp --recursive \S+/pr-review-input {dest}$")
+        self.assertRegex(
+            lines[-1], rf"^s3 cp \S+/pr-review-manifest\.json {dest}manifest\.json$"
+        )
         for f in self.INPUTS:
             self.assertIn(f"{f}=content of {f}\n", recorded)
-        self.assertIn("manifest.json={\n", recorded)
         self.assertEqual(
             manifest,
             {
@@ -4978,13 +4988,13 @@ class TestTheReviewInputsAreKept(unittest.TestCase):
         )
         self.assertNotIn("::warning::", proc.stdout)
 
-    def test_a_missing_input_is_skipped_and_a_failed_upload_only_warns(self):
-        proc, _, uploaded, _ = self._run(0, present=("pr-diff.txt",))
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(uploaded, ["manifest.json", "pr-diff.txt"])
-        proc, _, _, _ = self._run(1)
+    def test_a_failed_upload_only_warns_and_writes_no_manifest(self):
+        proc, _, _, recorded = self._run(1)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("::warning::review input upload failed", proc.stdout)
+        self.assertEqual(recorded.count("aws s3 cp"), 1, recorded)
+        self.assertRegex(recorded, r"(?m)^s3 cp --recursive ")
+        self.assertNotIn("manifest.json", recorded)
 
     def test_a_staging_failure_only_warns_and_uploads_nothing(self):
         proc, _, _, recorded = self._run(0, block_staging=True)
@@ -4992,10 +5002,23 @@ class TestTheReviewInputsAreKept(unittest.TestCase):
         self.assertIn("::warning::review input upload failed", proc.stdout)
         self.assertNotIn("s3 cp", recorded)
 
-    def test_the_tree_sha_comes_from_the_diff_step(self):
-        self.assertIn(
-            "HEAD_TREE_SHA: ${{ steps.diff.outputs.head_tree_sha }}", self.step
+    def test_the_manifest_sources_and_key_are_the_runs_own(self):
+        """`_run` binds the env itself, so the bindings and key are pinned here."""
+        for name, value in {
+            "REPO": "github.repository",
+            "PR_NUMBER": "needs.prepare.outputs.pr_number",
+            "HEAD_SHA": "needs.prepare.outputs.head_sha",
+            "BASE_SHA": "needs.prepare.outputs.base_sha",
+            "MERGE_BASE_SHA": "needs.prepare.outputs.merge_base_sha",
+            "HEAD_TREE_SHA": "steps.diff.outputs.head_tree_sha",
+        }.items():
+            self.assertEqual(env_values(self.step, name), [f"${{{{ {value} }}}}"])
+        stem = (
+            "s3://${S3_BUCKET}/pr_review_traces/${{ github.repository }}/"
+            "${{ github.run_id }}_${{ github.run_attempt }}"
         )
+        self.assertIn(f'"{stem}.json"', self.review)
+        self.assertIn(f'DEST="{stem}_input/"', self.step)
 
     def test_merge_base_plus_the_diff_rebuilds_the_recorded_tree(self):
         """The replay recipe, on a real repo: merge base + pr-diff.txt from the
