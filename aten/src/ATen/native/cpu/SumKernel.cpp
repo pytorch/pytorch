@@ -706,13 +706,15 @@ void cascade_sum(TensorIterator &iter, bool sqrt_result = false) {
   }
   iter.output_base().fill_(out_t(0));
   iter.parallel_reduce(loop);
-  if (sqrt_result) {
-    const TensorBase& out = iter.output_base();
-    auto sqrt_iter = TensorIteratorConfig().add_output(out).add_const_input(out).build();
-    cpu_kernel_vec(
-        sqrt_iter,
-        [](out_t a) -> out_t { return std::sqrt(a); },
-        [](Vectorized<out_t> a) { return a.sqrt(); });
+  if constexpr (std::is_same_v<Map, SquareMap>) {
+    if (sqrt_result) {
+      const TensorBase& out = iter.output_base();
+      auto sqrt_iter = TensorIteratorConfig().add_output(out).add_const_input(out).build();
+      cpu_kernel_vec(
+          sqrt_iter,
+          [](out_t a) -> out_t { return std::sqrt(a); },
+          [](Vectorized<out_t> a) { return a.sqrt(); });
+    }
   }
 }
 
