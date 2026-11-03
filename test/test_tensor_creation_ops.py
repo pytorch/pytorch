@@ -4766,7 +4766,8 @@ class TestAsArray(_TestAsArrayBase):
         self.assertEqual(result.device, original.device)
         self.assertEqual(result, original)
         self.assertEqual(result.data_ptr(), original.data_ptr())
-        self.assertEqual(torch.asarray(_DLPackBuffer(original), dtype=torch.float64), original.to(torch.float64))
+        target = torch.complex128 if dtype.is_complex else torch.float64
+        self.assertEqual(torch.asarray(_DLPackBuffer(original), dtype=target), original.to(target))
         alias = torch.asarray(_DLPackBuffer(original), copy=False)
         self.assertEqual(alias.data_ptr(), original.data_ptr())
         copied = torch.asarray(_DLPackBuffer(original), copy=True)
