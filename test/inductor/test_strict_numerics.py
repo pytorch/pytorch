@@ -2557,6 +2557,13 @@ class PointwiseStrictNumericsTest(TestCase):
             self.assertTrue(_outputs_equal(result[1], reference[1]))
             self.assertEqual(result[2:], reference[2:])
 
+        if not full:
+            inp = next(call[1] for call in calls if call[0] == "bits")
+            actual_bits = inp.view(torch.int32).tolist()
+            expected_bits = _sampled_fp32(256, device).view(torch.int32).tolist()
+            self.assertEqual(set(actual_bits), set(expected_bits))
+            self.assertEqual(len(actual_bits), len(set(expected_bits)))
+
     @dtypes(torch.float16, torch.bfloat16)
     def test_keyword_input_grads(self, device, dtype):
         inp = torch.tensor([-2.0], device=device, dtype=dtype)
@@ -2817,18 +2824,36 @@ class PointwiseStrictNumericsTest(TestCase):
 
         calls = []
         seen = set()
+        single_input = None
         for sample in samples:
             if not isinstance(sample.input, torch.Tensor):
                 self._coverage_filter("non_tensor_raw_bit_input")
                 continue
             operands = (*sample.args, *sample.kwargs.values())
+            inp = x
+            if not expanded and not any(
+                isinstance(t, torch.Tensor)
+                for t in tree_leaves((sample.args, sample.kwargs))
+            ):
+                # With one tensor input, special-value pairs repeat the same call.
+                if single_input is None:
+                    single_input = (
+                        torch.unique(
+                            x.view(torch.uint8).reshape(-1, x.element_size()), dim=0
+                        )
+                        .reshape(-1)
+                        .view(dtype)
+                    )
+                inp = single_input
             masked = any(
                 isinstance(t, torch.Tensor) and t.dtype == torch.bool for t in operands
             )
             for parity in (0, 1) if masked else (0,):
-                args = tuple(_substitute(a, y, x.numel(), parity) for a in sample.args)
+                args = tuple(
+                    _substitute(a, y, inp.numel(), parity) for a in sample.args
+                )
                 kwargs = {
-                    k: _substitute(v, y, x.numel(), parity)
+                    k: _substitute(v, y, inp.numel(), parity)
                     for k, v in sample.kwargs.items()
                 }
                 key = (
@@ -2841,13 +2866,13 @@ class PointwiseStrictNumericsTest(TestCase):
                     continue
                 seen.add(key)
                 try:
-                    op.op(x, *args, **kwargs)
+                    op.op(inp, *args, **kwargs)
                 except Exception as error:
                     self._coverage_filter(
                         f"invalid_raw_bit_call:{type(error).__name__}"
                     )
                     continue  # e.g. per-channel PReLU weights
-                calls.append((x, args, kwargs))
+                calls.append((inp, args, kwargs))
         return calls
 
     def _collect_calls(self, device, op, dtype, *, backward=False):
@@ -3007,18 +3032,20 @@ class PointwiseStrictNumericsTest(TestCase):
         )
 
     @dtypes(torch.float32)
-    def test_small_shapes_receive_all_upstream_edges(self, device, dtype):
+    @parametrize("output_count", (1, 2))
+    def test_small_shapes_receive_all_upstream_edges(self, device, dtype, output_count):
         seen = []
 
         class Observe(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
-                return x.clone()
+                outputs = tuple(x.clone() for _ in range(output_count))
+                return outputs[0] if output_count == 1 else outputs
 
             @staticmethod
-            def backward(ctx, grad):
-                seen.append(grad[0].detach().clone())
-                return grad
+            def backward(ctx, *grads):
+                seen.append(tuple(grad[0].detach().clone() for grad in grads))
+                return sum(grads)
 
         class Op:
             name, variant_test_name = "clone", ""
@@ -3036,10 +3063,21 @@ class PointwiseStrictNumericsTest(TestCase):
                 calls=[("edge_opinfo", x, (), {})],
             )
         self.assertFalse(mismatches)
-        self.assertTrue(
-            _outputs_equal(
-                torch.stack(seen[::2]), _pointwise_grad_values(dtype, device)
+        values = _pointwise_grad_values(dtype, device).view(torch.int32).tolist()
+        expected = [
+            tuple(
+                values[(index + output_index) % len(values)]
+                for output_index in range(output_count)
             )
+            for index in range(len(values))
+        ]
+        actual = [
+            tuple(grad.view(torch.int32).item() for grad in grads)
+            for grads in seen[::2]
+        ]
+        self.assertEqual(set(actual), set(expected))
+        self.assertEqual(
+            len(actual), len(expected) if ALL_SAMPLES else len(set(expected))
         )
 
     @dtypes(torch.float32)
@@ -3052,7 +3090,13 @@ class PointwiseStrictNumericsTest(TestCase):
         expected = torch.cat(
             (torch.stack((values, zeros), -1), torch.stack((zeros, values), -1))
         ).flatten()
-        self.assertTrue(_outputs_equal(actual, expected))
+        actual_bits = actual.view(torch.int32).tolist()
+        expected_bits = expected.view(torch.int32).tolist()
+        self.assertEqual(set(actual_bits), set(expected_bits))
+        self.assertEqual(
+            len(actual_bits),
+            len(expected_bits) if ALL_SAMPLES else len(set(expected_bits)),
+        )
 
     @dtypes(torch.float32)
     def test_repeated_input_grad(self, device, dtype):
@@ -3207,7 +3251,25 @@ class PointwiseStrictNumericsTest(TestCase):
             else []
         )
         count = max(v.numel() for v in values) if edge else 1
+        patterns = (
+            [
+                v.view(torch.uint8).reshape(v.numel(), v.element_size()).cpu().tolist()
+                for v in values
+            ]
+            if edge and not ALL_SAMPLES
+            else []
+        )
+        seen = set()
         for index in range(count):
+            if patterns:
+                # Deduplicate whole tuples so multiple outputs keep their pairings.
+                key = tuple(
+                    bytes(rows[(index + output_index) % len(rows)])
+                    for output_index, rows in enumerate(patterns)
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
             upstream = []
             for output_index, output in enumerate(outputs):
                 if edge:
