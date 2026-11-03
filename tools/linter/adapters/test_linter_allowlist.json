@@ -744,7 +744,6 @@
   "test/test_jit_llga_fuser.py",
   "test/test_jit_string.py",
   "test/test_jiterator.py",
-  "test/test_kernel_launch_checks.py",
   "test/test_legacy_vmap.py",
   "test/test_license.py",
   "test/test_linalg.py",
