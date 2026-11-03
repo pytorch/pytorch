@@ -2637,25 +2637,37 @@ class ByteArrayVariable(VariableTracker):
                     {},
                 ).items
             except ObservedException:
-                if self.data is not sep:
-                    handle_observed_exception(tx)
-                    return None
-                raise
+                if self.data is sep:
+                    raise
+                handle_observed_exception(tx)
             if self.data is not sep:
-                return None
+                unimplemented(
+                    gb_type="bytearray.join with a separator mutated during iteration",
+                    context=f"iterable: {iterable}",
+                    explanation="The iterable passed to bytearray.join mutated the "
+                    "separator. CPython holds a buffer export on the separator "
+                    "during the call, which Dynamo does not model.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
         parts = []
         for item in items:
             item = item.realize()
             if isinstance(item, ByteArrayVariable):
                 parts.append(item.data)
-            elif item.is_python_constant():
+            elif isinstance(item, ConstantVariable):
                 parts.append(item.as_python_constant())
             else:
-                return None
+                unimplemented(
+                    gb_type="bytearray.join with an unsupported item",
+                    context=f"item: {item}",
+                    explanation="Dynamo only traces bytearray.join over items that "
+                    "are constants or bytearrays.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
         try:
             return VariableTracker.build(tx, self.data.join(parts))
-        except TypeError as e:
-            raise_observed_exception(TypeError, tx, args=list(e.args))
+        except (MemoryError, OverflowError, TypeError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
 
     def _bytearray_case_method(
         self,

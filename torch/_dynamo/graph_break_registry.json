@@ -1271,6 +1271,26 @@
       ]
     }
   ],
+  "GB5576": [
+    {
+      "Gb_type": "bytearray.join with a separator mutated during iteration",
+      "Context": "iterable: {iterable}",
+      "Explanation": "The iterable passed to bytearray.join mutated the separator. CPython holds a buffer export on the separator during the call, which Dynamo does not model.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6914": [
+    {
+      "Gb_type": "bytearray.join with an unsupported item",
+      "Context": "item: {item}",
+      "Explanation": "Dynamo only traces bytearray.join over items that are constants or bytearrays.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0077": [
     {
       "Gb_type": "Length mismatch when unpacking object for UNPACK_SEQUENCE",

@@ -13,6 +13,7 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
+from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import make_dynamo_test, run_tests
 
 
@@ -519,6 +520,8 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             # A TypeError from the first iter() becomes join's own error.
             lambda: Items(iter_error=TypeError("first iter")),
             lambda: Items(iter_error=MyTypeError("first iter")),
+            # Any other error from the first iter() propagates as is.
+            lambda: Items(iter_error=ValueError("first iter")),
             # Errors from the second iter() and from iteration propagate as is.
             lambda: Outer(Items(iter_error=TypeError("second iter"))),
             lambda: Items(next_error=TypeError("next")),
@@ -680,6 +683,12 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         )
         # Mutating the separator during join is left to eager.
         self.assertEqual(cnt.frame_count, 2)
+        self.assertTrue(
+            any(
+                "separator mutated during iteration" in m
+                for m in counters["graph_break"]
+            )
+        )
 
     def test_join_nonconstant_item_graph_break(self):
         cnt = CompileCounter()
@@ -692,6 +701,25 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         result = f(bytearray(b"-"), memoryview(b"ab"), torch.ones(1))
         self.assertEqual(result, (b"ab-c", torch.full((1,), 4.0)))
         self.assertEqual(cnt.frame_count, 2)
+        self.assertTrue(
+            any("join with an unsupported item" in m for m in counters["graph_break"])
+        )
+
+    def test_join_iterator_item_error(self):
+        # Eager names the real iterator type in the error.
+        def f(make_item, x):
+            try:
+                bytearray(b",").join([make_item()])
+            except TypeError as e:
+                return str(e), x + 1
+            return None, x + 1
+
+        for make_item in (lambda: iter(b"ab"), lambda: iter("ab")):
+            torch._dynamo.reset()
+            compiled = torch.compile(f, backend="eager")
+            self.assertEqual(
+                compiled(make_item, torch.ones(1)), f(make_item, torch.ones(1))
+            )
 
     def test_join_separator_mutation_then_raise(self):
         class NextRaises:
@@ -739,10 +767,10 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         def fn(sep, ba, items):
             return sep.join([ba, b"x"]), sep.join(items)
 
-        self.assertEqual(
-            fn(bytearray(b"-"), bytearray(b"ab"), [b"ab", bytearray(b"cd")]),
-            (bytearray(b"ab-x"), bytearray(b"ab-cd")),
-        )
+        results = fn(bytearray(b"-"), bytearray(b"ab"), [b"ab", bytearray(b"cd")])
+        self.assertEqual(results, (bytearray(b"ab-x"), bytearray(b"ab-cd")))
+        for r in results:
+            self.assertIs(type(r), bytearray)
 
     @make_dynamo_test
     def test_hex(self):
