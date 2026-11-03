@@ -1980,6 +1980,37 @@ class TestMaxAutotune(TestCase):
             bf16_red_setting
         )
 
+    def test_template_module_key_matches_precompile_worker(self):
+        # The precompile worker writes the template source keyed by code alone
+        # (async_compile.triton). The parent must load the same module, or the
+        # module-qualified names of @triton.jit helpers differ, Triton misses
+        # the worker's compile, and the parent recompiles at benchmark time.
+        from torch._inductor.codecache import PyCodeCache
+
+        a = torch.randn(256, 128, device=GPU_TYPE)
+        b = torch.randn(128, 64, device=GPU_TYPE)
+        templates: list[TritonTemplateCaller] = []
+
+        def record(choices):
+            templates.extend(c for c in choices if isinstance(c, TritonTemplateCaller))
+            return choices
+
+        torch._dynamo.reset()
+        add_preprocessing_fn(record)
+        try:
+            with config.patch(
+                {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
+            ):
+                torch.compile(lambda x, y: x @ y)(a, b)
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        self.assertTrue(templates)
+        for choice in templates:
+            with open(choice.bmreq.module_path) as f:
+                worker_key, _ = PyCodeCache.write(f.read())
+            self.assertEqual(choice.bmreq.module_cache_key, worker_key, choice.name)
+
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
