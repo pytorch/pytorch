@@ -2992,6 +2992,14 @@
       ]
     }
   ],
+  "GB0443": [
+    {
+      "Gb_type": "Constant C property getter",
+      "Context": "constant property getter: {fget_vt}",
+      "Explanation": "C-defined property getters on constants use constant attribute access.",
+      "Hints": []
+    }
+  ],
   "GB0170": [
     {
       "Gb_type": "Data-dependent branching",

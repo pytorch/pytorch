@@ -2352,6 +2352,20 @@ def _resolve_descriptor_get(
             else None
         )
         prop_vt = variables.PropertyVariable.create(type_attr, prop_source)
+        if (
+            type(type_attr) is property
+            and isinstance(obj, variables.ConstantVariable)
+            and variables.UserDefinedObjectVariable._is_c_defined_property(type_attr)
+        ):
+            fget_vt = prop_vt.tp_getattro_impl(tx, "fget").realize()
+            if isinstance(fget_vt, variables.SkipFunctionVariable):
+                # Preserve each caller's constant fallback and result source.
+                unimplemented(
+                    gb_type="Constant C property getter",
+                    context=f"constant property getter: {fget_vt}",
+                    explanation="C-defined property getters on constants use constant attribute access.",
+                    hints=[],
+                )
         return prop_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.MemberDescriptorType):
         md_vt = variables.MemberDescriptorVariable.create(type_attr, source)
