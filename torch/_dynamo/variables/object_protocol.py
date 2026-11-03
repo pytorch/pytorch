@@ -2612,7 +2612,12 @@ def generic_hasattr_str(
     try:
         # A GetAttrVariable means the read was deferred, not resolved, so it is
         # no evidence the attribute exists; fall through to the probe below.
-        if not isinstance(obj.tp_getattro_impl(tx, name), variables.GetAttrVariable):
+        # A lazy VT wraps a real value, and realizing it would install guards
+        # on a value hasattr never reads.
+        value = obj.tp_getattro_impl(tx, name)
+        if isinstance(value, variables.LazyVariableTracker) or not isinstance(
+            value, variables.GetAttrVariable
+        ):
             # A True answer needs no guard of its own: tp_getattro_impl
             # installed whatever guards the read it performed depends on.
             return True
@@ -2633,16 +2638,21 @@ def generic_hasattr_str(
     # tp_getattro_impl could not resolve the name. generic_getattr would defer
     # by wrapping it in a GetAttrVariable, which is indistinguishable from a
     # missing attribute, so ask the concrete object (or its type) instead.
-    probe = NO_SUCH_SUBOBJ
-    for get_probe in (obj.get_real_python_backed_value, obj.python_type):
-        try:
-            probe = get_probe()
-        except (NotImplementedError, AttributeError):
-            continue
-        if probe is not NO_SUCH_SUBOBJ:
-            break
+    found = None
+    try:
+        probe = obj.get_real_python_backed_value()
+    except (NotImplementedError, AttributeError):
+        probe = NO_SUCH_SUBOBJ
     if probe is not NO_SUCH_SUBOBJ:
         found = hasattr(probe, name)
+    else:
+        try:
+            # Not hasattr(type, name): that also sees metaclass attributes
+            # such as __dict__ or __mro__, which instances lack.
+            found = any(name in c.__dict__ for c in obj.python_type().__mro__)
+        except (NotImplementedError, AttributeError):
+            pass
+    if found is not None:
         if not found and obj.source:
             install_guard(
                 obj.source.make_guard(
