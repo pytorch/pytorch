@@ -22165,7 +22165,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_noncontiguous_samples", device_type="xpu"),
             DecorateInfo(unittest.expectedFailure, "TestCommon",
-                          "test_variant_consistency_eager", device_type="mps"),
+                         "test_variant_consistency_eager", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_variant_consistency_eager", device_type="xpu"),
             # not instantiated on mps
