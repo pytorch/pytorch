@@ -678,6 +678,79 @@ class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
         del work
         gc.collect()
 
+    @requires_nccl()
+    @requires_nccl_version((2, 28), "Need NCCL 2.28+ for reconfigure")
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        and dist.is_nccl_available()
+        and torch.cuda.nccl.version() < (2, 30, 7),
+        "nccl2 reconfigure requires RCCL 2.30.7 or later",
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_reconfigure_old_work(self) -> None:
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        store = dist.FileStore(self.file_name, self.world_size)
+        timeout = timedelta(seconds=30)
+        store.set_timeout(timeout)
+        dist.init_process_group(
+            "nccl2",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            timeout=timeout,
+            enable_reconfigure=True,
+            device_id=device,
+        )
+        group = dist.group.WORLD
+
+        def make_reconfigure_options(uuid: int) -> ReconfigureOptions:
+            key = f"nccl2_reconfigure/{uuid}"
+            store.set(f"{key}/{self.rank}", group.get_reconfigure_handle())
+            handles = [
+                store.get(f"{key}/{rank}").decode() for rank in range(self.world_size)
+            ]
+            opts = ReconfigureOptions()
+            opts.uuid = uuid
+            opts.handles = handles
+            opts.timeout = timeout
+            return opts
+
+        try:
+            group.reconfigure(make_reconfigure_options(1)).wait()
+            next_options = make_reconfigure_options(2)
+
+            completed = torch.tensor([self.rank + 1], device=device)
+            completed_work = dist.all_reduce(completed, async_op=True)
+            completed_work.wait()
+            torch.cuda.current_stream(device).synchronize()
+            self.assertTrue(completed_work.is_completed())
+
+            # No other rank issues this collective, so it cannot complete.
+            if self.rank == 0:
+                old_work = dist.all_reduce(torch.ones(4, device=device), async_op=True)
+                was_pending = not old_work.is_completed()
+            store.set(f"reconfigure_ready/{self.rank}", "1")
+            for rank in range(self.world_size):
+                store.get(f"reconfigure_ready/{rank}")
+
+            group.reconfigure(next_options).wait()
+            health = torch.tensor([self.rank + 1], device=device)
+            dist.all_reduce(health)
+            expected = sum(range(1, self.world_size + 1))
+            self.assertEqual(int(health.item()), expected)
+            completed_work.wait()
+            self.assertEqual(completed, torch.full_like(completed, expected))
+            if self.rank == 0:
+                self.assertTrue(was_pending)
+                with self.assertRaisesRegex(
+                    dist.DistBackendError, "communicator is being reconfigured"
+                ):
+                    old_work.wait()
+                self.assertTrue(old_work.is_completed())
+        finally:
+            dist.destroy_process_group()
+
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
     """Base for groups initialized with backend specific options."""
