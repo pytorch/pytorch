@@ -633,11 +633,12 @@ def _wrap_hashfunc(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 0:
         raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
-    from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
+    from .builder import SourcelessBuilder
+    from .constant import ConstantVariable, FakeValueKind
 
     h, is_fake = func(self, tx)
     if is_fake:
-        return FakeIdVariable(h, kind=FakeValueKind.HASH)
+        return SourcelessBuilder.create_internal_fake_id(h, kind=FakeValueKind.HASH)
     return ConstantVariable.create(h)
 
 
@@ -2084,17 +2085,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         VT subclasses override this for types with their own C tp_richcompare.
         """
+        from .builder import SourcelessBuilder
         from .constant import ConstantVariable
-        from .object_protocol import (
-            generic_is_true,
-            is_richcompare_not_implemented,
-            vt_identity_compare,
-        )
+        from .object_protocol import is_richcompare_not_implemented, vt_identity_compare
 
-        if self.source:
-            real_type = type(tx.output.resolve_source_value(self.source))
-        else:
-            real_type = maybe_get_python_type(self)
+        value = self.get_real_python_backed_value()
+        if value is NO_SUCH_SUBOBJ and self.source:
+            try:
+                value = tx.output.resolve_source_value(self.source)
+            except Exception:
+                # Sources that need guard-scope helpers can't be resolved here.
+                pass
+        real_type = (
+            maybe_get_python_type(self) if value is NO_SUCH_SUBOBJ else type(value)
+        )
         if getattr(real_type, op) is not getattr(object, op):
             unimplemented(
                 gb_type="Missing tp_richcompare_impl override",
@@ -2117,10 +2121,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             res = self.tp_richcompare_impl(tx, other, "__eq__")
             if is_richcompare_not_implemented(res):
                 return res
-            ok = generic_is_true(tx, res)
-            if ok.is_python_constant():
-                return ConstantVariable.create(not ok.as_python_constant())
-            return VariableTracker.build(tx, operator.not_).call_function(tx, [ok], {})
+            not_ = SourcelessBuilder.create_internal_builtin(operator.not_)
+            return not_.call_function(tx, [res], {})
         return ConstantVariable.create(NotImplemented)
 
     def is_constant_match(self, *values: Any) -> bool:
@@ -2776,8 +2778,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def set_name_hint(self, name: str) -> None:
         pass
 
-    def set_source_location(self, source_location: SourceLocation) -> None:
+    def with_source_location(self, source_location: SourceLocation) -> VariableTracker:
         self.source_location = source_location
+        return self
 
     def realize(self) -> VariableTracker:
         """Used by LazyVariableTracker to build the real VariableTracker"""
@@ -2828,7 +2831,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         source: Source | None = None,
         realize: bool = False,
     ) -> Any:
-        """Create a new VariableTracker from a value and optional Source"""
+        """Create a VariableTracker through the canonical classification path.
+
+        Sourceful values are classified by VariableBuilder when realized, which
+        also owns guard installation for that classification. Thus, ``source``
+        must reproduce the exact value without changing its lookup semantics.
+        Values without a source are unguarded and should be compiler-created or
+        otherwise ephemeral. Compiler-selected values that must bypass normal
+        classification use a narrow ``VariableBuilder.create_internal_*`` or
+        ``SourcelessBuilder.create_internal_*`` entry point.
+        Other direct construction requires an explicit reviewed exception because
+        builder classification or guarding cannot preserve the intended semantics.
+        """
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
         elif realize:
@@ -2975,7 +2989,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ``reverse=True`` means self is the right-hand operand (CPython would
         look up ``__rlshift__`` instead of ``__lshift__``).
         """
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_inplace_lshift_impl(
         self,
@@ -2983,7 +2997,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_lshift slot. Default: returns NotImplemented."""
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_rshift_impl(
         self,
@@ -2996,7 +3010,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ``reverse=True`` means self is the right-hand operand (CPython would
         look up ``__rrshift__`` instead of ``__rshift__``).
         """
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_inplace_rshift_impl(
         self,
@@ -3004,7 +3018,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_rshift slot. Default: returns NotImplemented."""
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_and_impl(
         self,
@@ -3017,7 +3031,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ``reverse=True`` means self is the right-hand operand (CPython would
         look up ``__rand__`` instead of ``__and__``).
         """
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_inplace_and_impl(
         self,
@@ -3025,7 +3039,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_and slot. Default: returns NotImplemented."""
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_xor_impl(
         self,
@@ -3038,7 +3052,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ``reverse=True`` means self is the right-hand operand (CPython would
         look up ``__rxor__`` instead of ``__xor__``).
         """
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_inplace_xor_impl(
         self,
@@ -3046,7 +3060,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_xor slot. Default: returns NotImplemented."""
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_floor_divide_impl(
         self,
@@ -3059,7 +3073,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ``reverse=True`` means self is the right-hand operand (CPython would
         look up ``__rfloordiv__`` instead of ``__floordiv__``).
         """
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_inplace_floor_divide_impl(
         self,
@@ -3067,7 +3081,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_floor_divide slot. Default: returns NotImplemented."""
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_true_divide_impl(
         self,
@@ -3080,7 +3094,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ``reverse=True`` means self is the right-hand operand (CPython would
         look up ``__rtruediv__`` instead of ``__truediv__``).
         """
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_inplace_true_divide_impl(
         self,
@@ -3088,7 +3102,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_true_divide slot. Default: returns NotImplemented."""
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_remainder_impl(
         self,
@@ -3101,7 +3115,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ``reverse=True`` means self is the right-hand operand (CPython would
         look up ``__rmod__`` instead of ``__mod__``).
         """
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_inplace_remainder_impl(
         self,
@@ -3109,7 +3123,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_remainder slot. Default: returns NotImplemented."""
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_divmod_impl(
         self,
@@ -3123,7 +3137,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         look up ``__rdivmod__`` instead of ``__divmod__``). divmod has no
         in-place form.
         """
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_power_impl(
         self,
@@ -3132,7 +3146,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         z: VariableTracker | None,
         reverse: bool = False,
     ) -> VariableTracker:
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_power_z_impl(
         self,
@@ -3144,7 +3158,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         ``v`` is the base, ``w`` is the exponent, ``self`` is the modulus.
         """
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_inplace_power_impl(
         self,
@@ -3152,7 +3166,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
         z: VariableTracker | None,
     ) -> VariableTracker:
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_multiply_impl(
         self,
@@ -3243,7 +3257,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ``reverse=True`` means self is the right-hand operand (CPython would
         look up ``__ror__`` instead of ``__or__``).
         """
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_inplace_or_impl(
         self,
@@ -3251,7 +3265,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_or slot. Default: returns NotImplemented."""
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_negative_impl(
         self,
@@ -3299,7 +3313,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         look up ``__radd__`` instead of ``__add__``).
         """
         # We need to return NotImplemented here because of sq_concat
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_inplace_add_impl(
         self,
@@ -3308,7 +3322,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_add slot. Default: graph break."""
         # We need to return NotImplemented here because of sq_inplace_concat
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_subtract_impl(
         self,
@@ -3321,7 +3335,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ``reverse=True`` means self is the right-hand operand (CPython would
         look up ``__rsub__`` instead of ``__sub__``).
         """
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_inplace_subtract_impl(
         self,
@@ -3329,7 +3343,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_subtract slot. Default: graph break."""
-        return variables.ConstantVariable(NotImplemented)
+        return variables.ConstantVariable.create(NotImplemented)
 
     def nb_absolute_impl(
         self,

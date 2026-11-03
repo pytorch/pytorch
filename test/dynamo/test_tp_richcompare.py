@@ -1961,10 +1961,10 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
     def test_object_richcompare_random_class(self):
         import random
 
-        def fn(x):
-            return x + 1, random.Random == random.Random, random.Random != int  # noqa: E721
-
-        self._assert_fn_matches_eager(fn, torch.ones(1))
+        self._assert_all_sourceless_cmp_equals(
+            lambda: random.Random, lambda: random.Random, error_ops=self._ORDERING_OPS
+        )
+        self._assert_fn_matches_eager(lambda: random.Random != int)  # noqa: E721
 
     def test_object_richcompare_untyped_storage(self):
         def fn(x):
@@ -2043,13 +2043,52 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(Unsupported, msg):
             torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
 
-    def test_skip_function_richcompare(self):
+    def test_object_richcompare_tuple_iterator_source(self):
+        def f1():
+            pass
+
+        def f2():
+            pass
+
+        def fn(it):
+            g = next(it)
+            return g == g, g != None  # noqa: E711
+
+        expected = fn(iter((f1, f2)))
+        result = torch.compile(fn, backend="eager", fullgraph=True)(iter((f1, f2)))
+        self.assertEqual(result, expected)
+
+    def test_object_richcompare_torch_function_mode_stack(self):
+        from torch.overrides import _get_current_function_mode_stack
+
+        class Mode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                return func(*args, **(kwargs or {}))
+
+        def fn(x):
+            stack = _get_current_function_mode_stack()
+            return x + 1, stack[0] == stack[0], stack[0] != None  # noqa: E711
+
+        with Mode():
+            self._assert_fn_matches_eager(fn, torch.ones(1))
+
+    def test_wrapped_skip_function_dunder_eq(self):
         import time
 
-        def fn(a, b, x):
-            return x + 1, a == b, a != b, a == time.monotonic
+        def fn():
+            w = torch.no_grad()(time.time)
+            return w.__eq__(w), w.__ne__(w), w == w, w != w
 
-        self._assert_fn_matches_eager(fn, time.time, time.time, torch.ones(1))
+        self._assert_fn_matches_eager(fn)
+
+    def test_skip_function_richcompare(self):
+        import random
+
+        r = random.Random()
+        # Equal but not identical: tests value comparison, not identity.
+        a, b = r.random, r.random
+        self.assertIsNot(a, b)
+        self._assert_all_cmp_equals(a, b, error_ops=self._ORDERING_OPS)
 
 
 # =====================================================================
