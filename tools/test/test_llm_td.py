@@ -150,10 +150,12 @@ class TestSelection(unittest.TestCase):
             ("test/compiled_autograd_skips/TestNN.test_x", {"test_nn"}, set()),
             ("test/compiled_autograd_skips/TestGone.test_x", set(), {"dynamo_wrapped"}),
             ("test/dynamo_skips/.gitkeep", set(), set()),
+            # Not checked at import, and it names no test.
+            ("test/compiled_autograd_skips/TestNN", set(), set()),
             # dynamo_test_failures.py rejects these names at import.
             ("test/dynamo_skips/TestNN_test_x", set(), {"dynamo_wrapped"}),
             ("test/dynamo_expected_failures/TestNN.test_x.y", set(), {"dynamo_wrapped"}),
-            ("test/compiled_autograd_skips/TestNN", set(), {"dynamo_wrapped"}),
+            ("test/dynamo_skips/TestNN.x-TestNN.test_y", set(), {"dynamo_wrapped"}),
         ]:  # fmt: skip
             sel = self.select_in_tree(sources, CANDIDATES, [changed])
             self.assertFalse(sel.run_all, changed)
