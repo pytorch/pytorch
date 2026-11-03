@@ -794,6 +794,45 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
         self.assertTrue(any(isinstance(s[1], Partial) for s in both))
 
     @with_comms
+    def test_scaled_mm_v2_swizzle_is_in_cache_key(self):
+        """The _scaled_mm_v2 strategy depends on swizzle_a / swizzle_b, so they
+        must be part of the sharding propagation cache key."""
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+        from torch.distributed.tensor._op_schema import OpSchema
+
+        mesh = self.build_device_mesh()
+        op = torch.ops.aten._scaled_mm_v2.default
+        propagator = DTensor._op_dispatcher.sharding_propagator
+        schema_info = propagator.op_to_schema_info_for_single_dim_strategy[op]
+        recipe = int(F.ScalingType.BlockWise1x32)
+        no_swizzle = [int(F.SwizzleType.NO_SWIZZLE)]
+        swizzle = [int(F.SwizzleType.SWIZZLE_32_4_4)]
+
+        def spec(rows, cols):
+            meta = TensorMeta(torch.Size((rows, cols)), (cols, 1), torch.float32)
+            return DTensorSpec(mesh, (Replicate(),), tensor_meta=meta)
+
+        def schema(swizzle_b):
+            args = (
+                spec(128, 128),
+                spec(128, 128),
+                [spec(128, 4)],
+                [recipe],
+                swizzle,
+                [spec(128, 4)],
+                [recipe],
+                swizzle_b,
+                None,
+                torch.bfloat16,
+                [],
+                False,
+            )
+            return OpSchema(op, args, {}, schema_info=schema_info)
+
+        self.assertNotEqual(schema(no_swizzle), schema(swizzle))
+        self.assertEqual(schema(swizzle), schema(swizzle))
+
+    @with_comms
     def test_matmul(self):
         device_mesh = self.build_device_mesh()
         dim = 128
