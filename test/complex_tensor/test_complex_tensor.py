@@ -36,6 +36,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     unMarkDynamoStrictTest,
 )
@@ -352,6 +354,147 @@ class TestComplexTensorGeneric(TestCase):
         self.assertEqual(pivots, expected.pivots)
         self.assertEqual(info, expected.info)
 
+    def test_lu_unpack_out_writes_destinations(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        lu_data, pivots = torch.linalg.lu_factor(
+            torch.randn(3, 3, dtype=torch.complex128)
+        )
+        expected = torch.lu_unpack(lu_data, pivots)
+        x = ComplexTensor.from_interleaved(lu_data)
+
+        def complex_dest() -> ComplexTensor:
+            return ComplexTensor.from_interleaved(
+                torch.zeros(3, 3, dtype=torch.complex128)
+            )
+
+        # `P` takes the dtype of `LU_data`, so it may be a `ComplexTensor` or a
+        # plain complex permutation matrix.
+        for p_out in (complex_dest(), torch.zeros(3, 3, dtype=torch.complex128)):
+            with self.subTest(p_out=type(p_out).__name__):
+                l_out, u_out = complex_dest(), complex_dest()
+                result = torch.lu_unpack(x, pivots, out=(p_out, l_out, u_out))
+
+                self.assertIs(result[0], p_out)
+                self.assertIs(result[1], l_out)
+                self.assertIs(result[2], u_out)
+                p = (
+                    p_out.as_interleaved()
+                    if isinstance(p_out, ComplexTensor)
+                    else p_out
+                )
+                self.assertEqual(p, expected.P)
+                self.assertEqual(l_out.as_interleaved(), expected.L)
+                self.assertEqual(u_out.as_interleaved(), expected.U)
+
+        # Like native, a real `P` is rejected.
+        p_real = torch.zeros(3, 3, dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+            torch.lu_unpack(lu_data, pivots, out=(p_real, *expected[1:]))
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+            torch.lu_unpack(x, pivots, out=(p_real, complex_dest(), complex_dest()))
+
+    @parametrize(
+        "divisor",
+        [
+            "complex_tensor",
+            "complex_tensor_broadcast",
+            "real_tensor",
+            "real_tensor_broadcast",
+            "real_scalar",
+            "complex_scalar",
+        ],
+    )
+    def test_div_inplace(self, divisor: str):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        divisors = {
+            "complex_tensor": torch.randn(2, 3, dtype=torch.complex128),
+            "complex_tensor_broadcast": torch.randn(1, dtype=torch.complex128),
+            "real_tensor": torch.randn(2, 3, dtype=torch.float64),
+            "real_tensor_broadcast": torch.randn(1, dtype=torch.float64),
+            "real_scalar": 2.0,
+            "complex_scalar": 2.0 - 1.0j,
+        }
+        rhs = divisors[divisor]
+        xrhs = (
+            ComplexTensor.from_interleaved(rhs)
+            if isinstance(rhs, torch.Tensor) and rhs.dtype.is_complex
+            else rhs
+        )
+        a = torch.randn(2, 3, dtype=torch.complex128)
+        xa = ComplexTensor.from_interleaved(a)
+        result = xa.div_(xrhs)
+
+        self.assertIs(result, xa)
+        self.assertEqual(xa.as_interleaved(), a / rhs)
+
+    @parametrize("shape", [(3, 3), (3, 5), (2, 4, 3)])
+    @parametrize("diagonal", [-1, 0, 1])
+    def test_tril_inplace(self, shape: tuple[int, ...], diagonal: int):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        a = torch.randn(shape, dtype=torch.complex128)
+        xa = ComplexTensor.from_interleaved(a)
+        result = xa.tril_(diagonal)
+
+        self.assertIs(result, xa)
+        self.assertEqual(xa.as_interleaved(), a.tril(diagonal))
+
+    # These ops are force-tested, so `TestComplexBwdGradients` doesn't cover them. Their
+    # backward formulas need `div_` (`eig`), `tril_` (`householder_product`) and
+    # `lu_unpack` (`lu_factor_ex`, `lu_solve`).
+    @parametrize("op", ["eig", "lu_factor_ex", "lu_solve"])
+    def test_linalg_backward_matches_native(self, op: str):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        def eig(a: torch.Tensor) -> tuple[torch.Tensor, ...]:
+            # Eigenvectors are only defined up to a phase, so use their magnitudes.
+            eigenvalues, eigenvectors = torch.linalg.eig(a)
+            return eigenvalues, eigenvectors.abs()
+
+        def lu_factor_ex(a: torch.Tensor) -> tuple[torch.Tensor, ...]:
+            return (torch.linalg.lu_factor_ex(a).LU,)
+
+        def lu_solve(a: torch.Tensor, b: torch.Tensor) -> tuple[torch.Tensor, ...]:
+            lu, pivots, _ = torch.linalg.lu_factor_ex(a)
+            return (torch.linalg.lu_solve(lu, pivots, b),)
+
+        fn, shapes = {
+            "eig": (eig, [(3, 3)]),
+            "lu_factor_ex": (lu_factor_ex, [(3, 3)]),
+            "lu_solve": (lu_solve, [(3, 3), (3, 2)]),
+        }[op]
+        inputs = [torch.randn(s, dtype=torch.complex128) for s in shapes]
+
+        def grads(*args: torch.Tensor) -> tuple[torch.Tensor, ...]:
+            outs = fn(*args)
+            return torch.autograd.grad(sum((o.abs() ** 2).sum() for o in outs), args)
+
+        expected = grads(*(t.clone().requires_grad_() for t in inputs))
+        actual = grads(
+            *(ComplexTensor.from_interleaved(t).requires_grad_() for t in inputs)
+        )
+        for a, e in zip(actual, expected, strict=True):
+            self.assertEqual(a, e)
+
+    def test_householder_product_backward_runs(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        # The gradient values are wrong for now: the backward writes through views of
+        # intermediates, which don't alias for `ComplexTensor`. Check it doesn't raise.
+        a = ComplexTensor.from_interleaved(
+            torch.randn(4, 3, dtype=torch.complex128)
+        ).requires_grad_()
+        tau = ComplexTensor.from_interleaved(
+            torch.randn(2, dtype=torch.complex128)
+        ).requires_grad_()
+        out = torch.linalg.householder_product(a, tau)
+        grad_a, grad_tau = torch.autograd.grad((out.abs() ** 2).sum(), (a, tau))
+
+        self.assertEqual(grad_a.shape, a.shape)
+        self.assertEqual(grad_tau.shape, tau.shape)
+
 
 @unMarkDynamoStrictTest
 class TestComplexBwdGradients(TestCase):
@@ -367,6 +510,7 @@ class TestComplexBwdGradients(TestCase):
         self.check_grad(device, dtype, op)
 
 
+instantiate_parametrized_tests(TestComplexTensorGeneric)
 instantiate_device_type_tests(TestComplexTensor, globals())
 instantiate_device_type_tests(TestComplexBwdGradients, globals())
 
