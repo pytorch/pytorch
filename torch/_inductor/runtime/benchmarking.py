@@ -1,14 +1,15 @@
 import contextlib
 import functools
 import inspect
+import logging
 import threading
 import time
 from collections.abc import Callable, Iterator
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Concatenate
-from typing_extensions import ParamSpec, Self, TypeVar
+from typing import Any, Concatenate, Self
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 import torch._inductor.config as inductor_config
@@ -17,10 +18,11 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters
 from torch.utils._debug_mode import DebugMode
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._triton import triton_compile_iq_collect_enabled
 
 
+log = logging.getLogger(__name__)
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
-GPU_BENCHMARK_DEVICE_TYPES = ("cuda", "xpu", "mtia")
 _CALLABLE_PROFILE_EVENT_NAME = "_CALLABLE"
 
 
@@ -31,16 +33,9 @@ T = TypeVar("T")
 
 
 def _get_default_gpu_device_type() -> str:
-    avail_gpus = [
-        device_type
-        for device_type in GPU_BENCHMARK_DEVICE_TYPES
-        if getattr(torch, device_type).is_available()
-    ]
-    if len(avail_gpus) > 1:
-        raise AssertionError(
-            f"expected at most one available GPU type, got {avail_gpus}"
-        )
-    return "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+    from torch._inductor.utils import get_gpu_type
+
+    return get_gpu_type()
 
 
 def _normalize_gpu_device_type(device_type: str | torch.device | None) -> str:
@@ -175,13 +170,41 @@ def may_ban_benchmarking() -> None:
         """)
 
 
+@functools.cache
+def _triton_benchmarking_context() -> Callable[
+    [], contextlib.AbstractContextManager[Any]
+]:
+    # fbtriton's compile_iq collector skips launches inside this context, so it only collects
+    # the autotune winner. Only looked up when collection is enabled. The result is cached, so
+    # TRITON_COMPILE_IQ_COLLECT is read once per process.
+    if triton_compile_iq_collect_enabled():
+        try:
+            from triton.magnon.collector import benchmarking
+
+            return benchmarking
+        except ImportError as e:
+            log.warning(
+                "TRITON_COMPILE_IQ_COLLECT is enabled but triton.magnon.collector.benchmarking "
+                "is unavailable (%s); compile_iq will also collect autotune candidates.",
+                e,
+            )
+    return contextlib.nullcontext
+
+
 def time_and_count(
     fn: Callable[Concatenate[Any, P], T],
 ) -> Callable[Concatenate[Any, P], T]:
     """
-    Wraps `fn` to increment the appropriate dynamo counters. It is expected that `fn`
-    is a method of `Benchmarker` or one of its subclasses; typing limitations prevent
-    us from declaring this directly.
+    Wraps `fn` to increment the appropriate dynamo counters and to run it inside the
+    compile_iq benchmarking context (see `_triton_benchmarking_context`), so fbtriton's
+    collector skips the candidate launches it makes. It is expected that `fn` is a method
+    of `Benchmarker` or one of its subclasses; typing limitations prevent us from
+    declaring this directly.
+
+    NOTE: A new benchmarking entry point that is not wrapped with this decorator (or
+    does not enter `_triton_benchmarking_context()()` itself, as
+    `torch._inductor.utils.do_bench_using_profiling` does) leaks its candidate launches
+    into compile_iq collection.
 
     NOTE: If you're tempted to add a dynamo_timed call here, this function can be
     called enough that the dynamo_timed overhead is not negligible.
@@ -191,7 +214,8 @@ def time_and_count(
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
         fn_qual_name = f"{self.__class__.__name__}.{fn.__name__}"
         counters["inductor"][f"benchmarking.{fn_qual_name}"] += 1
-        return fn(self, *args, **kwargs)
+        with _triton_benchmarking_context()():
+            return fn(self, *args, **kwargs)
 
     return wrapper
 

@@ -475,6 +475,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # comment at CppWrapperCpu `codegen_subgraph` function.
         return CppWrapperCpu()
 
+    def defines_triton_kernels_as_code(self) -> bool:
+        # The C++ wrapper keeps each Triton kernel as an async_compile.triton(...) source
+        # string: its call wrappers and its compile-time autotune block compile from it.
+        return False
+
     @contextlib.contextmanager
     def _target_buf(self, attr: str, buf: IndentedBuffer):
         """Temporarily redirect self.<attr> to a specific buffer."""
@@ -599,6 +604,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def write_constant(self, name, hashed):
         # include a hash so our code cache gives different constants different files
         self.header.writeline(f"// {name} {hashed}")
+
+    def generate_tma_descriptor(self, desc):
+        raise NotImplementedError(
+            "TMA descriptors are not supported by the CPU cpp_wrapper"
+        )
 
     @staticmethod
     def get_device_include_path_jit(device: str) -> str:
@@ -1656,6 +1666,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         metadata: str | None = None,
         gpu: bool = False,
         cpp_definition: str | None = None,
+        # Ignored: a C++ wrapper compiles each Triton kernel from its source string, not
+        # from a module-level def (see defines_triton_kernels_as_code). Accepted to keep
+        # one signature across _define_kernel_helper implementations.
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         # Misnomer: `gpu` actually means "is this a Triton kernel?"
         if gpu:
@@ -1700,23 +1715,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
             )
 
-    @staticmethod
-    def output_aliases_constant(output: str, output_buffer: ir.IRNode) -> bool:
-        def aliases_constant(name: str) -> bool:
-            if name in V.graph.constants:
-                return True
-            # IR views of a constant already resolve to its name, but fallback
-            # view ops (e.g. under fallback_by_default) alias their input
-            # without an IR view in between.
-            buf = V.graph.try_get_buffer(name)
-            return isinstance(buf, ir.Buffer) and any(
-                map(aliases_constant, buf.get_inputs_that_alias_output())
-            )
-
-        name = output_buffer.maybe_get_name()
-        return output in V.graph.constants or bool(name and aliases_constant(name))
-
     def generate_return(self, output_refs: list[str]):
+        cst_names = V.graph.constants.keys()
         output2idx: dict[str, int] = {}
 
         # If any output ref represents an rvalue tensor, materialize it to an lvalue
@@ -1731,8 +1731,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
             if output == "nullptr":
                 continue
 
+            is_constant_buffer = output in cst_names
             output_buffer = V.graph.graph_outputs[idx]
-            is_constant_buffer = self.output_aliases_constant(output, output_buffer)
+            if isinstance(output_buffer, ir.BaseView):
+                output_storage = output_buffer.unwrap_view()
+                if not isinstance(output_storage, (ir.BaseView, ir.MutableBox)):
+                    raise AssertionError(
+                        f"expected output_storage to be BaseView or MutableBox, "
+                        f"got {type(output_storage)}"
+                    )
+                if isinstance(output_storage.data, ir.ConstantBuffer):
+                    is_constant_buffer = True
 
             if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                 # Need to wrap scalar into tensor as the main function returns a vector of tensors
@@ -1983,9 +1992,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         stack_traces: OrderedSet[str] | None = None,
         profiling_args: Sequence[str | None] | None = None,
         output_handle: str | None = None,
+        tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
+        _ = tunable_dyn_dims_mask
         # We can do this unconditionally, since we cache this call.
         self.add_device_include(device)
 
@@ -2076,6 +2087,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args,
             device,
             profiling_args=profiling_args,
+            tunable_dyn_dims_mask=extern_kernel.tunable_dyn_dims_mask,
         )
 
         if extern_kernel.python_kernel_name in (
@@ -2145,6 +2157,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args,
             device,
             profiling_args=profiling_args,
+            tunable_dyn_dims_mask=fallback_kernel.tunable_dyn_dims_mask,
         )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
@@ -2158,6 +2171,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device: str,
         stack_traces: OrderedSet[str] | None = None,
         profiling_args: Sequence[str | None] | None = None,
+        tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
@@ -2174,6 +2188,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             stack_traces=stack_traces,
             profiling_args=profiling_args,
             output_handle=out_name,
+            tunable_dyn_dims_mask=tunable_dyn_dims_mask,
         )
 
     def _get_scatter_reduce_enum(self, reduce):
@@ -2444,6 +2459,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def make_free_by_names(self, names_to_del: list[str]):
         return " ".join(f"{name}.reset();" for name in names_to_del)
+
+    def codegen_free_unused_outputs(self, node: ir.ExternKernelAlloc) -> None:
+        # Every multi-output extern kernel path declares an RAII handle per
+        # tensor output, but the scheduler never schedules a free for outputs it
+        # eliminated as dead, so they would otherwise stay alive until the
+        # wrapper returns.
+        unused = [
+            out.get_name()
+            for out in torch.utils._pytree.tree_leaves(node.outputs)
+            if isinstance(out, ir.MultiOutput)
+            and out.get_name() in V.graph.removed_buffers
+        ]
+        if unused:
+            self.writeline(self.make_free_by_names(unused))
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"auto {new_name} = std::move({old_name});  // reuse"
@@ -3489,6 +3518,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ) or repr(t) in ("Layout", "MemoryFormat", "ScalarType", "SymFloat")
 
         def return_supported(t: torch.JitType) -> bool:
+            if isinstance(t, torch.ListType):
+                # batch_p2p_ops and the in-place coalesced collectives model
+                # Tensor[] returns through mutated inputs and placeholders
+                # rather than one IR output per element, so all collectives
+                # keep the Python callback.
+                return (
+                    isinstance(t.getElementType(), torch.TensorType)
+                    and op.namespace != "_c10d_functional"
+                )
             if isinstance(t, torch.OptionalType):
                 return isinstance(t.getElementType(), torch.TensorType)
             return isinstance(t, (torch.NoneType, torch.TensorType))
@@ -3623,12 +3661,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         """Emit JIT-mode fallback kernel code (no-Python dispatcher or Python callback)."""
         if not isinstance(op_overload, torch._ops.OpOverload):
             raise AssertionError(type(op_overload))
-        for output in output_args:
-            if not (output is None or isinstance(output, str)):
-                raise AssertionError(
-                    "fallback kernels with runtime lookup currently only support tensor "
-                    "returns, not more complicated types (such as list-of-list-of-tensor)"
-                )
 
         # In non-AOT mode, we use aoti_torch_call_dispatcher if all the inputs and
         # outputs of the op can be represented with StableIValue.  This avoids the
@@ -3653,9 +3685,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             return
 
-        # Otherwise, we call back into Python, which has some extra runtime overhead,
-        # but handles situations like list[Tensor] (currently unrepresentable via
-        # StableIValue).
+        for output in output_args:
+            if not (output is None or isinstance(output, str)):
+                raise AssertionError(
+                    "fallback kernels with runtime lookup currently only support tensor "
+                    "returns, not more complicated types (such as list-of-list-of-tensor)"
+                )
+
+        # Schemas outside native dispatch support, such as Tensor?[] returns,
+        # use a Python callback with some extra runtime overhead.
         self.generate_fallback_kernel_with_runtime_lookup_python(
             buf_name,
             python_kernel_name,
@@ -3970,8 +4008,8 @@ if (!custom_op_wrapper) {
         self,
         op_overload: torch._ops.OpOverload,
         raw_args: Sequence[Any],
-        output_args: Sequence[str | None],
-        raw_outputs: Sequence[ir.Buffer],
+        output_args: _OUTPUT_ARGS_TYPE,
+        raw_outputs: Sequence[ir.Buffer | Sequence[ir.Buffer] | None],
     ) -> None:
         """Generate a JIT-only fallback call through c10::Dispatcher.
 
@@ -3983,17 +4021,21 @@ if (!custom_op_wrapper) {
         self.include_extra_header("ATen/core/jit_type.h")
         self.include_extra_header("torch/csrc/inductor/aoti_torch/utils.h")
 
+        flat_output_args = torch.utils._pytree.tree_leaves(output_args)
+        flat_raw_outputs = torch.utils._pytree.tree_leaves(raw_outputs)
         if raw_outputs:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg, raw_output_arg in zip(output_args, raw_outputs)
+                for output_arg, raw_output_arg in zip(
+                    flat_output_args, flat_raw_outputs
+                )
                 if output_arg is not None
                 and not isinstance(raw_output_arg, ir.MutationOutput)
             ]
         else:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg in output_args
+                for output_arg in flat_output_args
                 if output_arg is not None
             ]
 
@@ -4002,6 +4044,8 @@ if (!custom_op_wrapper) {
         dispatch_lines.writeline("{")
 
         with dispatch_lines.indent():
+            if kernel_profile_enabled():
+                dispatch_lines.writeline(_record_function_handle_line(str(op_overload)))
             tmp_var_number = count()
 
             def next_tmp(prefix: str) -> str:
@@ -4199,16 +4243,45 @@ if (!custom_op_wrapper) {
             )
             dispatch_lines.writeline(f"op.callBoxed(&{stack_var});")
 
-            stack_idx = 0
-            for output_arg, raw_output_arg in zip(output_args, raw_outputs):
+            returns = op_overload._schema.returns
+            if len(returns) == 1 and isinstance(returns[0].real_type, torch.ListType):
+                outputs_by_return = [(output_args, raw_outputs)]
+            else:
+                outputs_by_return = zip(output_args, raw_outputs)
+
+            for stack_idx, (schema_return, (output_arg, raw_output_arg)) in enumerate(
+                zip(returns, outputs_by_return)
+            ):
                 if isinstance(raw_output_arg, ir.MutationOutput):
                     continue
-                if output_arg is not None:
+                if isinstance(schema_return.real_type, torch.ListType):
+                    if not isinstance(output_arg, list):
+                        raise AssertionError(
+                            f"Expected tensor-list outputs, got {output_arg}"
+                        )
+                    if not isinstance(raw_output_arg, (list, tuple)):
+                        raise AssertionError(
+                            f"Expected tensor-list output buffers, got {raw_output_arg}"
+                        )
+                    list_var = next_tmp("returned_list")
+                    dispatch_lines.writeline(
+                        f"auto {list_var} = std::move({stack_var}[{stack_idx}]).toTensorList();"
+                    )
+                    dispatch_lines.writeline(
+                        f"TORCH_CHECK({list_var}.size() == {len(output_arg)}, "
+                        f'"{op_overload._schema.name} return {stack_idx} expected '
+                        f'{len(output_arg)} tensors, got ", {list_var}.size());'
+                    )
+                    for idx, name in enumerate(output_arg):
+                        dispatch_lines.writeline(
+                            f"{name} = torch::aot_inductor::new_tensor_handle("
+                            f"at::Tensor({list_var}.get({idx})));"
+                        )
+                elif output_arg is not None:
                     dispatch_lines.writeline(
                         f"{output_arg} = torch::aot_inductor::new_tensor_handle("
                         f"std::move({stack_var}[{stack_idx}]).toTensor());"
                     )
-                stack_idx += 1
 
         dispatch_lines.writeline("}")
         self.writelines(dispatch_lines.getvalue().splitlines())

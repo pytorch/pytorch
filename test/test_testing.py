@@ -5,9 +5,9 @@ import dataclasses
 import doctest
 import functools
 import importlib
-import importlib.metadata
 import inspect
 import itertools
+import json
 import math
 import os
 import re
@@ -37,7 +37,7 @@ from torch.testing._internal.common_device_type import \
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal import opinfo
+from torch.testing._internal import common_cuda, opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
@@ -439,13 +439,13 @@ if __name__ == '__main__':
             self.assertIn('errors=1', stderr)
 
 
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/106308")
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
         # test to ensure common_distributed.py override should not early terminate CUDA.
-        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+        # Run from a real file. python -c cannot be the spawn main module, so
+        # the worker would fail to unpickle this test class.
+        script = """\
 #!/usr/bin/env python3
 
 import torch
@@ -454,6 +454,17 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 
 class TestThatContainsCUDAAssertFailure(MultiProcessTestCase):
+
+    @property
+    def world_size(self):
+        # One worker is enough to fault the device. The default world size
+        # would run this index once per rank.
+        return 1
+
+    def setUp(self):
+        super().setUp()
+        # The parent only joins children. Spawn one so the body runs.
+        self._spawn_processes()
 
     @slowTest
     def test_throw_unrecoverable_cuda_exception(self, device):
@@ -475,9 +486,33 @@ instantiate_device_type_tests(
 
 if __name__ == '__main__':
     run_tests()
-""")
-        # we are currently disabling CUDA early termination for distributed tests.
-        self.assertIn('errors=2', stderr)
+"""
+        # Run this suite from a real .py file.
+        fd, path = tempfile.mkstemp(suffix=".py")
+        os.close(fd)
+        try:
+            with open(path, "w") as f:
+                f.write(script)
+            env = os.environ.copy()
+            env["PYTORCH_API_USAGE_STDERR"] = "1"
+            env.pop("CI", None)
+            env.pop("TEST_SHOWLOCALS", None)
+            proc = subprocess.run(
+                [sys.executable, path],
+                env=env,
+                capture_output=True,
+            )
+        finally:
+            os.remove(path)
+        stderr = proc.stderr.decode("utf-8", errors="replace")
+        # The spawned worker's device-side assert is reported in stderr.
+        # On CUDA, unittest records that failure as this test's error.
+        self.assertTrue(
+            has_device_side_assert(stderr),
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+        )
+        if torch.version.cuda:
+            self.assertIn('errors=1', stderr)
 
     @expectedFailureMeta  # This is only supported for CPU and CUDA
     @onlyNativeDeviceTypes
@@ -492,6 +527,8 @@ if __name__ == '__main__':
             dynamic_dispatch = opinfo.utils.dtypes_dispatch_hint(dynamic_dtypes)
             if self.device_type == 'cpu':
                 dtypes = op.dtypes
+            elif self.device_type == 'xpu':
+                dtypes = op.dtypesIfXPU
             else:  # device_type ='cuda'
                 dtypes = op.dtypesIfCUDA
 
@@ -581,6 +618,17 @@ class TestFrameworkUtils(TestCase):
             self.assertEqual(_get_torch_rocm_version(), (7, 15, 26306))
             self.assertEqual(getRocmVersion(), (7, 15, 26306))
 
+    def test_windows_sm89_xfail_excludes_rocm(self):
+        def test_fn():
+            pass
+
+        with unittest.mock.patch.multiple(
+            common_cuda, IS_WINDOWS=True, TEST_WITH_ROCM=True, SM89OrLater=True
+        ):
+            self.assertIs(
+                common_cuda.xfailCUDAIfSM89OrLaterOnWindows(test_fn), test_fn
+            )
+
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
     def test_filtering_env_var(self):
@@ -645,18 +693,26 @@ _REGENERATE_JUNIT_GOLDENS = os.environ.get("REGENERATE_JUNIT_GOLDENS") == "1"
 _JUNIT_CHILD_ENV = {
     k: v
     for k, v in os.environ.items()
-    if k not in ("PYTHONPATH", "CI", "PYTEST_ADDOPTS") and not k.startswith("PYTORCH_TEST_")
+    if k not in ("PYTHONPATH", "CI", "PYTEST_ADDOPTS", "PYTEST_PLUGINS", "PYTEST_DISABLE_PLUGIN_AUTOLOAD")
+    and not k.startswith("PYTORCH_TEST_")
 } | {"PYTHONDONTWRITEBYTECODE": "1"}
 
 
-def _junit_provenance() -> str:
-    versions = []
-    for dist in ("pytest", "pytest-rerunfailures"):
-        try:
-            versions.append(f"{dist} {importlib.metadata.version(dist)}")
-        except importlib.metadata.PackageNotFoundError:
-            versions.append(f"{dist} missing")
-    return ", ".join(versions)
+def _junit_child_versions() -> dict[str, str | None]:
+    """pytest and pytest-rerunfailures versions as the fixture suite's interpreter and environment see them."""
+    code = (
+        "import importlib.metadata as m, json\n"
+        "def version(dist):\n"
+        "    try:\n"
+        "        return m.version(dist)\n"
+        "    except m.PackageNotFoundError:\n"
+        "        return None\n"
+        "print(json.dumps({d: version(d) for d in ('pytest', 'pytest-rerunfailures')}))\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code], env=_JUNIT_CHILD_ENV, capture_output=True, text=True, check=True
+    )
+    return json.loads(proc.stdout)
 
 
 def _redact_junit(text: str) -> str:
@@ -698,16 +754,24 @@ def _count_junit_tags(normalized: str) -> collections.Counter[str]:
 @unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "junit XML shape doesn't depend on the device")
 class TestJunitXml(TestCase):
     provenance: str
+    golden_skip: str | None
+    has_rerunfailures: bool
     raw_xml: str
+    output: str
 
     @classmethod
     def setUpClass(cls) -> None:
+        versions = _junit_child_versions()
+        if versions["pytest"] is None:
+            raise unittest.SkipTest("the fixture suite needs pytest")
+        cls.has_rerunfailures = versions["pytest-rerunfailures"] is not None
         # The goldens depend on the pytest and pytest-rerunfailures versions they record.
-        cls.provenance = _junit_provenance()
+        cls.provenance = ", ".join(f"{dist} {v or 'missing'}" for dist, v in versions.items())
         header = f"<!-- provenance: {cls.provenance} -->"
         golden = _JUNIT_TESTDATA / "expected" / "pytest.xml"
+        cls.golden_skip = None
         if not _REGENERATE_JUNIT_GOLDENS and golden.exists() and header not in golden.read_text().splitlines():
-            raise unittest.SkipTest(
+            cls.golden_skip = (
                 f"goldens were generated with other versions than {cls.provenance}; "
                 "rerun with REGENERATE_JUNIT_GOLDENS=1"
             )
@@ -731,6 +795,7 @@ class TestJunitXml(TestCase):
                     f"stdout:\n{proc.stdout[-3000:]}\nstderr:\n{proc.stderr[-3000:]}"
                 )
             cls.raw_xml = xml_path.read_text()
+            cls.output = proc.stdout + proc.stderr
         super().setUpClass()
 
     def _assert_matches_golden(self, name: str, doc: str) -> None:
@@ -741,17 +806,20 @@ class TestJunitXml(TestCase):
                 f"<!-- provenance: {self.provenance} -->\n{doc}"
             )
             return
+        if self.golden_skip:
+            self.skipTest(self.golden_skip)
         self.assertTrue(golden.exists(), f"{golden} is missing; generate it with REGENERATE_JUNIT_GOLDENS=1")
         expected = "".join(
             ln for ln in golden.read_text().splitlines(keepends=True) if not ln.startswith("<!--")
         )
         self.assertMultiLineEqual(expected, doc, f"{golden} is stale; rerun with REGENERATE_JUNIT_GOLDENS=1")
 
-    def test_pytest_outcome_shapes(self) -> None:
-        normalized = _normalize_junit_xml(self.raw_xml)
-        self._assert_matches_golden("pytest", normalized)
-
-        counts = _count_junit_tags(normalized)
+    def test_pytest_outcome_counts(self) -> None:
+        # Unlike the goldens, these hold on every pytest version.
+        if not self.has_rerunfailures:
+            self.skipTest("the fixture suite needs pytest-rerunfailures")
+        self.assertNotIn("INTERNALERROR", self.output)
+        counts = _count_junit_tags(_normalize_junit_xml(self.raw_xml))
         # <testsuite tests="14"> counts the teardown error separately, but it merges
         # into its <testcase>
         self.assertEqual(counts["testcase"], 13)
@@ -763,6 +831,9 @@ class TestJunitXml(TestCase):
         self.assertEqual(counts["skipped"], 3)
         # 2 each for rerun_then_pass and rerun_then_fail
         self.assertEqual(counts["rerun"], 4)
+
+    def test_pytest_outcome_shapes(self) -> None:
+        self._assert_matches_golden("pytest", _normalize_junit_xml(self.raw_xml))
 
     def test_sanitize_pytest_xml(self) -> None:
         with TemporaryFileName() as path:
@@ -1350,7 +1421,7 @@ class TestAssertCloseMultiDevice(TestCase):
                 fn(check_device=False)
 
 
-instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for="cuda")
+instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
 
 
 class TestAssertCloseErrorMessage(TestCase):
@@ -3020,13 +3091,14 @@ class TestImports(TestCase):
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.linear_cross_entropy.fused_grad_logits_kernel",  # depends on cutlass
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
+                           "torch._native.ops.norm.rmsnorm_kernels",  # depends on cutlass
                            "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
-                           "torch._native.ops.reductions.inner_tree_kernel",  # depends on cutlass
                            "torch._native.ops.reductions.kernel_general",  # depends on cutlass
                            "torch._native.ops.reductions.kernel_rowtile",  # depends on cutlass
                            "torch._native.ops.reductions.tile",  # depends on cutlass
                            "torch._native.ops.reductions.kernel_xcta",  # depends on cutlass
                            "torch._native.ops.reductions.kernel_coltile",  # depends on cutlass
+                           "torch._native.ops.reductions.ordered",  # depends on cutlass
                            "torch._native.ops.scatter_add",  # depends on cutlass
                            "torch._native.ops.topk",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass

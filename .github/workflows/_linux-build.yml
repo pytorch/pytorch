@@ -35,6 +35,12 @@ on:
         default: "7.5"
         description: |
           List of CUDA architectures CI build should target.
+      rocm-arch-list:
+        required: false
+        type: string
+        default: ""
+        description: |
+          List of ROCm architectures CI build should target.
       runner_prefix:
         required: false
         default: ""
@@ -119,13 +125,6 @@ on:
         description: |
           If set, the build job will also builds these packages and saves their
           wheels as artifacts
-        required: false
-        type: string
-        default: ""
-      build-external-packages:
-        description: |
-          If set, the build external packages and saves their wheels as artifacts
-          use command separated list of packages to build ex: 'vllm,transformers'.
         required: false
         type: string
         default: ""
@@ -233,11 +232,10 @@ jobs:
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1
           SCCACHE_S3_NO_CREDENTIALS: ${{ steps.aws-creds.outcome != 'success' && 'true' || 'false' }}
-          XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
+          PYTORCH_ROCM_ARCH: ${{ inputs.rocm-arch-list }}
           FLASH_ATTENTION_LARGE_MEMORY_BUILD: ${{ inputs.flash-attention-large-memory-build }}
-          XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           OUR_GITHUB_JOB_ID: ${{ steps.setup-linux.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           BUILD_ADDITIONAL_PACKAGES: ${{ inputs.build-additional-packages }}
@@ -248,26 +246,6 @@ jobs:
           .ci/pytorch/build.sh
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
-
-      - name: Build external packages
-        id: build-external-packages
-        if: inputs.build-external-packages != '' &&  steps.build.outcome != 'skipped'
-        uses: pytorch/pytorch/.github/actions/build-external-packages@main
-        with:
-          build-targets: ${{ inputs.build-external-packages }}
-          docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
-          cuda-arch-list: ${{ inputs.cuda-arch-list }}
-          output-dir: external
-
-      - name: Move external packages to dist
-        if: steps.build-external-packages.outputs.output_dir != '' && steps.build-external-packages.outcome != 'skipped'
-        shell: bash
-        run: |
-          src="${{ steps.build-external-packages.outputs.output_dir }}"
-          if [ -d "$src" ]; then
-            mkdir -p "dist/$(dirname "$src")"
-            mv "$src" "dist/$(dirname "$src")/"
-          fi
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && steps.use-old-whl.outputs.reuse != 'true'

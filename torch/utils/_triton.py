@@ -1,5 +1,6 @@
 import functools
 import hashlib
+import importlib.util
 import logging
 import os
 from typing import Any
@@ -45,6 +46,16 @@ def has_triton_package() -> bool:
         return True
     except ImportError:
         return False
+
+
+@functools.cache
+def get_triton_constexpr_function_type() -> type | None:
+    """Check if Triton is installed and has constexpr_function, introduced in v3.5."""
+    if not has_triton_package():
+        return None
+    import triton
+
+    return getattr(triton.runtime.jit, "ConstexprFunction", None)
 
 
 @functools.cache
@@ -267,6 +278,43 @@ def has_triton_reduction_ordering() -> bool:
         except ImportError:
             pass
     return False
+
+
+@functools.cache
+def has_triton_compile_iq() -> bool:
+    """Whether the available Triton is fbtriton with the compile_iq (magnon) hooks."""
+    if not has_triton_package():
+        return False
+    return importlib.util.find_spec("triton.magnon") is not None
+
+
+def triton_compile_iq_collect_enabled() -> bool:
+    """Whether fbtriton's compile_iq collection is on, parsed the same way Triton parses it."""
+    return _triton_compile_iq_flag("TRITON_COMPILE_IQ_COLLECT", "collect_enabled")
+
+
+def triton_compile_iq_apply_enabled() -> bool:
+    """Whether fbtriton's compile_iq apply is on, parsed the same way Triton parses it."""
+    return _triton_compile_iq_flag("TRITON_COMPILE_IQ_APPLY", "apply_enabled")
+
+
+def triton_compile_iq_enabled() -> bool:
+    """Whether fbtriton's compile_iq collection or apply is on."""
+    return triton_compile_iq_collect_enabled() or triton_compile_iq_apply_enabled()
+
+
+def _triton_compile_iq_flag(env_var: str, flag: str) -> bool:
+    # The env var is read first so the probe, which imports Triton, only runs once compile_iq
+    # is requested.
+    if not os.environ.get(env_var) or not has_triton_compile_iq():
+        return False
+    try:
+        from triton.magnon import flags
+    except ImportError:
+        flags = None
+    enabled = getattr(flags, flag, None)
+    # fbtriton builds without this parser treat any non-empty value as on.
+    return True if enabled is None else enabled()
 
 
 @functools.cache

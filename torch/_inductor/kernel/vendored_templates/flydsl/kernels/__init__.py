@@ -9,6 +9,7 @@ _EXPORT_MODULES = {
     "GEMM_DTYPE_FP16": "gemm_gfx950",
     "GEMM_DTYPE_MXFP4": "gemm_gfx950",
     "GEMM_DTYPE_MXFP8": "gemm_gfx950",
+    "build_flex_attn_fwd_module": "flex_attn_fwd_gfx950",
     "gemm_mxfp_gfx950": "gemm_gfx950",
     "infer_has_k_tail": "gemm_gfx950",
     "make_gemm_gfx950_param": "gemm_gfx950",

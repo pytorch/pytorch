@@ -1871,7 +1871,8 @@ def build_stage(
         group (Optional[dist.ProcessGroup]): the process group to be used by this stage
 
     Returns:
-        _PipelineStage: a pipeline stage that can run with `PipelineSchedules`.
+        A pipeline stage that can run with the pipeline schedules, e.g.
+        :class:`~torch.distributed.pipelining.schedules.ScheduleGPipe`.
     """
     return _PipelineStage(
         stage_module,
