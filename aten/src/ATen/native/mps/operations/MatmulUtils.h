@@ -30,16 +30,18 @@ MatmulParams<idx_t> matmul_params(
   };
 }
 
-// Prefer the largest row tile that `rows` keeps busy; the 48/24 cut points are
-// 75% of the 64 and 32 row tiles.
+// Prefer the largest row tile that `rows` keeps at least 75% occupied.
 inline uint32_t matmul_tile_rows(int64_t rows) {
-  if (rows > 48) {
-    return 64;
+  const auto keeps_occupied = [rows](int64_t tile_rows) {
+    return rows > tile_rows * 3 / 4;
+  };
+  if (keeps_occupied(kMatmulTileRowsLarge)) {
+    return kMatmulTileRowsLarge;
   }
-  if (rows > 24) {
-    return 32;
+  if (keeps_occupied(kMatmulTileRowsMedium)) {
+    return kMatmulTileRowsMedium;
   }
-  return 16;
+  return kMatmulTileRowsSmall;
 }
 
 inline bool matmul_mpp_tensor_offsets_fit(
