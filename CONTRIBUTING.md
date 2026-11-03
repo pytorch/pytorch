@@ -1481,3 +1481,4 @@ The workflow files themselves get taken from checkpoint `C`, the merger of your
 PR and the `main` branch. But only the workflow files get taken from that merged
 checkpoint. Everything else (tests, code, etc) all get taken directly from your
 PR's commit (commit `B`). Please note, this scenario would never affect PRs authored by `ghstack` as they would not automatically ingest the updates from default branch.
+<!-- sp native stack test 2 -->
