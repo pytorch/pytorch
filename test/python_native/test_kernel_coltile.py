@@ -502,11 +502,34 @@ class TestOrderedColRoute(TestCase):
         view = torch.empty(shape, device="meta")
         self.assertEqual(kg._ordered_col_route_ok(view, nfields, cc), routed)
 
-    @parametrize("dtype", [torch.float16, torch.float64, torch.int8])
+    @parametrize("dtype", [*_DTYPES, torch.float64, torch.int8])
     def test_gate_admits_measured_dtypes(self, dtype):
         view = torch.empty((16, 128, 128), device="meta", dtype=dtype)
         routed = kg._ordered_col_route_ok(view, 1, (10, 0))
-        self.assertEqual(routed, dtype == torch.float16)
+        self.assertEqual(routed, dtype in _DTYPES)
+
+    @parametrize(
+        "field,error",
+        [
+            ("shape", "do not support"),
+            ("vec_linear", "tree vector folds"),
+            ("batches", "single planner batch"),
+        ],
+    )
+    def test_constructor_invariants_raise(self, field, error):
+        # reduce_ordered_col declines these plans first, so only direct callers reach them.
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        trait = T.SumOps(acc=cutlass.Float32)
+        default = rt._ITREE_ARCH["default"]
+        with mock.patch.object(rt, "_itree_arch", return_value=default):
+            plan = rt.trait_itree_plan(trait, 1024, 32, 4, stage=False)
+        state = (plan.shape, plan.vec_linear, len(plan.batches))
+        self.assertEqual(state, ("looped", False, 1))
+        invalid = {"shape": "multirow", "vec_linear": True, "batches": plan.batches * 2}
+        bad = plan._replace(**{field: invalid[field]})
+        with self.assertRaisesRegex(ValueError, error):
+            ct._OrderedColReduce(trait, bad, 1024, 32, 1)
 
     @parametrize("columns", [512, 1024])
     def test_general_norm_splits_need_wide_columns(self, columns):
