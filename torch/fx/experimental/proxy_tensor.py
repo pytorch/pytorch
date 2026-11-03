@@ -714,7 +714,9 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     inner = val
     while functorch.is_batchedtensor(inner) or functorch.is_gradtrackingtensor(inner):
         inner = functorch.get_unwrapped(inner)
-    fake = cast(FakeTensor, inner) if is_fake_tensor(inner) else None
+    # The view below is built from a Python FakeTensor's fields, as fast_detach
+    # does, so a C++ fake keeps its wrapper.
+    fake = inner if isinstance(inner, FakeTensor) else None  # noqa: ISINSTANCE_FAKE_TENSOR
     # A value whose real tensor is kept, such as a placeholder of a cond branch
     # inside vmap under real tensor propagation, keeps its wrapper as before,
     # which carries the real tensor. Its real view would need the real layout
