@@ -576,7 +576,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # from Python 3.11 on; before that it is a _SpecialForm, guarded by an
         # ID_MATCH that is kept because it pickles as the global typing.Any.
         any_is_class = isinstance(pytree.Any, type)
-        class_matches, id_matches = (2, 2) if any_is_class else (1, 3)
+        # Constructed lookup keys now retain their class guard as well.
+        class_matches, id_matches = (3, 2) if any_is_class else (2, 3)
         self.assertEqual(
             counts - control_counts,
             {

@@ -1649,12 +1649,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                             if issubclass(type(hooks_dict), collections.OrderedDict)
                             else variables.NNModuleHooksDictVariable
                         )
-                    from .builder import _build_dict_items
+                    from .builder import _dict_input_snapshot
 
-                    # Empty storage can still have orphaned OrderedDict links.
-                    _build_dict_items(
-                        hooks_dict, lambda i, k, v: (k, VariableTracker.build(tx, v))
-                    )
+                    _dict_input_snapshot(hooks_dict)
                     return hooks_vt_cls({}, source=hooks_source)
 
         # Hook IDs differ across equivalent module instances (RemovableHandle;
@@ -1673,7 +1670,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             and not tx.output.side_effects.has_pending_mutation_of_attr(self, name)
         ):
             hooks_dict = getattr(self.value, name)
-            if type(hooks_dict) not in (dict, collections.OrderedDict):
+            if not issubclass(type(hooks_dict), dict):
                 return super().tp_getattro_impl(tx, name)
             hooks_dict_source = AttrSource(self.source, name)
             install_guard(hooks_dict_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
@@ -1707,7 +1704,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             # noqa: RVT001
             hooks_vt_cls = (
                 variables.NNModuleHooksOrderedDictVariable
-                if type(hooks_dict) is collections.OrderedDict
+                if issubclass(type(hooks_dict), collections.OrderedDict)
                 else variables.NNModuleHooksDictVariable
             )
             return hooks_vt_cls(result, source=hooks_dict_source)
