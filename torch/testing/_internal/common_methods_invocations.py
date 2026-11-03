@@ -15859,9 +15859,6 @@ op_db: list[OpInfo] = [
            dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.float16),
-           dtypesIfMPS=floating_types_and(
-               torch.int64, torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.uint8, torch.bool
-           ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_avg_pool1d,
            sample_inputs_func=sample_inputs_avgpool1d),
@@ -15873,9 +15870,7 @@ op_db: list[OpInfo] = [
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.float16),
-           dtypesIfMPS=floating_types_and(
-               torch.int64, torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.uint8, torch.bool
-           ),
+           dtypesIfMPS=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_avg_pool3d,
            sample_inputs_func=sample_inputs_avgpool3d,
@@ -16831,9 +16826,6 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           dtypesIfMPS=floating_types_and(
-               torch.int64, torch.float16, torch.bfloat16, torch.int32, torch.uint8, torch.bool, torch.int8, torch.int16
-           ),
            error_inputs_func=error_inputs_avg_pool2d,
            sample_inputs_func=sample_inputs_avgpool2d,
            skips=(

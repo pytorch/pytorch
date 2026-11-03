@@ -616,45 +616,45 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
                                                const Tensor& indices,
                                                const Tensor& input,
                                                const Tensor& grad_output,
-                                               PoolingParams<5>& params,
+                                               const int32_t dims,
+                                               const int32_t pooling_dims,
                                                const std::string& op_name) {
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      supportedFloatingType(input), "\"", op_name, "\" not implemented for '", input.scalar_type(), "'");
-  TORCH_CHECK_TYPE(grad_output.scalar_type() == input.scalar_type() && indices.scalar_type() == kLong,
-                   op_name,
-                   ": expected grad_output of dtype ",
-                   input.scalar_type(),
-                   " and int64 indices, got ",
-                   grad_output.scalar_type(),
-                   " and ",
-                   indices.scalar_type());
-  grad_input.resize_(input.sizes(), input.suggest_memory_format());
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      canUse32BitIndexMath(grad_input) && canUse32BitIndexMath(grad_output) && canUse32BitIndexMath(indices),
-      op_name,
-      ": MPS does not support tensors that require 64-bit indexing");
-  if (grad_input.numel() == 0) {
-    return;
-  }
-  params.dims = static_cast<int32_t>(input.dim());
-  fill_pool_size_strides(params, grad_input, grad_output, indices);
+  const auto memory_format = input.suggest_memory_format();
+  grad_input.resize_(input.sizes(), memory_format);
+  grad_input.fill_(0);
 
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  MPSStream* mpsStream = getCurrentMPSStream();
   // See Note [Enabling Deterministic Operations]
   // The operation is normally nondeterministic because of atomic accumulation
   // across multiple threads. To make it deterministic, dispatch only one thread
   // per batch, so the accumulations are serialized.
-  const bool serial = at::globalContext().deterministicAlgorithms();
+  bool serial = at::globalContext().deterministicAlgorithms();
   if (serial && input.scalar_type() != kFloat) {
     Tensor grad_input_float = at::empty({0}, grad_input.options().dtype(kFloat));
     max_pool_backward_out_mps_template(
-        grad_input_float, indices, input.to(kFloat), grad_output.to(kFloat), params, op_name);
+        grad_input_float, indices, input.to(kFloat), grad_output.to(kFloat), dims, pooling_dims, op_name);
     grad_input.copy_(grad_input_float);
     return;
   }
-  grad_input.fill_(0);
-  const auto numThreads = pool_backward_num_threads(grad_output, params.dims, params.pooling_dims, serial);
+  auto numThreads = pool_backward_num_threads(grad_output, dims, pooling_dims, serial);
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      canUse32BitIndexMath(grad_input) && canUse32BitIndexMath(grad_output) && canUse32BitIndexMath(indices),
+      op_name,
+      ": MPS does not support tensors that require 64-bit indexing");
+  PoolingBackwardParams<5> params;
 
-  MPSStream* mpsStream = getCurrentMPSStream();
+  params.dims = dims;
+  params.pooling_dims = pooling_dims;
+
+  for (const auto dim : c10::irange(dims)) {
+    params.grad_input_sizes[dim] = safe_downcast<int32_t, int64_t>(grad_input.size(dim));
+    params.grad_input_strides[dim] = safe_downcast<int32_t, int64_t>(grad_input.stride(dim));
+    params.grad_output_sizes[dim] = safe_downcast<int32_t, int64_t>(grad_output.size(dim));
+    params.grad_output_strides[dim] = safe_downcast<int32_t, int64_t>(grad_output.stride(dim));
+    params.indices_strides[dim] = safe_downcast<int32_t, int64_t>(indices.stride(dim));
+  }
+
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
@@ -682,15 +682,9 @@ static void max_pool_with_indices_backward_out_mps_template(Tensor& grad_input,
                                                             bool ceil_mode,
                                                             const int32_t pooling_dims,
                                                             const std::string& op_name) {
-  auto [_, __, kernel_size, stride, padding, dilation_opt] =
-      process_pool_sizes(input, _kernel_size, _stride, _padding, _dilation, ceil_mode, pooling_dims, op_name);
-  PoolingParams<5> params{};
-  params.pooling_dims = pooling_dims;
-  memcpy(params.kernel_size.data(), kernel_size.data(), pooling_dims * sizeof(int32_t));
-  memcpy(params.stride.data(), stride.data(), pooling_dims * sizeof(int32_t));
-  memcpy(params.padding.data(), padding.data(), pooling_dims * sizeof(int32_t));
-  memcpy(params.dilation.data(), dilation_opt->data(), pooling_dims * sizeof(int32_t));
-  max_pool_backward_out_mps_template(grad_input, indices, input, grad_output, params, op_name);
+  const auto dims = std::get<0>(
+      process_pool_sizes(input, _kernel_size, _stride, _padding, _dilation, ceil_mode, pooling_dims, op_name));
+  max_pool_backward_out_mps_template(grad_input, indices, input, grad_output, dims, pooling_dims, op_name);
 }
 
 static void max_unpool_out_mps_template(const Tensor& input,
@@ -1193,11 +1187,15 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_out_mps)
 
 TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_mps)
 (const Tensor& grad_output, const Tensor& input, const Tensor& indices, const Tensor& grad_input) {
-  PoolingParams<5> params{};
-  params.pooling_dims = 2;
-  params.adaptive = true;
-  mps::max_pool_backward_out_mps_template(
-      const_cast<Tensor&>(grad_input), indices, input, grad_output, params, "adaptive_max_pool2d_backward");
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
+                              "Adaptive max pooling backward for complex is not supported for MPS");
+  mps::max_pool_backward_out_mps_template(const_cast<Tensor&>(grad_input),
+                                          indices,
+                                          input,
+                                          grad_output,
+                                          static_cast<int32_t>(input.dim()),
+                                          /*pooling_dims=*/2,
+                                          "adaptive_max_pool2d_backward");
 }
 
 Tensor& adaptive_avg_pool2d_out_mps(const Tensor& input, IntArrayRef output_size, Tensor& output) {
