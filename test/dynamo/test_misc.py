@@ -2389,6 +2389,17 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(TypeError):
             opt(5)
 
+    def test_int_base_symint_type_error(self):
+        def fn(x):
+            try:
+                return int(x.size(0), 16)
+            except TypeError as e:
+                return str(e)
+
+        opt = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        x = torch.ones(5)
+        self.assertEqual(opt(x), fn(x))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
         def f1(x, y):
@@ -5401,6 +5412,46 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = torch.compile(fn, fullgraph=True, backend="eager")(x)
         self.assertEqual(result, correct)
 
+    def test_copy_container_subclasses(self):
+        class ListSubclass(list):
+            pass
+
+        class DictSubclass(dict):
+            pass
+
+        def shallow_copy(obj):
+            return copy.copy(obj)
+
+        def deep_copy(obj):
+            return copy.deepcopy(obj)
+
+        def item(obj):
+            return obj[0] if isinstance(obj, list) else obj["value"]
+
+        compiled_copy = torch.compile(shallow_copy, fullgraph=True, backend="eager")
+        for original in (
+            ListSubclass([torch.randn(2)]),
+            DictSubclass(value=torch.randn(2)),
+        ):
+            original.attr = "state"
+            result = compiled_copy(original)
+            self.assertIs(type(result), type(original))
+            self.assertEqual(result, original)
+            self.assertEqual(result.attr, original.attr)
+            self.assertIs(item(result), item(original))
+
+        compiled_deepcopy = torch.compile(deep_copy, fullgraph=True, backend="eager")
+        for original in (
+            ListSubclass([[1, 2]]),
+            DictSubclass(value=[1, 2]),
+        ):
+            original.attr = "state"
+            result = compiled_deepcopy(original)
+            self.assertIs(type(result), type(original))
+            self.assertEqual(result, original)
+            self.assertEqual(result.attr, original.attr)
+            self.assertIsNot(item(result), item(original))
+
     def test_deepcopy_user_defined_object(self):
         class MyConfig:
             def __init__(self, hidden_size=64):
@@ -6745,6 +6796,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+
+    @parametrize("bind", [False, True])
+    def test_typing_method_descriptor(self, bind):
+        def fn(x):
+            if bind:
+                descriptor = typing.Annotated[int, str.format].__metadata__[0]
+                return x + 1, descriptor.__get__("{}", str)("a")
+            return x + 1, typing.Literal[str.format].__args__[0]
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=bind)
+        x = torch.ones(2)
+        result = opt_fn(x)
+        self.assertEqual(result, fn(x))
+        self.assertEqual(opt_fn(x), result)
+        if bind:
+            self.assertEqual(counter.frame_count, 1)
+        else:
+            self.assertIs(result[1], str.format)
 
     def test_tying_union_new_syntax(self):
         def fn(x):

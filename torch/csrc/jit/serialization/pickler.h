@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -91,7 +93,14 @@ class TORCH_API Pickler {
       const IValue& ivalue,
       const char* list_name,
       const std::function<void(const IValue&)>& item_pusher);
-  void pushGlobal(std::string_view module_name, std::string_view class_name);
+  // Returns the memo id of the global
+  uint32_t pushGlobal(
+      std::string_view module_name,
+      std::string_view class_name);
+  void pushCachedGlobal(
+      std::optional<uint32_t>& memo_id,
+      std::string_view module_name,
+      std::string_view class_name);
   // raw string data is appended directly to the byte stream
   void pushBytes(const std::string& string);
   void pushTensorData(const at::Tensor& tensor);
@@ -173,6 +182,13 @@ class TORCH_API Pickler {
   c10::FastMap<const void*, uint32_t> memoized_storage_map_;
 
   c10::FastMap<std::string, uint32_t> memoized_globals_map_;
+  std::optional<uint32_t> build_tensor_from_id_memo_id_;
+  std::optional<uint32_t> rebuild_tensor_v2_memo_id_;
+  std::optional<uint32_t> ordered_dict_memo_id_;
+  std::array<
+      std::optional<uint32_t>,
+      static_cast<size_t>(c10::ScalarType::NumOptions)>
+      storage_type_memo_ids_;
   c10::FastMap<std::string, uint32_t> memoized_strings_map_;
   c10::FastMap<std::string, uint32_t> memoized_devices_map_;
   // when true, List and Dict objects will be wrapped in a

@@ -12,6 +12,7 @@ from torch.utils._config_module import (
     inherit_fields_from,
     install_config_module,
 )
+from torch.utils._triton import triton_compile_iq_enabled
 
 
 if TYPE_CHECKING:
@@ -71,7 +72,19 @@ def lite_mode_default(lite_value: bool, default: bool) -> bool:
 def static_cuda_launcher_default() -> bool:
     STATIC_CUDA_LAUNCHER_VERSION = 2
 
-    if "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
+    if triton_compile_iq_enabled():
+        # fbtriton's compile_iq collect/apply hooks run in Triton's launcher, which the static
+        # launcher bypasses.
+        if os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1":
+            import logging
+
+            log = logging.getLogger(__name__)
+            log.warning(
+                "Ignoring TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER=1: TRITON_COMPILE_IQ_COLLECT "
+                "and TRITON_COMPILE_IQ_APPLY require Triton's launcher."
+            )
+        return False
+    elif "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
         return os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1"
     elif is_fbcode():
         version = torch._utils_internal.justknobs_getval_int(
@@ -1018,6 +1031,9 @@ delay_realize_cheap_outputs: bool = Config(
 fallback_random = False
 
 # align random/dropout as eager mode(aten) behavior, maintaining fused possibility and faster gpu kernel
+# TODO: Currently only aligned, contiguous fp32/fp16/bf16 dropout approximately matches
+# eager. Not yet handled: fp64 or misaligned/non-dense dropout, torch.rand values (and
+# fp64 offsets), randn/randint/bernoulli/uniform_, and multi-round Halide kernels.
 align_random_eager = False
 
 # Use tl.rand4x/randn4x for 1D CUDA Triton random. Disabled pending
@@ -1152,6 +1168,15 @@ max_pointwise_cat_inputs = 8
 
 # force concat to be generated as a pointwise op with masked loads
 force_pointwise_cat = False
+
+# Lower a cat input that is all of an already-laid-out computed buffer through
+# ConcatKernel, so its copy can fuse into the producer instead of being re-read
+# by a pointwise cat. Off by default: profitability depends on the destination
+# layout (a permuted destination makes the fused stores uncoalesced).
+# TODO: map out profitability and remove this flag. A stack's size-1 views
+# freeze such buffers, which should not happen; once they don't, this rule is
+# rarely needed.
+cat_fuse_computed_input_copies = False
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
@@ -2326,6 +2351,12 @@ class triton:
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
 
+    # Let Triton contract multiply-adds in Inductor's generated kernels into FMAs.
+    # Which multiply-adds become FMAs can depend on the block size, so disable this
+    # for results that do not depend on the configs autotuning picks.
+    # emulate_precision_casts also disables it.
+    enable_fp_fusion = os.environ.get("TORCHINDUCTOR_ENABLE_FP_FUSION", "1") == "1"
+
     # max autotune gemm with cublasLt
     autotune_cublasLt = True
 
@@ -3293,6 +3324,13 @@ class trace:
     # Add Inductor kernel stack traces back into exported PyTorch profiler timelines.
     provenance_tracking_to_timeline = (
         os.environ.get("TORCH_COMPILE_DEBUG_EXTEND", "0") == "1"
+    )
+
+    # Emit a zero-length profiler event "inductor_provenance:<kernel>:<debug_handle>"
+    # before each Python wrapper kernel launch that has a provenance debug handle,
+    # so kernels in any profiler trace can be joined to the provenance artifacts.
+    provenance_profiler_markers = (
+        os.environ.get("TORCHINDUCTOR_PROVENANCE_PROFILER_MARKERS", "0") == "1"
     )
 
     # Maximum number of trace events to process in profiler timeline post-processing.

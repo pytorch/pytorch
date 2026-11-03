@@ -44,12 +44,13 @@ from typing import (
     cast,
     Literal,
     NamedTuple,
+    NotRequired,
     Optional,
     TYPE_CHECKING,
     TypedDict,
     Union,
 )
-from typing_extensions import NotRequired, ParamSpec, TypeVar
+from typing_extensions import ParamSpec, TypeVar
 
 import sympy
 
@@ -176,13 +177,14 @@ from .utils import (
 from .variables.builder import (
     BackwardStateGraphArg,
     GraphArg,
+    SourcelessUserDefinedObjectBuilder,
     TrackedFake,
+    VariableBuilder,
     wrap_fx_proxy,
 )
 from .variables.ctx_manager import ContextWrappingVariable
 from .variables.functions import ClosureConversionError, VariableTracker
 from .variables.misc import NullVariable
-from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -1742,8 +1744,9 @@ class OutputGraph(OutputGraphCommon):
                 install_guard(source.make_guard(GuardBuilder.NN_MODULE))
 
                 def wrap_name(module_key: str) -> VariableTracker:
-                    # pyrefly: ignore [bad-argument-type]
-                    return NNModuleVariable(type(target), module_key, target, **options)
+                    return VariableBuilder.create_internal_nn_module(
+                        target, module_key, **options
+                    )
 
             else:
                 # This is Dynamo created graph module, e.g., graph module coming
@@ -1751,8 +1754,9 @@ class OutputGraph(OutputGraphCommon):
                 # sourceless, so let's return a unspecializedNNModule variable
                 # tracker.
                 def wrap_name(module_key: str) -> VariableTracker:
-                    # pyrefly: ignore[bad-argument-type]
-                    return variables.UnspecializedNNModuleVariable(target, **options)
+                    return SourcelessUserDefinedObjectBuilder.create(
+                        self.current_tx, target, **options
+                    )
 
         elif isinstance(target, (torch.SymInt, torch.SymFloat)):
             # HACKY CODE REGION BEGIN
