@@ -65,10 +65,16 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results
-from tools.testing.llm_td.selection import LLM_TD_SELECTION_FILE, Selection
+from tools.testing.llm_td.selection import (
+    LLM_TD_HEDGE,
+    LLM_TD_SELECTION_FILE,
+    Selection,
+)
 from tools.testing.target_determination.gen_artifact import gen_ci_artifact
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
+    get_previous_failures,
+    read_additional_test_failures_file,
 )
 from tools.testing.target_determination.heuristics.utils import get_pr_number
 from tools.testing.test_run import TestRun
@@ -2546,11 +2552,6 @@ def main():
             return s.strip()
 
     percent_to_run = 25 if options.enable_td else 100
-    print_to_stderr(
-        f"Running {percent_to_run}% of tests based on TD"
-        if options.enable_td
-        else "Running all tests"
-    )
     include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
 
     llm_selection = Selection.load(
@@ -2560,6 +2561,7 @@ def main():
     llm_enforced = False
     td_include: set[str] = set()
     llm_hedged: set[str] = set()
+    prev_failed: set[str] = set()
     if llm_selection is not None:
         ranked = include + exclude
         td_include = {x.test_file for x in include}
@@ -2567,16 +2569,23 @@ def main():
         files = list(dict.fromkeys(x.test_file for x in ranked))
         covered = {f for f in files if llm_selection.covers(f, TEST_CONFIG)}
         file_time = {f: test_file_times_dict.get(f, 0) for f in files}
+        time_total = sum(file_time.values())
+        prev_failed = get_previous_failures() | read_additional_test_failures_file()
         llm_enforced = (
             options.enable_td and llm_selection.enforce and get_pr_number() is not None
         )
+        if llm_enforced and not time_total:
+            llm_enforced = False
+            print_to_stderr("LLM selection: no test times for this config, using TD")
         llm_include, llm_exclude, llm_hedged = llm_selection.split(
-            ranked, test_prioritizations.get_score, file_time, TEST_CONFIG
+            ranked, test_prioritizations.get_score, file_time, TEST_CONFIG, prev_failed
         )
         if llm_enforced:
             include, exclude = llm_include, llm_exclude
+            num_run = len({x.test_file for x in include})
+            budget = LLM_TD_HEDGE * time_total
             print_to_stderr(
-                f"LLM selection: running {len(covered | llm_hedged)} of {len(files)} test files ({len(covered)} selected)"
+                f"LLM selection: running {num_run} of {len(files)} test files ({len(covered)} selected, {len(llm_hedged)} hedged within {budget:.0f}s)"
             )
         if IS_CI:
             emit_metric(
@@ -2589,11 +2598,18 @@ def main():
                     "num_covered": len(covered),
                     "num_td_include": len(td_include),
                     "num_hedged": len(llm_hedged),
-                    "time_total": sum(file_time.values()),
+                    "num_previously_failed": len(prev_failed & set(files)),
+                    "time_total": time_total,
                     "time_covered": sum(file_time[f] for f in covered),
                     "time_hedged": sum(file_time[f] for f in llm_hedged),
                 },
             )
+    if not llm_enforced:
+        print_to_stderr(
+            f"Running {percent_to_run}% of tests based on TD"
+            if options.enable_td
+            else "Running all tests"
+        )
 
     test_batch = TestBatch("tests to run", include, False)
     test_batch_exclude = TestBatch("excluded", exclude, True)
@@ -2655,13 +2671,13 @@ def main():
                     },
                 )
                 # Only tests that ran can fail, so with TD on these are failures in
-                # TD's include (shadow) or in the selection plus hedge (enforced).
+                # TD's include (shadow) or in the selection, previous failures and hedge
+                # (enforced).
                 if llm_selection is not None:
                     emit_metric(
                         "llm_td_shadow_failure",
                         {
                             "failure": str(test),
-                            "test_config": TEST_CONFIG,
                             "covered": llm_selection.covers(
                                 test.test_file, TEST_CONFIG
                             ),
@@ -2669,6 +2685,7 @@ def main():
                             "td_enabled": options.enable_td,
                             "in_td_include": test.test_file in td_include,
                             "hedged": test.test_file in llm_hedged,
+                            "previously_failed": test.test_file in prev_failed,
                         },
                     )
             gen_additional_test_failures_file(
