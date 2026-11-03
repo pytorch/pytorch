@@ -81,9 +81,11 @@ def run_one(
         cost += d.get("total_cost_usd") or 0.0
         # As in select_tests.select: an error result's output is discarded.
         out = None if d.get("is_error") else d.get("structured_output")
-        # Only the CLI's own error fields: a model's prose can mention "500".
+        # Only the CLI's own error fields: a model's prose can mention "500". A
+        # result with no "type" is query_model's dump of output that was not the
+        # CLI's JSON, i.e. a crash, which is final whatever its trace says.
         err = f"{d.get('subtype', '')} {d.get('result', '') if d.get('is_error') else ''}"  # fmt: skip
-        transient = out is None and bool(TRANSIENT.search(err))
+        transient = out is None and "type" in d and bool(TRANSIENT.search(err))
         if not transient:
             break
     return {
