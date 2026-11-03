@@ -6064,6 +6064,9 @@ if HAS_CUDA_AND_TRITON:
                     compiled(torch.rand([20], device="cuda")).backward()
                     self.assertEqual(w.grad, torch.ones_like(w))
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hits)
+                # Before the fix the hit's post-compile raised, which the cache
+                # caught as a bypass.
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
                 # The backward told the manager it ran: one graph, none pending.
                 manager = self.get_manager()
                 self.assertEqual(manager.new_graph_id().id, 1)
@@ -6089,6 +6092,29 @@ if HAS_CUDA_AND_TRITON:
 
         # Under graph partition the backend ignores CPU ops when it checks for skips.
         @torch._inductor.config.patch("graph_partition", False)
+        @torch._inductor.config.patch("graph_partition", False)
+        @torch._inductor.config.patch("triton.cudagraph_capture_sizes", (2,))
+        def test_skipped_backward_without_partition_of_a_forward_without_graph(self):
+            # Lazily lowered, without partition: capture sizes run the forward
+            # eagerly (no manager), and the backward's own fail reason takes
+            # post-compile's skip branch, which hands it to the manager.
+            w = torch.rand([20], device="cuda", requires_grad=True)
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return (x.sin() * w).sum()
+
+            backwards = self._spy_on_backward_generation()
+            for _ in range(3):
+                x = torch.rand([20], device="cuda")
+                out = foo(x)
+                w.grad = None
+                with config.patch(force_disable_cudagraph_TESTING_ONLY=True):
+                    out.backward()
+                self.assertEqual(w.grad, x.sin())
+            self.assertEqual(backwards(), 1)
+            self.assertIsNone(self.get_manager())
+
         @torch._functorch.config.patch("force_non_lazy_backward_lowering", True)
         def test_cudagraphs_backend_with_eagerly_lowered_skipped_backward(self):
             # The backward round-trips through the CPU, so it runs without a CUDA
