@@ -15,7 +15,16 @@
 
 - **The idea.** One `claude -p` call per PR push sees the title, description, diff and every candidate test file annotated with its CI minutes, and returns the files worth running.
 - **Old and new.** "Old" is TD as it runs on PRs today: its top 25% of test files per config, in the workflows that have TD. "New" is the proposed production config: Opus 5.5 at medium effort, plus TD's top files up to 20% of each config's test time. Main always runs everything in both.
-- **The model calls** cost about $2.2k a month. This stack reaches $190k of the saving, in pull and trunk. The other $43k needs follow-ups: the inductor workflow has to download the selection, and periodic and slow have to enable TD at all.
+- **The 25% and the 20% are in different units.** TD's 25% counts files: run_test.py keeps the top quarter of TD's ranked files (`get_top_per_tests(25)`) whatever their size. TD ranks the large, often-failing files high, so that quarter of the files is 48.7% of the CPU test time on a typical change. The hedge's 20% counts seconds: TD's ranked files are added in order until they fill 20% of the config's test time, about the first two fifths of what TD runs today. The model does not filter TD's list. New runs the union of the model's picks and that hedge:
+
+| CPU test time run on a typical change | Share of a full pass |
+|---|---|
+| Old: TD's top 25% of files | 48.7% |
+| New, model's picks alone (including the run-all rules) | 7.6% |
+| New, model's picks plus the 20% hedge | 24.0% |
+
+The hedge adds 16.4 points rather than 20 because files the model already picked cost it nothing, and a file that does not fit the remaining budget is skipped.
+- **The model calls** cost about $2.2k a month. This stack reaches $190k of the saving, in pull and trunk. The other $43k is in workflows where run_test.py turns TD off today (inductor's unit tests, periodic, slow), so they run every test on PRs and the selection is not enforced there yet; see Follow-ups under Spend.
 - **The stack.** The selector, harness, run_test.py integration and a shadow-mode CI workflow are in the PRs below this one. Enforcement is opt-in per PR through the `ci-llm-td` label.
 
 The sections up to Time to land compare old and new only. Other models, effort levels and hedge budgets are in [Sweep](#sweep-other-models-efforts-and-hedges), which is how the config was chosen.
@@ -82,7 +91,7 @@ Of 20,094 failing tests in TD jobs on these PRs' pushes, 25.6% are flaky by thes
 | model calls | 0 | 2.2 |
 
 - **Saved:** $233k a month, $191k CPU and $43k GPU. The first three rows, which this stack covers, are $190k.
-- **Follow-ups.** Inductor ($40k) needs `inductor.yml` to download the selection. Periodic and slow ($4k) run every test on PRs today because run_test.py turns TD off outside pull, trunk and ROCm, and the selection is only enforced where TD is on; those rows assume TD is extended to them.
+- **Follow-ups.** run_test.py enables TD only when `GITHUB_WORKFLOW` is pull, trunk or ROCm (`--enable-td`'s default), and the selection is only enforced where TD is on. So jobs of the inductor unit-test workflow (run on PRs by `ciflow/inductor`), periodic and slow run every test, under old and new alike. Their test jobs already download the selection through the shared `_linux-test.yml` step, so each follow-up is a one-line change that adds the workflow to that check, made once the shadow data shows the selection is safe there. The rows above assume it is: inductor $40k, periodic and slow $4k.
 - **Why 25% and not 50%.** New runs about half the PR test time old does, but three things dilute that. Main and scheduled runs keep running everything. The inductor model benchmarks, which PRs trigger, are not test files. And the 20% fixed job overhead is not saved (see Dollar model).
 - In inductor only the run_test.py unit-test configs are selectable. The model benchmarks (huggingface, timm, torchbench) are most of its GPU spend.
 - **Not in the table:** rocm-mi300 and the other ROCm workflows also download the selection, but their runners are carried at $0 in `misc.runner_cost`, so they show up only under Time to land and Capacity. The remaining callers (win, mac, s390x, xpu) cost under $1k a month together or are also carried at $0.

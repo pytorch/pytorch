@@ -73,19 +73,19 @@ def main() -> None:
             xy = [(cost(tag, p), caught(tag, p, kind)[0]) for p in pols]
             points += xy
             ax.plot(*zip(*xy), color=color, marker=MARKER[effort], markersize=5, linewidth=1, label=f"{name} {effort}")
-            if tag == PRODUCTION[0]:
+            if tag == PRODUCTION[0] and kind == "head":
                 for p, (x, y) in zip(pols, xy):
-                    ax.annotate(f"{HEDGES[p]}%", (x, y), textcoords="offset points", xytext=(4, -10), fontsize=7)
+                    ax.annotate(f"+{HEDGES[p]}% hedge" if HEDGES[p] else "no hedge", (x, y), textcoords="offset points", xytext=(4, -10), fontsize=7)
         x, y = cost(*PRODUCTION), caught(*PRODUCTION, kind)[0]
         ax.scatter(x, y, s=220, marker="*", color="gold", edgecolors="black", zorder=5, label="proposed: Opus medium + 20% hedge")
         td_x, (td_y, n) = cost("td", "td25"), caught("td", "td25", kind)
         points.append((td_x, td_y))
         ax.axhline(td_y, color="#d62728", linestyle=":", linewidth=1, zorder=0, label="TD today's level")
-        ax.scatter(td_x, td_y, s=70, marker="X", color="#d62728", zorder=5, label="TD today (top 25%)")
+        ax.scatter(td_x, td_y, s=70, marker="X", color="#d62728", zorder=5, label="TD today (top 25% of files)")
         fx, fy = zip(*frontier(points))
         ax.plot(fx, fy, color="gray", linestyle="--", linewidth=1, zorder=0, label="Pareto frontier")
         ax.set_title(f"{titles[kind]} (n={n})", fontsize=10)
-        ax.set_xlabel("CPU test time run on a typical change (% of a full pass)")
+        ax.set_xlabel("CPU test time run on a typical change (% of a full pass, in seconds)")
         ax.set_xlim(0, 55)
         ax.grid(alpha=0.3)
     # fmt: on
