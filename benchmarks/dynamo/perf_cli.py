@@ -18,6 +18,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1504,7 +1505,7 @@ def config_to_command(
 
     cmd_parts.extend(["--output", f"{config}_performance.csv"])
 
-    return " ".join(cmd_parts)
+    return shlex.join(cmd_parts)
 
 
 def cmd_repro(args):
@@ -1811,7 +1812,7 @@ Examples:
         "--baseline",
         type=str,
         default="latest",
-        help="Baseline run ID, 'latest' for most recent main nightly (default), or 'none' to disable",
+        help="Baseline run ID, 'latest' for a matching main run (default), or 'none' to disable",
     )
     p_summary.add_argument(
         "--metric",
