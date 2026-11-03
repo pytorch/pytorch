@@ -44,9 +44,9 @@ struct AvgPoolingParams {
   int32_t dims;
   int32_t pooling_dims;
   ::c10::metal::array<idx_type_t, N> input_sizes;
-  ::c10::metal::array<idx_type_t, N> input_strides;
+  ::c10::metal::array<int64_t, N> input_strides;
   ::c10::metal::array<idx_type_t, N> output_sizes;
-  ::c10::metal::array<idx_type_t, N> output_strides;
+  ::c10::metal::array<int64_t, N> output_strides;
   ::c10::metal::array<idx_type_t, N - 2> kernel_size;
   ::c10::metal::array<idx_type_t, N - 2> stride;
   ::c10::metal::array<idx_type_t, N - 2> padding;
