@@ -305,6 +305,25 @@ class MetaTensorDescriber:
     def describe_tensor(
         self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False
     ) -> MetaTensorDesc[Any]:
+        # A C++ fake mode includes Fake in TLS, so every op, including a metadata
+        # query on a real tensor, reaches the fake fallback. Take Fake out of
+        # the include set while describing: a real tensor then reaches its
+        # backend kernels, while a C++ fake still reaches the fallback through
+        # its own key, unless the caller excluded Fake. Code run while
+        # describing, such as a subclass's __tensor_flatten__, also sees Fake
+        # not included.
+        fake = torch._C.DispatchKey.Fake
+        if not torch._C._dispatch_tls_is_dispatch_key_included(fake):
+            return self._describe_tensor(t, recurse=recurse, trace=trace)
+        torch._C._dispatch_tls_set_dispatch_key_included(fake, False)
+        try:
+            return self._describe_tensor(t, recurse=recurse, trace=trace)
+        finally:
+            torch._C._dispatch_tls_set_dispatch_key_included(fake, True)
+
+    def _describe_tensor(
+        self, t: torch.Tensor, *, recurse: bool, trace: bool
+    ) -> MetaTensorDesc[Any]:
         data = _unwrap_python_functional_tensor(t) if self.copy_data else None
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()

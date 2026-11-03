@@ -628,6 +628,75 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             x = torch.rand([4])
             y = torch.nn.parameter.Parameter(x)
             self.assertTrue(isinstance(y, torch.nn.Parameter))
+            # A fake Parameter is a detached fake of the same type with the
+            # Parameter marker; for a C++ fake that type is torch.Tensor
+            self.assertIs(type(y), type(x))
+            self.assertTrue(y._is_param)
+            self.assertIsNot(y, x)
+            self.assertFalse(torch.nn.Parameter(x, requires_grad=False).requires_grad)
+
+    def test_parameter_from_lazy_module_parameter(self):
+        # A lazy module's UninitializedParameter needs _make_subclass on a fake,
+        # which fails for a Python FakeTensor.
+        if not CPP_FAKETENSOR:
+            self.skipTest("lazy modules cannot be built under this fake mode")
+        with FakeTensorMode():
+            lin = torch.nn.LazyLinear(4)
+            lin(torch.randn(2, 3))
+            # The materialized weight's exact type is Parameter
+            self.assertIs(type(lin.weight), torch.nn.Parameter)
+            tied = torch.nn.Parameter(lin.weight)
+        self.assertTrue(is_fake_tensor(tied))
+        self.assertIsInstance(tied, torch.nn.Parameter)
+        # tied gets the marker form; lin.weight is left as it was
+        self.assertIs(type(tied), torch.Tensor)
+        self.assertTrue(tied._is_param)
+        self.assertIsNot(tied, lin.weight)
+        self.assertIs(type(lin.weight), torch.nn.Parameter)
+
+    @skipIfTorchDynamo("uses torch.compile")
+    def test_compile_module_with_fake_parameters(self):
+        # The parameter guards must accept the same fake parameters on later calls
+        mode = FakeTensorMode()
+        with mode:
+            m = torch.nn.Linear(4, 4)
+            x = torch.randn(2, 4)
+        cnt = torch._dynamo.testing.CompileCounter()
+        f = torch.compile(m, backend=cnt)
+        try:
+            with mode:
+                for _ in range(3):
+                    f(x)
+            self.assertEqual(cnt.frame_count, 1)
+        finally:
+            torch._dynamo.reset()
+
+    @skipIfTorchDynamo("uses torch.compile")
+    def test_compile_parameter_subclass_with_fake_input(self):
+        # Parameter.__new__ treats a C++ fake differently, so a graph traced for
+        # a real input must not be reused for one
+        if not CPP_FAKETENSOR:
+            self.skipTest("TENSOR_MATCH already tells a Python FakeTensor apart")
+
+        class MyParam(torch.nn.Parameter):
+            pass
+
+        def fn(x):
+            return MyParam(x, requires_grad=False)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        f = torch.compile(fn, backend=cnt, fullgraph=True)
+        try:
+            self.assertIs(type(f(torch.randn(2))), MyParam)
+            with FakeTensorMode():
+                out = f(torch.randn(2))
+            self.assertIs(type(out), torch.Tensor)
+            self.assertTrue(out._is_param)
+            self.assertEqual(cnt.frame_count, 2)
+            self.assertIs(type(f(torch.randn(2))), MyParam)
+            self.assertEqual(cnt.frame_count, 2)
+        finally:
+            torch._dynamo.reset()
 
     @skipIfCppFakeTensor("exercises Python FakeTensor parameter reconstruction")
     def test_parameter_state_reconstruction_from_dict(self):
@@ -5383,6 +5452,153 @@ class TestFakeTensorViewCopy(TestCase):
                     ValueError, "Cannot view a tensor with shape *"
                 ):
                     _ = yf.view(-1)
+
+
+class TestCppFakeTensorModeBindings(TestCase):
+    class Wrapper:
+        pass
+
+    def _make_mode(self, shape_env=None):
+        wrapper = self.Wrapper()
+        mode = torch._C._CppFakeTensorMode(FakeTensorConverter(), shape_env, wrapper)
+        wrapper._cpp_mode = mode
+        return mode, wrapper
+
+    def test_create(self):
+        mode, wrapper = self._make_mode()
+        self.assertIs(wrapper._cpp_mode, mode)
+        self.assertTrue(mode.allow_meta)
+        mode.allow_meta = False
+        self.assertFalse(mode.allow_meta)
+        with torch._functorch.config.patch(fake_tensor_allow_meta=False):
+            mode, wrapper = self._make_mode(ShapeEnv())
+        self.assertFalse(mode.allow_meta)
+        self.assertTrue(mode.allow_unsafe_data_ptr_access)
+        config = torch._functorch.config
+        with config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            mode, wrapper = self._make_mode()
+        self.assertFalse(mode.allow_unsafe_data_ptr_access)
+        mode.allow_unsafe_data_ptr_access = True
+        self.assertTrue(mode.allow_unsafe_data_ptr_access)
+        with self.assertRaisesRegex(RuntimeError, "Expected a FakeTensorConverter"):
+            torch._C._CppFakeTensorMode(None, None, self.Wrapper())
+        with self.assertRaisesRegex(RuntimeError, "Expected the CppFakeTensorMode"):
+            torch._C._CppFakeTensorMode(FakeTensorConverter(), None, None)
+
+    def test_wrapper_weakref(self):
+        mode, wrapper = self._make_mode()
+        ref = weakref.ref(wrapper)
+        del wrapper
+        gc.collect()
+        self.assertIsNone(ref())
+        self.assertTrue(mode.allow_meta)
+
+    def test_from_meta_and_device(self):
+        mode, _ = self._make_mode()
+        # A plain meta tensor gets a new detached fake on device sharing its
+        # storage, as in Python, and keeps its own device and autograd state
+        meta = torch.empty(2, 3, device="meta", requires_grad=True) * 2
+        fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+        self.assertIsNot(fake, meta)
+        self.assertTrue(torch._C._is_fake_tensor(fake))
+        self.assertEqual(fake.device, torch.device("cpu"))
+        self.assertEqual(fake.shape, (2, 3))
+        self.assertTrue(fake.requires_grad)
+        self.assertTrue(fake.is_leaf)
+        self.assertEqual(
+            fake.untyped_storage()._cdata, meta.untyped_storage()._cdata
+        )
+        self.assertFalse(torch._C._is_fake_tensor(meta))
+        self.assertTrue(meta.is_meta)
+        self.assertIsNotNone(meta.grad_fn)
+        no_grad_meta = torch.empty(2, device="meta")
+        no_grad = torch._C._from_meta_and_device(no_grad_meta, torch.device("cpu"), mode)
+        self.assertFalse(no_grad.requires_grad)
+
+        # A fake of the same mode that reads as meta gets a new detached fake
+        # on device, unseen by dispatch modes, and keeps its own device and
+        # real tensor
+        meta_fake = torch._C._from_meta_and_device(
+            torch.empty(2, 3, device="meta", requires_grad=True),
+            torch.device("meta"),
+            mode,
+        )
+        torch._C._set_real_tensor(meta_fake, torch.zeros(2, 3))
+        ops = []
+
+        class RecordingMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                ops.append(func)
+                return func(*args, **(kwargs or {}))
+
+        with RecordingMode():
+            moved = torch._C._from_meta_and_device(meta_fake, torch.device("cpu"), mode)
+        self.assertEqual(ops, [])
+        self.assertIsNot(moved, meta_fake)
+        self.assertTrue(torch._C._is_fake_tensor(moved))
+        self.assertEqual(moved.device, torch.device("cpu"))
+        self.assertIsNone(torch._C._get_real_tensor(moved))
+        self.assertTrue(moved.requires_grad)
+        self.assertTrue(moved.is_leaf)
+        self.assertFalse(moved._is_view())
+        self.assertEqual(meta_fake.device, torch.device("meta"))
+        self.assertIsNotNone(torch._C._get_real_tensor(meta_fake))
+        other_mode, _other_wrapper = self._make_mode()
+        with self.assertRaisesRegex(RuntimeError, "Expected a fake of the given mode"):
+            torch._C._from_meta_and_device(meta_fake, torch.device("cpu"), other_mode)
+
+        with self.assertRaisesRegex(RuntimeError, "device must be 'meta', got cpu"):
+            torch._C._from_meta_and_device(fake, torch.device("cpu"), mode)
+        with self.assertRaisesRegex(RuntimeError, "device must be 'meta', got cpu"):
+            torch._C._from_meta_and_device(torch.empty(2), torch.device("cpu"), mode)
+        meta_subclass = TwoTensor(
+            torch.empty(2, device="meta"), torch.empty(2, device="meta")
+        )
+        with self.assertRaisesRegex(RuntimeError, "Expected a plain meta tensor"):
+            torch._C._from_meta_and_device(meta_subclass, torch.device("cpu"), mode)
+
+        class DispatchSubclass(torch.Tensor):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                return func(*args, **(kwargs or {}))
+
+        # A subclass made from a fake is rejected too, not silently unwrapped
+        fake_subclass = torch.Tensor._make_subclass(DispatchSubclass, meta_fake)
+        with self.assertRaisesRegex(RuntimeError, "Expected a plain meta tensor"):
+            torch._C._from_meta_and_device(fake_subclass, torch.device("cpu"), mode)
+
+        # allow_meta is enforced
+        with torch._functorch.config.patch(fake_tensor_allow_meta=False):
+            strict_mode, _strict_wrapper = self._make_mode()
+        meta = torch.empty(2, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "allow_meta is False"):
+            torch._C._from_meta_and_device(meta, torch.device("meta"), strict_mode)
+        self.assertFalse(torch._C._is_fake_tensor(meta))
+        self.assertTrue(meta.is_meta)
+
+    def test_unsafe_data_ptr_access(self):
+        def make_fake(mode):
+            meta = torch.empty(2, device="meta")
+            return torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+
+        warning = "Accessing the data pointer of FakeTensor"
+        config = torch._functorch.config
+        with config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            strict_mode, _ = self._make_mode()
+        with self.assertRaisesRegex(RuntimeError, "data pointer"):
+            make_fake(strict_mode).data_ptr()
+
+        mode, _ = self._make_mode()
+        fake = make_fake(mode)
+        with self.assertWarnsOnceRegex(UserWarning, warning):
+            fake.data_ptr()
+
+        # Reassigning applies to fakes created afterwards
+        mode.allow_unsafe_data_ptr_access = False
+        with self.assertRaisesRegex(RuntimeError, "data pointer"):
+            make_fake(mode).data_ptr()
+        with self.assertWarnsOnceRegex(UserWarning, warning):
+            fake.data_ptr()
 
 
 if __name__ == "__main__":

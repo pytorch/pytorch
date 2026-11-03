@@ -35,6 +35,97 @@ _IS_WINDOWS = sys.platform == "win32"
 class TestUtils(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_safe_repr(self):
+        class BadRepr:
+            def __repr__(self):
+                raise RuntimeError("repr failed")
+
+        t = torch.ones(1)
+        # Only the elements whose repr raises are replaced
+        self.assertEqual(
+            utils.safe_repr((1, BadRepr(), [t, BadRepr()])),
+            f"(1, <BadRepr>, [{t!r}, <BadRepr>])",
+        )
+        self.assertEqual(
+            utils.safe_repr({"x": BadRepr(), "y": 2}), "{'x': <BadRepr>, 'y': 2}"
+        )
+        self.assertEqual(utils.safe_repr((BadRepr(),)), "(<BadRepr>,)")
+        # An exception keeps its message when one of its args has a bad repr
+        self.assertEqual(
+            utils.safe_repr(RuntimeError("boom", BadRepr())),
+            "RuntimeError('boom', <BadRepr>)",
+        )
+        self.assertEqual(utils.safe_repr((t, {"k": 2})), repr((t, {"k": 2})))
+
+    def test_run_node_error_with_bad_repr_arg(self):
+        # A node that fails under fake tensors still reports the original error
+        # when one of its arguments has a repr that raises
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        class BadReprTensor(TwoTensor):
+            def __repr__(self):
+                raise RuntimeError("repr failed")
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+                return BadReprTensor(inner_tensors["a"], inner_tensors["b"])
+
+        def f(x, y):
+            return x + y
+
+        x = BadReprTensor(torch.ones(4), torch.ones(4))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            r"\(\*\(<BadReprTensor>, .*\), \*\*\{\}\): got RuntimeError\('Attempting to broadcast",
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x, torch.ones(3))
+
+    def test_summarize_example_value(self):
+        self.assertEqual(
+            utils.summarize_example_value([torch.ones(2, 3), 4]),
+            "list[Tensor(..., size=(2, 3)), 4]",
+        )
+        self.assertEqual(
+            utils.summarize_example_value(torch.ones(2)), "Tensor(..., size=(2,))"
+        )
+        # Without values to show it, int64 is shown too, as in a fake tensor's repr
+        self.assertEqual(
+            utils.summarize_example_value(torch.ones(2, dtype=torch.int64)),
+            "Tensor(..., size=(2,), dtype=torch.int64)",
+        )
+        # A non-default dtype and the autograd state are shown, as in a repr
+        t = torch.ones(2, dtype=torch.float16, requires_grad=True)
+        self.assertEqual(
+            utils.summarize_example_value(t),
+            "Tensor(..., size=(2,), dtype=torch.float16, requires_grad=True)",
+        )
+        self.assertEqual(
+            utils.summarize_example_value(t * 2),
+            "Tensor(..., size=(2,), dtype=torch.float16, grad_fn=<MulBackward0>)",
+        )
+        # Reading grad_fn raises for a view created and modified in place in
+        # no-grad mode; like a repr, the summary shows it as invalid
+        base = torch.ones(3, requires_grad=True).clone()
+        with torch.no_grad():
+            view = base[:2]
+            view.mul_(2)
+        self.assertEqual(
+            utils.summarize_example_value(view),
+            "Tensor(..., size=(2,), grad_fn=<Invalid>)",
+        )
+
+        # A tuple is summarized like a list, and a non-tensor whose repr raises
+        # is shown as <ClassName>
+        class BadRepr:
+            def __repr__(self):
+                raise RuntimeError("repr failed")
+
+        self.assertEqual(
+            utils.summarize_example_value((torch.ones(1), 2)),
+            "tuple[Tensor(..., size=(1,)), 2]",
+        )
+        self.assertEqual(utils.summarize_example_value(BadRepr()), "<BadRepr>")
+
     def test_cleanup_hook_tolerates_missing_name(self):
         # During interpreter shutdown the scope's module __dict__ may already be
         # cleared before the weakref callback fires the hook. The hook must not

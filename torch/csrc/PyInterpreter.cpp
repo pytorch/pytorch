@@ -1084,6 +1084,7 @@ std::function<py::object(py::object)> make_fake_device_stamp(
         "Note [C++ fake op_impl outputs]");
     at::set_and_normalize_fake_device(t.unsafeGetTensorImpl(), common_device);
     t.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+    at::mark_fake_storage(t.unsafeGetTensorImpl(), *mode);
     return obj;
   };
 }
@@ -1162,11 +1163,16 @@ bool run_python_callback(
   return true;
 }
 
-// The current TLS with Fake no longer excluded, so ops run by a Python fake
-// implementation dispatch back to Fake.
+// The TLS for ops run by a Python fake implementation: Fake is not excluded,
+// and while a mode is installed it is included, so that those ops, including
+// factory ops with no fake inputs, are faked even if the caller took Fake out
+// of the include set.
 c10::impl::LocalDispatchKeySet fake_reenabled_tls() {
   auto tls = c10::impl::tls_local_dispatch_key_set();
   tls.excluded_ = tls.excluded_.remove(c10::DispatchKey::Fake);
+  if (c10::impl::FakeTensorModeTLS::get_state() != nullptr) {
+    tls.included_ = tls.included_.add(c10::DispatchKey::Fake);
+  }
   return tls;
 }
 

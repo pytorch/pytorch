@@ -503,6 +503,31 @@ class GraphModule(torch.nn.Module):
 
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
+class TestLeafFunctionEagerForward(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_forward_drops_fake_key(self):
+        # The leaf function runs eagerly on real tensors, so the Fake key that a
+        # C++ fake mode includes in TLS must not be included while it runs
+        from torch._higher_order_ops.invoke_leaf_function import _make_forward
+
+        fake = torch._C.DispatchKey.Fake
+        seen = []
+
+        def fn(x):
+            seen.append(torch._C._dispatch_tls_is_dispatch_key_included(fake))
+            return (x * 2,)
+
+        include = torch._C._dispatch_tls_local_include_set()
+        exclude = torch._C._dispatch_tls_local_exclude_set()
+        forward, _ = _make_forward(fn, include | torch._C.DispatchKeySet(fake), exclude)
+        x = torch.randn(3, requires_grad=True)
+        (out,) = forward(x)
+        self.assertEqual(seen, [False])
+        self.assertEqual(out, x * 2)
+
+
+@skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionEscapedGradients(TestCase):
     hw_classification = HardwareClassification.GENERIC
 

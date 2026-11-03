@@ -258,6 +258,15 @@ struct C10_API FakeTensorMode {
   // so read this through PyInterpreterVTable::allow_non_fake_inputs().
   bool allow_non_fake_inputs_ = false;
 
+  // Whether reading a fake's mutable data pointer only warns (true) or throws
+  // (false), as Python's _allow_unsafe_data_ptr_access. The _CppFakeTensorMode
+  // binding initializes it from
+  // torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access. It can
+  // be reassigned and applies to fakes created afterwards: at::mark_fake_storage
+  // marks a new fake's storage, which its views share. A storage's marking is
+  // never relaxed, and throwing takes precedence over warning.
+  bool allow_unsafe_data_ptr_access_ = true;
+
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter,
