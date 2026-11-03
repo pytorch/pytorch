@@ -24,6 +24,50 @@ struct PoolDimGeom {
   bool adaptive;
 };
 
+// Outputs whose window, spanning `span` input indices, covers input index `idx`
+// along one pooling dim
+inline IterBounds<int32_t> pool_output_range(
+    int32_t idx,
+    int32_t padding,
+    int32_t span,
+    int32_t stride,
+    int32_t out_size) {
+  auto padded_idx = idx + padding;
+  auto first = padded_idx < span ? 0 : (padded_idx - span) / stride + 1;
+  return {first, min(padded_idx / stride + 1, out_size)};
+}
+
+// Coordinates of one thread of a 2D pooling kernel, which runs one thread per
+// element (or tile of elements) of a [N, C, H, W] (or [C, H, W]) tensor
+// dispatched as (c, w, n * H + h) for channels_last and (w, h, n * C + c)
+// otherwise, so that consecutive threads follow the smallest stride
+struct Pool2dCoords {
+  int32_t n, c, h, w;
+};
+
+inline Pool2dCoords pool2d_coords(
+    uint3 pos,
+    int32_t C,
+    int32_t H,
+    bool channels_last) {
+  if (channels_last) {
+    return {
+        int32_t(pos.z / H), int32_t(pos.x), int32_t(pos.z % H), int32_t(pos.y)};
+  }
+  return {
+      int32_t(pos.z / C), int32_t(pos.z % C), int32_t(pos.y), int32_t(pos.x)};
+}
+
+template <typename idx_t>
+inline idx_t pool2d_offset(
+    Pool2dCoords xy,
+    constant int64_t* strides,
+    int32_t dims) {
+  auto offset = xy.c * idx_t(strides[dims - 3]) +
+      xy.h * idx_t(strides[dims - 2]) + xy.w * idx_t(strides[dims - 1]);
+  return dims == 4 ? offset + xy.n * idx_t(strides[0]) : offset;
+}
+
 template <int32_t dim>
 IterBounds<int32_t> get_input_iter_bounds(
     constant int32_t* input_sizes,
@@ -438,124 +482,285 @@ kernel void max_pool2d_dense(
   }
 }
 
-// Computes out[v] = max(row[c0 + v], ..., row[c0 + v + kw - 1]) for v < G,
+template <typename T>
+struct MaxPoolS1 {
+  using acc_t = T;
+  static inline acc_t load(device const T* row, int32_t col, int32_t IW) {
+    return row[clamp(col, 0, IW - 1)];
+  }
+  static inline acc_t reduce(acc_t a, acc_t b) {
+    update_max(a, b);
+    return a;
+  }
+  static inline acc_t seed(acc_t first) {
+    return first;
+  }
+};
+
+template <typename T>
+struct AvgPoolS1 {
+  using acc_t = opmath_t<T>;
+  static inline acc_t load(device const T* row, int32_t col, int32_t IW) {
+    return col >= 0 && col < IW ? static_cast<acc_t>(row[col]) : acc_t(0);
+  }
+  static inline acc_t reduce(acc_t a, acc_t b) {
+    return a + b;
+  }
+  static inline acc_t seed(acc_t) {
+    return acc_t(0);
+  }
+};
+
+template <typename acc_t>
+using PoolS1Tile = ::metal::
+    array<::metal::array<acc_t, pool2d_s1_tile_cols>, pool2d_s1_tile_rows>;
+
+// Lanes of the vector loads and stores of the _vec kernels (16 bytes for float)
+C10_METAL_CONSTEXPR int pool2d_s1_vec_width = 4;
+static_assert(
+    pool2d_s1_tile_cols % pool2d_s1_vec_width == 0,
+    "a tile row is loaded and stored as whole vectors");
+
+// The kCols + KW - 1 columns of an input row that a tile's windows cover
+template <typename acc_t, int KW>
+using PoolS1Row = ::metal::array<acc_t, pool2d_s1_tile_cols + KW - 1>;
+
+// Computes out[v] = reduce(row[c0 + v], ..., row[c0 + v + kw - 1]) for v < G,
 // assuming kw >= G. All G windows share [c0 + G - 1, c0 + kw), and each one
 // adds a suffix of the G - 1 columns before it and a prefix of the G - 1
-// columns after it, so only kw + G - 1 elements are loaded. Columns are clamped
-// to [0, IW), see max_pool2d_s1_nchw.
-template <int G, typename T>
-inline void max_pool_windows(
+// columns after it, so only kw + G - 1 elements are loaded.
+template <int G, typename Op, typename T>
+inline void pool_windows(
     device const T* row,
     int32_t c0,
     int32_t kw,
     int32_t IW,
-    thread T* out) {
-  T shared = row[clamp(c0 + G - 1, 0, IW - 1)];
+    thread typename Op::acc_t* out) {
+  auto shared = Op::load(row, c0 + G - 1, IW);
   for (int32_t j = G; j < kw; ++j) {
-    update_max(shared, row[clamp(c0 + j, 0, IW - 1)]);
+    shared = Op::reduce(shared, Op::load(row, c0 + j, IW));
   }
   out[G - 1] = shared;
   for (int v = G - 2; v >= 0; --v) {
-    out[v] = out[v + 1];
-    update_max(out[v], row[clamp(c0 + v, 0, IW - 1)]);
+    out[v] = Op::reduce(out[v + 1], Op::load(row, c0 + v, IW));
   }
-  T suffix = row[clamp(c0 + kw, 0, IW - 1)];
+  auto suffix = Op::load(row, c0 + kw, IW);
   for (int v = 1; v < G; ++v) {
-    update_max(out[v], suffix);
+    out[v] = Op::reduce(out[v], suffix);
     if (v + 1 < G) {
-      update_max(suffix, row[clamp(c0 + kw + v, 0, IW - 1)]);
+      suffix = Op::reduce(suffix, Op::load(row, c0 + kw + v, IW));
     }
   }
 }
 
-// Stride-1 2D max pooling of a dense NCHW tensor without dilation along W.
-// Each thread computes a tile of kCols x kRows outputs, so each input row is
-// loaded once per tile and reduced along W before being combined into all
-// output rows whose window covers it. Columns are clamped to the input, which
-// does not change the result, as without dilation along W the clamped column is
-// always within the window. KW is the window width if known at compile time
-// (which lets the row be kept in registers), or 0.
-template <typename T, int KW>
-kernel void max_pool2d_s1_nchw(
-    device const T* input [[buffer(0)]],
-    device T* output [[buffer(1)]],
-    constant PoolingParams<5>& p [[buffer(3)]],
-    uint3 pos [[thread_position_in_grid]]) {
-  constexpr int kCols = max_pool2d_s1_tile_cols;
-  constexpr int kRows = max_pool2d_s1_tile_rows;
-  const int32_t IH = p.input_sizes[p.dims - 2], IW = p.input_sizes[p.dims - 1];
-  const int32_t OH = p.output_sizes[p.dims - 2],
-                OW = p.output_sizes[p.dims - 1];
-  const auto kh = p.kernel_size[0], kw = KW > 0 ? KW : p.kernel_size[1];
-  const auto dh = p.dilation[0];
-  const int32_t ow0 = pos.x * kCols;
-  const int32_t oh0 = pos.y * kRows;
-  const int32_t c0 = ow0 - p.padding[1];
-  input += int64_t(pos.z) * (IH * IW);
+// Loads the columns of `row` that a tile's windows cover, through Op::load
+template <int KW, typename Op, typename T>
+inline void load_s1_row(
+    device const T* row,
+    int32_t c0,
+    int32_t IW,
+    thread PoolS1Row<typename Op::acc_t, KW>& vals,
+    bool_constant<false>) {
+  for (int i = 0; i < pool2d_s1_tile_cols + KW - 1; ++i) {
+    vals[i] = Op::load(row, c0 + i, IW);
+  }
+}
 
-  ::metal::array<::metal::array<T, kCols>, kRows> acc;
+// Same with the tile's own kCols columns loaded as vectors. The host picks
+// this only for odd KW with padding == KW / 2 and W and storage offsets that
+// are multiples of kCols, so the block starts at the tile's first output
+// column, aligned and inside the row
+template <int KW, typename Op, typename T>
+inline void load_s1_row(
+    device const T* row,
+    int32_t c0,
+    int32_t IW,
+    thread PoolS1Row<typename Op::acc_t, KW>& vals,
+    bool_constant<true>) {
+  using acc_t = typename Op::acc_t;
+  using vec_t = ::metal::vec<T, pool2d_s1_vec_width>;
+  constexpr int kCols = pool2d_s1_tile_cols;
+  constexpr int left = KW / 2;
+  static_assert(KW % 2 == 1, "the vector block starts at the first output");
+  auto block = reinterpret_cast<device const vec_t*>(row + c0 + left);
+  for (int i = 0; i < kCols / pool2d_s1_vec_width; ++i) {
+    const auto b = block[i];
+    for (int j = 0; j < pool2d_s1_vec_width; ++j) {
+      vals[left + pool2d_s1_vec_width * i + j] = acc_t(b[j]);
+    }
+  }
+  for (int i = 0; i < left; ++i) {
+    vals[i] = Op::load(row, c0 + i, IW);
+  }
+  for (int i = left + kCols; i < kCols + KW - 1; ++i) {
+    vals[i] = Op::load(row, c0 + i, IW);
+  }
+}
+
+// Reduces the kCols windows of one input row with Op, for a width KW known at
+// compile time, which keeps the row in registers
+template <int KW, bool VEC, typename Op, typename T>
+inline void reduce_s1_row(
+    device const T* row,
+    int32_t c0,
+    int32_t,
+    int32_t IW,
+    thread ::metal::array<typename Op::acc_t, pool2d_s1_tile_cols>& out,
+    bool_constant<true>) {
+  PoolS1Row<typename Op::acc_t, KW> vals;
+  load_s1_row<KW, Op>(row, c0, IW, vals, bool_constant<VEC>{});
+  for (int v = 0; v < pool2d_s1_tile_cols; ++v) {
+    out[v] = vals[v];
+    for (int j = 1; j < KW; ++j) {
+      out[v] = Op::reduce(out[v], vals[v + j]);
+    }
+  }
+}
+
+// Same for a runtime width kw, sharing the loads of overlapping windows
+template <int KW, bool VEC, typename Op, typename T>
+inline void reduce_s1_row(
+    device const T* row,
+    int32_t c0,
+    int32_t kw,
+    int32_t IW,
+    thread ::metal::array<typename Op::acc_t, pool2d_s1_tile_cols>& out,
+    bool_constant<false>) {
+  constexpr int kCols = pool2d_s1_tile_cols;
+  if (kw >= kCols) {
+    pool_windows<kCols, Op>(row, c0, kw, IW, out.data());
+  } else if (kw >= kCols / 2) {
+    pool_windows<kCols / 2, Op>(row, c0, kw, IW, out.data());
+    pool_windows<kCols / 2, Op>(
+        row, c0 + kCols / 2, kw, IW, out.data() + kCols / 2);
+  } else {
+    for (int v = 0; v < kCols; ++v) {
+      out[v] = Op::load(row, c0 + v, IW);
+    }
+    for (int32_t j = 1; j < kw; ++j) {
+      for (int v = 0; v < kCols; ++v) {
+        out[v] = Op::reduce(out[v], Op::load(row, c0 + v + j, IW));
+      }
+    }
+  }
+}
+
+// Stores the outputs of one tile row that lie inside the output row
+template <typename T>
+inline void store_s1_row(
+    device T* dst,
+    int32_t cols,
+    thread const ::metal::array<T, pool2d_s1_tile_cols>& out,
+    bool_constant<false>) {
+  for (int v = 0; v < pool2d_s1_tile_cols && v < cols; ++v) {
+    dst[v] = out[v];
+  }
+}
+
+// Same as whole vectors, for output rows that are multiples of kCols wide
+template <typename T>
+inline void store_s1_row(
+    device T* dst,
+    int32_t,
+    thread const ::metal::array<T, pool2d_s1_tile_cols>& out,
+    bool_constant<true>) {
+  using vec_t = ::metal::vec<T, pool2d_s1_vec_width>;
+  auto block = reinterpret_cast<device vec_t*>(dst);
+  for (int i = 0; i < pool2d_s1_tile_cols / pool2d_s1_vec_width; ++i) {
+    vec_t v;
+    for (int j = 0; j < pool2d_s1_vec_width; ++j) {
+      v[j] = out[pool2d_s1_vec_width * i + j];
+    }
+    block[i] = v;
+  }
+}
+
+// Stride-1 2D pooling of a dense NCHW plane without dilation along W, reduced
+// with Op. Each thread computes a tile of kCols x kRows windows, so each input
+// row is loaded once per tile and reduced along W before being combined into
+// all output rows whose window covers it, starting from Op::seed of the first
+// row. Max clamps columns to the input, which does not change the result, as
+// without dilation along W the clamped column is always within the window; avg
+// loads zeros there. KW is the window width if known at compile time (which
+// lets the row be kept in registers), or 0. VEC loads the tile's own kCols
+// columns as vectors, see load_s1_row.
+template <typename T, int KW, bool VEC, typename Op>
+__attribute__((always_inline)) inline void pool2d_s1_nchw_tile(
+    device const T* input,
+    constant int32_t* in_sizes,
+    constant int32_t* padding,
+    int32_t kh,
+    int32_t kw,
+    int32_t dh,
+    int32_t oh0,
+    int32_t ow0,
+    thread PoolS1Tile<typename Op::acc_t>& acc) {
+  using acc_t = typename Op::acc_t;
+  constexpr int kCols = pool2d_s1_tile_cols;
+  constexpr int kRows = pool2d_s1_tile_rows;
+  const int32_t IH = in_sizes[0], IW = in_sizes[1];
+  const int32_t c0 = ow0 - padding[1];
+
   ::metal::array<int32_t, kRows> first_row;
   for (int u = 0; u < kRows; ++u) {
     for (int v = 0; v < kCols; ++v) {
-      acc[u][v] = T(0);
+      acc[u][v] = acc_t(0);
     }
-    auto h = oh0 + u - p.padding[0];
+    auto h = oh0 + u - padding[0];
     if (h < 0) {
       h += dh * ((dh - 1 - h) / dh);
     }
     first_row[u] = h;
   }
 
-  const auto ih_begin = max(oh0 - p.padding[0], 0);
-  const auto ih_end = min(oh0 + kRows - p.padding[0] + (kh - 1) * dh, IH);
+  const auto ih_begin = max(oh0 - padding[0], 0);
+  const auto ih_end = min(oh0 + kRows - padding[0] + (kh - 1) * dh, IH);
   for (auto ih = ih_begin; ih < ih_end; ++ih) {
     const auto row = input + ih * IW;
-    ::metal::array<T, kCols> row_max;
-    if IF_CONSTEXPR (KW > 0) {
-      ::metal::array<T, kCols + KW - 1> vals;
-      for (int i = 0; i < kCols + KW - 1; ++i) {
-        vals[i] = row[clamp(c0 + i, 0, IW - 1)];
-      }
-      for (int v = 0; v < kCols; ++v) {
-        row_max[v] = vals[v];
-        for (int j = 1; j < KW; ++j) {
-          update_max(row_max[v], vals[v + j]);
-        }
-      }
-    } else if (kw >= kCols) {
-      max_pool_windows<kCols>(row, c0, kw, IW, row_max.data());
-    } else if (kw >= kCols / 2) {
-      max_pool_windows<kCols / 2>(row, c0, kw, IW, row_max.data());
-      max_pool_windows<kCols / 2>(
-          row, c0 + kCols / 2, kw, IW, row_max.data() + kCols / 2);
-    } else {
-      for (int v = 0; v < kCols; ++v) {
-        row_max[v] = row[clamp(c0 + v, 0, IW - 1)];
-      }
-      for (int32_t j = 1; j < kw; ++j) {
-        for (int v = 0; v < kCols; ++v) {
-          update_max(row_max[v], row[clamp(c0 + v + j, 0, IW - 1)]);
-        }
-      }
-    }
+    ::metal::array<acc_t, kCols> row_red;
+    reduce_s1_row<KW, VEC, Op>(
+        row, c0, kw, IW, row_red, bool_constant<(KW > 0)>{});
     for (int u = 0; u < kRows; ++u) {
-      const auto rel = ih - (oh0 + u - p.padding[0]);
+      const auto rel = ih - (oh0 + u - padding[0]);
       if (rel < 0 || rel > (kh - 1) * dh || (dh != 1 && rel % dh != 0)) {
         continue;
       }
       const bool first = ih == first_row[u];
       for (int v = 0; v < kCols; ++v) {
-        acc[u][v] = first ? row_max[v] : acc[u][v];
-        update_max(acc[u][v], row_max[v]);
+        acc[u][v] = first ? Op::seed(row_red[v]) : acc[u][v];
+        acc[u][v] = Op::reduce(acc[u][v], row_red[v]);
       }
     }
   }
+}
+
+template <typename T, int KW>
+kernel void max_pool2d_s1_nchw(
+    device const T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    constant PoolingParams<5>& p [[buffer(3)]],
+    uint3 pos [[thread_position_in_grid]]) {
+  auto in_sizes = p.input_sizes.data() + p.dims - 2;
+  const int32_t OH = p.output_sizes[p.dims - 2],
+                OW = p.output_sizes[p.dims - 1];
+  const int32_t ow0 = pos.x * pool2d_s1_tile_cols;
+  const int32_t oh0 = pos.y * pool2d_s1_tile_rows;
+  PoolS1Tile<T> acc;
+  pool2d_s1_nchw_tile<T, KW, false, MaxPoolS1<T>>(
+      input + int64_t(pos.z) * (in_sizes[0] * in_sizes[1]),
+      in_sizes,
+      p.padding.data(),
+      p.kernel_size[0],
+      KW > 0 ? KW : p.kernel_size[1],
+      p.dilation[0],
+      oh0,
+      ow0,
+      acc);
 
   const auto out_base = int64_t(pos.z) * (OH * OW) + (oh0 * OW + ow0);
-  for (int u = 0; u < kRows && oh0 + u < OH; ++u) {
-    for (int v = 0; v < kCols && ow0 + v < OW; ++v) {
-      output[out_base + u * OW + v] = acc[u][v];
-    }
+  for (int u = 0; u < pool2d_s1_tile_rows && oh0 + u < OH; ++u) {
+    store_s1_row(
+        output + out_base + u * OW, OW - ow0, acc[u], bool_constant<false>{});
   }
 }
 
@@ -645,6 +850,70 @@ kernel void max_pool_backward(
   }
 }
 
+// max_pool_backward for 2 pooling dims, with the grid of pool2d_coords over
+// tiles of pool2d_backward_tile_cols grad_input columns
+template <typename T, typename idx_t>
+kernel void max_pool2d_backward(
+    device T* grad_input [[buffer(0)]],
+    device const T* grad_output [[buffer(1)]],
+    device const int64_t* indices [[buffer(2)]],
+    constant PoolingParams<5>& params [[buffer(3)]],
+    uint3 pos [[thread_position_in_grid]]) {
+  constexpr auto tile_cols = pool2d_backward_tile_cols;
+  auto dims = params.dims;
+  auto in_sizes = params.input_sizes.data() + dims - 2;
+  auto out_sizes = params.output_sizes.data() + dims - 2;
+  const idx_t out_strides[2] = {
+      idx_t(params.output_strides[dims - 2]),
+      idx_t(params.output_strides[dims - 1])};
+  const idx_t index_strides[2] = {
+      idx_t(params.indices_strides[dims - 2]),
+      idx_t(params.indices_strides[dims - 1])};
+  auto IW = in_sizes[1];
+  auto xy = pool2d_coords(
+      pos, params.input_sizes[dims - 3], in_sizes[0], params.channels_last);
+  auto iw0 = xy.w * tile_cols;
+  auto span_h = (params.kernel_size[0] - 1) * params.dilation[0] + 1;
+  auto span_w = (params.kernel_size[1] - 1) * params.dilation[1] + 1;
+  auto oh = pool_output_range(
+      xy.h, params.padding[0], span_h, params.stride[0], out_sizes[0]);
+  auto ow = pool_output_range(
+      iw0, params.padding[1], span_w, params.stride[1], out_sizes[1]);
+  ow.end = pool_output_range(
+               min(iw0 + tile_cols - 1, IW - 1),
+               params.padding[1],
+               span_w,
+               params.stride[1],
+               out_sizes[1])
+               .end;
+  grad_output += pool2d_offset<idx_t>(
+      {xy.n, xy.c, 0, 0}, params.output_strides.data(), dims);
+  indices += pool2d_offset<idx_t>(
+      {xy.n, xy.c, 0, 0}, params.indices_strides.data(), dims);
+  auto flat_index0 = idx_t(xy.h) * IW + iw0;
+
+  opmath_t<T> grad_sum[tile_cols] = {};
+  for (auto o0 = oh.start; o0 < oh.end; o0++) {
+    for (auto o1 = ow.start; o1 < ow.end; o1++) {
+      auto col =
+          indices[o0 * index_strides[0] + o1 * index_strides[1]] - flat_index0;
+      if (col >= 0 && col < tile_cols) {
+        auto grad = static_cast<opmath_t<T>>(
+            grad_output[o0 * out_strides[0] + o1 * out_strides[1]]);
+        for (int32_t v = 0; v < tile_cols; v++) {
+          grad_sum[v] += col == v ? grad : 0;
+        }
+      }
+    }
+  }
+  grad_input += pool2d_offset<idx_t>(
+      {xy.n, xy.c, xy.h, iw0}, params.input_strides.data(), dims);
+  auto in_stride_w = idx_t(params.input_strides[dims - 1]);
+  for (int32_t v = 0; v < tile_cols && iw0 + v < IW; v++) {
+    grad_input[v * in_stride_w] = static_cast<T>(grad_sum[v]);
+  }
+}
+
 template <typename T>
 void max_unpool_impl(
     device T* output,
@@ -729,6 +998,24 @@ struct AvgPoolIterBounds {
   T count;
 };
 
+// Window of input indices averaged into output index `out_idx` along one
+// pooling dim, with the count the sum is divided by
+inline AvgPoolIterBounds<int32_t> avg_pool_window(
+    int32_t out_idx,
+    int32_t in_size,
+    int32_t kernel_size,
+    int32_t stride,
+    int32_t padding,
+    bool count_include_pad) {
+  auto start = stride * out_idx - padding;
+  auto end = start + kernel_size;
+  auto end_corrected = min(end, in_size);
+  auto start_corrected = max(start, 0);
+  auto count = count_include_pad ? min(end, in_size + padding) - start
+                                 : end_corrected - start_corrected;
+  return {start_corrected, end_corrected, count};
+}
+
 template <int32_t dim, typename idx_t = int32_t>
 AvgPoolIterBounds<int32_t> get_avg_pool_input_iter_bounds(
     constant int32_t* input_sizes,
@@ -744,14 +1031,13 @@ AvgPoolIterBounds<int32_t> get_avg_pool_input_iter_bounds(
         input_sizes, output_sizes, pooling_dim_indices);
     return {bounds.start, bounds.end, bounds.end - bounds.start};
   }
-  auto start = stride[dim] * pooling_dim_indices[dim] - padding[dim];
-  auto end = start + kernel_size[dim];
-  auto end_corrected = min(start + kernel_size[dim], input_sizes[dim]);
-  auto start_corrected = (start < 0) ? 0 : start;
-  auto count = count_include_pad
-      ? (min(end, input_sizes[dim] + padding[dim]) - start)
-      : (end_corrected - start_corrected);
-  return {start_corrected, end_corrected, count};
+  return avg_pool_window(
+      pooling_dim_indices[dim],
+      input_sizes[dim],
+      kernel_size[dim],
+      stride[dim],
+      padding[dim],
+      count_include_pad);
 }
 
 // Iterates through all the input elements that this kernel needs to
@@ -761,7 +1047,7 @@ void avg_pool_3d_input_iter(
     device const T* input,
     device T* output,
     constant int32_t* input_sizes,
-    constant int32_t* input_strides,
+    constant int64_t* input_strides,
     constant int32_t* output_sizes,
     thread int32_t (&pooling_dim_indices)[3],
     constant int32_t* kernel_size,
@@ -805,13 +1091,13 @@ void avg_pool_3d_input_iter(
       : (bounds0.count) * (bounds1.count) * (bounds2.count);
 
   for (auto i0 = bounds0.start; i0 < bounds0.end; i0++) {
-    auto offset0 = input_strides[0] * i0;
+    auto offset0 = idx_t(input_strides[0]) * i0;
 
     for (auto i1 = bounds1.start; i1 < bounds1.end; i1++) {
-      auto offset1 = input_strides[1] * i1;
+      auto offset1 = idx_t(input_strides[1]) * i1;
 
       for (auto i2 = bounds2.start; i2 < bounds2.end; i2++) {
-        auto offset2 = input_strides[2] * i2;
+        auto offset2 = idx_t(input_strides[2]) * i2;
         auto input_value = input[offset0 + offset1 + offset2];
         value_sum += static_cast<opmath_t<T>>(input_value);
       }
@@ -827,7 +1113,7 @@ void avg_pool_2d_input_iter(
     device const T* input,
     device T* output,
     constant int32_t* input_sizes,
-    constant int32_t* input_strides,
+    constant int64_t* input_strides,
     constant int32_t* output_sizes,
     thread int32_t (&pooling_dim_indices)[3],
     constant int32_t* kernel_size,
@@ -858,14 +1144,14 @@ void avg_pool_2d_input_iter(
 
   opmath_t<T> value_sum = 0;
   opmath_t<T> divisor = has_divisor_override
-      ? divisor_override
-      : (bounds0.count) * (bounds1.count);
+      ? opmath_t<T>(divisor_override)
+      : opmath_t<T>(bounds0.count) * bounds1.count;
 
   for (auto i0 = bounds0.start; i0 < bounds0.end; i0++) {
-    auto offset0 = input_strides[0] * i0;
+    auto offset0 = idx_t(input_strides[0]) * i0;
 
     for (auto i1 = bounds1.start; i1 < bounds1.end; i1++) {
-      auto offset1 = input_strides[1] * i1;
+      auto offset1 = idx_t(input_strides[1]) * i1;
       auto input_value = input[offset0 + offset1];
       value_sum += static_cast<opmath_t<T>>(input_value);
     }
@@ -878,7 +1164,7 @@ void avg_pool_backward_3d_input_iter(
     device AtomicType_t<T>* grad_input,
     device const T* grad_output,
     constant int32_t* grad_input_sizes,
-    constant int32_t* grad_input_strides,
+    constant int64_t* grad_input_strides,
     int32_t grad_input_leading_offset,
     thread int32_t (&pooling_dim_indices)[3],
     constant int32_t* kernel_size,
@@ -915,13 +1201,13 @@ void avg_pool_backward_3d_input_iter(
   auto grad_val = *grad_output / static_cast<T>(divisor);
 
   for (auto i0 = bounds0.start; i0 < bounds0.end; i0++) {
-    auto offset0 = grad_input_strides[0] * i0;
+    auto offset0 = int32_t(grad_input_strides[0]) * i0;
 
     for (auto i1 = bounds1.start; i1 < bounds1.end; i1++) {
-      auto offset1 = grad_input_strides[1] * i1;
+      auto offset1 = int32_t(grad_input_strides[1]) * i1;
 
       for (auto i2 = bounds2.start; i2 < bounds2.end; i2++) {
-        auto offset2 = grad_input_strides[2] * i2;
+        auto offset2 = int32_t(grad_input_strides[2]) * i2;
         auto pool_offset = offset0 + offset1 + offset2;
 
         AtomicType<T>::atomic_add(
@@ -953,7 +1239,7 @@ kernel void avg_pool(
   // element of the output. We need to fill it with the proper values below.
   int32_t pooling_dim_indices[3];
 
-  auto offsets = find_pool_offsets<int32_t, int32_t>(
+  auto offsets = find_pool_offsets<idx_t, int64_t>(
       output_sizes,
       output_strides,
       /*indices_strides=*/nullptr,
@@ -1023,7 +1309,7 @@ void avg_pool_backward_kernel_impl(
   // element of the output. We need to fill it with the proper values below.
   int32_t pooling_dim_indices[3];
 
-  auto offsets = find_pool_offsets<int32_t, int32_t>(
+  auto offsets = find_pool_offsets<int32_t, int64_t>(
       grad_output_sizes,
       grad_output_strides,
       /*indices_strides=*/nullptr,
@@ -1053,6 +1339,122 @@ void avg_pool_backward_kernel_impl(
       params.divisor_override);
 }
 
+// avg_pool for 2 pooling dims of tensors that are dense in NCHW or NHWC
+// (channels_last) layout, with the grid of pool2d_coords over tiles of
+// avg_pool2d_tile_rows output rows. Knowing the W stride at compile time is
+// what makes its loads fast.
+template <typename T, bool channels_last>
+kernel void avg_pool2d_dense(
+    device const T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    constant AvgPoolingParams<5>& params [[buffer(2)]],
+    uint3 pos [[thread_position_in_grid]]) {
+  constexpr auto tile_rows = avg_pool2d_tile_rows;
+  auto dims = params.dims;
+  const auto C = params.input_sizes[dims - 3];
+  const auto IH = params.input_sizes[dims - 2],
+             IW = params.input_sizes[dims - 1];
+  const auto OH = params.output_sizes[dims - 2],
+             OW = params.output_sizes[dims - 1];
+  const int32_t stride_w = channels_last ? C : 1;
+  auto xy = pool2d_coords(pos, C, ceil_div(OH, tile_rows), channels_last);
+  auto oh0 = xy.h * tile_rows;
+  auto w = avg_pool_window(
+      xy.w,
+      IW,
+      params.kernel_size[1],
+      params.stride[1],
+      params.padding[1],
+      params.count_include_pad);
+  AvgPoolIterBounds<int32_t> h[tile_rows];
+  for (int32_t u = 0; u < tile_rows; u++) {
+    h[u] = avg_pool_window(
+        min(oh0 + u, OH - 1),
+        IH,
+        params.kernel_size[0],
+        params.stride[0],
+        params.padding[0],
+        params.count_include_pad);
+  }
+  input +=
+      channels_last ? xy.n * (IH * IW * C) + xy.c : int32_t(pos.z) * (IH * IW);
+
+  // Each input row is loaded once and added to every window of the tile that
+  // covers it: windows overlap when stride < kernel, and the rows between two
+  // windows when stride > kernel are skipped
+  opmath_t<T> value_sum[tile_rows] = {};
+  auto ih = h[0].start;
+  for (int32_t u = 0; u < tile_rows; u++) {
+    for (ih = max(ih, h[u].start); ih < h[u].end; ih++) {
+      auto row = input + ih * (IW * stride_w);
+      opmath_t<T> row_sum = 0;
+      for (auto iw = w.start; iw < w.end; iw++) {
+        row_sum += static_cast<opmath_t<T>>(row[iw * stride_w]);
+      }
+      for (int32_t v = u; v < tile_rows; v++) {
+        value_sum[v] += h[v].start <= ih ? row_sum : 0;
+      }
+    }
+  }
+  output +=
+      channels_last ? xy.n * (OH * OW * C) + xy.c : int32_t(pos.z) * (OH * OW);
+  output += (oh0 * OW + xy.w) * stride_w;
+  for (int32_t u = 0; u < tile_rows && oh0 + u < OH; u++) {
+    opmath_t<T> divisor = params.has_divisor_override ? params.divisor_override
+                                                      : h[u].count * w.count;
+    output[u * (OW * stride_w)] = static_cast<T>(value_sum[u] / divisor);
+  }
+}
+
+template <typename T, int KW, bool VEC>
+kernel void avg_pool2d_s1_nchw(
+    device const T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    constant AvgPoolingParams<5>& p [[buffer(2)]],
+    uint3 pos [[thread_position_in_grid]]) {
+  constexpr int kCols = pool2d_s1_tile_cols;
+  constexpr int kRows = pool2d_s1_tile_rows;
+  auto in_sizes = p.input_sizes.data() + p.dims - 2;
+  const int32_t IH = in_sizes[0], IW = in_sizes[1];
+  const int32_t OH = p.output_sizes[p.dims - 2],
+                OW = p.output_sizes[p.dims - 1];
+  const int32_t ow0 = pos.x * kCols;
+  const int32_t oh0 = pos.y * kRows;
+  const auto kh = p.kernel_size[0], kw = KW > 0 ? KW : p.kernel_size[1];
+  PoolS1Tile<opmath_t<T>> sum;
+  pool2d_s1_nchw_tile<T, KW, VEC, AvgPoolS1<T>>(
+      input + int64_t(pos.z) * (IH * IW),
+      in_sizes,
+      p.padding.data(),
+      kh,
+      kw,
+      1,
+      oh0,
+      ow0,
+      sum);
+
+  ::metal::array<int32_t, kCols> w_count;
+  for (int v = 0; v < kCols; ++v) {
+    w_count[v] =
+        avg_pool_window(ow0 + v, IW, kw, 1, p.padding[1], p.count_include_pad)
+            .count;
+  }
+  const auto out_base = int64_t(pos.z) * (OH * OW) + (oh0 * OW + ow0);
+  for (int u = 0; u < kRows && oh0 + u < OH; ++u) {
+    const auto h_count =
+        avg_pool_window(oh0 + u, IH, kh, 1, p.padding[0], p.count_include_pad)
+            .count;
+    ::metal::array<T, kCols> out;
+    for (int v = 0; v < kCols; ++v) {
+      opmath_t<T> divisor =
+          p.has_divisor_override ? p.divisor_override : h_count * w_count[v];
+      out[v] = static_cast<T>(sum[u][v] / divisor);
+    }
+    store_s1_row(
+        output + out_base + u * OW, OW - ow0, out, bool_constant<VEC>{});
+  }
+}
+
 // One simdgroup per output element, with lanes splitting the innermost window
 // dim. For large adaptive windows, where one thread per output leaves the GPU
 // mostly idle while each thread sums a whole window serially.
@@ -1067,7 +1469,7 @@ kernel void adaptive_avg_pool_simd(
   auto pooling_dims = params.pooling_dims;
   auto leading_dims = params.dims - pooling_dims;
   int32_t pooling_dim_indices[3];
-  auto offsets = find_pool_offsets<int32_t, int32_t>(
+  auto offsets = find_pool_offsets<int32_t, int64_t>(
       params.output_sizes.data(),
       params.output_strides.data(),
       /*indices_strides=*/nullptr,
@@ -1088,7 +1490,7 @@ kernel void adaptive_avg_pool_simd(
         pooling_dim_indices[dim],
         params.input_sizes[leading_dims + dim],
         params.output_sizes[leading_dims + dim]);
-    strides[k] = params.input_strides[leading_dims + dim];
+    strides[k] = int32_t(params.input_strides[leading_dims + dim]);
   }
 
   opmath_t<T> sum = 0;
@@ -1148,7 +1550,7 @@ kernel void adaptive_avg_pool_backward_scale(
     auto size = params.output_sizes[dim];
     auto i = static_cast<int32_t>(idx % size);
     idx /= size;
-    offset += i * params.output_strides[dim];
+    offset += i * int32_t(params.output_strides[dim]);
     if (dim >= leading_dims) {
       auto w = get_adaptive_bounds<idx_t>(i, params.input_sizes[dim], size);
       count *= w.end - w.start;
@@ -1173,7 +1575,7 @@ kernel void adaptive_avg_pool_backward(
   auto pooling_dims = params.pooling_dims;
   auto leading_dims = dims - pooling_dims;
   int32_t pooling_dim_indices[3];
-  auto offsets = find_pool_offsets<int32_t, int32_t>(
+  auto offsets = find_pool_offsets<int32_t, int64_t>(
       params.input_sizes.data(),
       params.input_strides.data(),
       /*indices_strides=*/nullptr,
@@ -1190,7 +1592,7 @@ kernel void adaptive_avg_pool_backward(
   for (int32_t dim = 0; dim < pooling_dims; dim++) {
     auto range = out_ranges[pooling_dim_indices[dim]];
     bounds[dim] = {range.x, range.y};
-    strides[dim] = params.output_strides[leading_dims + dim];
+    strides[dim] = int32_t(params.output_strides[leading_dims + dim]);
     out_ranges += params.input_sizes[leading_dims + dim];
   }
 
@@ -1223,6 +1625,83 @@ kernel void avg_pool_backward(
   for (uint pool_idx = 0; pool_idx < pool_size; pool_idx++) {
     avg_pool_backward_kernel_impl<T>(
         grad_input, grad_output, params, tid * pool_size + pool_idx);
+  }
+}
+
+// avg_pool_backward for 2 pooling dims, with the grid of pool2d_coords over
+// tiles of pool2d_backward_tile_cols grad_input columns
+template <typename T, typename idx_t>
+kernel void avg_pool2d_backward(
+    device T* grad_input [[buffer(0)]],
+    device const T* grad_output [[buffer(1)]],
+    constant AvgPoolingParams<5>& params [[buffer(2)]],
+    uint3 pos [[thread_position_in_grid]]) {
+  constexpr auto tile_cols = pool2d_backward_tile_cols;
+  auto dims = params.dims;
+  auto in_sizes = params.input_sizes.data() + dims - 2;
+  auto out_sizes = params.output_sizes.data() + dims - 2;
+  const idx_t out_strides[2] = {
+      idx_t(params.output_strides[dims - 2]),
+      idx_t(params.output_strides[dims - 1])};
+  auto IW = in_sizes[1];
+  auto xy = pool2d_coords(
+      pos, params.input_sizes[dims - 3], in_sizes[0], params.channels_last);
+  auto iw0 = xy.w * tile_cols;
+  auto oh = pool_output_range(
+      xy.h,
+      params.padding[0],
+      params.kernel_size[0],
+      params.stride[0],
+      out_sizes[0]);
+  auto ow = pool_output_range(
+      iw0,
+      params.padding[1],
+      params.kernel_size[1],
+      params.stride[1],
+      out_sizes[1]);
+  ow.end = pool_output_range(
+               min(iw0 + tile_cols - 1, IW - 1),
+               params.padding[1],
+               params.kernel_size[1],
+               params.stride[1],
+               out_sizes[1])
+               .end;
+  grad_output += pool2d_offset<idx_t>(
+      {xy.n, xy.c, 0, 0}, params.output_strides.data(), dims);
+
+  opmath_t<T> grad_sum[tile_cols] = {};
+  for (auto o0 = oh.start; o0 < oh.end; o0++) {
+    auto h = avg_pool_window(
+        o0,
+        in_sizes[0],
+        params.kernel_size[0],
+        params.stride[0],
+        params.padding[0],
+        params.count_include_pad);
+    for (auto o1 = ow.start; o1 < ow.end; o1++) {
+      auto w = avg_pool_window(
+          o1,
+          IW,
+          params.kernel_size[1],
+          params.stride[1],
+          params.padding[1],
+          params.count_include_pad);
+      opmath_t<T> divisor = params.has_divisor_override
+          ? opmath_t<T>(params.divisor_override)
+          : opmath_t<T>(h.count) * w.count;
+      auto grad = static_cast<opmath_t<T>>(
+                      grad_output[o0 * out_strides[0] + o1 * out_strides[1]]) /
+          divisor;
+      for (int32_t v = 0; v < tile_cols; v++) {
+        grad_sum[v] += w.start <= iw0 + v && iw0 + v < w.end ? grad : 0;
+      }
+    }
+  }
+  grad_input += pool2d_offset<idx_t>(
+      {xy.n, xy.c, xy.h, iw0}, params.input_strides.data(), dims);
+  auto in_stride_w = idx_t(params.input_strides[dims - 1]);
+  for (int32_t v = 0; v < tile_cols && iw0 + v < IW; v++) {
+    grad_input[v * in_stride_w] = static_cast<T>(grad_sum[v]);
   }
 }
 
@@ -1260,10 +1739,26 @@ kernel void avg_pool_backward(
       constant AvgPoolingParams<5>& params [[buffer(2)]],      \
       uint tid [[thread_position_in_grid]]);
 
+#define REGISTER_AVG_POOL2D_DENSE(DTYPE, CL, SUFFIX)            \
+  template [[host_name("avg_pool2d_dense_" SUFFIX "_" #DTYPE)]] \
+  kernel void avg_pool2d_dense<DTYPE, CL>(                      \
+      device const DTYPE* input [[buffer(0)]],                  \
+      device DTYPE* output [[buffer(1)]],                       \
+      constant AvgPoolingParams<5>& params [[buffer(2)]],       \
+      uint3 pos [[thread_position_in_grid]]);
+
+#define REGISTER_AVG_POOL2D_S1(DTYPE, KW, VEC, SUFFIX)                       \
+  template[                                                                  \
+      [host_name("avg_pool2d_s1_nchw_k" #KW SUFFIX "_" #DTYPE)]] kernel void \
+  avg_pool2d_s1_nchw<DTYPE, KW, VEC>(                                        \
+      device const DTYPE* input [[buffer(0)]],                               \
+      device DTYPE* output [[buffer(1)]],                                    \
+      constant AvgPoolingParams<5>& p [[buffer(2)]],                         \
+      uint3 pos [[thread_position_in_grid]]);
+
 #define REGISTER_POOL_OP(DTYPE)                                               \
   REGISTER_MAX_POOL(DTYPE, int32_t, "")                                       \
   REGISTER_MAX_POOL(DTYPE, int64_t, "_i64")                                   \
-  REGISTER_AVG_POOL(DTYPE, int32_t, "_i32")                                   \
                                                                               \
   template [[host_name("max_unpool_" #DTYPE)]] kernel void max_unpool<DTYPE>( \
       device DTYPE * output [[buffer(0)]],                                    \
@@ -1282,7 +1777,7 @@ kernel void avg_pool_backward(
   REGISTER_MAX_POOL2D_S1(DTYPE, 3)                                            \
   REGISTER_MAX_POOL2D_S1(DTYPE, 5)
 
-#define REGISTER_POOL_BACKWARD_OP_SERIAL(DTYPE, SERIAL)                    \
+#define REGISTER_MAX_POOL_BACKWARD(DTYPE, SERIAL)                          \
   template[[host_name("max_pool_backward_" #DTYPE C10_METAL_SERIAL_SUFFIX( \
       SERIAL))]] kernel void                                               \
   max_pool_backward<DTYPE, SERIAL>(                                        \
@@ -1290,8 +1785,9 @@ kernel void avg_pool_backward(
       device const DTYPE* grad_output_ [[buffer(1)]],                      \
       device const int64_t* grad_indices_ [[buffer(2)]],                   \
       constant PoolingBackwardParams<5>& params [[buffer(3)]],             \
-      uint tid [[thread_position_in_grid]]);                               \
-                                                                           \
+      uint tid [[thread_position_in_grid]]);
+
+#define REGISTER_AVG_POOL_BACKWARD(DTYPE, SERIAL)                          \
   template[[host_name("avg_pool_backward_" #DTYPE C10_METAL_SERIAL_SUFFIX( \
       SERIAL))]] kernel void                                               \
   avg_pool_backward<DTYPE, SERIAL>(                                        \
@@ -1300,36 +1796,52 @@ kernel void avg_pool_backward(
       constant AvgPoolingParams<5>& params [[buffer(2)]],                  \
       uint tid [[thread_position_in_grid]]);
 
+#define REGISTER_MAX_POOL2D_BACKWARD(DTYPE, IDX_T, SUFFIX)                \
+  template[[host_name("max_pool2d_backward_" #DTYPE SUFFIX)]] kernel void \
+  max_pool2d_backward<DTYPE, IDX_T>(                                      \
+      device DTYPE * grad_input [[buffer(0)]],                            \
+      device const DTYPE* grad_output [[buffer(1)]],                      \
+      device const int64_t* indices [[buffer(2)]],                        \
+      constant PoolingParams<5>& params [[buffer(3)]],                    \
+      uint3 pos [[thread_position_in_grid]]);
+
+#define REGISTER_AVG_POOL2D_BACKWARD(DTYPE, IDX_T, SUFFIX)                \
+  template[[host_name("avg_pool2d_backward_" #DTYPE SUFFIX)]] kernel void \
+  avg_pool2d_backward<DTYPE, IDX_T>(                                      \
+      device DTYPE * grad_input [[buffer(0)]],                            \
+      device const DTYPE* grad_output [[buffer(1)]],                      \
+      constant AvgPoolingParams<5>& params [[buffer(2)]],                 \
+      uint3 pos [[thread_position_in_grid]]);
+
 #define REGISTER_ADAPTIVE_AVG_POOL(DTYPE, IDX_T, SUFFIX)                     \
-  template [[host_name("adaptive_avg_pool_simd_" #DTYPE #SUFFIX)]]           \
-  kernel void adaptive_avg_pool_simd<DTYPE, IDX_T>(                          \
+  template[[host_name("adaptive_avg_pool_simd_" #DTYPE SUFFIX)]] kernel void \
+  adaptive_avg_pool_simd<DTYPE, IDX_T>(                                      \
       device const DTYPE* input [[buffer(0)]],                               \
       device DTYPE* output [[buffer(1)]],                                    \
       constant AvgPoolingParams<5>& params [[buffer(2)]],                    \
       uint tid [[thread_position_in_grid]],                                  \
       uint lane [[thread_index_in_simdgroup]],                               \
       uint simd_width [[threads_per_simdgroup]]);                            \
-  template [[host_name("adaptive_avg_pool_backward_scale_" #DTYPE #SUFFIX)]] \
-  kernel void adaptive_avg_pool_backward_scale<DTYPE, IDX_T>(                \
+  template[[host_name(                                                       \
+      "adaptive_avg_pool_backward_scale_" #DTYPE SUFFIX)]] kernel void       \
+  adaptive_avg_pool_backward_scale<DTYPE, IDX_T>(                            \
       device const DTYPE* grad_output [[buffer(0)]],                         \
       device opmath_t<DTYPE>* scaled_grad [[buffer(1)]],                     \
       constant AvgPoolingParams<5>& params [[buffer(2)]],                    \
       device int2* out_ranges [[buffer(3)]],                                 \
       uint tid [[thread_position_in_grid]]);                                 \
-  template [[host_name("adaptive_avg_pool_backward_" #DTYPE #SUFFIX)]]       \
-  kernel void adaptive_avg_pool_backward<DTYPE, IDX_T>(                      \
+  template[                                                                  \
+      [host_name("adaptive_avg_pool_backward_" #DTYPE SUFFIX)]] kernel void  \
+  adaptive_avg_pool_backward<DTYPE, IDX_T>(                                  \
       device DTYPE * grad_input [[buffer(0)]],                               \
       device const opmath_t<DTYPE>* scaled_grad [[buffer(1)]],               \
       constant AvgPoolingParams<5>& params [[buffer(2)]],                    \
       device const int2* out_ranges [[buffer(3)]],                           \
       uint tid [[thread_position_in_grid]])
 
-// Adaptive avg pooling supports floating types only, and is the only user of
-// the 64-bit avg_pool variant
-#define REGISTER_ADAPTIVE_AVG_POOL_OP(DTYPE)        \
-  REGISTER_AVG_POOL(DTYPE, int64_t, "_i64")         \
-  REGISTER_ADAPTIVE_AVG_POOL(DTYPE, int32_t, _i32); \
-  REGISTER_ADAPTIVE_AVG_POOL(DTYPE, int64_t, _i64)
+#define REGISTER_ADAPTIVE_AVG_POOL_OP(DTYPE)      \
+  REGISTER_ADAPTIVE_AVG_POOL(DTYPE, int32_t, ""); \
+  REGISTER_ADAPTIVE_AVG_POOL(DTYPE, int64_t, "_i64")
 
 REGISTER_POOL_OP(float);
 REGISTER_POOL_OP(half);
@@ -1341,10 +1853,42 @@ REGISTER_POOL_OP(char);
 REGISTER_POOL_OP(uchar);
 REGISTER_POOL_OP(bool);
 
-REGISTER_POOL_BACKWARD_OP_SERIAL(float, false);
-REGISTER_POOL_BACKWARD_OP_SERIAL(half, false);
-REGISTER_POOL_BACKWARD_OP_SERIAL(bfloat, false);
-REGISTER_POOL_BACKWARD_OP_SERIAL(float, true);
+#define REGISTER_AVG_POOL_OP(DTYPE)                \
+  REGISTER_AVG_POOL(DTYPE, int32_t, "")            \
+  REGISTER_AVG_POOL(DTYPE, int64_t, "_i64")        \
+  REGISTER_AVG_POOL2D_DENSE(DTYPE, false, "nchw")  \
+  REGISTER_AVG_POOL2D_DENSE(DTYPE, true, "nhwc")   \
+  REGISTER_AVG_POOL2D_S1(DTYPE, 0, false, "")      \
+  REGISTER_AVG_POOL2D_S1(DTYPE, 2, false, "")      \
+  REGISTER_AVG_POOL2D_S1(DTYPE, 3, false, "")      \
+  REGISTER_AVG_POOL2D_S1(DTYPE, 5, false, "")      \
+  REGISTER_AVG_POOL2D_S1(DTYPE, 7, false, "")      \
+  REGISTER_AVG_POOL2D_S1(DTYPE, 3, true, "_vec")   \
+  REGISTER_AVG_POOL2D_S1(DTYPE, 5, true, "_vec")   \
+  REGISTER_AVG_POOL2D_S1(DTYPE, 7, true, "_vec")   \
+  REGISTER_AVG_POOL2D_BACKWARD(DTYPE, int32_t, "") \
+  REGISTER_AVG_POOL2D_BACKWARD(DTYPE, int64_t, "_i64")
+
+REGISTER_AVG_POOL_OP(float);
+REGISTER_AVG_POOL_OP(half);
+REGISTER_AVG_POOL_OP(bfloat);
+REGISTER_AVG_POOL_OP(long);
+
+REGISTER_MAX_POOL_BACKWARD(float, false);
+REGISTER_MAX_POOL_BACKWARD(half, false);
+REGISTER_MAX_POOL_BACKWARD(bfloat, false);
+REGISTER_MAX_POOL_BACKWARD(float, true);
+REGISTER_MAX_POOL2D_BACKWARD(float, int32_t, "");
+REGISTER_MAX_POOL2D_BACKWARD(half, int32_t, "");
+REGISTER_MAX_POOL2D_BACKWARD(bfloat, int32_t, "");
+REGISTER_MAX_POOL2D_BACKWARD(float, int64_t, "_i64");
+REGISTER_MAX_POOL2D_BACKWARD(half, int64_t, "_i64");
+REGISTER_MAX_POOL2D_BACKWARD(bfloat, int64_t, "_i64");
+
+REGISTER_AVG_POOL_BACKWARD(float, false);
+REGISTER_AVG_POOL_BACKWARD(half, false);
+REGISTER_AVG_POOL_BACKWARD(bfloat, false);
+REGISTER_AVG_POOL_BACKWARD(float, true);
 
 REGISTER_ADAPTIVE_AVG_POOL_OP(float);
 REGISTER_ADAPTIVE_AVG_POOL_OP(half);

@@ -1661,7 +1661,6 @@ torch.{device_type}.synchronize()
         helper(1, 100000, 32, 32, ks=4)
         helper(1, 100000, 1, 4, ks=(1, 4))  # test for max_pool1d
 
-    @expectedFailureMPS  # TODO: Fixme
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfXPU(torch.half, torch.bfloat16, torch.float, torch.double)
@@ -1904,7 +1903,6 @@ torch.{device_type}.synchronize()
             helper((2, 1, 3, 3, 3), (1, 1, 1), contig)
 
     @dtypes(torch.float, torch.double)
-    @expectedFailureMPS  # test_pooling_max_nhwc currently fails on MPS - ISSUE#
     def test_pooling_max_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride, padding, dilation, contig, device):
             output_height = math.floor(

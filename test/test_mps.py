@@ -735,7 +735,7 @@ class TestAvgPool(TestCaseMPS):
         # complex input should raise NotImplementedError instead of
         # an opaque Metal RuntimeError on MPS.
         x = torch.randn(5, 1, 5, 2, 6, dtype=torch.complex64, device="mps")
-        with self.assertRaisesRegex(NotImplementedError, "complex"):
+        with self.assertRaisesRegex(NotImplementedError, "ComplexFloat"):
             F.local_response_norm(x, size=4)
 
     def test_channels_last_storage_offset(self):
