@@ -2245,14 +2245,8 @@ class ByteArrayVariable(VariableTracker):
             elif isinstance(value, ConstantVariable):
                 src = value.as_python_constant()
             elif istype(value, (ListVariable, TupleVariable)):
-                # As in bytearray_extend, __index__ specializes SymInt items.
-                src = []
-                for item in value.items:
-                    if not istype(item, ConstantVariable):
-                        item = pynumber_index(tx, item)
-                        if not item.is_python_constant():
-                            self._unsupported_store_value(value)
-                    src.append(item.as_python_constant())
+                # Items are converted in order and the first bad one raises.
+                src = [self._byte_value(tx, item, value) for item in value.items]
             else:
                 self._unsupported_store_value(value)
             new_data = bytearray(self.data)
@@ -2292,14 +2286,7 @@ class ByteArrayVariable(VariableTracker):
         byte = None
         if value is not None:
             # The value is checked before the index (gh-91153).
-            byte_value = pynumber_index(tx, value)
-            if not byte_value.is_python_constant():
-                self._unsupported_store_value(value)
-            byte = byte_value.as_python_constant()
-            if not 0 <= byte < 256:
-                raise_observed_exception(
-                    ValueError, tx, args=["byte must be in range(0, 256)"]
-                )
+            byte = self._byte_value(tx, value, value)
         if index < 0:
             index += len(self.data)
         if not 0 <= index < len(self.data):
@@ -2356,6 +2343,23 @@ class ByteArrayVariable(VariableTracker):
                 types.BuiltinFunctionType,
             ),
         )
+
+    @staticmethod
+    def _byte_value(
+        tx: "InstructionTranslatorBase",
+        item: VariableTracker,
+        value: VariableTracker,
+    ) -> int:
+        # _getbytevalue: __index__, which also specializes a SymInt, then range.
+        index = pynumber_index(tx, item)
+        if not index.is_python_constant():
+            ByteArrayVariable._unsupported_store_value(value)
+        byte = index.as_python_constant()
+        if not 0 <= byte < 256:
+            raise_observed_exception(
+                ValueError, tx, args=["byte must be in range(0, 256)"]
+            )
+        return byte
 
     @staticmethod
     def _unsupported_store_value(value: VariableTracker) -> NoReturn:

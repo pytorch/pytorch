@@ -1062,6 +1062,39 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             with self.subTest(values=values):
                 self.assertEqual(f(values, torch.ones(1))[0], bytearray(expected))
 
+    def test_setslice_value_conversion_order(self):
+        class Logged:
+            def __init__(self, value, log):
+                self.value = value
+                self.log = log
+
+            def __index__(self):
+                self.log.append(self.value)
+                return self.value
+
+        def f(make_value, x):
+            ba = bytearray(b"xyz")
+            log = []
+            try:
+                ba[0:2] = make_value(log)
+            except (TypeError, ValueError) as e:
+                return type(e), log, ba, x + 1
+            return None, log, ba, x + 1
+
+        # Items are converted in order and the first bad one stops it.
+        cases = {
+            "range": lambda log: [256, Logged(66, log)],
+            "type": lambda log: ("a", Logged(66, log)),
+            "mixed": lambda log: [Logged(65, log), 66, Logged(67, log)],
+        }
+        for name, make_value in cases.items():
+            with self.subTest(case=name):
+                torch._dynamo.reset()
+                compiled = torch.compile(f, backend="eager", fullgraph=True)
+                self.assertEqual(
+                    compiled(make_value, torch.ones(1)), f(make_value, torch.ones(1))
+                )
+
     def test_setitem_setslice_nonconstant_graph_break(self):
         cnt = CompileCounter()
 
