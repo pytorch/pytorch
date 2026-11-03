@@ -73,6 +73,10 @@ def split_module(
     """
     Creates subgraphs out of main graph
 
+    A submodule that a ``get_attr`` node reads is read inside the partition with
+    ``get_attr``. Other attributes that a ``get_attr`` node reads, such as
+    tensors, are passed to the partition as inputs.
+
     Args:
         m (GraphModule): Graph module to split
         root_m (torch.nn.Module): root nn module. Not currently used. Included
@@ -99,9 +103,6 @@ def split_module(
 
     Returns:
         GraphModule: the module after split.
-
-    A partition reads each submodule it uses with ``get_attr``, and takes other
-    attributes, such as tensors, as inputs.
 
     Example:
 
