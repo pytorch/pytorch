@@ -5136,6 +5136,7 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
     x_ndim = len(x_size)
 
     device = self.get_device()
+    # Triton atomic_add does not support bool or int64 on any device.
     if (
         accumulate
         and device is not None

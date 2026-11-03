@@ -1717,7 +1717,7 @@ class InductorOpInfoTemplate(TestCase):
         #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
 
 
-def make_inductor_opinfo_cls(ops_decorator, skip_ops_decorator):
+def make_inductor_opinfo_cls(ops):
     @wrapper_noop_set_seed_decorator
     class TestInductorOpInfo(InductorOpInfoTemplate):
         @suppress_warnings
@@ -1732,8 +1732,8 @@ def make_inductor_opinfo_cls(ops_decorator, skip_ops_decorator):
         @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
         @skipIfTorchDynamo("Test uses dynamo already")
         @skipIfCrossRef
-        @ops_decorator
-        @skip_ops_decorator
+        @_ops(ops)
+        @skipOps(test_skips_or_fails)
         @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
         @torch._inductor.config.patch(
             {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
@@ -1751,10 +1751,7 @@ def make_inductor_opinfo_cls(ops_decorator, skip_ops_decorator):
     return TestInductorOpInfo
 
 
-TestInductorOpInfo = make_inductor_opinfo_cls(
-    ops_decorator=_ops(op_db[START:END]),
-    skip_ops_decorator=skipOps(test_skips_or_fails),
-)
+TestInductorOpInfo = make_inductor_opinfo_cls(op_db[START:END])
 
 
 instantiate_device_type_tests(TestInductorOpInfo, globals(), allow_xpu=True)

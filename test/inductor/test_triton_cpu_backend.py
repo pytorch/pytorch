@@ -3,10 +3,7 @@ import unittest
 
 from torch._inductor import config
 from torch._inductor.test_case import run_tests
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    skipOps,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.inductor_utils import HAS_CPU, TRITON_HAS_CPU
 
 
@@ -86,32 +83,34 @@ if HAS_CPU and TRITON_HAS_CPU:
 
     # TODO: support generating inductor backend subclasses in instantiate_device_type_tests
     def make_inductor_opinfo_triton_cpu_cls():
-        OPINFO__INCLUDE_OPS = {"index_add"}
+        OPINFO_INCLUDE_OPS = {"index_add"}
         # TODO: expand op support over time. For now add as we see fit
-        # to avoid increasing CI time too much.
+        # to avoid increasing CI time too much. CPU OpInfo expectation tables
+        # describe the C++ backend, so audit each addition for Triton CPU.
         ops_subset = [
             op
             for op in test_torchinductor_opinfo.op_db
-            if op.full_name in OPINFO__INCLUDE_OPS
+            if op.full_name in OPINFO_INCLUDE_OPS
         ]
-        # Clone the base opinfo class and use that in `instantiate_device_type_tests`
-        # in order to preserve DecorateInfo references to TestTorchInductorOpInfo
-        TestTorchInductorOpInfo = test_torchinductor_opinfo.make_inductor_opinfo_cls(
-            ops_decorator=test_torchinductor_opinfo._ops(ops_subset),
-            skip_ops_decorator=skipOps(test_torchinductor_opinfo.test_skips_or_fails),
+        included_ops = {op.full_name for op in ops_subset}
+        if included_ops != OPINFO_INCLUDE_OPS:
+            missing_ops = sorted(OPINFO_INCLUDE_OPS - included_ops)
+            raise AssertionError(f"Missing OpInfo entries: {missing_ops}")
+
+        # Generate a fresh source class so DecorateInfo matches TestInductorOpInfo.
+        TestInductorOpInfo = test_torchinductor_opinfo.make_inductor_opinfo_cls(
+            ops_subset
         )
         opinfo_scope = {
-            TestTorchInductorOpInfo.__name__: TestTorchInductorOpInfo,
+            TestInductorOpInfo.__name__: TestInductorOpInfo,
         }
 
-        instantiate_device_type_tests(
-            TestTorchInductorOpInfo, opinfo_scope, only_for="cpu"
-        )
+        instantiate_device_type_tests(TestInductorOpInfo, opinfo_scope, only_for="cpu")
 
         generated_classes = [
             cls
             for name, cls in opinfo_scope.items()
-            if name != TestTorchInductorOpInfo.__name__
+            if name != TestInductorOpInfo.__name__
         ]
         if len(generated_classes) != 1:
             raise AssertionError(
@@ -119,9 +118,13 @@ if HAS_CPU and TRITON_HAS_CPU:
             )
         generated_cpu_cls = generated_classes[0]
 
-        return config.patch({"cpu_backend": "triton"})(
-            type("TestInductorOpInfoTritonCPU", (generated_cpu_cls,), {})
-        )
+        @unittest.skip(_CPU_TRITON_SKIP_REASON)
+        @config.patch({"cpu_backend": "triton"})
+        class TestInductorOpInfoTritonCPU(generated_cpu_cls):
+            pass
+
+        TestInductorOpInfoTritonCPU.__qualname__ = "TestInductorOpInfoTritonCPU"
+        return TestInductorOpInfoTritonCPU
 
     TestInductorOpInfoTritonCPU = make_inductor_opinfo_triton_cpu_cls()
 
