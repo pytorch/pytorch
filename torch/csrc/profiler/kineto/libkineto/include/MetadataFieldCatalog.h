@@ -200,6 +200,7 @@ inline constexpr MetadataField<uint64_t> kOverheadCount{"overhead count"};
 inline constexpr MetadataField<int64_t> kReturnCode{"Return_code"};
 inline constexpr MetadataField<uint64_t> kSourceLineNumber{
     "source_line_number"};
+inline constexpr MetadataField<int64_t> kStream{"stream"};
 inline constexpr MetadataField<uint64_t> kSyclInvocationId{
     "sycl_invocation_id"};
 inline constexpr MetadataField<uint64_t> kSyclNodeId{"sycl_node_id"};
