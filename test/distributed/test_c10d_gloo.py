@@ -546,6 +546,134 @@ class ProcessGroupGlooTestBase(MultiProcessTestCase):
                 self.assertEqual(tensors, outputs)
                 self.assertEqual(result, outputs)
 
+    def _test_scatter_basics(self, fn):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+
+        # Preallocate tensors for input/output
+        input = [fn(torch.tensor([self.rank])) for _ in range(self.world_size)]
+        outputs = [fn(torch.tensor([-1])) for _ in range(self.world_size)]
+
+        # Take turns being the scatter root and accumulate work items
+        futures = []
+        for i in range(self.world_size):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = i
+            if i == self.rank:
+                futures.append(pg.scatter([outputs[i]], [input], opts).get_future())
+            else:
+                futures.append(pg.scatter([outputs[i]], [], opts).get_future())
+
+        # Wait for work to complete
+        for i in range(self.world_size):
+            futures[i].wait()
+            result = futures[i].value()
+            self.assertEqual(torch.tensor([i]), result[0])
+
+    def _test_scatter_stress(self, inputs, fn):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts(threads=8)
+        )
+        outputs = [
+            [fn(torch.tensor([-1])) for _ in range(self.world_size)]
+            for _ in range(len(inputs))
+        ]
+        future_handles = []
+        for i in range(len(inputs)):
+            for root in range(self.world_size):
+                opts = c10d.ScatterOptions()
+                opts.rootRank = root
+                if root == self.rank:
+                    fut = pg.scatter(
+                        [outputs[i][root]], [[fn(e) for e in inputs[i]]], opts
+                    ).get_future()
+                else:
+                    fut = pg.scatter([outputs[i][root]], [], opts).get_future()
+                future_handles.append(fut)
+
+        for i, future_handle in enumerate(future_handles):
+            future_handle.wait()
+            iter = i // self.world_size
+            root = i % self.world_size
+            result = future_handle.value()
+
+            self.assertEqual(
+                torch.tensor([iter + root]),
+                result[0],
+                msg=(
+                    lambda msg: f"{msg}\nMismatch in iteration {iter:d} for rank {root:d}"
+                ),
+            )
+
+    def _test_gather_basics(self, fn):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+
+        # Preallocate tensors for input/output
+        input = [fn(torch.tensor([self.rank]))]
+        outputs = [fn(torch.tensor([-1])) for _ in range(self.world_size)]
+
+        # Take turns being the gather root and accumulate work items
+        futures = []
+        for i in range(self.world_size):
+            opts = c10d.GatherOptions()
+            opts.rootRank = i
+            if i == self.rank:
+                futures.append(pg.gather([outputs], input, opts).get_future())
+            else:
+                futures.append(pg.gather([], input, opts).get_future())
+
+        # Wait for work to complete
+        expected = [fn(torch.tensor([rank])) for rank in range(self.world_size)]
+        for i in range(self.world_size):
+            futures[i].wait()
+            result = futures[i].value()
+            if i == self.rank:
+                self.assertEqual(expected, result)
+
+    def _test_gather_stress(self, inputs, fn):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts(threads=8)
+        )
+        future_handles = []
+        outputs = [
+            [[fn(torch.tensor([-1])) for _ in range(self.world_size)]]
+            for _ in range(len(inputs))
+        ]
+        expected_outputs = [
+            [[torch.tensor([i + j]) for j in range(self.world_size)]]
+            for i in range(len(inputs))
+        ]
+        for i in range(len(inputs)):
+            for root in range(self.world_size):
+                opts = c10d.GatherOptions()
+                opts.rootRank = root
+                if root == self.rank:
+                    fut = pg.gather(outputs[i], [fn(inputs[i])], opts).get_future()
+                else:
+                    fut = pg.gather([], [fn(inputs[i])], opts).get_future()
+                future_handles.append(fut)
+
+        for i, future_handle in enumerate(future_handles):
+            future_handle.wait()
+            iter = i // self.world_size
+            root = i % self.world_size
+            if root == self.rank:
+                result = future_handle.value()
+                self.assertEqual(
+                    expected_outputs[iter],
+                    [result],
+                    msg=(
+                        lambda msg: f"{msg}\nMismatch in iteration {iter:d} for root {root:d}"
+                    ),
+                )
+
 
 class ProcessGroupGlooTest(ProcessGroupGlooTestBase):
     @requires_gloo()
@@ -1087,76 +1215,9 @@ class ProcessGroupGlooTest(ProcessGroupGlooTestBase):
             opts.rootRank = (self.rank + 1) % self.world_size
             pg.scatter([t1], [[t1] * self.world_size], opts)
 
-    def _test_scatter_basics(self, fn):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts()
-        )
-
-        # Preallocate tensors for input/output
-        input = [fn(torch.tensor([self.rank])) for _ in range(self.world_size)]
-        outputs = [fn(torch.tensor([-1])) for _ in range(self.world_size)]
-
-        # Take turns being the scatter root and accumulate work items
-        futures = []
-        for i in range(self.world_size):
-            opts = c10d.ScatterOptions()
-            opts.rootRank = i
-            if i == self.rank:
-                futures.append(pg.scatter([outputs[i]], [input], opts).get_future())
-            else:
-                futures.append(pg.scatter([outputs[i]], [], opts).get_future())
-
-        # Wait for work to complete
-        for i in range(self.world_size):
-            futures[i].wait()
-            result = futures[i].value()
-            self.assertEqual(torch.tensor([i]), result[0])
-
     @requires_gloo()
     def test_scatter_basics(self):
         self._test_scatter_basics(lambda t: t.clone())
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_scatter_basics_cuda(self):
-        self._test_scatter_basics(lambda t: t.clone().cuda())
-
-    def _test_scatter_stress(self, inputs, fn):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts(threads=8)
-        )
-        outputs = [
-            [fn(torch.tensor([-1])) for _ in range(self.world_size)]
-            for _ in range(len(inputs))
-        ]
-        future_handles = []
-        for i in range(len(inputs)):
-            for root in range(self.world_size):
-                opts = c10d.ScatterOptions()
-                opts.rootRank = root
-                if root == self.rank:
-                    fut = pg.scatter(
-                        [outputs[i][root]], [[fn(e) for e in inputs[i]]], opts
-                    ).get_future()
-                else:
-                    fut = pg.scatter([outputs[i][root]], [], opts).get_future()
-                future_handles.append(fut)
-
-        for i, future_handle in enumerate(future_handles):
-            future_handle.wait()
-            iter = i // self.world_size
-            root = i % self.world_size
-            result = future_handle.value()
-
-            self.assertEqual(
-                torch.tensor([iter + root]),
-                result[0],
-                msg=(
-                    lambda msg: f"{msg}\nMismatch in iteration {iter:d} for rank {root:d}"
-                ),
-            )
 
     @requires_gloo()
     def test_set_gloo_pg_timeout(self):
@@ -1242,21 +1303,6 @@ class ProcessGroupGlooTest(ProcessGroupGlooTestBase):
         ]
         self._test_scatter_stress(inputs, lambda t: t.clone())
 
-    @skip_but_pass_in_sandcastle(
-        "Test is flaky, see https://github.com/pytorch/pytorch/issues/15963"
-    )
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    @skipIfRocm(
-        msg="CLR execution-lock busy wait, see https://github.com/ROCm/rocm-systems/issues/11678"
-    )
-    def test_scatter_stress_cuda(self):
-        inputs = [
-            [torch.tensor([i + self.rank]) for _ in range(self.world_size)]
-            for i in range(1000)
-        ]
-        self._test_scatter_stress(inputs, lambda t: t.clone().cuda())
-
     @requires_gloo()
     def test_gather_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1339,99 +1385,19 @@ class ProcessGroupGlooTest(ProcessGroupGlooTestBase):
             opts.rootRank = (self.rank + 1) % self.world_size
             pg.gather([[t1] * self.world_size], [t1], opts)
 
-    def _test_gather_basics(self, fn):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts()
-        )
-
-        # Preallocate tensors for input/output
-        input = [fn(torch.tensor([self.rank]))]
-        outputs = [fn(torch.tensor([-1])) for _ in range(self.world_size)]
-
-        # Take turns being the gather root and accumulate work items
-        futures = []
-        for i in range(self.world_size):
-            opts = c10d.GatherOptions()
-            opts.rootRank = i
-            if i == self.rank:
-                futures.append(pg.gather([outputs], input, opts).get_future())
-            else:
-                futures.append(pg.gather([], input, opts).get_future())
-
-        # Wait for work to complete
-        expected = [fn(torch.tensor([rank])) for rank in range(self.world_size)]
-        for i in range(self.world_size):
-            futures[i].wait()
-            result = futures[i].value()
-            if i == self.rank:
-                self.assertEqual(expected, result)
-
     @requires_gloo()
     def test_gather_basics(self):
         self._test_gather_basics(lambda t: t.clone())
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_gather_basics_cuda(self):
-        self._test_gather_basics(lambda t: t.clone().cuda())
 
     @requires_gloo()
     def test_gather_noncontiguous_input(self):
         # Take a column of 2D tensor, such that memory is not dense
         self._test_gather_basics(lambda t: t.expand(2, 2).tril().contiguous()[:, 0])
 
-    def _test_gather_stress(self, inputs, fn):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts(threads=8)
-        )
-        future_handles = []
-        outputs = [
-            [[fn(torch.tensor([-1])) for _ in range(self.world_size)]]
-            for _ in range(len(inputs))
-        ]
-        expected_outputs = [
-            [[torch.tensor([i + j]) for j in range(self.world_size)]]
-            for i in range(len(inputs))
-        ]
-        for i in range(len(inputs)):
-            for root in range(self.world_size):
-                opts = c10d.GatherOptions()
-                opts.rootRank = root
-                if root == self.rank:
-                    fut = pg.gather(outputs[i], [fn(inputs[i])], opts).get_future()
-                else:
-                    fut = pg.gather([], [fn(inputs[i])], opts).get_future()
-                future_handles.append(fut)
-
-        for i, future_handle in enumerate(future_handles):
-            future_handle.wait()
-            iter = i // self.world_size
-            root = i % self.world_size
-            if root == self.rank:
-                result = future_handle.value()
-                self.assertEqual(
-                    expected_outputs[iter],
-                    [result],
-                    msg=(
-                        lambda msg: f"{msg}\nMismatch in iteration {iter:d} for root {root:d}"
-                    ),
-                )
-
     @requires_gloo()
     def test_gather_stress(self):
         inputs = [torch.tensor([i + self.rank]) for i in range(1000)]
         self._test_gather_stress(inputs, lambda t: t.clone())
-
-    @skip_if_lt_x_gpu(2)
-    @skipIfRocm(
-        msg="CLR execution-lock busy wait, see https://github.com/ROCm/rocm-systems/issues/11678"
-    )
-    @requires_gloo()
-    def test_gather_stress_cuda(self):
-        inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
-        self._test_gather_stress(inputs, lambda t: t.clone().cuda())
 
     @requires_gloo()
     def test_allgather_checks(self):
@@ -2131,6 +2097,40 @@ class ProcessGroupGlooTestCUDA(ProcessGroupGlooTestBase):
             work = dist.all_reduce(tensors, async_op=True)
             work.wait()
             self.assertEqual([tensors], outputs)
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_scatter_basics_cuda(self):
+        self._test_scatter_basics(lambda t: t.clone().cuda())
+
+    @skip_but_pass_in_sandcastle(
+        "Test is flaky, see https://github.com/pytorch/pytorch/issues/15963"
+    )
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    @skipIfRocm(
+        msg="CLR execution-lock busy wait, see https://github.com/ROCm/rocm-systems/issues/11678"
+    )
+    def test_scatter_stress_cuda(self):
+        inputs = [
+            [torch.tensor([i + self.rank]) for _ in range(self.world_size)]
+            for i in range(1000)
+        ]
+        self._test_scatter_stress(inputs, lambda t: t.clone().cuda())
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_gather_basics_cuda(self):
+        self._test_gather_basics(lambda t: t.clone().cuda())
+
+    @skip_if_lt_x_gpu(2)
+    @skipIfRocm(
+        msg="CLR execution-lock busy wait, see https://github.com/ROCm/rocm-systems/issues/11678"
+    )
+    @requires_gloo()
+    def test_gather_stress_cuda(self):
+        inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
+        self._test_gather_stress(inputs, lambda t: t.clone().cuda())
 
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
