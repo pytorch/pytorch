@@ -3,7 +3,11 @@ from collections.abc import Callable
 from typing import Any
 
 import torch
-from torch._higher_order_ops.utils import create_bw_fn, materialize_as_graph
+from torch._higher_order_ops.utils import (
+    _maybe_run_with_interpreter,
+    create_bw_fn,
+    materialize_as_graph,
+)
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -329,7 +333,12 @@ def create_hop_joint_graph(
         )
     example_grads = tuple(torch.zeros_like(val) for val in fw_gm_output_vals)
 
-    joint_fn = create_bw_fn(fw_fn, fw_args, return_fw_outputs=True)
+    # Both re-traces below call a graph module. Run it through an Interpreter
+    # so each new node keeps its source node's meta (e.g. a "recompute" tag or
+    # an fx.traceback.annotate region), which the partitioner reads.
+    joint_fn = create_bw_fn(
+        _maybe_run_with_interpreter(fw_fn), fw_args, return_fw_outputs=True
+    )
     joint_gm = materialize_as_graph(
         joint_fn, fw_args + example_grads, force_enable_grad=True
     )
@@ -337,8 +346,11 @@ def create_hop_joint_graph(
         # Need to first trace out the joint_fn with autograd info on
         # then functionalize the graph otherwise the grad information is lost
         joint_gm = materialize_as_graph(
-            # pyrefly: ignore [bad-argument-type]
-            torch.func.functionalize(joint_gm, remove="mutations_and_views"),
+            torch.func.functionalize(
+                # pyrefly: ignore [bad-argument-type]
+                _maybe_run_with_interpreter(joint_gm),
+                remove="mutations_and_views",
+            ),
             fw_args + example_grads,
         )
 

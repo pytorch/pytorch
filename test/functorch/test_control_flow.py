@@ -10969,6 +10969,37 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
         ):
             functional_f(example_init, example_inputs)
 
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_joint_graph_keeps_node_meta(self):
+        # Scan re-traces its body twice to build the joint graph that min-cut
+        # partitions. An annotate() region set in the body must survive both.
+        from torch.fx.traceback import annotate
+
+        def body(carry, x):
+            with annotate({"region": "keep"}):
+                y = carry.sin()
+            return y * x, y.new_zeros(())
+
+        def f(init, xs):
+            return scan(body, init, xs)[0]
+
+        init = torch.randn(4, requires_grad=True)
+        xs = torch.randn(3, 4, requires_grad=True)
+        backend = AotEagerAndRecordGraphs()
+        out = torch.compile(f, backend=backend, fullgraph=True)(init, xs)
+        self.assertEqual(out, f(init, xs))
+
+        # The forward body AOTAutograd hands the compiler is min-cut's output.
+        (fw_gm,) = backend.fw_graphs
+        (scan_node,) = fw_gm.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.scan
+        )
+        body_gm = getattr(fw_gm, scan_node.args[0].target)
+        (sin,) = body_gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sin.default
+        )
+        self.assertEqual(sin.meta.get("custom"), {"region": "keep"})
+
     def test_scan_functionalized_elem_alias(self):
         def add(x, y):
             return x, x
