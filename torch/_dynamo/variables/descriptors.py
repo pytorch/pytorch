@@ -330,13 +330,13 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         try:
             # CPython wrapper_hash:
             # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1347
             return hash(self.as_python_constant()), False
         except NotImplementedError:
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
@@ -575,7 +575,7 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
     def python_type(self) -> type:
         return types.BuiltinMethodType
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         # It hashes m_self by identity, so only a guarded runtime method has a
         # real hash; a method bound during tracing gets a compile-time-only one.
