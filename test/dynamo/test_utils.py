@@ -103,6 +103,16 @@ class TestUtils(TestCase):
             utils.summarize_example_value(t * 2),
             "Tensor(..., size=(2,), dtype=torch.float16, grad_fn=<MulBackward0>)",
         )
+        # Reading grad_fn raises for a view created and modified in place in
+        # no-grad mode; like a repr, the summary shows it as invalid
+        base = torch.ones(3, requires_grad=True).clone()
+        with torch.no_grad():
+            view = base[:2]
+            view.mul_(2)
+        self.assertEqual(
+            utils.summarize_example_value(view),
+            "Tensor(..., size=(2,), grad_fn=<Invalid>)",
+        )
 
         # A tuple is summarized like a list, and a non-tensor whose repr raises
         # is shown as <ClassName>
