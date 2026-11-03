@@ -1918,6 +1918,25 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             install_guard(arg.source.make_guard(GuardBuilder.COW_TENSOR_MATCH))
             return VariableTracker.build(tx, cast(bool, cow_state))
 
+        @register(torch._C._is_fake_tensor)
+        def handle_is_fake_tensor(
+            self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        ) -> ConstantVariable | None:
+            # Like an isinstance check against FakeTensor, which folds to the
+            # input's type that TENSOR_MATCH guards on, and is False for a
+            # tensor made in the graph. The traced example value is always
+            # fake, so use the real input.
+            if not isinstance(arg, TensorVariable):
+                return None
+            if arg.source is None:
+                return VariableTracker.build(tx, False)
+            is_fake = torch._C._is_fake_tensor(arg.get_real_value())
+            guard_fn = functools.partial(
+                GuardBuilder.FAKE_TENSOR_MATCH, expected=is_fake
+            )
+            install_guard(arg.source.make_guard(guard_fn))
+            return VariableTracker.build(tx, is_fake)
+
         @register(torch._C._is_torch_function_all_disabled)
         def handle_is_torch_function_all_disabled(
             self, tx: "InstructionTranslatorBase"
