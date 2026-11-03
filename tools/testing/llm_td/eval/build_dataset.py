@@ -4,16 +4,17 @@
 
 Four kinds of sample, each a JSON file under DIR/samples:
 
-  pr_<N>      a PR whose own CI failed tests that main did not fail. The
-              ground truth is every (test file, CI config) that failed on the
-              earliest failing head, in a job that runs TD and did not pass on
-              any attempt on that head. These runs are censored: pull/trunk
+  pr_<N>      a PR whose own CI failed tests that main did not fail: its
+              earliest head with a failure between --start and --end that the
+              rules below, short of the two on the head's bases, leave as the
+              PR's own. The ground truth is every (test file, CI config) of
+              that head's own failures. These runs are censored: pull/trunk
               jobs already skip 75% of files through TD, so truth is a lower
               bound.
   head_<N>_<sha>
-              every head of a pr_ sample's PR with a non-flaky test failure in a
-              job that runs TD; the truth is those failures. A failure is flaky
-              by Dr.CI's signals, with hindsight (see flaky_flags).
+              every head of a pr_ sample's PR with a failure that is the PR's
+              own; the truth is those failures, so the pr_ sample's head gets
+              the same truth here.
   rev_<sha>   a commit the autorevert bot reverted between --start and --end
               because it broke a test on main, where every test runs. The
               truth is the test files of the reverting signal that failed on
@@ -40,14 +41,28 @@ PR and head samples carry the PR's title and body as of the build, which may
 have been edited after the failure; revert and neutral samples carry the
 landed commit message.
 
-A PR failure is attributed to the PR only if, before the PR landed, the same
-test did not fail on another author's PR, or on main within four days of the
-failure or of the PR's merge base, and the test was not disabled within
-FLAKY_WINDOW of the failure, as in head samples' flaky_flags. PR
-truths that reproduced (same test failing in two build environments, or on
-two heads of the PR) are kept in `truth_strong`. A one-off is not necessarily a flake:
-often only one environment runs the test, or the author fixed it in the next
-push.
+PR and head samples judge a failure on a PR head with one rule set,
+History.why_dropped, with hindsight on both sides as Dr.CI does. A failure is
+not the PR's own, and is dropped, if
+  - it is before --start - WINDOW or from --end on, or after the PR landed,
+    when its own breakage on main and on PRs based on it can no longer be told
+    apart from someone else's;
+  - its job does not run TD, is unstable, or passed on any attempt on the head;
+  - the test was disabled within WINDOW of the failure;
+  - the same test failed on main, on a branch with no known PR, or on another
+    author's PR within WINDOW of the failure, before the PR landed;
+  - the same test failed on main within WINDOW of the head's `main_base`,
+    before the PR landed;
+  - the same test failed on another PR's head that is this head's CI base or
+    one of its ancestors: in a ghstack stack that is the breakage of a PR
+    below, which the diff against the CI base does not contain.
+WINDOW is 14 days, Dr.CI's flaky window: truth is a lower bound anyway, so a
+shorter window would buy a few more truths at the price of counting more
+flakes and parallel breakages as the PR's. The builder prints how many
+failures each rule dropped. PR truths that reproduced (same test failing in
+two build environments, or on two heads of the PR) are kept in
+`truth_strong`. A one-off is not necessarily a flake: often only one
+environment runs the test, or the author fixed it in the next push.
 """
 
 from __future__ import annotations
@@ -56,6 +71,7 @@ import argparse
 import ast
 import collections
 import concurrent.futures as cf
+import dataclasses
 import datetime as dt
 import json
 import random
@@ -71,14 +87,15 @@ from tools.testing.llm_td.select_tests import changed_files, diffstat_and_diff
 
 
 KINDS = ("pr", "head", "revert", "neutral")
-MAIN_WINDOW = dt.timedelta(days=4)
-# Main failures this far before --start are loaded, so PRs whose merge base is
-# older than --start still get the main-breakage check.
-MAIN_LOOKBACK = dt.timedelta(days=30)
-FLAKY_WINDOW = dt.timedelta(days=14)
+WINDOW = dt.timedelta(days=14)
+# Failures this far before --start are loaded: heads are judged from
+# --start - WINDOW, against failures up to WINDOW earlier, and merge bases may be
+# older still.
+LOOKBACK = dt.timedelta(days=30)
 NEVER = dt.datetime.max.replace(tzinfo=dt.timezone.utc)
 SKIP_JOBS = ("rerun_disabled_tests", "mem_leak_check")
 Disabled = dict[tuple[str, str], list[dt.datetime]]
+Key = tuple[str, str, str]
 
 
 def git(*args: str, check: bool = True) -> str:
@@ -192,46 +209,103 @@ def disabled_tests(lo: dt.date, hi: dt.date) -> Disabled:
 
 def was_disabled(disabled: Disabled, r: dict) -> bool:
     t, days = ts(r["t"]), disabled.get((r["classname"], r["test"]), [])
-    return any(abs(d - t) < FLAKY_WINDOW for d in days)
+    return any(abs(d - t) < WINDOW for d in days)
 
 
-def pr_caused_failures(
-    rows: list[dict], start: dt.date, end: dt.date, landed: dict[int, dt.datetime]
-) -> tuple[list[dict], dict]:
-    """Split failures into main and PR runs and keep the PR failures in [start, end), in TD jobs, attributable to the PR.
+def is_ancestor(a: str, b: str) -> bool:
+    """False also when `a` is not fetched, which an ancestor of a fetched `b` always is."""
+    return not subprocess.run(["git", "merge-base", "--is-ancestor", a, b], cwd=REPO, capture_output=True).returncode  # fmt: skip
 
-    `rows` may extend past the window on both sides, so failures near its edges
-    are still checked against main and other authors, within MAIN_WINDOW.
-    Failures after the PR landed (`landed`, see landed_times) may be its own
-    breakage and are not held against it, so its own failures from then on
-    cannot be checked and are dropped. Unstable jobs, jobs that passed on any
-    attempt on the same head, and tests disabled within FLAKY_WINDOW are not
-    truth, as in flaky_flags. Failures
-    on branches with no known PR count against PR failures here like main's,
-    but only main's are returned."""
-    sha2pr = pr_of_shas(sorted({r["sha"] for r in rows if not is_main(r["br"])}))
-    main, unmapped = collections.defaultdict(list), collections.defaultdict(list)
-    pr_rows: list[dict] = []
-    for r in rows:
-        k = (r["tf"], r["classname"], r["test"])
-        if is_main(r["br"]) or r["sha"] not in sha2pr:
-            (main if is_main(r["br"]) else unmapped)[k].append(ts(r["t"]))
-        else:
-            pr_rows.append({**r, "pr": sha2pr[r["sha"]]})
-    author = pr_authors(sorted({r["pr"] for r in pr_rows}))
-    authors = collections.defaultdict(list)
-    for r in pr_rows:
-        authors[(r["tf"], r["classname"], r["test"])].append((ts(r["t"]), author.get(r["pr"], r["pr"])))  # fmt: skip
-    lo, hi = ts(f"{start} 00:00:00"), ts(f"{end} 00:00:00")
-    disabled = disabled_tests(start - FLAKY_WINDOW, end + FLAKY_WINDOW)
-    keep = []
-    for r in pr_rows:
-        k, t, cutoff = (r["tf"], r["classname"], r["test"]), ts(r["t"]), landed.get(r["pr"], NEVER)  # fmt: skip
-        others = {who for wt, who in authors[k] if abs(wt - t) < MAIN_WINDOW and wt < cutoff} - {author.get(r["pr"], r["pr"])}  # fmt: skip
-        if lo <= t < min(hi, cutoff) and "unstable" not in r["job"] and job_runs_td(r["job"], r["wf"]) and not was_disabled(disabled, r) and not others and not any(abs(t - m) < MAIN_WINDOW and m < cutoff for m in main.get(k, []) + unmapped.get(k, [])):  # fmt: skip
-            keep.append(r)
-    green = green_jobs(sorted({r["sha"] for r in keep}))
-    return [r for r in keep if (r["sha"], r["wf"], r["job"]) not in green], main
+
+def key(r: dict) -> Key:
+    return r["tf"], r["classname"], r["test"]
+
+
+@dataclasses.dataclass
+class History:
+    """The test failures CI saw from --start - LOOKBACK to --end + WINDOW, and what tells whether a PR head's failure is the PR's own."""
+
+    start: dt.date
+    end: dt.date
+    # PR head sha -> its failures, each with its "pr".
+    heads: dict[str, list[dict]]
+    # Every failure of a test: time, author ("main" for main and branches with no known PR), sha, PR.
+    seen: dict[Key, list[tuple[dt.datetime, str, str, int | None]]]
+    main: dict[Key, list[dt.datetime]]
+    author: dict[int, str]
+    landed: dict[int, dt.datetime]
+    disabled: Disabled
+    # Head sha -> the (workflow, job)s that passed on it; see load_green.
+    green: dict[str, set[tuple[str, str]]] = dataclasses.field(default_factory=dict)
+
+    @classmethod
+    def load(cls, start: dt.date, end: dt.date) -> History:
+        rows = pull_failures(start - LOOKBACK, end + WINDOW)
+        sha2pr = pr_of_shas(sorted({r["sha"] for r in rows if not is_main(r["br"])}))
+        author = pr_authors(sorted(set(sha2pr.values())))
+        seen, main, heads = (
+            collections.defaultdict(list),
+            collections.defaultdict(list),
+            collections.defaultdict(list),
+        )
+        for r in rows:
+            pr = None if is_main(r["br"]) else sha2pr.get(r["sha"])
+            who = "main" if pr is None else author.get(pr, str(pr))
+            seen[key(r)].append((ts(r["t"]), who, r["sha"], pr))
+            if is_main(r["br"]):
+                main[key(r)].append(ts(r["t"]))
+            elif pr is not None:
+                heads[r["sha"]].append({**r, "pr": pr})
+        return cls(start, end, dict(heads), seen, main, author, landed_times(start - LOOKBACK), disabled_tests(start - LOOKBACK, end + WINDOW))  # fmt: skip
+
+    def load_green(self, shas: set[str]) -> None:
+        todo = sorted(shas - self.green.keys())
+        for sha in todo:
+            self.green[sha] = set()
+        for sha, wf, job in green_jobs(todo):
+            self.green[sha].add((wf, job))
+
+    def why_dropped(self, r: dict, base: str | None = None, base_t: dt.datetime | None = None) -> str | None:  # fmt: skip
+        """The first rule (see the module docstring) that drops PR failure `r`, or None if it is the PR's own.
+
+        The rules on the head's CI `base` and the time `base_t` of its merge base
+        with main are skipped without them, and the job_green rule for a head
+        load_green has not loaded."""
+        t, cutoff = ts(r["t"]), self.landed.get(r["pr"], NEVER)
+        me, k = self.author.get(r["pr"], str(r["pr"])), key(r)
+        if not ts(f"{self.start - WINDOW} 00:00:00") <= t < ts(f"{self.end} 00:00:00"):
+            return "window"
+        if t >= cutoff:
+            return "after_landing"
+        if "unstable" in r["job"] or not job_runs_td(r["job"], r["wf"]):
+            return "job"
+        if (r["wf"], r["job"]) in self.green.get(r["sha"], ()):
+            return "job_green"
+        if was_disabled(self.disabled, r):
+            return "disabled"
+        if any(who != me and abs(wt - t) < WINDOW and wt < cutoff for wt, who, _, _ in self.seen.get(k, [])):  # fmt: skip
+            return "other_failure"
+        if base_t is not None and any(abs(base_t - m) < WINDOW and m < cutoff for m in self.main.get(k, [])):  # fmt: skip
+            return "main_near_base"
+        if base is not None and any(pr not in (None, r["pr"]) and (sha == base or is_ancestor(sha, r["sha"])) for _, _, sha, pr in self.seen.get(k, [])):  # fmt: skip
+            return "stacked"
+        return None
+
+    def truth(self, sha: str, bases: dict[str, str], dropped: collections.Counter) -> list[dict] | None:  # fmt: skip
+        """The failures on PR head `sha` that are the PR's own, counting the others in `dropped` by rule; None if its main_base is older than the loaded failures."""
+        if sha not in self.green:
+            raise AssertionError(f"load_green({sha!r}) first")
+        base_t = commit_time(bases["main_base"])
+        if base_t - WINDOW < ts(f"{self.start - LOOKBACK} 00:00:00"):
+            print(f"skipping {sha}: merge base before the loaded failures", flush=True)
+            return None
+        kept = []
+        for r in self.heads[sha]:
+            if why := self.why_dropped(r, bases["base"], base_t):
+                dropped[why] += 1
+            else:
+                kept.append(r)
+        return kept
 
 
 def green_jobs(shas: list[str]) -> set[tuple[str, str, str]]:
@@ -382,30 +456,40 @@ def write_sample(
     })  # fmt: skip
 
 
-def pr_samples(
-    keep: list[dict],
-    main: dict,
-    out: Path,
-    jobs: int,
-    start: dt.date,
-    landed: dict[int, dt.datetime],
-) -> None:
+def by_file(rows: list[dict]) -> dict[str, list[tuple[str, str]]]:
+    out = collections.defaultdict(set)
+    for r in rows:
+        out[r["tf"]].add((r["wf"], r["job"]))
+    return {tf: sorted(js) for tf, js in sorted(out.items())}
+
+
+def print_dropped(kind: str, dropped: list[collections.Counter]) -> None:
+    total = sum(dropped, collections.Counter())
+    by_count = dict(sorted(total.items(), key=lambda x: (-x[1], x[0])))
+    print(
+        f"{kind} truth: dropped by rule over {len(dropped)} heads: {by_count}",
+        flush=True,
+    )
+
+
+def pr_samples(h: History, out: Path, jobs: int) -> None:
+    lo = ts(f"{h.start} 00:00:00")
+    own = [r for rows in h.heads.values() for r in rows if ts(r["t"]) >= lo and h.why_dropped(r) is None]  # fmt: skip
+    h.load_green({r["sha"] for r in own})
+    own = [r for r in own if h.why_dropped(r) is None]
     envs, heads = collections.defaultdict(set), collections.defaultdict(set)
     first: dict[int, dict] = {}
-    for r in keep:
-        k = (r["pr"], r["tf"], r["classname"], r["test"])
+    for r in own:
+        k = (r["pr"], *key(r))
         envs[k].add(r["job"].split(" / ")[0])
         heads[k].add(r["sha"])
         if r["pr"] not in first or r["t"] < first[r["pr"]]["t"]:
             first[r["pr"]] = r
     reproduced = {k for k in envs if len(envs[k]) >= 2 or len(heads[k]) >= 2}
-    first_rows = collections.defaultdict(list)
-    for r in keep:
-        if r["sha"] == first[r["pr"]]["sha"]:
-            first_rows[r["pr"]].append(r)
     fetch(sorted({f["sha"] for f in first.values()}))
     ci = ci_bases({f["sha"]: pr for pr, f in first.items()})
     sources: list[str] = []
+    dropped: list[collections.Counter] = []
 
     def go(pr: int) -> None:
         sha = first[pr]["sha"]
@@ -414,34 +498,21 @@ def pr_samples(
         bases = pr_bases(sha, ci.get(sha, []))
         if bases is None:
             return
-        base_t = commit_time(bases["main_base"])
-        if base_t - MAIN_WINDOW < ts(f"{start - MAIN_LOOKBACK} 00:00:00"):
-            print(f"skipping PR {pr}: merge base before the loaded main failures", flush=True)  # fmt: skip
-            return
-        # A test broken on main around the merge base, before this PR landed, is not its fault.
-        cutoff = landed.get(pr, NEVER)
-        by, strong = collections.defaultdict(set), set()
-        for r in first_rows[pr]:
-            k = (r["tf"], r["classname"], r["test"])
-            if not any(
-                abs(base_t - m) < MAIN_WINDOW and m < cutoff for m in main.get(k, [])
-            ):
-                by[r["tf"]].add((r["wf"], r["job"]))
-                if (pr, *k) in reproduced:
-                    strong.add(r["tf"])
-        truth = sorted(by)
-        if truth:
+        dropped.append(c := collections.Counter())
+        if kept := h.truth(sha, bases, c):
+            truth_jobs = by_file(kept)
+            strong = {r["tf"] for r in kept if (pr, *key(r)) in reproduced}
             try:
                 title, body = pr_text(pr)
-                write_sample(out, f"pr_{pr}", "pr", sha, title=title, body=body, **bases, pr=pr, date=first[pr]["t"][:19], truth=truth,
-                             truth_strong=[tf for tf in truth if tf in strong],
-                             truth_jobs={tf: sorted(by[tf]) for tf in truth})  # fmt: skip
+                write_sample(out, f"pr_{pr}", "pr", sha, title=title, body=body, **bases, pr=pr, date=first[pr]["t"][:19], truth=sorted(truth_jobs),
+                             truth_strong=sorted(strong), truth_jobs=truth_jobs)  # fmt: skip
                 sources.append(bases["base_source"])
             except subprocess.CalledProcessError as e:
                 print(f"skipping PR {pr}: {e}", flush=True)
 
     with cf.ThreadPoolExecutor(jobs) as ex:
         list(ex.map(go, sorted(first)))
+    print_dropped("pr", dropped)
     print(f"{sources.count('main')} of {len(sources)} PR samples have no CI base and are diffed against main", flush=True)  # fmt: skip
 
 
@@ -458,99 +529,39 @@ def landed_times(since: dt.date) -> dict[int, dt.datetime]:
     return out
 
 
-def flaky_flags(rows: list[dict], start: dt.date, end: dt.date) -> list[dict]:
-    """Dr.CI's flaky signals for each failing (job, test) of `rows`, with hindsight on both sides.
-
-    A failure is flaky if its job passed (on this attempt, after run_test.py's
-    rerun of the file, or on a rerun of the job), the job is marked unstable,
-    the test was disabled, or the same test failed on another author's PR, or
-    on main, before the PR landed and within FLAKY_WINDOW. A PR's own breakage
-    that landed and failed on main or on PRs based on it until its revert does
-    not make it flaky, so a failure after the PR landed cannot be checked and
-    counts as flaky."""
-    # `rows` start at start - FLAKY_WINDOW, so look back a full window from there.
-    w, lo = FLAKY_WINDOW, start - 2 * FLAKY_WINDOW
-    others = pull_failures(lo, end + w)
-    sha2pr = pr_of_shas(sorted({r["sha"] for r in others if not is_main(r["br"])}))
-    author = pr_authors(sorted(set(sha2pr.values()) | {r["pr"] for r in rows}))
-    landed = landed_times(lo)
-    seen = collections.defaultdict(list)
-    for r in others:
-        pr = sha2pr.get(r["sha"])
-        who = "main" if is_main(r["br"]) or pr is None else author.get(pr, pr)
-        seen[(r["tf"], r["classname"], r["test"])].append((ts(r["t"]), who))
-    disabled = disabled_tests(lo, end + w)
-    for r in rows:
-        t, me, cutoff = ts(r["t"]), author.get(r["pr"], r["pr"]), landed.get(r["pr"], NEVER)
-        near = {who for wt, who in seen[(r["tf"], r["classname"], r["test"])] if abs(wt - t) < w and wt < cutoff}
-        r["flaky"] = r["job_green"] or "unstable" in r["job"] or bool(near - {me}) or was_disabled(disabled, r) or t >= cutoff
-    return rows
-
-
-def head_failures(prs: list[int], start: dt.date, end: dt.date) -> list[dict]:
-    """Every failing (job, test) in a job that runs TD, on every head of `prs`, before `end`.
-
-    Later heads are left out because flaky_flags only has other failures up to
-    `end + FLAKY_WINDOW`."""
-    numbers = ",".join(map(str, prs))
-    sql = f"SELECT DISTINCT number, head_sha FROM materialized_views.pr_by_sha WHERE number IN ({numbers})"
-    sha2pr = {r["head_sha"]: int(r["number"]) for r in query(sql)}
-    shas = sorted(sha2pr)
-    jobs = []
-    for i in range(0, len(shas), 200):
-        chunk = ",".join(f"'{s}'" for s in shas[i : i + 200])
-        jobs += query(f"""
-            SELECT id, head_sha, workflow_name, name, run_attempt, conclusion FROM default.workflow_job FINAL
-            WHERE head_sha IN ({chunk}) AND repository_full_name = 'pytorch/pytorch'""")
-    green = {(j["head_sha"], j["workflow_name"], j["name"]) for j in jobs if j["conclusion"] == "success"}
-    by_id = {j["id"]: j for j in jobs if job_runs_td(j["name"], j["workflow_name"]) and not any(s in j["name"] for s in SKIP_JOBS)}
-    ids, rows = [str(i) for i in by_id], []
-    for i in range(0, len(ids), 2000):
-        sql = f"""
-            SELECT job_id, replaceRegexpOne(file, '\\.py$', '') tf, classname, name test, toString(min(time_inserted)) t
-            FROM tests.all_test_runs
-            WHERE time_inserted >= '{start - FLAKY_WINDOW}' AND time_inserted < '{end}' AND job_id IN ({",".join(ids[i : i + 2000])})
-              AND (failure_count > 0 OR error_count > 0)
-            GROUP BY job_id, tf, classname, test"""
-        for r in query(sql):
-            j = by_id[int(r["job_id"])]
-            sha, wf, name = j["head_sha"], j["workflow_name"], j["name"]
-            passed = (sha, wf, name) in green
-            rows.append({**r, "sha": sha, "pr": sha2pr[sha], "wf": wf, "job": name, "job_green": passed})
-    return rows
-
-
-def head_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
-    """One sample per failing head of each pr_ sample's PR, truth = its non-flaky failures in TD jobs."""
+def head_samples(h: History, out: Path, jobs: int) -> None:
+    """One sample per head of each pr_ sample's PR with failures that are the PR's own, truth = those failures."""
     prs = {}
     for p in out.glob("pr_*.json"):
         s = json.loads(p.read_text())
         prs[s["pr"]] = s
     if not prs:
         raise SystemExit(f"--kinds head needs the pr_ samples in {out}; build --kinds pr first")
-    by = collections.defaultdict(lambda: collections.defaultdict(set))
-    for r in flaky_flags(head_failures(sorted(prs), start, end), start, end):
-        if not r["flaky"]:
-            by[(r["pr"], r["sha"])][r["tf"]].add((r["wf"], r["job"]))
-    fetch(sorted({sha for _, sha in by}))
-    ci = ci_bases({sha: pr for pr, sha in by})
+    shas = {sha for sha, rows in h.heads.items() if rows[0]["pr"] in prs}
+    h.load_green(shas)
+    shas = {sha for sha in shas if any(h.why_dropped(r) is None for r in h.heads[sha])}
+    fetch(sorted(shas))
+    ci = ci_bases({sha: h.heads[sha][0]["pr"] for sha in shas})
     sources: list[str] = []
+    dropped: list[collections.Counter] = []
 
-    def go(k: tuple[int, str]) -> None:
-        (pr, sha), s = k, prs[k[0]]
-        if not has_commit(sha):
+    def go(sha: str) -> None:
+        pr = h.heads[sha][0]["pr"]
+        if not has_commit(sha) or (bases := pr_bases(sha, ci.get(sha, []))) is None:
             return
-        if bases := pr_bases(sha, ci.get(sha, [])):
-            truth_jobs = {tf: sorted(js) for tf, js in by[k].items()}
+        dropped.append(c := collections.Counter())
+        if kept := h.truth(sha, bases, c):
+            truth_jobs = by_file(kept)
             try:
-                write_sample(out, f"head_{pr}_{sha[:12]}", "head", sha, title=s["title"], body=s["body"], **bases, pr=pr,
+                write_sample(out, f"head_{pr}_{sha[:12]}", "head", sha, title=prs[pr]["title"], body=prs[pr]["body"], **bases, pr=pr,
                              truth=sorted(truth_jobs), truth_jobs=truth_jobs)
                 sources.append(bases["base_source"])
             except subprocess.CalledProcessError as e:
                 print(f"skipping head {sha}: {e}", flush=True)
 
     with cf.ThreadPoolExecutor(jobs) as ex:
-        list(ex.map(go, by))
+        list(ex.map(go, sorted(shas)))
+    print_dropped("head", dropped)
     print(f"{sources.count('main')} of {len(sources)} head samples have no CI base and are diffed against main", flush=True)
 # fmt: on
 
@@ -678,13 +689,12 @@ def main() -> None:
     out = args.data / "samples"
     out.mkdir(parents=True, exist_ok=True)
     git("fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main")
-    if "pr" in args.kinds:
-        rows = pull_failures(args.start - MAIN_LOOKBACK, args.end + MAIN_WINDOW)
-        landed = landed_times(args.start - MAIN_LOOKBACK)
-        keep, main_fail = pr_caused_failures(rows, args.start, args.end, landed)
-        pr_samples(keep, main_fail, out, args.jobs, args.start, landed)
-    if "head" in args.kinds:
-        head_samples(out, args.jobs, args.start, args.end)
+    if {"pr", "head"} & set(args.kinds):
+        h = History.load(args.start, args.end)
+        if "pr" in args.kinds:
+            pr_samples(h, out, args.jobs)
+        if "head" in args.kinds:
+            head_samples(h, out, args.jobs)
     if "revert" in args.kinds:
         revert_samples(out, args.jobs, args.start, args.end)
     if "neutral" in args.kinds:
