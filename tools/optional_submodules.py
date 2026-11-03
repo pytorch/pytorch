@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import os
-import shutil
+import re
+import sys
 import time
 from pathlib import Path
-from subprocess import CalledProcessError, check_call
+from subprocess import CalledProcessError, check_call, PIPE, run
 
 
 repo_root = Path(__file__).absolute().parent.parent
@@ -14,23 +17,53 @@ def _read_file(path: Path) -> str:
         return f.read().strip()
 
 
-def _checkout_by_tag(repo: str, tag: str, attempts: int = 6, backoff: int = 10) -> None:
-    # gitlab.com sheds load with transient clone failures, so retry with backoff
-    clone_dir = third_party_path / repo.rstrip("/").rsplit("/", 1)[-1]
+# Server-side failures of a clone that are worth another attempt: the "unable to
+# handle this request due to load" page gitlab.com serves when it sheds load,
+# HTTP 429 and 5xx, and connections that drop or time out. Everything else (a tag
+# that does not exist, no DNS, an unwritable directory) fails at once instead of
+# stalling for minutes, e.g. in the `cmake` configure step.
+_TRANSIENT_CLONE_ERROR = re.compile(
+    r"unable to handle this request due to load"
+    r"|The requested URL returned error: (?:429|5\d\d)"
+    r"|RPC failed|early EOF|unexpected disconnect"
+    r"|Connection (?:timed out|reset)|Operation timed out"
+    r"|SSL_ERROR_SYSCALL|GnuTLS recv error",
+    re.IGNORECASE,
+)
+
+
+def _clone(
+    cmd: list[str],
+    cwd: Path | None = None,
+    attempts: int = 8,
+    backoff: int = 10,
+    max_delay: int = 60,
+) -> None:
+    # git has no retry or backoff setting for `clone` (`http.lowSpeedLimit` and
+    # `http.lowSpeedTime` only abort a stalled transfer), so retry here. A failed
+    # clone removes the directory it created, so there is nothing to clean up.
     for attempt in range(1, attempts + 1):
-        try:
-            check_call(
-                ["git", "clone", "--depth", "1", "--branch", tag, repo],
-                cwd=third_party_path,
-            )
+        result = run(cmd, cwd=cwd, stderr=PIPE, text=True)
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr, flush=True)
+        if result.returncode == 0:
             return
-        except CalledProcessError:
-            if attempt == attempts:
-                raise
-            shutil.rmtree(clone_dir, ignore_errors=True)
-            delay = backoff * 2 ** (attempt - 1)
-            print(f"-- Clone failed (attempt {attempt}/{attempts}), retry in {delay}s")
-            time.sleep(delay)
+        if attempt == attempts or not _TRANSIENT_CLONE_ERROR.search(result.stderr):
+            raise CalledProcessError(result.returncode, cmd, stderr=result.stderr)
+        delay = min(backoff * 2 ** (attempt - 1), max_delay)
+        print(
+            f"-- Clone failed (attempt {attempt}/{attempts}), retry in {delay}s",
+            flush=True,
+        )
+        time.sleep(delay)
+
+
+def _checkout_by_tag(repo: str, tag: str, **retry: int) -> None:
+    _clone(
+        ["git", "clone", "--depth", "1", "--branch", tag, repo],
+        cwd=third_party_path,
+        **retry,
+    )
 
 
 def read_nccl_pin(cuda_version: str = "") -> str:
@@ -63,7 +96,7 @@ def checkout_nccl_ep() -> None:
     print(f"-- Checkout nccl-extensions revision: {revision}")
     source_dir = third_party_path / "nccl-extensions"
     if not source_dir.exists():
-        check_call(
+        _clone(
             [
                 "git",
                 "clone",
@@ -84,8 +117,6 @@ def checkout_eigen() -> None:
 
 
 if __name__ == "__main__":
-    import sys
-
     if len(sys.argv) == 1:
         # If no arguments are given checkout all optional dependency
         checkout_nccl()
