@@ -13132,10 +13132,11 @@ symbolic_aot_autograd_failures = {
         "linalg.householder_product",
         decorator=unittest.skipIf(IS_MACOS and IS_X86, "flaky"),
     ),
-    # Eager vs compiled gradients differ by up to ~4.3e-4 with MKL 2026.2.
+    # Eager vs compiled gradients differ by up to ~4.3e-3 with MKL 2026.2
+    # (disable_functionalization + dynamic shapes is the worst case).
     decorate(
         "linalg.householder_product",
-        decorator=toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1.3e-06)}),
+        decorator=toleranceOverride({torch.float32: tol(atol=1e-02, rtol=1.3e-06)}),
     ),
 }
 
