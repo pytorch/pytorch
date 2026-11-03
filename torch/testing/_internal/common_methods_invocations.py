@@ -3801,8 +3801,11 @@ class _TestParamsMaxPoolBase:
             'return_indices': [True, False]
         }
 
+        # Python-level arg forms (int vs tuple) that don't need to be crossed with self.kwargs
+        self.extra_kwargs = []
+
         self.shapes = [
-            [1, 2, None],  # batch
+            [1, None],  # batch
             [2],  # channels
             [3, 6]  # signal
         ]
@@ -3822,6 +3825,7 @@ class _TestParamsMaxPoolBase:
         keys = self.kwargs.keys()
         for values in product(*self.kwargs.values()):
             yield dict(zip(keys, values, strict=True))
+        yield from self.extra_kwargs
 
     def gen_input_params(self):
         yield from product(self._gen_shape(), self._gen_kwargs())
@@ -3830,19 +3834,19 @@ class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
 
     def __init__(self) -> None:
         super().__init__()
-        self.kwargs['kernel_size'] += [(3,)]
-        self.kwargs['stride'] += [(2,)]
-        self.kwargs['padding'] += [(1,)]
-        self.kwargs['dilation'] += [(1,)]
+        self.extra_kwargs.append(
+            dict(kernel_size=(3,), stride=(2,), ceil_mode=False, padding=(1,), dilation=(1,), return_indices=True))
 
 class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
 
     def __init__(self) -> None:
         super().__init__()
-        self.kwargs['kernel_size'] += [(3, 2)]
-        self.kwargs['stride'] += [(2, 1)]
-        self.kwargs['padding'] += [(1, 1)]
-        self.kwargs['dilation'] += [(1, 2)]
+        self.kwargs['kernel_size'] = [(3, 2)]
+        self.kwargs['stride'] = [None, (2, 1)]
+        self.kwargs['padding'] = [0, (1, 1)]
+        self.kwargs['dilation'] = [1, (1, 2)]
+        self.extra_kwargs.append(
+            dict(kernel_size=3, stride=3, ceil_mode=False, padding=1, dilation=1, return_indices=True))
 
         self.shapes.append([6])
 
@@ -3850,9 +3854,11 @@ class _TestParamsMaxPool3d(_TestParamsMaxPoolBase):
 
     def __init__(self) -> None:
         super().__init__()
-        self.kwargs['kernel_size'] += [(3, 2, 3)]
-        self.kwargs['stride'] += [(2, 1, 2)]
-        self.kwargs['dilation'] += [(1, 2, 1)]
+        self.kwargs['kernel_size'] = [(3, 2, 3)]
+        self.kwargs['stride'] = [None, (2, 1, 2)]
+        self.kwargs['dilation'] = [1, (1, 2, 1)]
+        self.extra_kwargs.append(
+            dict(kernel_size=3, stride=3, ceil_mode=False, padding=1, dilation=1, return_indices=True))
 
         self.shapes.append([6])
         self.shapes.append([5])
@@ -3869,6 +3875,9 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
 
     params_generator = params_generator_type_dict[op_info.name]()
     for (shape, memory_format), kwargs in params_generator.gen_input_params():
+        # max_pool2d_backward always computes indices, so return_indices=False would be a duplicate
+        if op_info.name == 'max_pool2d_with_indices_backward' and not kwargs['return_indices']:
+            continue
         arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
         yield SampleInput(arg, kwargs=kwargs)
 
@@ -5921,16 +5930,16 @@ def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S, S), (),),
         ((S, S, S), (1, ),),
         ((S, S, S), (1, True, ),),
-        ((), (),),
         ((), (0,),),
-        ((), (0, True,),),
-        # Non-fused mode kernel on CUDA
-        ((3000,), ()),
     )
     make_arg = partial(make_tensor, dtype=dtype, device=device,
                        requires_grad=requires_grad, low=None, high=None)
-    return (SampleInput(make_arg(input_tensor), *args)
-            for input_tensor, args in args)
+    for input_shape, input_args in args:
+        yield SampleInput(make_arg(input_shape), *input_args)
+
+    if torch.device(device).type == 'cuda':
+        # Non-fused mode kernel on CUDA (slice size > 2 * MAX_BLOCK_SIZE)
+        yield SampleInput(make_arg((2049,)))
 
 # Missing to test the nondeterminism of the operation
 # https://github.com/pytorch/pytorch/issues/53352
