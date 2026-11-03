@@ -41,7 +41,7 @@ class Partition:
         )
 
 
-def _get_attr_in_partition(attr: Any) -> bool:
+def _is_read_in_partition(attr: Any) -> bool:
     # Submodules and pytree specs (such as the flat_apply specs export emits) are
     # read with get_attr inside the partition instead of being passed to it.
     # Export turns some partitions into the bodies of higher order ops, whose
@@ -481,7 +481,7 @@ def split_module(
             if (
                 orig_node.op == "get_attr"
                 and isinstance(orig_node.target, str)
-                and _get_attr_in_partition(_get_attr_from_qualname(m, orig_node.target))
+                and _is_read_in_partition(_get_attr_from_qualname(m, orig_node.target))
             ):
                 get_attr_inputs.append(inp)
             else:
@@ -513,7 +513,7 @@ def split_module(
                     )
 
                 orig_attr = _get_attr_from_qualname(m, orig_node.target)
-                if _get_attr_in_partition(orig_attr):
+                if _is_read_in_partition(orig_attr):
                     placeholder = partition.graph.get_attr(orig_node.target)
                     partition.targets[orig_node.target] = orig_attr
                 else:
