@@ -1065,6 +1065,11 @@ def autograd_cache_key(
                     symint_name_map[str(inp)] = f"s_{j}"
                     j += 1
         with sanitize_gm_for_cache(gm):
+            # Cache hits skip compiled_graph_wrapper, so bypass while it is set.
+            # Install any env-requested wrapper before the cache lookup.
+            torch._utils_internal.maybe_init_compiled_graph_wrapper()
+            if torch._functorch.config.compiled_graph_wrapper is not None:
+                raise BypassAOTAutogradCache("compiled_graph_wrapper is set")
             check_cacheable(gm)
             _check_triton_cache_version()
             details = AOTAutogradCacheDetails(
