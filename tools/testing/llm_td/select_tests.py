@@ -48,6 +48,8 @@ DEFAULT_MODEL = (
 SYSTEM_PROMPT = (Path(__file__).parent / "prompt.md").read_text()
 DIFF_BUDGET = 120_000
 BODY_BUDGET = 4_000
+# A larger change runs everything rather than paying for an oversized prompt.
+MAX_CHANGED_FILES = 1000
 # Well under the CI job's 15 minute timeout, so a hung call still yields run_all.
 QUERY_TIMEOUT = 600
 # Room for the note that replaces a truncated file's tail.
@@ -121,9 +123,13 @@ def truncate_diff(diff: str, budget: int = DIFF_BUDGET) -> str:
 
 
 def test_minutes(test_times: dict) -> dict[str, float]:
-    """Machine-minutes of one full CI pass of each test file, summed over every job and config."""
+    """Machine-minutes of one full CI pass of each test file, summed over every job and config.
+
+    The "default" job is the fallback run_test.py uses for unknown jobs, not a job of its own."""
     minutes: dict[str, float] = {}
-    for configs in test_times.values():
+    for job, configs in test_times.items():
+        if job == "default":
+            continue
         for files in configs.values():
             for f, seconds in files.items():
                 minutes[f] = minutes.get(f, 0.0) + seconds / 60
@@ -180,7 +186,8 @@ def query_model(
     if checkout:
         cmd += ["--allowed-tools", tools, "--add-dir", checkout]
         prompt = f"A checkout of the repository at this change is at {checkout}; use Read/Grep/Glob to find what exercises the changed code. Keep exploration focused.\n\n{prompt}"
-    # An empty working directory keeps the CLI from picking up any project settings.
+    # Without a checkout, an empty working directory keeps the CLI from picking
+    # up any project settings.
     with tempfile.TemporaryDirectory() as tmp:
         p = subprocess.run(
             cmd,
@@ -248,6 +255,8 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
         return Selection(run_all=True, reason="no changed files")
     if needs_run_all(changed) and not args.print_prompt:
         return Selection(run_all=True, reason="change touches test infrastructure")
+    if len(changed) > MAX_CHANGED_FILES and not args.print_prompt:
+        return Selection(run_all=True, reason=f"more than {MAX_CHANGED_FILES} changed files")  # fmt: skip
     # get_test_times reports its download on stdout, where --print-prompt writes.
     with contextlib.redirect_stdout(sys.stderr):
         test_times = get_test_times()
@@ -283,7 +292,7 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     record["cost_usd"] = result.get("total_cost_usd")
     record["model_output"] = out
     if out is None:
-        record["error"] = str(result.get("result"))[:2000]
+        record["error"] = str(result.get("result") or "no structured output")[:2000]
     else:
         try:
             parse_model_output(out, set(candidates))
@@ -315,7 +324,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--enforce",
         action="store_true",
-        help="tell run_test.py to replace TD's split with this selection on PRs with TD on (ignored when the selector fails)",
+        help="tell run_test.py, on PRs with TD on, to run the covered files plus a hedge (previous failures, then TD's top files) instead of TD's split; ignored when the selector fails, and run_test.py keeps TD's split for a config without test times",
     )
     parser.add_argument("--print-prompt", action="store_true")
     args = parser.parse_args(argv)
@@ -338,8 +347,13 @@ def main(argv: list[str] | None = None) -> None:
     except Exception as e:
         if args.print_prompt:
             raise
-        record["error"] = repr(e)[:2000]
-        selection = Selection(run_all=True, reason=f"selector failed: {repr(e)[:500]}")
+        # TimeoutExpired's message is mostly the claude argv, prompt included.
+        if isinstance(e, subprocess.TimeoutExpired):
+            error = f"model call timed out after {e.timeout}s"
+        else:
+            error = f"{type(e).__name__}: {e}"
+        record["error"] = error[:2000]
+        selection = Selection(run_all=True, reason=f"selector failed: {error[:500]}")
     if selection is None:
         return
     # A deliberate run_all (test infrastructure, or the model) is enforced; a

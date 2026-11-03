@@ -90,7 +90,7 @@ jobs:
           unzip -o .additional_ci_files/llm_results/mappings.zip -d .additional_ci_files/llm_results || true
           # Dependencies are declared inline in the script via PEP 723.
           uv run --no-project --python 3.12 tools/testing/do_target_determination_for_s3.py
-          # run_test.py runs these files outside the LLM selection's hedge budget.
+          # run_test.py charges these files to the LLM selection's hedge budget first.
           cp .additional_ci_files/previous_failures*.json . || true
 
       - name: Upload TD results to s3
