@@ -63,7 +63,7 @@ def selector_runs(sha: str) -> list[dict]:
         and r["event"] == "pull_request_target"
         and r["head_sha"] == sha
         and (r["head_repository"] or {}).get("id") == r["repository"]["id"]
-        # Label events other than ci-llm-td skip the job.
+        # Fork and non-pytorch runs skip the job.
         and r["conclusion"] != "skipped"
     ]
     return sorted(runs, key=lambda r: (r["created_at"], r["id"]), reverse=True)
