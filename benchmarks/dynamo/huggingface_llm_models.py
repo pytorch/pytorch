@@ -12,7 +12,6 @@ try:
     from transformers import (
         AutoModelForCausalLM,
         AutoTokenizer,
-        StaticCache,
         WhisperForConditionalGeneration,
         WhisperProcessor,
     )
@@ -23,7 +22,6 @@ finally:
     from transformers import (
         AutoModelForCausalLM,
         AutoTokenizer,
-        StaticCache,
         WhisperForConditionalGeneration,
         WhisperProcessor,
     )
@@ -125,6 +123,8 @@ class TextGenerationPrefillModel(torch.nn.Module):
         self.cache = None
 
     def prepare_for_prefill(self, input_ids):
+        from transformers import StaticCache
+
         expected_shape = (self.batch_size, self.prompt_length)
         if tuple(input_ids.shape) != expected_shape:
             raise ValueError(
