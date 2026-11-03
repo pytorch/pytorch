@@ -3371,6 +3371,7 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(ExternKernelAllocLine(self, node))
         if isinstance(node.layout, ir.Layout):
             node.codegen_size_asserts(self)
+        self.codegen_free_unused_outputs(node)
 
     def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):
         # If it's a NoneLayout then the extern_kernel should essentially be
@@ -6048,6 +6049,10 @@ class PythonWrapperCodegen(CodeGen):
 
     def make_free_by_names(self, names_to_del: list[str]):
         return f"del {', '.join(name for name in names_to_del)}"
+
+    def codegen_free_unused_outputs(self, node: ir.ExternKernelAlloc) -> None:
+        # The Python wrapper drops unused outputs when it deletes the result tuple.
+        pass
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
