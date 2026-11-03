@@ -6024,6 +6024,72 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
+        @torch._functorch.config.patch("enable_autograd_cache", True)
+        @torch._inductor.config.patch("fx_graph_cache", True)
+        @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        @torch._inductor.config.patch("graph_partition", True)
+        # Currently fx graph cache is turned off for specialize_float=False
+        @torch._dynamo.config.patch("specialize_float", True)
+        def test_cache_hit_forward_with_skipped_backward(self):
+            # An AOTAutogradCache hit post-compiles the backward with the forward,
+            # before the forward's first call, under the default lazy lowering.
+            w = torch.rand([20], device="cuda", requires_grad=True)
+
+            def foo(x):
+                return x.sin().sum() + w.sum()
+
+            for hits in range(2):
+                torch._dynamo.reset()
+                counters.clear()
+                compiled = torch.compile(foo, mode="reduce-overhead")
+                for _ in range(3):
+                    w.grad = None
+                    compiled(torch.rand([20], device="cuda")).backward()
+                    self.assertEqual(w.grad, torch.ones_like(w))
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hits)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @torch._inductor.config.patch("triton.cudagraph_capture_sizes", (2,))
+        def test_skipped_backward_of_a_forward_that_recorded_no_graph(self):
+            # The forward has no int input, so capture sizes run it eagerly and
+            # no manager exists when its kernel-free backward runs.
+            w = torch.rand([20], device="cuda", requires_grad=True)
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x.sin().sum() + w.sum()
+
+            for _ in range(3):
+                foo(torch.rand([20], device="cuda")).backward()
+            self.assertEqual(w.grad, torch.full_like(w, 3))
+            self.assertIsNone(self.get_manager())
+
+        # Under graph partition the backend ignores CPU ops when it checks for skips.
+        @torch._inductor.config.patch("graph_partition", False)
+        @torch._functorch.config.patch("force_non_lazy_backward_lowering", True)
+        def test_cudagraphs_backend_with_eagerly_lowered_skipped_backward(self):
+            # The backward round-trips through the CPU, so it runs without a CUDA
+            # graph, and it is lowered before the forward creates the manager.
+            class Double(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x * 2
+
+                @staticmethod
+                def backward(ctx, grad):
+                    return grad.cpu().cuda() * 2
+
+            def foo(x):
+                return Double.apply(x).sin().sum()
+
+            x = torch.rand([20], device="cuda", requires_grad=True)
+            expected = 2 * torch.cos(2 * x.detach())
+            compiled = torch.compile(foo, backend="cudagraphs")
+            for _ in range(3):
+                x.grad = None
+                compiled(x).backward()
+                self.assertEqual(x.grad, expected)
+
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_forward_backward_not_called(self):
             # tests saved tensor is handled correctly

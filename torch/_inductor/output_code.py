@@ -197,9 +197,10 @@ def maybe_handle_backward_generation(
         compiled_graph_callable = compiled_graph.current_callable
         device_index = boxed_forward_device_index.value
 
-        # Looked up when the backward runs: the forward creates the manager on its
-        # first call, and an eagerly lowered backward
-        # (force_non_lazy_backward_lowering) gets here before that.
+        # Looked up when the backward runs, as cudagraph_trees' run_eager does: the
+        # manager may not exist yet (a backward lowered with its forward, before
+        # the forward's first call) or at all (a forward that never recorded a
+        # graph, or trees reset in between).
         def compiled_artifact(new_inputs: Sequence[InputType]) -> object:
             manager = torch._inductor.cudagraph_trees.get_manager(
                 device_index, create_if_none_exists=False
