@@ -62,12 +62,23 @@ class FlyDSLScheduling(BaseScheduling):
         return False
 
     def define_kernel(
-        self, src_code_str: str, node_schedule, precompile_metadata=None
+        self,
+        src_code_str: str,
+        node_schedule,
+        precompile_metadata=None,
+        template_name=None,
+        aot_tensor_names=None,
     ) -> str:
         wrapper = V.graph.wrapper_code
 
-        if src_code_str in wrapper.src_to_kernel:
-            kernel_name = wrapper.src_to_kernel[src_code_str]
+        source_cache_key = src_code_str
+        if getattr(V.graph, "aot_mode", False) and precompile_metadata is not None:
+            specialization = hashlib.sha256(
+                repr(precompile_metadata).encode("utf-8")
+            ).hexdigest()
+            source_cache_key = f"{src_code_str}\n# aot-specialization:{specialization}"
+        if source_cache_key in wrapper.src_to_kernel:
+            kernel_name = wrapper.src_to_kernel[source_cache_key]
         else:
             fused_name = (
                 get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
@@ -75,34 +86,57 @@ class FlyDSLScheduling(BaseScheduling):
                 else ""
             )
 
-            kernel_hash = hashlib.sha256(src_code_str.encode("utf-8")).hexdigest()[:8]
+            kernel_hash = hashlib.sha256(source_cache_key.encode("utf-8")).hexdigest()[
+                :8
+            ]
             if fused_name == "fused":
                 kernel_name = f"flydsl_{kernel_hash}"
             else:
                 kernel_name = f"flydsl_{fused_name}_{kernel_hash}"
-            wrapper.src_to_kernel[src_code_str] = kernel_name
+            wrapper.src_to_kernel[source_cache_key] = kernel_name
             src_code_str = src_code_str.replace(
                 str(Placeholder.KERNEL_NAME), kernel_name
             )
 
             _, _, kernel_path = get_path(code_hash(src_code_str), "py")
 
-            compile_wrapper = IndentedBuffer()
-            compile_wrapper.writeline(f"async_compile.flydsl({kernel_name!r}, r'''")
-            compile_wrapper.splice(src_code_str, strip=True)
-            if precompile_metadata is not None:
-                compile_wrapper.writeline(
-                    f"''', precompile_metadata={precompile_metadata!r})"
+            if getattr(V.graph, "aot_mode", False):
+                if precompile_metadata is None:
+                    raise NotImplementedError(
+                        "FlyDSL AOT requires static tensor metadata"
+                    )
+                if template_name is None:
+                    raise AssertionError("FlyDSL AOT template name is required")
+                from .aot_backend import (
+                    compile_flydsl_external_source,
+                    register_flydsl_external_artifact,
                 )
-            else:
-                compile_wrapper.writeline("''')")
 
-            metadata_comment = f"# kernel path: {kernel_path}"
-            origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
-            metadata_comment += "\n" + origins + "\n" + detailed_origins
-            wrapper.define_kernel(
-                kernel_name, compile_wrapper.getvalue(), metadata_comment
-            )
+                artifact, _spec = compile_flydsl_external_source(
+                    kernel_name,
+                    src_code_str,
+                    precompile_metadata,
+                    template_name=template_name,
+                    tensor_names=aot_tensor_names,
+                )
+                register_flydsl_external_artifact(wrapper, kernel_name, artifact)
+            else:
+                compile_wrapper = IndentedBuffer()
+                compile_wrapper.writeline(f"async_compile.flydsl({kernel_name!r}, r'''")
+                compile_wrapper.splice(src_code_str, strip=True)
+                if precompile_metadata is not None:
+                    compile_wrapper.writeline(
+                        f"''', precompile_metadata={precompile_metadata!r})"
+                    )
+                else:
+                    compile_wrapper.writeline("''')")
+
+                metadata_comment = f"# kernel path: {kernel_path}"
+                origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
+                metadata_comment += "\n" + origins + "\n" + detailed_origins
+                wrapper.define_kernel(
+                    kernel_name, compile_wrapper.getvalue(), metadata_comment
+                )
         return kernel_name
 
     def codegen_template(
@@ -133,11 +167,18 @@ class FlyDSLScheduling(BaseScheduling):
             src_code_str = src_code
 
         precompile_metadata = self._build_precompile_metadata(kernel, ftb)
+        aot_tensor_names = tuple(
+            arg_name.removeprefix("arg_") for arg_name, _ in kernel._template_input_args
+        )
 
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node]
             kernel_name = self.define_kernel(
-                src_code_str, node_schedule, precompile_metadata
+                src_code_str,
+                node_schedule,
+                precompile_metadata,
+                template_name=ftb.template.name,
+                aot_tensor_names=aot_tensor_names,
             )
         self.codegen_comment(node_schedule, kernel_name)
         kernel.call_kernel(kernel_name, ftb)

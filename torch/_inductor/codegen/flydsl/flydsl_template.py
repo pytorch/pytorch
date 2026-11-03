@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from typing import Any
 from unittest.mock import patch
 
+from torch._inductor import config
 from torch._inductor.utils import OrderedSet, Placeholder
 from torch._inductor.virtualized import V
 from torch._logging import getArtifactLogger
@@ -47,9 +48,17 @@ class FlyDSLTemplate(KernelTemplate):
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
     ) -> NotImplementedError | None:
-        if getattr(V.graph, "cpp_wrapper", False) or getattr(
-            V.graph, "aot_mode", False
-        ):
+        aot_mode = getattr(V.graph, "aot_mode", False)
+        if aot_mode:
+            if config.aot_inductor.emit_multi_arch_kernel:
+                return NotImplementedError(
+                    "FlyDSL AOT does not support multi-architecture packages"
+                )
+            if self.name != "mm_flydsl" or kwargs.get("IS_MXFP", False):
+                return NotImplementedError(
+                    "FlyDSL AOT initially supports dense MM only"
+                )
+        elif getattr(V.graph, "cpp_wrapper", False):
             return NotImplementedError("FlyDSL does not support AOT wrappers")
         if not flydsl_utils.runtime_available():
             return NotImplementedError("FlyDSL runtime is unavailable")
