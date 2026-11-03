@@ -126,8 +126,8 @@ def has_aliasing(op: OpType):
 def has_effects(op) -> bool:
     return (
         isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
-        and not has_aliasing(op)
         and _get_effect(op) is not None
+        and not has_aliasing(op)
     )
 
 

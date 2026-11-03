@@ -9,7 +9,9 @@
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/record_function.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/GraphExecGroupState.h>
 #include <c10/core/InferenceMode.h>
+#include <c10/core/SafePyObject.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
@@ -40,6 +42,7 @@
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
 
+#include <optional>
 #include <set>
 #include <unordered_set>
 #include <utility>
@@ -1400,10 +1403,10 @@ static PyObject* is_grad_layout_enforcement_enabled(
 static PyObject* set_graph_exec_group(PyObject* self, PyObject* obj) {
   HANDLE_TH_ERRORS
   if (Py_IsNone(obj)) {
-    c10::AutogradState::get_tls_state().set_graph_exec_group(std::nullopt);
+    c10::GraphExecGroupState::set_tls_state(std::nullopt);
   } else {
     Py_INCREF(obj);
-    c10::AutogradState::get_tls_state().set_graph_exec_group(
+    c10::GraphExecGroupState::set_tls_state(
         c10::SafePyObject(obj, getPyInterpreter()));
   }
   Py_RETURN_NONE;
@@ -1412,8 +1415,7 @@ static PyObject* set_graph_exec_group(PyObject* self, PyObject* obj) {
 
 static PyObject* get_graph_exec_group(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  const auto& group =
-      c10::AutogradState::get_tls_state().get_graph_exec_group();
+  const auto& group = c10::GraphExecGroupState::get_tls_state();
   if (group.has_value()) {
     PyObject* obj = group->ptr(getPyInterpreter());
     return Py_NewRef(obj);

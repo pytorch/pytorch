@@ -220,7 +220,7 @@ def setup_fake_process_groups(
         group_info: dict mapping group_name -> {'size': group_size, 'rank': rank}
     """
     import torch.distributed as dist
-    from torch.testing._internal.distributed.fake_pg import FakeStore
+    from torch.distributed._backends.fake import FakeStore
 
     if not group_info:
         return
@@ -555,7 +555,6 @@ def generate_compiler_repro_string(
         distributed_imports = textwrap.dedent(
             """
 import torch.distributed as dist
-from torch.testing._internal.distributed.fake_pg import FakeStore
         """
         ).strip()
 
@@ -841,7 +840,9 @@ if "__compile_source__" in globals():
                     f"    _output_size = reader.args[{output_size_idx}]"
                 )
                 writer._lines.append(
-                    "    if isinstance(_repeats, torch.Tensor) and _repeats.dtype == torch.int64:"
+                    "    if isinstance(_repeats, torch.Tensor) and "
+                    "_repeats.dtype in (torch.int32, torch.int64) and "
+                    "_repeats.numel() > 0:"
                 )
                 writer._lines.append("        _n = _repeats.numel()")
                 writer._lines.append("        _repeats.fill_(_output_size // _n)")
