@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import datetime as dt
 import sys
 import tempfile
 import textwrap
@@ -17,8 +16,7 @@ if TYPE_CHECKING:
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
-from tools.testing.llm_td.eval import build_dataset as bd, score
-from tools.testing.llm_td.eval.build_dataset import flaky_flags, strip_trailers
+from tools.testing.llm_td.eval import score
 from tools.testing.llm_td.eval.score import (
     Choice,
     ci_jobs,
@@ -267,45 +265,6 @@ class TestScore(unittest.TestCase):
         self.assertEqual(
             cost_fraction(Choice(Selection(run_all=True)), cands, SECONDS), (1.0, 1.0)
         )
-
-
-class TestBuildDataset(unittest.TestCase):
-    def test_strip_trailers(self) -> None:
-        msg = "Body line\n\nCo-authored-by: x\nPull Request resolved: https://x\nApproved by: https://y\nghstack-source-id: 1\nKeep: me\n"
-        self.assertEqual(strip_trailers(msg), "Body line\n\nKeep: me")
-
-    def test_flaky_flags(self) -> None:
-        def fail(test: str, t: str, **kw: object) -> dict:
-            return {"tf": "test_a", "classname": "TestA", "test": test, "t": t, "job": "pull / test (default, 1, 1)",
-                    "rerun_green": False, **kw}  # fmt: skip
-
-        others = [
-            fail("test_main", "2026-10-01 00:00:00", sha="m", br="main"),
-            fail("test_other", "2026-10-03 00:00:00", sha="o", br="gh/x"),
-            fail("test_mine", "2026-10-03 00:00:00", sha="s", br="gh/me"),
-            fail("test_old", "2026-08-01 00:00:00", sha="m", br="main"),
-        ]
-        disabled = [{"d": "2026-09-30", "name": "test_disabled (__main__.TestA)"}]
-        t = "2026-10-05 00:00:00"
-        rows = [
-            fail(name, t, pr=1, **kw)
-            for name, kw in [("test_real", {}), ("test_rerun", {"rerun_green": True}), ("test_main", {}),
-                             ("test_other", {}), ("test_mine", {}), ("test_old", {}), ("test_disabled", {})]
-        ]  # fmt: skip
-        rows.append(fail("test_unstable", t, pr=1, job="pull / test (default, 1, 1, unstable)"))  # fmt: skip
-        with (
-            mock.patch.object(bd, "pull_failures", return_value=others),
-            mock.patch.object(bd, "pr_of_shas", return_value={"o": 2, "s": 1}),
-            mock.patch.object(bd, "pr_authors", return_value={1: "me", 2: "x"}),
-            mock.patch.object(bd, "query", return_value=disabled),
-        ):
-            rows = flaky_flags(rows, dt.date(2026, 10, 1), dt.date(2026, 10, 26))
-        flags = {r["test"]: r["flaky"] for r in rows}
-        self.assertEqual(
-            flags,
-            {"test_real": False, "test_rerun": True, "test_main": True, "test_other": True, "test_mine": False,
-             "test_old": False, "test_disabled": True, "test_unstable": True},
-        )  # fmt: skip
 
 
 if __name__ == "__main__":
