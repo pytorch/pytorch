@@ -116,18 +116,18 @@ void raise_unsupported_grouped_scaling(
   TORCH_CHECK_VALUE(
       false,
       "Invalid scaling configuration for grouped GEMM. Expected:\n"
-      "- TensorWise/TensorWise or RowWise/RowWise: float8 inputs, one float32 scale per input; swizzle metadata is ignored except SWIZZLE_MNxK4, which is rejected.\n"
+      "- TensorWise/TensorWise or RowWise/RowWise: float8 inputs, one float32 scale per input; swizzle metadata is ignored except SWIZZLE_MN_K4, which is rejected.\n"
       "- Hopper block scaling: two float8_e4m3fn inputs, float32 scales packed per group, NO_SWIZZLE; "
       "1x128 is outer-major; 128x128 is K-major with K-block count padded to 4. "
       "3D inputs use (groups, scale_size); 2D inputs concatenate group scales in a 1D tensor. "
       "Recipe pairs: 1x128/1x128, 1x128/128x128, or 128x128/1x128.\n"
       "- Packed MNxK4: matching BlockWise1x32 or BlockWise1x128 recipes, float8_e4m3fn/e5m2 inputs "
-      "with at least one e4m3fn input, one float8_e8m0fnu scale per input, SWIZZLE_MNxK4.\n"
+      "with at least one e4m3fn input, one float8_e8m0fnu scale per input, SWIZZLE_MN_K4.\n"
       "- MXFP8: matching BlockWise1x32 recipes, float8_e4m3fn inputs, one float8_e8m0fnu scale per input.\n"
       "- MXFP4: matching BlockWise1x32 recipes, packed float4 inputs, one float8_e8m0fnu scale per input.\n"
       "- NVFP4: packed float4 inputs, one BlockWise1x16 float8_e4m3fn scale per input, "
       "followed by one TensorWise float32 global scale on both inputs.\n"
-      "MSLK MXFP4/NVFP4 ignore swizzle metadata except SWIZZLE_MNxK4, which is rejected.\n"
+      "MSLK MXFP4/NVFP4 ignore swizzle metadata except SWIZZLE_MN_K4, which is rejected.\n"
       "Each scale list must match its recipe list.\nGot ", inputs.str());
 }
 
