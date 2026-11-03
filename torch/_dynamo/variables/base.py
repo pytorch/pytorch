@@ -941,7 +941,12 @@ def _wrap_getattro(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 1:
         raise_type_error(tx, f"expected 1 argument, got {len(args)}")
-    return func(self, tx, args[0].as_python_constant())
+    name = args[0].as_python_constant()
+    if not isinstance(name, str):
+        raise_type_error(
+            tx, f"attribute name must be string, not '{type(name).__name__}'"
+        )
+    return func(self, tx, name)
 
 
 def _wrap_descr_get(
