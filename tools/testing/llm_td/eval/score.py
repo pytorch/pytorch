@@ -116,11 +116,15 @@ def config_of(job: str) -> str:
 
 @functools.cache
 def test_seconds(path: Path) -> Seconds:
-    """config -> file -> [cpu, gpu] seconds of one full CI pass."""
+    """config -> file -> [cpu, gpu] seconds of one full CI pass.
+
+    The "default" job is run_test.py's fallback for unknown jobs, not a job (see select_tests.test_minutes)."""
     out: dict = collections.defaultdict(
         lambda: collections.defaultdict(lambda: [0.0, 0.0])
     )
     for env, configs in json.loads(path.read_text()).items():
+        if env == "default":
+            continue
         gpu = int(bool(GPU_ENV.search(env)))
         for c, files in configs.items():
             for f, s in files.items():
