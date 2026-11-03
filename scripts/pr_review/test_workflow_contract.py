@@ -4835,6 +4835,13 @@ class TestThePrConversationReachesTheReview(unittest.TestCase):
         self.assertIn(f"Read(/{self.PATH})", stage_a)
         self.assertIn(self.PATH, stage_a_system_prompt())
 
+    def test_the_sanitizer_reads_the_pr_body_for_the_stack_policy(self):
+        names = re.findall(r"(?m)^      - name: (.+)$", self.review)
+        sanitize = "Sanitize the verdict"
+        self.assertLess(names.index("Write the PR conversation"), names.index(sanitize))
+        step = self._step(self.review, sanitize)
+        self.assertIn(f"--pr-comments-file {self.PATH}", step)
+
     def test_the_fetch_fails_closed_before_the_started_row(self):
         fetch = self._step(self.prepare, "Fetch the PR conversation")
         self.assertEqual(

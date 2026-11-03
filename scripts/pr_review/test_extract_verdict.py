@@ -25,6 +25,7 @@ from unittest import mock
 
 
 SCRIPT = Path(__file__).with_name("extract_verdict.py")
+REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(SCRIPT.parent))
 
 # Collected as a test of THIS module, so the suite notices if this file is the
@@ -1502,6 +1503,15 @@ class TestGhstackPosition(unittest.TestCase):
         self.assertEqual(ghstack_position("Related:" + follow_ups + "\n\n" + body), 2)
 
 
+def minor(i: int = 0) -> dict:
+    return {
+        "path": "src/app.py",
+        "line": 12,
+        "severity": "minor",
+        "message": f"Nit {i}.",
+    }
+
+
 class TestTheStackPolicyRequestsChangesHighInAStack(unittest.TestCase):
     TOUCHED = {"src/app.py": {11, 12, 13, 14}, "README.md": {1, 2}}
 
@@ -1510,9 +1520,11 @@ class TestTheStackPolicyRequestsChangesHighInAStack(unittest.TestCase):
         payload.update(over)
         return build(payload, self.TOUCHED)
 
-    def test_the_limit_matches_the_ai_policy(self):
-        # AI_POLICY.md: stacks must have fewer than 10 PRs.
-        self.assertEqual(STACK_POSITION_LIMIT, 10)
+    def test_the_limit_matches_contributing_md(self):
+        text = " ".join((REPO / "CONTRIBUTING.md").read_text().split())
+        m = re.search(r"Stacks of pull requests must have fewer than (\d+) PRs", text)
+        self.assertIsNotNone(m, "CONTRIBUTING.md no longer states the stack limit")
+        self.assertEqual(STACK_POSITION_LIMIT, int(m.group(1)))
 
     def test_below_the_limit_nothing_changes(self):
         result = self.clean_result()
@@ -1542,7 +1554,7 @@ class TestTheStackPolicyRequestsChangesHighInAStack(unittest.TestCase):
             self.clean_result(), stack_body(11, 12), self.TOUCHED
         )
         self.assertIn("number 11 from the bottom", result["summary"])
-        self.assertIn("AI_POLICY.md", result["summary"])
+        self.assertIn("CONTRIBUTING.md", result["summary"])
         self.assertIn(ok_payload()["summary"], result["summary"])
         self.assertTrue(is_neutral_prose(result["summary"], MAX_SUMMARY))
 
@@ -1550,49 +1562,46 @@ class TestTheStackPolicyRequestsChangesHighInAStack(unittest.TestCase):
         result = apply_stack_policy(
             self.clean_result(summary="word " * 400), stack_body(10, 12), self.TOUCHED
         )
-        self.assertIn("AI_POLICY.md", result["summary"])
+        self.assertIn("CONTRIBUTING.md", result["summary"])
         self.assertLessEqual(len(result["summary"]), MAX_SUMMARY)
         self.assertTrue(is_neutral_prose(result["summary"], MAX_SUMMARY))
 
     def test_a_major_finding_anchors_to_the_first_touched_line(self):
         # A major finding keeps the model's minor ones non-blocking: with no
         # major, post_review makes every finding of an objection blocking.
-        minor = {
-            "path": "src/app.py",
-            "line": 12,
-            "severity": "minor",
-            "message": "Nit.",
-        }
         result = apply_stack_policy(
-            self.clean_result(findings=[minor]), stack_body(10, 12), self.TOUCHED
+            self.clean_result(findings=[minor()]), stack_body(10, 12), self.TOUCHED
         )
         policy = result["findings"][0]
         self.assertEqual((policy["path"], policy["line"]), ("README.md", 1))
         self.assertEqual(policy["severity"], "major")
-        self.assertIn("AI_POLICY.md", policy["message"])
-        self.assertEqual(result["findings"][1:], [minor])
+        self.assertIn("CONTRIBUTING.md", policy["message"])
+        self.assertEqual(result["findings"][1:], [minor()])
         self.assertEqual(published_findings(result), result["findings"])
 
+    def test_a_model_objection_without_a_major_stays_blocking(self):
+        model = build(ok_payload(findings=[minor()]), self.TOUCHED)
+        result = apply_stack_policy(model, stack_body(10, 12), self.TOUCHED)
+        self.assertEqual(result["findings"][1:], [{**minor(), "severity": "major"}])
+
+    def test_a_model_objection_with_its_own_major_is_kept_as_is(self):
+        findings = [ok_payload()["findings"][0], minor()]
+        model = build(ok_payload(findings=findings), self.TOUCHED)
+        result = apply_stack_policy(model, stack_body(10, 12), self.TOUCHED)
+        self.assertEqual(result["findings"][1:], findings)
+
     def test_the_findings_cap_still_holds(self):
-        findings = [
-            {
-                "path": "src/app.py",
-                "line": 12,
-                "severity": "minor",
-                "message": f"Nit {i}.",
-            }
-            for i in range(MAX_FINDINGS)
-        ]
+        findings = [minor(i) for i in range(MAX_FINDINGS)]
         result = apply_stack_policy(
             self.clean_result(findings=findings), stack_body(10, 12), self.TOUCHED
         )
         self.assertEqual(len(result["findings"]), MAX_FINDINGS)
         self.assertEqual(result["findings"][0]["severity"], "major")
 
-    def test_with_no_touched_line_the_verdict_still_changes(self):
-        result = apply_stack_policy(self.clean_result(), stack_body(10, 12), {})
-        self.assertEqual(result["verdict"], "changes_requested")
-        self.assertEqual(result["findings"], [])
+    def test_with_no_line_to_anchor_on_nothing_changes(self):
+        # build() never publishes an objection without a finding to point at.
+        result = self.clean_result(findings=[minor()])
+        self.assertEqual(apply_stack_policy(result, stack_body(10, 12), {}), result)
 
 
 class TestTheStackPolicyEndToEnd(unittest.TestCase):
@@ -1631,10 +1640,18 @@ class TestTheStackPolicyEndToEnd(unittest.TestCase):
     def test_a_pr_high_in_a_stack_gets_changes_requested(self):
         result = self.run_script(json.dumps({"body": stack_body(10, 12)}))
         self.assertEqual(result["verdict"], "changes_requested")
+        (policy,) = result["findings"]
+        self.assertEqual(
+            (policy["path"], policy["line"], policy["severity"]),
+            ("README.md", 1, "major"),
+        )
+        self.assertIn("number 10 from the bottom", policy["message"])
+        self.assertTrue(result["summary"].startswith(policy["message"]))
 
     def test_a_pr_low_in_a_stack_keeps_the_model_verdict(self):
         result = self.run_script(json.dumps({"body": stack_body(3, 12)}))
         self.assertEqual(result["verdict"], "ready_for_human_review")
+        self.assertEqual(result["findings"], [])
 
     def test_an_unreadable_comments_file_does_not_break_the_review(self):
         for comments in (None, "{not json", "[]", json.dumps({"body": 7})):

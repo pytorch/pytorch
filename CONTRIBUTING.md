@@ -32,6 +32,7 @@ aspects of contributing to PyTorch.
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
   - [Skip CI while iterating](#skip-ci-while-iterating)
+  - [Keep PR stacks small](#keep-pr-stacks-small)
 - [Merging your Change](#merging-your-change)
 - [GreenLight](#greenlight)
 - [Writing documentation](#writing-documentation)
@@ -657,6 +658,26 @@ preserve it, so you do not need to repeat the prefix on each update.
 `ghstack -u` replaces the PR title from the commit subject, so keep the prefix
 there too if you use that option. This is separate from GitHub's `[no ci]`
 commit-message directive, which applies only to the commit that contains it.
+
+### Keep PR stacks small
+
+Stacks of pull requests must have fewer than 10 PRs. This applies to every
+contributor, with or without AI tools. Each PR of a stack runs CI on every
+push, and those results go stale as soon as a PR below it changes, so large
+stacks use up shared CI resources and slow down CI for everyone. Land the
+bottom of a stack before adding more on top, and use
+[`[no-ci]`](#skip-ci-while-iterating) on PRs that don't need CI yet. PRs with
+`[no-ci]` still count toward the limit.
+
+For `ghstack` stacks, two checks read the stack list in the PR body:
+
+- CI fails before the build starts on a PR with 10 or more PRs below it,
+  unless the PR has the `ciflow/trunk` label.
+- The automated review in the [PR lifecycle](#pr-lifecycle) requests changes
+  on a PR that is 10th or higher from the bottom of its stack.
+
+`ghstack` only rewrites the stack list when you submit, so once the PRs below
+land, rebase the stack and submit it again.
 
 ## Merging your Change
 The labels described in the [PR lifecycle](#pr-lifecycle) and the pytorchbot comment on your PR represent the status of your PR, including what the next step is and who is expected to take it.

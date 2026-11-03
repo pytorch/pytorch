@@ -69,7 +69,7 @@ MAX_DROPPED_TRACKED = (
 MAX_LINE = 10_000_000  # no source file has this many lines; bounds a published integer
 MAX_STRUCTURED_BYTES = 1024 * 1024  # whole-document ceiling, applied before parsing
 
-# AI_POLICY.md: stacks must have fewer than 10 PRs, so the 10th PR from the
+# CONTRIBUTING.md: stacks must have fewer than 10 PRs, so the 10th PR from the
 # bottom and everything above it get changes requested.
 STACK_POSITION_LIMIT = 10
 # One ghstack stack-list entry, "* #12345" or "* __->__ #12345" for the current
@@ -1020,8 +1020,9 @@ def apply_stack_policy(result: dict, body: str, touched: dict[str, set[int]]) ->
         return result
     policy = (
         f"This PR is number {position} from the bottom of its ghstack. "
-        f"PyTorch's AI policy (AI_POLICY.md) asks for stacks of fewer than "
-        f"{STACK_POSITION_LIMIT} PRs: land the PRs below it first, or split the stack."
+        f"PyTorch requires stacks of fewer than {STACK_POSITION_LIMIT} PRs "
+        f"(CONTRIBUTING.md): land the PRs below it and submit the stack again, "
+        f"or split the stack."
     )
     # The model's summary is already neutral; the cut can only end it in half
     # an escape or entity, which the drop and the end-of-text rule both allow.
@@ -1029,8 +1030,14 @@ def apply_stack_policy(result: dict, body: str, touched: dict[str, set[int]]) ->
     if not is_neutral_prose(summary, MAX_SUMMARY):
         summary = policy
     findings = list(result["findings"])
-    # A major finding keeps the model's minor ones non-blocking: post_review
-    # makes every finding blocking when changes are requested without one.
+    # post_review blocks on the major findings, or on all of them when changes
+    # are requested without one. The policy finding is major, so it would leave
+    # a clean model's minor findings non-blocking but also demote a model
+    # objection made without a major: promote that one's findings.
+    if result["verdict"] == "changes_requested" and all(
+        f["severity"] != "major" for f in findings
+    ):
+        findings = [{**f, "severity": "major"} for f in findings]
     for path in sorted(p for p, lines in touched.items() if lines):
         finding = {
             "path": neutralize_path(path)[:MAX_PATH],
@@ -1041,6 +1048,9 @@ def apply_stack_policy(result: dict, body: str, touched: dict[str, set[int]]) ->
         if is_publishable_finding(finding):
             findings = [finding, *findings][:MAX_FINDINGS]
             break
+    else:
+        # Like build(), never publish an objection with no finding to point at.
+        return result
     return {
         **result,
         "verdict": "changes_requested",

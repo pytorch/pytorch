@@ -14,6 +14,8 @@ on:
       # commands are pinned). Without this a skill-only change skips the one
       # check that would catch it.
       - ".agents/skills/pr-review/**"
+      # The stack-size limit is pinned to its text in CONTRIBUTING.md.
+      - "CONTRIBUTING.md"
   pull_request:
     paths:
       - "scripts/pr_review/**"
@@ -24,6 +26,8 @@ on:
       # commands are pinned). Without this a skill-only change skips the one
       # check that would catch it.
       - ".agents/skills/pr-review/**"
+      # The stack-size limit is pinned to its text in CONTRIBUTING.md.
+      - "CONTRIBUTING.md"
 
 permissions:
   contents: read
