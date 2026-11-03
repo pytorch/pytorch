@@ -121,13 +121,17 @@ def early_config_prune(g, m, dtsize, configs, named_args):
 triton_grouped_mm_template = TritonTemplate(
     name="grouped_mm",
     grid=persistent_grouped_mm_grid,
-    source=load_kernel_template("triton_mm_grouped"),
+    source=load_kernel_template(
+        "triton_mm_grouped", helpers=["helper_assign_maybe_constexpr"]
+    ),
 )
 
 triton_scaled_grouped_mm_template = TritonTemplate(
     name="scaled_grouped_mm",
     grid=persistent_grouped_mm_grid,
-    source=load_kernel_template("triton_mm_grouped"),
+    source=load_kernel_template(
+        "triton_mm_grouped", helpers=["helper_assign_maybe_constexpr"]
+    ),
 )
 
 cutedsl_grouped_mm_template = CuteDSLTemplate(
@@ -261,29 +265,27 @@ def get_flydsl_grouped_mm_template_kwargs(
     ]
 
 
-def has_grouped_mm_triton_support() -> bool:
+def has_grouped_mm_triton_support(device: torch.device | None) -> bool:
     if not torch.cuda.is_available():
         return False
     if torch.version.hip:
         # The grouped GEMM Triton template is supported on ROCm too. ATen
         # remains a separate autotune choice when fallback kernels are enabled.
         return True
-    return torch.cuda.get_device_capability() >= (9, 0)
+    return torch.cuda.get_device_capability(device) >= (9, 0)
 
 
-def _rocm_gcn_arch() -> str:
-    return torch.cuda.get_device_properties(
-        torch.cuda.current_device()
-    ).gcnArchName.split(":", 1)[0]
+def _rocm_gcn_arch(device: torch.device | None) -> str:
+    return torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
 
 
-def has_rocm_fp8_hardware_support() -> bool:
+def has_rocm_fp8_hardware_support(device: torch.device | None) -> bool:
     if not torch.version.hip:
         return False
 
     # Keep this in sync with torch.testing._internal.common_cuda.PLATFORM_SUPPORTS_FP8;
     # this is the production-side equivalent used to gate Triton FP8 lowering.
-    arch = _rocm_gcn_arch()
+    arch = _rocm_gcn_arch(device)
     rocm_version_str = getattr(torch.version, "rocm", None) or torch.version.hip
     rocm_version = tuple(int(v) for v in rocm_version_str.split(".")[:2])
     if arch.startswith("gfx94"):
@@ -298,10 +300,11 @@ def has_rocm_fp8_hardware_support() -> bool:
 def has_scaled_grouped_mm_triton_support(mat_a: TensorBox, mat_b: TensorBox) -> bool:
     if not torch.version.hip:
         return True
-    if not has_rocm_fp8_hardware_support():
+    device = mat_a.get_device()
+    if not has_rocm_fp8_hardware_support(device):
         return False
 
-    arch = _rocm_gcn_arch()
+    arch = _rocm_gcn_arch(device)
     # Match ATen's ROCm rowwise scaled grouped GEMM contract: gfx94 uses the
     # FNUZ FP8 encoding, while newer FP8-capable arches use OCP FP8.
     expected_dtype = (
@@ -400,7 +403,7 @@ def can_use_triton_kernel(
     bias: TensorBox | None,
     scale_result: TensorBox | None,
 ) -> bool:
-    if not has_grouped_mm_triton_support():
+    if not has_grouped_mm_triton_support(mat_a.get_device()):
         return False
     if not has_triton():
         return False
@@ -436,6 +439,7 @@ def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
         end_hint / noffs_hint
     )
     offs[:-1] = (offs[:-1] / alignment).round() * alignment
+    offs = offs.clamp(max=end_hint)  # Ensure non-decreasing up to end_hint
     offs[-1] = end_hint
     return offs.to(dtype=offs_box.get_dtype(), device=offs_box.get_device())
 
