@@ -2295,6 +2295,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if name == "__rmod__" and isinstance(self.value, str) and len(args) == 1:
+            # str.__rmod__ is unicode_mod(other, self): `other` is the format
+            # string, and its %s runs a subclass __str__ on self, so keep self.
+            if not issubclass(args[0].python_type(), str):
+                return ConstantVariable.create(NotImplemented)
+            return args[0].call_method(tx, "__mod__", [self], kwargs)
         for base, to_plain in _to_plain_constant.items():
             if isinstance(self.value, base):
                 # The base type's method ignores subclass overrides, so run it
@@ -5052,7 +5058,11 @@ _CONSTANT_BASE_TYPES = (int, float, str)
 Py_TPFLAGS_HEAPTYPE = 1 << 9
 
 # The conversions skip subclass overrides of __int__ / __float__ / __str__
-_to_plain_constant = {int: int.__int__, float: float.__float__, str: str.__str__}
+_to_plain_constant: dict[type, Callable[[Any], Any]] = {
+    int: int.__int__,
+    float: float.__float__,
+    str: str.__str__,
+}
 
 _constant_base_methods: dict[type, set[Any]] = {
     t: {m for m in t.__dict__.values() if callable(m)} for t in _CONSTANT_BASE_TYPES
