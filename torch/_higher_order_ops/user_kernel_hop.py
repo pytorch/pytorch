@@ -385,14 +385,17 @@ class UserKernelHOPInfo:
     # value. Read only the DSL's own arguments (e.g. kernel_idx) from hop_kwargs,
     # and the kernel's arguments from kernel_kwargs.
     get_mutated_tensors: Callable[[Mapping[str, Any], dict[str, Any]], list[str]]
-    # HOP kwargs -> kernel name, for logs and the reinplacing counters.
+    # HOP kwargs -> kernel name, for the reinplacing pass's log.
     get_kernel_name: Callable[[Mapping[str, Any]], str]
     # () -> the layout constraint Inductor gives the mutation HOP's tensor arguments:
     # "needs_fixed_stride_order" (the strides they had when the graph was traced) or
     # "flexible_layout" (Inductor picks them). Inductor calls it each time it lowers
     # one of this DSL's mutation HOP nodes.
     get_layout_constraint: Callable[[], str]
-    # Counts this DSL's reinplacing decisions.
+    # Only keys this DSL's reinplacing counters: ReInplaceTrigger.USER_KERNEL_OPS, or
+    # a member of the DSL's own. auto_functionalize's AUTO_FUNC_V1 and AUTO_FUNC_V2
+    # are refused; the reinplacing pass also reads AUTO_FUNC_V2 as a switch that
+    # stops it from rewriting getitem users.
     reinplace_trigger: ReInplaceTrigger
     # torch.export's serializer can write this DSL's nodes.
     serializable: bool
@@ -402,8 +405,14 @@ _user_kernel_hops: dict[UserKernelWrapperHOP, UserKernelHOPInfo] = {}
 
 
 def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
-    if not isinstance(info.reinplace_trigger, ReInplaceTrigger):
-        raise TypeError(f"{info.reinplace_trigger!r} is not a ReInplaceTrigger")
+    trigger = info.reinplace_trigger
+    if not isinstance(trigger, ReInplaceTrigger):
+        raise TypeError(f"{trigger!r} is not a ReInplaceTrigger")
+    if trigger in (ReInplaceTrigger.AUTO_FUNC_V1, ReInplaceTrigger.AUTO_FUNC_V2):
+        raise ValueError(
+            f"{trigger} belongs to auto_functionalize; register the {info.dsl} DSL "
+            "with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
+        )
     hops = (info.mutation, info.functional)
     for hop in hops:
         if not isinstance(hop, UserKernelWrapperHOP):
