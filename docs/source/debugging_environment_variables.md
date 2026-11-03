@@ -14,3 +14,5 @@
     -  For a more in depth explanation of this environment variable, see {doc}`/logging`.
   * - ``TORCH_DIST_NAN_CHECK``
     - If set to ``1``, checks the input (send) buffers of every ``torch.distributed`` collective for NaNs, for any backend. Unlike ``TORCH_NCCL_NAN_CHECK``, which is implemented natively by the NCCL backend, this is driven by the backend-agnostic ``ProcessGroup`` collective hooks.
+  * - ``TORCH_DIST_DESYNC_DEBUG``
+    - If set to ``1``, every rank publishes its last issued and completed collective to the store, and the ranks that are behind are logged when a collective fails. Requires a backend with abort hooks (``nccl``); ignored with a warning otherwise. Unlike ``TORCH_NCCL_DESYNC_DEBUG`` on ``nccl-legacy``, store writes happen on a background thread and never block issuing collectives.

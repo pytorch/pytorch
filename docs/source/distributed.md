@@ -994,6 +994,12 @@ PyTorch attaches these built-in hooks to new process groups:
   Disabled by `TORCH_FR_BUFFER_SIZE=0`.
 - {class}`~torch.distributed.distributed_c10d.NanCheckHook` checks operation
   inputs for NaNs. Enabled by `TORCH_DIST_NAN_CHECK=1`.
+- {class}`~torch.distributed.distributed_c10d.DesyncDebugHook` publishes each
+  rank's last issued and completed collective to the store and reports which
+  ranks are behind. Completion is tracked for the default backend only.
+  Enabled by `TORCH_DIST_DESYNC_DEBUG=1` on backends with abort hooks (`nccl`),
+  which log the report when a collective fails; on other backends attach it
+  explicitly and call `report()`.
 - {class}`~torch.distributed.distributed_c10d.HealthCheckHook` reports aborted
   backends through the `/c10d_health_check` debug server endpoint.
 
@@ -1015,6 +1021,8 @@ PyTorch attaches these built-in hooks to new process groups:
 .. autoclass:: torch.distributed.distributed_c10d.FlightRecorderHook
    :members:
 .. autoclass:: torch.distributed.distributed_c10d.NanCheckHook
+   :members:
+.. autoclass:: torch.distributed.distributed_c10d.DesyncDebugHook
    :members:
 .. autoclass:: torch.distributed.distributed_c10d.HealthCheckHook
    :members:
