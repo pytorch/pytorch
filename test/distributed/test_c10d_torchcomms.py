@@ -265,7 +265,8 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
 
     @skipXPUIf(
         True,
-        "a subgroup new_group() makes later new_group() calls hang under torchcomms: "
+        "passes alone, but hangs when run after test_new_group_delegates_to_split_group "
+        "in the same workers (subgroup new_group() under torchcomms): "
         "https://github.com/intel/torch-xpu-ops/issues/6001",
     )
     @onlyAccelerator
