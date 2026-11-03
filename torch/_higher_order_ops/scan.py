@@ -504,7 +504,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
 
 
 def _scan_output_value(node: Any, value: Any) -> Any:
-    # Inside vmap or jvp, meta["val"] holds a plain fake tensor, while the output
+    # Inside vmap, meta["val"] holds a plain fake tensor, while the output
     # of scan must keep the functorch wrapper that the combine function returned.
     # Otherwise meta["val"] is the value to use. Either way, the output holds no
     # constant or real tensor from the one step that tracing ran.
@@ -535,7 +535,7 @@ def trace_scan(
             clone_input(x) if isinstance(x, torch.Tensor) else x
             for x in additional_inputs
         ]
-        # Inside vmap or jvp, meta["val"] holds no functorch wrapper, so
+        # Inside vmap, meta["val"] holds no functorch wrapper, so
         # _scan_output_value reads the values the combine function returns.
         combine_outs: list[Any] = []
         run_combine = _maybe_run_with_interpreter(combine_fn)
