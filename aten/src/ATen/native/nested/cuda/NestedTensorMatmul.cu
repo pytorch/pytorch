@@ -29,6 +29,7 @@
 #endif
 
 #include <ATen/NestedTensorImpl.h>
+#include <c10/util/irange.h>
 
 #define BLOCK_DIM 256
 #define GRID_DIM_Y 16
@@ -246,7 +247,7 @@ bool group_gemm_dispatch(
   bptr.reserve(ntensors);
   std::vector<cutlass::half_t*> dptr;
   dptr.reserve(ntensors);
-  for (int64_t i = 0; i < ntensors; i++) {
+  for (const auto i : c10::irange(ntensors)) {
     aptr.push_back(reinterpret_cast<cutlass::half_t*>(aptr_[i]));
     bptr.push_back(reinterpret_cast<cutlass::half_t*>(bptr_[i]));
     dptr.push_back(reinterpret_cast<cutlass::half_t*>(dptr_[i]));
@@ -312,7 +313,7 @@ bool group_gemm_dispatch(
   bptr.reserve(ntensors);
   std::vector<cutlass::bfloat16_t*> dptr;
   dptr.reserve(ntensors);
-  for (int64_t i = 0; i < ntensors; i++) {
+  for (const auto i : c10::irange(ntensors)) {
     aptr.push_back(reinterpret_cast<cutlass::bfloat16_t*>(aptr_[i]));
     bptr.push_back(reinterpret_cast<cutlass::bfloat16_t*>(bptr_[i]));
     dptr.push_back(reinterpret_cast<cutlass::bfloat16_t*>(dptr_[i]));
@@ -376,7 +377,7 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
   int64_t* out_sizemat_ptr = out_sizemat.mutable_data_ptr<int64_t>();
 
   int64_t out_numel = 0;
-  for (int64_t i = 0; i < ntensors; i++) {
+  for (const auto i : c10::irange(ntensors)) {
     const IntArrayRef &self_shape = get_size_for_index(self, i), &mat2_shape = get_size_for_index(mat2, i);
     const int64_t &self_size0 = self_shape[0], &self_size1 = self_shape[1],
                   &mat2_size0 = mat2_shape[0], &mat2_size1 = mat2_shape[1];
@@ -420,7 +421,7 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
         std::vector<cutlass::gemm::GemmCoord> gemm_sizes;
         gemm_sizes.reserve(ntensors);
         bool all_row_major = true;
-        for (int64_t i = 0; i < ntensors; i++) {
+        for (const auto i : c10::irange(ntensors)) {
           const IntArrayRef& self_shape = get_size_for_index(self, i);
           const IntArrayRef& mat2_shape = get_size_for_index(mat2, i);
           const int64_t &self_size0 = self_shape[0];
@@ -463,7 +464,7 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
 #endif
 
   std::vector<Tensor> output_unbind = output.unbind();
-  for (int64_t i = 0; i < ntensors; i++) {
+  for (const auto i : c10::irange(ntensors)) {
     at::mm_out(output_unbind[i],
         self_buffer.as_strided(get_size_for_index(self, i), get_stride_for_index(self, i), get_offset_for_index(self, i)),
         mat2_buffer.as_strided(get_size_for_index(mat2, i), get_stride_for_index(mat2, i), get_offset_for_index(mat2, i)));

@@ -33,6 +33,7 @@
 #endif
 
 #include <ATen/NestedTensorImpl.h>
+#include <c10/util/irange.h>
 
 #define BLOCK_DIM 256
 #define GRID_DIM_Y 16
@@ -58,7 +59,7 @@ __global__ void remove_padding_transform0213_2(
   const int numel_i = sizes_i[0] * sizes_i[1];
   int input_offset =
       batch_id * input_sizes[1] * input_sizes[2] * input_sizes[3];
-  for (int ii = 0; ii < (numel_i / grainsize); ii++) {
+  for (const auto ii : c10::irange(numel_i / grainsize)) {
     const int i = ii * grainsize + tid;
     const int i2 = i / sizes_i[1];
     const int i13 = i % sizes_i[1];
@@ -98,7 +99,7 @@ __global__ void remove_padding_2(
   const int* sizes_i = output_sizes + batch_id * output_dim;
   const int numel_i = sizes_i[0] * sizes_i[1];
   int input_offset = batch_id * input_sizes[1] * input_sizes[2];
-  for (int ii = 0; ii < (numel_i / grainsize); ii++) {
+  for (const auto ii : c10::irange(numel_i / grainsize)) {
     const int i = ii * grainsize + tid;
     const int i0 = i / sizes_i[1];
     const int i1 = i % sizes_i[1];
@@ -132,7 +133,7 @@ __global__ void remove_padding(
   const int numel_i = sizes_i[0] * sizes_i[1] * sizes_i[2];
   int input_offset =
       batch_id * input_sizes[1] * input_sizes[2] * input_sizes[3];
-  for (int ii = 0; ii < (numel_i / grainsize); ii++) {
+  for (const auto ii : c10::irange(numel_i / grainsize)) {
     const int i = ii * grainsize + tid;
     const int i0 = i / (sizes_i[1] * sizes_i[2]);
     const int i1 = (i % (sizes_i[1] * sizes_i[2])) / sizes_i[2];
@@ -265,7 +266,7 @@ __global__ void add_padding_1(
   const int grainsize = GRID_DIM_Y * BLOCK_DIM;
   const int* sizes_i = input_sizes + batch_id * input_dim;
   const int batch_output_offset = batch_id * output_sizes_1;
-  for (int ii = 0; ii < (output_sizes_1 / grainsize); ii++) {
+  for (const auto ii : c10::irange(output_sizes_1 / grainsize)) {
     const int i = ii * grainsize + tid;
     const int output_offset = batch_output_offset + i;
     if (batch_id < batch_size && i < sizes_i[0]) {
@@ -305,7 +306,7 @@ __global__ void add_padding_2(
   const int* sizes_i = input_sizes + batch_id * input_dim;
   const int output_offset = batch_id * output_sizes_1 * output_sizes_2;
   const int output_numel = output_sizes_1 * output_sizes_2;
-  for (int ii = 0; ii < (output_numel / grainsize); ii++) {
+  for (const auto ii : c10::irange(output_numel / grainsize)) {
     const int i = ii * grainsize + tid;
     const int i0 = i / (output_sizes_2);
     const int i1 = i - i0 * output_sizes_2;
@@ -351,7 +352,7 @@ __global__ void add_padding_3(
   const int output_offset =
       batch_id * output_sizes_1 * output_sizes_2 * output_sizes_3;
   const int output_numel = output_sizes_1 * output_sizes_2 * output_sizes_3;
-  for (int ii = 0; ii < (output_numel / grainsize); ii++) {
+  for (const auto ii : c10::irange(output_numel / grainsize)) {
     const int i = ii * grainsize + tid;
     const int i0 = i / (output_sizes_2 * output_sizes_3);
     const int i1 = (i % (output_sizes_2 * output_sizes_3)) / output_sizes_3;
@@ -614,7 +615,7 @@ DEVICE_INLINE bool walk_down_tensor_storage_tree_(
   // walk down the tree
   bool is_zero = false;
 #pragma unroll
-  for (int d = 0; d < NUM_JAGGED_DIM; ++d) {
+  for (const auto d : c10::irange(NUM_JAGGED_DIM)) {
     const int begin = x_offsets.vals[d][offset];
     const int end = x_offsets.vals[d][offset + 1];
     if (jagged_coords[d] >= end - begin) {

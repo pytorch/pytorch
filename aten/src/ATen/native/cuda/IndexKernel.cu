@@ -18,6 +18,7 @@
 #include <ATen/native/cuda/IndexKernelUtils.h>
 
 #include <c10/core/Scalar.h>
+#include <c10/util/irange.h>
 
 namespace at::native {
 
@@ -32,7 +33,7 @@ __global__ void index_elementwise_kernel(const int64_t N, const func_t f) {
   const auto nv = nt * vt;
   auto idx = nv * blockIdx.x + tid;
   #pragma unroll
-  for (int i = 0; i < vt; i++) {
+  for ([[maybe_unused]] const auto _ : c10::irange(vt)) {
     if (idx < N) {
       f(idx);
       idx += nt;

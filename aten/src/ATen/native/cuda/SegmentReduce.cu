@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/cub.cuh>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -120,7 +121,7 @@ __global__ void segment_reduce_forward_kernel(
   index_t offset_end = lengths_cumsum_data[offset_idx + 1];
 
   // ===== step2: apply reduction
-  for (index_t j = offset_start; j < offset_end; ++j) {
+  for (const auto j : c10::irange(offset_start, offset_end)) {
     int64_t data_index = outer_idx * data_stride_axis * data_size_axis
                          + j * data_stride_axis + lane_id;
     const auto data = values_data[data_index];
@@ -294,10 +295,10 @@ Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
   // outer_offset is the size of the outer dimensions of output (before axis)
   // inner_offset is the size of the inner dimensions of output (after axis)
   int64_t outer_offset = 1, inner_offset = 1;
-  for (int64_t d = 0; d < axis; d++) {
+  for (const auto d : c10::irange(axis)) {
     outer_offset *= output_contig.size(d);
   }
-  for (int64_t d = axis + 1; d < output_contig.dim(); d++) {
+  for (const auto d : c10::irange(axis + 1, output_contig.dim())) {
     inner_offset *= output_contig.size(d);
   }
 
@@ -422,10 +423,10 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
   // outer_offset is the size of the outer dimensions of output (before axis)
   // inner_offset is the size of the inner dimensions of output (after axis)
   int64_t outer_offset = 1, inner_offset = 1;
-  for (int64_t d = 0; d < axis; d++) {
+  for (const auto d : c10::irange(axis)) {
     outer_offset *= output.size(d);
   }
-  for (int64_t d = axis + 1; d < output.dim(); d++) {
+  for (const auto d : c10::irange(axis + 1, output.dim())) {
     inner_offset *= output.size(d);
   }
 

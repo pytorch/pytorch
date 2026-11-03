@@ -1016,7 +1016,7 @@ std::string generate_code(
   // (look at polygamma for example).
   std::string extra_params;
   std::string extra_args;
-  for (size_t i = 0; i < extra_args_typenames.size(); i++) {
+  for (const auto i : c10::irange(extra_args_typenames.size())) {
     auto type = std::string(extra_args_typenames[i]);
     auto name = "extra_arg_" + std::to_string(i);
     extra_params += "," + type + " " + name;
@@ -1026,7 +1026,7 @@ std::string generate_code(
   env.s("extra_args", extra_args);
 
   std::stringstream declare_load_arrays;
-  for (int i = 0; i < nInputs; i++) {
+  for (const auto i : c10::irange(nInputs)) {
     // TODO these arrays are potentially of the different types, use function
     // traits to determine the types
     declare_load_arrays << f_inputs_type << " arg" << std::to_string(i)
@@ -1035,7 +1035,7 @@ std::string generate_code(
   env.s("declare_load_arrays", std::move(declare_load_arrays).str());
 
   std::stringstream declare_store_arrays;
-  for (int i = 0; i < nOutputs; i++) {
+  for (const auto i : c10::irange(nOutputs)) {
     declare_store_arrays << result_type << " out" << std::to_string(i)
                         << '[' << std::to_string(thread_work_size) << "];\n";
   }
@@ -1043,7 +1043,7 @@ std::string generate_code(
 
   std::stringstream functor_args;
   if (scalar_pos == BinaryFuncVariant::NoScalar) {
-    for (int i = 0; i < nInputs - 1; i++) {
+    for (const auto i : c10::irange(nInputs - 1)) {
       functor_args << "arg" << std::to_string(i) << "[j], ";
     }
     functor_args << "arg" << std::to_string(nInputs - 1) << "[j]";
@@ -1061,12 +1061,12 @@ std::string generate_code(
     bool need_temp_out = (compute_type != result_type);
     std::stringstream functor_outs;
     if (need_temp_out) {
-      for (int i = 0; i < nOutputs - 1; i++) {
+      for (const auto i : c10::irange(nOutputs - 1)) {
         functor_outs << "temp_out" << std::to_string(i) << ", ";
       }
       functor_outs << "temp_out" << std::to_string(nOutputs - 1);
     } else {
-      for (int i = 0; i < nOutputs - 1; i++) {
+      for (const auto i : c10::irange(nOutputs - 1)) {
         functor_outs << "out" << std::to_string(i) << "[j], ";
       }
       functor_outs << "out" << std::to_string(nOutputs - 1) << "[j]";
@@ -1080,7 +1080,7 @@ std::string generate_code(
     call_functor_template += "${name}<${compute_type}>(${args} ${extra_args}, ${functor_outs});\n";
 
     if (need_temp_out) {
-      for (int i = 0; i < nOutputs; i++) {
+      for (const auto i : c10::irange(nOutputs)) {
         auto i_string = std::to_string(i);
         call_functor_template += "out" +i_string + "[j] = temp_out" + i_string + ";\n";
       }
@@ -1152,7 +1152,7 @@ std::string generate_code(
     }
 
     std::stringstream load_inputs;
-    for (int i = 0; i < nInputs; i++) {
+    for (const auto i : c10::irange(nInputs)) {
       auto i_string = std::to_string(i);
       load_inputs << "arg" << i_string << "[j] = l.load<" << f_inputs_type
                   << ">(data[" << std::to_string(i + nOutputs)
@@ -1162,7 +1162,7 @@ std::string generate_code(
     env.s("load_inputs", std::move(load_inputs).str());
 
     std::stringstream store_outputs;
-    for (int i = 0; i < nOutputs; i++) {
+    for (const auto i : c10::irange(nOutputs)) {
       auto i_string = std::to_string(i);
       store_outputs << "s.store<" << result_type
                     << ">(out" << i_string << "[j], data[" << i_string

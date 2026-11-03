@@ -9,6 +9,7 @@
 #include <ATen/native/cuda/thrust_compat.h>
 #include <c10/core/DeviceArray.h>
 
+#include <c10/util/irange.h>
 #include <thrust/count.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
@@ -147,7 +148,7 @@ void calculate_mode(
   //
   // See [Note: CUDA torch.mode clones self]
   scalar_t* data = self.mutable_data_ptr<scalar_t>();
-  for (int64_t i = 0; i < static_cast<int64_t>(position.size()); i++) {
+  for (const auto i : c10::irange(static_cast<int64_t>(position.size()))) {
     data += position[i] * ensure_nonempty_stride(self, i);
   }
 
@@ -163,7 +164,7 @@ void calculate_mode(
   scalar_t* values_data = values.mutable_data_ptr<scalar_t>();
   int64_t* indices_data = indices.mutable_data_ptr<int64_t>();
 
-  for (int64_t i = 0; i < static_cast<int64_t>(position.size()); i++) {
+  for (const auto i : c10::irange(static_cast<int64_t>(position.size()))) {
     int64_t pos = position[i];
     values_data += ensure_nonempty_stride(values, i) * pos;
     indices_data += ensure_nonempty_stride(indices, i) * pos;
