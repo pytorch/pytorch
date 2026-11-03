@@ -1366,7 +1366,6 @@ exclude_patterns = [
     'test/quantization/core/experimental/apot_fx_graph_mode_ptq.py',
     'test/quantization/core/experimental/apot_fx_graph_mode_qat.py',
     'test/quantization/core/experimental/quantization_util.py',
-    'test/quantization/core/experimental/test_bits.py',
     'test/quantization/core/experimental/test_fake_quantize.py',
     'test/quantization/core/experimental/test_linear.py',
     'test/quantization/core/experimental/test_nonuniform_observer.py',
