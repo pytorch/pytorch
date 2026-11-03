@@ -76,7 +76,11 @@ ARG RESOLVE_CACHE_BUST
 RUN --mount=type=bind,from=torch-pip-args,source=/torch_pip_args.sh,target=/torch_pip_args.sh <<'EOF'
 set -eu
 . /torch_pip_args.sh
-echo "Resolving ${TORCH_PACKAGES} from ${TORCH_INDEX_ARGS} (${RESOLVE_CACHE_BUST:-})"
+# Resolve with the same pip the `official` stage installs with. Ubuntu's own pip
+# (24.0) does not resolve the current nightly wheels: on the cu130 and cu132
+# indexes it backtracks to torch 2.15.0.dev20260928 instead of the newest build.
+pip3 install --upgrade --ignore-installed pip
+echo "Resolving ${TORCH_PACKAGES} with pip $(pip3 --version | cut -d' ' -f2) from ${TORCH_INDEX_ARGS} (${RESOLVE_CACHE_BUST:-})"
 # shellcheck disable=SC2086
 pip3 install --dry-run --ignore-installed --quiet --report /tmp/report.json ${TORCH_INDEX_ARGS} ${TORCH_PACKAGES}
 python3 - <<'PY'
