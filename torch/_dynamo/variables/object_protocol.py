@@ -797,13 +797,12 @@ def pylong_from_base(
         raise_observed_exception(
             ValueError, tx, args=["int() base must be >= 2 and <= 36, or 0"]
         )
+    if not issubclass(x.python_type(), (str, bytes, bytearray)):
+        raise_type_error(tx, "int() can't convert non-string with explicit base")
     if not x.is_python_constant():
         return None
-    xval = x.as_python_constant()
-    if not isinstance(xval, (str, bytes, bytearray)):
-        raise_type_error(tx, "int() can't convert non-string with explicit base")
     try:
-        return ConstantVariable.create(int(xval, base))
+        return ConstantVariable.create(int(x.as_python_constant(), base))
     except ValueError as e:
         raise_observed_exception(ValueError, tx, args=list(e.args))
 
