@@ -23,6 +23,7 @@ accurate graph capture while handling Python's various function-related behavior
 
 import builtins
 import collections
+import copyreg
 import functools
 import importlib
 import importlib.metadata
@@ -72,8 +73,11 @@ from ..source import (
     ClosureSource,
     ConstantSource,
     DefaultsSource,
+    DictGetItemSource,
     GetItemSource,
     ImportSource,
+    TypeDictSource,
+    TypeMROSource,
     TypeSource,
 )
 from ..utils import (
@@ -940,6 +944,117 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # copyreg._slotnames mutates the class by caching its result.  Run it
+        # through Dynamo's side-effect tracker so the cache is created during
+        # compiled execution, not tracing.
+        if self.fn is copyreg._slotnames:  # type: ignore[attr-defined]
+            if (
+                kwargs
+                or len(args) != 1
+                or not isinstance(args[0], variables.UserDefinedClassVariable)
+            ):
+                return super().call_function(tx, args, kwargs)
+
+            cls_var = args[0]
+            cls = cls_var.value
+            if tx.output.side_effects.has_pending_mutation_of_attr(
+                cls_var, "__slotnames__"
+            ):
+                return tx.output.side_effects.load_attr(cls_var, "__slotnames__")
+            cached = cls.__dict__.get("__slotnames__")
+            if cached is not None:
+                source = cls_var.source and DictGetItemSource(
+                    TypeDictSource(cls_var.source), "__slotnames__"
+                )
+                return VariableTracker.build(tx, cached, source)
+
+            # Py_TPFLAGS_IMMUTABLETYPE.  CPython attempts the cache write for
+            # static types and suppresses the resulting TypeError.
+            immutable_type = bool(vars(type)["__flags__"].__get__(cls) & (1 << 8))
+            if not immutable_type and type(cls).__setattr__ is not type.__setattr__:
+                unimplemented(
+                    gb_type="custom metaclass copyreg._slotnames cache",
+                    context=f"class {cls.__qualname__}",
+                    explanation="Dynamo cannot safely defer copyreg._slotnames' "
+                    "best-effort cache write through a custom metaclass.",
+                    hints=[],
+                )
+            if not immutable_type and cls_var.source is None:
+                unimplemented(
+                    gb_type="sourceless copyreg._slotnames cache",
+                    context=f"class {cls.__qualname__}",
+                    explanation="Dynamo cannot replay copyreg._slotnames' cache "
+                    "write for a class without a reconstructible source.",
+                    hints=[],
+                )
+
+            if cls_var.source is not None:
+                cls_dict_source = TypeDictSource(cls_var.source)
+                if "__slotnames__" in cls.__dict__:
+                    install_guard(
+                        DictGetItemSource(cls_dict_source, "__slotnames__").make_guard(
+                            GuardBuilder.CONSTANT_MATCH
+                        )
+                    )
+                else:
+                    install_guard(
+                        cls_dict_source.make_guard(
+                            functools.partial(
+                                GuardBuilder.DICT_NOT_CONTAINS,
+                                key="__slotnames__",
+                            )
+                        )
+                    )
+                install_guard(
+                    TypeMROSource(cls_var.source).make_guard(GuardBuilder.EQUALS_MATCH)
+                )
+
+            names = []
+            for idx, base in enumerate(cls.__mro__):
+                base_dict = base.__dict__
+                if cls_var.source is not None:
+                    base_source = (
+                        cls_var.source
+                        if idx == 0
+                        else GetItemSource(TypeMROSource(cls_var.source), idx)
+                    )
+                    base_dict_source = TypeDictSource(base_source)
+                    if "__slots__" in base_dict:
+                        install_guard(
+                            DictGetItemSource(base_dict_source, "__slots__").make_guard(
+                                GuardBuilder.EQUALS_MATCH
+                            )
+                        )
+                    else:
+                        install_guard(
+                            base_dict_source.make_guard(
+                                functools.partial(
+                                    GuardBuilder.DICT_NOT_CONTAINS,
+                                    key="__slots__",
+                                )
+                            )
+                        )
+
+                slots = base_dict.get("__slots__", ())
+                if isinstance(slots, str):
+                    slots = (slots,)
+                for name in slots:
+                    if name in ("__dict__", "__weakref__"):
+                        continue
+                    if name.startswith("__") and not name.endswith("__"):
+                        stripped = base.__name__.lstrip("_")
+                        if stripped:
+                            name = f"_{stripped}{name}"
+                    names.append(name)
+
+            names_var = VariableTracker.build(tx, names)
+            if immutable_type:
+                return names_var
+            if not tx.output.side_effects.is_attribute_mutation(cls_var):
+                tx.output.side_effects.track_object_existing(cls, cls_var)
+            tx.output.side_effects.store_attr(cls_var, "__slotnames__", names_var)
+            return names_var
+
         # Handle patch_dynamo_config call
         if self.fn is torch._dynamo.patch_dynamo_config:
             try:

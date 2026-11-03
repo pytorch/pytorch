@@ -72,26 +72,13 @@ def reduce_ex_user_defined_object(obj: T, protocol: int, /) -> tuple:  # type: i
                 state = None
 
         slotstate: dict[str, object] = {}
-        for base in cls.__mro__:
+        for name in copyreg._slotnames(cls):  # type: ignore[attr-defined]
             try:
-                slots = base.__dict__["__slots__"]
-            except KeyError:
-                continue
-            if isinstance(slots, str):
-                slots = (slots,)
-            for name in slots:
-                if name in ("__dict__", "__weakref__"):
-                    continue
-                if name.startswith("__") and not name.endswith("__"):
-                    stripped = base.__name__.lstrip("_")
-                    if stripped:
-                        name = f"_{stripped}{name}"
-                try:
-                    value = getattr(obj, name)
-                except AttributeError:
-                    pass
-                else:
-                    slotstate[name] = value
+                value = getattr(obj, name)
+            except AttributeError:
+                pass
+            else:
+                slotstate[name] = value
         if slotstate:
             state = (state, slotstate)
 

@@ -1165,7 +1165,27 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
             items = (x, x + 1)
             alias = tuple(items)
             distinct = (x, x + 1)
-            return alias is items, distinct is items
+            empty = ()
+            return (
+                alias is items,
+                items[:] is items,
+                items[::1] is items,
+                items + () is items,
+                tuple.__new__(tuple, items) is items,
+                distinct is items,
+                empty[:] is empty,
+                empty + () is empty,
+                tuple.__new__(tuple, empty) is empty,
+            )
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), self._compile(fn, x))
+
+    def test_tree_map_reconstructs_tuple_identity(self):
+        def fn(x):
+            items = (x, x + 1)
+            mapped = torch.utils._pytree.tree_map(lambda item: item, items)
+            return mapped is items
 
         x = torch.randn(4)
         self.assertEqual(fn(x), self._compile(fn, x))
