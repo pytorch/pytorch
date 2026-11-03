@@ -306,7 +306,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   // stream and device so that they can be restored in __exit__.
   //
   // The stack is stored as a Python list where each entry is either:
-  //   - Py_None: no-op enter (stream was already current);
+  //   - Py_None: no-op enter (stream and its device were already current);
   //   - dict:    {_ctx_stream, _ctx_device_index} saved before switching.
   //
   // self->context is initialized lazily as a PyList on first __enter__.
