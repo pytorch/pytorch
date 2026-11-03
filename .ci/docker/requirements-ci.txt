@@ -418,7 +418,7 @@ cmake==3.31.6
 tlparse==0.4.0
 #Description: required for log parsing
 
-filelock==3.20.3
+filelock==4.2.1
 #Description: required for inductor testing
 
 fsspec==2026.9.0
