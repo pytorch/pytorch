@@ -3244,6 +3244,14 @@
     {
       "Gb_type": "Missing tp_richcompare_impl override",
       "Context": "tp_richcompare_impl {self} {op}",
+      "Explanation": "{type(self).__name__} wraps {real_type.__name__} which has a non-default tp_richcompare. Add a tp_richcompare_impl override to {type(self).__name__}.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    },
+    {
+      "Gb_type": "Missing tp_richcompare_impl override",
+      "Context": "tp_richcompare_impl {self} {op}",
       "Explanation": "{type(self).__name__} does not implement tp_richcompare_impl. Add a tp_richcompare_impl override to {type(self).__name__}.",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."

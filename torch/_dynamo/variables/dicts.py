@@ -1615,14 +1615,6 @@ class DictValuesVariable(DictViewVariable):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictValuesIterator.create(self.dv_dict.items)
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        # dict_values has no tp_richcompare (inherits object's).
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def debug_repr(self) -> str:
         if not self.view_items:
             return "dict_values([])"
