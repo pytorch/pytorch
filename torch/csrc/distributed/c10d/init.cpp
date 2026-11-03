@@ -9,6 +9,7 @@
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
+#include <torch/csrc/distributed/c10d/hooks/DesyncDebugHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/HealthCheckHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/NanCheckHook.hpp>
@@ -5520,6 +5521,43 @@ be removed again via remove().)")
       .def(
           "remove",
           &::c10d::NanCheckHook::remove,
+          "Detach the hook from its process group.");
+
+  py::class_<::c10d::DesyncDebugHook, std::shared_ptr<::c10d::DesyncDebugHook>>(
+      module,
+      "DesyncDebugHook",
+      R"(
+Backend-agnostic desync debugging (the ProcessGroupNCCL
+``TORCH_NCCL_DESYNC_DEBUG`` report) built on process group hooks. Attached
+automatically to new process groups when ``TORCH_DIST_DESYNC_DEBUG=1``.)")
+      .def_static(
+          "attach",
+          &::c10d::DesyncDebugHook::attach,
+          py::arg("pg"),
+          py::arg("flush_interval") = std::chrono::milliseconds(100),
+          R"(
+Attach desync debugging to a process group. Each rank publishes the last
+collective it issued and the last one it saw complete to the group's store from
+a background thread, at most once per ``flush_interval``; nothing blocks the
+issuing thread. When the backend aborts (backends with abort hooks), the
+desync report is logged. Every rank must attach at the same point in the
+group's collective sequence (e.g. before its first collective), and at most one
+hook per group. The process group owns the hook, so the returned handle only
+has to be kept for report() or remove().)")
+      .def(
+          "report",
+          &::c10d::DesyncDebugHook::report,
+          py::arg("timeout") = std::chrono::milliseconds(60000),
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Publish this rank's latest state and build the desync report from every
+rank's. Must be called while this rank has an unfinished collective. On
+backends without completion hooks (see ``supports_completion_hooks``) the last
+issued collective always counts as unfinished.)")
+      .def(
+          "remove",
+          &::c10d::DesyncDebugHook::remove,
+          py::call_guard<py::gil_scoped_release>(),
           "Detach the hook from its process group.");
 
   py::class_<::c10d::HealthCheckHook>(
