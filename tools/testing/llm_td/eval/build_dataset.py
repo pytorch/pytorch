@@ -18,14 +18,19 @@ Four kinds of sample, each a JSON file under DIR/samples:
               config they failed in on main between landing and the revert.
   neu_<sha>   an ordinary main commit from the 25 days before --end, with no
               truth, used only to measure how much a selector runs on typical
-              traffic. Reverts and relands are left out.
+              traffic. Reverts, relands and reverted commits are left out.
+
+Samples are only written once, so rebuilding into an existing DIR keeps them.
+PR and head samples carry the PR's title and body as of the build, which may
+have been edited after the failure; revert and neutral samples carry the
+landed commit message.
 
 A PR failure is attributed to the PR only if the same test did not fail on
 main within four days and did not fail on another author's PR. PR truths that
 reproduced (same test failing in two build environments, or on two heads of
-the PR) are kept in `truth_strong`. A failure here survived run_test.py's
-in-job retries, so a one-off is not necessarily a flake: often only one
-environment runs the test, or the author fixed it in the next push.
+the PR) are kept in `truth_strong`. A one-off is not necessarily a flake:
+often only one environment runs the test, or the author fixed it in the next
+push.
 """
 
 from __future__ import annotations
@@ -46,7 +51,13 @@ from tools.testing.llm_td.eval.clickhouse import query
 from tools.testing.llm_td.eval.score import job_runs_td
 
 
+KINDS = ("pr", "head", "revert", "neutral")
 MAIN_WINDOW = dt.timedelta(days=4)
+# Main failures this far before --start are loaded, so PRs whose merge base is
+# older than --start still get the main-breakage check.
+MAIN_LOOKBACK = dt.timedelta(days=30)
+FLAKY_WINDOW = dt.timedelta(days=14)
+SKIP_JOBS = ("rerun_disabled_tests", "mem_leak_check")
 
 
 def git(*args: str, check: bool = True) -> str:
@@ -90,9 +101,6 @@ def has_commit(sha: str) -> bool:
     return True
 
 
-KINDS = ("pr", "head", "revert", "neutral")
-
-
 def is_main(branch: str) -> bool:
     return branch == "main" or branch.startswith("trunk/")
 
@@ -117,11 +125,7 @@ def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
             ON j.id = f.job_id""")
         print(d, len(rows), flush=True)
         d = n
-    return [
-        r
-        for r in rows
-        if "rerun_disabled_tests" not in r["job"] and "mem_leak_check" not in r["job"]
-    ]
+    return [r for r in rows if not any(s in r["job"] for s in SKIP_JOBS)]
 
 
 def pr_of_shas(shas: list[str]) -> dict[str, int]:
@@ -146,29 +150,32 @@ def pr_authors(prs: list[int]) -> dict[int, str]:
     return out
 
 
-def pr_caused_failures(rows: list[dict]) -> tuple[list[dict], dict]:
-    """Split failures into main and PR runs and keep the PR failures attributable to the PR."""
+def pr_caused_failures(
+    rows: list[dict], start: dt.date, end: dt.date
+) -> tuple[list[dict], dict]:
+    """Split failures into main and PR runs and keep the PR failures in [start, end) attributable to the PR.
+
+    `rows` may extend past the window on both sides, so failures near its edges
+    are still checked against main and other authors."""
     sha2pr = pr_of_shas(sorted({r["sha"] for r in rows if not is_main(r["br"])}))
     main = collections.defaultdict(list)
     pr_rows = []
     for r in rows:
+        k = (r["tf"], r["classname"], r["test"])
         if is_main(r["br"]) or r["sha"] not in sha2pr:
-            main[(r["tf"], r["test"])].append(ts(r["t"]))
+            main[k].append(ts(r["t"]))
         else:
             pr_rows.append({**r, "pr": sha2pr[r["sha"]]})
     author = pr_authors(sorted({r["pr"] for r in pr_rows}))
     authors = collections.defaultdict(set)
     for r in pr_rows:
-        authors[(r["tf"], r["test"])].add(author.get(r["pr"], r["pr"]))
-    keep = [
-        r
-        for r in pr_rows
-        if len(authors[(r["tf"], r["test"])]) < 2
-        and not any(
-            abs(ts(str(r["t"])) - m) < MAIN_WINDOW
-            for m in main.get((r["tf"], r["test"]), [])
-        )
-    ]
+        authors[(r["tf"], r["classname"], r["test"])].add(author.get(r["pr"], r["pr"]))
+    lo, hi = ts(f"{start} 00:00:00"), ts(f"{end} 00:00:00")
+    keep = []
+    for r in pr_rows:
+        k, t = (r["tf"], r["classname"], r["test"]), ts(r["t"])
+        if lo <= t < hi and len(authors[k]) < 2 and not any(abs(t - m) < MAIN_WINDOW for m in main[k]):  # fmt: skip
+            keep.append(r)
     return keep, main
 
 
@@ -241,9 +248,11 @@ def write_sample(
     }))  # fmt: skip
 
 
-def pr_samples(keep: list[dict], main: dict, out: Path, jobs: int) -> None:
+def pr_samples(
+    keep: list[dict], main: dict, out: Path, jobs: int, start: dt.date
+) -> None:
     main_by_file = collections.defaultdict(list)
-    for (tf, _), times in main.items():
+    for (tf, _, _), times in main.items():
         main_by_file[tf] += times
     envs, heads = collections.defaultdict(set), collections.defaultdict(set)
     first: dict[int, dict] = {}
@@ -268,6 +277,9 @@ def pr_samples(keep: list[dict], main: dict, out: Path, jobs: int) -> None:
         if not base:
             return
         base_t = commit_time(base)
+        if base_t - MAIN_WINDOW < ts(f"{start - MAIN_LOOKBACK} 00:00:00"):
+            print(f"skipping PR {pr}: merge base before the loaded main failures", flush=True)  # fmt: skip
+            return
         # A file broken on main around the merge base is not this PR's fault.
         truth = sorted(
             tf
@@ -276,34 +288,48 @@ def pr_samples(keep: list[dict], main: dict, out: Path, jobs: int) -> None:
         )
         if truth:
             title, body = pr_text(pr)
-            write_sample(out, f"pr_{pr}", "pr", sha, base, title, body, pr=pr, date=first[pr]["t"][:19], truth=truth,
-                         truth_strong=[tf for tf in truth if (pr, tf) in reproduced],
-                         truth_jobs={tf: sorted(by[pr][tf]) for tf in truth})  # fmt: skip
+            try:
+                write_sample(out, f"pr_{pr}", "pr", sha, base, title, body, pr=pr, date=first[pr]["t"][:19], truth=truth,
+                             truth_strong=[tf for tf in truth if (pr, tf) in reproduced],
+                             truth_jobs={tf: sorted(by[pr][tf]) for tf in truth})  # fmt: skip
+            except subprocess.CalledProcessError as e:
+                print(f"skipping PR {pr}: {e}", flush=True)
 
     with cf.ThreadPoolExecutor(jobs) as ex:
         list(ex.map(go, sorted(first)))
 
 
 # fmt: off
-FLAKY_WINDOW = dt.timedelta(days=14)
-SKIP_JOBS = ("rerun_disabled_tests", "mem_leak_check")
+
+
+def landed_times(since: dt.date) -> dict[int, dt.datetime]:
+    """PR number -> when it first landed on main, from the merge bot's `Pull Request resolved:` line."""
+    out: dict[int, dt.datetime] = {}
+    for c in git("log", "origin/main", f"--since={since}", "--format=%ct %b%x00").split("\0"):
+        if m := re.search(r"^\s*(\d+) .*?Pull Request resolved: \S+/pull/(\d+)", c, re.DOTALL):
+            t = dt.datetime.fromtimestamp(int(m.group(1)), tz=dt.timezone.utc)
+            out[int(m.group(2))] = min(t, out.get(int(m.group(2)), t))
+    return out
 
 
 def flaky_flags(rows: list[dict], start: dt.date, end: dt.date) -> list[dict]:
     """Dr.CI's flaky signals for each failing (job, test) of `rows`, with hindsight on both sides.
 
-    A failure is flaky if its job passed on a rerun of the same head, the job is
-    marked unstable, the test was disabled, or the same test failed on main or on
-    another author's PR within FLAKY_WINDOW."""
+    A failure is flaky if its job passed (on this attempt, after run_test.py's
+    rerun of the file, or on a rerun of the job), the job is marked unstable,
+    the test was disabled, or the same test failed on another author's PR, or
+    on main before the PR landed, within FLAKY_WINDOW. A PR's own breakage that
+    landed and failed on main until its revert does not make it flaky."""
     w = FLAKY_WINDOW
     others = pull_failures(start - w, end + w)
     sha2pr = pr_of_shas(sorted({r["sha"] for r in others if not is_main(r["br"])}))
     author = pr_authors(sorted(set(sha2pr.values()) | {r["pr"] for r in rows}))
+    landed, never = landed_times(start - w), dt.datetime.max.replace(tzinfo=dt.timezone.utc)
     seen = collections.defaultdict(list)
     for r in others:
-        who = "main" if is_main(r["br"]) else author.get(sha2pr.get(r["sha"], -1))
-        if who:
-            seen[(r["tf"], r["classname"], r["test"])].append((ts(r["t"]), who))
+        pr = sha2pr.get(r["sha"])
+        who = "main" if is_main(r["br"]) or pr is None else author.get(pr, pr)
+        seen[(r["tf"], r["classname"], r["test"])].append((ts(r["t"]), who))
     disabled = collections.defaultdict(list)
     sql = f"""
         SELECT toString(day) d, name FROM misc.disabled_tests_historical
@@ -313,15 +339,18 @@ def flaky_flags(rows: list[dict], start: dt.date, end: dt.date) -> list[dict]:
         test, _, cls = d["name"].removesuffix(")").partition(" (")
         disabled[(cls.rsplit(".", 1)[-1], test)].append(ts(d["d"] + " 00:00:00"))
     for r in rows:
-        t, me = ts(r["t"]), author.get(r["pr"], r["pr"])
-        near = {who for wt, who in seen[(r["tf"], r["classname"], r["test"])] if abs(wt - t) < w}
+        t, me, cutoff = ts(r["t"]), author.get(r["pr"], r["pr"]), landed.get(r["pr"], never)
+        near = {who for wt, who in seen[(r["tf"], r["classname"], r["test"])] if abs(wt - t) < w and (who != "main" or wt < cutoff)}
         was_disabled = any(abs(d - t) < w for d in disabled[(r["classname"], r["test"])])
-        r["flaky"] = r["rerun_green"] or "unstable" in r["job"] or bool(near - {me}) or was_disabled
+        r["flaky"] = r["job_green"] or "unstable" in r["job"] or bool(near - {me}) or was_disabled
     return rows
 
 
-def head_failures(prs: list[int], start: dt.date) -> list[dict]:
-    """Every failing (job, test) in a job that runs TD, on every head of `prs`."""
+def head_failures(prs: list[int], start: dt.date, end: dt.date) -> list[dict]:
+    """Every failing (job, test) in a job that runs TD, on every head of `prs`, before `end`.
+
+    Later heads are left out because flaky_flags only has other failures up to
+    `end + FLAKY_WINDOW`."""
     numbers = ",".join(map(str, prs))
     sql = f"SELECT DISTINCT number, head_sha FROM materialized_views.pr_by_sha WHERE number IN ({numbers})"
     sha2pr = {r["head_sha"]: int(r["number"]) for r in query(sql)}
@@ -339,14 +368,14 @@ def head_failures(prs: list[int], start: dt.date) -> list[dict]:
         sql = f"""
             SELECT job_id, replaceRegexpOne(file, '\\.py$', '') tf, classname, name test, toString(min(time_inserted)) t
             FROM tests.all_test_runs
-            WHERE time_inserted >= '{start - FLAKY_WINDOW}' AND job_id IN ({",".join(ids[i : i + 2000])})
+            WHERE time_inserted >= '{start - FLAKY_WINDOW}' AND time_inserted < '{end}' AND job_id IN ({",".join(ids[i : i + 2000])})
               AND (failure_count > 0 OR error_count > 0)
             GROUP BY job_id, tf, classname, test"""
         for r in query(sql):
             j = by_id[int(r["job_id"])]
             sha, name = j["head_sha"], j["name"]
-            rerun = any((sha, name, a) in green for a in range(1, 10) if a != j["run_attempt"])
-            rows.append({**r, "sha": sha, "pr": sha2pr[sha], "job": name, "rerun_green": rerun})
+            passed = any((sha, name, a) in green for a in range(1, 10))
+            rows.append({**r, "sha": sha, "pr": sha2pr[sha], "job": name, "job_green": passed})
     return rows
 
 
@@ -356,8 +385,10 @@ def head_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
     for p in out.glob("pr_*.json"):
         s = json.loads(p.read_text())
         prs[s["pr"]] = s
+    if not prs:
+        raise SystemExit(f"--kinds head needs the pr_ samples in {out}; build --kinds pr first")
     by = collections.defaultdict(lambda: collections.defaultdict(set))
-    for r in flaky_flags(head_failures(sorted(prs), start), start, end):
+    for r in flaky_flags(head_failures(sorted(prs), start, end), start, end):
         if not r["flaky"]:
             by[(r["pr"], r["sha"])][r["tf"]].add(r["job"])
     fetch(sorted({sha for _, sha in by}))
@@ -389,7 +420,7 @@ def revert_truth_jobs(
               WHERE created_at >= toDateTime('{t0}') - INTERVAL 1 HOUR
                 AND created_at <= parseDateTimeBestEffort('{reverted}') + INTERVAL 1 HOUR
                 AND repository_full_name = 'pytorch/pytorch' AND (head_branch = 'main' OR head_branch LIKE 'trunk/%')
-                AND name NOT LIKE '%rerun_disabled_tests%' AND name NOT LIKE '%mem_leak_check%') j ON j.id = t.job_id
+                AND {" AND ".join(f"name NOT LIKE '%{s}%'" for s in SKIP_JOBS)}) j ON j.id = t.job_id
         WHERE time_inserted >= toDateTime('{t0}') AND time_inserted <= parseDateTimeBestEffort('{reverted}') + INTERVAL 2 HOUR
           AND file IN ({files}) AND (failure_count > 0 OR error_count > 0)""")
     truth_jobs: dict[str, set] = collections.defaultdict(set)
@@ -447,7 +478,19 @@ def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
         for sha, _, title in (line.partition(" ") for line in log)
         if not re.match(r"(Revert|Reland)", title) and sha not in reverted
     ]
+    # The autorevert bot's record and the rev_ samples also cover reverts whose
+    # message differs. They filter the sample rather than the population so the
+    # checked-in neutral ids stay a subset of the earlier draw.
+    reverted |= {
+        r["commit_sha"]
+        for r in query(f"""
+            SELECT DISTINCT commit_sha FROM misc.autorevert_events_v2
+            WHERE repo = 'pytorch/pytorch' AND action = 'revert' AND ts >= toDateTime('{start}')""")
+    }
+    reverted_ids = {p.stem.removeprefix("rev_") for p in out.glob("rev_*.json")}
     for sha in random.Random(0).sample(shas, min(n, len(shas))):
+        if sha in reverted or sha[:12] in reverted_ids:
+            continue
         msg = git("log", "-1", "--format=%B", sha)
         title, _, body = msg.partition("\n")
         write_sample(
@@ -476,8 +519,9 @@ def main() -> None:
     out = args.data / "samples"
     out.mkdir(parents=True, exist_ok=True)
     if "pr" in args.kinds:
-        keep, main_fail = pr_caused_failures(pull_failures(args.start, args.end))
-        pr_samples(keep, main_fail, out, args.jobs)
+        rows = pull_failures(args.start - MAIN_LOOKBACK, args.end + MAIN_WINDOW)
+        keep, main_fail = pr_caused_failures(rows, args.start, args.end)
+        pr_samples(keep, main_fail, out, args.jobs, args.start)
     if "head" in args.kinds:
         head_samples(out, args.jobs, args.start, args.end)
     if "revert" in args.kinds:

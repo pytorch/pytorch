@@ -543,6 +543,7 @@ jobs:
     needs:
       - linux-jammy-aarch64-py3_11-gcc13-build
       - get-label-type
+      - target-determination
     with:
       build-environment: ${{ needs.linux-jammy-aarch64-py3_11-gcc13-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-aarch64-py3_11-gcc13-build.outputs.docker-image }}

@@ -2,10 +2,15 @@
 
     python -m tools.testing.llm_td.eval.td_replay --data DIR [--out DIR/td] [--shard I N]
 
+--shard I N (0 <= I < N, 0-indexed unlike run_test.py's) processes every
+N-th sample starting at the I-th.
+
 Runs get_test_prioritizations over each sample's candidates, as the
 target-determination job does, with the change (changed files, commit text)
 patched in and every PR-local input (previous failures, the pytest cache, LLM
-mappings, linked issue bodies) empty. Writes OUT/<id>.json with:
+mappings, linked issue bodies) empty. A sample on which a heuristic raised
+gets no file, and the run exits non-zero, so a rerun recomputes it. Writes
+OUT/<id>.json with:
 
   scored     files TD gives a positive score, best first (what the hedge draws from)
   top25      CI's top-25% cut over all candidates
@@ -33,7 +38,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
-from tools.testing.llm_td.eval import REPO
+from tools.testing.llm_td.eval import REPO, write_json
 from tools.testing.llm_td.eval.score import Seconds, test_seconds
 
 
@@ -71,8 +76,11 @@ def main() -> None:
     p.add_argument("--out", type=Path, help="default: DATA/td")
     p.add_argument("--stats", type=Path, default=REPO / ".additional_ci_files")
     p.add_argument("--ids", type=Path, help="only these samples")
-    p.add_argument("--shard", type=int, nargs=2, default=[0, 1])
+    p.add_argument("--shard", type=int, nargs=2, default=[0, 1], metavar=("I", "N"), help="0-indexed: every N-th sample from the I-th")  # fmt: skip
     args = p.parse_args()
+    which, n = args.shard
+    if not 0 <= which < n:
+        p.error(f"--shard I N needs 0 <= I < N, got {which} {n}")
     if args.stats.name != ".additional_ci_files":
         raise SystemExit("--stats must be a directory named .additional_ci_files")
     missing = [a for a in ARTIFACTS if not (args.stats / a).exists()]
@@ -114,7 +122,7 @@ def main() -> None:
     if args.ids:
         ids = set(args.ids.read_text().split())
         paths = [x for x in paths if x.stem in ids]
-    which, n = args.shard
+    failed = []
     with contextlib.ExitStack() as stack:
         for target, new in patches.items():
             stack.enter_context(mock.patch(H + target, new))
@@ -129,15 +137,24 @@ def main() -> None:
                 tp = get_test_prioritizations(
                     cands, file=log
                 ).get_aggregated_priorities()
-            for line in log.getvalue().splitlines():
-                if line.startswith("Error in "):
-                    print(path.stem, line, flush=True)
+            # get_test_prioritizations drops a heuristic that raised and goes on without it.
+            errors = [
+                x for x in log.getvalue().splitlines() if x.startswith("Error in ")
+            ]
+            if errors:
+                print(path.stem, *errors, sep="\n", flush=True)
+                failed.append(path.stem)
+                continue
             scored = [t.test_file for score, t in tp._traverse_scores() if score > 0]
-            (out / path.name).write_text(json.dumps({
+            write_json(out / path.name, {
                 "scored": list(dict.fromkeys(scored)),
                 "top25": sorted({t.test_file for t in tp.get_top_per_tests(25)[0]}),
                 "top25_cfg": top25_per_config(tp, cands, seconds),
-            }))  # fmt: skip
+            })  # fmt: skip
+    if failed:
+        raise SystemExit(
+            f"a heuristic raised on {len(failed)} samples, left for a rerun: {failed}"
+        )
 
 
 if __name__ == "__main__":

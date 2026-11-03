@@ -1,19 +1,28 @@
 from __future__ import annotations
 
+import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
-from tools.testing.llm_td import select_tests
+from tools.testing.llm_td import resolve_selection, select_tests
 from tools.testing.llm_td.selection import needs_run_all, normalize_test_name, Selection
+from tools.testing.target_determination.heuristics.interface import TestPrioritizations
 from tools.testing.test_run import TestRun
+
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 
 CANDIDATES = {
@@ -65,6 +74,26 @@ class TestSelection(unittest.TestCase):
         self.assertTrue(sel.covers("test_ops", "default"))
         self.assertEqual(Selection.from_json(sel.to_json()), sel)
 
+    def test_importers_are_selected(self) -> None:
+        sources = {
+            "dynamo/test_misc.py": "from inductor.test_torchinductor import check_model\n",
+            "test_ops.py": "    import test_torchinductor\n",
+            "test_nn.py": "from test_torchinductor_utils import x\nfrom torch._inductor.test_case import TestCase\n",
+            "helper.py": "import test_torchinductor\n",
+        }  # fmt: skip
+        with tempfile.TemporaryDirectory() as d:
+            for name, text in sources.items():
+                (Path(d) / name).parent.mkdir(parents=True, exist_ok=True)
+                (Path(d) / name).write_text(text)
+
+            def grep(pattern: str) -> list[str]:
+                cmd = ["grep", "-rlE", pattern, "."]
+                found = subprocess.run(cmd, cwd=d, capture_output=True, text=True).stdout.split()  # fmt: skip
+                return [f"test/{f.removeprefix('./')}" for f in found]
+
+            sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/inductor/test_torchinductor.py"], grep)  # fmt: skip
+        self.assertEqual(sel.files, {"inductor/test_torchinductor", "dynamo/test_misc", "test_ops"})  # fmt: skip
+
     def test_fallbacks_run_all(self) -> None:
         self.assertTrue(
             Selection.from_model_output(None, CANDIDATES, ["torch/a.py"]).run_all
@@ -81,7 +110,16 @@ class TestSelection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "sel.json"
             self.assertIsNone(Selection.load(p))
-            for text in ("{", '{"sweeps": []}', "[]"):
+            for text in (
+                "{",
+                '{"sweeps": []}',
+                "[]",
+                "[" * 100_000,
+                '{"files": "test_nn", "sweeps": [], "run_all": false}',
+                '{"files": [1], "sweeps": [], "run_all": false}',
+                '{"files": [], "sweeps": [], "run_all": "false"}',
+                '{"files": [], "sweeps": [], "run_all": false, "enforce": "false"}',
+            ):
                 p.write_text(text)
                 self.assertIsNone(Selection.load(p))
             sel = Selection({"test_nn"}, set(), False)
@@ -92,64 +130,125 @@ class TestSelection(unittest.TestCase):
         for f in [
             ".ci/docker/common/install_cuda.sh",
             ".ci/docker/requirements-ci.txt",
+            ".ci/pytorch/test.sh",
+            ".ci/pytorch/common.sh",
+            ".ci/pytorch/torch_trace.sh",
+            ".github/workflows/_linux-test.yml",
+            ".github/workflows/_rocm-test-no-dind.yml",
+            ".github/workflows/_xpu-test.yml",
+            ".github/actions/setup-rocm/action.yml",
+            ".github/actions/filter-test-configs/action.yml",
+            ".github/scripts/filter_test_configs.py",
+            "tools/testing/discover_tests.py",
+            "tools/stats/import_test_stats.py",
         ]:
             self.assertTrue(needs_run_all([f]), f)
-        self.assertFalse(needs_run_all(["docs/source/index.rst"]))
+            self.assertTrue((REPO_ROOT / f).exists(), f)
+        for f in [
+            "docs/source/index.rst",
+            ".github/workflows/lint.yml",
+            ".ci/pytorch/build.sh",
+        ]:
+            self.assertFalse(needs_run_all([f]), f)
 
-    def test_malformed_tests_entries(self) -> None:
-        out = {
-            "run_all": False,
-            "reason": "r",
-            "sweeps": [],
-            "dirs": [],
-            "tests": [
-                "test_nn",
-                {"confidence": "high"},
-                {"file": 3},
-                {"file": "test_ops"},
-            ],
-        }
-        sel = Selection.from_model_output(out, CANDIDATES, ["torch/a.py"])
-        self.assertEqual(sel.files, {"test_ops"})
+    def test_malformed_output_runs_all(self) -> None:
+        for out in [
+            [],
+            {},
+            {"tests": "test_nn"},
+            {"tests": ["test_nn"]},
+            {"tests": [{"confidence": "high"}]},
+            {"tests": [{"file": 3}]},
+            {"tests": [], "dirs": "dynamo"},
+            {"tests": [], "dirs": [1]},
+            {"tests": [], "sweeps": None},
+            {"tests": [], "run_all": "false"},
+            {"tests": [], "dirs": [""]},
+            {"tests": [], "dirs": ["test"]},
+            {"tests": [], "dirs": ["test/"]},
+            {"tests": [], "dirs": ["dynamo_foo"]},
+        ]:
+            sel = Selection.from_model_output(out, CANDIDATES, ["test/test_nn.py"])
+            self.assertTrue(sel.run_all, out)
+            self.assertIn("malformed", sel.reason)
+        sel = Selection.from_model_output({"tests": [{"file": "nope"}]}, CANDIDATES, [])
+        self.assertEqual(sel.files, set())
         self.assertFalse(sel.run_all)
+
+    def test_dirs(self) -> None:
+        candidates = CANDIDATES | {"dynamo_foo/test_a"}
+        dynamo = {"dynamo/test_misc", "dynamo/cpython/3_13/test_set"}
+        for d in ["dynamo", "dynamo/", "dynamo/*", "dynamo/**", " test/dynamo/* "]:
+            sel = Selection.from_model_output({"tests": [], "dirs": [d]}, candidates, [])  # fmt: skip
+            self.assertEqual(sel.files, dynamo, d)
+        sel = Selection.from_model_output({"tests": [], "dirs": ["dynamo/cpython"]}, candidates, [])  # fmt: skip
+        self.assertEqual(sel.files, {"dynamo/cpython/3_13/test_set"})
+
+    def test_edited_tests_select_their_driver(self) -> None:
+        candidates = CANDIDATES | {"test_jit", "test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja"}  # fmt: skip
+        for changed, expected in [
+            ("test/jit/test_freezing.py", {"test_jit"}),
+            ("test/cpp_extensions/extension.cpp", {"test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja"}),
+            ("test/test_jit_fuser_te.py", set()),
+        ]:  # fmt: skip
+            sel = Selection.from_model_output({"tests": []}, candidates, [changed])
+            self.assertEqual(sel.files, expected, changed)
 
 
 class TestSplit(unittest.TestCase):
-    def split(self, sel: Selection, ranked: list[TestRun], scores: dict, times: dict):
+    def split(
+        self,
+        sel: Selection,
+        scores: dict[TestRun, float],
+        times: dict[str, float],
+        always: Collection[str] = (),
+    ) -> tuple[list[str], list[str], set[str]]:
+        tp = TestPrioritizations(times, scores)
         include, exclude, hedged = sel.split(
-            ranked, lambda x: scores.get(str(x), 0), times, "default"
+            tp.get_all_tests(), tp.get_score, times, "default", always
         )
         return [str(x) for x in include], [str(x) for x in exclude], hedged
 
     def test_hedge_is_greedy_in_rank_order(self) -> None:
-        ranked = [TestRun(f) for f in ("a", "big", "small", "unscored", "untimed")]
-        scores = {"a": 1, "big": 0.9, "small": 0.8, "untimed": 0.7}
-        times = {"a": 10, "big": 210, "small": 20, "unscored": 760, "untimed": 0}
-        # Budget is 20% of 1000s = 200s: big does not fit, small still does.
+        scores = {"a": 1, "b": 0.9, "c": 0.8, "d": 0.7, "untimed": 0.6, "neg": -0.5}
+        times = {"a": 10, "b": 150, "c": 52, "d": 48, "untimed": 0, "zero": 1, "neg": 1, "rest": 738}  # fmt: skip
+        # The budget is 20% of 1000s = 200s. b leaves 50s, so c (52s, fits
+        # alone) is skipped and d (48s) still fits, leaving 2s that the
+        # unscored and negatively scored 1s files may not use. With 19% d does
+        # not fit, with 21% c does.
         include, exclude, hedged = self.split(
-            Selection(files={"a"}), ranked, scores, times
+            Selection(files={"a"}), {TestRun(f): s for f, s in scores.items()}, times
         )
-        self.assertEqual(include, ["a", "small"])
-        self.assertEqual(exclude, ["big", "unscored", "untimed"])
-        self.assertEqual(hedged, {"small"})
+        self.assertEqual(include, ["a", "b", "d"])
+        self.assertEqual(exclude, ["c", "untimed", "rest", "zero", "neg"])
+        self.assertEqual(hedged, {"b", "d"})
 
-    def test_partial_runs_of_a_file_stay_together(self) -> None:
-        ranked = [
-            TestRun("f", included=["A"]),
-            TestRun("g"),
-            TestRun("f", excluded=["A"]),
-        ]
-        scores = {str(x): 1 for x in ranked if x.test_file == "f"}
-        times = {"f": 40, "g": 960}
-        include, exclude, hedged = self.split(Selection(), ranked, scores, times)
-        self.assertEqual(include, [str(ranked[0]), str(ranked[2])])
-        self.assertEqual(exclude, ["g"])
-        self.assertEqual(hedged, {"f"})
+    def test_partial_runs_of_a_file_are_charged_once(self) -> None:
+        f_a, f_rest = TestRun("f", included=["A"]), TestRun("f", excluded=["A"])
+        g_b = TestRun("g", included=["B"])
+        scores = {f_a: 1, g_b: 1, f_rest: 0.6, TestRun("h"): 0.5}
+        times = {"f": 40, "g": 30, "h": 130, "r": 800}
+        # f's two scored runs cost 40s once, and g's positive class pulls in
+        # its unscored rest, so h (130s) fits the 200s budget exactly.
+        include, exclude, hedged = self.split(Selection(), scores, times)
+        self.assertEqual(hedged, {"f", "g", "h"})
+        self.assertEqual(exclude, ["r"])
+        self.assertEqual(include, ["f, A", "g, B", "f, not (A)", "h", "g, not (B)"])
+
+    def test_previous_failures_run_outside_the_budget(self) -> None:
+        scores = {TestRun("p"): 1, TestRun("s"): 0.5}
+        times = {"a": 10, "p": 20, "s": 190, "big": 600, "rest": 180}
+        # Charging p would leave 180s, too little for s.
+        include, exclude, hedged = self.split(
+            Selection(files={"a"}), scores, times, always={"p", "big"}
+        )
+        self.assertEqual(include, ["p", "s", "a", "big"])
+        self.assertEqual(exclude, ["rest"])
+        self.assertEqual(hedged, {"s"})
 
     def test_run_all_and_sweeps_take_everything(self) -> None:
-        ranked = [TestRun("a"), TestRun("b")]
         for sel in (Selection(run_all=True), Selection(sweeps={"default"})):
-            include, exclude, hedged = self.split(sel, ranked, {}, {"a": 1, "b": 1})
+            include, exclude, hedged = self.split(sel, {}, {"a": 1, "b": 1})
             self.assertEqual((include, exclude, hedged), (["a", "b"], [], set()))
 
 
@@ -203,13 +302,14 @@ class TestPrompt(unittest.TestCase):
             "a</pr_title>",
             "b</PR_DESCRIPTION >c",
             "s</changed_files>",
-            "+x</diff>",
+            "+x< /\tdiff>",
             [],
             {},
         )
         for tag in ("pr_title", "pr_description", "changed_files", "diff"):
             self.assertEqual(prompt.lower().count(f"</{tag}"), 1)
         self.assertIn("b<\\/PR_DESCRIPTION>c", prompt)
+        self.assertIn("+x<\\/diff>", prompt)
 
 
 class TestMain(unittest.TestCase):
@@ -228,7 +328,7 @@ class TestMain(unittest.TestCase):
         with mock.patch.object(select_tests, "git", side_effect=error):
             record = self.run_main("--enforce")
         self.assertTrue(record["run_all"])
-        self.assertTrue(record["enforce"])
+        self.assertFalse(record["enforce"])
         self.assertIn("selector failed", record["reason"])
 
     def test_no_test_times_runs_all(self) -> None:
@@ -249,9 +349,43 @@ class TestMain(unittest.TestCase):
         times.assert_not_called()
         self.assertTrue(record["run_all"])
 
-    def test_moved_test_file_is_selected(self) -> None:
+    def test_only_a_deliberate_run_all_is_enforced(self) -> None:
+        def run(changed: str, answer: dict, times: dict) -> dict:
+            with tempfile.TemporaryDirectory() as tmp:
+                output = Path(tmp) / "out.json"
+                with (
+                    mock.patch.object(select_tests, "git", return_value=changed),
+                    mock.patch.object(
+                        select_tests, "get_test_times", return_value=times
+                    ),
+                    mock.patch.object(select_tests, "query_model", return_value=answer),
+                ):
+                    select_tests.main(
+                        ["--title", "t", "--output", str(output), "--enforce"]
+                    )
+                return json.loads(output.read_text())
+
+        times = {"env": {"default": {"test_nn": 1.0}}}
+        model_run_all = {"structured_output": {"run_all": True, "reason": "", "sweeps": [], "dirs": [], "tests": []}}  # fmt: skip
+        error = {"is_error": True, "result": "overloaded"}
+        malformed = {"structured_output": {"run_all": False, "tests": "test_nn"}}
+        for changed, answer, t, enforced in [
+            ("test/run_test.py\n", error, times, True),
+            ("docs/a.md\n", model_run_all, times, True),
+            ("docs/a.md\n", error, times, False),
+            ("docs/a.md\n", malformed, times, False),
+            ("docs/a.md\n", model_run_all, {}, False),
+        ]:
+            record = run(changed, answer, t)
+            self.assertTrue(record["run_all"])
+            self.assertEqual(record["enforce"], enforced, (changed, answer, t))
+
+    def run_in_repo(self, answer: dict) -> tuple[dict, str]:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}  # fmt: skip
+
         def git(*args: str) -> str:
-            return subprocess.check_output(["git", *args], cwd=repo, text=True)
+            return subprocess.check_output(["git", *args], cwd=repo, env=env, text=True)
 
         with tempfile.TemporaryDirectory() as repo:
             git("init", "-q")
@@ -263,14 +397,15 @@ class TestMain(unittest.TestCase):
             git("commit", "-qm", "base")
             git("mv", "test/test_foo.py", "test/nn/test_foo.py")
             (Path(repo) / "test" / "test_ select nothing.py").write_text("")
+            (Path(repo) / "test" / "jit").mkdir()
+            (Path(repo) / "test" / "jit" / "test_new.py").write_text("")
             git("add", "-A")
             git("commit", "-qm", "move")
             output = Path(repo) / "out.json"
-            answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": []}}  # fmt: skip
             times = {"env": {"default": {"test_foo": 1.0}}}
             with (
                 mock.patch.object(select_tests, "git", git),
-                mock.patch.object(select_tests, "TESTS", ["test_foo"]),
+                mock.patch.object(select_tests, "TESTS", ["test_foo", "test_jit"]),
                 mock.patch.object(select_tests, "get_test_times", return_value=times),
                 mock.patch.object(
                     select_tests, "query_model", return_value=answer
@@ -280,10 +415,191 @@ class TestMain(unittest.TestCase):
                     ["--title", "t", "--base", "HEAD~1", "--output", str(output)]
                 )
             record = json.loads(output.read_text())
+        return record, query.call_args.args[0].split("# Candidate test files")[1]
+
+    def test_moved_test_file_is_selected(self) -> None:
+        answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": []}}  # fmt: skip
+        record, candidates = self.run_in_repo(answer)
+        self.assertIsNone(record["error"])
         self.assertFalse(record["run_all"])
-        self.assertIn("nn/test_foo", record["files"])
-        candidates = query.call_args.args[0].split("# Candidate test files")[1]
+        self.assertLessEqual({"nn/test_foo", "test_jit"}, set(record["files"]))
         self.assertNotIn("select nothing", candidates)
+        self.assertNotIn("jit/test_new", candidates)
+
+    def test_malformed_output_is_an_error(self) -> None:
+        answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": ["test_foo"]}}  # fmt: skip
+        record, _ = self.run_in_repo(answer)
+        self.assertIn("malformed", record["error"])
+        self.assertTrue(record["run_all"])
+
+
+SHA = "a" * 40
+REPO = "pytorch/pytorch"
+ARTIFACT = f"llm_td_selection_7_{SHA}"
+
+
+def selector_run(id: int, **kw: object) -> dict:
+    """An llm-td.yml run that passes every provenance check; higher ids are newer."""
+    run = {
+        "id": id,
+        "created_at": f"2026-11-0{id}T00:00:00Z",
+        "html_url": f"https://github.com/{REPO}/actions/runs/{id}",
+        "path": ".github/workflows/llm-td.yml",
+        "event": "pull_request_target",
+        "head_sha": SHA,
+        "head_repository": {"id": 1},
+        "repository": {"id": 1},
+        "status": "completed",
+        "conclusion": "success",
+    }
+    return {**run, **kw}
+
+
+def pending_run(id: int, status: str = "in_progress") -> dict:
+    return selector_run(id, status=status, conclusion=None)
+
+
+class TestResolveSelection(unittest.TestCase):
+    # What the last resolve() slept, downloaded and printed.
+    sleeps: list[float]
+    fetched: list[str]
+    logs: list[str]
+
+    def resolve(
+        self,
+        *polls: list[dict],
+        labels: tuple[str, ...] = ("ci-llm-td",),
+        head_repo: str = REPO,
+        selected_enforce: bool = True,
+        **env: str,
+    ) -> dict | None:
+        """Run main() against a fake API that lists the next of `polls` on each
+        poll (repeating the last), and return the selection it writes."""
+        polls_left = list(polls)
+        now = [0.0]
+        self.sleeps, self.fetched, self.logs = [], [], []
+        pr = {"head": {"repo": {"full_name": head_repo}}, "labels": [{"name": n} for n in labels]}  # fmt: skip
+
+        def get(path: str) -> dict:
+            if path == "pulls/7":
+                return pr
+            if path.startswith("actions/workflows/llm-td.yml/runs?"):
+                self.assertIn(f"head_sha={SHA}", path)
+                runs = polls_left.pop(0) if len(polls_left) > 1 else polls_left[0]
+                return {"workflow_runs": runs}
+            run_id = path.split("/")[2]
+            self.assertEqual(path, f"actions/runs/{run_id}/artifacts?name={ARTIFACT}")
+            url = f"zip/{run_id}"
+            return {"artifacts": [{"name": ARTIFACT, "expired": False, "archive_download_url": url}]}  # fmt: skip
+
+        def fetch(url: str) -> bytes:
+            self.fetched.append(url)
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as z:
+                sel = Selection({"test_nn"}, enforce=selected_enforce)
+                z.writestr("llm_td_selection.json", json.dumps(sel.to_json()))
+            return buf.getvalue()
+
+        def sleep(t: float) -> None:
+            self.sleeps.append(t)
+            now[0] += t
+
+        env = {"GITHUB_REPOSITORY": REPO, "HEAD_SHA": SHA, "PR_NUMBER": "7", "TD_ENABLED": "true", **env}  # fmt: skip
+        time = resolve_selection.time
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(resolve_selection, "get", get),
+            mock.patch.object(resolve_selection, "fetch", fetch),
+            mock.patch.object(time, "monotonic", lambda: now[0]),
+            mock.patch.object(time, "sleep", sleep),
+            mock.patch("builtins.print", self.logs.append),
+        ):
+            output = Path(tmp) / "out.json"
+            resolve_selection.main(output)
+            record = json.loads(output.read_text()) if output.exists() else None
+        return record
+
+    def test_enforce_takes_the_newest_run_not_the_first_listed(self) -> None:
+        record = self.resolve([selector_run(1), selector_run(2)])
+        self.assertEqual(self.fetched, ["zip/2"])
+        self.assertTrue(record["enforce"])
+        self.assertEqual(record["files"], ["test_nn"])
+        self.assertEqual(self.sleeps, [])
+
+    def test_untrusted_runs_are_ignored(self) -> None:
+        for bad in [
+            {"path": ".github/workflows/pull.yml"},
+            {"event": "pull_request"},
+            {"head_sha": "b" * 40},
+            {"head_repository": {"id": 2}},
+            {"head_repository": None},
+        ]:
+            with self.subTest(bad=bad):
+                untrusted = selector_run(2, **bad)
+                self.resolve([selector_run(1), untrusted])
+                self.assertEqual(self.fetched, ["zip/1"])
+                self.assertIsNone(self.resolve([untrusted]))
+                self.assertEqual(self.fetched, [])
+
+    def test_waits_for_a_pending_run(self) -> None:
+        for status in ["queued", "in_progress", "waiting", "requested", "pending"]:
+            with self.subTest(status=status):
+                old, new = selector_run(1), pending_run(2, status)
+                record = self.resolve([old, new], [old, new], [old, selector_run(2)])
+                self.assertEqual(self.fetched, ["zip/2"])
+                self.assertTrue(record["enforce"])
+                self.assertEqual(self.sleeps, [15, 30])
+
+    def test_skipped_runs_are_ignored(self) -> None:
+        skipped = selector_run(2, conclusion="skipped")
+        self.resolve([selector_run(1), skipped])
+        self.assertEqual(self.fetched, ["zip/1"])
+
+    def test_enforce_gives_up_at_the_deadline(self) -> None:
+        record = self.resolve([selector_run(1), pending_run(2)])
+        self.assertIsNone(record)
+        self.assertEqual(self.fetched, [])
+        self.assertEqual(sum(self.sleeps), resolve_selection.WAIT_SECONDS)
+        self.assertIn("Gave up", self.logs[-1])
+
+    def test_enforce_does_not_fall_back_to_an_older_run(self) -> None:
+        for conclusion in ["failure", "cancelled", "timed_out"]:
+            with self.subTest(conclusion=conclusion):
+                failed = selector_run(2, conclusion=conclusion)
+                record = self.resolve([selector_run(1), failed])
+                self.assertIsNone(record)
+                self.assertEqual(self.fetched, [])
+
+    def test_shadow_unless_labeled_and_td_enabled(self) -> None:
+        for labels, env in [
+            ((), {}),
+            (("ci-llm-td", "ci-no-td"), {}),
+            (("ci-llm-td",), {"TD_ENABLED": "false"}),
+        ]:
+            with self.subTest(labels=labels, env=env):
+                runs = [selector_run(1), pending_run(2, "queued")]
+                record = self.resolve(runs, labels=labels, **env)
+                self.assertFalse(record["enforce"])
+                self.assertEqual(self.fetched, ["zip/1"])
+                self.assertEqual(self.sleeps, [])
+
+    def test_failed_selection_is_not_enforced(self) -> None:
+        # select_tests writes enforce=False when the model call failed.
+        record = self.resolve([selector_run(1)], selected_enforce=False)
+        self.assertFalse(record["enforce"])
+
+    def test_pr_number(self) -> None:
+        runs = [selector_run(1)]
+        tag = "refs/tags/ciflow/trunk/7"
+        self.assertTrue(self.resolve(runs, PR_NUMBER="", GITHUB_REF=tag)["enforce"])
+        branch = "refs/heads/main"
+        self.assertIsNone(self.resolve(runs, PR_NUMBER="", GITHUB_REF=branch))
+        self.assertIsNone(self.resolve(runs, HEAD_SHA=""))
+
+    def test_fork_pr_gets_nothing(self) -> None:
+        self.assertIsNone(self.resolve([selector_run(1)], head_repo="someone/pytorch"))
+        self.assertEqual(self.fetched, [])
 
 
 if __name__ == "__main__":
