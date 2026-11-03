@@ -90,6 +90,8 @@ from .object_protocol import (
 
 
 if TYPE_CHECKING:
+    from typing import NoReturn
+
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
@@ -2636,6 +2638,16 @@ class ByteArrayVariable(VariableTracker):
             # resizing it raises BufferError. A changed self.data means the
             # separator was mutated (see Note [bytearray copy on write]):
             # leave that to eager, also when iteration raised.
+            def unimplemented_mutated_separator() -> "NoReturn":
+                unimplemented(
+                    gb_type="bytearray.join with a separator mutated during iteration",
+                    context=f"iterable: {iterable}",
+                    explanation="The iterable passed to bytearray.join mutated the "
+                    "separator. CPython holds a buffer export on the separator "
+                    "during the call, which Dynamo does not model.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
             try:
                 items = tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.sequence_fast),
@@ -2646,15 +2658,9 @@ class ByteArrayVariable(VariableTracker):
                 if self.data is sep:
                     raise
                 handle_observed_exception(tx)
+                unimplemented_mutated_separator()
             if self.data is not sep:
-                unimplemented(
-                    gb_type="bytearray.join with a separator mutated during iteration",
-                    context=f"iterable: {iterable}",
-                    explanation="The iterable passed to bytearray.join mutated the "
-                    "separator. CPython holds a buffer export on the separator "
-                    "during the call, which Dynamo does not model.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
+                unimplemented_mutated_separator()
         parts = []
         for item in items:
             item = item.realize()

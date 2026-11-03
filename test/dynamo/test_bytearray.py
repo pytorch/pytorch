@@ -2,8 +2,6 @@
 """Tests for ByteArrayVariable: bytearray support in Dynamo.
 
 Ported from CPython's Lib/test/test_bytes.py (BaseBytesTest class).
-Only tests covering operations supported in PR 1 (read-only ops + wiring)
-are included; mutation, methods, and conversions will follow in later PRs.
 """
 
 import operator
@@ -14,7 +12,12 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import make_dynamo_test, run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    make_dynamo_test,
+    parametrize,
+    run_tests,
+)
 
 
 class Indexable:
@@ -482,7 +485,19 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         ):
             dot_join([bytearray(b"ab"), "cd", b"ef"])
 
-    def test_join_iterator_errors(self):
+    @parametrize(
+        "error_case",
+        [
+            "first_type_error",
+            "first_type_error_subclass",
+            "first_value_error",
+            "second_type_error",
+            "next_type_error",
+            "next_value_error",
+        ],
+    )
+    @parametrize("outer", [False, True])
+    def test_join_iterator_errors(self, error_case, outer):
         class MyTypeError(TypeError):
             pass
 
@@ -522,26 +537,22 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                     return join_error(make_items), x + 1
             return join_error(make_items), x + 1
 
+        make_items = {
+            "first_type_error": lambda: Items(iter_error=TypeError("first iter")),
+            "first_type_error_subclass": lambda: Items(
+                iter_error=MyTypeError("first iter")
+            ),
+            "first_value_error": lambda: Items(iter_error=ValueError("first iter")),
+            "second_type_error": lambda: Outer(
+                Items(iter_error=TypeError("second iter"))
+            ),
+            "next_type_error": lambda: Items(next_error=TypeError("next")),
+            "next_value_error": lambda: Items(next_error=ValueError("next")),
+        }[error_case]
         x = torch.ones(1)
-        cases = [
-            # A TypeError from the first iter() becomes join's own error.
-            lambda: Items(iter_error=TypeError("first iter")),
-            lambda: Items(iter_error=MyTypeError("first iter")),
-            # Any other error from the first iter() propagates as is.
-            lambda: Items(iter_error=ValueError("first iter")),
-            # Errors from the second iter() and from iteration propagate as is.
-            lambda: Outer(Items(iter_error=TypeError("second iter"))),
-            lambda: Items(next_error=TypeError("next")),
-            lambda: Items(next_error=ValueError("next")),
-        ]
-        for i, make_items in enumerate(cases):
-            torch._dynamo.reset()
-            compiled = torch.compile(f, backend="eager", fullgraph=True)
-            for outer in (False, True):
-                with self.subTest(case=i, outer=outer):
-                    self.assertEqual(
-                        compiled(make_items, outer, x), f(make_items, outer, x)
-                    )
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(make_items, outer, x), f(make_items, outer, x))
 
     def test_join_length_hint_first_iterator(self):
         seen = []
@@ -620,7 +631,18 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         x = torch.ones(1)
         self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(x), f(x))
 
-    def test_join_length_hint_errors(self):
+    @parametrize(
+        "length_source,error_kind",
+        [
+            ("len", "type_error"),
+            ("len", "type_error_subclass"),
+            ("len", "value_error"),
+            ("hint", "type_error"),
+            ("hint", "type_error_subclass"),
+            ("hint", "value_error"),
+        ],
+    )
+    def test_join_length_hint_errors(self, length_source, error_kind):
         class MyTypeError(TypeError):
             pass
 
@@ -651,17 +673,18 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             except Exception as e:
                 return type(e), str(e), x + 1
 
+        cls = LenRaises if length_source == "len" else HintRaises
+        error_type = {
+            "type_error": TypeError,
+            "type_error_subclass": MyTypeError,
+            "value_error": ValueError,
+        }[error_kind]
         x = torch.ones(1)
         # A TypeError, subclasses included, selects the default hint; any
         # other error propagates.
-        for cls in (LenRaises, HintRaises):
-            for error_type in (TypeError, MyTypeError, ValueError):
-                with self.subTest(cls=cls.__name__, error=error_type.__name__):
-                    torch._dynamo.reset()
-                    compiled = torch.compile(f, backend="eager", fullgraph=True)
-                    self.assertEqual(
-                        compiled(cls, error_type, x), f(cls, error_type, x)
-                    )
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(cls, error_type, x), f(cls, error_type, x))
 
     def test_join_separator_mutation_graph_break(self):
         class Items:
@@ -705,7 +728,8 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertGraphBreakReason("join with an unsupported item")
 
-    def test_join_iterator_item_error(self):
+    @parametrize("item_kind", ["bytes_iterator", "str_iterator"])
+    def test_join_iterator_item_error(self, item_kind):
         # Eager names the real iterator type in the error.
         def f(make_item, x):
             try:
@@ -714,18 +738,18 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 return str(e), x + 1
             return None, x + 1
 
-        for name, make_item in (
-            ("bytes_iterator", lambda: iter(b"ab")),
-            ("str_iterator", lambda: iter("ab")),
-        ):
-            with self.subTest(item=name):
-                torch._dynamo.reset()
-                torch._dynamo.utils.counters.clear()
-                compiled = torch.compile(f, backend="eager")
-                self.assertEqual(
-                    compiled(make_item, torch.ones(1)), f(make_item, torch.ones(1))
-                )
-                self.assertGraphBreakReason("join with an unsupported item")
+        make_item = (
+            (lambda: iter(b"ab"))
+            if item_kind == "bytes_iterator"
+            else (lambda: iter("ab"))
+        )
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        compiled = torch.compile(f, backend="eager")
+        self.assertEqual(
+            compiled(make_item, torch.ones(1)), f(make_item, torch.ones(1))
+        )
+        self.assertGraphBreakReason("join with an unsupported item")
 
     def test_join_buffer_subclass_item(self):
         if sys.version_info < (3, 12):
@@ -749,7 +773,8 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(log, ["buffer", "buffer"])
         self.assertGraphBreakReason("join with an unsupported item")
 
-    def test_join_separator_mutation_then_raise(self):
+    @parametrize("iterator_kind", ["next", "iter"])
+    def test_join_separator_mutation_then_raise(self, iterator_kind):
         class NextRaises:
             def __init__(self, sep):
                 self.sep = sep
@@ -784,15 +809,27 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 result = BufferError
             return result, sep
 
-        for cls in (NextRaises, IterRaises):
-            with self.subTest(cls=cls.__name__):
-                torch._dynamo.reset()
-                torch._dynamo.utils.counters.clear()
-                compiled = torch.compile(f, backend="eager")
-                self.assertEqual(run(compiled, cls), run(f, cls))
-                self.assertGraphBreakReason("separator mutated during iteration")
+        cls = NextRaises if iterator_kind == "next" else IterRaises
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        compiled = torch.compile(f, backend="eager")
+        self.assertEqual(run(compiled, cls), run(f, cls))
+        self.assertGraphBreakReason("separator mutated during iteration")
 
-    def test_join_separator_mutators(self):
+    @parametrize(
+        "mutator_name",
+        [
+            "extend",
+            "iadd",
+            "imul",
+            "append",
+            "insert",
+            "pop",
+            "iadd_resize",
+            "imul_resize",
+        ],
+    )
+    def test_join_separator_mutators(self, mutator_name):
         class Items:
             def __init__(self, sep, mutate):
                 self.sep = sep
@@ -826,18 +863,17 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             "iadd_resize": lambda b: operator.iadd(b, b"x"),
             "imul_resize": lambda b: operator.imul(b, 2),
         }
-        for name, mutate in mutators.items():
-            with self.subTest(mutator=name):
-                torch._dynamo.reset()
-                torch._dynamo.utils.counters.clear()
-                sep, compiled_sep = bytearray(b","), bytearray(b",")
-                compiled = torch.compile(f, backend="eager")
-                self.assertEqual(
-                    compiled(compiled_sep, mutate, torch.ones(1)),
-                    f(sep, mutate, torch.ones(1)),
-                )
-                self.assertEqual(compiled_sep, sep)
-                self.assertGraphBreakReason("separator mutated during iteration")
+        mutate = mutators[mutator_name]
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        sep, compiled_sep = bytearray(b","), bytearray(b",")
+        compiled = torch.compile(f, backend="eager")
+        self.assertEqual(
+            compiled(compiled_sep, mutate, torch.ones(1)),
+            f(sep, mutate, torch.ones(1)),
+        )
+        self.assertEqual(compiled_sep, sep)
+        self.assertGraphBreakReason("separator mutated during iteration")
 
     def test_join_other_iterables(self):
         class Sequence:
@@ -873,6 +909,29 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             list(it)
             hints.append(operator.length_hint(it))
             return hints, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
+
+    def test_list_reverse_iterator_length_hint(self):
+        def f(x):
+            items = [b"a", b"b", b"c"]
+            it = reversed(items)
+            hints = [operator.length_hint(it)]
+            next(it)
+            hints.append(operator.length_hint(it))
+            # Growing the list does not change the hint.
+            items.append(b"d")
+            hints.append(operator.length_hint(it))
+            # Shrinking it below the iterator position makes the hint zero.
+            items[1:] = []
+            hints.append(operator.length_hint(it))
+            consumed = list(it)
+            hints.append(operator.length_hint(it))
+            # Once exhausted, growing the list does not revive the hint.
+            items.extend([b"e", b"f"])
+            hints.append(operator.length_hint(it))
+            return hints, consumed, x + 1
 
         compiled = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(compiled(torch.ones(1)), f(torch.ones(1)))
@@ -1347,6 +1406,9 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             return x0, x1, x2
 
         self.assertEqual(fn(bytearray(b"abc")), (99, 98, 97))
+
+
+instantiate_parametrized_tests(ByteArrayTest)
 
 
 if __name__ == "__main__":
