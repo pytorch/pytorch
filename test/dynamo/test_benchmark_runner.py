@@ -9,6 +9,7 @@ import itertools
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import types
@@ -364,7 +365,13 @@ class BenchmarkRunnerTests(TestCase):
         args = common.parse_args(
             ["--performance", "--inference", "--tp-size=2", "--only=model", *extra]
         )
-        env = {"RANK": "0", "LOCAL_RANK": "0", "WORLD_SIZE": "2", **env}
+        env = {
+            "RANK": "0",
+            "LOCAL_RANK": "0",
+            "WORLD_SIZE": "2",
+            "LOCAL_WORLD_SIZE": "2",
+            **env,
+        }
         with (
             mock.patch.dict(os.environ, env),
             mock.patch.object(torch.distributed, "init_process_group") as init,
@@ -398,6 +405,13 @@ class TestHuggingFaceLLMPerformance(TestCase):
         calls = collections.Counter()
         clock = [0.0]
         result = {}
+        warmup_times = []
+        timed = common.timed
+
+        def measure_warmup(*args, **kwargs):
+            elapsed = timed(*args, **kwargs)
+            warmup_times.append(elapsed)
+            return elapsed
 
         class Model(torch.nn.Module):
             def forward(self, inputs):
@@ -440,6 +454,7 @@ class TestHuggingFaceLLMPerformance(TestCase):
             mock.patch.object(common, "current_device", "cuda"),
             mock.patch.object(common, "synchronize"),
             mock.patch.object(common, "reset_rng_state"),
+            mock.patch.object(common, "timed", side_effect=measure_warmup),
             mock.patch.object(common, "empty_gpu_cache"),
             mock.patch.object(
                 common,
@@ -463,6 +478,7 @@ class TestHuggingFaceLLMPerformance(TestCase):
         self.assertEqual(calls["setup"], 6 if prefill else 0)
         self.assertEqual(calls["eager"], 1)
         self.assertEqual(calls["compiled"], 5)
+        self.assertEqual(warmup_times, [10.0, 30.0] if prefill else [])
         self.assertEqual(result["compilation_latency"], 20.0)
         self.assertEqual(result["eager_peak_mem"], 1)
         self.assertEqual(result["dynamo_peak_mem"], 5)
@@ -544,6 +560,7 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             ("--amp", "does not support --amp"),
             ("--dynamic-shapes", "does not support --dynamic-shapes"),
             ("--trace-on-xla", "does not support --trace-on-xla"),
+            ("--multiprocess", "does not support --multiprocess"),
             ("--batch-size=0", "--batch-size must be positive"),
             ("--prompt-length=0", "--prompt-length must be positive"),
             ("--iterations-per-run=0", "--iterations-per-run must be positive"),
@@ -561,6 +578,45 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             self.assertRaisesRegex(ValueError, "transformers>=.*, found 5.0.0"),
         ):
             runner.validate_args(self._runner_args())
+
+    def test_generate_import_does_not_require_phase_cache_classes(self):
+        from benchmarks.dynamo import huggingface_llm_models as llm
+
+        transformers = types.ModuleType("transformers")
+        for name in (
+            "AutoConfig",
+            "AutoModelForCausalLM",
+            "AutoTokenizer",
+            "WhisperForConditionalGeneration",
+            "WhisperProcessor",
+        ):
+            setattr(transformers, name, getattr(llm, name))
+        spec = importlib.util.spec_from_file_location("llm_without_cache", llm.__file__)
+        module = importlib.util.module_from_spec(spec)
+        with mock.patch.dict(sys.modules, {"transformers": transformers}):
+            spec.loader.exec_module(module)
+        self.assertIn("Qwen/Qwen3-0.6B", module.HF_LLM_MODELS)
+
+    @parametrize("mode", ("prefill", "decode"))
+    def test_phase_multiprocess_rejected_before_launch(self, mode):
+        runner = self.huggingface.HuggingfaceRunner()
+        name = "openai/whisper-tiny" if mode == "encode" else "Qwen/Qwen3-0.6B"
+        with (
+            mock.patch.object(common.mp, "spawn") as spawn,
+            self.assertRaisesRegex(ValueError, "does not support --multiprocess"),
+        ):
+            common.main(
+                runner,
+                args=[
+                    "--performance",
+                    "--inference",
+                    "--backend=eager",
+                    f"--hf-inference-mode={mode}",
+                    f"--only={name}",
+                    "--multiprocess",
+                ],
+            )
+        spawn.assert_not_called()
 
     @parametrize("decode_length", (0, 2000))
     def test_decode_length_range(self, decode_length):
@@ -710,12 +766,21 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
 
     def test_prompt_must_fit_generation_context(self):
         runner = self.huggingface.HuggingfaceRunner()
-        args = self._runner_args("--only=Qwen/Qwen3-0.6B", "--prompt-length=2096")
-        with self._mock_pretrained():
-            runner.validate_args(args)
-            args.prompt_length = 2097
+        name = "Qwen/Qwen3-0.6B"
+        runner.args = self._runner_args(f"--only={name}", "--prompt-length=2096")
+        benchmark = self.huggingface.TextGenerationBenchmark
+        with (
+            self._mock_pretrained(),
+            mock.patch.object(runner, "validate_model"),
+            mock.patch.object(
+                benchmark, "get_model_and_inputs", wraps=benchmark.get_model_and_inputs
+            ) as load,
+        ):
+            runner.load_model("cpu", name, batch_size=1)
+            runner.args.prompt_length = 2097
             with self.assertRaisesRegex(ValueError, "exceeds .* context length 4096"):
-                runner.validate_args(args)
+                runner.load_model("cpu", name, batch_size=1)
+            load.assert_called_once()
 
     def test_prompt_validation_does_not_download_sweep_configs(self):
         runner = self.huggingface.HuggingfaceRunner()
@@ -730,10 +795,12 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
 
     def test_prompt_config_download_retries(self):
         runner = self.huggingface.HuggingfaceRunner()
-        args = self._runner_args("--only=Qwen/Qwen3-0.6B", "--prompt-length=7")
+        runner.args = self._runner_args("--only=Qwen/Qwen3-0.6B", "--prompt-length=7")
         config = mock.Mock()
         config.get_text_config.return_value.max_position_embeddings = 4096
         with (
+            self._mock_pretrained(),
+            mock.patch.object(runner, "validate_model"),
             mock.patch.object(
                 self.huggingface.AutoConfig,
                 "from_pretrained",
@@ -741,10 +808,65 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             ) as download,
             mock.patch.object(common.time, "sleep") as sleep,
         ):
-            runner.validate_args(args)
-        download.assert_has_calls([mock.call(args.only)] * 2)
+            runner.load_model("cpu", runner.args.only, batch_size=1)
+        download.assert_has_calls([mock.call(runner.args.only)] * 2)
         self.assertEqual(download.call_count, 2)
         sleep.assert_called_once_with(30)
+
+    @parametrize("sweep", (False, True))
+    @parametrize(
+        "name, mode, extra",
+        (
+            ("Qwen/Qwen3-0.6B", "prefill", "--prompt-length=7"),
+            ("Qwen/Qwen3-0.6B", "decode", "--prompt-length=7"),
+        ),
+    )
+    def test_config_download_failure_records_result(self, name, mode, extra, sweep):
+        def child(cmd, **kwargs):
+            with mock.patch.dict(vars(common)):
+                try:
+                    common.run(
+                        self.huggingface.HuggingfaceRunner(), common.parse_args(cmd[2:])
+                    )
+                except OSError as error:
+                    raise subprocess.CalledProcessError(1, cmd) from error
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            torch._dynamo.config.patch(base_dir=tmp, repro_tolerance=1e-4),
+            mock.patch.dict(vars(common)),
+            mock.patch.object(common, "setup_determinism"),
+            mock.patch.object(
+                self.huggingface.HuggingfaceRunner,
+                "_download_config",
+                side_effect=OSError("config unavailable"),
+            ),
+            mock.patch.object(
+                self.huggingface.TextGenerationBenchmark, "get_model_and_inputs"
+            ) as text_load,
+            mock.patch.object(subprocess, "check_call", side_effect=child),
+        ):
+            output = os.path.join(tmp, "results.csv")
+            argv = [
+                "benchmarks/dynamo/huggingface.py",
+                "--accuracy",
+                "--inference",
+                "--backend=eager",
+                "-dcpu",
+                "--no-skip",
+                f"--hf-inference-mode={mode}",
+                extra,
+                f"--output={output}",
+                f"--filter=^{name}$" if sweep else f"--only={name}",
+            ]
+            with mock.patch.object(sys, "argv", argv):
+                args = common.parse_args(argv[1:])
+                common.run(self.huggingface.HuggingfaceRunner(), args)
+            with open(output) as f:
+                (row,) = csv.DictReader(f)
+            text_load.assert_not_called()
+        self.assertEqual(row["name"], name)
+        self.assertEqual(row["accuracy"], "eager_fail_to_run")
 
     @torch._dynamo.config.patch(repro_tolerance=1e-4)
     @parametrize("mode", ("prefill", "decode"))
@@ -802,7 +924,7 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
 class TestHuggingFaceTensorParallelOptions(HuggingFacePrefillTestCase):
     def setUp(self):
         super().setUp()
-        # Validate as on a machine without an accelerator, where -dcpu TP is allowed.
+        # Validate as with a CPU-only PyTorch build, where -dcpu TP is allowed.
         patcher = mock.patch.object(
             torch.accelerator, "current_accelerator", return_value=None
         )
@@ -883,7 +1005,7 @@ class TestHuggingFaceTensorParallelOptions(HuggingFacePrefillTestCase):
             mock.patch.object(
                 torch.accelerator, "current_accelerator", return_value=cuda
             ),
-            self.assertRaisesRegex(ValueError, "requires a machine without an accel"),
+            self.assertRaisesRegex(ValueError, "build without accelerator"),
         ):
             runner.validate_args(self._tp_args())
 
@@ -1207,11 +1329,14 @@ class TestTensorParallelHarness(MultiProcessTestCase):
         self.assertEqual(elapsed, 9.0)
         self.assertEqual(barriers.call_count, 2)
 
-    def test_agree_on_status_takes_first_failure_in_rank_order(self):
+    @parametrize(
+        "statuses",
+        (("pass", "fail_accuracy"), ("fail_accuracy", "eager_two_runs_differ")),
+    )
+    def test_agree_on_status_takes_first_failure_in_rank_order(self, statuses):
         self._init_gloo()
         runner = common.BenchmarkRunner()
         runner.args = common.parse_args(["--performance", "--inference", "--tp-size=2"])
-        statuses = ["pass", "fail_accuracy"]
         self.assertEqual(runner.agree_on_status(statuses[self.rank]), "fail_accuracy")
         self.assertEqual(runner.agree_on_status("pass"), "pass")
 
@@ -1488,6 +1613,20 @@ class TestHuggingFaceTensorParallel(MultiProcessTestCase):
 
 @skipIfTorchDynamo("checks benchmark result files")
 class TestTensorParallelResults(TestCase):
+    @parametrize("stream", ("stdout", "stderr"))
+    def test_fatal_worker_exit_survives_flush_failure(self, stream):
+        args = common.parse_args(["--performance", "--inference", "--tp-size=2"])
+        with (
+            mock.patch.object(common.log, "exception"),
+            mock.patch.object(common.sys, stream) as output,
+            mock.patch.object(os, "_exit", side_effect=SystemExit(1)) as exit_worker,
+        ):
+            output.flush.side_effect = BrokenPipeError("closed output")
+            with self.assertRaises(SystemExit) as raised:
+                common.exit_on_tensor_parallel_error(args)
+        self.assertEqual(raised.exception.code, 1)
+        exit_worker.assert_called_once_with(1)
+
     @parametrize("mode", ("prefill", "decode"))
     @parametrize("tp_size", (1, 2))
     def test_json_result_identity_and_metrics(self, mode, tp_size):
@@ -1564,6 +1703,7 @@ instantiate_parametrized_tests(BenchmarkRunnerTests)
 instantiate_parametrized_tests(TestHuggingFaceLLMPerformance)
 instantiate_parametrized_tests(TestHuggingFacePrefill)
 instantiate_parametrized_tests(TestHuggingFaceTensorParallelOptions)
+instantiate_parametrized_tests(TestTensorParallelHarness)
 instantiate_device_type_tests(
     TestHuggingFaceTensorParallel, globals(), only_for=("cpu", "cuda")
 )
