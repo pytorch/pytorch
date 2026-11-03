@@ -76,6 +76,7 @@ from tools.testing.test_selections import (
     get_job_base_name,
     get_test_case_configs,
     NUM_PROCS,
+    NUM_PROCS_FOR_SHARDING_CALC,
     ShardedTest,
     THRESHOLD,
 )
@@ -358,7 +359,13 @@ CI_SERIAL_LIST = [
     "test_module_hooks",  # OOM
     "inductor/test_max_autotune",
     "inductor/test_cutlass_backend",  # slow due to many nvcc compilation steps,
-    "inductor/test_flex_attention",  # OOM
+]
+
+# Serial files whose tests run concurrently under pytest-xdist with NUM_PROCS
+# workers. Their tests are compile-bound with small GPU footprints, so a
+# machine dedicated to the file is better used running several tests at once.
+XDIST_SERIAL_LIST = [
+    "inductor/test_flex_attention",
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -719,6 +726,9 @@ def run_test(
         and test_module.time is not None
         else THRESHOLD * 3
         if is_cpp_test
+        # xdist runs skip the stepcurrent retries above, so bound a hang here.
+        else THRESHOLD * 6
+        if options.pytest_xdist_workers is not None
         else None
     )
     print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
@@ -1921,10 +1931,34 @@ def must_serial(file: str | ShardedTest) -> bool:
         or file in CUSTOM_HANDLERS
         or file in RUN_PARALLEL_BLOCKLIST
         or file in CI_SERIAL_LIST
+        or file in XDIST_SERIAL_LIST
         or file in JIT_EXECUTOR_TESTS
         or file in ONNX_SERIAL_LIST
         or NUM_PROCS == 1
     )
+
+
+def xdist_workers(file: str | ShardedTest, options, num_procs: int = NUM_PROCS) -> int:
+    """pytest-xdist workers for the tests inside a serial file; 1 means no xdist.
+
+    The global --pytest-xdist-workers mode schedules files itself, so it
+    returns 1 there."""
+    if isinstance(file, ShardedTest):
+        file = file.name
+    if (
+        file not in XDIST_SERIAL_LIST
+        or options.pytest_xdist_workers is not None
+        # Only CUDA caps each worker's memory (NUM_PARALLEL_PROCS); CPU-only
+        # jobs need no cap. ROCm pins each parallel test process to its own
+        # GPU (see maybe_set_hip_visible_devies) and xdist would bypass that.
+        or (torch.accelerator.is_available() and not TEST_CUDA)
+        or torch.version.hip
+        # These modes rely on the stepcurrent retries that xdist runs skip.
+        or RERUN_DISABLED_TESTS
+        or options.continue_through_error
+    ):
+        return 1
+    return num_procs
 
 
 def can_run_in_pytest(test):
@@ -2262,6 +2296,9 @@ def do_sharding(
         must_serial=(lambda _: True) if uses_xdist else must_serial,
         sort_by_time=sort_by_time,
         allow_pytest_sharding=not uses_xdist,
+        xdist_workers=lambda file: xdist_workers(
+            file, options, NUM_PROCS_FOR_SHARDING_CALC
+        ),
     )
     return shards[which_shard - 1]
 
@@ -2378,38 +2415,42 @@ def run_tests(
         "If running on CI, add the 'keep-going' label to your PR and rerun your jobs."
     )
 
+    def run_alone(
+        test: ShardedTest, serial_expr: str | None, workers: int | None = None
+    ) -> None:
+        options_clone = copy.deepcopy(options)
+        if can_run_in_pytest(test):
+            options_clone.pytest = True
+        options_clone.pytest_xdist_workers = workers
+        options_clone.additional_args.extend(marker_args(serial_expr))
+        failure = run_test_module(test, test_directory, options_clone)
+        test_failed = handle_complete(failure)
+        if (
+            test_failed
+            and not options.continue_through_error
+            and not RERUN_DISABLED_TESTS
+        ):
+            raise RuntimeError(failure.message + keep_going_message)
+
     pool = None
     try:
         for test in selected_tests_serial:
-            options_clone = copy.deepcopy(options)
-            if can_run_in_pytest(test):
-                options_clone.pytest = True
-            options_clone.pytest_xdist_workers = None
-            options_clone.additional_args.extend(marker_args(None))
-            failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_complete(failure)
-            if (
-                test_failed
-                and not options.continue_through_error
-                and not RERUN_DISABLED_TESTS
-            ):
-                raise RuntimeError(failure.message + keep_going_message)
+            workers = xdist_workers(test, options)
+            if workers == 1:
+                run_alone(test, None)
+                continue
+            # @serial tests still run alone. The rest share the machine across
+            # xdist workers, each capped to its share of GPU memory.
+            run_alone(test, "serial")
+            os.environ["NUM_PARALLEL_PROCS"] = str(workers)
+            try:
+                run_alone(test, "not serial", workers)
+            finally:
+                del os.environ["NUM_PARALLEL_PROCS"]
 
         # Run tests marked as serial first
         for test in selected_tests_parallel:
-            options_clone = copy.deepcopy(options)
-            if can_run_in_pytest(test):
-                options_clone.pytest = True
-            options_clone.pytest_xdist_workers = None
-            options_clone.additional_args.extend(marker_args("serial"))
-            failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_complete(failure)
-            if (
-                test_failed
-                and not options.continue_through_error
-                and not RERUN_DISABLED_TESTS
-            ):
-                raise RuntimeError(failure.message + keep_going_message)
+            run_alone(test, "serial")
 
         # This is used later to constrain memory per proc on the GPU. On ROCm
         # the number of procs is the number of GPUs, so we don't need to do this.
