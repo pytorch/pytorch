@@ -47,6 +47,7 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/Pooling_metallib.h>
 #endif
+using namespace std::string_view_literals;
 
 namespace mps {
 
@@ -458,6 +459,12 @@ static MTLSize pool_grid(const Tensor& t,
   return channels_last ? MTLSizeMake(C, W, N * H) : MTLSizeMake(W, H, N * C);
 }
 
+// Window widths with a register-resident specialization, up to `widest`, see REGISTER_MAX_POOL2D_S1 and
+// REGISTER_AVG_POOL2D_S1
+static int32_t pool2d_s1_kernel_width(int32_t kw, int32_t widest) {
+  return kw == 2 || kw == 3 || kw == 5 || kw == widest ? kw : 0;
+}
+
 // Adaptive pooling window bounds need (in_size + 1) * (out_size + 1) to fit in the kernel index type
 static bool adaptive_pool_needs_int64(const Tensor& input, const Tensor& output, const int32_t pooling_dims) {
   for (const auto dim : c10::irange(input.dim() - pooling_dims, input.dim())) {
@@ -493,12 +500,12 @@ static void launch_max_pool_kernel(const Tensor& input,
       params.stride[1] == 1 && params.dilation[1] == 1;
   std::string kernel_name;
   if (use_s1) {
-    kernel_name = fmt::format(
-        "max_pool2d_s1_nchw_k{}_{}", kw == 2 || kw == 3 || kw == 5 ? kw : 0, scalarToMetalTypeString(input));
+    kernel_name =
+        fmt::format("max_pool2d_s1_nchw_k{}_{}", pool2d_s1_kernel_width(kw, 5), scalarToMetalTypeString(input));
   } else if (is_dense) {
     kernel_name = fmt::format("max_pool2d_dense_{}{}_{}",
-                              channels_last ? "nhwc" : "nchw",
-                              params.return_indices ? "_idx" : "",
+                              channels_last ? "nhwc"sv : "nchw"sv,
+                              params.return_indices ? "_idx"sv : ""sv,
                               scalarToMetalTypeString(input));
   } else {
     const bool use_32bit = canUse32BitIndexMath(input) && canUse32BitIndexMath(output) &&
@@ -520,21 +527,10 @@ static void launch_max_pool_kernel(const Tensor& input,
       if (!is_dense) {
         mtl_dispatch1DJob(computeEncoder, maxPoolPSO, numThreads);
       } else {
-        const int64_t N = dims == 4 ? params.output_sizes[0] : 1;
-        const int64_t C = params.output_sizes[dims - 3];
-        const int64_t OH = params.output_sizes[dims - 2];
-        const int64_t OW = params.output_sizes[dims - 1];
-        if (use_s1) {
-          mtl_dispatch3DJob(computeEncoder,
-                            maxPoolPSO,
-                            ceil_div<int64_t>(OW, max_pool2d_s1_tile_cols),
-                            ceil_div<int64_t>(OH, max_pool2d_s1_tile_rows),
-                            N * C);
-        } else if (channels_last) {
-          mtl_dispatch3DJob(computeEncoder, maxPoolPSO, C, OW, N * OH);
-        } else {
-          mtl_dispatch3DJob(computeEncoder, maxPoolPSO, OW, OH, N * C);
-        }
+        mtl_dispatch3DJob(computeEncoder,
+                          maxPoolPSO,
+                          use_s1 ? pool_grid(output, true, false, pool2d_s1_tile_rows, pool2d_s1_tile_cols)
+                                 : pool_grid(output, true, channels_last));
       }
       getMPSProfiler().endProfileKernel(maxPoolPSO, mpsStream);
     }
@@ -633,12 +629,6 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
                    grad_output.scalar_type(),
                    " and ",
                    indices.scalar_type());
-  TORCH_CHECK(grad_output.sizes() == indices.sizes(),
-              op_name,
-              ": expected grad_output of shape ",
-              indices.sizes(),
-              " but got ",
-              grad_output.sizes());
   grad_input.resize_(input.sizes(), input.suggest_memory_format());
   TORCH_CHECK_NOT_IMPLEMENTED(
       canUse32BitIndexMath(grad_input) && canUse32BitIndexMath(grad_output) && canUse32BitIndexMath(indices),
@@ -848,15 +838,20 @@ static void avg_pool_out_mps_template(const Tensor& output,
   memcpy(params.padding.data(), padding.data(), pooling_dims * sizeof(int32_t));
 
   const bool is_dense = pooling_dims == 2 && input.is_contiguous(memory_format) && output.is_contiguous(memory_format);
-  const auto kernel_name =
-      is_dense ? fmt::format("avg_pool2d_dense_{}_", params.channels_last ? "nhwc" : "nchw") : "avg_pool_";
-  launch_avg_pool_kernel(kernel_name,
-                         "",
-                         input,
-                         output,
-                         pool_grid(output, is_dense, params.channels_last, avg_pool2d_tile_rows),
-                         params,
-                         op_name);
+  const bool use_s1 = is_dense && !params.channels_last && stride[0] == 1 && stride[1] == 1;
+  std::string kernel_name = "avg_pool_";
+  auto grid = pool_grid(output, is_dense, params.channels_last, avg_pool2d_tile_rows);
+  if (use_s1) {
+    const auto kw = pool2d_s1_kernel_width(kernel_size[1], 7);
+    const bool aligned = input.size(-1) % pool2d_s1_tile_cols == 0 && output.size(-1) % pool2d_s1_tile_cols == 0 &&
+        input.storage_offset() % pool2d_s1_tile_cols == 0 && output.storage_offset() % pool2d_s1_tile_cols == 0;
+    const bool vec = kw % 2 == 1 && padding[1] == kw / 2 && aligned;
+    kernel_name = fmt::format("avg_pool2d_s1_nchw_k{}{}_", kw, vec ? "_vec"sv : ""sv);
+    grid = pool_grid(output, true, false, pool2d_s1_tile_rows, pool2d_s1_tile_cols);
+  } else if (is_dense) {
+    kernel_name = fmt::format("avg_pool2d_dense_{}_", params.channels_last ? "nhwc"sv : "nchw"sv);
+  }
+  launch_avg_pool_kernel(kernel_name, "", input, output, grid, params, op_name);
 }
 
 static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
@@ -870,8 +865,13 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
                                                std::optional<int64_t> divisor_override,
                                                const int32_t pooling_dims,
                                                const std::string& op_name) {
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      supportedFloatingType(input), "\"", op_name, "\" not implemented for '", input.scalar_type(), "'");
+  const bool is_2d = pooling_dims == 2;
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(input) || (is_2d && input.scalar_type() == kLong),
+                              "\"",
+                              op_name,
+                              "\" not implemented for '",
+                              input.scalar_type(),
+                              "'");
   TORCH_CHECK_TYPE(grad_output.scalar_type() == input.scalar_type(),
                    op_name,
                    ": expected grad_output of dtype ",
@@ -888,7 +888,6 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
   // The other kernel is normally nondeterministic because of atomic accumulation
   // across multiple threads. To make it deterministic, dispatch only one thread
   // per batch, so the accumulations are serialized.
-  const bool is_2d = pooling_dims == 2;
   const bool serial = !is_2d && at::globalContext().deterministicAlgorithms();
   if (serial && input.scalar_type() != kFloat) {
     Tensor grad_input_float = at::empty({0}, grad_input.options().dtype(kFloat));
@@ -934,7 +933,7 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
 }
 
 // For 2 pooling dims, adaptive pooling with divisible sizes is regular pooling (or its gradient, when upsampling)
-// with kernel_size == stride, for which MPSGraph is faster than the adaptive Metal kernels
+// with kernel_size == stride, whose dense 2D kernels are faster than the adaptive ones
 static void adaptive_avg_pool_out_mps_template(const Tensor& output,
                                                const Tensor& input,
                                                const int32_t pooling_dims,
