@@ -1740,8 +1740,8 @@ class TileReduce:
             index_row0 = Int32(by) * q
             left = project_n - index_row0
             cnt = left if left < q else q  # noqa: FURB136 -- no DSL builtin min
-            # A capped npar may leave blocks empty; clamp explicitly instead of relying on
-            # negative trip counts lowering to zero.
+            # Chunks of ceil(R / npar) rows can leave trailing blocks empty; clamp
+            # explicitly instead of relying on negative trip counts lowering to zero.
             zero = Int32(0)
             cnt = cnt if cnt > zero else zero  # noqa: FURB136 -- no DSL builtin max
             if const_expr(self.batched_col):
