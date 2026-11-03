@@ -349,14 +349,16 @@ def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
 # 1.1-11x once B * C fills the GPU, but one 32-output block per tile leaves SMs idle
 # below that (0.16-0.6x), and wider traits need more outputs. The route starts at the
 # shortest measured win, R = 128 (reduce_ordered_col declines the multirow plans of rows
-# up to 64 anyway). Rows compile per (R, C): single-field rows
-# replay every lane statically, taking 0.35 s at R = 2048, 1.5 s at R = 8192 and 4.3 s at
-# R = 24576 (fp32/bf16, C = 2048), and multi-field rows 1.3 s at R = 8192 and 2.5-3.1 s
-# at R = 8193-16384 (fp32), against 0.3-0.75 s for the indexed tree. reduce_ordered_col
-# declines replays past tile.MAX_UNROLL leaves (looped R > 8192).
+# up to 32 for fp32 and 64 for 16-bit inputs anyway). Rows compile once per R:
+# single-field rows replay every lane statically, taking 0.35 s at R = 2048, 1.5 s at
+# R = 8192 and 4.3 s at R = 24576 (fp32/bf16, C = 2048), and multi-field rows 1.3 s at
+# R = 8192 and 2.5-3.1 s at R = 8193-16384 (fp32), against 0.3-0.75 s for the indexed
+# tree. reduce_ordered_col declines replays past tile.MAX_UNROLL leaves, so the route
+# stops at R = 8192.
 _ORDERED_COL_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 _ORDERED_COL_CCS = ((10, 0),)
 _ORDERED_COL_MIN_R = 128
+_ORDERED_COL_MAX_R = 8192
 _ORDERED_COL_MIN_OUTPUTS = {1: 2048, 2: 16384, 3: 32768}
 # Plans split above 24576 rows. Single-field B = 1 split views (sum, mean, prod, amax, amin,
 # nansum, absmax, absmin and norm1/2 in fp32/bf16/fp16 at R 32768-262144) win 1.45-8.5x
@@ -384,7 +386,7 @@ def _ordered_col_route_ok(
         ok = nfields == 1 and B == 1 and C >= min_outputs
     else:
         min_outputs = _ORDERED_COL_MIN_OUTPUTS[min(nfields, 3)]
-        ok = R >= _ORDERED_COL_MIN_R and B * C >= min_outputs
+        ok = _ORDERED_COL_MIN_R <= R <= _ORDERED_COL_MAX_R and B * C >= min_outputs
     return cc in _ORDERED_COL_CCS and view.dtype in _ORDERED_COL_DTYPES and ok
 
 
@@ -914,10 +916,12 @@ def _reduce(
             else:
                 from . import kernel_coltile as ct
 
-                col_view = _physical_col_view(
-                    x, red_axes, red_pairs, kept_pairs, count, num_o
-                )
                 cc = _hw.caps(x.device).cc
+                col_view = (
+                    _physical_col_view(x, red_axes, red_pairs, kept_pairs, count, num_o)
+                    if cc in _ORDERED_COL_CCS
+                    else None
+                )
                 if col_view is not None and _ordered_col_route_ok(
                     col_view, trait.nfields, cc, _general_norm(trait)
                 ):
