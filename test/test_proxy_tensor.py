@@ -946,6 +946,28 @@ class TestFakeProxyTensor(TestCase):
                 if propagate:
                     self.assertIsNotNone(functorch.get_unwrapped(kept).real_tensor)
 
+    def test_snapshot_fake_of_grad_tracking_tensor(self):
+        # A grad tracking wrapper, as inside jvp, is recorded as a view of the
+        # fake tensor it wraps, with the same layout.
+        from torch._functorch.eager_transforms import grad_increment_nesting
+
+        functorch = torch._C._functorch
+        mode = FakeTensorMode()
+        fake = mode.from_tensor(torch.randn(4, 3, 5)[1:].transpose(0, 2))
+        with grad_increment_nesting() as level:
+            with mode:
+                wrapped = functorch._wrap_for_grad(fake, level)
+            val = snapshot_fake(wrapped)
+        self.assertTrue(is_fake_tensor(val))
+        self.assertEqual(
+            StorageWeakRef(val.untyped_storage()),
+            StorageWeakRef(fake.untyped_storage()),
+        )
+        self.assertEqual(
+            (val.shape, val.stride(), val.storage_offset()),
+            (fake.shape, fake.stride(), fake.storage_offset()),
+        )
+
     def test_use_fake_and_tensor(self):
         def f(x, y):
             z = torch.tensor([2.0, 3.0])
