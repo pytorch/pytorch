@@ -42,8 +42,10 @@ Invariants:
   gives its opt-out command. A notice put back or folded is defused like any
   other body.
 - A too-large notice is a COMMENT. It hides earlier reviews like any other but
-  dismisses no change request, and is not posted again while it is the newest
-  visible review.
+  dismisses no change request, and is not posted again while the newest
+  visible review is that same notice, unmarked or marked in progress (a marked
+  one gets its body back, whichever run marked it). A notice that differs,
+  such as one put back defused, is replaced.
 - API errors are warnings. The step fails only when an earlier change request
   may still stand after a clean verdict.
 """
@@ -1169,7 +1171,7 @@ def too_large_body(opt_out: str, limits: tuple[int, int] | None) -> str:
     if not _PLAIN_LABEL.fullmatch(opt_out):
         opt_out = "no automated review"
     limit = (
-        f" of {limits[0]} changed files and {limits[1] // 1000} KB of diff"
+        f" of {limits[0]} changed files or {limits[1] // 1000} KB of diff"
         if limits
         else ""
     )
@@ -1190,9 +1192,27 @@ def too_large_body(opt_out: str, limits: tuple[int, int] | None) -> str:
     )
 
 
-def is_too_large_notice(review: dict) -> bool:
-    lines = (review.get("body") or "").replace("\r\n", "\n").split("\n")
-    return lines[:2] == [MARKER, TOO_LARGE_TAG]
+def notice_stands(gh: GitHub, pr: int, review: dict, body: str) -> bool:
+    """Whether `review` is the notice `body`, as posted or marked in progress.
+
+    On the diff-size path `announce` marks the notice before `review` finds the
+    PR too large; it gets its body back here, since `--restore-pending` would
+    put it back defused. Clearing another run's mark costs only its status line.
+    """
+    text = (review.get("body") or "").replace("\r\n", "\n")
+    if text == body:
+        return True
+    if pending_run(text) is None or unwrapped(text) != defuse_bot_commands(body):
+        return False
+    try:
+        gh.request(
+            "PUT",
+            f"/repos/{gh.repo}/pulls/{pr}/reviews/{review['id']}",
+            {"body": body},
+        )
+    except GitHubError as exc:
+        warn(f"could not put back too-large notice {review['id']}: {exc}")
+    return True
 
 
 def decline(gh, pr, sha, author, opt_out, limits) -> int:
@@ -1204,11 +1224,11 @@ def decline(gh, pr, sha, author, opt_out, limits) -> int:
     if opted_out(gh, pr, opt_out):
         print(f"PR carries '{opt_out}'; not posting")
         return 0
+    body = too_large_body(opt_out, limits)
     visible, _ = earlier_reviews(gh, pr, author, sys.maxsize)
-    if visible and is_too_large_notice(max(visible, key=lambda r: r["id"])):
+    if visible and notice_stands(gh, pr, max(visible, key=lambda r: r["id"]), body):
         print("the newest automated review already says the PR is too large")
         return 0
-    body = too_large_body(opt_out, limits)
     try:
         new = gh.request(
             "POST",

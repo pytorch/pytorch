@@ -448,6 +448,7 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         import post_review
 
         self.assertEqual(fpc.MARKER, post_review.MARKER)
+        self.assertEqual(fpc.TOO_LARGE_TAG, post_review.TOO_LARGE_TAG)
         self.assertEqual(fpc.REVIEW_AUTHOR, post_review.DEFAULT_AUTHOR)
 
     def test_the_author_follows_post_reviews_override(self):
@@ -679,6 +680,19 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         )
         (item,) = fpc.collect(api, REPO, PR)["items"]
         self.assertEqual(item["id"], 51)
+
+    def test_a_too_large_notice_is_not_the_latest_review(self):
+        import post_review
+
+        notice = post_review.too_large_body("no automated review", (100, 400_000))
+        api = FakeApi(
+            reviews=[
+                ours(rid=50, body=fpc.MARKER + "\nverdict"),
+                ours(rid=51, body=notice),
+            ]
+        )
+        (item,) = fpc.collect(api, REPO, PR)["items"]
+        self.assertEqual(item["id"], 50)
 
     def test_no_finding_is_kept_while_a_persons_comment_is_left_out(self):
         issue = [

@@ -5281,7 +5281,7 @@ class TestPublishMovesNoLabels(unittest.TestCase):
 
 
 class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
-    """`announce` edits one review body with GITHUB_TOKEN and nothing else.
+    """`announce` touches only automated reviews, with GITHUB_TOKEN and nothing else.
 
     It runs beside the review job, so it must not become a second publisher: no
     environment (the publisher role trusts the `bedrock` one), no AWS step, no
@@ -6341,7 +6341,7 @@ class TestTheSizeGateShortCircuitsBeforeTheRunner(unittest.TestCase):
         """Marking would leave a review in progress that no run replaces; the
         notice is the only thing the author sees on this path."""
         block = strip_comments(job_block(self.text, "announce"))
-        self.assertNotIn("too_large", job_if(block))
+        self.assertEqual(job_if(block), "needs.prepare.outputs.fresh == 'true'")
         gates = {}
         for name in (
             "Mark the previous automated review in progress",

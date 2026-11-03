@@ -727,7 +727,7 @@ class TestATooLargePrGetsANotice(unittest.TestCase):
         self.assertEqual(posted["commit_id"], SHA)
         body = posted["body"]
         self.assertTrue(body.startswith(f"{MARKER}\n{post_review.TOO_LARGE_TAG}\n"))
-        self.assertIn("100 changed files and 400 KB of diff", body)
+        self.assertIn("100 changed files or 400 KB of diff", body)
         self.assertIn("split it into smaller PRs", body)
         self.assertIn('`@pytorchbot label "no automated review"`', body)
         # It replaces the earlier review like any other.
@@ -782,15 +782,27 @@ class TestATooLargePrGetsANotice(unittest.TestCase):
         self.assertIn("::warning::too-large notice not posted", out.getvalue())
         self.assertEqual(minimized(gh), [])
 
-    def test_a_notice_is_marked_and_a_marked_one_is_replaced(self):
-        """A smaller commit's review marks it; if that commit is too large after
-        all, a fresh notice replaces the marked one instead of being skipped."""
+    def test_a_marked_notice_gets_its_body_back_instead_of_a_repost(self):
+        """On the diff-size path `announce` marks the notice before `review`
+        finds the PR too large again: no new notice, no defused command."""
         gh = FakeGitHub(reviews=[old_review(5, body=NOTICE)])
         post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
-        self.assertEqual(folds(gh), [5])
         self.assertEqual(post_review.pending_run(gh.reviews[0]["body"]), "77")
         decline(gh)
-        self.assertEqual(len(gh.posted()), 1)
+        self.assertEqual(gh.posted(), [])
+        self.assertEqual(gh.reviews[0]["body"], NOTICE)
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(gh.reviews[0]["body"], NOTICE)
+
+    def test_a_notice_put_back_defused_is_replaced(self):
+        """A smaller commit's failed review puts the notice back defused; once
+        the PR is too large again, a working notice replaces it."""
+        gh = FakeGitHub(reviews=[old_review(5, body=NOTICE)])
+        post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertIn("@ pytorchbot", gh.reviews[0]["body"])
+        decline(gh)
+        self.assertEqual([p["body"] for p in gh.posted()], [NOTICE])
         self.assertEqual(minimized(gh), ["N5"])
 
 

@@ -12,8 +12,9 @@ name: In Progress PR Review Run
 #            too large to review (GITHUB_TOKEN with pull-requests: write only;
 #            no AWS, no environment, no PR code)
 #   review   reads UNTRUSTED code; Bedrock + PutObject on the trace prefix only
-#   publish  verdict JSON -> S3, then posts it as a PR review, or puts back the
-#            review `announce` marked; never runs PR code
+#   publish  verdict JSON -> S3, then posts it as a PR review (the too-large
+#            notice when `review` found the diff over MAX_DIFF_BYTES), or puts
+#            back the review `announce` marked; never runs PR code
 #
 # Nothing here changes a label. Dr. CI reads the verdict row and decides
 # `ready for review` from it together with CI status.
@@ -1352,7 +1353,8 @@ jobs:
             "s3://${S3_BUCKET}/${S3_PREFIX}/${{ github.repository }}/${{ github.run_id }}_${{ github.run_attempt }}_terminal.json"
 
       - name: Post the automated review on the PR
-        # Posts the verdict as a GitHub review and hides the previous one.
+        # Posts the verdict, or the too-large notice on a `skipped_too_large`
+        # row, as a GitHub review and hides the previous one.
         # Runs after the terminal row is in S3, so a posting failure cannot cost telemetry.
         # See the docstring of post_review.py.
         env:
