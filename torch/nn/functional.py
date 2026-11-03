@@ -3546,14 +3546,16 @@ def cross_entropy(
             `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
         dim (int, optional): The dimension of :attr:`input` that holds the classes. For example,
             ``dim=-1`` takes logits of shape :math:`(N, d_1, d_2, ..., d_K, C)`, as produced by a
-            linear layer applied to a sequence. Default: ``None``, which means dimension 1, or 0
-            for unbatched input.
+            linear layer applied to a sequence. The loss is the same as with that dimension moved
+            to the default class dimension. Default: ``None``, which means dimension 1, or 0 for
+            unbatched input.
 
     Shape:
         - Input: Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of `K`-dimensional loss. If :attr:`dim` is given, :math:`C` is at that dimension instead.
         - Target: If containing class indices, shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with
           :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`.
+          If :attr:`dim` is given, the shape is that of the input with dimension :attr:`dim` removed.
           If containing class probabilities, same shape as the input and each value should be between :math:`[0, 1]`.
 
         where:
@@ -3600,32 +3602,34 @@ def cross_entropy(
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    batch_shape: list[int] | None = None
+    out_shape: list[int] | None = None
     if dim is not None:
+        if isinstance(dim, bool):
+            raise TypeError(f"dim must be an int or None, got {type(dim)}")
         ndim = input.dim()
-        if dim < -ndim or dim >= ndim:
+        # As in maybe_wrap_dim, a 0-d input takes the dims of a 1-d one.
+        wrap_ndim = max(ndim, 1)
+        if dim < -wrap_ndim or dim >= wrap_ndim:
             raise IndexError(
-                f"Dimension out of range (expected to be in range of [{-ndim}, {ndim - 1}], but got {dim})"
+                f"Dimension out of range (expected to be in range of [{-wrap_ndim}, {wrap_ndim - 1}], but got {dim})"
             )
         if dim < 0:
-            dim += ndim
+            dim += wrap_ndim
         if ndim > 1 and dim != 1:
-            # Move the classes last and fold the other dims into the batch dim. For the
-            # common (N, ..., C) layout this is a view, whereas moving the classes to
-            # dim 1 would make log_softmax copy the whole input.
-            is_prob_target = target.shape == input.shape
-            input = input.movedim(dim, -1)
-            # pyrefly: ignore [bad-assignment]
-            batch_shape = input.shape[:-1]
-            if is_prob_target:
-                target = target.movedim(dim, -1).flatten(0, -2)
-            elif target.shape == batch_shape:
-                target = target.flatten()
-            else:
-                raise ValueError(
-                    f"Expected target size {list(input.shape[:-1])}, got {list(target.shape)}"
+            # Fold the dims before the classes into the batch dim, which leaves the classes
+            # at dim 1 and the dims after them as the K-dimensional loss dims. Unlike moving
+            # the class dim, this doesn't copy a contiguous input.
+            shape = input.shape[:dim] + input.shape[dim + 1 :]
+            if target.shape != input.shape and target.shape != shape:
+                raise RuntimeError(
+                    f"Expected target size {list(shape)}, got {list(target.shape)}"
                 )
-            input = input.flatten(0, -2)
+            if dim == 0:
+                input, target = input.unsqueeze(0), target.unsqueeze(0)
+            else:
+                input, target = input.flatten(0, dim - 1), target.flatten(0, dim - 1)
+            # pyrefly: ignore [bad-assignment]
+            out_shape = shape
     loss = torch._C._nn.cross_entropy_loss(
         input,
         target,
@@ -3635,8 +3639,8 @@ def cross_entropy(
         ignore_index,
         label_smoothing,
     )
-    if batch_shape is not None and reduction == "none":
-        loss = loss.view(batch_shape)
+    if out_shape is not None and reduction == "none":
+        loss = loss.view(out_shape)
     return loss
 
 

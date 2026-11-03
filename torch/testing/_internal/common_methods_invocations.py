@@ -7284,7 +7284,7 @@ def sample_inputs_cross_entropy_dim(op_info, device, dtype, requires_grad, **kwa
         batch_shape = shape[:class_dim] + shape[class_dim + 1:]
         return make_tensor(batch_shape, low=0, high=num_classes, device=device, dtype=torch.long)
 
-    # Classes last (the layout that is not copied), then in the middle, first, and unbatched.
+    # Classes last, in the middle, first, and unbatched.
     shapes_dims_and_kwargs = [
         *[((2, 4, num_classes), -1, dict(reduction=reduction)) for reduction in ("mean", "sum", "none")],
         ((2, 4, num_classes, 2), 2, {}),
@@ -15302,8 +15302,8 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         skips=(
             # The alias annotation check needs the inputs of aten::cross_entropy_loss to be graph
-            # inputs, but with dim they are moved and flattened in Python first.
-            DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"),
+            # inputs, but with dim they are reshaped in Python first.
+            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
             DecorateInfo(unittest.skip("FP16 cross_entropy cases have not been enabled on MPS yet"),
                          dtypes=(torch.half,), device_type="mps"),
         ),

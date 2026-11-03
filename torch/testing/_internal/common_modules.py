@@ -1611,6 +1611,11 @@ def module_inputs_torch_nn_CrossEntropyLoss(module_info, device, dtype, requires
     module_inputs = []
     for reduction, (desc, constructor_kwargs) in product(reductions, cases):
         def reference_fn(m, p, i, t, reduction=reduction, constructor_kwargs=constructor_kwargs):
+            if m.dim is not None:
+                # The reference takes the classes at dim 1.
+                if t.shape == i.shape:
+                    t = t.movedim(m.dim, 1)
+                i = i.movedim(m.dim, 1)
             return cross_entropy_loss_reference(i, t, reduction=reduction, **constructor_kwargs)
 
         module_inputs.append(
@@ -1641,6 +1646,13 @@ def module_inputs_torch_nn_CrossEntropyLoss(module_info, device, dtype, requires
                         desc=f"higher_dim_{desc}_{reduction}",
                         reference_fn=reference_fn)
         )
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction, dim=-1, **constructor_kwargs),
+                        forward_input=FunctionInput(make_input((2, 5, 3)),
+                                                    make_target((2, 5), low=0, high=3)),
+                        desc=f"3d_class_dim_last_{desc}_{reduction}",
+                        reference_fn=reference_fn)
+        )
 
         if constructor_kwargs.get('ignore_index', None) is None:
             module_inputs.append(
@@ -1669,6 +1681,13 @@ def module_inputs_torch_nn_CrossEntropyLoss(module_info, device, dtype, requires
                             forward_input=FunctionInput(make_input((2, 3, 5, 5, 2, 2)),
                                                         make_input((2, 3, 5, 5, 2, 2)).softmax(dim=1)),
                             desc=f"higher_dim_prob_target_{desc}_{reduction}",
+                            reference_fn=reference_fn)
+            )
+            module_inputs.append(
+                ModuleInput(constructor_input=FunctionInput(reduction=reduction, dim=2, **constructor_kwargs),
+                            forward_input=FunctionInput(make_input((5, 4, 3, 2)),
+                                                        make_input((5, 4, 3, 2)).softmax(dim=2)),
+                            desc=f"4d_prob_target_class_dim_2_{desc}_{reduction}",
                             reference_fn=reference_fn)
             )
             module_inputs.append(

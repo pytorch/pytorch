@@ -1211,7 +1211,9 @@ class CrossEntropyLoss(_WeightedLoss):
     `input` has to be a Tensor of size :math:`(C)` for unbatched input,
     :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1` for the
     `K`-dimensional case. The last being useful for higher dimension inputs, such
-    as computing cross entropy loss per-pixel for 2D images.
+    as computing cross entropy loss per-pixel for 2D images. If :attr:`dim` is given, the
+    classes are at that dimension instead, for example :math:`(minibatch, d_1, d_2, ..., d_K, C)`
+    with ``dim=-1``.
 
     The `target` that this criterion expects should contain either:
 
@@ -1239,7 +1241,8 @@ class CrossEntropyLoss(_WeightedLoss):
             \end{cases}
 
       Note that this case is equivalent to applying :class:`~torch.nn.LogSoftmax`
-      on an input, followed by :class:`~torch.nn.NLLLoss`.
+      on an input, followed by :class:`~torch.nn.NLLLoss`, with the classes moved to
+      the default class dimension first if :attr:`dim` is given.
 
     - Probabilities for each class; useful when labels beyond a single class per minibatch item
       are required, such as for blended labels, label smoothing, etc. The unreduced (i.e. with
@@ -1296,21 +1299,24 @@ class CrossEntropyLoss(_WeightedLoss):
             `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
         dim (int, optional): The dimension of the input that holds the classes. For example,
             ``dim=-1`` takes logits of shape :math:`(N, d_1, d_2, ..., d_K, C)`, as produced by a
-            linear layer applied to a sequence. Default: ``None``, which means dimension 1, or 0
-            for unbatched input.
+            linear layer applied to a sequence. The loss is the same as with that dimension moved
+            to the default class dimension. Default: ``None``, which means dimension 1, or 0 for
+            unbatched input.
 
     Shape:
         - Input: Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of `K`-dimensional loss. If :attr:`dim` is given, :math:`C` is at that dimension instead.
         - Target: If containing class indices, shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with
-          :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`. The
+          :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`. If
+          :attr:`dim` is given, the shape is that of the input with dimension :attr:`dim` removed. The
           target data type is required to be long when using class indices. If containing class probabilities, the
           target must be the same shape input, and each value should be between :math:`[0, 1]`. This means the target
           data type is required to be float when using class probabilities. Note that PyTorch does not strictly enforce
           probability constraints on the class probabilities and that it is the user's responsibility to ensure
           ``target`` contains valid probability distributions (see below examples section for more details).
         - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
-          in the case of K-dimensional loss, depending on the shape of the input. Otherwise, scalar.
+          in the case of K-dimensional loss, depending on the shape of the input, or the shape of the input with
+          dimension :attr:`dim` removed if :attr:`dim` is given. Otherwise, scalar.
 
 
         where:
@@ -1333,6 +1339,13 @@ class CrossEntropyLoss(_WeightedLoss):
         >>> # Example of target with class probabilities
         >>> input = torch.randn(3, 5, requires_grad=True)
         >>> target = torch.randn(3, 5).softmax(dim=1)
+        >>> output = loss(input, target)
+        >>> output.backward()
+        >>>
+        >>> # Example of input with the classes in the last dimension
+        >>> loss = nn.CrossEntropyLoss(dim=-1)
+        >>> input = torch.randn(2, 4, 5, requires_grad=True)
+        >>> target = torch.empty(2, 4, dtype=torch.long).random_(5)
         >>> output = loss(input, target)
         >>> output.backward()
 
