@@ -3575,8 +3575,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._named_constants: dict[str, str] = {}
         self._named_constant_defs: IndentedBuffer = IndentedBuffer()
         self.outside_loop_vars = OrderedSet[Any]()
-        # Distinct loads emitted inside the current reduction loop body.
+        # Distinct loads emitted inside the current reduction loop body, and
+        # whether that body updates welford accumulators.
         self.num_loop_loads = 0
+        self.loop_has_welford = False
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.block_ptr_to_buffer = dict[str, str]()
@@ -6717,6 +6719,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ):
         """Helper to codegen a welford reduction"""
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
+        self.loop_has_welford = True
 
         accumulator = TritonCSEVariable(
             f"{result_var}_mean",
@@ -7591,6 +7594,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.loads.clear()
         self.compute.clear()
         self.num_loop_loads = 0
+        self.loop_has_welford = False
         self.stores.clear()
         self.post_loop_combine.clear()
         self.post_loop_store.clear()
@@ -7760,12 +7764,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         Unroll hint for the innermost reduction loop. When the block does not
         divide a static reduction size, Triton cannot prove the loop's bounds
         mask is always true, the compiled loop stays rolled, and a small tile
-        then leaves each thread with a single load in flight. The condition is a constexpr, so configs whose block divides
-        the size keep LLVM's own unrolling, large tiles, which already issue
-        several loads per thread, are left alone, and loops with fewer than
-        `factor` full blocks are not unrolled. Loops that issue more than
-        reduction_loop_unroll_max_loads loads per iteration get no hint,
-        because unrolling them raises register pressure more than it helps.
+        then leaves each thread with a single load in flight. The condition is
+        a constexpr, so configs whose block divides the size keep LLVM's own
+        unrolling, large tiles, which already issue several loads per thread,
+        are left alone, and loops with fewer than `factor` full blocks are not
+        unrolled. Loops that issue more than reduction_loop_unroll_max_loads
+        loads per iteration get no hint, and loops that update welford
+        accumulators use at most reduction_loop_unroll_welford_factor, because
+        unrolling them further raises register pressure more than it helps.
         """
         factor = config.triton.reduction_loop_unroll_factor
         # Cooperative reductions are excluded for correctness, not speed: their
@@ -7781,6 +7787,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             or self.num_loop_loads > config.triton.reduction_loop_unroll_max_loads
         ):
             return ""
+        if self.loop_has_welford:
+            factor = min(factor, config.triton.reduction_loop_unroll_welford_factor)
+            if factor <= 1:
+                return ""
         numel = V.graph.sizevars.simplify(tree.numel)
         if not isinstance(numel, (sympy.Integer, int)):
             return ""

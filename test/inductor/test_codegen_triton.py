@@ -475,6 +475,39 @@ class TestCodegenTriton(InductorTestCase):
     @inductor_config.patch(
         {"split_reductions": False, "triton.reduction_loop_unroll_factor": 8}
     )
+    def test_reduction_loop_unroll_welford_factor(self):
+        def fn(x):
+            return torch.var_mean(x, dim=1)
+
+        # The var_mean loop updates welford accumulators, so its factor is
+        # capped by reduction_loop_unroll_welford_factor.
+        x = torch.randn(64, 17920, device=GPU_TYPE)
+        for welford_factor in (4, 1):
+            torch._dynamo.reset()
+            with inductor_config.patch(
+                {"triton.reduction_loop_unroll_welford_factor": welford_factor}
+            ):
+                actual, codes = run_and_get_code(torch.compile(fn), x)
+            self.assertEqual(actual, fn(x), atol=1e-4, rtol=1e-4)
+            loop_headers = re.findall(
+                r"for r0_offset in tl\.range\(.*\):", "\n".join(codes)
+            )
+            self.assertEqual(len(loop_headers), 1)
+            if welford_factor > 1:
+                self.assertIn(
+                    "loop_unroll_factor=4 if (17920 % R0_BLOCK and 17920 >= 4 * R0_BLOCK)",
+                    loop_headers[0],
+                )
+            else:
+                self.assertNotIn("loop_unroll_factor", loop_headers[0])
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON and GPU_TYPE == "cuda" and not torch.version.hip,
+        "requires CUDA and Triton",
+    )
+    @inductor_config.patch(
+        {"split_reductions": False, "triton.reduction_loop_unroll_factor": 8}
+    )
     def test_reduction_loop_unroll_max_loads_counts_masked_loads(self):
         def fn(*xs):
             return torch.cat(xs, dim=1).sum(dim=1)

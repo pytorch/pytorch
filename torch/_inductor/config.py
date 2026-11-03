@@ -2429,6 +2429,13 @@ class triton:
         os.environ.get("TORCHINDUCTOR_REDUCTION_LOOP_UNROLL_MAX_LOADS", "3")
     )
 
+    # Upper bound on the unroll factor for reduction loops that update welford
+    # accumulators (var_mean, layer_norm statistics). Values <= 1 disable the
+    # hint for those loops.
+    reduction_loop_unroll_welford_factor: int = int(
+        os.environ.get("TORCHINDUCTOR_REDUCTION_LOOP_UNROLL_WELFORD_FACTOR", "4")
+    )
+
     # For small output size reductions uses cross thread-block synchronization to gain more parallelism
     cooperative_reductions = (
         os.environ.get("TORCHINDUCTOR_COOPERATIVE_REDUCTIONS", "0") == "1"
