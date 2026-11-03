@@ -497,8 +497,18 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     target_link_libraries(_nccl_ep PRIVATE
       torch_python torch_cuda __caffe2_nccl_ep pybind::pybind11)
     set_target_properties(_nccl_ep PROPERTIES
-      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"
-      INSTALL_RPATH "${_rpath_portable_origin}/lib")
+      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch")
+    if(USE_SYSTEM_NCCL)
+      # The package library is preloaded with its matching JIT header paths.
+      set_target_properties(_nccl_ep PROPERTIES
+        INSTALL_RPATH "${_rpath_portable_origin}/lib")
+    else()
+      # Static builds configure the in-tree JIT header paths at import.
+      target_compile_definitions(_nccl_ep PRIVATE
+        "NCCL_EP_JIT_HOME=\"${NCCL_EP_JIT_HOME}\"")
+      set_target_properties(_nccl_ep PROPERTIES
+        INSTALL_RPATH "${_rpath_portable_origin}/lib")
+    endif()
     if(NOT WIN32)
       set_target_properties(_nccl_ep PROPERTIES C_VISIBILITY_PRESET "default")
     endif()

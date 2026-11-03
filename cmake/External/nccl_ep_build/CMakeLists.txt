@@ -18,7 +18,7 @@ list(GET __cuda_ver_parts 1 CUDA_MINOR)
 file(REMOVE "${NCCL_EP_BUILDDIR}/include/ep_enums.h")
 add_subdirectory("${NCCL_EP_SOURCE_DIR}" nccl_ep)
 
-# System NCCL headers must also be available in EP's generated JIT include path.
+# The wrapper and JIT also need core NCCL headers in the combined include tree.
 # Copy only core headers so stale EP headers cannot overwrite the pinned ones.
 if(NOT "${NCCL_HOME}" STREQUAL "${NCCL_EP_BUILDDIR}")
   file(COPY

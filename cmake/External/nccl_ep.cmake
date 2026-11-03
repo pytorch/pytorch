@@ -21,8 +21,10 @@ if(NOT __NCCL_EP_INCLUDED)
   # NCCL is built (Makefile) into this tree by cmake/External/nccl.cmake.
   set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
 
-  # Build NCCL EP as its own CMake project against the selected NCCL, placing
-  # EP libraries and headers in __NCCL_BUILD_DIR alongside in-tree core NCCL.
+  # Build NCCL EP as its own CMake project against that prebuilt NCCL
+  # (headers + libnccl in __NCCL_BUILD_DIR). NCCL_EP_BUILDDIR == NCCL_HOME so
+  # nccl_ep's artifacts (libnccl_ep.a, headers) land in the same tree, leaving
+  # the core NCCL build untouched.
   # Build nccl_ep for the same CUDA archs as the rest of PyTorch, dropping
   # anything below sm_90 since nccl_ep requires Hopper+. PyTorch disables
   # CMAKE_CUDA_ARCHITECTURES in favor of TORCH_CUDA_ARCH_LIST, so derive the arch
@@ -52,7 +54,13 @@ if(NOT __NCCL_EP_INCLUDED)
     set(__NCCL_EP_ARCH_ARG "-DCMAKE_CUDA_ARCHITECTURES=${__NCCL_EP_ARCHS}")
   endif()
 
-  # Link EP statically with source NCCL and dynamically with system NCCL.
+  # Branch on how torch links NCCL (USE_NCCL_EP supports both):
+  #  - USE_SYSTEM_NCCL=OFF (source/dev): torch statically embeds the submodule
+  #    NCCL, so build libnccl_ep.a against it and have the extension statically
+  #    link it -- self-contained, no nccl-extensions, no runtime libnccl_ep.so.
+  #  - USE_SYSTEM_NCCL=ON (wheel/CI): torch dynamically links the system NCCL, so
+  #    build libnccl_ep.so against that same NCCL; the extension NEEDED-links it
+  #    and resolves it and its JIT headers from the nccl-extensions wheel.
   if(USE_SYSTEM_NCCL)
     if(DEFINED ENV{NCCL_INCLUDE_DIR})
       get_filename_component(__NCCL_EP_NCCL_HOME "$ENV{NCCL_INCLUDE_DIR}" DIRECTORY)
@@ -94,6 +102,14 @@ if(NOT __NCCL_EP_INCLUDED)
 
   set(NCCL_EP_LIBRARIES "${__NCCL_BUILD_DIR}/lib/${__NCCL_EP_LIB}")
   set(NCCL_EP_INCLUDE_DIRS "${__NCCL_BUILD_DIR}/include")
+
+  if(NOT USE_SYSTEM_NCCL)
+    # Static path only: bake the in-tree JIT header dir so the extension
+    # self-configures NCCL_EP_HOME / NCCL_HOME (both resolve under this one dir:
+    # include/nccl_ep and include/nccl.h). The dynamic path instead gets these
+    # from nccl-extensions at runtime, so leave NCCL_EP_JIT_HOME unset there.
+    set(NCCL_EP_JIT_HOME "${__NCCL_BUILD_DIR}" CACHE INTERNAL "nccl-ep JIT header home")
+  endif()
 
   add_library(__caffe2_nccl_ep INTERFACE)
   add_dependencies(__caffe2_nccl_ep nccl_ep_external)

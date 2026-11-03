@@ -62,7 +62,6 @@ def requires_nccl_ep():
     not torch.cuda.is_available() or importlib.util.find_spec("torch._nccl_ep") is None,
     "Test requires CUDA and a USE_NCCL_EP build",
 )
-@instantiate_parametrized_tests
 class TokenSwitchNCCLLoadingTest(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -75,21 +74,15 @@ class TokenSwitchNCCLLoadingTest(TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    @parametrize("prepare_first", [False, True])
-    def test_import(self, prepare_first):
-        if prepare_first and (
-            importlib.util.find_spec("nccl") is None
-            or importlib.util.find_spec("nccl.ep") is None
-        ):
-            self.skipTest("Test requires nccl-extensions")
-        self._run_script(f"""
-if {prepare_first!r}:
-    import nccl.ep
-    nccl.ep.get_lib_version()
+    def test_import_without_python_bindings(self):
+        self._run_script("""
+import sys
+from unittest.mock import patch
 
 from torch.distributed._token_switch import _import_nccl_ep
 
-_import_nccl_ep()
+with patch.dict(sys.modules, {"nccl.ep": None, "nccl._extensions": None}):
+    _import_nccl_ep()
 """)
 
     def test_without_runtime_package(self):
@@ -1335,9 +1328,19 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
         self.assertEqual(topk_idx.dtype, dtype)
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("layout", ["flat", "expert_major"])
-    @parametrize("output_mode", ["allocated", "full_metadata"])
-    def test_dispatch_actual_receive_count(self, device, layout, output_mode):
+    @parametrize(
+        "layout,output_index",
+        [
+            ("flat", None),
+            ("flat", 0),
+            ("flat", 1),
+            ("flat", 2),
+            ("expert_major", None),
+            ("expert_major", 0),
+            ("expert_major", 1),
+        ],
+    )
+    def test_dispatch_requires_full_capacity(self, device, layout, output_index):
         device = torch.device(torch.device(device).type, self.rank)
         torch.cuda.set_device(device)
         ts = self._get_token_switch()
@@ -1348,33 +1351,18 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
         num_recv = routing.handle.get_num_recv_tokens()
         self.assertEqual(num_recv, NUM_TOKENS)
         self.assertLess(num_recv, ts.max_recv_tokens_per_rank)
-        tokens = torch.full(
-            (NUM_TOKENS, HIDDEN), self.rank + 1, dtype=torch.bfloat16, device=device
-        )
-        if output_mode == "allocated":
-            tokens.requires_grad_()
-            topk_weights.requires_grad_()
-            outputs = ts.dispatch(routing, tokens, topk_weights, num_recv)
+        tokens = torch.zeros(NUM_TOKENS, HIDDEN, dtype=torch.bfloat16, device=device)
+        error = f"require at least {ts.max_recv_tokens_per_rank} rows"
+        if output_index is None:
+            with self.assertRaisesRegex(ValueError, error):
+                ts.dispatch(routing, tokens, topk_weights, num_recv)
         else:
-            rows = ts.max_recv_tokens_per_rank
-            weights = topk_weights.new_empty(
-                (rows, TOP_K) if layout == "flat" else (rows,)
+            out = list(
+                ts.dispatch(routing, tokens, topk_weights, ts.max_recv_tokens_per_rank)
             )
-            indices = topk_idx.new_empty(rows, TOP_K) if layout == "flat" else None
-            out = (tokens.new_empty(num_recv, HIDDEN), weights, indices)
-            outputs = ts.dispatch(routing, tokens, topk_weights, out=out)
-        dispatched, weights, indices = outputs
-        src_rank = (self.rank - 1) % self.world_size
-        self.assertEqual(dispatched, torch.full_like(tokens, src_rank + 1))
-        self.assertEqual(weights[:num_recv], torch.ones_like(weights[:num_recv]))
-        if layout == "flat":
-            self.assertEqual(indices[:num_recv], torch.zeros_like(topk_idx))
-        else:
-            self.assertIsNone(indices)
-        if output_mode == "allocated":
-            (dispatched.float().sum() + weights.sum()).backward()
-            self.assertEqual(tokens.grad, torch.ones_like(tokens))
-            self.assertEqual(topk_weights.grad, torch.ones_like(topk_weights))
+            out[output_index] = out[output_index][:num_recv]
+            with self.assertRaisesRegex(ValueError, error):
+                ts.dispatch(routing, tokens, topk_weights, out=tuple(out))
 
     @skip_if_lt_x_gpu(2)
     def test_expert_major_redispatch_preserves_receive_slots(self, device):
@@ -1420,20 +1408,6 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
         self.assertEqual(topk_weights.grad, topk_weights.detach() * 2)
         torch.cuda.synchronize()
         del loss, combined, first, first_weights, routing
-
-    @skip_if_lt_x_gpu(2)
-    @parametrize("layout", ["flat", "expert_major"])
-    def test_dispatch_insufficient_receive_count(self, device, layout):
-        device = torch.device(torch.device(device).type, self.rank)
-        torch.cuda.set_device(device)
-        ts = self._get_token_switch()
-        topk_idx, weights = _generate_topk(
-            self.rank, self.world_size, NUM_TOKENS, TOP_K, device
-        )
-        routing = ts.create_routing(topk_idx, layout=layout)
-        tokens = torch.zeros(NUM_TOKENS, HIDDEN, dtype=torch.bfloat16, device=device)
-        with self.assertRaisesRegex(ValueError, "rows but receives"):
-            ts.dispatch(routing, tokens, weights, NUM_TOKENS - 1)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("layout", ["flat", "expert_major"])
