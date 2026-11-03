@@ -145,7 +145,7 @@ from .utils import (
     remove_unaligned_input_idxs,
     shape_env_from_inputs,
 )
-from .virtualized import use_config_choices_handler, V
+from .virtualized import V
 
 
 if TYPE_CHECKING:
@@ -1076,7 +1076,6 @@ def compile_fx_inner(
                 stacklevel=2,
             )
         stack.enter_context(torch.utils._python_dispatch._disable_current_modes())
-        stack.enter_context(use_config_choices_handler())
         stack.enter_context(_use_lazy_graph_module(dynamo_config.use_lazy_graph_module))
         stack.enter_context(
             dynamo_utils.dynamo_timed(
