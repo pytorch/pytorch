@@ -2642,6 +2642,7 @@ _MOD_INDEX = "torch._dynamo._trace_wrapped_higher_order_op.ModIndex"
 _OS_SYSTEM_OP = {"as_operator": "torch.os.system"}
 _COND_OP = {"as_operator": "torch.ops.higher_order.cond"}
 _DICT_WITH_OP = {"as_string_to_argument": {"f": _OS_SYSTEM_OP}}
+_CUSTOM_OBJ = {"as_custom_obj": {"name": "obj0", "class_fqn": "a.b"}}
 
 
 def _set_in_spec(args_and_kwargs):
@@ -3378,6 +3379,8 @@ class TestPredispatchSerialization(TestCase):
         # A dict of arguments could hold one too, and export passes neither
         # dicts nor keyword arguments through flat_apply.
         "dict": (_set_last_input(arg=_DICT_WITH_OP), "of kind as_string_to_argument"),
+        # Export passes an enum value as a custom object.
+        "custom_obj": (_set_last_input(arg=_CUSTOM_OBJ), "enum values and other"),
         "keyword": (
             _set_last_input(arg={"as_int": 0}, kind=ArgumentKind.KEYWORD),
             "keyword input",
@@ -3402,13 +3405,7 @@ class TestPredispatchSerialization(TestCase):
             "not an operator overload",
         ),
         "direct_helper_call_dict_custom_obj": (
-            _call_helper_directly_with(
-                {
-                    "as_string_to_argument": {
-                        "o": {"as_custom_obj": {"name": "obj0", "class_fqn": "a.b"}}
-                    }
-                }
-            ),
+            _call_helper_directly_with({"as_string_to_argument": {"o": _CUSTOM_OBJ}}),
             "of kind as_custom_obj",
         ),
     }

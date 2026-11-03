@@ -770,8 +770,8 @@ def _find_imported(name: str) -> Any:
 
 # The kinds of saved inputs that a flat_apply call may have: plain values and
 # operators. Load turns some other kinds, such as graphs or dicts of arguments,
-# into objects that the function could call. Custom objects, which export can
-# also pass, are refused too for now.
+# into objects that the function could call. Custom objects, which export uses
+# for enum values and other opaque objects, are refused too for now.
 _FLAT_APPLY_INPUT_KINDS = frozenset(
     {
         "as_none",
@@ -818,7 +818,8 @@ def _check_flat_apply_inputs(where: str, inputs: Sequence[NamedArgument]) -> Non
         if inp.arg.type not in _FLAT_APPLY_INPUT_KINDS:
             raise SerializeError(
                 f"{where} has an input of kind {inp.arg.type}, which cannot be "
-                "saved or loaded"
+                "saved or loaded. Use plain values or operator overloads; enum "
+                "values and other custom objects are not supported yet."
             )
         _check_operator_name(where, inp)
 
