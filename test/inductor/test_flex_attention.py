@@ -1312,10 +1312,8 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
 class TestFlexAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
-        skipCPUIf(
-            LONG_COMPILATION_ON_CPU,
-            "skip UT for CPU due to long compilation time found in CI",
-        )
+        if self.device_type == "cpu" and LONG_COMPILATION_ON_CPU:
+            self.skipTest("skip UT for CPU due to long compilation time found in CI")
 
     def _check_equal(
         self,
@@ -10080,10 +10078,8 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 class TestPagedAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
-        skipCPUIf(
-            LONG_COMPILATION_ON_CPU,
-            "skip UT for CPU due to long compilation time found in CI",
-        )
+        if self.device_type == "cpu" and LONG_COMPILATION_ON_CPU:
+            self.skipTest("skip UT for CPU due to long compilation time found in CI")
 
     def _check_equal(
         self,
@@ -10595,10 +10591,8 @@ supports_learnable_bias = unittest.skipUnless(
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()
-        skipCPUIf(
-            LONG_COMPILATION_ON_CPU,
-            "skip UT for CPU due to long compilation time found in CI",
-        )
+        if self.device_type == "cpu" and LONG_COMPILATION_ON_CPU:
+            self.skipTest("skip UT for CPU due to long compilation time found in CI")
         self.dtype = torch.float32
         self.atol = 3e-2
         self.rtol = 3e-2
