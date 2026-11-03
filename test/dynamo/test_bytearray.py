@@ -905,6 +905,14 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(b, b"abc")
 
     def test_setslice_zero_step_from_input(self):
+        import enum
+
+        class Step(enum.IntEnum):
+            ZERO = 0
+
+        class MyInt(int):
+            pass
+
         def store_key(key, x):
             ba = bytearray(b"abc")
             try:
@@ -921,8 +929,28 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 return str(e), x + 1
             return None, x + 1
 
-        for fn, arg in ((store_key, slice("a", 1, 0)), (store_step, 0)):
-            with self.subTest(fn=fn.__name__):
+        def store_list(step, x):
+            ba = bytearray(b"abc")
+            try:
+                ba[::step] = [300]
+            except ValueError as e:
+                return str(e), x + 1
+            return None, x + 1
+
+        def delete_step(step, x):
+            ba = bytearray(b"abc")
+            try:
+                del ba["a":1:step]
+            except ValueError as e:
+                return str(e), x + 1
+            return None, x + 1
+
+        cases = [(store_key, slice("a", 1, 0))]
+        for step in (0, Step.ZERO, MyInt(0)):
+            cases += [(store_step, step), (store_list, step), (delete_step, step)]
+        for fn, arg in cases:
+            with self.subTest(fn=fn.__name__, arg=type(arg).__name__):
+                torch._dynamo.reset()
                 compiled = torch.compile(fn, backend="eager", fullgraph=True)
                 self.assertEqual(
                     compiled(arg, torch.ones(1)),
@@ -1043,6 +1071,66 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                     "bytearray slice store with Python __index__ bounds",
                 ):
                     run(torch.compile(fn, backend="eager", fullgraph=True), *args)
+
+    def test_setslice_python_index_subclass_bounds(self):
+        log = []
+
+        class FloatIndex(float):
+            def __index__(self):
+                log.append(float(self))
+                return int(self)
+
+        class StrIndex(str):
+            __slots__ = ()
+
+            def __index__(self):
+                log.append(self)
+                return len(self)
+
+        def store(start, stop, x):
+            ba = bytearray(b"abcd")
+            ba[start:stop] = [88, 89]
+            return ba, x + 1
+
+        def run(fn, start, stop):
+            log.clear()
+            return fn(start, stop, torch.ones(1)), list(log)
+
+        for start, stop in (
+            (FloatIndex(0.0), FloatIndex(2.0)),
+            (StrIndex(""), StrIndex("ab")),
+        ):
+            with self.subTest(type=type(start).__name__):
+                torch._dynamo.reset()
+                self.assertEqual(
+                    run(torch.compile(store, backend="eager"), start, stop),
+                    run(store, start, stop),
+                )
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported,
+                    "bytearray slice store with Python __index__ bounds",
+                ):
+                    run(
+                        torch.compile(store, backend="eager", fullgraph=True),
+                        start,
+                        stop,
+                    )
+
+    def test_store_symbolic_ints(self):
+        def f(x):
+            n = x.size(0)
+            ba = bytearray(b"abcdefgh")
+            ba[n] = n + 60
+            ba[:n] = [n + 70, n + 71]
+            del ba[::n]
+            return ba
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True, dynamic=True)
+        for size in (2, 3):
+            with self.subTest(size=size):
+                x = torch.ones(size)
+                self.assertEqual(compiled(x), f(x))
 
     def test_setslice_input_values(self):
         @torch.compile(backend="eager", fullgraph=True)

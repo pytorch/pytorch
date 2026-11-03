@@ -2212,29 +2212,31 @@ class ByteArrayVariable(VariableTracker):
             return ByteArrayVariable.sq_ass_item_impl(self, tx, index, value)
         elif pyslice_check(key):
             # PySlice_Unpack calls the bounds' __index__ in step, start, stop
-            # order, and a value that is not a bytearray makes CPython unpack
-            # the slice a second time. Leave Python-level __index__ to eager.
+            # order, and a store whose value is not a bytearray, or is self,
+            # unpacks the slice a second time. Leave Python-level __index__ to
+            # eager.
             if any(self._has_python_index(member) for member in key.items):
                 unimplemented(
                     gb_type="bytearray slice store with Python __index__ bounds",
                     context=f"slice: {key.debug_repr()}",
                     explanation="CPython calls the __index__ of slice bounds in "
-                    "step, start, stop order, and again when it converts the "
-                    "stored value. Dynamo does not model that order, so bytearray "
-                    "slice stores and deletes whose bounds define __index__ in "
-                    "Python are left to eager.",
+                    "step, start, stop order, and a store calls them again when "
+                    "the value is not a bytearray or is the bytearray itself. "
+                    "Dynamo does not model that order, so bytearray slice stores "
+                    "and deletes whose bounds define __index__ in Python are left "
+                    "to eager.",
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
-            # PySlice_Unpack checks the step before start and stop.
-            step = key.items[2].realize()
-            if (
-                istype(step, ConstantVariable)
-                and istype(step.value, (int, bool))
-                and step.value == 0
+            # PySlice_Unpack converts the step and rejects zero before start
+            # and stop.
+            step = key.items[2]
+            if not step.is_constant_none() and pyindex_check(
+                maybe_get_python_type(step)
             ):
-                raise_observed_exception(
-                    ValueError, tx, args=["slice step cannot be zero"]
-                )
+                if pynumber_as_ssize_t(tx, step, None).as_python_constant() == 0:
+                    raise_observed_exception(
+                        ValueError, tx, args=["slice step cannot be zero"]
+                    )
             index = key.as_index_slice(tx)
             if value is not None:
                 value = value.realize()
@@ -2313,15 +2315,16 @@ class ByteArrayVariable(VariableTracker):
         if isinstance(self.mutation_type, ValueMutationExisting):
             unimplemented(
                 gb_type="bytearray store to an existing bytearray",
-                context=f"bytearray: {self.debug_repr()}",
-                explanation="Dynamo traces bytearray item and slice stores only on "
-                "bytearrays created in the same frame. An existing bytearray may "
-                "share its buffer with a memoryview, tensor or array that Dynamo "
-                "cannot see, so the store is left to eager. A bytearray created "
-                "before a graph break is treated as existing in the resume "
-                "function, so each later store breaks the graph again.",
+                context=f"bytearray: {self}",
+                explanation="Dynamo traces bytearray item and slice stores and "
+                "deletes only on bytearrays created during tracing. An input, "
+                "global, attribute or other existing bytearray may share its "
+                "buffer with a memoryview, tensor or array that Dynamo cannot "
+                "see, so the store is left to eager. A bytearray created before "
+                "a graph break is treated as existing in the resume function, so "
+                "each later store breaks the graph again.",
                 hints=[
-                    "Store into a bytearray created in the same frame.",
+                    "Return a new bytearray from the compiled function instead of storing into an existing one.",
                     *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
                 ],
             )
@@ -2331,8 +2334,8 @@ class ByteArrayVariable(VariableTracker):
         from .tensor import SymNodeVariable
 
         # Dynamo handles SymInt.__index__ itself; any other __index__ that is
-        # not a C slot is user code.
-        if isinstance(member, (ConstantVariable, SymNodeVariable)):
+        # not a C slot is user code, also on int, float or str subclasses.
+        if istype(member, ConstantVariable) or isinstance(member, SymNodeVariable):
             return False
         index = inspect.getattr_static(maybe_get_python_type(member), "__index__", None)
         return index is not None and not isinstance(
@@ -2365,11 +2368,11 @@ class ByteArrayVariable(VariableTracker):
     def _unsupported_store_value(value: VariableTracker) -> NoReturn:
         unimplemented(
             gb_type="bytearray store with an unsupported value",
-            context=f"value: {value.debug_repr()}",
+            context=f"value: {value.python_type_name()}",
             explanation="Dynamo only traces bytearray stores whose value is known "
             "at compile time: for an item, a value whose __index__ gives a "
-            "constant int; for a slice, bytes, a bytearray, or a constant plain "
-            "list or tuple.",
+            "constant int; for a slice, bytes, a bytearray, or a plain list or "
+            "tuple whose items' __index__ give constant ints.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 

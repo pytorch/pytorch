@@ -43,7 +43,7 @@
     {
       "Gb_type": "bytearray slice store with Python __index__ bounds",
       "Context": "slice: {key.debug_repr()}",
-      "Explanation": "CPython calls the __index__ of slice bounds in step, start, stop order, and again when it converts the stored value. Dynamo does not model that order, so bytearray slice stores and deletes whose bounds define __index__ in Python are left to eager.",
+      "Explanation": "CPython calls the __index__ of slice bounds in step, start, stop order, and a store calls them again when the value is not a bytearray or is the bytearray itself. Dynamo does not model that order, so bytearray slice stores and deletes whose bounds define __index__ in Python are left to eager.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -1071,10 +1071,10 @@
   "GB2918": [
     {
       "Gb_type": "bytearray store to an existing bytearray",
-      "Context": "bytearray: {self.debug_repr()}",
-      "Explanation": "Dynamo traces bytearray item and slice stores only on bytearrays created in the same frame. An existing bytearray may share its buffer with a memoryview, tensor or array that Dynamo cannot see, so the store is left to eager. A bytearray created before a graph break is treated as existing in the resume function, so each later store breaks the graph again.",
+      "Context": "bytearray: {self}",
+      "Explanation": "Dynamo traces bytearray item and slice stores and deletes only on bytearrays created during tracing. An input, global, attribute or other existing bytearray may share its buffer with a memoryview, tensor or array that Dynamo cannot see, so the store is left to eager. A bytearray created before a graph break is treated as existing in the resume function, so each later store breaks the graph again.",
       "Hints": [
-        "Store into a bytearray created in the same frame.",
+        "Return a new bytearray from the compiled function instead of storing into an existing one.",
         "This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one."
       ]
     }
@@ -1826,8 +1826,8 @@
   "GB6860": [
     {
       "Gb_type": "bytearray store with an unsupported value",
-      "Context": "value: {value.debug_repr()}",
-      "Explanation": "Dynamo only traces bytearray stores whose value is known at compile time: for an item, a value whose __index__ gives a constant int; for a slice, bytes, a bytearray, or a constant plain list or tuple.",
+      "Context": "value: {value.python_type_name()}",
+      "Explanation": "Dynamo only traces bytearray stores whose value is known at compile time: for an item, a value whose __index__ gives a constant int; for a slice, bytes, a bytearray, or a plain list or tuple whose items' __index__ give constant ints.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
