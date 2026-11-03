@@ -1113,6 +1113,31 @@ def forward(self, sin, cos):
         }
         self.assertEqual(spec_targets, {"sub.spec"})
 
+    def test_node_inline_renames_colliding_attribute(self):
+        # The inlined graph reads an attribute under a name that the outer
+        # module uses for another object, so it is stored under a new name.
+        inner_root = torch.nn.Module()
+        inner_root.c = torch.tensor([1.0])
+        inner_graph = torch.fx.Graph()
+        x = inner_graph.placeholder("x")
+        inner_graph.output(
+            inner_graph.call_function(torch.add, (x, inner_graph.get_attr("c")))
+        )
+        root = torch.nn.Module()
+        root.inner = torch.fx.GraphModule(inner_root, inner_graph)
+        root.c = torch.tensor([10.0])
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        call = graph.call_module("inner", (x,))
+        graph.output(graph.call_function(torch.mul, (call, graph.get_attr("c"))))
+        gm = torch.fx.GraphModule(root, graph)
+        node_inline_(call)
+        gm.recompile()
+        targets = [n.target for n in gm.graph.find_nodes(op="get_attr")]
+        self.assertEqual(len(set(targets)), 2)
+        self.assertIs(gm.c, root.c)
+        self.assertEqual(gm(torch.ones(1)), torch.tensor([20.0]))
+
     def test_predispatch_autocast_and_set_grad(self):
         mod_orig, mod, args = self.MIXED_AUTOCAST_SET_GRAD_TESTS["multi_ctx_manager"]
         self._check_node_users_in_the_same_graph(mod)
