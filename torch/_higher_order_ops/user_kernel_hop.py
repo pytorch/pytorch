@@ -62,16 +62,39 @@ def _has_slot_state(cls: type) -> bool:
     return False
 
 
-def _object_state(value: object) -> dict[str, object] | None:
+class ConstantRules:
+    """What a DSL tells constant_key and _snapshot about its own values. The
+    defaults treat every value as a plain Python one; a DSL whose side table dedupes
+    its constant args supplies its own (cutedsl_kernel_wrap.CUTEDSL_CONSTANT_RULES)."""
+
+    def is_dsl_value(self, value: object) -> bool:
+        """Whether ``value`` is of one of the DSL's own types, which is never keyed or
+        copied by its attributes."""
+        return False
+
+    def scalar_value(self, value: object) -> bool | int | float | None:
+        """The Python value that ``value``, a DSL scalar, is keyed by (with its type),
+        or None for any other value."""
+        return None
+
+    def keyed_by_content(self, value: object) -> bool:
+        """Whether ``value``, a callable object, is keyed and copied by its attributes
+        as a plain object is (other callables are keyed as themselves)."""
+        return False
+
+
+def _object_state(value: object, rules: ConstantRules) -> dict[str, object] | None:
     """The attributes constant_key keys an object by, and _snapshot copies: the
     fields of a dataclass instance, or the __dict__ of a plain object (one with no
     __slots__ attributes that is not callable or a module, of a class that does not
-    hash by value), such as a mutable config object, or of a CuTeDSL kernel object,
-    one that would be a plain object but for its class's @cute.jit __call__ (a host
-    function takes one as a Constexpr and calls it). Equal objects then share one
-    side-table entry and one compile, kernel objects built for each call included,
-    and an object mutated between launches is compiled again. None for any other
-    value, cutlass values included.
+    hash by value), such as a mutable config object, or of a callable object the DSL
+    keys by content (ConstantRules.keyed_by_content), such as a CuTeDSL kernel
+    object, one that would be a plain object but for its class's @cute.jit __call__
+    (a host function takes one as a Constexpr and calls it). Equal objects then
+    share one side-table entry and one compile, kernel objects built for each call
+    included, and an object mutated between launches is compiled again. None for any
+    other value, the DSL's own values and tensors (of a subclass that does not hash
+    too) included.
 
     Limitation: any other object with __slots__ attributes, or another callable (a
     functor), is keyed as itself, by identity unless its class defines equality and
@@ -80,9 +103,9 @@ def _object_state(value: object) -> dict[str, object] | None:
     object also stays in memory, with anything it holds, a tensor included
     (constant_key does not look inside it): a side-table entry holds it for the life
     of the process (see KernelSideTable), and the eager compile cache as long as the
-    host function lives (see cutedsl_user_kernel.py)."""
+    host function lives (see torch/_native/cutedsl/user_kernel.py)."""
     cls = type(value)
-    if (getattr(cls, "__module__", "") or "").startswith("cutlass"):
+    if rules.is_dsl_value(value) or isinstance(value, Tensor):
         return None
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return {f.name: getattr(value, f.name) for f in dataclasses.fields(value)}
@@ -91,11 +114,9 @@ def _object_state(value: object) -> dict[str, object] | None:
         and hasattr(value, "__dict__")
         and not isinstance(value, types.ModuleType)
         and not _has_slot_state(cls)
+        and (not callable(value) or rules.keyed_by_content(value))
     ):
-        from torch._library.cutedsl import is_cutedsl_jit_function
-
-        if not callable(value) or is_cutedsl_jit_function(cls.__call__):
-            return vars(value)
+        return vars(value)
     return None
 
 
@@ -112,7 +133,7 @@ class ConstantContents(NamedTuple):
     rebuild: Callable[[list[object]], object]
 
 
-def constant_contents(value: object) -> ConstantContents | None:
+def constant_contents(value: object, rules: ConstantRules) -> ConstantContents | None:
     """The values directly inside a constant kernel argument that constant_key keys,
     and _snapshot copies, by content, for any walk of a constant to agree with the
     side table: the items of a tuple or list, the keys and then the values of a dict
@@ -126,7 +147,7 @@ def constant_contents(value: object) -> ConstantContents | None:
         steps = [(".keys()[{!r}]", i, key) for i, key in enumerate(value)]
         steps += [("[{!r}]", key, item) for key, item in value.items()]
     else:
-        state = _object_state(value)
+        state = _object_state(value, rules)
         if state is None:
             return None
         names = tuple(state)
@@ -156,28 +177,40 @@ def constant_contents(value: object) -> ConstantContents | None:
     return ConstantContents(names, steps, rebuild)
 
 
-def constant_key(value: object) -> object:
+def constant_key(value: object, rules: ConstantRules) -> object:
     """A hashable key for a constant kernel argument, equal for two values only when
     they are interchangeable: containers (see constant_contents) by type and
-    content, floats by hex() (-0.0 is not 0.0, and every NaN is the same), a cutlass
-    Numeric by its type and Python value, other values by their own equality. Any
-    other unhashable value, a value that contains itself, and a tensor, as the value
-    or in a container, are refused."""
-    return _ContentWalk().key(value)
+    content, floats by hex() (-0.0 is not 0.0, and every NaN is the same), a DSL
+    scalar by its type and Python value (see ConstantRules), other values by their
+    own equality. Any other unhashable value, a value that contains itself, and a
+    tensor, as the value or in a container, are refused."""
+    return _ContentWalk(rules).key(value)
 
 
-def _snapshot(value: object) -> object:
+def _snapshot(value: object, rules: ConstantRules) -> object:
     """``value`` with everything constant_key keys by content copied, so that the
     caller mutating it later changes neither the stored value nor its key."""
-    return _ContentWalk().snapshot(value)
+    return _ContentWalk(rules).snapshot(value)
+
+
+def map_constant(
+    value: object, rules: ConstantRules, fn: Callable[[object], object]
+) -> object:
+    """``value`` with ``fn`` applied to each value in it that is not a container (see
+    constant_contents), or to ``value`` itself if it is not one. A container is
+    copied only if ``fn`` changed something in it. A value that contains itself is
+    refused, as constant_key refuses it."""
+    return _ContentWalk(rules).map(value, fn)
 
 
 class _ContentWalk:
     """One walk of a constant kernel argument's contents (see constant_contents), by
-    constant_key or _snapshot. A cycle would be followed forever, so entering a
-    container that the walk is already inside raises a TypeError naming the cycle."""
+    constant_key, _snapshot or map_constant. A cycle would be followed forever, so
+    entering a container that the walk is already inside raises a TypeError naming
+    the cycle."""
 
-    def __init__(self) -> None:
+    def __init__(self, rules: ConstantRules) -> None:
+        self.rules = rules
         # The containers the walk is inside, outermost first, by id, each with the
         # step it took out of it: a format and the index, key or attribute name.
         self.path: dict[int, tuple[str, object]] = {}
@@ -214,13 +247,12 @@ class _ContentWalk:
                 + (f" at {where}" if where else "")
                 + ": pass each tensor as its own argument"
             )
-        if (getattr(type(value), "__module__", "") or "").startswith("cutlass"):
-            inner = getattr(value, "value", None)
-            if isinstance(inner, (bool, int, float)):
-                return (type(value), self.key(inner))
+        scalar = self.rules.scalar_value(value)
+        if scalar is not None:
+            return (type(value), self.key(scalar))
         if isinstance(value, float):
             return (type(value), value.hex())
-        contents = constant_contents(value)
+        contents = constant_contents(value, self.rules)
         if contents is not None:
             items = self.visit(value, contents.steps, self.key)
             return (type(value), contents.names, tuple(items))
@@ -235,10 +267,22 @@ class _ContentWalk:
         return (type(value), value)
 
     def snapshot(self, value: object) -> object:
-        contents = constant_contents(value)
+        if self.rules.scalar_value(value) is not None:
+            # A DSL scalar is keyed by its value, which its owner can still change.
+            return copy.copy(value)
+        contents = constant_contents(value, self.rules)
         if contents is None:
             return value
         return contents.rebuild(self.visit(value, contents.steps, self.snapshot))
+
+    def map(self, value: object, fn: Callable[[object], object]) -> object:
+        contents = constant_contents(value, self.rules)
+        if contents is None:
+            return fn(value)
+        items = self.visit(value, contents.steps, lambda item: self.map(item, fn))
+        if all(new is old for new, (_, _, old) in zip(items, contents.steps)):
+            return value
+        return contents.rebuild(items)
 
 
 # We cannot put user kernels into the FX graph as the graph nodes
@@ -246,21 +290,22 @@ class _ContentWalk:
 # Use a side table.
 # We use two dicts so that fetching both the kernel and id are O(1)
 class KernelSideTable(Generic[KernelT]):
-    def __init__(self, dedupe_constant_args: bool = False) -> None:
+    def __init__(self, constant_rules: ConstantRules | None = None) -> None:
         # Per instance, so that each DSL's table has its own index space.
         self.id_to_kernel: dict[int, KernelT] = {}
         self.kernel_to_id: dict[KernelT, int] = {}
         self.constant_args: dict[int, dict[str, object]] = {}
         self.lock = threading.Lock()
-        # With dedupe_constant_args, equal constant args (see constant_key) share one
-        # index, so a table that is never reset does not grow with every eager launch,
-        # and each entry is a snapshot of the args it was added with. A constant keyed
-        # by identity (see _object_state) still adds an entry per object, which such a
+        # With constant_rules, equal constant args (see constant_key) share one index,
+        # so a table that is never reset does not grow with every eager launch, and
+        # each entry is a snapshot of the args it was added with. A constant keyed by
+        # identity (see _object_state) still adds an entry per object, which such a
         # table keeps, with the object, for the life of the process: each capture adds
         # its constants, and captured graphs hold their indexes, so entries cannot be
         # evicted.
+        self.constant_rules = constant_rules
         self._constant_args_index: dict[object, int] | None = (
-            {} if dedupe_constant_args else None
+            {} if constant_rules is not None else None
         )
 
     # Returns index on the table
@@ -286,11 +331,14 @@ class KernelSideTable(Generic[KernelT]):
     def add_constant_args(self, args: dict[str, object]) -> int:
         with self.lock:
             key = None
-            if self._constant_args_index is not None:
-                key = tuple((k, constant_key(v)) for k, v in sorted(args.items()))
+            rules = self.constant_rules
+            if self._constant_args_index is not None and rules is not None:
+                key = tuple(
+                    (k, constant_key(v, rules)) for k, v in sorted(args.items())
+                )
                 if key in self._constant_args_index:
                     return self._constant_args_index[key]
-                args = {k: _snapshot(v) for k, v in args.items()}
+                args = {k: _snapshot(v, rules) for k, v in args.items()}
             idx = len(self.constant_args)
             self.constant_args[idx] = args
             if key is not None:
@@ -600,14 +648,17 @@ class UserKernelHOPInfo:
     # value. Read only the DSL's own arguments (e.g. kernel_idx) from hop_kwargs,
     # and the kernel's arguments from kernel_kwargs.
     get_mutated_tensors: Callable[[Mapping[str, Any], dict[str, Any]], list[str]]
-    # HOP kwargs -> kernel name, for logs and the reinplacing counters.
+    # HOP kwargs -> kernel name, for the reinplacing pass's log.
     get_kernel_name: Callable[[Mapping[str, Any]], str]
     # () -> the layout constraint Inductor gives the mutation HOP's tensor arguments:
     # "needs_fixed_stride_order" (the strides they had when the graph was traced) or
     # "flexible_layout" (Inductor picks them). Inductor calls it each time it lowers
     # one of this DSL's mutation HOP nodes.
     get_layout_constraint: Callable[[], str]
-    # Counts this DSL's reinplacing decisions.
+    # Only keys this DSL's reinplacing counters: ReInplaceTrigger.USER_KERNEL_OPS, or
+    # a member of the DSL's own. auto_functionalize's AUTO_FUNC_V1 and AUTO_FUNC_V2
+    # are refused; the reinplacing pass also reads AUTO_FUNC_V2 as a switch that
+    # stops it from rewriting getitem users.
     reinplace_trigger: ReInplaceTrigger
     # torch.export's serializer can write this DSL's nodes.
     serializable: bool
@@ -617,8 +668,14 @@ _user_kernel_hops: dict[UserKernelWrapperHOP, UserKernelHOPInfo] = {}
 
 
 def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
-    if not isinstance(info.reinplace_trigger, ReInplaceTrigger):
-        raise TypeError(f"{info.reinplace_trigger!r} is not a ReInplaceTrigger")
+    trigger = info.reinplace_trigger
+    if not isinstance(trigger, ReInplaceTrigger):
+        raise TypeError(f"{trigger!r} is not a ReInplaceTrigger")
+    if trigger in (ReInplaceTrigger.AUTO_FUNC_V1, ReInplaceTrigger.AUTO_FUNC_V2):
+        raise ValueError(
+            f"{trigger} belongs to auto_functionalize; register the {info.dsl} DSL "
+            "with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
+        )
     hops = (info.mutation, info.functional)
     for hop in hops:
         if not isinstance(hop, UserKernelWrapperHOP):
