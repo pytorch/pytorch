@@ -97,8 +97,8 @@ inline std::optional<Tensor> _allreduce_return_trivial(
 }
 
 // Whether CPU vector_norm and _powsum reduce sum(|x|^p) with the cascade
-// summation in cpu/SumKernel.cpp, which keeps its precision on large inputs
-// (#65815). It adds partial sums into its output, so half and bfloat16 need a
+// summation in cpu/SumKernel.cpp, which keeps small terms after large ones as
+// long as the reduced dims can be merged into one (#65815). It adds partial sums into its output, so half and bfloat16 need a
 // float one unless the output has a single element. _powsum keeps its own
 // p == 0, which counts zeros too (0^0 == 1).
 inline bool use_cascade_powsum(ScalarType in, ScalarType out, double p, bool is_norm, bool single_output) {

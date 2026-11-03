@@ -1952,6 +1952,22 @@ class TestLinalg(TestCase):
         finally:
             torch.set_num_threads(num_threads)
 
+    # Inputs longer than two vectors plus a tail, so ord 0, 1 and 2 run through the
+    # vectorized maps; small integers keep the sums exact.
+    @onlyCPU
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    def test_vector_norm_special_values(self, device, dtype):
+        base = torch.tensor([-3.0, -0.0, 2.0, 0.0, -1.0, 1.0], dtype=torch.double).repeat(12)[:67]
+        for (special, i), ord in product([(None, 0)] + list(product((nan, inf, -inf), (20, 65))), (0, 1, 2)):
+            x = base.clone()
+            if special is not None:
+                x[i] = special
+            for t, dim in ((x, None), (x.unsqueeze(1).repeat(1, 32), 0)):
+                expected = torch.from_numpy(np.array(np.linalg.norm(t.numpy(), ord, axis=dim))).to(dtype)
+                result = torch.linalg.vector_norm(t.to(dtype=dtype, device=device), ord, dim=dim)
+                msg = f"ord={ord}, dim={dim}, x[{i}]={special}"
+                self.assertEqual(result, expected, atol=0, rtol=0, exact_device=False, msg=msg)
+
     # Test that linal.vector_norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
     def test_vector_norm_extreme_values(self, device):

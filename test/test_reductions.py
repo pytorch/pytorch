@@ -1830,6 +1830,22 @@ class TestReductionsDevice(TestCase):
         finally:
             torch.set_num_threads(num_threads)
 
+    # Above GRAIN_SIZE, so at 4 threads a full nansum is split across threads; the
+    # small integers keep the sum exact, so it is rounded to dtype only once.
+    @onlyCPU
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_nansum_nan_multithreaded(self, device, dtype):
+        x = torch.arange(2**16, dtype=torch.double).remainder(9).sub(4)
+        x[::7] = math.nan
+        expected = torch.nansum(x).to(dtype)
+        num_threads = torch.get_num_threads()
+        try:
+            for threads in (1, 4):
+                torch.set_num_threads(threads)
+                self.assertEqual(torch.nansum(x.to(dtype)), expected, atol=0, rtol=0, msg=f"threads={threads}")
+        finally:
+            torch.set_num_threads(num_threads)
+
     @dtypes(*all_types_and(torch.half))
     @skipIfMPS
     def test_nansum_out_dtype(self, device, dtype):
