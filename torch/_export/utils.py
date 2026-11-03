@@ -890,7 +890,7 @@ def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
                     # Loop through and find the "submod_{i}" that have no name collision
                     i = 1
                     new_target_name = f"submod_{i}"
-                    while hasattr(gm, new_target_name):
+                    while _has_attr(gm, new_target_name):
                         i += 1
                         new_target_name = f"submod_{i}"
                 if not _has_attr(gm, new_target_name):

@@ -7,6 +7,7 @@ import operator
 from typing import TYPE_CHECKING
 
 import torch
+from torch.fx.graph_module import _assign_attr, _get_attr
 
 from ..utils import node_replace_, nodes_map
 
@@ -195,7 +196,7 @@ def _replace_with_hop_pass_helper(
     # recursively call
     for node in new_gm.graph.nodes:
         if node.op == "get_attr":
-            subgm = torch.fx.graph_module._get_attr(new_gm, node.target)
+            subgm = _get_attr(new_gm, node.target)
             if not isinstance(subgm, torch.fx.GraphModule):
                 continue
             new_subgm, _ = _replace_with_hop_pass_helper(
@@ -203,7 +204,7 @@ def _replace_with_hop_pass_helper(
                 None,
                 sequential_split_and_maybe_inline_subgraphs,
             )
-            torch.fx.graph_module._assign_attr(new_subgm, new_gm, node.target)
+            _assign_attr(new_subgm, new_gm, node.target)
 
     new_gm.recompile()
     new_gm.graph.lint()
