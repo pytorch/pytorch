@@ -12,7 +12,7 @@ from .sets import LineWithSets
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from typing_extensions import Self
+    from typing import Self
 
     from .block import Block
 
