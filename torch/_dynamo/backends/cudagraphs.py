@@ -204,13 +204,15 @@ def cudagraphs(dynamo_model: torch.fx.GraphModule, dynamo_inputs: Sequence[Any])
                 f"skipping cudagraphs due to {skip_msg}"
             )
 
-            # See [Backward Generation Handling]. Looked up when the backward runs,
-            # as in output_code.maybe_handle_backward_generation: an eagerly
-            # lowered backward gets here before the forward creates the manager.
+            # See [Backward Generation Handling]. The forward compiled first and set
+            # the index. The manager is looked up when the backward runs, as in
+            # output_code.maybe_handle_backward_generation: an eagerly lowered
+            # backward gets here before the forward creates it.
+            device_idx = boxed_device_index.value
+            if device_idx is None:
+                raise AssertionError("boxed_device_index.value must not be None")
+
             def fn(inputs: list[Any]) -> Any:
-                device_idx = boxed_device_index.value
-                if device_idx is None:
-                    device_idx = 0  # Default to device 0 if not set
                 manager = torch._inductor.cudagraph_trees.get_manager(
                     device_idx, create_if_none_exists=False
                 )

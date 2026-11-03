@@ -930,18 +930,11 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertIsNotNone(self.get_manager())
 
-        @parametrize("backend", ("inductor", "cudagraphs"))
-        @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
-        @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", True)
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
-        def test_mutation_rule_of_a_tree_wrapper_after_trees_are_turned_off(
-            self, backend
-        ):
-            # A tree wrapper is built once, so it keeps the tree rule after
-            # triton.cudagraph_trees is turned off: what it skipped and recorded
-            # with trees on, it still does (under inductor a buffer's mutation
-            # records), and a user input's mutation still skips.
-
+        def test_buffer_mutation_records_after_trees_are_turned_off(self):
+            # compile_fx.cudagraphify builds a tree wrapper once, so it keeps the
+            # tree rule after triton.cudagraph_trees is turned off: a buffer, a
+            # static input, may mutate.
             class Mod(torch.nn.Module):
                 def __init__(self) -> None:
                     super().__init__()
@@ -951,36 +944,66 @@ if HAS_CUDA_AND_TRITON:
                     self.buf.add_(x)
                     return self.buf + x
 
+            @torch.compile(mode="reduce-overhead")
             def foo(mod, x):
                 return mod(x)
-
-            def bar(x):
-                x.add_(2)
-                return x
 
             def inp():
                 return torch.ones([10], device="cuda")
 
-            def recorded():
-                return sum(len(nodes) for nodes in self.get_manager().roots.values())
-
-            foo = get_compile_fn(backend)(foo)
-            bar = get_compile_fn(backend)(bar)
             mod, mod2 = Mod(), Mod()
             self.assertEqual(foo(mod, inp()), mod2(inp()))
-            self.assertEqual(bar(inp()), inp() + 2)
-            skips = counters["inductor"]["cudagraph_skips"]
             with config.patch("triton.cudagraph_trees", False):
                 for _ in range(3):
                     self.assertEqual(foo(mod, inp()), mod2(inp()))
                     self.assertEqual(mod.buf, mod2.buf)
-                self.assertEqual(counters["inductor"]["cudagraph_skips"], skips)
-                if backend == "inductor":
-                    self.assertGreater(recorded(), 0)
-                before = recorded()
-                for _ in range(3):
-                    self.assertEqual(bar(inp()), inp() + 2)
-                self.assertEqual(recorded(), before)
+            self.assertNotIn("cudagraph_skips", counters["inductor"])
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @parametrize("backend", ("inductor", "cudagraphs"))
+        @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
+        @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", True)
+        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
+        def test_mutation_cudagraph_managed_tensors_after_trees_are_turned_off(
+            self, backend
+        ):
+            # The cudagraphs backend always builds tree wrappers, and both keep the
+            # tree rule: mutating a tensor a CUDA graph recorded is allowed.
+            def foo(x):
+                return x + 1
+
+            def mut(x):
+                x.add_(2)
+                return x
+
+            mut = get_compile_fn(backend)(mut)
+            foo = get_compile_fn(backend)(foo)
+            for trees in (True, False, False, False):
+                with config.patch("triton.cudagraph_trees", trees):
+                    torch.compiler.cudagraph_mark_step_begin()
+                    inp = torch.rand([4], device="cuda")
+                    self.assertEqual(mut(foo(inp)), inp + 3)
+            self.assertNotIn("cudagraph_skips", counters["inductor"])
+
+        def test_check_for_mutation_counts_a_user_input_without_trees(self):
+            import types
+
+            from torch._inductor.cudagraph_utils import check_for_mutation
+
+            # Input 0 is a user input, 1 a static one; both are mutated.
+            func = types.SimpleNamespace(
+                mutated_input_idxs=[0, 1],
+                static_input_idxs=[1],
+                placeholders=[
+                    PlaceholderInfo(f"arg{i}", None, [], None) for i in (0, 1)
+                ],
+            )
+            inputs = [torch.ones(4), torch.ones(4)]
+            with config.patch("triton.cudagraph_trees", False):
+                reason = check_for_mutation(func, inputs, lambda t: False)
+                self.assertIn("mutated inputs (1 instances)", reason)
+                # A tensor a CUDA graph recorded may mutate.
+                self.assertIsNone(check_for_mutation(func, inputs, lambda t: True))
 
         def test_input_storage_mutation_skips_cudagraphs(self):
             class Mod(nn.Module):
@@ -6099,6 +6122,10 @@ if HAS_CUDA_AND_TRITON:
                     compiled(torch.rand([20], device="cuda")).backward()
                     self.assertEqual(w.grad, torch.ones_like(w))
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hits)
+                # The backward told the manager it ran: one graph, none pending.
+                manager = self.get_manager()
+                self.assertEqual(manager.new_graph_id().id, 1)
+                self.assertFalse(manager.running_forwards_with_pending_backwards)
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("triton.cudagraph_capture_sizes", (2,))
@@ -6141,6 +6168,8 @@ if HAS_CUDA_AND_TRITON:
                 x.grad = None
                 compiled(x).backward()
                 self.assertEqual(x.grad, expected)
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_forward_backward_not_called(self):
