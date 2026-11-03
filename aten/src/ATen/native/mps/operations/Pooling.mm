@@ -857,7 +857,7 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
                                                const int32_t pooling_dims,
                                                const std::string& op_name) {
   const bool is_2d = pooling_dims == 2;
-  TORCH_CHECK_NOT_IMPLEMENTED(input.scalar_type() == kLong || supportedFloatingType(input),
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(input) || (is_2d && input.scalar_type() == kLong),
                               "\"",
                               op_name,
                               "\" not implemented for '",
@@ -875,12 +875,11 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
 
   grad_input.resize_(input.sizes(), input.suggest_memory_format());
 
-  // The 2D kernel gathers and long additions commute, so both are deterministic.
-  // See Note [Enabling Deterministic Operations]
+  // The 2D kernel gathers and is deterministic. See Note [Enabling Deterministic Operations]
   // The other kernel is normally nondeterministic because of atomic accumulation
   // across multiple threads. To make it deterministic, dispatch only one thread
   // per batch, so the accumulations are serialized.
-  const bool serial = !is_2d && input.scalar_type() != kLong && at::globalContext().deterministicAlgorithms();
+  const bool serial = !is_2d && at::globalContext().deterministicAlgorithms();
   if (serial && input.scalar_type() != kFloat) {
     Tensor grad_input_float = at::empty({0}, grad_input.options().dtype(kFloat));
     avg_pool_backward_out_mps_template(grad_input_float,
