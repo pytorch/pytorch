@@ -361,6 +361,44 @@ def fn():
             self.assertIsNotNone(inst.exn_tab_entry)
             self.assertIs(inst.exn_tab_entry.target, insts[exp])
 
+    @skipIfNotPy312
+    def test_restore_conditional_jump_exception_entries(self):
+        create_instruction = bytecode_transformation.create_instruction
+        Entry = bytecode_transformation.InstructionExnTabEntry
+        handler = create_instruction("NOP")
+
+        def restore(gap_opnames, right_target=handler, depth=0, lasti=False):
+            left = create_instruction("NOP")
+            right = create_instruction("NOP")
+            left.exn_tab_entry = Entry(left, left, handler, 0, False)
+            right.exn_tab_entry = Entry(right, right, right_target, depth, lasti)
+            gap = [
+                create_instruction(name, target=handler)
+                if "JUMP" in name
+                else create_instruction(name)
+                for name in gap_opnames
+            ]
+            bytecode_transformation.restore_conditional_jump_exception_entries(
+                [left, *gap, right, handler]
+            )
+            return gap
+
+        gap = restore(["POP_JUMP_IF_FALSE", "NOP", "JUMP_BACKWARD", "POP_JUMP_IF_NONE"])
+        for inst in (gap[0], gap[3]):
+            self.assertEqual(inst.exn_tab_entry, Entry(inst, inst, handler, 0, False))
+        self.assertIsNone(gap[1].exn_tab_entry)
+        self.assertIsNone(gap[2].exn_tab_entry)
+
+        jump_and_nop = ["POP_JUMP_IF_FALSE", "NOP"]
+        for name, gap in [
+            ("other target", restore(jump_and_nop, right_target=create_instruction("NOP"))),
+            ("other depth", restore(jump_and_nop, depth=1)),
+            ("other lasti", restore(jump_and_nop, lasti=True)),
+            ("other opcode in gap", restore(["POP_JUMP_IF_FALSE", "POP_TOP"])),
+        ]:
+            with self.subTest(name):
+                self.assertTrue(all(inst.exn_tab_entry is None for inst in gap))
+
     @skipIfNotPy311
     def test_compute_exception_table_nested(self):
         insts = []

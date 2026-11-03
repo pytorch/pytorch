@@ -911,6 +911,65 @@ def virtualize_exception_table(
         pass
 
 
+# Opcodes CPython may leave without an exception table entry even though they
+# sit inside a protected region, so being uncovered does not mean the region
+# was exited.
+UNCOVERED_IN_BLOCK_OPNAMES = {"NOP", "NOT_TAKEN", "JUMP_BACKWARD"}
+
+
+def restore_conditional_jump_exception_entries(
+    instructions: list[Instruction],
+) -> None:
+    """
+    Python 3.14 can emit a conditional jump with no exception table entry even
+    when the instructions around it are covered by the same entry (seen with
+    comprehension filters inside a `with` block). Dynamo's block stack tracking
+    treats an uncovered instruction as leaving the block, so it drops the live
+    `with` and resumes after a graph break without re-entering it.
+
+    For each run of uncovered instructions that contains only conditional
+    jumps and UNCOVERED_IN_BLOCK_OPNAMES, and whose covered neighbors share a
+    handler target, depth, and lasti, give each conditional jump a singleton
+    entry for that handler. Must run before remove_jump_if_none, whose
+    LOAD_CONST/IS_OP/POP_JUMP_IF_TRUE replacement inherits the entry.
+
+    The entries are written into the emitted exception table by
+    compute_exception_table. That is safe because none of the covered
+    instructions can raise: on 3.14 POP_JUMP_IF_TRUE/FALSE consume an exact
+    bool, and the None tests and their lowering only compare identity.
+    JUMP_BACKWARD may appear in the run but stays uncovered: it can raise via
+    the eval breaker, and a `continue` in a `try` body really leaves the block.
+    """
+    jumps = {
+        "POP_JUMP_IF_TRUE",
+        "POP_JUMP_IF_FALSE",
+        "POP_JUMP_IF_NONE",
+        "POP_JUMP_IF_NOT_NONE",
+    }
+    transparent = jumps | UNCOVERED_IN_BLOCK_OPNAMES
+    previous: InstructionExnTabEntry | None = None
+    gap: list[Instruction] = []
+    for inst in instructions:
+        entry = inst.exn_tab_entry
+        if entry is None:
+            gap.append(inst)
+            continue
+        if (
+            previous is not None
+            and previous.target is entry.target
+            and previous.depth == entry.depth
+            and previous.lasti == entry.lasti
+            and all(item.opname in transparent for item in gap)
+        ):
+            for item in gap:
+                if item.opname in jumps:
+                    item.exn_tab_entry = InstructionExnTabEntry(
+                        item, item, entry.target, entry.depth, entry.lasti
+                    )
+        previous = entry
+        gap.clear()
+
+
 def compute_exception_table(
     instructions: list[Instruction],
 ) -> list[ExceptionTableEntry]:
@@ -1736,6 +1795,8 @@ def _cached_cleaned_instructions(
     if not safe:
         if sys.version_info < (3, 12):
             explicit_super(code, instructions)
+        if sys.version_info >= (3, 14):
+            restore_conditional_jump_exception_entries(instructions)
         remove_jump_if_none(instructions)
         if sys.version_info >= (3, 12):
             remove_binary_store_slice(instructions)
