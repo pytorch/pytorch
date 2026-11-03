@@ -4522,6 +4522,20 @@ class InstructionTranslatorBase(
             )
         if not obj.is_mutable():
             raise AssertionError("expected obj.is_mutable() to be true")
+        if inst.opname == "DICT_MERGE":
+            v = v.realize()
+            if type(v) is ConstDictVariable:
+                # Bind fixed-signature keywords by name. A **kwargs callee can
+                # observe their order, so guard the input before copying it.
+                offset = 3 if sys.version_info >= (3, 13) else 2
+                fn = self.stack[-inst.arg - offset]
+                v.install_dict_keys_match_guard()
+                if (
+                    not isinstance(fn, BaseUserFunctionVariable)
+                    or fn.get_code().co_flags & inspect.CO_VARKEYWORDS
+                ):
+                    v.install_dict_order_guard(self)
+                v = v.clone(source=None, mutation_type=ValueMutationNew())
         obj.call_method(self, "update", [v], {})  # type: ignore[arg-type]
 
     DICT_UPDATE = DICT_MERGE

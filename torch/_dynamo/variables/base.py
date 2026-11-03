@@ -355,26 +355,19 @@ def _check_method_arity(
     flags: MethodFlags,
     args: Any,
     kwargs: Any,
-    *,
-    qualname: str | Callable[[], str] | None = None,
 ) -> None:
     # Centralized arity check for a tp_methods handler, driven by MethodFlags,
     # raising the same TypeErrors CPython raises for builtin methods. Shared by
     # Method and callers that run the handler directly (e.g. tensor.py).
     n = len(args)
+    qualname = f"{vt.python_type_name()}.{name}"
     if kwargs and not (flags & MethodFlags.KEYWORDS):
-        error = "takes no keyword arguments"
-    elif flags & MethodFlags.NOARGS and args:
-        error = f"takes no arguments ({n} given)"
-    elif flags & MethodFlags.O and n != 1:
-        error = f"takes exactly one argument ({n} given)"
-    else:
-        return
-    if callable(qualname):
-        qualname = qualname()
-    elif qualname is None:
-        qualname = f"{vt.python_type_name()}.{name}"
-    raise_type_error(tx, f"{qualname}() {error}")
+        raise_type_error(tx, f"{qualname}() takes no keyword arguments")
+    if flags & (MethodFlags.NOARGS | MethodFlags.O):
+        if flags & MethodFlags.NOARGS and args:
+            raise_type_error(tx, f"{qualname}() takes no arguments ({n} given)")
+        if flags & MethodFlags.O and n != 1:
+            raise_type_error(tx, f"{qualname}() takes exactly one argument ({n} given)")
 
 
 # CPython PyMethodDef.ml_flags bits (Include/methodobject.h); MethodFlags above
@@ -436,14 +429,13 @@ class Method:
         kwargs: Any,
         *,
         descriptor: types.MethodDescriptorType | None = None,
-        qualname: str | Callable[[], str] | None = None,
     ) -> VariableTracker | None:
         flags = (
             _derive_method_flags(vt, name)
             if descriptor is None
             else _flags_from_ml_flags(descriptor.__objclass__, name)
         )
-        _check_method_arity(vt, tx, name, flags, args, kwargs, qualname=qualname)
+        _check_method_arity(vt, tx, name, flags, args, kwargs)
         return self.handler(vt, tx, args, kwargs)
 
 
@@ -910,8 +902,8 @@ def check_setattr_args(
         raise_type_error(tx, "wrapper __setattr__() takes no keyword arguments")
     if len(args) != 2:
         # CPython's wrap_setattr names the method starting in 3.14.
-        name = "__setattr__" if sys.version_info >= (3, 14) else ""
-        raise_type_error(tx, f"{name} expected 2 arguments, got {len(args)}")
+        prefix = "__setattr__ " if sys.version_info >= (3, 14) else ""
+        raise_type_error(tx, f"{prefix}expected 2 arguments, got {len(args)}")
 
 
 def _wrap_setattr(

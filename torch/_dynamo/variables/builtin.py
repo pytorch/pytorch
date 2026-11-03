@@ -1962,10 +1962,6 @@ class BuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self.fn is object and name == "__setattr__":
-            if not args:
-                raise_type_error(
-                    tx, "descriptor '__setattr__' of 'object' object needs an argument"
-                )
             check_setattr_args(tx, args[1:], kwargs)
             obj, name_var, val = args
             obj = obj.realize()
