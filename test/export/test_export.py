@@ -1064,7 +1064,6 @@ class TestExport(TestCase):
         # Strict export traces scan inside vmap with batched operands. The
         # outputs of scan stay batched, so leaving vmap does not broadcast them
         # along the batch dim.
-        from torch._higher_order_ops.scan import scan
 
         def combine(carry, x):
             carry = carry + x
@@ -1123,7 +1122,6 @@ class TestExport(TestCase):
     def test_scan_output_keeps_no_constant(self) -> None:
         # Tracing runs the combine function for one step, and the outputs of
         # scan must not keep the constant values of that step.
-        from torch._higher_order_ops.scan import scan
 
         def combine(carry, x):
             step, acc = carry
