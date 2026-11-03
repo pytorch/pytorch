@@ -134,9 +134,8 @@ jobs:
       log-prefix: ${{ needs.prepare.outputs.mode == 'apply' && github.repository == 'pytorch/pytorch' && 'review-logs' || '' }}
       prompt: |
         Triage issue #{0} in ${{ github.repository }} with the `triaging-issues` skill
-        (`.agents/skills/triaging-issues/SKILL.md`). Read the skill first, then `labels.json` and
-        `templates.json` beside it, and `pt2-triage-rubric.md` when the issue involves
-        PT2/torch.compile. Finish by calling `submit_result` with your plan.
+        (`.agents/skills/triaging-issues/SKILL.md`). Consult its reference files as relevant
+        to the report. Finish by calling `submit_result` with your plan.
 
         RELEASE CONTEXT (authoritative: use this and nothing else for the current release
         version, not any version written in the skill files or your own knowledge of PyTorch
