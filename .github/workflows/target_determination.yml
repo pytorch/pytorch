@@ -111,8 +111,11 @@ jobs:
           if-no-files-found: error
           path: td_results.json
 
+      # Only the workflows where run_test.py enables TD, and so can enforce the selection.
       - name: Wait for the LLM test selection
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        if: >-
+          (contains(fromJSON('["pull", "trunk"]'), github.workflow) || startsWith(github.workflow, 'rocm-') || startsWith(github.workflow, 'periodic-rocm-')) &&
+          (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         continue-on-error: true
         timeout-minutes: 12
         env:

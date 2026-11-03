@@ -5,8 +5,8 @@ name: llm-td
 # only ever handed to reviewed code. The PR is read through git, never executed.
 # Test jobs fetch the result by PR number and head SHA in download-td-artifacts;
 # when enforcing, the target-determination job they need first waits for this
-# run (see wait_for_selection.py, which reads the run name below). run_test.py only skips tests with it when the PR is labeled ci-llm-td and TD is
-# enabled.
+# run (see wait_for_selection.py, which reads the run name below). run_test.py
+# only skips tests with it when the PR is labeled ci-llm-td and TD is enabled.
 
 run-name: llm-td ${{ contains(github.event.pull_request.labels.*.name, 'ci-llm-td') && 'enforce' || 'shadow' }}
 
