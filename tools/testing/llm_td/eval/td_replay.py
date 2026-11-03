@@ -12,8 +12,10 @@ mappings, linked issue bodies) empty. A sample on which a heuristic raised
 gets no file, and the run exits non-zero, so a rerun recomputes it. Writes
 OUT/<id>.json with:
 
-  inputs     a hash of test-times.json and the STATS artifacts; a file with
-             another hash is recomputed
+  inputs     a hash of test-times.json, the sample and `stats` (see
+             score.replay_inputs); a file with another hash is recomputed,
+             and score.py drops one that does not match its inputs
+  stats      a hash of the STATS artifacts
   scored     files TD gives a positive score, best first (what the hedge draws from)
   top25      CI's top-25% cut over all candidates
   top25_cfg  config -> files of that cut per config of test-times.json (see top25_per_config)
@@ -48,7 +50,7 @@ from tools.stats.import_test_stats import (
     TEST_FILE_RATINGS_FILE,
 )
 from tools.testing.llm_td.eval import REPO, write_json
-from tools.testing.llm_td.eval.score import Seconds, test_seconds
+from tools.testing.llm_td.eval.score import replay_inputs, Seconds, test_seconds
 
 
 if TYPE_CHECKING:
@@ -106,8 +108,8 @@ def main() -> None:
     from tools.testing.target_determination.determinator import get_test_prioritizations
 
     seconds = test_seconds(args.data / "test-times.json")
-    sources = [args.data / "test-times.json", *(args.stats / a for a in ARTIFACTS)]
-    inputs = hashlib.sha256(b"".join(x.read_bytes() for x in sources)).hexdigest()
+    times = (args.data / "test-times.json").read_bytes()
+    stats = hashlib.sha256(b"".join((args.stats / a).read_bytes() for a in ARTIFACTS)).hexdigest()  # fmt: skip
     current: dict = {}
     stats_root = args.stats.absolute().parent
     patches = {
@@ -143,11 +145,12 @@ def main() -> None:
         for target, new in patches.items():
             stack.enter_context(mock.patch(H + target, new))
         for path in paths[which::n]:
-            done = out / path.name
+            done, sample = out / path.name, path.read_bytes()
+            inputs = replay_inputs(stats, times, sample)
             if done.exists() and json.loads(done.read_text()).get("inputs") == inputs:
                 continue
             current.clear()
-            current.update(json.loads(path.read_text()))
+            current.update(json.loads(sample))
             cands = current["candidates"]
             log = io.StringIO()
             with contextlib.redirect_stdout(io.StringIO()):
@@ -165,6 +168,7 @@ def main() -> None:
             scored = [t.test_file for score, t in tp._traverse_scores() if score > 0]
             write_json(done, {
                 "inputs": inputs,
+                "stats": stats,
                 "scored": list(dict.fromkeys(scored)),
                 "top25": sorted({t.test_file for t in tp.get_top_per_tests(25)[0]}),
                 "top25_cfg": top25_per_config(tp, cands, seconds),

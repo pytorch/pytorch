@@ -66,6 +66,11 @@ DRIVER_MAPPINGS = {
         t: [*ADDITIONAL_MAPPINGS[t], r"^test/test_cpp_extensions_aot\.py$"]
         for t in ("test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja")
     },  # fmt: skip
+    # run_test.py runs test_autoload.py, with the cpp_extensions installed, as both autoload drivers.
+    **{
+        t: [r"^test/test_autoload\.py$", r"^test/cpp_extensions/"]
+        for t in ("test_autoload_enable", "test_autoload_disable")
+    },  # fmt: skip
     "test_ao_sparsity": [r"^test/ao/"],
     "test_autograd": [r"^test/autograd/"],
     "test_fx": [r"^test/fx/"],
