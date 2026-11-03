@@ -1,6 +1,6 @@
 # LLM test selection for PyTorch CI: offline evaluation
 
-**TL;DR.** If PRs picked their tests with one Opus 5.5 call (low effort, plus a 5% TD hedge) instead of today's target determination (TD), CI test-job spend would fall **36%, from $935k to $599k a month** ($336k saved, $61k of it GPU). The p50 wait for pull and trunk would fall from **181 to 96 minutes**. It would also catch more real breakages than TD does today: in a backtest, **77% of the commits later reverted for breaking main would have failed CI on their PR, against 71% with TD**, and 97.7% of PRs with a reproducible failure would still have gone red, against 96.6%.
+**TL;DR.** If PRs picked their tests with one Opus 5.5 call (low effort, plus a 5% TD hedge) instead of today's target determination (TD), CI test-job spend would fall **36%, from $935k to $599k a month** ($336k saved, $61k of it GPU). The p50 wait for pull and trunk would fall from **181 to 96 minutes**. It would also catch more real breakages than TD does today: in a backtest over the 148 commits later reverted for breaking a job that TD runs in, **78% would have failed CI on their PR, against 70% with TD**, and 97.7% of PRs with a reproducible failure would still have gone red, against 96.6%.
 
 - **The idea.** One `claude -p` call per PR push sees the title, description, diff and every candidate test file annotated with its CI minutes, and returns the files worth running.
 - **Old and new.** Below, "old" is TD as it runs on PRs today: its top 25% of test files per config, in the workflows that have TD. "New" is the proposed production config: Opus 5.5 at low effort plus TD's top files up to 5% of each config's test time. Main always runs everything in both.
@@ -22,7 +22,7 @@ The sections up to Time to land compare old and new only. Other models, effort l
 
 We took 666 historical changes, asked each policy offline which test files it would run, and checked that against which tests really failed. A failure is a (test file, CI config) pair, for example `test_ops.py` in the `default` config. A policy **catches** a change if it would have run at least one of the change's failing files in the config where it failed, which is enough for that CI run to go red. Only failures in jobs that run TD today count: the pull, trunk and ROCm workflows. Jobs elsewhere (inductor's unit tests, periodic, slow, mac-mps, ...) run every test under both policies, so their failures cannot tell the two apart and are left out; a change whose only failures were there is left out too. There are three kinds of change:
 
-- **Reverted commits (n=119).** These are commits that landed on main between 2026-04-01 and 2026-10-25 and that the autorevert bot then reverted because they broke tests. Main runs every test, so we know exactly which files started failing, and in which configs, between the landing and the revert. Of 160 such reverts, 119 broke a TD job, with 164 failures in those jobs. A caught revert is a breakage that the PR's own CI would have flagged before it landed. This is the most important number: TD is not involved in choosing what main runs, so this truth is not biased toward either policy.
+- **Reverted commits (n=148).** These are commits that landed on main between 2026-04-01 and 2026-10-25 and that the autorevert bot then reverted because they broke tests. Main runs every test, so we know exactly which files started failing, and in which configs, between the landing and the revert. Of 160 such reverts, 148 broke a TD job, with 193 failures in those jobs; the other 12 broke only jobs without TD. A caught revert is a breakage that the PR's own CI would have flagged before it landed. This is the most important number: TD is not involved in choosing what main runs, so this truth is not biased toward either policy.
 - **PRs with a reproduced failure (n=176).** We took 316 PRs from 2026-10-01 to 2026-10-25 whose CI had a test failure we can blame on the PR: no other author's PR failed the same test, and main did not fail it within 4 days. 176 of them have a failure in a TD job that happened again on a rerun or on a later push of the same PR (348 failures). These are real bugs the author introduced, and a caught PR is one whose CI would still have gone red. These PRs ran under TD, so we only see failures in files TD chose to run, which favors old.
 - **PRs with any attributable failure (n=282).** These are the same 316 PRs counting every attributable failure in a TD job, including ones seen only once, which are mostly flaky tests. 282 have one. This is the one metric where old is ahead, because TD's heuristics rank historically flaky tests high.
 - **Typical changes (n=190).** These are random main commits from 2026-10-01 to 2026-10-25 with no known breakage. **Test time run** is the mean over them of the share of a full CI pass's test-seconds that a policy runs, with CPU and GPU counted separately, over the configs that some TD job runs (the inductor unit-test configs are priced separately below). The dollars come from this number.
@@ -33,8 +33,8 @@ We took 666 historical changes, asked each policy offline which test files it wo
 
 | | Old | New |
 |---|---|---|
-| Reverted commits caught (n=119) | 70.6% | 77.3% |
-| their failures caught (164) | 61.6% | 72.6% |
+| Reverted commits caught (n=148) | 70.3% | 77.7% |
+| their failures caught (193) | 63.7% | 72.5% |
 | PRs with a reproduced failure caught (n=176) | 96.6% | 97.7% |
 | their failures caught (348) | 92.5% | 97.4% |
 | PRs with any attributable failure caught (n=282) | 92.2% | 86.9% |
@@ -42,7 +42,7 @@ We took 666 historical changes, asked each policy offline which test files it wo
 | GPU test time run on a typical change | 43.5% | 11.5% |
 | Model call, $ per push / p50 latency | - | $0.179 / 8s |
 
-- New catches 21 reverted commits that old misses, and old catches 13 that new misses. On PRs with a reproduced failure the split is 6 and 4.
+- New catches 26 reverted commits that old misses, and old catches 15 that new misses. On PRs with a reproduced failure the split is 6 and 4.
 - Old's numbers come from a replay of today's TD that is optimistic for it; see Caveats.
 
 ## Spend and savings
@@ -109,7 +109,7 @@ Time to signal (TTS) per workflow, in minutes:
 
 - The selectable part of each test job is the Test step. Outside it, checkout, docker pull, build download and teardown take a median of 4.3 to 4.8 minutes, about 12-15% of the job. The model assumes a fixed overhead fraction of 0.2 for that.
 - A job's relative cost is `0.2 + 0.8 * f`, where f is the share of test time it runs. For old, f is the replayed TD share in TD workflows and 1 elsewhere. The PR share of each workflow's test hours is then rescaled by new over old.
-- **Test-time shares.** pull, trunk, periodic and slow use the typical-change shares from the Accuracy table: old 48.7% CPU / 43.5% GPU, new 11.5% / 11.5%. The inductor rows use the configs of inductor-unittest.yml that no TD job runs (`inductor_core`, `inductor_cpp_wrapper`, `inductor_distributed`, `inductor_amx`, `inductor_aoti_fallback`, `inductor-halide`, `inductor-triton-cpu`), over only the 69 of 190 neutral commits that match the `ciflow/inductor` autolabel globs, since those are the PRs that run it; on those, new runs 12.3% of CPU and 18.7% of GPU unit-test time. trunk's own `inductor` config has TD and is priced with trunk.
+- **Test-time shares.** pull, trunk, periodic and slow use the typical-change shares from the Accuracy table, which are over the configs TD jobs run, so the periodic and slow rows are approximations ($4k together): old 48.7% CPU / 43.5% GPU, new 11.5% / 11.5%. The inductor rows use the configs of inductor-unittest.yml that no TD job runs (`inductor_core`, `inductor_cpp_wrapper`, `inductor_distributed`, `inductor_amx`, `inductor_aoti_fallback`, `inductor-halide`, `inductor-triton-cpu`), over only the 69 of 190 neutral commits that match the `ciflow/inductor` autolabel globs, since those are the PRs that run it; on those, new runs 12.3% of CPU and 18.7% of GPU unit-test time. trunk's own `inductor` config has TD and is priced with trunk.
 - **Model cost.** $0.179 per call is the mean over all 666 samples, a conservative basis since neutral commits average $0.139. At about 11.4k PR pushes a month that is $2.0k a month. The same basis is used for every policy in Sweep.
 
 The overhead fraction dominates the uncertainty:
@@ -149,7 +149,7 @@ The overhead fraction dominates the uncertainty:
 
 | Kind | n | Window | Truth |
 |---|---|---|---|
-| PR | 316 | 2026-10-01 to 10-25 | Test files that failed on the PR head and that we can blame on the PR: no other author's PR failed the same test, and main did not fail it within 4 days. "Strong" truth keeps only failures that reproduced on a second run or a later head; 185 PRs have one. |
+| PR | 316 | 2026-10-01 to 10-25 | Test files that failed on the PR head and that we can blame on the PR: no other author's PR failed the same test, and main did not fail it within 4 days. "Strong" truth keeps only failures that reproduced on a second run or a later head; 185 PRs have one, and 176 of those have one in a TD job, which is the n scored throughout. |
 | revert | 160 | 2026-04-01 to 10-25 | Main commits the autorevert system reverted. The truth is the failures that appeared between landing and the revert, with their configs. |
 | neutral | 190 | 2026-10-01 to 10-25 | Random main commits, with no truth. They measure how much a selector runs on a typical change, which is what the dollars depend on. |
 
@@ -176,53 +176,53 @@ Each point is one model and effort level. Filled points are the selection as the
 
 | Model / effort | PR caught | PR failures | Revert caught | Revert failures | Typical CPU | Typical GPU | $/call | p50 wall |
 |---|---|---|---|---|---|---|---|---|
-| Haiku 4.5 low | 84.1% | 75.3% | 42.0% | 39.6% | 6.9% | 6.9% | $0.064 | 32s |
-| Haiku 4.5 high | 85.8% | 77.3% | 44.5% | 41.5% | 6.9% | 6.9% | $0.064 | 32s |
-| Sonnet 5 low | 95.5% | 92.2% | 53.8% | 49.4% | 8.7% | 8.2% | $0.102 | 5s |
-| Sonnet 5 medium | 94.9% | 92.0% | 58.8% | 52.4% | 8.6% | 8.4% | $0.110 | 11s |
-| Sonnet 5 high | 94.9% | 92.5% | 65.5% | 61.0% | 10.1% | 9.6% | $0.127 | 23s |
-| Opus 5.5 low | 97.2% | 95.1% | 69.7% | 65.2% | 7.6% | 7.3% | $0.179 | 8s |
-| Opus 5.5 low (rerun) | 98.3% | 96.0% | 67.2% | 61.0% | 7.8% | 7.5% | $0.178 | 8s |
-| Opus 5.5 medium | 98.3% | 96.6% | 69.7% | 65.2% | 7.6% | 7.5% | $0.192 | 14s |
-| Opus 5.5 high | 98.3% | 97.4% | 70.6% | 66.5% | 7.8% | 7.7% | $0.201 | 18s |
-| TD today (old), for reference | 96.6% | 92.5% | 70.6% | 61.6% | 48.7% | 43.5% | - | - |
+| Haiku 4.5 low | 84.1% | 75.3% | 44.6% | 42.0% | 6.9% | 6.9% | $0.064 | 32s |
+| Haiku 4.5 high | 85.8% | 77.3% | 45.9% | 43.0% | 6.9% | 6.9% | $0.064 | 32s |
+| Sonnet 5 low | 95.5% | 92.2% | 54.1% | 50.3% | 8.7% | 8.2% | $0.102 | 5s |
+| Sonnet 5 medium | 94.9% | 92.0% | 58.1% | 52.3% | 8.6% | 8.4% | $0.110 | 11s |
+| Sonnet 5 high | 94.9% | 92.5% | 64.2% | 59.6% | 10.1% | 9.6% | $0.127 | 23s |
+| Opus 5.5 low | 97.2% | 95.1% | 70.9% | 65.8% | 7.6% | 7.3% | $0.179 | 8s |
+| Opus 5.5 low (rerun) | 98.3% | 96.0% | 67.6% | 61.1% | 7.8% | 7.5% | $0.178 | 8s |
+| Opus 5.5 medium | 98.3% | 96.6% | 70.9% | 66.3% | 7.6% | 7.5% | $0.192 | 14s |
+| Opus 5.5 high | 98.3% | 97.4% | 73.0% | 67.9% | 7.8% | 7.7% | $0.201 | 18s |
+| TD today (old), for reference | 96.6% | 92.5% | 70.3% | 63.7% | 48.7% | 43.5% | - | - |
 
 **With the 5% hedge:**
 
 | Model / effort | PR caught | PR failures | Revert caught | Revert failures | Typical CPU | Typical GPU | Saved $k/mo | Model $k/mo |
 |---|---|---|---|---|---|---|---|---|
-| **Opus 5.5 low (production)** | **97.7%** | **97.4%** | **77.3%** | **72.6%** | **11.5%** | **11.5%** | **336** | **2.0** |
-| Opus 5.5 high | 98.3% | 97.7% | 75.6% | 72.6% | 11.7% | 11.9% | 334 | 2.3 |
-| Sonnet 5 medium | 97.7% | 96.8% | 69.7% | 65.2% | 12.6% | 12.5% | 326 | 1.3 |
-| Haiku 4.5 low | 89.8% | 84.2% | 58.8% | 55.5% | 10.9% | 11.0% | 342 | 0.7 |
+| **Opus 5.5 low (production)** | **97.7%** | **97.4%** | **77.7%** | **72.5%** | **11.5%** | **11.5%** | **336** | **2.0** |
+| Opus 5.5 high | 98.3% | 97.7% | 77.7% | 73.6% | 11.7% | 11.9% | 334 | 2.3 |
+| Sonnet 5 medium | 97.7% | 96.8% | 70.3% | 65.3% | 12.6% | 12.5% | 326 | 1.3 |
+| Haiku 4.5 low | 89.8% | 84.2% | 60.1% | 56.5% | 10.9% | 11.0% | 342 | 0.7 |
 
-Opus 5.5 low without the hedge would save $369k but catches 7.6 points fewer reverts, which leaves it level with TD (69.7% vs 70.6%). Haiku saves more only because it runs less, and catches 18 points fewer reverts than production.
+Opus 5.5 low without the hedge would save $369k but catches 6.8 points fewer reverts, which leaves it level with TD (70.9% vs 70.3%). Haiku saves more only because it runs less, and catches 18 points fewer reverts than production.
 
 **Hedge budgets, Opus 5.5 low:**
 
 | Hedge | Revert caught | Typical CPU |
 |---|---|---|
-| 0% | 69.7% | 7.6% |
-| **5% (production)** | **77.3%** | **11.5%** |
-| 10% | 77.3% | 15.6% |
-| 15% | 81.5% | 19.6% |
-| 20% | 80.7% | 23.9% |
+| 0% | 70.9% | 7.6% |
+| **5% (production)** | **77.7%** | **11.5%** |
+| 10% | 79.1% | 15.6% |
+| 15% | 81.8% | 19.6% |
+| 20% | 81.8% | 23.9% |
 
-The budgets are not nested: the hedge skips a file that does not fit and keeps filling, so a larger budget can take one large file in place of several small ones. A larger budget therefore does not always catch more; 20% catches one revert fewer than 15%.
+The budgets are not nested: the hedge skips a file that does not fit and keeps filling, so a larger budget can take one large file in place of several small ones. A larger budget therefore does not always catch more; 20% catches no revert that 15% misses.
 
 **What the sweep shows.**
-- **Model size matters more than effort.** Opus at low effort beats Sonnet at high effort on reverts (69.7% vs 65.5%) and is about 3x faster (8s vs 23s p50).
-  - Effort helps Opus by about one point on reverts, which is within run-to-run noise.
+- **Model size matters more than effort.** Opus at low effort beats Sonnet at high effort on reverts (70.9% vs 64.2%) and is about 3x faster (8s vs 23s p50).
+  - Effort helps Opus by about two points on reverts (70.9% low and medium, 73.0% high), which is within run-to-run noise.
   - Haiku 4.5 does not support the effort setting, so its two runs are effectively replicates. It is not good enough on reverts.
   - Sonnet sometimes fails to produce schema-valid output after retries: 12 of 666 samples at low effort. Those fall back to run-all, which is safe but costs.
 - **Spend goes almost entirely on run-all.**
   - Without the safety rules, Opus low alone runs about 3.2% of test time on a typical change.
   - The run-all rules fire on 10 of 190 typical changes, mostly edits to `.ci/pytorch/test.sh` and the test docker images, and account for most of the rest of the 7.6%.
   - Narrowing those rules is the cheapest remaining lever. They were kept broad because 8 of the 160 reverts are docker image changes.
-- **The LLM and TD miss different things.** On reverts, Opus low (no hedge) catches 19 that TD misses, and TD catches 20 that Opus misses; their union catches 103 of 119 (87%). This is why the hedge matters: alone, each catches about 70%. Running all of TD's top 25% on top of the model would cost what TD costs now, which is why the hedge is a small budget. 5% is the recommended start because many of the misses it leaves are label noise.
-- **Run-to-run variance is about 3 points.** Two identical Opus low runs give 69.7% and 67.2% on reverts, so differences of 2 or 3 points between neighbors are not significant.
+- **The LLM and TD miss different things.** On reverts, Opus low (no hedge) catches 24 that TD misses, and TD catches 23 that Opus misses; their union catches 128 of 148 (86%). This is why the hedge matters: alone, each catches about 70%. Running all of TD's top 25% on top of the model would cost what TD costs now, which is why the hedge is a small budget. 5% is the recommended start because many of the misses it leaves are label noise.
+- **Run-to-run variance is about 3 points.** Two identical Opus low runs give 70.9% and 67.6% on reverts, so differences of 2 or 3 points between neighbors are not significant.
 
-**Revert misses.** Opus high (no hedge) misses every failure on 35 of the 119 reverts. The AI assistant that wrote this stack hand-checked the misses on an earlier version of the revert truth and scoring (39 of them); a human has not reviewed them.
+**Revert misses.** Opus high (no hedge) misses every failure on 40 of the 148 reverts. The AI assistant that wrote this stack hand-checked the misses on an earlier version of the revert truth and scoring (39 of them); a human has not reviewed them.
 - About a quarter are not plausibly caused by the reverted commit; they are label noise. Examples:
   - a torchtitan pin bump labeled with a test_testing failure;
   - a docs change labeled with libtorch_agnostic;
@@ -236,15 +236,15 @@ The budgets are not nested: the hedge skips a file that does not fit and keeps f
 
 **Agentic mode.**
 - **Setup.** Sonnet 5 medium was rerun on 169 of the samples (80 PR, 60 revert, 29 neutral) with Read/Grep/Glob over a checkout of the change.
-- **It made no difference.** Revert recall was identical, 22 of the subset's 42 scored reverts (52.4%) with and without tools. On the subset's 49 PRs with a reproduced failure, it dropped from 46 (93.9%) to 45 (91.8%).
+- **It made no difference.** Revert recall was identical, 30 of the subset's 56 scored reverts (53.6%) with and without tools. On the subset's 49 PRs with a reproduced failure, it dropped from 46 (93.9%) to 45 (91.8%).
 - **The model rarely used the tools.** In about 63% of samples it answered without calling one.
 - **It added cost and latency.** Per call it cost $0.150 vs $0.134 on PRs and $0.116 vs $0.095 on reverts, and p90 latency rose from 29s to 37s.
-- **Opus without tools is better.** On the same subset, Opus 5.5 low with no tools catches all 49 PRs (100%) and 28 of the 42 reverts (66.7%).
+- **Opus without tools is better.** On the same subset, Opus 5.5 low with no tools catches all 49 PRs (100%) and 40 of the 56 reverts (71.4%).
 - **Conclusion.** Spend on a bigger model, not on letting a smaller one explore. CI runs with `--tools ""`, which also removes any route for PR content to drive file reads.
 
 ## Caveats
 
-- **The TD replay is optimistic.** It uses today's heuristic stats, which include these failures. PR truth is also censored toward TD's picks. Both favor old. Failures in jobs without TD (inductor unit tests, periodic, slow, ...) are left out because both policies run everything there; scoring them as caught for both would add the same 41 reverts to each side.
+- **The TD replay is optimistic.** It uses today's heuristic stats, which include these failures. PR truth is also censored toward TD's picks. Both favor old. Failures in jobs without TD (inductor unit tests, periodic, slow, ...) are left out because both policies run everything there; scoring them as caught for both would add the same 12 reverts to each side (79.4% vs 72.5% of all 160).
 - **Label noise.** About a quarter of the remaining revert misses look unrelated to the reverted change, so true revert recall is higher than reported.
 - **Training-data contamination.** Reverts before mid-2026 may predate the models' knowledge cutoff. The PR samples (October 2026) do not, and they show the same ordering of models.
 - **Prompt injection.**
