@@ -22,3 +22,59 @@ updates:
       - "module: ci"
       - "module: inductor"
       - "ciflow/inductor"
+
+  # Weekly version updates for the CI image requirements. Minor and patch
+  # bumps are batched into one PR, so the image is rebuilt and tested once a
+  # week; a major bump gets its own PR. CI runs on each PR before a maintainer
+  # merges it. Security updates are separate and still arrive as individual
+  # PRs when an advisory is published.
+  - package-ecosystem: "pip"
+    directory: "/.ci/docker"
+    # Only requirements-ci.txt: transformers has its own entry above, and the
+    # docs and TPU requirements are tested by other jobs.
+    exclude-paths:
+      - ".ci/docker/ci_commit_pins/**"
+      - ".ci/docker/common/**"
+      - ".ci/docker/requirements-docs.txt"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    target-branch: "main"
+    # Bump == pins; leave lower bounds alone unless the new version needs it.
+    versioning-strategy: increase-if-necessary
+    # Only propose a release once it has been out for a week, so a compromised
+    # or broken release is more likely to be yanked or reported first.
+    cooldown:
+      default-days: 7
+    groups:
+      ci-image:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Pinned to a different version per Python version with environment
+      # markers. Dependabot evaluates markers for a single Python version and
+      # would bump only the matching line, so bump these by hand. (Entries
+      # limited to other Python versions, such as numba, are never bumped.)
+      - dependency-name: "coremltools"
+      - dependency-name: "librosa"
+      - dependency-name: "lxml"
+      - dependency-name: "networkx"
+      - dependency-name: "numpy"
+      - dependency-name: "optree"
+      - dependency-name: "pandas"
+      - dependency-name: "pywavelets"
+      - dependency-name: "scikit-image"
+      - dependency-name: "scipy"
+      - dependency-name: "tensorboard"
+    commit-message:
+      prefix: "[Dependabot] Update"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "open source"
+      - "python"
+      - "topic: not user facing"
+      - "module: ci"
+      - "ciflow/trunk"
+      - "ciflow/inductor"

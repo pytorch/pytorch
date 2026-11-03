@@ -33,6 +33,7 @@ from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
     Min,
+    Mod,
     ModularIndexing,
     TruncToFloat,
     TruncToInt,
@@ -3173,9 +3174,58 @@ class TMACompatibilityChecker:
     ) -> bool:
         """
         Check if the block parameters are valid for TMA.
-        If force, we allow relying on symbolic hints equivalent
-        to what we check for Triton templates.
+        If force, the check is decided from size hints, and the alignment it
+        relied on is then guarded, as can_use_tma does for Triton templates.
         """
+        if not self._are_block_parameters_compatible(block_params, constant_offset):
+            return False
+        return not self.force or self._guard_forced_alignment(
+            block_params, constant_offset
+        )
+
+    def _guard_forced_alignment(
+        self,
+        block_params: BlockParameters,
+        constant_offset: sympy.Expr | int,
+    ) -> bool:
+        """
+        A forced access can have a dynamic dim the template's can_use_tma never
+        checked, e.g. an epilogue input's outer dim, so the alignment that held
+        on the hints is guarded here. Under AOTI, which does not check guards,
+        it must be statically provable instead.
+        """
+        sizevars = V.graph.sizevars
+        # Expand precomputed sizes (ps0 for e.g. 2*s0), which have no ShapeEnv
+        # range to guard on.
+        strides = [
+            sizevars.remove_precomputed_replacements(sympy.sympify(st))
+            for st in block_params.strides
+        ]
+        offset = sizevars.remove_precomputed_replacements(
+            sympy.sympify(constant_offset)
+        )
+        # Constant requirements were already decided by the hint check. Mod
+        # requires a non-negative dividend, so the offset's alignment is checked
+        # on its magnitude; strides are required to be non-negative.
+        requirements = [sympy.Eq(strides[-1], 1)]
+        requirements += [sympy.Ge(st, 0) for st in strides[:-1] if st.free_symbols]
+        if V.graph.get_current_device_or_throw().type != "cpu":
+            element_size = self.dtype.itemsize
+            requirements += [
+                sympy.Eq(Mod(expr * element_size, 16), 0)
+                for expr in (*strides[:-1], sympy.Abs(offset))
+                if expr.free_symbols
+            ]
+        requirements = [r for r in requirements if r.free_symbols]
+        if V.graph.aot_mode:
+            return all(sizevars.statically_known_true(r) for r in requirements)
+        return all(sizevars.guard_or_false(r) for r in requirements)
+
+    def _are_block_parameters_compatible(
+        self,
+        block_params: BlockParameters,
+        constant_offset: sympy.Expr | int = 0,
+    ) -> bool:
         device = V.graph.get_current_device_or_throw()
         device_type = device.type
         if self.force:
@@ -3237,6 +3287,18 @@ class TMACompatibilityChecker:
         if not V.graph.sizevars.statically_known_equals(strides[-1], sympy.Integer(1)):
             log.debug(
                 "%s tensor descriptors require innermost stride to be 1. Strides are: %s",
+                self.failed_debug_prefix,
+                strides,
+            )
+            return False
+
+        # Tensor descriptor strides are unsigned. A flipped view has a negative
+        # stride, which a precomputed size can hide from the checks below.
+        if self.force and not all(
+            V.graph.sizevars.statically_known_geq(stride, 0) for stride in strides[:-1]
+        ):
+            log.debug(
+                "%s tensor descriptors require non-negative strides. Strides are: %s",
                 self.failed_debug_prefix,
                 strides,
             )
@@ -5066,7 +5128,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if current_node is not None and is_single_launch_kernel:
                 scheduler = V.graph.scheduler
                 previous_node = (
-                    scheduler.previous_node if scheduler is not None else None
+                    scheduler.previous_nodes[-1]
+                    if scheduler is not None and scheduler.previous_nodes is not None
+                    else None
                 )
                 if previous_node is not None:
                     from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
@@ -5101,27 +5165,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ):
         if not self._enable_pdl_codegen():
             return
-        current_node = V.kernel.current_node
-        prev_node = (
-            V.graph.scheduler.previous_node if V.graph.scheduler is not None else None
+        prev_nodes = (
+            V.graph.scheduler.previous_nodes if V.graph.scheduler is not None else None
         )
 
         def matching_dep(dep):
-            if prev_node is None:
-                raise AssertionError("prev_node must not be None")
-            if current_node is None:
-                raise AssertionError("current_node must not be None")
-            prev_deps = prev_node.read_writes.writes
+            if prev_nodes is None:
+                raise AssertionError("prev_nodes must not be None")
+            prev_deps = [w for n in prev_nodes for w in n.read_writes.writes]
             if consider_reads:
-                prev_deps = itertools.chain(prev_deps, prev_node.read_writes.reads)
+                prev_deps += [r for n in prev_nodes for r in n.read_writes.reads]
+            real = V.graph.scheduler.mutation_real_name
             return any(
-                dep == current_node.mutation_renames.get(w.name, w.name)
-                for w in prev_deps
+                real.get(dep, dep) == real.get(w.name, w.name) for w in prev_deps
             )
 
         if not dependencies:
             raise AssertionError("dependencies must not be empty")
-        need_wait = prev_node is None or any(matching_dep(d) for d in dependencies)
+        need_wait = prev_nodes is None or any(matching_dep(d) for d in dependencies)
         if not need_wait:
             return
         # hoist before the loop
@@ -5162,10 +5223,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 previous_launch = len(new_lines)
             new_lines.append(l)
         code._lines = new_lines
-        # gdc_wait only covers the direct predecessor, so a kernel that exits
-        # without waiting lets its dependents start before older kernels finish.
-        if not has_wait and self._enable_pdl_codegen():
-            code.writeline(self.GDC_WAIT)
+        self._pdl_has_wait = has_wait
 
     def _load_index_split_basis(
         self, index: sympy.Expr, tree: IterationRangesRoot
@@ -6896,7 +6954,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.guard_cooperative_store(name, self.post_loop_store)
             )
 
-        self._handle_pdl_before_access(self.post_loop_store, var)
+        self._handle_pdl_before_access(self.post_loop_store, name)
 
         if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
             block_descriptor, other = self.codegen_block_ptr(name, var, indexing)
@@ -7817,7 +7875,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     @classmethod
     def triton_meta_common(cls) -> TritonMeta:
         return {
-            "enable_fp_fusion": not config.emulate_precision_casts,
+            "enable_fp_fusion": (
+                config.triton.enable_fp_fusion and not config.emulate_precision_casts
+            ),
             "launch_pdl": cls._enable_pdl_codegen(),
             "disable_ftz": config.eager_numerics.disable_ftz,
         }
@@ -9095,6 +9155,10 @@ class TritonScheduling(SIMDScheduling):
             src_code,
             current_device.type,
             metadata=metadata_comment,
+            # A template is built with its one config already.
+            pin_config=not isinstance(
+                kernel, torch._inductor.select_algorithm.TritonTemplateKernel
+            ),
         )
 
     def define_kernel(self, src_code, node_schedule, kernel):

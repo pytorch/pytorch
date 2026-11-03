@@ -358,6 +358,73 @@ with profile(activities=[ProfilerActivity.CUDA]):
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(
+        not torch.version.cuda or int(torch.version.cuda.split(".")[0]) < 13,
+        "CUDA 13+ is required",
+    )
+    @patch.dict(os.environ, {"TEARDOWN_CUPTI": "0"})
+    def test_profiler_cuda_stream_wait_event_correlation(self):
+        producer, consumer = torch.cuda.Stream(), torch.cuda.Stream()
+        tensors = [torch.ones(1, device="cuda") for _ in range(2)]
+        cuda_events = [torch.cuda.Event() for _ in tensors]
+        torch.cuda.synchronize()
+
+        for capture in range(2):
+            with _profile(
+                use_kineto=True,
+                use_device="cuda",
+                experimental_config=_ExperimentalConfig(enable_cuda_sync_events=True),
+            ) as prof:
+                for tensor, event in zip(tensors, cuda_events):
+                    with torch.cuda.stream(producer):
+                        torch.cuda._sleep(1000000)
+                        tensor.add_(1)
+                        event.record()
+                    with torch.cuda.stream(consumer):
+                        consumer.wait_event(event)
+                        tensor.mul_(2)
+                torch.cuda.synchronize()
+
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    trace = json.load(f)
+                    trace_events = trace["traceEvents"]
+
+            trace_events.sort(key=lambda e: e.get("ts", 0))
+            records = [
+                e
+                for e in trace_events
+                if e.get("cat") == "cuda_runtime"
+                and e["name"].startswith("cudaEventRecord")
+            ]
+            waits = [
+                e
+                for e in trace_events
+                if e.get("cat") == "cuda_sync" and e["name"] == "Stream Wait Event"
+            ]
+            kernels = [e for e in trace_events if e.get("cat") == "kernel"]
+            self.assertEqual(len(records), len(cuda_events), msg=f"capture {capture}")
+            self.assertEqual(len(waits), len(cuda_events))
+            self.assertTrue(kernels)
+            producer_stream = kernels[0]["args"]["stream"]
+            for record, wait in zip(records, waits):
+                corr_id = wait["args"]["wait_on_cuda_event_record_corr_id"]
+                self.assertGreater(corr_id, 0)
+                self.assertEqual(corr_id, record["args"]["correlation"])
+                self.assertEqual(wait["args"]["wait_on_stream"], producer_stream)
+
+            timestamps_enabled = (
+                int(trace["cupti_version"]) >= 130400
+                and int(trace["cuda_driver_version"]) >= 13040
+            )
+            self.assertEqual(
+                sum(e.get("cat") == "cuda_event" for e in trace_events),
+                len(cuda_events) if timestamps_enabled else 0,
+            )
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_disable_external_correlation(self):
         cuda_external_id_events = {"cuda_runtime", "gpu_memcpy", "kernel"}
         activities = [ProfilerActivity.CPU, ProfilerActivity.CUDA]
@@ -1006,51 +1073,92 @@ class TestProfiler(TestCase):
         self.assertEqual(trace[0]["name"], tricky_name)
 
     def test_experimental_config_pickle(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", BytesWarning)
+        # Test with default values
+        config = _ExperimentalConfig()
+        pickled = pickle.dumps(config)
+        unpickled = pickle.loads(pickled)
+        self.assertIsInstance(unpickled, _ExperimentalConfig)
 
-            # Test with default values
-            config = _ExperimentalConfig()
-            pickled = pickle.dumps(config)
-            unpickled = pickle.loads(pickled)
-            self.assertIsInstance(unpickled, _ExperimentalConfig)
+        # Alternate the flags in pickled order so that a flag read from a
+        # neighboring slot gets the wrong value.
+        config = _ExperimentalConfig(
+            verbose=True,
+            performance_events=["event1", "event2"],
+            enable_cuda_sync_events=False,
+            disable_external_correlation=True,
+            profile_all_threads=False,
+            capture_overload_names=True,
+            record_python_gc_info=False,
+            expose_kineto_event_metadata=True,
+            custom_profiler_config="custom_config",
+            adjust_timestamps=False,
+            trace_only=True,
+        )
+        pickled = pickle.dumps(config)
+        unpickled = pickle.loads(pickled)
+        self.assertIsInstance(unpickled, _ExperimentalConfig)
+        self.assertEqual(unpickled.__getstate__(), config.__getstate__())
 
-            # Test with non-default values
-            config = _ExperimentalConfig(
-                verbose=True,
-                performance_events=["event1", "event2"],
-                enable_cuda_sync_events=True,
-                adjust_profiler_step=True,
-                disable_external_correlation=True,
-                profile_all_threads=True,
-                capture_overload_names=True,
-                record_python_gc_info=True,
-                expose_kineto_event_metadata=True,
-                custom_profiler_config="custom_config",
-            )
-            pickled = pickle.dumps(config)
-            unpickled = pickle.loads(pickled)
-            self.assertIsInstance(unpickled, _ExperimentalConfig)
+        # Test deepcopy (which uses pickle internally)
+        copied = copy.deepcopy(config)
+        self.assertIsInstance(copied, _ExperimentalConfig)
+        self.assertEqual(copied.__getstate__(), config.__getstate__())
 
-            # Test deepcopy (which uses pickle internally)
-            copied = copy.deepcopy(config)
-            self.assertIsInstance(copied, _ExperimentalConfig)
+    def test_experimental_config_rejects_old_pickle_state(self):
+        # Pickles from before PyTorch 2.16 use a different layout, with more,
+        # fewer, or the same number of values as the current state.
+        state = _ExperimentalConfig().__getstate__()
+        old_states = [
+            state + (False,),
+            state[:-1],
+            (False, [], False, False, False, False, False, False, False, "", False),
+        ]
+        for old_state in old_states:
+            # Unpickling calls __setstate__ on an object made by __new__. pybind
+            # ignores __setstate__ on an already initialized object, so this
+            # test can't use _ExperimentalConfig().
+            config = _ExperimentalConfig.__new__(_ExperimentalConfig)
+            with self.subTest(old_state=old_state):
+                with self.assertRaisesRegex(RuntimeError, "older PyTorch versions"):
+                    config.__setstate__(old_state)
 
-    def test_adjust_profiler_step_deprecated(self):
-        # adjust_profiler_step is a deprecated no-op: passing it must warn with
-        # FutureWarning and not error.
-        with self.assertWarnsRegex(FutureWarning, "adjust_profiler_step"):
-            with profile(
-                activities=[ProfilerActivity.CPU],
-                experimental_config=_ExperimentalConfig(adjust_profiler_step=True),
-            ):
-                pass
-
-    def test_with_modules_deprecated(self):
+    @parametrize("with_modules", [True, False])
+    @parametrize("autograd_profiler", [False, True])
+    def test_with_modules_deprecated(self, autograd_profiler, with_modules):
         # with_modules only collects data for TorchScript models and is on its
-        # way out: passing it must warn with FutureWarning and not error.
+        # way out: passing it with any value must warn with FutureWarning once, at
+        # the caller's line, and not error or warn again when profiling starts.
+        activities = [ProfilerActivity.CPU]
+        with self.assertWarnsRegex(FutureWarning, "with_modules is deprecated") as cm:
+            if autograd_profiler:
+                prof = _profile(with_modules=with_modules)
+            else:
+                prof = profile(activities=activities, with_modules=with_modules)
+        self.assertEqual(cm.filename, __file__)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", "with_modules", FutureWarning)
+            with prof:
+                torch.ones(1)
+
+    def test_with_modules_deprecated_when_disabled(self):
+        # Callers that disable the profiler still break once with_modules is
+        # removed, so they must be warned too.
         with self.assertWarnsRegex(FutureWarning, "with_modules is deprecated"):
-            with profile(activities=[ProfilerActivity.CPU], with_modules=True):
+            _profile(enabled=False, with_modules=False)
+
+    @parametrize("autograd_profiler", [False, True])
+    def test_with_modules_omitted_does_not_warn(self, autograd_profiler):
+        # Both profilers warn on any with_modules value other than None, so
+        # both defaults must stay None. torch.profiler.profile also builds an
+        # autograd profiler when it starts; passing with_modules to that
+        # constructor would warn every user, even those who never pass it.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", "with_modules", FutureWarning)
+            if autograd_profiler:
+                prof = _profile()
+            else:
+                prof = profile(activities=[ProfilerActivity.CPU])
+            with prof:
                 torch.ones(1)
 
     @parametrize("api", ("load_nvprof", "parse_nvprof_trace"))
@@ -1270,6 +1378,29 @@ torch.ones(10) * 2
 """
         proc = subprocess.run(
             [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_left_running_at_exit_cuda(self):
+        # With GPU tracing still on at exit, BLAS libraries' static destructors
+        # make traced runtime calls after the main thread's thread_locals are
+        # destroyed. MALLOC_PERTURB_ poisons freed memory so a use of freed
+        # per-thread tracer state faults instead of passing silently.
+        script = """
+import torch
+from torch.profiler import profile, ProfilerActivity
+p = profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA])
+p.start()
+x = torch.randn(64, 64, device="cuda")
+(x @ x).sum().item()
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "MALLOC_PERTURB_": "165"},
+            timeout=60,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
@@ -2043,12 +2174,20 @@ with open(sys.argv[1], "w") as f:
     json.dump([len(cpu_scopes), raw_device_us, benchmark_device_us], f)
 """
         with TemporaryFileName() as filename:
+            # Initializing the GPU here makes ROCm setenv()
+            # ROCPROFILER_REGISTER_LIBRARY to the profiler lib it loaded.
+            # os.environ never sees it, but subprocesses inherit it, and the
+            # child then records no device kernels. Rebuilding from os.environ
+            # drops it.
+            env = os.environ.copy()
+            env.pop("ROCPROFILER_REGISTER_LIBRARY", None)
             result = subprocess.run(
                 [sys.executable, "-c", script, filename],
                 capture_output=True,
                 text=True,
                 cwd=os.path.dirname(os.path.realpath(__file__)),
                 timeout=120,
+                env=env,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             with open(filename) as f:
@@ -3088,6 +3227,8 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
     def test_dynamic_toggle(self, device):
         device_type = device.split(":")[0]
         gpu_activity = getattr(ProfilerActivity, device_type.upper(), None)
+        if gpu_activity not in supported_activities():
+            self.skipTest(f"{device_type.upper()} profiling is not supported")
         activities = get_profiler_activities(device_type)
         with profile(activities=activities) as p:
             with torch.profiler.record_function("test_user_annotation"):
@@ -4827,6 +4968,36 @@ class TestProfilerTraceCompression(TestCase):
             with opener(path, "rt", encoding="utf-8") as f:
                 trace = json.load(f)
             self.assertEqual(trace["compression_test"], value)
+
+    @parametrize("suffix", [".json.gz", ".json.zst"])
+    def test_export_keeps_kineto_sibling(self, suffix):
+        if suffix.endswith(".zst") and not (
+            try_import("pyzstd") or try_import("zstandard")
+        ):
+            self.skipTest("requires zstandard or pyzstd")
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ones(8) + 1
+        kineto_export = prof.profiler.export_chrome_trace
+
+        def export_with_sibling(path, *args, **kwargs):
+            # Some Kineto builds write extra files next to the JSON.
+            kineto_export(path, *args, **kwargs)
+            with open(path.removesuffix(".json") + ".extra", "wb") as f:
+                f.write(b"extra")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace" + suffix)
+            with patch.object(
+                prof.profiler, "export_chrome_trace", export_with_sibling
+            ):
+                prof.export_chrome_trace(path)
+            sibling = os.path.join(tmpdir, "trace.extra")
+            self.assertTrue(os.path.exists(path))
+            self.assertTrue(os.path.exists(sibling))
+            with open(sibling, "rb") as f:
+                self.assertEqual(f.read(), b"extra")
+            # The uncompressed JSON stays in the temporary directory.
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, "trace.json")))
 
     @parametrize("use_python_export", [False, True])
     def test_missing_zstd(self, use_python_export):

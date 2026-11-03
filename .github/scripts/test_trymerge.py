@@ -10,19 +10,23 @@
 
 from __future__ import annotations
 
+import errno
 import gzip
 import json
 import os
+import socket
 import warnings
 from dataclasses import replace
 from hashlib import sha256
+from http.client import IncompleteRead, RemoteDisconnected
+from io import BytesIO
 from itertools import pairwise
 from types import MethodType
 from typing import Any, TYPE_CHECKING
 from unittest import main, mock, skip, TestCase
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
-from github_utils import gh_graphql, GHGraphQLError, GitHubComment
+from github_utils import gh_fetch_url, gh_graphql, GHGraphQLError, GitHubComment
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from greenlight_guard import (
     GREENLIGHT_LOGIN,
@@ -31,6 +35,17 @@ from greenlight_guard import (
     GuardVerdict,
 )
 from greenlight_identity import normalize_login
+from mergebot_status import (
+    MERGE_FAILURE,
+    MERGE_SUCCESS,
+    parse_status,
+    parse_tag,
+    REVERT_FAILURE,
+    REVERT_SUCCESS,
+    Status,
+    Tag,
+    with_status,
+)
 from native_stack import (
     _landed_in,
     build_native_stack_commits,
@@ -58,6 +73,8 @@ from trymerge import (
     categorize_checks,
     check_greenlight_reviewed_head_sha,
     DRCI_CHECKRUN_NAME,
+    DRCI_RETRY_DELAYS_SECONDS,
+    DRCI_TIMEOUT_SECONDS,
     ensure_mergeable_labels,
     find_matching_merge_rule,
     format_failure_comment,
@@ -80,8 +97,10 @@ from trymerge import (
     is_docker_affecting_files,
     iter_issue_timeline_until_comment,
     JobCheckState,
+    LandedError,
     main as trymerge_main,
     MandatoryChecksMissingError,
+    manually_close_merged_pr,
     merge,
     merge_authorized_logins,
     MERGE_COMPLETE_LABEL,
@@ -791,6 +810,13 @@ class TestTryMerge(TestCase):
         self.assertEqual(pr.get_pr_creator_login(), "mruberry")
         author = pr.get_author()
         self.assertTrue(author is not None)
+
+    def test_is_dependabot_pr(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 71759)
+        self.assertFalse(pr.is_dependabot_pr())
+        for login in ("dependabot", "dependabot[bot]"):
+            pr.info["author"]["login"] = login
+            self.assertTrue(pr.is_dependabot_pr())
 
     def test_large_diff(self, *args: Any) -> None:
         "Tests that PR with 100+ files can be fetched"
@@ -2583,7 +2609,9 @@ class TestGreenlightGuardCallSite(TestCase):
             GitHubPR.merge_into(
                 pr, mock.MagicMock(spec=GitRepo), comment_id=1, dry_run=True
             )
-        mock_post.assert_called_once_with("pytorch", "pytorch", 1, "hold tight", True)
+        mock_post.assert_called_once_with(
+            "pytorch", "pytorch", 1, "hold tight", dry_run=True
+        )
 
     @mock.patch("trymerge.gh_post_pr_comment")
     @mock.patch("trymerge.evaluate_greenlight_guard")
@@ -3191,6 +3219,31 @@ class NoNetworkTestCase(TestCase):
         return patcher.start()
 
 
+class TestAddNumberedLabel(NoNetworkTestCase):
+    def added_label(self, labels: list[str]) -> str:
+        add = self.patch("trymerge.gh_add_labels")
+        self.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
+        pr = GitHubPR("pytorch", "pytorch", 1)
+        pr.labels = labels
+        pr.add_numbered_label("merged", False)
+        return add.call_args.args[3][0]
+
+    def test_unrelated_label_containing_base_is_not_counted(self) -> None:
+        self.assertEqual(self.added_label(["mergedog", "autoland"]), "merged")
+        self.assertEqual(self.added_label(["mergedX1foo", "mergedx1"]), "merged")
+
+    def test_capitalized_repo_label_is_not_counted(self) -> None:
+        # GitHub applies "merged" as the repo's existing "Merged" label; matching
+        # stays case-sensitive so such PRs keep getting plain "Merged".
+        self.assertEqual(self.added_label(["Merged", "mergedog"]), "merged")
+
+    def test_own_repeats_are_counted(self) -> None:
+        self.assertEqual(self.added_label(["merged"]), "mergedX1")
+        self.assertEqual(
+            self.added_label(["mergedog", "merged", "mergedX1"]), "mergedX2"
+        )
+
+
 class TestGetNativeStackPrs(NoNetworkTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -3273,6 +3326,37 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
         with self.assertRaisesRegex(RuntimeError, "stop after gates"):
             self.merge_into(**kwargs)
 
+    def test_a_failure_after_landing_is_a_landed_error(self) -> None:
+        for failing in (self.repo.rev_parse, self.close):
+            with self.subTest(failing=failing):
+                failing.side_effect = RuntimeError("failed after landing")
+                with self.assertRaises(LandedError) as raised:
+                    self.merge_into()
+                failing.side_effect = None
+                self.assertEqual(
+                    str(raised.exception.__cause__), "failed after landing"
+                )
+
+    def test_a_label_failure_after_landing_keeps_the_merge_record(self) -> None:
+        for pr in (self.top, self.lower):
+            with self.subTest(pr=pr.pr_num):
+                self.record.reset_mock()
+                pr.add_numbered_label.side_effect = RuntimeError("label failed")
+                with self.assertRaises(LandedError):
+                    self.merge_into()
+                pr.add_numbered_label.side_effect = None
+                self.record.assert_called_once()
+                self.assertEqual(
+                    self.record.call_args.kwargs["merge_commit_sha"], "merged-sha"
+                )
+                self.assertFalse(self.record.call_args.kwargs["is_failed"])
+
+    def test_a_dry_run_lands_nothing(self) -> None:
+        self.close.side_effect = RuntimeError("close failed")
+        with self.assertRaisesRegex(RuntimeError, "close failed") as raised:
+            self.merge_into(dry_run=True)
+        self.assertNotIsInstance(raised.exception, LandedError)
+
     def test_gates_lower_prs_before_landing(self) -> None:
         waivers = {(1001, "red")}
         self.assertStopsBeforeLanding(ignore_current_checks=waivers)
@@ -3327,6 +3411,7 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
             pr=self.top,
             additional_merged_prs=[self.lower, self.top],
             merge_commit_sha="merged-sha",
+            comment_id=1,
             dry_run=False,
         )
         self.assertEqual(self.record.call_args.kwargs["merge_commit_sha"], "merged-sha")
@@ -3384,11 +3469,17 @@ class TestStartingMergeComment(NoNetworkTestCase):
         post = self.patch("trymerge.gh_post_pr_comment")
         explainer = mock.MagicMock()
         explainer.get_merge_message.return_value = "Merge started"
-        post_starting_merge_comment(top, [lower, top], explainer, True)
+        post_starting_merge_comment(top, [lower, top], explainer, 7, True)
         self.assertEqual(
             post.call_args_list,
             [
-                mock.call("pytorch", "pytorch", 1002, "Merge started", dry_run=True),
+                mock.call(
+                    "pytorch",
+                    "pytorch",
+                    1002,
+                    with_status("Merge started", MERGE_SUCCESS, 7),
+                    dry_run=True,
+                ),
                 mock.call(
                     "pytorch",
                     "pytorch",
@@ -3398,6 +3489,38 @@ class TestStartingMergeComment(NoNetworkTestCase):
                 ),
             ],
         )
+
+
+class TestManuallyCloseMergedPr(NoNetworkTestCase):
+    def test_only_the_pr_asked_to_merge_gets_a_tag(self) -> None:
+        lower, top = stacked_pr(1001), stacked_pr(1002)
+        prs = {1001: lower, 1002: top}
+        self.patch("trymerge.GitHubPR", side_effect=lambda _o, _p, n: prs[n])
+        post = self.patch("trymerge.gh_post_pr_comment")
+        close = self.patch("trymerge.gh_close_pr")
+        # A native stack passes every PR it merged, the asked one included
+        manually_close_merged_pr(top, [lower, top], "sha", 7, True)
+        self.assertEqual(
+            [(c.args[2], parse_tag(c.args[3])) for c in post.call_args_list],
+            [(1002, Tag(MERGE_SUCCESS, 7)), (1001, None)],
+        )
+        self.assertEqual(
+            close.call_args_list,
+            [
+                mock.call("pytorch", "pytorch", 1002, True),
+                mock.call("pytorch", "pytorch", 1001, True),
+            ],
+        )
+
+    def test_closed_prs_get_nothing(self) -> None:
+        top = stacked_pr(1002)
+        top.is_closed.return_value = True
+        self.patch("trymerge.GitHubPR", return_value=top)
+        post = self.patch("trymerge.gh_post_pr_comment")
+        close = self.patch("trymerge.gh_close_pr")
+        manually_close_merged_pr(top, [], "sha", 7, True)
+        post.assert_not_called()
+        close.assert_not_called()
 
 
 class TestNativeStackMergePlumbing(NoNetworkTestCase):
@@ -3472,10 +3595,22 @@ class TestNativeStackMain(NoNetworkTestCase):
             "trymerge.get_native_stack", return_value=NATIVE_STACK
         )
 
-    def assertRefused(self, refusal: str = TARGETS_ANOTHER_BRANCH) -> None:
+    def assertRefused(
+        self,
+        refusal: str = TARGETS_ANOTHER_BRANCH,
+        status: Status | None = MERGE_FAILURE,
+    ) -> None:
         self.assertEqual(
             self.post.call_args_list,
-            [mock.call("pytorch", "pytorch", 1002, refusal, dry_run=True)],
+            [
+                mock.call(
+                    "pytorch",
+                    "pytorch",
+                    1002,
+                    with_status(refusal, status, self.args.comment_id),
+                    dry_run=True,
+                )
+            ],
         )
         self.merge.assert_not_called()
 
@@ -3519,7 +3654,8 @@ class TestNativeStackMain(NoNetworkTestCase):
         self.args.check_mergeability = True
         trymerge_main()
         self.get_stack.assert_not_called()
-        self.assertRefused()
+        # No merge command was issued, so the refusal carries no tag
+        self.assertRefused(status=None)
 
     def test_fork_pr_does_not_read_the_stack(self) -> None:
         self.info.return_value = {**stacked_pr_info(), "isCrossRepository": True}
@@ -3630,7 +3766,14 @@ class TestNativeStackRevert(NoNetworkTestCase):
         self.assertEqual(
             [(call.args[2], call.args[3]) for call in comments],
             [
-                (1000, "@author1000 your PR has been successfully reverted."),
+                (
+                    1000,
+                    with_status(
+                        "@author1000 your PR has been successfully reverted.",
+                        REVERT_SUCCESS,
+                    ),
+                ),
+                # Reverted along with #1000: the outcome is reported there
                 (1001, f"@author1001 {stacked}"),
                 (1002, f"@author1002 {stacked}"),
             ],
@@ -3650,6 +3793,45 @@ class TestNativeStackRevert(NoNetworkTestCase):
         for pr in self.prs.values():
             pr.add_numbered_label.assert_called_once_with("reverted", False)
             pr.add_label.assert_called_once_with("ci-no-td", False)
+
+    def test_the_revert_reply_names_its_command(self) -> None:
+        for ghstack in (False, True):
+            with self.subTest(ghstack=ghstack):
+                self.calls.reset_mock()
+                self.bottom.is_ghstack_pr.return_value = ghstack
+                self.ghstack.return_value = [("sha-1000", self.bottom)]
+                try_revert(self.repo, self.bottom, comment_id=42)
+                [reply] = [
+                    call.args[3]
+                    for call in self.calls_to("gh_post_pr_comment")
+                    if call.args[2] == 1000
+                ]
+                self.assertIn("has been successfully reverted", reply)
+                self.assertEqual(parse_tag(reply), Tag(REVERT_SUCCESS, 42))
+
+    def test_a_failure_after_the_push_is_a_landed_error(self) -> None:
+        for ghstack in (False, True):
+            with self.subTest(ghstack=ghstack):
+                self.calls.reset_mock()
+                self.bottom.is_ghstack_pr.return_value = ghstack
+                self.ghstack.return_value = [("sha-1000", self.bottom)]
+                self.calls.reopen.side_effect = RuntimeError("reopen failed")
+                with self.assertRaises(LandedError) as raised:
+                    self.revert()
+                self.assertEqual(len(self.calls_to("repo.push")), 1)
+                self.assertEqual(str(raised.exception.__cause__), "reopen failed")
+                # Nothing lands in a dry run
+                comment = self.calls.gh_post_pr_comment
+                comment.side_effect = RuntimeError("comment failed")
+                with self.assertRaisesRegex(RuntimeError, "comment failed") as raised:
+                    self.revert(dry_run=True)
+                comment.side_effect = None
+                self.assertNotIsInstance(raised.exception, LandedError)
+
+    def test_a_failed_refresh_after_the_push_is_a_landed_error(self) -> None:
+        self.patch("trymerge.refresh_reverted_branches", side_effect=OSError("boom"))
+        with self.assertRaises(LandedError):
+            self.revert()
 
     def test_pr_without_dependents_is_reverted_alone(self) -> None:
         self.validate.return_value = ("reverter", "sha-validated")
@@ -3874,6 +4056,7 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
             pr=self.prs[103],
             additional_merged_prs=list(self.prs.values()),
             merge_commit_sha=landed[-1],
+            comment_id=1,
             dry_run=False,
         )
 
@@ -4061,6 +4244,342 @@ class TestNativeStackRevertRefreshEndToEnd(NoNetworkTestCase, LineStackTestCase)
         self.move_trunk()
         self.rebase_stack(self.stack, 103)
         self.assertLandsOwnChanges(self.merge(103), 101, 102, 103)
+
+
+class TestMainStatusTags(NoNetworkTestCase):
+    """main()'s replies to a merge or revert command carry their outcome."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.args = mock_parse_args()
+        self.patch("trymerge.parse_args", return_value=self.args)
+        self.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+        self.info = self.patch(
+            "trymerge.gh_get_pr_info", return_value=stacked_pr_info(base="main")
+        )
+        self.post = self.patch("trymerge.gh_post_pr_comment")
+        self.merge = self.patch("trymerge.merge")
+        self.patch("trymerge.gh_remove_label")
+        self.record = self.patch("trymerge.save_merge_record")
+        self.patch("trymerge.GitHubPR.get_merge_base", return_value="base-sha")
+        self.patch("trymerge.GitHubPR.get_author", return_value="author")
+        self.patch("trymerge.GitHubPR.last_commit_sha", return_value="head-sha")
+
+    def statuses(self) -> list[Status | None]:
+        return [parse_status(call.args[3]) for call in self.post.call_args_list]
+
+    def test_failed_merge_is_tagged_failure(self) -> None:
+        self.merge.side_effect = RuntimeError("boom")
+        trymerge_main()
+        self.assertEqual(self.statuses(), [MERGE_FAILURE])
+        self.assertTrue(self.post.call_args.args[3].startswith("## Merge failed"))
+        self.record.assert_called_once()
+        self.assertTrue(self.record.call_args.kwargs["is_failed"])
+
+    def test_closed_pr_is_tagged_failure(self) -> None:
+        self.info.return_value = {**stacked_pr_info(base="main"), "closed": True}
+        trymerge_main()
+        self.assertEqual(self.statuses(), [MERGE_FAILURE])
+        self.merge.assert_not_called()
+
+    @staticmethod
+    def landed(message: str) -> LandedError:
+        try:
+            raise LandedError(message) from RuntimeError(message)
+        except LandedError as e:
+            return e
+
+    def test_failure_after_a_merge_landed_is_untagged(self) -> None:
+        self.merge.side_effect = self.landed("close failed")
+        trymerge_main()
+        self.assertEqual(self.statuses(), [None])
+        body = self.post.call_args.args[3]
+        self.assertTrue(
+            body.startswith("## The merge landed, but a step after it failed\n")
+        )
+        self.assertIn("**Reason**: close failed", body)
+        # The record merge_into saved for the landed merge is not overwritten
+        self.record.assert_not_called()
+
+    def test_failure_after_a_revert_landed_is_untagged(self) -> None:
+        self.args.revert = True
+        self.patch("trymerge.try_revert", side_effect=self.landed("reopen failed"))
+        trymerge_main()
+        self.assertEqual(self.statuses(), [REVERT_SUCCESS, None])
+        self.assertTrue(
+            self.post.call_args.args[3].startswith(
+                "## The revert landed, but a step after it failed\n"
+            )
+        )
+
+    def test_revert_start_and_failure_are_tagged(self) -> None:
+        self.args.revert = True
+        revert = self.patch("trymerge.try_revert", side_effect=RuntimeError("boom"))
+        trymerge_main()
+        revert.assert_called_once()
+        self.assertEqual(self.statuses(), [REVERT_SUCCESS, REVERT_FAILURE])
+        self.assertIn(
+            "successfully started a revert job", self.post.call_args_list[0].args[3]
+        )
+
+    def test_refused_revert_is_tagged_failure(self) -> None:
+        self.args.revert = True
+        self.patch(
+            "trymerge.validate_revert", side_effect=PostCommentError("not merged")
+        )
+        trymerge_main()
+        tags = [parse_tag(call.args[3]) for call in self.post.call_args_list]
+        self.assertEqual(tags, [Tag(REVERT_SUCCESS, 12345), Tag(REVERT_FAILURE, 12345)])
+        self.assertTrue(self.post.call_args.args[3].startswith("not merged"))
+
+    def test_cross_repo_ghstack_merge_is_tagged_failure(self) -> None:
+        self.patch("trymerge.GitHubPR.is_cross_repo", return_value=True)
+        self.patch("trymerge.GitHubPR.is_ghstack_pr", return_value=True)
+        trymerge_main()
+        self.assertEqual(self.statuses(), [MERGE_FAILURE])
+        self.assertTrue(
+            self.post.call_args.args[3].startswith(
+                "Cross-repo ghstack merges are not supported"
+            )
+        )
+        self.merge.assert_not_called()
+
+    def test_check_mergeability_refusals_are_untagged(self) -> None:
+        # check_mergeability_ghstack.yml runs this on PRs nobody asked to merge,
+        # with no comment id
+        self.args.check_mergeability = True
+        self.args.comment_id = None
+        local = self.patch("trymerge.GitHubPR.merge_changes_locally")
+        cases = {
+            "PR targets user/1001 rather than main": stacked_pr_info(),
+            "Can't merge closed PR": {**stacked_pr_info(base="main"), "closed": True},
+        }
+        for refusal, info in cases.items():
+            with self.subTest(refusal):
+                self.post.reset_mock()
+                self.info.return_value = info
+                trymerge_main()
+                self.assertEqual(self.statuses(), [None])
+                self.assertTrue(self.post.call_args.args[3].startswith(refusal))
+        with self.subTest("cross-repo ghstack"):
+            self.post.reset_mock()
+            self.info.return_value = stacked_pr_info(base="main")
+            with (
+                mock.patch("trymerge.GitHubPR.is_cross_repo", return_value=True),
+                mock.patch("trymerge.GitHubPR.is_ghstack_pr", return_value=True),
+            ):
+                trymerge_main()
+            self.assertEqual(self.statuses(), [None])
+        local.assert_not_called()
+        self.merge.assert_not_called()
+        # The same refusal answering a merge command is tagged
+        self.args.check_mergeability = False
+        self.args.comment_id = 12345
+        self.post.reset_mock()
+        self.info.return_value = stacked_pr_info()
+        self.patch("trymerge.get_native_stack", return_value=None)
+        trymerge_main()
+        self.assertEqual(
+            [parse_tag(call.args[3]) for call in self.post.call_args_list],
+            [Tag(MERGE_FAILURE, 12345)],
+        )
+
+    def test_submodule_update_refusal_is_tagged_failure(self) -> None:
+        self.patch("trymerge.GitHubPR.has_invalid_submodule_updates", return_value=True)
+        self.patch(
+            "trymerge.GitHubPR.get_changed_submodules", return_value=["third_party/x"]
+        )
+        trymerge_main()
+        self.assertEqual(self.statuses(), [MERGE_FAILURE])
+        self.assertTrue(
+            self.post.call_args.args[3].startswith(
+                "This PR updates submodules third_party/x"
+            )
+        )
+        self.merge.assert_not_called()
+
+
+def _drci_http_error(code: int, body: bytes) -> HTTPError:
+    return HTTPError(
+        "https://hud.pytorch.org/api/drci/drci?prNumber=1",  # @lint-ignore
+        code,
+        "Bad Request",
+        {},  # type: ignore[arg-type]
+        BytesIO(body),
+    )
+
+
+@mock.patch("trymerge.time.sleep")
+@mock.patch("trymerge.gh_fetch_url")
+class TestDrciRetries(TestCase):
+    def test_no_pause_when_hud_did_not_answer(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        for unreachable in (
+            URLError(OSError("no route")),
+            URLError(ConnectionRefusedError("refused")),
+            URLError(socket.gaierror(socket.EAI_NONAME, "Name or service not known")),
+        ):
+            mock_fetch.side_effect = [unreachable, {}]
+            with mock.patch("builtins.print"):
+                self.assertEqual(get_drci_classifications(1), {})
+        mock_sleep.assert_not_called()
+
+    def test_only_the_previous_failure_decides_the_pause(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        mock_fetch.side_effect = [
+            _drci_http_error(400, b""),
+            URLError(OSError("no route")),
+            {},
+        ]
+        with mock.patch("builtins.print"):
+            self.assertEqual(get_drci_classifications(1), {})
+        mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
+
+    def test_no_pause_on_auth_failure(self, mock_fetch: Any, mock_sleep: Any) -> None:
+        mock_fetch.side_effect = [_drci_http_error(401, b""), {}]
+        with mock.patch("builtins.print"):
+            self.assertEqual(get_drci_classifications(1), {})
+        self.assertEqual(mock_fetch.call_count, 2)
+        mock_sleep.assert_not_called()
+
+    def test_timeout_or_504_is_not_retried(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        for stalled in (
+            TimeoutError("timed out"),
+            URLError(TimeoutError("timed out")),
+            _drci_http_error(504, b""),
+        ):
+            mock_fetch.reset_mock()
+            mock_fetch.side_effect = [stalled, {}]
+            with mock.patch("builtins.print"):
+                self.assertIsNone(get_drci_classifications(1))
+            self.assertEqual(mock_fetch.call_count, 1)
+        mock_sleep.assert_not_called()
+
+    def test_retries_after_a_failure_with_a_pause(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        mock_fetch.side_effect = [
+            _drci_http_error(400, b'{"error": "boom"}'),
+            {"1": {"AI_NOT_RELATED": []}},
+        ]
+        with mock.patch("builtins.print") as mock_print:
+            self.assertEqual(get_drci_classifications(1), {"AI_NOT_RELATED": []})
+        mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
+        self.assertEqual(mock_fetch.call_count, 2)
+        logged = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+        self.assertIn(f"Attempt 1 of {len(DRCI_RETRY_DELAYS_SECONDS) + 1}", logged)
+        self.assertIn('{"error": "boom"}', logged)
+
+    def test_first_success_does_not_pause(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        mock_fetch.return_value = {"1": {"FLAKY": []}}
+        self.assertEqual(get_drci_classifications(1), {"FLAKY": []})
+        mock_sleep.assert_not_called()
+        self.assertEqual(mock_fetch.call_count, 1)
+        self.assertEqual(mock_fetch.call_args.kwargs["timeout"], DRCI_TIMEOUT_SECONDS)
+
+    def test_unreadable_error_body_still_retries(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        err = _drci_http_error(400, b"")
+        err.read = mock.Mock(side_effect=ConnectionResetError("reset"))  # type: ignore[method-assign]
+        mock_fetch.side_effect = [err, {}]
+        with mock.patch("builtins.print"):
+            self.assertEqual(get_drci_classifications(1), {})
+        mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
+
+    def test_stalled_error_body_is_not_retried(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        err = _drci_http_error(400, b"")
+        err.read = mock.Mock(side_effect=TimeoutError("stalled"))  # type: ignore[method-assign]
+        mock_fetch.side_effect = [err, {}]
+        with mock.patch("builtins.print") as mock_print:
+            self.assertIsNone(get_drci_classifications(1))
+        self.assertEqual(mock_fetch.call_count, 1)
+        mock_sleep.assert_not_called()
+        logged = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+        self.assertIn("<body timed out: stalled>", logged)
+
+    def test_unexpected_error_retries_without_pause(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        for bug in (
+            AttributeError("'list' object has no attribute 'get'"),
+            KeyError("x"),
+        ):
+            mock_fetch.reset_mock()
+            mock_fetch.side_effect = [bug, {}]
+            with mock.patch("builtins.print"):
+                self.assertEqual(get_drci_classifications(1), {})
+            self.assertEqual(mock_fetch.call_count, 2)
+        mock_sleep.assert_not_called()
+
+    def test_logged_error_body_is_bounded(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        err = _drci_http_error(400, b"x" * 2000)
+        err.read = mock.Mock(wraps=err.read)  # type: ignore[method-assign]
+        mock_fetch.side_effect = [err, {}]
+        with mock.patch("builtins.print") as mock_print:
+            get_drci_classifications(1)
+        err.read.assert_called_once_with(500)
+        logged = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+        self.assertIn("x" * 500, logged)
+        self.assertNotIn("x" * 501, logged)
+
+    def test_returns_none_once_every_attempt_fails(
+        self, mock_fetch: Any, mock_sleep: Any
+    ) -> None:
+        mock_fetch.side_effect = [
+            _drci_http_error(400, b"{}")
+            for _ in range(len(DRCI_RETRY_DELAYS_SECONDS) + 1)
+        ]
+        with mock.patch("builtins.print"):
+            self.assertIsNone(get_drci_classifications(1))
+        self.assertEqual(mock_fetch.call_count, len(DRCI_RETRY_DELAYS_SECONDS) + 1)
+        self.assertEqual(
+            [c.args[0] for c in mock_sleep.call_args_list],
+            list(DRCI_RETRY_DELAYS_SECONDS),
+        )
+
+    def test_dropped_connection_pauses(self, mock_fetch: Any, mock_sleep: Any) -> None:
+        for dropped in (
+            RemoteDisconnected("closed"),
+            URLError(ConnectionResetError("reset")),
+            URLError(TimeoutError(errno.ETIMEDOUT, "Connection timed out")),
+            URLError(socket.gaierror(socket.EAI_AGAIN, "Temporary failure")),
+            IncompleteRead(b"{", 10),
+            json.JSONDecodeError("cut off", "{", 1),
+            UnicodeDecodeError("utf-8", b"\xe2", 0, 1, "unexpected end of data"),
+            _drci_http_error(408, b""),
+            _drci_http_error(429, b""),
+            _drci_http_error(500, b""),
+        ):
+            mock_fetch.reset_mock()
+            mock_sleep.reset_mock()
+            mock_fetch.side_effect = [dropped, {}]
+            with mock.patch("builtins.print"):
+                self.assertEqual(get_drci_classifications(1), {})
+            mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
+            self.assertEqual(mock_fetch.call_count, 2)
+
+
+class TestFetchUrlTimeout(TestCase):
+    @mock.patch("github_utils.urlopen")
+    def test_timeout_reaches_urlopen_only_when_given(self, mock_urlopen: Any) -> None:
+        url = "https://hud.pytorch.org/x"  # @lint-ignore
+        gh_fetch_url(url, reader=lambda conn: None, timeout=DRCI_TIMEOUT_SECONDS)
+        self.assertEqual(
+            mock_urlopen.call_args.kwargs, {"timeout": DRCI_TIMEOUT_SECONDS}
+        )
+        gh_fetch_url(url, reader=lambda conn: None)
+        self.assertEqual(mock_urlopen.call_args.kwargs, {})
 
 
 if __name__ == "__main__":
