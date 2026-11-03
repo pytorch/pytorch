@@ -866,7 +866,7 @@ test_inductor_shard() {
 
   # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
   python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor inductor/test_cpu_select_algorithm \
+    --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor inductor/test_cpu_select_algorithm dynamo/test_benchmark_runner \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
 
@@ -2702,6 +2702,11 @@ elif [[ "${TEST_CONFIG}" == *aoti_cross_compile_for_windows* ]]; then
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
+  if [[ "${TEST_CONFIG}" == "inductor_huggingface" &&
+        "${BUILD_ENVIRONMENT}" == *cuda* &&
+        "${SHARD_NUMBER}" -eq 1 ]]; then
+    env -u TORCH_TRACE python test/run_test.py --include dynamo/test_benchmark_runner --verbose
+  fi
   setup_torch_trace
   if [[ "${TEST_CONFIG}" == *unbacked_parity* ]]; then
     test_unbacked_parity_smoketest
