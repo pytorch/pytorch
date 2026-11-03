@@ -1150,7 +1150,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # Read dynamically: the cached dict always has True, but
             # is_exporting() should only be True during torch.export.
             if self.value is torch.compiler.is_exporting:
-                return VariableTracker.build(tx, torch.compiler.is_exporting())
+                return VariableTracker.build(tx, torch.compiler._is_exporting_flag)
             return VariableTracker.build(tx, tracing_state_functions()[self.value])
 
         @register(*dispatch_key_set_functions)
@@ -1176,14 +1176,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # pyrefly: ignore[missing-attribute]
                 example_value = args[0].proxy.node.meta["example_value"]
                 dks = self.value(example_value)
-                # Remove Python and PythonTLSSnapshot from the dispatch key set,
-                # as they originate from FakeTensor propagation.
-                # This should only be done if the example_value is a FakeTensor.
+                # Remove the keys that come from the example value being fake:
+                # Python and PythonTLSSnapshot from a Python FakeTensor, Fake
+                # from a C++ fake. The real tensor would not have them.
+                # This should only be done if the example_value is a fake.
                 # However, if tensor subclasses are present,
                 # it is reasonable for Python to remain in the dispatch key set.
                 if torch._subclasses.fake_tensor.is_fake_tensor(example_value):
                     dks = (
                         dks
+                        - torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
                         - torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
                         - torch._C.DispatchKeySet(
                             torch._C.DispatchKey.PythonTLSSnapshot
@@ -1841,7 +1843,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         "torch.compile regions.",
                     ],
                 )
-            if tx.output.current_tracer.is_export or torch.compiler.is_exporting():
+            if tx.output.current_tracer.is_export or torch.compiler._is_exporting_flag:
                 unimplemented(
                     gb_type="COW tensor check during export",
                     context="torch._C._is_cow_tensor during export",
