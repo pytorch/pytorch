@@ -141,8 +141,13 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
       "Invalid arguments to cudnn_grid_sampler_backward");
   if (globalContext().deterministicAlgorithms()) {
     return at::grid_sampler_2d_backward(
-        grad_output_t, input_t, grid_t, /*interpolation_mode=*/0 /*Bilinear*/,
-        /*padding_mode=*/0 /*Zeros*/, /*align_corners=*/true, {true, true});
+        grad_output_t,
+        input_t,
+        grid_t,
+        /*interpolation_mode=*/0 /*Bilinear*/,
+        /*padding_mode=*/0 /*Zeros*/,
+        /*align_corners=*/true,
+        {true, true});
   }
 
   auto input_contig = contiguousIfZeroInStrides(input_t);
