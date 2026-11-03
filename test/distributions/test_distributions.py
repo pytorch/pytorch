@@ -1338,8 +1338,7 @@ class DistributionsTestCase(TestCase):
         samples_per_bin = len(samples) // num_bins
         bins = samples.reshape((num_bins, samples_per_bin)).mean(axis=1)
         stddev = samples_per_bin**-0.5
-        # Two-sided standard-normal quantile. scipy.special.erfinv(p) needs a
-        # sqrt(2) factor to be a z-score, so the old threshold was too tight.
+        # Two-sided standard-normal quantile.
         threshold = stddev * scipy.stats.norm.ppf(1 - failure_rate / (2 * num_bins))
         message = f"{message}.sample() is biased:\n{bins}"
         for bias in bins:
@@ -3094,8 +3093,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         d = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
         samples = d.rsample((100000,))
         num_samples = samples.shape[0]
-        # Check each moment to within 5 standard errors (Gaussian formulas)
-        # instead of a fixed atol, which ignores the scale of the variance.
+        # Check each moment to within 5 standard errors (Gaussian formulas).
         mean_se = (d.variance / num_samples).sqrt()
         var_se = d.variance * (2 / (num_samples - 1)) ** 0.5
         zeros = torch.zeros_like(d.mean)
@@ -3334,8 +3332,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         d = MultivariateNormal(mean, scale_tril=scale_tril)
         samples = d.rsample((100000,))
         num_samples = samples.shape[0]
-        # Check each moment to within 5 standard errors (Gaussian formulas)
-        # instead of a fixed atol, which ignores the scale of the variance.
+        # Check each moment to within 5 standard errors (Gaussian formulas).
         mean_se = (d.variance / num_samples).sqrt()
         var_se = d.variance * (2 / (num_samples - 1)) ** 0.5
         zeros = torch.zeros_like(d.mean)
@@ -3580,8 +3577,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         num_samples = samples.shape[0]
         empirical_mean = samples.mean(0)
         empirical_var = samples.var(0)
-        # Check each moment to within 5 standard errors. A fixed atol fails
-        # whenever the random scale_tril makes the variance large.
+        # Check each moment to within 5 standard errors.
         mean_se = (empirical_var / num_samples).sqrt()
         fourth = ((samples - empirical_mean) ** 4).mean(0)
         var_se = ((fourth - empirical_var**2).clamp(min=0) / num_samples).sqrt()
