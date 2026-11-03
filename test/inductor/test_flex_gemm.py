@@ -3253,9 +3253,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 case "offs_rank":
                     options["offs"] = offs.unsqueeze(0)
                 case "offs_stride":
-                    options["offs"] = torch.empty(6, device="cuda", dtype=torch.int32)[
-                        ::2
-                    ]
+                    options["offs"] = torch.empty_strided(
+                        (3,), (2,), device="cuda", dtype=torch.int32
+                    )
                 case "no_offs":
                     options.pop("offs")
                 case "output_dtype":
@@ -3265,21 +3265,25 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 case "a_layout":
                     a = a.t()
                 case "k":
-                    a = a[:, :224]
+                    a = torch.empty_strided(
+                        (256, 224), a.stride(), device="cuda", dtype=a.dtype
+                    )
                 case "n":
-                    b = b[..., :-1]
+                    b = torch.empty_strided(
+                        (3, 256, 271), b.stride(), device="cuda", dtype=b.dtype
+                    )
                 case "scale_rank":
                     sa = sa.flatten()
                 case "scale_rows":
                     sa = sa.reshape(128, 16)
                 case "scale_groups":
-                    sb = sb[:2]
+                    sb = torch.empty(2, 3072, device="cuda", dtype=sb.dtype)
                 case "scale_columns":
                     sa = torch.empty(256, 16, device="cuda", dtype=sa.dtype)
                 case "scale_alignment":
                     sa = torch.empty(257, 8, device="cuda", dtype=sa.dtype)
                 case "b_groups":
-                    b = b[:2]
+                    b = torch.empty(2, 272, 256, device="cuda", dtype=b.dtype).mT
                 case "recipe":
                     options["scale_recipe_b"] = F.ScalingType.TensorWise
                 case "swizzle":
@@ -3347,11 +3351,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             recipe = [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise]
             swizzle = [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE]
             if case == "global_shape":
-                global_scale = global_scale[:1]
+                global_scale = torch.ones(1, device="cuda")
             elif case == "global_dtype":
                 global_scale = global_scale.bfloat16()
             elif case == "global_stride":
-                global_scale = torch.ones(6, device="cuda")[::2]
+                global_scale = torch.empty_strided((3,), (2,), device="cuda")
             if case == "single_scale":
                 scales = (sa, sb)
                 recipe, swizzle = recipe[:1], swizzle[:1]
