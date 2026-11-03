@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import io
 import json
 import os
@@ -16,6 +17,7 @@ from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
+from tools.testing import do_target_determination_for_s3
 from tools.testing.discover_tests import BLOCKLISTED_PATTERNS, TESTS
 from tools.testing.do_target_determination_for_s3 import td_results_json
 from tools.testing.llm_td import resolve_selection, select_tests, selection
@@ -106,7 +108,11 @@ class TestSelection(unittest.TestCase):
         self.assertTrue(Selection.from_json(sel.to_json()).covers("test_nn", "default"))
 
     def select_in_tree(
-        self, sources: dict[str, str], candidates: set[str], changed: list[str]
+        self,
+        sources: dict[str, str],
+        candidates: set[str],
+        changed: list[str],
+        deleted: tuple[str, ...] = (),
     ) -> Selection:
         """from_model_output with an empty answer and a grep over `sources`, a test/ tree."""
         with tempfile.TemporaryDirectory() as d:
@@ -119,7 +125,7 @@ class TestSelection(unittest.TestCase):
                 found = subprocess.run(cmd, cwd=d, capture_output=True, text=True).stdout.split()  # fmt: skip
                 return [f"test/{f.removeprefix('./')}" for f in found]
 
-            return Selection.from_model_output({"tests": []}, candidates, changed, grep)
+            return Selection.from_model_output({"tests": []}, candidates, changed, grep, deleted)  # fmt: skip
 
     def test_importers_are_selected(self) -> None:
         sources = {
@@ -169,11 +175,18 @@ class TestSelection(unittest.TestCase):
             "distributed/launcher/test_run.py": 'path("bin/test_script.py")\n',
             "distributed/launcher/bin/test_script.py": "",
             "distributed/launcher/bin/unused.py": "",
+            "README.md": "notes.txt\n",
+            "run_test.py": 'open("run_only.json")\n',
+            "cpp/api/CMakeLists.txt": "cpp_data.bin\n",
         }  # fmt: skip
-        candidates = CANDIDATES | {"test_public_bindings", "test_tensorboard", "distributed/launcher/test_run"}  # fmt: skip
+        drivers = {"test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja", "test_autoload_enable", "test_autoload_disable"}  # fmt: skip
+        candidates = CANDIDATES | drivers | {"test_public_bindings", "test_tensorboard", "distributed/launcher/test_run"}  # fmt: skip
         for changed, expected in [
             ("test/allowlist_for_publicAPI.json", {"test_public_bindings"}),
-            ("test/cpp_extensions/my_ext.cpp", {"test_ops"}),
+            # The drivers build every extension, and test_ops loads this one by its path.
+            ("test/cpp_extensions/my_ext.cpp", {"test_ops"} | drivers),
+            ("test/cpp_extensions/ext.cpp", drivers),
+            ("test/cpp_data.bin", set()),
             ("test/expect/TestNNCPU.test_x-y.expect", {"test_nn", "dynamo/test_misc"}),
             # test_tensorboard.py builds this path for TestTensorBoardSummary.
             ("test/expect/TestTensorBoard.test_x.expect", {"test_tensorboard"}),
@@ -185,9 +198,19 @@ class TestSelection(unittest.TestCase):
         ]:  # fmt: skip
             sel = self.select_in_tree(sources, candidates, [changed])
             self.assertEqual((sel.files, sel.run_all), (expected, False), changed)
-        for changed in ("test/cpp_extensions/ext.cpp", "test/expect/TestGone.test_x.expect", "test/distributed/launcher/bin/unused.py"):  # fmt: skip
+        # Named only by a README, by run_test.py, which no test imports, or by
+        # another edited data file that nothing reads.
+        for changed in ("test/expect/TestGone.test_x.expect", "test/distributed/launcher/bin/unused.py", "test/notes.txt", "test/run_only.json"):  # fmt: skip
             sel = self.select_in_tree(sources, candidates, ["test/allowlist_for_publicAPI.json", changed])  # fmt: skip
             self.assertEqual((sel.run_all, sel.reason), (True, f"nothing found that reads {changed}"))  # fmt: skip
+        sel = self.select_in_tree(sources | {"allowlist_for_publicAPI.json": "b.json\n"}, candidates, ["test/allowlist_for_publicAPI.json", "test/b.json"])  # fmt: skip
+        self.assertEqual((sel.run_all, sel.reason), (True, "nothing found that reads test/b.json"))  # fmt: skip
+        sel = self.select_in_tree(sources, CANDIDATES, ["test/cpp_extensions/ext.cpp"])
+        self.assertEqual((sel.run_all, sel.reason), (True, "nothing found that reads test/cpp_extensions/ext.cpp"))  # fmt: skip
+        # A deleted file, or the old path of a moved one, needs no reader.
+        gone = ["test/gone.json", "test/distributed/launcher/bin/unused.py"]
+        sel = self.select_in_tree(sources, candidates, gone, deleted=tuple(gone))
+        self.assertEqual((sel.files, sel.run_all), (set(), False))
         many = [f"test/data{i}.json" for i in range(selection.MAX_DATA_FILES + 1)]
         self.assertTrue(self.select_in_tree(sources, candidates, many).run_all)
 
@@ -324,6 +347,39 @@ class TestSelection(unittest.TestCase):
                     self.assertEqual(load_previous_failures(p), failed)
                 loaded = TestPrioritizations.from_json(json.loads(p.read_text()))
                 self.assertEqual([(str(x), loaded.get_score(x)) for x in loaded.get_all_tests()], [("test_nn", 1), ("test_ops", 0)])  # fmt: skip
+
+    def test_td_job_writes_the_previous_failures(self) -> None:
+        tp = TestPrioritizations(["test_nn", "test_ops"], {TestRun("test_nn"): 1})
+        heuristics = mock.Mock(**{"get_aggregated_priorities.return_value": tp})
+        fetches: dict[str, Any] = dict.fromkeys(
+            [
+                "get_test_times",
+                "get_test_class_times",
+                "get_test_file_ratings",
+                "get_test_class_ratings",
+                "get_td_heuristic_historial_edited_files_json",
+                "get_td_heuristic_profiling_json",
+                "copy_pytest_cache",
+                "copy_additional_previous_failures",
+            ],
+            mock.DEFAULT,
+        )
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.multiple(
+                do_target_determination_for_s3,
+                REPO_ROOT=Path(d),
+                get_test_prioritizations=mock.Mock(return_value=heuristics),
+                get_all_previous_failures=mock.Mock(return_value={"test_ops"}),
+                **fetches,
+            ),
+            mock.patch.dict(os.environ, {"CI": "false"}),
+            mock.patch("sys.stdout"),
+        ):
+            do_target_determination_for_s3.main()
+            td_results = Path(d) / "td_results.json"
+            with mock.patch("sys.stderr"):
+                self.assertEqual(load_previous_failures(td_results), {"test_ops"})
 
     def test_load_previous_failures(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -753,7 +809,6 @@ class TestSplitTests(unittest.TestCase):
         return split, stderr.getvalue()
 
     def test_wiring(self) -> None:
-        stats: dict[str, object] = {"stat": 1}
         for sel, enforced in [(None, False), (Selection(files={"a"}, candidates={"a"}), False), (Selection(files={"a"}, enforce=True, candidates={"a"}), True)]:  # fmt: skip
             emit = mock.Mock()
             split, stderr = self.run_split(sel, emit)
@@ -762,21 +817,36 @@ class TestSplitTests(unittest.TestCase):
             self.assertEqual(split.source, gen_artifact.LLM_SELECTION_SOURCE if enforced else "td")  # fmt: skip
             self.assertNotIn("::warning::", stderr)
             self.assertEqual("Running 25% of tests based on TD" in stderr, not enforced)
-            split.report_failure(TestRun("p"), ["p"], stats)
-            failure = {"selected_tests": ["p"], "failure": "p", "llm_enforced": enforced, "stat": 1}  # fmt: skip
-            calls = [mock.call("td_test_failure_stats_v2", failure)]
+            split.report_failure(TestRun("p"))
+            calls = []
             if split.llm is not None:
                 selected = mock.call("llm_td_shadow_selection", split.llm.selection_metric)  # fmt: skip
                 shadow = mock.call("llm_td_shadow_failure", split.llm.failure_metric(TestRun("p")))  # fmt: skip
-                calls = [selected, *calls, shadow]
+                calls = [selected, shadow]
             self.assertEqual(emit.call_args_list, calls)
+
+    def test_td_failure_metric_is_emitted_by_run_test_main(self) -> None:
+        # emit_metric records its caller's file, module and function, which
+        # queries of td_test_failure_stats_v2 filter on.
+        tree = ast.parse((REPO_ROOT / "test" / "run_test.py").read_text())
+        callers = [
+            f.name
+            for f in ast.walk(tree)
+            if isinstance(f, ast.FunctionDef)
+            for c in ast.walk(f)
+            if isinstance(c, ast.Call)
+            and getattr(c.func, "id", None) == "emit_metric"
+            and isinstance(c.args[0], ast.Constant)
+            and c.args[0].value == "td_test_failure_stats_v2"
+        ]
+        self.assertEqual(callers, ["main"])
 
     def test_no_metrics_outside_ci(self) -> None:
         split, _ = self.run_split(
             Selection(files={"a"}, enforce=True, candidates={"a"}), emit=None
         )
         self.assertTrue(split.enforced)
-        split.report_failure(TestRun("p"), ["p"], {})
+        split.report_failure(TestRun("p"))
 
 
 class TestDashboardExclusions(unittest.TestCase):
@@ -824,7 +894,7 @@ class TestDashboardExclusions(unittest.TestCase):
         self.assertEqual(
             json.loads(json.dumps(exclusions)),
             {
-                "td": {"linux": {"default": ["a", "b"]}},
+                "all": {"linux": {"default": ["a", "b", "c"]}},
                 "llm_selection": {"linux": {"default": ["c"]}},
             },  # fmt: skip
         )
@@ -833,9 +903,10 @@ class TestDashboardExclusions(unittest.TestCase):
         dash = import_test_dashboard()
         td, llm = {"linux": {"default": ["a"]}}, {"linux": {"default": ["c"]}}
         for exclusions, expected in (
-            ({"td": td}, [mock.call(1, 2, "additional_info/td_exclusions", [td])]),
+            ({}, [mock.call(1, 2, "additional_info/td_exclusions", [{}])]),
+            ({"all": td}, [mock.call(1, 2, "additional_info/td_exclusions", [td])]),
             (
-                {"td": td, "llm_selection": llm},
+                {"all": td, "llm_selection": llm},
                 [
                     mock.call(1, 2, "additional_info/td_exclusions", [td]),
                     mock.call(1, 2, "additional_info/llm_td_exclusions", [llm]),
@@ -1078,9 +1149,11 @@ class TestMain(unittest.TestCase):
             (Path(repo) / "test" / "test_bar.py").write_text(
                 'import test_foo\nrun("test_ select nothing.py")\n'
             )
+            (Path(repo) / "test" / "unused.json").write_text("")
             git("add", "-A")
             git("commit", "-qm", "base")
             git("mv", "test/test_foo.py", "test/nn/test_foo.py")
+            git("rm", "-q", "test/unused.json")
             (Path(repo) / "test" / "test_ select nothing.py").write_text("")
             (Path(repo) / "test" / "jit").mkdir()
             (Path(repo) / "test" / "jit" / "test_new.py").write_text("")

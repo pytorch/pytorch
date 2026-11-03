@@ -11,15 +11,16 @@ Policies: `model` is the raw model output, `final` adds what CI adds (edited
 test files, the run-all rules), `final-hm` keeps only high/medium-confidence
 picks of a well-formed answer and otherwise falls back as `final` does, and
 `final+tdN` hedges `final` with TD's files that fit in N% of each config's
-test time (N defaults to 100*LLM_TD_HEDGE), and keeps TD's cut of a config in
-which that runs nothing, as Selection.split does. `final+tdN` falls back to
+test time (N defaults to 100*LLM_TD_HEDGE), and keeps TD's cut alone in a
+config in which that runs nothing or that has no test time, as
+Selection.split and apply_selection do. `final+tdN` falls back to
 TD's own cut when the model call failed or its answer is malformed, as CI
 does: select_tests never enforces such a selection, so
-selection.apply_selection keeps TD's split. Under enforcement
-Selection.split also always runs the files that already failed on the PR and
-that TD's split runs; the samples carry no such signal, so the hedge here has
-no `always` set, which understates both what enforcement runs and what it
-catches on a PR's later pushes.
+selection.apply_selection keeps TD's split. As Selection.split does under
+enforcement, `final+tdN` also runs a sample's `previous_failures` (head
+samples only, see build_dataset) that are in TD's cut of the config, outside
+the hedge budget; td_replay ranks them first, as TD's PreviouslyFailedInPR
+does.
 As in select_tests.select, a sample with no changed files, a change to test
 infrastructure (needs_run_all) or more than MAX_CHANGED_FILES runs everything
 under every model policy, at no model cost (with no changed files it is an
@@ -30,8 +31,8 @@ single policy `td25`, its CI cut of the top 25% per config, and ignores
 --policies.
 
 Every tag and policy is scored on the same samples: those with a TD replay
-of the current test-times.json, sample, STATS artifacts and TD heuristics'
-code (see replay_inputs and replay_stats) and a result for every model tag; the rest are counted on stderr. The test files that
+of the current test-times.json, sample, STATS artifacts and replay code
+(see replay_inputs and replay_stats) and a result for every model tag; the rest are counted on stderr. The test files that
 import an edited test file are found with git grep at the sample's head; a
 sample on which that fails (its head is not in this clone?) is left out and
 counted on stderr too, as in CI the grep works.
@@ -49,7 +50,7 @@ periodic reuses trunk's job names. test-times.json is merged over jobs per
 config, so a config that TD and non-TD jobs share (e.g. `default` in
 periodic) is priced as one.
 CI applies the TD cut and the hedge per job over that job's own test list;
-this models a job as a config of test-times.json, and hedges a config no job
+this models a job as a config of test-times.json (see job_files), and hedges a config no job
 of test-times.json records over its fallback job's times, as run_test.py
 does: default/<config>, else default/default (see fallback_seconds).
 
@@ -64,6 +65,7 @@ import collections
 import contextlib
 import functools
 import hashlib
+import inspect
 import json
 import re
 import statistics as st
@@ -104,6 +106,7 @@ NO_TD_CONFIGS = ("dynamo_cpython",)
 # The historical-stats artifacts td_replay reads, and the TD code it runs.
 STATS_ARTIFACTS = [TEST_FILE_RATINGS_FILE, TD_HEURISTIC_HISTORICAL_EDITED_FILES, TD_HEURISTIC_PROFILING_FILE]  # fmt: skip
 TD_CODE = REPO / "tools/testing/target_determination"
+REPLAY_CODE = [Path(__file__).with_name("td_replay.py"), REPO / "tools/testing/test_run.py"]  # fmt: skip
 
 # config -> file -> [cpu, gpu] seconds
 Seconds = dict[str, dict[str, list[float]]]
@@ -113,16 +116,20 @@ Seconds = dict[str, dict[str, list[float]]]
 class Choice:
     """A Selection plus the files run on top of it in each config (TD's cut or the hedge).
 
-    `other` applies to configs absent from test-times.json and its fallback job."""
+    `other` applies to configs absent from test-times.json and its fallback job,
+    and "" in `unenforced` to those. A config in `unenforced` runs only TD's cut."""
 
     sel: Selection
     per_config: dict[str, set[str]] = field(default_factory=dict)
     other: set[str] = field(default_factory=set)
+    unenforced: set[str] = field(default_factory=set)
 
     def covers(self, test_file: str, test_config: str) -> bool:
-        return self.sel.covers(
-            test_file, test_config
-        ) or test_file in self.per_config.get(test_config, self.other)
+        known = test_config in self.per_config
+        cut = self.per_config[test_config] if known else self.other
+        if (test_config if known else "") in self.unenforced:
+            return test_file in cut
+        return self.sel.covers(test_file, test_config) or test_file in cut
 
     def files(self) -> set[str]:
         return self.sel.files.union(*self.per_config.values())
@@ -279,6 +286,23 @@ def truth_pairs(s: dict, strong: bool) -> list[tuple[str, str]]:
     return sorted(pairs)
 
 
+def job_files(s: dict, seconds: Seconds) -> dict[str, set[str]]:
+    """config -> the candidates of `s` in the test list of that config's job.
+
+    That is the config's recorded files, the candidates no config records (CI
+    amends to the job's whole selected_tests, so a newly added file is in every
+    job), and the truth files that failed in it, which CI ran there. TD's cut
+    (td_replay) and the hedge both work over these lists."""
+    cands = set(s["candidates"])
+    untimed = cands - set().union(*seconds.values())
+    out = {c: (cands & fs.keys()) | untimed for c, fs in seconds.items()}
+    for f in truth_files(s, strong=False):
+        for c in {config_of(j) for _, j in truth_jobs(s, f)} or {"default"}:
+            if c in out:
+                out[c].add(f)
+    return out
+
+
 def hedge(
     sel: Selection,
     scored: list[str],
@@ -287,23 +311,27 @@ def hedge(
     config: str,
     td_cut: Collection[str],
     untimed: Collection[str],
+    previous: Collection[str] = (),
 ) -> set[str]:
-    """TD's positive-score files that fit in `share` of `seconds`' total, filled greedily in TD's order.
+    """The `previous` failures in TD's cut `td_cut`, and TD's positive-score files that fit in `share` of `seconds`' total, filled greedily in TD's order.
 
     This is selection.Selection.split for any share and with a job's test
     list taken to be `seconds` and `untimed` (test_hedge_matches_split pins
-    the two together). As in split, files the selection already covers cost
-    nothing, and a file that does not fit is skipped while smaller ones after
-    it may still fit. Files with no recorded time are skipped rather than added
-    for free. If the selection covers none of `seconds`' files and the
-    `untimed` ones and nothing is hedged, it is TD's cut `td_cut`. Unlike
-    split it takes any share and has no `always` files (see the module
-    docstring)."""
+    the two together). As in split, the previous failures are not charged to
+    the budget, files the selection already covers cost nothing, and a file
+    that does not fit is skipped while smaller ones after it may still fit.
+    Files with no recorded time are skipped rather than added for free. If
+    the selection covers none of `seconds`' files and the `untimed` ones and
+    that adds nothing, it is TD's cut `td_cut`. Unlike split it takes any
+    share. If `seconds` sums to 0 it is `td_cut` too: apply_selection does
+    not enforce a job with no test times."""
+    if not sum(seconds.values()):
+        return set(td_cut)
     budget = share * sum(seconds.values())
-    out = set()
+    out = {f for f in previous if f in td_cut and not sel.covers(f, config)}
     for f in scored:
         t = seconds.get(f, 0.0)
-        if t > 0 and t <= budget and not sel.covers(f, config):
+        if f not in out and t > 0 and t <= budget and not sel.covers(f, config):
             budget -= t
             out.add(f)
     if not out and not any(sel.covers(f, config) for f in [*seconds, *untimed]):
@@ -377,23 +405,18 @@ def policy(
             c: {f: cpu + gpu for f, (cpu, gpu) in fs.items() if f in cands}
             for c, fs in seconds.items()
         }
-        total: dict[str, float] = collections.defaultdict(float)
-        for fs in times.values():
-            for f, t in fs.items():
-                total[f] += t
-        # As in td_replay.top25_per_config, untimed files are in every job.
-        cut, untimed = td["top25_cfg"], cands - set(total)
-        per_config = {
-            c: hedge(sel, td["scored"], fs, share, c, cut.get(c, ()), untimed)
-            for c, fs in times.items()
-        }
+        cut, jobs = td["top25_cfg"], job_files(s, seconds)
+        prev = set(s.get("previous_failures", ()))
+        per_config = {c: hedge(sel, td["scored"], fs, share, c, cut.get(c, ()), jobs[c] - fs.keys(), prev) for c, fs in times.items()}  # fmt: skip
         # A config no job records is hedged over the fallback job's times, and its test list is every candidate.
         fb = {c: {f: t for f, t in fs.items() if f in cands} for c, fs in (fallback or {}).items()}  # fmt: skip
         for c in fb.keys() - times.keys() - {"default"}:
-            per_config[c] = hedge(sel, td["scored"], fb[c], share, c, td["top25"], cands - set(fb[c]))  # fmt: skip
+            per_config[c] = hedge(sel, td["scored"], fb[c], share, c, td["top25"], cands - set(fb[c]), prev)  # fmt: skip
+            times[c] = fb[c]
         fs = fb.get("default", {})
-        other = hedge(sel, td["scored"], fs, share, "", td["top25"], cands - set(fs))
-        return Choice(sel, per_config, other)
+        other = hedge(sel, td["scored"], fs, share, "", td["top25"], cands - set(fs), prev)  # fmt: skip
+        unenforced = {c for c, fs in [*times.items(), ("", fs)] if not sum(fs.values())}  # fmt: skip
+        return Choice(sel, per_config, other, unenforced)
     if name == "final-hm":
         # A malformed answer is left for from_model_output to fall back on.
         with contextlib.suppress(ValueError):
@@ -425,9 +448,10 @@ def replay_inputs(stats: str, times: bytes, sample: bytes) -> str:
 
 
 def replay_stats(stats_dir: Path) -> str:
-    """A hash of the STATS_ARTIFACTS in `stats_dir` and of the TD code (TD_CODE) a replay runs."""
-    paths = [stats_dir / a for a in STATS_ARTIFACTS] + sorted(TD_CODE.rglob("*.py"))
+    """A hash of the STATS_ARTIFACTS in `stats_dir` and of the code a replay runs: TD_CODE, REPLAY_CODE and this module's functions td_replay calls."""
+    paths = [stats_dir / a for a in STATS_ARTIFACTS] + sorted(TD_CODE.rglob("*.py")) + REPLAY_CODE  # fmt: skip
     parts = [f"{p.name} {hashlib.sha256(p.read_bytes()).hexdigest()}" for p in paths]
+    parts += [inspect.getsource(f) for f in (test_seconds, job_files, truth_files, truth_jobs, config_of)]  # fmt: skip
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
