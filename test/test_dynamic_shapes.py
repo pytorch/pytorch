@@ -7481,6 +7481,34 @@ class ShapeEnvReplacementCacheTest(TestCase):
         self.assertEqual(fn(a), c + 3)
         self.assertEqual(fn.cache_info().hits, hits + 1)
 
+    def test_replacement_refinement_invalidates_simplify(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 8, duck=False).node.expr
+        s1 = create_symint(shape_env, 4, duck=False).node.expr
+        s2 = create_symint(shape_env, 4, duck=False).node.expr
+        shape_env._set_replacement(s0, 2 * s1, "test")
+        self.assertEqual(shape_env.simplify(s0 + 1), 2 * s1 + 1)
+        num_replacements = len(shape_env.replacements)
+        shape_env._set_replacement(s0, 2 * s2, "test")
+        self.assertEqual(len(shape_env.replacements), num_replacements)
+        # Previously, simplify kept the result computed with the old replacement.
+        self.assertEqual(shape_env.simplify(s0 + 1), 2 * s2 + 1)
+
+    def test_path_compression_preserves_versions(self):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint().node.expr
+        b = shape_env.create_unbacked_symint().node.expr
+        c = shape_env.create_unbacked_symint().node.expr
+        shape_env._set_replacement(a, b + 1, "test")
+        shape_env._set_replacement(b, c + 2, "test")
+        version = shape_env._version_counter
+        replacements_version = shape_env._replacements_version_counter
+        self.assertEqual(shape_env._find(a), c + 3)
+        self.assertEqual(shape_env.replacements[a], c + 3)
+        # Compression does not change what a resolves to, so no cache is cleared.
+        self.assertEqual(shape_env._version_counter, version)
+        self.assertEqual(shape_env._replacements_version_counter, replacements_version)
+
 
 instantiate_parametrized_tests(ShapeEnvReplacementCacheTest)
 
