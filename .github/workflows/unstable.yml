@@ -48,6 +48,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      actions: read
 
   get-label-type:
     name: get-label-type
