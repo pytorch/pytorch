@@ -924,8 +924,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.
     def __call__(self, /, *args: _P.args, **kwargs: _P.kwargs) -> _T:
-        # CustomOpDef.__call__ calls _op directly, and Dynamo treats a call to
-        # _op as a call to the op, so this must stay just this.
+        # CustomOpDef.__call__ calls _op directly, so this must stay just this.
         return self._op(*args, **kwargs)
 
     # Use positional-only argument to avoid naming collision with aten ops arguments
