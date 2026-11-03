@@ -8,6 +8,7 @@
 #include <c10/util/irange.h>
 
 #include <climits>
+#include <cmath>
 #include <memory>
 #if !defined(__s390x__ ) && !defined(__powerpc__)
 #include <cpuinfo.h>
@@ -125,12 +126,6 @@ bool use_blas_gemm(
 C10_DIAGNOSTIC_POP()
 
 #if defined(MKL_HAS_SBGEMM) || defined(MKL_HAS_SHGEMM)
-// MKL's bf16/f16 gemm parallelizes poorly over few columns. For transa/no-transb
-// problems (the nn.Linear layout) the dot-product kernel in cpu/BlasKernel.cpp
-// wins below a crossover measured at 16-192 columns on AVX2/AVX-512 without AMX
-// (it grows with weight size and thread count); 128 is the median of that sweep.
-constexpr int64_t kMklXf16GemmMinColsTransA = 128;
-
 // Runs a bf16/f16 gemm on MKL, which only writes f32 C, through an f32 copy of C.
 // Returns false when the ATen kernel should handle the problem instead: tiny
 // problems (same bound as mkldnn_gemm, where MKL's call overhead dominates) and
@@ -144,8 +139,17 @@ bool mkl_xf16_gemm(
     const scalar_t *b, int64_t ldb,
     float beta,
     scalar_t *c, int64_t ldc) {
+  // MKL's bf16/f16 gemm parallelizes poorly over few columns, while the transa
+  // dot-product kernel in cpu/BlasKernel.cpp splits the rows of A across threads,
+  // so for transa/no-transb problems (the nn.Linear layout) the ATen kernel wins
+  // below a column count that grows with the thread count and the size of A.
+  // Measured on AVX2 and AVX-512 without AMX, keeping problems below 5 columns per
+  // thread for a 4096x4096 A (scaled by sqrt(m * k)), or below 24 columns, on the
+  // ATen kernel avoids slowdowns while keeping most of MKL's speedup.
+  const int64_t threads = at::in_parallel_region() ? 1 : at::get_num_threads();
+  const double min_cols_transa = std::max(24.0, 5.0 * threads * std::sqrt(static_cast<double>(m) * k) / 4096);
   const bool skinny_transa = transa != TransposeType::NoTranspose &&
-      transb == TransposeType::NoTranspose && n < kMklXf16GemmMinColsTransA;
+      transb == TransposeType::NoTranspose && n < min_cols_transa;
   if (m * n * k <= 16 * 16 * 16 || skinny_transa ||
       !use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     return false;
