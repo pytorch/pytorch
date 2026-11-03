@@ -1898,6 +1898,22 @@ def get_cpp_torch_options(
     )
     cflags = sys_libs_cflags + omp_cflags
     ldflags = sys_libs_ldflags + omp_ldflags
+    # Unless the compiler asks the linker to link as needed, as Ubuntu's GCC
+    # does by default, the OpenMP added above makes the linker record libgomp
+    # even when the model calls no OpenMP function. The shared library then
+    # fails to load without torch on a machine that has no libgomp. Dropping
+    # libraries nothing references cannot drop one the model uses. Links with
+    # libtorch are left alone, because a library there can matter without
+    # being referenced, when its static initializers register something. A
+    # static library is linked later by the program that uses it, so there
+    # the program's own link flags decide.
+    if (
+        _IS_LINUX
+        and aot_mode
+        and not config.aot_inductor.link_libtorch
+        and config.aot_inductor.cross_target_platform is None
+    ):
+        ldflags.append("Wl,--as-needed")
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
     libraries = torch_libraries + omp_lib
     passthrough_args = (
@@ -3085,13 +3101,14 @@ class CppBuilder:
                 )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
-        lflags = " ".join(self._build_option.get_ldflags())
-        passthrough = " ".join(self._build_option.get_passthrough_args())
         libs = " ".join(self._build_option.get_libraries())
         contents = textwrap.dedent(
             f"""
             # Add linker flags
-            target_link_options({self._target_name} PRIVATE {lflags} {passthrough})
+            target_link_options(
+                {self._target_name}
+                PRIVATE {self._ldflags_args} {self._passthrough_parameters_args}
+            )
 
             # Add libraries
             target_link_libraries({self._target_name} PRIVATE {libs})
