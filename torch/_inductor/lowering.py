@@ -8359,8 +8359,122 @@ def reduce_min(x, dim=None, keepdim=False):
 
 
 register_lowering(prims.xor_sum)(make_reduction("xor_sum"))
-reduce_amax = register_lowering(aten.amax)(make_reduction("max"))
-reduce_amin = register_lowering(aten.amin)(make_reduction("min"))
+
+
+def _pointwise_producer_is_shared(x):
+    """Whether x comes from a pointwise chain that is also written to memory
+    (a realized link, or a user outside the chain), so the atomics can fuse
+    into the kernel that writes it. Otherwise the plain reduction either fuses
+    the whole chain already or reads x from a buffer the atomics can't fuse into.
+    """
+    node = V.graph.current_node
+    if (
+        node is None
+        or node.target not in (aten.amax.default, aten.amin.default)
+        or V.graph.env.get(node.args[0]) is not x
+    ):
+        return False
+    chain: OrderedSet[torch.fx.Node] = OrderedSet()
+    stack = [node.args[0]]
+    while stack:
+        n = stack.pop()
+        if not isinstance(n, torch.fx.Node) or n in chain:
+            continue
+        value = V.graph.env.get(n)
+        if not (isinstance(value, TensorBox) and isinstance(value.data, ir.StorageBox)):
+            continue
+        data = value.data.data
+        if isinstance(data, ir.ComputedBuffer) and isinstance(data.data, ir.Pointwise):
+            return True
+        if not isinstance(data, ir.Pointwise):
+            continue
+        chain.add(n)
+        stack.extend(n.all_input_nodes)
+    return any(u is not node and u not in chain for n in chain for u in n.users)
+
+
+def _atomic_epilogue_minmax(x, reduction_type, axis, keepdims):
+    """Full fp32 amax/amin as an atomic epilogue of x's pointwise producer.
+
+    Returns None when not applicable. NaN is tracked with a separate flag
+    because float atomic max/min do not propagate it.
+    """
+    if not config.reduction_atomic_epilogue or x.get_dtype() != torch.float32:
+        return None
+    device = x.get_device()
+    size = x.get_size()
+    if (
+        device is None
+        or not is_gpu(device.type)
+        or not is_triton(device)
+        or len(size) == 0
+    ):
+        return None
+    if axis is not None and len(axis) != 0:
+        if sorted(a % len(size) for a in axis) != list(range(len(size))):
+            return None
+    if not V.graph.sizevars.statically_known_gt(sympy_product(size), 0):
+        return None
+    if not _pointwise_producer_is_shared(x):
+        return None
+
+    neutral = float("-inf") if reduction_type == "max" else float("inf")
+    mode = "atomic_max" if reduction_type == "max" else "atomic_min"
+    loader = x.make_loader()
+
+    def atomic_into(target, mode, inner_fn):
+        scatter = ir.Scatter(
+            device=device,
+            dtype=torch.float32,
+            inner_fn=inner_fn,
+            ranges=list(size),
+            output_indexer=lambda idx: [sympy.Integer(0)],
+            scatter_mode=mode,
+        )
+        buffer = ir.ComputedBuffer(
+            name=None, layout=ir.MutationLayoutSHOULDREMOVE(target), data=scatter
+        )
+        buffer.name = V.graph.register_buffer(buffer)
+        V.graph.register_operation(buffer)
+
+    out = full([1], neutral, dtype=torch.float32, device=device)
+    out.realize()
+    atomic_into(out, mode, loader)
+    has_nan = full([1], 0.0, dtype=torch.float32, device=device)
+    has_nan.realize()
+
+    def nan_flag(idx):
+        one, zero = ops.constant(1.0, torch.float32), ops.constant(0.0, torch.float32)
+        return ops.where(ops.isnan(loader(idx)), one, zero)
+
+    atomic_into(has_nan, "atomic_max", nan_flag)
+    out_loader, flag_loader = out.make_loader(), has_nan.make_loader()
+
+    def finalize(idx):
+        return ops.where(
+            ops.gt(flag_loader([0]), ops.constant(0.0, torch.float32)),
+            ops.constant(float("nan"), torch.float32),
+            out_loader([0]),
+        )
+
+    shape = [1] * len(size) if keepdims else []
+    return Pointwise.create(
+        device=device, dtype=torch.float32, inner_fn=finalize, ranges=shape
+    )
+
+
+def _make_minmax_reduction(reduction_type):
+    reduction = make_reduction(reduction_type)
+
+    def inner(x, axis=None, keepdims=False):
+        result = _atomic_epilogue_minmax(x, reduction_type, axis, keepdims)
+        return result if result is not None else reduction(x, axis, keepdims)
+
+    return inner
+
+
+reduce_amax = register_lowering(aten.amax)(_make_minmax_reduction("max"))
+reduce_amin = register_lowering(aten.amin)(_make_minmax_reduction("min"))
 reduce_argmax = register_lowering(aten.argmax)(
     make_reduction("argmax", override_return_dtype=torch.int64)
 )
