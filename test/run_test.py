@@ -2560,44 +2560,43 @@ def main():
     llm_selection = Selection.load(
         REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_TD_SELECTION_FILE
     )
-    # Written by the llm-test-selection job of target_determination.yml; see tools/testing/llm_td.
+    # Written by the llm-test-selection workflow; see tools/testing/llm_td.
     if llm_selection is not None:
         ranked = include + exclude
-        covered = [x for x in ranked if llm_selection.covers(x.test_file, TEST_CONFIG)]
+        # Partial TestRuns of one file share its time, so account per file.
+        files = list(dict.fromkeys(x.test_file for x in ranked))
+        chosen = {f for f in files if llm_selection.covers(f, TEST_CONFIG)}
+        file_time = {f: test_file_times_dict.get(f, 0) for f in files}
         if IS_CI:
             emit_metric(
                 "llm_td_shadow_selection",
                 {
                     "enforced": llm_selection.enforce,
                     "run_all": llm_selection.run_all,
-                    "num_tests": len(ranked),
-                    "num_covered": len(covered),
-                    "num_td_include": len(include),
-                    "time_total": sum(
-                        test_file_times_dict.get(x.test_file, 0) for x in ranked
-                    ),
-                    "time_covered": sum(
-                        test_file_times_dict.get(x.test_file, 0) for x in covered
-                    ),
+                    "num_tests": len(files),
+                    "num_covered": len(chosen),
+                    "num_td_include": len({x.test_file for x in include}),
+                    "time_total": sum(file_time.values()),
+                    "time_covered": sum(file_time[f] for f in chosen),
                 },
             )
-        if llm_selection.enforce and get_pr_number() is not None:
-            # Hedge with TD's top-ranked files that fit in a small share of the job's time.
-            budget = LLM_TD_HEDGE * sum(
-                test_file_times_dict.get(x.test_file, 0) for x in ranked
-            )
-            include, exclude = [], []
+        if options.enable_td and llm_selection.enforce and get_pr_number() is not None:
+            num_selected = len(chosen)
+            # Hedge greedily with TD's positively scored files, in rank order, that fit
+            # in a small share of the job's time. Files without a time are skipped.
+            budget = LLM_TD_HEDGE * sum(file_time.values())
+            scores = test_prioritizations._test_scores
             for x in ranked:
-                t = test_file_times_dict.get(x.test_file, 0)
-                if llm_selection.covers(x.test_file, TEST_CONFIG):
-                    include.append(x)
-                elif t <= budget:
-                    budget -= t
-                    include.append(x)
-                else:
-                    exclude.append(x)
+                f = x.test_file
+                if f in chosen or scores.get(x, 0) <= 0 or not file_time[f]:
+                    continue
+                if file_time[f] <= budget:
+                    budget -= file_time[f]
+                    chosen.add(f)
+            include = [x for x in ranked if x.test_file in chosen]
+            exclude = [x for x in ranked if x.test_file not in chosen]
             print_to_stderr(
-                f"LLM selection: running {len(include)} of {len(ranked)} tests ({len(covered)} selected)"
+                f"LLM selection: running {len(chosen)} of {len(files)} test files ({num_selected} selected)"
             )
 
     test_batch = TestBatch("tests to run", include, False)
