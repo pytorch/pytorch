@@ -9,6 +9,8 @@
 #endif
 
 #include <ATen/Context.h>
+#include <ATen/detail/HPUHooksInterface.h>
+#include <ATen/detail/MTIAHooksInterface.h>
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
@@ -264,7 +266,12 @@ void ActivityTraceWrapper::save(const std::string& path) {
 }
 
 bool isDevicePresent() {
-  return at::hasCUDA() || at::hasXPU() || at::hasMTIA() || at::hasHPU() ||
+  // Asking for hooks that are not registered yet caches stub hooks for the
+  // whole process, so an out-of-tree backend that loads later would never be
+  // seen. Check the registry first.
+  const bool hasMTIA = at::detail::isMTIAHooksBuilt() && at::hasMTIA();
+  const bool hasHPU = at::HPUHooksRegistry()->Has("HPUHooks") && at::hasHPU();
+  return at::hasCUDA() || at::hasXPU() || hasMTIA || hasHPU ||
       c10::is_privateuse1_backend_registered();
 }
 

@@ -116,10 +116,11 @@ using ActivityFilter = std::unordered_map<
 using ProfilerExtensionMap = std::unordered_map<std::string, std::string>;
 
 // Whether this process may have a device that Kineto could trace. For XPU this
-// only says that PyTorch was built with XPU support. A PrivateUse1 backend
-// counts once it has registered its own name, which it has not yet done while
-// torch._C initializes. Asking can initialize a device driver; for CUDA it
-// calls cudaGetDeviceCount, as libkineto does anyway when a trace stops.
+// only says that PyTorch was built with XPU support. Out-of-tree backends
+// (HPU, PrivateUse1) count once they have registered, which they have not yet
+// done while torch._C initializes. Asking can initialize a device driver; for
+// CUDA it calls cudaGetDeviceCount, as libkineto does anyway when a trace
+// stops.
 bool isDevicePresent();
 
 // cpuOnly matters only when this call registers libkineto, which happens once
