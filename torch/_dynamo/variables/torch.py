@@ -1177,14 +1177,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # pyrefly: ignore[missing-attribute]
                 example_value = args[0].proxy.node.meta["example_value"]
                 dks = self.value(example_value)
-                # Remove Python and PythonTLSSnapshot from the dispatch key set,
-                # as they originate from FakeTensor propagation.
-                # This should only be done if the example_value is a FakeTensor.
+                # Remove the keys that come from the example value being fake:
+                # Python and PythonTLSSnapshot from a Python FakeTensor, Fake
+                # from a C++ fake. The real tensor would not have them.
+                # This should only be done if the example_value is a fake.
                 # However, if tensor subclasses are present,
                 # it is reasonable for Python to remain in the dispatch key set.
                 if torch._subclasses.fake_tensor.is_fake_tensor(example_value):
                     dks = (
                         dks
+                        - torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
                         - torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
                         - torch._C.DispatchKeySet(
                             torch._C.DispatchKey.PythonTLSSnapshot
@@ -2157,8 +2159,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fill_value: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if isinstance(fill_value, variables.TensorVariable) and not issubclass(
-                fill_value.python_type(), torch.nn.Parameter
+            # Eager only accepts a 0-d tensor fill_value that does not require
+            # grad, and fill_ would make the result differentiable w.r.t. it.
+            if (
+                isinstance(fill_value, variables.TensorVariable)
+                and fill_value.ndim == 0
+                and not fill_value.requires_grad
             ):
                 dtype = kwargs.get("dtype")
                 out = kwargs.get("out")
@@ -3169,7 +3175,44 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # Under compile-on-one-rank the index must stay None so the runtime
                 # resolves it per rank and one artifact serves them all.
                 if not _coor_enabled():
-                    device_index = 0
+                    # Everywhere else it has to be resolved here, at trace time, and
+                    # guarded. Inductor wraps the call in
+                    # `with torch.cuda._DeviceGuard(<graph device>):`, so an index
+                    # deferred to run time would resolve against the graph's device
+                    # rather than the caller's -- synchronizing whichever device the
+                    # graph happens to be laid out for.
+                    torch_source = ImportSource("torch")
+                    install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
+                    current_device_source = CallFunctionNoArgsSource(
+                        AttrSource(
+                            AttrSource(torch_source, "accelerator"),
+                            "current_device_index",
+                        )
+                    )
+                    install_guard(
+                        current_device_source.make_guard(GuardBuilder.EQUALS_MATCH)
+                    )
+                    try:
+                        device_index = torch.accelerator.current_device_index()
+                    except RuntimeError as e:
+                        # No visible accelerator. Break rather than surface this as
+                        # an InternalTorchDynamoError telling the user to file a bug;
+                        # running the call eagerly reproduces the same error eager
+                        # would have raised.
+                        unimplemented(
+                            gb_type="synchronize with no accelerator available",
+                            context=f"device={device}",
+                            explanation=(
+                                "torch.accelerator.current_device_index() failed while "
+                                "resolving an index-less device for synchronize, so the "
+                                "index cannot be baked into the graph."
+                            ),
+                            hints=[
+                                "Pass an explicit device index to synchronize.",
+                                "Make an accelerator visible to the process.",
+                            ],
+                            from_exc=e,
+                        )
 
             tx.output.create_proxy(
                 "call_function",
