@@ -30,10 +30,17 @@ runs:
         pattern: llm_td_selection.json
         merge-multiple: true
 
+    - name: Download the previous failures
+      continue-on-error: true
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      with:
+        pattern: previous_failures
+        merge-multiple: true
+        path: .additional_ci_files
+
     - name: Move artifacts to .additional_ci_files folder
       shell: bash
       run: |
         mkdir -p .additional_ci_files
         mv td_results.json .additional_ci_files/td_results.json || true
-        mv previous_failures*.json .additional_ci_files/ || true
         mv llm_td_selection.json .additional_ci_files/llm_td_selection.json || true
