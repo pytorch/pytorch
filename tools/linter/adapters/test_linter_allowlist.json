@@ -57,7 +57,6 @@
   "test/distributed/_tools/test_sac_estimator.py",
   "test/distributed/_tools/test_sac_ilp.py",
   "test/distributed/algorithms/quantization/test_quantization.py",
-  "test/distributed/algorithms/test_join.py",
   "test/distributed/checkpoint/e2e/test_e2e_save_and_load.py",
   "test/distributed/checkpoint/e2e/test_fine_tuning.py",
   "test/distributed/checkpoint/e2e/test_fsdp_ep.py",
