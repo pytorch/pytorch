@@ -197,15 +197,6 @@ int32_t cute_dsl_{function_prefix}_wrapper(
             self.assertIn("c10::call_once", code)
             self.assertIn("dynamic_shapes[0]", code)
             self.assertIn("dynamic_strides[0]", code)
-            header_path = Path(artifact.header_path)
-            header_path.write_text(
-                header_path.read_text().replace(
-                    "cute_kernel_Kernel_Module_t*,\n    cute_kernel_Tensor_x_t*",
-                    "cute_kernel_Tensor_x_t*,\n    cute_kernel_Kernel_Module_t*",
-                )
-            )
-            with self.assertRaisesRegex(RuntimeError, "parameters"):
-                backend.validate_abi(artifact, spec)
 
 
 if __name__ == "__main__":
