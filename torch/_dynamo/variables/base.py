@@ -1826,7 +1826,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             for attr in table_attrs:
                 table = d.get(attr)
                 if isinstance(table, property):
-                    table = table.fget(self)
+                    table = table.__get__(self)
                 if table is not None and name in table:
                     return table[name]
         return None
