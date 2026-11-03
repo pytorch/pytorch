@@ -256,7 +256,9 @@ class TextGenerationPrefillModel(torch.nn.Module):
                     config.linear_key_head_dim,
                     config.linear_value_head_dim,
                 )
-                recurrent_states = conv_states.new_empty(recurrent_shape)
+                recurrent_states = conv_states.new_empty(
+                    recurrent_shape, dtype=torch.float32
+                )
                 for layer, is_linear in zip(self.cache.layers, self.cache.is_linear):
                     if is_linear:
                         layer.lazy_initialization(
