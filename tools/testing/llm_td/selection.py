@@ -88,8 +88,10 @@ class Selection:
             return cls(run_all=True, reason="change touches test infrastructure")
         files = {
             n
-            for t in out.get("tests", [])
-            if (n := normalize_test_name(t["file"], candidates))
+            for t in out.get("tests") or []
+            if isinstance(t, dict)
+            and isinstance(f := t.get("file"), str)
+            and (n := normalize_test_name(f, candidates))
         }
         for d in out.get("dirs") or []:
             prefix = d.strip().removeprefix("test/").strip("/") + "/"
@@ -122,7 +124,8 @@ class Selection:
 
     @classmethod
     def load(cls, path: Path) -> Selection | None:
-        if not path.exists():
+        try:
+            with open(path) as f:
+                return cls.from_json(json.load(f))
+        except (OSError, ValueError, KeyError, TypeError):
             return None
-        with open(path) as f:
-            return cls.from_json(json.load(f))
