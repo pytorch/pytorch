@@ -28,6 +28,7 @@ from tools.testing.llm_td.eval import REPO
 from tools.testing.llm_td.eval.score import (
     ci_jobs,
     cost_fraction,
+    grep_head,
     load,
     policy,
     runs_td,
@@ -80,7 +81,7 @@ def fractions(
     td_dir: Path,
     labeler: Path = LABELER,
 ) -> dict[str, float]:
-    """Mean (cpu, gpu) share of test time `pol` runs on `ids`, which must all have its inputs."""
+    """Mean (cpu, gpu) share of test time `pol` runs on `ids`, which must all have its inputs, with importers as in score.score."""
     seconds = test_seconds(data / "test-times.json")
     globs = inductor_globs(labeler)
     # The configs of inductor.yml's unit-test job (inductor-unittest.yml) that TD never runs.
@@ -88,10 +89,11 @@ def fractions(
     inductor = {c for c in unit if not runs_td(c)}
     if not inductor:
         raise SystemExit("no inductor unit-test configs without TD in workflows")
-    gen, ind = [], []
+    gen, ind, ungrepped = [], [], set()
     for sid in ids:
         s, r, td = load(data, tag, sid, samples, td_dir)
-        choice = None if tag != "td" and r is None else policy(pol, s, r, td, seconds)
+        grep = grep_head(s, sid, ungrepped)
+        choice = None if tag != "td" and r is None else policy(pol, s, r, td, seconds, grep)  # fmt: skip
         if choice is None:
             raise SystemExit(f"{sid} has no {tag} result or TD replay")
         cands = set(s["candidates"])
@@ -102,6 +104,8 @@ def fractions(
         raise SystemExit(f"no {tag} samples")
     if not ind:
         raise SystemExit(f"no {tag} sample matches the ciflow/inductor globs")
+    if ungrepped:
+        print(f"{len(ungrepped)} of {len(ids)} ids without importers: git grep failed at their head")  # fmt: skip
     return {
         "cpu": st.mean(x[0] for x in gen), "gpu": st.mean(x[1] for x in gen),
         "ind_cpu": st.mean(x[0] for x in ind), "ind_gpu": st.mean(x[1] for x in ind),
@@ -165,7 +169,8 @@ def model(
                 "save_k": save,
             }
         )
-    llm_k = PR_PUSHES_PER_MONTH_K * mean_call_usd(data, tag, cost_ids)
+    calls = 0.0 if tag == "td" else mean_call_usd(data, tag, cost_ids)
+    llm_k = PR_PUSHES_PER_MONTH_K * calls
     return {"tag": tag, "policy": pol, "overhead": overhead, "fractions": f, "td_fractions": ftd, "rows": rows,
             "total_k_per_month": total, "stack_k_per_month": stack, "llm_k_per_month": llm_k}  # fmt: skip
 

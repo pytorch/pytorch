@@ -85,6 +85,8 @@ def main() -> None:
         for tag in tags:
             prefix, effort = tag.rsplit("_", 1)
             pols = [p for p in HEDGES if (tag, p, kind) in g]
+            if not pols:
+                raise SystemExit(f"no {kind} rows for {tag}")
             xy = [(cost(tag, p), rate(tag, p, kind)[0]) for p in pols]
             points += xy
             ax.plot(*zip(*xy), color=COLOR[tag], marker=MARKER[effort], markersize=5, linewidth=1, label=f"{MODELS[prefix]} {effort}")
