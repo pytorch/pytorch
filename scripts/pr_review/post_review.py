@@ -25,7 +25,9 @@ Invariants:
   The only other dismissal is a run retracting its own review because the
   head moved. Failed, skipped and opted-out runs change nothing.
 - `@pytorchbot` is escaped in all posted text, because pytorch-bot reads
-  commands from review bodies.
+  commands from review bodies. One exception: a change request's footer names
+  `@pytorchbot review` live, so the author can copy it. It must stay mid-line
+  and backticked, so it never matches pytorch-bot's `^ *@pytorch(merge|)bot .+$`.
 - API errors are warnings. The step fails only when an earlier change request
   may still stand after a clean verdict.
 """
@@ -81,7 +83,7 @@ REPORT_TEMPLATE = "ai-pr-review-feedback.yml"
 # A re-review reads the PR's comments, replies to earlier findings included.
 PUSH_BACK = (
     "Disagree with a finding? Reply with your reasoning, then comment "
-    "`@pytorchbot review` to request a re-review. "
+    "`@pytorchbot review` to request a re-review."
 )
 _VERDICT_LINE = {
     "changes_requested": "changes requested before human review",
@@ -434,7 +436,7 @@ def _compose(
     body, report_link = map(defuse_bot_commands, ("\n".join(lines), report_link))
     # Added after defusing so the command reads as written. Mid-line, so it
     # never matches pytorch-bot's `^ *@pytorch(merge|)bot .+$`.
-    push_back = PUSH_BACK if verdict == "changes_requested" else ""
+    push_back = f"{PUSH_BACK} " if verdict == "changes_requested" else ""
     return (
         f"{body}\n<sub>{push_back}This review is AI-generated and advisory. "
         f"Each new automated review replaces the previous one.{report_link}</sub>"
