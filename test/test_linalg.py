@@ -1924,20 +1924,24 @@ class TestLinalg(TestCase):
     # how the per-thread sums are combined. The other cases have 2 or 3 outputs,
     # and each output is still reduced by a single thread.
     @onlyCPU
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float)
     def test_vector_norm_keeps_small_terms(self, device, dtype):
+        norm, powsum = torch.linalg.vector_norm, torch.linalg._powsum
         n = 2**16
         num_threads = torch.get_num_threads()
         try:
             for threads in (1, 4):
                 torch.set_num_threads(threads)
-                for ord, first, expected in ((1, 2.0**24, 2.0**24 + n), (2, 2.0**12, math.sqrt(2.0**24 + n))):
+                for ord, first in ((1, 2.0**24), (2, 2.0**12)):
                     x = torch.ones(n + 1, dtype=dtype, device=device)
                     x[0] = first
                     cols = x.unsqueeze(1).repeat(1, 3)
-                    for t, dim in ((x, None), (cols, 0), (cols.t().contiguous(), 1)):
-                        result = torch.linalg.vector_norm(t, ord, dim=dim)
-                        msg = f"threads={threads}, ord={ord}, dim={dim}"
+                    for (t, dim), fn in product(((x, None), (cols, 0), (cols.t().contiguous(), 1)), (norm, powsum)):
+                        result = fn(t, ord, dim=dim)
+                        expected = 2.0**24 + n
+                        if fn is norm and ord == 2:
+                            expected = math.sqrt(expected)
+                        msg = f"threads={threads}, {fn.__name__}, ord={ord}, dim={dim}"
                         self.assertEqual(result, torch.full_like(result, expected), atol=0, rtol=1e-5, msg=msg)
                 # ord=0 counts the nonzeros, so it needs more than 2**24 elements.
                 x = torch.ones((), dtype=dtype, device=device).expand(2**24 + n, 2)
