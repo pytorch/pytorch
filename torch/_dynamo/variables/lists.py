@@ -18,7 +18,6 @@ import collections
 import inspect
 import operator
 import sys
-import types
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 from typing_extensions import TypeIs
 
@@ -49,6 +48,7 @@ from ..utils import (
     cmp_name_to_op_mapping,
     get_fake_value,
     guard_if_dyn,
+    is_wrapper_or_member_descriptor,
     istype,
     iter_contains,
     no_keywords,
@@ -2135,7 +2135,7 @@ class ByteArrayVariable(VariableTracker):
 
     _nonvar_fields = {
         "data",
-        "is_sourceless_capture",
+        "is_from_sourceless_builder",
         *VariableTracker._nonvar_fields,
     }
 
@@ -2143,21 +2143,25 @@ class ByteArrayVariable(VariableTracker):
         self,
         data: bytearray,
         *,
-        is_sourceless_capture: bool = False,
+        is_from_sourceless_builder: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         if not isinstance(data, bytearray):
             raise AssertionError(f"data must be a bytearray, got {type(data).__name__}")
         self.data = data
-        self.is_sourceless_capture = is_sourceless_capture
+        self.is_from_sourceless_builder = is_from_sourceless_builder
 
     def python_type(self) -> type[bytearray]:  # type: ignore[type-arg]
         return bytearray
 
     @staticmethod
     def create(data: bytearray) -> "ByteArrayVariable":
-        """Wrap a bytearray freshly allocated by the operation being traced."""
+        """Wrap a freshly allocated bytearray.
+
+        New bytearrays must use this factory, not VariableTracker.build, which
+        sends raw bytearrays through SourcelessBuilder with unknown provenance.
+        """
         return ByteArrayVariable(data, mutation_type=ValueMutationNew())
 
     def as_python_constant(self) -> bytearray:
@@ -2218,11 +2222,10 @@ class ByteArrayVariable(VariableTracker):
                 f"{type(self).__name__}; every construction site should set "
                 "mutation_type."
             )
-        self._decline_store_to_existing()
+        self._decline_store_to_existing(tx)
         # value=None signals delete (CPython NULL sentinel).
         if pyindex_check(maybe_get_python_type(key)):
             index = pynumber_as_ssize_t(tx, key)
-            # Explicit unbound dispatch: the value is checked before the bounds.
             return ByteArrayVariable.sq_ass_item_impl(self, tx, index, value)
         elif pyslice_check(key):
             # PySlice_Unpack calls the bounds' __index__ in step, start, stop
@@ -2296,7 +2299,7 @@ class ByteArrayVariable(VariableTracker):
                 f"{type(self).__name__}; every construction site should set "
                 "mutation_type."
             )
-        self._decline_store_to_existing()
+        self._decline_store_to_existing(tx)
         # value=None signals delete (CPython NULL sentinel).
         index = key.nb_index_impl(tx).as_python_constant()
         byte = None
@@ -2318,30 +2321,48 @@ class ByteArrayVariable(VariableTracker):
         self.data = new_data
         return ConstantVariable.create(None)
 
-    def _decline_store_to_existing(self) -> None:
+    def _decline_store_to_existing(self, tx: "InstructionTranslatorBase") -> None:
         # Stores run on a copy that side-effect replay writes back after the
         # frame. A bytearray that existed before the frame may share its buffer
         # with a memoryview, tensor or ndarray, which would read stale bytes,
         # and eager raises BufferError for a resize at the store itself.
         # SourcelessBuilder copies can also refer to existing objects, without
         # a source through which to write the changes back.
+        # Other mutators retain this pre-existing limitation. See #203287.
         if (
             isinstance(self.mutation_type, ValueMutationExisting)
-            or self.is_sourceless_capture
+            or self.is_from_sourceless_builder
         ):
+            from ..resume_execution import ContinueExecutionCache
+
+            context = (
+                self.source.name
+                if self.source is not None
+                else "captured without a source"
+            )
+            is_resume = (
+                tx.output.root_tx.f_code
+                in ContinueExecutionCache.generated_code_metadata
+            )
             unimplemented(
                 gb_type="bytearray store to an existing bytearray",
-                context=f"bytearray: {self}",
+                context=f"bytearray: {context}",
                 explanation="Dynamo traces bytearray item and slice stores and "
-                "deletes only on bytearrays created during tracing. An input, "
-                "global, attribute or other existing bytearray may share its "
-                "buffer with a memoryview, tensor or array that Dynamo cannot "
-                "see, so the store is left to eager. A bytearray created before "
-                "a graph break is treated as existing in the resume function, so "
-                "each later store breaks the graph again.",
+                "deletes only on bytearrays created during tracing. Existing "
+                "bytearrays may share their buffer with a memoryview, tensor or "
+                "array that Dynamo cannot see, so their stores are left to eager. "
+                "Bytearrays captured without a source, including in closures, "
+                "default arguments and class or module attributes, have no source "
+                "through which to write changes back to the original object. "
+                "Their stores are also left to eager. A bytearray created before "
+                "a graph break is treated as existing in the resume function.",
                 hints=[
                     "Return a new bytearray from the compiled function instead of storing into an existing one.",
-                    *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
+                    *(
+                        graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK
+                        if is_resume
+                        else []
+                    ),
                 ],
             )
 
@@ -2351,22 +2372,16 @@ class ByteArrayVariable(VariableTracker):
 
         # PyLong_Check bypasses Python __index__ overrides on int subclasses;
         # Dynamo handles SymInt separately. Other Python-defined __index__
-        # methods may run arbitrary code.
+        # methods, including assigned builtin callables, may run arbitrary code.
+        member_type = maybe_get_python_type(member)
         if (
             istype(member, ConstantVariable)
             or isinstance(member, SymNodeVariable)
-            or pylong_check(maybe_get_python_type(member))
+            or pylong_check(member_type)
         ):
             return False
-        index = inspect.getattr_static(maybe_get_python_type(member), "__index__", None)
-        return index is not None and not isinstance(
-            index,
-            (
-                types.WrapperDescriptorType,
-                types.MethodDescriptorType,
-                types.BuiltinFunctionType,
-            ),
-        )
+        index = inspect.getattr_static(member_type, "__index__", None)
+        return index is not None and not is_wrapper_or_member_descriptor(index)
 
     @staticmethod
     def _byte_value(
@@ -2637,13 +2652,12 @@ class ByteArrayVariable(VariableTracker):
         except AsPythonConstantNotImplementedError:
             return None
         try:
-            return VariableTracker.build(
-                tx,
-                [
-                    ByteArrayVariable.create(part)
-                    for part in getattr(self.data, method)(*const_args, **const_kwargs)
-                ],
-            )
+            result = getattr(self.data, method)(*const_args, **const_kwargs)
+            if isinstance(result, bytearray):
+                return ByteArrayVariable.create(result)
+            if isinstance(result, (list, tuple)):
+                result = type(result)(ByteArrayVariable.create(part) for part in result)
+            return VariableTracker.build(tx, result)
         except (MemoryError, OverflowError, TypeError, ValueError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 

@@ -1414,6 +1414,7 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
     def test_store_to_existing_bytearray(self, case):
         if case == "global":
             fn, args = setitem_global, ()
+            target = global_bytearray
         elif case == "closure":
             ba = bytearray(b"ab")
 
@@ -1421,6 +1422,7 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 ba[0] = 1
 
             args = ()
+            target = ba
         elif case == "attribute":
             holder = types.SimpleNamespace(ba=bytearray(b"ab"))
 
@@ -1428,23 +1430,71 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 holder.ba[0] = 1
 
             args = (holder,)
+            target = holder.ba
         else:
             arguments = {
                 "argument_item": (setitem, (0, ord("x"))),
-                "argument_slice_resize": (setitem, (slice(1, 3), b"YZ")),
-                "argument_slice_overwrite": (setitem, (slice(1, 2), b"XY")),
+                "argument_slice_resize": (setitem, (slice(1, 2), b"XY")),
+                "argument_slice_overwrite": (setitem, (slice(1, 3), b"YZ")),
                 "argument_delete_item": (delitem, (0,)),
                 "argument_delete_slice": (delitem, (slice(None, None, 2),)),
             }
             fn, args = arguments[case]
             args = (bytearray(b"abcd"), *args)
+            target = args[0]
 
+        initial = bytearray(target)
+        try:
+            fn(*args)
+            expected = bytearray(target)
+            target[:] = initial
+            torch.compile(fn, backend="eager")(*args)
+            self.assertEqual(target, expected)
+        finally:
+            target[:] = initial
         torch._dynamo.reset()
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
             "bytearray store to an existing bytearray",
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(*args)
+
+    @parametrize("escape", ["global", "list", "attribute", "alias"])
+    def test_new_bytearray_escape_then_store(self, escape):
+        global global_bytearray
+
+        def f(holder, x):
+            global global_bytearray
+            ba = bytearray(b"abc")
+            alias = ba
+            if escape == "global":
+                global_bytearray = ba
+            elif escape == "list":
+                holder.append(ba)
+            elif escape == "attribute":
+                holder.ba = ba
+            ba[0] = 1
+            return alias, ba, x + 1
+
+        original = global_bytearray
+        holder = [] if escape == "list" else types.SimpleNamespace()
+        counter = CompileCounter()
+        try:
+            alias, result, tensor = torch.compile(f, backend=counter, fullgraph=True)(
+                holder, torch.ones(1)
+            )
+            self.assertEqual(result, bytearray(b"\x01bc"))
+            self.assertEqual(tensor, torch.ones(1) + 1)
+            self.assertIs(alias, result)
+            if escape == "global":
+                self.assertIs(global_bytearray, result)
+            elif escape == "list":
+                self.assertIs(holder[0], result)
+            elif escape == "attribute":
+                self.assertIs(holder.ba, result)
+            self.assertEqual(counter.frame_count, 1)
+        finally:
+            global_bytearray = original
 
     def test_store_to_existing_bytearray_with_export(self):
         # The tensor and the memoryview share the buffer: they must see the
@@ -1520,6 +1570,35 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             "bytearray slice store with Python __index__ bounds",
         ):
             run(torch.compile(fn, backend="eager", fullgraph=True), *args)
+
+    @parametrize("position", ["start", "stop", "step"])
+    def test_setslice_builtin_index_bounds(self, position):
+        def store(bound, x):
+            ba = bytearray(b"abc")
+            if position == "start":
+                ba[bound:2] = b"XY"
+            elif position == "stop":
+                ba[:bound] = b"XY"
+            else:
+                ba[::bound] = b"XYZ"
+            return ba, x + 1
+
+        def run(fn):
+            index = {"start": 0, "stop": 2, "step": 1}[position]
+            calls = [index, index]
+
+            class Bound:
+                __index__ = calls.pop
+
+            return fn(Bound(), torch.ones(1)), calls
+
+        self.assertEqual(run(torch.compile(store, backend="eager")), run(store))
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "bytearray slice store with Python __index__ bounds",
+        ):
+            run(torch.compile(store, backend="eager", fullgraph=True))
 
     @parametrize("index_type", ["float", "str"])
     def test_setslice_python_index_subclass_bounds(self, index_type):

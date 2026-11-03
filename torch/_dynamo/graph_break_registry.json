@@ -1071,11 +1071,10 @@
   "GB2918": [
     {
       "Gb_type": "bytearray store to an existing bytearray",
-      "Context": "bytearray: {self}",
-      "Explanation": "Dynamo traces bytearray item and slice stores and deletes only on bytearrays created during tracing. An input, global, attribute or other existing bytearray may share its buffer with a memoryview, tensor or array that Dynamo cannot see, so the store is left to eager. A bytearray created before a graph break is treated as existing in the resume function, so each later store breaks the graph again.",
+      "Context": "bytearray: {context}",
+      "Explanation": "Dynamo traces bytearray item and slice stores and deletes only on bytearrays created during tracing. Existing bytearrays may share their buffer with a memoryview, tensor or array that Dynamo cannot see, so their stores are left to eager. Bytearrays captured without a source, including in closures, default arguments and class or module attributes, have no source through which to write changes back to the original object. Their stores are also left to eager. A bytearray created before a graph break is treated as existing in the resume function.",
       "Hints": [
-        "Return a new bytearray from the compiled function instead of storing into an existing one.",
-        "This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one."
+        "Return a new bytearray from the compiled function instead of storing into an existing one."
       ]
     }
   ],
