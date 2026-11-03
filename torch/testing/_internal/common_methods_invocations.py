@@ -9989,10 +9989,10 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
                         mat2,
                         [scale1],
                         [recipe],
-                        [SwizzleType.SWIZZLE_MNxK4],
+                        [SwizzleType.SWIZZLE_MN_K4],
                         [scale2],
                         [recipe],
-                        [SwizzleType.SWIZZLE_MNxK4],
+                        [SwizzleType.SWIZZLE_MN_K4],
                         None,  # bias
                         torch.bfloat16,  # out_dtype
                     )

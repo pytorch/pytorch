@@ -9102,7 +9102,7 @@ def meta_scaled_grouped_mm_v2(
     vec32 = ScalingType.BlockWise1x32.value
     vec128 = ScalingType.BlockWise1x128.value
     block128 = ScalingType.BlockWise128x128.value
-    mnk4 = SwizzleType.SWIZZLE_MNxK4.value
+    mnk4 = SwizzleType.SWIZZLE_MN_K4.value
     has_mnk4 = mnk4 in swizzle_a or mnk4 in swizzle_b
     fp8_types = (torch.float8_e4m3fn, torch.float8_e5m2)
     torch._check_value(
@@ -9116,7 +9116,7 @@ def meta_scaled_grouped_mm_v2(
             and torch.float8_e4m3fn in (mat_a.dtype, mat_b.dtype)
         ),
         lambda: "Invalid scaling configuration for grouped GEMM: packed MNxK4 requires matching "
-        "BlockWise1x32 or BlockWise1x128 recipes, SWIZZLE_MNxK4 on both inputs, and a valid float8 input pair",
+        "BlockWise1x32 or BlockWise1x128 recipes, SWIZZLE_MN_K4 on both inputs, and a valid float8 input pair",
     )
     hopper = (
         len(scale_recipe_a) == len(scale_recipe_b) == 1
