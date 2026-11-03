@@ -33,8 +33,8 @@ from the head's pull_request runs (see pr_bases), or the merge base with main
 when no run recorded one (`base_source` says which). For revert and neutral samples it
 is the parent commit. Candidates approximate what select_tests offers: CI reads
 TESTS from its main checkout when it runs, which this replaces with TESTS at
-the head's merge base with main, plus the test files the sample adds. PR
-samples carry the raw PR body.
+the head's merge base with main (`main_base`), plus the test files the sample
+adds. PR samples carry the raw PR body.
 Samples are only written once, so rebuilding into an existing DIR keeps them.
 PR and head samples carry the PR's title and body as of the build, which may
 have been edited after the failure; revert and neutral samples carry the
@@ -42,7 +42,8 @@ landed commit message.
 
 A PR failure is attributed to the PR only if, before the PR landed, the same
 test did not fail on another author's PR, or on main within four days of the
-failure or of the PR's merge base. PR
+failure or of the PR's merge base, and the test was not disabled within
+FLAKY_WINDOW of the failure, as in head samples' flaky_flags. PR
 truths that reproduced (same test failing in two build environments, or on
 two heads of the PR) are kept in `truth_strong`. A one-off is not necessarily a flake:
 often only one environment runs the test, or the author fixed it in the next
@@ -77,6 +78,7 @@ MAIN_LOOKBACK = dt.timedelta(days=30)
 FLAKY_WINDOW = dt.timedelta(days=14)
 NEVER = dt.datetime.max.replace(tzinfo=dt.timezone.utc)
 SKIP_JOBS = ("rerun_disabled_tests", "mem_leak_check")
+Disabled = dict[tuple[str, str], list[dt.datetime]]
 
 
 def git(*args: str, check: bool = True) -> str:
@@ -175,6 +177,24 @@ def pr_authors(prs: list[int]) -> dict[int, str]:
     return out
 
 
+def disabled_tests(lo: dt.date, hi: dt.date) -> Disabled:
+    """(class, test) -> the days in [lo, hi) it was on the disabled list."""
+    out: Disabled = collections.defaultdict(list)
+    sql = f"""
+        SELECT toString(day) d, name FROM misc.disabled_tests_historical
+        WHERE day >= '{lo}' AND day < '{hi}'"""
+    for d in query(sql):
+        # "test_foo (__main__.TestBar)"
+        test, _, cls = d["name"].removesuffix(")").partition(" (")
+        out[(cls.rsplit(".", 1)[-1], test)].append(ts(d["d"] + " 00:00:00"))
+    return out
+
+
+def was_disabled(disabled: Disabled, r: dict) -> bool:
+    t, days = ts(r["t"]), disabled.get((r["classname"], r["test"]), [])
+    return any(abs(d - t) < FLAKY_WINDOW for d in days)
+
+
 def pr_caused_failures(
     rows: list[dict], start: dt.date, end: dt.date, landed: dict[int, dt.datetime]
 ) -> tuple[list[dict], dict]:
@@ -184,8 +204,9 @@ def pr_caused_failures(
     are still checked against main and other authors, within MAIN_WINDOW.
     Failures after the PR landed (`landed`, see landed_times) may be its own
     breakage and are not held against it, so its own failures from then on
-    cannot be checked and are dropped. Unstable jobs, and jobs that passed on
-    any attempt on the same head, are not truth, as in flaky_flags. Failures
+    cannot be checked and are dropped. Unstable jobs, jobs that passed on any
+    attempt on the same head, and tests disabled within FLAKY_WINDOW are not
+    truth, as in flaky_flags. Failures
     on branches with no known PR count against PR failures here like main's,
     but only main's are returned."""
     sha2pr = pr_of_shas(sorted({r["sha"] for r in rows if not is_main(r["br"])}))
@@ -202,11 +223,12 @@ def pr_caused_failures(
     for r in pr_rows:
         authors[(r["tf"], r["classname"], r["test"])].append((ts(r["t"]), author.get(r["pr"], r["pr"])))  # fmt: skip
     lo, hi = ts(f"{start} 00:00:00"), ts(f"{end} 00:00:00")
+    disabled = disabled_tests(start - FLAKY_WINDOW, end + FLAKY_WINDOW)
     keep = []
     for r in pr_rows:
         k, t, cutoff = (r["tf"], r["classname"], r["test"]), ts(r["t"]), landed.get(r["pr"], NEVER)  # fmt: skip
         others = {who for wt, who in authors[k] if abs(wt - t) < MAIN_WINDOW and wt < cutoff} - {author.get(r["pr"], r["pr"])}  # fmt: skip
-        if lo <= t < min(hi, cutoff) and "unstable" not in r["job"] and job_runs_td(r["job"], r["wf"]) and not others and not any(abs(t - m) < MAIN_WINDOW and m < cutoff for m in main.get(k, []) + unmapped.get(k, [])):  # fmt: skip
+        if lo <= t < min(hi, cutoff) and "unstable" not in r["job"] and job_runs_td(r["job"], r["wf"]) and not was_disabled(disabled, r) and not others and not any(abs(t - m) < MAIN_WINDOW and m < cutoff for m in main.get(k, []) + unmapped.get(k, [])):  # fmt: skip
             keep.append(r)
     green = green_jobs(sorted({r["sha"] for r in keep}))
     return [r for r in keep if (r["sha"], r["wf"], r["job"]) not in green], main
@@ -224,19 +246,20 @@ def green_jobs(shas: list[str]) -> set[tuple[str, str, str]]:
 
 
 def ci_bases(heads: dict[str, int]) -> dict[str, list[str]]:
-    """Head sha -> the base shas of PR `heads[sha]` that the head's pull_request(_target) runs recorded.
+    """Head sha -> the base shas of PR `heads[sha]` that the head's pull_request runs recorded.
 
     llm-td.yml passes the base.sha of the head's push event to select_tests.
-    A run records the base as of its latest webhook, which can be a base
-    pushed after the head; see pr_bases. Heads with no such run, such as a
-    fork's, are left out."""
+    pull_request_target runs record the base branch as head_sha, so they never
+    match a head. A run records the base as of its latest webhook, which can be
+    a base pushed after the head; see pr_bases. Heads with no such run, such
+    as a fork's, are left out."""
     shas, out = sorted(heads), {}
     for i in range(0, len(shas), 200):
         chunk = ",".join(f"'{s}'" for s in shas[i : i + 200])
         sql = f"""
             SELECT head_sha, tupleElement(p, 1) pr, groupUniqArray(tupleElement(p, 2)) bases
             FROM default.workflow_run ARRAY JOIN arrayZip(pull_requests.number, pull_requests.base.sha) AS p
-            WHERE head_sha IN ({chunk}) AND event IN ('pull_request', 'pull_request_target')
+            WHERE head_sha IN ({chunk}) AND event = 'pull_request'
               AND repository.full_name = 'pytorch/pytorch'
             GROUP BY head_sha, pr"""
         for r in query(sql):
@@ -262,6 +285,7 @@ def pr_bases(sha: str, bases: list[str]) -> dict[str, str] | None:
             by_mb.setdefault(mb, b)
     if not by_mb:
         return {"base": main_base, "merge_base": main_base, "main_base": main_base, "base_source": "main"}  # fmt: skip
+    # When the merge bases are truly independent (rare), --independent keeps them all and this picks one.
     mb = git("merge-base", "--independent", *by_mb).split()[0] if len(by_mb) > 1 else next(iter(by_mb))  # fmt: skip
     return {"base": by_mb[mb], "merge_base": mb, "main_base": main_base, "base_source": "ci"}  # fmt: skip
 
@@ -343,16 +367,17 @@ def write_sample(
     main_base: str | None = None,
     **extra,
 ) -> None:
-    """Write sample `sid` for `sha` diffed against `merge_base` (default `base`), with main at `main_base` (default `merge_base`)."""
+    """Write sample `sid` for `sha` diffed against `merge_base` (default `base`), with main at `main_base` (default `merge_base`), whose TESTS give the candidates."""
     path = out / f"{sid}.json"
     if path.exists():
         return
     merge_base = merge_base or base
+    main_base = main_base or merge_base
     diffstat, diff = diffstat_and_diff(merge_base, sha)
     write_json(path, {
-        "id": sid, "kind": kind, "sha": sha, "base": base, "merge_base": merge_base, "title": title, "body": body,
+        "id": sid, "kind": kind, "sha": sha, "base": base, "merge_base": merge_base, "main_base": main_base, "title": title, "body": body,
         "diff": diff, "diffstat": diffstat, "changed_files": changed_files(merge_base, sha),
-        "candidates": candidates_at(main_base or merge_base, sha, merge_base),
+        "candidates": candidates_at(main_base, sha, merge_base),
         **extra,
     })  # fmt: skip
 
@@ -454,19 +479,11 @@ def flaky_flags(rows: list[dict], start: dt.date, end: dt.date) -> list[dict]:
         pr = sha2pr.get(r["sha"])
         who = "main" if is_main(r["br"]) or pr is None else author.get(pr, pr)
         seen[(r["tf"], r["classname"], r["test"])].append((ts(r["t"]), who))
-    disabled = collections.defaultdict(list)
-    sql = f"""
-        SELECT toString(day) d, name FROM misc.disabled_tests_historical
-        WHERE day >= '{lo}' AND day < '{end + w}'"""
-    for d in query(sql):
-        # "test_foo (__main__.TestBar)"
-        test, _, cls = d["name"].removesuffix(")").partition(" (")
-        disabled[(cls.rsplit(".", 1)[-1], test)].append(ts(d["d"] + " 00:00:00"))
+    disabled = disabled_tests(lo, end + w)
     for r in rows:
         t, me, cutoff = ts(r["t"]), author.get(r["pr"], r["pr"]), landed.get(r["pr"], NEVER)
         near = {who for wt, who in seen[(r["tf"], r["classname"], r["test"])] if abs(wt - t) < w and wt < cutoff}
-        was_disabled = any(abs(d - t) < w for d in disabled[(r["classname"], r["test"])])
-        r["flaky"] = r["job_green"] or "unstable" in r["job"] or bool(near - {me}) or was_disabled or t >= cutoff
+        r["flaky"] = r["job_green"] or "unstable" in r["job"] or bool(near - {me}) or was_disabled(disabled, r) or t >= cutoff
     return rows
 
 
