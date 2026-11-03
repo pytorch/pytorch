@@ -91,7 +91,7 @@ by default. Prefill is opt-in and supports `meta-llama/Llama-3.2-1B`,
   --batch-size=1 --only=Qwen/Qwen3-0.6B --output=prefill_performance.csv
 ```
 
-Prefill and decode require Transformers 5.14.1 or newer.
+Prefill, decode, and encode require Transformers 5.14.1 or newer.
 
 Prefill measures one forward over the prompt, returning last-position logits and
 populating a reusable static cache. The cache holds `prompt_length + 1999`
@@ -131,6 +131,30 @@ CSV `abs_latency` and `eager_latency` are milliseconds for all
 `--iterations-per-run` requests; `output_tokens_per_second` counts every decode
 step across batch elements. Default output and profiler trace names get a
 `_decode` suffix.
+
+#### Whisper encode and decode
+
+`openai/whisper-tiny` and `openai/whisper-large-v3-turbo` support
+`--hf-inference-mode=encode` and `decode`. Each batch element is 30 seconds of
+random audio:
+
+```
+./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
+  --backend=inductor --hf-inference-mode=decode --decode-length=128 \
+  --batch-size=1 --only=openai/whisper-large-v3-turbo
+```
+
+Encode times one compiled encoder forward over the log-mel features. Decode
+allocates static self- and cross-attention caches. Each request runs the encoder
+and prefills the decoder start token eagerly outside the timed region, which
+fills the cross-attention cache, then times `--decode-length` single-token
+compiled decoder forwards. The self-attention cache holds 447 positions, as in
+`generate` with a static cache, so `--decode-length` is at most 446. Explicit
+Whisper requests reject `--prompt-length` and decode lengths above that limit
+before loading weights. Decode sweeps exclude Whisper when either option is
+incompatible, keeping the selected workloads valid for every child process.
+Encode rows report `eager_latency` but no throughput.
+Default output and profiler trace names get an `_encode` suffix for encode.
 
 #### Tensor-parallel prefill and decode
 

@@ -2161,7 +2161,7 @@ class BenchmarkRunner:
             or args.tp_size != 1
         ):
             raise ValueError(
-                "--hf-inference-mode=prefill/decode, --prompt-length, "
+                "--hf-inference-mode=prefill/decode/encode, --prompt-length, "
                 "--decode-length, and --tp-size require the huggingface suite"
             )
 
@@ -3636,7 +3636,7 @@ def parse_args(args=None):
     )
     parser.add_argument(
         "--hf-inference-mode",
-        choices=("generate", "prefill", "decode"),
+        choices=("generate", "prefill", "decode", "encode"),
         default="generate",
         help="Inference workload for registered Hugging Face generation models.",
     )
