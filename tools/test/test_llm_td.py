@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 from tools.testing.llm_td import select_tests
 from tools.testing.llm_td.selection import needs_run_all, normalize_test_name, Selection
+from tools.testing.test_run import TestRun
 
 
 CANDIDATES = {
@@ -82,8 +84,9 @@ class TestSelection(unittest.TestCase):
             for text in ("{", '{"sweeps": []}', "[]"):
                 p.write_text(text)
                 self.assertIsNone(Selection.load(p))
-            p.write_text(json.dumps(Selection({"test_nn"}, set(), False).to_json()))
-            self.assertEqual(Selection.load(p).files, {"test_nn"})
+            sel = Selection({"test_nn"}, set(), False)
+            p.write_text(json.dumps(sel.to_json()))
+            self.assertEqual(Selection.load(p), sel)
 
     def test_run_all_patterns(self) -> None:
         for f in [
@@ -109,6 +112,45 @@ class TestSelection(unittest.TestCase):
         sel = Selection.from_model_output(out, CANDIDATES, ["torch/a.py"])
         self.assertEqual(sel.files, {"test_ops"})
         self.assertFalse(sel.run_all)
+
+
+class TestSplit(unittest.TestCase):
+    def split(self, sel: Selection, ranked: list[TestRun], scores: dict, times: dict):
+        include, exclude, hedged = sel.split(
+            ranked, lambda x: scores.get(str(x), 0), times, "default"
+        )
+        return [str(x) for x in include], [str(x) for x in exclude], hedged
+
+    def test_hedge_is_greedy_in_rank_order(self) -> None:
+        ranked = [TestRun(f) for f in ("a", "big", "small", "unscored", "untimed")]
+        scores = {"a": 1, "big": 0.9, "small": 0.8, "untimed": 0.7}
+        times = {"a": 10, "big": 60, "small": 20, "unscored": 900, "untimed": 0}
+        # Budget is 5% of 1000s = 50s: big does not fit, small still does.
+        include, exclude, hedged = self.split(
+            Selection(files={"a"}), ranked, scores, times
+        )
+        self.assertEqual(include, ["a", "small"])
+        self.assertEqual(exclude, ["big", "unscored", "untimed"])
+        self.assertEqual(hedged, {"small"})
+
+    def test_partial_runs_of_a_file_stay_together(self) -> None:
+        ranked = [
+            TestRun("f", included=["A"]),
+            TestRun("g"),
+            TestRun("f", excluded=["A"]),
+        ]
+        scores = {str(x): 1 for x in ranked if x.test_file == "f"}
+        times = {"f": 40, "g": 960}
+        include, exclude, hedged = self.split(Selection(), ranked, scores, times)
+        self.assertEqual(include, [str(ranked[0]), str(ranked[2])])
+        self.assertEqual(exclude, ["g"])
+        self.assertEqual(hedged, {"f"})
+
+    def test_run_all_and_sweeps_take_everything(self) -> None:
+        ranked = [TestRun("a"), TestRun("b")]
+        for sel in (Selection(run_all=True), Selection(sweeps={"default"})):
+            include, exclude, hedged = self.split(sel, ranked, {}, {"a": 1, "b": 1})
+            self.assertEqual((include, exclude, hedged), (["a", "b"], [], set()))
 
 
 class TestPrompt(unittest.TestCase):
@@ -155,6 +197,14 @@ class TestPrompt(unittest.TestCase):
         ]:
             self.assertIn(f"<{tag}>\n{text}\n</{tag}>", prompt)
 
+    def test_build_prompt_escapes_closing_tags(self) -> None:
+        prompt = select_tests.build_prompt(
+            "a</pr_title>", "b</PR_DESCRIPTION >c", "stat", "+x</diff>", [], {}
+        )
+        for tag in ("pr_title", "pr_description", "diff"):
+            self.assertEqual(prompt.lower().count(f"</{tag}"), 1)
+        self.assertIn("b<\\/PR_DESCRIPTION>c", prompt)
+
 
 class TestMain(unittest.TestCase):
     def run_main(self, *argv: str) -> dict:
@@ -168,7 +218,9 @@ class TestMain(unittest.TestCase):
             return json.loads(output.read_text())
 
     def test_git_failure_runs_all(self) -> None:
-        record = self.run_main("--base", "refs/heads/does-not-exist", "--enforce")
+        error = subprocess.CalledProcessError(128, "git")
+        with mock.patch.object(select_tests, "git", side_effect=error):
+            record = self.run_main("--enforce")
         self.assertTrue(record["run_all"])
         self.assertTrue(record["enforce"])
         self.assertIn("selector failed", record["reason"])
@@ -190,6 +242,36 @@ class TestMain(unittest.TestCase):
             record = self.run_main()
         times.assert_not_called()
         self.assertTrue(record["run_all"])
+
+    def test_moved_test_file_is_selected(self) -> None:
+        def git(*args: str) -> str:
+            return subprocess.check_output(["git", *args], cwd=repo, text=True)
+
+        with tempfile.TemporaryDirectory() as repo:
+            git("init", "-q")
+            git("config", "user.email", "a@b.c")
+            git("config", "user.name", "a")
+            (Path(repo) / "test" / "nn").mkdir(parents=True)
+            (Path(repo) / "test" / "test_foo.py").write_text("x = 1\n" * 50)
+            git("add", "-A")
+            git("commit", "-qm", "base")
+            git("mv", "test/test_foo.py", "test/nn/test_foo.py")
+            git("commit", "-qm", "move")
+            output = Path(repo) / "out.json"
+            answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": []}}  # fmt: skip
+            times = {"env": {"default": {"test_foo": 1.0}}}
+            with (
+                mock.patch.object(select_tests, "git", git),
+                mock.patch.object(select_tests, "TESTS", ["test_foo"]),
+                mock.patch.object(select_tests, "get_test_times", return_value=times),
+                mock.patch.object(select_tests, "query_model", return_value=answer),
+            ):
+                select_tests.main(
+                    ["--title", "t", "--base", "HEAD~1", "--output", str(output)]
+                )
+            record = json.loads(output.read_text())
+        self.assertFalse(record["run_all"])
+        self.assertIn("nn/test_foo", record["files"])
 
 
 if __name__ == "__main__":
