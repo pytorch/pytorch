@@ -149,7 +149,7 @@ class InputAliasInfo:
     # Backends read tensor storage directly and ignore that bit, so the runtime
     # wrapper hands them a resolved copy instead. See
     # Note [Resolving lazy negative inputs at the backend boundary].
-    is_neg: bool = False
+    is_neg: bool
 
     def __post_init__(self) -> None:
         if self.mutates_storage_metadata:

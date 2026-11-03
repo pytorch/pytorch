@@ -700,87 +700,149 @@ class TestAOTAutograd(_TestAOTAutogradBase):
         self.assertEqual(x.grad, x_ref.grad)
         self.assertEqual(w.grad, w_ref.grad)
 
-    def test_neg_view_input_mutation_and_alias(self):
+    @parametrize("keep_input_mutations", [True, False])
+    def test_neg_view_input_mutation_and_alias(self, keep_input_mutations):
+        # keep_inference_input_mutations=True mutates the resolved copy in the
+        # graph, False goes through the runtime mutation epilogue.
         def f(x):
             x.mul_(2)
             return x[1:], x + 1
 
-        # keep_inference_input_mutations=True mutates the resolved copy in the
-        # graph, False goes through the runtime mutation epilogue.
-        for keep_mutations in (True, False):
-            base_ref = torch.arange(4.0)
-            outs_ref = f(base_ref._neg_view())
-            base = torch.arange(4.0)
-            compiled_f = aot_function(
-                f,
-                fw_compiler=self._no_neg_input_compiler,
-                keep_inference_input_mutations=keep_mutations,
-            )
-            outs = compiled_f(base._neg_view())
-            self.assertEqual(base, base_ref)
-            self.assertEqual(outs, outs_ref)
-            # The view output still aliases the user's tensor, negative bit included.
-            self.assertTrue(outs[0].is_neg())
-            self.assertEqual(outs[0].data_ptr(), base[1:].data_ptr())
+        base_ref = torch.arange(4.0)
+        outs_ref = f(base_ref._neg_view())
+        base = torch.arange(4.0)
+        compiled_f = aot_function(
+            f,
+            fw_compiler=self._no_neg_input_compiler,
+            keep_inference_input_mutations=keep_input_mutations,
+        )
+        outs = compiled_f(base._neg_view())
+        self.assertEqual(base, base_ref)
+        self.assertEqual(outs, outs_ref)
+        # The view output still aliases the user's tensor, negative bit included.
+        self.assertTrue(outs[0].is_neg())
+        self.assertEqual(outs[0].data_ptr(), base[1:].data_ptr())
 
-    def test_neg_view_input_strided_alias_output(self):
-        # Dynamic shapes, or turning view replay off, rebuild an output that
-        # aliases an input from the output's strides and offset, which are
-        # relative to the resolved copy; it must still land on the user's
-        # elements.
+    @parametrize("view_replay_for_aliased_outputs", [True, False])
+    @parametrize("dynamic", [False, True])
+    @parametrize(
+        "index",
+        [slice(3, 11), slice(3, None, 2)],
+        name_fn=lambda index: "dense" if index.step is None else "strided",
+    )
+    def test_neg_view_input_offset_alias_output(
+        self, view_replay_for_aliased_outputs, dynamic, index
+    ):
+        # Without view replay (turned off, or skipped under dynamic shapes), an
+        # output aliasing an input is rebuilt from the output's strides and
+        # offset, which are relative to the resolved copy; it must still land
+        # on the user's elements. A dense input is copied by resolve_neg(), a
+        # strided one by clone_preserve_strides().
         def f(x):
             return x[: x.shape[0] // 2], x * 2
 
-        for replay_views in (True, False):
-            base = torch.arange(20.0)
-            x = base[3::2]._neg_view()
-            outs_ref = f(x)
-            compiled_f = aot_function(f, self._no_neg_input_compiler, dynamic=True)
-            with torch._functorch.config.patch(
-                view_replay_for_aliased_outputs=replay_views
-            ):
-                outs = compiled_f(x)
-            self.assertEqual(outs, outs_ref)
-            self.assertTrue(outs[0].is_neg())
-            self.assertEqual(outs[0].stride(), outs_ref[0].stride())
-            self.assertEqual(outs[0].data_ptr(), outs_ref[0].data_ptr())
+        x = torch.arange(20.0)[index]._neg_view()
+        outs_ref = f(x)
+        with patch(
+            "torch._functorch.config.view_replay_for_aliased_outputs",
+            view_replay_for_aliased_outputs,
+        ):
+            outs = aot_function(f, self._no_neg_input_compiler, dynamic=dynamic)(x)
+        self.assertEqual(outs, outs_ref)
+        self.assertTrue(outs[0].is_neg())
+        self.assertEqual(outs[0].stride(), outs_ref[0].stride())
+        self.assertEqual(outs[0].data_ptr(), outs_ref[0].data_ptr())
 
-    def test_neg_view_input_metadata_mutation(self):
+    @parametrize("dynamic", [False, True])
+    def test_neg_view_complex_input_real_alias_output(self, dynamic):
+        # The alias fallback shifts the copy's offset in the units of the
+        # view_as_real() view it applies it to.
+        def f(x):
+            return torch.view_as_real(x[: x.shape[0] // 2])
+
+        x = torch.randn(10, dtype=torch.complex64)[3:]._neg_view()
+        out_ref = f(x)
+        with patch("torch._functorch.config.view_replay_for_aliased_outputs", False):
+            out = aot_function(f, self._no_neg_input_compiler, dynamic=dynamic)(x)
+        self.assertEqual(out, out_ref)
+        self.assertEqual(out.storage_offset(), out_ref.storage_offset())
+        self.assertEqual(out.data_ptr(), out_ref.data_ptr())
+
+    def test_neg_view_expanded_input(self):
+        # A stride-0 input overlaps itself, so clone_preserve_strides() copies it.
+        def f(x):
+            return x[1:], x * 2
+
+        x = torch.arange(3.0).view(3, 1).expand(3, 4)._neg_view()
+        outs_ref = f(x)
+        outs = aot_function(f, self._no_neg_input_compiler)(x)
+        self.assertEqual(outs, outs_ref)
+        self.assertEqual(outs[0].stride(), outs_ref[0].stride())
+        self.assertEqual(outs[0].data_ptr(), outs_ref[0].data_ptr())
+
+    def test_neg_view_input_passed_twice(self):
+        def f(a, b):
+            return a * b + a
+
+        x = torch.arange(4.0)._neg_view()
+        self.assertEqual(aot_function(f, self._no_neg_input_compiler)(x, x), f(x, x))
+
+    @parametrize("case", ["unsqueeze_", "transpose_", "unsqueeze_and_mul_"])
+    def test_neg_view_input_metadata_mutation(self, case):
         # The resolved copy starts at storage offset 0, so applying a metadata
         # mutation to the user's tensor has to shift it back by the input's.
-        cases = [
-            (
+        f, make_base, index = {
+            "unsqueeze_": (
                 lambda x: x.unsqueeze_(0) + 1,
                 lambda: torch.arange(10.0),
                 (slice(2, None),),
             ),
-            (
+            "transpose_": (
                 lambda x: x.transpose_(0, 1) * 3,
                 lambda: torch.arange(24.0).view(4, 6),
                 (slice(1, None), slice(2, None)),
             ),
             # The epilogue applies a data and metadata mutation from a fresh
             # graph output, which only matches at offset 0 (plain inputs too).
-            (
+            "unsqueeze_and_mul_": (
                 lambda x: x.unsqueeze_(0).mul_(2) + 1,
                 lambda: torch.arange(10.0),
                 (slice(8),),
             ),
-        ]
-        for f, make_base, index in cases:
-            base_ref = make_base()
-            x_ref = base_ref[index]._neg_view()
-            out_ref = f(x_ref)
+        }[case]
+        base_ref = make_base()
+        x_ref = base_ref[index]._neg_view()
+        out_ref = f(x_ref)
 
-            base = make_base()
-            x = base[index]._neg_view()
-            out = aot_function(f, self._no_neg_input_compiler)(x)
-            self.assertEqual(out, out_ref)
-            self.assertEqual(base, base_ref)
-            self.assertEqual(x, x_ref)
-            self.assertTrue(x.is_neg())
-            self.assertEqual(x.stride(), x_ref.stride())
-            self.assertEqual(x.storage_offset(), x_ref.storage_offset())
+        base = make_base()
+        x = base[index]._neg_view()
+        out = aot_function(f, self._no_neg_input_compiler)(x)
+        self.assertEqual(out, out_ref)
+        self.assertEqual(base, base_ref)
+        self.assertEqual(x, x_ref)
+        self.assertTrue(x.is_neg())
+        self.assertEqual(x.stride(), x_ref.stride())
+        self.assertEqual(x.storage_offset(), x_ref.storage_offset())
+
+    def test_neg_view_traced_metadata_mutation_on_plain_input(self):
+        # aot_function doesn't guard on the bit, so a graph traced with a lazy
+        # negative input can run on a plain one, which isn't copied; its
+        # metadata mutation must then land without a shift.
+        def f(x):
+            x.unsqueeze_(0)
+            return x + 1
+
+        compiled_f = aot_function(f, nop)
+        compiled_f(torch.arange(10.0)[2:]._neg_view())
+
+        base_ref = torch.arange(10.0)
+        x_ref = base_ref[2:]
+        out_ref = f(x_ref)
+        base = torch.arange(10.0)
+        x = base[2:]
+        self.assertEqual(compiled_f(x), out_ref)
+        self.assertEqual(x, x_ref)
+        self.assertEqual(x.storage_offset(), x_ref.storage_offset())
 
     def test_neg_view_input_mutated_in_training_graph(self):
         # x doesn't require grad, so its mutation stays in the training graph
@@ -833,6 +895,18 @@ class TestAOTAutograd(_TestAOTAutogradBase):
         compiled_f = aot_function(f, nop, keep_inference_input_mutations=True)
         with self.assertRaisesRegex(RuntimeError, "lazy negative bit"):
             compiled_f(torch.arange(4.0)._neg_view(), torch.ones(2))
+
+    def test_conj_and_neg_view_input(self):
+        # Only the negation is resolved; the traced graph applies the
+        # conjugation itself.
+        def f(x):
+            return x.imag * 2, x + 1
+
+        def make_input():
+            return torch.tensor([1 + 2j, 3 + 4j, 5 + 6j]).conj()._neg_view()
+
+        outs = aot_function(f, self._no_neg_input_compiler)(make_input())
+        self.assertEqual(outs, f(make_input()))
 
     def test_conj_view_input_left_to_traced_graph(self):
         # Tracing records the conjugation of a conj-bit input as explicit ops

@@ -595,6 +595,30 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_neg_view_input_cache_hit_training(self):
+        def fn(x, y):
+            return (x * y).sin().sum()
+
+        x = torch.randn(8)._neg_view()
+        y = torch.randn(8)
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        def out_and_grad(f):
+            x_grad = x.detach().requires_grad_()
+            out = f(x_grad, y)
+            out.backward()
+            return out, x_grad.grad
+
+        self.assertEqual(out_and_grad(fn), out_and_grad(compiled_fn))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(out_and_grad(fn), out_and_grad(compiled_fn))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch(
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
     )

@@ -70,7 +70,11 @@ from .descriptors import (
     SyntheticBaseAOTInput,
     ViewBaseAOTInput,
 )
-from .functional_utils import gen_alias_from_base, resolve_neg_preserving_strides
+from .functional_utils import (
+    gen_alias_from_base,
+    resolve_neg_preserving_strides,
+    storage_offset_on,
+)
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
     compute_overlapping_inputs,
@@ -561,9 +565,9 @@ class _FirstInvocationContext:
 # these inputs, and the backend compiles against resolved example inputs. The
 # copies keep the inputs' strides (resolve_neg_preserving_strides) and start at
 # storage offset 0, so a graph output that views a copy maps onto the user's
-# tensor by shifting its storage offset by the input's. The output alias replay
-# relies on this when it falls back to the output's strides and offset, and the
-# mutation epilogue when it applies a metadata mutation.
+# tensor by shifting its storage offset by the input's (storage_offset_on). The
+# output alias replay relies on this when it falls back to the output's strides
+# and offset, and the mutation epilogue when it applies a metadata mutation.
 # The mutation epilogue and output alias replay keep using the user's original
 # tensors, which are captured before the call. A data mutation the graph
 # performs in place lands on the copy, so it is copied back after the call.
@@ -578,9 +582,11 @@ class _FirstInvocationContext:
 # values and gradients are correct; rebuilding it on the user's tensor would
 # bypass the compiled backward.
 #
-# Conjugate-bit inputs are left alone: tracing already records their
-# conjugation as explicit ops (e.g. Tensor.imag emits _conj), so resolving them
-# before the call would apply it twice.
+# Conjugate bits are left alone, including on an input that also carries the
+# negative bit: the traced graph records the conjugation as explicit ops (e.g.
+# Tensor.imag emits _conj), and conj-bit inputs give correct results today.
+# Resolving the conjugation first would make the recorded _conj set the bit
+# again on the copy, and view_as_real() would then fail on it.
 def _resolve_neg_inputs(
     args: list[Any],
     neg_input_indices: tuple[int, ...],
@@ -837,12 +843,13 @@ class _RuntimeForwardEpilogue:
                     updated_inpt = updated_inpt.alias
                 # We need to grab the size/stride/storage_offset from the compiled forward,
                 # and use that to mutate the metadata of the input
-                storage_offset = updated_inpt.storage_offset()
-                if meta.is_neg:
-                    # See Note [Resolving lazy negative inputs at the backend boundary]
-                    storage_offset += original_inpt.storage_offset()
                 original_inpt.as_strided_(
-                    updated_inpt.size(), updated_inpt.stride(), storage_offset
+                    updated_inpt.size(),
+                    updated_inpt.stride(),
+                    # See Note [Resolving lazy negative inputs at the backend boundary]
+                    storage_offset_on(original_inpt, updated_inpt)
+                    if meta.is_neg
+                    else updated_inpt.storage_offset(),
                 )
             else:
                 if meta.mutates_data and meta.mutates_metadata:
@@ -1114,9 +1121,9 @@ def _create_runtime_wrapper(
         info = runtime_metadata.input_info[i]
         if info.mutates_storage_metadata or info.mutation_inductor_storage_resize:
             raise RuntimeError(
-                f"aot_autograd() does not yet handle set_() or resize_() on input {i}, "
-                "which carries the lazy negative bit (Tensor._neg_view()). Call "
-                "resolve_neg() on it before passing it in."
+                "aot_autograd() does not yet handle set_() or resize_() on an input "
+                "that carries the lazy negative bit, as Tensor.conj().imag and "
+                "Tensor._neg_view() return. Call resolve_neg() on it first."
             )
     compiled_invoker = _RuntimeCompiledFnInvoker(
         compiled_fn=compiled_fn,
@@ -1230,7 +1237,11 @@ def _create_runtime_wrapper(
             args="orig_inputs, updated_inputs",
             artifact_name="mutation_epilogue",
         )
-        buf.bind(torch=torch, _unwrap_tensoralias=_unwrap_tensoralias)
+        buf.bind(
+            torch=torch,
+            _unwrap_tensoralias=_unwrap_tensoralias,
+            _storage_offset_on=storage_offset_on,
+        )
         wrote_body = False
         with buf.indent():
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
@@ -1256,7 +1267,7 @@ def _create_runtime_wrapper(
                     offset = f"{u}.storage_offset()"
                     if meta.is_neg:
                         # See Note [Resolving lazy negative inputs at the backend boundary]
-                        offset = f"{oi}.storage_offset() + {offset}"
+                        offset = f"_storage_offset_on({oi}, {u})"
                     buf.writeline(
                         f"{oi}.as_strided_({u}.size(), {u}.stride(), {offset})"
                     )

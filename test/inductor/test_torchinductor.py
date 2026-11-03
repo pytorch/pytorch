@@ -8657,11 +8657,20 @@ for dtype in (torch.int32, torch.int64):
         y = torch.randn(8, device=self.device)
         self.assertEqual(torch.compile(fn)(x, y), fn(x, y))
 
+        def train(x, y):
+            return (x * y).sin().sum()
+
         x_grad = x.detach().requires_grad_()
+        y_grad = y.detach().requires_grad_()
         x_ref = x.detach().requires_grad_()
-        torch.compile(fn)(x_grad, y)[1].backward()
-        fn(x_ref, y)[1].backward()
+        y_ref = y.detach().requires_grad_()
+        out = torch.compile(train)(x_grad, y_grad)
+        out_ref = train(x_ref, y_ref)
+        self.assertEqual(out, out_ref)
+        out.backward()
+        out_ref.backward()
         self.assertEqual(x_grad.grad, x_ref.grad)
+        self.assertEqual(y_grad.grad, y_ref.grad)
 
         def mutate(x):
             x.mul_(2)
