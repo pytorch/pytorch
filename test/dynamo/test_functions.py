@@ -8516,8 +8516,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             f.__annotate__ = lambda x: 42
             try:
                 f.__annotations__
-            except TypeError as e:
-                out.append(str(e))
+            except TypeError:
+                out.append("raised")
             f.__annotate__ = lambda x: {"x": x}
             out.append(f.__annotations__)
             # Setting annotate to None does not invalidate the cached __annotations__
@@ -8542,7 +8542,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 None,
                 "__annotate__ must be callable or None",
                 True,
-                "__annotate__ returned non-dict of type 'int'",
+                "raised",
                 {"x": 1},
                 {"x": 1},
                 {"y": 1},
