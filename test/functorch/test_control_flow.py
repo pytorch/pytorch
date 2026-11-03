@@ -5057,6 +5057,74 @@ class TestControlFlowDevice(_TestControlFlowBase):
         self.assertEqual(result, result_exp)
         self.assertEqual(buf, torch.full_like(buf, xs.size(0)))
 
+    # Under aot_eager and inductor, functionalization flags the scan body as aliasing
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: (
+            params["hop"] == "scan" and params["backend"] in ("aot_eager", "inductor")
+        ),
+    )
+    @decorateIf(
+        unittest.skip,
+        lambda params: TEST_WITH_TORCHDYNAMO and params["backend"] != "none",
+    )
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("hop", ["cond", "map", "scan", "while_loop"])
+    @parametrize("transform", ["grad", "vjp"])
+    @parametrize("backend", ["none", "eager", "aot_eager", "inductor"])
+    def test_hop_func_grad(self, device, hop, transform, backend):
+        def scan_body(c, x):
+            c = c * x + x
+            return c, c.sin()
+
+        def while_body(i, x):
+            return i + 1, x * 1.5 + x.sin()
+
+        init = torch.ones(3, device=device)
+        zero = torch.tensor(0, device=device)
+        # Each HOP and the same computation without it
+        fn, fn_exp = {
+            "cond": (
+                lambda x: cond(x.sum() > 0, lambda x: x.sin() * x, torch.cos, (x,)),
+                lambda x: x.sin() * x,
+            ),
+            "map": (
+                lambda x: control_flow.map(lambda x: x.sin() * x, x),
+                lambda x: x.sin() * x,
+            ),
+            "scan": (
+                lambda x: scan(scan_body, init, x)[1],
+                lambda x: _fake_scan(scan_body, init, x)[1],
+            ),
+            "while_loop": (
+                lambda x: while_loop(lambda i, x: i < 3, while_body, (zero, x))[1],
+                lambda x: while_body(*while_body(*while_body(zero, x)))[1],
+            ),
+        }[hop]
+        x = torch.rand(5, 3, device=device) + 0.5
+        w = torch.rand(5, 3, device=device)
+
+        def run(f):
+            if transform == "grad":
+                return torch.func.grad(lambda x: (f(x) * w).sum())(x)
+            out, vjp_fn = torch.func.vjp(f, x)
+            return out, vjp_fn(w)
+
+        run_hop = run
+        if backend != "none":
+            run_hop = torch.compile(run, backend=backend, fullgraph=True)
+        self.assertEqual(run_hop(fn), run(fn_exp))
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_cond_func_grad_of_grad_raises(self, device):
+        def f(x):
+            return cond(x.sum() > 0, lambda x: x.sin() * x, torch.cos, (x,)).sum()
+
+        x = torch.rand(5, 3, device=device) + 0.5
+        grad = torch.func.grad
+        with self.assertRaisesRegex(Exception, "does not support higher-order"):
+            grad(lambda x: grad(f)(x).sum())(x)
+
 
 class AssociativeScanModels:
     @staticmethod
