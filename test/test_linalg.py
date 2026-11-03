@@ -12053,10 +12053,8 @@ class TestLinalgCudaOnly(TestCase):
     @dtypes(torch.float)
     def test_borrow_verdict_not_revalidated_tunableop(self, device, dtype):
         # The verdict stands: the second call of the same shape is an exact
-        # hit: the borrow was persisted by RecordBorrowed. LookupNearest never
-        # checks for an exact entry, so the caller's Lookup guard is what
-        # protects this. Counted in a subprocess
-        # (VERBOSE is sticky per-process).
+        # hit, since RecordBorrowed persisted the borrow. The caller's Lookup
+        # guard protects this. Counted in a subprocess (VERBOSE is sticky).
         import os
         import shutil
         import subprocess

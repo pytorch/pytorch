@@ -103,8 +103,8 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
     // Borrow the tuned solution of a neighbouring shape: identical except in one
     // free dim (M, N or batch count), rounded up. Separate from Lookup so a caller
     // can tell a measured hit from a borrow, which is expected to be validated.
-    // Unconditional: TunableOp dispatch never calls this, so calling it is the
-    // opt-in and there is no flag to consult. Nor is there a check for an
+    // No flag gate: calling it is the opt-in, and dispatch reaches it only
+    // from ResolveWithoutExactHit. Nor is there a check for an
     // existing exact entry -- a candidate equal to the query differs in no dim,
     // so it never matches. Call Lookup first and only come here on a miss.
     //
@@ -272,8 +272,8 @@ class TORCH_CUDA_CPP_API TuningContext {
 
     // Policy for the compile-time reuse pass: set from Python, read back by
     // the pass through these C++ accessors (the Python query helpers exist
-    // only for tests). Not consulted by TuningResultsManager or TunableOp
-    // dispatch. Runtime-settable because the pass and the execution that
+    // only for tests). Read by dispatch too, in ResolveWithoutExactHit.
+    // Runtime-settable because the pass and the
     // follows it share a process and need opposite values.
     void EnableNearestMatch(bool value);
     bool IsNearestMatchEnabled() const;

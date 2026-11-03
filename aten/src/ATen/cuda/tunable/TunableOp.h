@@ -173,13 +173,10 @@ class TunableOp {
     }
 #endif
 
-    // A donor is only usable if this process can actually run it:
-    // FindFastestAmong TORCH_CHECKs the op it looks up. cuBLASLt registers
-    // only Default up front and builds the rest on demand; ROCm registers
-    // every candidate in the constructor, but a results file can still name
-    // one this build did not register -- hipBLASLt is skipped for complex and
-    // suppressed by PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED=0, neither of which is
-    // a validator. An unusable donor is a miss, not a fault.
+    // A donor is only usable if this process can run it: FindFastestAmong
+    // TORCH_CHECKs the op. cuBLASLt builds candidates on demand, and even on
+    // ROCm a file can name one this build never registered (hipBLASLt is
+    // skipped for complex, and by HIPBLASLT_ENABLED=0). Unusable is a miss.
     bool DonorIsUsable(
         const ResultEntry& donor,
         [[maybe_unused]] const ParamsT* params) {
@@ -208,13 +205,10 @@ class TunableOp {
         if (borrowed != ResultEntry::Null() && !DonorIsUsable(borrowed, params)) {
           borrowed = ResultEntry::Null();
         }
-        // No usable nearest donor: consult the wildcard entry as a second
-        // donor before Default. Otherwise the worker measures Default while
-        // runtime (nearest match off) runs the wildcard kernel, and autotune
-        // ranks a kernel that will never run. Validated like any borrow.
-        // Default wildcard entries are skipped like Default nearest donors:
-        // validating Default against Default profiles the fallback twice and
-        // persists nothing new.
+        // No usable nearest donor: try the wildcard as a second donor, or
+        // the worker measures Default while runtime runs the wildcard and
+        // autotune ranks a kernel that never runs. Validated like any borrow;
+        // Default wildcards skipped, as profiling the fallback twice is moot.
         if (borrowed == ResultEntry::Null() && ctx->IsWildcardFallbackEnabled()) {
           auto wildcard = mgr.LookupWildcardFallback(op_sig, concrete_sig);
           if (wildcard != ResultEntry::Null() &&
@@ -226,11 +220,10 @@ class TunableOp {
       }
       const bool will_validate = (borrowed != ResultEntry::Null());
 
-      // Only a validated donor persists this shape as an exact entry, leaving
-      // offline tuning nothing to find. Report up front unless a persisted
-      // verdict is coming; the capture path below re-reports when validation
-      // is skipped, so the shape cannot drop out of both files. Reporting
-      // happens before the lookup.
+      // Only a validated donor persists this shape, leaving offline tuning
+      // nothing to find. Report unless a persisted verdict is coming; the
+      // capture path re-reports when validation is skipped, so the shape
+      // cannot drop out of both files. After the lookup: it needs that.
       if (ctx->IsRecordUntunedEnabled() &&
           !(will_validate && ctx->IsRecordBorrowedEnabled())) {
         mgr.RecordUntuned(
@@ -242,8 +235,7 @@ class TunableOp {
         // Tuning under stream capture is forbidden (see the tuning path
         // above): FindFastestAmong allocates, memcpys and synchronizes events,
         // any of which invalidates the capture. While capturing, report
-        // untuned (unless already reported above) and fall through to Default
-        // below -- the caller retries outside capture.
+        // untuned (unless reported above) and return Default unvalidated.
         bool can_validate = true;
 #ifndef USE_ROCM
         can_validate =

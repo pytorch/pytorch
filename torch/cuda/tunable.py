@@ -319,9 +319,8 @@ def _nearest_match_enable(val: bool = True) -> None:
 
 
 def _nearest_match_is_enabled() -> bool:
-    r"""Returns the reuse pass's borrow setting, with the env kill switches
-    switch applied. Not a statement about what LookupNearest will do: it
-    borrows whenever it is called, regardless of this value.
+    r"""Whether a reuse pass may borrow: the setting, both env kill switches,
+    and the record-borrowed gate, since borrowing requires recording.
     """
     return torch._C._cuda_tunableop_nearest_match_is_enabled()  # type: ignore[attr-defined]
 
@@ -331,9 +330,7 @@ def _record_borrowed_enable(val: bool = True) -> None:
 
     Companion to _nearest_match_enable. Results are normally written only
     during a tuning pass; this allows a verdict reached without tuning to be
-    persisted as well. With it off the verdict is still cached in memory, so
-    the comparison is not repeated for that shape; the env kill switch below
-    drops the record entirely, in-memory map included.
+    persisted too. Turning it off turns borrowing off with it.
 
     Setting PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED=0 forces this off for the
     process and cannot be overridden here.
@@ -342,9 +339,8 @@ def _record_borrowed_enable(val: bool = True) -> None:
 
 
 def _record_borrowed_is_enabled() -> bool:
-    r"""Returns the reuse pass's recording setting, with the env kill
-    switch applied. Not a statement about what RecordBorrowed will do: it
-    records whenever it is called, regardless of this value.
+    r"""Returns the reuse pass's recording setting, with the env kill switch
+    applied. Gates borrowing as well -- see _nearest_match_is_enabled.
     """
     return torch._C._cuda_tunableop_record_borrowed_is_enabled()  # type: ignore[attr-defined]
 
