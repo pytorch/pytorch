@@ -217,7 +217,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(base, torch.ones(4, device=device))
 
     @onlyNativeDeviceTypes
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5378
     @dtypes(torch.bits1x8, torch.bits2x4, torch.bits4x2, torch.bits8,
             torch.bits16, torch.float4_e2m1fn_x2)
     def test_zero_dtypes_without_fill_kernel(self, device, dtype):
