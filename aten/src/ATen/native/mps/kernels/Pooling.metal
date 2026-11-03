@@ -1460,17 +1460,21 @@ kernel void avg_pool2d_backward(
       device const int2* out_ranges [[buffer(3)]],                           \
       uint tid [[thread_position_in_grid]])
 
-// Floating types only: avg pool backward, adaptive avg pooling and the 64-bit
-// avg_pool variant that only adaptive pooling uses
-#define REGISTER_AVG_POOL_FLOAT_OP(DTYPE)                           \
+// Avg pool backward supports the dtypes of the CPU kernel: floating types and
+// long
+#define REGISTER_AVG_POOL2D_BACKWARD(DTYPE)                         \
   template [[host_name("avg_pool2d_backward_" #DTYPE)]] kernel void \
   avg_pool2d_backward<DTYPE>(                                       \
       device DTYPE * grad_input [[buffer(0)]],                      \
       device const DTYPE* grad_output [[buffer(1)]],                \
       constant AvgPoolingParams<5>& params [[buffer(2)]],           \
-      uint3 pos [[thread_position_in_grid]]);                       \
-  REGISTER_AVG_POOL(DTYPE, int64_t, "_i64")                         \
-  REGISTER_ADAPTIVE_AVG_POOL(DTYPE, int32_t, _i32);                 \
+      uint3 pos [[thread_position_in_grid]]);
+
+// Floating types only: adaptive avg pooling and the 64-bit avg_pool variant
+// that only adaptive pooling uses
+#define REGISTER_AVG_POOL_FLOAT_OP(DTYPE)           \
+  REGISTER_AVG_POOL(DTYPE, int64_t, "_i64")         \
+  REGISTER_ADAPTIVE_AVG_POOL(DTYPE, int32_t, _i32); \
   REGISTER_ADAPTIVE_AVG_POOL(DTYPE, int64_t, _i64)
 
 REGISTER_POOL_OP(float);
@@ -1487,6 +1491,11 @@ REGISTER_POOL_BACKWARD_OP_SERIAL(float, false);
 REGISTER_POOL_BACKWARD_OP_SERIAL(half, false);
 REGISTER_POOL_BACKWARD_OP_SERIAL(bfloat, false);
 REGISTER_POOL_BACKWARD_OP_SERIAL(float, true);
+
+REGISTER_AVG_POOL2D_BACKWARD(float);
+REGISTER_AVG_POOL2D_BACKWARD(half);
+REGISTER_AVG_POOL2D_BACKWARD(bfloat);
+REGISTER_AVG_POOL2D_BACKWARD(long);
 
 REGISTER_AVG_POOL_FLOAT_OP(float);
 REGISTER_AVG_POOL_FLOAT_OP(half);
