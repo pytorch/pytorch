@@ -166,6 +166,7 @@ from .tensor import (
 )
 from .user_defined import (
     is_data_descriptor,
+    Py_TPFLAGS_HEAPTYPE,
     UserDefinedObjectVariable,
     UserDefinedVariable,
 )
@@ -2290,11 +2291,17 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
-        # Call arg.__round__()
+        # builtin_round: call arg.__round__(), passing ndigits positionally
+        # and only when it is not None.
         round_method = SourcelessBuilder.create(tx, getattr).call_function(
             tx, [arg, VariableTracker.build(tx, "__round__")], {}
         )
-        return round_method.call_function(tx, list(args), kwargs)
+        if len(args) + len(kwargs) > 1 or kwargs.keys() - {"ndigits"}:
+            actual = f"{len(args) + 1} args, kwargs {list(kwargs)}"
+            raise_args_mismatch(tx, "round", "number, ndigits=None", actual)
+        ndigits = args[0] if args else kwargs.get("ndigits")
+        round_args = [] if ndigits is None or ndigits.is_constant_none() else [ndigits]
+        return round_method.call_function(tx, round_args, {})
 
     def call_range(
         self,
@@ -2841,7 +2848,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             owner = self
             if value.__objclass__ is not self.fn:
                 owner = VariableTracker.build(tx, value.__objclass__)
-            create = (
+            create: Callable[..., VariableTracker] = (
                 VariableBuilder.create_internal_wrapper_descriptor
                 if isinstance(value, types.WrapperDescriptorType)
                 else VariableBuilder.create_internal_method_descriptor
@@ -3370,11 +3377,14 @@ class BuiltinTypeVariable(VariableTracker):
         if is_data_descriptor(meta_attr):
             return super().tp_getattro_impl(tx, name)
         cls_attr = mro_lookup(fn, name)
-        if isinstance(cls_attr, staticmethod) and self.lookup_tp_method(name):
+        if isinstance(cls_attr, staticmethod):
             # A builtin staticmethod, e.g. str.maketrans, is modeled by tp_methods
-            return variables.GetAttrVariable(
-                self, name, py_type=type(attr), source=source
-            )
+            if self.lookup_tp_method(name):
+                return variables.GetAttrVariable(
+                    self, name, py_type=type(attr), source=source
+                )
+            # staticmethod.__get__ returns the wrapped C function
+            return VariableTracker.build(tx, attr, source)
         if cls_attr is not NO_SUCH_SUBOBJ:
             none_vt = ConstantVariable.create(None)
             result = _resolve_descriptor_get(tx, cls_attr, none_vt, self, source, name)
@@ -3396,8 +3406,17 @@ class BuiltinTypeVariable(VariableTracker):
             raise_type_error(tx, f"{self._fn.__name__}.__new__(): not enough arguments")
         # Immutable builtin types have no tp_init work, so T.__new__(T, ...)
         # equals T(...). A subtype wraps that value. Mutable types override this.
-        if args[0].as_python_constant() is self._fn:
+        cls = args[0].as_python_constant()
+        if cls is self._fn:
             return self.call_function(tx, args[1:], kwargs)
+        # tp_new_wrapper: cls's nearest builtin base must use this tp_new.
+        base = next(t for t in cls.__mro__ if not t.__flags__ & Py_TPFLAGS_HEAPTYPE)
+        if base.__new__ is not self._fn.__new__:
+            raise_type_error(
+                tx,
+                f"{self._fn.__name__}.__new__({cls.__name__}) is not safe, "
+                f"use {base.__name__}.__new__()",
+            )
         return tx.output.side_effects.track_new_user_defined_object(
             self, args[0], args[1:], tx=tx
         )
@@ -3432,7 +3451,7 @@ class BuiltinTypeVariable(VariableTracker):
             other_val = other.as_python_constant()
         except NotImplementedError:
             return VariableTracker.build(tx, NotImplemented)
-        return VariableTracker.build(tx, type(self._fn).__or__(self._fn, other_val))
+        return VariableTracker.build(tx, type.__or__(self._fn, other_val))
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -4108,16 +4127,17 @@ def _constant_fold_on_unsupported(
         try:
             return call_function(self, tx, args, kwargs)
         except Unsupported as exc:
-            if check_unspec_or_constant_args(args, kwargs):
-                exc.remove_from_stats()
-                try:
-                    res = self._fn(
-                        *(a.as_python_constant() for a in args),
-                        **{k: v.as_python_constant() for k, v in kwargs.items()},
-                    )
-                except Exception as e:
-                    raise_observed_exception(type(e), tx, args=list(e.args))
-            return VariableTracker.build(tx, res)
+            if not check_unspec_or_constant_args(args, kwargs):
+                raise
+            exc.remove_from_stats()
+        try:
+            res = self._fn(
+                *(a.as_python_constant() for a in args),
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+        except Exception as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return VariableTracker.build(tx, res)
 
     return wrapper
 
@@ -4233,20 +4253,23 @@ class IntBuiltinVariable(BuiltinTypeVariable):
             base = args[1]
         if base is None:
             return pynumber_int(tx, args[0])
-        return pylong_from_base(tx, args[0], base)
+        res = pylong_from_base(tx, args[0], base)
+        if res is None:
+            unimplemented(
+                gb_type="int() with a base on non-constant arguments",
+                context=f"int({args[0]}, {base})",
+                explanation="Dynamo only traces int(x, base) when x and base are constants.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return res
 
 
 class FloatBuiltinVariable(BuiltinTypeVariable):
     _fn = float
 
-    tp_methods = {
-        "fromhex": _constant_fold_classmethod("fromhex"),
-        **(
-            {"from_number": _constant_fold_classmethod("from_number")}
-            if sys.version_info >= (3, 14)
-            else {}
-        ),
-    }
+    tp_methods = {"fromhex": _constant_fold_classmethod("fromhex")}
+    if sys.version_info >= (3, 14):
+        tp_methods["from_number"] = _constant_fold_classmethod("from_number")
 
     @_constant_fold_on_unsupported
     def call_function(
@@ -4267,11 +4290,8 @@ class FloatBuiltinVariable(BuiltinTypeVariable):
 class ComplexBuiltinVariable(BuiltinTypeVariable):
     _fn = complex
 
-    tp_methods = (
-        {"from_number": _constant_fold_classmethod("from_number")}
-        if sys.version_info >= (3, 14)
-        else {}
-    )
+    if sys.version_info >= (3, 14):
+        tp_methods = {"from_number": _constant_fold_classmethod("from_number")}
 
     def call_function(
         self,
@@ -4326,6 +4346,7 @@ class StrBuiltinVariable(BuiltinTypeVariable):
         "maketrans": _constant_fold_classmethod("maketrans"),
     }
 
+    @_constant_fold_on_unsupported
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
