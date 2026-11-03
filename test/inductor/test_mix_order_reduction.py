@@ -18,7 +18,6 @@ from torch._inductor.scheduler import MixOrderReduction
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
@@ -28,7 +27,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     recover_orig_fp32_precision,
     skipIfXpu,
-    TEST_WITH_ROCM,
     TEST_XPU,
 )
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
@@ -1080,50 +1078,6 @@ class MixOrderReductionTest(TestBase):
         # one is the mix-order reduction kernel
         # the other is the piontwise kernel
         self.assertTrue(2, metrics.generated_kernel_count)
-
-    @unittest.skipIf(
-        GPU_TYPE != "cuda" or not SM90OrLater or TEST_WITH_ROCM,
-        "PDL requires NVIDIA sm90+",
-    )
-    @inductor_config.patch({"triton.enable_pdl": True})
-    @torch._dynamo.config.patch(
-        canonicalize_output_graph_node_order=False,
-        capture_dynamic_output_shape_ops=True,
-    )
-    def test_pdl_kernel_after_folded_reduction_waits(self):
-        if not inductor_config.triton.mix_order_reduction:
-            self.skipTest("Mix order reduction not enabled")
-
-        def f(x, y, w, m=None, k=None):
-            nz = None if m is None else torch.nonzero(m).float()
-            a = x.sum(dim=1)
-            t = y.cos()
-            for _ in range(4):
-                t = torch.sin(t) * 1.5
-            qs = t.sum(dim=1)
-            # an mm with u0 rows launches nothing before the folded node
-            e = () if nz is None else ((nz.expand(-1, 8) + 1) @ k,)
-            b = x.sum(dim=0)  # final reduction folded into a's kernel
-            return a, b, qs[:, None] * w, *e
-
-        # requires_grad orders b's final reduction after the kernel computing qs
-        x = torch.randn(32768, 768, device=GPU_TYPE, requires_grad=True)
-        y = torch.randn(128, 1024, device=GPU_TYPE)
-        w = torch.randn(16, device=GPU_TYPE)
-        m = torch.zeros(16, device=GPU_TYPE, dtype=torch.bool)
-        k = torch.randn(8, 8, device=GPU_TYPE)
-        for name, args in [("no_extern", (x, y, w)), ("empty_mm", (x, y, w, m, k))]:
-            with self.subTest(name):
-                metrics.reset()
-                act, (code,) = utils.run_and_get_code(torch.compile(f), *args)
-                self.assertTrue(same(f(*args), act, tol=1e-3))
-                self.assertEqual(1, metrics.codegen_mix_order_reduction)
-                # b's final reduction emits no launch, so the last kernel's
-                # predecessor is the one computing qs: it must wait before
-                # loading qs
-                FileCheck().check("def triton_poi_fused_mul").check_not(
-                    "tl.load"
-                ).check("gdc_wait").run(code)
 
     @patch("torch._inductor.scheduler.MixOrderReduction.is_split_reduction")
     @patch("torch._inductor.scheduler.MixOrderReduction.get_numel_rnumel")

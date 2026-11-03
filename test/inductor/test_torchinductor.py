@@ -20725,6 +20725,50 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @requires_cuda_and_triton
     @skip_if_cpu
     @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @torch._dynamo.config.patch(
+        canonicalize_output_graph_node_order=False,
+        capture_dynamic_output_shape_ops=True,
+    )
+    @config.patch({"triton.enable_pdl": True})
+    def test_pdl_kernel_after_folded_reduction_waits(self):
+        if not config.triton.mix_order_reduction or is_dynamic_shape_enabled():
+            # dynamic shapes do not fold b's final reduction here
+            raise unittest.SkipTest("needs a mix order reduction")
+
+        def f(x, y, w, m=None, k=None):
+            nz = None if m is None else torch.nonzero(m).float()
+            a = x.sum(dim=1)
+            t = y.cos()
+            for _ in range(4):
+                t = torch.sin(t) * 1.5
+            qs = t.sum(dim=1)
+            # an mm with u0 rows launches nothing before the folded node
+            e = () if nz is None else ((nz.expand(-1, 8) + 1) @ k,)
+            b = x.sum(dim=0)  # final reduction folded into a's kernel
+            return a, b, qs[:, None] * w, *e
+
+        # requires_grad orders b's final reduction after the kernel computing qs
+        x = torch.randn(32768, 768, device=GPU_TYPE, requires_grad=True)
+        y = torch.randn(128, 1024, device=GPU_TYPE)
+        w = torch.randn(16, device=GPU_TYPE)
+        m = torch.zeros(16, device=GPU_TYPE, dtype=torch.bool)
+        k = torch.randn(8, 8, device=GPU_TYPE)
+        for name, args in [("no_extern", (x, y, w)), ("empty_mm", (x, y, w, m, k))]:
+            with self.subTest(name):
+                torch._inductor.metrics.reset()
+                act, (code,) = run_and_get_code(torch.compile(f), *args)
+                self.assertTrue(same(f(*args), act, tol=1e-3))
+                self.assertEqual(1, torch._inductor.metrics.codegen_mix_order_reduction)
+                # b's final reduction emits no launch, so the last kernel's
+                # predecessor is the one computing qs: it must wait before
+                # loading qs
+                FileCheck().check("def triton_poi_fused_mul").check_not(
+                    "tl.load"
+                ).check("gdc_wait").run(code)
+
+    @requires_cuda_and_triton
+    @skip_if_cpu
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @config.patch(
         {
             "triton.enable_pdl": True,
