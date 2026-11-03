@@ -91,6 +91,8 @@ unpadded prompts:
   --batch-size=1 --only=Qwen/Qwen3-0.6B --output=prefill_performance.csv
 ```
 
+Prefill and decode require Transformers 5.14.1 or newer.
+
 Prefill measures one forward over the prompt, returning last-position logits and
 populating a reusable static cache. The cache holds `prompt_length + 1999`
 positions, the capacity `generate` allocates for its first forward, so attention

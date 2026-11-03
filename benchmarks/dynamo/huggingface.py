@@ -483,6 +483,7 @@ class HuggingfaceRunner(BenchmarkRunner):
             "export_nativert",
             "find_batch_sizes",
             "fsdp",
+            "multiprocess",
             "recompile_profiler",
             "torchscript_jit_trace",
             "tolerance",
@@ -505,18 +506,6 @@ class HuggingfaceRunner(BenchmarkRunner):
             raise ValueError(
                 f"--hf-inference-mode={mode} requires --backend or --inductor"
             )
-        if args.prompt_length is not None and args.only:
-            # Each child validates its model so config fetches cannot abort a sweep.
-            output_length = HF_LLM_MODELS[args.only].OUTPUT_LENGTH
-            total_length = args.prompt_length + output_length
-            config = self._download_config(args.only).get_text_config(decoder=True)
-            context_length = getattr(config, "max_position_embeddings", None)
-            if context_length is not None and total_length > context_length:
-                raise ValueError(
-                    f"--prompt-length={args.prompt_length} plus {output_length} "
-                    f"generated-token slots exceeds {args.only}'s context length "
-                    f"{context_length}"
-                )
 
     def get_performance_workload(self):
         if self.args.hf_inference_mode == "prefill":
@@ -604,12 +593,28 @@ class HuggingfaceRunner(BenchmarkRunner):
         if self.args.hf_inference_mode != "generate" and batch_size <= 0:
             raise ValueError(f"--batch-size must be positive, got {batch_size}")
 
-        # Get model and example inputs
+        # Config downloads belong in the load path so failures produce model
+        # results, while invalid dimensions still fail before downloading weights.
         if model_name in HF_LLM_MODELS:
             benchmark_cls = HF_LLM_MODELS[model_name]
             mode = self.args.hf_inference_mode
             if mode in ("prefill", "decode"):
                 prompt_length = self.args.prompt_length or benchmark_cls.INPUT_LENGTH
+                if self.args.prompt_length is not None:
+                    config = self._download_config(model_name).get_text_config(
+                        decoder=True
+                    )
+                    context_length = getattr(config, "max_position_embeddings", None)
+                    output_length = benchmark_cls.OUTPUT_LENGTH
+                    if (
+                        context_length is not None
+                        and prompt_length + output_length > context_length
+                    ):
+                        raise ValueError(
+                            f"--prompt-length={prompt_length} plus {output_length} "
+                            f"generated-token slots exceeds {model_name}'s context length "
+                            f"{context_length}"
+                        )
                 decode_length = self.args.decode_length or benchmark_cls.DECODE_LENGTH
                 model, example_inputs = benchmark_cls.get_model_and_inputs(
                     model_name,
