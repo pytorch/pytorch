@@ -1311,11 +1311,10 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestFlexAttention(InductorTestCase):
     def setUp(self):
+        # Skip before InductorTestCase.setUp enters state that only tearDown undoes.
+        if self.device_type == "cpu" and LONG_COMPILATION_ON_CPU:
+            self.skipTest("skip UT for CPU due to long compilation time found in CI")
         super().setUp()
-        skipCPUIf(
-            LONG_COMPILATION_ON_CPU,
-            "skip UT for CPU due to long compilation time found in CI",
-        )
 
     def _check_equal(
         self,
@@ -10079,11 +10078,10 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestPagedAttention(InductorTestCase):
     def setUp(self):
+        # Skip before InductorTestCase.setUp enters state that only tearDown undoes.
+        if self.device_type == "cpu" and LONG_COMPILATION_ON_CPU:
+            self.skipTest("skip UT for CPU due to long compilation time found in CI")
         super().setUp()
-        skipCPUIf(
-            LONG_COMPILATION_ON_CPU,
-            "skip UT for CPU due to long compilation time found in CI",
-        )
 
     def _check_equal(
         self,
@@ -10594,11 +10592,10 @@ supports_learnable_bias = unittest.skipUnless(
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
+        # Skip before InductorTestCase.setUp enters state that only tearDown undoes.
+        if self.device_type == "cpu" and LONG_COMPILATION_ON_CPU:
+            self.skipTest("skip UT for CPU due to long compilation time found in CI")
         super().setUp()
-        skipCPUIf(
-            LONG_COMPILATION_ON_CPU,
-            "skip UT for CPU due to long compilation time found in CI",
-        )
         self.dtype = torch.float32
         self.atol = 3e-2
         self.rtol = 3e-2
