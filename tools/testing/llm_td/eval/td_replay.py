@@ -12,6 +12,8 @@ mappings, linked issue bodies) empty. A sample on which a heuristic raised
 gets no file, and the run exits non-zero, so a rerun recomputes it. Writes
 OUT/<id>.json with:
 
+  inputs     a hash of test-times.json and the STATS artifacts; a file with
+             another hash is recomputed
   scored     files TD gives a positive score, best first (what the hedge draws from)
   top25      CI's top-25% cut over all candidates
   top25_cfg  config -> files of that cut per config of test-times.json (see top25_per_config)
@@ -32,6 +34,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import copy
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -103,6 +106,8 @@ def main() -> None:
     from tools.testing.target_determination.determinator import get_test_prioritizations
 
     seconds = test_seconds(args.data / "test-times.json")
+    sources = [args.data / "test-times.json", *(args.stats / a for a in ARTIFACTS)]
+    inputs = hashlib.sha256(b"".join(x.read_bytes() for x in sources)).hexdigest()
     current: dict = {}
     stats_root = args.stats.absolute().parent
     patches = {
@@ -138,7 +143,8 @@ def main() -> None:
         for target, new in patches.items():
             stack.enter_context(mock.patch(H + target, new))
         for path in paths[which::n]:
-            if (out / path.name).exists():
+            done = out / path.name
+            if done.exists() and json.loads(done.read_text()).get("inputs") == inputs:
                 continue
             current.clear()
             current.update(json.loads(path.read_text()))
@@ -157,7 +163,8 @@ def main() -> None:
                 failed.append(path.stem)
                 continue
             scored = [t.test_file for score, t in tp._traverse_scores() if score > 0]
-            write_json(out / path.name, {
+            write_json(done, {
+                "inputs": inputs,
                 "scored": list(dict.fromkeys(scored)),
                 "top25": sorted({t.test_file for t in tp.get_top_per_tests(25)[0]}),
                 "top25_cfg": top25_per_config(tp, cands, seconds),
