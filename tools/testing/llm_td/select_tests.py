@@ -213,6 +213,16 @@ def git_grep(pattern: str, rev: str) -> list[str]:
     return [line.split(":", 1)[1] for line in p.stdout.splitlines()]
 
 
+def changed_files(merge_base: str, head: str) -> list[str]:
+    # Without renames a moved file is listed at both paths, and its new path is
+    # an added file.
+    return git("diff", "--name-only", "--no-renames", merge_base, head).splitlines()
+
+
+def diffstat_and_diff(merge_base: str, head: str) -> tuple[str, str]:
+    return git("diff", "--stat=200", "--no-renames", merge_base, head), git("diff", merge_base, head)  # fmt: skip
+
+
 def pr_text(args: argparse.Namespace) -> tuple[str, str]:
     if args.title is not None:
         return args.title, args.body or ""
@@ -232,11 +242,7 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     merge_base = git("merge-base", args.base, args.head).strip()
     record["merge_base"] = merge_base
     record["head"] = git("rev-parse", args.head).strip()
-    # Without renames a moved file is listed at both paths, and its new path is
-    # an added file below.
-    changed = git(
-        "diff", "--name-only", "--no-renames", merge_base, args.head
-    ).splitlines()
+    changed = changed_files(merge_base, args.head)
     if not changed and not args.print_prompt:
         record["error"] = "no changed files"
         return Selection(run_all=True, reason="no changed files")
@@ -247,8 +253,7 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
         test_times = get_test_times()
     if not test_times and not args.print_prompt:
         return Selection(run_all=True, reason="no test times")
-    diffstat = git("diff", "--stat=200", "--no-renames", merge_base, args.head)
-    diff = git("diff", merge_base, args.head)
+    diffstat, diff = diffstat_and_diff(merge_base, args.head)
     # TESTS comes from the checkout this script runs from, which in CI is the
     # trusted default branch rather than the PR; add the test files the PR adds
     # that run_test.py would discover.
