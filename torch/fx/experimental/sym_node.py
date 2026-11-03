@@ -1548,8 +1548,10 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
         cache_key = None
         # mod picks Mod or PythonMod from value ranges, so it isn't memoized.
         if shape_env is not None and method != "mod":
-            cache = shape_env._get_symop_cache()
             cache_key = (method, self.expr, other.expr)
+            # Resolving the operands can bump the replacement version, which
+            # clears the memo, so fetch it afterwards.
+            cache = shape_env._get_symop_cache()
             cached = cache.get(cache_key)
             if cached is not None:
                 out, pytype, optimized_summation = cached
