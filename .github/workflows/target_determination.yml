@@ -90,8 +90,6 @@ jobs:
           unzip -o .additional_ci_files/llm_results/mappings.zip -d .additional_ci_files/llm_results || true
           # Dependencies are declared inline in the script via PEP 723.
           uv run --no-project --python 3.12 tools/testing/do_target_determination_for_s3.py
-          # run_test.py charges these files to the LLM selection's hedge budget first.
-          cp .additional_ci_files/previous_failures*.json . || true
 
       - name: Upload TD results to s3
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
@@ -101,9 +99,7 @@ jobs:
           name: td_results
           retention-days: 1
           if-no-files-found: error
-          path: |
-            td_results.json
-            previous_failures*.json
+          path: td_results.json
 
       - name: Store TD results on GHA
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -112,6 +108,16 @@ jobs:
           name: td_results.json
           retention-days: 1
           if-no-files-found: error
-          path: |
-            td_results.json
-            previous_failures*.json
+          path: td_results.json
+
+      # Its own artifact, so download-td-artifacts@main (used by the Linux test jobs) never sees
+      # it; run_test.py charges these files to the LLM selection's hedge budget first.
+      - name: Store the previous failures on GHA
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: steps.td.outcome == 'success'
+        continue-on-error: true
+        with:
+          name: previous_failures
+          retention-days: 1
+          if-no-files-found: ignore
+          path: .additional_ci_files/previous_failures*.json
