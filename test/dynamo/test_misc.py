@@ -2389,6 +2389,17 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(TypeError):
             opt(5)
 
+    def test_int_base_symint_type_error(self):
+        def fn(x):
+            try:
+                return int(x.size(0), 16)
+            except TypeError as e:
+                return str(e)
+
+        opt = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        x = torch.ones(5)
+        self.assertEqual(opt(x), fn(x))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
         def f1(x, y):
@@ -5427,6 +5438,46 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         correct = fn(x)
         result = torch.compile(fn, fullgraph=True, backend="eager")(x)
         self.assertEqual(result, correct)
+
+    def test_copy_container_subclasses(self):
+        class ListSubclass(list):
+            pass
+
+        class DictSubclass(dict):
+            pass
+
+        def shallow_copy(obj):
+            return copy.copy(obj)
+
+        def deep_copy(obj):
+            return copy.deepcopy(obj)
+
+        def item(obj):
+            return obj[0] if isinstance(obj, list) else obj["value"]
+
+        compiled_copy = torch.compile(shallow_copy, fullgraph=True, backend="eager")
+        for original in (
+            ListSubclass([torch.randn(2)]),
+            DictSubclass(value=torch.randn(2)),
+        ):
+            original.attr = "state"
+            result = compiled_copy(original)
+            self.assertIs(type(result), type(original))
+            self.assertEqual(result, original)
+            self.assertEqual(result.attr, original.attr)
+            self.assertIs(item(result), item(original))
+
+        compiled_deepcopy = torch.compile(deep_copy, fullgraph=True, backend="eager")
+        for original in (
+            ListSubclass([[1, 2]]),
+            DictSubclass(value=[1, 2]),
+        ):
+            original.attr = "state"
+            result = compiled_deepcopy(original)
+            self.assertIs(type(result), type(original))
+            self.assertEqual(result, original)
+            self.assertEqual(result.attr, original.attr)
+            self.assertIsNot(item(result), item(original))
 
     def test_deepcopy_user_defined_object(self):
         class MyConfig:

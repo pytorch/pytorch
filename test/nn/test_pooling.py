@@ -2543,6 +2543,38 @@ class TestPoolingNNCudaOnly(NNTestCase):
         self.assertEqual(grad_input[..., ph * k :, :].count_nonzero().item(), 0)
         self.assertEqual(grad_input[..., :, pw * k :].count_nonzero().item(), 0)
 
+    # With 33 planes of 8192 x 8192, the last plane starts at element 2^31.
+    # output_size=128 overflows the int32 gradInput plane offset; 8192 also overflows
+    # the output and indices plane offsets. The last plane is checked against the same
+    # plane pooled on its own. See #197461.
+    @largeTensorTest(lambda self, device, size: (10 if size == 128 else 36) * 2**30)
+    @parametrize_test("size", [128, 8192])
+    def test_adaptive_max_pool2d_large_plane_offset(self, device, size):
+        x = torch.randn(33, 1, 8192, 8192, device=device, dtype=torch.half)
+        x.requires_grad_()
+        out, idx = F.adaptive_max_pool2d(x, size, return_indices=True)
+        (grad,) = torch.autograd.grad(out.sum(), x)
+        x_last = x[-1:].detach().requires_grad_()
+        out_last, idx_last = F.adaptive_max_pool2d(x_last, size, return_indices=True)
+        (grad_last,) = torch.autograd.grad(out_last.sum(), x_last)
+        self.assertEqual(out[-1:], out_last)
+        self.assertEqual(idx[-1:], idx_last)
+        self.assertEqual(grad[-1:], grad_last)
+
+    # A single 46341 x 46341 plane has more than 2^31 elements, so the argmax of the
+    # last element does not fit in int32.
+    @largeTensorTest("12GB", device="cuda")
+    def test_adaptive_max_pool2d_large_single_plane(self, device):
+        n = 46341
+        x = torch.zeros(1, 1, n, n, device=device, dtype=torch.half)
+        x[..., -1, -1] = 1
+        x.requires_grad_()
+        out, idx = F.adaptive_max_pool2d(x, 1024, return_indices=True)
+        self.assertEqual(idx[0, 0, -1, -1].item(), n * n - 1)
+        (grad,) = torch.autograd.grad(out.sum(), x)
+        self.assertEqual(grad[0, 0, -1, -1].item(), 1)
+        self.assertEqual(grad.sum(dtype=torch.float).item(), 1024 * 1024)
+
     @parametrize_test("channels_last", [False, True])
     @parametrize_test(
         "shape,pool_kwargs",
