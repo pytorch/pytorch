@@ -3742,16 +3742,6 @@ class BuiltinTypeVariable(VariableTracker):
         # A builtin type is an instance of type, so its tp_init is type_init.
         return type_init(tx, args, kwargs)
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # Unbound method call, e.g. int.__add__(1, 2): args[0] is the instance.
-        return super().call_method(tx, name, args, kwargs)
-
     # type_as_number.nb_or = _Py_union_type_or, e.g. list | tuple
     def nb_or_impl(
         self,
