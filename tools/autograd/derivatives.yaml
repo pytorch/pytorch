@@ -2665,6 +2665,10 @@
   grad_output: huber_loss_double_backward_grad_output(grad, grad_output, self, target, reduction, delta)
   self: huber_loss_double_backward(grad * grad_output, self, target, reduction, delta)
   target: -huber_loss_double_backward(grad * grad_output, self, target, reduction, delta)
+  result: "  huber_loss_double_backward(self_t * grad_output_p, self_p, target_p, reduction, delta)
+           - huber_loss_double_backward(target_t * grad_output_p, self_p, target_p, reduction, delta)
+           + huber_loss_backward(grad_output_t, self_p, target_p, reduction, delta)
+          "
 
 - name: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold) -> Tensor
   grad_output: softplus_backward(grad, self, beta, threshold)
