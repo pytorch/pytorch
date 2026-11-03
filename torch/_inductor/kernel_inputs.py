@@ -4,8 +4,8 @@ from abc import ABC, abstractmethod
 from typing import Any, TYPE_CHECKING
 
 import torch
-import torch._inductor.config
-from torch._inductor import ir
+from torch._inductor import config as inductor_config, ir
+from torch._inductor.utils import has_free_symbols
 from torch._inductor.virtualized import V
 
 from .ir import FixedLayout, FlexibleLayout, Layout
@@ -23,6 +23,12 @@ class KernelInputs(ABC):
     This class takes in a tuple of input nodes and provides methods to access
     information about these nodes, such as their device type and device.
     """
+
+    # GEMM operand positions within input_nodes, used by dynamic_dim_mask.
+    # Defaults select the trailing two inputs; MMKernelInputs overrides them
+    # (scaled GEMM trails scale/bias tensors, so operands are not the last two).
+    _mat1_idx: int = -2
+    _mat2_idx: int = -1
 
     def __init__(
         self,
@@ -115,6 +121,58 @@ class KernelInputs(ABC):
             A tuple of shape tuples for each input node
         """
         return tuple(node.get_size() for node in self._input_nodes)
+
+    def dynamic_dim_mask(self, op_name: str) -> tuple[bool, bool, bool, bool]:
+        """
+        Derive a per-call (dyn_m, dyn_n, dyn_k, dyn_batch) mask marking which
+        GEMM dims are symbolic (SymInt) for this op. The autotune path pushes
+        this mask so TunableOp persists wildcard keys that runtime lookup reuses.
+        Unrecognized ops (or non-symbolic shapes) yield all-False, i.e. the
+        legacy concrete-only behavior.
+        """
+        # Feature disabled: persist concrete signatures for new tuning entries.
+        if not inductor_config.cuda.autotune_tunableop_dynamic_dims_wildcard:
+            return (False, False, False, False)
+
+        # IR dimensions may be symbolic sympy expressions.
+        def _dyn(d: Any) -> bool:
+            return has_free_symbols((d,))
+
+        # mat1/mat2 live at explicit operand positions, not necessarily the
+        # trailing two inputs (scaled GEMM trails scale/bias tensors).
+        shapes = self.shapes_symbolic()
+        if len(shapes) < 2:
+            return (False, False, False, False)
+        mat1_shape, mat2_shape = shapes[self._mat1_idx], shapes[self._mat2_idx]
+
+        # bmm / baddbmm: both operands carry a leading batch dim.
+        if (
+            op_name in ("bmm", "baddbmm")
+            and len(mat1_shape) >= 3
+            and len(mat2_shape) >= 3
+        ):
+            b1, m, k1 = mat1_shape[-3], mat1_shape[-2], mat1_shape[-1]
+            b2, k2, n = mat2_shape[-3], mat2_shape[-2], mat2_shape[-1]
+            dyn_batch = _dyn(b1) or _dyn(b2)
+            dyn_m = _dyn(m)
+            dyn_k = _dyn(k1) or _dyn(k2)
+            dyn_n = _dyn(n)
+            return (dyn_m, dyn_n, dyn_k, dyn_batch)
+
+        # mm / addmm / scaled_mm: 2D matmul, no batch axis.
+        if (
+            op_name in ("mm", "addmm", "scaled_mm")
+            and len(mat1_shape) >= 2
+            and len(mat2_shape) >= 2
+        ):
+            m, k1 = mat1_shape[-2], mat1_shape[-1]
+            k2, n = mat2_shape[-2], mat2_shape[-1]
+            dyn_m = _dyn(m)
+            dyn_k = _dyn(k1) or _dyn(k2)
+            dyn_n = _dyn(n)
+            return (dyn_m, dyn_n, dyn_k, False)
+
+        return (False, False, False, False)
 
     def shapes_hinted(self) -> tuple[tuple[int, ...], ...]:
         """

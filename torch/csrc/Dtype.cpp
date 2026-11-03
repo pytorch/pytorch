@@ -6,6 +6,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/refcount_contention.h>
 #include <cstring>
 
 PyObject* THPDtype_New(at::ScalarType scalar_type, const std::string& name) {
@@ -16,10 +17,13 @@ PyObject* THPDtype_New(at::ScalarType scalar_type, const std::string& name) {
   auto self_ = reinterpret_cast<THPDtype*>(self.get());
   self_->scalar_type = scalar_type;
   std::strncpy(self_->name, name.c_str(), DTYPE_NAME_LEN);
+  torch::utils::set_immortal_if_possible(self.get());
   return self.release();
 }
 
-static PyObject* THPDtype_is_floating_point(THPDtype* self, PyObject* noargs) {
+static PyObject* THPDtype_is_floating_point(
+    THPDtype* self,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   if (at::isFloatingType(self->scalar_type)) {
     Py_RETURN_TRUE;
@@ -29,14 +33,14 @@ static PyObject* THPDtype_is_floating_point(THPDtype* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPDtype_itemsize(THPDtype* self, PyObject* noargs) {
+static PyObject* THPDtype_itemsize(THPDtype* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   return THPUtils_packUInt64(
       scalarTypeToTypeMeta(self->scalar_type).itemsize());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPDtype_is_complex(THPDtype* self, PyObject* noargs) {
+static PyObject* THPDtype_is_complex(THPDtype* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   if (at::isComplexType(self->scalar_type)) {
     Py_RETURN_TRUE;
@@ -46,7 +50,7 @@ static PyObject* THPDtype_is_complex(THPDtype* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPDtype_is_signed(THPDtype* self, PyObject* noargs) {
+static PyObject* THPDtype_is_signed(THPDtype* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   if (at::isSignedType(self->scalar_type)) {
     Py_RETURN_TRUE;
@@ -75,7 +79,7 @@ static PyObject* THPDtype_reduce(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPDtype_to_real(PyObject* _self, PyObject* noargs) {
+static PyObject* THPDtype_to_real(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto* self = reinterpret_cast<THPDtype*>(_self);
   auto scalar_type = self->scalar_type;
@@ -86,7 +90,7 @@ static PyObject* THPDtype_to_real(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPDtype_to_complex(PyObject* _self, PyObject* noargs) {
+static PyObject* THPDtype_to_complex(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto* self = reinterpret_cast<THPDtype*>(_self);
   auto scalar_type = self->scalar_type;

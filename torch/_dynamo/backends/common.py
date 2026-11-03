@@ -21,8 +21,8 @@ from __future__ import annotations
 import contextlib
 import functools
 import logging
-from typing import Any, TYPE_CHECKING
-from typing_extensions import ParamSpec, Required, TypedDict, TypeVar, Unpack
+from typing import Any, Required, TYPE_CHECKING
+from typing_extensions import ParamSpec, TypedDict, TypeVar, Unpack
 from unittest.mock import patch
 
 import torch
@@ -108,7 +108,7 @@ class AotAutograd:
                 # Note [Wrapping bw_compiler in disable]
                 # The two disables here:
                 # - stop TorchDynamo from trying to compile the bw_compiler function itself
-                # - stop TorchDynamo from trying to compile our the generated backwards pass bw_compiler produces
+                # - stop TorchDynamo from trying to compile the generated backwards pass bw_compiler produces
 
                 return disable(
                     disable(

@@ -29,6 +29,7 @@ MANY_LINUX_VERSION=${MANY_LINUX_VERSION:-}
 DOCKERFILE_SUFFIX=${DOCKERFILE_SUFFIX:-}
 OPENBLAS_VERSION=${OPENBLAS_VERSION:-}
 ACL_VERSION=${ACL_VERSION:-}
+DOCKER_GPU_BUILD_ARGS=()
 
 case ${image} in
     manylinux2_28-builder:cpu)
@@ -38,7 +39,7 @@ case ${image} in
         MANY_LINUX_VERSION="2_28"
         ;;
     manylinux2_28_aarch64-builder:cpu-aarch64)
-        TARGET=final
+        TARGET=cpu_final
         GPU_IMAGE=arm64v8/almalinux:8
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=13"
         MANY_LINUX_VERSION="2_28_aarch64"
@@ -71,36 +72,28 @@ case ${image} in
         TARGET=cuda_final
         GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=13"
-        MANY_LINUX_VERSION="aarch64"
-        DOCKERFILE_SUFFIX="_cuda_aarch64"
+        MANY_LINUX_VERSION="2_28_aarch64"
         ;;
     manylinux2_28-builder:rocm*)
         MANY_LINUX_VERSION="2_28"
         DEVTOOLSET_VERSION="13"
-        # Common gfx arch list shared by all ROCm builds; each path extends it.
-        PYTORCH_ROCM_ARCH="gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx1150;gfx1151"
-        if [[ "$GPU_ARCH_VERSION" == *"7.14"* ]]; then
-            # ROCm 7.14 installs from the TheRock multi-arch wheel index instead of
-            # rocm/dev-almalinux-8 OS packages; start from a plain almalinux base.
-            TARGET=rocm_final
-            GPU_IMAGE=amd64/almalinux:8
-            THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
-            DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${GPU_ARCH_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION} --build-arg THEROCK_INDEX_URL=${THEROCK_INDEX_URL}"
+        PYTORCH_ROCM_ARCH="gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx1150;gfx1151;gfx1250"
+        TARGET=rocm_final
+        GPU_IMAGE=amd64/almalinux:8
+        ROCM_VERSION="${GPU_ARCH_VERSION}"
+        if [[ "${DOCKER_TAG_PREFIX}" == "rocm-preview" ]]; then
+            THEROCK_INDEX_URL="https://nightly.repo.amd.com/rocm/core/whl-next/"
+            ROCM_VERSION=$(tr -d '[:space:]' < "${TOPDIR}/.ci/docker/ci_commit_pins/rocm-preview.txt")
+            DOCKER_GPU_BUILD_ARG=""
+            DOCKER_GPU_BUILD_ARGS=(
+                --build-arg "ROCM_VERSION=${ROCM_VERSION}"
+                --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}"
+                --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}"
+                --build-arg "THEROCK_INDEX_URL=${THEROCK_INDEX_URL}"
+            )
         else
-            # Earlier ROCm versions install from the rocm/dev-almalinux-8 OS packages.
-            # we want the patch version of 7.2 instead
-            if [[ "$GPU_ARCH_VERSION" == *"7.2"* ]]; then
-                GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.1"
-            fi
-            # we want the patch version of 7.1 instead
-            if [[ "$GPU_ARCH_VERSION" == *"7.1"* ]]; then
-                GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.1"
-            fi
-            TARGET=rocm_final_legacy
-            GPU_IMAGE=rocm/dev-almalinux-8:${GPU_ARCH_VERSION}-complete
-            # Legacy images also cover the older gfx900/gfx906 targets.
-            PYTORCH_ROCM_ARCH="gfx900;gfx906;${PYTORCH_ROCM_ARCH}"
-            DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${GPU_ARCH_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}"
+            THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
+            DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION} --build-arg THEROCK_INDEX_URL=${THEROCK_INDEX_URL}"
         fi
         ;;
     manylinux2_28-builder:xpu)
@@ -130,6 +123,7 @@ fi
 
 docker buildx build \
     ${DOCKER_GPU_BUILD_ARG} \
+    "${DOCKER_GPU_BUILD_ARGS[@]}" \
     --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
     --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
     --build-arg "ACL_VERSION=${ACL_VERSION:-}" \

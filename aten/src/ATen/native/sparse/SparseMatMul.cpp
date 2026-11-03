@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/native/LinearAlgebraUtils.h>
@@ -9,7 +8,7 @@
 #include <ATen/native/StridedRandomAccessor.h>
 #include <ATen/native/CompositeRandomAccessor.h>
 #include <c10/util/irange.h>
-#include <unordered_map>
+#include <type_traits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -44,7 +43,7 @@ void csr_to_coo(const int64_t n_row, const int64_t Ap[], int64_t Bi[]) {
       `Bi` is the row indices
   */
   for (const auto i : c10::irange(n_row)) {
-    for (int64_t jj = Ap[i]; jj < Ap[i + 1]; jj++) {
+    for (const auto jj : c10::irange(Ap[i], Ap[i + 1])) {
       Bi[jj] = i;
     }
   }
@@ -69,9 +68,9 @@ int64_t _csr_matmult_maxnnz(
   for (const auto i : c10::irange(n_row)) {
     int64_t row_nnz = 0;
 
-    for (int64_t jj = Ap[i]; jj < Ap[i + 1]; jj++) {
+    for (const auto jj : c10::irange(Ap[i], Ap[i + 1])) {
       int64_t j = Aj[jj];
-      for (int64_t kk = Bp[j]; kk < Bp[j + 1]; kk++) {
+      for (const auto kk : c10::irange(Bp[j], Bp[j + 1])) {
         int64_t k = Bj[kk];
         if (mask[k] != i) {
           mask[k] = i;
@@ -96,11 +95,11 @@ void _csr_matmult(
     const index_t_ptr Bj,
     const scalar_t_ptr Bx,
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-    typename index_t_ptr::value_type Cp[],
+    std::remove_const_t<typename index_t_ptr::value_type> Cp[],
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-    typename index_t_ptr::value_type Cj[],
+    std::remove_const_t<typename index_t_ptr::value_type> Cj[],
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-    typename scalar_t_ptr::value_type Cx[]) {
+    std::remove_const_t<typename scalar_t_ptr::value_type> Cx[]) {
   /*
     Compute CSR entries for matrix C = A@B.
 
@@ -124,8 +123,8 @@ void _csr_matmult(
     Note:
       Output arrays Cp, Cj, and Cx must be preallocated
   */
-  using index_t = typename index_t_ptr::value_type;
-  using scalar_t = typename scalar_t_ptr::value_type;
+  using index_t = std::remove_const_t<typename index_t_ptr::value_type>;
+  using scalar_t = std::remove_const_t<typename scalar_t_ptr::value_type>;
 
   std::vector<index_t> next(n_col, -1);
   std::vector<scalar_t> sums(n_col, 0);
@@ -205,23 +204,23 @@ void sparse_matmul_kernel(
   const auto mat1_csr = mat1.to_sparse_csr();
   const auto mat2_csr = mat2.to_sparse_csr();
 
-  auto mat1_crow_indices_ptr = StridedRandomAccessor<int64_t>(
-      mat1_csr.crow_indices().data_ptr<int64_t>(),
+  auto mat1_crow_indices_ptr = StridedRandomAccessor<const int64_t>(
+      mat1_csr.crow_indices().const_data_ptr<int64_t>(),
       mat1_csr.crow_indices().stride(-1));
-  auto mat1_col_indices_ptr = StridedRandomAccessor<int64_t>(
-      mat1_csr.col_indices().data_ptr<int64_t>(),
+  auto mat1_col_indices_ptr = StridedRandomAccessor<const int64_t>(
+      mat1_csr.col_indices().const_data_ptr<int64_t>(),
       mat1_csr.col_indices().stride(-1));
-  auto mat1_values_ptr = StridedRandomAccessor<scalar_t>(
-      mat1_csr.values().data_ptr<scalar_t>(),
+  auto mat1_values_ptr = StridedRandomAccessor<const scalar_t>(
+      mat1_csr.values().const_data_ptr<scalar_t>(),
       mat1_csr.values().stride(-1));
-  auto mat2_crow_indices_ptr = StridedRandomAccessor<int64_t>(
-      mat2_csr.crow_indices().data_ptr<int64_t>(),
+  auto mat2_crow_indices_ptr = StridedRandomAccessor<const int64_t>(
+      mat2_csr.crow_indices().const_data_ptr<int64_t>(),
       mat2_csr.crow_indices().stride(-1));
-  auto mat2_col_indices_ptr = StridedRandomAccessor<int64_t>(
-      mat2_csr.col_indices().data_ptr<int64_t>(),
+  auto mat2_col_indices_ptr = StridedRandomAccessor<const int64_t>(
+      mat2_csr.col_indices().const_data_ptr<int64_t>(),
       mat2_csr.col_indices().stride(-1));
-  auto mat2_values_ptr = StridedRandomAccessor<scalar_t>(
-      mat2_csr.values().data_ptr<scalar_t>(),
+  auto mat2_values_ptr = StridedRandomAccessor<const scalar_t>(
+      mat2_csr.values().const_data_ptr<scalar_t>(),
       mat2_csr.values().stride(-1));
 
   const auto nnz = _csr_matmult_maxnnz(
@@ -252,11 +251,11 @@ void sparse_matmul_kernel(
       mat2_crow_indices_ptr,
       mat2_col_indices_ptr,
       mat2_values_ptr,
-      output_indptr.data_ptr<int64_t>(),
-      output_col_indices.data_ptr<int64_t>(),
-      output_values.data_ptr<scalar_t>());
+      output_indptr.mutable_data_ptr<int64_t>(),
+      output_col_indices.mutable_data_ptr<int64_t>(),
+      output_values.mutable_data_ptr<scalar_t>());
 
-  csr_to_coo(M, output_indptr.data_ptr<int64_t>(), output_row_indices.data_ptr<int64_t>());
+  csr_to_coo(M, output_indptr.const_data_ptr<int64_t>(), output_row_indices.mutable_data_ptr<int64_t>());
   output._coalesced_(true);
 }
 

@@ -33,7 +33,7 @@ bool InputArchive::try_read(const std::string& key, c10::IValue& ivalue) {
 bool InputArchive::try_read(
     const std::string& key,
     Tensor& tensor,
-    bool is_buffer) {
+    bool /*is_buffer*/) {
   if (!module_.hasattr(key)) {
     return false;
   }

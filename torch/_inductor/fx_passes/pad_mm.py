@@ -9,6 +9,7 @@ import torch
 import torch._inductor.runtime.runtime_utils
 from torch import Tensor
 from torch._dynamo.utils import counters
+from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor import utils
 from torch._inductor.autoheuristic.autoheuristic import (
     AHContext,
@@ -352,12 +353,7 @@ def should_pad_bench_key(
     def tensor_key(t: Tensor) -> tuple[torch.Size, tuple[int, ...], torch.dtype]:
         return (t.shape, t.stride(), t.dtype)
 
-    tf32_key = (
-        None
-        if mat1.dtype != torch.float32
-        else torch.backends.cuda.matmul.fp32_precision == "tf32"
-        or torch.backends.mkldnn.fp32_precision == "tf32"
-    )
+    fp32_precision = encoders.get_matmul_precision_for_cache(mat1)
 
     def fmt_pad(name: str) -> str | None:
         if is_base_time_key:
@@ -371,7 +367,7 @@ def should_pad_bench_key(
         fmt_pad("mat2"),
         op,
         input if input is None else tensor_key(input),
-        tf32_key,
+        fp32_precision,
     )
 
     key = str(key)
@@ -478,6 +474,8 @@ def should_pad(
     op: torch._ops.OpOverloadPacket,
     input: Tensor | None = None,
 ) -> bool:
+    if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
+        return False
     if not can_pad(mat1, mat2, op, input):
         return False
 

@@ -15,7 +15,11 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
-from torch._inductor.fx_utils import get_node_storage
+from torch._inductor.fx_utils import (
+    get_node_storage,
+    rank_agnostic_device,
+    rank_agnostic_passes,
+)
 from torch._inductor.utils import get_gpu_type
 from torch._library.utils import zip_schema
 from torch.fx.experimental.symbolic_shapes import (
@@ -32,6 +36,7 @@ from ..custom_graph_pass import get_custom_graph_passes
 from ..pattern_matcher import (
     Arg,
     CallFunction,
+    Ignored,
     init_once_fakemode,
     KeywordArg,
     Match,
@@ -471,8 +476,11 @@ class UniformValueConstantFolder(ConstantFolder):
             if isinstance(out, torch.Tensor) and out.numel() == 1:
                 return out
 
-        # handle device_put op
-        if node.target == prims.device_put.default:
+        # handle device_put, and current_device since it feeds constructors' device
+        if node.target in (
+            prims.device_put.default,
+            torch.ops.coor.current_device.default,
+        ):
             return super(ConstantFolder, self).run_node(node)
 
         # constructors ops
@@ -486,7 +494,7 @@ class UniformValueConstantFolder(ConstantFolder):
             # Don't specialize symbolic value.
             if not isinstance(value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
                 new_args = [[1], value]
-                return aten.full.default(*new_args, **node.kwargs)
+                return aten.full.default(*new_args, **kwargs)
 
         # handle before view ops because this changes value
         if node.target is aten.view.dtype:
@@ -554,8 +562,51 @@ def _has_self_referential_shape(
     return False
 
 
+# TODO: Investigate generalizing this to cuDNN, CPU Flash, and overrideable fused attention.
+def _remove_zero_bias_from_efficient_attention(
+    gm: torch.fx.GraphModule,
+    uniform_values: dict[torch.fx.Node, Any],
+) -> None:
+    if config.numerics == "strict":
+        return
+
+    targets = (
+        (aten._scaled_dot_product_efficient_attention.default, 3),
+        (aten._scaled_dot_product_efficient_attention_backward.default, 4),
+    )
+    for target, bias_index in targets:
+        for node in gm.graph.find_nodes(op="call_function", target=target):
+            bias = node.args[bias_index]
+            if not isinstance(bias, torch.fx.Node):
+                continue
+            if target is aten._scaled_dot_product_efficient_attention_backward.default:
+                # Backward positional argument 10 is a four-element bool sequence:
+                # [..., compute_grad_bias]. Thus grad_input_mask[3] says whether backward
+                # must produce grad_bias, which requires retaining the bias. This is
+                # rare for a proven-zero bias, but can occur for a differentiable
+                # expression such as parameter * 0.
+                grad_input_mask = node.args[10]
+                compute_bias_gradient = grad_input_mask[3]
+                if compute_bias_gradient:
+                    continue
+            value = uniform_values.get(bias)
+            fake_bias = bias.meta.get("val")
+            if (
+                not isinstance(fake_bias, torch.Tensor)
+                or not fake_bias.dtype.is_floating_point
+                or value != 0.0
+            ):
+                continue
+            args = list(node.args)
+            args[bias_index] = None
+            node.args = tuple(args)
+
+
 def constant_fold_uniform_value(gm: torch.fx.GraphModule):
-    """Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."""
+    """Fold uniform constants and algebraic no-ops.
+
+    This includes replacing an all-zero additive efficient-attention bias with no bias.
+    """
     with torch.utils._python_dispatch._disable_current_modes():
         aten = torch.ops.aten
 
@@ -565,6 +616,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
         cf.run()
 
         node_replacements = cf.node_replacements
+        _remove_zero_bias_from_efficient_attention(gm, node_replacements)
 
         # note: [constant folding refining of symints]
         # constant folding will partially evaluate a graph such that values which have dependencies which
@@ -651,7 +703,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                     kwargs={
                         "dtype": fake_tensor.dtype,
                         "layout": torch.strided,
-                        "device": fake_tensor.device,
+                        "device": rank_agnostic_device(graph, fake_tensor.device),
                         "pin_memory": node.kwargs.get("pin_memory", False),
                     },
                 )
@@ -752,6 +804,7 @@ def canonicalize_aten_ir_passes(gm: torch.fx.GraphModule):
     canonicalize_quant_mapping(gm)
 
 
+@rank_agnostic_passes()
 def joint_graph_passes(
     graph: torch.fx.GraphModule,
     input_device: torch.device | None = None,
@@ -864,7 +917,8 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
 
     if len(user_devices) == 1 and "val" in node.meta:
         (user_device,) = user_devices
-        if device.type != user_device.type:
+        # Under compile-on-one-rank, device may be a current_device() node.
+        if node.meta["val"].device.type != user_device.type:
             repl = match.graph.call_function(
                 torch.ops.prims.iota.default,
                 (length,),
@@ -872,7 +926,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
                     "start": start,
                     "step": step,
                     "dtype": dtype,
-                    "device": user_device,
+                    "device": rank_agnostic_device(match.graph, user_device),
                     "requires_grad": requires_grad,
                 },
             )
@@ -1247,6 +1301,9 @@ def scatter_upon_const_tensor_extra_check(m):
             KeywordArg("shape"),
             KeywordArg("background_val"),
             dtype=KeywordArg("dtype"),
+            # the replacement takes its device from selector; scatter requires it
+            # to match the full's
+            device=Ignored(),
         ),
         KeywordArg("dim"),
         KeywordArg("selector"),

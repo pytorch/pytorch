@@ -261,6 +261,11 @@ def custom_op(
                     f"Please make these consistent."
                 )
         result.register_kernel(device_types)(fn)
+        # The op's own kernel, not one the module running custom_op overrides it with.
+        if isinstance(module := getattr(fn, "__module__", None), str):
+            result._backend_fn_callers = dict.fromkeys(
+                result._backend_fn_callers, module
+            )
         result._opoverload._enable_pyobj_dispatch(True)
         return result
 
@@ -296,6 +301,9 @@ class CustomOpDef:
         self._init_fn = fn
 
         self._backend_fns: dict[str | None, Callable] = {}
+        # The utils.caller_module() of each register_kernel call, by dispatch key,
+        # as the dispatcher records only this file.
+        self._backend_fn_callers: dict[str, str] = {}
         self._abstract_fn: Callable | None = None
         self._setup_context_fn: Callable | None = None
         self._backward_fn: Callable | None = None
@@ -389,6 +397,72 @@ class CustomOpDef:
             else:
                 self._disabled_kernel.discard(device_type)
 
+    def _make_backend_fn(
+        self, device_type: str | None, fn: Callable[..., object]
+    ) -> Callable[..., object]:
+        """Wraps fn to choose between the default implementation or the
+        device-specific one, depending on whether device_type's kernel is
+        disabled."""
+
+        @torch._disable_dynamo
+        def wrapped_fn(*args, **kwargs):
+            if device_type in self._disabled_kernel:
+                return self._init_fn(*args, **kwargs)
+            else:
+                return fn(*args, **kwargs)
+
+        return wrapped_fn
+
+    def _make_backend_impl(self, device_type: str | None) -> Callable[..., object]:
+        """Makes the dispatcher kernel for device_type, which runs the function
+        registered for it and checks the result against the schema."""
+
+        def backend_impl(*args, **kwargs):
+            result = self._backend_fns[device_type](*args, **kwargs)
+
+            def get_module():
+                fn = self._backend_fns[device_type]
+                return inspect.getmodule(fn)
+
+            schema = self._opoverload._schema
+            if self._is_inplace:
+                if result is not args[0]:
+                    raise RuntimeError(
+                        f"{self._name} (with implementation in {get_module()}): "
+                        "An operator tagged with torch.Tag.inplace must "
+                        "return its first argument."
+                    )
+            elif self._is_out:
+                out_kwarg_names = self._out_kwarg_names
+                if len(out_kwarg_names) == 1:
+                    returns_out_args = result is kwargs[out_kwarg_names[0]]
+                else:
+                    returns_out_args = (
+                        isinstance(result, tuple)
+                        and len(result) == len(out_kwarg_names)
+                        and all(
+                            result[i] is kwargs[name]
+                            for i, name in enumerate(out_kwarg_names)
+                        )
+                    )
+                if not returns_out_args:
+                    raise RuntimeError(
+                        f"{self._name} (with implementation in {get_module()}): "
+                        "An operator tagged with torch.Tag.out must "
+                        "return its mutable keyword-only arguments."
+                    )
+            elif not schema._is_view_op():
+                utils._c_check_aliasing_constraint(
+                    self._name,
+                    args,
+                    kwargs,
+                    result,
+                    get_module,
+                )
+            return result
+
+        return backend_impl
+
     def register_kernel(
         self, device_types: device_types_t, fn: Callable | None = None, /
     ) -> Callable:
@@ -436,73 +510,15 @@ class CustomOpDef:
             else:
                 dtypes = list(device_types)
             for device_type in dtypes:
+                key = "CompositeExplicitAutograd"
+                if device_type is not None:
+                    key = _C._dispatch_key_for_device(device_type)
                 if device_type not in self._backend_fns:
+                    backend_impl = self._make_backend_impl(device_type)
+                    self._lib.impl(self._name, backend_impl, key)
 
-                    def backend_impl(*args, **kwargs):
-                        result = self._backend_fns[device_type](*args, **kwargs)
-
-                        def get_module():
-                            fn = self._backend_fns[device_type]
-                            return inspect.getmodule(fn)
-
-                        schema = self._opoverload._schema
-                        if self._is_inplace:
-                            if result is not args[0]:
-                                raise RuntimeError(
-                                    f"{self._name} (with implementation in {get_module()}): "
-                                    "An operator tagged with torch.Tag.inplace must "
-                                    "return its first argument."
-                                )
-                        elif self._is_out:
-                            out_kwarg_names = self._out_kwarg_names
-                            if len(out_kwarg_names) == 1:
-                                returns_out_args = result is kwargs[out_kwarg_names[0]]
-                            else:
-                                returns_out_args = (
-                                    isinstance(result, tuple)
-                                    and len(result) == len(out_kwarg_names)
-                                    and all(
-                                        result[i] is kwargs[name]
-                                        for i, name in enumerate(out_kwarg_names)
-                                    )
-                                )
-                            if not returns_out_args:
-                                raise RuntimeError(
-                                    f"{self._name} (with implementation in {get_module()}): "
-                                    "An operator tagged with torch.Tag.out must "
-                                    "return its mutable keyword-only arguments."
-                                )
-                        elif not schema._is_view_op():
-                            utils._c_check_aliasing_constraint(
-                                self._name,
-                                args,
-                                kwargs,
-                                result,
-                                get_module,
-                            )
-                        return result
-
-                    if device_type is None:
-                        self._lib.impl(
-                            self._name, backend_impl, "CompositeExplicitAutograd"
-                        )
-                    else:
-                        self._lib.impl(
-                            self._name,
-                            backend_impl,
-                            _C._dispatch_key_for_device(device_type),
-                        )
-
-                # Wrap function to choose between the default implementation or the device-specific
-                # implementation depending on if the kernel is disabled.
-                @torch._disable_dynamo
-                def wrapped_fn(*args, **kwargs):
-                    if device_type in self._disabled_kernel:
-                        return self._init_fn(*args, **kwargs)
-                    else:
-                        return fn(*args, **kwargs)
-
-                self._backend_fns[device_type] = wrapped_fn
+                self._backend_fns[device_type] = self._make_backend_fn(device_type, fn)
+                self._backend_fn_callers[key] = utils.caller_module()
             return fn
 
         if device_types is not None and not utils.has_tensor_arg(
@@ -658,6 +674,17 @@ class CustomOpDef:
         The ``ctx`` object is `the same ctx object <context_method_mixins>`_ used by
         :class:`torch.autograd.Function`. The semantics of ``backward_fn`` are the
         same as :meth:`torch.autograd.Function.backward`.
+
+        .. warning::
+            The strides of the gradients passed to ``backward_fn`` are undefined:
+            they may not match the strides of the corresponding forward outputs
+            (for example, the backward of :func:`torch.cat` produces gradients
+            that are non-contiguous views into a larger tensor). If
+            ``backward_fn`` calls a kernel that assumes a particular memory
+            layout (such as a raw Triton or CUDA kernel), it must call
+            :meth:`~torch.Tensor.contiguous` on the gradients or handle their
+            strides explicitly. Backward formulas composed of PyTorch operations
+            handle arbitrary strides automatically.
 
         ``setup_context(ctx, inputs, output)`` runs during the forward pass.
         Please save quantities needed for backward onto the ``ctx`` object via

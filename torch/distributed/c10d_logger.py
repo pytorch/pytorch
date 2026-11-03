@@ -15,6 +15,7 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch.distributed as dist
+from torch._C._distributed_c10d import Backend as C10DBackend
 from torch.distributed.logging_handlers import _log_handlers
 from torch.monitor import _WaitCounter
 
@@ -53,14 +54,15 @@ _c10d_logger = _get_or_create_logger()
 def _get_msg_dict(func_name, *args, **kwargs) -> dict[str, Any]:
     if dist.is_initialized():
         group = kwargs.get("group") or kwargs.get("process_group")
+        is_backend = isinstance(group, C10DBackend)
         msg_dict = {
             "func_name": f"{func_name}",
             "pg_name": f"{dist._get_process_group_name(kwargs.get('pg'))}",  # type: ignore[arg-type]
-            "backend": f"{dist.get_backend(group)}",
+            "backend": f"{group.name() if is_backend else dist.get_backend(group)}",
             "world_size": f"{dist.get_world_size()}",
-            "group_size": f"{dist.get_world_size(group)}",
+            "group_size": f"{group.size() if is_backend else dist.get_world_size(group)}",
             "global_rank": f"{dist.get_rank()}",
-            "local_rank": f"{dist.get_rank(group)}",
+            "local_rank": f"{group.rank() if is_backend else dist.get_rank(group)}",
         }
         if msg_dict["backend"] == "nccl":
             nccl_version = torch.cuda.nccl.version()

@@ -1,10 +1,9 @@
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/export/upgrader.h>
-#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
-#include <stdexcept>
 #include <vector>
 
 namespace torch::_export {
@@ -38,7 +37,7 @@ static void setFieldByKeypath(
     const std::vector<std::string>& keypath,
     nlohmann::json value) {
   nlohmann::json* current = &obj;
-  for (size_t i = 0; i < keypath.size() - 1; ++i) {
+  for (const auto i : c10::irange(keypath.size() - 1)) {
     const auto& key = keypath[i];
     TORCH_CHECK(current->contains(key), "Keypath not found: " + key);
     current = &((*current)[key]);
@@ -76,7 +75,7 @@ void registerUpgrader(
         std::ostringstream error_stream;
         error_stream << "Upgrader already registered for version " << version
                      << " and keypath: ";
-        for (size_t i = 0; i < keypath.size(); ++i) {
+        for (const auto i : c10::irange(keypath.size())) {
           if (i > 0)
             error_stream << '.';
           error_stream << keypath[i];
@@ -101,7 +100,7 @@ void registerUpgrader(
   while (std::getline(ss, component, '.')) {
     TORCH_CHECK_VALUE(
         !component.empty(), "Empty component in keypath: ", dot_keypath);
-    keypath_vector.push_back(component);
+    keypath_vector.push_back(std::move(component));
   }
 
   TORCH_CHECK_VALUE(!keypath_vector.empty(), "Empty keypath provided");
@@ -144,7 +143,7 @@ bool deregisterUpgrader(int version, const std::string& dot_keypath) {
   while (std::getline(ss, component, '.')) {
     TORCH_CHECK_VALUE(
         !component.empty(), "Empty component in keypath: ", dot_keypath);
-    keypath_vector.push_back(component);
+    keypath_vector.push_back(std::move(component));
   }
 
   TORCH_CHECK_VALUE(!keypath_vector.empty(), "Empty keypath provided");

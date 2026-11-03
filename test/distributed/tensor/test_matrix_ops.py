@@ -39,11 +39,12 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocm,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorTestBase,
+    DTensorContinuousTestBase,
+    LocalDTensorContinuousTestBase,
+    NUM_DEVICES,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -66,7 +67,9 @@ def scale_for_fp8(
     return t_fp8.flatten(end_dim=1).flatten(start_dim=-2), scale.view(scale_shape)
 
 
-class DistMatrixOpsTest(DTensorTestBase):
+class DistMatrixOpsTest(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     @with_comms
     def test_addmm(self):
         """
@@ -464,10 +467,6 @@ class DistMatrixOpsTest(DTensorTestBase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @unittest.skip(
-        "Disabled due to CI failures on B200; see "
-        "https://github.com/pytorch/pytorch/issues/190086"
-    )
     def test_scaled_mm(self):
         device_mesh = self.build_device_mesh()
         shrd0 = Shard(0)
@@ -504,8 +503,8 @@ class DistMatrixOpsTest(DTensorTestBase):
             (repl, repl, repl, (m, 1), (n, 1), repl, repl),
             # Column-parallel
             (shrd1, repl, shrd0, (m, 1), (n, 1), repl, shrd0),
-            # Row-parallel (which actually ends up doing sub-row-wise scaling)
-            (part, shrd1, shrd1, (m, ws), (n, ws), shrd1, shrd1),
+            # Row-parallel
+            (part, shrd1, shrd1, (m, 1), (n, 1), repl, repl),
         ]:
             full_ref_res = t1 @ t2.t()
 
@@ -560,6 +559,22 @@ class DistMatrixOpsTest(DTensorTestBase):
             Shard(0), torch.Size([16, 1]), contracting_dim=1
         )
         self.assertEqual(result, Shard(0))
+
+        # --- 2D scale, shard on a size-1 (broadcast) dim -> Replicate ---
+        result = _scaled_mm_scale_placement(
+            Shard(1), torch.Size([16, 1]), contracting_dim=1
+        )
+        self.assertEqual(result, Replicate())
+        result = _scaled_mm_scale_placement(
+            Shard(0), torch.Size([1, 64]), contracting_dim=0
+        )
+        self.assertEqual(result, Replicate())
+
+        # --- 2D scale + Partial -> Replicate ---
+        result = _scaled_mm_scale_placement(
+            Partial(), torch.Size([16, 1]), contracting_dim=1
+        )
+        self.assertEqual(result, Replicate())
 
         # --- 1D blockwise + non-contracting shard -> Shard(0) ---
         # A (mk): dim 0 = m (non-contracting), dim 1 = k (contracting)
@@ -1014,7 +1029,6 @@ class DistMatrixOpsTest(DTensorTestBase):
             dist_result_full = dist_result.full_tensor()
             self.assertEqual(local_result, dist_result_full)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @with_comms
     @skip_unless_torch_gpu
@@ -1163,7 +1177,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 instantiate_parametrized_tests(DistMatrixOpsTest)
 
 DistMatrixOpsTestWithLocalTensor = create_local_tensor_test_class(
-    DistMatrixOpsTest,
+    DistMatrixOpsTest, base_class=LocalDTensorContinuousTestBase
 )
 
 if __name__ == "__main__":

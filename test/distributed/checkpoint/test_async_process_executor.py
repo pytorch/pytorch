@@ -5,6 +5,7 @@ import sys
 from unittest.mock import patch
 
 import torch
+import torch.distributed.checkpoint._async_process_executor as async_process_executor
 import torch.testing._internal.common_utils as common
 from torch import distributed as dist
 from torch.distributed.checkpoint._async_process_executor import (
@@ -22,7 +23,9 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorContinuousTestBase,
     DTensorTestBase,
+    NUM_DEVICES,
     with_comms,
 )
 
@@ -183,35 +186,47 @@ class TestAsyncProcessExecutorPrefixStore(TestCase):
         master_addr = "localhost"
         master_port = str(common.find_free_port())
 
-        with patch.dict(
-            os.environ,
-            {
-                "DCP_USE_PREFIX_STORE": "1",
-                "MASTER_ADDR": master_addr,
-                "MASTER_PORT": master_port,
-            },
-        ):
-            with patch(
-                "torch.distributed.checkpoint._async_process_executor.get_free_port"
-            ) as mock_get_free_port:
-                dist.init_process_group(
-                    backend=dist.Backend.GLOO,
-                    rank=0,
-                    world_size=1,
-                )
+        # retry_on_connect_failures re-runs this whole body on a RuntimeError,
+        # so nothing it created may survive a failed attempt.
+        try:
+            with patch.dict(
+                os.environ,
+                {
+                    "DCP_USE_PREFIX_STORE": "1",
+                    "MASTER_ADDR": master_addr,
+                    "MASTER_PORT": master_port,
+                },
+            ):
+                with patch(
+                    "torch.distributed.checkpoint._async_process_executor.get_free_port"
+                ) as mock_get_free_port:
+                    dist.init_process_group(
+                        backend=dist.Backend.GLOO,
+                        rank=0,
+                        world_size=1,
+                    )
 
-                proc_executor = _ProcessBasedAsyncCheckpointExecutor()
-                fut = proc_executor.execute_save(
-                    staging_future_or_state_dict=test_state_dict,
-                    storage_writer=TestStorageWriter(behavior="success"),
-                )
-                result = fut.result()
-                self.assertIsNotNone(result)
-                mock_get_free_port.assert_not_called()
+                    proc_executor = _ProcessBasedAsyncCheckpointExecutor()
+                    fut = proc_executor.execute_save(
+                        staging_future_or_state_dict=test_state_dict,
+                        storage_writer=TestStorageWriter(behavior="success"),
+                    )
+                    result = fut.result()
+                    self.assertIsNotNone(result)
+                    mock_get_free_port.assert_not_called()
+        finally:
+            # The daemon is cached in a module global and outlives the test. Drop
+            # it first: its __del__ terminates the child while the rank-0 store
+            # that child is connected to is still owned by the live group.
+            async_process_executor._CHECKPOINT_PROCESS = None
+            if dist.is_initialized():
+                dist.destroy_process_group()
 
 
-class TestProcessGroupInitInfo(DTensorTestBase):
+class TestProcessGroupInitInfo(DTensorContinuousTestBase):
     """Test suite for _ProcessGroupInitInfo."""
+
+    world_size = NUM_DEVICES
 
     @with_comms
     def test_process_group_init_info_with_default_pg(self) -> None:

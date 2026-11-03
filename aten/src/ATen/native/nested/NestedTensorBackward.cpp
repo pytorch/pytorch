@@ -7,8 +7,8 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
-#include <c10/core/DeviceType.h>
 
+#include <c10/util/irange.h>
 #include <utility>
 
 namespace at::native {
@@ -133,13 +133,13 @@ Tensor _nested_sum_backward_cpu(
   // (2) the gradient nested tensors are stored contiguously in the buffer
   AT_DISPATCH_ALL_TYPES_AND2(
     ScalarType::Half, ScalarType::BFloat16, self_grad_buffer.scalar_type(), "nested_sum_dim_cpu", [&]() {
-    auto* self_grad_data = self_grad_buffer.data_ptr<scalar_t>();
+    auto* self_grad_data = self_grad_buffer.mutable_data_ptr<scalar_t>();
     const auto* output_grad_data = grad_buffer.const_data_ptr<scalar_t>();
     int64_t out_idx = 0, in_idx = 0;
     for (const auto i : c10::irange(ntensors)) {
       int64_t segments = num_segments[i].item<int64_t>();
       int64_t segment_length = segment_lengths[i].item<int64_t>();
-      for (int64_t j = 0; j < segments; j++) {
+      for ([[maybe_unused]] const auto _ : c10::irange(segments)) {
         scalar_t output_grad = output_grad_data[out_idx];
         for (int64_t k = 0; k < segment_length; k++) {
           self_grad_data[in_idx] = output_grad;

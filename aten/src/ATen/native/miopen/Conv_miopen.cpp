@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/Config.h>
 #include <ATen/native/ConvUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -150,6 +150,7 @@ at::Tensor miopen_convolution_relu(
 #include <c10/util/irange.h>
 
 #include <c10/hip/HIPCachingAllocator.h>
+#include <c10/hip/HIPGraphsC10Utils.h>
 
 #include <functional>
 #include <iterator>
@@ -398,13 +399,13 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
 
     if (force_default) {
         // find default alg
-        for (size_t i=0; i<solution_count; ++i) {
+        for (const auto i : c10::irange(solution_count)) {
             if (solutions[i].algorithm == (miopenConvAlgorithm_t)DEFAULT_ALGO) {
                 return solutions[i];
             }
         }
         // default algo was not found, select first algo without workspace requirement
-        for (size_t i=0; i<solution_count; ++i) {
+        for (const auto i : c10::irange(solution_count)) {
             if (solutions[i].workspace_size == 0) {
                 return solutions[i];
             }
@@ -471,13 +472,13 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
 
     if (force_default) {
         // find default alg
-        for (size_t i=0; i<solution_count; ++i) {
+        for (const auto i : c10::irange(solution_count)) {
             if (solutions[i].algorithm == (miopenConvAlgorithm_t)DEFAULT_ALGO) {
                 return solutions[i];
             }
         }
         // default algo was not found, select first algo without workspace requirement
-        for (size_t i=0; i<solution_count; ++i) {
+        for (const auto i : c10::irange(solution_count)) {
             if (solutions[i].workspace_size == 0) {
                 return solutions[i];
             }
@@ -544,13 +545,13 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
 
     if (force_default) {
         // find default alg
-        for (size_t i=0; i<solution_count; ++i) {
+        for (const auto i : c10::irange(solution_count)) {
             if (solutions[i].algorithm == (miopenConvAlgorithm_t)DEFAULT_ALGO) {
                 return solutions[i];
             }
         }
         // default algo was not found, select first algo without workspace requirement
-        for (size_t i=0; i<solution_count; ++i) {
+        for (const auto i : c10::irange(solution_count)) {
             if (solutions[i].workspace_size == 0) {
                 return solutions[i];
             }
@@ -635,6 +636,22 @@ Workspace chooseSolution(const ConvolutionArgs& args, uint64_t* solution_id)
     *solution_id = solution.solution_id;
     return Workspace(solution.workspace_size);
   }
+}
+
+// miopenFind* times candidate kernels on the stream, which invalidates a graph
+// capture. While capturing, keep an algorithm already found in eager mode and
+// otherwise use immediate mode, which picks a solution without launching.
+template<typename algo_t>
+bool useImmediateMode(const ConvolutionArgs& args)
+{
+  if (at::globalContext().immediateMiopen()) {
+    return true;
+  }
+  if (c10::cuda::currentStreamCaptureStatusMayInitCtx() == c10::cuda::CaptureStatus::None) {
+    return false;
+  }
+  algo_t algo;
+  return !algorithm_search<algo_t>::cache().find(args.params, &algo);
 }
 
 // See NOTE [ raw_cudnn_convolution_forward_out ] in aten/src/ATen/native/cudnn/Conv_v7.cpp
@@ -853,7 +870,7 @@ void raw_miopen_convolution_forward_out_32bit(
       benchmark,
       deterministic);
 
-  if (at::globalContext().immediateMiopen()) {
+  if (useImmediateMode<miopenConvFwdAlgorithm_t>(args)) {
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvFwdAlgorithm_t>(args, &solution_id);
 
@@ -1154,7 +1171,7 @@ void raw_miopen_convolution_backward_input_out_32bit(
       benchmark,
       deterministic);
 
-  if (at::globalContext().immediateMiopen()) {
+  if (useImmediateMode<miopenConvBwdDataAlgorithm_t>(args)) {
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvBwdDataAlgorithm_t>(args, &solution_id);
 
@@ -1331,7 +1348,7 @@ void raw_miopen_convolution_backward_weight_out_32bit(
       benchmark,
       deterministic);
 
-  if (at::globalContext().immediateMiopen()) {
+  if (useImmediateMode<miopenConvBwdWeightsAlgorithm_t>(args)) {
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvBwdWeightsAlgorithm_t>(args, &solution_id);
 

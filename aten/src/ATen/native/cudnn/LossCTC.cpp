@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/Config.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -78,9 +77,6 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
 
 #else // AT_CUDNN_ENABLED
 
-#include <ATen/cudnn/Types.h>
-#include <ATen/cudnn/Utils.h>
-
 #include <ATen/TensorUtils.h>
 #include <c10/util/irange.h>
 
@@ -101,8 +97,9 @@ bool _use_cudnn_ctc_loss(
       (log_probs.device().type() == at::kCUDA) && (log_probs.dim() == 3);
 
   if (use_cudnn) {
-    // we don't know that input_lengths and target_lengths have the same size
-    // (they should, but we didn't check yet)
+    // Nothing has compared these sizes yet; without this the loop below
+    // reads input_lengths past its end.
+    use_cudnn = use_cudnn && (input_lengths.size() == target_lengths.size());
     int64_t max_input_length = log_probs.size(0);
     for (const auto input_length : input_lengths) {
       use_cudnn = use_cudnn && ((input_length == max_input_length) ? 1 : 0);
@@ -135,16 +132,15 @@ bool _use_cudnn_ctc_loss_tensor(
   if (use_cudnn) {
     if (at::cuda::currentStreamCaptureStatus() ==
         at::cuda::CaptureStatus::None) {
+      // Hoisted out: the inner tlc used to shadow this and redo the copy.
+      Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
       Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+      IntArrayRef il(ilc.const_data_ptr<int64_t>(), ilc.numel());
       IntArrayRef tl(tlc.const_data_ptr<int64_t>(), tlc.numel());
+      use_cudnn = use_cudnn && (il.size() == tl.size());
       for (const auto b : c10::irange(tl.size())) {
         // target length < 256 is documented, but we see illegal memory accesses
         // when target lengths > input lengths for CuDNN
-        Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-        Tensor tlc =
-            target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-        IntArrayRef il(ilc.const_data_ptr<int64_t>(), ilc.numel());
-        IntArrayRef tl(tlc.const_data_ptr<int64_t>(), tlc.numel());
         use_cudnn = use_cudnn && (tl[b] < 256) && (tl[b] <= il[b]);
         if (!use_cudnn) {
           break;
@@ -223,7 +219,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
       handle,
       log_probs_desc.desc(),
       grad_desc.desc(),
-      targets->data_ptr<int>(),
+      targets->const_data_ptr<int>(),
       target_lengths.data(),
       input_lengths.data(),
       algo,
@@ -237,8 +233,8 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
   AT_CUDNN_CHECK(cudnnCTCLoss(
       handle,
       log_probs_desc.desc(),
-      log_probs_t.data_ptr(),
-      targets->data_ptr<int>(),
+      log_probs_t.const_data_ptr(),
+      targets->const_data_ptr<int>(),
       target_lengths.data(),
       input_lengths.data(),
       costs.data_ptr(),
@@ -333,10 +329,10 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
       algo,
       ctc_loss_desc.desc(),
       log_probs_desc.desc(),
-      log_probs_t.data_ptr(),
-      targets_t_.data_ptr<int>(),
-      target_lengths_.data_ptr<int>(),
-      input_lengths_.data_ptr<int>(),
+      log_probs_t.const_data_ptr(),
+      targets_t_.const_data_ptr<int>(),
+      target_lengths_.const_data_ptr<int>(),
+      input_lengths_.const_data_ptr<int>(),
       costs.data_ptr(),
       grad_desc.desc(),
       grad.data_ptr(),

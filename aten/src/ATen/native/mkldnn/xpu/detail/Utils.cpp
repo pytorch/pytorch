@@ -1,4 +1,5 @@
 #include <ATen/Context.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 
@@ -16,13 +17,6 @@ dnnl::memory make_onednn_memory(
       engine,
       dnnl::sycl_interop::memory_kind::usm,
       ptr == nullptr ? DNNL_MEMORY_ALLOCATE : ptr);
-}
-
-dnnl::memory make_onednn_memory(
-    dnnl::memory::desc md,
-    dnnl::engine& engine,
-    const void* ptr) {
-  return make_onednn_memory(md, engine, const_cast<void*>(ptr));
 }
 
 dnnl::memory::format_tag get_dnnl_default_format(

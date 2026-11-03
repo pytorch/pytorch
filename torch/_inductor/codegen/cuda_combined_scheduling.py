@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any, TYPE_CHECKING
 
+import torch
+
 from ..ir import MultiTemplateBuffer
 from ..scheduler import (
     BaseSchedulerNode,
@@ -15,12 +17,16 @@ from ..scheduler import (
 from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
 from .cutlass.scheduling import CUTLASSScheduling
 from .flydsl.flydsl_scheduling import FlyDSLScheduling
-from .nv_universal_gemm.nv_universal_gemm_scheduling import NVUniversalGemmScheduling
+from .nv_universal_gemm.nv_universal_gemm_scheduling import (
+    NVGemmVerticalFusionDecision,
+    NVUniversalGemmScheduling,
+)
 from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
 from .triton import TritonScheduling
 
 
 log = logging.getLogger(__name__)
+fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 
 if TYPE_CHECKING:
@@ -29,10 +35,10 @@ if TYPE_CHECKING:
 
     from sympy import Expr
 
-    import torch
     from torch.utils._ordered_set import OrderedSet
 
-    from .common import BackendFeature
+    from .common import BackendFeature, Kernel
+    from .multi_kernel import MultiKernel
 
     _IntLike: TypeAlias = int | Expr
 
@@ -98,13 +104,18 @@ class CUDACombinedScheduling(BaseScheduling):
         # Only intercept when node1 is the NVGEMM template (epilogue direction).
         # Prologue direction (node1=pointwise, node2=template) must fall through to
         # Triton, or NVGEMM-winning MTBs silently lose Triton prologue fusion.
-        # For MTBs, if NVGEMM can't fuse, fall through to Triton scheduling so
+        # For MTBs, defer NVGEMM-specific failures to Triton scheduling so
         # Triton choices in the same MTB can still attempt epilogue fusion.
         elif self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(node1):
-            if self._nv_universal_gemm_scheduling.can_fuse_vertical(node1, node2):
+            decision = self._nv_universal_gemm_scheduling.vertical_fusion_decision(
+                node1, node2
+            )
+            if decision is NVGemmVerticalFusionDecision.FUSE:
                 return True
-            if isinstance(node1, SchedulerNode) and isinstance(
-                node1.node, MultiTemplateBuffer
+            if (
+                decision is NVGemmVerticalFusionDecision.DEFER
+                and isinstance(node1, SchedulerNode)
+                and isinstance(node1.node, MultiTemplateBuffer)
             ):
                 return self._triton_scheduling.can_fuse_vertical(node1, node2)
             return False
@@ -121,6 +132,11 @@ class CUDACombinedScheduling(BaseScheduling):
     def can_fuse_horizontal(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
+        if any(
+            self._nv_universal_gemm_scheduling.has_nvgemm_bool_output(node)
+            for node in (node1, node2)
+        ):
+            return False
         for node in (node1, node2):
             if self._cutlass_scheduling.is_cutlass_template(node):
                 return self._cutlass_scheduling.can_fuse_horizontal(
@@ -144,6 +160,15 @@ class CUDACombinedScheduling(BaseScheduling):
                 )  # always False at the moment
         return self._triton_scheduling.can_fuse_horizontal(node1, node2)
 
+    def can_fuse_reduction_pair(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return (
+            not self._nv_universal_gemm_scheduling.has_conflicting_epilogue_reductions(
+                node1, node2
+            )
+        )
+
     def can_fuse_reduction_epilogue(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
@@ -156,6 +181,16 @@ class CUDACombinedScheduling(BaseScheduling):
                 node1, node2
             )
         return False
+
+    def get_fusion_pair_priority(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> int:
+        priority = self._nv_universal_gemm_scheduling.get_fusion_pair_priority(
+            node1, node2
+        )
+        if priority < 2:
+            return priority
+        return self._triton_scheduling.get_fusion_pair_priority(node1, node2) + 2
 
     def group_fn(
         self, sizes: Sequence[Sequence[_IntLike]]
@@ -224,7 +259,9 @@ class CUDACombinedScheduling(BaseScheduling):
     def codegen_staged_reduction(self, node):
         return self._triton_scheduling.codegen_staged_reduction(node)
 
-    def codegen_node(self, node: FusedSchedulerNode | SchedulerNode) -> None:
+    def codegen_node(
+        self, node: FusedSchedulerNode | SchedulerNode
+    ) -> Kernel[Any] | MultiKernel | None:
         return self._triton_scheduling.codegen_node(node)
 
     def codegen_sync(self) -> None:
@@ -258,16 +295,18 @@ class CUDACombinedScheduling(BaseScheduling):
             preserve_rng_state(),
             device_interface.device(V.graph.get_current_device_or_throw()),
         ):
-            args = module.get_args()
-            call = module.call
-
             try:
+                args = module.get_args()
+                call = module.call
                 call(args)
             except Exception as e:
-                log.debug(
-                    "Exception (%s) in compiling NVGEMM fused kernel",
+                fusion_log.warning(
+                    "NVGEMM fused kernel compilation failed for %s: %s: %s",
+                    module.__file__,
+                    type(e).__name__,
                     e,
                 )
+                log.debug("NVGEMM fused kernel compilation failed", exc_info=True)
                 return float("inf"), module.__file__ or ""
 
             device = V.graph.get_current_device_or_throw()
@@ -277,10 +316,13 @@ class CUDACombinedScheduling(BaseScheduling):
                     device=device,
                 )
             except Exception as e:
-                log.debug(
-                    "Exception (%s) while benchmarking NVGEMM fused kernel",
+                fusion_log.warning(
+                    "NVGEMM fused kernel benchmark failed for %s: %s: %s",
+                    module.__file__,
+                    type(e).__name__,
                     e,
                 )
+                log.debug("NVGEMM fused kernel benchmark failed", exc_info=True)
                 return float("inf"), module.__file__ or ""
 
             return ms, module.__file__ or ""

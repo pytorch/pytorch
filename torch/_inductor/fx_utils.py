@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import contextvars
 import operator
 import warnings
 from collections import defaultdict
@@ -14,7 +15,7 @@ from collections.abc import (
 from dataclasses import dataclass
 from functools import partial
 from itertools import chain
-from typing import Any
+from typing import Any, cast
 
 import sympy
 
@@ -22,7 +23,12 @@ import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._inductor.fx_passes.control_dependencies import control_deps
+from torch._library.utils import zip_schema
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.proxy_tensor import (
+    _coor_device_index_is_current,
+    _coor_enabled,
+)
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     rebind_unbacked,
@@ -72,8 +78,8 @@ def matches_module_function_pattern(
 
 
 def _is_fake_tensor_same(
-    new: Any,
-    old: Any,
+    new: object,
+    old: object,
     existing_storages: Mapping[int, int],
     *,
     check_strides: bool = True,
@@ -111,6 +117,7 @@ def _is_fake_tensor_same(
             return old is None
 
         if isinstance(new, Collection):
+            old_collection = cast(Collection[object], old)
             if recursive_ids is None:
                 recursive_ids = OrderedSet()
 
@@ -122,7 +129,7 @@ def _is_fake_tensor_same(
             # this collection have already been validated (or will be validated in the
             # future) by a call at a different layer of recursion.
             return visited or (
-                len(new) == len(old)
+                len(new) == len(old_collection)
                 and all(
                     _is_fake_tensor_same(
                         new_i,
@@ -133,14 +140,15 @@ def _is_fake_tensor_same(
                         node=node,
                         recursive_ids=recursive_ids,
                     )
-                    for new_i, old_i in zip(new, old)
+                    for new_i, old_i in zip(new, old_collection)
                 )
             )
 
         if isinstance(new, torch.types.py_sym_types):
+            old_sym = cast(torch.types.PySymType, old)
             return (
                 not_none(new.node.shape_env)._maybe_evaluate_static(
-                    sympy.Eq(new.node.expr, old.node.expr)
+                    sympy.Eq(new.node.expr, old_sym.node.expr)
                 )
                 == sympy.true
             )
@@ -150,20 +158,22 @@ def _is_fake_tensor_same(
         # implemented __eq__ method will compare IDs.
         return new == old
 
+    old_tensor = cast(torch.Tensor, old)
+
     if (
-        new.layout != old.layout
-        or new.dtype != old.dtype
-        or not is_intlist_same(new.shape, old.shape)
+        new.layout != old_tensor.layout
+        or new.dtype != old_tensor.dtype
+        or not is_intlist_same(new.shape, old_tensor.shape)
     ):
         return False
 
-    if new.device != old.device:
+    if new.device != old_tensor.device:
         return False
 
     if (
         check_strides
         and new.layout == torch.strided
-        and not is_intlist_same(new.stride(), old.stride())
+        and not is_intlist_same(new.stride(), old_tensor.stride())
     ):
         return False
 
@@ -171,11 +181,14 @@ def _is_fake_tensor_same(
         return True
 
     if not statically_known_true(
-        new.storage_offset() == old.storage_offset()
-    ) or get_storage(new) != get_storage(old):
+        new.storage_offset() == old_tensor.storage_offset()
+    ) or get_storage(new) != get_storage(old_tensor):
         return False
 
     def any_user_may_alias(node):
+        # imported here because reinplace imports this module at load time
+        from .fx_passes.reinplace import _generalized_scatter
+
         if not isinstance(node.meta["val"], torch.Tensor):
             # analysis too complicated on lists, can support in the future
             return True
@@ -183,8 +196,7 @@ def _is_fake_tensor_same(
         for user in node.users:
             if not (
                 isinstance(user.target, torch._ops.OperatorBase)
-                or user.target
-                is torch._inductor.fx_passes.reinplace._generalized_scatter
+                or user.target is _generalized_scatter
             ):
                 return True
 
@@ -225,7 +237,7 @@ def _is_fake_tensor_same(
     # else.  If the FakeTensor's storage is fresh and none of the node's users can alias
     # it, then we don't need to update this node.
     if (
-        existing_storages[get_storage(old)] == 1
+        existing_storages[get_storage(old_tensor)] == 1
         and get_storage(new) not in existing_storages
         and not any_user_may_alias(node)
     ):
@@ -403,7 +415,7 @@ def _extract_subgraphs_and_args(
                 )
             wrapped_node = wrapped_nodes[0]
 
-            def replace_placeholder(item: Any) -> Any:
+            def replace_placeholder(item: object) -> object:
                 if isinstance(item, torch.fx.Node):
                     return placeholder_to_arg.get(item, item)
                 return item
@@ -824,6 +836,106 @@ def get_node_storage(node: torch.fx.Node) -> int | None:
     return get_storage(node.meta["val"])
 
 
+def get_mutated_input_nodes(node: torch.fx.Node) -> list[torch.fx.Node]:
+    """Tensor input nodes that node writes in place."""
+    target: object = node.target
+    args = node.args
+    if target is torch.ops.higher_order.with_effects:
+        target, args = args[1], args[2:]
+    if target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+        written = [node.kwargs["kwargs"]]
+    elif isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
+        written = [
+            arg
+            for schema_arg, arg in zip_schema(target._schema, args, node.kwargs)
+            if schema_arg.alias_info is not None and schema_arg.alias_info.is_write
+        ]
+    else:
+        return []
+    return [x for x in pytree.tree_leaves(written) if isinstance(x, torch.fx.Node)]
+
+
+def get_mutated_storages(gm: torch.fx.GraphModule) -> OrderedSet[int]:
+    """
+    Fake storages written in place by any node of gm. control_deps subgraphs
+    are included since their placeholders carry the outer nodes' fake values.
+    """
+    storages: OrderedSet[int] = OrderedSet()
+    for node in gm.graph.nodes:
+        subgraph_attr = node.args[1] if node.target is control_deps else None
+        if isinstance(subgraph_attr, torch.fx.Node) and subgraph_attr.op == "get_attr":
+            subgraph = getattr(gm, cast(str, subgraph_attr.target))
+            storages |= get_mutated_storages(subgraph)
+        for written in get_mutated_input_nodes(node):
+            storage = get_node_storage(written)
+            if storage is not None:
+                storages.add(storage)
+    return storages
+
+
+def _same_size_stride_and_storage_offset(
+    lhs: torch.Tensor,
+    rhs: torch.Tensor,
+    *,
+    skip_strides: bool = False,
+    skip_storage_offset: bool = False,
+) -> bool:
+    """Check size and requested layout metadata without adding guards."""
+
+    return (
+        statically_known_true(sym_eq(lhs.size(), rhs.size()))
+        and (skip_strides or statically_known_true(sym_eq(lhs.stride(), rhs.stride())))
+        and (
+            skip_storage_offset
+            or statically_known_true(sym_eq(lhs.storage_offset(), rhs.storage_offset()))
+        )
+    )
+
+
+def same_tensor_meta(
+    lhs: torch.Tensor | torch.fx.Node,
+    rhs: torch.Tensor | torch.fx.Node,
+    *,
+    skip_strides: bool = False,
+    skip_storage_offset: bool = False,
+) -> bool:
+    """Check equal tensor metadata without comparing storage identity.
+
+    FX nodes are compared through their ``meta["val"]`` values and do not match
+    unless both values are tensors. For strided tensors this compares size,
+    requested stride and storage-offset properties, dtype, device, layout, and
+    conjugate and negative view bits. For other layouts, only size and the common
+    dtype, device, layout, and view-bit properties are compared.
+    """
+    lhs_val: object = lhs.meta.get("val") if isinstance(lhs, torch.fx.Node) else lhs
+    rhs_val: object = rhs.meta.get("val") if isinstance(rhs, torch.fx.Node) else rhs
+    if not isinstance(lhs_val, torch.Tensor) or not isinstance(rhs_val, torch.Tensor):
+        return False
+
+    return (
+        lhs_val.dtype == rhs_val.dtype
+        and lhs_val.device == rhs_val.device
+        and lhs_val.layout == rhs_val.layout
+        and (
+            (
+                lhs_val.layout == torch.strided
+                and _same_size_stride_and_storage_offset(
+                    lhs_val,
+                    rhs_val,
+                    skip_strides=skip_strides,
+                    skip_storage_offset=skip_storage_offset,
+                )
+            )
+            or (
+                lhs_val.layout != torch.strided
+                and statically_known_true(sym_eq(lhs_val.size(), rhs_val.size()))
+            )
+        )
+        and lhs_val.is_conj() == rhs_val.is_conj()
+        and lhs_val.is_neg() == rhs_val.is_neg()
+    )
+
+
 def get_fake(x: Any, gm: torch.fx.GraphModule | None) -> Any:
     """Return a fake tensor from the meta values of an input FX node.  If the input node
     is a get_attr node, we attempt to resolve it as a member of gm."""
@@ -892,9 +1004,15 @@ def is_node_realized(node: torch.fx.Node) -> bool:
 def count_flops_fx(node: torch.fx.Node) -> int | None:
     if not countable_fx(node) or isinstance(node.target, str):
         return None
-    with FakeTensorMode(allow_non_fake_inputs=True):
-        success, args, kwargs = get_fake_args_kwargs(node)
-
+    success, args, kwargs = get_fake_args_kwargs(node)
+    fake_mode = torch._guards.detect_fake_mode((args, kwargs)) if success else None
+    # Cost estimation must not specialize the graph's symbolic shapes.
+    guards_ctx = (
+        fake_mode.shape_env.suppress_guards()
+        if fake_mode is not None and fake_mode.shape_env is not None
+        else contextlib.nullcontext()
+    )
+    with guards_ctx, FakeTensorMode(allow_non_fake_inputs=True):
         if success:
             # flex_attention HOPs have registered formulas, but invoking them
             # here can require tracing-only context, e.g. TransformGetItemToIndex.
@@ -929,3 +1047,70 @@ def countable_fx(node: torch.fx.Node) -> bool:
         return target in flop_registry
     packet = target.overloadpacket
     return packet in flop_registry
+
+
+_in_rank_agnostic_passes = contextvars.ContextVar(
+    "_in_rank_agnostic_passes", default=False
+)
+
+
+@contextlib.contextmanager
+def rank_agnostic_passes() -> Generator[None, None, None]:
+    """Mark passes that run on a graph still carrying coor.current_device() nodes.
+
+    Under compile-on-one-rank the graph stays rank-agnostic until post_grad's
+    respecialize_current_device_nodes, so passes inside this window must not bake
+    this rank's device: they get device operands from rank_agnostic_device.
+
+    This is a property of the pipeline phase, not something stored on the graph.
+    Node presence can't tell the phases apart (a graph with no device operands has
+    no such node either before or after), and a GraphModule.meta flag would be lost
+    on every GraphModule(root, graph) rebuild, such as prepare_for_partitioner's
+    right before the joint passes.
+
+    There is deliberately no check on exit that no node holds this rank's device:
+    it can't tell a device a pass inserted from one already in the incoming graph,
+    and would turn the programs below into crashes, where a leak only costs
+    cross-rank cache sharing (post_grad respecializes the device either way).
+
+    TODO: HOP proxy implementations (auto_functionalized, with_effects, ...) build
+    their nodes with create_proxy directly, bypassing make_fx's compile-on-one-rank
+    rewrite. So an explicit torch.device("cuda", idx) passed to e.g. a mutable
+    custom op reaches the joint graph with its index and still splits the FX graph
+    cache per rank.
+    """
+    token = _in_rank_agnostic_passes.set(True)
+    try:
+        yield
+    finally:
+        _in_rank_agnostic_passes.reset(token)
+
+
+def rank_agnostic() -> bool:
+    """Whether anything inserted into the graph must not bake this rank's device."""
+    return _in_rank_agnostic_passes.get() and _coor_enabled()
+
+
+def rank_agnostic_device(
+    graph: torch.fx.Graph, device: torch.device
+) -> torch.device | torch.fx.Node:
+    """The operand to give a node inserted into ``graph`` for ``device``.
+
+    Inside rank_agnostic_passes under compile-on-one-rank, this rank's current
+    accelerator becomes a coor.current_device() node, the one a CooR trace would have
+    emitted. It goes before the first non-placeholder, so it precedes every use, and
+    later calls on the same graph reuse it. (A replacement graph brings its own,
+    which Replacer copies to each match site.) It carries meta["val"] like the nodes
+    make_fx creates: the partitioner only lets a device node be recomputed in the
+    backward when it has one.
+    """
+    if not (rank_agnostic() and _coor_device_index_is_current(device)):
+        return device
+    target = torch.ops.coor.current_device.default
+    first = next(n for n in graph.nodes if n.op != "placeholder")
+    if first.target is target:
+        return first
+    with graph.inserting_before(first):
+        node = graph.call_function(target)
+    node.meta["val"] = device
+    return node

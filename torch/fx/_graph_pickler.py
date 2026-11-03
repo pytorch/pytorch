@@ -7,8 +7,8 @@ import pickle
 import weakref
 from abc import abstractmethod
 from collections.abc import Callable, Generator
-from typing import Any, NewType, TypeVar
-from typing_extensions import override, Self
+from typing import Any, NewType, Self, TypeVar
+from typing_extensions import override
 
 from torch.utils._import_utils import import_dill
 
@@ -540,6 +540,16 @@ class _TensorPickleData:
                 f"{type(metadata.view_func)}"
             )
         self.metadata = dataclasses.replace(metadata, fake_mode=None)
+
+        # A view's base carries its own fake_mode, which drags in the whole
+        # FakeTensorMode -> FakeTensorConverter -> MetaConverter.storage_memo
+        # graph and dies on a meta storage's data_ptr(). unpickle() restores
+        # fake_mode on the base, so clearing it here keeps the two symmetric.
+        if self.metadata.is_view and self.metadata.base is not None:
+            self.metadata = dataclasses.replace(
+                self.metadata,
+                base=dataclasses.replace(self.metadata.base, fake_mode=None),
+            )
 
         # Some debugging/verification
         for k in MetaTensorDesc._UNSERIALIZABLE:

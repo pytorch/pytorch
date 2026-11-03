@@ -1,12 +1,9 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/MemoryOverlap.h>
-#include <ATen/Parallel.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
-#include <ATen/WrapDimUtils.h>
 
 #include <ATen/native/Resize.h>
 #include <ATen/native/UnaryOps.h>
@@ -711,7 +708,7 @@ Tensor special_sinc(const Tensor& self) { return self.sinc(); }
 namespace {
 
 inline Tensor calc_ndtr(const Tensor& self) {
-  auto x_sqrt_2 = self * M_SQRT1_2;
+  auto x_sqrt_2 = self * c10::frac_sqrt_2<double>;
   return (1 + at::erf(x_sqrt_2)) * 0.5;
 }
 
