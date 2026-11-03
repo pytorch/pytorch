@@ -735,10 +735,10 @@ def _find_imported(name: str) -> Any:
     module = sys.modules.get(module_name)
     if module is None:
         raise SerializeError(
-            f"{name} is not a top-level class or function of an imported "
-            "module. Define it at the top level of a module, and import that "
-            "module before loading: load does not import it, because importing "
-            "a module runs its code."
+            f"{name} cannot be found: {module_name} is not an imported module. "
+            "Only top-level classes and functions of imported modules are "
+            "found, and no module is imported here, because importing a "
+            "module runs its code."
         )
     # Reading an attribute can run code: getattr calls a module __getattr__,
     # and any attribute read on a lazily loaded module loads it. So the lookup
