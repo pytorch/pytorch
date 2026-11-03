@@ -2850,6 +2850,10 @@ class TestPredispatchSerialization(TestCase):
             self.assertEqual(spec_input.op, "get_attr")
             spec = getattr(loaded_ep.graph_module, spec_input.target)
             self.assertTrue(pytree._is_pytreespec_instance(spec))
+        func_specs = [
+            getattr(loaded_ep.graph_module, n.args[0].target) for n in loaded_nodes
+        ]
+        self.assertIn(Sub, [pytree._retrieve_constant(s).func for s in func_specs])
         self.assertEqual(expected, loaded_ep.module()(*inp))
         # The loaded program saves again, and that file loads and runs.
         buffer = io.BytesIO()
