@@ -82,6 +82,10 @@ PegasusForCausalLM,pass,0,333,0
 
 
 
+Qwen/Qwen2.5-0.5B-Instruct,pass,0,1578,0
+
+
+
 Qwen/Qwen3-0.6B,pass,0,2282,0
 
 
@@ -119,6 +123,10 @@ YituTechConvBert,pass,0,650,0
 
 
 google/gemma-2-2b,pass,0,2380,0
+
+
+
+google/gemma-3-1b-it,pass,0,2932,0
 
 
 

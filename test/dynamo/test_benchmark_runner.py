@@ -99,7 +99,8 @@ def _tiny_causal_lm(model_type, **config_overrides):
     import transformers
 
     model_cls = getattr(transformers, model_type + "ForCausalLM")
-    config_name = "Qwen3_5Text" if model_type == "Qwen3_5" else model_type
+    text_configs = {"Gemma3": "Gemma3Text", "Qwen3_5": "Qwen3_5Text"}
+    config_name = text_configs.get(model_type, model_type)
     config_cls = getattr(transformers, config_name + "Config")
     config_kwargs = {
         "vocab_size": 32,
@@ -114,6 +115,12 @@ def _tiny_causal_lm(model_type, **config_overrides):
         config_kwargs["head_dim"] = 8
     if model_type == "Gemma2":
         config_kwargs["sliding_window"] = 8
+    if model_type == "Gemma3":
+        # Shorter than the 4-token test prompts, as gemma-3-1b-it's 512-token window
+        # is shorter than the benchmark's 1000-token prompt.
+        config_kwargs.update(
+            sliding_window=2, layer_types=["sliding_attention", "full_attention"]
+        )
     if model_type == "Qwen3_5":
         config_kwargs.update(
             layer_types=["linear_attention", "linear_attention", "full_attention"],
@@ -123,7 +130,13 @@ def _tiny_causal_lm(model_type, **config_overrides):
             linear_value_head_dim=8,
         )
     config_kwargs.update(config_overrides)
-    return model_cls(config_cls(**config_kwargs))
+    model = model_cls(config_cls(**config_kwargs))
+    if model_type == "Qwen2":
+        with torch.no_grad():
+            for name, parameter in model.named_parameters():
+                if name.endswith(("q_proj.bias", "k_proj.bias", "v_proj.bias")):
+                    parameter.uniform_(-0.1, 0.1)
+    return model
 
 
 class BenchmarkRunnerTests(TestCase):
@@ -662,18 +675,19 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         with self.assertRaisesRegex(ValueError, "does not support openai/whisper-tiny"):
             runner.validate_args(args)
 
-    def test_decode_excludes_gemma2(self):
+    @parametrize("name", ("google/gemma-2-2b", "google/gemma-3-1b-it"))
+    def test_decode_excludes_gemma(self, name):
         runner = self.huggingface.HuggingfaceRunner()
         args = self._runner_args(mode="decode")
         args.filter, args.exclude, args.exclude_exact = ["."], ["^$"], []
         runner.args = args
-        names = {"google/gemma-2-2b": 8, "Qwen/Qwen3-0.6B": 8}
+        names = {name: 8, "Qwen/Qwen3-0.6B": 8}
         with mock.patch.dict(
             self.huggingface.BATCH_SIZE_KNOWN_MODELS, names, clear=True
         ):
             self.assertEqual(list(runner.iter_model_names(args)), ["Qwen/Qwen3-0.6B"])
-        args.only = "google/gemma-2-2b"
-        with self.assertRaisesRegex(ValueError, "does not support google/gemma-2-2b"):
+        args.only = name
+        with self.assertRaisesRegex(ValueError, f"does not support {name}"):
             runner.validate_args(args)
 
     def test_prompt_length_requires_prefill(self):
@@ -1233,7 +1247,9 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
                                 rtol=0,
                             )
 
-    @parametrize("model_type", ("Llama", "Gemma2", "Qwen3", "Qwen3_5"))
+    @parametrize(
+        "model_type", ("Llama", "Gemma2", "Gemma3", "Qwen2", "Qwen3", "Qwen3_5")
+    )
     def test_prefill_resets_cache(self, device, model_type):
         runner = self.huggingface.HuggingfaceRunner()
         runner.args = self._runner_args("--iterations=2")
@@ -1258,6 +1274,11 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
         ):
             output = runner.run_n_iterations(model, inputs, runner.prefill)
         self.assertEqual(starting_lengths, [0, 0])
+        if model_type == "Gemma3":
+            self.assertEqual(model.cache.is_sliding, [True, False])
+            self.assertEqual(
+                [layer.keys.shape[-2] for layer in model.cache.layers], [2, 11]
+            )
         linear_states = [
             states.data_ptr()
             for layer, is_linear in zip(model.cache.layers, model.cache.is_linear)
@@ -1270,7 +1291,7 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
             expected = model.model(**inputs, use_cache=False, logits_to_keep=1)
         self.assertEqual(output, expected.logits[:, -1, :])
 
-    @parametrize("model_type", ("Llama", "Qwen3", "Qwen3_5"))
+    @parametrize("model_type", ("Llama", "Qwen2", "Qwen3", "Qwen3_5"))
     def test_decode_matches_full_forward(self, device, model_type):
         runner = self.huggingface.HuggingfaceRunner()
         runner.args = self._runner_args("--iterations=2", mode="decode")
@@ -1284,7 +1305,7 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
             expected = model.model(full_ids, use_cache=False, logits_to_keep=1)
         self.assertEqual(output, expected.logits[:, -1, :])
 
-    @parametrize("model_type", ("Llama", "Qwen3", "Qwen3_5"))
+    @parametrize("model_type", ("Llama", "Qwen2", "Qwen3", "Qwen3_5"))
     def test_decode_compiles_once(self, device, model_type):
         runner = self.huggingface.HuggingfaceRunner()
         model = self._make_model(model_type, device)
@@ -1333,6 +1354,8 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
             ("Llama", False),
             ("Llama", True),
             ("Gemma2", True),
+            ("Gemma3", True),
+            ("Qwen2", True),
             ("Qwen3", True),
             ("Qwen3_5", False),
             ("Qwen3_5", True),
@@ -1380,7 +1403,7 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
 
     @onlyCUDA
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA and Triton are required")
-    @parametrize("model_type", ("Llama", "Qwen3", "Qwen3_5"))
+    @parametrize("model_type", ("Llama", "Qwen2", "Qwen3", "Qwen3_5"))
     def test_inductor_decode_cudagraphs(self, device, model_type):
         from torch._dynamo.utils import counters
         from torch._inductor.cudagraph_trees import get_manager
@@ -1529,7 +1552,8 @@ class TestHuggingFaceTensorParallel(MultiProcessTestCase):
             overrides = dict(TP_CONFIG)
             if model_type == "Qwen3_5":
                 overrides.update(TP_QWEN3_5_CONFIG)
-            _tiny_causal_lm(model_type, **overrides).save_pretrained(path)
+            model = _tiny_causal_lm(model_type, **overrides)
+            model.save_pretrained(path)
         torch.distributed.barrier()
         try:
             yield path
@@ -1588,6 +1612,10 @@ class TestHuggingFaceTensorParallel(MultiProcessTestCase):
             sharded.append((f"layers.{linear}.linear_attn.in_proj_qkv.weight", 0))
         local = model.model.model.get_parameter
         full = reference.model.model.get_parameter
+        if model.model.config.model_type == "qwen2":
+            for projection in ("q_proj", "k_proj", "v_proj"):
+                name = f"layers.{full_attention}.self_attn.{projection}.bias"
+                self.assertEqual(local(name), full(name).chunk(2)[self.rank])
         for name, dim in sharded:
             expected = list(full(name).shape)
             expected[dim] //= 2
@@ -1614,7 +1642,7 @@ class TestHuggingFaceTensorParallel(MultiProcessTestCase):
                 self.assertEqual(layer.keys.shape, (2, 1, model.cache_capacity, 8))
 
     @parametrize("backend", ("aot_eager", "inductor"))
-    @parametrize("model_type", ("Llama", "Qwen3", "Qwen3_5"))
+    @parametrize("model_type", ("Llama", "Qwen2", "Qwen3", "Qwen3_5"))
     def test_tp_matches_unsharded_reference(self, device, model_type, backend):
         from benchmarks.dynamo.huggingface_llm_models import TextGenerationPrefillModel
         from transformers import AutoModelForCausalLM
