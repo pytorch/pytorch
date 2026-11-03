@@ -12,6 +12,7 @@
 #include "include/MetadataFieldCatalog.h"
 #include "include/libkineto.h"
 #include "src/plugin/xpupti/XpuptiActivityProfiler.h"
+#include "src/plugin/xpupti/XpuptiActivityProfilerSession.h"
 #include "test/xpupti/compute/XpuptiPeerCopyCompute.h"
 
 #include <fmt/ranges.h>
@@ -319,7 +320,11 @@ TEST(XpuptiProfilerTest, GpuUserAnnotationLinkedActivityRetry) {
   expectTwoUserAnnotations(*pBuffer);
 }
 
-TEST(XpuptiProfilerTest, PeerToPeerMemcpy) {
+namespace {
+
+// Profiles one peer copy from the first GPU to the second, submitted to a
+// queue of the second when `pull`, else of the first.
+void expectPeerToPeerMemcpy(bool pull) {
   KN::XPUActivityProfiler profiler;
   auto pSession =
       profiler.configure({KN::ActivityType::GPU_MEMCPY}, KN::Config{});
@@ -331,7 +336,7 @@ TEST(XpuptiProfilerTest, PeerToPeerMemcpy) {
   };
   const int64_t startTime = now();
   pSession->start();
-  const bool copied = CopyPeerToPeerOnXpu(1024);
+  const bool copied = CopyPeerToPeerOnXpu(1024, pull);
   pSession->stop();
   const int64_t endTime = now();
   if (!copied) {
@@ -358,7 +363,26 @@ TEST(XpuptiProfilerTest, PeerToPeerMemcpy) {
       activity.getMetadataValue(libkineto::XpuMetadataFields::kFromDevice);
   const auto toDevice =
       activity.getMetadataValue(libkineto::XpuMetadataFields::kToDevice);
-  EXPECT_EQ(fromDevice, std::optional<int64_t>{activity.deviceId()});
+  const auto inDevice =
+      activity.getMetadataValue(libkineto::XpuMetadataFields::kInDevice);
+  ASSERT_TRUE(fromDevice.has_value());
   ASSERT_TRUE(toDevice.has_value());
   EXPECT_NE(*fromDevice, *toDevice);
+  if constexpr (KN::kReportsCopyExecutingDevice) {
+    EXPECT_EQ(inDevice, pull ? toDevice : fromDevice);
+    EXPECT_EQ(std::optional<int64_t>{activity.deviceId()}, inDevice);
+  } else {
+    EXPECT_FALSE(inDevice.has_value());
+    EXPECT_EQ(activity.deviceId(), *fromDevice);
+  }
+}
+
+} // namespace
+
+TEST(XpuptiProfilerTest, PeerToPeerMemcpy) {
+  expectPeerToPeerMemcpy(false);
+}
+
+TEST(XpuptiProfilerTest, PeerToPeerMemcpyPull) {
+  expectPeerToPeerMemcpy(true);
 }

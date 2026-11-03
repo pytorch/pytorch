@@ -24,17 +24,25 @@
 #include <set>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include <pti/pti_view.h>
 
+// Declared so that the plugin can test whether this PTI defines it: the v3
+// peer-to-peer copy record also names the device that ran the copy.
+struct pti_view_record_memory_copy_p2p_v3;
+
 namespace KINETO_NAMESPACE {
 
 class XpuptiActivityApi;
 
 using DeviceUUIDsT = std::array<unsigned char, 16>;
+
+template <typename T>
+concept IsCompleteType = requires { sizeof(T); };
 
 // Device activity record versions this plugin consumes. The v2 records (PTI
 // 0.18+) extend v1 with the hardware engine an operation ran on; against older
@@ -44,10 +52,16 @@ using DeviceUUIDsT = std::array<unsigned char, 16>;
 inline constexpr bool kReportsEngineIds = true;
 using pti_view_record_kernel_t = pti_view_record_kernel_v2;
 using pti_view_record_memcpy_t = pti_view_record_memory_copy_v2;
-using pti_view_record_memcpy_p2p_t = pti_view_record_memory_copy_p2p_v2;
+inline constexpr bool kReportsCopyExecutingDevice =
+    IsCompleteType<pti_view_record_memory_copy_p2p_v3>;
+using pti_view_record_memcpy_p2p_t = std::conditional_t<
+    kReportsCopyExecutingDevice,
+    pti_view_record_memory_copy_p2p_v3,
+    pti_view_record_memory_copy_p2p_v2>;
 using pti_view_record_memfill_t = pti_view_record_memory_fill_v2;
 #else
 inline constexpr bool kReportsEngineIds = false;
+inline constexpr bool kReportsCopyExecutingDevice = false;
 using pti_view_record_kernel_t = pti_view_record_kernel;
 using pti_view_record_memcpy_t = pti_view_record_memory_copy;
 using pti_view_record_memcpy_p2p_t = pti_view_record_memory_copy_p2p;
