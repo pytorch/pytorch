@@ -85,8 +85,8 @@ class TestRunEval(unittest.TestCase):
     def test_retry_then_success(self) -> None:
         out = {"tests": []}
         r, _, sleep = self.run_one([
-            {"is_error": True, "result": "API Error: 502 Bad Gateway", "total_cost_usd": 0.1},
-            {"structured_output": out, "total_cost_usd": 0.2},
+            {"type": "result", "is_error": True, "result": "API Error: 502 Bad Gateway", "total_cost_usd": 0.1},
+            {"type": "result", "structured_output": out, "total_cost_usd": 0.2},
         ])  # fmt: skip
         self.assertEqual(
             (r["out"], r["error"], r["transient"], r["attempts"]), (out, None, False, 2)
@@ -98,14 +98,18 @@ class TestRunEval(unittest.TestCase):
         # Only an error's text is matched, and an error drops the structured output as CI does.
         for reply in (
             {
+                "type": "result",
                 "subtype": "error_max_structured_output_retries",
                 "result": "the 500 tests timed out",
             },
             {
+                "type": "result",
                 "is_error": True,
                 "result": "bad schema",
                 "structured_output": {"tests": []},
             },
+            # query_model's fallback for output that is not JSON: a crash, whatever its trace says.
+            {"is_error": True, "result": "TypeError at cli.js:503:12"},
         ):
             r, query, _ = self.run_one([reply])
             self.assertEqual(
@@ -121,7 +125,7 @@ class TestRunEval(unittest.TestCase):
 
     def test_gives_up(self) -> None:
         r, query, sleep = self.run_one(
-            [{"is_error": True, "result": "529 overloaded"}] * 4
+            [{"type": "result", "is_error": True, "result": "529 overloaded"}] * 4
         )
         self.assertTrue(r["transient"])
         self.assertEqual((query.call_count, sleep.call_count), (4, 3))
@@ -169,6 +173,7 @@ class TestScore(unittest.TestCase):
                     uses: ./.github/workflows/_linux-test.yml
                     with:
                       test-matrix: ${{ needs.build.outputs.test-matrix }}
+                      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
                   xpu-build:
                     name: linux-noble-xpu-n-py3.10
                     uses: ./.github/workflows/_linux-build.yml
@@ -250,6 +255,20 @@ class TestScore(unittest.TestCase):
                       test-matrix: |
                         { include: [{ config: "dynamo_wrapped", shard: 1 }] }
             """,
+            "rocm-rx7900.yml": """
+                name: rocm-rx7900
+                on: pull_request
+                jobs:
+                  test:
+                    name: linux-noble-rocm-py3.12-rx7900
+                    uses: ./.github/workflows/_rocm-test.yml
+                    with:
+                      tests-to-include: >-
+                        test_nn
+                        test_torch
+                      test-matrix: |
+                        { include: [{ config: "default", shard: 1 }] }
+            """,
             "periodic.yml": """
                 name: periodic
                 on: schedule
@@ -301,6 +320,8 @@ class TestScore(unittest.TestCase):
                 ),
                 ("trunk", "dynamo-unittest / dynamo-no-td", "dynamo_wrapped"),
                 ("dynamo-unittest", "dynamo-no-td", "dynamo_wrapped"),
+                # TESTS_TO_INCLUDE turns TD off; pull's dispatch-input expression does not.
+                ("rocm-rx7900", "linux-noble-rocm-py3.12-rx7900", "default"),
             },
         )
         truth_jobs = {
@@ -323,6 +344,7 @@ class TestScore(unittest.TestCase):
             "test_g": ["linux-jammy-py3.10-gcc11 / test (default, 1, 1, linux.2xlarge)"],
             # A recorded TD workflow with an unknown job falls back to its config; a non-TD one never counts.
             "test_h": [["trunk", "linux-old / test (default, 1, 1, linux.2xlarge)"], ["inductor", "linux-old / test (slow, 1, 1, linux.2xlarge)"]],
+            "test_i": [["rocm-rx7900", "linux-noble-rocm-py3.12-rx7900 / test (default, 1, 1, linux.rocm.gpu)"]],
         }  # fmt: skip
         sample = {**SAMPLE, "kind": "revert", "truth": list(truth_jobs), "candidates": list(truth_jobs), "truth_jobs": truth_jobs}  # fmt: skip
         with patch_ci_jobs(jobs):
@@ -398,6 +420,13 @@ class TestScore(unittest.TestCase):
         self.assertEqual(
             pick("final-hm", {"out": {"tests": tests}}, None).sel.files, {"test_b"}
         )
+        # Filtering never makes a well-formed answer malformed: only unmatched names are left at high confidence.
+        tests = [{"file": "test_a", "confidence": "low"}, {"file": "bogus", "confidence": "high"}]  # fmt: skip
+        self.assertEqual(pick("final", {"out": {"tests": tests}}, None).sel.files, {"test_a"})  # fmt: skip
+        empty = pick("final-hm", {"out": {"tests": tests}}, None).sel
+        self.assertEqual((empty.run_all, empty.files), (False, set()))
+        hm = pick("final-hm", {"out": {"tests": tests, "dirs": ["sub"]}}, None, {**SAMPLE, "candidates": [*SAMPLE["candidates"], "sub/test_x"]})  # fmt: skip
+        self.assertEqual((hm.sel.run_all, hm.sel.files), (False, {"sub/test_x"}))
 
     def test_score_same_ids(self) -> None:
         td = {"scored": [], "top25": ["test_a"], "top25_cfg": {"default": ["test_a"]}}
