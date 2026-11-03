@@ -42,8 +42,8 @@ enum CorrelationDomain {
   size = end
 };
 
-// A kernel dispatch issued by the runtime to implement a HIP memset or
-// memcpy API call (rocclr fill/copy kernels).
+// The HIP memset or memcpy API call a GPU row implements: a fill/copy kernel
+// the runtime dispatched for it (rocclr), or an SDMA copy.
 enum RuntimeInternalApi : uint32_t {
   RuntimeInternalNone = 0,
   RuntimeInternalMemset = 1,
@@ -217,8 +217,8 @@ struct rocprofMallocRow : public rocprofRow {
   size_t size;
 };
 
-// A HIP memset API call.  The size classifies the fill kernels the runtime
-// dispatches to implement it.
+// A HIP memset API call.  Its correlation id identifies the fill kernels the
+// runtime dispatches for it; their bytes and stream come from here.
 struct rocprofMemsetRow : public rocprofRow {
   rocprofMemsetRow(
       uint64_t id,
@@ -270,14 +270,14 @@ struct rocprofAsyncRow : public rocprofBase {
   uint32_t workgroupX{0};
   uint32_t workgroupY{0};
   uint32_t workgroupZ{0};
-  // Set when this dispatch was issued by the runtime to implement a HIP
-  // memset or memcpy API call.  The dispatch record is the GPU-side
-  // artifact for kernel-implemented fills/copies; report it under the API
-  // the user called (CUPTI parity) instead of as a user kernel.  For a
-  // memcpy, op then holds a ROCPROFILER_MEMORY_COPY_* direction instead of a
-  // kernel dispatch operation.
+  // Set when this row implements a HIP memset or memcpy API call.  A kernel
+  // dispatch is then reported under the API the user called (CUPTI parity)
+  // instead of as a user kernel; for a memcpy, its op holds a
+  // ROCPROFILER_MEMORY_COPY_* direction instead of a kernel dispatch
+  // operation.
   RocLogger::RuntimeInternalApi internalApi{RocLogger::RuntimeInternalNone};
+  // The API call's byte count, on one of its GPU rows only.
   size_t internalBytes{0};
-  // The API call was split into several dispatches.
+  // The API call has several GPU rows.
   bool internalSplit{false};
 };

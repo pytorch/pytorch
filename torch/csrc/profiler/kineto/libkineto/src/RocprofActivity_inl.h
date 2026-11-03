@@ -25,8 +25,6 @@ namespace KINETO_NAMESPACE {
 using namespace libkineto;
 
 namespace {
-thread_local std::unordered_map<int, size_t> correlationToSize;
-
 inline std::vector<int64_t> rocprofKernelGrid(
     const rocprofKernelRow& activity) {
   return {
@@ -103,10 +101,8 @@ inline const std::string GpuActivity::name() const {
     return demangle(
         raw().kernelName.length() > 0 ? raw().kernelName : std::string(name));
   } else if (type_ == ActivityType::GPU_MEMSET) {
-    if (raw().internalApi == RocLogger::RuntimeInternalMemset)
-      return "Memset (Device)";
-    return fmt::format(
-        "Memset ({})", getGpuActivityKindString(raw().domain, raw().op));
+    // Only runtime fill dispatches are reported as memsets.
+    return "Memset (Device)";
   } else if (type_ == ActivityType::GPU_MEMCPY) {
     std::string src = "";
     std::string dst = "";
@@ -155,43 +151,24 @@ inline void GpuActivity::visitTypedMetadata(
   visitor.visit(
       RocmMetadataFields::kCorrelation, static_cast<uint64_t>(gpuActivity.id));
 
-  // A dispatch the runtime issued to implement a HIP memset or memcpy API
-  // call.  Report it like the API the user called (CUPTI parity), with the
-  // transfer size that API was given, rather than like a kernel.
-  if (gpuActivity.internalApi != RocLogger::RuntimeInternalNone) {
-    if (gpuActivity.internalApi == RocLogger::RuntimeInternalMemcpy) {
-      visitor.visit(
-          RocmMetadataFields::kKind,
-          std::string{
-              getGpuActivityKindString(memcpyKindDomain(), gpuActivity.op)});
-    }
-    if (gpuActivity.internalBytes > 0) {
-      visitor.visit(
-          RocmMetadataFields::kBytes,
-          static_cast<uint64_t>(gpuActivity.internalBytes));
-      if (!gpuActivity.internalSplit) {
-        addBandwidthTypedMetadata(
-            visitor,
-            gpuActivity.internalBytes,
-            gpuActivity.end - gpuActivity.begin);
-      }
-    }
-    return;
+  if (gpuActivity.internalApi != RocLogger::RuntimeInternalMemset) {
+    visitor.visit(
+        RocmMetadataFields::kKind,
+        std::string{
+            getGpuActivityKindString(memcpyKindDomain(), gpuActivity.op)});
   }
 
-  visitor.visit(
-      RocmMetadataFields::kKind,
-      std::string{
-          getGpuActivityKindString(gpuActivity.domain, gpuActivity.op)});
-
-  // if memcpy, add size
-  auto sizeIt = correlationToSize.find(gpuActivity.id);
-  if (sizeIt != correlationToSize.end()) {
+  // A memset or memcpy reports the transfer size its API call was given.
+  if (gpuActivity.internalBytes > 0) {
     visitor.visit(
-        RocmMetadataFields::kBytes, static_cast<uint64_t>(sizeIt->second));
-    addBandwidthTypedMetadata(
-        visitor, sizeIt->second, gpuActivity.end - gpuActivity.begin);
-    return;
+        RocmMetadataFields::kBytes,
+        static_cast<uint64_t>(gpuActivity.internalBytes));
+    if (!gpuActivity.internalSplit) {
+      addBandwidthTypedMetadata(
+          visitor,
+          gpuActivity.internalBytes,
+          gpuActivity.end - gpuActivity.begin);
+    }
   }
 
   // if compute kernel, add grid and block from the dispatch record
@@ -268,7 +245,6 @@ inline const std::string RuntimeActivity<rocprofKernelRow>::metadataJson()
 template <>
 inline void RuntimeActivity<rocprofCopyRow>::visitTypedMetadata(
     ITypedMetadataVisitor& visitor) const {
-  correlationToSize[raw().id] = raw().size;
   visitor.visit(RocmMetadataFields::kCid, static_cast<uint64_t>(raw().cid));
   visitor.visit(
       RocmMetadataFields::kCorrelation, static_cast<uint64_t>(raw().id));
@@ -290,7 +266,6 @@ inline const std::string RuntimeActivity<rocprofCopyRow>::metadataJson() const {
 template <>
 inline void RuntimeActivity<rocprofMallocRow>::visitTypedMetadata(
     ITypedMetadataVisitor& visitor) const {
-  correlationToSize[raw().id] = raw().size;
   if (raw().cid == ROCPROFILER_HIP_RUNTIME_API_ID_hipMalloc) {
     visitor.visit(
         RocmMetadataFields::kBytes, static_cast<uint64_t>(raw().size));

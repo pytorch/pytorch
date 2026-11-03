@@ -159,7 +159,7 @@ int RocprofActivityApi::processActivities(
     detail::backfillAsyncStreams(
         d->rows_, [this](const rocprofAsyncRow& async) {
           return (isAsyncCopy(async) || isAsyncKernel(async)) &&
-              isLogged(detail::asyncActivityType(async));
+              detail::isAsyncRowLogged(async, activityMaskSnapshot_);
         });
   }
 
@@ -178,8 +178,9 @@ int RocprofActivityApi::processActivities(
         case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
         default:
           if (item->type == ROCTRACER_ACTIVITY_ASYNC) {
-            filtered = !isLogged(detail::asyncActivityType(
-                *reinterpret_cast<rocprofAsyncRow*>(item)));
+            filtered = !detail::isAsyncRowLogged(
+                *reinterpret_cast<rocprofAsyncRow*>(item),
+                activityMaskSnapshot_);
           } else if (!isLogged(ActivityType::CONCURRENT_KERNEL)) {
             filtered = true;
           }

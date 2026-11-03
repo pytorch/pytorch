@@ -44,14 +44,14 @@ inline uint64_t runtimeStreamId(const rocprofBase* item) {
   return 0;
 }
 
-// Assign logical stream ID to async kernel and copy rows. Remap to small index
-// for proper display. Recover logical stream ID from the correlated runtime
-// row. isAsyncOp selects the async rows to process.
+// Assign logical stream ID to async rows. Remap to small index for proper
+// display. Recover logical stream ID from the correlated runtime row. isAsyncOp
+// selects the async rows to process.
 template <class IsAsyncOp>
 void backfillAsyncStreams(
     std::vector<rocprofBase*>& rows,
     IsAsyncOp isAsyncOp) {
-  // Map correlation id -> HIP stream from the runtime kernel/copy rows.
+  // Map correlation id -> HIP stream from the runtime kernel/copy/memset rows.
   std::unordered_map<uint64_t, uint64_t> streamByCorrelation;
   for (const auto* item : rows) {
     const uint64_t sid = runtimeStreamId(item);
@@ -78,9 +78,9 @@ void backfillAsyncStreams(
     }
   }
 
-  // Fallback: (e.g. ROCm-internal dispatches like __amd_rocclr_copyBuffer),
-  // infer the stream from the HSA queue, given the queue maps directly to a HIP
-  // stream
+  // Fallback for rows with no correlated runtime stream (e.g. dispatches
+  // replayed by hipGraphLaunch, or calls on the null stream): infer the stream
+  // from the HSA queue, given the queue maps directly to a HIP stream
   std::unordered_map<uint64_t, uint64_t> streamByQueue;
   std::unordered_set<uint64_t> ambiguousQueues;
   for (const auto* item : rows) {
@@ -178,6 +178,26 @@ inline size_t memsetTotalBytes(uint32_t apiId, const MemsetArgs& args) {
   return 0;
 }
 
+// Size arguments of a HIP memcpy API call.
+struct CopySizeArgs {
+  size_t sizeBytes{0};
+  size_t count{0};
+  size_t width{0};
+  size_t height{0};
+};
+
+// Total bytes copied by a HIP memcpy API call, or 0 if unknown.  Array copies
+// take 'count' and 2D copies 'width' (both in bytes) and 'height' instead of
+// 'sizeBytes'.  hipMemcpy3D* and hipMemcpyParam2D* pass their sizes in a
+// struct and are not covered.
+inline size_t copyTotalBytes(const CopySizeArgs& args) {
+  if (args.sizeBytes > 0)
+    return args.sizeBytes;
+  if (args.count > 0)
+    return args.count;
+  return args.width * args.height;
+}
+
 // Map a HIP memcpy kind to the rocprofiler copy operation used to render
 // copy direction strings.  Copies issued through APIs that take no kind
 // argument (hipMemcpyPeerAsync, hipMemcpyDtoD*, ...) always report
@@ -210,6 +230,8 @@ inline uint32_t copyOperationFromApi(hipMemcpyKind kind, uint32_t apiId) {
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyToArray:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyToSymbol:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyToSymbolAsync:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyToSymbol_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyToSymbolAsync_spt:
       return ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE;
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyAtoH:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyDtoH:
@@ -217,19 +239,23 @@ inline uint32_t copyOperationFromApi(hipMemcpyKind kind, uint32_t apiId) {
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyFromArray:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyFromSymbol:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyFromSymbolAsync:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyFromArray_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyFromSymbol_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyFromSymbolAsync_spt:
       return ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST;
     default:
       return ROCPROFILER_MEMORY_COPY_NONE;
   }
 }
 
-// Classify kernel dispatches the runtime issued to implement HIP memset or
-// memcpy API calls.  Some memsets/copies are implemented with a fill/copy
-// kernel instead of SDMA; for those, the dispatch record is the *only*
-// GPU-side artifact (no MEMORY_SET/MEMORY_COPY record is emitted), so there
-// is no double counting when it is reported as the memset/memcpy the user
-// asked for (CUPTI parity) rather than as a user kernel.  The dispatch
-// shares the correlation id of the runtime API record.
+// Mark the GPU rows that implement HIP memset or memcpy API calls; they share
+// the correlation id of the runtime API record.  The runtime implements some
+// fills and copies with a fill/copy kernel instead of SDMA; for those, the
+// dispatch record is the only GPU-side artifact (no MEMORY_COPY record is
+// emitted), so there is no double counting when it is reported as the
+// memset/memcpy the user asked for (CUPTI parity) rather than as a user
+// kernel.  SDMA MEMORY_COPY records keep their type and take the call's byte
+// count.  Rows already marked are skipped, so a second call changes nothing.
 inline void classifyRuntimeInternalDispatches(std::vector<rocprofBase*>& rows) {
   std::unordered_map<uint64_t, const rocprofCopyRow*> copyByCorrelation;
   std::unordered_map<uint64_t, size_t> memsetByCorrelation;
@@ -245,31 +271,37 @@ inline void classifyRuntimeInternalDispatches(std::vector<rocprofBase*>& rows) {
   if (memsetByCorrelation.empty() && copyByCorrelation.empty()) {
     return;
   }
-  std::unordered_map<uint64_t, std::vector<rocprofAsyncRow*>> dispatches;
+  std::unordered_map<uint64_t, std::vector<rocprofAsyncRow*>> callRows;
   for (auto* item : rows) {
     if (item->type != ROCTRACER_ACTIVITY_ASYNC) {
       continue;
     }
     auto* async = reinterpret_cast<rocprofAsyncRow*>(item);
-    if (async->domain != ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH ||
-        async->internalApi != RocLogger::RuntimeInternalNone) {
+    if (async->internalApi != RocLogger::RuntimeInternalNone) {
       continue;
     }
     const auto copyIt = copyByCorrelation.find(async->id);
-    if (copyIt != copyByCorrelation.end()) {
-      async->internalApi = RocLogger::RuntimeInternalMemcpy;
-      async->op =
-          copyOperationFromApi(copyIt->second->kind, copyIt->second->cid);
-      dispatches[async->id].push_back(async);
-    } else if (memsetByCorrelation.count(async->id)) {
-      async->internalApi = RocLogger::RuntimeInternalMemset;
-      dispatches[async->id].push_back(async);
+    if (async->domain == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) {
+      if (copyIt != copyByCorrelation.end()) {
+        async->internalApi = RocLogger::RuntimeInternalMemcpy;
+        callRows[async->id].push_back(async);
+      }
+    } else if (async->domain == ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) {
+      if (copyIt != copyByCorrelation.end()) {
+        async->internalApi = RocLogger::RuntimeInternalMemcpy;
+        async->op =
+            copyOperationFromApi(copyIt->second->kind, copyIt->second->cid);
+        callRows[async->id].push_back(async);
+      } else if (memsetByCorrelation.count(async->id)) {
+        async->internalApi = RocLogger::RuntimeInternalMemset;
+        callRows[async->id].push_back(async);
+      }
     }
   }
-  // The runtime can split one fill or copy into several dispatches (unaligned
-  // head and tail, one per 3D slice).  The first carries the API's bytes; no
-  // dispatch of a split call gets a bandwidth, since none moved all of them.
-  for (auto& [id, split] : dispatches) {
+  // The runtime can split one fill or copy into several GPU rows (unaligned
+  // head and tail, one per 3D slice).  One of them carries the API's bytes; no
+  // row of a split call gets a bandwidth, since none moved all of them.
+  for (auto& [id, split] : callRows) {
     const auto copyIt = copyByCorrelation.find(id);
     split.front()->internalBytes = copyIt != copyByCorrelation.end()
         ? copyIt->second->size
@@ -294,6 +326,15 @@ inline ActivityType asyncActivityType(const rocprofAsyncRow& async) {
     default:
       return ActivityType::CONCURRENT_KERNEL;
   }
+}
+
+// Whether a GPU row is kept, given the mask of logged activity types.  The
+// stream backfill and the output filter both use it, so a row the classifier
+// marked follows the type it is reported as.
+inline bool isAsyncRowLogged(
+    const rocprofAsyncRow& async,
+    uint32_t activityMask) {
+  return activityMask & (1u << static_cast<uint32_t>(asyncActivityType(async)));
 }
 
 } // namespace detail

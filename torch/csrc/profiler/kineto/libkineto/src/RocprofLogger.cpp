@@ -61,7 +61,7 @@ using agent_info_map_t =
 struct copy_args {
   const char* dst{""};
   const char* src{""};
-  size_t size{0};
+  detail::CopySizeArgs size;
   const char* copyKindStr{""};
   hipMemcpyKind copyKind{hipMemcpyDefault};
   hipStream_t stream{nullptr};
@@ -85,7 +85,13 @@ auto extract_copy_args =
   } else if (strcmp("src", arg_name) == 0) {
     args.src = arg_value_str;
   } else if (strcmp("sizeBytes", arg_name) == 0) {
-    args.size = *(reinterpret_cast<const size_t*>(arg_value_addr));
+    args.size.sizeBytes = *(reinterpret_cast<const size_t*>(arg_value_addr));
+  } else if (strcmp("count", arg_name) == 0) {
+    args.size.count = *(reinterpret_cast<const size_t*>(arg_value_addr));
+  } else if (strcmp("width", arg_name) == 0) {
+    args.size.width = *(reinterpret_cast<const size_t*>(arg_value_addr));
+  } else if (strcmp("height", arg_name) == 0) {
+    args.size.height = *(reinterpret_cast<const size_t*>(arg_value_addr));
   } else if (strcmp("kind", arg_name) == 0) {
     args.copyKindStr = arg_value_str;
     args.copyKind = *(reinterpret_cast<const hipMemcpyKind*>(arg_value_addr));
@@ -288,6 +294,21 @@ bool isCopyApi(uint32_t id) {
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyToSymbol:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyToSymbolAsync:
     case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyWithStream:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyAsync_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy2D_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy2DAsync_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy2DFromArray_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy2DFromArrayAsync_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy2DToArray_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy2DToArrayAsync_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy3D_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy3DAsync_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyFromArray_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyFromSymbol_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyFromSymbolAsync_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyToSymbol_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyToSymbolAsync_spt:
       return true;
     default:;
   }
@@ -878,7 +899,7 @@ void RocprofLogger::api_callback(
             endTime,
             args.src,
             args.dst,
-            args.size,
+            detail::copyTotalBytes(args.size),
             args.copyKind,
             args.stream);
         insert_row_to_buffer(row);
@@ -906,8 +927,8 @@ void RocprofLogger::api_callback(
         insert_row_to_buffer(row);
       }
       // Memset Records
-      // The size and stream classify the fill kernels that the runtime
-      // dispatches to implement the memset.
+      // Its correlation id identifies the fill kernels the runtime dispatches
+      // for it; their bytes and stream come from here.
       else if (isMemsetApi(record.operation)) {
         detail::MemsetArgs args;
         rocprofiler_iterate_callback_tracing_kind_operation_args(

@@ -1031,6 +1031,53 @@ std::unique_ptr<rocprofAsyncRow> makeDispatch(uint64_t correlation) {
   return std::make_unique<rocprofAsyncRow>(
       correlation, kDispatch, 0, 0, 0, 1, 10, 20, std::string());
 }
+
+std::unique_ptr<rocprofAsyncRow> makeSdmaCopy(uint64_t correlation) {
+  return std::make_unique<rocprofAsyncRow>(
+      correlation,
+      ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+      0,
+      ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE,
+      0,
+      2,
+      10,
+      20,
+      std::string());
+}
+
+rocprofCopyRow makeCopyCall(uint64_t correlation, uint32_t cid, size_t size) {
+  return rocprofCopyRow(
+      correlation,
+      RUNTIME_DOMAIN,
+      cid,
+      0,
+      0,
+      1,
+      2,
+      nullptr,
+      nullptr,
+      size,
+      hipMemcpyHostToDevice,
+      reinterpret_cast<hipStream_t>(0x1000));
+}
+
+rocprofMemsetRow makeMemsetCall(uint64_t correlation, size_t size) {
+  return rocprofMemsetRow(
+      correlation,
+      RUNTIME_DOMAIN,
+      ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetAsync,
+      0,
+      0,
+      1,
+      2,
+      size,
+      reinterpret_cast<hipStream_t>(0x1000));
+}
+
+nlohmann::json metadataOf(const rocprofAsyncRow& row) {
+  const GpuActivity activity(&row, nullptr);
+  return nlohmann::json::parse("{" + activity.metadataJson() + "}");
+}
 } // namespace
 
 TEST(RocmRuntimeInternalDispatchTest, CopyOperationFromApi) {
@@ -1104,6 +1151,22 @@ TEST(RocmRuntimeInternalDispatchTest, MemsetTotalBytes) {
   EXPECT_EQ(
       memsetTotalBytes(ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset, MemsetArgs{}),
       0u);
+}
+
+TEST(RocmRuntimeInternalDispatchTest, CopyTotalBytes) {
+  using detail::CopySizeArgs;
+  using detail::copyTotalBytes;
+  CopySizeArgs bytes;
+  bytes.sizeBytes = 20;
+  EXPECT_EQ(copyTotalBytes(bytes), 20u);
+  CopySizeArgs array;
+  array.count = 30;
+  EXPECT_EQ(copyTotalBytes(array), 30u);
+  CopySizeArgs plane;
+  plane.width = 100;
+  plane.height = 6;
+  EXPECT_EQ(copyTotalBytes(plane), 600u);
+  EXPECT_EQ(copyTotalBytes(CopySizeArgs{}), 0u);
 }
 
 TEST(RocmRuntimeInternalDispatchTest, ClassifiesFillAndCopyDispatches) {
@@ -1199,6 +1262,162 @@ TEST(RocmRuntimeInternalDispatchTest, ClassifiesFillAndCopyDispatches) {
   EXPECT_NE(fillHead->stream, 0u);
   EXPECT_EQ(fillHead->stream, fillTail->stream);
   EXPECT_EQ(kernel->stream, 0u);
+
+  // processActivities classifies on every call; a second pass changes nothing.
+  detail::classifyRuntimeInternalDispatches(rows);
+  EXPECT_EQ(copyHead->internalBytes, 4096u);
+  EXPECT_EQ(copyTail->internalBytes, 0u);
+  EXPECT_EQ(fillHead->internalBytes, 20u);
+  EXPECT_EQ(fillTail->internalBytes, 0u);
+  EXPECT_TRUE(fillHead->internalSplit);
+  EXPECT_EQ(wholeFillDispatch->internalBytes, 1024u);
+  EXPECT_FALSE(wholeFillDispatch->internalSplit);
+  EXPECT_EQ(kernel->internalApi, RocLogger::RuntimeInternalNone);
+}
+
+TEST(RocmRuntimeInternalDispatchTest, SdmaCopyRecordsTakeCallBytes) {
+  auto whole =
+      makeCopyCall(1, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyAsync, 8192);
+  auto split =
+      makeCopyCall(2, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyAsync, 100);
+  auto wholeCopy = makeSdmaCopy(1);
+  auto splitHead = makeSdmaCopy(2);
+  auto splitTail = makeSdmaCopy(2);
+  // Correlation 3 has no runtime copy row.
+  auto orphan = makeSdmaCopy(3);
+  std::vector<rocprofBase*> rows{
+      &whole,
+      &split,
+      wholeCopy.get(),
+      splitHead.get(),
+      splitTail.get(),
+      orphan.get()};
+
+  for (int pass = 0; pass < 2; ++pass) {
+    detail::classifyRuntimeInternalDispatches(rows);
+    EXPECT_EQ(wholeCopy->internalBytes, 8192u);
+    EXPECT_FALSE(wholeCopy->internalSplit);
+    EXPECT_EQ(splitHead->internalBytes, 100u);
+    EXPECT_EQ(splitTail->internalBytes, 0u);
+    EXPECT_TRUE(splitHead->internalSplit);
+    EXPECT_TRUE(splitTail->internalSplit);
+    EXPECT_EQ(orphan->internalBytes, 0u);
+  }
+  // The record keeps its own direction and type.
+  EXPECT_EQ(
+      wholeCopy->op,
+      static_cast<uint32_t>(ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE));
+  EXPECT_EQ(detail::asyncActivityType(*wholeCopy), ActivityType::GPU_MEMCPY);
+
+  const auto wholeMd = metadataOf(*wholeCopy);
+  EXPECT_EQ(wholeMd["kind"].get<std::string>(), "HtoD");
+  EXPECT_EQ(wholeMd["bytes"].get<uint64_t>(), 8192u);
+  EXPECT_TRUE(wholeMd.contains("memory bandwidth (GB/s)"));
+  const auto headMd = metadataOf(*splitHead);
+  EXPECT_EQ(headMd["bytes"].get<uint64_t>(), 100u);
+  EXPECT_FALSE(headMd.contains("memory bandwidth (GB/s)"));
+  EXPECT_FALSE(metadataOf(*splitTail).contains("bytes"));
+  EXPECT_FALSE(metadataOf(*orphan).contains("bytes"));
+}
+
+TEST(RocmRuntimeInternalDispatchTest, ReportsMarkedDispatches) {
+  auto copy = makeCopyCall(1, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy, 4096);
+  copy.kind = hipMemcpyDeviceToDevice;
+  auto fill = makeMemsetCall(2, 20);
+  auto copyDispatch = makeDispatch(1);
+  auto fillHead = makeDispatch(2);
+  auto fillTail = makeDispatch(2);
+  auto kernel = makeDispatch(3);
+  kernel->gridX = 4;
+  kernel->workgroupX = 256;
+  std::vector<rocprofBase*> rows{
+      &copy,
+      &fill,
+      copyDispatch.get(),
+      fillHead.get(),
+      fillTail.get(),
+      kernel.get()};
+  detail::classifyRuntimeInternalDispatches(rows);
+
+  const GpuActivity copyActivity(copyDispatch.get(), nullptr);
+  EXPECT_EQ(copyActivity.type(), ActivityType::GPU_MEMCPY);
+  EXPECT_EQ(copyActivity.name(), "Memcpy DtoD (Device -> Device)");
+  const auto copyMd = metadataOf(*copyDispatch);
+  EXPECT_EQ(copyMd["kind"].get<std::string>(), "DtoD");
+  EXPECT_EQ(copyMd["bytes"].get<uint64_t>(), 4096u);
+  EXPECT_TRUE(copyMd.contains("memory bandwidth (GB/s)"));
+  EXPECT_FALSE(copyMd.contains("grid"));
+  EXPECT_FALSE(copyMd.contains("block"));
+
+  const GpuActivity fillActivity(fillHead.get(), nullptr);
+  EXPECT_EQ(fillActivity.type(), ActivityType::GPU_MEMSET);
+  EXPECT_EQ(fillActivity.name(), "Memset (Device)");
+  const auto headMd = metadataOf(*fillHead);
+  EXPECT_EQ(headMd["bytes"].get<uint64_t>(), 20u);
+  // Split: no dispatch moved all the bytes, so none reports a bandwidth.
+  EXPECT_FALSE(headMd.contains("memory bandwidth (GB/s)"));
+  EXPECT_FALSE(headMd.contains("grid"));
+  EXPECT_FALSE(headMd.contains("block"));
+  const auto tailMd = metadataOf(*fillTail);
+  EXPECT_FALSE(tailMd.contains("bytes"));
+  EXPECT_FALSE(tailMd.contains("memory bandwidth (GB/s)"));
+  EXPECT_FALSE(tailMd.contains("grid"));
+
+  const GpuActivity kernelActivity(kernel.get(), nullptr);
+  EXPECT_EQ(kernelActivity.type(), ActivityType::CONCURRENT_KERNEL);
+  const auto kernelMd = metadataOf(*kernel);
+  EXPECT_EQ(
+      kernelMd["grid"].get<std::vector<int64_t>>(),
+      (std::vector<int64_t>{4, 0, 0}));
+  EXPECT_EQ(
+      kernelMd["block"].get<std::vector<int64_t>>(),
+      (std::vector<int64_t>{256, 0, 0}));
+  EXPECT_FALSE(kernelMd.contains("bytes"));
+}
+
+TEST(RocmRuntimeInternalDispatchTest, FilterFollowsReportedType) {
+  auto fill = makeMemsetCall(1, 20);
+  auto fillDispatch = makeDispatch(1);
+  auto kernel = makeDispatch(2);
+  auto sdma = makeSdmaCopy(3);
+  std::vector<rocprofBase*> rows{
+      &fill, fillDispatch.get(), kernel.get(), sdma.get()};
+  detail::classifyRuntimeInternalDispatches(rows);
+
+  const auto bit = [](ActivityType type) {
+    return 1u << static_cast<uint32_t>(type);
+  };
+  const uint32_t memsetOnly = bit(ActivityType::GPU_MEMSET);
+  EXPECT_TRUE(detail::isAsyncRowLogged(*fillDispatch, memsetOnly));
+  EXPECT_FALSE(detail::isAsyncRowLogged(*kernel, memsetOnly));
+  EXPECT_FALSE(detail::isAsyncRowLogged(*sdma, memsetOnly));
+
+  const uint32_t noMemset =
+      bit(ActivityType::CONCURRENT_KERNEL) | bit(ActivityType::GPU_MEMCPY);
+  EXPECT_FALSE(detail::isAsyncRowLogged(*fillDispatch, noMemset));
+  EXPECT_TRUE(detail::isAsyncRowLogged(*kernel, noMemset));
+  EXPECT_TRUE(detail::isAsyncRowLogged(*sdma, noMemset));
+}
+
+TEST(RocmRuntimeInternalDispatchTest, MemsetAndCopyCallsStartFlows) {
+  const auto fill = makeMemsetCall(1, 20);
+  EXPECT_TRUE(RuntimeActivity<rocprofRow>(&fill, nullptr).flowStart());
+  constexpr uint32_t copyIds[] = {
+      ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyDtoDAsync,
+      ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyAsync_spt};
+  for (const uint32_t cid : copyIds) {
+    const auto copy = makeCopyCall(2, cid, 8);
+    EXPECT_TRUE(RuntimeActivity<rocprofCopyRow>(&copy, nullptr).flowStart());
+  }
+  const rocprofRow sync(
+      3,
+      RUNTIME_DOMAIN,
+      ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamSynchronize,
+      0,
+      0,
+      1,
+      2);
+  EXPECT_FALSE(RuntimeActivity<rocprofRow>(&sync, nullptr).flowStart());
 }
 
 TEST(RocmRuntimeInternalDispatchTest, AsyncCopyRecordIsMemcpy) {
