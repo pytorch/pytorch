@@ -289,7 +289,8 @@ if HAS_CUDA_AND_TRITON:
             warnings.resetwarnings()
 
         def _spy_on_backward_generation(self):
-            # Counts the backwards that post-compile handed to the manager.
+            # Counts the backwards passed to maybe_handle_backward_generation, which
+            # post-compile wraps to mark the manager when they run.
             spy = mock.patch.object(
                 torch._inductor.output_code,
                 "maybe_handle_backward_generation",
@@ -6055,6 +6056,8 @@ if HAS_CUDA_AND_TRITON:
             def foo(x):
                 return x.sin().sum() + w.sum()
 
+            FxGraphCache.clear()
+            AOTAutogradCache.clear()
             for hits in range(2):
                 torch._dynamo.reset()
                 counters.clear()
@@ -6095,7 +6098,7 @@ if HAS_CUDA_AND_TRITON:
         def test_skipped_backward_without_partition_of_a_forward_without_graph(self):
             # Lazily lowered, without partition: capture sizes run the forward
             # eagerly (no manager), and the backward's own fail reason takes
-            # post-compile's skip branch, which hands it to the manager.
+            # post-compile's skip branch, which wraps it to mark a manager.
             w = torch.rand([20], device="cuda", requires_grad=True)
 
             @torch.compile(mode="reduce-overhead")
