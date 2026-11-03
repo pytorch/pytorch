@@ -2087,6 +2087,22 @@ class TestWarpSizeUnification(TestCase):
         # Default warp_size is 32; confirm the default path matches wave32.
         self.assertEqual(_num_warps(8, max_num_warps=8), 8)
 
+    def test_triton_config_uses_warp_size_for_min_elem(self):
+        # min_elem_per_thread * warp_size * num_warps drives the floor for
+        # block_size; doubling warp_size should at least double the XBLOCK.
+        size_hints = {"x": 4096}
+        cfg32 = triton_config(
+            size_hints, 128, num_warps=1, min_elem_per_thread=4, warp_size=32
+        )
+        cfg64 = triton_config(
+            size_hints, 128, num_warps=1, min_elem_per_thread=4, warp_size=64
+        )
+        self.assertEqual(cfg64.kwargs["XBLOCK"], 2 * cfg32.kwargs["XBLOCK"])
+
+
+class TestBackendGridLimits(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_check_max_grid_x_respects_warp_size_hip(self):
         # _check_max_grid_x only uses warp_size on the HIP path, where the
         # bound is on total threads (num_blocks * num_warps * warp_size).
@@ -2109,18 +2125,6 @@ class TestWarpSizeUnification(TestCase):
             x32, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=32)
             x64, _ = _check_max_grid_x(size_hints, x=1, num_warps=8, warp_size=64)
         self.assertEqual(x32, x64)
-
-    def test_triton_config_uses_warp_size_for_min_elem(self):
-        # min_elem_per_thread * warp_size * num_warps drives the floor for
-        # block_size; doubling warp_size should at least double the XBLOCK.
-        size_hints = {"x": 4096}
-        cfg32 = triton_config(
-            size_hints, 128, num_warps=1, min_elem_per_thread=4, warp_size=32
-        )
-        cfg64 = triton_config(
-            size_hints, 128, num_warps=1, min_elem_per_thread=4, warp_size=64
-        )
-        self.assertEqual(cfg64.kwargs["XBLOCK"], 2 * cfg32.kwargs["XBLOCK"])
 
 
 class TestMakeLaunchersMemory(TestCase):
