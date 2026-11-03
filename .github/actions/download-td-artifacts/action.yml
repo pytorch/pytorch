@@ -27,3 +27,4 @@ runs:
       run: |
         mkdir -p .additional_ci_files
         mv td_results.json .additional_ci_files/td_results.json || true
+        mv previous_failures*.json .additional_ci_files/ || true
