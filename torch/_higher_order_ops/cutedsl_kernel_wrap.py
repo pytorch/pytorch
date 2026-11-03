@@ -26,6 +26,7 @@ from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
 from torch._higher_order_ops.user_kernel_hop import (
+    ConstantRules,
     functional_hop_dense,
     functional_hop_fake,
     functionalize_functional_hop,
@@ -90,10 +91,28 @@ class CuteDSLKernel:
         return getattr(inspect.unwrap(self.fn), "__name__", "cutedsl_kernel")
 
 
+def _is_cutlass_type(cls: type) -> bool:
+    """Whether ``cls`` comes from the cutlass package (not cutlass_library, say)."""
+    module = getattr(cls, "__module__", "") or ""
+    return module == "cutlass" or module.startswith("cutlass.")
+
+
+class _CuteDSLConstantRules(ConstantRules):
+    def is_dsl_value(self, value: object) -> bool:
+        return _is_cutlass_type(type(value))
+
+    def scalar_value(self, value: object) -> bool | int | float | None:
+        # A cutlass Numeric, such as cutlass.Float32(2.0), is keyed by its value.
+        inner = getattr(value, "value", None) if self.is_dsl_value(value) else None
+        return inner if isinstance(inner, (bool, int, float)) else None
+
+
+CUTEDSL_CONSTANT_RULES = _CuteDSLConstantRules()
+
 # Unlike Triton's table, torch._dynamo.reset() leaves this one alone: graphs and
 # exported programs captured before a reset keep resolving their indices.
 cutedsl_kernel_side_table: KernelSideTable[CuteDSLKernel] = KernelSideTable(
-    dedupe_constant_args=True
+    constant_rules=CUTEDSL_CONSTANT_RULES
 )
 
 
@@ -139,17 +158,25 @@ class CuteDSLHostFnInfo:
         )
 
 
-def python_scalar(value: Any) -> Any:
+def python_scalar(value: Any, annotation: type | None = None) -> Any:
     """A runtime scalar as the Python value the DSL expects: a cutlass Numeric value
     as its .value, a subclass of bool/int/float (an IntEnum, a numpy float) as the
-    builtin, which the DSL's argument adapters require exactly."""
+    builtin, which the DSL's argument adapters require exactly, and an int for a
+    parameter annotated with a cutlass float type (``annotation``) as a float."""
     if isinstance(value, bool):
         return bool(value)
     if isinstance(value, int):
+        if annotation is not None:
+            from cutlass.base_dsl.typing import Boolean, Integer
+
+            if not issubclass(annotation, (Boolean, Integer)):
+                # nvidia-cutlass-dsl 4.5 and later would pass the int through Int32
+                # first, overflowing or wrapping one beyond its range.
+                return float(value)
         return int(value)
     if isinstance(value, float):
         return float(value)
-    if (getattr(type(value), "__module__", "") or "").startswith("cutlass"):
+    if _is_cutlass_type(type(value)):
         from cutlass.base_dsl.typing import Boolean, Numeric
 
         if isinstance(value, Boolean):
@@ -172,8 +199,13 @@ def get_host_fn_info(fn: Callable[..., Any]) -> CuteDSLHostFnInfo:
         return info
 
     import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
-    from cutlass.base_dsl.dsl import is_arg_spec_constexpr
+    from cutlass.base_dsl.runtime import jit_arg_adapters
     from cutlass.base_dsl.typing import NumericMeta
+
+    # Named is_arg_spec_constexpr before nvidia-cutlass-dsl 4.5.
+    is_constexpr = getattr(jit_arg_adapters, "is_arg_annotation_constexpr", None)
+    if is_constexpr is None:
+        is_constexpr = jit_arg_adapters.is_arg_spec_constexpr
 
     inner = inspect.unwrap(fn)
     name = getattr(inner, "__qualname__", repr(inner))
@@ -181,8 +213,14 @@ def get_host_fn_info(fn: Callable[..., Any]) -> CuteDSLHostFnInfo:
     numeric: dict[str, type] = {}
     streams = []
     for i, p in enumerate(inspect.signature(inner).parameters.values()):
-        if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD):
-            raise ValueError(f"{name}: *args and **kwargs parameters are not supported")
+        if p.kind is not p.POSITIONAL_OR_KEYWORD:
+            # The launch passes the arguments to cute.compile by name and to the
+            # compiled function by position, which CuTeDSL binds to keyword-only
+            # parameters only on its fast path, for one value per runtime parameter.
+            raise ValueError(
+                f"{name}: parameter {p.name!r} is {p.kind.description}, but PT2 needs "
+                "every parameter to accept both positional and keyword arguments"
+            )
         ann = p.annotation
         if isinstance(ann, str):
             raise ValueError(
@@ -194,7 +232,7 @@ def get_host_fn_info(fn: Callable[..., Any]) -> CuteDSLHostFnInfo:
             defaults[p.name] = p.default
         if inspect.isclass(ann) and issubclass(ann, cuda.CUstream):
             streams.append(p.name)
-        elif is_arg_spec_constexpr(ann, p.name, i, inner):
+        elif is_constexpr(ann, p.name, i, inner):
             constexpr.add(p.name)
         elif isinstance(ann, NumericMeta):
             numeric[p.name] = ann
@@ -277,7 +315,7 @@ def cutedsl_kernel_wrapper_mutation_dense(
     constant_args_idx: int,
     kwargs: dict[str, Any],
 ) -> None:
-    from torch._inductor.runtime.cutedsl_user_kernel import launch_cutedsl_kernel
+    from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
     kernel = cutedsl_kernel_side_table.get_kernel(kernel_idx)
     constant_args = cutedsl_kernel_side_table.get_constant_args(constant_args_idx)
@@ -364,7 +402,7 @@ def _rows_disjoint(a: Tensor, b: Tensor) -> bool:
         return True
     if s == 0:
         return False
-    return d % s >= x.size(1) and d % s + y.size(1) <= s
+    return bool(d % s >= x.size(1) and d % s + y.size(1) <= s)
 
 
 def _may_overlap(a: Tensor, b: Tensor) -> bool:

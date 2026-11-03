@@ -1,6 +1,7 @@
 """Compile and launch user-defined CuTeDSL kernels (``@cute.jit`` host functions).
 
-Used by the eager impl of ``cutedsl_kernel_wrapper_mutation``.
+Used by the eager impl of ``cutedsl_kernel_wrapper_mutation``. It lives outside
+torch._inductor so that an eager launch imports neither Inductor nor Dynamo.
 
 A compiled CuTeDSL kernel is specialized to the argument layouts it was compiled for
 and checks nothing at launch, so compiles are cached per argument signature: dtype,
@@ -84,11 +85,12 @@ def launch_cutedsl_kernel(
     from cutlass.cute.runtime import from_dlpack
 
     from torch._higher_order_ops.cutedsl_kernel_wrap import (
+        CUTEDSL_CONSTANT_RULES,
         get_host_fn_info,
         python_scalar,
     )
     from torch._higher_order_ops.user_kernel_hop import _snapshot, constant_key
-    from torch._inductor.codegen.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
+    from torch._native.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
     from torch._native.cutedsl.launch import supported_alignment
 
     info = get_host_fn_info(fn)
@@ -117,10 +119,11 @@ def launch_cutedsl_kernel(
                 elif info.is_runtime_scalar(name, value):
                     # The DSL converts only exact bool/int/float (not an IntEnum or
                     # a numpy float) and takes a cutlass Numeric value as a Python one.
-                    value = python_scalar(value)
-                    key.append((name, info.numeric_params.get(name, type(value))))
+                    annotation = info.numeric_params.get(name)
+                    value = python_scalar(value, annotation)
+                    key.append((name, annotation or type(value)))
                 else:
-                    key.append((name, constant_key(value)))
+                    key.append((name, constant_key(value, CUTEDSL_CONSTANT_RULES)))
                     constants.append(name)
             compile_args[name] = value
             if name not in info.constexpr_params:
@@ -136,7 +139,8 @@ def launch_cutedsl_kernel(
                     # host code that the compile runs can change one (cache a
                     # layout on a config object, say), so it compiles copies.
                     for name in constants:
-                        compile_args[name] = _snapshot(compile_args[name])
+                        value = compile_args[name]
+                        compile_args[name] = _snapshot(value, CUTEDSL_CONSTANT_RULES)
                     compiled = cute.compile(fn, **compile_args)
                     per_fn[tuple(key)] = compiled
         compiled(*call_args)
