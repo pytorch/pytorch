@@ -148,8 +148,8 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 
 ### Serialization
 
-- [ ] **weights_only=False** — PR adds `torch.load(..., weights_only=False)`, explicitly opting out of safe deserialization. `weights_only=True` is already the default; setting it to `False` enables arbitrary code execution via pickle and is almost never the right thing to do. Flag this and ask the author to register safe globals via `torch.serialization.add_safe_globals()` instead
-- [ ] **safe_globals** — PR adds new types to serialization that should be loadable with `weights_only=True` but doesn't register them via `torch.serialization.add_safe_globals()`
+- [ ] **weights_only=False** — PR adds `torch.load(..., weights_only=False)`, explicitly opting out of safe deserialization. `weights_only=True` is already the default; setting it to `False` enables arbitrary code execution via pickle and is almost never the right thing to do. Flag this and ask the author to restructure the payload into plain data (tensors, dicts, lists, tuples, strings, numbers)
+- [ ] **safe_globals** — Calling `torch.serialization.add_safe_globals()` is NEVER OK outside `torch/serialization.py` and `torch/_weights_only_unpickler.py`; Request Changes on any new call and never suggest it. Any new allowlisted global must pass the review in `torch/REVIEW.md`, even when the changed file is outside `torch/`
 - [ ] **skip_data context** — PR implements metadata-only checkpoint inspection by reading full tensors instead of using `torch.serialization.skip_data()` context manager
 
 ### Distributed
