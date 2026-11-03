@@ -82,6 +82,9 @@ void libkineto_init(bool cpuOnly, [[maybe_unused]] bool logOnError) {
 #endif // HAS_CUPTI
 
 #ifdef HAS_ROCTRACER
+  // rocprofiler-sdk must be configured before the HSA runtime creates its
+  // queues, or it never sees their kernel dispatches. So unlike PTI below, the
+  // tool registers here, even in a process that only profiles the CPU.
   if (!cpuOnly) {
     RocprofLogger::ensureRegistered();
   }
