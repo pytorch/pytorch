@@ -20,8 +20,8 @@ if TYPE_CHECKING:
 
 
 def _first_call_in_sub_mod(subgm: torch.fx.GraphModule) -> torch.fx.Node | None:
-    # split_module reads submodules and pytree specs, such as the branches of a
-    # cond, with get_attr nodes before the first call of a region.
+    # sequential_split reads submodules and pytree specs, such as the branches of
+    # a cond, with get_attr nodes before the first call of a region.
     return next(
         (n for n in subgm.graph.nodes if n.op not in ("placeholder", "get_attr")), None
     )

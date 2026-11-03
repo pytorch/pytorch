@@ -203,9 +203,9 @@ def _split_module(
     read_pytree_specs_in_partition: bool = False,
 ) -> GraphModule:
     """
-    ``split_module``, where a partition can also read each pytree spec it uses
-    with ``get_attr`` instead of taking it as an input. Then its inputs are only
-    tensors and other values that a graph can pass, such as symbolic sizes.
+    ``split_module`` with one more option. When ``read_pytree_specs_in_partition``
+    is True (it is False by default), a partition also reads each pytree spec it
+    uses with ``get_attr`` instead of taking it as an input.
     """
     log.debug(
         "%s",
