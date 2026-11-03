@@ -156,6 +156,7 @@ class TestCppWrapper(InductorTestCase):
 
 
 class DynamicShapesCppWrapperCpuTests(InductorTestCase):
+    hw_classification = HardwareClassification.CPU
     device = "cpu"
 
 

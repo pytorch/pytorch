@@ -261,7 +261,8 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Used so that only cuda/rocm specific versions of tests are generated
   # mainly used so that we're not spending extra cycles testing cpu
-  # devices on expensive gpu machines
+  # devices on expensive gpu machines. The nogpu_* jobs bring back inductor's
+  # RUN_CPU classes with PYTORCH_TEST_INDUCTOR_RUN_CPU (below).
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
