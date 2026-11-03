@@ -33,6 +33,7 @@ from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
     Min,
+    Mod,
     ModularIndexing,
     TruncToFloat,
     TruncToInt,
@@ -3251,9 +3252,58 @@ class TMACompatibilityChecker:
     ) -> bool:
         """
         Check if the block parameters are valid for TMA.
-        If force, we allow relying on symbolic hints equivalent
-        to what we check for Triton templates.
+        If force, the check is decided from size hints, and the alignment it
+        relied on is then guarded, as can_use_tma does for Triton templates.
         """
+        if not self._are_block_parameters_compatible(block_params, constant_offset):
+            return False
+        return not self.force or self._guard_forced_alignment(
+            block_params, constant_offset
+        )
+
+    def _guard_forced_alignment(
+        self,
+        block_params: BlockParameters,
+        constant_offset: sympy.Expr | int,
+    ) -> bool:
+        """
+        A forced access can have a dynamic dim the template's can_use_tma never
+        checked, e.g. an epilogue input's outer dim, so the alignment that held
+        on the hints is guarded here. Under AOTI, which does not check guards,
+        it must be statically provable instead.
+        """
+        sizevars = V.graph.sizevars
+        # Expand precomputed sizes (ps0 for e.g. 2*s0), which have no ShapeEnv
+        # range to guard on.
+        strides = [
+            sizevars.remove_precomputed_replacements(sympy.sympify(st))
+            for st in block_params.strides
+        ]
+        offset = sizevars.remove_precomputed_replacements(
+            sympy.sympify(constant_offset)
+        )
+        # Constant requirements were already decided by the hint check. Mod
+        # requires a non-negative dividend, so the offset's alignment is checked
+        # on its magnitude; strides are required to be non-negative.
+        requirements = [sympy.Eq(strides[-1], 1)]
+        requirements += [sympy.Ge(st, 0) for st in strides[:-1] if st.free_symbols]
+        if V.graph.get_current_device_or_throw().type != "cpu":
+            element_size = self.dtype.itemsize
+            requirements += [
+                sympy.Eq(Mod(expr * element_size, 16), 0)
+                for expr in (*strides[:-1], sympy.Abs(offset))
+                if expr.free_symbols
+            ]
+        requirements = [r for r in requirements if r.free_symbols]
+        if V.graph.aot_mode:
+            return all(sizevars.statically_known_true(r) for r in requirements)
+        return all(sizevars.guard_or_false(r) for r in requirements)
+
+    def _are_block_parameters_compatible(
+        self,
+        block_params: BlockParameters,
+        constant_offset: sympy.Expr | int = 0,
+    ) -> bool:
         device = V.graph.get_current_device_or_throw()
         device_type = device.type
         if self.force:
@@ -3315,6 +3365,18 @@ class TMACompatibilityChecker:
         if not V.graph.sizevars.statically_known_equals(strides[-1], sympy.Integer(1)):
             log.debug(
                 "%s tensor descriptors require innermost stride to be 1. Strides are: %s",
+                self.failed_debug_prefix,
+                strides,
+            )
+            return False
+
+        # Tensor descriptor strides are unsigned. A flipped view has a negative
+        # stride, which a precomputed size can hide from the checks below.
+        if self.force and not all(
+            V.graph.sizevars.statically_known_geq(stride, 0) for stride in strides[:-1]
+        ):
+            log.debug(
+                "%s tensor descriptors require non-negative strides. Strides are: %s",
                 self.failed_debug_prefix,
                 strides,
             )
