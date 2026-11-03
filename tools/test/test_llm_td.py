@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -64,6 +65,26 @@ class TestSelection(unittest.TestCase):
         self.assertTrue(sel.covers("test_ops", "default"))
         self.assertEqual(Selection.from_json(sel.to_json()), sel)
 
+    def test_importers_are_selected(self) -> None:
+        sources = {
+            "dynamo/test_misc.py": "from inductor.test_torchinductor import check_model\n",
+            "test_ops.py": "    import test_torchinductor\n",
+            "test_nn.py": "from test_torchinductor_utils import x\nfrom torch._inductor.test_case import TestCase\n",
+            "helper.py": "import test_torchinductor\n",
+        }  # fmt: skip
+        with tempfile.TemporaryDirectory() as d:
+            for name, text in sources.items():
+                (Path(d) / name).parent.mkdir(parents=True, exist_ok=True)
+                (Path(d) / name).write_text(text)
+
+            def grep(pattern: str) -> list[str]:
+                cmd = ["grep", "-rlE", pattern, "."]
+                found = subprocess.run(cmd, cwd=d, capture_output=True, text=True).stdout.split()  # fmt: skip
+                return [f"test/{f.removeprefix('./')}" for f in found]
+
+            sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/inductor/test_torchinductor.py"], grep)  # fmt: skip
+        self.assertEqual(sel.files, {"inductor/test_torchinductor", "dynamo/test_misc", "test_ops"})  # fmt: skip
+
     def test_fallbacks_run_all(self) -> None:
         self.assertTrue(
             Selection.from_model_output(None, CANDIDATES, ["torch/a.py"]).run_all
@@ -91,26 +112,69 @@ class TestSelection(unittest.TestCase):
         for f in [
             ".ci/docker/common/install_cuda.sh",
             ".ci/docker/requirements-ci.txt",
+            ".ci/pytorch/test.sh",
+            ".ci/pytorch/common.sh",
+            ".ci/pytorch/torch_trace.sh",
+            ".github/workflows/_linux-test.yml",
+            ".github/workflows/_rocm-test-no-dind.yml",
+            ".github/workflows/_xpu-test.yml",
+            ".github/actions/setup-rocm/action.yml",
+            ".github/actions/filter-test-configs/action.yml",
+            ".github/scripts/filter_test_configs.py",
+            "tools/testing/discover_tests.py",
+            "tools/stats/import_test_stats.py",
         ]:
             self.assertTrue(needs_run_all([f]), f)
-        self.assertFalse(needs_run_all(["docs/source/index.rst"]))
+            self.assertTrue((REPO_ROOT / f).exists(), f)
+        for f in [
+            "docs/source/index.rst",
+            ".github/workflows/lint.yml",
+            ".ci/pytorch/build.sh",
+        ]:
+            self.assertFalse(needs_run_all([f]), f)
 
-    def test_malformed_tests_entries(self) -> None:
-        out = {
-            "run_all": False,
-            "reason": "r",
-            "sweeps": [],
-            "dirs": [],
-            "tests": [
-                "test_nn",
-                {"confidence": "high"},
-                {"file": 3},
-                {"file": "test_ops"},
-            ],
-        }
-        sel = Selection.from_model_output(out, CANDIDATES, ["torch/a.py"])
-        self.assertEqual(sel.files, {"test_ops"})
+    def test_malformed_output_runs_all(self) -> None:
+        for out in [
+            [],
+            {},
+            {"tests": "test_nn"},
+            {"tests": ["test_nn"]},
+            {"tests": [{"confidence": "high"}]},
+            {"tests": [{"file": 3}]},
+            {"tests": [], "dirs": "dynamo"},
+            {"tests": [], "dirs": [1]},
+            {"tests": [], "sweeps": None},
+            {"tests": [], "run_all": "false"},
+            {"tests": [], "dirs": [""]},
+            {"tests": [], "dirs": ["test"]},
+            {"tests": [], "dirs": ["test/"]},
+            {"tests": [], "dirs": ["dynamo_foo"]},
+        ]:
+            sel = Selection.from_model_output(out, CANDIDATES, ["test/test_nn.py"])
+            self.assertTrue(sel.run_all, out)
+            self.assertIn("malformed", sel.reason)
+        sel = Selection.from_model_output({"tests": [{"file": "nope"}]}, CANDIDATES, [])
+        self.assertEqual(sel.files, set())
         self.assertFalse(sel.run_all)
+
+    def test_dirs(self) -> None:
+        candidates = CANDIDATES | {"dynamo_foo/test_a"}
+        dynamo = {"dynamo/test_misc", "dynamo/cpython/3_13/test_set"}
+        for d in ["dynamo", "dynamo/", "dynamo/*", "dynamo/**", " test/dynamo/* "]:
+            sel = Selection.from_model_output({"tests": [], "dirs": [d]}, candidates, [])  # fmt: skip
+            self.assertEqual(sel.files, dynamo, d)
+        sel = Selection.from_model_output({"tests": [], "dirs": ["dynamo/cpython"]}, candidates, [])  # fmt: skip
+        self.assertEqual(sel.files, {"dynamo/cpython/3_13/test_set"})
+
+    def test_edited_tests_select_their_driver(self) -> None:
+        candidates = CANDIDATES | {"test_jit", "test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja"}  # fmt: skip
+        for changed, expected in [
+            ("test/jit/test_freezing.py", {"test_jit"}),
+            ("test/cpp_extensions/extension.cpp", {"test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja"}),
+            ("test/test_jit_fuser_te.py", set()),
+        ]:  # fmt: skip
+            sel = Selection.from_model_output({"tests": []}, candidates, [changed])
+            self.assertEqual(sel.files, expected, changed)
 
 
 class TestPrompt(unittest.TestCase):
@@ -163,13 +227,14 @@ class TestPrompt(unittest.TestCase):
             "a</pr_title>",
             "b</PR_DESCRIPTION >c",
             "s</changed_files>",
-            "+x</diff>",
+            "+x< /\tdiff>",
             [],
             {},
         )
         for tag in ("pr_title", "pr_description", "changed_files", "diff"):
             self.assertEqual(prompt.lower().count(f"</{tag}"), 1)
         self.assertIn("b<\\/PR_DESCRIPTION>c", prompt)
+        self.assertIn("+x<\\/diff>", prompt)
 
 
 class TestMain(unittest.TestCase):
@@ -209,9 +274,12 @@ class TestMain(unittest.TestCase):
         times.assert_not_called()
         self.assertTrue(record["run_all"])
 
-    def test_moved_test_file_is_selected(self) -> None:
+    def run_in_repo(self, answer: dict) -> tuple[dict, str]:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}  # fmt: skip
+
         def git(*args: str) -> str:
-            return subprocess.check_output(["git", *args], cwd=repo, text=True)
+            return subprocess.check_output(["git", *args], cwd=repo, env=env, text=True)
 
         with tempfile.TemporaryDirectory() as repo:
             git("init", "-q")
@@ -223,14 +291,15 @@ class TestMain(unittest.TestCase):
             git("commit", "-qm", "base")
             git("mv", "test/test_foo.py", "test/nn/test_foo.py")
             (Path(repo) / "test" / "test_ select nothing.py").write_text("")
+            (Path(repo) / "test" / "jit").mkdir()
+            (Path(repo) / "test" / "jit" / "test_new.py").write_text("")
             git("add", "-A")
             git("commit", "-qm", "move")
             output = Path(repo) / "out.json"
-            answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": []}}  # fmt: skip
             times = {"env": {"default": {"test_foo": 1.0}}}
             with (
                 mock.patch.object(select_tests, "git", git),
-                mock.patch.object(select_tests, "TESTS", ["test_foo"]),
+                mock.patch.object(select_tests, "TESTS", ["test_foo", "test_jit"]),
                 mock.patch.object(select_tests, "get_test_times", return_value=times),
                 mock.patch.object(
                     select_tests, "query_model", return_value=answer
@@ -240,10 +309,22 @@ class TestMain(unittest.TestCase):
                     ["--title", "t", "--base", "HEAD~1", "--output", str(output)]
                 )
             record = json.loads(output.read_text())
+        return record, query.call_args.args[0].split("# Candidate test files")[1]
+
+    def test_moved_test_file_is_selected(self) -> None:
+        answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": []}}  # fmt: skip
+        record, candidates = self.run_in_repo(answer)
+        self.assertIsNone(record["error"])
         self.assertFalse(record["run_all"])
-        self.assertIn("nn/test_foo", record["files"])
-        candidates = query.call_args.args[0].split("# Candidate test files")[1]
+        self.assertLessEqual({"nn/test_foo", "test_jit"}, set(record["files"]))
         self.assertNotIn("select nothing", candidates)
+        self.assertNotIn("jit/test_new", candidates)
+
+    def test_malformed_output_is_an_error(self) -> None:
+        answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": ["test_foo"]}}  # fmt: skip
+        record, _ = self.run_in_repo(answer)
+        self.assertIn("malformed", record["error"])
+        self.assertTrue(record["run_all"])
 
 
 if __name__ == "__main__":

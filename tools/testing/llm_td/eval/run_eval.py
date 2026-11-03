@@ -1,7 +1,7 @@
 """Run the selector over eval samples, caching one result per sample.
 
     python -m tools.testing.llm_td.eval.run_eval --data DIR --tag sonnet5_medium \\
-        --model us.anthropic.claude-sonnet-5 --effort medium --ids DIR/ids_test.txt
+        --model us.anthropic.claude-sonnet-5 --effort medium --ids tools/testing/llm_td/eval/ids/eval.txt
 
 Results go to DIR/results/<tag>/<id>.json and are never recomputed; rerun the
 same command to fill in samples whose call failed transiently. With
@@ -20,7 +20,7 @@ import time
 import traceback
 from pathlib import Path
 
-from tools.testing.llm_td.eval import REPO
+from tools.testing.llm_td.eval import REPO, write_json
 from tools.testing.llm_td.select_tests import (
     build_prompt,
     query_model,
@@ -31,8 +31,9 @@ from tools.testing.llm_td.select_tests import (
 
 TIMED_OUT = f"model call timed out after {QUERY_TIMEOUT}s"
 TRANSIENT = re.compile(
-    r"Throttl|rate limit|overloaded|\b(500|529)\b|timed out", re.IGNORECASE
+    r"Throttl|rate limit|overloaded|\b(500|502|503|504|529)\b|timed out", re.IGNORECASE
 )
+ATTEMPTS = 4
 
 
 def checkout(root: Path, slot: int, sha: str) -> str:
@@ -65,35 +66,40 @@ def run_one(
         sample["candidates"],
         minutes,
     )
-    t0 = time.time()
-    transient = None
-    for attempt in range(4):
+    cost = 0.0
+    for attempt in range(ATTEMPTS):
+        if attempt:
+            time.sleep(30 * attempt)
+        t0 = time.time()
         try:
             d = query_model(prompt, args.model, args.effort, checkout=wt)
         except subprocess.TimeoutExpired:
             # Final rather than retried: in CI a hung call runs everything, so score it that way.
-            d = {"is_error": True, "result": TIMED_OUT}
-            transient = None
+            d, out, transient = {"is_error": True, "result": TIMED_OUT}, None, False
             break
-        transient = not d.get("structured_output") and TRANSIENT.search(
-            str(d.get("result"))
-        )
+        cost += d.get("total_cost_usd") or 0.0
+        # As in select_tests.select: an error result's output is discarded.
+        out = None if d.get("is_error") else d.get("structured_output")
+        # Only the CLI's own error fields: a model's prose can mention "500".
+        err = f"{d.get('subtype', '')} {d.get('result', '') if d.get('is_error') else ''}"  # fmt: skip
+        transient = out is None and bool(TRANSIENT.search(err))
         if not transient:
             break
-        time.sleep(30 * (attempt + 1))
     return {
         "id": sample["id"],
         "model": args.model,
         "effort": args.effort,
         "agentic": wt is not None,
+        "attempts": attempt + 1,
+        # The last call's latency; cost_usd sums every attempt's.
         "wall_s": round(time.time() - t0, 1),
         "prompt_chars": len(prompt),
-        "cost_usd": d.get("total_cost_usd"),
+        "cost_usd": cost,
         "usage": d.get("usage"),
         "num_turns": d.get("num_turns"),
-        "error": None if d.get("structured_output") else str(d.get("result"))[:2000],
-        "transient": bool(transient),
-        "out": d.get("structured_output"),
+        "error": None if out is not None else str(d.get("result"))[:2000],
+        "transient": transient,
+        "out": out,
     }
 
 
@@ -141,7 +147,7 @@ def main() -> None:
                     flush=True,
                 )
                 continue
-            (out / f"{sid}.json").write_text(json.dumps(r))
+            write_json(out / f"{sid}.json", r)
 
     with cf.ThreadPoolExecutor(args.jobs) as ex:
         list(ex.map(worker, range(args.jobs)))
