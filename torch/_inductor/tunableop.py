@@ -224,7 +224,7 @@ class BenchmarkJob:
         # split exists to keep out of the timing. Turning borrowing off cannot
         # change which kernel is measured -- a borrow that happened was recorded,
         # so this call is an exact hit, and with no donor the warm ran the
-        # default too. IsNearestMatchEnabled() rules out borrowed-but-unrecorded.
+        # default too: borrowing requires recording, so a borrow was written.
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._nearest_match_enable(False)
         if not warm_ok:

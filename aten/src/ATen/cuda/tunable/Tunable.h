@@ -139,14 +139,6 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
         const std::string& params_signature,
         ResultEntry entry);
 
-    // Remember a borrowed verdict for this process only, so the comparison is
-    // not repeated for a shape already decided. Honours the same env kill
-    // switch as RecordBorrowed: results_ is what get_results() reports and
-    // what write_file() persists, so an entry here is not private.
-    void CacheBorrowedInMemory(const std::string& op_signature,
-        const std::string& params_signature,
-        ResultEntry entry);
-
     void Delete(const std::string& op_signature, const std::string& params_signature);
 
     void DisjointMergeImpl(

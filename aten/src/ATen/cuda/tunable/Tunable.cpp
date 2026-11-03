@@ -360,21 +360,6 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
   }
 }
 
-void TuningResultsManager::CacheBorrowedInMemory(const std::string& op_signature,
-    const std::string& params_signature,
-    ResultEntry entry) {
-  // Same kill switch as RecordBorrowed, applied here rather than at the call
-  // site so it holds for every caller. Skipping only the file write would
-  // leave the verdict in results_, where get_results() reports it and a later
-  // write_file() persists it -- the switch would not be a switch.
-  if (RecordBorrowedDisabledByEnv()) {
-    return;
-  }
-  std::scoped_lock l{lock_};
-  auto& km = results_[op_signature];
-  AddImpl(op_signature, params_signature, std::move(entry), km);
-}
-
 void TuningResultsManager::RecordBorrowed(const std::string& op_signature,
     const std::string& params_signature,
     ResultEntry entry) {
@@ -871,11 +856,10 @@ bool TuningContext::IsNearestMatchEnabled() const {
     return false;
   }
   // Borrowing without recording is worse than not borrowing: the pass measures
-  // the borrowed kernel and reports that time, but with nothing written the
-  // deployed process misses the shape and runs Default, so the decision rests
-  // on a measurement runtime cannot reproduce. Checked here so it holds for
-  // every caller, not only one that thinks to ask.
-  if (RecordBorrowedDisabledByEnv()) {
+  // the donor but writes nothing, so the deployed process misses the shape and
+  // runs Default -- the decision would rest on a measurement runtime cannot
+  // reproduce. IsRecordBorrowedEnabled() covers env switch and flag alike.
+  if (!IsRecordBorrowedEnabled()) {
     return false;
   }
   return nearest_match_enable_;

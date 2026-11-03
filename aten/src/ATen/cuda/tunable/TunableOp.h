@@ -261,19 +261,11 @@ class TunableOp {
         {
           auto result = FindFastestAmong(
               params, {ResultEntry::Default().GetKey(), borrowed.GetKey()});
-          if (ctx->IsRecordBorrowedEnabled()) {
-            // Persist whichever won, including Default: the shape becomes an
-            // exact hit, so neither the search nor this comparison is repeated.
-            // That verdict is final -- tuning it properly means tuning from a
-            // results file that does not carry these entries.
-            mgr.RecordBorrowed(op_sig, concrete_sig, result);
-          } else {
-            // Remember it for this process so the comparison is not repeated,
-            // without persisting. Not Add(): results_ is reachable from
-            // get_results() and write_file(), so this has to honour the
-            // record-borrowed kill switch, which CacheBorrowedInMemory does.
-            mgr.CacheBorrowedInMemory(op_sig, concrete_sig, result);
-          }
+          // Always persisted: IsNearestMatchEnabled() is false unless
+          // recording is on. Default too -- the shape becomes an exact hit, so
+          // neither the search nor this comparison is repeated. Final: tuning
+          // it properly means tuning from a file without these entries.
+          mgr.RecordBorrowed(op_sig, concrete_sig, result);
           return result;
         }
       }

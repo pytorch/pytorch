@@ -310,14 +310,16 @@ def _nearest_match_enable(val: bool = True) -> None:
     one free dimension (M, N or batch count), rounded up. A borrow is a guess
     and is expected to be benchmarked before it is trusted.
 
-    Setting PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED=0 forces this off for the
-    process and cannot be overridden here.
+    Borrowing requires recording: it is off whenever _record_borrowed is, since
+    a borrow nothing records leaves runtime on the default kernel while the pass
+    measured the donor. Either PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED=0 or
+    PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED=0 forces this off for the process.
     """
     torch._C._cuda_tunableop_nearest_match_enable(val)  # type: ignore[attr-defined]
 
 
 def _nearest_match_is_enabled() -> bool:
-    r"""Returns the reuse pass's advisory borrow setting, with the env kill
+    r"""Returns the reuse pass's borrow setting, with the env kill switches
     switch applied. Not a statement about what LookupNearest will do: it
     borrows whenever it is called, regardless of this value.
     """
@@ -340,7 +342,7 @@ def _record_borrowed_enable(val: bool = True) -> None:
 
 
 def _record_borrowed_is_enabled() -> bool:
-    r"""Returns the reuse pass's advisory recording setting, with the env kill
+    r"""Returns the reuse pass's recording setting, with the env kill
     switch applied. Not a statement about what RecordBorrowed will do: it
     records whenever it is called, regardless of this value.
     """

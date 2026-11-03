@@ -11925,8 +11925,9 @@ class TestLinalgCudaOnly(TestCase):
         self.assertEqual(
             run({"PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED": "0"}), ("False", "True")
         )
+        # Borrowing requires recording, so this var turns both off.
         self.assertEqual(
-            run({"PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED": "0"}), ("True", "False")
+            run({"PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED": "0"}), ("False", "False")
         )
         # Only "0" vetoes. 1 means "leave it to the pass", which is what the
         # script then enables, and an unparsable value warns and does the same.
@@ -12025,8 +12026,8 @@ class TestLinalgCudaOnly(TestCase):
     @onlyCUDA
     @dtypes(torch.float)
     def test_record_borrowed_disabled_tunableop(self, device, dtype):
-        # Borrowing without record_borrowed must not write anything, since the
-        # write path is gated on it.
+        # With recording off there is no borrow at all: measuring a donor the
+        # deployed process would never get is worse than not borrowing.
         with self._tunableop_ctx():
             torch.cuda.tunable.set_max_tuning_iterations(1)
 
@@ -12044,18 +12045,17 @@ class TestLinalgCudaOnly(TestCase):
             A2 = torch.randn(32, K, device=device, dtype=dtype)
             torch.matmul(A2, B)
 
-            # The verdict is cached in memory so the comparison is not repeated,
-            # but with record_borrowed off it must not reach the file.
-            self.assertGreater(len(torch.cuda.tunable.get_results()), after_tuning)
+            # Nothing borrowed, so nothing recorded in memory or on disk.
+            self.assertEqual(len(torch.cuda.tunable.get_results()), after_tuning)
             self.assertEqual(self._results_file_rows(), persisted)
 
     @onlyCUDA
     @dtypes(torch.float)
     def test_borrow_verdict_not_revalidated_tunableop(self, device, dtype):
         # The verdict stands: the second call of the same shape is an exact
-        # hit, whether RecordBorrowed persisted it or CacheBorrowedInMemory
-        # only cached it. LookupNearest never checks for an exact entry, so the
-        # caller's Lookup guard is what protects this. Counted in a subprocess
+        # hit: the borrow was persisted by RecordBorrowed. LookupNearest never
+        # checks for an exact entry, so the caller's Lookup guard is what
+        # protects this. Counted in a subprocess
         # (VERBOSE is sticky per-process).
         import os
         import shutil

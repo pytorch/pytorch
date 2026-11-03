@@ -698,6 +698,18 @@ class TestTunableOpPretune(TestCase):
         self.assertNotIn(tuned_dim, retried, "the tuned rung must be skipped")
 
     @parametrize("tunableop_on", (True, False))
+    def test_pipelined_autotuning_is_off_when_enabled(self, tunableop_on):
+        # The pipelined path benchmarks the bmreq directly, so the routing in
+        # ExternKernelCaller.benchmark never runs and nothing is tuned.
+        from torch._inductor.autotune_process import use_pipelined_autotuning
+
+        with config.patch({"pipeline_max_autotune_gemm": True}):
+            with mock.patch(
+                "torch._inductor.tunableop.is_enabled", return_value=tunableop_on
+            ):
+                self.assertEqual(use_pipelined_autotuning(), not tunableop_on)
+
+    @parametrize("tunableop_on", (True, False))
     def test_autotune_local_cache_is_bypassed_when_enabled(self, tunableop_on):
         # A cached timing skips benchmark(), so neither tuning nor borrow
         # validation runs. The write side matters as much: update_local_cache

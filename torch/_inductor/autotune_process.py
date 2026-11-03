@@ -1912,9 +1912,17 @@ class AutotuneProcessPool:
 
 
 def use_pipelined_autotuning() -> bool:
+    # Function-local: tunableop imports this module.
+    from torch._inductor import tunableop
+
     return (
         config.pipeline_max_autotune_gemm
         and not AutotuneProcessPool._shutdown_for_inactivity
+        # The pipelined path benchmarks the bmreq directly, so the routing in
+        # ExternKernelCaller.benchmark never runs: nothing is tuned and aten is
+        # ranked on an untuned timing. Routing into this pool instead is out --
+        # TunableOp's flags are process-global and the pool is shared.
+        and not tunableop.is_enabled()
     )
 
 
