@@ -915,6 +915,8 @@ class TestFakeProxyTensor(TestCase):
         # A vmap wrapper is recorded as a view of the fake tensor it wraps, with
         # no real tensor. A value whose real tensor is kept keeps its wrapper,
         # which carries it.
+        from torch._functorch.vmap import vmap_increment_nesting
+
         functorch = torch._C._functorch
         real = torch.randn(4, 3, 5)[1:]
         for propagate in (False, True):
@@ -923,14 +925,11 @@ class TestFakeProxyTensor(TestCase):
             ):
                 mode = FakeTensorMode()
                 fake = mode.from_tensor(real)
-                level = functorch._vmap_increment_nesting(3, "error")
-                try:
+                with vmap_increment_nesting(3, "error") as level:
                     with mode:
                         batched = functorch._add_batch_dim(fake, 1, level)
                     val = snapshot_fake(batched)
                     kept = snapshot_fake(batched, include_real=True)
-                finally:
-                    functorch._vmap_decrement_nesting()
                 self.assertTrue(is_fake_tensor(val))
                 self.assertIsNone(val.real_tensor)
                 self.assertEqual(

@@ -11052,6 +11052,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         # output of scan keeps the wrapper that the combine function returned,
         # but not the constant or real tensor of that step, and the step's own
         # value keeps both.
+        from torch._functorch.vmap import vmap_increment_nesting
         from torch._higher_order_ops.scan import _scan_output_value
         from torch._subclasses.fake_tensor import (
             FakeTensorMode,
@@ -11067,15 +11068,12 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         # plain fake tensor.
         node = torch.fx.Graph().placeholder("step")
         node.meta["val"] = step
-        level = functorch._vmap_increment_nesting(1, "error")
-        try:
+        with vmap_increment_nesting(1, "error") as level:
             with mode:
                 batched = functorch._add_batch_dim(step, 0, level)
             out = _scan_output_value(node, batched)
             self.assertTrue(functorch.is_batchedtensor(out))
             inner = functorch.get_unwrapped(out)
-        finally:
-            functorch._vmap_decrement_nesting()
         self.assertIsNone(maybe_get_fake_constant(inner))
         self.assertIsNone(maybe_get_real_tensor(inner))
         self.assertIsNotNone(maybe_get_fake_constant(step))

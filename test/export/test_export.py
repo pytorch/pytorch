@@ -1098,24 +1098,27 @@ class TestExport(TestCase):
         inp = (torch.randn(3, 4), torch.ones(2))
         functorch = torch._C._functorch
         for real in (False, True):
-            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=real):
-                ep = torch.export.export(CondInVmap(), inp, strict=True)
-            placeholders = [
-                node
-                for name in ("true_graph_0", "false_graph_0")
-                for node in getattr(ep.graph_module, name).graph.find_nodes(
-                    op="placeholder"
-                )
-            ]
-            self.assertEqual(len(placeholders), 2)
-            for node in placeholders:
-                val = node.meta["val"]
-                if real:
-                    self.assertIsNotNone(functorch.get_unwrapped(val).real_tensor)
-                else:
-                    self.assertTrue(is_fake_tensor(val), node.name)
-            for args in (inp, (torch.randn(3, 4), -torch.ones(2))):
-                self.assertEqual(ep.module()(*args), CondInVmap()(*args))
+            with self.subTest(real=real):
+                with torch._functorch.config.patch(
+                    fake_tensor_propagate_real_tensors=real
+                ):
+                    ep = torch.export.export(CondInVmap(), inp, strict=True)
+                placeholders = [
+                    node
+                    for name in ("true_graph_0", "false_graph_0")
+                    for node in getattr(ep.graph_module, name).graph.find_nodes(
+                        op="placeholder"
+                    )
+                ]
+                self.assertEqual(len(placeholders), 2)
+                for node in placeholders:
+                    val = node.meta["val"]
+                    if real:
+                        self.assertIsNotNone(functorch.get_unwrapped(val).real_tensor)
+                    else:
+                        self.assertTrue(is_fake_tensor(val), node.name)
+                for args in (inp, (torch.randn(3, 4), -torch.ones(2))):
+                    self.assertEqual(ep.module()(*args), CondInVmap()(*args))
 
     @skipIfCrossRef
     @skipIfTorchDynamo("export inside dynamo is not supported")
