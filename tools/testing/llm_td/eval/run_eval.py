@@ -14,15 +14,19 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as cf
 import json
+import re
 import subprocess
 import time
+import traceback
 from pathlib import Path
 
+from tools.testing.llm_td.eval import REPO
 from tools.testing.llm_td.select_tests import build_prompt, query_model, test_minutes
 
 
-REPO = Path(__file__).resolve().parents[4]
-TRANSIENT = ("Throttl", "rate limit", "overloaded", "500", "529", "timed out")
+TRANSIENT = re.compile(
+    r"Throttl|rate limit|overloaded|\b(500|529)\b|timed out", re.IGNORECASE
+)
 
 
 def checkout(root: Path, slot: int, sha: str) -> str:
@@ -57,10 +61,14 @@ def run_one(
     )
     t0 = time.time()
     for attempt in range(4):
-        d = query_model(prompt, args.model, args.effort, checkout=wt)
-        if d.get("structured_output") or not any(
-            s in str(d.get("result")) for s in TRANSIENT
-        ):
+        try:
+            d = query_model(prompt, args.model, args.effort, checkout=wt, timeout=1800)
+        except subprocess.TimeoutExpired:
+            d = {"is_error": True, "result": "timed out"}
+        transient = not d.get("structured_output") and TRANSIENT.search(
+            str(d.get("result"))
+        )
+        if not transient:
             break
         time.sleep(30 * (attempt + 1))
     return {
@@ -74,6 +82,7 @@ def run_one(
         "usage": d.get("usage"),
         "num_turns": d.get("num_turns"),
         "error": None if d.get("structured_output") else str(d.get("result"))[:2000],
+        "transient": bool(transient),
         "out": d.get("structured_output"),
     }
 
@@ -100,14 +109,23 @@ def main() -> None:
     def worker(slot: int) -> None:
         # Each worker owns one worktree slot, so the ids are dealt out round-robin.
         for sid in ids[slot :: args.jobs]:
-            sample = json.loads((args.data / "samples" / f"{sid}.json").read_text())
-            wt = (
-                checkout(args.data / "worktrees", slot, sample["sha"])
-                if args.agentic
-                else None
-            )
-            r = run_one(sample, minutes, args, wt)
-            if r["error"] and r["out"] is None and not r["cost_usd"]:
+            try:
+                sample = json.loads((args.data / "samples" / f"{sid}.json").read_text())
+                wt = (
+                    checkout(args.data / "worktrees", slot, sample["sha"])
+                    if args.agentic
+                    else None
+                )
+                r = run_one(sample, minutes, args, wt)
+            except Exception:
+                print(
+                    f"{sid} failed, left for a rerun:\n{traceback.format_exc()}",
+                    flush=True,
+                )
+                continue
+            if r.pop("transient") or (
+                r["error"] and r["out"] is None and not r["cost_usd"]
+            ):
                 print(
                     "transient failure, left for a rerun:",
                     sid,
