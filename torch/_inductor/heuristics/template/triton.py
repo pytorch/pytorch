@@ -2444,6 +2444,7 @@ def mm_allow_tf32(
     k: Any,
     device_type: str | None,
     dtype: torch.dtype | None = None,
+    batched: bool = False,
 ) -> bool:
     """Whether a Triton GEMM template should use TF32, matching eager matmul."""
     allow_tf32 = False
@@ -2455,21 +2456,42 @@ def mm_allow_tf32(
         else:
             allow_tf32 = bool(iface.allow_tf32())
     if device_type == "cuda" and allow_tf32:
-        # Match when cuBLAS uses TF32 (reverse engineered on H100, CUDA 12.8;
-        # on B200, cuBLAS 12.8/13.0 use TF32 for every M >= 17 whatever N and K).
-        # Only fp32 dots read ALLOW_TF32. Backed dynamic dims follow their hint
-        # and get a guard; unbacked dims, AOT mode (no runtime guard check) and
-        # dims whose bounded range spans a threshold (a guard would narrow a
-        # user's min/max) need a proof.
+        # Match when cuBLAS uses TF32: reverse engineered on H100 (CUDA 12.8)
+        # and SM10x (CUDA 12.8/13.0). On SM10x, cuBLAS skips TF32 for some
+        # M = 16 shapes with smaller N or K, and its batched choice depends on
+        # layout, hence a larger N, K floor there; batched M == 16 keeps the
+        # min(N, K) >= 512 rule although cuBLAS skips TF32 for some layouts. Only fp32 dots read
+        # ALLOW_TF32. Backed dynamic dims follow their hint and get a guard;
+        # unbacked dims, AOT mode (no runtime guard check) and dims whose
+        # bounded range spans a threshold (a guard would narrow a user's
+        # min/max) need a proof.
         fp32_tf32 = (
             dtype == torch.float32
             and torch.cuda.is_available()
             and torch.cuda.is_tf32_supported()
         )
-        thresholds = [(m, 16)]
-        if torch.version.hip or not (fp32_tf32 and using_b200()):
-            thresholds += [(n, 512), (k, 512)]
-        size_threshold = sympy.And(*(sympy.Ge(d, t) for d, t in thresholds))
+        if not torch.version.hip and fp32_tf32 and using_b200():
+            # M >= 17 with min(N, K) >= min_nk, or M == 16 with min(N, K) >= 512.
+            min_nk = 64 if batched else 16
+            thresholds = [
+                (m, 16),
+                (m, 17),
+                (n, min_nk),
+                (k, min_nk),
+                (n, 512),
+                (k, 512),
+            ]
+            size_threshold = sympy.And(
+                sympy.Ge(m, 16),
+                sympy.Ge(n, min_nk),
+                sympy.Ge(k, min_nk),
+                sympy.Or(
+                    sympy.Ge(m, 17), sympy.And(sympy.Ge(n, 512), sympy.Ge(k, 512))
+                ),
+            )
+        else:
+            thresholds = [(m, 16), (n, 512), (k, 512)]
+            size_threshold = sympy.And(*(sympy.Ge(d, t) for d, t in thresholds))
         if (
             not fp32_tf32
             or V.graph.aot_mode
@@ -2524,8 +2546,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         m, n, k = kernel_inputs.mnk_symbolic()
         dtype = kernel_inputs.mat1mat2()[0].get_dtype()
         # Skip the gate (and its guard) when this template yields no configs.
+        batched = op_name in ("bmm", "baddbmm")
         allow_tf32 = self.should_run(kernel_inputs) and mm_allow_tf32(
-            m, n, k, kernel_inputs.device_type, dtype
+            m, n, k, kernel_inputs.device_type, dtype, batched
         )
         extra_kwargs = {"ALLOW_TF32": allow_tf32}
         # Scoped to XPU (self.ascending_k) and to the templates that reference

@@ -1462,7 +1462,7 @@ class TestBlackwellBMMTemplate(TestCase):
     @parametrize("fp32_precision", ("ieee", "tf32"))
     @parametrize("n", (128, 512))
     def test_blackwell_bmm_template_allow_tf32(self, fp32_precision: str, n: int):
-        # fp32 follows the shared TF32 gate, which has no min(N, K) term on B200.
+        # fp32 follows the shared TF32 gate (min(N, K) >= 16 on SM10x).
         expect_tf32 = fp32_precision == "tf32"
         if meta_ws_enabled() and not expect_tf32:
             self.skipTest("Meta autoWS fails to warp-specialize IEEE fp32 dots")
