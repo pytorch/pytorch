@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import itertools
 import struct
 import time
 import unittest
@@ -224,16 +225,19 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
     def test_dropout_mask_parity_and_rng_offset_cuda(self):
         device = torch.device(GPU_TYPE)
-        H, W = BATCH * SEQ_LEN, FFN_DIM
+        props = torch.cuda.get_device_properties(device)
+        threads = props.multi_processor_count * props.max_threads_per_multi_processor
+        # 4 * threads elements is where fp16/bf16 (VEC=8) need more offset than fp32 (VEC=4).
+        shapes = [(BATCH * SEQ_LEN, FFN_DIM), (4 * threads,)]
 
         dtypes = [torch.float32, torch.float16, torch.bfloat16]
-        for dtype in dtypes:
+        for shape, dtype in itertools.product(shapes, dtypes):
             if dtype is torch.bfloat16 and (
                 torch.cuda.is_available() and not torch.cuda.is_bf16_supported()
             ):
                 continue
 
-            x = torch.ones((H, W), device=device, dtype=dtype)
+            x = torch.ones(shape, device=device, dtype=dtype)
 
             # Eager
             _set_seed(BASE_SEED)

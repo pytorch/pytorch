@@ -4446,6 +4446,7 @@ class SIMDScheduling(BaseScheduling):
                     )
 
         self.free_buffers_in_scheduler()
+        return final_kernel
 
     def _launch_kernel_and_cleanup(
         self,

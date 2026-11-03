@@ -41,7 +41,13 @@ set(LIBKINETO_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(LIBKINETO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(LIBKINETO_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(LIBKINETO_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
-set(LIBKINETO_THIRDPARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
+if(CAFFE2_THIRD_PARTY_ROOT)
+  set(PYTORCH_THIRDPARTY_DIR "${CAFFE2_THIRD_PARTY_ROOT}")
+else()
+  # Direct libkineto builds use the enclosing PyTorch checkout's dependencies.
+  get_filename_component(PYTORCH_THIRDPARTY_DIR
+    "${LIBKINETO_DIR}/../../../../../third_party" ABSOLUTE)
+endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 #We should default to a Release build
@@ -234,15 +240,22 @@ target_compile_options(kineto_base PRIVATE "${KINETO_COMPILE_OPTIONS}")
 target_compile_definitions(kineto_api PUBLIC "${KINETO_DEFINITIONS}")
 target_compile_options(kineto_api PRIVATE "${KINETO_COMPILE_OPTIONS}")
 
-# dynolog's ipcfabric is header-only and vendored under third_party/dynolog_headers
-# (pinned in version.txt), so only its include paths are needed below -- there
-# is no library to build or link.
-set(DYNOLOG_INCLUDE_DIR "${LIBKINETO_THIRDPARTY_DIR}/dynolog_headers/")
+# dynolog's header-only ipcfabric is vendored in PyTorch's third_party/dynolog_headers
+# (pinned in version.txt), so only its include paths are needed below.
+# Callers may set DYNOLOG_INCLUDE_DIR to use external headers.
+if(NOT DYNOLOG_INCLUDE_DIR)
+  set(DYNOLOG_INCLUDE_DIR "${PYTORCH_THIRDPARTY_DIR}/dynolog_headers")
+  if(NOT IS_DIRECTORY "${DYNOLOG_INCLUDE_DIR}")
+    message(FATAL_ERROR
+      "Dynolog headers not found at ${DYNOLOG_INCLUDE_DIR}. "
+      "Set DYNOLOG_INCLUDE_DIR to the directory containing dynolog/src/ipcfabric.")
+  endif()
+endif()
 set(IPCFABRIC_INCLUDE_DIR "${DYNOLOG_INCLUDE_DIR}/dynolog/src/ipcfabric/")
 
 if(NOT TARGET fmt::fmt-header-only)
   if(NOT FMT_SOURCE_DIR)
-    set(FMT_SOURCE_DIR "${LIBKINETO_THIRDPARTY_DIR}/fmt"
+    set(FMT_SOURCE_DIR "${PYTORCH_THIRDPARTY_DIR}/fmt"
       CACHE STRING "fmt source directory from submodules")
   endif()
 
@@ -339,7 +352,8 @@ if(KINETO_BUILD_TESTS)
     set(INSTALL_GTEST OFF)
     set(TMP_BUILD_SHARED_LIBS "${BUILD_SHARED_LIBS}")
     set(BUILD_SHARED_LIBS OFF)
-    add_subdirectory("${LIBKINETO_THIRDPARTY_DIR}/googletest")
+    add_subdirectory("${PYTORCH_THIRDPARTY_DIR}/googletest"
+                     "${LIBKINETO_BINARY_DIR}/googletest")
     set(BUILD_SHARED_LIBS "${TMP_BUILD_SHARED_LIBS}")
     if(KINETO_BACKEND STREQUAL "xpu")
       set_property(TARGET gtest PROPERTY POSITION_INDEPENDENT_CODE ON)
@@ -349,7 +363,7 @@ if(KINETO_BUILD_TESTS)
     set(JSON_BuildTests OFF CACHE INTERNAL "")
     set(JSON_Install OFF CACHE INTERNAL "")
     add_subdirectory(
-      "${LIBKINETO_THIRDPARTY_DIR}/json"
+      "${PYTORCH_THIRDPARTY_DIR}/nlohmann"
       "${LIBKINETO_BINARY_DIR}/json")
   endif()
   enable_testing()

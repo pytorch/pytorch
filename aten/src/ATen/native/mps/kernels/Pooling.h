@@ -41,6 +41,7 @@ struct AvgPoolingParams {
   int32_t divisor_override;
   bool count_include_pad;
   bool has_divisor_override;
+  bool adaptive;
 };
 
 template <unsigned N = 5, typename idx_type_t = int32_t>
