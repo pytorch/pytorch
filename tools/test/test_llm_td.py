@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 
@@ -20,7 +21,7 @@ CANDIDATES = {
     "test_nn",
     "test_ops",
     "dynamo/test_misc",
-    "dynamo/cpython/3_13/test_set",
+    "cpython/v3_13/test_set",
     "inductor/test_torchinductor",
 }
 
@@ -54,10 +55,8 @@ class TestSelection(unittest.TestCase):
         sel = Selection.from_model_output(
             out, CANDIDATES, ["torch/_dynamo/x.py", "test/test_nn.py"]
         )
-        self.assertEqual(
-            sel.files,
-            {"test_ops", "test_nn", "dynamo/test_misc", "dynamo/cpython/3_13/test_set"},
-        )
+        self.assertEqual(sel.files, {"test_ops", "test_nn", "dynamo/test_misc"})
+        self.assertEqual(select_tests.unmatched_tests(out, CANDIDATES), ["nope"])
         self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
         self.assertFalse(sel.run_all)
         self.assertTrue(sel.covers("inductor/test_torchinductor", "dynamo_wrapped"))
@@ -112,17 +111,45 @@ class TestSelection(unittest.TestCase):
         for f in [
             ".ci/docker/common/install_cuda.sh",
             ".ci/docker/requirements-ci.txt",
+            ".ci/docker/build.sh",
+            ".ci/docker/ci_commit_pins/triton.txt",
+            ".ci/docker/ubuntu/Dockerfile",
             ".ci/pytorch/test.sh",
+            ".ci/pytorch/multigpu-test.sh",
+            ".ci/pytorch/win-test.sh",
+            ".ci/pytorch/macos-test.sh",
+            ".ci/pytorch/macos-common.sh",
             ".ci/pytorch/common.sh",
+            ".ci/pytorch/common-build.sh",
+            ".ci/pytorch/common_utils.sh",
             ".ci/pytorch/torch_trace.sh",
+            ".ci/pytorch/win-test-helpers/setup_pytorch_env.bat",
+            ".ci/pytorch/win-test-helpers/test_python_shard.bat",
+            ".ci/pytorch/win-test-helpers/installation-helpers/activate_miniconda3.bat",
             ".github/workflows/_linux-test.yml",
+            ".github/workflows/_win-test.yml",
+            ".github/workflows/_mac-test.yml",
+            ".github/workflows/_rocm-test.yml",
             ".github/workflows/_rocm-test-no-dind.yml",
             ".github/workflows/_xpu-test.yml",
+            ".github/workflows/_s390x-test.yml",
+            ".github/workflows/_tpu-test.yml",
+            ".github/actions/setup-linux/action.yml",
             ".github/actions/setup-rocm/action.yml",
+            ".github/actions/setup-win/action.yml",
+            ".github/actions/setup-xpu/action.yml",
             ".github/actions/filter-test-configs/action.yml",
+            ".github/actions/download-td-artifacts/action.yml",
             ".github/scripts/filter_test_configs.py",
+            "test/run_test.py",
+            "test/conftest.py",
+            "test/pytest_shard_custom.py",
+            "pytest.ini",
+            "torch/testing/_internal/common_utils.py",
+            "torch/testing/_internal/common_device_type.py",
             "tools/testing/discover_tests.py",
             "tools/stats/import_test_stats.py",
+            "tools/stats/upload_metrics.py",
         ]:
             self.assertTrue(needs_run_all([f]), f)
             self.assertTrue((REPO_ROOT / f).exists(), f)
@@ -134,7 +161,7 @@ class TestSelection(unittest.TestCase):
             self.assertFalse(needs_run_all([f]), f)
 
     def test_malformed_output_runs_all(self) -> None:
-        for out in [
+        malformed: list[Any] = [
             [],
             {},
             {"tests": "test_nn"},
@@ -149,22 +176,26 @@ class TestSelection(unittest.TestCase):
             {"tests": [], "dirs": ["test"]},
             {"tests": [], "dirs": ["test/"]},
             {"tests": [], "dirs": ["dynamo_foo"]},
-        ]:
+            {"tests": [], "dirs": ["dynamo/cpython"]},
+            {"tests": [{"file": "nope"}]},
+            {"tests": [{"file": "test_nn (12m)"}, {"file": "nn/test_conv"}]},
+        ]
+        for out in malformed:
             sel = Selection.from_model_output(out, CANDIDATES, ["test/test_nn.py"])
             self.assertTrue(sel.run_all, out)
             self.assertIn("malformed", sel.reason)
-        sel = Selection.from_model_output({"tests": [{"file": "nope"}]}, CANDIDATES, [])
-        self.assertEqual(sel.files, set())
+        out = {"tests": [{"file": "nope"}, {"file": "test_ops"}]}
+        sel = Selection.from_model_output(out, CANDIDATES, [])
+        self.assertEqual(sel.files, {"test_ops"})
         self.assertFalse(sel.run_all)
 
     def test_dirs(self) -> None:
         candidates = CANDIDATES | {"dynamo_foo/test_a"}
-        dynamo = {"dynamo/test_misc", "dynamo/cpython/3_13/test_set"}
         for d in ["dynamo", "dynamo/", "dynamo/*", "dynamo/**", " test/dynamo/* "]:
             sel = Selection.from_model_output({"tests": [], "dirs": [d]}, candidates, [])  # fmt: skip
-            self.assertEqual(sel.files, dynamo, d)
-        sel = Selection.from_model_output({"tests": [], "dirs": ["dynamo/cpython"]}, candidates, [])  # fmt: skip
-        self.assertEqual(sel.files, {"dynamo/cpython/3_13/test_set"})
+            self.assertEqual(sel.files, {"dynamo/test_misc"}, d)
+        sel = Selection.from_model_output({"tests": [], "dirs": ["cpython"]}, candidates, [])  # fmt: skip
+        self.assertEqual(sel.files, {"cpython/v3_13/test_set"})
 
     def test_edited_tests_select_their_driver(self) -> None:
         candidates = CANDIDATES | {"test_jit", "test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja"}  # fmt: skip
@@ -265,6 +296,24 @@ class TestMain(unittest.TestCase):
         self.assertTrue(record["run_all"])
         self.assertEqual(record["reason"], "no test times")
 
+    def test_no_changed_files_runs_all(self) -> None:
+        with (
+            mock.patch.object(select_tests, "git", return_value=""),
+            mock.patch.object(select_tests, "get_test_times") as times,
+        ):
+            record = self.run_main()
+        times.assert_not_called()
+        self.assertTrue(record["run_all"])
+        self.assertEqual(record["reason"], "no changed files")
+
+    def test_bad_effort_env_is_rejected(self) -> None:
+        with (
+            mock.patch.dict(os.environ, {"LLM_TD_EFFORT": "bogus"}),
+            self.assertRaises(SystemExit),
+            mock.patch("sys.stderr"),
+        ):
+            select_tests.main(["--print-prompt"])
+
     def test_infra_change_runs_all(self) -> None:
         with (
             mock.patch.object(select_tests, "git", return_value="test/run_test.py\n"),
@@ -287,6 +336,7 @@ class TestMain(unittest.TestCase):
             git("config", "user.name", "a")
             (Path(repo) / "test" / "nn").mkdir(parents=True)
             (Path(repo) / "test" / "test_foo.py").write_text("x = 1\n" * 50)
+            (Path(repo) / "test" / "test_bar.py").write_text("import test_foo\n")
             git("add", "-A")
             git("commit", "-qm", "base")
             git("mv", "test/test_foo.py", "test/nn/test_foo.py")
@@ -299,7 +349,11 @@ class TestMain(unittest.TestCase):
             times = {"env": {"default": {"test_foo": 1.0}}}
             with (
                 mock.patch.object(select_tests, "git", git),
-                mock.patch.object(select_tests, "TESTS", ["test_foo", "test_jit"]),
+                mock.patch.object(select_tests, "REPO_ROOT", Path(repo)),
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch.object(
+                    select_tests, "TESTS", ["test_bar", "test_foo", "test_jit"]
+                ),
                 mock.patch.object(select_tests, "get_test_times", return_value=times),
                 mock.patch.object(
                     select_tests, "query_model", return_value=answer
@@ -316,9 +370,20 @@ class TestMain(unittest.TestCase):
         record, candidates = self.run_in_repo(answer)
         self.assertIsNone(record["error"])
         self.assertFalse(record["run_all"])
-        self.assertLessEqual({"nn/test_foo", "test_jit"}, set(record["files"]))
+        self.assertEqual(
+            set(record["files"]), {"test_foo", "nn/test_foo", "test_bar", "test_jit"}
+        )
+        self.assertEqual(record["unmatched"], [])
         self.assertNotIn("select nothing", candidates)
         self.assertNotIn("jit/test_new", candidates)
+
+    def test_unmatched_tests_are_recorded(self) -> None:
+        tests = [{"file": "test_jit", "confidence": "high"}, {"file": "nope", "confidence": "low"}]  # fmt: skip
+        answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": tests}}  # fmt: skip
+        record, _ = self.run_in_repo(answer)
+        self.assertIsNone(record["error"])
+        self.assertFalse(record["run_all"])
+        self.assertEqual(record["unmatched"], ["nope"])
 
     def test_malformed_output_is_an_error(self) -> None:
         answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": ["test_foo"]}}  # fmt: skip
