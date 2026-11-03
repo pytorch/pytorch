@@ -15523,16 +15523,23 @@ class TestCommon(TestCase):
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize("op", [F.softmax, F.log_softmax])
     @parametrize("margin", [17.0, 20.0])
-    @parametrize("max_col,other_col", [(0, 256), (255, 256), (2047, 2048), (4095, 4094)])
-    def test_softmax_split_tail(self, device, dtype, op, margin, max_col, other_col):
-        x = torch.full((1, 4096), -math.inf, dtype=dtype)
-        x[0, max_col] = 0
-        x[0, other_col] = -margin
-        expected = op(x.double(), dim=-1).to(dtype)
-        actual = op(x.to(device), dim=-1).cpu()
+    @parametrize("max_col,other_col", [(0, 256), (128, 0), (255, 256), (2047, 2048), (4095, 4094)])
+    @parametrize("layout", ["contiguous", "strided", "transposed"])
+    def test_softmax_split_tail(self, device, dtype, op, margin, max_col, other_col, layout):
+        x = torch.full((33, 4096), -math.inf, dtype=dtype)
+        x[:, max_col] = 0
+        x[:, other_col] = -margin
+        dim = -1
+        if layout != "contiguous":
+            x = x.t()
+            dim = 0
+            if layout == "strided":
+                x = x.contiguous()
+        expected = op(x.double(), dim=dim).to(dtype)
+        actual = op(x.to(device), dim=dim).cpu()
         self.assertEqual(actual, expected)
         rtol = 1e-6 if op is F.log_softmax else 0
-        self.assertEqual(actual[0, max_col], expected[0, max_col], atol=0, rtol=rtol)
+        self.assertEqual(actual.select(dim, max_col), expected.select(dim, max_col), atol=0, rtol=rtol)
 
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize("op", [F.softmax, F.log_softmax])
@@ -15540,11 +15547,18 @@ class TestCommon(TestCase):
         (0, 0, 0), (-math.inf, -math.inf, 0), (-math.inf, -math.inf, -math.inf),
         (0, math.inf, 0), (0, math.nan, 0),
     ])
-    def test_softmax_split_special_values(self, device, dtype, op, values):
-        x = torch.full((1, 4096), -math.inf, dtype=dtype)
-        x[0, [0, 256, 2048]] = torch.tensor(values, dtype=dtype)
-        expected = op(x.double(), dim=-1).to(dtype)
-        self.assertEqual(op(x.to(device), dim=-1).cpu(), expected)
+    @parametrize("layout", ["contiguous", "strided", "transposed"])
+    def test_softmax_split_special_values(self, device, dtype, op, values, layout):
+        x = torch.full((33, 4096), -math.inf, dtype=dtype)
+        x[:, [0, 256, 2048]] = torch.tensor(values, dtype=dtype)
+        dim = -1
+        if layout != "contiguous":
+            x = x.t()
+            dim = 0
+            if layout == "strided":
+                x = x.contiguous()
+        expected = op(x.double(), dim=dim).to(dtype)
+        self.assertEqual(op(x.to(device), dim=dim).cpu(), expected)
 
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
     @classmethod

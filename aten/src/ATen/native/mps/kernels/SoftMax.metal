@@ -351,13 +351,20 @@ softmax(
   }
 }
 
-// Online (max, sum) pair for the strided split path; sum is relative to max.
+// Online (max, tail) pair; tail excludes one maximum and is relative to max.
 inline float2 softmax_combine(float2 a, float2 b) {
   const float m = c10::metal::max(a.x, b.x);
   if (m == -INFINITY) {
     return float2(m, 0.f);
   }
-  return float2(m, a.y * precise::exp(a.x - m) + b.y * precise::exp(b.x - m));
+  if (!isfinite(m)) {
+    return float2(m, NAN);
+  }
+  const bool keep_a = a.x >= b.x;
+  const float2 hi = keep_a ? a : b;
+  const float2 lo = keep_a ? b : a;
+  const float scale = precise::exp(lo.x - m);
+  return float2(m, metal::fma(scale, lo.y, hi.y) + scale);
 }
 
 // Reduces a threadgroup's per-thread pairs along y, leaving the result in
@@ -383,7 +390,7 @@ inline float2 softmax_threadgroup_combine(
 // First pass of the strided split path. Used when the reduction dim is not
 // the innermost one and there are too few columns to fill the GPU: grid.z
 // splits the reduction dim into chunks and each threadgroup stores the
-// (max, sum) of its chunk for tptg.x columns.
+// (max, tail) of its chunk for tptg.x columns.
 template <typename T, typename idx_t>
 [[max_total_threads_per_threadgroup(kSoftmaxMaxThreads)]] [[kernel]] void
 softmax_strided_partial(
@@ -405,7 +412,7 @@ softmax_strided_partial(
   float2 acc(-INFINITY, 0.f);
   for (idx_t r = chunk_begin + tid.y; active && r < chunk_end; r += tptg.y) {
     acc =
-        softmax_combine(acc, float2(float(input[base + r * dim_stride]), 1.f));
+        softmax_combine(acc, float2(float(input[base + r * dim_stride]), 0.f));
   }
   acc = softmax_threadgroup_combine(shared, acc, tid.xy, tptg.xy);
   if (tid.y == 0 && active) {
@@ -440,7 +447,7 @@ softmax_strided_finalize(
   if (!active) {
     return;
   }
-  const SoftmaxEpilogue<log_softmax> epilogue(acc.x, acc.y);
+  const SoftmaxEpilogue<log_softmax, true> epilogue(acc.x, acc.y);
   const idx_t base = input_row_offset(row, params);
   const idx_t out_base = out_row_offset(row, dim_size, inner_size);
   const idx_t dim_stride = params.strides[params.dim];
