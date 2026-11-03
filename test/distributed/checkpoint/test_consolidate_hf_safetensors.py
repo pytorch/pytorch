@@ -160,6 +160,55 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
                 )
         dist.barrier()
 
+    def test_parse_input_metadata_integer_bool_dtypes(self) -> None:
+        if importlib.util.find_spec("safetensors") is None:
+            self.skipTest("safetensors not installed")
+
+        from torch.distributed.checkpoint._consolidate_hf_safetensors import (
+            _FqnData,
+            _InputFileData,
+            _OutputFileData,
+            _parse_input_metadata,
+        )
+
+        for code, dtype in (
+            ("I8", torch.int8),
+            ("U8", torch.uint8),
+            ("I16", torch.int16),
+            ("I32", torch.int32),
+            ("I64", torch.int64),
+            ("BOOL", torch.bool),
+            ("F32", torch.float32),
+        ):
+            with self.subTest(dtype=code):
+                inputs = {
+                    "shard": _InputFileData(
+                        metadata={
+                            "__metadata__": {
+                                "DCP_SHARDING_INFO": json.dumps(
+                                    {"weight": {"saved_offsets": [0]}}
+                                )
+                            },
+                            "weight": {"shape": [4], "dtype": code},
+                        }
+                    )
+                }
+                outputs = {
+                    "out": _OutputFileData(
+                        fqn_data={"weight": _FqnData()}
+                    )
+                }
+
+                _parse_input_metadata(inputs, outputs)
+                result = outputs["out"].fqn_data["weight"]
+
+                self.assertEqual(result.shape_in_file, [4])
+                self.assertEqual(result.dtype_str, code)
+                self.assertEqual(
+                    result.dtype_size,
+                    torch.empty((), dtype=dtype).element_size(),
+                )
+
     def test_calculate_max_contiguous_elements_validations(self) -> None:
         """Test validation logic in _calculate_max_contiguous_elements function."""
 
