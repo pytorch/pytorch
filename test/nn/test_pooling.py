@@ -2543,6 +2543,21 @@ class TestPoolingNNCudaOnly(NNTestCase):
         self.assertEqual(grad_input[..., ph * k :, :].count_nonzero().item(), 0)
         self.assertEqual(grad_input[..., :, pw * k :].count_nonzero().item(), 0)
 
+    @largeTensorTest("30GB", device="cuda")
+    def test_max_unpool3d_many_slices(self, device):
+        # N * C * T == 2**31 z-slices: the launcher's slice count must not be
+        # narrowed to int (it wrapped negative and launched nothing, leaving
+        # the output all zeros).
+        N, C, T = 1, 2**16, 2**15
+        input = torch.ones(N, C, T, 1, 1, device=device, dtype=torch.half)
+        indices = torch.zeros(N, C, T, 1, 1, device=device, dtype=torch.long)
+        out = F.max_unpool3d(input, indices, kernel_size=1, output_size=(T, 1, 1))
+        del input, indices
+        # Every frame of a (n, c) plane maps to flat position 0 of that plane.
+        # Use min/max rather than count_nonzero to avoid a full-size mask.
+        self.assertEqual(out[:, :, 0].min().item(), 1)
+        self.assertEqual(out[:, :, 1:].max().item(), 0)
+
     @parametrize_test("channels_last", [False, True])
     @parametrize_test(
         "shape,pool_kwargs",
