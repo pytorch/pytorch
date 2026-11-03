@@ -1006,7 +1006,7 @@ Tensor& _scaled_mnk4(
     bool use_fast_accum,
     Tensor& out,
     const ScaledGemmEpilogue& epilogue = {}) {
-  at::cuda::blas::detail::check_mnk4_support();
+  scaled_blas::check_mnk4_support();
   TORCH_CHECK_VALUE(
       out.scalar_type() == kBFloat16 || out.scalar_type() == kHalf || out.scalar_type() == kFloat,
       "packed MNxK4 output dtype must be BFloat16, Float16, or Float32, got ", out.scalar_type());
@@ -1736,7 +1736,7 @@ void scaled_mm_cuda_v2_impl(
     }
     if (gemm_impl == ScaledGemmImplementation::MNK4_1x32 ||
         gemm_impl == ScaledGemmImplementation::MNK4_1x128) {
-      at::cuda::blas::detail::check_mnk4_support();
+      scaled_blas::check_mnk4_support();
     }
     epilogue.beta = beta.to<float>();
     epilogue.alpha = alpha.to<float>();
