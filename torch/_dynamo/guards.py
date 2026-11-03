@@ -67,6 +67,7 @@ from torch._C._dynamo.guards import (
     GuardDebugInfo,
     GuardManager,
     install_no_tensor_aliasing_guard,
+    install_object_alias_pattern_guard,
     install_object_aliasing_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
@@ -3684,8 +3685,11 @@ class GuardBuilder(GuardBuilderBase):
         refs = ", ".join(self.arg_ref(source.name) for source in sources)
         code = [f"___receiver_alias_pattern(({refs},)) == {aliases!r}"]
         self._set_guard_export_info(guard, code)
-        self.add_python_lambda_leaf_guard_to_root(
-            code, get_verbose_code_parts(code, guard)
+        install_object_alias_pattern_guard(
+            [self.get_guard_manager_from_source(source) for source in sources],
+            aliases,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
         )
 
     # Multi-source guard (two inputs aliasing) — not expressible as a
@@ -5403,9 +5407,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(
             obj, (types.MethodDescriptorType, types.ClassMethodDescriptorType)
         ):
+            from .variables.object_protocol import Py_TPFLAGS_IMMUTABLETYPE
+
             owner = obj.__objclass__
             flags = type.__dict__["__flags__"].__get__(owner, type(owner))
-            if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
+            if not flags & Py_TPFLAGS_IMMUTABLETYPE:
                 raise torch._dynamo.exc.PackageError(
                     f"Cannot serialize {type(obj).__name__} with a mutable owner"
                 )
@@ -5683,11 +5689,13 @@ def _resolves_by_reference(value: object) -> bool:
             and getattr(owner, value.name, None) is value
         )
     if isinstance(value, (types.MethodDescriptorType, types.ClassMethodDescriptorType)):
+        from .variables.object_protocol import Py_TPFLAGS_IMMUTABLETYPE
+
         owner = value.__objclass__
         # Match GuardsStatePickler's immutable-owner descriptor reducer.
         flags = type.__dict__["__flags__"].__get__(owner, type(owner))
         return (
-            bool(flags & (1 << 8))
+            bool(flags & Py_TPFLAGS_IMMUTABLETYPE)
             and _resolves_by_reference(owner)
             and any(
                 item is value for item in get_type_dict_no_user_code(owner).values()
@@ -6316,6 +6324,12 @@ class CheckFunctionManager:
                     for guard in sorted_guards
                 )
             ),
+            # Filtered guards need order annotations only for retained dictionaries.
+            guard_on_key_order={
+                source
+                for source in output_graph_guards_state.guard_on_key_order
+                if id(builder.get(source)) in builder.guard_tree_values
+            },
             input_source_to_sizes_strides=pytree.tree_map(
                 convert_int_to_concrete_values,
                 output_graph_guards_state.input_source_to_sizes_strides,
