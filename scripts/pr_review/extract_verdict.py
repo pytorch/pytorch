@@ -3,10 +3,11 @@
 
 The review job runs Claude against UNTRUSTED pull-request content with network
 egress locked down, no GitHub write token, and an S3 credential that can write
-only the raw traces and inputs under pr_review_traces/. The only thing that
-leaves that job for a public surface is the JSON this script produces, so this
-file is the egress boundary and every control here exists because that text is attacker-influenced
-and ends up somewhere a human or a dashboard reads.
+only under the private pr_review_traces/ prefix. Apart from token and cost
+numbers, the only thing that leaves that job for a public surface is the JSON
+this script produces, so this file is the egress boundary and every control here
+exists because that text is attacker-influenced and ends up somewhere a human or
+a dashboard reads.
 
 The model is given the output shape in the prompt, NOT as an enforced schema -
 the workflow passes no --json-schema - so shape, types, the verdict enum and the
@@ -33,8 +34,8 @@ None of this closes the channel, and it is not the thing keeping us safe. A few
 hundred characters of prose can still carry a secret via an acrostic or semantic
 encoding, and no output filter fixes that. The control that actually bounds the
 damage is upstream: a one-hour role limited to Bedrock and S3 writes under
-pr_review_traces/, with no GitHub write. This script raises the cost of the naive attempts and makes the
-deliberate ones narrow.
+pr_review_traces/, with no GitHub write. This script raises the cost of the
+naive attempts and makes the deliberate ones narrow.
 
 A well-formed file is written on every path where writing is possible, and the
 exit code is 0 — a rejected or malformed result is reported as a

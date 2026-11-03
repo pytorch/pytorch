@@ -745,7 +745,8 @@ jobs:
           echo "changed files: ${FILES}, diff bytes: ${BYTES}"
           # The commit's tree, not the worktree's: the symlink scrub above
           # edited only the latter. A replay checks its rebuild against this.
-          echo "head_tree_sha=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+          TREE=$(git rev-parse 'HEAD^{tree}')
+          echo "head_tree_sha=${TREE}" >> "$GITHUB_OUTPUT"
 
           if [ "$FILES" -gt "${MAX_CHANGED_FILES}" ] || [ "$BYTES" -gt "${MAX_DIFF_BYTES}" ]; then
             echo "::notice::PR exceeds the review size gate (${FILES} files, ${BYTES}B)"
@@ -784,10 +785,11 @@ jobs:
       # an eval case without rebuilding them from GitHub, where comments get
       # edited or deleted and force-pushed heads are not guaranteed to survive.
       # The checkout itself is not kept, so a replay needs head_sha or
-      # merge_base_sha still fetchable. A tree rebuilt from the merge base and
-      # pr-diff.txt is the one the model read only if it hashes to
-      # head_tree_sha; a binary change, which a plain diff cannot carry, fails
-      # that check.
+      # merge_base_sha still fetchable. The merge base plus pr-diff.txt rebuilds
+      # the reviewed commit only if the result hashes to head_tree_sha (a binary
+      # change cannot: the diff is plain text). The model read that commit minus
+      # the symlinks the scrub above removed, so after that check a replay
+      # re-runs the scrub before the review reads the tree.
       # Before the model: everything it uploads is final by now, and this way
       # it does not depend on the credential outlasting both stages. Under
       # pr_review_traces/ because that is the one prefix this job's role may
@@ -795,6 +797,8 @@ jobs:
       - name: Upload the review inputs to S3
         if: steps.aws.outcome == 'success'
         env:
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
           HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
           BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
           MERGE_BASE_SHA: ${{ needs.prepare.outputs.merge_base_sha }}
@@ -811,10 +815,12 @@ jobs:
           # timeout keeps a slow S3 from eating the model's credential time.
           if mkdir -p /tmp/pr-review-input \
              && { [ "${#FILES[@]}" -eq 0 ] || cp -- "${FILES[@]}" /tmp/pr-review-input/; } \
-             && jq -n --arg head_sha "$HEAD_SHA" --arg base_sha "$BASE_SHA" \
+             && jq -n --arg repo "$REPO" --arg pr_number "$PR_NUMBER" \
+                      --arg head_sha "$HEAD_SHA" --arg base_sha "$BASE_SHA" \
                       --arg merge_base_sha "$MERGE_BASE_SHA" --arg head_tree_sha "$HEAD_TREE_SHA" \
-                      '{head_sha: $head_sha, base_sha: $base_sha, merge_base_sha: $merge_base_sha,
-                        head_tree_sha: $head_tree_sha, diff: "git diff merge_base_sha head_sha"}' \
+                      '{repo: $repo, pr_number: ($pr_number | tonumber), head_sha: $head_sha,
+                        base_sha: $base_sha, merge_base_sha: $merge_base_sha,
+                        head_tree_sha: $head_tree_sha}' \
                       > /tmp/pr-review-input/manifest.json \
              && timeout 120 aws s3 cp --recursive /tmp/pr-review-input "$DEST"; then
             echo "uploaded ${#FILES[@]} input file(s) and the manifest to ${DEST}"

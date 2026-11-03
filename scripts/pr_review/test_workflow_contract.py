@@ -46,6 +46,7 @@ import textwrap
 import unittest
 import unittest.mock
 from pathlib import Path
+from typing import Callable
 
 
 HERE = Path(__file__).resolve().parent
@@ -667,7 +668,12 @@ def sole_outputs(case: unittest.TestCase, written: str) -> dict:
 
 
 def run_step(
-    text: str, marker: str, td: str, env: dict, stubs: dict, rewrite=None
+    text: str,
+    marker: str,
+    td: str,
+    env: dict,
+    stubs: dict,
+    rewrite: Callable[[str], str] | None = None,
 ) -> tuple:
     """Extract the `run:` body of the step NAMED `marker` and EXECUTE it.
 
@@ -1707,8 +1713,8 @@ class TestCredentialDuration(unittest.TestCase):
     `prepare` and `publish` take the 900s STS minimum. The review job takes
     3600s, the role's ceiling, because its model step may run for 55 minutes; its
     role grants Bedrock and S3 writes under `pr_review_traces/`. Omitting the
-    line does not fail anything — it silently
-    defaults the credential to an hour — so every value is pinned.
+    line does not fail anything — it silently defaults the credential to an
+    hour — so every value is pinned.
     """
 
     EXPECTED = ("900", "3600", "900")
@@ -4926,6 +4932,8 @@ class TestTheReviewInputsAreKept(unittest.TestCase):
                 td,
                 {
                     "S3_BUCKET": "b",
+                    "REPO": "o/r",
+                    "PR_NUMBER": "7",
                     "HEAD_SHA": "h" * 40,
                     "BASE_SHA": "b" * 40,
                     "MERGE_BASE_SHA": "m" * 40,
@@ -4958,13 +4966,15 @@ class TestTheReviewInputsAreKept(unittest.TestCase):
             self.assertIn(f"{f}=content of {f}\n", recorded)
         self.assertIn("manifest.json={\n", recorded)
         self.assertEqual(
-            (
-                manifest["head_sha"],
-                manifest["base_sha"],
-                manifest["merge_base_sha"],
-                manifest["head_tree_sha"],
-            ),
-            ("h" * 40, "b" * 40, "m" * 40, "t" * 40),
+            manifest,
+            {
+                "repo": "o/r",
+                "pr_number": 7,
+                "head_sha": "h" * 40,
+                "base_sha": "b" * 40,
+                "merge_base_sha": "m" * 40,
+                "head_tree_sha": "t" * 40,
+            },
         )
         self.assertNotIn("::warning::", proc.stdout)
 
