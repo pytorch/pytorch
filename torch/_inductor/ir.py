@@ -9143,7 +9143,7 @@ class UserDefinedCuteDSLKernel(UserDefinedKernel):
 
     Unlike a user Triton kernel, Inductor does not compile or fuse into it: the
     Python wrapper launches the host function on the current stream of the kernel's
-    device. The C++ wrappers refuse it.
+    device. The C++ and FX wrappers refuse it.
     """
 
     def __init__(
@@ -9173,7 +9173,10 @@ class UserDefinedCuteDSLKernel(UserDefinedKernel):
         arguments, None, objects). Parameters the call left out take a copy of their
         defaults, made here as the side table copies passed constants. Unlike those,
         defaults are not guarded by Dynamo: changing one later does not recompile."""
-        from torch._higher_order_ops.cutedsl_kernel_wrap import python_scalar
+        from torch._higher_order_ops.cutedsl_kernel_wrap import (
+            CUTEDSL_CONSTANT_RULES,
+            python_scalar,
+        )
         from torch._higher_order_ops.user_kernel_hop import _snapshot
 
         info = self.host_fn_info
@@ -9185,7 +9188,7 @@ class UserDefinedCuteDSLKernel(UserDefinedKernel):
             if name in self.ordered_kwargs_for_cpp_kernel:
                 value = self.get_kwargs_value(name)
             else:
-                value = _snapshot(info.defaults[name])
+                value = _snapshot(info.defaults[name], CUTEDSL_CONSTANT_RULES)
             if isinstance(value, IRNode):
                 runtime_args[name] = value
             elif info.is_runtime_scalar(name, value):
@@ -9200,11 +9203,14 @@ class UserDefinedCuteDSLKernel(UserDefinedKernel):
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         runtime_args, constant_args = self.split_args()
         name = wrapper.define_user_defined_cutedsl_kernel(
-            self.kernel, constant_args, runtime_args
+            self.kernel, constant_args=constant_args, runtime_args=runtime_args
         )
         self.codegen_comment(wrapper, name)
         wrapper.generate_user_defined_cutedsl_kernel_call(
-            name, self.kernel, runtime_args, self.get_device_or_error()
+            name,
+            self.kernel,
+            runtime_args=runtime_args,
+            device=self.get_device_or_error(),
         )
 
 
