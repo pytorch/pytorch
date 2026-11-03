@@ -76,7 +76,7 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 - [ ] **C10_CUDA_KERNEL_LAUNCH_CHECK** — PR launches CUDA kernels with `<<<>>>` syntax but doesn't follow with `C10_CUDA_KERNEL_LAUNCH_CHECK()` immediately after to detect launch errors early
 - [ ] **CUDAStreamGuard** — PR manually manages CUDA streams (`cudaStreamCreate`/`cudaStreamDestroy`) instead of using `CUDAStreamGuard` or getting streams from `at::cuda::getCurrentCUDAStream()` / `getStreamFromPool()`
 - [ ] **CUDAEvent synchronization** — PR uses `cudaDeviceSynchronize()` or `cudaStreamSynchronize()` for cross-stream ordering instead of `CUDAEvent::record()` + `CUDAEvent::block()` which avoids unnecessary full synchronization
-- [ ] **Cross-stream tensor lifetime / recordStream** — PR uses a tensor on a stream other than the one it was allocated on. Check that either the side-stream use is synced back to the creation stream before the last reference is dropped, or `record_stream()` / `recordStream()` is called; with neither, the allocator may reuse the memory while the side stream is still using it. If the PR adds `record_stream`, don't flag it automatically: decide whether it is avoidable, using the `cuda-streams` skill (`.agents/skills/cuda-streams/SKILL.md`), and say which case you think applies and why
+- [ ] **Cross-stream tensor lifetime / recordStream** — PR uses a tensor on a stream other than the one it was allocated on. Check that either the side-stream use is synced back to the creation stream before the last reference is dropped, or `record_stream()` / `recordStream()` is called; with neither, the allocator may reuse the memory while the side stream is still using it. If the PR adds `record_stream`, don't flag it automatically: decide whether it is avoidable, using the `cuda-streams` skill (`../cuda-streams/SKILL.md`), and say which case you think applies and why
 - [ ] **CUDA graph compatibility** — PR adds host-GPU synchronization, unpinned memory transfers, or other graph-unsafe operations without checking `currentStreamCaptureStatusMayInitCtx()` to detect CUDA graph capture mode
 - [ ] **AcceleratorHooksInterface** — PR adds device-specific `#ifdef USE_CUDA` blocks in generic code instead of using `AcceleratorHooksInterface` from `aten/src/ATen/detail/AcceleratorHooksInterface.h` for device-agnostic behavior
 - [ ] **DeviceGuardImplInterface** — PR implements custom device management without going through `DeviceGuardImplInterface` from `c10/core/impl/DeviceGuardImplInterface.h`, bypassing the standard device abstraction layer
@@ -167,6 +167,12 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 When a PR adds CI (a workflow, job, matrix or matrix entry) or changes a CI runner label, even if only its prefix changes:
 
 - [ ] **Runner naming standard** — PR adds or changes a runner label, or adds CI that inherits one from an input, matrix or dispatch default or option, and the label breaks the runner naming standard in [ci-runner-naming.md](ci-runner-naming.md). If no other CI in this repo uses that label, this always means **Request Changes**; if other CI already uses it, give a short non-blocking heads-up instead (an exception to "Everything is a must-fix")
+
+### CI Dependencies
+
+When a PR changes code that runs in a Linux CI build or test job (anything under `.ci/` other than `.ci/docker/`, `.github/`, or scripts those jobs run, such as `benchmarks/dynamo/` and `test/`):
+
+- [ ] **No package resolution at test time** — PR adds an install that resolves packages from an index while a Linux CI job runs, instead of adding them to the CI image. Apply [ci-dependencies.md](ci-dependencies.md) for what counts, the fix, and the exemptions. A non-exempt install always means **Request Changes**
 
 ### Miscellaneous
 

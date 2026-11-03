@@ -43,7 +43,8 @@ namespace c10d {
 // Thread safety: user-facing calls follow the Backend contract (the caller
 // serializes them); pair_mu_ additionally protects the pair map so abort()
 // (which may fire from a background thread) can walk it safely. The lock is
-// released around the slow pair-comm construction.
+// released around the slow pair-comm construction. Completion hooks may be
+// (un)registered from any thread, so completion_hooks_mu_ guards them.
 template <typename T>
 class LazyBackend : public Backend {
   static_assert(
@@ -332,6 +333,7 @@ class LazyBackend : public Backend {
     return primary_->supportsCompletionHooks();
   }
   void registerCompletionHook(int64_t hook_id, CompletionHook hook) override {
+    std::lock_guard<std::mutex> hooks_lk(completion_hooks_mu_);
     completion_hooks_.emplace(hook_id, hook);
     primary_->registerCompletionHook(hook_id, hook);
     std::lock_guard<std::mutex> lk(pair_mu_);
@@ -340,6 +342,7 @@ class LazyBackend : public Backend {
     }
   }
   void unregisterCompletionHook(int64_t hook_id) override {
+    std::lock_guard<std::mutex> hooks_lk(completion_hooks_mu_);
     completion_hooks_.erase(hook_id);
     primary_->unregisterCompletionHook(hook_id);
     std::lock_guard<std::mutex> lk(pair_mu_);
@@ -442,6 +445,9 @@ class LazyBackend : public Backend {
     for (const auto& [hook_id, hook] : abort_hooks_) {
       sub->registerAbortHook(hook_id, hook);
     }
+    // Completion hooks may be (un)registered from any thread; hold the lock
+    // until the channel is visible to them.
+    std::lock_guard<std::mutex> hooks_lk(completion_hooks_mu_);
     for (const auto& [hook_id, hook] : completion_hooks_) {
       sub->registerCompletionHook(hook_id, hook);
     }
@@ -501,6 +507,9 @@ class LazyBackend : public Backend {
 
   bool coalescing_active_{false};
   std::unordered_map<int64_t, AbortHook> abort_hooks_;
+  // Guards completion_hooks_ and its fan-out to pair comms. Taken before
+  // pair_mu_.
+  std::mutex completion_hooks_mu_;
   std::unordered_map<int64_t, CompletionHook> completion_hooks_;
 };
 

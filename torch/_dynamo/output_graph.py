@@ -26,6 +26,7 @@ import dataclasses
 import functools
 import inspect
 import itertools
+import linecache
 import logging
 import operator
 import re
@@ -175,13 +176,14 @@ from .utils import (
 from .variables.builder import (
     BackwardStateGraphArg,
     GraphArg,
+    SourcelessUserDefinedObjectBuilder,
     TrackedFake,
+    VariableBuilder,
     wrap_fx_proxy,
 )
 from .variables.ctx_manager import ContextWrappingVariable
 from .variables.functions import ClosureConversionError, VariableTracker
 from .variables.misc import NullVariable
-from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -1741,8 +1743,9 @@ class OutputGraph(OutputGraphCommon):
                 install_guard(source.make_guard(GuardBuilder.NN_MODULE))
 
                 def wrap_name(module_key: str) -> VariableTracker:
-                    # pyrefly: ignore [bad-argument-type]
-                    return NNModuleVariable(type(target), module_key, target, **options)
+                    return VariableBuilder.create_internal_nn_module(
+                        target, module_key, **options
+                    )
 
             else:
                 # This is Dynamo created graph module, e.g., graph module coming
@@ -1750,8 +1753,9 @@ class OutputGraph(OutputGraphCommon):
                 # sourceless, so let's return a unspecializedNNModule variable
                 # tracker.
                 def wrap_name(module_key: str) -> VariableTracker:
-                    # pyrefly: ignore[bad-argument-type]
-                    return variables.UnspecializedNNModuleVariable(target, **options)
+                    return SourcelessUserDefinedObjectBuilder.create(
+                        self.current_tx, target, **options
+                    )
 
         elif isinstance(target, (torch.SymInt, torch.SymFloat)):
             # HACKY CODE REGION BEGIN
@@ -4013,6 +4017,7 @@ class SubgraphTracer(fx.Tracer):
         self.dynamic_scalar_nodes: dict[int, torch.SymInt] = {}
 
         self.prev_inst = None
+        self.stack_trace_cache: dict[tuple[tuple[object, ...], ...], str] = {}
         # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
         # during this tracer's tracing. This is currently only used by experimental AC out-of-tree
         # via torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer.
@@ -4301,9 +4306,44 @@ class SubgraphTracer(fx.Tracer):
             # Reverse the frame_summaries, such that the innermost frame is at the last
             filtered_frame_summaries.reverse()
 
-            # official from_list stub doesn't have new-style type
-            msgs = traceback.StackSummary.from_list(filtered_frame_summaries).format()
-            rv.node.stack_trace = "".join(msgs)
+            frame_keys = []
+            for frame in filtered_frame_summaries:
+                end_lineno = getattr(frame, "end_lineno", None)
+                start_lineno = frame.lineno
+                if start_lineno is None:
+                    source_lines = ()
+                else:
+                    # Traceback formats multiline source spans starting in Python 3.13.
+                    last_source_line = (
+                        end_lineno
+                        if sys.version_info >= (3, 13) and end_lineno is not None
+                        else start_lineno
+                    )
+                    source_lines = tuple(
+                        linecache.getline(frame.filename, lineno)
+                        for lineno in range(start_lineno, last_source_line + 1)
+                    )
+                frame_keys.append(
+                    (
+                        frame.filename,
+                        frame.lineno,
+                        frame.name,
+                        end_lineno,
+                        getattr(frame, "colno", None),
+                        getattr(frame, "end_colno", None),
+                        source_lines,
+                    )
+                )
+            cache_key = tuple(frame_keys)
+            stack_trace = self.stack_trace_cache.get(cache_key)
+            if stack_trace is None:
+                # official from_list stub doesn't have new-style type
+                msgs = traceback.StackSummary.from_list(
+                    filtered_frame_summaries
+                ).format()
+                stack_trace = "".join(msgs)
+                self.stack_trace_cache[cache_key] = stack_trace
+            rv.node.stack_trace = stack_trace
 
         if (
             torch._dynamo.config.use_graph_deduplication

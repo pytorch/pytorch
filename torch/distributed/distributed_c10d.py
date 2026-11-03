@@ -46,6 +46,7 @@ from torch._C._distributed_c10d import (
     Backend as C10DBackend,
     BarrierOptions,
     BroadcastOptions,
+    CompletionHookArgs,  # noqa: F401
     DebugLevel,
     FlightRecorderHook,
     GatherOptions,
