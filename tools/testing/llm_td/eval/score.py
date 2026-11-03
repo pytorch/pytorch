@@ -30,8 +30,8 @@ single policy `td25`, its CI cut of the top 25% per config, and ignores
 --policies.
 
 Every tag and policy is scored on the same samples: those with a TD replay
-of the current test-times.json and sample (see replay_inputs) and a result
-for every model tag; the rest are counted on stderr. The test files that
+of the current test-times.json, sample, STATS artifacts and TD heuristics'
+code (see replay_inputs and replay_stats) and a result for every model tag; the rest are counted on stderr. The test files that
 import an edited test file are found with git grep at the sample's head; a
 sample on which that fails (its head is not in this clone?) is left out and
 counted on stderr too, as in CI the grep works.
@@ -49,8 +49,9 @@ periodic reuses trunk's job names. test-times.json is merged over jobs per
 config, so a config that TD and non-TD jobs share (e.g. `default` in
 periodic) is priced as one.
 CI applies the TD cut and the hedge per job over that job's own test list;
-this models a job as a config of test-times.json, and for a failure in a
-config missing from test-times.json falls back to a cut over all candidates.
+this models a job as a config of test-times.json, and hedges a config no job
+of test-times.json records over its fallback job's times, as run_test.py
+does: default/<config>, else default/default (see fallback_seconds).
 
 `files` in the summary is the median number of files selected among the
 selections that do not run everything.
@@ -73,6 +74,12 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from tools.stats.import_test_stats import (
+    ADDITIONAL_CI_FILES_FOLDER,
+    TD_HEURISTIC_HISTORICAL_EDITED_FILES,
+    TD_HEURISTIC_PROFILING_FILE,
+    TEST_FILE_RATINGS_FILE,
+)
 from tools.testing.llm_td.eval import REPO
 from tools.testing.llm_td.select_tests import git_grep, MAX_CHANGED_FILES
 from tools.testing.llm_td.selection import (
@@ -92,8 +99,11 @@ HEDGE = re.compile(r"final\+td(\d+(?:\.\d+)?)?")
 MATRIX_CONFIG = re.compile(r'config: "([^"]+)"')
 VERSION = re.compile(r"\d+(\.\d+)*")
 MATRIX_SUFFIX = re.compile(r" \([^()]*\)")
-# The TEST_CONFIGs whose .ci/pytorch/test.sh function exports NO_TD=1.
-NO_TD_CONFIGS = {"dynamo_cpython"}
+# .ci/pytorch/test.sh runs a TEST_CONFIG containing one of these through a function that exports NO_TD=1.
+NO_TD_CONFIGS = ("dynamo_cpython",)
+# The historical-stats artifacts td_replay reads, and the TD code it runs.
+STATS_ARTIFACTS = [TEST_FILE_RATINGS_FILE, TD_HEURISTIC_HISTORICAL_EDITED_FILES, TD_HEURISTIC_PROFILING_FILE]  # fmt: skip
+TD_CODE = REPO / "tools/testing/target_determination"
 
 # config -> file -> [cpu, gpu] seconds
 Seconds = dict[str, dict[str, list[float]]]
@@ -103,7 +113,7 @@ Seconds = dict[str, dict[str, list[float]]]
 class Choice:
     """A Selection plus the files run on top of it in each config (TD's cut or the hedge).
 
-    `other` applies to configs absent from test-times.json."""
+    `other` applies to configs absent from test-times.json and its fallback job."""
 
     sel: Selection
     per_config: dict[str, set[str]] = field(default_factory=dict)
@@ -140,6 +150,12 @@ def test_seconds(path: Path) -> Seconds:
             for f, s in files.items():
                 out[c][f][gpu] += s
     return {c: dict(files) for c, files in out.items()}
+
+
+@functools.cache
+def fallback_seconds(path: Path) -> dict[str, dict[str, float]]:
+    """config -> file -> seconds of test-times.json's "default" job, which run_test.py uses for a job it has no times of."""
+    return json.loads(path.read_text()).get("default", {})
 
 
 def td_workflow(name: str) -> bool:
@@ -197,7 +213,7 @@ def ci_jobs(
             elif "test" in uses:
                 w = job.get("with") or {}
                 ok = td_job(uses, arg(key, "build-environment"), w.get("force-no-td"), str(w.get("tests-to-include", "")))  # fmt: skip
-                out |= {(name, c, ok and c not in NO_TD_CONFIGS) for c in MATRIX_CONFIG.findall(arg(key, "test-matrix"))}  # fmt: skip
+                out |= {(name, c, ok and not any(n in c for n in NO_TD_CONFIGS)) for c in MATRIX_CONFIG.findall(arg(key, "test-matrix"))}  # fmt: skip
         return out
 
     out: dict[bool, set[tuple[str, str, str]]] = {True: set(), False: set()}
@@ -274,7 +290,9 @@ def hedge(
 ) -> set[str]:
     """TD's positive-score files that fit in `share` of `seconds`' total, filled greedily in TD's order.
 
-    As in selection.Selection.split, files the selection already covers cost
+    This is selection.Selection.split for any share and with a job's test
+    list taken to be `seconds` and `untimed` (test_hedge_matches_split pins
+    the two together). As in split, files the selection already covers cost
     nothing, and a file that does not fit is skipped while smaller ones after
     it may still fit. Files with no recorded time are skipped rather than added
     for free. If the selection covers none of `seconds`' files and the
@@ -317,10 +335,12 @@ def policy(
     td: dict | None,
     seconds: Seconds,
     grep: Callable[[str], list[str]] | None = None,
+    fallback: dict[str, dict[str, float]] | None = None,
 ) -> Choice | None:
     """The files `name` runs on sample `s`, or None when its inputs are missing.
 
-    `grep` finds the importers of edited test files (see selection.importers)."""
+    `grep` finds the importers of edited test files (see selection.importers),
+    and `fallback` is fallback_seconds."""
     cands = set(s["candidates"])
     if name == "td25":
         if td is None:
@@ -367,7 +387,12 @@ def policy(
             c: hedge(sel, td["scored"], fs, share, c, cut.get(c, ()), untimed)
             for c, fs in times.items()
         }
-        other = hedge(sel, td["scored"], total, share, "", td["top25"], untimed)
+        # A config no job records is hedged over the fallback job's times, and its test list is every candidate.
+        fb = {c: {f: t for f, t in fs.items() if f in cands} for c, fs in (fallback or {}).items()}  # fmt: skip
+        for c in fb.keys() - times.keys() - {"default"}:
+            per_config[c] = hedge(sel, td["scored"], fb[c], share, c, td["top25"], cands - set(fb[c]))  # fmt: skip
+        fs = fb.get("default", {})
+        other = hedge(sel, td["scored"], fs, share, "", td["top25"], cands - set(fs))
         return Choice(sel, per_config, other)
     if name == "final-hm":
         # A malformed answer is left for from_model_output to fall back on.
@@ -394,9 +419,16 @@ def malformed(out: object, cands: set[str]) -> bool:
 
 
 def replay_inputs(stats: str, times: bytes, sample: bytes) -> str:
-    """The `inputs` hash of a TD replay of `sample` under `times` and the digest `stats` of td_replay's STATS artifacts."""
+    """The `inputs` hash of a TD replay of `sample` under `times` and the digest `stats` (see replay_stats)."""
     parts = [stats, *(hashlib.sha256(b).hexdigest() for b in (times, sample))]
     return hashlib.sha256(" ".join(parts).encode()).hexdigest()
+
+
+def replay_stats(stats_dir: Path) -> str:
+    """A hash of the STATS_ARTIFACTS in `stats_dir` and of the TD code (TD_CODE) a replay runs."""
+    paths = [stats_dir / a for a in STATS_ARTIFACTS] + sorted(TD_CODE.rglob("*.py"))
+    parts = [f"{p.name} {hashlib.sha256(p.read_bytes()).hexdigest()}" for p in paths]
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
 def cost_fraction(
@@ -435,9 +467,11 @@ def score(
     strong: bool,
     samples: Path,
     td_dir: Path,
+    stats: str,
 ) -> list[dict]:
-    """Rows of every tag and policy, all on the ids that have a current TD replay, git grep at their head and, unless `unasked`, a result for every tag but `td`."""
+    """Rows of every tag and policy, all on the ids that have a TD replay of the current inputs under `stats` (see replay_stats), git grep at their head and, unless `unasked`, a result for every tag but `td`."""
     seconds = test_seconds(data / "test-times.json")
+    fallback = fallback_seconds(data / "test-times.json")
     times = (data / "test-times.json").read_bytes()
     rows = []
     dropped: collections.Counter[str] = collections.Counter()
@@ -447,8 +481,10 @@ def score(
         loaded = {tag: load(data, tag, sid, samples, td_dir) for tag in tags}
         s, _, td = next(iter(loaded.values()))
         missing = [] if td else ["td replay"]
-        if td and td.get("inputs") != replay_inputs(td.get("stats", ""), times, (samples / f"{sid}.json").read_bytes()):  # fmt: skip
-            missing = ["td replay of the current test-times.json and sample"]
+        if td and td.get("inputs") != replay_inputs(stats, times, (samples / f"{sid}.json").read_bytes()):  # fmt: skip
+            missing = [
+                "td replay of the current test-times.json, sample, STATS and TD code"
+            ]
         if not unasked(s):
             missing += [f"{tag} result" for tag, (_, r, _) in loaded.items() if tag != "td" and r is None]  # fmt: skip
         dropped.update(missing)
@@ -459,7 +495,9 @@ def score(
         for tag, (_, r, td) in loaded.items():
             skipped = tag != "td" and unasked(s)
             for pol in ["td25"] if tag == "td" else policies:
-                choice = policy(pol, s, r, td, seconds, grep_head(s, sid, ungrepped))
+                choice = policy(
+                    pol, s, r, td, seconds, grep_head(s, sid, ungrepped), fallback
+                )
                 if choice is None:
                     continue
                 hit = [choice.covers(f, c) for f, c in pairs]
@@ -512,6 +550,7 @@ def main() -> None:
     p.add_argument("--ids", type=Path, required=True)
     p.add_argument("--samples-dir", type=Path, help="default: DATA/samples")
     p.add_argument("--td-dir", type=Path, help="td_replay.py output; default: DATA/td")
+    p.add_argument("--stats", type=Path, default=REPO / ADDITIONAL_CI_FILES_FOLDER, help="td_replay.py's --stats")  # fmt: skip
     p.add_argument("--policies", default="model,final,final-hm,final+td20")
     p.add_argument(
         "--all-truth",
@@ -521,12 +560,14 @@ def main() -> None:
     p.add_argument("--json", type=Path, help="also write per-sample rows here")
     p.add_argument("tags", nargs="+")
     args = p.parse_args()
+    if missing := [a for a in STATS_ARTIFACTS if not (args.stats / a).exists()]:
+        p.error(f"{args.stats} lacks {missing}, which td_replay.py read")
     ids = args.ids.read_text().split()
     samples, td_dir = (
         args.samples_dir or args.data / "samples",
         args.td_dir or args.data / "td",
     )
-    rows = score(args.data, ids, args.tags, args.policies.split(","), not args.all_truth, samples, td_dir)  # fmt: skip
+    rows = score(args.data, ids, args.tags, args.policies.split(","), not args.all_truth, samples, td_dir, replay_stats(args.stats))  # fmt: skip
     for x in summarize(rows):
         print(
             f"{x['tag']:24s} {x['policy']:10s} {x['kind']:7s} n={x['n']:3d} fail={x['n_failing']:3d} caught={x['caught_any']:6.1%} "

@@ -349,8 +349,9 @@ def main(argv: list[str] | None = None) -> None:
     if selection is None:
         return
     # A deliberate run_all (test infrastructure, too many changed files, an
-    # inductor failure list naming an unknown class, too many import hops, or
-    # the model) is enforced; a broken selector leaves TD's split in place.
+    # inductor failure list naming an unknown class, too many import hops, an
+    # edited file under test/ that nothing reads, or the model) is enforced; a
+    # broken selector leaves TD's split in place.
     selection.enforce = args.enforce and record["error"] is None
     args.output.write_text(
         json.dumps({**selection.to_json(), "diagnostics": record}, indent=1)
