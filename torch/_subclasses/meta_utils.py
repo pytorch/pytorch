@@ -305,32 +305,22 @@ class MetaTensorDescriber:
     def describe_tensor(
         self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False
     ) -> MetaTensorDesc[Any]:
-        # Describe a non-fake tensor with the Fake key excluded: under a C++
-        # fake mode its metadata queries (e.g. sparse_dim) would otherwise route
-        # to the fake fallback, which rejects non-fake inputs. A C++ fake,
-        # including one inside functionalization or functorch wrappers, is
-        # described with Fake enabled so its queries reach the fake fallback
-        # rather than backend kernels on a tensor without data. Those wrappers
-        # carry no Fake key, so a wrapper goes by the innermost value, which
-        # describing it syncs; they are unwrapped here without syncing. A
-        # Python fake mode only intercepts while it is on the mode stack, so
-        # this does not affect it.
-        from torch._subclasses.functional_tensor import FunctionalTensor
-
-        inner = t
-        while True:
-            if torch._is_functional_tensor(inner):
-                inner = torch._from_functional_tensor(inner)
-            elif is_functorch_wrapped_tensor(inner):
-                inner = get_unwrapped(inner)
-            elif isinstance(inner, FunctionalTensor):
-                inner = inner.elem
-            else:
-                break
-        with torch._C._SetExcludeDispatchKeyGuard(
-            torch._C.DispatchKey.Fake, not torch._C._is_fake_tensor(inner)
-        ):
+        # Under a C++ fake mode the Fake key is in the TLS include set, so every
+        # op reaches the fake fallback, which rejects non-fake inputs: metadata
+        # queries on a real tensor (e.g. sparse_dim) would fail. Take Fake out
+        # of the include set while describing. A real tensor then reaches its
+        # backend kernels, while a C++ fake, including one inside a wrapper or
+        # subclass, still reaches the fake fallback through its own Fake key.
+        # The TLS exclude set is left as the caller set it. A Python fake mode
+        # only intercepts while it is on the mode stack, so this does not
+        # affect it.
+        fake = torch._C.DispatchKey.Fake
+        included = torch._C._dispatch_tls_is_dispatch_key_included(fake)
+        torch._C._dispatch_tls_set_dispatch_key_included(fake, False)
+        try:
             return self._describe_tensor(t, recurse=recurse, trace=trace)
+        finally:
+            torch._C._dispatch_tls_set_dispatch_key_included(fake, included)
 
     def _describe_tensor(
         self, t: torch.Tensor, *, recurse: bool, trace: bool
