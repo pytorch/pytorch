@@ -8,7 +8,7 @@ from torch.nn.attention.flex_attention import _LARGE_SPARSE_BLOCK_SIZE
 
 from ...codegen.flydsl import flydsl_utils
 from ...codegen.flydsl.flydsl_template import FlyDSLTemplate
-from ...ir import FixedLayout, Pointwise
+from ...ir import fixed_layout_snapshot, FixedLayout, Pointwise
 from ...lowering import empty_strided, full
 from ...select_algorithm import autotune_select_algorithm
 from ...virtualized import ops, V
@@ -41,7 +41,10 @@ def _contiguous_strides(shape):
 def _get_supported_bhsd_stride(node, *, allow_strided: bool) -> tuple[int, ...] | None:
     try:
         sizes = [V.graph.sizevars.guard_int(value) for value in node.get_size()]
-        strides = [V.graph.sizevars.guard_int(value) for value in node.get_stride()]
+        strides = [
+            V.graph.sizevars.guard_int(value)
+            for value in fixed_layout_snapshot(node).stride
+        ]
     except (TypeError, ValueError):
         return None
     if len(sizes) != 4 or len(strides) != 4:
@@ -64,7 +67,10 @@ def _get_supported_bhsd_stride(node, *, allow_strided: bool) -> tuple[int, ...] 
 def _fits_u32_head_slice(node) -> bool:
     try:
         sizes = [V.graph.sizevars.guard_int(value) for value in node.get_size()]
-        strides = [V.graph.sizevars.guard_int(value) for value in node.get_stride()]
+        strides = [
+            V.graph.sizevars.guard_int(value)
+            for value in fixed_layout_snapshot(node).stride
+        ]
         element_size = torch._utils._element_size(node.get_dtype())
     except (AttributeError, TypeError, ValueError):
         return False
@@ -130,7 +136,10 @@ def _get_block_mask_metadata(
         return None, f"{prefix}requires BlockMask metadata on the query device"
     try:
         strides = tuple(
-            tuple(V.graph.sizevars.guard_int(item) for item in node.get_stride())
+            tuple(
+                V.graph.sizevars.guard_int(item)
+                for item in fixed_layout_snapshot(node).stride
+            )
             for node in nodes
         )
     except (AttributeError, NotImplementedError, TypeError, ValueError):
@@ -270,7 +279,7 @@ def _get_flydsl_flex_attention_forward_config(
             V.graph.sizevars.guard_int(item)
             for item in infer_dense_strides(
                 [b, hq, sq, v_dim],
-                query.get_stride(),
+                fixed_layout_snapshot(query).stride,
             )
         )
     except (AttributeError, TypeError, ValueError):
@@ -548,7 +557,7 @@ def create_flydsl_flex_attention_kernel(
         query.get_device(),
         query.get_dtype(),
         out_size,
-        stride=infer_dense_strides(out_size, query.get_stride()),
+        stride=infer_dense_strides(out_size, fixed_layout_snapshot(query).stride),
     )
     logsumexp = empty_strided(
         [batch, heads, seq_q], None, dtype=torch.float32, device=query.get_device()

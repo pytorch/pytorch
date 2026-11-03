@@ -23,6 +23,8 @@ else:
 
 
 from ...ir import (
+    BaseView,
+    Buffer,
     ComputedBuffer,
     ExternKernel,
     FixedLayout,
@@ -31,6 +33,7 @@ from ...ir import (
     InputBuffer,
     IRNode,
     MutationLayoutSHOULDREMOVE,
+    NonOwningLayout,
     Scatter,
     StorageBox,
     Subgraph,
@@ -114,6 +117,11 @@ def zeros_and_scatter_lowering(shape: list[int], indices, values):
         raise AssertionError(f"Expected TensorBox, got {type(grad)}")
     grad.realize()
     x_size = grad.get_size()
+    # The scatter template emits indexing into grad from its strides; freeze them
+    # unpadded now so they are final (and padding can't force an output copy).
+    grad.data.data.freeze_layout_with_exact_strides(  # type: ignore[attr-defined]
+        FlexibleLayout.contiguous_strides(x_size)
+    )
     values = to_dtype(values, grad.get_dtype())
     device = grad.get_device()
     if device is None:
@@ -449,11 +457,44 @@ def create_num_blocks_fake_generator(sparse_indices):
 
 def contiguous_last_dim(x):
     """Ensure that realized IR node has a contiguous stride in the last dimension."""
-    strides = x.maybe_get_stride()
-    if strides and strides[-1] != 1:
-        contiguous_stride_order = list(reversed(range(len(x.get_size()))))
-        return ExternKernel.require_stride_order(x, contiguous_stride_order)
-    return x
+    if isinstance(x, TensorBox) and isinstance(x.data, StorageBox):
+        if not isinstance(x.data.data, Buffer):
+            x.data.realize()
+        buf = x.data.data
+        if (
+            isinstance(buf, Buffer)
+            and isinstance(buf.layout, FlexibleLayout)
+            and len(buf.get_size()) > 0
+        ):
+            # freeze in the fill order decide_layout would pick, with the last dim
+            # moved innermost if it isn't already
+            order = buf.get_fill_order() if isinstance(buf, ComputedBuffer) else None
+            order = list(order or get_fill_order(buf.layout.stride_hint()))
+            last = len(order) - 1
+            buf.freeze_layout_with_fill_order([last] + [d for d in order if d != last])
+            return x
+    elif isinstance(x, TensorBox) and isinstance(x.data, BaseView):
+        base = x.data.unwrap_view()
+        if isinstance(base, StorageBox) and not isinstance(base.data, Buffer):
+            base.realize()
+        if isinstance(base, StorageBox) and isinstance(base.data, ComputedBuffer):
+            # settle the base as decide_layout would; the view's strides are then final
+            base.data.decide_layout()
+            strides = x.maybe_get_stride()
+            if strides and strides[-1] == 1:
+                return x
+    strides = x.maybe_get_stride_hint()
+    if strides and strides[-1] == 1:
+        if isinstance(x.maybe_get_layout(), (FixedLayout, NonOwningLayout)):
+            return x
+    else:
+        sizes = x.get_size()
+        strides = (
+            infer_dense_strides(sizes, strides)
+            if strides
+            else FlexibleLayout.contiguous_strides(sizes)
+        )
+    return ExternKernel.require_exact_strides(x, strides, allow_padding=True)
 
 
 def set_head_dim_values(
