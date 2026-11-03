@@ -53,7 +53,6 @@
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Event.h>
 #include <torch/csrc/Export.h>
-#include <torch/csrc/FakeTensorMode.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -3013,7 +3012,9 @@ Call this whenever a new thread is created in order to propagate values from
             "Expected a fake of the given mode");
         // Like Python's FakeTensor(mode, meta, device), which goes through
         // _make_subclass: a new detached fake sharing meta's storage, made
-        // without dispatching. meta itself is left unchanged.
+        // without dispatching. meta keeps its own device, autograd state and
+        // real tensor; as in Python, the storage it shares is marked as a
+        // fake's.
         c10::intrusive_ptr<c10::TensorImpl> out_impl;
         {
           // Otherwise an active dispatch mode would run the detach
@@ -3025,6 +3026,7 @@ Call this whenever a new thread is created in order to propagate values from
         out_impl->set_real_tensor(nullptr);
         at::set_and_normalize_fake_device(out_impl.get(), device);
         out_impl->set_fake_tensor_mode(mode);
+        at::mark_fake_storage(out_impl.get(), *mode);
         at::Tensor out(std::move(out_impl));
         out.set_requires_grad(meta.requires_grad());
         return out;
@@ -3032,15 +3034,6 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("meta"),
       py::arg("device"),
       py::arg("mode"));
-
-  // The Python wrapper of a C++ fake's mode, or None for any other tensor.
-  py_module.def("_maybe_get_fake_mode", [](const at::Tensor& t) -> py::object {
-    if (!t.defined() || !t.is_fake()) {
-      return py::none();
-    }
-    return torch::fake_tensor::getCppFakeTensorModePyObj(
-        t.unsafeGetTensorImpl()->fake_tensor_mode());
-  });
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
