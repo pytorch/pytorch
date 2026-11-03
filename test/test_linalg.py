@@ -12104,6 +12104,9 @@ class TestLinalgCudaOnly(TestCase):
                 # entries would skip tuning and change the count.
                 results_dir = tempfile.mkdtemp(prefix="tunableop_borrow_cache_")
                 env = os.environ.copy()
+                # An inherited kill switch would stop the borrow entirely.
+                env.pop("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", None)
+                env.pop("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", None)
                 env["PYTORCH_TUNABLEOP_VERBOSE"] = "3"
                 env["PYTORCH_TUNABLEOP_VERBOSE_FILENAME"] = "out"
                 try:
@@ -12131,13 +12134,15 @@ class TestLinalgCudaOnly(TestCase):
 
                 # One "finding fastest for" from FindFastest, one more from
                 # the borrow's FindFastestAmong; the repeat must log nothing.
-                validations = result.stdout.count("finding fastest for")
-                # If Default won the tune there is no donor, nothing was
-                # borrowed, and there is nothing to pin -- the subprocess
-                # cannot use _force_nondefault_donor.
-                if validations == 1:
-                    self.skipTest("tuning picked Default, so nothing was borrowed")
-                self.assertEqual(validations, 2, result.stdout)
+                # Searches after the tune. A borrow runs FindFastestAmong over
+                # exactly Default and the donor, which is what proves it was
+                # measured and not trusted; the repeat must add none. With
+                # recording off nothing is borrowed, so there is no search.
+                tuned = parse_tunable_log(result.stdout)
+                counts = [v["candidate_count"] for v in tuned.values()]
+                self.assertEqual(
+                    counts[1:], [2] if record_borrowed else [], result.stdout
+                )
 
     @onlyCUDA
     @dtypes(torch.float)

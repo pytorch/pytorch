@@ -227,11 +227,6 @@ class BenchmarkJob:
         # default too: borrowing requires recording, so a borrow was written.
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._nearest_match_enable(False)
-        if not warm_ok:
-            log.warning(
-                "TunableOp warm-up failed and no borrow was validated; "
-                "measuring the default kernel instead"
-            )
         return self.bmreq.benchmark()
 
     def __call__(self, device: int, filename: str, settings: dict[str, Any]) -> float:
