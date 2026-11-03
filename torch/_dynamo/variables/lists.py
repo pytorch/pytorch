@@ -2494,7 +2494,7 @@ class ByteArrayVariable(VariableTracker):
                 kwargs,
             )
 
-    def _bytearray_constant_method(
+    def _bytearray_split(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
@@ -2519,7 +2519,7 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        return self._bytearray_constant_method(tx, args, kwargs, "split")
+        return self._bytearray_split(tx, args, kwargs, "split")
 
     def bytearray_rsplit(
         self,
@@ -2527,31 +2527,7 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        return self._bytearray_constant_method(tx, args, kwargs, "rsplit")
-
-    def bytearray_splitlines(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker | None:
-        return self._bytearray_constant_method(tx, args, kwargs, "splitlines")
-
-    def bytearray_partition(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker | None:
-        return self._bytearray_constant_method(tx, args, kwargs, "partition")
-
-    def bytearray_rpartition(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker | None:
-        return self._bytearray_constant_method(tx, args, kwargs, "rpartition")
+        return self._bytearray_split(tx, args, kwargs, "rsplit")
 
     def bytearray_hex(
         self,
@@ -2775,9 +2751,6 @@ class ByteArrayVariable(VariableTracker):
         "count": Method(bytearray_count),
         "split": Method(bytearray_split),
         "rsplit": Method(bytearray_rsplit),
-        "splitlines": Method(bytearray_splitlines),
-        "partition": Method(bytearray_partition),
-        "rpartition": Method(bytearray_rpartition),
         "hex": Method(bytearray_hex),
         "decode": Method(bytearray_decode),
         "append": Method(bytearray_append),
