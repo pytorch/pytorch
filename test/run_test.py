@@ -2616,10 +2616,19 @@ def main():
 
         if IS_CI:
             for test, _ in all_failures:
+                test_stats = test_prioritizations.get_test_stats(test)
                 print_to_stderr("Emitting td_test_failure_stats_v2")
-                split.report_failure(
-                    test, selected_tests, test_prioritizations.get_test_stats(test)
+                # emit_metric records its caller, so this stays in main().
+                emit_metric(
+                    "td_test_failure_stats_v2",
+                    {
+                        "selected_tests": selected_tests,
+                        "failure": str(test),
+                        "llm_enforced": split.enforced,
+                        **test_stats,
+                    },
                 )
+                split.report_failure(test)
             gen_additional_test_failures_file(
                 [test.test_file for test, _ in all_failures]
             )
