@@ -1044,10 +1044,9 @@ class WarmMeasureTest(TestCase):
 
     @parametrize("warm_ok", (True, False))
     def test_measured_call_runs_with_both_flags_off(self, warm_ok):
-        # The donor search is compile-time-only work, like tuning: left on it
-        # folds a fruitless LookupNearest into every timed repetition. Safe
-        # because it cannot change the kernel -- a borrow that happened was
-        # recorded, so the measured call is an exact hit.
+        # The donor search is compile-time-only work, like tuning, and cannot
+        # change the kernel: a borrow that happened was recorded, so the
+        # measured call is an exact hit.
         job = self._job(nearest_match=True, record_borrowed=True)
         order: list = []
         tunable = mock.Mock()

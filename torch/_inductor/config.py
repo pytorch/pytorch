@@ -3015,8 +3015,11 @@ class cuda(cutlass):
     # tunes a range of sizes of each GEMM's dynamic dim, the traced shape among
     # them. A GEMM the ladder skips -- ladder off, static shape, more than one
     # dynamic symbol, dynamic K, a non-dense operand, an operand still flexible
-    # after finalize() -- still has its traced shape tuned, because autotune
-    # routes the aten candidate through the worker. "reuse" instead borrows the
+    # after finalize() -- has its traced shape tuned only where autotune leaves
+    # it more than one choice, so the aten candidate is benchmarked and routed
+    # through the worker. With max-autotune off there is only the aten choice,
+    # autotune returns without benchmarking, and the shape is covered only with
+    # PYTORCH_TUNABLEOP_ENABLED set on a later run. "reuse" instead borrows the
     # nearest recorded shape, benchmarks it against the default kernel, and
     # records the winner. Run as separate passes: "tune" builds the results
     # file, "reuse" consumes it.

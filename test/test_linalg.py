@@ -12052,11 +12052,10 @@ class TestLinalgCudaOnly(TestCase):
     @onlyCUDA
     @dtypes(torch.float)
     def test_borrow_verdict_not_revalidated_tunableop(self, device, dtype):
-        # The verdict stands: the second call of the same shape is an exact hit,
-        # not a second FindFastestAmong. Holds whether RecordBorrowed persisted
-        # the verdict or Add only cached it in memory. LookupNearest itself
-        # never checks for an exact entry, so what protects this is the caller's
-        # Lookup guard. Count "finding fastest for" lines in a subprocess
+        # The verdict stands: the second call of the same shape is an exact
+        # hit, whether RecordBorrowed persisted it or CacheBorrowedInMemory
+        # only cached it. LookupNearest never checks for an exact entry, so the
+        # caller's Lookup guard is what protects this. Counted in a subprocess
         # (VERBOSE is sticky per-process).
         import os
         import shutil
@@ -12132,15 +12131,12 @@ class TestLinalgCudaOnly(TestCase):
                 finally:
                     shutil.rmtree(results_dir, ignore_errors=True)
 
-                # The tuning run logs one "finding fastest for" via FindFastest
-                # and the single borrow validation one more via
-                # FindFastestAmong. The second identical call must hit the
-                # verdict and log nothing.
+                # One "finding fastest for" from FindFastest, one more from
+                # the borrow's FindFastestAmong; the repeat must log nothing.
                 validations = result.stdout.count("finding fastest for")
-                # One from the tune itself. A borrow adds exactly one more and
-                # the repeat must add none. If Default won the tune there is no
-                # donor, so nothing was borrowed and there is nothing to pin --
-                # the subprocess cannot use _force_nondefault_donor.
+                # If Default won the tune there is no donor, nothing was
+                # borrowed, and there is nothing to pin -- the subprocess
+                # cannot use _force_nondefault_donor.
                 if validations == 1:
                     self.skipTest("tuning picked Default, so nothing was borrowed")
                 self.assertEqual(validations, 2, result.stdout)

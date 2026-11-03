@@ -132,6 +132,19 @@ def is_enabled() -> bool:
     return is_tune_mode() or is_reuse_mode()
 
 
+def routes_to_worker(choices: list[Any]) -> bool:
+    """Whether any choice would be benchmarked in the worker.
+
+    Mirrors ExternKernelCaller.benchmark: a non-extern choice has no .choice.
+    """
+    if not is_enabled():
+        return False
+    return any(
+        is_tunableop_gemm(getattr(getattr(c, "choice", None), "name", ""))
+        for c in choices
+    )
+
+
 def is_tunableop_gemm(choice_name: str) -> bool:
     """Whether an extern choice may be routed to the TunableOp worker.
 
@@ -803,9 +816,12 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     if not is_tune_mode():
         return
     if not config.cuda.autotune_tunableop_ladder:
-        # No ladder entries, but the traced shape is still covered: autotune
-        # routes this GEMM's aten candidate through the worker (see
-        # ExternKernelCaller.benchmark), which tunes it at the traced shape.
+        # No ladder entries. The traced shape is covered only when autotune
+        # leaves this GEMM more than one choice, so the aten candidate is
+        # benchmarked and routed through the worker (see
+        # ExternKernelCaller.benchmark). The single-choice and deterministic
+        # exits return without benchmarking, so with max-autotune off nothing
+        # is tuned here and only PYTORCH_TUNABLEOP_ENABLED covers the shape.
         return
     # is_tune_mode() proves the host has a GPU, not that this GEMM runs on one.
     # A CPU winner carries an ExternKernelCPUBenchmarkRequest, which the CUDA

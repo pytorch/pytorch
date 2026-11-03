@@ -699,33 +699,36 @@ class TestTunableOpPretune(TestCase):
 
     @parametrize("tunableop_on", (True, False))
     def test_autotune_local_cache_is_bypassed_when_enabled(self, tunableop_on):
-        # Tuning and borrow validation both happen inside benchmark(); a cached
-        # timing skips it, so neither runs. The mode is in neither the choice
-        # hash nor the benchmark cache key, so without this a plain run's
-        # timing is served to a tune compile, and the reverse.
+        # A cached timing skips benchmark(), so neither tuning nor borrow
+        # validation runs. The write side matters as much: update_local_cache
+        # rewrites the whole file from the dict given, so a bypass that still
+        # called it would replace the machine's cache.
         from torch._inductor.codecache import PersistentCache
 
         s = sympy.Symbol(f"s_cache_{tunableop_on}", positive=True, integer=True)
         winner = self._mm_winner("mm", s)
         winner.hash_key = lambda: "fake-choice"
-        with mock.patch.object(
-            PersistentCache, "get_local_cache", return_value={}
-        ) as local_cache:
-            with mock.patch(
+        with (
+            mock.patch.object(
+                PersistentCache, "get_local_cache", return_value={}
+            ) as read_cache,
+            mock.patch.object(PersistentCache, "update_local_cache") as write_cache,
+            mock.patch(
                 "torch._inductor.tunableop.is_enabled", return_value=tunableop_on
-            ):
-                PersistentCache().lookup(
-                    [winner], "mm", "inputs", lambda cs: {c: 1.0 for c in cs}
-                )
-        self.assertEqual(local_cache.called, not tunableop_on)
+            ),
+        ):
+            timings = PersistentCache().lookup(
+                [winner], "mm", "inputs", lambda cs: {c: 1.0 for c in cs}
+            )
+        self.assertEqual(timings, {winner: 1.0})
+        self.assertEqual(read_cache.called, not tunableop_on)
+        self.assertEqual(write_cache.called, not tunableop_on)
 
     def test_routing_is_wider_than_the_ladder(self):
-        # Two sets, not one: routing contains a hipBLASLt fault in the worker
-        # and is worth doing for every tunable GEMM, while the ladder rebuilds
-        # metas and cannot do that safely for bias_addmm. Pinned here because
-        # the gates read different globals -- one set shadowing the other is
-        # silent, and test_bias_addmm_is_skipped below does not catch it (the
-        # K-dim guard rejects that fixture first, whatever the set says).
+        # Two sets, not one: routing covers every tunable GEMM, the ladder
+        # cannot rebuild bias_addmm's meta. Pinned here because one set
+        # shadowing the other is silent, and test_bias_addmm_is_skipped below
+        # does not catch it (its K-dim guard rejects the fixture first).
         self.assertTrue(tunableop.is_tunableop_gemm("bias_addmm"))
         self.assertNotIn("bias_addmm", tunableop._TUNABLEOP_LADDER_CHOICES)
         self.assertLess(
@@ -820,12 +823,10 @@ class TestTunableOpPretune(TestCase):
         ("single_choice", "deterministic", "no_timings", "no_extern", "best_choice"),
     )
     def test_algorithm_selector_hook_fires_on_every_exit(self, exit_path):
-        # AlgorithmSelectorCache.__call__ returns from five places and each
-        # needs a hook of its own; calling the hook directly would pass with
-        # any of the five lines deleted. The hook itself is patched, so
-        # no_extern -- whose winner the isinstance gate turns away, see
-        # test_select_algorithm_hook_queues_until_layouts_are_final -- can
-        # assert the same way as the rest. None of this reaches a device.
+        # __call__ returns from five places and each needs its own hook; a
+        # direct call to the hook passes with any of them deleted. The hook is
+        # patched, so no_extern -- whose winner the isinstance gate turns away
+        # -- asserts like the rest. None of this reaches a device.
         from torch._inductor import select_algorithm as _sa
 
         s = sympy.Symbol(f"s_sel_{exit_path}", positive=True, integer=True)
@@ -868,11 +869,9 @@ class TestTunableOpPretune(TestCase):
 
     def test_benchmark_subgraph_compiles_with_tuning_off(self):
         # A subgraph candidate's benchmark compile forces ATEN, so every inner
-        # GEMM arrives as a single choice and would reach the hook -- spending
-        # that GEMM's whole budget for a candidate that may lose. decompose-K's
-        # inner torch.bmm(..., out_dtype=float32) is one, laddered over the
-        # outer M. A winner is re-lowered from output_node(), so nothing is
-        # lost by turning it off here.
+        # GEMM is a single choice and would reach the hook, spending that
+        # GEMM's whole budget for a candidate that may lose (decompose-K's
+        # inner bmm is one). A winner is re-lowered, so nothing is lost.
         from torch._inductor.codegen import subgraph as _sg
 
         modes = []
