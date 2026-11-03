@@ -968,6 +968,8 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
             # xref: https://github.com/sympy/sympy/issues/26620
             ret = str(int(expr))
         else:
+            # Use base class method to handle double precision floats
+            # in order to avoid literal trunctation
             float_literal = super()._print_Float(expr)
             if config.is_fbcode() and torch.version.hip:
                 ret = f"{float_literal}"
