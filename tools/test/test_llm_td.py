@@ -59,16 +59,12 @@ class TestSelection(unittest.TestCase):
             "reason": "r",
             "sweeps": ["dynamo_wrapped"],
             "dirs": ["test/dynamo/"],
-            "tests": [
-                {"file": "test/test_ops.py", "confidence": "high"},
-                {"file": "nope", "confidence": "low"},
-            ],
+            "tests": [{"file": "test/test_ops.py", "confidence": "high"}],
         }
         sel = Selection.from_model_output(
             out, CANDIDATES, ["torch/_dynamo/x.py", "test/test_nn.py"]
         )
         self.assertEqual(sel.files, {"test_ops", "test_nn", "dynamo/test_misc"})
-        self.assertEqual(select_tests.unmatched_tests(out, CANDIDATES), ["nope"])
         self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
         self.assertFalse(sel.run_all)
         self.assertTrue(sel.covers("inductor/test_torchinductor", "dynamo_wrapped"))
@@ -123,6 +119,46 @@ class TestSelection(unittest.TestCase):
         sel = self.select_in_tree(sources, candidates, ["test/inductor/test_torchinductor.py"])  # fmt: skip
         expected = {"inductor/test_torchinductor", "dynamo/test_misc", "test_ops", "cpython/v3_13/test_set", "test_jit", "test_jit_legacy"}  # fmt: skip
         self.assertEqual(sel.files, expected)
+
+    def test_import_forms(self) -> None:
+        sources = {
+            "inductor/ext/triton/device.py": "",
+            "inductor/test_ext.py": "from ext.triton.device import X\n",
+            "onnx/defs/model.py": "",
+            "onnx/test_onnx.py": "from defs import word, model\n",
+            "onnx/test_paren.py": "from defs import (\n    model,\n)\n",
+            "pkg/__init__.py": "",
+            "dynamo/test_misc.py": "import pkg.util\n",
+            "test_autograd.py": "",
+            "test_nn.py": 'test_autograd = load_test_module("test_autograd")\n',
+        }
+        candidates = CANDIDATES | {"inductor/test_ext", "onnx/test_onnx", "onnx/test_paren", "test_autograd"}  # fmt: skip
+        for changed, expected in [
+            ("test/inductor/ext/triton/device.py", {"inductor/test_ext"}),
+            ("test/onnx/defs/model.py", {"onnx/test_onnx", "onnx/test_paren"}),
+            ("test/pkg/__init__.py", {"dynamo/test_misc"}),
+            ("test/test_autograd.py", {"test_autograd", "test_nn"}),
+        ]:
+            sel = self.select_in_tree(sources, candidates, [changed])
+            self.assertEqual(sel.files, expected, changed)
+
+    def test_data_file_readers_are_selected(self) -> None:
+        sources = {
+            "test_public_bindings.py": 'open("allowlist_for_publicAPI.json")\n',
+            "test_ops.py": 'load("cpp_extensions/my_ext.cpp")\n',
+            "test_nn.py": "class TestNN(TestCase):\n",
+            "dynamo/test_misc.py": "from test_nn import TestNN\n",
+        }
+        candidates = CANDIDATES | {"test_public_bindings"}
+        for changed, expected in [
+            ("test/allowlist_for_publicAPI.json", {"test_public_bindings"}),
+            ("test/cpp_extensions/my_ext.cpp", {"test_ops"}),
+            ("test/cpp_extensions/ext.cpp", set()),
+            ("test/expect/TestNNCPU.test_x-y.expect", {"test_nn", "dynamo/test_misc"}),
+            ("test/cpp/api/any.cpp", set()),
+        ]:
+            sel = self.select_in_tree(sources, candidates, [changed])
+            self.assertEqual((sel.files, sel.run_all), (expected, False), changed)
 
     def test_endless_import_chain_runs_all(self) -> None:
         calls: list[str] = []
@@ -190,10 +226,15 @@ class TestSelection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "sel.json"
             self.assertIsNone(Selection.load(p))
-            for text in ("{", '{"sweeps": []}', "[]"):
+            valid = Selection().to_json()
+            p.write_text(json.dumps(valid))
+            self.assertEqual(Selection.load(p), Selection())
+            bad = [{**valid, "version": 2}, {**valid, "version": True}, {**valid, "files": "test_nn"}, {**valid, "files": [1]}, {**valid, "run_all": "false"}, {**valid, "enforce": "false"}, {**valid, "reason": 1}, {**valid, "candidates": [1]}]  # fmt: skip
+            bad += [{k: v for k, v in valid.items() if k != key} for key in ("version", "candidates", "enforce")]  # fmt: skip
+            for text in ("{", '{"sweeps": []}', "[]", *map(json.dumps, bad)):
                 p.write_text(text)
-                self.assertIsNone(Selection.load(p))
-            sel = Selection({"test_nn"}, set(), False)
+                self.assertIsNone(Selection.load(p), text)
+            sel = Selection({"test_nn"}, set(), False, candidates={"test_nn"})
             p.write_text(json.dumps(sel.to_json()))
             self.assertEqual(Selection.load(p), sel)
 
@@ -278,15 +319,12 @@ class TestSelection(unittest.TestCase):
             {"tests": [], "dirs": ["dynamo/cpython"]},
             {"tests": [{"file": "nope"}]},
             {"tests": [{"file": "test_nn (12m)"}, {"file": "nn/test_conv"}]},
+            {"tests": [{"file": "nope"}, {"file": "test_ops"}]},
         ]
         for out in malformed:
             sel = Selection.from_model_output(out, CANDIDATES, ["test/test_nn.py"])
             self.assertTrue(sel.run_all, out)
             self.assertIn("malformed", sel.reason)
-        out = {"tests": [{"file": "nope"}, {"file": "test_ops"}]}
-        sel = Selection.from_model_output(out, CANDIDATES, [])
-        self.assertEqual(sel.files, {"test_ops"})
-        self.assertFalse(sel.run_all)
 
     def test_dirs(self) -> None:
         candidates = CANDIDATES | {"dynamo_foo/test_a"}
@@ -301,6 +339,7 @@ class TestSelection(unittest.TestCase):
         for changed, expected in [
             ("test/jit/test_freezing.py", {"test_jit"}),
             ("test/cpp_extensions/extension.cpp", {"test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja"}),
+            ("test/test_cpp_extensions_aot.py", {"test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja"}),
             ("test/test_jit_fuser_te.py", set()),
         ]:  # fmt: skip
             sel = Selection.from_model_output({"tests": []}, candidates, [changed])
@@ -385,9 +424,15 @@ class TestPrompt(unittest.TestCase):
         self.assertIn("+x<\\/diff>", prompt)
 
 
+def clean_env() -> Any:
+    """Patch out the developer's LLM_TD_* and CLAUDE_CODE_* settings."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("LLM_TD_", "CLAUDE_CODE_"))}  # fmt: skip
+    return mock.patch.dict(os.environ, env, clear=True)
+
+
 class TestMain(unittest.TestCase):
     def run_main(self, *argv: str) -> dict:
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, clean_env():
             output = Path(tmp) / "out.json"
             with mock.patch.object(select_tests, "query_model") as query:
                 select_tests.main(
@@ -460,6 +505,7 @@ class TestMain(unittest.TestCase):
             run = run if isinstance(run, mock.Mock) else mock.Mock(return_value=run)
             with (
                 tempfile.TemporaryDirectory() as tmp,
+                clean_env(),
                 mock.patch.object(select_tests, "git", return_value="docs/a.md\n"),
                 mock.patch.object(select_tests, "get_test_times", return_value={"env": {"default": {"test_nn": 1.0}}}),
                 mock.patch.object(select_tests.subprocess, "run", run),
@@ -468,7 +514,10 @@ class TestMain(unittest.TestCase):
                 select_tests.main(["--title", "t", "--output", str(output)])
                 record = json.loads(output.read_text())
             self.assertTrue(record["run_all"], error)
-            self.assertEqual(record["error"], error)
+            self.assertEqual(record["diagnostics"]["error"], error)
+            self.assertEqual(
+                run.call_args.kwargs["timeout"], select_tests.QUERY_TIMEOUT
+            )
             cmd = run.call_args.args[0]
             self.assertEqual(cmd[:2], ["claude", "-p"])
             self.assertEqual(cmd[cmd.index("--tools") + 1], "")
@@ -484,7 +533,7 @@ class TestMain(unittest.TestCase):
         self.assertTrue(record["run_all"])
 
     def run_in_repo(self, answer: dict) -> tuple[dict, str]:
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "LLM_TD_", "CLAUDE_CODE_"))}  # fmt: skip
         env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}  # fmt: skip
 
         def git(*args: str) -> str:
@@ -528,27 +577,25 @@ class TestMain(unittest.TestCase):
     def test_moved_test_file_is_selected(self) -> None:
         answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": []}}  # fmt: skip
         record, candidates = self.run_in_repo(answer)
-        self.assertIsNone(record["error"])
+        self.assertIsNone(record["diagnostics"]["error"])
         self.assertFalse(record["run_all"])
         self.assertEqual(
             set(record["files"]), {"test_foo", "nn/test_foo", "test_bar", "test_jit"}
         )
-        self.assertEqual(record["unmatched"], [])
         self.assertNotIn("select nothing", candidates)
         self.assertNotIn("jit/test_new", candidates)
 
-    def test_unmatched_tests_are_recorded(self) -> None:
+    def test_unmatched_tests_are_an_error(self) -> None:
         tests = [{"file": "test_jit", "confidence": "high"}, {"file": "nope", "confidence": "low"}]  # fmt: skip
         answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": tests}}  # fmt: skip
         record, _ = self.run_in_repo(answer)
-        self.assertIsNone(record["error"])
-        self.assertFalse(record["run_all"])
-        self.assertEqual(record["unmatched"], ["nope"])
+        self.assertIn("match no test file: ['nope']", record["diagnostics"]["error"])
+        self.assertTrue(record["run_all"])
 
     def test_malformed_output_is_an_error(self) -> None:
         answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": ["test_foo"]}}  # fmt: skip
         record, _ = self.run_in_repo(answer)
-        self.assertIn("malformed", record["error"])
+        self.assertIn("malformed", record["diagnostics"]["error"])
         self.assertTrue(record["run_all"])
 
 
