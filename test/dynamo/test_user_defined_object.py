@@ -8,7 +8,6 @@ import sys
 import types
 import unittest
 import warnings
-from unittest import mock
 
 import torch
 import torch._dynamo.testing as dynamo_testing
@@ -1773,10 +1772,7 @@ class TestConstantTypeProperty(TestCase):
             return x + len(value), value
 
         x = torch.randn(3)
-        with (
-            mock.patch("torch._dynamo.utils.warn_once_cache", set()),
-            warnings.catch_warnings(record=True) as caught,
-        ):
+        with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
         expected = fn(x)
@@ -1808,10 +1804,7 @@ class TestConstantTypeProperty(TestCase):
         x = torch.randn(3)
         expected = fn(x)
         counter = dynamo_testing.CompileCounter()
-        with (
-            mock.patch("torch._dynamo.utils.warn_once_cache", set()),
-            warnings.catch_warnings(record=True) as caught,
-        ):
+        with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             compiled = torch.compile(fn, backend=counter, fullgraph=True)
             self.assertEqual(compiled(x), expected)
@@ -1986,10 +1979,7 @@ class TestConstantTypePropertyAccelerator(TestCase):
             return x + props.clock_rate + props.memory_clock_rate
 
         x = torch.randn(3, device=device)
-        with (
-            mock.patch("torch._dynamo.utils.warn_once_cache", set()),
-            warnings.catch_warnings(record=True) as caught,
-        ):
+        with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(actual, fn(x))
