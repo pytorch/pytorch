@@ -10,3 +10,5 @@ class ReInplaceTrigger(enum.Enum):
     AUTO_FUNC_V1 = 1
     AUTO_FUNC_V2 = 2
     TRITON_OPS = 3
+    # A user-kernel DSL without a member of its own.
+    USER_KERNEL_OPS = 4
