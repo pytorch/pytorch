@@ -659,7 +659,8 @@ def sequential_split(
     """
     sequential_split creates a new graph module that splits the input graph module into multiple submodules
     based on the node_call_back. It doesn't mutate the input graph module. The node_call_back should return
-    True if the node is a delimiter.  Delimiter will be the first node in the next submodule.
+    True if the node is a delimiter. A delimiter starts the next submodule: it is the first node
+    copied from the graph, after the placeholders and the ``get_attr`` nodes that the submodule reads.
     """
     from torch.fx.passes.split_module import _split_module
 
