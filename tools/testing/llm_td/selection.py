@@ -33,8 +33,8 @@ MAX_FAILURE_LIST_CLASSES = 50
 
 # Tests that run the files a change matches although they do not import them:
 # the drivers of the directories discover_tests.py blocklists (except
-# torch_openreg/tests, whose driver test_openreg is never a candidate), TD's
-# ADDITIONAL_MAPPINGS, and the compiled autograd rerun of test_autograd.
+# torch_openreg/tests, whose driver test_openreg is never a candidate), and
+# TD's ADDITIONAL_MAPPINGS.
 DRIVER_MAPPINGS = {
     **ADDITIONAL_MAPPINGS,
     "test_ao_sparsity": [r"^test/ao/"],
@@ -43,15 +43,15 @@ DRIVER_MAPPINGS = {
     "test_jit": [r"^test/jit/"],
     "test_package": [r"^test/package/"],
     "test_quantization": [r"^test/quantization/"],
-    "inductor/test_compiled_autograd": [r"^test/compiled_autograd_skips/"],
 }
 
 # common_utils xfails or skips a test named in one of these lists, one file per
 # test such as TestNNCPU.test_x or CPython313-test_set-TestSet.test_x, when it
 # runs under dynamo (the dynamo_wrapped config), inductor or compiled autograd.
-FAILURE_LIST_RE = re.compile(
-    r"^test/(dynamo|inductor|compiled_autograd)_(?:expected_failures|skips)/(?:.*-)?(\w+)\.[^./]+$"
+FAILURE_LIST_DIR_RE = re.compile(
+    r"^test/(dynamo|inductor|compiled_autograd)_(?:expected_failures|skips)/"
 )
+FAILURE_LIST_RE = re.compile(FAILURE_LIST_DIR_RE.pattern + r"(?:.*-)?(\w+)\.[^./]+$")
 # instantiate_device_type_tests names TestFooCPU after TestFoo.
 DEVICE_SUFFIX_RE = re.compile(r"(CPU|CUDA|MPS|XPU|HPU|META|LAZY|PRIVATEUSE1)$")
 
@@ -59,10 +59,14 @@ DEVICE_SUFFIX_RE = re.compile(r"(CPU|CUDA|MPS|XPU|HPU|META|LAZY|PRIVATEUSE1)$")
 # subset is safe whatever the model says.
 RUN_ALL_PATTERNS = [
     r"^test/run_test\.py$",
-    r"^test/conftest\.py$",
+    r"^test/(.*/)?conftest\.py$",
+    # Loaded by every test process; it moves tests between configs.
+    r"^test/slow_tests\.json$",
     r"^pytest\.ini$",
     r"^torch/testing/_internal/common_utils\.py$",
     r"^torch/testing/_internal/common_device_type\.py$",
+    # Loads the failure lists for every dynamo and inductor wrapped run.
+    r"^torch/testing/_internal/dynamo_test_failures\.py$",
     r"^tools/testing/",
     r"^test/pytest_shard_custom\.py$",
     r"^tools/stats/(import_test_stats|upload_metrics)\.py$",
@@ -75,7 +79,7 @@ RUN_ALL_PATTERNS = [
     # The pytest plugin every test job loads.
     r"^torch/testing/_internal/torchci/",
     # Installed by .ci/pytorch/common_utils.sh for the test jobs.
-    r"^\.github/ci_commit_pins/(audio|vision)\.txt$",
+    r"^\.github/ci_commit_pins/(audio|vision|spmd_types)\.txt$",
     # The CI test images: a new package version or toolchain can break any test.
     r"^\.ci/docker/(build\.sh|requirements-ci\.txt|common/|ci_commit_pins/|ubuntu)",
 ]
@@ -144,15 +148,19 @@ def failure_list_sources(
     """The paths under test/ that define the classes named by the edited
     failure-list entries (see FAILURE_LIST_RE), and the lists ("dynamo",
     "inductor" or "compiled_autograd") naming a class that `grep` (see
-    importers) does not find."""
+    importers) does not find or holding an entry that FAILURE_LIST_RE cannot
+    parse, which dynamo_test_failures.py rejects at import."""
     classes: dict[str, set[str]] = {}
+    unparsed: set[str] = set()
     for f in changed_files:
         if m := FAILURE_LIST_RE.match(f):
             classes.setdefault(m[2], set()).add(m[1])
+        elif (m := FAILURE_LIST_DIR_RE.match(f)) and not f.endswith("/.gitkeep"):
+            unparsed.add(m[1])
     if grep is None or len(classes) > MAX_FAILURE_LIST_CLASSES:
-        return [], set().union(*classes.values())
+        return [], unparsed.union(*classes.values())
     sources: list[str] = []
-    missing: set[str] = set()
+    missing = unparsed
     for c, lists in sorted(classes.items()):
         alt = "|".join(sorted({c, DEVICE_SUFFIX_RE.sub("", c)}))
         found = grep(rf"^[[:space:]]*class[[:space:]]+({alt})([^[:alnum:]_]|$)")
