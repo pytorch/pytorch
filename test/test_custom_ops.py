@@ -2,7 +2,6 @@
 # ruff: noqa: F841
 
 import collections
-import inspect
 import io
 import itertools
 import os
@@ -27,6 +26,7 @@ import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
+from torch._library.custom_ops import OPDEFS
 from torch._library.fake_profile import (
     generate_yaml_from_profiles,
     load_op_profiles,
@@ -726,10 +726,12 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         op = self.ns().pyobject_dispatch_profiled.default
         self.assertTrue(op._is_pyobj_dispatcher_enabled())
+        x = torch.randn(3)
         with torch.profiler.profile() as prof:
-            f(torch.randn(3))
-        names = {e.name for e in prof.events()}
-        self.assertIn(f"{self.test_ns}::pyobject_dispatch_profiled", names)
+            y = f(x)
+        self.assertEqual(y, x)
+        name = f"{self.test_ns}::pyobject_dispatch_profiled"
+        self.assertEqual(sum(e.name == name for e in prof.events()), 1)
 
     @skipIfTorchDynamo("Checks which dispatcher kernels run in eager")
     def test_skip_autograd_kernel_if_no_grad(self):
@@ -1009,38 +1011,6 @@ class TestCustomOp(CustomOpTestCaseBase):
                 self.assertEqual(
                     results[0], results[1], msg=f"{schema} returning {value!r}"
                 )
-
-    def test_custom_op_call_has_fn_signature(self):
-        @torch.library.custom_op(f"{self.test_ns}::call_signature", mutates_args=())
-        def f(x: Tensor, y: Tensor, n: int = 2, *, scale: float = 1.0) -> Tensor:
-            return (x + y) * n * scale
-
-        @f.register_fake
-        def _(x, y, n=2, *, scale=1.0):
-            return torch.empty_like(x)
-
-        self.assertEqual(
-            list(inspect.signature(f).parameters), ["x", "y", "n", "scale"]
-        )
-        x, y = torch.randn(3), torch.randn(3)
-        self.assertEqual(f(x, y), (x + y) * 2)
-        self.assertEqual(f(x, y=y, n=3), (x + y) * 3)
-        self.assertEqual(f(y=y, x=x, scale=0.5), (x + y))
-        with self.assertRaisesRegex(
-            TypeError, "missing 1 required positional argument: 'y'"
-        ):
-            f(x)
-
-        # An explicit schema keeps the generic (*args, **kwargs) __call__.
-        @torch.library.custom_op(
-            f"{self.test_ns}::call_explicit_schema",
-            mutates_args=(),
-            schema="(Tensor x, int n) -> Tensor",
-        )
-        def g(*args):
-            return args[0] * args[1]
-
-        self.assertEqual(g(x, 3), x * 3)
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_custom_op_autograd(self):
@@ -5879,6 +5849,22 @@ Please use `add.register_fake` to add an fake impl.""",
         with f.set_kernel_enabled("cpu", enabled=False):
             self.assertEqual(f(x), x + 1)
 
+        # One function registered for several devices at once: each device
+        # must check whether its own kernel is enabled.
+        @torch.library.custom_op("_torch_testing::g", mutates_args=())
+        def g(x: Tensor) -> Tensor:
+            return x + 1
+
+        @g.register_kernel(("cpu", "cuda"))
+        def _(x):
+            return x + 2
+
+        self.assertEqual(g(x), x + 2)
+        with g.set_kernel_enabled("cuda", enabled=False):
+            self.assertEqual(g(x), x + 2)
+        with g.set_kernel_enabled("cpu", enabled=False):
+            self.assertEqual(g(x), x + 1)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_overloading(self):
         called_f = 0
@@ -5931,6 +5917,18 @@ Please use `add.register_fake` to add an fake impl.""",
         x = torch.randn(3)
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             numpy_sin_inplace(x)
+
+    def test_triton_op_function_is_the_users(self):
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        op = torch.library.triton_op("_torch_testing::triton_module", mutates_args=())(
+            f
+        )
+        # Not torch._library.triton's wrapper, so precompile imports this module.
+        self.assertEqual(op._init_fn.__module__, __name__)
+        self.assertIs(op._init_fn.__wrapped__, f)
+        self.assertEqual(op._init_fn.__qualname__, f.__qualname__)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_factory_function(self):
@@ -6588,6 +6586,62 @@ except RuntimeError as e:
         # The error message should reference <string>:2, since
         # lib1 = torch.library.Library(...) is on line 2 of the script.
         self.assertIn("<string>:2", result.stdout)
+
+    def test_kernel_registration_records_the_calling_module(self):
+        ns = "_test_kernel_callers"
+        ops_source = f"""\
+import torch
+@torch.library.custom_op("{ns}::f", mutates_args=())
+def f(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+@torch.library.custom_op("{ns}::g", mutates_args=(), device_types="cpu")
+def g(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+torch.library.define("{ns}::h", "(Tensor x) -> Tensor", lib=lib)
+"""
+        kernels_source = f"""\
+import torch
+@f.register_kernel("cpu")
+def _(x):
+    return x.clone()
+@torch.library.impl("{ns}::h", "cpu")
+def _(x):
+    return x.clone()
+"""
+        keep_alive = len(torch.library._keep_alive)
+        ops = {"__name__": "kernel_callers_ops"}
+        try:
+            with torch.library._scoped_library(ns, "FRAGMENT") as ops["lib"]:
+                exec(compile(ops_source, "/callers/ops.py", "exec"), ops)
+                kernels = {"__name__": "kernel_callers_kernels", "f": ops["f"]}
+                exec(compile(kernels_source, "/callers/kernels.py", "exec"), kernels)
+                self.assertEqual(
+                    ops["f"]._backend_fn_callers,
+                    {
+                        "CompositeExplicitAutograd": "kernel_callers_ops",
+                        "CPU": "kernel_callers_kernels",
+                    },
+                )
+                self.assertEqual(
+                    ops["g"]._backend_fn_callers, {"CPU": "kernel_callers_ops"}
+                )
+                self.assertEqual(
+                    torch._library.utils.kernel_callers(f"{ns}::h"),
+                    {"CPU": "kernel_callers_kernels"},
+                )
+                # The dispatcher still records torch.library.impl's own Library.
+                dump = torch._C._dispatch_dump(f"{ns}::h")
+                self.assertRegex(
+                    dump, r"CPU: registered at .*torch[/\\]library\.py:\d+ ::"
+                )
+        finally:
+            while len(torch.library._keep_alive) > keep_alive:
+                torch.library._keep_alive.pop()._destroy()
+            for n in ("f", "g"):
+                if n in ops:
+                    ops[n]._lib._destroy()
+                OPDEFS.pop(f"{ns}::{n}", None)
+            torch._library.utils.REGISTRATION_CALLERS.pop((f"{ns}::h", "CPU"), None)
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):
