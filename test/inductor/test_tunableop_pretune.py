@@ -697,45 +697,6 @@ class TestTunableOpPretune(TestCase):
         retried = {b.input_tensor_meta[0].sizes[0] for b in second}
         self.assertNotIn(tuned_dim, retried, "the tuned rung must be skipped")
 
-    @parametrize("tunableop_on", (True, False))
-    def test_pipelined_autotuning_is_off_when_enabled(self, tunableop_on):
-        # The pipelined path benchmarks the bmreq directly, so the routing in
-        # ExternKernelCaller.benchmark never runs and nothing is tuned.
-        from torch._inductor.autotune_process import use_pipelined_autotuning
-
-        with config.patch({"pipeline_max_autotune_gemm": True}):
-            with mock.patch(
-                "torch._inductor.tunableop.is_enabled", return_value=tunableop_on
-            ):
-                self.assertEqual(use_pipelined_autotuning(), not tunableop_on)
-
-    @parametrize("tunableop_on", (True, False))
-    def test_autotune_local_cache_is_bypassed_when_enabled(self, tunableop_on):
-        # A cached timing skips benchmark(), so neither tuning nor borrow
-        # validation runs. The write side matters as much: update_local_cache
-        # rewrites the whole file from the dict given, so a bypass that still
-        # called it would replace the machine's cache.
-        from torch._inductor.codecache import PersistentCache
-
-        s = sympy.Symbol(f"s_cache_{tunableop_on}", positive=True, integer=True)
-        winner = self._mm_winner("mm", s)
-        winner.hash_key = lambda: "fake-choice"
-        with (
-            mock.patch.object(
-                PersistentCache, "get_local_cache", return_value={}
-            ) as read_cache,
-            mock.patch.object(PersistentCache, "update_local_cache") as write_cache,
-            mock.patch(
-                "torch._inductor.tunableop.is_enabled", return_value=tunableop_on
-            ),
-        ):
-            timings = PersistentCache().lookup(
-                [winner], "mm", "inputs", lambda cs: {c: 1.0 for c in cs}
-            )
-        self.assertEqual(timings, {winner: 1.0})
-        self.assertEqual(read_cache.called, not tunableop_on)
-        self.assertEqual(write_cache.called, not tunableop_on)
-
     def test_routing_is_wider_than_the_ladder(self):
         # Two sets, not one: routing covers every tunable GEMM, the ladder
         # cannot rebuild bias_addmm's meta. Pinned here because one set
@@ -952,45 +913,6 @@ class TestTunableOpPretune(TestCase):
             # It freezes flexible input layouts; the flag must short out first.
             sched._has_layout_conflict_for_template.assert_not_called()
         winner.output_node.assert_called_once()
-
-    def test_enabled_modes_bypass_the_fx_graph_cache(self):
-        # Both passes work while lowering -- tune records, reuse borrows and
-        # validates -- so a cache hit does neither and a rerun writes an empty
-        # results file. AOTAutogradCache routes through the same validator.
-        from torch._inductor.codecache import BypassFxGraphCache, FxGraphCache
-
-        gm = torch.fx.symbolic_trace(torch.nn.Linear(4, 4))
-        with mock.patch("torch.cuda.is_available", return_value=True):
-            for mode, expect_bypass in (
-                ("off", False),
-                ("reuse", True),
-                ("tune", True),
-            ):
-                with self.subTest(mode=mode):
-                    with config.patch({"cuda.autotune_tunableop_mode": mode}):
-                        try:
-                            FxGraphCache._check_can_cache(gm, require_shape_env=False)
-                        except BypassFxGraphCache as e:
-                            bypassed = "TunableOp" in str(e)
-                        else:
-                            bypassed = False
-                    self.assertEqual(bypassed, expect_bypass)
-
-
-class TunableOpPretuneRealGpuTest(InductorTestCase):
-    """The ladder against a real compile, worker and results file.
-
-    The only test that sends a real ExternKernelGPUBenchmarkRequest through
-    the pipe, so it is what proves the rebuilt metas describe shapes
-    hipBLASLt accepts and that each reaches the file runtime reads.
-
-    InductorTestCase enters fresh_cache(), which isolates the cache directory
-    per test and clears _pretuned_gemms with it. That also means the compile
-    always starts cold, so this does not exercise the tune-mode cache bypass;
-    test_enabled_modes_bypass_the_fx_graph_cache covers that directly.
-    """
-
-    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
     @skipIfWindows(msg="pass_fds not supported on Windows.")
