@@ -208,8 +208,10 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   source /opt/intel/oneapi/umf/latest/env/vars.sh
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/ccl/latest/env/vars.sh
-  # shellcheck disable=SC1091
-  source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  if [ -f /opt/intel/oneapi/mpi/latest/env/vars.sh ]; then
+    # shellcheck disable=SC1091
+    source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  fi
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/pti/latest/env/vars.sh
   # Enable XCCL build
