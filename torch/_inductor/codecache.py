@@ -4194,16 +4194,14 @@ class CppCodeCache:
         )
 
         # Both keys come from here; only the command line passed in differs.
-        def kernel_key(compile_cmd_line: str, final_link_cmd_line: str) -> str:
-            return get_hash(
-                main_code.strip(),
-                f"{optimized_code} {compile_cmd_line} {final_link_cmd_line}",
-            )
+        def kernel_key(cmd_line: str) -> str:
+            return get_hash(main_code.strip(), f"{optimized_code} {cmd_line}")
 
+        combined_cmd_line = f"{main_cmd_line} {link_cmd_line}"
         key, main_path = write(
             main_code,
             "main.cpp",
-            key=kernel_key(main_cmd_line, link_cmd_line),
+            key=kernel_key(combined_cmd_line),
         )
 
         # The key a capture freezes this kernel's binary under, and a replay finds it
@@ -4212,12 +4210,8 @@ class CppCodeCache:
         # itself stays under key, which this host's paths tell apart.
         def relocatable_key() -> str:
             if key not in cls._relocatable_keys:
-                relocated_compile = _relocatable_command_line(main_cmd_line)
-                relocated_link = _relocatable_command_line(link_cmd_line)
-                cls._relocatable_keys[key] = kernel_key(
-                    relocated_compile,
-                    relocated_link,
-                )
+                relocated = _relocatable_command_line(combined_cmd_line)
+                cls._relocatable_keys[key] = kernel_key(relocated)
             return cls._relocatable_keys[key]
 
         # Don't bother writing if the argument is empty.
