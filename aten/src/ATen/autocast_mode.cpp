@@ -314,7 +314,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   KERNEL_MPS(linalg_vector_norm, fp32)
   KERNEL_MPS(linalg_matrix_norm, fp32)
   KERNEL_MPS(linalg_matrix_norm, str_ord, fp32)
-  KERNEL_MPS(avg_pool3d, fp32)
   KERNEL_MPS(sum, fp32)
   KERNEL_MPS(sum, dim_IntList, fp32)
   //
