@@ -12,9 +12,15 @@ test files, the run-all rules), `final-hm` keeps only high/medium-confidence
 picks, and `final+tdN` hedges `final` with TD's files that fit in N% of each
 config's test time (N defaults to LLM_TD_HEDGE). The tag `td` scores the
 replayed in-repo TD (see td_replay.py) at its CI cut of the top 25% per config.
-The inductor workflow has no TD and this stack does not wire the selection
-into it, so failures in its jobs count as caught by every policy and its
-configs are left out of the cost share (dollars.py models them separately).
+
+run_test.py applies TD, and so the selection, only in the pull, trunk and
+ROCm workflows. Jobs of any other workflow (inductor's unit tests, periodic,
+slow, ...) run every test under every policy, so their failures are left out
+of the truth, and configs no TD job runs are left out of the cost share
+(dollars.py models the inductor ones separately). Jobs are classified from
+.github/workflows (see job_runs_td). test-times.json is merged over jobs per
+config, so a config that TD and non-TD jobs share (e.g. `default` in
+periodic) is priced as one.
 CI applies the TD cut and the hedge per job over that job's own test list;
 this models a job as a config of test-times.json, and for a failure in a
 config missing from test-times.json falls back to a cut over all candidates.
@@ -34,14 +40,18 @@ import statistics as st
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import yaml
+
+from tools.testing.llm_td.eval import REPO
 from tools.testing.llm_td.selection import LLM_TD_HEDGE, Selection
 
 
 GPU_ENV = re.compile(r"cuda|rocm|sm\d+|xpu|h100|b200|a100|gpu", re.IGNORECASE)
 CONFIDENCE = {"high": 0, "medium": 1, "low": 2}
 HEDGE = re.compile(r"final\+td(\d+(?:\.\d+)?)?")
-# Jobs of inductor.yml's unit-test (inductor-unittest.yml), which run every test.
-RUNS_EVERYTHING = re.compile(r"unit-test / ")
+MATRIX_CONFIG = re.compile(r'config: "([^"]+)"')
+MATRIX_NEEDS = re.compile(r"needs\.([\w-]+)\.outputs\.test-matrix")
+VERSION = re.compile(r"\d+(\.\d+)*")
 
 # config -> file -> [cpu, gpu] seconds
 Seconds = dict[str, dict[str, list[float]]]
@@ -86,17 +96,74 @@ def test_seconds(path: Path) -> Seconds:
     return {c: dict(files) for c, files in out.items()}
 
 
-def is_inductor(config: str) -> bool:
-    return config.startswith("inductor")
+def td_workflow(name: str) -> bool:
+    """Whether run_test.py enables TD under GITHUB_WORKFLOW `name`."""
+    return name in ("trunk", "pull") or name.startswith(("rocm-", "periodic-rocm-"))
+
+
+@functools.cache
+def ci_jobs(
+    workflows: Path = REPO / ".github/workflows",
+) -> dict[bool, set[tuple[str, str]]]:
+    """Whether TD runs -> the (job name, config) pairs of the test jobs that run so.
+
+    A reusable workflow's jobs are named and classified under each caller, as
+    GitHub reports them ('unit-test / inductor-test') and sets GITHUB_WORKFLOW."""
+    wfs = {p.name: yaml.safe_load(p.read_text()) for p in workflows.glob("*.yml")}
+
+    def test_jobs(file: str) -> set[tuple[str, str]]:
+        jobs = wfs[file].get("jobs") or {}
+
+        def configs(key: str) -> set[str]:
+            matrix = str((jobs[key].get("with") or {}).get("test-matrix", ""))
+            if (m := MATRIX_NEEDS.search(matrix)) and m.group(1) in jobs:
+                return configs(m.group(1))
+            return set(MATRIX_CONFIG.findall(matrix))
+
+        out = set()
+        for key, job in jobs.items():
+            name, uses = job.get("name", key), Path(job.get("uses", "")).name
+            if uses in wfs and not uses.startswith("_"):
+                out |= {(f"{name} / {n}", c) for n, c in test_jobs(uses)}
+            elif "test" in uses:
+                out |= {(name, c) for c in configs(key)}
+        return out
+
+    out: dict[bool, set[tuple[str, str]]] = {True: set(), False: set()}
+    for file, wf in wfs.items():
+        if isinstance(wf, dict) and "workflow_call" not in (wf.get(True) or {}):
+            out[td_workflow(wf.get("name", ""))] |= test_jobs(file)
+    return out
+
+
+@functools.cache
+def runs_td(config: str) -> bool:
+    return any(c == config for _, c in ci_jobs()[True])
+
+
+@functools.cache
+def job_runs_td(job: str) -> bool:
+    """Whether the test job named `job` runs with TD.
+
+    It is looked up by name, then with versions wildcarded (CI has moved to
+    newer CUDA and Python since), then by config alone. A job that matches
+    both TD and non-TD jobs counts as TD."""
+    name, c = job.rsplit(" / ", 1)[0], config_of(job)
+    jobs = ci_jobs()
+    for norm in (lambda n: n, lambda n: VERSION.sub("#", n)):
+        td, other = ({(norm(n), k) for n, k in jobs[b]} for b in (True, False))
+        if (norm(name), c) in td | other:
+            return (norm(name), c) in td
+    return runs_td(c)
 
 
 def runs_everything(s: dict) -> set[tuple[str, str]]:
-    """(file, config) pairs that some job running every test failed on."""
+    """(file, config) pairs that some job without TD failed on, which no policy changes."""
     return {
         (f, config_of(j))
         for f, jobs in s.get("truth_jobs", {}).items()
         for j in jobs
-        if RUNS_EVERYTHING.match(j)
+        if not job_runs_td(j)
     }
 
 
@@ -232,17 +299,15 @@ def score(
         s, r, td = load(data, tag, sid, samples, td_dir)
         if tag != "td" and r is None:
             continue
-        pairs = truth_pairs(s, strong)
         always = runs_everything(s)
+        pairs = [p for p in truth_pairs(s, strong) if p not in always]
         cands = set(s["candidates"])
         for pol in policies:
             choice = policy(pol, s, r, td, seconds)
             if choice is None:
                 continue
-            hit = [(f, c) in always or choice.covers(f, c) for f, c in pairs]
-            cpu, gpu = cost_fraction(
-                choice, cands, seconds, lambda c: not is_inductor(c)
-            )
+            hit = [choice.covers(f, c) for f, c in pairs]
+            cpu, gpu = cost_fraction(choice, cands, seconds, runs_td)
             rows.append({
                 "tag": tag, "policy": pol, "id": sid, "kind": s["kind"], "pairs": len(pairs), "hit": sum(hit),
                 "cpu": cpu, "gpu": gpu, "run_all": choice.sel.run_all, "files": len(choice.files()),
