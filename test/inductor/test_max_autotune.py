@@ -490,7 +490,7 @@ class TestMaxAutotune(TestCase):
         graph = GraphLowering(make_fx(lambda: torch.zeros(2, 3))(), shape_env=shape_env)
         mat = mock.Mock()
         mat.get_size.return_value = [m, k]
-        mat.get_stride.return_value = [k, 1]
+        mat.get_stride_hint.return_value = [k, 1]
         mat.get_dtype.return_value = dtype
         with (
             V.set_graph_handler(graph),
