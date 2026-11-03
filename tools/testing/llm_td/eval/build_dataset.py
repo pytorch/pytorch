@@ -528,26 +528,26 @@ def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
         f"--until={end} 00:00 +0000",
         "origin/main",
     ).splitlines()
+    shas = [
+        sha
+        for sha, _, title in (line.partition(" ") for line in log)
+        if not re.match(r"(Revert|Reland)", title)
+    ]
+    # Reverts (by message, by the autorevert bot's record, or with a rev_
+    # sample) and titles naming a revert or reland anywhere filter the sample
+    # rather than the population, so a later revert only drops its id from the
+    # draw instead of reshuffling it.
     reverted = set(
         re.findall(
             r"This reverts commit ([0-9a-f]{40})",
             git("log", "--format=%B", f"--since={start} 00:00 +0000", "origin/main"),
         )
     )
-    shas = [
-        sha
-        for sha, _, title in (line.partition(" ") for line in log)
-        if not re.match(r"(Revert|Reland)", title) and sha not in reverted
-    ]
-    # The autorevert bot's record and the rev_ samples also cover reverts whose
-    # message differs, as does the title check for a revert or reland named
-    # anywhere in it. They filter the sample rather than the population, so a
-    # newer record only drops ids from the draw instead of reshuffling it.
     reverted |= {
         r["commit_sha"]
         for r in query(f"""
             SELECT DISTINCT commit_sha FROM misc.autorevert_events_v2
-            WHERE repo = 'pytorch/pytorch' AND action = 'revert' AND ts >= toDateTime('{start}')""")
+            WHERE repo = 'pytorch/pytorch' AND action = 'revert' AND dry_run = 0 AND ts >= toDateTime('{start}')""")
     }
     reverted_ids = {p.stem.removeprefix("rev_") for p in out.glob("rev_*.json")}
     for sha in random.Random(0).sample(shas, min(n, len(shas))):

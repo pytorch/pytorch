@@ -77,7 +77,6 @@ from tools.testing.llm_td.selection import (
     failure_list_sources,
     LLM_TD_HEDGE,
     needs_run_all,
-    normalize_test_name,
     parse_model_output,
     Selection,
 )
@@ -373,11 +372,10 @@ def policy(
         return Choice(sel, per_config, other)
     if name == "final-hm":
         # A malformed answer is left for from_model_output to fall back on.
-        # Unmatched names go too, as a list of only those would be malformed.
         with contextlib.suppress(ValueError):
             parse_model_output(out, cands)
             if isinstance(out, dict):
-                out = {**out, "tests": [t for t in out["tests"] if t.get("confidence") in ("high", "medium") and normalize_test_name(t["file"], cands)]}  # fmt: skip
+                out = {**out, "tests": [t for t in out["tests"] if t.get("confidence") in ("high", "medium")]}  # fmt: skip
     return Choice(Selection.from_model_output(out, cands, s["changed_files"], grep))
 
 
