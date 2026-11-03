@@ -2487,7 +2487,6 @@ class TestMaxAutotune(TestCase):
                 self.assertEqual(len(configs), 1)
                 self.assertEqual(configs[0], expected_config)
 
-    @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
     def test_bmm_out_dtype(self):
         def f(a, b):
             return torch.bmm(a, b, out_dtype=torch.float32)
@@ -2501,10 +2500,14 @@ class TestMaxAutotune(TestCase):
         ):
             compiled_f = torch.compile(f)
             out, code = run_and_get_code(compiled_f, a, b)
-            FileCheck().check("extern_kernels.bmm_dtype").run(code[0])
+            bmm_call = (
+                f"aoti_torch_{GPU_TYPE}_bmm_dtype_out"
+                if config.cpp_wrapper
+                else "extern_kernels.bmm_dtype"
+            )
+            FileCheck().check(bmm_call).run(code[0])
             self.assertEqual(out, expected, atol=1e-3, rtol=1e-3)
 
-    @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
     def test_triton_bmm_out_dtype(self):
         def f(a, b, out_dtype=torch.float32):
             return torch.bmm(a, b, out_dtype=out_dtype)
@@ -5902,6 +5905,28 @@ class TestPrologueFusion(TestCase):
                 get_kernel_launch(), 1, exactly=True
             ).run(code[0])
             self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
+
+    @config.patch(
+        {
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
+        }
+    )
+    def test_identical_template_epilogue_fusions(self):
+        # The mm + relu pairs all render the same fused kernel, so they share
+        # one async compile future. Each pair must still be benchmarked and
+        # fused, leaving one template launch per pair.
+        def fn(*xs):
+            return tuple(torch.relu(x @ y) for x, y in zip(xs[::2], xs[1::2]))
+
+        torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
+
+        args = [torch.randn(128, 128, device=GPU_TYPE) for _ in range(6)]
+        with self.force_template_fusion_benchmark():
+            out, code = run_and_get_code(torch.compile(fn), *args)
+
+        self.assertEqual(out, fn(*args), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=3, num_allocs=None, num_deallocs=None)
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     @parametrize("use_async_compile", (True, False))
