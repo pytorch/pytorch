@@ -4378,17 +4378,7 @@
       "Context": "builtin method key hashing",
       "Explanation": "Custom key equality can observe runtime method hash collisions, but a locally created receiver has no guardable identity.",
       "Hints": [
-        "Keep these dictionary or set operations outside the compiled region."
-      ]
-    }
-  ],
-  "GB9745": [
-    {
-      "Gb_type": "Unguardable builtin method key receiver",
-      "Context": "source.name",
-      "Explanation": "Builtin method keys require guards on receiver aliasing.",
-      "Hints": [
-        "Keep these dictionary or set operations outside the compiled region."
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -6092,7 +6082,7 @@
       "Context": "builtin method key hashing",
       "Explanation": "Dynamo cannot trace custom metaclass equality against builtin method keys.",
       "Hints": [
-        "Keep these dictionary or set operations outside the compiled region."
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

@@ -3,6 +3,7 @@
 
 import contextlib
 import enum
+import functools
 import re
 import unittest
 import unittest.mock as mock
@@ -20,6 +21,8 @@ import torch.utils._pytree as pytree
 from functorch.compile import aot_function, nop
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+from torch._dynamo.guards import GuardBuilder
+from torch._dynamo.source import LocalSource
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     CompileCounter,
@@ -28,6 +31,7 @@ from torch._dynamo.testing import (
     InductorAndRecordGraphs,
     normalize_gm,
 )
+from torch._dynamo.variables.invoke_subgraph import equivalent_guards
 from torch._higher_order_ops.auto_functionalize import FunctionalCallableWithEpilogue
 from torch._higher_order_ops.schema import find_hop_schema
 from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
@@ -50,6 +54,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skipIfCppFakeTensor,
     skipIfTorchDynamo,
@@ -3644,6 +3650,7 @@ class TestInvokeSubgraphCompileCUDA(TestCase):
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
+@instantiate_parametrized_tests
 class TestInvokeSubgraphReuse(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -3719,13 +3726,25 @@ class TestInvokeSubgraphReuse(TestCase):
             lambda x, holder: x + next(iter(holder.mapping)), reorder
         )
 
-    def test_reused_region_runtime_guard_nested(self):
+    @parametrize("inner_index", [0, 1])
+    @parametrize("kind", ["scalar", "callback", "shape", "order"])
+    def test_reused_region_runtime_guard_nested(self, inner_index, kind):
         class Holder:
-            scale = 2
+            def __init__(self):
+                self.scale = 2
+                self.callback = torch.sin
+                self.shape_only = torch.ones(2)
+                self.mapping = {1: None, 2: None}
 
         @nested_compile_region
         def inner(x, holder):
-            return x * holder.scale
+            if kind == "scalar":
+                return x * holder.scale
+            if kind == "callback":
+                return holder.callback(x)
+            if kind == "shape":
+                return x + holder.shape_only.shape[0]
+            return x + next(iter(holder.mapping))
 
         @nested_compile_region
         def outer(x, pair):
@@ -3736,14 +3755,102 @@ class TestInvokeSubgraphReuse(TestCase):
 
         pairs = [[Holder(), Holder()], [Holder(), Holder()]]
         counter = CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=False)
         x = torch.ones(1)
         with self._count_speculate_calls() as count:
             self.assertEqual(compiled(x, pairs), fn(x, pairs))
         self.assertEqual(count(), 2)
-        pairs[-1][-1].scale = 3
+        self.assertEqual(counter.frame_count, 1)
+        holder = pairs[-1][inner_index]
+        if kind == "scalar":
+            holder.scale = 3
+        elif kind == "callback":
+            holder.callback = torch.cos
+        elif kind == "shape":
+            holder.shape_only = torch.ones(3)
+        else:
+            holder.mapping[1] = holder.mapping.pop(1)
         self.assertEqual(compiled(x, pairs), fn(x, pairs))
         self.assertEqual(counter.frame_count, 2)
+
+        self.assertEqual(compiled(x, pairs), fn(x, pairs))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_reused_region_deduplicates_argument_guards(self):
+        class Holder:
+            scale = 2
+
+        @nested_compile_region
+        def region(x, holder):
+            return x * holder.scale
+
+        def fn(x, holders):
+            return tuple(region(x, holder) for holder in holders)
+
+        captured = []
+        compiled = torch._dynamo.optimize(
+            "eager",
+            nopython=True,
+            guard_export_fn=lambda guards: captured.append(list(guards)),
+        )(fn)
+        x, holders = torch.ones(1), [Holder() for _ in range(3)]
+        self.assertEqual(compiled(x, holders), fn(x, holders))
+        guards = list(captured[0])
+        for index in range(3):
+            matches = [
+                g
+                for g in guards
+                if g.name == f"L['holders'][{index}]"
+                and g.create_fn_name() == "TYPE_MATCH"
+            ]
+            self.assertEqual(
+                len(matches), 1, [(g.name, g.create_fn_name()) for g in guards]
+            )
+
+    def test_reused_region_guard_payloads(self):
+        owner, other = LocalSource("owner"), LocalSource("other")
+        first = owner.make_guard(
+            functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=other)
+        )
+        same = owner.make_guard(
+            functools.partial(
+                GuardBuilder.DUPLICATE_INPUT, source_b=LocalSource("other")
+            )
+        )
+        different = owner.make_guard(
+            functools.partial(
+                GuardBuilder.DUPLICATE_INPUT, source_b=LocalSource("third")
+            )
+        )
+        self.assertTrue(equivalent_guards(first, same))
+        self.assertFalse(equivalent_guards(first, different))
+
+    def test_reused_region_placeholder_order(self):
+        class Holder:
+            def __init__(self):
+                self.z, self.a = torch.ones(1), torch.zeros(1)
+
+        @nested_compile_region
+        def region(x, holder):
+            return x + holder.z + holder.a
+
+        def fn(x, holders):
+            return tuple(region(x, holder) for holder in holders)
+
+        x, holders = torch.ones(1), [Holder(), Holder()]
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        self.assertEqual(compiled(x, holders), fn(x, holders))
+        names = [
+            str(node.target)
+            for node in backend.graphs[0].graph.nodes
+            if node.op == "placeholder"
+        ]
+        for index in range(2):
+            matched = [name for name in names if f"holders_{index}_" in name]
+            self.assertEqual(len(matched), 2)
+            self.assertIn("_z", matched[0])
+            self.assertIn("_a", matched[1])
 
     def test_subgraph_reuse_skips_tracing(self):
         @nested_compile_region
