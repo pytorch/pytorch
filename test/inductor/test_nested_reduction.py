@@ -1406,7 +1406,12 @@ class _NestedReductionBase:
         self.check_fusion()
         # One split of the lane source and one of the per-group scale, which
         # is lifted to the parent tile and split like the data.
-        FileCheck().check_count("tl.split(", 2, exactly=True).run("\n".join(sources))
+        source = "\n".join(sources)
+        FileCheck().check_count("tl.split(", 2, exactly=True).run(source)
+        self.assertEqual(
+            source.count("tl.load("),
+            3 if self.force_persistent_outer_reduction is False else 2,
+        )
 
     def test_producer_consumer_lane_fold_splits_computed_value(self):
         """Lanes split the normalized value once, not the raw x and w loads."""
