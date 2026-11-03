@@ -9,7 +9,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
 #include <ATen/native/mps/operations/GemmHeuristics.h>
-#include <ATen/native/mps/operations/Matmul.h>
+#include <ATen/native/mps/operations/MatmulUtils.h>
 
 #include <fmt/format.h>
 
