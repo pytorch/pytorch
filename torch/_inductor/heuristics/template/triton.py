@@ -3010,7 +3010,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             # outer stride whose hint is 1 as unaligned.
             stride = [
                 V.graph.sizevars.replace_backed_symbols_with_hints(st)
-                for st in node.layout.stride
+                for st in node.get_stride_hint()
             ]
             inner = tma_inner_dim(stride)
             if inner is None:

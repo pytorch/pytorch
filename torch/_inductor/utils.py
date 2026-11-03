@@ -2506,7 +2506,7 @@ def can_use_tma(
         if layout is None:
             return True
         sizes = layout.size
-        strides = layout.stride
+        strides = layout.stride_hint()
         dtype = layout.dtype
 
         # Verify the output is 16-byte aligned
@@ -2517,7 +2517,7 @@ def can_use_tma(
 
     def _is_tma_compatible_matrix(m: IRNode) -> bool:
         sizes = m.get_size()
-        strides = m.get_stride()
+        strides = m.get_stride_hint()
         dtype = m.get_dtype()
 
         # Base pointer 16-byte aligned
@@ -3002,7 +3002,8 @@ def _tma_descriptor_max_offset_fits_in_int32(
     # fits.
     int32_max = torch.iinfo(torch.int32).max
     max_offset = sum(
-        (size - 1) * stride for size, stride in zip(mat.get_size(), mat.get_stride())
+        (size - 1) * stride
+        for size, stride in zip(mat.get_size(), mat.get_stride_hint())
     )
     if isinstance(max_offset, (int, sympy.Integer)):
         return max_offset <= int32_max
@@ -3576,7 +3577,7 @@ def use_cpp_bmm_template(
     # But the 2D matrix within each batch can still be contiguous, allowing us to apply max autotune.
     # So here we specifically check for contiguity within the 2D matrix of each batch.
     mat1_size = mat1.layout.size
-    mat1_stride = mat1.layout.stride
+    mat1_stride = mat1.layout.stride_hint()
     mat1_each_batch_is_contiguous = (
         _use_template_for_cpu(layout)
         and mat1.get_dtype() == torch.float32

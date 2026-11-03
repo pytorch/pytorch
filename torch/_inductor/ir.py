@@ -3539,6 +3539,20 @@ def freeze_storage_layout(x: IRNode) -> None:
         as_storage_and_layout(x)
 
 
+def fixed_layout_snapshot(x: IRNode) -> Layout:
+    """
+    The layout x gets if frozen in its current order: a flexible layout's
+    provisional strides with padding applied, computed without freezing it.
+    Code that bakes x's strides in before layouts are final reads them from
+    here, and freezes x to exactly these strides if it is used (see
+    ChoiceCaller.snapshot_input_layouts).
+    """
+    layout = x.get_layout()
+    if isinstance(layout, FlexibleLayout):
+        return layout.get_fixed_layout_without_freezing()
+    return layout
+
+
 def is_stride_order_storage_and_layout(
     x: IRNode, stride_order: Sequence[int | Integer]
 ) -> bool:
@@ -6564,6 +6578,9 @@ class ChoiceCaller:
         self.decomposition: Callable[..., Any] | None = None
         self.decomposition_kwargs: dict[str, object] = {}
         self.config_patches: dict[str, Any] = {}
+        # Input layouts this choice's kernel was built for, for choices whose
+        # kernel bakes in input strides; see snapshot_input_layouts
+        self.input_layout_snapshot: list[Layout] | None = None
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
@@ -6591,6 +6608,40 @@ class ChoiceCaller:
 
     def output_node(self) -> TensorBox:
         raise NotImplementedError
+
+    def snapshot_input_layouts(self) -> None:
+        """
+        Record the input layouts this choice's kernel is built for (see
+        fixed_layout_snapshot). Choices that bake in input strides call this at
+        creation and freeze_inputs_to_snapshot when selected, so inputs that are
+        still flexible cannot be frozen differently later.
+        """
+        self.input_layout_snapshot = [
+            fixed_layout_snapshot(node) for node in self.input_nodes
+        ]
+
+    def is_layout_compatible(self) -> bool:
+        """Whether this choice can still use the current input layouts."""
+        if self.input_layout_snapshot is None:
+            return True
+        return all(
+            isinstance(node.get_layout(), FlexibleLayout)
+            or node.get_layout() == snapshot
+            for node, snapshot in zip(
+                self.input_nodes, self.input_layout_snapshot, strict=True
+            )
+        )
+
+    def freeze_inputs_to_snapshot(self) -> None:
+        if self.input_layout_snapshot is None:
+            return
+        if not self.is_layout_compatible():
+            raise AssertionError(f"{self.name}: input layouts changed after selection")
+        for node, snapshot in zip(
+            self.input_nodes, self.input_layout_snapshot, strict=True
+        ):
+            if isinstance(node.get_layout(), FlexibleLayout):
+                node.freeze_layout_with_exact_strides(snapshot.stride)
 
     def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
@@ -6762,7 +6813,12 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self, hint_override: int | None = None
     ) -> tuple[ChoiceCaller, float]:
         timings = self.choice_timings(hint_override=hint_override)
-        min_choice = min(timings, key=timings.get)  # type: ignore[arg-type]
+        choices = [choice for choice in timings if choice.is_layout_compatible()]
+        if not choices:
+            raise torch._inductor.select_algorithm.NoValidChoicesError(
+                "No choices remain compatible with the input layouts"
+            )
+        min_choice = min(choices, key=timings.get)  # type: ignore[arg-type]
         return (min_choice, timings[min_choice])
 
     def finalize_as_triton_callers(
@@ -8744,6 +8800,10 @@ class TMADescriptor(ExternKernel):
     def __init__(
         self, tensor: IRNode, inputs: Sequence[Any], constant_args: Sequence[Any]
     ) -> None:
+        # Freeze so the ownership ReinterpretView below does not capture a
+        # still-flexible layout (reachable when
+        # triton_kernel_default_layout_constraint is "flexible_layout").
+        as_storage_and_layout(tensor)
         super().__init__(
             None,
             # link back to the underlying tensor in terms of ownership

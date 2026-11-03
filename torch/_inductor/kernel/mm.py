@@ -34,6 +34,8 @@ from ..ir import (
     ChoiceCaller,
     ExternKernel,
     FallbackKernel,
+    fixed_layout_snapshot,
+    FlexibleLayout,
     IRNode,
     is_triton,
     is_unaligned,
@@ -312,14 +314,14 @@ def check_supported_striding(mat_a, mat_b) -> None:
 
     # Check mat_a (self) stride requirements
     torch._check(
-        is_row_major(mat_a.get_stride()) or has_zero_dim(mat_a.get_size()),
-        lambda: f"mat_a must be row_major, got stride {mat_a.get_stride()}",
+        is_row_major(mat_a.get_stride_hint()) or has_zero_dim(mat_a.get_size()),
+        lambda: f"mat_a must be row_major, got stride {mat_a.get_stride_hint()}",
     )
 
     # Check mat_b stride requirements
     torch._check(
-        is_col_major(mat_b.get_stride()) or has_zero_dim(mat_b.get_size()),
-        lambda: f"mat_b must be col_major, got stride {mat_b.get_stride()}",
+        is_col_major(mat_b.get_stride_hint()) or has_zero_dim(mat_b.get_size()),
+        lambda: f"mat_b must be col_major, got stride {mat_b.get_stride_hint()}",
     )
 
 
@@ -348,8 +350,9 @@ def get_flydsl_mm_template_kwargs(
         return []
 
     sizevars = V.graph.sizevars
-    mat1_stride = mat1.get_stride()
-    mat2_stride = mat2.get_stride()
+    # FlyDSLTemplateCaller freezes the inputs to these layouts if selected
+    mat1_stride = fixed_layout_snapshot(mat1).stride
+    mat2_stride = fixed_layout_snapshot(mat2).stride
     out_stride = layout.stride
 
     if sizevars.statically_known_equals(mat1_stride[1], 1):
@@ -1030,7 +1033,7 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
         aten_templates: list[ExternKernelChoice | KernelTemplate] = [aten_addmm]
         if (
             len(inp.get_size()) == 2
-            and inp.get_stride()[0] == 0
+            and inp.get_stride_hint()[0] == 0
             and inductor_config.triton.autotune_cublasLt
             and not V.graph.cpp_wrapper  # bias_addmm only has a Python implementation
         ):
@@ -1508,6 +1511,14 @@ def scaled_mm_v2_constraint(
     # compatible leading dimensions rather than making both matrices dense.
     for name, inner_dim in (("self", 1), ("mat2", 0)):
         matrix = operands[name]
+        if isinstance(matrix.maybe_get_layout(), FlexibleLayout):
+            # freeze in place in the required order; padding may still widen
+            # the leading dim
+            order = [1, 0] if inner_dim == 1 else [0, 1]
+            operands[name] = ExternKernel.require_stride_order(
+                matrix, order, allow_padding=True
+            )
+            continue
         strides = matrix.maybe_get_stride()
         if strides is None or not V.graph.sizevars.statically_known_equals(
             strides[inner_dim], 1
@@ -2264,8 +2275,8 @@ def get_size_hints(mat1, mat2, m, n, k):
 
 
 def get_size_hints_strides(mat1, mat2):
-    mat1_stride = mat1.layout.stride
-    mat2_stride = mat2.layout.stride
+    mat1_stride = mat1.layout.stride_hint()
+    mat2_stride = mat2.layout.stride_hint()
     strides = [mat1_stride, mat2_stride]
     strides_hints = []
     for stride in strides:

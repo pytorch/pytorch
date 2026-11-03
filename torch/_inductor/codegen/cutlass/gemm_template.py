@@ -1189,7 +1189,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             )
         X, W = self.input_nodes[0], self.input_nodes[1]
         for input_node in self.input_nodes:
-            if not isinstance(X.layout, FixedLayout):
+            if not isinstance(input_node.layout, FixedLayout):
                 input_node.freeze_layout()
 
         Y = self.output_node

@@ -84,13 +84,13 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self.benchmark_inputs = []
         with V.fake_mode:
             for i, inp in enumerate(self.input_nodes):
+                inp.data.freeze_layout()  # type: ignore[attr-defined]
+
                 # Here there will be no unbacked symbols, as SubgraphBuffer does not support them
                 if len(get_free_symbols(inp.get_size(), unbacked_only=True)) != 0:
                     raise AssertionError("expected no unbacked symbols in input size")
                 if len(get_free_symbols(inp.get_stride(), unbacked_only=True)) != 0:
                     raise AssertionError("expected no unbacked symbols in input stride")
-
-                inp.data.freeze_layout()  # type: ignore[attr-defined]
 
                 # Always use symbolic inputs for tracing
                 trace_inputs.append(ir_node_to_tensor(inp))
@@ -610,8 +610,14 @@ class SubgraphTemplate(KernelTemplate):
             example_inputs = []
             for i, inp in enumerate(input_nodes):
                 if input_gen_fns and i in input_gen_fns:
-                    fake_tensor = input_gen_fns[i](inp)
+                    # only drives benchmarking: the winning decomposition is
+                    # re-inlined and the fallback layout is recomputed later
+                    with ir.allow_layout_analysis():
+                        fake_tensor = input_gen_fns[i](inp)
                 else:
+                    # the inferred output layout below persists as the choice's
+                    # layout, so it must be derived from final input strides
+                    ir.freeze_storage_layout(inp)
                     raw_shape = inp.get_size()
                     concrete_shape = V.graph.sizevars.optimization_hints(raw_shape)
                     raw_stride = inp.get_stride()
