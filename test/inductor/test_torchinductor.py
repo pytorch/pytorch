@@ -13132,13 +13132,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         name_fn=lambda constructor_case: constructor_case[0],
     )
     def test_constructors_pin_memory(self, constructor_case):
-        if self.device != "cpu":
-            raise unittest.SkipTest("pin_memory is not supported on non-CPU devices")
-
         _, constructor, args, expected_shape = constructor_case
 
+        # Pinned memory is CPU memory, but pinning needs a GPU, so build a CPU
+        # tensor whatever self.device is.
         def fn():
-            return constructor(*args, pin_memory=True, device=self.device)
+            return constructor(*args, pin_memory=True, device="cpu")
 
         result = torch.compile(fn, backend="inductor")()
         self.assertTrue(result.is_pinned())
@@ -13149,15 +13148,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @dynamo_config.patch(assume_static_by_default=False)
     @config.patch({"fx_graph_cache": False})
     def test_tensor_pin_memory_dynamic_scalar_list(self):
-        if self.device != "cpu":
-            raise unittest.SkipTest("pin_memory is not supported on non-CPU devices")
-
         def fn(a, b, c):
-            return torch.tensor([a, b, c], pin_memory=True, device=self.device)
+            return torch.tensor([a, b, c], pin_memory=True, device="cpu")
 
         result = torch.compile(fn, backend="inductor")(1, 2, 3)
         self.assertTrue(result.is_pinned())
-        self.assertEqual(result, torch.tensor([1, 2, 3], device=self.device))
+        self.assertEqual(result, torch.tensor([1, 2, 3]))
 
     def test_mkldnn_constant_buffer_is_not_checked_for_pin_memory(self):
         if self.device != "cpu":
