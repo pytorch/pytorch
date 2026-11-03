@@ -380,6 +380,12 @@ def lower_grouped_scale_row_offsets(cu_seqlens, mat_a, axis="m"):
     )
 
 
+def flex_gemm_grouped_scale_offsets_benchmark_input(node, total_length):
+    total = V.graph.sizevars.optimization_hint(total_length)
+    cu_seqlens = flex_gemm_cu_seqlens_benchmark_input(node, total)
+    return grouped_scale_row_offsets(cu_seqlens, total)
+
+
 def flex_gemm_cu_seqlens_benchmark_input(
     node: IRNode, total_length: _IntLike
 ) -> torch.Tensor:
@@ -881,6 +887,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         FlexGemmEpilogueConfig,
         FlexGemmEpilogueLocalReduceConfig,
     )
+    from torch._inductor.kernel.gemm_epilogue_analysis import (
+        flex_gemm_to_blocked_offsets,
+    )
     from torch._inductor.select_algorithm import autotune_select_algorithm
 
     op_spec = FLEX_GEMM_OP_SPECS[gemm_op]
@@ -925,6 +934,15 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         if not isinstance(alpha, (int, float)) or not isinstance(beta, (int, float)):
             raise NotImplementedError("FlexGEMM alpha/beta must be static scalars")
 
+    for node in subgraph.graph_module.graph.nodes:
+        if node.target is torch.ops.flex_gemm.to_blocked.default:
+            offs = flex_gemm_to_blocked_offsets(node)
+            if offs is not None and (
+                varlen_axis != "m" or offs is not gemm_operand_nodes[2]
+            ):
+                raise NotImplementedError(
+                    "grouped to_blocked must use the grouped-M GEMM's offs tensor"
+                )
     gemm_args: list[TensorBox] = []
     for arg in gemm_operand_nodes:
         gemm_arg = placeholder_args[arg] if isinstance(arg, torch.fx.Node) else arg
@@ -1072,22 +1090,21 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
     outputs = epilogue_analysis.outputs
     if grouped_mm and outputs.local_reduce is not None:
-        # Varlen-M rows never share a group along N, so a stored N-group reduction
-        # is per-row and group-safe; M groups would straddle experts. Feed-main is
-        # untested under varlen-M (span-1 feed-main also needs the accumulator
-        # prepass QuACK rejects with varlen).
+        # N groups stay within one expert row; fragment-local groups of 32 can
+        # also feed quantization without QuACK's unsupported accumulator prepass.
         local_reduce = outputs.local_reduce
         store = local_reduce.store
         if (
             varlen_axis != "m"
             or local_reduce.match.geometry.axis != 1
-            or local_reduce.feeds_main
             or store is None
-            or store.output_layout is not None
+            or (local_reduce.feeds_main and not local_reduce.grouped_fragment_reduction)
+            or (store.output_layout is not None and not store.output_layout.varlen_m)
         ):
             raise NotImplementedError(
                 "FlexGEMM QUACK grouped_mm (varlen) supports grouped reductions only "
-                "as stored N-group partials under varlen-M"
+                "as stored N-group partials or MXFP8 quantization with grouped blocked scales "
+                "under varlen-M"
             )
         if (
             epimod_local_reduce_spec(epilogue_analysis, local_reduce).prepass
@@ -1334,6 +1351,23 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_plan(
         outputs.local_reduce, local_reduce_out_index, epimod_source
     )
+    if (
+        local_reduce_store is not None
+        and local_reduce_store.output_layout is not None
+        and local_reduce_store.output_layout.varlen_m
+    ):
+        if template_local_reduce is None:
+            raise AssertionError("grouped blocked output requires a local-reduce plan")
+        row_offsets = (
+            grouped_row_offsets
+            if grouped_row_offsets is not None
+            else lower_grouped_scale_row_offsets(gemm_args[2], gemm_args[0])
+        )
+        row_offsets_index = len(input_nodes)
+        input_nodes.append(ir.TemplateBuffer.realize_template_input(row_offsets))
+        template_local_reduce = dataclasses.replace(
+            template_local_reduce, row_offsets_index=row_offsets_index
+        )
     if epimod_source.local_reduce_fragment_reduced:
         # Fragment partials are lowered for the unswapped accumulator geometry.
         config_constraints["swap_ab"] = False
@@ -1424,6 +1458,14 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             total_length=mat1.get_size()[-1]
             if varlen_axis == "k"
             else logical_output_size[0],
+        )
+    if (
+        template_local_reduce is not None
+        and template_local_reduce.row_offsets_index is not None
+    ):
+        input_gen_fns[template_local_reduce.row_offsets_index] = functools.partial(
+            flex_gemm_grouped_scale_offsets_benchmark_input,
+            total_length=logical_output_size[0],
         )
     result, _ = autotune_select_algorithm(
         "flex_gemm_epilogue",

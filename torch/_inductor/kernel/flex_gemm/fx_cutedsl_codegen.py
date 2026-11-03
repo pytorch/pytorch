@@ -744,6 +744,9 @@ class FlexGemmEpilogueEmitter:
         self.paired_reduction = (
             self.local_reduce is not None and self.local_reduce.match.physical_span > 1
         )
+        self.fragment_reduction = (
+            self.local_reduce is not None and self.local_reduce.fragment_reduction
+        )
         self.output_contraction_select_indices = (
             analysis.output_contraction_select_indices
         )
@@ -788,9 +791,9 @@ class FlexGemmEpilogueEmitter:
             match = self.local_reduce.match
             # Complete logical groups are finalized before their physical broadcast.
             self.local_reduce_finalize = (
-                None if self.paired_reduction else sink.finalize
+                None if self.fragment_reduction else sink.finalize
             )
-            if self.paired_reduction and swap_ab:
+            if self.fragment_reduction and swap_ab:
                 raise NotImplementedError(
                     "nested TensorSSA reductions do not support swap_ab=True"
                 )
@@ -805,18 +808,18 @@ class FlexGemmEpilogueEmitter:
                 prepass is None
                 and self.local_reduce.feeds_main
                 and match.geometry.axis == 1
-                and not self.paired_reduction
+                and not self.fragment_reduction
             ):
                 prepass = sink
             self.local_reduce_prepass = prepass
-            # GroupedMainStore min_fragment_n keeps each paired logical group
-            # inside one fragment, so QuACK skips only its in-fragment fold.
-            self.local_reduce_fragment_reduced = self.paired_reduction
+            # Paired stores and grouped blocked scales keep complete groups
+            # inside one fragment, so the main pass can consume the reduction.
+            self.local_reduce_fragment_reduced = self.fragment_reduction
             if (
                 (
                     not self.local_reduce.feeds_main
                     or prepass is not None
-                    or self.paired_reduction
+                    or self.fragment_reduction
                 )
                 and self.local_reduce.store is not None
                 and self.local_reduce.store.value_node is not sink.node
@@ -868,7 +871,7 @@ class FlexGemmEpilogueEmitter:
         if self.local_reduce_prepass is not None or (
             self.local_reduce is not None
             and self.local_reduce.feeds_main
-            and not self.paired_reduction
+            and not self.fragment_reduction
         ):
             self.params.append(LOCAL_REDUCE_FEED_MAIN_ARG_NAME)
         self.local_reduce_prepass_value: CuteDSLCSEVariable | None = None
@@ -1145,22 +1148,25 @@ class FlexGemmEpilogueEmitter:
             f"reduction_profile={layout.reduction_profile})",
             source,
         )
-        if self.paired_reduction and sink.finalize == "mean":
+        if self.fragment_reduction and sink.finalize == "mean":
             reduced = self.generate_like(
                 f"({reduced} / {float(geometry.group)!r})", reduced
             )
+        broadcast = self.broadcast_fragment_partial(reduced, layout, source)
+        sink_value = broadcast
         if self.paired_reduction and self.local_reduce.store is not None:
-            # QuACK collects this sink at physical fragment width; broadcast the
-            # logical group value across both paired lanes.
+            # QuACK collects this sink at physical fragment width.
             physical = GroupedTensorSSALayout(
                 match.physical_geometry.group, geometry.axis
             )
-            self.local_reduce_sink_value = self.generate_like(
+            sink_value = self.generate_like(
                 f"{reduced}.reshape({physical.keepdim_shape('acc')})"
                 f".broadcast_to({physical.tensorssa_shape('acc')})",
                 reduced,
             )
-        return self.broadcast_fragment_partial(reduced, layout, source)
+        if self.fragment_reduction and self.local_reduce.store is not None:
+            self.local_reduce_sink_value = sink_value
+        return broadcast
 
     def capture_broadcast_env(self, node: torch.fx.Node) -> dict[torch.fx.Node, Any]:
         """Re-broadcast uniform captures to the current logical fragment.
@@ -1234,7 +1240,7 @@ class FlexGemmEpilogueEmitter:
                 if node is self.gemm or node.op in ("placeholder", "output"):
                     continue
                 if (
-                    not self.paired_reduction
+                    not self.fragment_reduction
                     and (
                         self.local_reduce_prepass is None
                         or (spec is not None and spec.prepass is not None)
@@ -1417,7 +1423,7 @@ class FlexGemmEpilogueEmitter:
             and (
                 not self.local_reduce.feeds_main
                 or self.local_reduce_prepass is not None
-                or self.paired_reduction
+                or self.fragment_reduction
             )
         ):
             store_value = (

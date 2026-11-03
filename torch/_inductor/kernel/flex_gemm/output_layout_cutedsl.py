@@ -10,6 +10,10 @@ def blocked_128x4_fake_shape(batch, _rows, _cols):
     return (batch, cute.sym_int(), cute.sym_int(), 512)
 
 
+def grouped_blocked_128x4_fake_shape(_groups, _rows, _cols):
+    return (1, cute.sym_int(), cute.sym_int(), 512)
+
+
 @cute.jit
 def blocked_128x4_output_tensor(
     tensor: cute.Tensor, transposed: cutlass.Constexpr[bool]
