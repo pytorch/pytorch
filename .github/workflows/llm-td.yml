@@ -3,21 +3,18 @@ name: llm-td
 # Shadow LLM test selection (tools/testing/llm_td). pull_request_target runs this
 # file from the default branch and the job checks out main, so the bedrock role is
 # only ever handed to reviewed code. The PR is read through git, never executed.
-# Test jobs fetch the result by PR number and head SHA in download-td-artifacts;
-# when enforcing, the target-determination job they need first waits for this
-# run (see wait_for_selection.py, which reads the run name below). run_test.py
-# only skips tests with it when the PR is labeled ci-llm-td and TD is enabled.
-
-run-name: llm-td ${{ contains(github.event.pull_request.labels.*.name, 'ci-llm-td') && 'enforce' || 'shadow' }}
+# The target-determination job of each test workflow resolves one selection per
+# workflow run from this workflow's newest run for the head (resolve_selection.py).
+# --enforce marks a selection enforceable unless the selector failed; it is
+# enforced only while the PR is labeled ci-llm-td, waiting for a pending run
+# first, and run_test.py applies it only where TD is enabled.
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened]
 
 concurrency:
-  # Only pushes and ci-llm-td label changes select; other label events must not
-  # cancel a selection in flight.
-  group: llm-td-${{ github.event.pull_request.number }}-${{ (!contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) || github.event.label.name == 'ci-llm-td') && 'select' || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 permissions: {}
@@ -26,9 +23,7 @@ jobs:
   llm-test-selection:
     if: >-
       github.repository_owner == 'pytorch' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (!contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) ||
-       github.event.label.name == 'ci-llm-td')
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: bedrock
@@ -65,10 +60,7 @@ jobs:
           # The PR's own base, so a ghstack PR is diffed against the PR below it.
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          ENFORCE: ${{ contains(github.event.pull_request.labels.*.name, 'ci-llm-td') && '--enforce' || '' }}
-        run: |
-          python3 -m tools.testing.llm_td.select_tests --base "$BASE_SHA" --head "$HEAD_SHA" \
-            --output llm_td_selection.json $ENFORCE
+        run: python3 -m tools.testing.llm_td.select_tests --base "$BASE_SHA" --head "$HEAD_SHA" --output llm_td_selection.json --enforce
 
       - name: Upload selection
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
