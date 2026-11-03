@@ -69,13 +69,25 @@ class TestPointwiseCoverage(TestCase):
             "setup_error",
             "class_skip",
             "expected_failure",
+            "matched_both_samples",
+            "incomplete_samples",
+            "incomplete_known_mismatch",
         ),
     )
     def test_runner_outcomes(self, outcome):
         record = CoverageRecord(
             {"test": "example"},
-            expected_mismatch=outcome == "known_mismatch",
+            expected_mismatch=outcome
+            in ("known_mismatch", "incomplete_known_mismatch"),
             kernel_required=outcome != "matched_without_kernel",
+            required_sample_kinds=("opinfo", "edges")
+            if outcome
+            in (
+                "matched_both_samples",
+                "incomplete_samples",
+                "incomplete_known_mismatch",
+            )
+            else (),
         )
 
         class Example(unittest.TestCase):
@@ -89,13 +101,18 @@ class TestPointwiseCoverage(TestCase):
                 if outcome in ("failed", "expected_failure"):
                     self.fail("numerical mismatch")
                 record.compared = 1
+                if record.required_sample_kinds:
+                    record.compared_by_sample_kind["opinfo"] = 1
+                    if outcome == "matched_both_samples":
+                        record.compared_by_sample_kind["edges"] = 1
+                        record.compared = 2
                 record.generated_kernels = int(
                     outcome not in ("matched_without_kernel", "unverified")
                 )
-                if outcome == "known_mismatch":
+                if record.expected_mismatch:
                     record.mismatches["nan-payload"] += 1
                 else:
-                    record.matched = 1
+                    record.matched = record.compared
 
         if outcome == "class_skip":
             Example = unittest.skip("unsupported hardware")(Example)
@@ -107,9 +124,13 @@ class TestPointwiseCoverage(TestCase):
         with record_result(record, result, test):
             test.run(result)
         self.assertEqual(result.addSuccess, original)
-        expected = {"setup_error": "failed", "class_skip": "skipped"}.get(
-            outcome, outcome
-        )
+        expected = {
+            "setup_error": "failed",
+            "class_skip": "skipped",
+            "matched_both_samples": "matched",
+            "incomplete_samples": "unverified",
+            "incomplete_known_mismatch": "unverified",
+        }.get(outcome, outcome)
         self.assertEqual(record.status, expected)
         self.assertEqual(result.testsRun, 1)
         self.assertEqual(
@@ -278,23 +299,20 @@ class TestPointwiseCoverage(TestCase):
                 summarize(directory)
 
     @parametrize(
-        "method,family",
+        "method,family,sample_kind",
         (
-            ("test_pointwise_edges_backward", "test_pointwise_edges_backward"),
-            ("test_pointwise_bitwise", "test_pointwise_bitwise"),
-            ("test_pointwise_backward", "test_pointwise_backward"),
-            ("test_pointwise_bitwise", "test_pointwise_edges"),
-            ("test_pointwise_backward", "test_pointwise_edges_backward"),
+            ("test_pointwise_edges_backward", "test_pointwise_edges_backward", None),
+            ("test_pointwise_bitwise", "test_pointwise_bitwise", "opinfo"),
+            ("test_pointwise_backward", "test_pointwise_backward", "opinfo"),
+            ("test_pointwise_bitwise", "test_pointwise_edges", "edges"),
+            ("test_pointwise_backward", "test_pointwise_edges_backward", "edges"),
+            ("test_pointwise_bitwise", "test_pointwise_bitwise", None),
+            ("test_pointwise_backward", "test_pointwise_backward", None),
         ),
-        name_fn=lambda method, family: f"{method}_{family}",
+        name_fn=lambda method, family, sample_kind: f"{method}_{family}_{sample_kind}",
     )
-    def test_case_identity(self, method, family):
-        sample_kind = "edges" if "edges" in family else "opinfo"
-        suffix = (
-            ""
-            if method == "test_pointwise_edges_backward"
-            else f"_sample_kind_{sample_kind}"
-        )
+    def test_case_identity(self, method, family, sample_kind):
+        suffix = "" if sample_kind is None else f"_sample_kind_{sample_kind}"
         case = coverage_case(
             f"{method}_nn_functional_silu_complex{suffix}_cuda_complex128"
         )

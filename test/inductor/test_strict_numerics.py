@@ -54,6 +54,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
     generate_elementwise_binary_with_scalar_samples,
+    SampleInput,
     UnaryUfuncInfo,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -2015,7 +2016,7 @@ def _dtype_label(dtype):
 
 # Exhaust all 16-bit encodings and sample float32 bit patterns.
 NUM_BITPATTERN_SAMPLES = 65536
-# Opt in to expanded reference inputs, including arbitrary strides.
+# Opt in to complete OpInfo samples, reference inputs and raw-bit sweeps.
 ALL_SAMPLES = os.getenv("PYTORCH_ALL_SAMPLES", "0") == "1"
 
 _FINFO32 = torch.finfo(torch.float32)
@@ -2344,6 +2345,47 @@ def _outputs_equal(a, b):
     )
 
 
+def _representative_samples(samples):
+    def signature(t):
+        if not isinstance(t, torch.Tensor):
+            return t
+        return (
+            t.dtype,
+            t.layout,
+            tuple(min(size, 2) for size in t.shape),
+            t.is_contiguous(),
+            tuple(sorted(range(t.ndim), key=lambda dim: t.stride(dim))),
+            tuple(stride == 0 for stride in t.stride()),
+            t.is_conj(),
+            t.is_neg(),
+            t.requires_grad,
+        )
+
+    seen = set()
+    for sample in samples:
+        scalar_parameters = [
+            t.detach()
+            .resolve_conj()
+            .resolve_neg()
+            .cpu()
+            .reshape(-1)
+            .clone(memory_format=torch.contiguous_format)
+            .view(torch.uint8)
+            .tolist()
+            for t in tree_leaves((sample.args, sample.kwargs))
+            if isinstance(t, torch.Tensor) and t.numel() == 1
+        ]
+        key = repr(
+            (
+                tree_map(signature, (sample.input, sample.args, sample.kwargs)),
+                scalar_parameters,
+            )
+        )
+        if key not in seen:
+            seen.add(key)
+            yield sample
+
+
 BACKWARD_OPS = [op for op in POINTWISE_OPS if op.supports_autograd]
 
 # (op_id, dtype_label) pairs that must still differ from eager.
@@ -2437,6 +2479,7 @@ class PointwiseStrictNumericsTest(TestCase):
         self._coverage = CoverageRecord(
             case,
             (case["op"], case["dtype"]) in ledgers.get(case["family"], ()),
+            required_sample_kinds=("opinfo", "edges"),
         )
         self._coverage.kernel_required = case["op"] not in {
             _op_id(op)
@@ -2458,9 +2501,12 @@ class PointwiseStrictNumericsTest(TestCase):
         if self._coverage is not None and count:
             self._coverage.filters[reason] += count
 
-    def _coverage_comparison(self, equal, kind=""):
+    def _coverage_comparison(self, equal, kind="", tag="sample"):
         if self._coverage is not None:
             self._coverage.compared += 1
+            self._coverage.compared_by_sample_kind[
+                "edges" if tag.startswith("edge_") else "opinfo"
+            ] += 1
             self._coverage.matched += int(equal)
             self._coverage.generated_kernels = metrics.generated_kernel_count
             if not equal:
@@ -2471,6 +2517,45 @@ class PointwiseStrictNumericsTest(TestCase):
         torch.manual_seed(0)
         # Release large reference-input allocations between concurrent tests.
         torch.cuda.empty_cache()
+
+    @dtypes(torch.float32)
+    @parametrize("parameter_kind", ("python", "tensor"))
+    def test_representative_samples_keep_parameters_and_layouts(
+        self, device, dtype, parameter_kind
+    ):
+        x = torch.randn((2, 3), device=device, dtype=dtype)
+        parameters = (0.0, -0.0) if parameter_kind == "tensor" else (0.1, 0.2)
+        if parameter_kind == "tensor":
+            parameters = tuple(
+                torch.tensor([p, 1.0], device=device)[::2] for p in parameters
+            )
+        samples = [
+            SampleInput(x, args=(parameters[0],)),
+            SampleInput(torch.ones((4, 5), device=device), args=(parameters[0],)),
+            SampleInput(x.t(), args=(parameters[0],)),
+            SampleInput(x[:, ::2], args=(parameters[0],)),
+            SampleInput(x.expand(2, 2, 3), args=(parameters[0],)),
+            SampleInput(x, args=(parameters[1],)),
+        ]
+        selected = list(_representative_samples(samples))
+        self.assertEqual(len(selected), 5)
+        self.assertIs(selected[0], samples[0])
+        self.assertIs(selected[-1], samples[-1])
+
+    @dtypes(torch.float32)
+    @parametrize("full", (False, True))
+    def test_combined_samples_preserve_seeded_edges(self, device, dtype, full):
+        op = next(op for op in POINTWISE_OPS if op.name == "nn.functional.relu")
+        torch.manual_seed(0)
+        expected = self._edge_calls(op, device, dtype)
+        with mock.patch(f"{__name__}.ALL_SAMPLES", full):
+            calls = self._combined_calls(device, op, dtype)
+        actual = [call for call in calls if call[0].startswith("edge_")]
+        self.assertEqual(len(actual), len(expected))
+        for result, reference in zip(actual, expected):
+            self.assertEqual(result[0], reference[0])
+            self.assertTrue(_outputs_equal(result[1], reference[1]))
+            self.assertEqual(result[2:], reference[2:])
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_keyword_input_grads(self, device, dtype):
@@ -2678,18 +2763,33 @@ class PointwiseStrictNumericsTest(TestCase):
         if op.name in BITPATTERN_SLOW or "polynomial" in op.name:
             self._coverage_filter("raw_bit_sweep_disabled_for_slow_series")
             return []
+        key = (_op_id(op), _dtype_label(dtype))
+        expanded = (
+            ALL_SAMPLES
+            or key in REFERENCE_INPUTS
+            or key in POINTWISE_XFAIL | NONFLOAT_XFAIL | BACKWARD_XFAIL
+        )
+        count = NUM_BITPATTERN_SAMPLES if expanded else 256
         if dtype in (torch.float16, torch.bfloat16):
-            x = _exhaustive_16bit(dtype, device)
+            if expanded:
+                x = _exhaustive_16bit(dtype, device)
+            else:
+                gen = torch.Generator(device=device).manual_seed(0)
+                x = (
+                    torch.randint(0, 65536, (count,), device=device, generator=gen)
+                    .to(torch.int16)
+                    .view(dtype)
+                )
             y = x.flip(0)
         elif dtype == torch.float32:
-            x = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device, seed=0)
-            y = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device, seed=1)
+            x = _sampled_fp32(count, device, seed=0)
+            y = _sampled_fp32(count, device, seed=1)
         elif dtype == torch.float64 or dtype.is_complex:
             gen = torch.Generator(device=device).manual_seed(0)
             bits = torch.randint(
                 0,
                 256,
-                (NUM_BITPATTERN_SAMPLES * dtype.itemsize,),
+                (count * dtype.itemsize,),
                 dtype=torch.uint8,
                 device=device,
                 generator=gen,
@@ -2764,6 +2864,8 @@ class PointwiseStrictNumericsTest(TestCase):
             calls += [("bits", *c) for c in self._bitpattern_call(op, dtype, device)]
             if not use_reference:
                 samples = self._sample_inputs(op, device, dtype, requires_grad=backward)
+                if not ALL_SAMPLES:
+                    samples = _representative_samples(samples)
                 sample_calls = self._build_calls(samples, dtype)
                 calls += [("sample", *c) for c in sample_calls]
         except Exception as e:
@@ -2809,6 +2911,23 @@ class PointwiseStrictNumericsTest(TestCase):
         ):
             self.skipTest("no Triton kernel generated (op falls back to ATen)")
 
+    def _combined_calls(self, device, op, dtype, *, backward=False):
+        try:
+            calls = self._collect_calls(device, op, dtype, backward=backward)
+        except unittest.SkipTest as error:
+            self._coverage_filter(f"opinfo_samples_skipped:{error}")
+            calls = []
+        # Preserve the edge inputs previously generated in a separate seeded test.
+        torch.manual_seed(0)
+        calls += self._edge_calls(op, device, dtype, backward=backward)
+        return calls
+
+    def _assert_sample_ledgers(self, mismatches, op, dtype, what, xfail, xfail_name):
+        ordinary = [row for row in mismatches if not row[0].startswith("edge_")]
+        edges = [row for row in mismatches if row[0].startswith("edge_")]
+        self._assert_ledger(ordinary, op, dtype, what, xfail, xfail_name)
+        self._assert_ledger(edges, op, dtype, f"edges {what}", (), "")
+
     def _sweep(self, device, op, dtype, cfg, *, calls=None):
         r"""Return mismatching (source, index, shape, kwargs, kind) records."""
         if calls is None:
@@ -2841,7 +2960,7 @@ class PointwiseStrictNumericsTest(TestCase):
                 tested += 1
                 equal = _outputs_equal(eager, result)
                 kind = "" if equal else _diff_kind(eager, result)
-                self._coverage_comparison(equal, kind)
+                self._coverage_comparison(equal, kind, tag)
                 if not equal:
                     mismatches.append(
                         (
@@ -2875,16 +2994,15 @@ class PointwiseStrictNumericsTest(TestCase):
             )
 
     @ops(POINTWISE_OPS)
-    @parametrize("sample_kind", ("opinfo", "edges"))
-    def test_pointwise_bitwise(self, device, dtype, op, sample_kind):
-        calls = self._edge_calls(op, device, dtype) if sample_kind == "edges" else None
+    def test_pointwise_bitwise(self, device, dtype, op):
+        calls = self._combined_calls(device, op, dtype)
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG, calls=calls)
-        self._assert_ledger(
+        self._assert_sample_ledgers(
             mismatches,
             op,
             dtype,
-            f"{sample_kind} forward",
-            POINTWISE_XFAIL | NONFLOAT_XFAIL if sample_kind == "opinfo" else (),
+            "forward",
+            POINTWISE_XFAIL | NONFLOAT_XFAIL,
             "POINTWISE_XFAIL/NONFLOAT_XFAIL",
         )
 
@@ -3206,7 +3324,7 @@ class PointwiseStrictNumericsTest(TestCase):
                     )
                     tested += 1
                     if comp_grads is None:
-                        self._coverage_comparison(False, "shape")
+                        self._coverage_comparison(False, "shape", tag)
                         mismatches.append(
                             (
                                 tag,
@@ -3223,7 +3341,7 @@ class PointwiseStrictNumericsTest(TestCase):
                         continue
                     equal = _outputs_equal(eager_grads, comp_grads)
                     kind = "" if equal else _diff_kind(eager_grads, comp_grads)
-                    self._coverage_comparison(equal, kind)
+                    self._coverage_comparison(equal, kind, tag)
                     if not equal:
                         mismatches.append(
                             (
@@ -3244,22 +3362,17 @@ class PointwiseStrictNumericsTest(TestCase):
         return mismatches
 
     @ops(BACKWARD_OPS, dtypes=OpDTypes.supported_backward)
-    @parametrize("sample_kind", ("opinfo", "edges"))
-    def test_pointwise_backward(self, device, dtype, op, sample_kind):
-        calls = (
-            self._edge_calls(op, device, dtype, backward=True)
-            if sample_kind == "edges"
-            else None
-        )
+    def test_pointwise_backward(self, device, dtype, op):
+        calls = self._combined_calls(device, op, dtype, backward=True)
         mismatches = self._sweep_backward(
             device, op, dtype, POINTWISE_STRICT_CFG, calls=calls
         )
-        self._assert_ledger(
+        self._assert_sample_ledgers(
             mismatches,
             op,
             dtype,
-            f"{sample_kind} backward",
-            BACKWARD_XFAIL if sample_kind == "opinfo" else (),
+            "backward",
+            BACKWARD_XFAIL,
             "BACKWARD_XFAIL",
         )
 
@@ -3272,6 +3385,7 @@ if directory := os.getenv("PYTORCH_POINTWISE_COVERAGE_DIR"):
         globals().get("PointwiseStrictNumericsTestCUDA"),
         {
             "all_samples": ALL_SAMPLES,
+            "sample_mode": "full" if ALL_SAMPLES else "compact",
             "torch_version": torch.__version__,
             "cuda_version": torch.version.cuda,
             "gpu_capability": torch.cuda.get_device_capability()
