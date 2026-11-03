@@ -11,6 +11,7 @@ import torch.distributed.distributed_c10d as c10d
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyAccelerator,
     skipXPUIf,
 )
 from torch.testing._internal.common_distributed import C10dTorchCommsTestBase
@@ -36,11 +37,6 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
     @property
     def _rank_value(self):
         return self.rank + 1
-
-    def _skip_if_cpu(self):
-        """Skip the cpu variant; these tests need an accelerator backend."""
-        if self.device_type == "cpu":
-            self.skipTest("requires an accelerator")
 
     def _skip_if_product_overflows(self, op):
         if op == dist.ReduceOp.PRODUCT and self.world_size > 12:
@@ -263,8 +259,8 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
+    @onlyAccelerator
     def test_new_group_bare_default_backend_is_auto_qualified(self):
-        self._skip_if_cpu()
         ranks = list(range(self.world_size))
         backend = dist.get_default_backend_for_device(self.device_type)
         ng = dist.new_group(ranks=ranks, backend=backend)
@@ -272,8 +268,8 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
+    @onlyAccelerator
     def test_new_group_qualified_backend_passes_through(self):
-        self._skip_if_cpu()
         ranks = list(range(self.world_size))
         backend = dist.get_default_backend_for_device(self.device_type)
         ng = dist.new_group(ranks=ranks, backend=f"{self.device_type}:{backend}")
@@ -286,8 +282,8 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         "ProcessGroupXCCL.Options has no config knobs equivalent to "
         "ncclConfig_t: https://github.com/intel/torch-xpu-ops/issues/5385",
     )
+    @onlyAccelerator
     def test_new_group_with_pg_options(self):
-        self._skip_if_cpu()
         ranks = list(range(self.world_size))
         opts = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
         opts.config.cga_cluster_size = 2
@@ -302,8 +298,8 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         "ProcessGroupXCCL.Options has no config knobs equivalent to "
         "ncclConfig_t: https://github.com/intel/torch-xpu-ops/issues/5385",
     )
+    @onlyAccelerator
     def test_new_group_sequential_pg_options_produce_distinct_groups(self):
-        self._skip_if_cpu()
         ranks = list(range(self.world_size))
         opts_a = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
         opts_a.config.cga_cluster_size = 2
