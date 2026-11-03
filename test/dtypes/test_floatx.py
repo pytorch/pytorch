@@ -14,7 +14,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfMPS,
     dtypesIfXPU,
     instantiate_device_type_tests,
-    onlyCPU,
     skipMPS,
 )
 from torch.testing._internal.common_utils import (
@@ -523,30 +522,6 @@ class TestFloat4Dtype(TestCase):
                 lambda t: t.to(torch.float32), backend="eager", fullgraph=True
             )(x)
 
-    @onlyCPU
-    def test_shell_dtype_lists_match(self, device):
-        # The prims check mirrors the C++ copy_ check; keep their dtype sets equal.
-        quantized = {
-            torch.qint8,
-            torch.qint32,
-            torch.quint8,
-            torch.quint4x2,
-            torch.quint2x4,
-        }
-        dtypes = {d for d in vars(torch).values() if isinstance(d, torch.dtype)}
-        for dtype in dtypes - quantized - {torch.float32}:
-            meta = torch.empty(2, dtype=dtype, device="meta")
-            meta_f32 = torch.empty(2, device="meta")
-            for cast in (lambda: meta.to(torch.float32), lambda: meta_f32.to(dtype)):
-                try:
-                    cast()
-                    rejected = False
-                except NotImplementedError:
-                    rejected = True
-                self.assertEqual(
-                    rejected, dtype in _uncastable_shell_dtypes, msg=str(dtype)
-                )
-
     def test_f4_save_load(self, device):
         x1 = torch.randint(0, 10, (4, 4), device=device, dtype=torch.uint8).view(
             torch.float4_e2m1fn_x2
@@ -594,6 +569,7 @@ def _e5m3fnu_encode_reference(x):
 
 
 class TestFloat8E5M3FNU(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     dtype = torch.float8_e5m3fnu
 
     def test_decode_all_codes(self, device):
@@ -725,6 +701,33 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(TestFloat8E5M3FNU, globals(), except_for="mps")
 instantiate_device_type_tests(TestFloat4Dtype, globals(), allow_xpu=True)
+
+
+class TestShellDtypes(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_shell_dtype_lists_match(self):
+        # The prims check mirrors the C++ copy_ check; keep their dtype sets equal.
+        quantized = {
+            torch.qint8,
+            torch.qint32,
+            torch.quint8,
+            torch.quint4x2,
+            torch.quint2x4,
+        }
+        dtypes = {d for d in vars(torch).values() if isinstance(d, torch.dtype)}
+        for dtype in dtypes - quantized - {torch.float32}:
+            meta = torch.empty(2, dtype=dtype, device="meta")
+            meta_f32 = torch.empty(2, device="meta")
+            for cast in (lambda: meta.to(torch.float32), lambda: meta_f32.to(dtype)):
+                try:
+                    cast()
+                    rejected = False
+                except NotImplementedError:
+                    rejected = True
+                self.assertEqual(
+                    rejected, dtype in _uncastable_shell_dtypes, msg=str(dtype)
+                )
 
 
 class TestFloat8DtypeCPUOnly(TestCase):
