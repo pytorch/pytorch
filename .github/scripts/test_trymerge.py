@@ -23,6 +23,7 @@ from typing import Any, TYPE_CHECKING
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError, URLError
 
+import yaml
 from github_utils import gh_graphql, GHGraphQLError, GitHubComment
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from greenlight_guard import (
@@ -70,8 +71,10 @@ from trymerge import (
     categorize_checks,
     check_ciflow_covers,
     check_greenlight_reviewed_head_sha,
+    CiflowCover,
     DRCI_CHECKRUN_NAME,
     ensure_mergeable_labels,
+    find_ciflow_covers,
     find_matching_merge_rule,
     format_failure_comment,
     get_classifications,
@@ -93,6 +96,7 @@ from trymerge import (
     is_authorized_without_greenlight,
     is_bot_initiated_codev_merge,
     is_docker_affecting_files,
+    is_transient_lookup_error,
     iter_issue_timeline_until_comment,
     JobCheckState,
     labeler_globs_to_regex,
@@ -2656,6 +2660,7 @@ class TestGreenlightGuardCallSite(TestCase):
         mock_fetch_url.assert_not_called()
 
 
+@mock.patch("trymerge.get_ciflow_cover_runs", return_value=([], []))
 @mock.patch("trymerge.gh_add_labels")
 @mock.patch("trymerge.check_for_sev")
 @mock.patch("trymerge.post_starting_merge_comment")
@@ -2863,6 +2868,7 @@ class TestIgnoreCurrentScope(TestCase):
         self.assertEqual((pending, failed), ([red], []))
 
 
+@mock.patch("trymerge.get_ciflow_cover_runs", return_value=([], []))
 @mock.patch("trymerge.gh_add_labels")
 @mock.patch("trymerge.check_for_sev")
 @mock.patch("trymerge.post_starting_merge_comment")
@@ -3511,6 +3517,7 @@ class TestNativeStackMergePlumbing(NoNetworkTestCase):
         ):
             self.patch(target)
         self.patch("trymerge.get_classifications", return_value={})
+        self.patch("trymerge.get_ciflow_cover_runs", return_value=([], []))
         self.post = self.patch("trymerge.post_starting_merge_comment")
         self.lower, self.top = stacked_pr(1001), stacked_pr(1002)
         self.patch("trymerge.GitHubPR", return_value=self.top)
@@ -4391,6 +4398,8 @@ CIFLOW_LABELER_CONFIG = """
   globs: torch/**
 "ciflow/braces":
 - torch/{a,b}.py
+"ciflow/docker":
+- .ci/docker/**
 """
 
 GHSTACK_BODY = """Stack from [ghstack](https://github.com/ezyang/ghstack) (oldest at bottom):
@@ -4425,7 +4434,14 @@ class TestCiflowNeeds(TestCase):
             warnings.simplefilter("always")
             rules = read_ciflow_labeler_rules(labeler_repo(self))
         self.assertEqual(set(rules), {"ciflow/inductor", "ciflow/h100"})
-        self.assertEqual(len(w), 2)
+        self.assertEqual(
+            [str(x.message).split(":")[0] for x in w],
+            [
+                "Skipping malformed labeler rule for ciflow/malformed",
+                "Skipping labeler rule for ciflow/braces",
+            ],
+        )
+        self.assertIn("unsupported glob", str(w[1].message))
 
         def needs(files: list[str], draft: bool) -> list[str]:
             return needed_ciflow_labels(rules, files, lambda: draft)
@@ -4439,6 +4455,17 @@ class TestCiflowNeeds(TestCase):
 
     def test_missing_labeler_config_means_no_rules(self) -> None:
         self.assertEqual(read_ciflow_labeler_rules(labeler_repo(self, None)), {})
+
+    def test_every_checked_in_ciflow_rule_but_docker_converts(self) -> None:
+        repo = GitRepo(get_git_repo_dir())
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            rules = read_ciflow_labeler_rules(repo)
+        with open(os.path.join(repo.repo_dir, ".github", "labeler.yml")) as f:
+            config = yaml.safe_load(f)
+        labels = {label for label in config if label.startswith("ciflow/")}
+        self.assertIn("ciflow/inductor", rules)
+        self.assertEqual(set(rules), labels - {"ciflow/docker"})
 
     def test_globs_match_like_the_labelers_minimatch(self) -> None:
         """Expected values are minimatch 9's, with default options."""
@@ -4585,6 +4612,16 @@ def ciflow_job(job_id: int, status: str, conclusion: str | None) -> dict[str, An
     }
 
 
+def http_error(code: int) -> HTTPError:
+    return HTTPError(
+        "https://api.github.com",
+        code,
+        "error",
+        {},  # type: ignore[arg-type]
+        None,
+    )
+
+
 class TestCiflowCoveringRuns(NoNetworkTestCase):
     """#1001 and #1002 need ciflow/inductor and land together; #1003 above them
     carries it."""
@@ -4609,7 +4646,6 @@ class TestCiflowCoveringRuns(NoNetworkTestCase):
         self.prs_to_merge = self.patch(
             "trymerge.get_prs_to_merge", return_value=self.landing
         )
-        self.get_stack = self.patch("trymerge.get_native_stack", return_value=None)
         self.above = self.patch(
             "trymerge.get_open_prs_above",
             return_value=(
@@ -4654,14 +4690,28 @@ class TestCiflowCoveringRuns(NoNetworkTestCase):
         message = str(ctx.exception)
         for part in ("`ciflow/inductor`", "#1001, #1002", "#1003", "[wf1 / job11]"):
             self.assertIn(part, message)
-        self.assertNotIn("land the stack", message)
+        self.assertIn("add `ciflow/inductor` to #1002 and merge from #1002", message)
         self.top.merge_into.assert_not_called()
+
+    def test_the_advice_names_the_covered_pr_not_the_merged_one(self) -> None:
+        self.failed_run()
+        self.top.get_changed_files.return_value = ["README.md"]
+        with self.assertRaisesRegex(RuntimeError, "to #1001 and merge from #1001"):
+            self.merge()
 
     def test_failure_dr_ci_calls_flaky_does_not_block(self) -> None:
         self.failed_run()
         self.drci.return_value = {"FLAKY": [{"id": 11, "name": "wf1 / job11"}]}
         self.merge()
         self.top.merge_into.assert_called_once()
+        self.drci.assert_any_call(pr_num=1003, project="pytorch")
+
+    def test_failure_the_ai_advisor_clears_still_blocks(self) -> None:
+        self.failed_run()
+        self.drci.return_value = {"AI_NOT_RELATED": [{"id": 11, "name": "wf1 / job11"}]}
+        with self.assertRaisesRegex(RuntimeError, "ran on #1003"):
+            self.merge()
+        self.top.merge_into.assert_not_called()
         self.drci.assert_any_call(pr_num=1003, project="pytorch")
 
     def test_running_run_above_waits(self) -> None:
@@ -4753,9 +4803,69 @@ class TestCiflowCoveringRuns(NoNetworkTestCase):
         self.top.merge_into.assert_not_called()
 
     def test_a_transient_error_retries(self) -> None:
-        self.fetch.side_effect = URLError("connection reset")
-        with self.assertRaisesRegex(MandatoryChecksMissingError, "connection reset"):
-            self.check()
+        sleep = self.patch(
+            "trymerge.time.sleep", side_effect=[None, AssertionError("merge waits")]
+        )
+        errors = [URLError("connection reset")]
+
+        def fetch_after_an_error(url: str, params: dict[str, Any]) -> dict[str, Any]:
+            if errors:
+                raise errors.pop()
+            return self._fetch(url, params)
+
+        self.fetch.side_effect = fetch_after_an_error
+        self.runs = [ciflow_run(1, "ciflow/inductor/1003")]
+        self.jobs = {1: [ciflow_job(11, "completed", "success")]}
+        self.merge()
+        sleep.assert_called_once()
+        self.top.merge_into.assert_called_once()
+
+    def test_a_permanent_error_refuses_at_once(self) -> None:
+        self.fetch.side_effect = http_error(404)
+        with self.assertRaisesRegex(RuntimeError, "Could not check the ciflow runs"):
+            self.merge()
+        self.top.merge_into.assert_not_called()
+
+    def test_only_client_errors_other_than_rate_limits_are_permanent(self) -> None:
+        for error, transient in (
+            (URLError("reset"), True),
+            (http_error(502), True),
+            (http_error(429), True),
+            (http_error(403), True),
+            (GHGraphQLError("timeout", {}), True),
+            (NativeStackError("GraphQL errors: timeout"), True),
+            (http_error(404), False),
+            (http_error(422), False),
+        ):
+            with self.subTest(error=error):
+                self.assertEqual(is_transient_lookup_error(error), transient)
+
+    def test_no_lookup_when_every_landing_pr_carries_its_labels(self) -> None:
+        self.above.side_effect = get_open_prs_above
+        self.lower.get_labels.return_value = ["ciflow/inductor"]
+        self.top.get_labels.return_value = ["ciflow/inductor"]
+        stack = mock.Mock(return_value=None)
+        self.assertEqual(
+            find_ciflow_covers(self.top, self.landing, self.rules, stack), ([], [])
+        )
+        self.above.assert_not_called()
+        stack.assert_not_called()
+
+    def test_a_ghstack_pr_is_covered_through_the_orig_branch_above(self) -> None:
+        self.above.side_effect = get_open_prs_above
+        self.top.is_ghstack_pr.return_value = True
+        self.top.head_ref.return_value = "gh/alice/2/head"
+        self.top.get_body.return_value = GHSTACK_BODY
+        above = {"pr1003": stack_pr_info(1003, "gh/alice/3/head")}
+        self.patch("trymerge.gh_graphql", return_value={"data": {"repository": above}})
+        self.assertEqual(
+            find_ciflow_covers(
+                self.top, [(self.top, "orig-1002")], self.rules, lambda: None
+            ),
+            ([CiflowCover("ciflow/inductor", 1003, "sha-1003", [1002])], []),
+        )
+        compare = self.fetch.call_args.args[0]
+        self.assertTrue(compare.endswith("/compare/orig-1002...gh/alice/3/orig"))
 
     def test_ignore_current_waives_the_runs_current_failures(self) -> None:
         self.failed_run()
@@ -4768,7 +4878,6 @@ class TestCiflowCoveringRuns(NoNetworkTestCase):
     def test_force_merge_looks_nothing_up(self) -> None:
         self.merge(skip_mandatory_checks=True)
         self.top.merge_into.assert_called_once()
-        self.get_stack.assert_not_called()
         self.above.assert_not_called()
         self.fetch.assert_not_called()
 

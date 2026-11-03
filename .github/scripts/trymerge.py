@@ -16,6 +16,7 @@ from functools import cache, partial
 from pathlib import Path
 from re import Pattern
 from typing import Any, cast, NamedTuple, TYPE_CHECKING
+from urllib.error import HTTPError
 from warnings import warn
 
 import yaml
@@ -485,6 +486,9 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
 RE_PR_CC_LINE = re.compile(r"^cc:? @\w+.*\r?\n?$", re.MULTILINE)
 RE_DIFF_REV = re.compile(r"^Differential Revision:.+?(D[0-9]+)", re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
+# The labeler keeps it on every PR that needs it; check_docker_builds_ready gates
+# .ci/docker changes.
+CIFLOW_LABELS_NOT_COVERED = frozenset({"ciflow/docker"})
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 GHSTACK_LISTING_HEADER = "Stack from [ghstack]"
 RE_GHSTACK_LISTING_ROW = re.compile(r"\* (__->__ )?#([1-9][0-9]*)")
@@ -2551,7 +2555,11 @@ def read_ciflow_labeler_rules(repo: GitRepo) -> dict[str, LabelerRule]:
         return {}
     rules: dict[str, LabelerRule] = {}
     for label, rule in config.items():
-        if not isinstance(label, str) or not CIFLOW_LABEL.match(label):
+        if (
+            not isinstance(label, str)
+            or not CIFLOW_LABEL.match(label)
+            or label in CIFLOW_LABELS_NOT_COVERED
+        ):
             continue
         extended = isinstance(rule, dict)
         globs = rule.get("globs") if extended else rule
@@ -2645,6 +2653,13 @@ def gh_get_stack_prs(org: str, project: str, numbers: list[int]) -> list[Any]:
 CIFLOW_LOOKUP_ERRORS = (OSError, GHGraphQLError, NativeStackError)
 
 
+def is_transient_lookup_error(e: Exception) -> bool:
+    """GitHub answers rate limits with 403 or 429, not always with rate-limit
+    headers, and reports GraphQL rate limits and timeouts as errors in a 200
+    response."""
+    return not isinstance(e, HTTPError) or e.code >= 500 or e.code in (403, 429)
+
+
 def get_cover_stack(
     pr: GitHubPR, native_stack: NativeStack | None
 ) -> NativeStack | None:
@@ -2722,6 +2737,20 @@ def find_ciflow_covers(
     unless that is `pr`, whose own checks the merge already waits for. Also why
     `pr` itself is not covered, when it has PRs above it and nothing covers it."""
     landing = [(pr if p.pr_num == pr.pr_num else p, rev) for p, rev in landing]
+    needs = [
+        needed_ciflow_labels(
+            {
+                label: rule
+                for label, rule in rules().items()
+                if label not in p.get_labels()
+            },
+            p.get_changed_files(),
+            partial(is_draft_pr, p),
+        )
+        for p, _ in landing
+    ]
+    if not any(needs):
+        return [], []
     listed_above, above = get_open_prs_above(pr, stack)
     if len(landing) == 1 and not listed_above:
         return [], []
@@ -2744,18 +2773,7 @@ def find_ciflow_covers(
     uncovered: list[str] = []
     for idx, (stacked, rev) in enumerate(landing):
         is_merged_pr = stacked.pr_num == pr.pr_num
-        missing = {
-            label: rule
-            for label, rule in rules().items()
-            if label not in chain[idx].labels
-            and (label in carried or (is_merged_pr and listed_above))
-        }
-        if not missing:
-            continue
-        files = stacked.get_changed_files()
-        for label in needed_ciflow_labels(
-            missing, files, partial(is_draft_pr, stacked)
-        ):
+        for label in needs[idx]:
             carriers = [p for p in chain[idx + 1 :] if label in p.labels]
             cover = next(
                 (
@@ -2894,14 +2912,22 @@ def check_ciflow_covers(
         ]
     except CIFLOW_LOOKUP_ERRORS as e:
         traceback.print_exc()
-        raise MandatoryChecksMissingError(
-            f"Could not check the ciflow runs above in the stack: {e}"
-        ) from e
+        reason = f"Could not check the ciflow runs above in the stack: {e}"
+        if is_transient_lookup_error(e):
+            raise MandatoryChecksMissingError(reason) from e
+        raise RuntimeError(reason) from e
     if uncovered:
         raise RuntimeError(" ".join(uncovered))
     waiting: list[str] = []
     for cover, checks in classified:
         covered = ", ".join(f"#{num}" for num in cover.covered)
+        # The AI advisor judges a failure against the cover PR's own diff only.
+        checks = {
+            name: c._replace(classification=None)
+            if c.classification == "AI_NOT_RELATED"
+            else c
+            for name, c in checks.items()
+        }
         if not checks:
             waiting.append(
                 f"the `{cover.label}` run on #{cover.pr_num}, which tests "
@@ -2914,13 +2940,15 @@ def check_ciflow_covers(
             ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD,
         )
         if failing:
+            top = cover.covered[-1]
             raise RuntimeError(
                 f"`{cover.label}` is needed by {covered} and ran on #{cover.pr_num} "
                 f"above in the stack instead, where {len(failing)} jobs have failed, "
                 "first few of them are: "
                 + ", ".join(f"[{x[0]}]({x[1]})" for x in failing[:5])
-                + f". Fix the failure, add `{cover.label}` to {covered} so it runs "
-                f"there, or use `-i` if the failure comes from a PR above {covered}."
+                + f". Fix the failure, use `-i` if it comes from a PR above {covered}, "
+                f"or add `{cover.label}` to #{top} and merge from #{top} once its "
+                "run passes there."
             )
         if pending:
             waiting.append(
