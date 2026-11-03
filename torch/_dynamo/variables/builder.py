@@ -936,12 +936,9 @@ def _is_dim_dynamic_from_source_dynamism(
     return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
 
 
-def _build_dict_items(
-    value: dict[Any, Any],
-    build_key_value: Callable[[int, object, object], tuple[T, VariableTracker]],
-) -> dict[T, VariableTracker]:
+def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
     try:
-        snapshot = enumerate_items_with_dict_position(value)
+        return list(enumerate_items_with_dict_position(value))
     except InvalidOrderedDict:
         unimplemented(
             gb_type="OrderedDict storage differs from linked keys",
@@ -954,6 +951,13 @@ def _build_dict_items(
             skip_frame=True,
             apply_to_code=False,
         )
+
+
+def _build_dict_items(
+    value: dict[Any, Any],
+    build_key_value: Callable[[int, object, object], tuple[T, VariableTracker]],
+) -> dict[T, VariableTracker]:
+    snapshot = _dict_input_snapshot(value)
     entries = [
         (position, *build_key_value(position, key, item))
         for position, key, item in snapshot
@@ -1503,15 +1507,13 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            use_const_keys = all(
-                ConstantVariable.is_literal(k) for k in dict.keys(value)
-            )
+            all_const = all(ConstantVariable.is_literal(k) for k in dict.keys(value))
 
-            # For use_const_keys, we don't have to guard on anything yet. We guard on
+            # For all_const, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
             # For cases where we need to guard on all keys, we lazily put guards
             # during the dict call_method (check dicts.py)
-            if not use_const_keys:
+            if not all_const:
                 # Guard on the key order
                 # This is not ideal, i.e., there is no need to guard on the key
                 # order. But we guard on the key order because of the complexity
@@ -1536,7 +1538,7 @@ class VariableBuilder:
                 i: int, k: object, v: object
             ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
-                if use_const_keys:
+                if all_const:
                     # OrderedDict replay rebuilds linked order and must retain
                     # the input key objects; plain dict replay can update in place.
                     # Read values by literal key to avoid guarding input order.
@@ -2573,7 +2575,6 @@ class VariableBuilder:
                 tx=self.tx,
             )
         elif issubclass(type(value), dict):
-            # Input instances already ran __new__, including any subclass override.
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
