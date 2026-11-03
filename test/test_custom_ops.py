@@ -60,6 +60,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     subtest,
     TemporaryFileName,
+    TEST_ACCELERATOR,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
