@@ -2848,7 +2848,7 @@ class CachingAutotuner(KernelInterface):
                 n_scratch = max(n_scratch, 2)
 
             fast_runner = _FastCudaLauncher(
-                cu_function, num_warps, shared, arg_tys, n_scratch
+                cu_function, num_warps, shared, arg_tys, n_scratch, kernel.launch_pdl
             )
 
             new_globals = {**launcher.__globals__, "runner": fast_runner}
@@ -3247,11 +3247,9 @@ class StaticTritonCompileResult(CompileResult[_T]):
                 # Requires storing the entire binary
                 raise CannotStaticallyLaunchKernel("store_cubin is enabled")
 
-            if getattr(kernel.metadata, "launch_pdl", False) or getattr(
-                kernel.metadata, "launch_cooperative_grid", False
-            ):
+            if getattr(kernel.metadata, "launch_cooperative_grid", False):
                 raise CannotStaticallyLaunchKernel(
-                    "static launch does not support launch attributes"
+                    "static launch does not support cooperative grid launches"
                 )
 
             binary_ext = GPU_KERNEL_BIN_EXTS.get(
@@ -3338,7 +3336,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
         # we're sure static cuda launcher was used for this compile
         set_feature_use("static_triton_launcher", True)
         # Load the binary on the parent
-        if not self.kernel.cubin_path:
+        if not self.kernel.cubin_path and self.kernel.function is None:
             self.reload_cubin_path()
         # compile-on-one-rank: a None device in compile_meta marks a rank/device-agnostic
         # kernel, so the launcher must keep its loaded handles per device.
