@@ -83,6 +83,64 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
+    def test_nested_lazy_constant_aggregate_does_not_specialize_values(self):
+        def fn(x, value):
+            return x + 1, ((value, None),)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for value in (1234567, 2345678, 1234567):
+            self.assertEqual(compiled(x, value), fn(x, value))
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("value", [None, True, False, Ellipsis, NotImplemented, torch.float32])
+    def test_sourced_singleton_aggregate_uses_load_const(self, value):
+        constants = []
+
+        def hook(instructions):
+            constants.extend(
+                i.argval
+                for i in instructions
+                if i.opname == "LOAD_CONST" and type(i.argval) is tuple
+            )
+
+        def fn(x, value):
+            return x + 1, (value, None)
+
+        x = torch.ones(1)
+        with self.register_bytecode_hook(hook):
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x, value),
+                fn(x, value),
+            )
+        self.assertIn((value, None), constants)
+
+    @parametrize(
+        "factory",
+        [
+            lambda: torch.device("cpu"),
+            lambda: float("1.23456789"),
+            lambda: int("1234567890123456"),
+            lambda: b"configuration-value".decode(),
+        ],
+    )
+    def test_sourced_non_singleton_aggregate_identity(self, factory):
+        def fn(x, value):
+            return x + 1, ((value,),), frozenset((value,)), slice(value, None)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        values = [factory(), factory()]
+        self.assertIsNot(values[0], values[1])
+        x = torch.ones(1)
+        for value in values:
+            result = compiled(x, value)
+            self.assertIs(result[1][0][0], value)
+            self.assertIs(next(iter(result[2])), value)
+            self.assertIs(result[3].start, value)
+        self.assertEqual(counter.frame_count, 1)
+
     @parametrize("mapping_type", [dict, collections.OrderedDict])
     def test_dict_input_key_snapshot_reused(self, mapping_type):
         def hook(instructions):
