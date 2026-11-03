@@ -210,7 +210,7 @@ def _get_flydsl_flex_attention_backward_config(
 def _empty_gradient(source, size, *, dtype, device):
     return empty_strided(
         size=size,
-        stride=infer_dense_strides(size, source.get_stride()),
+        stride=infer_dense_strides(size, source.get_stride_hint()),
         dtype=dtype,
         device=device,
     )
