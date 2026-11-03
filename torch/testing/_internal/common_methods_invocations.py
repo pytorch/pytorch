@@ -15870,9 +15870,15 @@ op_db: list[OpInfo] = [
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.float16),
+           dtypesIfMPS=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_avg_pool3d,
            sample_inputs_func=sample_inputs_avgpool3d,
+           decorators=(
+               DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-04), }),
+                   'TestConsistency', 'test_output_grad_match', device_type='mps'),
+           ),
            skips=(
                # AssertionError: Tensor-likes are not close!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
