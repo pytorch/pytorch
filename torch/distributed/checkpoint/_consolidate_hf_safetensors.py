@@ -8,6 +8,7 @@ import math
 import os
 import struct
 import time
+import warnings
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -565,13 +566,7 @@ def _consolidate_safetensors_files(
 
     # Names with no saved tensor would get an empty dtype, which readers reject
     input_fqns = {fqn for data in input_files_data.values() for fqn in data.metadata}
-    skipped_fqns = sorted(fqn_to_file_mapping.keys() - input_fqns)
-    if skipped_fqns:
-        logger.warning(
-            "Skipping %d tensors in fqn_to_index_mapping that were not saved: %s",
-            len(skipped_fqns),
-            skipped_fqns[:20],
-        )
+    input_fqns.discard(DEFAULT_EXTRA_METADATA_KEY)
 
     output_files_data: dict[str, _OutputFileData] = {}
     # Create multiple output files based on the provided mapping
@@ -596,6 +591,23 @@ def _consolidate_safetensors_files(
     return output_files_data
 
 
+def _warn_skipped_fqns(
+    fqn_to_index_mapping: dict[str, int],
+    output_files_data: dict[str, _OutputFileData],
+    /,
+) -> None:
+    """Warn about fqn_to_index_mapping entries missing from the full output_files_data."""
+    saved_fqns = {fqn for data in output_files_data.values() for fqn in data.fqn_data}
+    skipped_fqns = sorted(fqn_to_index_mapping.keys() - saved_fqns)
+    if skipped_fqns:
+        warnings.warn(
+            f"Skipping {len(skipped_fqns)} tensors in fqn_to_index_mapping that were not "
+            "saved, leaving them out of the consolidated files and the index. Remove them "
+            f"from the mapping or add them to the state dict. First 20: {skipped_fqns[:20]}",
+            UserWarning,
+        )
+
+
 def consolidate_safetensors_files(
     input_dir: str,
     output_dir: str,
@@ -606,8 +618,9 @@ def consolidate_safetensors_files(
     Main function to consolidate sharded safetensors files into one or more output files.
 
     This function orchestrates the entire consolidation process:
-    1. Sets up the output file structure based on the fqn_to_index_mapping
-    2. Finds all safetensors files in the input directory
+    1. Finds all safetensors files in the input directory and reads their metadata
+    2. Sets up the output file structure based on the fqn_to_index_mapping, skipping
+       (with a warning) entries that no input file holds
     3. Parses metadata from all input files
     4. Writes metadata to the output files
     5. Writes tensor data from input files to output files
@@ -636,6 +649,7 @@ def consolidate_safetensors_files(
     output_files_data = _consolidate_safetensors_files(
         input_dir, output_dir, fqn_to_file_mapping, num_threads
     )
+    _warn_skipped_fqns(fqn_to_index_mapping, output_files_data)
 
     # Step 4: Write overall model.index.safetensors.json file with weight map
     _write_overall_metadata_file(output_dir, output_files_data)
@@ -656,6 +670,7 @@ def consolidate_safetensors_files_on_every_rank(
     This function distributes the consolidation work by assigning output files to different ranks.
     All tensors with the same index in fqn_to_index_mapping are processed by the same rank,
     as they belong to the same output file.
+    Mapping entries that no input file holds are skipped, and rank 0 names them in one warning.
 
     If process_group is provided, rank and world_size will be derived from it. Otherwise,
     they will be automatically detected from the distributed environment if available.
@@ -756,7 +771,10 @@ def consolidate_safetensors_files_on_every_rank(
             for rank_data in gathered_output_files_data:
                 all_output_files_data.update(rank_data)
 
+            _warn_skipped_fqns(fqn_to_index_mapping, all_output_files_data)
             _write_overall_metadata_file(output_dir, all_output_files_data)
             logger.info("Rank 0: Wrote overall metadata file.")
             logger.info("Total time taken: %.2f secs.", time.time() - start_time)
         dist.barrier(group=process_group)
+    else:
+        _warn_skipped_fqns(fqn_to_index_mapping, output_files_data)
