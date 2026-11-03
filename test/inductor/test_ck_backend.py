@@ -23,6 +23,7 @@ from torch._inductor.utils import run_and_get_code, try_import_ck_lib
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     subtest,
@@ -58,6 +59,8 @@ _parametrize_dtype = parametrize(
 
 @instantiate_parametrized_tests
 class TestCKBackend(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         # The new inductor cache refresh mechanism
         # introduced with https://github.com/pytorch/pytorch/pull/122661
@@ -649,6 +652,8 @@ struct UniversalGemmPipelineProblem
 @instantiate_parametrized_tests
 @unittest.skipIf(not torch.version.hip, "ROCM only")
 class TestCKTileUniversalGemmTemplate(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     _MODULE = "torch._inductor.codegen.rocm.ck_tile_universal_gemm_template"
 
     def setUp(self):
