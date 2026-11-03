@@ -1920,7 +1920,9 @@ class TestLinalg(TestCase):
 
     # A running float32 sum stops growing once it reaches 2**24, so a norm that
     # accumulates linearly drops every small term after a large one (#65815).
-    # At 4 threads, n is large enough for the reduction to be split across them.
+    # At 4 threads only the dim=None cases are split across threads, which checks
+    # how the per-thread sums are combined. The other cases have 2 or 3 outputs,
+    # and each output is still reduced by a single thread.
     @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_vector_norm_keeps_small_terms(self, device, dtype):
@@ -2039,8 +2041,8 @@ class TestLinalg(TestCase):
         try:
             for threads in (1, 4):
                 torch.set_num_threads(threads)
-                for (x, fn, ord), contiguous in product(cases, (False, True)):
-                    t = x[:, :2].contiguous() if contiguous else x[:, :2]
+                for (inp, fn, ord), contiguous in product(cases, (False, True)):
+                    t = inp[:, :2].contiguous() if contiguous else inp[:, :2]
                     expected = fn(t.double(), ord).to(dtype)
                     msg = f"threads={threads}, contiguous={t.is_contiguous()}, {fn.__name__}, ord={ord}"
                     self.assertEqual(fn(t, ord), expected, atol=0, rtol=0, msg=msg)
