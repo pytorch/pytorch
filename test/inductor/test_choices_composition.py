@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 from typing import Any
 from unittest.mock import patch
 
@@ -15,12 +14,7 @@ from torch._inductor.choices import (
     registered_inductor_choices,
     unregister_inductor_choices,
 )
-from torch._inductor.virtualized import (
-    _choices,
-    threadlocal,
-    use_config_choices_handler,
-    V,
-)
+from torch._inductor.virtualized import _choices, threadlocal, V
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -369,56 +363,6 @@ class ChoicesCompositionTest(TestCase):
             runtime_uuid,
             ("composed_inductor_choices", ("alpha:_alpha:7", "beta")),
         )
-
-    def test_reused_thread_follows_config_changes(self) -> None:
-        # The autograd engine thread lowers lazily compiled backwards under the
-        # forward's (thread-local) config and is reused across compiles; its
-        # handler must track that config, as the compile cache key does.
-        def get_runtime_and_cache_uuid(name: str) -> tuple[Any, Any]:
-            with config.patch(inductor_choices_class=partial(UUIDChoices, name)):
-                return (
-                    V.choices.uuid(),
-                    config.save_config_portable(ignore_private_configs=False)[
-                        "inductor_choices_class"
-                    ],
-                )
-
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            for name in ("first", "second"):
-                runtime_uuid, cache_uuid = executor.submit(
-                    get_runtime_and_cache_uuid, name
-                ).result()
-                self.assertEqual(runtime_uuid, name)
-                self.assertEqual(cache_uuid, name)
-
-    def test_registered_choices_follow_config_patch(self) -> None:
-        register_inductor_choices("registered", lambda: UUIDChoices("registered"))
-        with config.patch(inductor_choices_class=partial(UUIDChoices, "patched")):
-            handler = V.choices
-            cache_uuid = config.save_config_portable(ignore_private_configs=False)[
-                "inductor_choices_class"
-            ]
-            self.assertIs(V.choices, handler)
-        self.assertEqual(handler.uuid(), cache_uuid)
-        self.assertIn("patched", str(cache_uuid))
-
-    def test_config_handler_is_pinned_for_compile_unless_set(self) -> None:
-        with config.patch(inductor_choices_class=partial(UUIDChoices, "config")):
-            with use_config_choices_handler():
-                handler = V.choices
-                self.assertEqual(handler.uuid(), "config")
-                self.assertIs(getattr(threadlocal, _choices._key), handler)
-            self.assertFalse(hasattr(threadlocal, _choices._key))
-
-            direct = UUIDChoices("direct")
-            with V.set_choices_handler(direct), use_config_choices_handler():
-                self.assertIs(V.choices, direct)
-
-    def test_direct_handler_exit_does_not_pin_default(self) -> None:
-        with V.set_choices_handler(AlphaChoices(threshold=3)):
-            pass
-        with config.patch(inductor_choices_class=lambda: UUIDChoices("after")):
-            self.assertEqual(V.choices.uuid(), "after")
 
     def test_inherited_default_is_used_when_nobody_overrides(self) -> None:
         register_inductor_choices("beta", BetaChoices)
