@@ -83,6 +83,9 @@ def has_commit(sha: str) -> bool:
     return True
 
 
+KINDS = ("pr", "revert", "neutral")
+
+
 def is_main(branch: str) -> bool:
     return branch == "main" or branch.startswith("trunk/")
 
@@ -149,7 +152,7 @@ def pr_caused_failures(rows: list[dict]) -> tuple[list[dict], dict]:
     author = pr_authors(sorted({r["pr"] for r in pr_rows}))
     authors = collections.defaultdict(set)
     for r in pr_rows:
-        authors[(r["tf"], r["test"])].add(author.get(r["pr"]))
+        authors[(r["tf"], r["test"])].add(author.get(r["pr"], r["pr"]))
     keep = [
         r
         for r in pr_rows
@@ -285,7 +288,7 @@ def revert_truth_jobs(
         JOIN (SELECT id, name FROM default.workflow_job
               WHERE created_at >= toDateTime('{t0}') - INTERVAL 1 HOUR
                 AND created_at <= parseDateTimeBestEffort('{reverted}') + INTERVAL 1 HOUR
-                AND repository_full_name = 'pytorch/pytorch' AND head_branch = 'main'
+                AND repository_full_name = 'pytorch/pytorch' AND (head_branch = 'main' OR head_branch LIKE 'trunk/%')
                 AND name NOT LIKE '%rerun_disabled_tests%' AND name NOT LIKE '%mem_leak_check%') j ON j.id = t.job_id
         WHERE time_inserted >= toDateTime('{t0}') AND time_inserted <= parseDateTimeBestEffort('{reverted}') + INTERVAL 2 HOUR
           AND file IN ({files}) AND (failure_count > 0 OR error_count > 0)""")
@@ -333,8 +336,16 @@ def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
         f"--until={end}",
         "origin/main",
     ).splitlines()
+    reverted = set(
+        re.findall(
+            r"This reverts commit ([0-9a-f]{40})",
+            git("log", "--format=%B", f"--since={start}", "origin/main"),
+        )
+    )
     shas = [
-        line.split()[0] for line in log if not re.match(r"^\S+ (Revert|Reland)", line)
+        sha
+        for sha, _, title in (line.partition(" ") for line in log)
+        if not re.match(r"(Revert|Reland)", title) and sha not in reverted
     ]
     for sha in random.Random(0).sample(shas, min(n, len(shas))):
         msg = git("log", "-1", "--format=%B", sha)
@@ -360,13 +371,17 @@ def main() -> None:
     p.add_argument("--end", type=dt.date.fromisoformat, required=True)
     p.add_argument("--neutral", type=int, default=200)
     p.add_argument("--jobs", type=int, default=8)
+    p.add_argument("--kinds", nargs="+", choices=KINDS, default=KINDS)
     args = p.parse_args()
     out = args.data / "samples"
     out.mkdir(parents=True, exist_ok=True)
-    keep, main_fail = pr_caused_failures(pull_failures(args.start, args.end))
-    pr_samples(keep, main_fail, out, args.jobs)
-    revert_samples(out, args.jobs, args.start, args.end)
-    neutral_samples(out, args.end - dt.timedelta(days=25), args.end, args.neutral)
+    if "pr" in args.kinds:
+        keep, main_fail = pr_caused_failures(pull_failures(args.start, args.end))
+        pr_samples(keep, main_fail, out, args.jobs)
+    if "revert" in args.kinds:
+        revert_samples(out, args.jobs, args.start, args.end)
+    if "neutral" in args.kinds:
+        neutral_samples(out, args.end - dt.timedelta(days=25), args.end, args.neutral)
 
 
 if __name__ == "__main__":
