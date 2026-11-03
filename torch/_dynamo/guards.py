@@ -6324,6 +6324,12 @@ class CheckFunctionManager:
                     for guard in sorted_guards
                 )
             ),
+            # Filtered guards need order annotations only for retained dictionaries.
+            guard_on_key_order={
+                source
+                for source in output_graph_guards_state.guard_on_key_order
+                if id(builder.get(source)) in builder.guard_tree_values
+            },
             input_source_to_sizes_strides=pytree.tree_map(
                 convert_int_to_concrete_values,
                 output_graph_guards_state.input_source_to_sizes_strides,
