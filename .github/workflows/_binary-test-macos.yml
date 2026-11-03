@@ -85,6 +85,23 @@ jobs:
           source "$venv_dir/bin/activate"
           pip install "${RUNNER_TEMP}/artifacts"/*.whl numpy -v
           python .ci/pytorch/smoke_test/smoke_test.py --package torchonly
+      # GitHub-hosted runners expose a paravirtual GPU that is not Apple7+,
+      # see https://github.com/pytorch/pytorch/issues/202529
+      - name: Test MPS on paravirtual GPU
+        if: ${{ inputs.desired_python == '3.14' }}
+        run: |
+          set -eux -o pipefail
+          # shellcheck disable=SC1091
+          source "${RUNNER_TEMP}/test_venv/bin/activate"
+          python - <<'EOF'
+          import torch
+          print(f"torch {torch.__version__}")
+          if not torch.backends.mps.is_available():
+              raise RuntimeError("MPS is not available")
+          print(f"MPS device: {torch.backends.mps.get_name()}")
+          a = torch.rand(64, 64) + 64 * torch.eye(64)
+          torch.testing.assert_close(torch.linalg.inv(a.to("mps")).cpu(), torch.linalg.inv(a))
+          EOF
 
   upload:
     needs: test
