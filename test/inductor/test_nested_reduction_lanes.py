@@ -19,6 +19,7 @@ from torch._inductor.utils import (
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -43,6 +44,8 @@ class _SplitCodegen:
 
 @instantiate_parametrized_tests
 class TestLaneSplitValidation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("factor", [0, 1, 3, 5, 6, 9])
     @parametrize("dtype", [torch.int16, torch.float16, torch.bfloat16, torch.float32])
     def test_invalid_factor(self, factor, dtype):
@@ -58,6 +61,8 @@ class TestLaneSplitValidation(TestCase):
 
 
 class TestRecursiveLaneSplit(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @parametrize("persistent", [False, True])
     @parametrize("rank", [2, 3])
     @parametrize("factor", [2, 4, 8, 32, 64])
@@ -163,6 +168,8 @@ class NestedLaneTestCase(TestCase):
 
 
 class TestPitchedLaneSources(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @parametrize(
         "mode", ["escape", "dynamic", "misaligned", "cross_row", "input_mutation"]
     )
@@ -244,6 +251,8 @@ class TestPitchedLaneSources(TestCase):
 
 
 class TestNestedLaneSplits(NestedLaneTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @parametrize("persistent", [False, True])
     @parametrize("lanes", [(1,), (0, 1, 2, 3)])
     def test_no_unused_splits(self, device, persistent, lanes):
