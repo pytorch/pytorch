@@ -247,6 +247,7 @@ def compile_cutedsl_external_source(
     precompile_metadata: dict[str, Any],
     *,
     aot_arg_names: tuple[str, ...] | None,
+    tensor_names: tuple[str, ...] | None,
 ) -> tuple[ExternalAOTArtifact, ExternalAOTBuildSpec]:
     from torch._inductor.codecache import PyCodeCache
 
@@ -288,6 +289,7 @@ def compile_cutedsl_external_source(
         source_code,
         precompile_metadata,
         aot_arg_names=aot_arg_names,
+        tensor_names=tensor_names,
     )
     output_dir = str(Path(cache_dir()) / "external_aot" / "cutedsl")
     backend = _CUTEDSL_AOT_BACKEND
@@ -330,8 +332,11 @@ def _build_spec(
     metadata: dict[str, Any],
     *,
     aot_arg_names: tuple[str, ...] | None,
+    tensor_names: tuple[str, ...] | None,
 ) -> ExternalAOTBuildSpec:
-    sources = (*metadata["tensor_names"], "output")
+    if tensor_names is None:
+        raise NotImplementedError("CuteDSL AOT requires ordered tensor names")
+    sources = (*tensor_names, "output")
     arg_names = aot_arg_names
     if arg_names is None or len(arg_names) != len(sources):
         raise NotImplementedError(
