@@ -507,6 +507,7 @@ void GenericActivityProfiler::configure(
     addMetadata("trace_id", "\"" + config_->requestTraceID() + "\"");
   }
 
+  toggleState_.store(true);
   if (shouldTraceGpu()) {
     // Enabling CUPTI activity tracing incurs a larger perf hit at first,
     // presumably because structures are allocated and initialized, callbacks
@@ -519,7 +520,6 @@ void GenericActivityProfiler::configure(
     if (VLOG_IS_ON(1)) {
       timestamp = system_clock::now();
     }
-    toggleState_.store(true);
     enableGpuTracing();
     if (VLOG_IS_ON(1)) {
       auto t2 = system_clock::now();
@@ -527,6 +527,7 @@ void GenericActivityProfiler::configure(
           setupOverhead_, duration_cast<microseconds>(t2 - timestamp).count());
     }
   }
+  gpuTracingArmed_.store(shouldTraceGpu());
 
   if (!profilers_.empty()) {
     configureChildProfilers();
@@ -808,7 +809,7 @@ void GenericActivityProfiler::collectTrace(
     libkineto::api().client()->stop();
   }
 
-  if (isGpuCollectionStopped()) {
+  if (isStopped()) {
     ecs_.gpu_stopped_early = true;
     LOG(ERROR)
         << "State: CollectTrace stopped by GPU profiler. (Buffer size configured is "

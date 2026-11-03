@@ -121,8 +121,10 @@ class GenericActivityProfiler {
   GenericActivityProfiler& operator=(GenericActivityProfiler&&) = delete;
   virtual ~GenericActivityProfiler();
 
+  // The GPU tracer keeps its stopped state after a trace ends, so only a trace
+  // that armed GPU tracing may report it.
   bool isStopped() const {
-    return isGpuCollectionStopped();
+    return gpuTracingArmed_.load() && isGpuCollectionStopped();
   }
 
   // Collect CPU and GPU traces
@@ -503,6 +505,9 @@ class GenericActivityProfiler {
   // and resetInternal() — spans arriving outside this window are discarded.
   bool acceptCpuTraces_{false};
   std::atomic<bool> toggleState_{true};
+  // Whether the current trace armed GPU tracing. Atomic because other threads
+  // ask whether the trace stopped.
+  std::atomic<bool> gpuTracingArmed_{false};
 
   // ***************************************************************************
   // Below state is shared with external threads.

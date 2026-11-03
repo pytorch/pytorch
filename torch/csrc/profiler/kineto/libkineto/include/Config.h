@@ -88,7 +88,10 @@ class Config : public AbstractConfig {
   }
 
   // Whether this trace may arm GPU tracing. A profiler registered without GPU
-  // support never arms it, whatever this says.
+  // support never arms it, whatever this says. Child profilers that drive a
+  // device tracer must honor it too, by returning no session from configure.
+  // The KINETO_CONFIG file is parsed after the client's config string, so it
+  // can override what the client asked for.
   [[nodiscard]] bool gpuTracingEnabled() const {
     return gpuTracingEnabled_;
   }

@@ -7,12 +7,12 @@
  */
 
 #include "XpuptiActivityProfiler.h"
+#include "Logger.h"
 #include "MetadataFieldCatalog.h"
 #include "ThrowUtil.h"
 #include "TypedMetadata.h"
 #include "TypedMetadataJson.h"
 #include "XpuptiActivityApi.h"
-#include "XpuptiProfilerMacros.h"
 #include "XpuptiScopeProfilerSession.h"
 
 #include <algorithm>
@@ -23,6 +23,7 @@
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <pti/pti.h>
 #include <sycl/sycl.hpp>
 
 namespace KINETO_NAMESPACE {
@@ -105,9 +106,15 @@ std::unique_ptr<libkineto::IActivityProfilerSession> XPUActivityProfiler::
   if (!config.gpuTracingEnabled()) {
     return nullptr;
   }
-  XPUPTI_CALL(
-      ptiViewGPULocalAvailable(),
-      /*error_message=*/"Failed to enable Kineto Profiler on XPU.");
+  // On-demand traces configure on the profiler thread, where an exception
+  // would end the process. Without PTI, the trace goes on without XPU
+  // activities.
+  if (const pti_result result = ptiViewGPULocalAvailable();
+      result != PTI_SUCCESS) {
+    LOG(ERROR) << "Failed to enable Kineto Profiler on XPU: "
+               << ptiResultTypeToString(result);
+    return nullptr;
+  }
   return std::make_unique<XpuptiScopeProfilerSession>(
       XpuptiActivityApi::singleton(), name(), config, activity_types);
 }

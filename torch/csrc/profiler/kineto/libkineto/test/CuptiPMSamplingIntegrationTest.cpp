@@ -45,3 +45,16 @@ TEST_F(CuptiPMSamplingIntegrationTest, ProfilerForwardsConfiguration) {
   EXPECT_EQ(mockCupti().samplingInterval, 250'000);
   EXPECT_EQ(mockCupti().maxSamples, 8'000);
 }
+
+TEST_F(CuptiPMSamplingIntegrationTest, ProfilerHonorsGpuTracingOptOut) {
+  Config config;
+  ASSERT_TRUE(
+      config.parse("PERFORMANCE_METRICS_DEVICE_ID=2\n"
+                   "PERFORMANCE_METRICS=sm__cycles_active.avg\n"
+                   "GPU_TRACING_ENABLED=false"));
+  CuptiPMSamplingProfiler profiler;
+
+  EXPECT_EQ(
+      profiler.configure({ActivityType::HARDWARE_COUNTERS}, config), nullptr);
+  EXPECT_TRUE(mockCupti().calls.empty());
+}
