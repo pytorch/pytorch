@@ -14,6 +14,7 @@
 
 #include <c10/core/SafePyObject.h>
 #include <c10/util/SmallVector.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -26,6 +27,7 @@
 #include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 #include <torch/csrc/utils/python_raii.h>
 
+#include <c10/util/irange.h>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -201,6 +203,7 @@ static py::object ophandle_call_boxed(
     const c10::OperatorHandle& handle,
     const py::args& args,
     const py::kwargs& kwargs) {
+  HANDLE_TH_ERRORS
   auto stack = torch::jit::createStackForSchema(
       handle.schema(),
       args,
@@ -211,6 +214,7 @@ static py::object ophandle_call_boxed(
     handle.callBoxed(stack);
   }
   return torch::jit::createPyObjectForStack(std::move(stack));
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 // Function that performs PyObject dispatch
@@ -245,7 +249,7 @@ static void pyobject_dispatch_collect_keys(PyObject* obj, uint64_t& key_set) {
   }
   if (PyList_CheckExact(obj)) {
     Py_ssize_t size = PyList_GET_SIZE(obj);
-    for (Py_ssize_t i = 0; i < size; ++i) {
+    for (const auto i : c10::irange(size)) {
       pyobject_dispatch_collect_keys(PyList_GET_ITEM(obj, i), key_set);
     }
     return;
@@ -339,7 +343,7 @@ static bool pyobject_dispatch_arg_has_torch_function(PyObject* arg) {
   if (PyList_CheckExact(arg) || PyTuple_CheckExact(arg)) {
     const Py_ssize_t len = PySequence_Fast_GET_SIZE(arg);
     PyObject** items = PySequence_Fast_ITEMS(arg);
-    for (Py_ssize_t i = 0; i < len; ++i) {
+    for (const auto i : c10::irange(len)) {
       if (pyobject_dispatch_arg_has_torch_function(items[i])) {
         return true;
       }
@@ -365,7 +369,7 @@ static bool pyobject_dispatch_has_torch_function(
   if (at::impl::torch_function_mode_enabled()) {
     return true;
   }
-  for (Py_ssize_t i = op_args_start; i < nargs + nkwargs; ++i) {
+  for (const auto i : c10::irange(op_args_start, nargs + nkwargs)) {
     if (pyobject_dispatch_arg_has_torch_function(args[i])) {
       return true;
     }
@@ -385,7 +389,7 @@ static PyObject* pyobject_dispatch_call_redispatch_cpp(
   c10::SmallVector<PyObject*, 64> call_args;
   call_args.reserve(1 + nargs - op_args_start + nkwargs);
   call_args.push_back(py_key_set.ptr());
-  for (Py_ssize_t i = op_args_start; i < nargs + nkwargs; ++i) {
+  for (const auto i : c10::irange(op_args_start, nargs + nkwargs)) {
     call_args.push_back(args[i]);
   }
   return PyObject_Vectorcall(
@@ -420,7 +424,7 @@ static PyObject* pyobject_dispatch_call_python_with_keyset(
   c10::SmallVector<PyObject*, 64> call_args;
   call_args.reserve(1 + nargs - op_args_start + nkwargs);
   call_args.push_back(py_key_set.ptr());
-  for (Py_ssize_t i = op_args_start; i < nargs + nkwargs; ++i) {
+  for (const auto i : c10::irange(op_args_start, nargs + nkwargs)) {
     call_args.push_back(args[i]);
   }
   return PyObject_Vectorcall(
@@ -709,6 +713,7 @@ void initDispatchBindings(PyObject* module) {
              c10::DispatchKeySet keyset,
              const py::args& args,
              const py::kwargs& kwargs) {
+            HANDLE_TH_ERRORS
             auto& handle = self.cast<c10::OperatorHandle&>();
             auto stack = torch::jit::createStackForSchema(
                 handle.schema(),
@@ -720,6 +725,7 @@ void initDispatchBindings(PyObject* module) {
               handle.redispatchBoxed(keyset, &stack);
             }
             return torch::jit::createPyObjectForStack(std::move(stack));
+            END_HANDLE_TH_ERRORS_PYBIND
           });
 
   m.def("_dispatch_call_boxed", &ophandle_call_boxed);
@@ -1220,6 +1226,9 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(FuncTorchVmapMode)
       DEF_ONE(FuncTorchGradWrapper)
       DEF_ONE(PythonDispatcher)
+      // Export DispatchKey::Fake to Python so Python guards and dispatch
+      // utilities can construct, inspect, include, or exclude that key.
+      DEF_ONE(Fake)
       DEF_ONE(PreDispatch)
       DEF_ONE(Functionalize)
       DEF_ONE(AutocastCPU)
@@ -1436,16 +1445,16 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {
-    return at::functionalization::impl::replace_(a, b);
+    at::functionalization::impl::replace_(a, b);
   });
   m.def("_propagate_xla_data", [](const at::Tensor& a, const at::Tensor& b) {
     at::functionalization::impl::propagate_xla_data(a, b);
   });
   m.def("_commit_update", [](const at::Tensor& a) {
-    return at::functionalization::impl::commit_update(a);
+    at::functionalization::impl::commit_update(a);
   });
   m.def("_unsafe_reset_storage", [](const at::Tensor& a) {
-    return at::functionalization::impl::unsafe_reset_storage(a);
+    at::functionalization::impl::unsafe_reset_storage(a);
   });
 
   m.def("_dispatch_key_for_device", [](const std::string& device_type) {

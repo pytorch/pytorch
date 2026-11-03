@@ -38,6 +38,7 @@ def gh_fetch_url_and_headers(
     data: dict[str, Any] | None | str = None,
     method: str | None = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
+    timeout: float | None = None,
 ) -> tuple[Any, Any]:
     if headers is None:
         headers = {}
@@ -50,7 +51,10 @@ def gh_fetch_url_and_headers(
         data_ = data.encode() if isinstance(data, str) else json.dumps(data).encode()
 
     try:
-        with urlopen(Request(url, headers=headers, data=data_, method=method)) as conn:
+        request = Request(url, headers=headers, data=data_, method=method)
+        # urlopen's own default applies when no timeout is given.
+        kwargs = {} if timeout is None else {"timeout": timeout}
+        with urlopen(request, **kwargs) as conn:
             return conn.headers, reader(conn)
     except HTTPError as err:
         if (
@@ -81,9 +85,10 @@ def gh_fetch_url(
     data: dict[str, Any] | None | str = None,
     method: str | None = None,
     reader: Callable[[Any], Any] = json.load,
+    timeout: float | None = None,
 ) -> Any:
     return gh_fetch_url_and_headers(
-        url, headers=headers, data=data, reader=reader, method=method
+        url, headers=headers, data=data, reader=reader, method=method, timeout=timeout
     )[1]
 
 
@@ -133,6 +138,50 @@ def gh_fetch_json_dict(
     return cast(dict[str, Any], _gh_fetch_json_any(url, params, data))
 
 
+def _truncate(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"... ({len(text) - limit} more chars truncated)"
+
+
+class GHGraphQLError(RuntimeError):
+    """GraphQL response contained errors; the raw response is kept so callers
+    can tolerate partial failures (GraphQL still returns data for the paths
+    that resolved)."""
+
+    def __init__(
+        self,
+        message: str,
+        response: dict[str, Any],
+        query: str | None = None,
+        variables: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.response = response
+        self.query = query
+        self.variables = variables
+        if query is not None and hasattr(self, "add_note"):  # Python 3.11+
+            # Shown in tracebacks but not in str(e), which stays short for comments
+            self.add_note(self.details_markdown())
+
+    def details_markdown(self) -> str:
+        """The query, variables and raw errors, for a collapsed comment section.
+
+        Each part is capped so the whole comment stays well under GitHub's
+        65536-char limit.
+        """
+        parts: list[str] = []
+        if self.variables is not None:
+            variables = _truncate(json.dumps(self.variables, indent=2), 2000)
+            parts.append(f"GraphQL variables:\n```json\n{variables}\n```")
+        errors = _truncate(json.dumps(self.response.get("errors"), indent=2), 20000)
+        parts.append(f"GraphQL errors:\n```json\n{errors}\n```")
+        if self.query is not None:
+            query = _truncate(self.query.strip(), 10000)
+            parts.append(f"GraphQL query:\n```graphql\n{query}\n```")
+        return "\n\n".join(parts)
+
+
 def gh_graphql(query: str, **kwargs: Any) -> dict[str, Any]:
     rc = gh_fetch_url(
         "https://api.github.com/graphql",  # @lint-ignore
@@ -140,9 +189,25 @@ def gh_graphql(query: str, **kwargs: Any) -> dict[str, Any]:
         reader=json.load,
     )
     if "errors" in rc:
-        raise RuntimeError(
-            f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}"
+        errors = rc["errors"]
+        if not isinstance(errors, list):
+            errors = [] if errors is None else [errors]
+        messages = "; ".join(
+            str(err.get("message", err)) if isinstance(err, dict) else str(err)
+            for err in errors
         )
+        # One line, so a newline in the message can't open a markdown block
+        messages = _truncate(" ".join(messages.split()), 2000)
+        err = GHGraphQLError(
+            f"GitHub GraphQL query failed: {messages or '(no error message)'}",
+            rc,
+            query=query,
+            variables=kwargs,
+        )
+        # Keep the full context in the job log; mergebot runs on Python 3.10,
+        # where tracebacks don't show add_note()
+        print(f"{err}\n{err.details_markdown()}")
+        raise err
     return cast(dict[str, Any], rc)
 
 

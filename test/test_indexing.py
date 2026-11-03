@@ -1,5 +1,6 @@
 # Owner(s): ["module: tests"]
 
+import math
 import operator
 import random
 import warnings
@@ -11,6 +12,7 @@ import numpy as np
 import torch
 from torch import tensor
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import evaluate_gfx_arch_within
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
@@ -20,11 +22,9 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
     skipCUDAIf,
-    skipMPS,
     skipXLA,
     skipXPUIf,
     tol,
@@ -39,6 +39,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    HardwareClassification,
     parametrize,
     run_tests,
     serialTest,
@@ -50,6 +51,38 @@ from torch.testing._internal.common_utils import (
 
 
 class TestIndexing(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_errors_index_copy(self):
+        # We do not test the GPU as the CUDA_ASSERT would break the CUDA context
+        device = "cpu"
+
+        idx_dim = 8
+        tgt_dim = 5
+        batch_dim = 3
+
+        # Too large of an index
+        a = torch.randn(batch_dim, tgt_dim, device=device)
+        idx = torch.full((idx_dim,), tgt_dim, device=device)
+        c = torch.zeros(batch_dim, idx_dim, device=device)
+        with self.assertRaises(IndexError):
+            a.index_copy_(1, idx, c)
+
+        # Too small (negative indices)
+        idx = torch.full((idx_dim,), -1, device=device)
+        with self.assertRaises(IndexError):
+            a.index_copy_(1, idx, c)
+
+        # Too small (very negative indices) - they should be unsupported even
+        # when support for negative indices is implemented for index_copy_
+        idx = torch.full((idx_dim,), -tgt_dim - 1, device=device)
+        with self.assertRaises(IndexError):
+            a.index_copy_(1, idx, c)
+
+
+class TestIndexingDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_index(self, device):
         def consec(size, start=1):
             sequence = torch.ones(torch.tensor(size).prod(0)).cumsum(0)
@@ -200,7 +233,6 @@ class TestIndexing(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.double)
-    @dtypesIfMPS(torch.half)  # TODO: add bf16 there?
     def test_advancedindex(self, device, dtype):
         # Tests for Integer Array Indexing, Part I - Purely integer array
         # indexing
@@ -1060,8 +1092,9 @@ class TestIndexing(TestCase):
 
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_expanded_values(self, device):
-        # checks the issue with cuda: https://github.com/pytorch/pytorch/issues/39227
-        # and verifies consistency with CPU result
+        # Checks the issue (originally found on cuda) on gpu:
+        # https://github.com/pytorch/pytorch/issues/39227, and verifies
+        # consistency with the CPU result.
         t = torch.zeros((5, 2))
         t_dev = t.to(device)
         indices = [torch.tensor([0, 1, 2, 3]), torch.tensor([1])]
@@ -1069,13 +1102,13 @@ class TestIndexing(TestCase):
         values0d = torch.tensor(1.0)
         values1d = torch.tensor([1.0])
 
-        out_cuda = t_dev.index_put_(indices_dev, values0d.to(device), accumulate=True)
+        out_gpu = t_dev.index_put_(indices_dev, values0d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values0d, accumulate=True)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
-        out_cuda = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
+        out_gpu = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values1d, accumulate=True)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
         t = torch.zeros(4, 3, 2)
         t_dev = t.to(device)
@@ -1089,16 +1122,16 @@ class TestIndexing(TestCase):
         values1d = torch.tensor([-1.0, -2.0])
         values2d = torch.tensor([[-1.0, -2.0]])
 
-        out_cuda = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
+        out_gpu = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values1d, accumulate=True)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
-        out_cuda = t_dev.index_put_(indices_dev, values2d.to(device), accumulate=True)
+        out_gpu = t_dev.index_put_(indices_dev, values2d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values2d, accumulate=True)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
     @onlyAccelerator
-    @skipMPS
+    @expectedFailureMPS
     def test_index_put_large_indices(self, device):
         def generate_indices(num_indices: int, index_range: int):
             indices = []
@@ -1162,15 +1195,15 @@ class TestIndexing(TestCase):
         indices = [torch.tensor([0, 1])]
         indices_dev = [i.to(device) for i in indices]
         value = torch.randn(2, 2)
-        out_cuda = t1.index_put_(indices_dev, value.to(device), accumulate=True)
+        out_gpu = t1.index_put_(indices_dev, value.to(device), accumulate=True)
         out_cpu = t2.index_put_(indices, value, accumulate=True)
         self.assertTrue(not t1.is_contiguous())
         self.assertTrue(not t2.is_contiguous())
 
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
     @onlyAccelerator
-    @skipMPS
+    @expectedFailureMPS
     def test_index_put_deterministic_with_optional_tensors(self, device):
         def func(x, i, v):
             with DeterministicGuard(True):
@@ -1192,18 +1225,18 @@ class TestIndexing(TestCase):
         values2d = torch.randn(n, 1)
 
         for val in (value0d, value1d, values2d):
-            out_cuda = func(t_dev, indices_dev, val.to(device))
+            out_gpu = func(t_dev, indices_dev, val.to(device))
             out_cpu = func(t, indices, val)
-            self.assertEqual(out_cuda.cpu(), out_cpu)
+            self.assertEqual(out_gpu.cpu(), out_cpu)
 
         t = torch.zeros((5, 4))
         t_dev = t.to(device)
         indices = torch.tensor([1, 4, 3])
         indices_dev = indices.to(device)
         val = torch.randn(4)
-        out_cuda = func1(t_dev, indices_dev, val.to(device))
+        out_gpu = func1(t_dev, indices_dev, val.to(device))
         out_cpu = func1(t, indices, val)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
         t = torch.zeros(2, 3, 4)
         ind = torch.tensor([0, 1])
@@ -1215,9 +1248,9 @@ class TestIndexing(TestCase):
             func(t.to(device), ind.to(device), val.to(device))
 
         val = torch.randn(2, 3, 1)
-        out_cuda = func1(t.to(device), ind.to(device), val.to(device))
+        out_gpu = func1(t.to(device), ind.to(device), val.to(device))
         out_cpu = func1(t, ind, val)
-        self.assertEqual(out_cuda.cpu(), out_cpu)
+        self.assertEqual(out_gpu.cpu(), out_cpu)
 
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
@@ -1341,6 +1374,8 @@ class TestIndexing(TestCase):
         torch.long,
         torch.bool,
         torch.bfloat16,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
     )
     @dtypesIfMPS(torch.float, torch.float16, torch.long, torch.bool)
     def test_index_put_src_datatype(self, device, dtype):
@@ -1354,6 +1389,7 @@ class TestIndexing(TestCase):
     @dtypesIfCPU(torch.float, torch.long, torch.bfloat16, torch.bool)
     @dtypesIfCUDA(torch.half, torch.long, torch.bfloat16, torch.bool)
     @dtypesIfXPU(torch.half, torch.long, torch.bfloat16, torch.bool)
+    @dtypesIfMPS(torch.float, torch.half, torch.long, torch.bfloat16, torch.bool)
     def test_index_src_datatype(self, device, dtype):
         src = torch.ones(3, 2, 4, device=device, dtype=dtype)
         # test index
@@ -1414,7 +1450,7 @@ class TestIndexing(TestCase):
     def test_empty_ndim_index_bool(self, device):
         x = torch.randn(5, device=device)
         self.assertRaises(
-            IndexError, lambda: x[torch.empty(0, 2, dtype=torch.uint8, device=device)]
+            IndexError, lambda: x[torch.empty(0, 2, dtype=torch.bool, device=device)]
         )
 
     def test_empty_slice(self, device):
@@ -1427,8 +1463,8 @@ class TestIndexing(TestCase):
         self.assertTrue(z.is_contiguous())
 
     def test_index_getitem_copy_bools_slices(self, device):
-        true = torch.tensor(1, dtype=torch.uint8, device=device)
-        false = torch.tensor(0, dtype=torch.uint8, device=device)
+        true = torch.tensor(True, device=device)
+        false = torch.tensor(False, device=device)
 
         tensors = [torch.randn(2, 3, device=device), torch.tensor(3.0, device=device)]
 
@@ -1441,8 +1477,8 @@ class TestIndexing(TestCase):
             self.assertEqual(a.data_ptr(), a[...].data_ptr())
 
     def test_index_setitem_bools_slices(self, device):
-        true = torch.tensor(1, dtype=torch.uint8, device=device)
-        false = torch.tensor(0, dtype=torch.uint8, device=device)
+        true = torch.tensor(True, device=device)
+        false = torch.tensor(False, device=device)
 
         tensors = [torch.randn(2, 3, device=device), torch.tensor(3, device=device)]
 
@@ -1768,7 +1804,7 @@ class TestIndexing(TestCase):
             torch.take_along_dim(t, indices, dim=7)
 
     @onlyAccelerator
-    @skipMPS
+    @expectedFailureMPS
     @dtypes(torch.float)
     def test_gather_take_along_dim_cross_device(self, device, dtype):
         shape = (2, 3, 1, 4)
@@ -1799,7 +1835,7 @@ class TestIndexing(TestCase):
             torch.take_along_dim(t.cpu(), indices, dim=0)
 
     @onlyAccelerator
-    def test_cuda_broadcast_index_use_deterministic_algorithms(self, device):
+    def test_gpu_broadcast_index_use_deterministic_algorithms(self, device):
         with DeterministicGuard(True):
             idx1 = torch.tensor([0])
             idx2 = torch.tensor([2, 6])
@@ -1931,8 +1967,20 @@ class TestIndexing(TestCase):
                         kwargs = {"atol": 0.02, "rtol": 0.1}
                     self.assertEqual(dest, expected, **kwargs)
 
+    @parametrize("include_self", [True, False])
+    @parametrize("reduce", ["amin", "amax"])
+    @dtypes(torch.half, torch.bfloat16, torch.float32)
+    def test_index_reduce_nan(self, device, dtype, reduce, include_self):
+        # Slot 0 has NaN in self, slot 1 gets NaN from src, slot 2 gets NaN then a finite value
+        nan = float("nan")
+        src = torch.tensor([1.0, nan, nan, 5.0], device=device, dtype=dtype)
+        idx = torch.tensor([0, 1, 2, 2], device=device)
+        dest = torch.tensor([nan, 1.0, 1.0], device=device, dtype=dtype)
+        dest.index_reduce_(0, idx, src, reduce, include_self=include_self)
+        expected = [nan if include_self else 1.0, nan, nan]
+        self.assertEqual(dest, torch.tensor(expected, dtype=dtype), equal_nan=True)
+
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_copy(self, device, dtype):
         # We just test for num_copy <= num_dest, as otherwise there are repeated indices
         # and the behavior is undefined
@@ -1976,7 +2024,6 @@ class TestIndexing(TestCase):
     # https://github.com/pytorch/pytorch/issues/53256
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_copy_scalars(self, device, dtype):
         # Create the 8 possible combinations of scalar sizes for target / index / source
         scalars = (
@@ -1990,31 +2037,6 @@ class TestIndexing(TestCase):
         for target, idx, source in scalars:
             target.index_copy_(0, idx, source)
             self.assertEqual(target.item(), source.item())
-
-    @onlyCPU
-    def test_errors_index_copy(self, device):
-        # We do not test the GPU as the CUDA_ASSERT would break the CUDA context
-        idx_dim = 8
-        tgt_dim = 5
-        batch_dim = 3
-
-        # Too large of an index
-        a = torch.randn(batch_dim, tgt_dim, device=device)
-        idx = torch.full((idx_dim,), tgt_dim, device=device)
-        c = torch.zeros(batch_dim, idx_dim, device=device)
-        with self.assertRaises(IndexError):
-            a.index_copy_(1, idx, c)
-
-        # Too small (negative indices)
-        idx = torch.full((idx_dim,), -1, device=device)
-        with self.assertRaises(IndexError):
-            a.index_copy_(1, idx, c)
-
-        # Too small (very negative indices) - they should be unsupported even
-        # when support for negative indices is implemented for index_copy_
-        idx = torch.full((idx_dim,), -tgt_dim - 1, device=device)
-        with self.assertRaises(IndexError):
-            a.index_copy_(1, idx, c)
 
     def _prepare_data_for_index_copy_and_add_deterministic(
         self, dim: int, device: torch.device
@@ -2032,7 +2054,6 @@ class TestIndexing(TestCase):
         return (x, index, src)
 
     @onlyNativeDeviceTypes
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1973")
     @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029
     def test_index_copy_deterministic(self, device: torch.device) -> None:
         for dim in range(3):
@@ -2074,144 +2095,7 @@ class TestIndexing(TestCase):
                     y_nd = torch.index_add(x, dim, index, src, alpha=alpha)
                     self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
 
-    @serialTest()
-    @onlyCUDA
-    @toleranceOverride(
-        {
-            torch.float32: tol(atol=1e-5, rtol=1e-3),
-            torch.float64: tol(atol=1e-5, rtol=1e-3),
-            torch.half: tol(atol=5e-2, rtol=5e-2),
-            torch.bfloat16: tol(atol=0.5, rtol=0.5),
-        }
-    )
-    @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
-    def test_index_add_fast_path(self, device, dtype):
-        # Coverage for the index_add_ TMA fast path: one eligible case + five
-        # fallback predicates per shape, asserted against a CPU reference.
-        # Shapes keep n/m <= 1 so atomicAdd-order noise on bf16/half stays
-        # within tolerance; (4096, 1024, 1024) crosses the TMA chunk_elems
-        # boundary (D > one chunk).
-        def check(out, dim, idx, src, alpha=1.0):
-            expected = (
-                out.cpu().clone().index_add_(dim, idx.cpu(), src.cpu(), alpha=alpha)
-            )
-            out.index_add_(dim, idx, src, alpha=alpha)
-            self.assertEqual(out.cpu(), expected)
-
-        for m, n, D in [(1024, 512, 128), (4096, 3072, 128), (4096, 1024, 1024)]:
-            torch.cuda.empty_cache()
-            for idx_dtype in (torch.int32, torch.int64):
-                src = make_tensor((n, D), device=device, dtype=dtype)
-                idx = torch.randint(m, (n,), device=device, dtype=idx_dtype)
-
-                # 1) Eligible -> fast path.
-                check(torch.zeros(m, D, device=device, dtype=dtype), 0, idx, src)
-                # 2) alpha != 1 -> fallback.
-                check(
-                    torch.zeros(m, D, device=device, dtype=dtype),
-                    0,
-                    idx,
-                    src,
-                    alpha=2.5,
-                )
-                # 3) Discontiguous src -> fallback.
-                src_strided = torch.empty(n, 2 * D, device=device, dtype=dtype)[
-                    :, ::2
-                ].copy_(src)
-                check(
-                    torch.zeros(m, D, device=device, dtype=dtype), 0, idx, src_strided
-                )
-                # 4) Misaligned self (one-element pointer offset) -> fallback.
-                self_mis = (
-                    torch.empty(m * D + 1, device=device, dtype=dtype)[1:]
-                    .view(m, D)
-                    .zero_()
-                )
-                check(self_mis, 0, idx, src)
-                # 5) dim != 0 -> fallback.
-                check(
-                    torch.zeros(D, m, device=device, dtype=dtype),
-                    1,
-                    idx,
-                    make_tensor((D, n), device=device, dtype=dtype),
-                )
-                # 6) Sliced inner dim (not is_contiguous) -> fallback.
-                sl = slice(64, 192)
-                check(
-                    torch.zeros(m, 256, device=device, dtype=dtype)[:, sl],
-                    0,
-                    idx,
-                    make_tensor((n, 256), device=device, dtype=dtype)[:, sl],
-                )
-
-        # 7) Empty index is a no-op.
-        out = torch.randn(8, 128, device=device, dtype=dtype)
-        expected = out.clone()
-        out.index_add_(
-            0,
-            torch.empty(0, device=device, dtype=torch.int64),
-            torch.empty(0, 128, device=device, dtype=dtype),
-        )
-        self.assertEqual(out, expected)
-
-    @serialTest()
-    @onlyCUDA
-    @toleranceOverride(
-        {
-            # Tolerances follow test_index_add_fast_path: this shape does
-            # ~n/m atomic adds per row (~670 here with m=13), and bf16's
-            # 7-bit mantissa accumulates noise quickly under non-
-            # deterministic atomicAdd ordering. fp32 stays tight.
-            torch.float32: tol(atol=1e-4, rtol=1e-3),
-            torch.bfloat16: tol(atol=20.0, rtol=0.5),
-        }
-    )
-    @dtypes(torch.float32, torch.bfloat16)
-    def test_index_add_smem_stage_alignment_regression(self, device, dtype):
-        # Regression for SEV S664741: the original D104669063 was reverted
-        # when this delegation surfaced a latent scatter_add TMA smem
-        # stage-alignment bug -- chunk_bytes < 128 (or not a multiple of
-        # 128) plus multi-iter-per-CTA (M_src > grid_x cap of sm*64) wrote
-        # stage 1 of the 2-stage pipeline buffer at a non-128-aligned smem
-        # offset, faulting in cp.async.bulk. Fixed in PR #184554 by
-        # rounding the stage stride to 128 bytes. This test pins the
-        # prod shape (small D + high M_src) at the index_add layer so a
-        # future refactor of the delegation re-exposing the same shape
-        # class is caught here, not in prod.
-        sm = torch.cuda.get_device_properties(0).multi_processor_count
-        # D=8 fp32 -> chunk_bytes=32 (< 128). M_src > sm*64 forces every
-        # CTA into >= 2 iterations -> stage 1 used. Prod fault was at
-        # sm*64=8448 (H100); sm*64 + 256 exposes the regime on any GPU.
-        m, n, D = 13, sm * 64 + 256, 8
-        src = make_tensor((n, D), device=device, dtype=dtype)
-        idx = torch.randint(m, (n,), device=device, dtype=torch.int64)
-        out = torch.zeros(m, D, device=device, dtype=dtype)
-        expected = out.cpu().clone().index_add_(0, idx.cpu(), src.cpu())
-        out.index_add_(0, idx, src)
-        self.assertEqual(out.cpu(), expected)
-
-    @serialTest()
-    @onlyCUDA
-    @dtypes(torch.complex64, torch.complex128, torch.bool)
-    def test_index_add_excluded_dtypes(self, device, dtype):
-        # scatter_add_'s CUDA dispatch covers neither complex nor bool, so the
-        # fast-path delegation in index_add_cuda_impl excludes these dtypes
-        # and lets them fall through to indexFunc{Small,Large}Index. Regression
-        # test that an eligible-shape (dim=0, alpha=1, contiguous, aligned)
-        # call still produces correct results for these dtypes.
-        m, n, D = 1024, 512, 128
-        if dtype == torch.bool:
-            src = torch.randint(0, 2, (n, D), device=device, dtype=dtype)
-        else:
-            src = make_tensor((n, D), device=device, dtype=dtype)
-        out = torch.zeros(m, D, device=device, dtype=dtype)
-        idx = torch.randint(m, (n,), device=device, dtype=torch.int64)
-        expected = out.cpu().clone().index_add_(0, idx.cpu(), src.cpu())
-        out.index_add_(0, idx, src)
-        self.assertEqual(out.cpu(), expected)
-
     @onlyNativeDeviceTypes
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1973")
     def test_index_put_non_accumulate_deterministic(self, device) -> None:
         with DeterministicGuard(True):
             for i in range(3):
@@ -2258,7 +2142,7 @@ class TestIndexing(TestCase):
             torch.uint64,
         )
     )
-    @dtypesIfXPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfXPU(*all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_select(self, device, dtype):
         num_src, num_out = 3, 5
@@ -2336,6 +2220,487 @@ class TestIndexing(TestCase):
             out = source.index_select(0, idx)
             self.assertEqual(out.item(), source.item())
 
+    @parametrize("op", ["index_add", "index_copy"])
+    @parametrize("shape", [(5,), (3, 4)])
+    def test_index_add_copy_empty_index(self, device, op, shape):
+        dst = torch.arange(math.prod(shape), dtype=torch.float, device=device).reshape(
+            shape
+        )
+        index = torch.empty(0, dtype=torch.int64, device=device)
+        source = torch.empty((0, *shape[1:]), dtype=dst.dtype, device=device)
+        kwargs = {"alpha": 2.0} if op == "index_add" else {}
+        out = dst.clone()
+        getattr(out, op + "_")(0, index, source, **kwargs)
+        self.assertEqual(out, dst)
+
+    @onlyAccelerator
+    @toleranceOverride(
+        {
+            torch.float32: tol(atol=1e-5, rtol=1e-3),
+            torch.float64: tol(atol=1e-5, rtol=1e-3),
+            torch.half: tol(atol=5e-2, rtol=5e-2),
+            torch.bfloat16: tol(atol=0.5, rtol=0.5),
+        }
+    )
+    @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
+    @parametrize(
+        "op,variant,m,n,D",
+        [
+            ("index_add", "functional", 64, 32, 264),
+            ("index_add", "inplace", 64, 32, 264),
+            ("index_add", "out", 64, 32, 264),
+            ("index_copy", "functional", 64, 32, 264),
+            ("index_copy", "inplace", 64, 32, 264),
+            ("index_copy", "out", 64, 32, 264),
+            ("index_add", "inplace", 1024, 512, 128),
+            ("index_add", "inplace", 4096, 3072, 128),
+            ("index_add", "inplace", 4096, 1024, 1024),
+        ],
+    )
+    def test_index_add_copy_fast_path(self, device, dtype, op, variant, m, n, D):
+        def check(dst, dim, idx, src, alpha=1.0):
+            kwargs = {"alpha": alpha} if op == "index_add" else {}
+            fn = getattr(torch, op)
+            expected = fn(dst.cpu(), dim, idx.cpu(), src.cpu(), **kwargs)
+            original = dst.clone()
+            if variant == "inplace":
+                result = getattr(dst, op + "_")(dim, idx, src, **kwargs)
+                self.assertIs(result, dst)
+            elif variant == "functional":
+                result = fn(dst, dim, idx, src, **kwargs)
+                self.assertTrue(result.is_contiguous())
+            else:
+                out = torch.empty_strided(
+                    dst.shape, dst.stride(), device=device, dtype=dtype
+                )
+                result = fn(dst, dim, idx, src, out=out, **kwargs)
+                self.assertIs(result, out)
+            tolerances = {"atol": 0, "rtol": 0} if op == "index_copy" else {}
+            self.assertEqual(result.cpu(), expected, **tolerances)
+            if variant != "inplace":
+                self.assertEqual(dst, original, atol=0, rtol=0)
+
+        for idx_dtype in (
+            (torch.int32, torch.int64) if op == "index_add" else (torch.int64,)
+        ):
+            src = make_tensor((n, D), device=device, dtype=dtype)
+            # Copy requires distinct indices for a deterministic reference.
+            idx = (
+                torch.randint(m, (n,), device=device, dtype=idx_dtype)
+                if op == "index_add"
+                else torch.randperm(m, device=device)[:n]
+            )
+            check(torch.ones(m, D, device=device, dtype=dtype), 0, idx, src)
+            # Layout and fallback checks use only the small in-place cases.
+            if variant != "inplace" or m != 64:
+                continue
+            if op == "index_add":
+                check(
+                    torch.ones(m, D, device=device, dtype=dtype), 0, idx, src, alpha=2.5
+                )
+
+            src_strided = torch.empty(n, 2 * D, device=device, dtype=dtype)[
+                :, ::2
+            ].copy_(src)
+            check(torch.ones(m, D, device=device, dtype=dtype), 0, idx, src_strided)
+
+            dst_mis = (
+                torch.empty(m * D + 1, device=device, dtype=dtype)[1:]
+                .view(m, D)
+                .fill_(1)
+            )
+            check(dst_mis, 0, idx, src)
+
+            check(
+                torch.ones(D, m, device=device, dtype=dtype),
+                1,
+                idx,
+                make_tensor((D, n), device=device, dtype=dtype),
+            )
+
+            # Dense slices separated by padding remain eligible.
+            dst_padded = torch.ones(m, D + 8, device=device, dtype=dtype)[:, :D]
+            src_padded = torch.empty(n, D + 8, device=device, dtype=dtype)[:, :D].copy_(
+                src
+            )
+            check(dst_padded, 0, idx, src_padded)
+            check(
+                torch.ones(m, D, device=device, dtype=dtype),
+                0,
+                idx,
+                src[:1].expand_as(src),
+            )
+
+    @serialTest()
+    @onlyAccelerator
+    @expectedFailureMPS
+    @toleranceOverride(
+        {
+            # Tolerances follow test_index_add_copy_fast_path: this shape does
+            # ~n/m atomic adds per row (~670 here with m=13), and bf16's
+            # 7-bit mantissa accumulates noise quickly under non-
+            # deterministic atomicAdd ordering. fp32 stays tight.
+            torch.float32: tol(atol=1e-4, rtol=1e-3),
+            torch.bfloat16: tol(atol=20.0, rtol=0.5),
+        }
+    )
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_index_add_smem_stage_alignment_regression(self, device, dtype):
+        # Originally test added for CUDA implementation:
+        # Regression for SEV S664741: the original D104669063 was reverted
+        # when this delegation surfaced a latent scatter_add TMA smem
+        # stage-alignment bug -- chunk_bytes < 128 (or not a multiple of
+        # 128) plus multi-iter-per-CTA (M_src > grid_x cap of sm*64) wrote
+        # stage 1 of the 2-stage pipeline buffer at a non-128-aligned smem
+        # offset, faulting in cp.async.bulk. Fixed in PR #184554 by
+        # rounding the stage stride to 128 bytes. This test pins the
+        # prod shape (small D + high M_src) at the index_add layer so a
+        # future refactor of the delegation re-exposing the same shape
+        # class is caught here, not in prod.
+        device_type = torch.device(device).type
+
+        dp = torch.get_device_module(device_type).get_device_properties(0)
+
+        if device_type == "cuda":
+            sm = dp.multi_processor_count
+        elif device_type == "xpu":
+            sm = dp.gpu_subslice_count
+        else:
+            raise RuntimeError(f"Unsupported device type {device_type}")
+
+        # D=8 fp32 -> chunk_bytes=32 (< 128). M_src > sm*64 forces every
+        # CTA into >= 2 iterations -> stage 1 used. Prod fault was at
+        # sm*64=8448 (H100); sm*64 + 256 exposes the regime on any GPU.
+        m, n, D = 13, sm * 64 + 256, 8
+        src = make_tensor((n, D), device=device, dtype=dtype)
+        idx = torch.randint(m, (n,), device=device, dtype=torch.int64)
+        out = torch.zeros(m, D, device=device, dtype=dtype)
+        expected = out.cpu().clone().index_add_(0, idx.cpu(), src.cpu())
+        out.index_add_(0, idx, src)
+        self.assertEqual(out.cpu(), expected)
+
+    def _skip_unless_sorted_index_add_arch(self):
+        if not evaluate_gfx_arch_within(["gfx942", "gfx950"]):
+            self.skipTest("requires the MI300x/MI350x sorted index_add path")
+
+    def _ran_sorted_index_add(self, fn):
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CUDA]
+        ) as prof:
+            fn()
+            torch.cuda.synchronize()
+        return any(
+            "index_add_sorted_prepare_sort_kernel" in event.name
+            for event in prof.events()
+        )
+
+    def _sorted_index_add_index(self, pattern, num_indices, device):
+        if pattern == "single_row":
+            num_rows = 2
+            index = torch.zeros(num_indices, device=device, dtype=torch.long)
+        elif pattern == "medium_runs":
+            num_rows = num_indices // 2000
+            index = torch.randperm(num_indices, device=device).remainder(num_rows)
+        elif pattern == "unique":
+            num_rows = num_indices
+            index = torch.randperm(num_indices, device=device)
+        elif pattern == "more_rows_than_indices":
+            num_rows = 2 * num_indices
+            index = torch.randint(0, num_rows, (num_indices,), device=device)
+        elif pattern in ("run_length_edges", "run_length_edges_with_singletons"):
+            # Lengths straddle both compact strides (128, 512) and the 8192-entry
+            # long-run threshold. Singletons pull the average run below 128,
+            # which switches the compact stride from 128 to 512.
+            edges = [127, 128, 129, 511, 512, 513, 8191, 8192, 8193]
+            with_singletons = pattern == "run_length_edges_with_singletons"
+            lengths = edges * (18 if with_singletons else 37)
+            remainder = num_indices - sum(lengths)
+            lengths += [1] * remainder if with_singletons else [remainder]
+            num_rows = len(lengths)
+            rows = torch.randperm(num_rows, device=device)
+            index = rows.repeat_interleave(torch.tensor(lengths, device=device))
+            index = index[torch.randperm(num_indices, device=device)]
+        else:
+            self.assertEqual(pattern, "mixed_runs")
+            num_rows = num_indices // 4
+            long_count = num_indices // 2
+            medium_count = num_indices // 4
+            short_count = num_indices - long_count - medium_count
+            index = torch.cat(
+                [
+                    torch.zeros(long_count, device=device, dtype=torch.long),
+                    torch.randint(1, 101, (medium_count,), device=device),
+                    torch.randint(101, num_rows, (short_count,), device=device),
+                ]
+            )[torch.randperm(num_indices, device=device)]
+        return index, num_rows
+
+    def _sorted_index_add_case(self, device, dtype, pattern, layout="dim0"):
+        num_indices = 1000000
+        dim, outer_size, inner_size, index_dtype = {
+            "dim0": (0, None, 128, torch.long),
+            "dim1": (1, 2, 128, torch.long),
+            "inner256": (0, None, 256, torch.long),
+        }[layout]
+        index, num_rows = self._sorted_index_add_index(pattern, num_indices, device)
+        prefix = (outer_size,) if outer_size else ()
+        source_shape = prefix + (num_indices, inner_size)
+        # ~32 small integers per output element keeps every partial sum exact in bf16.
+        keep = (32.0 / torch.bincount(index, minlength=num_rows)[index]).clamp(max=1)
+        keep_shape = [1] * len(source_shape)
+        keep_shape[dim] = num_indices
+        mask = torch.rand(source_shape, device=device) < keep.view(keep_shape)
+        values = torch.randint(-3, 4, source_shape, device=device)
+        source = (values * mask).to(dtype)
+        target = torch.randint(-4, 5, prefix + (num_rows, inner_size), device=device)
+        return target.to(dtype), dim, index.to(index_dtype), source
+
+    def _check_sorted_index_add(
+        self, target, dim, index, source, *, alpha=1, expect_sorted=True
+    ):
+        expected = (
+            target.cpu()
+            .double()
+            .index_add_(dim, index.cpu(), source.cpu().double(), alpha=alpha)
+            .to(target.dtype)
+        )
+        ran_sorted = self._ran_sorted_index_add(
+            lambda: target.index_add_(dim, index, source, alpha=alpha)
+        )
+        self.assertEqual(ran_sorted, expect_sorted)
+        self.assertEqual(target.cpu(), expected, atol=0, rtol=0)
+
+    def _runs_of_512_index(self, num_indices, device):
+        # Runs of exactly 512 entries, first in sorted order so each run is one
+        # 512-aligned chunk, padded with singleton rows so the average run stays
+        # below 128 and the compact stride is 512.
+        num_runs = 1000
+        run_entries = num_runs * 512
+        index = torch.cat(
+            [
+                torch.arange(run_entries, device=device).div(
+                    512, rounding_mode="floor"
+                ),
+                torch.arange(
+                    num_runs, num_runs + num_indices - run_entries, device=device
+                ),
+            ]
+        )
+        return index, num_runs
+
+    def _misaligned_copy(self, tensor):
+        storage = torch.empty(
+            tensor.numel() + 1, device=tensor.device, dtype=tensor.dtype
+        )
+        return storage[1:].view_as(tensor).copy_(tensor)
+
+    @serialTest()
+    @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize(
+        "pattern",
+        [
+            "single_row",
+            "medium_runs",
+            "unique",
+            "more_rows_than_indices",
+            "mixed_runs",
+            "run_length_edges",
+            "run_length_edges_with_singletons",
+        ],
+    )
+    def test_index_add_sorted_matches_reference(self, device, dtype, pattern):
+        self._skip_unless_sorted_index_add_arch()
+        self._check_sorted_index_add(
+            *self._sorted_index_add_case(device, dtype, pattern)
+        )
+
+    @serialTest()
+    @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("layout", ["dim1", "inner256"])
+    def test_index_add_sorted_layouts(self, device, dtype, layout):
+        self._skip_unless_sorted_index_add_arch()
+        self._check_sorted_index_add(
+            *self._sorted_index_add_case(device, dtype, "mixed_runs", layout)
+        )
+
+    @serialTest()
+    @onlyCUDA
+    @parametrize(
+        "case",
+        [
+            "alpha",
+            "misaligned_self",
+            "misaligned_source",
+            "int32_index",
+            "non_contiguous_self",
+            "non_contiguous_source",
+            "non_contiguous_index",
+            "misaligned_half_self",
+            "unsupported_dtype",
+            "below_sort_threshold",
+            "inner_size_64",
+            "deterministic",
+        ],
+    )
+    def test_index_add_sorted_dispatch(self, device, case):
+        self._skip_unless_sorted_index_add_arch()
+        target, dim, index, source = self._sorted_index_add_case(
+            device, torch.bfloat16, "mixed_runs"
+        )
+        alpha = 1
+        expect_sorted = False
+        if case == "alpha":
+            alpha = 2
+        elif case == "misaligned_self":
+            target = self._misaligned_copy(target)
+        elif case == "misaligned_source":
+            source = self._misaligned_copy(source)
+            expect_sorted = True
+        elif case == "int32_index":
+            index = index.int()
+            expect_sorted = True
+        elif case == "non_contiguous_self":
+            target = target.t().contiguous().t()
+        elif case == "non_contiguous_source":
+            source = source.t().contiguous().t()
+        elif case == "non_contiguous_index":
+            index = torch.stack([index, index], dim=1)[:, 0]
+        elif case == "misaligned_half_self":
+            target = self._misaligned_copy(target.half())
+            source = source.half()
+        elif case == "unsupported_dtype":
+            target = target.int()
+            source = source.int()
+        elif case == "below_sort_threshold":
+            index = index[:8192]
+            source = source[:8192]
+        elif case == "inner_size_64":
+            target = target[:, :64].contiguous()
+            source = source[:, :64].contiguous()
+
+        with DeterministicGuard(case == "deterministic"):
+            self._check_sorted_index_add(
+                target, dim, index, source, alpha=alpha, expect_sorted=expect_sorted
+            )
+
+    @serialTest()
+    @onlyCUDA
+    @parametrize("reduction_kind", ["compact", "long"])
+    def test_index_select_backward_sorted_accumulates_in_half(
+        self, device, reduction_kind
+    ):
+        self._skip_unless_sorted_index_add_arch()
+        num_indices = 1000000
+        inner_size = 128
+        chunk_size = 512
+        contributions_cpu = torch.tensor([0.000001, 0.0031], dtype=torch.half)
+        pair_sum = contributions_cpu.float().sum()
+        full_chunk_sum = (pair_sum * (chunk_size // 2)).half()
+        remainder = num_indices % chunk_size
+        remainder_sum = (pair_sum * (remainder // 2)).half()
+        if reduction_kind == "compact":
+            index, num_runs = self._runs_of_512_index(num_indices, device)
+            num_rows = int(index.max().item()) + 1
+            singles = contributions_cpu[
+                torch.arange(num_runs * chunk_size, num_indices).remainder(2)
+            ]
+            expected = torch.cat(
+                [
+                    torch.full((num_runs,), full_chunk_sum.item(), dtype=torch.half),
+                    singles,
+                ]
+            )
+            expected = expected.unsqueeze(1).expand(-1, inner_size).contiguous()
+        else:
+            num_rows = 1
+            index = torch.zeros(num_indices, device=device, dtype=torch.int64)
+            expected_value = (
+                full_chunk_sum.float() * (num_indices // chunk_size)
+                + remainder_sum.float()
+            ).half()
+            expected = torch.empty((num_rows, inner_size), dtype=torch.half).fill_(
+                expected_value.item()
+            )
+
+        source = torch.zeros(
+            (num_rows, inner_size),
+            device=device,
+            dtype=torch.half,
+            requires_grad=True,
+        )
+        contributions = contributions_cpu.to(device)
+        grad_rows = contributions[torch.arange(num_indices, device=device).remainder(2)]
+        grad = grad_rows.unsqueeze(1).expand(-1, inner_size).contiguous()
+
+        ran_sorted = self._ran_sorted_index_add(
+            lambda: source.index_select(0, index).backward(grad)
+        )
+
+        self.assertTrue(ran_sorted)
+        self.assertEqual(source.grad.cpu(), expected, atol=0, rtol=0)
+
+    @serialTest()
+    @onlyCUDA
+    @parametrize("reduction_kind", ["compact", "long"])
+    @parametrize("grad_alignment", ["aligned", "misaligned"])
+    def test_index_select_backward_sorted_accumulates_bfloat16_in_float(
+        self, device, reduction_kind, grad_alignment
+    ):
+        self._skip_unless_sorted_index_add_arch()
+        num_indices = 1000000
+        inner_size = 128
+        if reduction_kind == "compact":
+            index, _ = self._runs_of_512_index(num_indices, device)
+        else:
+            index = torch.zeros(num_indices, device=device, dtype=torch.int64)
+        num_rows = int(index.max().item()) + 1
+        # A bf16 running sum of 512 equal values stalls at 256 * value.
+        feature_values = (
+            torch.arange(inner_size, device=device).remainder(4) + 1
+        ) * 0.25
+        grad = feature_values.to(torch.bfloat16).expand(num_indices, inner_size)
+        grad = grad.contiguous()
+        if grad_alignment == "misaligned":
+            grad = self._misaligned_copy(grad)
+        source = torch.zeros(
+            (num_rows, inner_size),
+            device=device,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        counts = torch.bincount(index, minlength=num_rows).double()
+        expected = (counts.unsqueeze(1) * feature_values.double()).to(torch.bfloat16)
+
+        ran_sorted = self._ran_sorted_index_add(
+            lambda: source.index_select(0, index).backward(grad)
+        )
+
+        self.assertTrue(ran_sorted)
+        self.assertEqual(source.grad, expected, atol=0, rtol=0)
+
+    @serialTest()
+    @onlyAccelerator
+    @dtypes(torch.complex64, torch.complex128, torch.bool)
+    def test_index_add_excluded_dtypes(self, device, dtype):
+        # Originally test added for CUDA implementation:
+        # scatter_add_'s CUDA dispatch covers neither complex nor bool, so the
+        # fast-path delegation in index_add_cuda_impl excludes these dtypes
+        # and lets them fall through to indexFunc{Small,Large}Index. Regression
+        # test that an eligible-shape (dim=0, alpha=1, contiguous, aligned)
+        # call still produces correct results for these dtypes.
+        m, n, D = 1024, 512, 128
+        if dtype == torch.bool:
+            src = torch.randint(0, 2, (n, D), device=device, dtype=dtype)
+        else:
+            src = make_tensor((n, D), device=device, dtype=dtype)
+        out = torch.zeros(m, D, device=device, dtype=dtype)
+        idx = torch.randint(m, (n,), device=device, dtype=torch.int64)
+        expected = out.cpu().clone().index_add_(0, idx.cpu(), src.cpu())
+        out.index_add_(0, idx, src)
+        self.assertEqual(out.cpu(), expected)
+
 
 # The tests below are from NumPy test_indexing.py with some modifications to
 # make them compatible with PyTorch. It's licensed under the BDS license below:
@@ -2372,7 +2737,9 @@ class TestIndexing(TestCase):
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-class NumpyTests(TestCase):
+class NumpyTestsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_index_no_floats(self, device):
         a = torch.tensor([[[5.0]]], device=device)
 
@@ -2471,7 +2838,7 @@ class NumpyTests(TestCase):
         index = tensor([False] * 6, device=device)
         self.assertRaisesRegex(IndexError, "mask", lambda: arr[index])
 
-        index = torch.ByteTensor(4, 4).to(device).zero_()
+        index = torch.zeros(4, 4, dtype=torch.bool, device=device)
         self.assertRaisesRegex(IndexError, "mask", lambda: arr[index])
         self.assertRaisesRegex(IndexError, "mask", lambda: arr[(slice(None), index)])
 
@@ -2608,9 +2975,12 @@ class NumpyTests(TestCase):
 
 
 instantiate_device_type_tests(
-    TestIndexing, globals(), except_for="meta", allow_mps=True, allow_xpu=True
+    TestIndexingDevice, globals(), except_for="meta", allow_mps=True, allow_xpu=True
 )
-instantiate_device_type_tests(NumpyTests, globals(), except_for="meta", allow_xpu=True)
+
+instantiate_device_type_tests(
+    NumpyTestsDevice, globals(), except_for="meta", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

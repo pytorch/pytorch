@@ -59,7 +59,7 @@ def sharded_embedding(types, args, kwargs, pg):
        The reason of having an extra row (aka, number 4 in the example) is
        because when max_norm is specified only weight which has looked will
        be re-normed so mask IDs whose embeddings are not stored in current
-       rank will to an extra row will ensure max_norm still works as expected.
+       rank to an extra row will ensure max_norm still works as expected.
     3. If max_norm is specified, the extra row guarantees that the mask ID will
        not affect the behavior of weight re-norm.
 

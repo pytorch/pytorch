@@ -2,7 +2,6 @@
 #include <poll.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <algorithm>
 #include <cerrno>
 #include <memory>
 #include <set>
@@ -85,7 +84,7 @@ static void free_used_object(const std::string& name) {
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
-int main(int argc, char* argv[]) {
+int main(int  /*argc*/, char*  /*argv*/[]) {
   setsid(); // Daemonize the process
 
   std::unique_ptr<ManagerServerSocket> srv_socket;

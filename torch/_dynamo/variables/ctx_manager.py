@@ -29,7 +29,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch._C
 from torch._dynamo import config
-from torch._guards import Guard
+from torch._guards import Guard, Source
 from torch._logging import warning_once
 
 from .. import graph_break_hints, variables
@@ -37,18 +37,25 @@ from ..bytecode_transformation import create_call_function
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
-from ..utils import _get_error_on_graph_break, _set_error_on_graph_break
+from ..utils import (
+    _get_error_on_graph_break,
+    _set_error_on_graph_break,
+    is_safe_constant,
+)
 from .base import VariableTracker
+from .descriptors import MethodDescriptorVariable
 from .functions import (
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    WrappedMethodDescriptorVariable,
     WrappedNestedUserFunctionVariable,
     WrappedSkipFunctionVariable,
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
+from .object_protocol import python_constant_repr_impl
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -143,22 +150,32 @@ class ContextWrappingVariable(VariableTracker):
         if not isinstance(
             args[0],
             (
+                MethodDescriptorVariable,
                 NestedUserFunctionVariable,
                 SkipFunctionVariable,
                 UserMethodVariable,
                 UserFunctionVariable,
+                WrappedMethodDescriptorVariable,
             ),
         ):
             raise AssertionError(f"expected a function variable, got {type(args[0])}")
 
-        if isinstance(args[0], NestedUserFunctionVariable):
-            return WrappedNestedUserFunctionVariable(args[0], self)
-        elif isinstance(args[0], SkipFunctionVariable):
-            return WrappedSkipFunctionVariable(args[0], self)
-        elif isinstance(args[0], UserMethodVariable):
-            return WrappedUserMethodVariable(args[0], self)
-        elif isinstance(args[0], UserFunctionVariable):
-            return WrappedUserFunctionVariable(args[0], self)
+        return self._wrap_function(args[0])
+
+    # noqa: RVT001
+    def _wrap_function(self, fn: VariableTracker) -> VariableTracker:
+        if isinstance(fn, NestedUserFunctionVariable):
+            return WrappedNestedUserFunctionVariable(fn, self)
+        elif isinstance(fn, SkipFunctionVariable):
+            return WrappedSkipFunctionVariable(fn, self)
+        elif isinstance(
+            fn, (MethodDescriptorVariable, WrappedMethodDescriptorVariable)
+        ):
+            return WrappedMethodDescriptorVariable(fn, self)
+        elif isinstance(fn, UserMethodVariable):
+            return WrappedUserMethodVariable(fn, self)
+        elif isinstance(fn, UserFunctionVariable):
+            return WrappedUserFunctionVariable(fn, self)
         else:
             raise AssertionError("Unexpected arg type")
 
@@ -199,9 +216,14 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         return type(self.cm_obj).__name__
 
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .builder import VariableBuilder
+
         source = None if self.source is None else AttrSource(self.source, "__enter__")
         return variables.UserMethodVariable(
-            self.cm_obj.__enter__.__func__,  # type: ignore[attr-defined]
+            VariableBuilder.create_internal_user_function(
+                self.cm_obj.__enter__.__func__,
+                source=source and AttrSource(source, "__func__"),
+            ),
             self,
             source=source,
         ).call_function(tx, [], {})
@@ -209,9 +231,14 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
     def exit(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         source = None if self.source is None else AttrSource(self.source, "__exit__")
         x = variables.UserMethodVariable(
-            self.cm_obj.__exit__.__func__,  # type: ignore[attr-defined]
+            VariableBuilder.create_internal_user_function(
+                self.cm_obj.__exit__.__func__,
+                source=source and AttrSource(source, "__func__"),
+            ),
             self,
             source=source,
         ).call_function(tx, list(args), {})
@@ -723,6 +750,9 @@ class GradModeVariable(ContextWrappingVariable):
     def python_type(self) -> type:
         return torch.set_grad_enabled
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
+
 
 class InferenceModeVariable(ContextWrappingVariable):
     @staticmethod
@@ -805,6 +835,9 @@ class GenericDeviceVariable(ContextWrappingVariable):
     _exchange_fn: Any
     _maybe_exchange_fn: Any
     _get_device_index_fn: Any
+    # False for managers whose constructor takes an integer index rather than a
+    # torch.device, which cannot accept a rank-relative device.
+    _accepts_device_object = True
 
     @classmethod
     def create(
@@ -849,6 +882,59 @@ class GenericDeviceVariable(ContextWrappingVariable):
         raise NotImplementedError
 
 
+class CurrentDeviceContextVariable(ContextWrappingVariable):
+    """A device context whose target is the CooR runtime current device.
+
+    CooR assumes one accelerator per rank, so entering this context is a no-op.
+    That holds only while nothing moves the current device mid-frame, which is why
+    entering a device with an explicit index is refused under CooR (see
+    ``UserDefinedClassVariable.call_function``), as is calling a device setter such
+    as ``torch.cuda.set_device`` (see ``SkipFunctionVariable.call_function``).
+
+    ``target_values`` is deliberately index-less: at a graph break the inherited
+    ``reconstruct`` calls e.g. ``torch.cuda.device(torch.device("cuda"))``, which
+    resolves to whatever device is current in the resuming process. Freezing the
+    compiling rank's index here is exactly the bug this class exists to avoid.
+    """
+
+    _nonvar_fields = {
+        *ContextWrappingVariable._nonvar_fields,
+        "device_context",
+    }
+
+    @classmethod
+    def create(
+        cls, device_type: str, device_context: type
+    ) -> "CurrentDeviceContextVariable":
+        return cls(device_type, device_context)
+
+    def __init__(
+        self,
+        device_type: str,
+        device_context: type,
+        **kwargs: Any,
+    ) -> None:
+        self.device_context = device_context
+        super().__init__(target_values=[torch.device(device_type)], **kwargs)
+
+    def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return variables.ConstantVariable.create(None)
+
+    def exit(
+        self, tx: "InstructionTranslatorBase", *args: VariableTracker
+    ) -> VariableTracker:
+        return variables.ConstantVariable.create(False)
+
+    def module_name(self) -> str:
+        return self.device_context.__module__
+
+    def fn_name(self) -> str:
+        return self.device_context.__name__
+
+    def python_type(self) -> type:
+        return self.device_context
+
+
 class CUDADeviceVariable(GenericDeviceVariable):
     """represents torch.cuda.device"""
 
@@ -883,6 +969,7 @@ class AcceleratorDeviceIndexVariable(GenericDeviceVariable):
     _exchange_fn = staticmethod(torch._C._accelerator_exchangeDevice)
     _maybe_exchange_fn = staticmethod(torch._C._accelerator_maybeExchangeDevice)
     _get_device_index_fn = staticmethod(lambda device, **kwargs: device)
+    _accepts_device_object = False
 
     def module_name(self) -> str:
         return "torch.accelerator"
@@ -1344,7 +1431,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     """
 
     @staticmethod
-    def _create_lambda_from_tensors(
+    def create(
         tx: "InstructionTranslatorBase",
         tensors: VariableTracker,
     ) -> "PreserveVersionContextVariable":
@@ -1367,9 +1454,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     @staticmethod
     def constructor(tx: "InstructionTranslatorBase") -> VariableTracker:
         return variables.LambdaVariable(
-            lambda tensors: PreserveVersionContextVariable._create_lambda_from_tensors(
-                tx, tensors
-            )
+            lambda tensors: PreserveVersionContextVariable.create(tx, tensors)
         )
 
     def __init__(
@@ -1398,8 +1483,9 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
         from ..tensor_version_op import _unsafe_set_version_counter
+        from .builder import SourcelessBuilder
 
-        return variables.TorchInGraphFunctionVariable(
+        return SourcelessBuilder.create_internal_torch_function(
             _unsafe_set_version_counter
         ).call_function(tx, [self.tensors, self.prev_versions], {})
 
@@ -1601,14 +1687,40 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
 
     _nonvar_fields = {
         "annotation",
+        "_reenter_fn_name",
         *ContextWrappingVariable._nonvar_fields,
     }
+
+    # Whether a graph break inside this context re-enters the annotation in the
+    # resume function. Subclasses whose context does more than annotate opt out.
+    _reenter_after_graph_break: bool = True
+
+    @staticmethod
+    def create(
+        annotation: dict[str, Any], *, source: Source | None = None
+    ) -> "FxTracebackAnnotateVariable":
+        return FxTracebackAnnotateVariable(annotation, source=source)
 
     def __init__(
         self, annotation: dict[str, Any], initial_values: Any = None, **kwargs: Any
     ) -> None:
         self.annotation = annotation
-        super().__init__(target_values=(), initial_values=initial_values, **kwargs)
+        budget = annotation.get(torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY)
+        self._reenter_fn_name: str | None = None
+        target_values: tuple[Any, ...] = ()
+        if len(annotation) == 1 and type(budget) is float:
+            self._reenter_fn_name = "_dynamo_region_activation_memory_budget"
+            target_values = (budget,)
+        elif self._reenter_after_graph_break:
+            items = tuple(annotation.items())
+            if is_safe_constant(items):
+                self._reenter_fn_name = "_dynamo_annotate"
+                target_values = (items,)
+        super().__init__(
+            target_values=target_values,
+            initial_values=initial_values,
+            **kwargs,
+        )
 
     def enter(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
@@ -1626,16 +1738,18 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         return "torch.fx.traceback"
 
     def fn_name(self) -> str:
-        return "annotate"
+        return self._reenter_fn_name or "annotate"
 
     def python_type(self) -> type:
         return contextlib._GeneratorContextManager
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
+        if self.target_values:
+            return super().reconstruct_type(codegen)
         unimplemented(
             gb_type="torch.fx.traceback.annotate escaped from compiled region",
             context=str(self),
-            explanation="Dynamo doesn't support graph break on torch.fx.traceback.annotate.",
+            explanation="Dynamo can only resume torch.fx.traceback.annotate after a graph break when every annotation value is a constant it can embed in bytecode.",
             hints=[
                 *graph_break_hints.SUPPORTABLE,
             ],
@@ -1834,6 +1948,12 @@ class WithExitFunctionVariable(VariableTracker):
         "target",
         *VariableTracker._nonvar_fields,
     }
+
+    @staticmethod
+    def create(
+        ctx: ContextWrappingVariable | GenericContextWrappingVariable, target: Any
+    ) -> "WithExitFunctionVariable":
+        return WithExitFunctionVariable(ctx, target)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str

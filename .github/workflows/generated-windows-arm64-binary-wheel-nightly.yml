@@ -40,10 +40,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      check_experiments: lf,wincanary,wincanarylf
 
   wheel-build:
     name: ${{ matrix.build_name }}-build
     if: ${{ github.repository_owner == 'pytorch' }}
+    needs: get-label-type
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     strategy:
@@ -95,7 +106,7 @@ jobs:
           git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
           git config --system core.longpaths true
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
       - name: Bootstrap Python
@@ -126,7 +137,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.ci/pytorch/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         if: always()
         with:
           name: ${{ matrix.build_name }}
@@ -137,7 +148,7 @@ jobs:
   wheel-test:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [wheel-build]
+    needs: [get-label-type, wheel-build]
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     strategy:
@@ -183,7 +194,7 @@ jobs:
           git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
           git config --system core.longpaths true
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
       - name: Bootstrap APL
@@ -198,7 +209,7 @@ jobs:
         shell: cmd
         run: |
           ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: ${{ matrix.build_name }}
@@ -214,11 +225,11 @@ jobs:
 
   wheel-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && needs.get-label-type.result == 'success' && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: wheel-test
+    needs: [get-label-type, wheel-test]
     uses: ./.github/workflows/_binary-upload.yml
     strategy:
       fail-fast: false
@@ -269,12 +280,12 @@ jobs:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/libtorch/
           show-progress: false
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Wheel Artifact
         with:
           name: wheel-py3_11-cpu
@@ -291,7 +302,7 @@ jobs:
             --desired-cuda "$DESIRED_CUDA" \
             --libtorch-variant "$LIBTORCH_VARIANT" \
             --arch arm64
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         if: always()
         with:
           name: libtorch-arm64-cpu-shared-with-deps-release

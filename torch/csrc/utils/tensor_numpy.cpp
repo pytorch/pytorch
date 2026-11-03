@@ -54,8 +54,6 @@ bool is_numpy_dlpack_deleter_bugged() {
 
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
-#include <memory>
-#include <stdexcept>
 
 using namespace at;
 using namespace torch::autograd;
@@ -270,7 +268,7 @@ at::Tensor tensor_from_numpy(
       data_ptr,
       sizes,
       strides,
-      [obj](void* data) {
+      [obj](void* /*data*/) {
         pybind11::gil_scoped_acquire gil;
         Py_DECREF(obj);
       },
@@ -504,7 +502,7 @@ at::Tensor tensor_from_cuda_array_interface(
       data_ptr,
       sizes,
       strides,
-      [obj](void* data) {
+      [obj](void* /*data*/) {
         pybind11::gil_scoped_acquire gil;
         Py_DECREF(obj);
       },

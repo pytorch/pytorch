@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     import triton
 
 from .. import config, metrics
-from ..runtime.hints import DeviceProperties, TritonMeta
+from ..runtime.hints import TritonMeta
 from ..runtime.runtime_utils import next_power_of_2
 from ..runtime.triton_heuristics import (
     RoundRobinComboKernelGrid,
@@ -61,6 +61,7 @@ from .triton_utils import (
     equal_1_arg_indices,
     is_unaligned_buffer,
     signature_to_meta,
+    triton_meta_device_props,
 )
 
 
@@ -159,7 +160,10 @@ def _default_custom_combo_kernel_horizontal_partition(
     The default algorithm is to partition nodes based on the following rules:
         1) nodes with the same number of block dimensions are grouped together.
         2) large pointwise nodes (numels greater than LARGE_NUMELS) are separated from other nodes.
-        3) large reduce nodes are separated from other nodes.
+        3) large reduce nodes (numel * rnumel greater than LARGE_NUMELS) are separated from other nodes.
+           With benchmark_combo_kernel, only long ones (rnumel > 2048) are.
+        4) without benchmark_combo_kernel or per-subkernel blocks, persistent and
+           non-persistent reduce nodes are separated from each other.
     """
 
     if len(nodes) < 1:
@@ -176,6 +180,17 @@ def _default_custom_combo_kernel_horizontal_partition(
             n for n in group_per_dim if node_info_map[n].features.is_reduction()
         ]
         not_reduction = [n for n in group_per_dim if n not in reduction]
+        very_large_reduction = [
+            n
+            for n in reduction
+            if _size_hint(node_info_map[n].numel) * _size_hint(node_info_map[n].rnumel)
+            > LARGE_NUMELS
+            and (
+                not config.benchmark_combo_kernel
+                or _size_hint(node_info_map[n].rnumel) > 2048
+            )
+        ]
+        reduction = [n for n in reduction if n not in very_large_reduction]
         # rnumel > 2048 usually has long execution time
         # BaseSchedulerNode.group[-1][-1] is rnumel for reduction nodes
         # Scheduling heuristic: separate long reductions (rnumel > 2048).
@@ -186,18 +201,6 @@ def _default_custom_combo_kernel_horizontal_partition(
             if V.graph.sizevars.optimization_hint(n.group[-1][-1], fallback=1) > 2048  # type: ignore[arg-type]
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
-        very_large_reduction = [
-            n
-            for n in long_reduction
-            if (
-                V.graph.sizevars.optimization_hint(node_info_map[n].numel, fallback=1)
-                * V.graph.sizevars.optimization_hint(
-                    node_info_map[n].rnumel, fallback=1
-                )
-            )
-            > LARGE_NUMELS
-        ]
-        long_reduction = [n for n in long_reduction if n not in very_large_reduction]
         if long_reduction:
             _log_partition_separation(
                 "ComboKernels: %d long reduction nodes are separated",
@@ -235,9 +238,18 @@ def _default_custom_combo_kernel_horizontal_partition(
             not_reduction = companion_nodes
             nodes_per_ndim.extend([node] for node in large_pointwise)
 
-        nodes_per_ndim.extend(
-            g for g in (not_reduction, short_reduction, long_reduction) if g
-        )
+        reduction_partitions = [short_reduction, long_reduction]
+        if not (
+            config.benchmark_combo_kernel or config.combo_kernel_per_subkernel_blocks
+        ):
+            # Without benchmarking or per-subkernel blocks, sub-kernels share XBLOCK and
+            # num_warps, and persistent and looped reductions may want very different ones.
+            reduction_partitions = [
+                [n for n in group if node_info_map[n].is_persistent_reduction == p]
+                for group in reduction_partitions
+                for p in (True, False)
+            ]
+        nodes_per_ndim.extend(g for g in (not_reduction, *reduction_partitions) if g)
 
     if sum(len(p) for p in nodes_per_ndim) != len(nodes):
         raise AssertionError("partitioned node count must equal input node count")
@@ -379,7 +391,7 @@ class ComboKernel(Kernel):
             if ndim < 2:
                 raise AssertionError(f"Combokernel not support tile {tiled_groups}")
 
-            # Skip 2d reductions (r0_,r1_) and 3D pointwise (x,y,z) from combo
+            # Skip multi-axis reductions and 3D pointwise kernels from combo.
             keys = tiled_groups.keys()
             if ("r0_" in keys and "r1_" in keys) or "z" in keys:
                 all_partitions.append([node_info])
@@ -918,7 +930,7 @@ class ComboKernel(Kernel):
                 "signature": signature_to_meta(
                     signature, size_dtype=size_dtype, argdefs=argdefs
                 ),
-                "device": DeviceProperties.create(
+                "device": triton_meta_device_props(
                     V.graph.get_current_device_or_throw()
                 ),
                 "constants": {},
@@ -932,7 +944,18 @@ class ComboKernel(Kernel):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
         triton_meta["configs"] = [
-            config_of(signature, skip_cpp_wrapper_input_tensor_alignment=True)
+            config_of(
+                signature,
+                # sub-kernel bodies are spliced into this kernel, so their
+                # atomics are this kernel's atomics
+                pointer_range_override=(
+                    ()
+                    if torch.version.hip is not None
+                    and any(k.atomic_add_found for k in self.sub_kernels)
+                    else None
+                ),
+                skip_cpp_wrapper_input_tensor_alignment=True,
+            )
         ]
 
         mutated_args = self.get_mutated_args_sub_kernels()

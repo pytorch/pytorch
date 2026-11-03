@@ -5,11 +5,11 @@ Tuning enabled (compile-time autotune):
   concrete miss -> tune, persist concrete, plus a wildcard key if a dim is
   dynamic; concrete hit -> persist the wildcard key if it is still missing.
 
-Tuning disabled (runtime): the AOTI cpp_wrapper emits no
-`TunableDynamicDimsGuard`, so the mask is empty and a concrete miss is
-resolved by `LookupWildcardFallback`'s token scan. With no match,
-`operator()` falls through to `ResultEntry::Default()`, which is the same
-non-tunable aten kernel the caller would have used.
+Tuning disabled (runtime): a concrete miss is resolved by
+`LookupWildcardFallback`'s token scan. This also supports artifacts compiled
+without `TunableDynamicDimsGuard` emission. With no match, `operator()` falls
+through to `ResultEntry::Default()`, which is the same non-tunable aten kernel
+the caller would have used.
 
 Observability caveat, applying to every runtime wildcard test here: nothing
 reports whether a wildcard actually served a dispatch. A wildcard hit and a
@@ -39,6 +39,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from collections.abc import Callable
 from typing import cast, TypeAlias
 
 import sympy
@@ -225,6 +226,45 @@ def _assert_ld_wildcarding_consistent(test: TestCase, op_substr: str) -> None:
     )
 
 
+# C++ reads this env var (lazily, on first open) for the untuned-GEMM output
+# path and inserts the device ordinal before the extension:
+# `foo.csv` -> `foo<device>.csv`. See TuningContext::GetUntunedFile.
+_UNTUNED_FILENAME_ENV = "PYTORCH_TUNABLEOP_UNTUNED_FILENAME"
+
+
+def _read_untuned_lines(stem_path: str) -> list[str]:
+    """Read back the untuned-GEMM file written for `stem_path`, accounting for
+    the device ordinal the C++ layer splices in before the extension."""
+    device = torch.cuda.current_device()
+    root, ext = os.path.splitext(stem_path)
+    actual = f"{root}{device}{ext}"
+    if not os.path.exists(actual):
+        return []
+    with open(actual) as f:
+        return [line.strip() for line in f if line.strip()]
+
+
+def _untuned_has(lines: list[str], op_substr: str, m: int, n: int, k: int) -> bool:
+    """True if any untuned line records a concrete (non-wildcard) shape for
+    `op_substr` whose params signature contains all of (m, n, k).
+
+    Each line is `op_signature,params_signature` (the BLAS_PARAMS suffix is only
+    present when PYTORCH_TUNABLEOP_BLAS_LOG=1, which these tests do not set).
+    Dim matching is order-independent so it does not depend on the cuBLAS
+    row-major M<->N swap in the persisted concrete signature."""
+    for line in lines:
+        parts = line.split(",")
+        if len(parts) < 2:
+            continue
+        op_sig, params_sig = parts[0], parts[1]
+        if op_substr not in op_sig or "*" in params_sig:
+            continue
+        padded = "_" + params_sig + "_"
+        if all(f"_{d}_" in padded for d in (m, n, k)):
+            return True
+    return False
+
+
 class DynamicTunableOpsTest(TestCase):
     """Verification of the full tuning enable/disable x dynamic-dim matrix.
 
@@ -261,6 +301,7 @@ class DynamicTunableOpsTest(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
@@ -270,6 +311,7 @@ class DynamicTunableOpsTest(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     # -- Tuning enabled --------------------------------------------------
 
@@ -445,7 +487,7 @@ class DynamicTunableOpsTest(TestCase):
     ) -> None:
         """Tuning disabled + concrete miss + wildcard match -> dispatch via
         the wildcard. Phase B deliberately runs without a `dynamic_dims_mask`
-        to mirror the AOTI runtime, which emits no guard."""
+        to verify wildcard fallback independently of AOTI guard emission."""
         m_tuned, n, k = 47, 2053, 1019
         m_test = 53  # different M, same wildcard pattern
         bias_t, mat1_t, mat2_t = _addmm(m_tuned, n, k, seed=6)
@@ -477,10 +519,9 @@ class DynamicTunableOpsTest(TestCase):
         torch.cuda.tunable.tuning_enable(False)
         ref = torch.addmm(bias_x, mat1_x, mat2_x)
 
-        # Phase B (runtime analog): tunable enabled, tuning disabled,
-        # NO `dynamic_dims_mask` context -- the AOTI runtime cannot push
-        # one. Concrete miss for m_test -> LookupWildcardFallback finds
-        # the wildcard seeded in Phase A and dispatches via it.
+        # Phase B (runtime analog): tunable enabled, tuning disabled, and no
+        # dynamic mask. Concrete miss for m_test -> LookupWildcardFallback
+        # finds the wildcard seeded in Phase A and dispatches via it.
         torch.cuda.tunable.enable(True)
         torch.cuda.tunable.tuning_enable(False)
         out = torch.addmm(bias_x, mat1_x, mat2_x)
@@ -844,6 +885,7 @@ class LayoutCoverageWildcardTest(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
@@ -853,6 +895,7 @@ class LayoutCoverageWildcardTest(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     @staticmethod
     def _make_layout(
@@ -1056,6 +1099,7 @@ class BmmLayoutCoverageWildcardTest(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
@@ -1065,6 +1109,7 @@ class BmmLayoutCoverageWildcardTest(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     @staticmethod
     def _make_layout(
@@ -1272,6 +1317,7 @@ class ScaledGemmTunableOpFP8Test(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
@@ -1281,6 +1327,7 @@ class ScaledGemmTunableOpFP8Test(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     @staticmethod
     def _scaled_mm_inputs(
@@ -1465,6 +1512,7 @@ class LegacyConcreteOnlyTunableOpsTest(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
@@ -1474,6 +1522,7 @@ class LegacyConcreteOnlyTunableOpsTest(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     def _entries_for_op(self, op_substr: str) -> list[_TunableResultEntry]:
         return [e for e in _get_tunable_results() if op_substr in e[0]]
@@ -1613,6 +1662,217 @@ class LegacyConcreteOnlyTunableOpsTest(TestCase):
             atol=1e-2,
             rtol=1e-2,
             msg="concrete-hit dispatch result should match reference",
+        )
+
+
+# --- PYTORCH_TUNABLEOP_RECORD_UNTUNED collection on a concrete miss ---
+# Regression coverage for the runtime record-untuned path across every GEMM
+# category. TunableOp::operator() records the concrete shape on every miss,
+# before consulting the wildcard entries, so the offline-tuning workflow sees
+# the shape whether it ends up served by a wildcard or by the non-tunable aten
+# fallback. Recording only on a total miss would silently drop exactly the
+# shapes a wildcard is approximating.
+
+
+class RecordUntunedConcreteMissTest(TestCase):
+    """PYTORCH_TUNABLEOP_RECORD_UNTUNED collection on a runtime concrete miss,
+    for every GEMM category, whether or not a wildcard then serves the call. A
+    concrete hit records nothing.
+
+    Untuned output is redirected per test via
+    PYTORCH_TUNABLEOP_UNTUNED_FILENAME; record_untuned_enable(False) flushes
+    and closes that file and clears the C++ dedup set."""
+
+    _tmpdir: str = ""
+    _tmp_results_path: str = ""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if not torch.cuda.is_available():
+            raise unittest.SkipTest("cuda not available")
+        cls._tmpdir = tempfile.mkdtemp(prefix="record_untuned_test_")
+        cls._tmp_results_path = os.path.join(cls._tmpdir, "tunable_results.csv")
+        torch.cuda.tunable.set_filename(cls._tmp_results_path, False)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        if cls._tmpdir:
+            shutil.rmtree(cls._tmpdir, ignore_errors=True)
+
+    def setUp(self) -> None:
+        super().setUp()
+        torch.cuda.tunable.enable(False)
+        torch.cuda.tunable.tuning_enable(False)
+        torch.cuda.tunable.record_untuned_enable(False)
+        torch.cuda.tunable._clear_all()
+        torch.cuda.tunable.wildcard_fallback_enable(True)
+
+    def tearDown(self) -> None:
+        torch.cuda.tunable.record_untuned_enable(False)
+        torch.cuda.tunable.enable(False)
+        torch.cuda.tunable.tuning_enable(False)
+        torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
+
+    def _record_untuned_run(self, stem: str, run_op: Callable[[], object]) -> list[str]:
+        """Run `run_op` at runtime (TunableOp enabled, tuning disabled) with
+        record-untuned redirected to `stem`, then close the file (flush) and
+        return its recorded lines."""
+        # Close first so the next open re-reads our env-provided filename and
+        # the untuned dedup set starts empty.
+        torch.cuda.tunable.record_untuned_enable(False)
+        prev = os.environ.get(_UNTUNED_FILENAME_ENV)
+        os.environ[_UNTUNED_FILENAME_ENV] = stem
+        try:
+            torch.cuda.tunable.enable(True)
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable.record_untuned_enable(True)
+            run_op()
+        finally:
+            torch.cuda.tunable.record_untuned_enable(False)
+            if prev is None:
+                os.environ.pop(_UNTUNED_FILENAME_ENV, None)
+            else:
+                os.environ[_UNTUNED_FILENAME_ENV] = prev
+        return _read_untuned_lines(stem)
+
+    def _assert_records_concrete_miss(
+        self,
+        op_substr: str,
+        m: int,
+        n: int,
+        k: int,
+        run_op: Callable[[], object],
+    ) -> None:
+        stem = os.path.join(self._tmpdir, f"untuned_{op_substr}_{m}_{n}_{k}.csv")
+        lines = self._record_untuned_run(stem, run_op)
+        self.assertTrue(
+            _untuned_has(lines, op_substr, m, n, k),
+            f"concrete miss ({m},{n},{k}) for {op_substr} must be appended to "
+            f"the untuned file when record-untuned is enabled; got {lines}",
+        )
+
+    # -- Total miss records for every GEMM category ----------------------
+
+    def test_addmm_concrete_miss_records_untuned(self) -> None:
+        m, n, k = 107, 3001, 401
+        bias, mat1, mat2 = _addmm(m, n, k, seed=70)
+        self._assert_records_concrete_miss(
+            "GemmAndBiasTunableOp", m, n, k, lambda: torch.addmm(bias, mat1, mat2)
+        )
+
+    def test_mm_concrete_miss_records_untuned(self) -> None:
+        m, n, k = 109, 3011, 409
+        mat1, mat2 = _mm(m, n, k, seed=71)
+        self._assert_records_concrete_miss(
+            "GemmTunableOp", m, n, k, lambda: torch.mm(mat1, mat2)
+        )
+
+    def test_bmm_concrete_miss_records_untuned(self) -> None:
+        b, m, n, k = 8, 113, 3019, 419
+        b1, b2 = _bmm(b, m, n, k, seed=72)
+        self._assert_records_concrete_miss(
+            "GemmStridedBatchedTunableOp", m, n, k, lambda: torch.bmm(b1, b2)
+        )
+
+    def test_baddbmm_concrete_miss_records_untuned(self) -> None:
+        b, m, n, k = 8, 127, 3023, 421
+        bias, b1, b2 = _baddbmm(b, m, n, k, seed=73)
+        self._assert_records_concrete_miss(
+            "GemmStridedBatchedTunableOp",
+            m,
+            n,
+            k,
+            lambda: torch.baddbmm(bias, b1, b2),
+        )
+
+    @unittest.skipIf(
+        torch.version.hip is None,
+        "_scaled_gemm only reaches TunableOp under USE_ROCM; off ROCm "
+        "tunable_op_enabled is hardcoded false (ScaledBlas.cpp) so nothing "
+        "is ever recorded",
+    )
+    def test_scaled_mm_concrete_miss_records_untuned(self) -> None:
+        if not hasattr(torch, "float8_e4m3fn"):
+            raise unittest.SkipTest("torch.float8_e4m3fn not available")
+        # Use distinct aligned N and K to verify the helper's K-by-N layout.
+        m, n, k = 2560, 1408, 1536
+        a, b, sa, sb = ScaledGemmTunableOpFP8Test._scaled_mm_inputs(m, n, k, seed=74)
+
+        # Confirm _scaled_mm is usable here before asserting on the tunable
+        # path (mirrors the skips in ScaledGemmTunableOpFP8Test).
+        torch.cuda.tunable.enable(False)
+        torch.cuda.tunable.tuning_enable(False)
+        try:
+            torch._scaled_mm(a, b, sa, sb, out_dtype=torch.bfloat16)
+        except RuntimeError as e:
+            raise unittest.SkipTest(
+                f"_scaled_mm not supported in this configuration: {e}"
+            ) from e
+
+        self._assert_records_concrete_miss(
+            "ScaledGemmTunableOp",
+            m,
+            n,
+            k,
+            lambda: torch._scaled_mm(a, b, sa, sb, out_dtype=torch.bfloat16),
+        )
+
+    # -- Already-covered shapes must NOT record --------------------------
+
+    def test_concrete_hit_does_not_record_untuned(self) -> None:
+        """A runtime concrete hit is already tuned, so nothing is recorded."""
+        m, n, k = 131, 3041, 431
+        bias, mat1, mat2 = _addmm(m, n, k, seed=75)
+
+        # Phase A: tune the concrete shape (tuning on, outside the record
+        # window; tuning writes the results file, never the untuned file).
+        torch.cuda.tunable.enable(True)
+        torch.cuda.tunable.tuning_enable(True)
+        torch.addmm(bias, mat1, mat2)
+        self.assertTrue(
+            _has_concrete_entry("GemmAndBiasTunableOp", m, n, k),
+            f"expected concrete entry for ({m},{n},{k}) after phase A tuning",
+        )
+
+        stem = os.path.join(self._tmpdir, f"untuned_concrete_hit_{m}.csv")
+        lines = self._record_untuned_run(stem, lambda: torch.addmm(bias, mat1, mat2))
+        self.assertFalse(
+            _untuned_has(lines, "GemmAndBiasTunableOp", m, n, k),
+            f"concrete hit must not record an untuned entry; got {lines}",
+        )
+
+    def test_wildcard_fallback_hit_still_records_untuned(self) -> None:
+        """A wildcard only approximates the shape -- it was tuned for a
+        different one -- so offline tuning must still see the concrete miss."""
+        m_tuned, n, k = 137, 3049, 433
+        m_test = 139
+        bias_t, mat1_t, mat2_t = _addmm(m_tuned, n, k, seed=76)
+        bias_x, mat1_x, mat2_x = _addmm(m_test, n, k, seed=77)
+
+        # Phase A: tune with M dynamic so the wildcard is seeded.
+        torch.cuda.tunable.enable(True)
+        torch.cuda.tunable.tuning_enable(True)
+        with torch.cuda.tunable.dynamic_dims_mask(M=True):
+            torch.addmm(bias_t, mat1_t, mat2_t)
+        self.assertTrue(
+            _has_wildcard_with_dims("GemmAndBiasTunableOp", n, k),
+            "expected wildcard entry with concrete (n, k) after phase A",
+        )
+        self.assertFalse(
+            _has_concrete_entry("GemmAndBiasTunableOp", m_test, n, k),
+            "should have no concrete entry for the new M before the runtime call",
+        )
+
+        # Runtime: the concrete miss is recorded, then served by the wildcard.
+        stem = os.path.join(self._tmpdir, f"untuned_wildcard_hit_{m_test}.csv")
+        lines = self._record_untuned_run(
+            stem, lambda: torch.addmm(bias_x, mat1_x, mat2_x)
+        )
+        self.assertTrue(
+            _untuned_has(lines, "GemmAndBiasTunableOp", m_test, n, k),
+            "a wildcard-served concrete miss must still be recorded as "
+            f"untuned; got {lines}",
         )
 
 

@@ -160,6 +160,9 @@ FunctionExtractor::FunctionContext::FunctionContext(
       auto n_b_attr_names = n_b->attributeNames();
       std::sort(n_a_attr_names.begin(), n_a_attr_names.end());
       std::sort(n_b_attr_names.begin(), n_b_attr_names.end());
+      diff_attrs.reserve(n_a_attr_names.size());
+      same_attrs.reserve(
+          std::min(n_a_attr_names.size(), n_b_attr_names.size()));
       std::set_difference(
           n_a_attr_names.begin(),
           n_a_attr_names.end(),
@@ -604,7 +607,6 @@ Node* FunctionExtractor::CreateFunctionNode(
                 static_cast<int>(a->kindOf(attr)),
                 " from node ",
                 *a);
-            break;
         }
       };
 
@@ -999,10 +1001,7 @@ static bool HasSameAttribute(
           static_cast<int>(a_kind),
           " from node ",
           *a);
-      break;
   }
-
-  return true;
 }
 
 scope_list FunctionExtractor::SortScopesByMaxDepth(

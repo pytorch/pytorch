@@ -14,6 +14,8 @@ For more information on CUDA runtime environment variables, see [CUDA Environmen
 | `TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT` | The cache limit for the cuDNN v8 API. This is used to limit the memory used by the cuDNN v8 API. The default value is 10000, which roughly corresponds to 2GiB assuming 200KiB per ExecutionPlan. Set to `0` for no limit or a negative value for no caching. |
 | `TORCH_CUDNN_V8_API_DISABLED` | If set to `1`, disables the cuDNN v8 API. And will fall back to the cuDNN v7 API. |
 | `TORCH_ALLOW_TF32_CUBLAS_OVERRIDE` | If set to `1`, forces TF32 enablement, overrides `set_float32_matmul_precision` setting. |
+| `TORCH_CUBLAS_WORKSPACE_CACHE` | If set to `1`, retains ATen's cuBLAS and cuBLASLt workspaces per handle and stream instead of allocating them for each ATen operation, which is the default. This is separate from the CUDA allocator's caching of freed device memory. Persistent ATen workspaces should not be used when capturing multiple CUDA graphs on the same stream. Handles returned by `torch.cuda.current_blas_handle()` use cuBLAS's default workspace when this variable is unset. |
+| `TORCH_CUBLASLT_UNIFIED_WORKSPACE` | Controls whether cached cuBLAS and cuBLASLt workspaces share an allocation. This only takes effect when `TORCH_CUBLAS_WORKSPACE_CACHE=1`. |
 | `TORCH_NCCL_USE_COMM_NONBLOCKING` | If set to `1`, enables non-blocking error handling in NCCL. |
 | `TORCH_CUDNN_V8_API_DEBUG` | If set to `1`, sanity check whether cuDNN V8 is being used. |
 
@@ -23,7 +25,7 @@ For more information on CUDA runtime environment variables, see [CUDA Environmen
 |----------|-------------|
 | `CUDA_VISIBLE_DEVICES` | Comma-separated list of GPU device IDs that should be made available to CUDA runtime. If set to `-1`, no GPUs are made available. |
 | `CUDA_LAUNCH_BLOCKING` | If set to `1`, makes CUDA calls synchronous. This can be useful for debugging. |
-| `CUBLAS_WORKSPACE_CONFIG` | This environment variable is used to set the workspace configuration for cuBLAS per allocation. The format is `:[SIZE]:[COUNT]`. As an example, the default workspace size per allocation is `CUBLAS_WORKSPACE_CONFIG=:4096:2:16:8` which specifies a total size of `2 * 4096 + 8 * 16 KiB`. To force cuBLAS to avoid using workspaces, set `CUBLAS_WORKSPACE_CONFIG=:0:0`. |
+| `CUBLAS_WORKSPACE_CONFIG` | This environment variable is used to set the workspace configuration for cuBLAS per allocation. The format is `:[SIZE]:[COUNT]`. For example, `CUBLAS_WORKSPACE_CONFIG=:4096:2:16:8` specifies a total size of `2 * 4096 + 8 * 16 KiB`. To force cuBLAS to avoid using workspaces, set `CUBLAS_WORKSPACE_CONFIG=:0:0`. |
 | `CUDNN_CONV_WSCAP_DBG` | Similar to `CUBLAS_WORKSPACE_CONFIG`, this environment variable is used to set the workspace configuration for cuDNN per allocation. |
 | `CUBLASLT_WORKSPACE_SIZE` | Similar to `CUBLAS_WORKSPACE_CONFIG`, this environment variable is used to set the workspace size for cuBLASLT. |
 | `CUDNN_ERRATA_JSON_FILE` | Can be set to a file path for an errata filter that can be passed to cuDNN to avoid specific engine configs, used primarily for debugging or to hardcode autotuning. |

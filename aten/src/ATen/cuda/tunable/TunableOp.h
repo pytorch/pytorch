@@ -94,13 +94,17 @@ class TunableOp {
         }
         else {
           if (!concrete_hit) {
-            if (ctx->IsWildcardFallbackEnabled()) {
-              result = mgr.LookupWildcardFallback(op_sig, concrete_sig);
-            }
-            if (result == ResultEntry::Null() && ctx->IsRecordUntunedEnabled()) {
+            // Record before the wildcard lookup, not after it. A wildcard is
+            // an approximation -- the kernel was tuned for a different
+            // concrete shape and is merely reused here -- so offline tuning
+            // still needs to see this shape even when a wildcard serves it.
+            if (ctx->IsRecordUntunedEnabled()) {
               mgr.RecordUntuned(
                   ctx->GetUntunedFile(), op_sig, concrete_sig,
                   params->BLASSignature());
+            }
+            if (ctx->IsWildcardFallbackEnabled()) {
+              result = mgr.LookupWildcardFallback(op_sig, concrete_sig);
             }
           }
         }

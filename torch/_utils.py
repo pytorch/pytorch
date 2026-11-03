@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import _compat_pickle
 import copyreg
 import functools
 import importlib
@@ -217,13 +216,27 @@ def set_tensor_metadata(tensor, metadata):
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
 
 
+def copy_backend_meta(src, dst, for_fake=False):
+    # Copy the backend-specific metadata (``c10::BackendMeta``) from ``src`` to
+    # ``dst``. When ``for_fake`` is set (copying onto a FakeTensor) the backend
+    # may drop or strip data that is not valid on a fake. See
+    # `get_tensor_metadata` / `set_tensor_metadata` above.
+    if not isinstance(src, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(src).__name__}")
+    if not isinstance(dst, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(dst).__name__}")
+    torch._C._copy_backend_meta(src, dst, for_fake)  # type: ignore[attr-defined]
+
+
 def _restore_device_fake_mode(tensor):
+    from torch._subclasses.fake_tensor import maybe_set_fake_device
+
     if torch._guards.detect_fake_mode(None) is not None:
         if tensor.untyped_storage()._fake_device is not None:
             device = _get_restore_location(tensor.untyped_storage()._fake_device)
             if not isinstance(device, torch.device):
                 device = torch.device(device)
-            tensor.fake_device = torch.device(device)
+            maybe_set_fake_device(tensor, torch.device(device))
     return tensor
 
 
@@ -274,7 +287,8 @@ def _rebuild_tensor_v3(
     return t
 
 
-_sparse_tensors_to_validate: list["torch.Tensor"] = []
+def _get_sparse_tensors_to_validate() -> list["torch.Tensor"]:
+    return torch.serialization._serialization_tls.sparse_tensors_to_validate
 
 
 # In _legacy_load() in serialization.py we unpickle storages after the sparse
@@ -292,8 +306,9 @@ def _validate_loaded_sparse_tensors(weights_only=False):
     # cause out-of-bounds reads later (e.g. in to_dense()), and an untrusted
     # checkpoint must not be able to slip those through. Otherwise we fall back
     # to the global check_sparse_tensor_invariants setting.
+    sparse_tensors_to_validate = _get_sparse_tensors_to_validate()
     try:
-        if not _sparse_tensors_to_validate:
+        if not sparse_tensors_to_validate:
             return
         if weights_only:
             warnings.warn(
@@ -307,7 +322,7 @@ def _validate_loaded_sparse_tensors(weights_only=False):
         # We disable pinning check (see check_pinning=False below) to
         # avoid gh-153143. In fact, pinning check is unnecessary
         # anyway when loading sparse data from external sources.
-        for t in _sparse_tensors_to_validate:
+        for t in sparse_tensors_to_validate:
             if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
                     t._indices(),
@@ -348,7 +363,7 @@ def _validate_loaded_sparse_tensors(weights_only=False):
                 )
 
     finally:
-        _sparse_tensors_to_validate.clear()
+        sparse_tensors_to_validate.clear()
 
 
 def _rebuild_sparse_tensor(layout, data):
@@ -369,7 +384,7 @@ def _rebuild_sparse_tensor(layout, data):
         result = torch.sparse_coo_tensor(
             indices, values, size, check_invariants=False, is_coalesced=is_coalesced
         )
-        _sparse_tensors_to_validate.append(result)
+        _get_sparse_tensors_to_validate().append(result)
         return result
 
     elif layout in {
@@ -387,7 +402,7 @@ def _rebuild_sparse_tensor(layout, data):
             layout=layout,
             check_invariants=False,
         )
-        _sparse_tensors_to_validate.append(result)
+        _get_sparse_tensors_to_validate().append(result)
         return result
 
     raise NotImplementedError(f"rebuilding sparse tensor for layout {layout}")
@@ -1158,16 +1173,6 @@ NAME_MAPPING = {
     ("UserDict", "UserDict"): ("collections", "UserDict"),
 }
 
-# Protocol 2 pickle (torch.save's default) maps builtin exceptions to the
-# Python 2 "exceptions" module via REVERSE_NAME_MAPPING; map them back so
-# allowlisted exception types resolve under their builtins.* names.
-NAME_MAPPING.update(
-    {
-        ("exceptions", name): ("builtins", name)
-        for name in _compat_pickle.PYTHON2_EXCEPTIONS
-    }
-)
-
 
 def _chunk_or_narrow_cat(
     tensor: "torch.Tensor",
@@ -1233,6 +1238,10 @@ def _maybe_view_chunk_cat(
     Returns:
         Tensor with data rearranged to gather along gather_dim
     """
+
+    # The shape slicing below assumes a non-negative gather_dim.
+    if gather_dim < 0:
+        gather_dim += res.dim()
 
     if gather_dim == 0:
         # When gather_dim is 0, chunk+cat is a no-op

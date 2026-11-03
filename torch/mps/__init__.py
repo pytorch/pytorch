@@ -151,13 +151,18 @@ def compile_shader(source: str):
     """
     from pathlib import Path
 
+    from torch._utils_internal import get_file_path
     from torch.utils._cpp_embed_headers import _embed_headers
 
     if not hasattr(torch._C, "_mps_compileShader"):
         raise RuntimeError("MPS is not available")
+    # Resolve the header directory the same way cpp_extension does. Deriving it
+    # from `__file__` breaks under an editable install, where the package is
+    # redirected to the source checkout while the headers are staged next to
+    # the installed distribution.
     source = _embed_headers(
         [l + "\n" for l in source.split("\n")],
-        [Path(__file__).parent.parent / "include"],
+        [Path(get_file_path("torch")) / "include"],
         set(),
     )
     return torch._C._mps_compileShader(source)
@@ -233,6 +238,7 @@ def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorag
 
 from . import profiler
 from .event import Event
+from .streams import current_stream, default_stream, set_stream, Stream, stream
 
 
 __all__ = [
@@ -249,6 +255,11 @@ __all__ = [
     "current_allocated_memory",
     "driver_allocated_memory",
     "Event",
+    "Stream",
+    "stream",
+    "current_stream",
+    "set_stream",
+    "default_stream",
     "profiler",
     "recommended_max_memory",
     "is_available",

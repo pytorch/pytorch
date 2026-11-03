@@ -7,6 +7,7 @@ from datetime import timedelta
 
 import torch
 import torch.distributed as dist
+from torch._C._distributed_c10d import Backend as C10dBackend
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import TEST_CUDA
 
@@ -56,9 +57,85 @@ class BackendConfig:
     complex_dtypes: tuple[torch.dtype, ...] = COMPLEX_DTYPES
 
 
+class PythonGlooBackend(C10dBackend):
+    """Python Backend that forwards to gloo to exercise the PyBackend trampoline."""
+
+    def __init__(self, gloo):
+        super().__init__(gloo.rank(), gloo.size())
+        self._gloo = gloo
+
+    @classmethod
+    def create(cls, store, rank, world_size, timeout):
+        return cls(dist.ProcessGroupGloo(store, rank, world_size, timeout))
+
+    def getBackendName(self):
+        return "python-gloo"
+
+    @property
+    def options(self):
+        return self._gloo.options
+
+    @property
+    def supports_splitting(self):
+        return self._gloo.supports_splitting
+
+    def split(self, store, ranks, opts):
+        child = self._gloo.split(store, ranks, opts)
+        return None if child is None else PythonGlooBackend(child)
+
+
+def _forward_to_gloo(name):
+    def method(self, *args, **kwargs):
+        return getattr(self._gloo, name)(*args, **kwargs)
+
+    method.__name__ = name
+    return method
+
+
+# Collectives, p2p and sequence numbers; other trampoline lookups use Backend defaults.
+for _name in (
+    "broadcast",
+    "allreduce",
+    "allreduce_sparse",
+    "allreduce_coalesced",
+    "reduce",
+    "allgather",
+    "all_gather_single",
+    "allgather_coalesced",
+    "all_gather_single_coalesced",
+    "gather",
+    "gather_single",
+    "scatter",
+    "reduce_scatter",
+    "reduce_scatter_single",
+    "reduce_scatter_single_coalesced",
+    "all_to_all_single",
+    "alltoall",
+    "send",
+    "recv",
+    "recv_anysource",
+    "barrier",
+    "monitored_barrier",
+    "_get_sequence_number_for_group",
+    "_set_sequence_number_for_group",
+):
+    setattr(PythonGlooBackend, _name, _forward_to_gloo(_name))
+
+if dist.is_gloo_available():
+    dist.Backend.register_backend(
+        "python-gloo", PythonGlooBackend.create, devices=["cpu"]
+    )
+
+
 C10D_BACKENDS = (
     BackendConfig(
         "gloo",
+        "cpu",
+        supports_bitwise_reductions=True,
+        supports_work_sequence_number=True,
+    ),
+    BackendConfig(
+        "python-gloo",
         "cpu",
         supports_bitwise_reductions=True,
         supports_work_sequence_number=True,
@@ -148,6 +225,7 @@ class C10dBackendTest:
             pass
 
     def _init_pg(self):
+        os.environ["LOCAL_RANK"] = str(self.rank)
         if self.device_type == "cuda":
             torch.cuda.set_device(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
@@ -160,13 +238,53 @@ class C10dBackendTest:
         )
 
 
-def instantiate_backend_tests(namespace, suite_name, base_class, backends):
+class C10dBackendTestContinuous:
+    """Reuse workers, creating a fresh process group before each test method."""
+
+    world_size = 2
+    timeout = timedelta(seconds=60)
+
+    @classmethod
+    def backend_str(cls):
+        return cls.backend_name
+
+    @property
+    def device(self):
+        if self.device_type == "cuda":
+            return torch.device("cuda", self.rank)
+        return torch.device(self.device_type)
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        if "_store_prefix" not in cls.__dict__:
+            cls._store_prefix = rdvz_file
+        if cls.device_type == "cuda":
+            torch.cuda.set_device(rank)
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @classmethod
+    def _run_test_given_id(cls, test_id, **kwargs):
+        # Reuse Python workers, not communicators. Keep the first collective
+        # in every method on a freshly initialized process group.
+        iteration = cls.__dict__.get("_test_iteration", 0)
+        if iteration:
+            dist.destroy_process_group()
+            cls.pg = None
+            # Never race deletion of the previous FileStore's rendezvous file.
+            cls._init_pg(cls.rank, cls.world_size, f"{cls._store_prefix}.{iteration}")
+        cls._test_iteration = iteration + 1
+        super()._run_test_given_id(test_id, **kwargs)
+
+
+def instantiate_backend_tests(
+    namespace, suite_name, base_class, backends, *, harness=MultiProcessTestCase
+):
     for backend in backends:
         backend_name = backend.name.replace("-", " ").title().replace(" ", "")
         class_name = f"{backend_name}{suite_name}Test"
         test_class = type(
             class_name,
-            (base_class, MultiProcessTestCase),
+            (base_class, harness),
             {
                 "__module__": namespace["__name__"],
                 "backend_name": backend.name,

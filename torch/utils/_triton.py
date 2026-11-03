@@ -1,7 +1,12 @@
 import functools
 import hashlib
+import importlib.util
+import logging
 import os
 from typing import Any
+
+
+log = logging.getLogger(__name__)
 
 
 _FAILED_TO_MAP_SEGMENT_FROM_SHARED_OBJECT = "failed to map segment from shared object"
@@ -41,6 +46,16 @@ def has_triton_package() -> bool:
         return True
     except ImportError:
         return False
+
+
+@functools.cache
+def get_triton_constexpr_function_type() -> type | None:
+    """Check if Triton is installed and has constexpr_function, introduced in v3.5."""
+    if not has_triton_package():
+        return None
+    import triton
+
+    return getattr(triton.runtime.jit, "ConstexprFunction", None)
 
 
 @functools.cache
@@ -170,6 +185,50 @@ def has_triton_tma_device() -> bool:
     return False
 
 
+def has_triton_amd_tdm_device(arch: str) -> bool:
+    """Return whether Triton exposes AMD TDM lowering for the given GCN arch."""
+    return _has_triton_amd_tdm_device(arch.split(":", 1)[0])
+
+
+@functools.cache
+def _has_triton_amd_tdm_device(arch: str) -> bool:
+    if not has_triton_package():
+        return False
+
+    try:
+        from triton.language import make_tensor_descriptor  # noqa: F401
+    except ImportError:
+        return False
+
+    try:
+        from triton._C.libtriton import amd
+
+        return bool(amd.supports_tdm(arch))
+    except Exception:
+        log.debug(
+            "Failed to query Triton AMD TDM support for %s",
+            arch,
+            exc_info=True,
+        )
+    return False
+
+
+@functools.cache
+def has_triton_cuda_tma_device() -> bool:
+    """Whether the current CUDA device supports Triton device-side TMA."""
+    if not has_triton_package():
+        return False
+
+    import torch
+
+    return (
+        torch.cuda.is_available()
+        and not torch.version.hip
+        and torch.cuda.get_device_capability() >= (9, 0)
+        and has_triton_tma_device()
+    )
+
+
 @functools.cache
 def has_datacenter_blackwell_tma_device() -> bool:
     import torch
@@ -222,7 +281,49 @@ def has_triton_reduction_ordering() -> bool:
 
 
 @functools.cache
-def has_triton() -> bool:
+def has_triton_compile_iq() -> bool:
+    """Whether the available Triton is fbtriton with the compile_iq (magnon) hooks."""
+    if not has_triton_package():
+        return False
+    return importlib.util.find_spec("triton.magnon") is not None
+
+
+def triton_compile_iq_collect_enabled() -> bool:
+    """Whether fbtriton's compile_iq collection is on, parsed the same way Triton parses it."""
+    return _triton_compile_iq_flag("TRITON_COMPILE_IQ_COLLECT", "collect_enabled")
+
+
+def triton_compile_iq_apply_enabled() -> bool:
+    """Whether fbtriton's compile_iq apply is on, parsed the same way Triton parses it."""
+    return _triton_compile_iq_flag("TRITON_COMPILE_IQ_APPLY", "apply_enabled")
+
+
+def triton_compile_iq_enabled() -> bool:
+    """Whether fbtriton's compile_iq collection or apply is on."""
+    return triton_compile_iq_collect_enabled() or triton_compile_iq_apply_enabled()
+
+
+def _triton_compile_iq_flag(env_var: str, flag: str) -> bool:
+    # The env var is read first so the probe, which imports Triton, only runs once compile_iq
+    # is requested.
+    if not os.environ.get(env_var) or not has_triton_compile_iq():
+        return False
+    try:
+        from triton.magnon import flags
+    except ImportError:
+        flags = None
+    enabled = getattr(flags, flag, None)
+    # fbtriton builds without this parser treat any non-empty value as on.
+    return True if enabled is None else enabled()
+
+
+@functools.cache
+def has_triton(*, include_cpu: bool = False) -> bool:
+    """Return whether a usable Triton backend is available.
+
+    By default, this helper only considers accelerator devices; callers must
+    explicitly include CPU.
+    """
     if not has_triton_package():
         return False
 
@@ -241,7 +342,7 @@ def has_triton() -> bool:
     # specific TritonUnavailableError rather than RuntimeError so unexpected
     # errors are not silently swallowed.
     for name, device_interface in get_registered_device_interfaces():
-        if ":" in name:
+        if ":" in name or (name == "cpu" and not include_cpu):
             continue
         if not (
             device_interface.is_available() and device_interface.is_triton_capable()

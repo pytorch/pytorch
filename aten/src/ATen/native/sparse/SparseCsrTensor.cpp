@@ -1,15 +1,14 @@
 // Basic functions on sparse tensors
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/Layout.h>
-#include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -24,14 +23,12 @@
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_bsc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_with_dims_native.h>
-#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe.h>
 #include <ATen/ops/_validate_sparse_compressed_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_csr_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_csc_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_bsr_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_bsc_tensor_args_native.h>
-#include <ATen/ops/aminmax.h>
 #include <ATen/ops/ccol_indices_native.h>
 #include <ATen/ops/clone_native.h>
 #include <ATen/ops/col_indices_native.h>
@@ -229,7 +226,7 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
       batchsize, ")");
 
   // A tensor constitutes of full blocks, 3.1
-  for (int i=0; i<block_ndim; i++) {
+  for (const auto i : c10::irange(block_ndim)) {
       TORCH_CHECK(size[batch_ndim + i] % blocksize[i] == 0,
                   "tensor shape[", batch_ndim + i, "] (=", size[batch_ndim + i],
                   ") must be divisible with blocksize[", i, "] (=", blocksize[i],
