@@ -1,13 +1,7 @@
-"""Process-wide lock for in-process CuTeDSL compilation.
+"""Process-wide lock for in-process CuTeDSL compilation (see
+torch._native.cutedsl.compile_lock, which defines it)."""
 
-CuTeDSL's ``DSLPreprocessor`` singleton and ``cuda_dialect_init_library_once``
-are not thread-safe. Inductor compiles CuTeDSL kernels from several places
-(template precompile threads, lazy benchmark-time compiles, NVGEMM's in-process
-fallback), so every in-process ``cute.compile`` site must hold this lock.
-Subprocess compile workers take it uncontended.
-"""
-
-import threading
+from torch._native.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
 
 
-CUTEDSL_COMPILE_LOCK = threading.Lock()
+__all__ = ["CUTEDSL_COMPILE_LOCK"]

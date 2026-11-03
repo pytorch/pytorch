@@ -16,6 +16,7 @@ import unittest
 
 import torch
 from torch._higher_order_ops.cutedsl_kernel_wrap import (
+    CUTEDSL_CONSTANT_RULES,
     cutedsl_kernel_side_table,
     cutedsl_kernel_wrapper_functional,
     cutedsl_kernel_wrapper_mutation,
@@ -338,7 +339,7 @@ def _counting_compiles():
     so that its call count is the number of compiles eager launches did."""
     from unittest import mock
 
-    from torch._inductor.runtime import cutedsl_user_kernel
+    from torch._native.cutedsl import user_kernel as cutedsl_user_kernel
 
     with mock.patch.dict(cutedsl_user_kernel._compiled, clear=True):
         with mock.patch.object(cute, "compile", wraps=cute.compile) as compile_spy:
@@ -462,6 +463,12 @@ class CuteDSLHOPTests(TestCase):
         self.assertEqual((add(Tile([128], 64)), add(Cfg(1.0))), (tiles, cfgs))
         self.assertNotEqual(add(tile), tiles)
         self.assertNotEqual(add(cfg), cfgs)
+        # A cutlass Numeric is keyed by its value, so the entry holds a copy too.
+        numeric = cutlass.Float32(2.0)
+        numerics = add(numeric)
+        numeric.value = 5.0
+        self.assertEqual(add(cutlass.Float32(2.0)), numerics)
+        self.assertEqual(table.get_constant_args(numerics)["c"].value, 2.0)
 
         # An object with __slots__ attributes, even one with a __dict__ too, is keyed
         # as itself: keyed by its __dict__, objects differing only in a slot would
@@ -478,13 +485,75 @@ class CuteDSLHOPTests(TestCase):
         with self.assertRaisesRegex(TypeError, "type set is unhashable"):
             add({1, 2})
 
+    def test_constants_from_cutlass_named_modules_are_keyed_by_content(self):
+        # Only the cutlass package's own values are the DSL's: an object of a class
+        # from a module merely named like it (cutlass_configs, cutlass_library), even
+        # one with a numeric .value like a cutlass Numeric's, is keyed by its
+        # attributes in the side table and the eager compile cache, and stored as a
+        # snapshot in the side table.
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
+
+        class Cfg:
+            __module__ = "cutlass_configs"
+
+            def __init__(self, **attrs):
+                vars(self).update(attrs)
+
+        table = cutedsl_kernel_side_table
+
+        def add(cfg):
+            return table.add_constant_args({"cfg": cfg})
+
+        cfg = Cfg(value=1, alpha=2.0)
+        idx = add(cfg)
+        self.assertEqual(add(Cfg(value=1, alpha=2.0)), idx)
+        self.assertNotEqual(add(Cfg(value=1, alpha=3.0)), idx)
+        self.assertEqual(add(Cfg(alpha=2.0)), add(Cfg(alpha=2.0)))
+        cfg.alpha = 3.0
+        snapshot = table.get_constant_args(idx)["cfg"]
+        self.assertEqual(vars(snapshot), {"value": 1, "alpha": 2.0})
+
+        x = _rand(1000)
+        for alpha in (2.0, 3.0):
+            out = torch.empty_like(x)
+            args = {"mX": x, "mOut": out, "n": 1000, "cfg": Cfg(value=1, alpha=alpha)}
+            launch_cutedsl_kernel(mul_cfg_kernel, args)
+            self.assertEqual(out, x * alpha)
+
+    def test_constants_from_the_cutlass_package_are_keyed_as_themselves(self):
+        # A value of a class from the cutlass package is the DSL's own, never keyed
+        # or copied by its attributes: equal ones get their own side-table entries,
+        # which hold the objects themselves, and their own eager compiles.
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
+
+        class DslCfg:
+            __module__ = "cutlass.cute.fake"
+
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        table = cutedsl_kernel_side_table
+        cfg = DslCfg(2.0)
+        idx = table.add_constant_args({"cfg": cfg})
+        self.assertNotEqual(table.add_constant_args({"cfg": DslCfg(2.0)}), idx)
+        self.assertIs(table.get_constant_args(idx)["cfg"], cfg)
+
+        x = _rand(1000)
+        with _counting_compiles() as compile_spy:
+            for cfg in (DslCfg(2.0), DslCfg(2.0)):
+                out = torch.empty_like(x)
+                args = {"mX": x, "mOut": out, "n": 1000, "cfg": cfg}
+                launch_cutedsl_kernel(mul_cfg_kernel, args)
+                self.assertEqual(out, x * 2.0)
+        self.assertEqual(compile_spy.call_count, 2)
+
     def test_signed_zero_and_nan_constants(self):
         # Float constants are keyed by their bits, in the side table and the eager
         # compile cache alike: -0.0 and 0.0 are different constants (x * alpha has
         # the sign of alpha for x > 0), and every NaN is the same constant.
         import math
 
-        from torch._inductor.runtime.cutedsl_user_kernel import launch_cutedsl_kernel
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
         table = cutedsl_kernel_side_table
         pos, neg = (table.add_constant_args({"alpha": a}) for a in (0.0, -0.0))
@@ -513,7 +582,7 @@ class CuteDSLHOPTests(TestCase):
         import logging
 
         from torch._higher_order_ops.user_kernel_hop import _snapshot, constant_key
-        from torch._inductor.runtime.cutedsl_user_kernel import launch_cutedsl_kernel
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
         class Cfg:
             def __init__(self, alpha, **attrs):
@@ -549,17 +618,19 @@ class CuteDSLHOPTests(TestCase):
             msg += f"through {path}$"
             for walk in (constant_key, _snapshot):
                 with self.assertRaisesRegex(TypeError, msg):
-                    walk(value)
+                    walk(value, CUTEDSL_CONSTANT_RULES)
             with self.assertRaisesRegex(TypeError, msg):
                 cutedsl_kernel_side_table.add_constant_args({"cfg": value})
         # A logger of the process: what its walk meets first depends on the process.
         with self.assertRaisesRegex(TypeError, "^a constant kernel argument of type"):
-            constant_key(Cfg(1.0, log=logging.getLogger(__name__)))
+            log = logging.getLogger(__name__)
+            constant_key(Cfg(1.0, log=log), CUTEDSL_CONSTANT_RULES)
 
         shared = Cfg(1.0, lookup={"k": [0.5]})
         twice = Cfg(2.0, a=shared, b=[shared], c=shared.lookup)
-        snapshot = _snapshot(twice)
-        self.assertEqual(constant_key(snapshot), constant_key(twice))
+        rules = CUTEDSL_CONSTANT_RULES
+        snapshot = _snapshot(twice, rules)
+        self.assertEqual(constant_key(snapshot, rules), constant_key(twice, rules))
         self.assertTrue(all(c is not shared for c in (snapshot.a, snapshot.b[0])))
         self.assertIsNot(snapshot.c, shared.lookup)
 
@@ -576,7 +647,7 @@ class CuteDSLHOPTests(TestCase):
         # table and the eager launch alike.
         import types
 
-        from torch._inductor.runtime.cutedsl_user_kernel import launch_cutedsl_kernel
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
         @dataclasses.dataclass
         class Cfg:
@@ -606,7 +677,7 @@ class CuteDSLHOPTests(TestCase):
         # without a default, a name that is not a parameter (here a typo of the
         # defaulted scale, which would launch with scale=1.0) and the stream are
         # refused, with the kernel and the parameters named.
-        from torch._inductor.runtime.cutedsl_user_kernel import launch_cutedsl_kernel
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
         x, y, s, d = (_rand(1000) for _ in range(4))
         args = {"mX": x, "mY": y, "mSum": s, "mDiff": d, "n": 1000}
@@ -624,6 +695,12 @@ class CuteDSLHOPTests(TestCase):
     def test_get_host_fn_info_rejects_unlaunchable_signatures(self):
         from torch._higher_order_ops.cutedsl_kernel_wrap import get_host_fn_info
 
+        def positional_only(mX: cute.Tensor, /, stream: cuda.CUstream):
+            pass
+
+        def keyword_only(mX: cute.Tensor, stream: cuda.CUstream, *, n: cutlass.Int32):
+            pass
+
         def var_args(mX: cute.Tensor, stream: cuda.CUstream, *rest):
             pass
 
@@ -633,14 +710,23 @@ class CuteDSLHOPTests(TestCase):
         def string_annotation(mX, stream: cuda.CUstream):
             pass
 
+        for fn, param, kind in (
+            (positional_only, "mX", "positional-only"),
+            (keyword_only, "n", "keyword-only"),
+            (var_args, "rest", "variadic positional"),
+            (var_kwargs, "rest", "variadic keyword"),
+        ):
+            msg = (
+                f"{fn.__name__}: parameter '{param}' is {kind}, but PT2 needs every "
+                "parameter to accept both positional and keyword arguments$"
+            )
+            with self.assertRaisesRegex(ValueError, msg):
+                get_host_fn_info(fn)
         # What `from __future__ import annotations` would leave.
         string_annotation.__annotations__["mX"] = "cute.Tensor"
-        varargs_msg = r"\*args and \*\*kwargs parameters are not supported"
         for fn, msg in (
             (no_stream_kernel, r"exactly one parameter annotated cuda\.CUstream"),
             (two_stream_kernel, r"found \['stream', 'stream2'\]"),
-            (var_args, varargs_msg),
-            (var_kwargs, varargs_msg),
             (string_annotation, "annotation of 'mX' is a string"),
         ):
             with self.assertRaisesRegex(ValueError, msg):
@@ -650,7 +736,7 @@ class CuteDSLHOPTests(TestCase):
         # A compiled CuTeDSL kernel checks nothing at launch, so the eager compile
         # cache keys on the dtype, shape, stride and alignment of every tensor: a
         # change in any of them compiles again, and every result must be right.
-        from torch._inductor.runtime.cutedsl_user_kernel import launch_cutedsl_kernel
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
         def add(x, y):
             out = torch.empty_like(x)
@@ -679,7 +765,7 @@ class CuteDSLHOPTests(TestCase):
     def test_launch_on_the_given_stream(self):
         # stream= is the raw stream to launch on: queued behind a sleep on a side
         # stream, the kernel has not run yet when the current stream reads its output.
-        from torch._inductor.runtime.cutedsl_user_kernel import launch_cutedsl_kernel
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
         from torch.testing._internal.common_utils import get_cycles_per_ms
 
         x, y = _rand(1000), _rand(1000)
@@ -702,7 +788,7 @@ class CuteDSLHOPTests(TestCase):
         # object, None) at call time too. An object is keyed by its contents in the
         # side table and the compile cache alike: equal objects share an entry and a
         # compile, and one mutated between launches is compiled again.
-        from torch._inductor.runtime.cutedsl_user_kernel import launch_cutedsl_kernel
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
         class Cfg:
             def __init__(self, alpha):
@@ -741,7 +827,7 @@ class CuteDSLHOPTests(TestCase):
         # layout on cfg). The compile gets copies, so the side table's snapshot and
         # the caller's object keep the contents they were keyed by, and later
         # launches through either reuse the compile.
-        from torch._inductor.runtime.cutedsl_user_kernel import launch_cutedsl_kernel
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
         class Cfg:
             def __init__(self, alpha):
@@ -803,6 +889,22 @@ class CuteDSLHOPTests(TestCase):
             kwargs={"mX": x, "mOut": out, "n": 1000},
         )
         self.assertEqual(out, x + 0.25)
+
+        # An int for a float parameter is passed as a float, even one beyond int64.
+        y, total, diff = _rand(1000), torch.empty_like(x), torch.empty_like(x)
+        cutedsl_kernel_wrapper_mutation(
+            kernel_idx=_add_kernel_to_table(add_sub_kernel, ["mSum", "mDiff"]),
+            constant_args_idx=cutedsl_kernel_side_table.add_constant_args({}),
+            kwargs={
+                "mX": x,
+                "mY": y,
+                "mSum": total,
+                "mDiff": diff,
+                "n": 1000,
+                "scale": 2**64,
+            },
+        )
+        self.assertEqual(total, (x + y) * 2.0**64)
 
     def test_constexpr_default_reaches_the_dsl_as_written(self):
         # Only runtime scalars are converted: the IntEnum default of a Constexpr param
@@ -937,6 +1039,63 @@ class CuteDSLHOPTests(TestCase):
             kernel_idx=kidx, constant_args_idx=cidx, kwargs={"mX": xt, "mOut": out}
         )
         self.assertEqual(out, xt + 1)
+
+    def test_eager_launch_imports_neither_dynamo_nor_inductor(self):
+        # This process has imported both, so the launch runs in a fresh one, from a
+        # file since cute.jit reads the host function's source.
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        program = textwrap.dedent(
+            """\
+            import sys
+
+            import cuda.bindings.driver as cuda
+            import cutlass
+            import cutlass.cute as cute
+            import torch
+            from torch._higher_order_ops.cutedsl_kernel_wrap import (
+                cutedsl_kernel_side_table as table,
+                cutedsl_kernel_wrapper_mutation,
+                CuteDSLKernel,
+            )
+
+
+            @cute.kernel
+            def scale_k(gX: cute.Tensor, n: cutlass.Int32):
+                tidx, _, _ = cute.arch.thread_idx()
+                bidx, _, _ = cute.arch.block_idx()
+                i = bidx * 128 + tidx
+                if i < n:
+                    gX[i] = gX[i] * 2.0
+
+
+            @cute.jit
+            def scale(mX: cute.Tensor, n: cutlass.Int32, stream: cuda.CUstream):
+                grid = [(n + 127) // 128, 1, 1]
+                scale_k(mX, n).launch(grid=grid, block=[128, 1, 1], stream=stream)
+
+
+            x = torch.ones(1000, device="cuda")
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=table.add_kernel(CuteDSLKernel(scale, ["mX"])),
+                constant_args_idx=table.add_constant_args({}),
+                kwargs={"mX": x, "n": 1000},
+            )
+            loaded = sorted({"torch._dynamo", "torch._inductor"} & set(sys.modules))
+            print(x.sum().item(), loaded)
+            """
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".py") as f:
+            f.write(program)
+            f.flush()
+            proc = subprocess.run(
+                [sys.executable, f.name], capture_output=True, text=True, check=False
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip().splitlines()[-1], "2000.0 []")
 
     def test_cutedsl_hop_constant_args(self):
         # Values from the side table. The Constexpr alpha is baked into the compiled
