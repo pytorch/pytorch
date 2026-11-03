@@ -175,20 +175,6 @@ inline cublasOperation_t cublasOpFromChar(char op) {
   return CUBLAS_OP_N; // unreachable - TORCH_CHECK(false) throws
 }
 
-inline void check_mnk4_support() {
-#ifdef USE_ROCM
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "packed MNxK4 scaling is not supported on ROCm");
-#else
-  const auto major = at::cuda::getCurrentDeviceProperties()->major;
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      major == 10 || major == 11,
-      "packed MNxK4 scaling is only supported on SM10.x and SM11.x");
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      CUBLAS_VERSION >= 130801 && cublasLtGetVersion() >= 130801,
-      "packed MNxK4 scaling requires cuBLASLt >= 13.8.1 (bundled with CUDA 13.4)");
-#endif
-}
-
 inline int cublasLtMatmulScaleMode(
     at::blas::ScalingType scaling_type,
     at::blas::SwizzleType swizzle_type,

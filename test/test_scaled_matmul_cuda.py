@@ -64,6 +64,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     run_tests,
+    instantiate_parametrized_tests,
     runOnRocmArch,
     skipIfRocm,
     skipIfTorchDynamo,
@@ -3448,8 +3449,11 @@ class TestFP8Matmul(TestCase):
 
 
     def _combine_grouped_gemm_values(self, values, cat_dim):
+        dtype = values[0].dtype
+        if dtype == torch.float8_e8m0fnu:
+            values = [value.view(torch.uint8) for value in values]
         result = torch.stack(values) if cat_dim is None else torch.cat(values, dim=cat_dim)
-        return result.contiguous()
+        return result.contiguous().view(dtype)
 
     def _make_cublaslt_grouped_gemm_inputs(
         self, op, group_m, group_n, group_k, make_a, make_b, device
@@ -3722,13 +3726,15 @@ class TestFP8Matmul(TestCase):
                 scaling = [scaling, ScalingType.TensorWise]
                 scale = [scale, torch.ones(1, device=device)]
         offs = torch.tensor([128], device=device, dtype=torch.int32)
-        if PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM and PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM:
-            if recipe == "rowwise":
-                with self.assertRaisesRegex(ValueError, "Rowwise grouped GEMM requires BFloat16 output"):
-                    scaled_grouped_mm(a, a.t(), scale, scaling, scale, scaling, offs=offs, output_dtype=torch.float32)
-            else:
-                result = scaled_grouped_mm(a, a.t(), scale, scaling, scale, scaling, offs=offs)
-                self.assertEqual(result, torch.full_like(result, 128))
+        supports_recipe = {
+            "tensorwise": PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
+            "rowwise": PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
+            "mxfp4": PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
+            "nvfp4": PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
+        }
+        if supports_recipe[recipe]:
+            result = scaled_grouped_mm(a, a.t(), scale, scaling, scale, scaling, offs=offs)
+            self.assertEqual(result, torch.full_like(result, 128))
         swizzle = [SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_MNxK4] if trailing else SwizzleType.SWIZZLE_MNxK4
         kwargs = {f"swizzle_{side}": swizzle}
         with self.assertRaisesRegex(ValueError, "Invalid scaling configuration for grouped GEMM"):
@@ -3789,7 +3795,7 @@ class TestFP8Matmul(TestCase):
                 scaled_grouped_mm_wrap(a, a.t(), **kwargs)
 
     @onlyCUDA
-    @parametrize("format", ["mxfp4", "nvfp4"])
+    @parametrize("format", ["mxfp8", "mxfp4", "nvfp4"])
     @parametrize("out_dtype", [torch.float16, torch.float32])
     @parametrize("fake", [False, True])
     def test_scaled_grouped_mm_v2_rejects_blockwise_out_dtype(self, device, format, out_dtype, fake):
@@ -3902,18 +3908,34 @@ class TestFP8Matmul(TestCase):
                 B_T = torch.nn.functional.pad(B_T, (0, 128) if op == "2d/2d" else (0, 0, 0, 128))
         return A, B_T, scale_a, scale_b, offs, expected
 
-    def scaled_grouped_gemm_cublaslt_mnk4_helper(self, op, recipe, device, jagged_m=False, out_dtype=torch.bfloat16):
+    def scaled_grouped_gemm_cublaslt_mnk4_helper(
+        self, op, recipe, device, case="regular", out_dtype=torch.bfloat16,
+        a_dtype=torch.float8_e4m3fn, b_dtype=torch.float8_e4m3fn,
+    ):
         ngroups = 3
         group_m = group_n = [128] * ngroups
         group_k = [640] * ngroups
-        if jagged_m:
-            group_m, group_n = [3, 5, 8], [16] * ngroups
         block_size = 32 if recipe == ScalingType.BlockWise1x32 else 128
+        if case == "jagged_m":
+            group_m, group_n = [3, 5, 8], [16] * ngroups
+        elif case == "jagged_n":
+            align = 4 if out_dtype == torch.float32 else 8
+            group_m, group_n = [16] * ngroups, [align, align, 2 * align]
+        elif case == "partial_k":
+            group_k = [block_size + 16] * ngroups
+        elif case == "zero_group":
+            if op == "2d/2d":
+                group_k = [0, 640, 640]
+            elif op == "2d/3d":
+                group_m = [0, 128, 128]
+            else:
+                group_n = [0, 128, 128]
         hp_groups = [[], []]
 
         def make(is_a):
             def make_group(group, outer, k):
-                value = torch.ones((outer, k), device=device, dtype=torch.float8_e4m3fn)
+                values = torch.exp2(-(torch.arange(k, device=device) // block_size % 5).float())
+                value = values.expand(outer, k).to(a_dtype if is_a else b_dtype).contiguous()
                 rows = torch.arange(outer, device=device).unsqueeze(1)
                 kb = torch.arange(ceil_div(k, block_size), device=device).unsqueeze(0)
                 exponent = (rows + kb) % 3 if is_a else (2 * rows + kb + 1) % 3
@@ -4210,8 +4232,15 @@ torch.cuda.synchronize()
         not PLATFORM_SUPPORTS_CUBLASLT_MNK4,
         cublaslt_mnk4_skip_msg,
     )
-    @parametrize("op,jagged_m", [
-        ("2d/2d", False), ("2d/3d", False), ("3d/2d", False), ("3d/3d", False), ("2d/3d", True),
+    @parametrize("op,case", [
+        ("2d/2d", "regular"), ("2d/3d", "regular"), ("3d/2d", "regular"), ("3d/3d", "regular"),
+        ("2d/3d", "jagged_m"), ("3d/2d", "jagged_n"), ("2d/2d", "partial_k"),
+        ("2d/2d", "zero_group"), ("2d/3d", "zero_group"), ("3d/2d", "zero_group"),
+    ])
+    @parametrize("a_dtype,b_dtype", [
+        (torch.float8_e4m3fn, torch.float8_e4m3fn),
+        (torch.float8_e4m3fn, torch.float8_e5m2),
+        (torch.float8_e5m2, torch.float8_e4m3fn),
     ])
     @parametrize(
         "recipe",
@@ -4219,9 +4248,11 @@ torch.cuda.synchronize()
     )
     @parametrize("out_dtype", [torch.bfloat16, torch.float16, torch.float32])
     @parametrize("fast_accum", [False, True])
-    def test_scaled_grouped_gemm_cublaslt_mnk4(self, op, jagged_m, recipe, out_dtype, fast_accum, device):
+    def test_scaled_grouped_gemm_cublaslt_mnk4(
+        self, op, case, a_dtype, b_dtype, recipe, out_dtype, fast_accum, device
+    ):
         A, B_T, scale_a, scale_b, offs, expected = self.scaled_grouped_gemm_cublaslt_mnk4_helper(
-            op, recipe, device, jagged_m=jagged_m, out_dtype=out_dtype
+            op, recipe, device, case=case, out_dtype=out_dtype, a_dtype=a_dtype, b_dtype=b_dtype
         )
         C = scaled_grouped_mm_wrap(
             A,
@@ -4245,6 +4276,28 @@ torch.cuda.synchronize()
                          use_fast_accum=fast_accum, output_dtype=out_dtype),
                 expected,
             )
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUBLASLT_MNK4, cublaslt_mnk4_skip_msg)
+    @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
+    @parametrize("out_dtype", [torch.bfloat16, torch.float32])
+    def test_scaled_grouped_gemm_cublaslt_mnk4_jagged_n_alignment(self, device, recipe, out_dtype):
+        _, stderr = self.run_process_no_exception(f"""
+import torch
+from torch.nn.functional import scaled_grouped_mm, ScalingType, SwizzleType
+a = torch.ones(3, 16, 128, device={device!r}, dtype=torch.float8_e4m3fn)
+b = torch.ones(16, 128, device={device!r}, dtype=torch.float8_e4m3fn)
+sa = torch.ones(3, 64, device={device!r}, dtype=torch.float8_e8m0fnu)
+sb = torch.ones(80, device={device!r}, dtype=torch.float8_e8m0fnu)
+recipe = ScalingType({recipe.value})
+scaled_grouped_mm(a, b.t(), sa, recipe, sb, recipe,
+                  offs=torch.tensor([3, 8, 16], device={device!r}, dtype=torch.int32),
+                  swizzle_a=SwizzleType.SWIZZLE_MNxK4, swizzle_b=SwizzleType.SWIZZLE_MNxK4,
+                  output_dtype={out_dtype})
+torch.cuda.synchronize()
+""")
+        self.assertIn(b"expected output tensor dynamic dimension byte size", stderr)
 
     @onlyCUDA
     @skipIfRocm
@@ -4284,8 +4337,9 @@ torch.cuda.synchronize()
             rows = torch.arange(m, device=device).unsqueeze(1)
             kb = torch.arange(ceil_div(k, block_size), device=device).unsqueeze(0)
             sa = torch.exp2(((rows + kb) % 3 + kb // 4 + group - 4).float())
-            sb = torch.exp2(((2 * rows + kb + 1) % 3 + kb // 4 - group - 2).float())
-            a = torch.ones((m, k), device=device, dtype=torch.float8_e4m3fn)
+            sb = torch.exp2(((2 * rows + kb + 1) % 3 + kb // 4 + group - 4).float())
+            values = torch.exp2(-(torch.arange(k, device=device) // block_size % 5).float())
+            a = values.expand(m, k).to(torch.float8_e4m3fn).contiguous()
             b = torch.ones((n, k), device=device, dtype=torch.float8_e4m3fn)
             a_groups.append(a)
             b_groups.append(b)
@@ -4323,15 +4377,20 @@ torch.cuda.synchronize()
         (ScalingType.BlockWise1x128, 128),
     ])
     @parametrize("shape", [(16, 32, 4), (128, 128, 5), (17, 16, 7)])
-    @parametrize("b_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    @parametrize("a_dtype,b_dtype", [
+        (torch.float8_e4m3fn, torch.float8_e4m3fn),
+        (torch.float8_e4m3fn, torch.float8_e5m2),
+        (torch.float8_e5m2, torch.float8_e4m3fn),
+    ])
+    @parametrize("partial_k", [False, True])
     @parametrize("out_dtype", [torch.bfloat16, torch.float16, torch.float32])
-    def test_scaled_mm_cublaslt_mnk4(self, recipe, block_size, shape, b_dtype, out_dtype, device):
+    def test_scaled_mm_cublaslt_mnk4(self, recipe, block_size, shape, a_dtype, b_dtype, partial_k, out_dtype, device):
         m, n, k_blocks = shape
-        k = block_size * k_blocks
+        k = block_size * k_blocks - (16 if partial_k else 0)
         kb = torch.arange(k_blocks, device=device)
         k_scales = torch.exp2((kb % 4 + kb // 4 - 3).float())
         values = k_scales.reciprocal().square()
-        a = values.repeat_interleave(block_size).expand(m, -1).contiguous().to(torch.float8_e4m3fn)
+        a = values.repeat_interleave(block_size)[:k].expand(m, -1).contiguous().to(a_dtype)
         b = torch.ones((n, k), device=device, dtype=b_dtype).t()
         row_scales = 2.0 ** (torch.arange(m, device=device) % 3)
         col_scales = 2.0 ** ((2 * torch.arange(n, device=device) + 1) % 3)
@@ -4381,6 +4440,27 @@ torch.cuda.synchronize()
             message = "is not implemented for ROCm" if torch.version.hip else "packed MNxK4 scaling"
             with self.assertRaisesRegex(NotImplementedError, message):
                 op(input, *args, **kwargs)
+
+    @onlyCUDA
+    @unittest.skipIf(PLATFORM_SUPPORTS_CUBLASLT_MNK4, "requires an unsupported MNxK4 platform")
+    @parametrize("recipe,block_size", [(ScalingType.BlockWise1x32, 32), (ScalingType.BlockWise1x128, 128)])
+    @parametrize("grouped", [False, True])
+    def test_scaled_mm_cublaslt_mnk4_unsupported(self, device, recipe, block_size, grouped):
+        if not grouped and not PLATFORM_SUPPORTS_FP8:
+            self.skipTest(f8_msg)
+        a = torch.ones(16, 128, device=device, dtype=torch.float8_e4m3fn)
+        scale = to_mnk4(torch.ones(16, ceil_div(128, block_size), device=device))
+        if grouped:
+            a, scale = a.unsqueeze(0), scale.unsqueeze(0)
+        op = scaled_grouped_mm if grouped else scaled_mm
+        message = "packed MNxK4 scaling"
+        if grouped and (torch.version.hip or _get_torch_cuda_version() < (13, 4)):
+            message = "cuBLASLt scaled grouped GEMM requires CUDA >= 13.4 and a non-ROCm build"
+        if not grouped and torch.version.hip:
+            message = "packed MNxK4 scaling is not supported on ROCm"
+        with self.assertRaisesRegex(NotImplementedError, message):
+            op(a, a.transpose(-2, -1), scale, recipe, scale, recipe,
+               swizzle_a=SwizzleType.SWIZZLE_MNxK4, swizzle_b=SwizzleType.SWIZZLE_MNxK4)
 
     @onlyCUDA
     @skipIfRocm
@@ -4487,13 +4567,11 @@ print("tunableop_keys_ok")
 
     @onlyCUDA
     @skipIfRocm
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_CUBLASLT_MNK4,
-        cublaslt_mnk4_skip_msg,
-    )
     @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
     @parametrize("case", ["dtype", "float_scale", "numel", "noncontiguous", "alignment", "missing_swizzle", "mismatched_swizzle", "recipe"])
     def test_scaled_grouped_gemm_cublaslt_mnk4_errors(self, recipe, case, device):
+        if case in ("numel", "noncontiguous", "alignment") and not PLATFORM_SUPPORTS_CUBLASLT_MNK4:
+            self.skipTest(cublaslt_mnk4_skip_msg)
         a = torch.ones((2, 16, 512), device=device, dtype=torch.float8_e4m3fn)
         b = torch.ones_like(a).transpose(-2, -1)
         elems = 256 if recipe == ScalingType.BlockWise1x32 else 64
@@ -4950,6 +5028,59 @@ print("tunableop_keys_ok")
         out = scaled_mm_wrap(x.to(device), y.to(device), scale, scale, out_dtype=torch.float32)
         expected = x[:, :1].float() * values.float() * 16
         self.assertEqual(out.cpu(), expected, atol=0, rtol=0, equal_nan=True)
+
+
+@instantiate_parametrized_tests
+class TestScaledGroupedMMMeta(TestCase):
+    @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
+    @parametrize("out_dtype", [torch.float16, torch.float32])
+    def test_mnk4_output_dtype(self, recipe, out_dtype):
+        with FakeTensorMode():
+            a = torch.empty(2, 16, 128, dtype=torch.float8_e4m3fn)
+            scale = torch.empty(2, 64, dtype=torch.float8_e8m0fnu)
+            result = scaled_grouped_mm(
+                a, a.transpose(-2, -1), scale, recipe, scale, recipe,
+                swizzle_a=SwizzleType.SWIZZLE_MNxK4, swizzle_b=SwizzleType.SWIZZLE_MNxK4,
+                output_dtype=out_dtype,
+            )
+            self.assertEqual(result.shape, (2, 16, 16))
+            self.assertEqual(result.dtype, out_dtype)
+
+    @parametrize("case", ["block_block", "tensor_row", "mixed_block", "one_swizzle", "extra_swizzle",
+                          "tensor_mnk4", "e5m2_mnk4"])
+    @parametrize("out_dtype", [torch.float16, torch.float32])
+    def test_invalid_output_recipe(self, case, out_dtype):
+        with FakeTensorMode():
+            a = torch.empty(2, 16, 128, dtype=torch.float8_e4m3fn)
+            scale = torch.empty(2, 256, dtype=torch.float8_e8m0fnu)
+            recipe_a = recipe_b = ScalingType.BlockWise1x32
+            swizzle_a = swizzle_b = SwizzleType.SWIZZLE_MNxK4
+            message = "Invalid scaling configuration for grouped GEMM"
+            if case == "block_block":
+                recipe_a = recipe_b = ScalingType.BlockWise128x128
+                swizzle_a = swizzle_b = None
+                message = "Grouped scaling configuration requires BFloat16 output"
+            elif case == "tensor_row":
+                recipe_a, recipe_b = ScalingType.TensorWise, ScalingType.RowWise
+                swizzle_a = swizzle_b = None
+                message = "Grouped scaling configuration requires BFloat16 output"
+            elif case == "mixed_block":
+                recipe_b = ScalingType.BlockWise1x128
+                swizzle_a = swizzle_b = None
+                message = "Grouped scaling configuration requires BFloat16 output"
+            elif case == "one_swizzle":
+                swizzle_b = None
+            elif case == "extra_swizzle":
+                swizzle_b = [SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_MNxK4]
+            elif case == "tensor_mnk4":
+                recipe_a = recipe_b = ScalingType.TensorWise
+            elif case == "e5m2_mnk4":
+                a = a.to(torch.float8_e5m2)
+            with self.assertRaisesRegex(ValueError, message):
+                scaled_grouped_mm(
+                    a, a.transpose(-2, -1), scale, recipe_a, scale, recipe_b,
+                    swizzle_a=swizzle_a, swizzle_b=swizzle_b, output_dtype=out_dtype,
+                )
 
 
 instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True, allow_mps=True)
