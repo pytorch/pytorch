@@ -12,8 +12,13 @@ from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
-from torch.testing._internal.common_utils import requires_cuda
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipPRIVATEUSE1,
+)
+from torch.testing._internal.common_utils import HardwareClassification, requires_cuda
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.utils._triton import has_triton
 
 
 aten = torch.ops.aten
@@ -173,25 +178,6 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.bisect_number, 4)
         self.assertTrue("joint_custom_post_pass" in out.debug_info)
 
-    def test_rng(self):
-        def foo():
-            return torch.rand([10], device=GPU_TYPE) + 1
-
-        def test_fn():
-            torch._dynamo.reset()
-
-            with preserve_rng_state():
-                out = foo()
-            with preserve_rng_state():
-                out_c = torch.compile(foo)()  # noqa: UNSPECIFIED_BACKEND
-
-            return torch.allclose(out, out_c)
-
-        out = CompilerBisector.do_bisect(test_fn)
-        self.assertEqual(out.backend, "inductor")
-        self.assertEqual(out.subsystem, "inductor_fallback_random")
-        self.assertTrue("inductor_fallback_random" in out.debug_info)
-
     def test_crossref(self):
         with _scoped_library(self.test_ns, "FRAGMENT") as lib:
             lib.define("foo(Tensor x) -> Tensor")
@@ -236,46 +222,6 @@ class TestCompilerBisector(TestCase):
 
             out = CompilerBisector.do_bisect(test_fn)
             self.assertEqual(out.backend, "aot_eager_decomp_partition_crossref")
-
-    def test_emulate_precision_casts(self):
-        def test_fn():
-            torch._dynamo.reset()
-
-            def calculate_scale(inp):
-                amax = torch.abs(torch.max(inp))
-                scale = 448.0 / torch.clamp(amax, min=1e-12)
-                scale = scale.to(torch.float32)
-                return scale
-
-            dtype = torch.bfloat16
-            torch.manual_seed(0)
-            inp = torch.randn(16, 16, 768, dtype=dtype, device=GPU_TYPE)
-            eager_scale = calculate_scale(inp)
-            compile_scale = torch.compile(calculate_scale)(inp)  # noqa: UNSPECIFIED_BACKEND
-
-            return torch.equal(eager_scale, compile_scale)
-
-        out = CompilerBisector.do_bisect(test_fn)
-        self.assertEqual(out.backend, "inductor")
-        self.assertEqual(out.subsystem, "inductor_emulate_precision_casts")
-
-    def test_bad_lowering(self):
-        def test_fn():
-            torch._dynamo.reset()
-            with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
-
-                def my_func(x):
-                    return ((x * -1) - 0.01).relu()
-
-                inp = torch.rand([100], device=GPU_TYPE)
-
-                return torch.allclose(torch.compile(my_func)(inp), my_func(inp))  # noqa: UNSPECIFIED_BACKEND
-
-        out = CompilerBisector.do_bisect(test_fn)
-        self.assertEqual(out.backend, "inductor")
-        self.assertEqual(out.subsystem, "lowerings")
-        self.assertEqual(out.bisect_number, 2)
-        self.assertTrue("relu" in out.debug_info)
 
     def test_eager_backend(self):
         # should indicate problem with first backend
@@ -380,7 +326,12 @@ class TestCompilerBisector(TestCase):
                 CompilerBisector.bisection_enabled = False
                 get_env_val.cache_clear()
 
-    def test_bisect_run_debuginfo(self):
+
+@unittest.skipIf(not has_triton(), "requires Triton")
+class TestCompilerBisectorDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_bisect_run_debuginfo(self, device):
         import os
         import subprocess
         from pathlib import Path
@@ -391,7 +342,11 @@ class TestCompilerBisector(TestCase):
         )
         # Minimize test runtime by searching only the subsystem that's broken.
         with patch.dict(
-            os.environ, {"TORCH_BISECT_BACKEND": "aot_eager_decomp_partition"}
+            os.environ,
+            {
+                "TORCH_BISECT_BACKEND": "aot_eager_decomp_partition",
+                "TORCH_BISECT_TEST_DEVICE": device,
+            },
         ):
             output = subprocess.run(
                 [
@@ -411,6 +366,85 @@ class TestCompilerBisector(TestCase):
             "Debug info: <OpOverload(op='aten.exponential', overload='default')>"
         )
         self.assertIn(expected_result, output.stdout)
+
+    def test_bad_lowering(self, device):
+        def test_fn():
+            torch._dynamo.reset()
+            with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
+
+                def my_func(x):
+                    return ((x * -1) - 0.01).relu()
+
+                inp = torch.rand([100], device=device)
+
+                return torch.allclose(torch.compile(my_func)(inp), my_func(inp))  # noqa: UNSPECIFIED_BACKEND
+
+        out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "lowerings")
+        self.assertEqual(out.bisect_number, 2)
+        self.assertTrue("relu" in out.debug_info)
+
+    def test_emulate_precision_casts(self, device):
+        def test_fn():
+            torch._dynamo.reset()
+
+            def calculate_scale(inp):
+                amax = torch.abs(torch.max(inp))
+                scale = 448.0 / torch.clamp(amax, min=1e-12)
+                scale = scale.to(torch.float32)
+                return scale
+
+            dtype = torch.bfloat16
+            torch.manual_seed(0)
+            inp = torch.randn(16, 16, 768, dtype=dtype, device=device)
+            eager_scale = calculate_scale(inp)
+            compile_scale = torch.compile(calculate_scale)(inp)  # noqa: UNSPECIFIED_BACKEND
+
+            return torch.equal(eager_scale, compile_scale)
+
+        out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "inductor_emulate_precision_casts")
+
+
+instantiate_device_type_tests(
+    TestCompilerBisectorDevice, globals(), except_for="cpu", allow_xpu=True
+)
+
+
+@unittest.skipIf(not has_triton(), "requires Triton")
+class TestCompilerBisectorRNG(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    # `preserve_rng_state` only saves/restores CPU, CUDA and XPU RNG state, so
+    # the eager-vs-compiled RNG comparison below is only meaningful on those
+    # accelerator devices; PrivateUse1 backends are skipped explicitly rather
+    # than silently diverging.
+    @skipPRIVATEUSE1
+    def test_rng(self, device):
+        def foo():
+            return torch.rand([10], device=device) + 1
+
+        def test_fn():
+            torch._dynamo.reset()
+
+            with preserve_rng_state():
+                out = foo()
+            with preserve_rng_state():
+                out_c = torch.compile(foo)()  # noqa: UNSPECIFIED_BACKEND
+
+            return torch.allclose(out, out_c)
+
+        out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "inductor_fallback_random")
+        self.assertTrue("inductor_fallback_random" in out.debug_info)
+
+
+instantiate_device_type_tests(
+    TestCompilerBisectorRNG, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
