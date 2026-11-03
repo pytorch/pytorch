@@ -9,7 +9,6 @@ import math
 import subprocess
 import warnings
 import unittest
-from unittest import mock
 from itertools import product, combinations, combinations_with_replacement, permutations
 import random
 import tempfile
@@ -20,7 +19,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     do_test_empty_full,
-    set_warn_always_context,
     HardwareClassification,
     TEST_WITH_ROCM,
     suppress_warnings,
@@ -39,6 +37,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     instantiate_parametrized_tests,
     parametrize,
+    subtest,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
     skipIfTorchDynamo,
@@ -3329,6 +3328,12 @@ class TestTensorCreationCudaOnly(TestCase):
     hw_classification = HardwareClassification.CUDA
     exact_dtype = True
 
+    def test_tensor_and_as_tensor_prefer_cuda_array_interface(self, device):
+        # Unlike torch.asarray, which reads DLPack first.
+        original = torch.arange(5, device=device)
+        self.assertEqual(torch.tensor(_FailingDLPackAndCAI(original)), original)
+        self.assertEqual(torch.as_tensor(_FailingDLPackAndCAI(original)).data_ptr(), original.data_ptr())
+
     # TODO: this test should be updated
     def test_constructor_dtypes(self, device):
         with set_default_tensor_type(torch.cuda.FloatTensor):
@@ -4438,7 +4443,7 @@ class _DLPackWrapper:
 class _DLPackBuffer(_DLPackWrapper, bytearray):
     """A _DLPackWrapper that is also a buffer holding a flat host copy of the tensor's bytes."""
     def __init__(self, tensor):
-        bytearray.__init__(self, tensor.cpu().numpy().tobytes())
+        bytearray.__init__(self, tensor.cpu().reshape(-1).view(torch.uint8).numpy().tobytes())
         self._tensor = tensor
 
 class _FailingDLPack:
@@ -4469,6 +4474,37 @@ class _CopyingDLPack(_DLPackWrapper):
 class _CopyingDLPackBuffer(_CopyingDLPack, _DLPackBuffer):
     pass
 
+_requires_pep688 = unittest.skipIf(sys.version_info < (3, 12), "PEP 688 __buffer__ requires Python 3.12+")
+
+# Copies a bytearray with asarray while another thread resizes it.
+_RESIZE_DURING_COPY = """
+import threading
+import torch
+
+size = 4 << 20
+buffer = bytearray(size)
+stop = False
+resizes = []
+
+def resize():
+    # Nonzero, so a copy that reads freed memory sees these bytes or crashes.
+    while not stop:
+        buffer.extend(b"\\x01" * (2 * size))
+        del buffer[size:]
+        resizes.append(None)
+
+thread = threading.Thread(target=resize)
+thread.start()
+try:
+    for _ in range(20):
+        assert not torch.asarray(buffer, copy=True)[:size].any()
+finally:
+    stop = True
+    thread.join()
+assert resizes, "the resizing thread never ran"
+"""
+
+
 class _RefusingBuffer:
     """Has a buffer slot that refuses at runtime, like a CuPy array's (Python >= 3.12)."""
     def __buffer__(self, flags):
@@ -4476,6 +4512,20 @@ class _RefusingBuffer:
 
 class _FailingDLPackRefusingBuffer(_RefusingBuffer, _FailingDLPack):
     pass
+
+class _FailingDLPackPointerBuffer(_FailingDLPack):
+    """Has a buffer of pointers, a format with no dtype (Python >= 3.12)."""
+    def __buffer__(self, flags):
+        return memoryview(bytes(8)).cast("P")
+
+# Made outside the tests, which Dynamo traces: it would rebuild these arrays.
+_SWAPPED = np.arange(2, dtype=np.dtype(np.int32).newbyteorder())
+_FLOATS = np.array([1.5, 2.5], dtype=np.float32)
+
+class _FailingDLPackSwappedBuffer(_FailingDLPack):
+    """Has a buffer in non-native byte order (Python >= 3.12)."""
+    def __buffer__(self, flags):
+        return memoryview(_SWAPPED)
 
 class _FailingDLPackAndCAI(_FailingDLPack):
     def __init__(self, tensor):
@@ -4491,6 +4541,26 @@ class _FailingDLPackAndCAI(_FailingDLPack):
 
 class _FailingDLPackAndCAIRefusingBuffer(_RefusingBuffer, _FailingDLPackAndCAI):
     pass
+
+class _FailingDLPackAndCAIEmptyBuffer(_FailingDLPackAndCAI, bytearray):
+    pass
+
+class _Reversed:
+    """Exports an array with negative strides through DLPack and (Python >= 3.12) its buffer."""
+    def __init__(self):
+        self._array = np.arange(6)[::-1]
+
+    def __dlpack__(self, *args, **kwargs):
+        return self._array.__dlpack__(*args, **kwargs)
+
+    def __dlpack_device__(self):
+        return self._array.__dlpack_device__()
+
+    def __buffer__(self, flags):
+        return memoryview(self._array)
+
+# Made outside the tests, which Dynamo traces: it would rebuild the array without its strides.
+_REVERSED = _Reversed()
 
 # This base class holds shared helpers only; test methods must be defined on the concrete subclasses.
 class _TestAsArrayBase(TestCase):
@@ -4757,10 +4827,10 @@ class TestAsArray(_TestAsArrayBase):
 
 
     @skipMeta
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_asarray_prefers_dlpack_over_buffer(self, device, dtype):
-        # The buffer path would return a flat CPU copy and reinterpret its bytes
-        # as dtype.
+        # Read through DLPack, not the buffer: the result keeps the producer's
+        # shape, device and memory, and dtype= converts the values.
         original = make_tensor((2, 3), dtype=dtype, device=device)
         result = torch.asarray(_DLPackBuffer(original))
         self.assertEqual(result.device, original.device)
@@ -4775,9 +4845,9 @@ class TestAsArray(_TestAsArrayBase):
         self.assertEqual(copied, original)
 
     @skipMeta
-    @parametrize("shape", [(), (0,), (2, 0, 3)])
+    @parametrize("shape", [(), (0,), (2, 0, 3)], name_fn=lambda shape: "x".join(map(str, shape)) or "scalar")
     def test_asarray_dlpack_buffer_keeps_shape(self, device, shape):
-        # The buffer path turned 0-d into 1-d and rejected empty buffers.
+        # Read through DLPack, so 0-d and empty shapes are kept.
         original = make_tensor(shape, dtype=torch.int32, device=device)
         result = torch.asarray(_DLPackBuffer(original))
         self.assertEqual(result, original)
@@ -4814,8 +4884,33 @@ class TestAsArray(_TestAsArrayBase):
         self.assertEqual(result, original)
         self.assertNotEqual(result.data_ptr(), original.data_ptr())
         # A buffer can be aliased, but it doesn't hold the producer's array.
-        with self.assertRaisesRegex(BufferError, "export needs a copy"):
+        with self.assertRaisesRegex(ValueError, "reading it through DLPack failed") as ctx:
             torch.asarray(cvt(original), copy=False)
+        self.assertIsInstance(ctx.exception.__cause__, BufferError)
+
+    @skipMeta
+    def test_asarray_dlpack_copy_true_copies_the_export(self, device):
+        # Like CuPy for device memory, a producer may refuse copy=True.
+        class _RefusesCopy(_DLPackWrapper):
+            def __dlpack__(self, *args, copy=None, **kwargs):
+                if copy:
+                    raise BufferError("copy=True only supported for copy to CPU.")
+                return self._tensor.__dlpack__(*args, copy=copy, **kwargs)
+
+        original = make_tensor((2, 3), dtype=torch.float32, device=device)
+        result = torch.asarray(_RefusesCopy(original), copy=True)
+        self.assertNotEqual(result.data_ptr(), original.data_ptr())
+        self.assertEqual(result, original)
+
+    @skipMeta
+    @parametrize("cvt", [_DLPackWrapper, _DLPackBuffer], name_fn=lambda cvt: cvt.__name__)
+    def test_asarray_dlpack_requires_grad(self, device, cvt):
+        original = make_tensor((2, 3), dtype=torch.float32, device=device)
+        result = torch.asarray(cvt(original), requires_grad=True)
+        self.assertTrue(result.requires_grad)
+        self.assertTrue(result.is_leaf)
+        self.assertEqual(result.data_ptr(), original.data_ptr())
+        self.assertEqual(result, original)
 
 
 class TestAsArrayCpuOnly(_TestAsArrayBase):
@@ -4884,7 +4979,7 @@ class TestAsArrayCpuOnly(_TestAsArrayBase):
         self.assertEqual(tensor.item(), zerodim_arr.item())
         self.assertEqual(tensor.dtype, torch.int32)
 
-    @parametrize("exc", [KeyboardInterrupt, SystemExit])
+    @parametrize("exc", [KeyboardInterrupt, SystemExit], name_fn=lambda exc: exc.__name__)
     def test_asarray_dlpack_baseexception_propagates(self, device, exc):
         # A buffer, so only the exception type prevents falling back to it.
         class _Interrupting(_FailingDLPackBuffer):
@@ -4894,7 +4989,14 @@ class TestAsArrayCpuOnly(_TestAsArrayBase):
         with self.assertRaisesRegex(exc, "interrupted export"):
             torch.asarray(_Interrupting(b"\x00"))
 
-    @parametrize("base", [_FailingDLPack, _FailingDLPackSequence, _FailingDLPackRefusingBuffer],
+    # _FailingDLPackBuffer is empty here, and the buffer path can't read that.
+    @parametrize("base", [_FailingDLPack, _FailingDLPackSequence, _FailingDLPackBuffer,
+                          subtest(_FailingDLPackRefusingBuffer, name="_FailingDLPackRefusingBuffer",
+                                  decorators=[_requires_pep688]),
+                          subtest(_FailingDLPackPointerBuffer, name="_FailingDLPackPointerBuffer",
+                                  decorators=[_requires_pep688]),
+                          subtest(_FailingDLPackSwappedBuffer, name="_FailingDLPackSwappedBuffer",
+                                  decorators=[_requires_pep688])],
                  name_fn=lambda base: base.__name__)
     @parametrize("copy", [None, False])
     def test_asarray_dlpack_failure_raises(self, device, base, copy):
@@ -4907,55 +5009,158 @@ class TestAsArrayCpuOnly(_TestAsArrayBase):
                 calls.append(kwargs)
                 return super().__dlpack__(*args, **kwargs)
 
-        with self.assertRaisesRegex(RuntimeError, "dlpack export failed"):
-            torch.asarray(_Counting(), copy=copy)
+        if copy is False:
+            with self.assertRaisesRegex(ValueError, "reading it through DLPack failed") as ctx:
+                torch.asarray(_Counting(), copy=copy)
+            self.assertRegex(str(ctx.exception.__cause__), "dlpack export failed")
+        else:
+            with self.assertRaisesRegex(RuntimeError, "dlpack export failed"):
+                torch.asarray(_Counting(), copy=copy)
         self.assertEqual(len(calls), 1)
 
-    @parametrize("exc", [RuntimeError, BufferError, TypeError, ValueError])
+    @parametrize("exc", [RuntimeError, BufferError, TypeError, ValueError], name_fn=lambda exc: exc.__name__)
     def test_asarray_dlpack_failure_falls_back_to_buffer(self, device, exc):
+        calls = []
+
         class _Failing(_FailingDLPackBuffer):
             def __dlpack__(self, *args, **kwargs):
+                calls.append(kwargs)
                 raise exc("dlpack export failed")
 
-        expected = torch.tensor([1, 2, 3], dtype=torch.uint8)
-        self.assertEqual(torch.asarray(_Failing(expected.tolist())), expected)
-        self.assertEqual(torch.asarray(_Failing(expected.tolist()), copy=True), expected)
-        # An alias of the bytes isn't an alias of the producer's array.
+        buffer = _Failing([1, 2, 3])
         with self.assertRaisesRegex(exc, "dlpack export failed"):
-            torch.asarray(_Failing(expected.tolist()), copy=False)
+            torch.utils.dlpack.from_dlpack(buffer)
+        from_dlpack_calls = len(calls)
+        calls.clear()
+        with self.assertWarnsRegex(UserWarning, "reading the object through DLPack failed"):
+            alias = torch.asarray(buffer)
+        # asarray reads __dlpack__ through from_dlpack, once.
+        self.assertEqual(len(calls), from_dlpack_calls)
+        with self.assertWarnsRegex(UserWarning, "reading the object through DLPack failed"):
+            copied = torch.asarray(buffer, copy=True)
+        buffer[0] = 9
+        self.assertEqual(alias, torch.tensor([9, 2, 3], dtype=torch.uint8))
+        self.assertEqual(copied, torch.tensor([1, 2, 3], dtype=torch.uint8))
+        # An alias of the bytes isn't an alias of the producer's array.
+        with self.assertRaisesRegex(ValueError, "reading it through DLPack failed") as ctx:
+            torch.asarray(buffer, copy=False)
+        self.assertIsInstance(ctx.exception.__cause__, exc)
+
+    @_requires_pep688
+    def test_asarray_dlpack_failure_with_unmapped_buffer_and_dtype_raises(self, device):
+        # dtype= converts the buffer's declared values, so it can't stand in for its format.
+        with self.assertRaisesRegex(RuntimeError, "dlpack export failed"):
+            torch.asarray(_FailingDLPackPointerBuffer(), dtype=torch.int64)
+
+    def test_asarray_buffer_copy_with_requires_grad_is_leaf(self, device):
+        source = memoryview(np.array([1.0, 2.0], dtype=np.float32))
+        result = torch.asarray(source, copy=True, requires_grad=True)
+        self.assertTrue(result.is_leaf)
+        result.sum().backward()
+        self.assertEqual(result.grad, torch.ones(2))
+
+    def test_asarray_dlpack_failure_falls_back_to_buffer_with_dtype(self, device):
+        # As for a DLPack import, dtype= converts the values the buffer declares.
+        with self.assertWarnsRegex(UserWarning, r"torch\.frombuffer\(obj, dtype=torch\.uint8\)"):
+            result = torch.asarray(_FailingDLPackBuffer(b"\x01\x02\x03"), dtype=torch.float32, requires_grad=True)
+        self.assertEqual(result, torch.tensor([1.0, 2.0, 3.0]))
+        self.assertTrue(result.requires_grad)
+
+    def test_asarray_dlpack_device_failure_falls_back_to_buffer(self, device):
+        class _NoDevice(_DLPackBuffer):
+            def __dlpack_device__(self):
+                raise RuntimeError("no device")
+
+        with self.assertWarnsRegex(UserWarning, "reading the object through DLPack failed with RuntimeError"):
+            result = torch.asarray(_NoDevice(torch.tensor([1, 2], dtype=torch.uint8)))
+        self.assertEqual(result, torch.tensor([1, 2], dtype=torch.uint8))
+
+    @skipIfTorchDynamo("Dynamo looks attributes up on the object itself")
+    def test_asarray_dlpack_lookup_error_means_no_dlpack(self, device):
+        # As with hasattr, an Exception from looking __dlpack__ up means it's missing.
+        class _RaisingLookup(bytearray):
+            def __getattr__(self, name):
+                raise RuntimeError(f"no {name}")
+
+        self.assertNotWarn(lambda: torch.asarray(_RaisingLookup(b"\x01\x02")))
+        self.assertEqual(torch.asarray(_RaisingLookup(b"\x01\x02")), torch.tensor([1, 2], dtype=torch.uint8))
+
+    @_requires_pep688
+    def test_asarray_dlpack_failure_falls_back_to_typed_buffer(self, device):
+        class _FloatBuffer(_FailingDLPack):
+            def __buffer__(self, flags):
+                return memoryview(_FLOATS)
+
+        with self.assertWarnsRegex(UserWarning, r"torch\.frombuffer\(obj, dtype=torch\.float32\)"):
+            result = torch.asarray(_FloatBuffer())
+        self.assertEqual(result, torch.tensor([1.5, 2.5]))
 
     def test_asarray_dlpack_import_failure_falls_back_to_buffer(self, device):
+        calls = []
+
         class _NotACapsule(_FailingDLPackBuffer):
             def __dlpack__(self, *args, **kwargs):
+                calls.append(kwargs)
                 return "not a capsule"
 
-        self.assertEqual(torch.asarray(_NotACapsule([1, 2])), torch.tensor([1, 2], dtype=torch.uint8))
+        with self.assertWarnsRegex(UserWarning, "reading the object through DLPack failed"):
+            result = torch.asarray(_NotACapsule([1, 2]))
+        self.assertEqual(result, torch.tensor([1, 2], dtype=torch.uint8))
+        self.assertEqual(len(calls), 1)
 
-    # Dynamo rebuilds the array, which loses its negative strides.
-    @xfailIfTorchDynamo
+    @_requires_pep688
     def test_asarray_dlpack_import_failure_with_strided_buffer_raises(self, device):
         # PyTorch can't import negative strides, and the buffer path can't read them.
-        class _Reversed:
-            def __init__(self):
-                self._array = np.arange(6)[::-1]
-
-            def __dlpack__(self, *args, **kwargs):
-                return self._array.__dlpack__(*args, **kwargs)
-
-            def __dlpack_device__(self):
-                return self._array.__dlpack_device__()
-
-            def __buffer__(self, flags):
-                return memoryview(self._array)
-
         with self.assertRaisesRegex(RuntimeError, "Storage size calculation overflowed"):
-            torch.asarray(_Reversed())
+            torch.asarray(_REVERSED)
 
-    def test_asarray_dlpack_lookup_failure_propagates(self, device):
-        with mock.patch.dict(vars(torch.utils.dlpack)):
-            del torch.utils.dlpack.from_dlpack
-            with self.assertRaisesRegex(AttributeError, "from_dlpack"):
-                torch.asarray(_FailingDLPackBuffer(b"\x00"))
+    def test_asarray_dlpack_failure_with_unprintable_error_falls_back(self, device):
+        class _Unprintable(Exception):
+            def __str__(self):
+                raise RuntimeError("no message")
+
+        class _Failing(_FailingDLPackBuffer):
+            def __dlpack__(self, *args, **kwargs):
+                raise _Unprintable
+
+        with self.assertWarnsRegex(UserWarning, "reading the object through DLPack failed with _Unprintable"):
+            result = torch.asarray(_Failing([1, 2]))
+        self.assertEqual(result, torch.tensor([1, 2], dtype=torch.uint8))
+
+    @parametrize("exc", [KeyboardInterrupt, SystemExit], name_fn=lambda exc: exc.__name__)
+    def test_asarray_dlpack_lookup_interrupt_propagates(self, device, exc):
+        class _Interrupting:
+            def __getattr__(self, name):
+                raise exc(f"interrupted lookup of {name}")
+
+        with self.assertRaisesRegex(exc, "interrupted lookup of __dlpack__"):
+            torch.asarray(_Interrupting())
+
+    def test_asarray_dlpack_failure_with_unreadable_cuda_array_interface_raises(self, device):
+        class _ReadOnlyCAI(_FailingDLPack):
+            __cuda_array_interface__ = {"shape": (1,), "typestr": "<i8", "data": (0, True), "version": 3}
+
+        with self.assertRaisesRegex(TypeError, "the read only flag is not supported"):
+            torch.asarray(_ReadOnlyCAI())
+
+    @parametrize("exc", [KeyboardInterrupt, SystemExit], name_fn=lambda exc: exc.__name__)
+    def test_asarray_dlpack_failure_with_interrupting_cuda_array_interface(self, device, exc):
+        class _Interrupting(_FailingDLPack):
+            def __getattr__(self, name):
+                raise exc(f"interrupted lookup of {name}")
+
+        with self.assertRaisesRegex(exc, "interrupted lookup of __cuda_array_interface__"):
+            torch.asarray(_Interrupting())
+
+    @_requires_pep688
+    @parametrize("exc", [KeyboardInterrupt, SystemExit], name_fn=lambda exc: exc.__name__)
+    def test_asarray_dlpack_failure_with_interrupting_buffer(self, device, exc):
+        class _InterruptingBuffer(_FailingDLPack):
+            def __buffer__(self, flags):
+                raise exc("interrupted buffer")
+
+        with self.assertRaisesRegex(exc, "interrupted buffer"):
+            torch.asarray(_InterruptingBuffer())
 
     def test_asarray_dlpack_copy_false_without_copy_parameter(self, device):
         # Such a producer can't be asked not to copy, so its export is trusted.
@@ -4967,57 +5172,115 @@ class TestAsArrayCpuOnly(_TestAsArrayBase):
         result = torch.asarray(_NoCopyParameter(original), copy=False)
         self.assertEqual(result.data_ptr(), original.data_ptr())
 
-    # Dynamo passes a bytes subclass as bytes, which skips __dlpack__.
-    @xfailIfTorchDynamo
+    @_requires_pep688
     def test_asarray_dlpack_read_only_buffer_does_not_warn(self, device):
-        class _ReadOnlyBuffer(bytes):
-            def __dlpack__(self, *args, **kwargs):
-                return torch.arange(3, dtype=torch.uint8).__dlpack__(*args, **kwargs)
+        class _ReadOnlyBuffer(_DLPackWrapper):
+            def __buffer__(self, flags):
+                return memoryview(b"\x07\x08\x09")
 
-            def __dlpack_device__(self):
-                return (1, 0)
+        original = torch.arange(3, dtype=torch.uint8)
+        self.assertNotWarn(lambda: torch.asarray(_ReadOnlyBuffer(original)))
+        # The values come from the DLPack export, not from the bytes.
+        self.assertEqual(torch.asarray(_ReadOnlyBuffer(original)), original)
 
-        with set_warn_always_context(True), warnings.catch_warnings():
-            warnings.simplefilter("error")
-            result = torch.asarray(_ReadOnlyBuffer(b"\x00\x01\x02"))
-        self.assertEqual(result, torch.arange(3, dtype=torch.uint8))
+    @skipIfTorchDynamo("the subprocess doesn't run under Dynamo")
+    @unittest.skipIf(hasattr(sys, "_is_gil_enabled") and not sys._is_gil_enabled(), "needs the GIL")
+    def test_asarray_buffer_copy_keeps_gil(self, device):
+        # tensor_frombuffer doesn't hold the buffer's export, so if the copy ran
+        # without the GIL, the other thread's resize could free it mid-copy. The
+        # race is probabilistic, so this can miss such a regression.
+        subprocess.check_call([sys.executable, "-c", _RESIZE_DURING_COPY], timeout=300)
+
+    @parametrize("cvt", [_DLPackWrapper, _DLPackBuffer], name_fn=lambda cvt: cvt.__name__)
+    def test_asarray_dlpack_is_traced(self, device, cvt):
+        # As for a sequence, a traced factory call makes the result, so a trace
+        # that returns it passes the data-dependence check.
+        original = torch.arange(3.0)
+        obj = cvt(original)
+        traced = torch.jit.trace(lambda x: torch.asarray(obj), (torch.ones(3),), check_trace=False)
+        self.assertIn("aten::to", str(traced.graph))
+        self.assertEqual(traced(torch.ones(3)), original)
 
 
 class TestAsArrayCudaOnly(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def test_asarray_prefers_dlpack_over_cuda_array_interface(self, device):
+        reads = []
+
         class _DLPackAndCAI(_DLPackWrapper):
             @property
             def __cuda_array_interface__(self):
-                raise AssertionError("__cuda_array_interface__ must not be read")
+                reads.append(True)
+                return self._tensor.__cuda_array_interface__
 
-        # asarray honors copy= for DLPack, but not via __cuda_array_interface__.
         original = torch.arange(5, device=device)
         alias = torch.asarray(_DLPackAndCAI(original), copy=False)
         self.assertEqual(alias.data_ptr(), original.data_ptr())
         copied = torch.asarray(_DLPackAndCAI(original), copy=True)
         self.assertNotEqual(copied.data_ptr(), original.data_ptr())
         self.assertEqual(copied, original)
+        self.assertEqual(reads, [])
 
-    def test_tensor_and_as_tensor_prefer_cuda_array_interface(self, device):
-        original = torch.arange(5, device=device)
-        self.assertEqual(torch.tensor(_FailingDLPackAndCAI(original)), original)
-        self.assertEqual(torch.as_tensor(_FailingDLPackAndCAI(original)).data_ptr(), original.data_ptr())
+    def test_asarray_buffer_copy_to_device_runs_no_python(self, device):
+        # No Python code may run between tensor_frombuffer taking the buffer's
+        # pointer and the copy: here, the device's lazy initialization frees it.
+        code = """
+import sys
+import torch
 
-    @parametrize("cvt", [_FailingDLPackAndCAI, _FailingDLPackAndCAIRefusingBuffer],
+buffer = bytearray(4 << 20)
+torch.cuda._lazy_call(buffer.clear)
+try:
+    copied = torch.asarray(buffer, device=sys.argv[1])
+except ValueError:
+    # The device was initialized, emptying the buffer, before it was read.
+    assert len(buffer) == 0
+else:
+    assert copied.numel() == 4 << 20 and not copied.any()
+"""
+        subprocess.check_call([sys.executable, "-c", code, device], timeout=300)
+
+    @parametrize("cvt", [_FailingDLPackAndCAI, _FailingDLPackAndCAIEmptyBuffer,
+                         subtest(_FailingDLPackAndCAIRefusingBuffer, name="_FailingDLPackAndCAIRefusingBuffer",
+                                 decorators=[_requires_pep688])],
                  name_fn=lambda cvt: cvt.__name__)
     def test_asarray_dlpack_failure_falls_back_to_cuda_array_interface(self, device, cvt):
         original = torch.arange(5, device=device)
-        self.assertEqual(torch.asarray(cvt(original)).data_ptr(), original.data_ptr())
-        copied = torch.asarray(cvt(original), copy=True)
+        fallback = "its __cuda_array_interface__ is read instead"
+        with self.assertWarnsRegex(UserWarning, fallback):
+            self.assertEqual(torch.asarray(cvt(original)).data_ptr(), original.data_ptr())
+        # Recorded by torch.jit.trace, like an uncopied DLPack import.
+        obj = cvt(original)
+        with self.assertWarnsRegex(UserWarning, fallback):
+            traced = torch.jit.trace(lambda x: torch.asarray(obj), (torch.ones(1),), check_trace=False)
+        self.assertIn("aten::to", str(traced.graph))
+        with self.assertWarnsRegex(UserWarning, fallback):
+            copied = torch.asarray(cvt(original), copy=True)
         self.assertNotEqual(copied.data_ptr(), original.data_ptr())
         self.assertEqual(copied, original)
-        # asarray can't alias through __cuda_array_interface__.
-        with self.assertRaisesRegex(RuntimeError, "dlpack export failed"):
+        with self.assertWarnsRegex(UserWarning, fallback):
+            self.assertEqual(torch.asarray(cvt(original), dtype=torch.float64), original.double())
+        with self.assertWarnsRegex(UserWarning, fallback):
+            self.assertEqual(torch.asarray(cvt(original), device="cpu"), original.cpu())
+        with self.assertWarnsRegex(UserWarning, fallback):
+            self.assertTrue(torch.asarray(cvt(original.float()), requires_grad=True).requires_grad)
+        # copy=False needs the DLPack read.
+        with self.assertRaisesRegex(ValueError, "reading it through DLPack failed") as ctx:
             torch.asarray(cvt(original), copy=False)
+        self.assertRegex(str(ctx.exception.__cause__), "dlpack export failed")
 
-    @parametrize("exc", [KeyboardInterrupt, SystemExit])
+    @deviceCountAtLeast(2)
+    def test_asarray_dlpack_failure_falls_back_to_cuda_array_interface_on_another_device(self, devices):
+        # The interface is read on its own device, and device= then copies it.
+        original = torch.arange(5, device=devices[0])
+        with self.assertWarnsRegex(UserWarning, "its __cuda_array_interface__ is read instead"):
+            result = torch.asarray(_FailingDLPackAndCAI(original), device=devices[1])
+        self.assertEqual(result.device, torch.device(devices[1]))
+        self.assertEqual(result.cpu(), original.cpu())
+        self.assertNotEqual(result.data_ptr(), original.data_ptr())
+
+    @parametrize("exc", [KeyboardInterrupt, SystemExit], name_fn=lambda exc: exc.__name__)
     def test_asarray_dlpack_baseexception_propagates_with_cuda_array_interface(self, device, exc):
         class _Interrupting(_FailingDLPackAndCAI):
             def __dlpack__(self, *args, **kwargs):
@@ -5049,6 +5312,7 @@ class TestAsArrayCudaOnly(TestCase):
 
     def test_asarray_dlpack_initializes_device(self, device):
         code = """
+import sys
 import torch
 
 class Wrapper:
@@ -5061,10 +5325,10 @@ class Wrapper:
     def __dlpack_device__(self):
         return self.tensor.__dlpack_device__()
 
-torch.asarray(Wrapper(torch.arange(3.0)), device="cuda:0")
+torch.asarray(Wrapper(torch.arange(3.0)), device=sys.argv[1])
 print(torch.cuda.is_initialized())
 """
-        output = subprocess.check_output([sys.executable, "-c", code], text=True)
+        output = subprocess.check_output([sys.executable, "-c", code, device], text=True, timeout=300)
         self.assertEqual(output.strip(), "True")
 
     def test_asarray_dlpack_passes_current_stream(self, device):
