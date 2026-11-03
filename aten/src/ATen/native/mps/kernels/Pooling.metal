@@ -935,6 +935,64 @@ void avg_pool_2d_input_iter(
   *output = static_cast<T>(value_sum / divisor);
 }
 
+template <typename T>
+void avg_pool_backward_3d_input_iter(
+    device AtomicType_t<T>* grad_input,
+    device const T* grad_output,
+    constant int32_t* grad_input_sizes,
+    constant int32_t* grad_input_strides,
+    int32_t grad_input_leading_offset,
+    thread int32_t (&pooling_dim_indices)[3],
+    constant int32_t* kernel_size,
+    constant int32_t* stride,
+    constant int32_t* padding,
+    bool count_include_pad,
+    bool has_divisor_override,
+    int32_t divisor_override) {
+  auto bounds0 = get_avg_pool_input_iter_bounds<0>(
+      grad_input_sizes,
+      pooling_dim_indices,
+      kernel_size,
+      stride,
+      padding,
+      count_include_pad);
+  auto bounds1 = get_avg_pool_input_iter_bounds<1>(
+      grad_input_sizes,
+      pooling_dim_indices,
+      kernel_size,
+      stride,
+      padding,
+      count_include_pad);
+  auto bounds2 = get_avg_pool_input_iter_bounds<2>(
+      grad_input_sizes,
+      pooling_dim_indices,
+      kernel_size,
+      stride,
+      padding,
+      count_include_pad);
+
+  auto divisor = has_divisor_override
+      ? divisor_override
+      : (bounds0.count) * (bounds1.count) * (bounds2.count);
+  auto grad_val = *grad_output / static_cast<T>(divisor);
+
+  for (auto i0 = bounds0.start; i0 < bounds0.end; i0++) {
+    auto offset0 = grad_input_strides[0] * i0;
+
+    for (auto i1 = bounds1.start; i1 < bounds1.end; i1++) {
+      auto offset1 = grad_input_strides[1] * i1;
+
+      for (auto i2 = bounds2.start; i2 < bounds2.end; i2++) {
+        auto offset2 = grad_input_strides[2] * i2;
+        auto pool_offset = offset0 + offset1 + offset2;
+
+        AtomicType<T>::atomic_add(
+            grad_input, grad_input_leading_offset + pool_offset, grad_val);
+      }
+    }
+  }
+}
+
 // Kernel computes one element of the output per kernel call.
 template <typename T, typename idx_t>
 kernel void avg_pool(
@@ -1004,6 +1062,57 @@ kernel void avg_pool(
         params.has_divisor_override,
         params.divisor_override);
   }
+}
+
+template <typename T>
+void avg_pool_backward_kernel_impl(
+    device AtomicType_t<T>* grad_input,
+    device const T* grad_output,
+    constant AvgPoolingParams<5>& params,
+    uint tid) {
+  auto pooling_dims = params.pooling_dims;
+  auto dims = params.dims;
+  auto grad_input_sizes = params.input_sizes.data();
+  auto grad_input_strides = params.input_strides.data();
+  auto grad_output_sizes = params.output_sizes.data();
+  auto grad_output_strides = params.output_strides.data();
+  auto kernel_size = params.kernel_size.data();
+  auto stride = params.stride.data();
+  auto padding = params.padding.data();
+  auto leading_dims = dims - pooling_dims;
+
+  // This buffer keeps track of the pooling dimension indices of this thread's
+  // element of the output. We need to fill it with the proper values below.
+  int32_t pooling_dim_indices[3];
+
+  auto offsets = find_pool_offsets<int32_t, int32_t>(
+      grad_output_sizes,
+      grad_output_strides,
+      /*indices_strides=*/nullptr,
+      grad_input_strides,
+      pooling_dim_indices,
+      dims,
+      leading_dims,
+      /*return_indices=*/false,
+      tid);
+
+  grad_output += offsets.output;
+  grad_input_sizes += leading_dims;
+  grad_input_strides += leading_dims;
+
+  avg_pool_backward_3d_input_iter<T>(
+      grad_input,
+      grad_output,
+      grad_input_sizes,
+      grad_input_strides,
+      offsets.input_leading,
+      pooling_dim_indices,
+      kernel_size,
+      stride,
+      padding,
+      params.count_include_pad,
+      params.has_divisor_override,
+      params.divisor_override);
 }
 
 // One simdgroup per output element, with lanes splitting the innermost window
@@ -1159,92 +1268,24 @@ kernel void adaptive_avg_pool_backward(
   grad_input[offsets.output] = static_cast<T>(grad_sum);
 }
 
-// Computes one element of grad_input per thread by summing the gradients of
-// all outputs whose window covers it, each divided by that window's divisor.
-template <typename T>
+template <typename T, bool serial>
 kernel void avg_pool_backward(
-    device T* grad_input [[buffer(0)]],
+    device AtomicType_t<T>* grad_input [[buffer(0)]],
     device const T* grad_output [[buffer(1)]],
     constant AvgPoolingParams<5>& params [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
-  auto dims = params.dims;
-  auto pooling_dims = params.pooling_dims;
-  auto leading_dims = dims - pooling_dims;
-  auto input_sizes = params.input_sizes.data() + leading_dims;
-  auto kernel_size = params.kernel_size.data();
-  auto stride = params.stride.data();
-  auto padding = params.padding.data();
-  int32_t pooling_dim_indices[3];
-  auto offsets = find_pool_offsets<int32_t, int32_t>(
-      params.input_sizes.data(),
-      params.input_strides.data(),
-      /*indices_strides=*/nullptr,
-      params.output_strides.data(),
-      pooling_dim_indices,
-      dims,
-      leading_dims,
-      /*return_indices=*/false,
-      tid);
-  grad_output += offsets.input_leading;
-
-  IterBounds<int32_t> bounds[3] = {{0, 1}, {0, 1}, {0, 1}};
-  int32_t grad_strides[3] = {0, 0, 0};
-  for (int32_t dim = 0; dim < pooling_dims; dim++) {
-    bounds[dim] = pool_output_range(
-        pooling_dim_indices[dim],
-        padding[dim],
-        kernel_size[dim],
-        stride[dim],
-        params.output_sizes[leading_dims + dim]);
-    grad_strides[dim] = params.output_strides[leading_dims + dim];
+  if IF_CONSTEXPR (!serial) {
+    avg_pool_backward_kernel_impl<T>(grad_input, grad_output, params, tid);
+    return;
   }
-
-  int32_t out_idx[3];
-  opmath_t<T> grad_sum = 0;
-  for (out_idx[0] = bounds[0].start; out_idx[0] < bounds[0].end; out_idx[0]++) {
-    auto count0 = get_avg_pool_input_iter_bounds<0>(
-                      input_sizes,
-                      out_idx,
-                      kernel_size,
-                      stride,
-                      padding,
-                      params.count_include_pad)
-                      .count;
-    for (out_idx[1] = bounds[1].start; out_idx[1] < bounds[1].end;
-         out_idx[1]++) {
-      auto count01 = count0 *
-          get_avg_pool_input_iter_bounds<1>(
-              input_sizes,
-              out_idx,
-              kernel_size,
-              stride,
-              padding,
-              params.count_include_pad)
-              .count;
-      auto row = grad_output + out_idx[0] * grad_strides[0] +
-          out_idx[1] * grad_strides[1];
-      for (out_idx[2] = bounds[2].start; out_idx[2] < bounds[2].end;
-           out_idx[2]++) {
-        auto count = count01;
-        if (pooling_dims == 3) {
-          count *= get_avg_pool_input_iter_bounds<2>(
-                       input_sizes,
-                       out_idx,
-                       kernel_size,
-                       stride,
-                       padding,
-                       params.count_include_pad)
-                       .count;
-        }
-        auto divisor =
-            params.has_divisor_override ? params.divisor_override : count;
-        grad_sum +=
-            static_cast<opmath_t<T>>(row[out_idx[2] * grad_strides[2]]) /
-            divisor;
-      }
-    }
+  uint pool_size = 1;
+  for (auto dim = params.dims - params.pooling_dims; dim < params.dims; dim++) {
+    pool_size *= params.output_sizes[dim];
   }
-  grad_input[offsets.output] = static_cast<T>(grad_sum);
+  for (uint pool_idx = 0; pool_idx < pool_size; pool_idx++) {
+    avg_pool_backward_kernel_impl<T>(
+        grad_input, grad_output, params, tid * pool_size + pool_idx);
+  }
 }
 
 // avg_pool_backward for 2 pooling dims, with the grid of pool2d_coords over
@@ -1385,6 +1426,14 @@ kernel void avg_pool2d_backward(
       device const DTYPE* grad_output_ [[buffer(1)]],                      \
       device const int64_t* grad_indices_ [[buffer(2)]],                   \
       constant PoolingBackwardParams<5>& params [[buffer(3)]],             \
+      uint tid [[thread_position_in_grid]]);                               \
+                                                                           \
+  template[[host_name("avg_pool_backward_" #DTYPE C10_METAL_SERIAL_SUFFIX( \
+      SERIAL))]] kernel void                                               \
+  avg_pool_backward<DTYPE, SERIAL>(                                        \
+      device AtomicType_t<DTYPE> * grad_input [[buffer(0)]],               \
+      device const DTYPE* grad_output [[buffer(1)]],                       \
+      constant AvgPoolingParams<5>& params [[buffer(2)]],                  \
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_ADAPTIVE_AVG_POOL(DTYPE, IDX_T, SUFFIX)                     \
@@ -1414,12 +1463,6 @@ kernel void avg_pool2d_backward(
 // Floating types only: avg pool backward, adaptive avg pooling and the 64-bit
 // avg_pool variant that only adaptive pooling uses
 #define REGISTER_AVG_POOL_FLOAT_OP(DTYPE)                           \
-  template [[host_name("avg_pool_backward_" #DTYPE)]] kernel void   \
-  avg_pool_backward<DTYPE>(                                         \
-      device DTYPE * grad_input [[buffer(0)]],                      \
-      device const DTYPE* grad_output [[buffer(1)]],                \
-      constant AvgPoolingParams<5>& params [[buffer(2)]],           \
-      uint tid [[thread_position_in_grid]]);                        \
   template [[host_name("avg_pool2d_backward_" #DTYPE)]] kernel void \
   avg_pool2d_backward<DTYPE>(                                       \
       device DTYPE * grad_input [[buffer(0)]],                      \
