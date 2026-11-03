@@ -561,6 +561,11 @@ def trace_scan(
 
     if outputs is None:
         raise AssertionError("no output node found in combine_graph")
+    if len(combine_outs) != 1:
+        raise AssertionError(
+            "expected the combine function to be traced once, but it ran "
+            f"{len(combine_outs)} times"
+        )
 
     carry, output = _extract_carry_and_out(outputs, len(init))
     init_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
@@ -589,11 +594,6 @@ def trace_scan(
 
     with disable_proxy_modes_tracing():
         scan_length = xs[0].shape[0]
-        if len(combine_outs) != 1:
-            raise AssertionError(
-                "expected the combine function to be traced once, but it ran "
-                f"{len(combine_outs)} times"
-            )
         fake_carry, fake_outputs = _extract_carry_and_out(
             [
                 _scan_output_value(o, v)
