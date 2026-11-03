@@ -1481,7 +1481,28 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
 
 
 class TestHuggingFaceWhisperDevice(HuggingFacePrefillTestCase):
-    def test_training_accuracy(self, device):
+    def test_checkpoint_dtype(self, device):
+        from benchmarks.dynamo import huggingface_llm_models as llm
+        from transformers import WhisperFeatureExtractor
+
+        checkpoint = _tiny_whisper().half()
+        feature_extractor = WhisperFeatureExtractor(
+            feature_size=checkpoint.config.num_mel_bins, chunk_length=1
+        )
+        with (
+            tempfile.TemporaryDirectory() as path,
+            mock.patch.object(
+                llm.WhisperProcessor, "from_pretrained", return_value=feature_extractor
+            ),
+        ):
+            checkpoint.save_pretrained(path)
+            model, _ = llm.WhisperBenchmark.get_model_and_inputs(path, device)
+        self.assertEqual(
+            {parameter.dtype for parameter in model.parameters()}, {torch.float32}
+        )
+
+    @parametrize("name", ("openai/whisper-tiny", "openai/whisper-large-v3-turbo"))
+    def test_training_accuracy(self, device, name):
         runner = self.huggingface.HuggingfaceRunner()
         runner.args = common.parse_args(
             [
@@ -1489,12 +1510,12 @@ class TestHuggingFaceWhisperDevice(HuggingFacePrefillTestCase):
                 "--backend=aot_eager",
                 "--accuracy",
                 "--training",
-                "--only=openai/whisper-tiny",
+                f"--only={name}",
             ]
         )
         runner.model_iter_fn = runner.forward_and_backward_pass
         with self._mock_whisper(_tiny_whisper()):
-            _, name, model, inputs, _ = runner.load_model(device, "openai/whisper-tiny")
+            _, name, model, inputs, _ = runner.load_model(device, name)
         self.assertEqual(set(inputs), {"input_features", "labels"})
         self.assertEqual(inputs["labels"].shape, (1, 128))
         self.assertTrue(model.training)
