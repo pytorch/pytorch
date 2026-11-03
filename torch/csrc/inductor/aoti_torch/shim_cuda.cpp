@@ -164,6 +164,13 @@ AOTITorchError aoti_torch_delete_cuda_graph(CUDAGraphHandle graph) {
       { delete reinterpret_cast<at::cuda::CUDAGraph*>(graph); });
 }
 
+// Not an #ifdef inside the error-code macro's argument: MSVC rejects that.
+#ifdef USE_ROCM
+constexpr bool kCanCaptureCudaGraphs = false;
+#else
+constexpr bool kCanCaptureCudaGraphs = true;
+#endif
+
 AOTITorchError aoti_torch_cuda_graph_capture_begin(
     CUDAGraphHandle graph,
     CUDAMemPoolHandle pool,
@@ -177,12 +184,10 @@ AOTITorchError aoti_torch_cuda_graph_capture_begin(
             capture_mode == cudaStreamCaptureModeRelaxed,
         "Invalid CUDA graph capture mode ",
         capture_mode);
-#ifdef USE_ROCM
     TORCH_CHECK(
-        false,
+        kCanCaptureCudaGraphs,
         "CUDA graph capture isn't supported on ROCm yet, see "
         "https://github.com/ROCm/rocm-systems/issues/12677");
-#endif // USE_ROCM
     auto* mem_pool = reinterpret_cast<at::cuda::MemPool*>(pool);
     // On another device, the allocator would quietly route the capture to a
     // new pool on that device.
