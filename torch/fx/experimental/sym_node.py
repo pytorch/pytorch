@@ -116,6 +116,7 @@ class SymNode:
         self.pytype = pytype
         self._optimized_summation = optimized_summation
         self._expr_ver = -1
+        self._expr_range_ver = -1
         self._expr_cache: object | None = None
 
         # What's the difference between hint and constant?
@@ -233,10 +234,17 @@ class SymNode:
         ver = self.shape_env._replacements_version_counter
         if ver == 0:
             return self._expr
-        if self._expr_cache is not None and ver == self._expr_ver:
+        # replace() also depends on value ranges; see ShapeEnv._find.
+        range_ver = self.shape_env._var_to_range_version_counter
+        if (
+            self._expr_cache is not None
+            and ver == self._expr_ver
+            and range_ver == self._expr_range_ver
+        ):
             return self._expr_cache
         result = self.shape_env.replace(self._expr)
         self._expr_ver = ver
+        self._expr_range_ver = range_ver
         self._expr_cache = result
         return result
 
@@ -1538,14 +1546,10 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
         shape_env = self.shape_env
         cache = None
         cache_key = None
-        if shape_env is not None:
-            cache = shape_env._symop_cache
-            cache_key = (
-                method,
-                self._expr,
-                other._expr,
-                shape_env._replacements_version_counter,
-            )
+        # mod picks Mod or PythonMod from value ranges, so it isn't memoized.
+        if shape_env is not None and method != "mod":
+            cache = shape_env._get_symop_cache()
+            cache_key = (method, self.expr, other.expr)
             cached = cache.get(cache_key)
             if cached is not None:
                 out, pytype, optimized_summation = cached
@@ -1584,11 +1588,13 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
                     out = PythonMod(self.expr, other.expr)
             elif method == "add":
                 # see Note [optimized_summation]
+                # The flags describe _expr; a replacement may have turned expr
+                # into something that is no longer a summation of symbols.
                 (optimized_summation, out) = _optimized_add(
                     self.expr,
                     other.expr,
-                    self._optimized_summation,
-                    other._optimized_summation,
+                    self._optimized_summation and self.expr is self._expr,
+                    other._optimized_summation and other.expr is other._expr,
                 )
             elif method in ("eq", "ne", "ge", "gt", "le", "lt"):
                 import sympy
