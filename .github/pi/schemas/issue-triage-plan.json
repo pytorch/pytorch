@@ -47,6 +47,11 @@
       "type": "string",
       "description": "Destination owner/repo, only for decision=transfer."
     },
+    "possible_duplicate": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "One ordinary same-repository issue that may report the same underlying bug, after reading its body and relevant comments. Suggestion only: the source stays open. Use with label or triage_review, never with umbrella or a close decision."
+    },
     "umbrella": {
       "type": "object",
       "additionalProperties": false,

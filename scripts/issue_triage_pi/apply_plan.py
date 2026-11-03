@@ -3,7 +3,7 @@
 
 The plan comes from a model that read untrusted issue text, so it is treated
 as a request: labels are filtered with the triaging-issues skill's rules,
-comments are limited to templates.json and fixed approved umbrella references.
+comments are limited to templates.json and fixed related-issue references.
 Only usage questions, expected numerical behavior, or covered reports in an
 explicitly close-enabled umbrella policy may close the issue. Labels are only ever added. Reproduction
 requests redact download links using a fixed policy, never a model-written body.
@@ -111,6 +111,7 @@ class Effects:
     umbrella_issue: int | None = None
     duplicate_issue_id: int | None = None
     umbrella_action: str = ""
+    possible_duplicate: int | None = None
     redact_body: bool = False
     notes: list[str] = field(default_factory=list)
 
@@ -188,7 +189,11 @@ def umbrella_policy(repo: str, annotation: object) -> dict | None:
 
 def fetch_umbrella_target(repo: str, source: int, plan: dict) -> dict | None:
     annotation = plan.get("umbrella")
-    if not umbrella_policy(repo, annotation) or annotation["issue"] == source:
+    if (
+        "possible_duplicate" in plan
+        or not umbrella_policy(repo, annotation)
+        or annotation["issue"] == source
+    ):
         return None
     try:
         return json.loads(
@@ -196,6 +201,60 @@ def fetch_umbrella_target(repo: str, source: int, plan: dict) -> dict | None:
         )
     except RuntimeError:
         return None
+
+
+def fetch_possible_duplicate(repo: str, source: int, plan: dict) -> dict | None:
+    number = plan.get("possible_duplicate")
+    if type(number) is not int or number <= 0 or number == source or "umbrella" in plan:
+        return None
+    try:
+        return json.loads(gh_api([f"repos/{repo}/issues/{number}"], retry=False))
+    except RuntimeError:
+        return None
+
+
+def possible_duplicate_comment(
+    repo: str,
+    source: int,
+    plan: dict,
+    target: dict | None,
+    bot_comments: list[str],
+    effects: Effects,
+) -> tuple[str, bool]:
+    number = plan["possible_duplicate"]
+    if "umbrella" in plan or plan["decision"] not in ("label", "triage_review"):
+        effects.notes.append(
+            "possible duplicate conflicts with the decision; kept open for review"
+        )
+        return "", False
+    if (
+        type(number) is not int
+        or number <= 0
+        or number == source
+        or not isinstance(target, dict)
+        or type(target.get("number")) is not int
+        or not is_repo_issue(target, repo, number)
+        or target.get("state") not in ("open", "closed")
+        or umbrella_policy(repo, {"issue": number, "match": "covered"})
+    ):
+        effects.notes.append(
+            "possible duplicate is not a valid non-umbrella issue; review"
+        )
+        return "", False
+    effects.possible_duplicate = number
+    marker = f"<!-- issue-triage-pi:possible-duplicate:{repo}#{number} -->"
+    if any(marker in body.splitlines() for body in bot_comments):
+        effects.notes.append(f"already suggested possible duplicate #{number}")
+        return "", True
+    reference = f"[{repo}#{number}](https://github.com/{repo}/issues/{number})"
+    comment = (
+        f"This looks similar to {reference} and may be the same underlying issue. "
+        "Could you check whether that report covers your case?\n\n"
+        "If it does, please add any new reproduction details there and close this issue "
+        "so we can track the discussion in one place. If yours differs—or still "
+        "reproduces after the linked issue’s fix—please explain the difference here."
+    )
+    return f"{comment}\n\n{marker}", False
 
 
 def pt2_close_receipt(repo: str, number: int, target_id: int) -> str:
@@ -216,6 +275,7 @@ def pending_pt2_close(
     requested = set(plan.get("labels", []))
     return bool(
         policy.get("action") == "close"
+        and "possible_duplicate" not in plan
         and annotation["match"] == "covered"
         and plan["decision"] == "label"
         and "oncall: pt2" in requested
@@ -345,6 +405,7 @@ def plan_effects(
     issue: int = 0,
     source: dict | None = None,
     umbrella_target: dict | None = None,
+    duplicate_target: dict | None = None,
 ) -> Effects:
     """Map a submitted plan to the effects the trusted step will apply.
 
@@ -364,6 +425,11 @@ def plan_effects(
     ):
         effects.notes.append("issue already has an oncall: label; skipping")
         return effects
+    if ("umbrella" in plan or "possible_duplicate" in plan) and (
+        not is_repo_issue(source, repo, issue) or source.get("state") != "open"
+    ):
+        effects.notes.append("related-issue source is not an open issue; skipping")
+        return effects
     if decision == "skip_already_routed":
         effects.notes.append("skip has no existing oncall label; flagging for review")
         effects.add_labels = [
@@ -371,12 +437,6 @@ def plan_effects(
             for label in (TRIAGE_REVIEW, BOT_TRIAGED)
             if label not in existing_labels
         ]
-        return effects
-
-    if "umbrella" in plan and (
-        not is_repo_issue(source, repo, issue) or source.get("state") != "open"
-    ):
-        effects.notes.append("umbrella source is not an open issue; skipping")
         return effects
 
     requested = [
@@ -431,11 +491,19 @@ def plan_effects(
         labels.append(TRIAGE_REVIEW)
         keys = [key for key in keys if key not in CLOSING_TEMPLATES.values()]
         effects.notes.append("numerical dismissal conflicts with review; kept open")
-    umbrella_body, umbrella_posted = "", False
-    if "umbrella" in plan:
+    reference_body, reference_posted = "", False
+    if "possible_duplicate" in plan:
         effects.close = False
         keys = [key for key in keys if key not in CLOSING_TEMPLATES.values()]
-        umbrella_body, umbrella_posted = umbrella_comment(
+        reference_body, reference_posted = possible_duplicate_comment(
+            repo, issue, plan, duplicate_target, bot_comments, effects
+        )
+        if effects.possible_duplicate is None:
+            labels.append(TRIAGE_REVIEW)
+    elif "umbrella" in plan:
+        effects.close = False
+        keys = [key for key in keys if key not in CLOSING_TEMPLATES.values()]
+        reference_body, reference_posted = umbrella_comment(
             repo,
             issue,
             plan,
@@ -474,11 +542,11 @@ def plan_effects(
         keys, templates, bot_comments, effects.notes
     )
 
-    if umbrella_body:
+    if reference_body:
         effects.comment = "\n\n---\n\n".join(
-            body for body in (effects.comment, umbrella_body) if body
+            body for body in (effects.comment, reference_body) if body
         )
-    posted = posted or umbrella_posted
+    posted = posted or reference_posted
 
     if (
         decision == "label"
@@ -562,6 +630,7 @@ def current_reference_effects(repo: str, issue: int, plan: dict) -> Effects:
         issue=issue,
         source=current,
         umbrella_target=fetch_umbrella_target(repo, issue, plan),
+        duplicate_target=fetch_possible_duplicate(repo, issue, plan),
     )
 
 
@@ -575,11 +644,13 @@ def post_labels(repo: str, issue: int, labels: list[str]) -> None:
 def apply_effects(
     repo: str, issue: int, effects: Effects, *, plan: dict | None = None
 ) -> Effects:
-    """Write effects only on the source issue; recheck umbrella plans before writes."""
-    if plan is not None and "umbrella" in plan:
+    """Write only on the source issue; recheck related-issue plans before writes."""
+    if plan is not None and ("umbrella" in plan or "possible_duplicate" in plan):
         effects = current_reference_effects(repo, issue, plan)
-    elif effects.umbrella_action:
-        raise ValueError("umbrella effects require the plan for trusted revalidation")
+    elif effects.umbrella_action or effects.possible_duplicate is not None:
+        raise ValueError(
+            "related-issue effects require the plan for trusted revalidation"
+        )
     if effects.redact_body:
         # Use the current body, not the model's input snapshot or proposed prose.
         current = json.loads(gh_api([f"repos/{repo}/issues/{issue}"]))["body"] or ""
@@ -604,7 +675,7 @@ def apply_effects(
                 "-f",
                 f"body={effects.comment}",
             ],
-            retry=not bool(effects.umbrella_action),
+            retry=not bool(effects.umbrella_action or effects.possible_duplicate),
         )
     if effects.add_labels:
         post_labels(repo, issue, effects.add_labels)
@@ -664,6 +735,10 @@ def summary_markdown(
             else "invalid target"
         )
         lines.append(f"**Umbrella:** {effects.umbrella_action} · **Target:** {target}")
+    if effects.possible_duplicate is not None:
+        lines.append(
+            f"**Possible duplicate:** {repo}#{effects.possible_duplicate} (suggestion only)"
+        )
     if effects.redact_body:
         lines.append("**Body:** redact external download links using the fixed policy")
     if effects.notes:
@@ -695,7 +770,7 @@ def main() -> int:
 
     plan = json.loads(args.plan.read_text())
     templates = load_templates(TRIAGE_SKILL)
-    if "umbrella" in plan:
+    if "umbrella" in plan or "possible_duplicate" in plan:
         issue, bot_comments = fetch_issue(args.repo, args.issue, all_comments=True)
     else:
         issue, bot_comments = fetch_issue(args.repo, args.issue)
@@ -724,6 +799,7 @@ def main() -> int:
         issue=args.issue,
         source={**issue, "state": "open"} if args.replay else issue,
         umbrella_target=fetch_umbrella_target(args.repo, args.issue, plan),
+        duplicate_target=fetch_possible_duplicate(args.repo, args.issue, plan),
     )
     if args.apply:
         effects = apply_effects(args.repo, args.issue, effects, plan=plan)

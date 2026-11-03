@@ -124,6 +124,12 @@ by the workflow), and the replayed issue. Each call returns at most 10 matches; 
 prove absence, decide duplicates, or authorize closure. Search and follow-up reads have no
 separate discovery-specific session budget.
 
+An optional `possible_duplicate` issue number produces a fixed suggestion asking the reporter
+to confirm the match; the source stays open. The apply step validates the same-repository
+source and candidate before writing, never writes to the candidate, and suppresses repeated
+suggestions using a bot-authored target marker. This field cannot invoke an umbrella action
+or be combined with a close decision. Umbrella link/close rules remain separate.
+
 The offline issue-tool tests run against Pi installed from the action lockfile, use its real
 argument validator, and replace only `gh` with controlled fixtures (no GitHub access):
 `PI_TEST_RUNTIME=/absolute/path/to/node_modules/@earendil-works/pi-coding-agent node --test .github/pi/tests/github-issue-tools.mjs`.
