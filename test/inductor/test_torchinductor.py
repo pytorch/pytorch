@@ -15437,10 +15437,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         @torch.compile(dynamic=True)
         def fn(x):
             return F.interpolate(x, scale_factor=1 / 300, mode="linear")
-        import contextlib
 
         with torch._inductor.config.patch({"triton.prefer_nd_tiling": prefer_nd_tiling}):
-        #with contextlib.nullcontext():
             self.common(fn, [torch.randn(1, 8, 396 * 300)])
 
     def test_broadcast_symbolic_size_one_dynamic_shapes(self):
