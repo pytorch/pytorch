@@ -20226,6 +20226,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @skip_if_halide
     def test_unbacked_float_item(self):
+        # The tensorify_python_scalars pass turns max_val.item() back into a 0-d
+        # tensor, so this covers clamp with a tensor bound, not unbacked-float
+        # codegen.
         def fn(x, max_val):
             return torch.clamp(x, 0, max_val.item())
 
