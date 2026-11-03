@@ -2283,7 +2283,7 @@ def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
     """
     if not idx and get_type_mro_no_user_code(klass)[0] is klass:
         return klass_source
-    return GetItemSource(TypeMROSource(klass_source), idx)
+    return GetItemSource(TypeMROSource(klass_source, raw=True), idx)
 
 
 def mro_attr_source(
@@ -2317,7 +2317,7 @@ def mro_attr_source(
             tx.output.guarded_mro_absent_keys.add(absent_key)
             install_guard(
                 TypeDictSource(
-                    _mro_entry_source(klass, klass_source, absent_idx)
+                    _mro_entry_source(klass, klass_source, absent_idx), raw=True
                 ).make_guard(partial(GuardBuilder.DICT_NOT_CONTAINS, key=name))
             )
 
@@ -2332,7 +2332,7 @@ def mro_attr_source(
             return cached
 
         source = DictGetItemSource(
-            TypeDictSource(_mro_entry_source(klass, klass_source, idx)), name
+            TypeDictSource(_mro_entry_source(klass, klass_source, idx), raw=True), name
         )
         tx.output.mro_source_cache[cache_key] = source
         return source
