@@ -2713,7 +2713,9 @@ class CatchErrorsWrapper:
         if (
             frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__"
         ) or (
-            frame.f_code.co_filename.endswith("collections/__init__.py")
+            frame.f_code.co_filename.replace("\\", "/").endswith(
+                "collections/__init__.py"
+            )
             and frame.f_code.co_name == "_make"
         ):
             return self._handle_skip(
