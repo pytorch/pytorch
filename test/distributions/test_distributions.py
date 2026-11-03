@@ -117,6 +117,7 @@ from torch.testing._internal.common_device_type import (
     skipMPS,
 )
 from torch.testing._internal.common_utils import (
+    freeze_rng_state,
     gradcheck,
     load_tests,
     parametrize,
@@ -1326,8 +1327,7 @@ class DistributionsTestCase(TestCase):
         samples_per_bin = len(samples) // num_bins
         bins = samples.reshape((num_bins, samples_per_bin)).mean(axis=1)
         stddev = samples_per_bin**-0.5
-        # Two-sided standard-normal quantile. scipy.special.erfinv(p) needs a
-        # sqrt(2) factor to be a z-score, so the old threshold was too tight.
+        # Two-sided standard-normal quantile.
         threshold = stddev * scipy.stats.norm.ppf(1 - failure_rate / (2 * num_bins))
         message = f"{message}.sample() is biased:\n{bins}"
         for bias in bins:
@@ -2353,11 +2353,8 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(Uniform, (low, 1.0))
         self._gradcheck_log_prob(Uniform, (0.0, high))
 
-        # Reseed instead of get/set_rng_state(), which only covers the CPU
-        # generator, so eps and rsample() draw the same values on any device.
-        torch.manual_seed(0)
-        rand = low.new(low.size()).uniform_()
-        torch.manual_seed(0)
+        with freeze_rng_state():
+            rand = low.new(low.size()).uniform_()
         u = Uniform(low, high).rsample()
         u.backward(torch.ones_like(u))
         self.assertEqual(low.grad, 1 - rand)
@@ -2408,11 +2405,8 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(Cauchy, (loc, 1.0))
         self._gradcheck_log_prob(Cauchy, (0.0, scale))
 
-        # Reseed instead of get/set_rng_state(), which only covers the CPU
-        # generator, so eps and rsample() draw the same values on any device.
-        torch.manual_seed(0)
-        eps = loc.new(loc.size()).cauchy_()
-        torch.manual_seed(0)
+        with freeze_rng_state():
+            eps = loc.new(loc.size()).cauchy_()
         c = Cauchy(loc, scale).rsample()
         c.backward(torch.ones_like(c))
         self.assertEqual(loc.grad, torch.ones_like(scale))
@@ -2439,11 +2433,8 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(HalfCauchy, (scale,))
         self._gradcheck_log_prob(HalfCauchy, (1.0,))
 
-        # Reseed instead of get/set_rng_state(), which only covers the CPU
-        # generator, so eps and rsample() draw the same values on any device.
-        torch.manual_seed(0)
-        eps = scale.new(scale.size()).cauchy_().abs_()
-        torch.manual_seed(0)
+        with freeze_rng_state():
+            eps = scale.new(scale.size()).cauchy_().abs_()
         c = HalfCauchy(scale).rsample()
         c.backward(torch.ones_like(c))
         self.assertEqual(scale.grad, eps)
@@ -2827,11 +2818,8 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(Normal, (loc, 1.0))
         self._gradcheck_log_prob(Normal, (0.0, scale))
 
-        # Reseed instead of get/set_rng_state(), which only covers the CPU
-        # generator, so eps and rsample() draw the same values on any device.
-        torch.manual_seed(0)
-        eps = torch.normal(torch.zeros_like(loc), torch.ones_like(scale))
-        torch.manual_seed(0)
+        with freeze_rng_state():
+            eps = torch.normal(torch.zeros_like(loc), torch.ones_like(scale))
         z = Normal(loc, scale).rsample()
         z.backward(torch.ones_like(z))
         self.assertEqual(loc.grad, torch.ones_like(loc))
@@ -3048,8 +3036,7 @@ class TestDistributions(DistributionsTestCase):
         d = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
         samples = d.rsample((100000,))
         num_samples = samples.shape[0]
-        # Check each moment to within 5 standard errors (Gaussian formulas)
-        # instead of a fixed atol, which ignores the scale of the variance.
+        # Check each moment to within 5 standard errors (Gaussian formulas).
         mean_se = (d.variance / num_samples).sqrt()
         var_se = d.variance * (2 / (num_samples - 1)) ** 0.5
         zeros = torch.zeros_like(d.mean)
@@ -3286,8 +3273,7 @@ class TestDistributions(DistributionsTestCase):
         d = MultivariateNormal(mean, scale_tril=scale_tril)
         samples = d.rsample((100000,))
         num_samples = samples.shape[0]
-        # Check each moment to within 5 standard errors (Gaussian formulas)
-        # instead of a fixed atol, which ignores the scale of the variance.
+        # Check each moment to within 5 standard errors (Gaussian formulas).
         mean_se = (d.variance / num_samples).sqrt()
         var_se = d.variance * (2 / (num_samples - 1)) ** 0.5
         zeros = torch.zeros_like(d.mean)
@@ -3524,8 +3510,7 @@ class TestDistributions(DistributionsTestCase):
         num_samples = samples.shape[0]
         empirical_mean = samples.mean(0)
         empirical_var = samples.var(0)
-        # Check each moment to within 5 standard errors. A fixed atol fails
-        # whenever the random scale_tril makes the variance large.
+        # Check each moment to within 5 standard errors.
         mean_se = (empirical_var / num_samples).sqrt()
         fourth = ((samples - empirical_mean) ** 4).mean(0)
         var_se = ((fourth - empirical_var**2).clamp(min=0) / num_samples).sqrt()
@@ -3546,11 +3531,8 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(Exponential(50.0).sample((1,)).size(), (1,))
 
         self._gradcheck_log_prob(Exponential, (rate,))
-        # Reseed instead of get/set_rng_state(), which only covers the CPU
-        # generator, so eps and rsample() draw the same values on any device.
-        torch.manual_seed(0)
-        eps = rate.new(rate.size()).exponential_()
-        torch.manual_seed(0)
+        with freeze_rng_state():
+            eps = rate.new(rate.size()).exponential_()
         z = Exponential(rate).rsample()
         z.backward(torch.ones_like(z))
         self.assertEqual(rate.grad, -eps / rate**2)
@@ -3616,11 +3598,8 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(Laplace, (loc, 1.0))
         self._gradcheck_log_prob(Laplace, (0.0, scale))
 
-        # Reseed instead of get/set_rng_state(), which only covers the CPU
-        # generator, so eps and rsample() draw the same values on any device.
-        torch.manual_seed(0)
-        eps = torch.ones_like(loc).uniform_(-0.5, 0.5)
-        torch.manual_seed(0)
+        with freeze_rng_state():
+            eps = torch.ones_like(loc).uniform_(-0.5, 0.5)
         z = Laplace(loc, scale).rsample()
         z.backward(torch.ones_like(z))
         self.assertEqual(loc.grad, torch.ones_like(loc))
