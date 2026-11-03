@@ -37,7 +37,10 @@ run_if_exists() {
 run_if_exists tensor_interop_test
 run_if_exists cudnn_test
 run_if_exists cuda_generator_test
-run_if_exists apply_test
+# ROCm builds name this executable cuda_apply_test or hip_apply_test,
+# depending on the PyTorch revision.
+run_if_exists cuda_apply_test
+run_if_exists hip_apply_test
 run_if_exists stream_test
 run_if_exists cuda_half_test
 run_if_exists cuda_vectorized_test

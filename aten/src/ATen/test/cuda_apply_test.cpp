@@ -5,6 +5,11 @@
 
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#ifdef USE_ROCM
+#include <ATen/ATen.h>
+#include <ATen/native/cuda/GridSampler.h>
+#include <limits>
+#endif
 #define ASSERT_EQ_CUDA(X, Y) \
   {                          \
     bool _isEQ = X == Y;     \
@@ -143,4 +148,45 @@ TEST(ApplyTest, InvalidExclusion) {
   ::at::cuda::detail::TensorInfo<void, int> ti{nullptr, 3, sizes, strides};
   ASSERT_ANY_THROW(ti.collapseDims(5));
 }
+#ifdef USE_ROCM
+
+// The ROCm grid_sampler_2d backward channel-parallel kernel advances each
+// lane's channel counter by the lane count, so 32-bit indexing also needs
+// C - 1 + lanes to fit. Meta tensors keep this host-only: no GPU or large
+// allocation is needed.
+TEST(ApplyTest, GridSampler2dBackwardChannelLaneIndexWidth) {
+  using at::native::canUse32BitIndexMath;
+  using at::native::rocm_grid_sampler_2d_backward_channel_lane_use_32bit_index;
+  const auto meta = at::TensorOptions().device(at::kMeta).dtype(at::kBFloat16);
+  const auto grid = at::empty({1, 1, 1, 2}, meta);
+  const int64_t int32_max = std::numeric_limits<int32_t>::max();
+  ASSERT_EQ(at::native::rocm_grid_sampler_2d_backward_lanes(int32_max), 256);
+  // (C, expected selection); the large C use scalar-expanded tensors.
+  const std::pair<int64_t, bool> cases[] = {
+      {257, true},
+      {int32_max - 255, true},
+      {int32_max - 254, false},
+      {(int64_t{1} << 31) - 128, false},
+  };
+  for (const auto& [C, use_32bit] : cases) {
+    const auto input = at::empty({1, 1, 1, 1}, meta).expand({1, C, 1, 1});
+    const auto grad_output = at::empty({1, 1, 1, 1}, meta).expand({1, C, 1, 1});
+    // The tensor-offset checks alone accept every case.
+    ASSERT_TRUE(canUse32BitIndexMath(input));
+    ASSERT_TRUE(canUse32BitIndexMath(grid));
+    ASSERT_TRUE(canUse32BitIndexMath(grad_output));
+    EXPECT_EQ(
+        rocm_grid_sampler_2d_backward_channel_lane_use_32bit_index(
+            input, grid, grad_output),
+        use_32bit)
+        << "C=" << C;
+  }
+  // A tensor offset beyond the 32-bit range still selects 64-bit indexing.
+  const auto strided =
+      at::empty_strided({1, 4, 1, 1}, {4, int64_t{1} << 31, 1, 1}, meta);
+  ASSERT_FALSE(canUse32BitIndexMath(strided));
+  EXPECT_FALSE(rocm_grid_sampler_2d_backward_channel_lane_use_32bit_index(
+      strided, grid, at::empty({1, 4, 1, 1}, meta)));
+}
+#endif
 #endif

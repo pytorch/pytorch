@@ -988,6 +988,46 @@ if(USE_ROCM)
   set(__caffe2_hip_srcs_hip ${Caffe2_HIP_SRCS})
   list(FILTER __caffe2_hip_srcs_hip INCLUDE REGEX "\\.(cu|hip)$")
   set_source_files_properties(${__caffe2_hip_srcs_hip} PROPERTIES LANGUAGE HIP)
+
+  # gfx1250: LLVM without llvm/llvm-project#209861 emits
+  # v_pk_{add,mul,fma}_bf16 with an inline-constant operand (such as 1.0 or
+  # 0.5) but not the op_sel that selects its upper 16 bits, so the instruction
+  # reads zero; the 2D BF16 bicubic backward then returns a zero grid gradient
+  # and a wrong input gradient. A compiler version does not show whether a
+  # given LLVM 23 build has the fix, so compile the smallest affected case and
+  # check for the fixed encoding (op_sel:[0,1]). Only without it, build the grid
+  # sampler without packed BF16 instructions. The flag covers every BF16 kernel
+  # in this file, including the 3D backward, which then use v_fma_mix and f32
+  # instructions; other dtypes, and architectures without the feature, compile
+  # unchanged. If the probe cannot run, the flag is applied.
+  if(PYTORCH_ROCM_ARCH MATCHES "gfx1250")
+    set(_gs_probe "${CMAKE_CURRENT_BINARY_DIR}/gfx1250_bf16_inline_constant.ll")
+    file(WRITE "${_gs_probe}"
+      "target triple = \"amdgcn-amd-amdhsa\"\n"
+      "define <2 x bfloat> @probe(<2 x bfloat> %x) {\n"
+      "  %r = fadd <2 x bfloat> %x, <bfloat 0xR3F80, bfloat 0xR3F80>\n"
+      "  ret <2 x bfloat> %r\n"
+      "}\n")
+    execute_process(
+      COMMAND "${CMAKE_HIP_COMPILER}" -target amdgcn-amd-amdhsa -mcpu=gfx1250
+              -O3 -S -x ir "${_gs_probe}" -o -
+      RESULT_VARIABLE _gs_probe_result
+      OUTPUT_VARIABLE _gs_probe_asm
+      ERROR_QUIET)
+    string(REGEX MATCH "v_pk_add_bf16[^\n]*" _gs_probe_insn "${_gs_probe_asm}")
+    if(_gs_probe_result EQUAL 0 AND _gs_probe_insn MATCHES "op_sel:\\[0,1\\]")
+      message(STATUS "gfx1250 packed BF16 inline constants are encoded "
+                     "correctly; GridSampler.hip keeps packed BF16")
+    else()
+      message(STATUS "gfx1250 packed BF16 inline constants lack op_sel "
+                     "(llvm/llvm-project#209861); building GridSampler.hip "
+                     "without packed BF16 instructions")
+      set_property(SOURCE
+          "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/hip/GridSampler.hip"
+          APPEND_STRING PROPERTY COMPILE_FLAGS
+          " -Xclang -target-feature -Xclang -bf16-pk-insts")
+    endif()
+  endif()
 endif()
 
 # Compile exposed libraries.
