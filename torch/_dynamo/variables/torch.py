@@ -337,23 +337,58 @@ methods_consuming_unbacked_scalars: frozenset[str] = frozenset(
 )
 
 
-# Linalg ops whose errors depend on tensor data: a square singular input
-# (inv, inverse) or a non-positive-definite input (cholesky) traces
-# successfully under fake tensors, so the compiled graph would drop an
-# enclosing exception handler. Callers break when one of these runs inside
-# an except handler region (see InstructionTranslatorBase
-# .in_except_handler_region). torch.cholesky is deliberately absent: it is
-# a removed API that always raises RuntimeError, so the existing handler
-# path already covers it. Other data-dependent linalg ops (solve, svd,
-# eigh, lu_factor, lstsq, matrix_power) are absent pending Dynamo
-# maintainer sign-off on where such ops get recognized.
+# Linalg ops whose errors depend on tensor data: a singular input
+# (inv, inverse, solve, lu_factor), a non-positive-definite input
+# (cholesky), a non-converging factorization (svd, eigh), or a
+# negative power of a singular input (matrix_power). Fake tracing
+# succeeds for these shapes, so a call inside an except handler region
+# would compile into a graph that drops the handler. torch.cholesky is
+# deliberately absent: it is a removed API that always raises
+# RuntimeError, so the existing handler path already covers it.
+# torch.linalg.lstsq is deliberately absent too: it already breaks
+# inside a try region through the dynamic-shape-operator path, so a
+# denylist entry would change neither the break nor its reason.
+# Narrowing the break by the except clause's exception type was
+# deliberately not done: it would need reading the CHECK_EXC_MATCH
+# classes out of each handler's bytecode, which differs across Python
+# versions and cannot cover tuples, except*, bare except, or dynamic
+# classes; the break stays conservative (still correct, just eager).
 DATA_DEPENDENT_LINALG_FUNCTIONS: frozenset[Callable[..., Any]] = frozenset(
     {
         torch.linalg.inv,
         torch.linalg.cholesky,
         torch.inverse,
+        torch.linalg.solve,
+        torch.linalg.svd,
+        torch.linalg.eigh,
+        torch.linalg.lu_factor,
+        torch.linalg.matrix_power,
     }
 )
+
+
+# The _ex variants only raise when check_errors is enabled; with
+# check_errors=False (the default) they return info instead of raising,
+# so there is no handler to preserve and no break is needed.
+DATA_DEPENDENT_LINALG_EX_FUNCTIONS: frozenset[Callable[..., Any]] = frozenset(
+    {
+        torch.linalg.inv_ex,
+        torch.linalg.cholesky_ex,
+    }
+)
+
+
+def _ex_check_errors_enabled(kwargs: "dict[str, VariableTracker]") -> bool:
+    # True unless check_errors is provably the constant False: absent
+    # means the default (False), while a non-constant value could be
+    # True at runtime, so the conservative break still applies.
+    check_errors = kwargs.get("check_errors")
+    if check_errors is None:
+        return False
+    try:
+        return bool(check_errors.as_python_constant())
+    except Exception:
+        return True
 
 
 @functools.cache
@@ -4315,15 +4350,21 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     )
 
         # Data-dependent linalg errors (singular matrix, non-positive-definite
-        # input) trace successfully under fake tensors, so a call inside an
-        # except handler region would compile into a graph that drops the
-        # handler. Break so the region runs eagerly, where the handler works.
-        # Errors fake tracing does catch (e.g. non-square input) raise before
-        # this point and still take the handler path.
-        if (
+        # input, non-converging factorization) trace successfully under fake
+        # tensors, so a call inside an except handler region would compile
+        # into a graph that drops the handler. Break so the region runs
+        # eagerly, where the handler works. Errors fake tracing does catch
+        # (e.g. non-square input) raise before this point and still take
+        # the handler path. The _ex variants only raise when check_errors
+        # is enabled; otherwise they return info and need no break.
+        breaks_on_data_dependent_error = (
             self.value in DATA_DEPENDENT_LINALG_FUNCTIONS
-            and tx.in_except_handler_region()
-        ):
+            or (
+                self.value in DATA_DEPENDENT_LINALG_EX_FUNCTIONS
+                and _ex_check_errors_enabled(kwargs)
+            )
+        )
+        if breaks_on_data_dependent_error and tx.in_except_handler_region():
             tx.raise_data_dependent_linalg_graph_break()
 
         return tensor_variable

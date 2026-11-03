@@ -353,10 +353,14 @@ class CurrentDeviceVariable(VariableTracker):
 
 
 # Tensor method forms of the data-dependent linalg ops (see
-# DATA_DEPENDENT_LINALG_FUNCTIONS in variables/torch.py). Only "inverse"
-# is a genuine gap: Tensor.cholesky is a removed API that always raises
-# RuntimeError, so the existing handler path already covers it.
-DATA_DEPENDENT_LINALG_METHODS: frozenset[str] = frozenset({"inverse"})
+# DATA_DEPENDENT_LINALG_FUNCTIONS in variables/torch.py). "inverse",
+# "svd", and "matrix_power" are the genuine gaps: Tensor.solve,
+# Tensor.lstsq, and Tensor.cholesky are removed APIs that always raise
+# RuntimeError, so the existing handler path already covers them, and
+# Tensor has no eigh or lu_factor method.
+DATA_DEPENDENT_LINALG_METHODS: frozenset[str] = frozenset(
+    {"inverse", "svd", "matrix_power"}
+)
 
 
 class TensorVariable(VariableTracker):
