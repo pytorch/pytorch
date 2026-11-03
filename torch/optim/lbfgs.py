@@ -410,14 +410,14 @@ class LBFGS(Optimizer):
                 q = flat_grad.neg()
                 for i in range(num_old - 1, -1, -1):
                     al[i] = old_stps[i].dot(q) * ro[i]
-                    q.add_(old_dirs[i], alpha=-al[i])
+                    q.addcmul_(old_dirs[i], al[i], value=-1)
 
                 # multiply by initial Hessian
                 # r/d is the final direction
                 d = r = torch.mul(q, H_diag)
                 for i in range(num_old):
                     be_i = old_dirs[i].dot(r) * ro[i]
-                    r.add_(old_stps[i], alpha=al[i] - be_i)
+                    r.addcmul_(old_stps[i], al[i] - be_i)
 
             if prev_flat_grad is None:
                 prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)
