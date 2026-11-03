@@ -67,6 +67,7 @@ from .wrapper import (
     Line,
     MultiOutputLine,
     NullLine,
+    ProfilerMarkerLine,
     PythonWrapperCodegen,
     ReinterpretLine,
     ReuseLine,
@@ -605,7 +606,7 @@ class FxConverter:
                     zero_mode=WorkspaceZeroMode.UNINITIALIZED,
                     device=device,
                     outer_name=unique_name,
-                    dtype=buffer.get_dtype(),
+                    dtype=node.get_dtype(),
                 )
 
                 # Generate FX IR for the view.
@@ -853,6 +854,11 @@ class FxConverter:
             raise AssertionError(f"expected CommentLine, got {type(line)}")
         # We ignore comments in FX IR.
 
+    def _generate_profiler_marker(self, line: WrapperLine) -> None:
+        if not isinstance(line, ProfilerMarkerLine):
+            raise AssertionError(f"expected ProfilerMarkerLine, got {type(line)}")
+        # Profiler markers are emitted only by the Python wrapper.
+
     def _generate_dynamic_scalar(self, line: WrapperLine) -> None:
         if not isinstance(line, DynamicScalarLine):
             raise AssertionError(f"expected DynamicScalarLine, got {type(line)}")
@@ -965,6 +971,10 @@ class FxConverter:
 
         # Map ReinterpretView to as_strided.
         result_node = self._create_as_strided(input_node, size, stride, offset)
+        if layout.dtype != input_buffer.get_dtype():
+            result_node = self.gm.graph.call_function(
+                torch.ops.aten.view.dtype, args=(result_node, layout.dtype)
+            )
         result_node.name = name
         self._record_allocation(result_buffer, result_node)
 

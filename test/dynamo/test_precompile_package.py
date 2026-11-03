@@ -92,6 +92,13 @@ _unregistered = types.ModuleType("_unregistered")
 _unregistered.SCALE = 1
 
 
+_ALIAS = typing.List  # noqa: UP006
+
+
+def _through_alias(x):
+    return x + 1 if _ALIAS is typing.List else x - 1  # noqa: UP006
+
+
 def _without_module_globals(fn):
     """A copy of fn whose globals no importable module owns, so a guard on it
     cannot be rebuilt by value in another process and the default filter drops
@@ -376,6 +383,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         keep = precompile_package.default_guard_filter_fn(entries)
         self.assertEqual(list(keep), [k for _, _, k in rows])
 
+    def test_default_guard_filter_keeps_a_typing_alias(self):
+        # typing.List pickles as the global typing.List; typing.List[int] is
+        # not a global of typing, so it is dropped before any reduction.
+        rows = [(typing.List, True), (typing.List[int], False)]  # noqa: UP006
+        entries = [_entry(GlobalSource("_ALIAS"), v, "ID_MATCH") for v, _ in rows]
+        keep = precompile_package.default_guard_filter_fn(entries)
+        self.assertEqual(list(keep), [k for _, k in rows])
+
     def test_default_guard_filter_through_serialize_guards(self):
         def fn(x):
             return _unportable_op(x) + len(x.shape)
@@ -517,15 +532,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             g.create_fn_name() for g in control_state.output_graph.guards
         )
         # pytree's classes are TreeSpec and typing.Any, which is a class only
-        # from Python 3.11 on.
-        class_matches = 2 if isinstance(pytree.Any, type) else 1
+        # from Python 3.11 on; before that it is a _SpecialForm, guarded by an
+        # ID_MATCH that is kept because it pickles as the global typing.Any.
+        any_is_class = isinstance(pytree.Any, type)
+        class_matches, id_matches = (2, 2) if any_is_class else (1, 3)
         self.assertEqual(
             counts - control_counts,
             {
                 "DICT_KEYS_MATCH": 1,
                 "MODULE_MATCH": 1,
                 "CLASS_MATCH": class_matches,
-                "ID_MATCH": 2,
+                "ID_MATCH": id_matches,
                 "FUNCTION_CODE_MATCH": 4,
             },
         )
@@ -1485,8 +1502,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             and value.__name__ == name
             and not reads_a_builtin(DictGetItemSource(_BUILTINS_DICT, name), value)
         ]
-        heap_types = ["ExceptionGroup"] if sys.version_info >= (3, 11) else []
-        self.assertEqual(refused, heap_types)
+        self.assertEqual(refused, ["ExceptionGroup"])
 
     def test_dynamo_synthesized_covers_only_the_resume_function_list(self):
         synthesized = precompile_package._is_dynamo_synthesized
@@ -1824,8 +1840,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # stores the function under its own name, is pinned last.
         def minted(key, qualname):
             code = _user_op.__code__.replace(co_name=qualname.rpartition(".")[2])
-            if sys.version_info >= (3, 11):
-                code = code.replace(co_qualname=qualname)
+            code = code.replace(co_qualname=qualname)
             fn = types.FunctionType(code, globals(), "__annotate__")
             fn.__qualname__ = qualname
             return type("Cfg", (), {key: fn})
@@ -2595,6 +2610,19 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertNotIn(slot, kept.dropped_guards)
         self.assertIn(slot, kept.kept_guards)
 
+    def test_an_identity_guard_on_a_typing_alias_is_kept(self):
+        # typing.List pickles as the global typing.List, so its ID_MATCH is
+        # serialized rather than dropped as a risky drop that trips the gate.
+        session = precompile_package.precompile_capture(_through_alias, backend="eager")
+        with session as call:
+            self.assertEqual(call(torch.ones(2)), torch.full((2,), 2.0))
+        summary = session.summary()
+        slot = ("ID_MATCH", "G['_ALIAS']")
+        self.assertIn(slot, summary.kept_guards)
+        self.assertNotIn(slot, summary.dropped_guards)
+        self.assertEqual(summary.risky_dropped_guards, ())
+        session.snapshot_artifact()
+
     @parametrize("backend", ["eager", "inductor"])
     def test_precompile_session_renders_behind_the_gates(self, backend):
         # Under inductor every backend graph is a bundled entry the session takes
@@ -2672,6 +2700,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config
+        import torch._inductor.config as inductor_config
         from torch._dynamo.precompile_package import _capture_config
 
         def flags():
@@ -2680,9 +2709,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 functorch_config.bypass_autograd_cache_key,
                 functorch_config.force_non_lazy_backward_lowering,
                 torch._dynamo.config.allow_empty_graphs,
+                inductor_config.triton.autotune_at_compile_time,
+                inductor_config.triton.multi_kernel,
             )
 
-        ambient = (False, False, False, False)
+        ambient, captured = (False,) * 5 + (1,), (True,) * 5 + (0,)
         with (
             functorch_config.patch(
                 bundled_autograd_cache=False,
@@ -2690,16 +2721,35 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 force_non_lazy_backward_lowering=False,
             ),
             torch._dynamo.config.patch(allow_empty_graphs=False),
+            inductor_config.patch(
+                {
+                    "triton.autotune_at_compile_time": False,
+                    "triton.multi_kernel": 1,
+                }
+            ),
         ):
             self.assertEqual(flags(), ambient)
-            with _capture_config():
-                self.assertEqual(flags(), (True, True, True, True))
-            self.assertEqual(flags(), ambient)
+            torch._logging._internal.warning_once.cache_clear()
+            with self.assertLogs(precompile_package.log, "WARNING") as logs:
+                with _capture_config(lowers_kernels=True):
+                    self.assertEqual(flags(), captured)
+                self.assertEqual(flags(), ambient)
 
-            with self.assertRaisesRegex(RuntimeError, "boom"):
-                with _capture_config():
-                    raise RuntimeError("boom")
-            self.assertEqual(flags(), ambient)
+                with self.assertRaisesRegex(RuntimeError, "boom"):
+                    with _capture_config(lowers_kernels=True):
+                        raise RuntimeError("boom")
+                self.assertEqual(flags(), ambient)
+            self.assertEqual(len(logs.records), 2)
+            self.assertIn("autotune_at_compile_time=False", logs.output[0])
+            self.assertIn("multi_kernel=1 to 0", logs.output[1])
+            with (
+                self.assertLogs(precompile_package.log, "WARNING") as logs,
+                inductor_config.patch("triton.multi_kernel", 2),
+                _capture_config(lowers_kernels=True),
+            ):
+                self.assertEqual(inductor_config.triton.multi_kernel, 0)
+            self.assertEqual(len(logs.records), 1)
+            self.assertIn("multi_kernel=2 to 0", logs.output[0])
 
             # Config values are per thread, so a worker entering the scope
             # patches only itself and the main thread stays ambient.
@@ -2708,7 +2758,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
             def hold():
                 seen.append(flags())
-                with _capture_config():
+                with _capture_config(lowers_kernels=True):
                     seen.append(flags())
                     entered.set()
                     release.wait(10)
@@ -2721,9 +2771,31 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             release.set()
             worker.join(10)
             self.assertFalse(worker.is_alive())
-            self.assertEqual(seen[1], (True, True, True, True))
+            self.assertEqual(seen[1], captured)
             self.assertEqual(seen[0], seen[2])
             self.assertNotEqual(seen[0], seen[1])
+
+    def test_eager_capture_keeps_triton_config_silently(self):
+        import torch._inductor.config as inductor_config
+
+        def fn(x):
+            return (
+                x + 1,
+                inductor_config.triton.autotune_at_compile_time,
+                inductor_config.triton.multi_kernel,
+            )
+
+        ambient = {
+            "triton.autotune_at_compile_time": False,
+            "triton.multi_kernel": 1,
+        }
+        session = precompile_package.precompile_capture(fn, backend="eager")
+        with inductor_config.patch(ambient):
+            torch._logging._internal.warning_once.cache_clear()
+            with self.assertNoLogs(precompile_package.log, "WARNING"):
+                with session as call:
+                    _, *seen = call(torch.ones(2))
+        self.assertEqual(seen, [False, 1])
 
     def test_capture_config_refuses_disabled_caches_and_honours_strict(self):
         import torch._functorch.config as functorch_config
@@ -2734,15 +2806,15 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # a capture with caches forced off would record nothing; say so up front.
         with torch.compiler.config.patch(force_disable_caches=True):
             with self.assertRaisesRegex(PackageError, "force_disable_caches"):
-                with _capture_config():
+                with _capture_config(lowers_kernels=True):
                     pass
 
         with functorch_config.patch(strict_autograd_cache=False):
             with torch._dynamo.config.patch(strict_precompile=False):
-                with _capture_config():
+                with _capture_config(lowers_kernels=True):
                     self.assertFalse(functorch_config.strict_autograd_cache)
             with torch._dynamo.config.patch(strict_precompile=True):
-                with _capture_config():
+                with _capture_config(lowers_kernels=True):
                     self.assertTrue(functorch_config.strict_autograd_cache)
             self.assertFalse(functorch_config.strict_autograd_cache)
 
