@@ -1691,15 +1691,30 @@ bool isValidDLPackCapsule(PyObject* data) {
       PyCapsule_IsValid(data, at::DLPackTraits<DLManagedTensor>::capsule);
 }
 
-// Infers a ScalarType from a buffer's declared format and itemsize.
+// Python's hasattr: only an AttributeError means the attribute is missing.
+bool has_attr(PyObject* obj, const char* name) {
+  int found = PyObject_HasAttrStringWithError(obj, name);
+  TORCH_CHECK_PYTHON(found >= 0);
+  return found == 1;
+}
+
+// Infers a ScalarType from a buffer-protocol object's declared format.
 // Only native byte order is supported because tensor_frombuffer reinterprets
-// bytes without byte-swapping; for unsupported/ambiguous formats it returns
-// nullopt and sets 'error', if given, which asks for an explicit dtype rather
-// than silently producing wrong results.
-std::optional<ScalarType> scalar_type_from_format(
-    const std::string& format,
-    Py_ssize_t itemsize,
-    std::string* error = nullptr) {
+// bytes without byte-swapping; unsupported/ambiguous formats raise, asking for
+// an explicit dtype rather than silently producing wrong results.
+ScalarType scalar_type_from_buffer_format(PyObject* obj) {
+  Py_buffer view;
+  if (PyObject_GetBuffer(obj, &view, PyBUF_FORMAT | PyBUF_STRIDES) < 0) {
+    PyErr_Clear();
+    TORCH_CHECK_VALUE(
+        false,
+        "could not infer a dtype from the buffer's format. "
+        "Please pass an explicit dtype= to torch.asarray.");
+  }
+  std::string format = view.format != nullptr ? view.format : "B";
+  auto itemsize = view.itemsize;
+  PyBuffer_Release(&view);
+
   // PEP-3118 scalar format: [ws] [byteorder] [ws] [count] [ws] typecode
   size_t i = 0;
   auto skip_ws = [&]() {
@@ -1732,17 +1747,13 @@ std::optional<ScalarType> scalar_type_from_format(
         break;
     }
   }
-  if (!native_order) {
-    if (error != nullptr) {
-      *error = c10::str(
-          "buffer has non-native byte order (format '",
-          format,
-          "'), which torch.asarray cannot reinterpret without copying. "
-          "Convert the buffer to native byte order first (e.g. with numpy's "
-          "arr.byteswap().view(arr.dtype.newbyteorder())).");
-    }
-    return std::nullopt;
-  }
+  TORCH_CHECK_VALUE(
+      native_order,
+      "buffer has non-native byte order (format '",
+      format,
+      "'), which torch.asarray cannot reinterpret without copying. "
+      "Convert the buffer to native byte order first (e.g. with numpy's "
+      "arr.byteswap().view(arr.dtype.newbyteorder())).");
 
   skip_ws();
 
@@ -1750,16 +1761,13 @@ std::optional<ScalarType> scalar_type_from_format(
   while (i < format.size() && format[i] >= '0' && format[i] <= '9') {
     ++i;
   }
-  if (i > count_start &&
-      !(i - count_start == 1 && format[count_start] == '1')) {
-    if (error != nullptr) {
-      *error = c10::str(
-          "could not infer a dtype from buffer format '",
-          format,
-          "' (multi-element formats are not supported). "
-          "Please pass an explicit dtype= to torch.asarray.");
-    }
-    return std::nullopt;
+  if (i > count_start) {
+    TORCH_CHECK_VALUE(
+        i - count_start == 1 && format[count_start] == '1',
+        "could not infer a dtype from buffer format '",
+        format,
+        "' (multi-element formats are not supported). "
+        "Please pass an explicit dtype= to torch.asarray.");
   }
 
   skip_ws();
@@ -1831,92 +1839,23 @@ std::optional<ScalarType> scalar_type_from_format(
     }
   }
 
-  if (!scalar_type.has_value()) {
-    if (error != nullptr) {
-      *error = c10::str(
-          "could not infer a dtype from buffer format '",
-          format,
-          "'. Please pass an explicit dtype= to torch.asarray.");
-    }
-    return std::nullopt;
-  }
-
-  if (at::elementSize(*scalar_type) != static_cast<size_t>(itemsize)) {
-    if (error != nullptr) {
-      *error = c10::str(
-          "buffer format '",
-          format,
-          "' has itemsize ",
-          itemsize,
-          " which does not match the inferred dtype ",
-          *scalar_type,
-          ". Please pass an explicit dtype= to torch.asarray.");
-    }
-    return std::nullopt;
-  }
-
-  return scalar_type;
-}
-
-struct BufferFormat {
-  std::string format;
-  Py_ssize_t itemsize;
-  // Whether tensor_frombuffer can read it as the array it holds. A buffer can
-  // refuse at runtime (a GPU array's does), and tensor_frombuffer doesn't ask
-  // for strides: a conforming exporter refuses, but others return the data
-  // without them.
-  bool readable;
-};
-
-// The format of the buffer 'obj' exports, or nullopt if it can't export one.
-std::optional<BufferFormat> buffer_format(PyObject* obj) {
-  Py_buffer view;
-  if (PyObject_GetBuffer(obj, &view, PyBUF_FORMAT | PyBUF_STRIDES) < 0) {
-    TORCH_CHECK_PYTHON(PyErr_ExceptionMatches(PyExc_Exception));
-    PyErr_Clear();
-    return std::nullopt;
-  }
-  BufferFormat result{
-      view.format != nullptr ? view.format : "B",
-      view.itemsize,
-      view.len > 0 && PyBuffer_IsContiguous(&view, 'C') != 0};
-  PyBuffer_Release(&view);
-  return result;
-}
-
-ScalarType scalar_type_from_buffer_format(PyObject* obj) {
-  auto buffer = buffer_format(obj);
   TORCH_CHECK_VALUE(
-      buffer.has_value(),
-      "could not infer a dtype from the buffer's format. "
-      "Please pass an explicit dtype= to torch.asarray.");
-  std::string error;
-  auto scalar_type =
-      scalar_type_from_format(buffer->format, buffer->itemsize, &error);
-  TORCH_CHECK_VALUE(scalar_type.has_value(), error);
+      scalar_type.has_value(),
+      "could not infer a dtype from buffer format '",
+      format,
+      "'. Please pass an explicit dtype= to torch.asarray.");
+
+  TORCH_CHECK_VALUE(
+      at::elementSize(*scalar_type) == static_cast<size_t>(itemsize),
+      "buffer format '",
+      format,
+      "' has itemsize ",
+      itemsize,
+      " which does not match the inferred dtype ",
+      *scalar_type,
+      ". Please pass an explicit dtype= to torch.asarray.");
+
   return *scalar_type;
-}
-
-// The dtype that 'obj' declares in its buffer's format, if tensor_frombuffer
-// can read the buffer as the array it holds.
-std::optional<ScalarType> readable_buffer_dtype(PyObject* obj) {
-  auto buffer = buffer_format(obj);
-  if (!buffer.has_value() || !buffer->readable) {
-    return std::nullopt;
-  }
-  return scalar_type_from_format(buffer->format, buffer->itemsize);
-}
-
-// Like PyObject_HasAttrString, which internal_new_from_data uses, an error
-// raised by the lookup means the attribute is missing, except that a
-// KeyboardInterrupt or SystemExit propagates.
-bool has_attr(PyObject* obj, const char* name) {
-  int found = PyObject_HasAttrStringWithError(obj, name);
-  if (found < 0) {
-    TORCH_CHECK_PYTHON(PyErr_ExceptionMatches(PyExc_Exception));
-    PyErr_Clear();
-  }
-  return found > 0;
 }
 
 } // namespace
@@ -2026,14 +1965,8 @@ Tensor asarray(
 
   // Check whether 'obj' exposes a '__dlpack__' method, preferring it over the
   // buffer protocol so dtype, device, and shape come from the producer.
-  bool use_buffer = PyObject_CheckBuffer(obj) != 0;
-  std::optional<ScalarType> buffer_dtype = dtype;
-  // A DLPack or __cuda_array_interface__ import, handled as
-  // internal_new_from_data handles one.
-  bool is_import = false;
+  bool is_dlpack_import = false;
   if (!tensor.defined() && has_attr(obj, "__dlpack__")) {
-    // Resolved outside the try so a broken install propagates instead of
-    // silently falling back.
     py::object from_dlpack =
         py::module::import("torch").attr("utils").attr("dlpack").attr(
             "from_dlpack");
@@ -2044,77 +1977,27 @@ Tensor asarray(
     try {
       tensor = from_dlpack(py::handle(obj), py::arg("copy") = copy_arg)
                    .cast<Tensor>();
-      is_import = true;
     } catch (py::error_already_set& e) {
-      if (!e.matches(PyExc_Exception)) {
+      // A producer that can only export a copy raises BufferError for
+      // copy=False, which the Array API reports as a ValueError.
+      if (!force_alias || !e.matches(PyExc_BufferError)) {
         throw;
       }
-      // copy=False asks for the producer's array, which no other path returns.
-      if (force_alias) {
-        py::raise_from(
-            e,
-            PyExc_ValueError,
-            "can't alias the object into a tensor, because reading it through DLPack failed.");
-        throw py::error_already_set();
-      }
-      // Fall back only to a path that can read the object: the buffer path,
-      // or with NumPy the __cuda_array_interface__ path. Anything else would
-      // reach the same from_dlpack call in internal_new_from_data. The buffer
-      // is read as the dtype its format declares, so dtype= converts its
-      // values below, as it does a DLPack import's.
-      if (use_buffer) {
-        buffer_dtype = readable_buffer_dtype(obj);
-        use_buffer = buffer_dtype.has_value();
-      }
-      bool use_cuda_array_interface = false;
-#ifdef USE_NUMPY
-      use_cuda_array_interface = !use_buffer && is_numpy_available() &&
-          has_attr(obj, "__cuda_array_interface__");
-#endif
-      if (!use_buffer && !use_cuda_array_interface) {
-        throw;
-      }
-      // Named by type only, so that Python's default filter shows the warning
-      // once per call site.
-      const char* error = Py_TYPE(e.value().ptr())->tp_name;
-      if (use_buffer) {
-        TORCH_WARN(
-            "torch.asarray: reading the object through DLPack failed with ",
-            error,
-            ", so its buffer is read into a flat tensor instead. To read it "
-            "that way without this warning, call torch.frombuffer(obj, dtype=torch.",
-            c10::getDtypeNames(*buffer_dtype).first,
-            ") and convert or copy the result as needed.");
-      } else {
-        TORCH_WARN(
-            "torch.asarray: reading the object through DLPack failed with ",
-            error,
-            ", so its __cuda_array_interface__ is read instead. To read it "
-            "that way without this warning, call torch.as_tensor(obj) and "
-            "convert or copy the result as needed.");
-      }
-#ifdef USE_NUMPY
-      if (use_cuda_array_interface) {
-        // At its own device, which device= then copies from.
-        tensor = tensor_from_cuda_array_interface(obj);
-        at::Device cuda_device = tensor.device();
-        maybe_initialize_device(cuda_device);
-        is_import = true;
-      }
-#endif
+      py::raise_from(
+          e,
+          PyExc_ValueError,
+          "can't alias the object into a tensor, because reading it through DLPack failed.");
+      throw py::error_already_set();
     }
+    is_dlpack_import = true;
   }
 
   // Check whether 'obj' implements the buffer protocol
-  if (!tensor.defined() && use_buffer) {
+  if (!tensor.defined() && PyObject_CheckBuffer(obj) != 0) {
     // When no dtype is given, infer it from the buffer's declared format
-    if (!buffer_dtype.has_value()) {
-      buffer_dtype = scalar_type_from_buffer_format(obj);
-    }
-    // requires_grad is set below, after any copy, so that the result is a
-    // leaf.
-    tensor =
-        tensor_frombuffer(obj, *buffer_dtype, -1, 0, /*requires_grad=*/false);
+    ScalarType buffer_dtype =
+        dtype.has_value() ? *dtype : scalar_type_from_buffer_format(obj);
+    tensor = tensor_frombuffer(obj, buffer_dtype, -1, 0, return_requires_grad);
   }
 
   if (tensor.defined()) {
@@ -2137,7 +2020,7 @@ Tensor asarray(
         }
         return tensor.clone();
       };
-      if (is_import) {
+      if (is_dlpack_import) {
         // As in internal_new_from_data. The import holds its memory, and is
         // only released once the GIL is back.
         Tensor copied;
@@ -2149,8 +2032,8 @@ Tensor asarray(
         tensor = std::move(copied);
       } else {
         // With the GIL held: tensor_frombuffer doesn't hold the buffer's
-        // export, so releasing it would let another thread resize the buffer
-        // mid-copy.
+        // export, so releasing the GIL would let another thread resize the
+        // buffer mid-copy.
         tensor = copy_tensor();
       }
     } else {
@@ -2170,7 +2053,7 @@ Tensor asarray(
           "' into dtype '",
           dtype.value(),
           "'.");
-      if (is_import) {
+      if (is_dlpack_import) {
         // A traced factory call, as in internal_new_from_data, so that
         // torch.jit.trace doesn't take the result for a constant.
         tensor = tensor.to(
@@ -2194,9 +2077,10 @@ Tensor asarray(
       tensor.set_requires_grad(return_requires_grad);
     }
   } else {
-    // Undefined tensor means neither DLPack nor the buffer protocol produced
-    // one. Last cases are a sequence, in which case we must copy (copy can't be
-    // false), and a __cuda_array_interface__ object, which copy_numpy copies.
+    // Undefined tensor means it does not implement neither DLPack nor
+    // the buffer protocol. Last cases are a sequence, in which case we must
+    // copy (copy can't be false), and a __cuda_array_interface__ object, which
+    // copy_numpy copies.
     TORCH_CHECK_VALUE(
         !force_alias, "can't alias arbitrary sequence into a tensor.");
 
