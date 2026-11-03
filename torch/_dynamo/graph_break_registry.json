@@ -39,16 +39,6 @@
       ]
     }
   ],
-  "GB5813": [
-    {
-      "Gb_type": "bytearray resize of a possibly exported input",
-      "Context": "bytearray: {self}",
-      "Explanation": "A store that resizes a bytearray raises BufferError in eager while the buffer is exported, e.g. by a memoryview. Dynamo cannot see exports of an input bytearray, so the store is left to eager.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB3084": [
     {
       "Gb_type": "bytearray slice store with Python __index__ bounds",
@@ -1078,6 +1068,17 @@
       ]
     }
   ],
+  "GB2918": [
+    {
+      "Gb_type": "bytearray store to an existing bytearray",
+      "Context": "bytearray: {self}",
+      "Explanation": "Dynamo traces bytearray item and slice stores only on bytearrays created in the compiled region. An existing bytearray may share its buffer with a memoryview, tensor or array that Dynamo cannot see, so the store is left to eager.",
+      "Hints": [
+        "Store into a bytearray created inside the compiled function.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0064": [
     {
       "Gb_type": "Fake tensor propagation exception",
@@ -1826,7 +1827,7 @@
     {
       "Gb_type": "bytearray store with an unsupported value",
       "Context": "value: {value}",
-      "Explanation": "Dynamo only traces bytearray item and slice stores whose value is a constant, bytes-like, or a constant list or tuple, not {value.python_type_name()}.",
+      "Explanation": "Dynamo only traces bytearray item and slice stores whose value is a constant, a bytearray, or a constant plain list or tuple.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

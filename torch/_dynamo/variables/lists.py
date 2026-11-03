@@ -19,7 +19,6 @@ import inspect
 import operator
 import sys
 import types
-from collections.abc import Callable
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 from typing_extensions import TypeIs
 
@@ -71,6 +70,7 @@ from .base import (
     MutationType,
     NO_SUCH_SUBOBJ,
     readonly_setter,
+    ValueMutationExisting,
     ValueMutationNew,
     VariableTracker,
 )
@@ -2200,6 +2200,7 @@ class ByteArrayVariable(VariableTracker):
         # bytearray_ass_subscript: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
         if not self.is_mutable():
             return super().mp_ass_subscript_impl(tx, key, value)
+        self._decline_store_to_existing()
         # value=None signals delete (CPython NULL sentinel).
         if pyindex_check(maybe_get_python_type(key)):
             index = pynumber_as_ssize_t(tx, key)
@@ -2233,14 +2234,16 @@ class ByteArrayVariable(VariableTracker):
                 src = value.as_python_constant()
             else:
                 self._unsupported_store_value(value)
-
-            def store(data: bytearray) -> None:
+            new_data = bytearray(self.data)
+            try:
                 if value is None:
-                    del data[index]
+                    del new_data[index]
                 else:
-                    data[index] = src
-
-            self._store_on_copy(tx, store)
+                    new_data[index] = src
+            except (TypeError, ValueError) as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            tx.output.side_effects.mutation(self)
+            self.data = new_data
             return ConstantVariable.create(None)
         else:
             raise_type_error(
@@ -2258,6 +2261,7 @@ class ByteArrayVariable(VariableTracker):
         # bytearray_setitem: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
         if not self.is_mutable():
             return super().sq_ass_item_impl(tx, key, value)
+        self._decline_store_to_existing()
         # value=None signals delete (CPython NULL sentinel).
         index = key.nb_index_impl(tx).as_python_constant()
         byte = None
@@ -2277,49 +2281,33 @@ class ByteArrayVariable(VariableTracker):
             raise_observed_exception(
                 IndexError, tx, args=["bytearray index out of range"]
             )
-
-        def store(data: bytearray) -> None:
-            if byte is None:
-                del data[index]
-            else:
-                data[index] = byte
-
-        self._store_on_copy(tx, store)
-        return ConstantVariable.create(None)
-
-    def _store_on_copy(
-        self,
-        tx: "InstructionTranslatorBase",
-        store: Callable[[bytearray], None],
-    ) -> None:
-        # The store runs on a new buffer, so a sourced live object is not
-        # mutated during tracing, and side-effect replay updates it after the
-        # frame. Eager raises BufferError for a resize while the buffer is
-        # exported, which replay would raise outside the user's code. Only a
-        # sourced bytearray can have a live export, as Dynamo does not trace
-        # memoryview(): give the copy an export so that the real store shows
-        # whether it resizes, and leave such stores to eager.
         new_data = bytearray(self.data)
-        view = memoryview(new_data) if self.source is not None else None
-        try:
-            store(new_data)
-        except BufferError:
-            unimplemented(
-                gb_type="bytearray resize of a possibly exported input",
-                context=f"bytearray: {self}",
-                explanation="A store that resizes a bytearray raises BufferError "
-                "in eager while the buffer is exported, e.g. by a memoryview. "
-                "Dynamo cannot see exports of an input bytearray, so the store "
-                "is left to eager.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        except (TypeError, ValueError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        finally:
-            if view is not None:
-                view.release()
+        if byte is None:
+            del new_data[index]
+        else:
+            new_data[index] = byte
         tx.output.side_effects.mutation(self)
         self.data = new_data
+        return ConstantVariable.create(None)
+
+    def _decline_store_to_existing(self) -> None:
+        # Stores run on a copy that side-effect replay writes back after the
+        # frame. A bytearray that existed before the frame may share its buffer
+        # with a memoryview, tensor or ndarray, which would read stale bytes,
+        # and eager raises BufferError for a resize at the store itself.
+        if isinstance(self.mutation_type, ValueMutationExisting):
+            unimplemented(
+                gb_type="bytearray store to an existing bytearray",
+                context=f"bytearray: {self}",
+                explanation="Dynamo traces bytearray item and slice stores only on "
+                "bytearrays created in the compiled region. An existing bytearray "
+                "may share its buffer with a memoryview, tensor or array that "
+                "Dynamo cannot see, so the store is left to eager.",
+                hints=[
+                    "Store into a bytearray created inside the compiled function.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
     @staticmethod
     def _has_python_index(member: VariableTracker) -> bool:
@@ -2345,8 +2333,7 @@ class ByteArrayVariable(VariableTracker):
             gb_type="bytearray store with an unsupported value",
             context=f"value: {value}",
             explanation="Dynamo only traces bytearray item and slice stores whose "
-            "value is a constant, bytes-like, or a constant list or tuple, "
-            f"not {value.python_type_name()}.",
+            "value is a constant, a bytearray, or a constant plain list or tuple.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 

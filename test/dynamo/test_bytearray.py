@@ -13,7 +13,11 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import make_dynamo_test, run_tests
+from torch.testing._internal.common_utils import (
+    make_dynamo_test,
+    run_tests,
+    skipIfTorchDynamo,
+)
 
 
 class Indexable:
@@ -864,62 +868,42 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(b, b"df")
         self.assertRaises(ValueError, delitem, b, slice(None, None, 0))
 
-    def test_setitem_delitem_arg_mutation(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def f(ba, x):
-            ba[0] = ord("x")
-            ba[1:3] = b"YZ"
-            ba[::2] = b"PQ"
-            return x + 1
-
-        b = bytearray(b"abcd")
-        self.assertEqual(f(b, torch.ones(1)), torch.ones(1) + 1)
-        self.assertEqual(b, bytearray(b"PYQd"))
-
-    def test_setitem_delitem_input_resize(self):
-        def f(ba, key, value, x):
-            try:
-                if value is None:
-                    delitem(ba, key)
-                else:
-                    setitem(ba, key, value)
-            except BufferError as e:
-                return str(e), x + 1
-            return None, x + 1
-
-        def run(fn, key, value, exported):
-            ba = bytearray(b"abcd")
-            view = memoryview(ba) if exported else None
-            result = fn(ba, key, value, torch.ones(1))
-            if view is not None:
-                view.release()
-            return result, ba
-
+    def test_store_to_existing_bytearray(self):
         cases = [
-            (slice(0, 1), b"XY"),
-            (slice(0, 2), b""),
-            (0, None),
-            (slice(None, None, 2), None),
-            # An empty extended slice still resizes.
-            (slice(5, 5, 2), None),
-            (slice(5, 5, 2), b""),
+            (setitem, (0, ord("x"))),
+            (setitem, (slice(1, 3), b"YZ")),
+            (delitem, (0,)),
+            (delitem, (slice(None, None, 2),)),
         ]
-        for key, value in cases:
-            for exported in (False, True):
-                with self.subTest(key=key, value=value, exported=exported):
-                    torch._dynamo.reset()
-                    compiled = torch.compile(f, backend="eager")
-                    self.assertEqual(
-                        run(compiled, key, value, exported),
-                        run(f, key, value, exported),
+        for fn, args in cases:
+            with self.subTest(fn=fn.__name__, args=args):
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported,
+                    "bytearray store to an existing bytearray",
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=True)(
+                        bytearray(b"abcd"), *args
                     )
 
-        # A resizing store on an input may hit a live export: left to eager.
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "bytearray resize of a possibly exported input",
-        ):
-            torch.compile(delitem, backend="eager", fullgraph=True)(bytearray(b"ab"), 0)
+    @skipIfTorchDynamo("torch.frombuffer on a bytearray is not traceable")
+    def test_store_to_existing_bytearray_with_export(self):
+        # The tensor shares the buffer: it must see the store, and a resize
+        # must raise BufferError inside the try.
+        def f(ba, t, x):
+            ba[0] = 9
+            try:
+                ba[1:2] = b"XY"
+            except BufferError as e:
+                return t.sum(), str(e), x + 1
+            return t.sum(), None, x + 1
+
+        def run(fn):
+            ba = bytearray(b"\x01\x02")
+            t = torch.frombuffer(ba, dtype=torch.uint8)
+            return fn(ba, t, torch.ones(1)), ba
+
+        self.assertEqual(run(torch.compile(f, backend="eager")), run(f))
 
     def test_setslice_python_index_bounds(self):
         class Bound:
@@ -932,72 +916,74 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 self.log.append(self.name)
                 return self.value
 
-        def f(ba, start, stop, step, value, x):
+        def f(start, stop, step, value, x):
+            ba = bytearray(b"abcd")
             ba[start:stop:step] = value
-            return x + 1
+            return ba, x + 1
 
         def run(fn, value):
             log = []
-            ba = bytearray(b"abcd")
-            bounds = [Bound(name, i, log) for name, i in (("start", 0), ("stop", 2))]
-            fn(ba, *bounds, Bound("step", 1, log), value, torch.ones(1))
-            return ba, log
+            bounds = [
+                Bound(n, i, log) for n, i in (("start", 0), ("stop", 2), ("step", 1))
+            ]
+            return fn(*bounds, value, torch.ones(1)), log
 
         # CPython unpacks the slice step first, and again for a value that
         # is not a bytearray.
         for value in (b"XY", bytearray(b"XY"), [88, 89]):
             with self.subTest(value=value):
                 torch._dynamo.reset()
-                compiled = torch.compile(f, backend="eager")
-                self.assertEqual(run(compiled, value), run(f, value))
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "bytearray slice store with Python __index__ bounds",
-        ):
-            torch.compile(f, backend="eager", fullgraph=True)(
-                bytearray(b"ab"), Indexable(0), 1, None, b"X", torch.ones(1)
-            )
+                self.assertEqual(
+                    run(torch.compile(f, backend="eager"), value), run(f, value)
+                )
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported,
+                    "bytearray slice store with Python __index__ bounds",
+                ):
+                    run(torch.compile(f, backend="eager", fullgraph=True), value)
 
     def test_setslice_input_values(self):
         @torch.compile(backend="eager", fullgraph=True)
-        def f(ba, values, x):
+        def f(values, x):
+            ba = bytearray(b"xyz")
             ba[0:2] = values
-            return x + 1
+            return ba, x + 1
 
         for values in ([65, 66], (65, 66), b"AB", bytearray(b"AB")):
             with self.subTest(values=values):
-                b = bytearray(b"xyz")
-                f(b, values, torch.ones(1))
-                self.assertEqual(b, bytearray(b"ABz"))
+                self.assertEqual(f(values, torch.ones(1))[0], bytearray(b"ABz"))
 
     def test_setitem_setslice_nonconstant_graph_break(self):
         cnt = CompileCounter()
 
         @torch.compile(backend=cnt)
-        def f(ba, x):
+        def f(x):
+            ba = bytearray(b"ab")
             x = x + 1
             ba[0] = 0x7A
             x = x * 2
             ba[:1] = (i for i in range(2))
             x = x - 1
             ba[-1] = x[0].to(torch.int64)
-            return x * 3
+            return ba, x * 3
 
-        b = bytearray(b"ab")
-        self.assertEqual(f(b, torch.ones(1)), torch.full((1,), 9.0))
-        self.assertEqual(b, bytearray(b"\x00\x01\x03"))
-        # The constant store is traced; the generator and tensor values each
-        # break the graph once.
+        self.assertEqual(
+            f(torch.ones(1)), (bytearray(b"\x00\x01\x03"), torch.full((1,), 9.0))
+        )
+        # The constant store is traced. The generator value breaks the graph,
+        # and in the resume function ba already exists, so its store breaks too.
         self.assertEqual(cnt.frame_count, 3)
 
-        def g(ba, x):
+        def g(x):
+            ba = bytearray(b"ab")
             ba[0] = x[0].to(torch.int64)
+            return ba
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported, "bytearray store with an unsupported value"
         ):
-            torch.compile(g, backend="eager", fullgraph=True)(b, torch.ones(1))
+            torch.compile(g, backend="eager", fullgraph=True)(torch.ones(1))
 
     def test_repr(self):
         @torch.compile(backend="eager")
