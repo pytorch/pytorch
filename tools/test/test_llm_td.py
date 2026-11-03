@@ -161,10 +161,12 @@ class TestSelection(unittest.TestCase):
             ("test/compiled_autograd_skips/TestNN.test_x", {"test_nn"}, set()),
             ("test/compiled_autograd_skips/TestGone.test_x", set(), {"dynamo_wrapped"}),
             ("test/dynamo_skips/.gitkeep", set(), set()),
+            # Not checked at import, and it names no test.
+            ("test/compiled_autograd_skips/TestNN", set(), set()),
             # dynamo_test_failures.py rejects these names at import.
             ("test/dynamo_skips/TestNN_test_x", set(), {"dynamo_wrapped"}),
             ("test/dynamo_expected_failures/TestNN.test_x.y", set(), {"dynamo_wrapped"}),
-            ("test/compiled_autograd_skips/TestNN", set(), {"dynamo_wrapped"}),
+            ("test/dynamo_skips/TestNN.x-TestNN.test_y", set(), {"dynamo_wrapped"}),
         ]:  # fmt: skip
             sel = self.select_in_tree(sources, CANDIDATES, [changed])
             self.assertFalse(sel.run_all, changed)
@@ -393,6 +395,14 @@ class TestSplit(unittest.TestCase):
         self.assertEqual(exclude, ["c", "untimed", "rest", "zero", "neg"])
         self.assertEqual((split.covered, split.hedged, split.budget), ({"a"}, {"b", "d"}, 200))  # fmt: skip
 
+    def test_nothing_chosen_keeps_td_include(self) -> None:
+        # A targeted call such as `run_test.py --include test_cuda`: one file
+        # is all of the call's time, so it never fits the 20% hedge.
+        include, exclude, split = self.split(Selection(files={"a"}), {TestRun("test_cuda"): 1}, {"test_cuda": 100}, td={"test_cuda"})  # fmt: skip
+        self.assertEqual((include, exclude, split.kept_td), (["test_cuda"], [], True))
+        include, exclude, split = self.split(Selection(files={"test_cuda"}), {TestRun("test_cuda"): 1}, {"test_cuda": 100}, td={"test_cuda"})  # fmt: skip
+        self.assertEqual((include, split.kept_td), (["test_cuda"], False))
+
     def test_partial_runs_of_a_file_are_charged_once(self) -> None:
         f_a, f_rest = TestRun("f", included=["A"]), TestRun("f", excluded=["A"])
         g_b = TestRun("g", included=["B"])
@@ -476,6 +486,7 @@ class TestApplySelection(unittest.TestCase):
             "num_td_include": 2,
             "num_hedged": 1,
             "num_previously_failed": 1,
+            "kept_td": False,
             "time_total": 1000,
             "time_covered": 10,
             "time_hedged": 170,

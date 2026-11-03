@@ -43,10 +43,11 @@ MAX_IMPORT_HOPS = 8
 # More edited failure-list classes than this are not looked up one by one.
 MAX_FAILURE_LIST_CLASSES = 50
 # When enforcing, run_test.py also runs the files that already failed on the
-# PR and that TD runs, charged first to this share (20%) of the config's test
-# time (all shards together), and then, greedily in rank order, TD's positively
-# scored files that have a known time and fit what is left: TD and the model
-# miss largely different failures.
+# PR and that TD runs, charged first to this share (20%) of the test time of
+# the call's test list (for a whole config, all its shards together; for a
+# targeted --include call, only those files), and then, greedily in rank order,
+# TD's positively scored files that have a known time and fit what is left: TD
+# and the model miss largely different failures.
 LLM_TD_HEDGE = 0.20
 
 
@@ -167,15 +168,17 @@ def failure_list_sources(
     """The paths under test/ that define the classes named by the edited
     failure-list entries (see FAILURE_LIST_RE), and the lists ("dynamo",
     "inductor" or "compiled_autograd") naming a class that `grep` (see
-    importers) does not find or holding an entry that FAILURE_LIST_RE cannot
-    parse, which dynamo_test_failures.py rejects at import."""
+    importers) does not find or holding an entry without exactly one ".", which
+    dynamo_test_failures.py rejects at import for the dynamo and inductor lists."""
     classes: dict[str, set[str]] = {}
     unparsed: set[str] = set()
     for f in changed_files:
-        if m := FAILURE_LIST_RE.match(f):
+        if not (d := FAILURE_LIST_DIR_RE.match(f)):
+            continue
+        if d[1] != "compiled_autograd" and f.rsplit("/", 1)[-1].count(".") != 1:
+            unparsed.add(d[1])
+        elif m := FAILURE_LIST_RE.match(f):
             classes.setdefault(m[2], set()).add(m[1])
-        elif (m := FAILURE_LIST_DIR_RE.match(f)) and not f.endswith("/.gitkeep"):
-            unparsed.add(m[1])
     if grep is None or len(classes) > MAX_FAILURE_LIST_CLASSES:
         return [], unparsed.union(*classes.values())
     sources: list[str] = []
@@ -315,12 +318,14 @@ class Selection:
         their size, and a hedge. The pool of previous failures spans the PR's
         SHAs and configs, so running only those TD runs keeps their cost within
         TD's. They are charged first to a budget of LLM_TD_HEDGE (20%) of the
-        config's test time; what is left (at least 0) is spent greedily in
+        test time of `ranked`; what is left (at least 0) is spent greedily in
         rank order on the files with a positively scored TestRun, including
         the other previous failures. One positive
         class-level run hedges its whole file at the file's full time. Files
         without a time are never hedged. Partial TestRuns of one file share
-        its time, so a file is charged once and lands in one batch."""
+        its time, so a file is charged once and lands in one batch. If that
+        chooses nothing, the files in `td_include` run (kept_td), so a call
+        never runs fewer files than TD's split, which keeps at least one."""
         files = dict.fromkeys(x.test_file for x in ranked)
         covered = {f for f in files if self.covers(f, test_config)}
         prev = {f for f in files if f in previously_failed and f in td_include} - covered  # fmt: skip
@@ -334,9 +339,12 @@ class Selection:
                 left -= t
                 hedged.add(f)
                 chosen.add(f)
+        kept_td = not chosen
+        if kept_td:
+            chosen = {f for f in files if f in td_include}
         include = [x for x in ranked if x.test_file in chosen]
         exclude = [x for x in ranked if x.test_file not in chosen]
-        return Split(include, exclude, covered, prev, hedged, budget)
+        return Split(include, exclude, covered, prev, hedged, budget, kept_td)
 
     def to_json(self) -> dict:
         return {
@@ -388,7 +396,8 @@ class Selection:
 class Split:
     """Selection.split's result: the TestRuns to run and to skip, and which
     files run because they are covered, already failed on the PR and are in
-    TD's split, or are hedged (disjoint sets), and the hedge budget in seconds."""
+    TD's split, or are hedged (disjoint sets), the hedge budget in seconds, and
+    whether none of those ran so TD's split was kept."""
 
     include: list[TestRun]
     exclude: list[TestRun]
@@ -396,6 +405,7 @@ class Split:
     previously_failed: set[str]
     hedged: set[str]
     budget: float
+    kept_td: bool
 
 
 @dataclass
@@ -477,6 +487,7 @@ def apply_selection(
         "num_td_include": len(td_include),
         "num_hedged": len(split.hedged),
         "num_previously_failed": len(split.previously_failed),
+        "kept_td": split.kept_td,
         "time_total": time_total,
         "time_covered": sum(file_time[f] for f in split.covered),
         "time_hedged": sum(file_time[f] for f in split.hedged),
