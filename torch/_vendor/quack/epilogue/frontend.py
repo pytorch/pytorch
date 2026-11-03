@@ -769,8 +769,6 @@ class EpiMod:
             if (
                 A_idx is not None
                 or use_tma_gather
-                or SFA is not None
-                or SFB is not None
                 or concat_layout
                 or transform_a is not None
                 or ag_args is not None
@@ -778,7 +776,10 @@ class EpiMod:
                 or split_k != 1
                 or add_to_output
             ):
-                raise ValueError("varlen_k supports plain GEMM without gather/scales/swap/split-K")
+                raise ValueError(
+                    "varlen_k does not support gather, concat, transforms, all-gather, "
+                    "swap, split-K, or add_to_output"
+                )
             if self.mode != "element" or self.sinks or self.prepass is not None:
                 raise ValueError("varlen_k supports element-mode epilogues without reductions")
         gather_A = A_idx is not None
@@ -938,8 +939,8 @@ class EpiMod:
                 )
             return plan
         if blockscaled:
-            if varlen_m or gather_A:
-                raise ValueError("blockscaled GEMM does not support varlen/gather yet")
+            if gather_A:
+                raise ValueError("blockscaled GEMM does not support gather yet")
             if concat_key:
                 raise ValueError("blockscaled GEMM does not support concat_layout")
             if tile_K is not None:
@@ -947,7 +948,7 @@ class EpiMod:
         if varlen_k:
             if not persistent:
                 raise ValueError("varlen_k requires persistent=True")
-            if A.dtype not in (torch.bfloat16, torch.float16) or B.dtype != A.dtype:
+            if not blockscaled and (A.dtype not in (torch.bfloat16, torch.float16) or B.dtype != A.dtype):
                 raise ValueError("varlen_k requires matching BF16/FP16 operands")
             if (
                 A.ndim != 2 or B.ndim != 2 or A.shape[-1] != B.shape[-1]
@@ -1233,8 +1234,14 @@ class EpiMod:
             fmt_a, fmt_b = resolve_blockscaled_formats(bs_format_a, bs_format_b)
             a_mma_dtype = fmt_a.to_cutlass_dtype()
             b_mma_dtype = fmt_b.to_cutlass_dtype()
+            num_batches = None
+            if varlen_m:
+                num_batches = cu_seqlens_m.shape[0] - 1
+            elif varlen_k:
+                num_batches = cu_seqlens_k.shape[0] - 1
             sf_dtype, sf_vec_size = validate_blockscaled_sf(
-                A, B, SFA, SFB, device_capacity, b_kn=b_kn, fmt_a=fmt_a, fmt_b=fmt_b
+                A, B, SFA, SFB, device_capacity, num_batches=num_batches,
+                varlen_k=varlen_k, b_kn=b_kn, fmt_a=fmt_a, fmt_b=fmt_b,
             )
         # Re-map pinned ops' kind for the device loop: explicit pins still
         # need a fragment kind; VecLoads present as their dim.
