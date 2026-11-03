@@ -95,6 +95,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_CI,
     IS_FBCODE,
+    IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
@@ -5902,6 +5903,98 @@ class AOTInductorTestsTemplate:
             example_args = (torch.randn(8, device=self.device),)
             self.check_model(M(), example_args, options={"fallback_by_default": True})
 
+    @parametrize("empty_middle", [False, True])
+    @config.patch({"triton.autotune_at_compile_time": False, "memory_planning": True})
+    def test_nested_tensor_list_fallback(self, empty_middle):
+        with torch.library._scoped_library("nested_fallback", "FRAGMENT") as lib:
+            torch.library.define(
+                "nested_fallback::lists",
+                "(Tensor x) -> (Tensor[], Tensor[], Tensor[])",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "nested_fallback::lists", "CompositeExplicitAutograd", lib=lib
+            )
+            @torch.library.register_fake("nested_fallback::lists", lib=lib)
+            def lists(x):
+                return [x + 1, x * 2], [] if empty_middle else [x - 3], [x.square()]
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    first, middle, last = torch.ops.nested_fallback.lists(x.sin())
+                    result = first[0] * first[1] + last[0]
+                    if not empty_middle:
+                        result = result + middle[0]
+                    return result
+
+            inputs = [
+                (torch.randn(batch, 16, device=self.device),) for batch in (4, 7, 12)
+            ]
+            self.check_model_with_multiple_inputs(
+                Model(),
+                inputs,
+                dynamic_shapes=({0: Dim("batch", min=2, max=32)},),
+            )
+
+    @config.patch({"triton.autotune_at_compile_time": False})
+    def test_mutating_empty_tensor_list_fallback(self):
+        from torch._inductor.lowering import (
+            fallbacks,
+            lowerings,
+            make_fallback,
+            needs_realized_inputs,
+        )
+
+        with torch.library._scoped_library("empty_list_fallback", "FRAGMENT") as lib:
+            lib.define("fill(Tensor x) -> Tensor", tags=torch.Tag.pt2_compliant_tag)
+            lib.define(
+                "empty_out(Tensor(a!) out) -> Tensor[]",
+                tags=torch.Tag.pt2_compliant_tag,
+            )
+            lib.impl(
+                "fill", lambda x: torch.full_like(x, 7), "CompositeExplicitAutograd"
+            )
+            lib.impl("fill", lambda x: torch.empty_like(x), "Meta")
+
+            def empty_out(out):
+                out.fill_(7)
+                return []
+
+            lib.impl("empty_out", empty_out, "CompositeExplicitAutograd")
+            lib.impl("empty_out", lambda out: [], "Meta")
+            empty = torch.ops.empty_list_fallback.empty_out.default
+            functional = torch.ops.empty_list_fallback.fill.default
+
+            def unreachable_functionalize(out):
+                raise AssertionError("empty_out is introduced after functionalization")
+
+            # FallbackKernel requires a Functionalize kernel for mutable
+            # Tensor[]-returning ops; the post-grad rewrite never runs it.
+            lib.impl("empty_out", unreachable_functionalize, "Functionalize")
+            self.addCleanup(lowerings.pop, empty, None)
+            self.addCleanup(needs_realized_inputs.discard, empty)
+            self.addCleanup(fallbacks.discard, empty)
+            make_fallback(empty, warn=False)
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    y = torch.ops.empty_list_fallback.fill(x.sin())
+                    return y * x.cos()
+
+            def mutate_after_functionalize(graph):
+                nodes = graph.find_nodes(op="call_function", target=functional)
+                self.assertEqual(len(nodes), 1)
+                node = nodes[0]
+                node.replace_all_uses_with(node.args[0])
+                node.target = empty
+                node.meta["val"] = []
+                graph.lint()
+
+            with config.patch(post_grad_custom_post_pass=mutate_after_functionalize):
+                self.check_model(Model(), (torch.randn(4, 8, device=self.device),))
+
     def test_proxy_executor_error_message_preserved(self):
         @torch.library.custom_op("aoti_test::validate_input", mutates_args=())
         def validate_input(x: torch.Tensor) -> torch.Tensor:
@@ -9920,6 +10013,25 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    @unittest.skipIf(config.triton.native_matmul, "matmul is generated")
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+    def test_bmm_out_dtype(self, input_dtype):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.bmm(x, y, out_dtype=torch.float32)
+
+        example_inputs = (
+            torch.randn(4, 64, 32, device=self.device, dtype=input_dtype),
+            torch.randn(4, 32, 64, device=self.device, dtype=input_dtype),
+        )
+        self.check_model(Model(), example_inputs)
+        self.code_check_count(
+            Model(), example_inputs, f"aoti_torch_{GPU_TYPE}_bmm_dtype_out(", 1
+        )
+
     @parametrize("m", [32])
     @parametrize("n", [64])
     @parametrize("q_group", [32, 64])
@@ -10846,6 +10958,43 @@ class AOTInductorTestsTemplate:
                     if "NEEDED" in line:
                         for lib in torch_libs:
                             self.assertTrue(lib not in line)
+
+    @unittest.skipUnless(IS_LINUX, "the flag it checks is passed to ELF linkers")
+    def test_libtorch_free_so_has_no_unused_openmp_dependency(self):
+        # _get_openmp_args adds OpenMP to every Linux link. A model that calls no
+        # OpenMP function must still not record libgomp, or the artifact fails to
+        # load on a machine without it. A compiler that links as needed by
+        # default, such as Ubuntu's GCC, passes this either way, so
+        # test_cpp_builder also checks the link command itself.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        def openmp_libraries(x, options):
+            so_path = AOTIRunnerUtil.legacy_compile(
+                Model(), (x,), options={"aot_inductor.link_libtorch": False, **options}
+            )
+            dynamic = subprocess.run(
+                ["readelf", "-d", so_path], check=True, capture_output=True, text=True
+            ).stdout
+            needed = re.findall(r"\(NEEDED\)\s+Shared library: \[(.+?)\]", dynamic)
+            self.assertTrue(needed, f"readelf reported no dependencies for {so_path}")
+            return [lib for lib in needed if "omp" in lib.lower()]
+
+        # assertFalse names the libraries that came back, assertEqual does not.
+        # dynamic_threads would put even this small kernel in a parallel region.
+        self.assertFalse(
+            openmp_libraries(
+                torch.randn(8, device=self.device), {"cpp.dynamic_threads": False}
+            )
+        )
+
+        # Large enough for Inductor to parallelize the kernel with OpenMP on two
+        # threads, so the library is used and has to stay. With
+        # fallback_by_default (lite mode) the op goes to ATen and no kernel is
+        # generated.
+        if self.device == "cpu" and not config.fallback_by_default:
+            self.assertTrue(openmp_libraries(torch.randn(4096), {"cpp.threads": 2}))
 
     def test_unbounded_expr_substitutions(self):
         class Model(torch.nn.Module):
@@ -11990,11 +12139,13 @@ class TestCppWrapperFallbackProfiling(TestCase):
     """Test RAIIAtenRecordFunctionHandle profiling for kernel paths that the
     device-parametrized AOTInductorTestsTemplate does not reach.
 
-    The two dispatcher fallbacks only arise in cpp_wrapper mode WITHOUT AOT
-    (torch.compile with config.cpp_wrapper=True), so they are driven through
-    get_code, which generates code without compiling or running it (avoids ASAN
-    issues). The non-Triton GPU template path is AOT-only and needs a GPU, so it
-    goes through AOTIRunnerUtil rather than being parametrized over devices.
+    The StableIValue and Python JIT fallbacks only arise in cpp_wrapper mode
+    WITHOUT AOT (torch.compile with config.cpp_wrapper=True), so they are driven
+    through get_code, which generates code without compiling or running it
+    (avoids ASAN issues). Boxed JIT fallback profiling is checked at runtime in
+    test_cpp_wrapper_custom_ops.py. The non-Triton GPU template path is AOT-only
+    and needs a GPU, so it goes through AOTIRunnerUtil rather than being
+    parametrized over devices.
     """
 
     @unittest.skipIf(
@@ -12054,15 +12205,14 @@ class TestCppWrapperFallbackProfiling(TestCase):
     def test_aoti_profiler_python_fallback(self, enable_kernel_profile):
         """Test profiling for non-AOT Python fallback path.
 
-        Custom ops whose return type is not boxed-dispatch compatible (only
-        Tensor, Tensor? and () are) go through PyObject_CallObject in non-AOT
-        cpp_wrapper mode. A Tensor[] return is the cheapest such schema; a
-        Tensor[] argument is boxed-compatible and would not reach this path.
+        A Tensor?[] return is outside the native boxed-dispatch subset and
+        goes through PyObject_CallObject. Tensor[] arguments are supported
+        by boxed dispatch, so the return type forces the Python path.
         """
         with torch.library._scoped_library("proftest", "FRAGMENT") as lib:
             torch.library.define(
                 "proftest::python_cat",
-                "(Tensor[] tensors, int dim=0) -> Tensor[]",
+                "(Tensor[] tensors, int dim=0) -> Tensor?[]",
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
@@ -12075,7 +12225,7 @@ class TestCppWrapperFallbackProfiling(TestCase):
             )
             def python_cat_impl(
                 tensors: list[torch.Tensor], dim: int = 0
-            ) -> list[torch.Tensor]:
+            ) -> list[torch.Tensor | None]:
                 return [torch.cat(tensors, dim=dim)]
 
             class Model(torch.nn.Module):
