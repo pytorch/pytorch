@@ -27,15 +27,23 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.import_test_stats import get_test_times
 from tools.testing.discover_tests import TESTS
-from tools.testing.llm_td.selection import Selection, SWEEPS
+from tools.testing.llm_td.selection import needs_run_all, Selection, SWEEPS
 
 
 sys.path.remove(str(REPO_ROOT))
 
-DEFAULT_MODEL = "us.anthropic.claude-opus-5-5"
+DEFAULT_MODEL = (
+    "us.anthropic.claude-opus-5-5"
+    if os.environ.get("CLAUDE_CODE_USE_BEDROCK", "").lower() in ("1", "true", "yes")
+    else "claude-opus-5-5"
+)
 SYSTEM_PROMPT = (Path(__file__).parent / "prompt.md").read_text()
 DIFF_BUDGET = 120_000
 BODY_BUDGET = 4_000
+# Well under the CI job's 20 minute timeout, so a hung call still yields run_all.
+QUERY_TIMEOUT = 600
+# Room for the note that replaces a truncated file's tail.
+TRUNCATION_MARKER = 40
 
 SCHEMA = {
     "type": "object",
@@ -72,18 +80,31 @@ SCHEMA = {
 
 
 def truncate_diff(diff: str, budget: int = DIFF_BUDGET) -> str:
-    """Share the budget across files so that one huge generated file cannot crowd out the rest."""
+    """Share the budget across files so that one huge generated file cannot crowd out the rest.
+
+    Files under the fair share are kept whole and the rest of the budget is
+    split evenly among the larger ones. A truncated file always keeps its
+    `diff --git` line."""
     if len(diff) <= budget:
         return diff
     parts = diff.split("\ndiff --git ")
     parts = [parts[0]] + ["diff --git " + p for p in parts[1:]]
-    per = max(budget // len(parts), 400)
-    return "\n".join(
-        p
-        if len(p) <= per
-        else p[:per] + f"\n... [{len(p) - per} chars of this file's diff truncated]\n"
-        for p in parts
-    )
+    remaining = budget - (len(parts) - 1)
+    cap = 0
+    for i, size in enumerate(sorted(len(p) for p in parts)):
+        cap = remaining // (len(parts) - i)
+        if size > cap:
+            break
+        remaining -= size
+    out = []
+    for p in parts:
+        if len(p) <= cap:
+            out.append(p)
+            continue
+        keep = max(cap - TRUNCATION_MARKER, len(p.split("\n", 1)[0]))
+        note = f"... [{len(p) - keep} chars truncated]"
+        out.append(f"{p[:keep]}\n{note}")
+    return "\n".join(out)
 
 
 def test_minutes(test_times: dict) -> dict[str, float]:
@@ -109,10 +130,10 @@ def build_prompt(
         body = body[:BODY_BUDGET] + "\n...[truncated]"
     return "\n".join(
         [
-            f"# PR title\n{title}",
-            f"# PR description\n{body or '(none)'}",
+            f"# PR title\n<pr_title>\n{title}\n</pr_title>",
+            f"# PR description\n<pr_description>\n{body or '(none)'}\n</pr_description>",
             f"# Changed files\n{diffstat}",
-            f"# Diff\n```diff\n{truncate_diff(diff)}\n```",
+            f"# Diff\n<diff>\n{truncate_diff(diff)}\n</diff>",
             f"# Candidate test files ({len(candidates)})",
             "\n".join(f"{c} [{minutes.get(c, 0):.0f}m]" for c in candidates),
             "\nSelect the test files to run. Use the exact names from the candidate list.",
@@ -125,7 +146,7 @@ def query_model(
     model: str,
     effort: str,
     checkout: str | None = None,
-    timeout: int = 1800,
+    timeout: int = QUERY_TIMEOUT,
 ) -> dict:
     """Run `claude -p` and return its JSON result.
 
@@ -177,7 +198,50 @@ def pr_text(args: argparse.Namespace) -> tuple[str, str]:
     )
 
 
-def main() -> None:
+def select(args: argparse.Namespace, record: dict) -> Selection | None:
+    """Make the selection, filling `record` with diagnostics; None after --print-prompt."""
+    merge_base = git("merge-base", args.base, args.head).strip()
+    record["merge_base"] = merge_base
+    record["head"] = git("rev-parse", args.head).strip()
+    changed = git("diff", "--name-only", merge_base, args.head).splitlines()
+    if needs_run_all(changed) and not args.print_prompt:
+        return Selection(run_all=True, reason="change touches test infrastructure")
+    test_times = get_test_times()
+    if not test_times and not args.print_prompt:
+        return Selection(run_all=True, reason="no test times")
+    diffstat = git("diff", "--stat=200", merge_base, args.head)
+    diff = git("diff", merge_base, args.head)
+    # TESTS comes from the checkout this script runs from, which in CI is the
+    # trusted default branch rather than the PR; add the test files the PR adds.
+    added = git(
+        "diff", "--name-only", "--diff-filter=A", merge_base, args.head
+    ).splitlines()
+    candidates = sorted(
+        set(TESTS)
+        | {
+            f.removeprefix("test/").removesuffix(".py")
+            for f in added
+            if re.match(r"test/(.*/)?test_[^/]*\.py$", f)
+        }
+    )
+    title, body = pr_text(args)
+    prompt = build_prompt(
+        title, body, diffstat, diff, candidates, test_minutes(test_times)
+    )
+    if args.print_prompt:
+        print(prompt)
+        return None
+
+    result = query_model(prompt, args.model, args.effort)
+    out = None if result.get("is_error") else result.get("structured_output")
+    record["cost_usd"] = result.get("total_cost_usd")
+    record["model_output"] = out
+    if out is None:
+        record["error"] = str(result.get("result"))[:2000]
+    return Selection.from_model_output(out, set(candidates), changed)
+
+
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -200,50 +264,28 @@ def main() -> None:
         help="tell run_test.py to skip uncovered files",
     )
     parser.add_argument("--print-prompt", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    merge_base = git("merge-base", args.base, args.head).strip()
-    changed = git("diff", "--name-only", merge_base, args.head).split()
-    diffstat = git("diff", "--stat=200", merge_base, args.head)
-    diff = git("diff", merge_base, args.head)
-    # TESTS comes from the checkout this script runs from, which in CI is the
-    # trusted default branch rather than the PR; add the test files the PR adds.
-    added = git("diff", "--name-only", "--diff-filter=A", merge_base, args.head).split()
-    candidates = sorted(
-        set(TESTS)
-        | {
-            f.removeprefix("test/").removesuffix(".py")
-            for f in added
-            if re.match(r"test/(.*/)?test_[^/]*\.py$", f)
-        }
-    )
-    title, body = pr_text(args)
-    prompt = build_prompt(
-        title, body, diffstat, diff, candidates, test_minutes(get_test_times())
-    )
-    if args.print_prompt:
-        print(prompt)
-        return
-
-    result: dict = {}
-    try:
-        result = query_model(prompt, args.model, args.effort)
-    except Exception as e:
-        result = {"is_error": True, "result": repr(e)}
-    out = None if result.get("is_error") else result.get("structured_output")
-    selection = Selection.from_model_output(out, set(candidates), changed)
-    selection.enforce = args.enforce
-    record = {
-        **selection.to_json(),
+    record: dict = {
         "model": args.model,
         "effort": args.effort,
-        "merge_base": merge_base,
-        "head": git("rev-parse", args.head).strip(),
-        "cost_usd": result.get("total_cost_usd"),
-        "error": None if out is not None else str(result.get("result"))[:2000],
-        "model_output": out,
+        "merge_base": None,
+        "head": None,
+        "cost_usd": None,
+        "error": None,
+        "model_output": None,
     }
-    args.output.write_text(json.dumps(record, indent=1))
+    try:
+        selection = select(args, record)
+    except Exception as e:
+        if args.print_prompt:
+            raise
+        record["error"] = repr(e)[:2000]
+        selection = Selection(run_all=True, reason=f"selector failed: {repr(e)[:500]}")
+    if selection is None:
+        return
+    selection.enforce = args.enforce
+    args.output.write_text(json.dumps({**selection.to_json(), **record}, indent=1))
     print(
         f"LLM TD: run_all={selection.run_all} sweeps={sorted(selection.sweeps)} files={len(selection.files)}"
     )
