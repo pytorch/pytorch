@@ -111,17 +111,27 @@ jobs:
           if-no-files-found: error
           path: td_results.json
 
-      # Only the workflows where run_test.py enables TD, and so can enforce the selection.
-      - name: Wait for the LLM test selection
-        if: >-
-          (contains(fromJSON('["pull", "trunk"]'), github.workflow) || startsWith(github.workflow, 'rocm-') || startsWith(github.workflow, 'periodic-rocm-')) &&
-          (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      # One selection per workflow run, so every shard of a test job applies the same one.
+      - name: Resolve the LLM test selection
+        id: llm-td
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
         timeout-minutes: 12
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF: ${{ github.ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: uv run --no-project --python 3.12 tools/testing/llm_td/wait_for_selection.py
+          # The workflows where run_test.py enables TD, and so can enforce the selection.
+          TD_ENABLED: ${{ contains(fromJSON('["pull", "trunk"]'), github.workflow) || startsWith(github.workflow, 'rocm-') || startsWith(github.workflow, 'periodic-rocm-') }}
+        run: uv run --no-project --python 3.12 tools/testing/llm_td/resolve_selection.py
+
+      - name: Store the LLM test selection on GHA
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: steps.llm-td.outcome == 'success'
+        with:
+          name: llm_td_selection.json
+          retention-days: 1
+          if-no-files-found: ignore
+          path: llm_td_selection.json

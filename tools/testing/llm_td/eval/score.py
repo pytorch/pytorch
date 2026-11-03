@@ -1,6 +1,6 @@
 """Score selector results: recall of real failures, and the share of CI test time selected.
 
-    python -m tools.testing.llm_td.eval.score --data DIR --ids DIR/ids_test.txt sonnet5_medium opus55_high td
+    python -m tools.testing.llm_td.eval.score --data DIR --ids tools/testing/llm_td/eval/ids/eval.txt sonnet5_medium opus55_high td
 
 A failure is a (test file, CI config) pair. It counts as caught when the
 selection runs that file in that config. Cost is the share of one full CI
@@ -10,12 +10,19 @@ would run.
 Policies: `model` is the raw model output, `final` adds what CI adds (edited
 test files, the run-all rules), `final-hm` keeps only high/medium-confidence
 picks, and `final+tdN` hedges `final` with TD's files that fit in N% of each
-config's test time (N defaults to LLM_TD_HEDGE). The tag `td` scores the
-replayed in-repo TD (see td_replay.py) at its CI cut of the top 25% per config.
+config's test time (N defaults to 100*LLM_TD_HEDGE). As under enforcement in
+CI, `final+tdN` falls back to TD's own cut when the model call failed or its
+answer is malformed. The tag `td` scores the replayed in-repo TD (see td_replay.py) under the single policy
+`td25`, its CI cut of the top 25% per config, and ignores --policies.
+
+Every tag and policy is scored on the same samples: those with a TD replay
+and a result for every model tag; the rest are counted on stderr.
 
 run_test.py applies TD, and so the selection, only in the pull, trunk and
-ROCm workflows. Jobs of any other workflow (inductor's unit tests, periodic,
-slow, ...) run every test under every policy, so their failures are left out
+ROCm workflows, and not on macOS, in xpu or onnx builds or under NO_TD
+(test/run_test.py's --enable-td default; _linux-test.yml sets NO_TD from
+force-no-td). Other jobs (inductor's unit tests, periodic, slow, ...) run
+every test under every policy, so their failures are left out
 of the truth, and configs no TD job runs are left out of the cost share
 (the report's dollar model prices the inductor ones separately). Jobs are
 classified from .github/workflows (see job_runs_td). test-times.json is
@@ -37,20 +44,26 @@ import functools
 import json
 import re
 import statistics as st
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
 from tools.testing.llm_td.eval import REPO
-from tools.testing.llm_td.selection import LLM_TD_HEDGE, Selection
+from tools.testing.llm_td.select_tests import git_grep
+from tools.testing.llm_td.selection import (
+    LLM_TD_HEDGE,
+    needs_run_all,
+    parse_model_output,
+    Selection,
+)
 
 
 GPU_ENV = re.compile(r"cuda|rocm|sm\d+|xpu|h100|b200|a100|gpu", re.IGNORECASE)
 CONFIDENCE = {"high": 0, "medium": 1, "low": 2}
 HEDGE = re.compile(r"final\+td(\d+(?:\.\d+)?)?")
 MATRIX_CONFIG = re.compile(r'config: "([^"]+)"')
-MATRIX_NEEDS = re.compile(r"needs\.([\w-]+)\.outputs\.test-matrix")
 VERSION = re.compile(r"\d+(\.\d+)*")
 MATRIX_SUFFIX = re.compile(r" \([^()]*\)")
 
@@ -98,8 +111,13 @@ def test_seconds(path: Path) -> Seconds:
 
 
 def td_workflow(name: str) -> bool:
-    """Whether run_test.py enables TD under GITHUB_WORKFLOW `name`."""
+    """Whether run_test.py enables TD under GITHUB_WORKFLOW `name` (see test/run_test.py --enable-td)."""
     return name in ("trunk", "pull") or name.startswith(("rocm-", "periodic-rocm-"))
+
+
+def td_job(uses: str, build_environment: str, force_no_td: object) -> bool:
+    """The rest of run_test.py's --enable-td check: not IS_MACOS, no xpu/onnx BUILD_ENVIRONMENT, no NO_TD."""
+    return uses != "_mac-test.yml" and not re.search("xpu|onnx", build_environment) and force_no_td not in (True, "true")  # fmt: skip
 
 
 @functools.cache
@@ -113,29 +131,34 @@ def ci_jobs(
     and also under its own name if it has triggers of its own."""
     wfs = {p.name: yaml.safe_load(p.read_text()) for p in workflows.glob("*.yml")}
 
-    def test_jobs(file: str) -> set[tuple[str, str]]:
+    def test_jobs(file: str) -> set[tuple[str, str, bool]]:
+        """(job name, config, whether the job itself allows TD) of `file`'s test jobs."""
         jobs = wfs[file].get("jobs") or {}
 
-        def configs(key: str) -> set[str]:
-            matrix = str((jobs[key].get("with") or {}).get("test-matrix", ""))
-            if (m := MATRIX_NEEDS.search(matrix)) and m.group(1) in jobs:
-                return configs(m.group(1))
-            return set(MATRIX_CONFIG.findall(matrix))
+        def arg(key: str, input: str) -> str:
+            """Job `key`'s `with: input`, following `needs.<job>.outputs.<input>` to the build job."""
+            value = str((jobs[key].get("with") or {}).get(input, ""))
+            if (m := re.search(rf"needs\.([\w-]+)\.outputs\.{input}\b", value)) and m.group(1) in jobs:  # fmt: skip
+                return arg(m.group(1), input)
+            return value
 
         out = set()
         for key, job in jobs.items():
             name, uses = job.get("name", key), Path(job.get("uses", "")).name
             if uses in wfs and not uses.startswith("_"):
-                out |= {(f"{name} / {n}", c) for n, c in test_jobs(uses)}
+                out |= {(f"{name} / {n}", c, ok) for n, c, ok in test_jobs(uses)}
             elif "test" in uses:
-                out |= {(name, c) for c in configs(key)}
+                ok = td_job(uses, arg(key, "build-environment"), (job.get("with") or {}).get("force-no-td"))  # fmt: skip
+                out |= {(name, c, ok) for c in MATRIX_CONFIG.findall(arg(key, "test-matrix"))}  # fmt: skip
         return out
 
     out: dict[bool, set[tuple[str, str]]] = {True: set(), False: set()}
     for file, wf in wfs.items():
         on = wf.get(True) if isinstance(wf, dict) else None
         if set([on] if isinstance(on, str) else on or []) - {"workflow_call"}:
-            out[td_workflow(wf.get("name", ""))] |= test_jobs(file)
+            td = td_workflow(wf.get("name", ""))
+            for name, c, ok in test_jobs(file):
+                out[td and ok].add((name, c))
     return out
 
 
@@ -199,6 +222,9 @@ def hedge(
     return out
 
 
+grep_at = functools.cache(git_grep)
+
+
 def policy(
     name: str, s: dict, r: dict | None, td: dict | None, seconds: Seconds
 ) -> Choice | None:
@@ -223,7 +249,15 @@ def policy(
         if td is None:
             return None
         share = float(m.group(1)) / 100 if m.group(1) else LLM_TD_HEDGE
-        sel = Selection.from_model_output(out, cands, s["changed_files"])
+        failed = out is None
+        try:
+            parse_model_output(out, cands)
+        except ValueError:
+            failed = True
+        if failed and not needs_run_all(s["changed_files"]):
+            # Under enforcement CI keeps TD's own split when the selector fails.
+            return policy("td25", s, r, td, seconds)
+        sel = Selection.from_model_output(out, cands, s["changed_files"], lambda p: grep_at(p, s["sha"]))  # fmt: skip
         if sel.run_all:
             return Choice(sel)
         times = {
@@ -244,13 +278,14 @@ def policy(
                 **out,
                 "tests": [
                     t
-                    for t in out.get("tests", [])
-                    if CONFIDENCE.get(t.get("confidence"), 2) <= 1
+                    for t in out.get("tests") or []
+                    if isinstance(t, dict)
+                    and CONFIDENCE.get(t.get("confidence"), 2) <= 1
                 ],
             }
     elif name != "final":
         raise ValueError(f"unknown policy {name!r}")
-    return Choice(Selection.from_model_output(out, cands, s["changed_files"]))
+    return Choice(Selection.from_model_output(out, cands, s["changed_files"], lambda p: grep_at(p, s["sha"])))  # fmt: skip
 
 
 def cost_fraction(
@@ -284,32 +319,40 @@ def load(
 def score(
     data: Path,
     ids: list[str],
-    tag: str,
+    tags: list[str],
     policies: list[str],
     strong: bool,
     samples: Path,
     td_dir: Path,
 ) -> list[dict]:
+    """Rows of every tag and policy, all on the ids that have a TD replay and a result for every tag but `td`."""
     seconds = test_seconds(data / "test-times.json")
     rows = []
+    dropped: collections.Counter[str] = collections.Counter()
     for sid in ids:
-        s, r, td = load(data, tag, sid, samples, td_dir)
-        if tag != "td" and r is None:
+        loaded = {tag: load(data, tag, sid, samples, td_dir) for tag in tags}
+        missing = [] if (td_dir / f"{sid}.json").exists() else ["td replay"]
+        missing += [f"{tag} result" for tag, (_, r, _) in loaded.items() if tag != "td" and r is None]  # fmt: skip
+        dropped.update(missing)
+        if missing:
             continue
-        pairs = truth_pairs(s, strong)
-        cands = set(s["candidates"])
-        for pol in policies:
-            choice = policy(pol, s, r, td, seconds)
-            if choice is None:
-                continue
-            hit = [choice.covers(f, c) for f, c in pairs]
-            cpu, gpu = cost_fraction(choice, cands, seconds, runs_td)
-            rows.append({
-                "tag": tag, "policy": pol, "id": sid, "kind": s["kind"], "pairs": len(pairs), "hit": sum(hit),
-                "cpu": cpu, "gpu": gpu, "run_all": choice.sel.run_all, "files": len(choice.files()),
-                "cost_usd": (r or {}).get("cost_usd") or 0.0, "error": bool(r and r["error"]),
-                "missed": [p for p, h in zip(pairs, hit) if not h],
-            })  # fmt: skip
+        for tag, (s, r, td) in loaded.items():
+            pairs = truth_pairs(s, strong)
+            cands = set(s["candidates"])
+            for pol in ["td25"] if tag == "td" else policies:
+                choice = policy(pol, s, r, td, seconds)
+                if choice is None:
+                    continue
+                hit = [choice.covers(f, c) for f, c in pairs]
+                cpu, gpu = cost_fraction(choice, cands, seconds, runs_td)
+                rows.append({
+                    "tag": tag, "policy": pol, "id": sid, "kind": s["kind"], "pairs": len(pairs), "hit": sum(hit),
+                    "cpu": cpu, "gpu": gpu, "run_all": choice.sel.run_all, "files": len(choice.files()),
+                    "cost_usd": (r or {}).get("cost_usd") or 0.0, "error": bool(r and r["error"]),
+                    "missed": [p for p, h in zip(pairs, hit) if not h],
+                })  # fmt: skip
+    for why, n in sorted(dropped.items()):
+        print(f"dropped {n} of {len(ids)} ids with no {why}", file=sys.stderr)
     return rows
 
 
@@ -341,7 +384,7 @@ def main() -> None:
     p.add_argument("--ids", type=Path, required=True)
     p.add_argument("--samples-dir", type=Path, help="default: DATA/samples")
     p.add_argument("--td-dir", type=Path, help="td_replay.py output; default: DATA/td")
-    p.add_argument("--policies", default="model,final,final-hm")
+    p.add_argument("--policies", default="model,final,final-hm,final+td20")
     p.add_argument(
         "--all-truth",
         action="store_true",
@@ -355,10 +398,7 @@ def main() -> None:
         args.samples_dir or args.data / "samples",
         args.td_dir or args.data / "td",
     )
-    rows = []
-    for tag in args.tags:
-        pols = ["td25"] if tag == "td" else args.policies.split(",")
-        rows += score(args.data, ids, tag, pols, not args.all_truth, samples, td_dir)
+    rows = score(args.data, ids, args.tags, args.policies.split(","), not args.all_truth, samples, td_dir)  # fmt: skip
     for x in summarize(rows):
         print(
             f"{x['tag']:24s} {x['policy']:10s} {x['kind']:7s} n={x['n']:3d} fail={x['n_failing']:3d} caught={x['caught_any']:6.1%} "

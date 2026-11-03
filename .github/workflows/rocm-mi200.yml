@@ -72,7 +72,6 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      actions: read
     name: linux-jammy-rocm-py3.11-mi200
     uses: ./.github/workflows/_rocm-test.yml
     needs:
