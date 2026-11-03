@@ -1431,6 +1431,15 @@ def _augment_memory_snapshot_stack_traces(
     return snapshot_dict
 
 
+def _get_privateuse1_backend_module():
+    """
+    Returns the registered privateuse1 backend module, or None if the backend
+    has not been registered.
+    """
+    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    return getattr(torch, privateuse1_backend_name, None)
+
+
 def _is_privateuse1_backend_available():
     """
     Determines whether the privateuse1 backend is registered and available.
@@ -1438,8 +1447,7 @@ def _is_privateuse1_backend_available():
     Returns:
         Return True if the privateuse1 backend is registered and available.
     """
-    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
-    privateuse1_backend_module = getattr(torch, privateuse1_backend_name, None)
+    privateuse1_backend_module = _get_privateuse1_backend_module()
     return (
         is_available := getattr(privateuse1_backend_module, "is_available", None)
     ) and is_available()
@@ -1534,3 +1542,22 @@ def remove_os_environ_hook() -> None:
     os.unsetenv = _original_os_unsetenv
     _original_os_putenv = None
     _original_os_unsetenv = None
+
+
+def _privateuse1_backend_avoids_device_init():
+    """
+    Determines whether the privateuse1 backend asks FakeTensorMode to avoid
+    initializing real device state.
+
+    A backend opts in by defining `_fake_avoid_device_init()` on its device
+    module. This is queried before `is_available()` so that a backend whose
+    availability check itself touches the runtime can stay uninitialized under
+    FakeTensorMode.
+
+    Returns:
+        Return True if the backend is registered and opts in to avoiding
+        device init.
+    """
+    privateuse1_backend_module = _get_privateuse1_backend_module()
+    hook = getattr(privateuse1_backend_module, "_fake_avoid_device_init", None)
+    return hook is not None and bool(hook())
