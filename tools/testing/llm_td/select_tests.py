@@ -266,7 +266,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--model", default=os.environ.get("LLM_TD_MODEL", DEFAULT_MODEL)
     )
-    parser.add_argument("--effort", default=os.environ.get("LLM_TD_EFFORT", "low"))
+    parser.add_argument("--effort", default=os.environ.get("LLM_TD_EFFORT", "medium"))
     parser.add_argument(
         "--output", type=Path, default=REPO_ROOT / "llm_td_selection.json"
     )
