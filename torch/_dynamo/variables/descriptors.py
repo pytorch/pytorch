@@ -948,13 +948,19 @@ class ClassMethodVariable(UserDefinedObjectVariable):
         self,
         descriptor: VariableTracker,
         value: classmethod | None = None,  # type: ignore[type-arg]
+        is_synthetic: bool | None = None,
         **kwargs: Any,
     ) -> None:
+        if is_synthetic is None:
+            is_synthetic = value is None
         if value is None:
             value = classmethod(cast(Any, None))
             value.__dict__.clear()
         super().__init__(value, **kwargs)
         self.descriptor = descriptor
+        self.is_synthetic = is_synthetic
+
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields | {"is_synthetic"}
 
     @classmethod
     def create(
@@ -962,8 +968,16 @@ class ClassMethodVariable(UserDefinedObjectVariable):
         tx: "InstructionTranslatorBase",
         descriptor: VariableTracker,
     ) -> "ClassMethodVariable":
-        result = cls(descriptor, mutation_type=AttributeMutationNew())
+        result = cls(
+            descriptor,
+            is_synthetic=False,
+            mutation_type=AttributeMutationNew(),
+        )
         tx.output.side_effects.track_attribute_mutation_new(result)
+        # DunderDictVariable seeds its proxy from the cleared backing dict.
+        # Expose that dict only during initialization, then hide the placeholder.
+        attrs_vt = result.get_dict_vt(tx)
+        result.is_synthetic = True
 
         attrs = ("__module__", "__name__", "__qualname__", "__doc__")
         if sys.version_info < (3, 14):
@@ -976,7 +990,7 @@ class ClassMethodVariable(UserDefinedObjectVariable):
                 continue
             if copied is None:
                 raise AssertionError(f"expected classmethod copied attribute {name}")
-            result.get_dict_vt(tx).setitem(name, copied)
+            attrs_vt.setitem(name, copied)
         return result
 
     def _get_wrapped_attr(
@@ -1035,8 +1049,29 @@ class ClassMethodVariable(UserDefinedObjectVariable):
     def as_python_constant(self) -> classmethod:  # type: ignore[type-arg]
         return classmethod(self.descriptor.as_python_constant())
 
+    def get_real_python_backed_value(self) -> object:
+        if self.is_synthetic:
+            return NO_SUCH_SUBOBJ
+        return self.value
+
+    def _isabstractmethod_getter(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker:
+        from .object_protocol import generic_getattr, generic_is_true
+
+        try:
+            value = generic_getattr(tx, self.descriptor, "__isabstractmethod__")
+        except get_dynamo_observed_exception(AttributeError):
+            tx.exn_vt_stack.clear_current_exception()
+            return ConstantVariable.create(False)
+        return generic_is_true(tx, value)
+
     tp_getset = {
         "__dict__": GetSet(lambda s, tx: s.get_dict_vt(tx), unmodeled_setter),
+        "__isabstractmethod__": GetSet(
+            _isabstractmethod_getter,
+            readonly_setter,
+        ),
     }
     if sys.version_info >= (3, 14):
         for attr in ("__annotations__", "__annotate__"):
@@ -1062,6 +1097,11 @@ class ClassMethodVariable(UserDefinedObjectVariable):
         owner: VariableTracker,
     ) -> VariableTracker:
         func = self.descriptor
+        if sys.version_info < (3, 13) and func.tp_type.tp_descr_get is not None:
+            # Before 3.13, cm_descr_get delegated to the wrapped descriptor.
+            return func.tp_descr_get_impl(tx, owner, owner)
+        # Python 3.13+ binds the wrapped object to the class.
+        # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1215-L1227
         # NestedUserFunctionVariable is not a UserFunctionVariable, but it is a
         # Python function all the same and binds like one.
         if not isinstance(func, BaseUserFunctionVariable):

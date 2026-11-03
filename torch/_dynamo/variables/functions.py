@@ -2223,6 +2223,16 @@ def invoke_and_store_as_constant(
         if isinstance(x, UserDefinedObjectVariable):
             if x.source is not None:
                 install_guard(x.make_guard(GuardBuilder.ID_MATCH))
+            if isinstance(x, variables.ClassMethodVariable) and x.is_synthetic:
+                unimplemented(
+                    gb_type="assume_constant_result argument has no real value",
+                    context=f"function {name}, variable type {type(x).__name__}",
+                    explanation="Cannot pass a synthetic Dynamo value to a function "
+                    "marked with torch._dynamo.assume_constant_result.",
+                    hints=[
+                        "Remove torch._dynamo.assume_constant_result from this function",
+                    ],
+                )
             return x.value
         try:
             return x.as_python_constant()
