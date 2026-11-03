@@ -967,11 +967,13 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
             # this workaround prints the float as an integer
             # xref: https://github.com/sympy/sympy/issues/26620
             ret = str(int(expr))
-        elif config.is_fbcode() and torch.version.hip:
-            ret = f"{expr}"
         else:
-            float_type = self._get_scalar_float_type()
-            ret = f"tl.full([], {expr}, {float_type})"
+            float_literal = super()._print_Float(expr)
+            if config.is_fbcode() and torch.version.hip:
+                ret = f"{float_literal}"
+            else:
+                float_type = self._get_scalar_float_type()
+                ret = f"tl.full([], {float_literal}, {float_type})"
         return ret
 
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
