@@ -2448,6 +2448,29 @@ with open(sys.argv[1], "w") as f:
             False, {ProfilerActivity.CUDA}
         )
 
+    def test_init_for_cuda_graphs_traces_cuda(self):
+        from torch.profiler._utils import _init_for_cuda_graphs
+
+        cupti = {ProfilerActivity.CPU, ProfilerActivity.CUDA}
+        with (
+            patch("torch.profiler.profile") as profile_mock,
+            patch("torch.profiler.supported_activities", return_value=cupti),
+            patch("torch.version.cuda", "12.8"),
+        ):
+            _init_for_cuda_graphs()
+        profile_mock.assert_called_once_with(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
+        )
+
+        # ROCm has no CUPTI to initialize.
+        with (
+            patch("torch.profiler.profile") as profile_mock,
+            patch("torch.profiler.supported_activities", return_value=cupti),
+            patch("torch.version.cuda", None),
+        ):
+            _init_for_cuda_graphs()
+        profile_mock.assert_not_called()
+
 
 class SimpleNet(nn.Module):
     def __init__(self) -> None:
