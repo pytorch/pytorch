@@ -1084,6 +1084,7 @@ std::function<py::object(py::object)> make_fake_device_stamp(
         "Note [C++ fake op_impl outputs]");
     at::set_and_normalize_fake_device(t.unsafeGetTensorImpl(), common_device);
     t.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+    at::mark_fake_storage(t.unsafeGetTensorImpl(), *mode);
     return obj;
   };
 }

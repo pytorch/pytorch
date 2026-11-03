@@ -5473,6 +5473,13 @@ class TestCppFakeTensorModeBindings(TestCase):
         with torch._functorch.config.patch(fake_tensor_allow_meta=False):
             mode, wrapper = self._make_mode(ShapeEnv())
         self.assertFalse(mode.allow_meta)
+        self.assertTrue(mode.allow_unsafe_data_ptr_access)
+        config = torch._functorch.config
+        with config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            mode, wrapper = self._make_mode()
+        self.assertFalse(mode.allow_unsafe_data_ptr_access)
+        mode.allow_unsafe_data_ptr_access = True
+        self.assertTrue(mode.allow_unsafe_data_ptr_access)
         with self.assertRaisesRegex(RuntimeError, "Expected a FakeTensorConverter"):
             torch._C._CppFakeTensorMode(None, None, self.Wrapper())
         with self.assertRaisesRegex(RuntimeError, "Expected the CppFakeTensorMode"):
