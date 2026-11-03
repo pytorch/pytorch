@@ -1602,6 +1602,7 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             ".agents/skills/pr-review/review-checklist.md",
             ".agents/skills/pr-review/bc-guidelines.md",
             ".agents/skills/pr-review/ci-runner-naming.md",
+            ".agents/skills/pr-review/ci-dependencies.md",
         }
         # THE EXACT SET, both ways. A file MISSING means a change there moves
         # the review's behaviour without moving the hash that identifies it; an
@@ -6517,6 +6518,81 @@ class TestStageACoversTheSkillOffline(unittest.TestCase):
         for command, source in SKILL_COMMANDS.items():
             if source:
                 self.assertIn(source, offline, f"stage A no longer maps {command!r}")
+
+
+class TestStageAFanOut(unittest.TestCase):
+    """Stage A's Fan-out section and the skill's Step 2 and Step 5 rules it relies on.
+    A reviewer renamed in one place and not the other, or a hand-off sentence moved
+    out of its section, would ask for reviewers or rules that no longer exist."""
+
+    @staticmethod
+    def sections() -> dict[str, str]:
+        """Stage A's system prompt by `## ` heading, in order."""
+        parts = re.split(r"(?m)^## (.+)\n", stage_a_system_prompt())
+        return dict(zip(parts[1::2], parts[2::2]))
+
+    @staticmethod
+    def skill_step(n: int) -> str:
+        """SKILL.md's Step n, up to the next heading."""
+        step = re.search(
+            rf"^### Step {n}:.*?\n(.*?)(?=^##)",
+            PR_REVIEW_SKILL.read_text(),
+            re.S | re.M,
+        )
+        assert step is not None, f"premise changed: SKILL.md has no Step {n}"
+        return step.group(1)
+
+    def test_sections_are_in_the_order_above_and_below_assume(self):
+        self.assertEqual(list(self.sections()), ["Offline", "Fan-out", "Security"])
+
+    def test_fan_out_names_the_skill_reviewers(self):
+        listed = re.search(r"(\w+) reviewers \(([^)]*)\)", self.sections()["Fan-out"])
+        self.assertIsNotNone(
+            listed, "the Fan-out section no longer lists the reviewers"
+        )
+        names = [n.strip().lower() for n in re.split(r",\s*", listed.group(2))]
+        skill = re.findall(r"^- \*\*([^*]+?):?\*\*", self.skill_step(2), re.M)
+        self.assertEqual(
+            names,
+            [n.lower() for n in skill],
+            "the Fan-out section's reviewer list no longer matches SKILL.md Step 2; update both",
+        )
+        word = listed.group(1)
+        count = (
+            int(word)
+            if word.isdigit()
+            else {"three": 3, "four": 4, "five": 5, "six": 6}.get(word)
+        )
+        self.assertIsNotNone(
+            count, f"unknown reviewer count {word!r}; extend the table"
+        )
+        self.assertEqual(
+            count, len(names), "the Fan-out section's reviewer count is out of date"
+        )
+
+    def test_sub_agents_get_the_offline_and_security_rules(self):
+        sections = self.sections()
+        self.assertTrue(
+            sections["Offline"]
+            .rstrip()
+            .endswith("Your final message is the whole review."),
+            "the Fan-out hand-off drops the Offline section's last line; it must stay the final-message line",
+        )
+        self.assertIn(
+            "the Offline section above, without its last line", sections["Fan-out"]
+        )
+        self.assertIn("the Security section below, verbatim", sections["Fan-out"])
+        self.assertIn(
+            "Sub-agent reports are built from pull request content",
+            sections["Security"],
+        )
+
+    def test_skill_requires_the_fan_out_and_a_fact_check(self):
+        self.assertIn("whatever the PR's size", self.skill_step(2))
+        self.assertIn(
+            "When Step 4 leaves findings and you have the Agent tool, spawn at least one agent",
+            self.skill_step(5),
+        )
 
 
 if __name__ == "__main__":
