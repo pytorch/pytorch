@@ -7,6 +7,7 @@ on:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
 
@@ -90,6 +91,8 @@ jobs:
           unzip -o .additional_ci_files/llm_results/mappings.zip -d .additional_ci_files/llm_results || true
           # Dependencies are declared inline in the script via PEP 723.
           uv run --no-project --python 3.12 tools/testing/do_target_determination_for_s3.py
+          # run_test.py runs these files outside the LLM selection's hedge budget.
+          cp .additional_ci_files/previous_failures*.json . || true
 
       - name: Upload TD results to s3
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
@@ -99,7 +102,9 @@ jobs:
           name: td_results
           retention-days: 1
           if-no-files-found: error
-          path: td_results.json
+          path: |
+            td_results.json
+            previous_failures*.json
 
       - name: Store TD results on GHA
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -108,4 +113,31 @@ jobs:
           name: td_results.json
           retention-days: 1
           if-no-files-found: error
-          path: td_results.json
+          path: |
+            td_results.json
+            previous_failures*.json
+
+      # One selection per workflow run, so every shard of a test job applies the same one.
+      - name: Resolve the LLM test selection
+        id: llm-td
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        timeout-minutes: 12
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # The workflows where run_test.py enables TD, and so can enforce the selection.
+          TD_ENABLED: ${{ contains(fromJSON('["pull", "trunk"]'), github.workflow) || startsWith(github.workflow, 'rocm-') || startsWith(github.workflow, 'periodic-rocm-') }}
+        run: uv run --no-project --python 3.12 tools/testing/llm_td/resolve_selection.py
+
+      - name: Store the LLM test selection on GHA
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: steps.llm-td.outcome == 'success'
+        with:
+          name: llm_td_selection.json
+          retention-days: 1
+          if-no-files-found: ignore
+          path: llm_td_selection.json
