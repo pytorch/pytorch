@@ -7,6 +7,7 @@ on:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
 
@@ -109,3 +110,15 @@ jobs:
           retention-days: 1
           if-no-files-found: error
           path: td_results.json
+
+      - name: Wait for the LLM test selection
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        timeout-minutes: 12
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: uv run --no-project --python 3.12 tools/testing/llm_td/wait_for_selection.py

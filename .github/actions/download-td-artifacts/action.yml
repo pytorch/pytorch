@@ -27,8 +27,6 @@ runs:
       # Written by llm-td.yml for internal PRs; without it the tests run as today.
       # Any workflow run can upload an artifact with this name, so only accept one
       # from llm-td.yml's pull_request_target run for this head in this repo.
-      # Nothing orders llm-td.yml before the test jobs (a Python-only build can
-      # finish first), so wait up to WAIT_SECONDS for its runs on this head.
       if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
       continue-on-error: true
       shell: bash
@@ -36,10 +34,9 @@ runs:
         GH_TOKEN: ${{ github.token }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
-        WAIT_SECONDS: 600
       run: |
         python3 - >> "$GITHUB_OUTPUT" <<'EOF'
-        import json, os, re, sys, time, urllib.request
+        import json, os, re, urllib.request
 
         def get(path):
             url = f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/{path}"
@@ -52,14 +49,6 @@ runs:
         tag = re.fullmatch(r"refs/tags/ciflow/.+/(\d+)", os.environ["GITHUB_REF"])
         pr = os.environ["PR_NUMBER"] or (tag and tag.group(1))
         name = f"llm_td_selection_{pr}_{sha}"
-        deadline, delay = time.monotonic() + int(os.environ["WAIT_SECONDS"]), 15
-        while pr and sha:
-            runs = get(f"actions/workflows/llm-td.yml/runs?event=pull_request_target&head_sha={sha}")["workflow_runs"]
-            if all(r["status"] == "completed" for r in runs) or time.monotonic() > deadline:
-                break
-            print(f"Waiting for llm-td.yml on {sha}", file=sys.stderr)
-            time.sleep(delay)
-            delay = min(2 * delay, 60)
         for a in (get(f"actions/artifacts?per_page=10&name={name}")["artifacts"] if pr else []):
             run = get(f"actions/runs/{a['workflow_run']['id']}")
             if (
