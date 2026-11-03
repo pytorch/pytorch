@@ -49,6 +49,43 @@ TORCH_IMPL_FUNC(log_softmax_backward_mps_out)
                                                             secondaryTensor:multiplicationTensor
                                                                        name:nil];
 
+      auto gradValues = castMPSTensor(mpsGraph, gradOutputTensor, kFloat);
+      auto logProbabilities = castMPSTensor(mpsGraph, outputTensor, kFloat);
+      auto probabilities = [mpsGraph exponentWithTensor:logProbabilities name:nil];
+      auto zero = [mpsGraph constantWithScalar:0.0 dataType:MPSDataTypeFloat32];
+      auto half = [mpsGraph constantWithScalar:0.5 dataType:MPSDataTypeFloat32];
+      auto dominant = [mpsGraph greaterThanWithPrimaryTensor:probabilities secondaryTensor:half name:nil];
+      auto hasDominant = [mpsGraph reductionOrWithTensor:dominant axis:dim name:nil];
+      auto gradSum = [mpsGraph reductionSumWithTensor:gradValues axis:dim name:nil];
+      auto weightedSum = [mpsGraph multiplicationWithPrimaryTensor:probabilities secondaryTensor:gradSum name:nil];
+      auto stableGrad = [mpsGraph subtractionWithPrimaryTensor:gradValues secondaryTensor:weightedSum name:nil];
+
+      // Reconstruct the dominant entry without subtracting a probability from one.
+      auto otherGrad = [mpsGraph selectWithPredicateTensor:dominant
+                                      truePredicateTensor:zero
+                                     falsePredicateTensor:stableGrad
+                                                     name:nil];
+      auto otherSum = [mpsGraph reductionSumWithTensor:otherGrad axis:dim name:nil];
+      auto maxGrad = [mpsGraph negativeWithTensor:otherSum name:nil];
+      stableGrad = [mpsGraph selectWithPredicateTensor:dominant
+                                 truePredicateTensor:maxGrad
+                                falsePredicateTensor:otherGrad
+                                                name:nil];
+      auto finiteInputs = [mpsGraph logicalANDWithPrimaryTensor:[mpsGraph isFiniteWithTensor:gradValues name:nil]
+                                                secondaryTensor:[mpsGraph isFiniteWithTensor:probabilities name:nil]
+                                                           name:nil];
+      auto finiteValues = [mpsGraph logicalANDWithPrimaryTensor:finiteInputs
+                                                secondaryTensor:[mpsGraph isFiniteWithTensor:stableGrad name:nil]
+                                                           name:nil];
+      auto finiteRows = [mpsGraph reductionAndWithTensor:finiteValues axis:dim name:nil];
+      auto useStable = [mpsGraph logicalANDWithPrimaryTensor:hasDominant secondaryTensor:finiteRows name:nil];
+      stableGrad = castMPSTensor(mpsGraph, stableGrad, getMPSDataType(out));
+      resultTensor = castMPSTensor(mpsGraph, resultTensor, getMPSDataType(out));
+      resultTensor = [mpsGraph selectWithPredicateTensor:useStable
+                                   truePredicateTensor:stableGrad
+                                  falsePredicateTensor:resultTensor
+                                                  name:nil];
+
       newCachedGraph->gradOutputTensor_ = gradOutputTensor;
       newCachedGraph->outputTensor_ = outputTensor;
       newCachedGraph->gradInputTensor_ = resultTensor;

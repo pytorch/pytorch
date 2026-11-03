@@ -15522,6 +15522,83 @@ class TestCommon(TestCase):
 
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize("op", [F.softmax, F.log_softmax])
+    @parametrize("dim", [0, -1])
+    @parametrize("grad_values", [(1, 0, 0), (-1, 0, 0), (1, 1, 1), (64, 64.5, 63)])
+    def test_softmax_backward_dominant(self, device, dtype, op, dim, grad_values):
+        margin = 8.0 if dtype == torch.float16 else 20.0
+        x = torch.tensor([[0, -margin, -margin], [-margin, -margin, 0]], dtype=dtype)
+        grad = torch.tensor([grad_values, grad_values[::-1]], dtype=dtype)
+        if dim == 0:
+            x, grad = x.t(), grad.t()
+        reference = x.double().requires_grad_()
+        expected = torch.autograd.grad(op(reference, dim=dim), reference, grad.double())[0].to(dtype)
+        if op is F.softmax and grad_values == (1, 1, 1):
+            expected.zero_()
+        x = x.to(device).requires_grad_()
+        actual = torch.autograd.grad(op(x, dim=dim), x, grad.to(device))[0]
+        rtol = {torch.float32: 1e-5, torch.float16: 5e-3, torch.bfloat16: 2e-2}[dtype]
+        self.assertEqual(actual.cpu(), expected, atol=0, rtol=rtol)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("op", [F.softmax, F.log_softmax])
+    def test_softmax_backward_dominant_threshold(self, device, dtype, op):
+        x = torch.tensor([[0, 0, 0], [math.log(2) - 0.02, 0, 0], [math.log(2) + 0.02, 0, 0]], dtype=dtype)
+        grad = torch.tensor([[1, -1, 0.5], [1, 0, -1], [1, 0, -1]], dtype=dtype)
+        reference = x.double().requires_grad_()
+        expected = torch.autograd.grad(op(reference, dim=-1), reference, grad.double())[0].to(dtype)
+        x = x.to(device).requires_grad_()
+        actual = torch.autograd.grad(op(x, dim=-1), x, grad.to(device))[0]
+        self.assertEqual(actual.cpu(), expected)
+
+    @dtypes(torch.bfloat16)
+    def test_softmax_backward_balanced(self, device, dtype):
+        x = torch.zeros(1002, device=device, dtype=dtype, requires_grad=True)
+        grad = torch.autograd.grad(x.softmax(-1), x, torch.ones_like(x))[0]
+        self.assertEqual(grad, torch.zeros_like(grad), atol=1e-5, rtol=0)
+
+    @dtypes(torch.float32)
+    @parametrize("op", [F.softmax, F.log_softmax])
+    @parametrize("shape", [(), (1,), (2, 3), (0, 3)])
+    @parametrize("logit,upstream", [(20, 1), (math.inf, 1), (-math.inf, 1), (math.nan, 1),
+                                   (20, math.inf), (20, math.nan)])
+    def test_softmax_backward_special_values(self, device, dtype, op, shape, logit, upstream):
+        x = torch.zeros(shape, dtype=dtype)
+        if x.ndim == 0:
+            x.fill_(logit)
+        elif x.numel():
+            x[..., 0] = logit
+        grad = torch.full_like(x, upstream)
+        reference = x.double().requires_grad_()
+        expected = torch.autograd.grad(op(reference, dim=-1), reference, grad.double())[0].to(dtype)
+        if op is F.softmax and logit == 20 and upstream == 1:
+            expected.zero_()
+        x = x.to(device).requires_grad_()
+        actual = torch.autograd.grad(op(x, dim=-1), x, grad.to(device))[0]
+        self.assertEqual(actual.cpu(), expected)
+
+    @dtypes(torch.float32)
+    @parametrize("op", [F.softmax, F.log_softmax])
+    @parametrize("dim", [0, -1])
+    @parametrize("dominant", [False, True])
+    def test_softmax_double_backward(self, device, dtype, op, dim, dominant):
+        margin = 3.0 if dominant else 0.2
+        x = torch.tensor([[0, -margin, -margin], [-margin, 0, -margin]], dtype=dtype)
+        grad, vector = torch.randn_like(x), torch.randn_like(x)
+        if dim == 0:
+            x, grad, vector = x.t(), grad.t(), vector.t()
+
+        def backward_twice(x, grad, vector):
+            x, grad = x.requires_grad_(), grad.requires_grad_()
+            first = torch.autograd.grad(op(x, dim=dim), x, grad, create_graph=True)[0]
+            return first, torch.autograd.grad(first, (x, grad), vector)
+
+        expected, expected_second = backward_twice(x.double(), grad.double(), vector.double())
+        actual, actual_second = backward_twice(x.to(device), grad.to(device), vector.to(device))
+        self.assertEqual(actual, expected.to(dtype), atol=1e-5, rtol=1e-4)
+        self.assertEqual(actual_second, tuple(t.to(dtype) for t in expected_second), atol=1e-5, rtol=1e-4)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("op", [F.softmax, F.log_softmax])
     @parametrize("shape,dim", [((3, 33), 0), ((256, 33), 0), ((257, 4096), 1)])
     @parametrize("values", [
         (0, -17, -math.inf), (-17, 0, -math.inf), (-20, -math.inf, 0),

@@ -212,6 +212,52 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
                                                                   secondaryTensor:gradSubTensor
                                                                              name:nil];
 
+      // Above 1/2 the maximum is unique. Center its upstream gradient before reducing.
+      auto probabilities = castMPSTensor(mpsGraph, softmaxTensor, kFloat);
+      auto gradValues = castMPSTensor(mpsGraph, gradOutputTensor, kFloat);
+      auto zero = [mpsGraph constantWithScalar:0.0 dataType:MPSDataTypeFloat32];
+      auto half = [mpsGraph constantWithScalar:0.5 dataType:MPSDataTypeFloat32];
+      auto dominant = [mpsGraph greaterThanWithPrimaryTensor:probabilities secondaryTensor:half name:nil];
+      auto hasDominant = [mpsGraph reductionOrWithTensor:dominant axis:dim_ name:nil];
+      auto pivotGrad = [mpsGraph selectWithPredicateTensor:dominant
+                                      truePredicateTensor:gradValues
+                                     falsePredicateTensor:zero
+                                                     name:nil];
+      pivotGrad = [mpsGraph reductionSumWithTensor:pivotGrad axis:dim_ name:nil];
+      auto centeredGrad = [mpsGraph subtractionWithPrimaryTensor:gradValues secondaryTensor:pivotGrad name:nil];
+      auto weightedGrad = [mpsGraph multiplicationWithPrimaryTensor:probabilities
+                                                    secondaryTensor:centeredGrad
+                                                               name:nil];
+      auto weightedSum = [mpsGraph reductionSumWithTensor:weightedGrad axis:dim_ name:nil];
+      auto centered = [mpsGraph subtractionWithPrimaryTensor:centeredGrad secondaryTensor:weightedSum name:nil];
+      auto stableGrad = [mpsGraph multiplicationWithPrimaryTensor:probabilities secondaryTensor:centered name:nil];
+      auto otherGrad = [mpsGraph selectWithPredicateTensor:dominant
+                                      truePredicateTensor:zero
+                                     falsePredicateTensor:stableGrad
+                                                     name:nil];
+      auto otherSum = [mpsGraph reductionSumWithTensor:otherGrad axis:dim_ name:nil];
+      auto maxGrad = [mpsGraph negativeWithTensor:otherSum name:nil];
+      stableGrad = [mpsGraph selectWithPredicateTensor:dominant
+                                 truePredicateTensor:maxGrad
+                                falsePredicateTensor:otherGrad
+                                                name:nil];
+
+      // Preserve the original graph for balanced rows and nonfinite arithmetic.
+      auto finiteInputs = [mpsGraph logicalANDWithPrimaryTensor:[mpsGraph isFiniteWithTensor:gradValues name:nil]
+                                                secondaryTensor:[mpsGraph isFiniteWithTensor:probabilities name:nil]
+                                                           name:nil];
+      auto finiteValues = [mpsGraph logicalANDWithPrimaryTensor:finiteInputs
+                                                secondaryTensor:[mpsGraph isFiniteWithTensor:stableGrad name:nil]
+                                                           name:nil];
+      auto finiteRows = [mpsGraph reductionAndWithTensor:finiteValues axis:dim_ name:nil];
+      auto useStable = [mpsGraph logicalANDWithPrimaryTensor:hasDominant secondaryTensor:finiteRows name:nil];
+      stableGrad = castMPSTensor(mpsGraph, stableGrad, getMPSDataType(grad_input));
+      gradInputTensor = castMPSTensor(mpsGraph, gradInputTensor, getMPSDataType(grad_input));
+      gradInputTensor = [mpsGraph selectWithPredicateTensor:useStable
+                                      truePredicateTensor:stableGrad
+                                     falsePredicateTensor:gradInputTensor
+                                                     name:nil];
+
       newCachedGraph->outputTensor_ = softmaxTensor;
       newCachedGraph->gradOutputTensor_ = gradOutputTensor;
       newCachedGraph->gradInputTensor_ = gradInputTensor;
