@@ -143,7 +143,12 @@ class TestNativeUtils(TestCase):
         calls = []
 
         def fn(self, *args, **kwargs):
+            # Record how many times the context was entered and exited when fn runs.
+            ctx = device.return_value
             calls.append((self, args, kwargs))
+            calls.append((ctx.__enter__.call_count, ctx.__exit__.call_count))
+            if kwargs.get("fail"):
+                raise RuntimeError("fn failed")
             return "result"
 
         guarded = cuda_device_guard(fn)
@@ -151,17 +156,20 @@ class TestNativeUtils(TestCase):
         for current, switched in ((1, False), (0, True)):
             calls.clear()
             device = MagicMock()
+            device.return_value.__exit__.return_value = False
             with (
                 patch.object(torch.cuda, "current_device", return_value=current),
                 patch.object(torch.cuda, "device", device),
             ):
                 self.assertEqual(guarded(x, 2, k=3), "result")
-            self.assertEqual(calls, [(x, (2,), {"k": 3})])
-            if switched:
-                device.assert_called_once_with(1)
-                device.return_value.__enter__.assert_called_once()
-            else:
-                device.assert_not_called()
+                with self.assertRaisesRegex(RuntimeError, "fn failed"):
+                    guarded(x, fail=True)
+            # fn runs inside the switched context, which exits even when fn raises.
+            n = int(switched)
+            want = [(x, (2,), {"k": 3}), (n, 0), (x, (), {"fail": True}), (2 * n, n)]
+            self.assertEqual(calls, want)
+            self.assertEqual(device.return_value.__exit__.call_count, 2 * n)
+            self.assertEqual([c.args for c in device.call_args_list], [(1,)] * 2 * n)
 
     def test_device_ok_never_raises_without_a_usable_device(self):
         # On CPU-only systems, fake CUDA tensors normalize to cuda:0 but device queries raise.
