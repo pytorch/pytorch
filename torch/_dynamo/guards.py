@@ -43,8 +43,8 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, cast, NamedTuple, NoReturn, TYPE_CHECKING
-from typing_extensions import LiteralString, TypeAliasType, TypeVar
+from typing import Any, cast, LiteralString, NamedTuple, NoReturn, TYPE_CHECKING
+from typing_extensions import TypeAliasType, TypeVar
 from weakref import ReferenceType
 
 import torch
