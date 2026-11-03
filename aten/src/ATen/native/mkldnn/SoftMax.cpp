@@ -26,6 +26,7 @@ Tensor mkldnn_softmax(
 #else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 namespace at::native {
 
@@ -37,6 +38,9 @@ Tensor mkldnn_softmax(
       !half_to_float,
       "softmax with half to float conversion is not supported on Mkldnn");
   const int64_t wrapped_dim = maybe_wrap_dim(dim, self.dim());
+  if (mkldnn_use_aten_for_eltwise()) {
+    return self.to_dense().softmax(wrapped_dim).to_mkldnn();
+  }
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor y;
   ideep::softmax_forward::compute(x, y, wrapped_dim);

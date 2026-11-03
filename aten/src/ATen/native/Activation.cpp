@@ -380,7 +380,7 @@ TORCH_IMPL_FUNC(softshrink_backward_out) (
 
 #if AT_MKLDNN_ENABLED()
 static bool use_mkldnn(const Tensor& input) {
-  if (!at::globalContext().userEnabledMkldnn()) {
+  if (!at::globalContext().userEnabledMkldnn() || mkldnn_use_aten_for_eltwise()) {
     return false;
   }
   if (!input.is_contiguous() || input.numel() <= 1) {

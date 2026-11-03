@@ -4,8 +4,11 @@
 #include <ATen/native/Activation.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/gelu.h>
+#include <ATen/ops/gelu_backward.h>
 #include <ATen/ops/gelu_native.h>
 #include <ATen/ops/gelu_backward_native.h>
 #endif
@@ -38,6 +41,9 @@ Tensor mkldnn_gelu(const Tensor& input, std::string_view approximate) {
   }
   TORCH_CHECK(get_gelutype_enum(approximate) == GeluType::None,
                   "mkldnn_gelu: fast, approximate gelu is not supported");
+  if (mkldnn_use_aten_for_eltwise()) {
+    return at::gelu(input.to_dense(), approximate).to_mkldnn();
+  }
   const ideep::tensor& x = itensor_from_const_tensor(input);
   ideep::tensor y;
   ideep::eltwise_forward::compute(
@@ -49,6 +55,9 @@ Tensor mkldnn_gelu(const Tensor& input, std::string_view approximate) {
 Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, std::string_view approximate) {
   TORCH_CHECK(get_gelutype_enum(approximate) == GeluType::None,
                   "mkldnn_gelu_backward: fast, approximate gelu is not supported");
+  if (mkldnn_use_aten_for_eltwise()) {
+    return at::gelu_backward(grad_output.to_dense(), input.to_dense(), approximate).to_mkldnn();
+  }
   const ideep::tensor& x = itensor_from_const_tensor(input);
   ideep::tensor grady = itensor_from_const_tensor(grad_output);
   ideep::tensor gradx;
