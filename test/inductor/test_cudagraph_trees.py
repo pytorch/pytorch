@@ -6047,6 +6047,10 @@ if HAS_CUDA_AND_TRITON:
                     compiled(torch.rand([20], device="cuda")).backward()
                     self.assertEqual(w.grad, torch.ones_like(w))
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hits)
+                # The backward told the manager it ran: one graph, none pending.
+                manager = self.get_manager()
+                self.assertEqual(manager.new_graph_id().id, 1)
+                self.assertFalse(manager.running_forwards_with_pending_backwards)
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("triton.cudagraph_capture_sizes", (2,))
@@ -6089,6 +6093,8 @@ if HAS_CUDA_AND_TRITON:
                 x.grad = None
                 compiled(x).backward()
                 self.assertEqual(x.grad, expected)
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_forward_backward_not_called(self):
