@@ -44,6 +44,7 @@ from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
 from ..utils._sympy.functions import CeilDiv, Max, Min
+from ..utils._sympy.symbol import SymT, symbol_is_type
 from . import config, ir
 from .autotune_process import (
     AsyncAutotuner,
@@ -980,6 +981,26 @@ class TritonTemplateKernel(TritonKernel):
                     return V.graph.sizevars.optimization_hint(f, fallback=0)
         return 0
 
+    def body_fixed_blocks(self, sig_arg_names: OrderedSet[str]) -> dict[str, int]:
+        fixed_blocks: dict[str, int] = {}
+        # prologue_cache maps a block name to the size expression that emitted its
+        # constexpr line; it also caches var -> descriptor name, which won't evaluate.
+        numeric_meta = {
+            k: v
+            for k, v in self.meta.items()
+            if isinstance(v, int) and not isinstance(v, bool)
+        }
+        for block_name, block_size in self.prologue_cache.items():
+            if block_name in sig_arg_names:
+                continue
+            try:
+                val = sympy.sympify(block_size).subs(numeric_meta)
+            except (sympy.SympifyError, TypeError, SyntaxError):
+                continue
+            if val.is_Integer:
+                fixed_blocks[block_name] = int(val)
+        return fixed_blocks
+
     def jit_lines(self):
         """Render decorators and metadata for the generated Triton template."""
         if self.use_jit:
@@ -1032,12 +1053,12 @@ class TritonTemplateKernel(TritonKernel):
             **self.inductor_meta_common(),
             **FixedGrid.setup_grid_as_args(),
         }
+        resolved_host_tma: dict[str, Any] = {}
         if self.host_tma_descriptor_args:
             # This meta is repr'd into the generated module, so epilogue-registered
             # TensorDescriptorOptions must be resolved to plain dims first.
-            inductor_meta["host_tma_descriptor_args"] = (
-                self.resolved_host_tma_descriptor_args()
-            )
+            resolved_host_tma = self.resolved_host_tma_descriptor_args()
+            inductor_meta["host_tma_descriptor_args"] = resolved_host_tma
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
@@ -1070,8 +1091,21 @@ class TritonTemplateKernel(TritonKernel):
                 """
                 triton_meta_extra[k] = v
 
+        # The signature below still shows these as pointers; _precompile_config
+        # rewrites them per config, so spell out what it will produce.
+        signature = self.triton_meta["signature"]
+        upgrades = [
+            f"#   {name} -> tensordesc<{signature[name][1:]}{desc['block_shape']}>"
+            for name, desc in resolved_host_tma.items()
+            if isinstance(signature.get(name), str) and signature[name].startswith("*")
+        ]
+        host_tma_note = ""
+        if upgrades:
+            body = "\n            ".join(upgrades)
+            host_tma_note = f"# host-side TMA, rewritten at precompile:\n            {body}\n\n            "
+
         return f"""
-            @triton_heuristics.template(
+            {host_tma_note}@triton_heuristics.template(
                 {template_args}
             )
             @triton.jit
@@ -1248,13 +1282,27 @@ class TritonTemplateKernel(TritonKernel):
             # kernel-side syntax the host launcher cannot resolve.
             node_size = node.get_size()
             node_stride = self.get_stride_and_maybe_freeze_layout(node)
+            dims = [
+                sympy.sympify(dim)
+                for dim in [node_size[d] for d in dim_order]
+                + [node_stride[d] for d in dim_order]
+            ]
+            launch_args = self._host_tma_launch_args(dims)
+            if launch_args is None:
+                # A dim the launcher cannot evaluate: build this descriptor in-kernel.
+                return self._device_tma_descriptor(
+                    desc_name, input_name, block_shape, dim_order
+                )
+            rendered = [self._host_tma_dim(self.rename_indexing(d)) for d in dims]
             desc: dict[str, Any] = {
                 "block_shape": [int(b) for b in block_shape],
-                "shape": [texpr(self.rename_indexing(node_size[d])) for d in dim_order],
-                "strides": [
-                    texpr(self.rename_indexing(node_stride[d])) for d in dim_order
-                ],
+                "shape": rendered[: len(dim_order)],
+                "strides": rendered[len(dim_order) :],
             }
+            if launch_args:
+                # The kernel's size args these dims read; the launcher evaluates
+                # the rendered expressions over them at each launch.
+                desc["launch_args"] = sorted(launch_args)
             prev = self.host_tma_descriptor_args.get(arg_name)
             if prev is not None and prev != desc:
                 # def_kernel dedupes operands that alias one buffer into a single
@@ -1266,6 +1314,48 @@ class TritonTemplateKernel(TritonKernel):
             self.host_tma_descriptor_args[arg_name] = desc
             return f"{desc_name} = {input_name}"
 
+        return self._device_tma_descriptor(
+            desc_name, input_name, block_shape, dim_order
+        )
+
+    def _host_tma_launch_args(self, dims: list[sympy.Expr]) -> OrderedSet[str] | None:
+        """Kernel size args a host-side descriptor's dims read at launch, or None
+        if a dim cannot be evaluated by the launcher.
+
+        A dim can be read at launch when it is an integer expression whose free
+        symbols are all graph sizes (dynamic shapes), which become the kernel's
+        size args (ks0). The C++ wrapper builds descriptors from the tensor's own
+        sizes, so there every dim must be a compile-time integer.
+        """
+        launch_args: OrderedSet[str] = OrderedSet()
+        for dim in dims:
+            dim = V.graph.sizevars.simplify(dim)
+            if not dim.free_symbols:
+                continue
+            if V.graph.cpp_wrapper or not dim.is_integer:
+                return None
+            if not all(
+                symbol_is_type(sym, (SymT.SIZE, SymT.PRECOMPUTED_SIZE))
+                for sym in dim.free_symbols
+            ):
+                return None
+            launch_args.update(
+                str(self.rename_indexing(sym)) for sym in dim.free_symbols
+            )
+        return launch_args
+
+    @staticmethod
+    def _host_tma_dim(dim: sympy.Expr) -> int | str:
+        """A host-side descriptor dim: an int, or launcher (Python) source."""
+        return int(dim) if dim.is_number else pexpr(dim)
+
+    def _device_tma_descriptor(
+        self,
+        desc_name: str,
+        input_name: str | None,
+        block_shape: list[int],
+        dim_order: list[int],
+    ) -> str:
         base_name = input_name if input_name is not None else "output"
         stride_exprs = ", ".join(self.stride(input_name, d) for d in dim_order)
         size_exprs = ", ".join(self.size(input_name, d) for d in dim_order)
