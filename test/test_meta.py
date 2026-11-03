@@ -2848,6 +2848,59 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(f_result.stride(), expected.stride())
         self.assertEqual(f_result.dtype, expected.dtype)
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_upsample_bicubic2d_aa_backward_meta_channels_last(self):
+        # The shared Python meta propagates grad_output's memory format while
+        # the C++ meta for _upsample_bicubic2d_aa_backward returns a bare
+        # grad_output.options() tensor, i.e. contiguous. A channels-last
+        # grad_output therefore made meta/FakeTensor report channels-last
+        # strides while eager reported contiguous ones. Compare the two so
+        # whichever side is changed stays in agreement.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            ShapeEnv,
+            StatelessSymbolicContext,
+        )
+
+        input_size = [2, 3, 8, 8]
+        output_size = [16, 16]
+        fwd_op = torch.ops.aten._upsample_bicubic2d_aa.default
+        bwd_op = torch.ops.aten._upsample_bicubic2d_aa_backward.default
+
+        x = torch.randn(*input_size).to(memory_format=torch.channels_last)
+        out = fwd_op(x, output_size, False)
+        grad_out = torch.randn_like(out).to(memory_format=torch.channels_last)
+        expected = bwd_op(grad_out, output_size, input_size, False)
+
+        shape_env = ShapeEnv()
+        with (
+            FakeTensorMode(shape_env=shape_env) as fake_mode,
+            enable_python_dispatcher(),
+        ):
+            f_grad = fake_mode.from_tensor(
+                grad_out,
+                symbolic_context=StatelessSymbolicContext(
+                    dynamic_sizes=[
+                        DimDynamic.STATIC,
+                        DimDynamic.STATIC,
+                        DimDynamic.DYNAMIC,
+                        DimDynamic.DYNAMIC,
+                    ],
+                    constraint_sizes=[None, None, None, None],
+                ),
+            )
+            f_result = bwd_op(
+                f_grad,
+                [f_grad.shape[2], f_grad.shape[3]],
+                input_size,
+                False,
+            )
+
+        self.assertEqual(f_result.shape, expected.shape)
+        self.assertEqual(f_result.stride(), expected.stride())
+        self.assertEqual(f_result.dtype, expected.dtype)
+
 
 instantiate_device_type_tests(TestMeta, globals())
 
