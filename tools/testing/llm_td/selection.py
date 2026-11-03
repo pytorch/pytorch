@@ -3,7 +3,8 @@
 A selection names test files (paths under test/ without .py), whole test
 directories, and wrapper sweeps (configs such as dynamo_wrapped that re-run
 ordinary test files in a special mode). A test file runs in a given CI config
-when the selection names the file, names that config as a sweep, or is run_all.
+when the selection names the file, names that config as a sweep, or is run_all,
+and so does every test file the model was not shown.
 """
 
 from __future__ import annotations
@@ -18,7 +19,22 @@ from tools.testing.target_determination.heuristics.edited_by_pr import (
 )
 
 
-# Directories that discover_tests.py blocklists because a driver runs their files.
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+
+SWEEPS = ("dynamo_wrapped", "crossref")
+LLM_TD_SELECTION_FILE = "llm_td_selection.json"
+# Longest chain of test modules importing each other that importers() follows.
+MAX_IMPORT_HOPS = 8
+# More edited failure-list classes than this are not looked up one by one.
+MAX_FAILURE_LIST_CLASSES = 50
+
+# Tests that run the files a change matches although they do not import them:
+# the drivers of the directories discover_tests.py blocklists (except
+# torch_openreg/tests, whose driver test_openreg is never a candidate), TD's
+# ADDITIONAL_MAPPINGS, and the compiled autograd rerun of test_autograd.
 DRIVER_MAPPINGS = {
     **ADDITIONAL_MAPPINGS,
     "test_ao_sparsity": [r"^test/ao/"],
@@ -27,18 +43,17 @@ DRIVER_MAPPINGS = {
     "test_jit": [r"^test/jit/"],
     "test_package": [r"^test/package/"],
     "test_quantization": [r"^test/quantization/"],
+    "inductor/test_compiled_autograd": [r"^test/compiled_autograd_skips/"],
 }
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-    from pathlib import Path
-
-
-SWEEPS = ("dynamo_wrapped", "crossref")
-LLM_TD_SELECTION_FILE = "llm_td_selection.json"
-# When enforcing, run_test.py also runs TD's top-ranked files up to this share of
-# the config's test time (all shards together): TD and the model miss largely different failures.
-LLM_TD_HEDGE = 0.20
+# common_utils xfails or skips a test named in one of these lists, one file per
+# test such as TestNNCPU.test_x or CPython313-test_set-TestSet.test_x, when it
+# runs under dynamo (the dynamo_wrapped config), inductor or compiled autograd.
+FAILURE_LIST_RE = re.compile(
+    r"^test/(dynamo|inductor|compiled_autograd)_(?:expected_failures|skips)/(?:.*-)?(\w+)\.[^./]+$"
+)
+# instantiate_device_type_tests names TestFooCPU after TestFoo.
+DEVICE_SUFFIX_RE = re.compile(r"(CPU|CUDA|MPS|XPU|HPU|META|LAZY|PRIVATEUSE1)$")
 
 # Changes to these paths alter how every test is collected or run, so no
 # subset is safe whatever the model says.
@@ -54,21 +69,31 @@ RUN_ALL_PATTERNS = [
     r"^\.ci/pytorch/(test|multigpu-test|win-test|macos-test|macos-common|common|common-build|common_utils|torch_trace)\.sh$",
     r"^\.ci/pytorch/win-test-helpers/(setup_pytorch_env\.bat|test_python_shard\.bat|installation-helpers/activate_miniconda3\.bat)$",
     r"^\.github/workflows/_(linux|win|mac|rocm|xpu|s390x|tpu)-test(-no-dind)?\.yml$",
-    r"^\.github/actions/(setup-linux|setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts)/",
+    # setup-linux is left out: the test jobs use it from main, not from the PR.
+    r"^\.github/actions/(setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts)/",
     r"^\.github/scripts/filter_test_configs\.py$",
+    # The pytest plugin every test job loads.
+    r"^torch/testing/_internal/torchci/",
+    # Installed by .ci/pytorch/common_utils.sh for the test jobs.
+    r"^\.github/ci_commit_pins/(audio|vision)\.txt$",
     # The CI test images: a new package version or toolchain can break any test.
     r"^\.ci/docker/(build\.sh|requirements-ci\.txt|common/|ci_commit_pins/|ubuntu)",
 ]
 
 
 def normalize_test_name(name: str, candidates: set[str]) -> str | None:
-    """Map a model-written name such as 'test/dynamo/test_misc.py [3m]' onto a candidate."""
+    """Map a model-written name such as 'test/dynamo/test_misc.py [3m]' onto a
+    candidate, and a file that a driver runs, such as jit/test_freezing, onto the driver."""
     n = re.sub(r"\s*\[[^\]]*\]$", "", name.strip())
     n = n.split("::")[0].removeprefix("./").removeprefix("test/").removesuffix(".py")
     if n in candidates:
         return n
     n = n.replace(".", "/")
-    return n if n in candidates else None
+    if n in candidates:
+        return n
+    path = f"test/{n}.py"
+    drivers = (t for t, regexes in DRIVER_MAPPINGS.items() if t in candidates and any(re.search(r, path) for r in regexes))  # fmt: skip
+    return next(drivers, None)
 
 
 def edited_tests(changed_files: list[str], candidates: set[str]) -> set[str]:
@@ -85,18 +110,56 @@ def edited_tests(changed_files: list[str], candidates: set[str]) -> set[str]:
 
 
 def importers(
-    changed_files: list[str], candidates: set[str], grep: Callable[[str], list[str]]
-) -> set[str]:
-    """Candidates that import a test module the change edits, such as the
-    *_dynamic_shapes copies of inductor/test_torchinductor. `grep` lists the
-    paths under test/ that match a `git grep -E` pattern at the change's head."""
-    mods = [f[5:-3] for f in changed_files if f.startswith("test/") and f.endswith(".py")]  # fmt: skip
-    names = sorted({n for m in mods for n in (m.replace("/", "."), m.rsplit("/", 1)[-1])})  # fmt: skip
-    if not names:
-        return set()
-    alt = "|".join(map(re.escape, names))
-    pattern = rf"^[[:space:]]*(from|import)[[:space:]]+({alt})([^[:alnum:]_]|$)"
-    return {n for f in grep(pattern) if (n := normalize_test_name(f, candidates))}
+    sources: list[str], candidates: set[str], grep: Callable[[str], list[str]]
+) -> set[str] | None:
+    """The candidates among `sources` (paths under test/), the candidates that
+    import one of them directly or through other modules under test/, and their
+    drivers: test/jit/test_freezing.py selects test_jit, which runs it, and
+    test_jit_legacy, which does `from test_jit import *`. `grep` lists the paths
+    under test/ that match a `git grep -E` pattern at the change's head. None if
+    the chain is longer than MAX_IMPORT_HOPS."""
+    found: set[str] = set()
+    seen: set[str] = set()
+    frontier = {f for f in sources if f.startswith("test/") and f.endswith(".py")}
+    for hop in range(MAX_IMPORT_HOPS + 1):
+        tests = edited_tests(sorted(frontier), candidates)
+        found |= tests
+        frontier = (frontier | {f"test/{t}.py" for t in tests}) - seen
+        if not frontier:
+            return found
+        if hop == MAX_IMPORT_HOPS:
+            return None
+        seen |= frontier
+        mods = [f[5:-3] for f in frontier]
+        names = sorted({n for m in mods for n in (m.replace("/", "."), m.rsplit("/", 1)[-1])})  # fmt: skip
+        alt = "|".join(map(re.escape, names))
+        pattern = rf"^[[:space:]]*((from|import)[[:space:]]+\.*({alt})|from[[:space:]]+\.+[[:space:]]+import[[:space:]]+({alt}))([^[:alnum:]_]|$)"  # fmt: skip
+        frontier = {f for f in grep(pattern) if f.endswith(".py")}
+    return None
+
+
+def failure_list_sources(
+    changed_files: list[str], grep: Callable[[str], list[str]] | None
+) -> tuple[list[str], set[str]]:
+    """The paths under test/ that define the classes named by the edited
+    failure-list entries (see FAILURE_LIST_RE), and the lists ("dynamo",
+    "inductor" or "compiled_autograd") naming a class that `grep` (see
+    importers) does not find."""
+    classes: dict[str, set[str]] = {}
+    for f in changed_files:
+        if m := FAILURE_LIST_RE.match(f):
+            classes.setdefault(m[2], set()).add(m[1])
+    if grep is None or len(classes) > MAX_FAILURE_LIST_CLASSES:
+        return [], set().union(*classes.values())
+    sources: list[str] = []
+    missing: set[str] = set()
+    for c, lists in sorted(classes.items()):
+        alt = "|".join(sorted({c, DEVICE_SUFFIX_RE.sub("", c)}))
+        found = grep(rf"^[[:space:]]*class[[:space:]]+({alt})([^[:alnum:]_]|$)")
+        sources += found
+        if not found:
+            missing |= lists
+    return sources, missing
 
 
 def unmatched_tests(out: dict, candidates: set[str]) -> list[str]:
@@ -122,6 +185,8 @@ def parse_model_output(out: object, candidates: set[str]) -> tuple[set[str], set
     for key, value in (("dirs", dirs), ("sweeps", sweeps)):
         if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
             raise ValueError(f"{key} is not a list of strings")
+    if unknown := set(sweeps) - set(SWEEPS):
+        raise ValueError(f"unknown sweeps {sorted(unknown)}")
     if not isinstance(out.get("run_all", False), bool):
         raise ValueError("run_all is not a boolean")
     files = {n for t in tests if (n := normalize_test_name(t["file"], candidates))}
@@ -133,7 +198,7 @@ def parse_model_output(out: object, candidates: set[str]) -> tuple[set[str], set
         if not in_dir:
             raise ValueError(f"dirs entry {d!r} matches no test file")
         files |= in_dir
-    return files, {s for s in sweeps if s in SWEEPS}
+    return files, set(sweeps)
 
 
 @dataclass
@@ -145,11 +210,14 @@ class Selection:
     # Whether run_test.py should skip the files the selection does not cover,
     # rather than only reporting what it would have skipped.
     enforce: bool = False
+    # The test files the model chose from. Any other file, such as a custom
+    # run_test.py handler or a C++ test, is always covered. None covers no extra file.
+    candidates: set[str] | None = None
 
     @classmethod
     def from_model_output(
         cls,
-        out: dict | None,
+        out: object,
         candidates: set[str],
         changed_files: list[str],
         grep: Callable[[str], list[str]] | None = None,
@@ -157,9 +225,10 @@ class Selection:
         """Turn the model's structured output into a Selection.
 
         A missing or malformed output and a change to test infrastructure
-        all fall back to running everything. Test files the
-        change edits are always selected, and with `grep` (see importers) so
-        are the test files that import them."""
+        all fall back to running everything. Test files the change edits and
+        their drivers are always selected, and with `grep` so are the test
+        files that import them (see importers) and those defining the tests
+        that an edited failure list names (see failure_list_sources)."""
         if out is None:
             return cls(run_all=True, reason="no model output; running everything")
         if needs_run_all(changed_files):
@@ -168,12 +237,25 @@ class Selection:
             files, sweeps = parse_model_output(out, candidates)
         except ValueError as e:
             return cls(run_all=True, reason=f"malformed model output ({e}); running everything")  # fmt: skip
+        if not isinstance(out, dict):
+            raise AssertionError("parse_model_output accepts only objects")
+        sources, missing = failure_list_sources(changed_files, grep)
+        if "inductor" in missing:
+            return cls(run_all=True, reason="an edited inductor failure list names an unknown test class")  # fmt: skip
+        if "dynamo" in missing:
+            sweeps.add("dynamo_wrapped")
         files |= edited_tests(changed_files, candidates)
         if grep is not None:
-            files |= importers(changed_files, candidates, grep)
-        return cls(files, sweeps, out.get("run_all", False), str(out.get("reason", "")))  # fmt: skip
+            found = importers(changed_files + sources, candidates, grep)
+            if found is None:
+                return cls(run_all=True, reason="test modules import the change through too many hops")  # fmt: skip
+            files |= found
+        run_all, reason = out.get("run_all", False), str(out.get("reason", ""))
+        return cls(files, sweeps, run_all, reason, candidates=set(candidates))
 
     def covers(self, test_file: str, test_config: str) -> bool:
+        if self.candidates is not None and test_file not in self.candidates:
+            return True
         return self.run_all or test_config in self.sweeps or test_file in self.files
 
     def to_json(self) -> dict:
@@ -183,6 +265,7 @@ class Selection:
             "run_all": self.run_all,
             "reason": self.reason,
             "enforce": self.enforce,
+            "candidates": None if self.candidates is None else sorted(self.candidates),
         }
 
     @classmethod
@@ -193,6 +276,7 @@ class Selection:
             d["run_all"],
             d.get("reason", ""),
             d.get("enforce", False),
+            None if d.get("candidates") is None else set(d["candidates"]),
         )
 
     @classmethod

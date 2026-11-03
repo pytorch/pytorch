@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -13,8 +15,14 @@ from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
-from tools.testing.llm_td import select_tests
-from tools.testing.llm_td.selection import needs_run_all, normalize_test_name, Selection
+from tools.testing.discover_tests import BLOCKLISTED_PATTERNS, TESTS
+from tools.testing.llm_td import select_tests, selection
+from tools.testing.llm_td.selection import (
+    DRIVER_MAPPINGS,
+    needs_run_all,
+    normalize_test_name,
+    Selection,
+)
 
 
 CANDIDATES = {
@@ -40,12 +48,16 @@ class TestSelection(unittest.TestCase):
             normalize_test_name("dynamo.test_misc", CANDIDATES), "dynamo/test_misc"
         )
         self.assertIsNone(normalize_test_name("test_nonexistent", CANDIDATES))
+        self.assertIsNone(normalize_test_name("jit/test_freezing", CANDIDATES))
+        candidates = CANDIDATES | {"test_jit"}
+        for name in ("jit/test_freezing", "test/jit/test_freezing.py", "jit.test_freezing"):  # fmt: skip
+            self.assertEqual(normalize_test_name(name, candidates), "test_jit")
 
     def test_from_model_output(self) -> None:
         out = {
             "run_all": False,
             "reason": "r",
-            "sweeps": ["dynamo_wrapped", "bogus"],
+            "sweeps": ["dynamo_wrapped"],
             "dirs": ["test/dynamo/"],
             "tests": [
                 {"file": "test/test_ops.py", "confidence": "high"},
@@ -64,13 +76,26 @@ class TestSelection(unittest.TestCase):
         self.assertTrue(sel.covers("test_ops", "default"))
         self.assertEqual(Selection.from_json(sel.to_json()), sel)
 
-    def test_importers_are_selected(self) -> None:
-        sources = {
-            "dynamo/test_misc.py": "from inductor.test_torchinductor import check_model\n",
-            "test_ops.py": "    import test_torchinductor\n",
-            "test_nn.py": "from test_torchinductor_utils import x\nfrom torch._inductor.test_case import TestCase\n",
-            "helper.py": "import test_torchinductor\n",
-        }  # fmt: skip
+    def test_files_the_model_never_saw_are_covered(self) -> None:
+        sel = Selection.from_model_output({"tests": []}, CANDIDATES, [])
+        self.assertEqual(sel.candidates, CANDIDATES)
+        for f in ("test_openreg", "cpp/test_jit"):
+            self.assertTrue(sel.covers(f, "default"), f)
+            self.assertFalse(Selection().covers(f, "default"), f)
+        self.assertFalse(sel.covers("test_nn", "default"))
+        self.assertEqual(Selection.from_json(sel.to_json()), sel)
+
+    def test_model_run_all_is_kept(self) -> None:
+        out = {"run_all": True, "reason": "", "sweeps": [], "dirs": [], "tests": []}
+        sel = Selection.from_model_output(out, CANDIDATES, ["torch/a.py"])
+        self.assertTrue(sel.run_all)
+        self.assertTrue(sel.covers("test_nn", "default"))
+        self.assertTrue(Selection.from_json(sel.to_json()).covers("test_nn", "default"))
+
+    def select_in_tree(
+        self, sources: dict[str, str], candidates: set[str], changed: list[str]
+    ) -> Selection:
+        """from_model_output with an empty answer and a grep over `sources`, a test/ tree."""
         with tempfile.TemporaryDirectory() as d:
             for name, text in sources.items():
                 (Path(d) / name).parent.mkdir(parents=True, exist_ok=True)
@@ -81,8 +106,64 @@ class TestSelection(unittest.TestCase):
                 found = subprocess.run(cmd, cwd=d, capture_output=True, text=True).stdout.split()  # fmt: skip
                 return [f"test/{f.removeprefix('./')}" for f in found]
 
-            sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/inductor/test_torchinductor.py"], grep)  # fmt: skip
-        self.assertEqual(sel.files, {"inductor/test_torchinductor", "dynamo/test_misc", "test_ops"})  # fmt: skip
+            return Selection.from_model_output({"tests": []}, candidates, changed, grep)
+
+    def test_importers_are_selected(self) -> None:
+        sources = {
+            "dynamo/test_misc.py": "from inductor.test_torchinductor import check_model\n",
+            "test_ops.py": "    import test_torchinductor\n",
+            "test_nn.py": "from test_torchinductor_utils import x\nfrom torch._inductor.test_case import TestCase\n",
+            "helper.py": "import test_torchinductor\n",
+            "cpython/v3_13/test_set.py": "from helper import *\n",
+            "jit/test_rel.py": "    from . import helper\n",
+            "test_jit.py": "from jit.test_rel import *\n",
+            "test_jit_legacy.py": "from test_jit import *\n",
+        }  # fmt: skip
+        candidates = CANDIDATES | {"test_jit", "test_jit_legacy"}
+        sel = self.select_in_tree(sources, candidates, ["test/inductor/test_torchinductor.py"])  # fmt: skip
+        expected = {"inductor/test_torchinductor", "dynamo/test_misc", "test_ops", "cpython/v3_13/test_set", "test_jit", "test_jit_legacy"}  # fmt: skip
+        self.assertEqual(sel.files, expected)
+
+    def test_endless_import_chain_runs_all(self) -> None:
+        calls: list[str] = []
+
+        def grep(pattern: str) -> list[str]:
+            calls.append(pattern)
+            return [f"test/m{len(calls)}.py"]
+
+        sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/test_nn.py"], grep)  # fmt: skip
+        self.assertTrue(sel.run_all)
+        self.assertEqual(len(calls), selection.MAX_IMPORT_HOPS)
+
+    def test_failure_list_edits_select_their_tests(self) -> None:
+        sources = {
+            "test_nn.py": "class TestNN(TestCase):\n",
+            "cpython/v3_13/test_set.py": "    class TestSet(unittest.TestCase):\n",
+            "inductor/test_torchinductor.py": "class TestSetCopy:\n",
+        }
+        candidates = CANDIDATES | {"inductor/test_compiled_autograd"}
+        for changed, files, sweeps in [
+            ("test/dynamo_expected_failures/TestNNCPU.test_x", {"test_nn"}, set()),
+            ("test/dynamo_skips/TestNN.test_x_cuda", {"test_nn"}, set()),
+            ("test/inductor_skips/TestNNCUDA.test_x", {"test_nn"}, set()),
+            ("test/dynamo_skips/CPython313-test_set-TestSet.test_x", {"cpython/v3_13/test_set"}, set()),
+            ("test/dynamo_skips/TestGone.test_x", set(), {"dynamo_wrapped"}),
+            ("test/compiled_autograd_skips/TestNN.test_x", {"inductor/test_compiled_autograd", "test_nn"}, set()),
+            ("test/compiled_autograd_skips/TestGone.test_x", {"inductor/test_compiled_autograd"}, set()),
+            ("test/dynamo_skips/.gitkeep", set(), set()),
+        ]:  # fmt: skip
+            sel = self.select_in_tree(sources, candidates, [changed])
+            self.assertFalse(sel.run_all, changed)
+            self.assertEqual((sel.files, sel.sweeps), (files, sweeps), changed)
+        for changed in ("test/inductor_expected_failures/TestGone.test_x", "test/inductor_skips/TestGone.test_x"):  # fmt: skip
+            self.assertTrue(self.select_in_tree(sources, candidates, [changed]).run_all)
+        many = [f"test/dynamo_skips/TestNN{i}.test_x" for i in range(selection.MAX_FAILURE_LIST_CLASSES + 1)]  # fmt: skip
+        self.assertEqual(self.select_in_tree(sources, candidates, many).sweeps, {"dynamo_wrapped"})  # fmt: skip
+        # Without a grep, the classes cannot be looked up.
+        sel = Selection.from_model_output({"tests": []}, candidates, ["test/dynamo_skips/TestNN.test_x"])  # fmt: skip
+        self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
+        sel = Selection.from_model_output({"tests": []}, candidates, ["test/inductor_skips/TestNN.test_x"])  # fmt: skip
+        self.assertTrue(sel.run_all)
 
     def test_fallbacks_run_all(self) -> None:
         self.assertTrue(
@@ -134,13 +215,15 @@ class TestSelection(unittest.TestCase):
             ".github/workflows/_xpu-test.yml",
             ".github/workflows/_s390x-test.yml",
             ".github/workflows/_tpu-test.yml",
-            ".github/actions/setup-linux/action.yml",
             ".github/actions/setup-rocm/action.yml",
             ".github/actions/setup-win/action.yml",
             ".github/actions/setup-xpu/action.yml",
             ".github/actions/filter-test-configs/action.yml",
             ".github/actions/download-td-artifacts/action.yml",
             ".github/scripts/filter_test_configs.py",
+            ".github/ci_commit_pins/vision.txt",
+            ".github/ci_commit_pins/audio.txt",
+            "torch/testing/_internal/torchci/plugin.py",
             "test/run_test.py",
             "test/conftest.py",
             "test/pytest_shard_custom.py",
@@ -157,6 +240,8 @@ class TestSelection(unittest.TestCase):
             "docs/source/index.rst",
             ".github/workflows/lint.yml",
             ".ci/pytorch/build.sh",
+            ".github/actions/setup-linux/action.yml",
+            ".github/ci_commit_pins/vllm.txt",
         ]:
             self.assertFalse(needs_run_all([f]), f)
 
@@ -171,6 +256,7 @@ class TestSelection(unittest.TestCase):
             {"tests": [], "dirs": "dynamo"},
             {"tests": [], "dirs": [1]},
             {"tests": [], "sweeps": None},
+            {"tests": [], "sweeps": ["dynamo-wrapped"]},
             {"tests": [], "run_all": "false"},
             {"tests": [], "dirs": [""]},
             {"tests": [], "dirs": ["test"]},
@@ -206,6 +292,21 @@ class TestSelection(unittest.TestCase):
         ]:  # fmt: skip
             sel = Selection.from_model_output({"tests": []}, candidates, [changed])
             self.assertEqual(sel.files, expected, changed)
+        out = {"tests": [{"file": "jit/test_freezing", "confidence": "high"}]}
+        sel = Selection.from_model_output(out, candidates, [])
+        self.assertEqual((sel.files, sel.run_all), ({"test_jit"}, False))
+
+    def test_drivers_match_the_test_list(self) -> None:
+        for test in DRIVER_MAPPINGS:
+            self.assertIn(test, TESTS)
+        # Directories whose files no candidate runs. torch_openreg/tests runs
+        # through test_openreg, which is never a candidate and so is always
+        # covered; edits there also select the cpp_extensions drivers.
+        undriven = {"custom_backend", "mobile", "onnx_caffe2"}
+        for pattern in BLOCKLISTED_PATTERNS:
+            path = f"test/{pattern}/test_x.py"
+            driven = any(re.search(r, path) for rs in DRIVER_MAPPINGS.values() for r in rs)  # fmt: skip
+            self.assertEqual(driven, pattern not in undriven, pattern)
 
 
 class TestPrompt(unittest.TestCase):
@@ -238,7 +339,10 @@ class TestPrompt(unittest.TestCase):
 
     def test_build_prompt(self) -> None:
         minutes = select_tests.test_minutes(
-            {"env": {"default": {"test_nn": 600.0}, "slow": {"test_nn": 60.0}}}
+            {
+                "env": {"default": {"test_nn": 600.0}, "slow": {"test_nn": 60.0}},
+                "default": {"default": {"test_nn": 600.0}},
+            }
         )
         self.assertEqual(minutes, {"test_nn": 11.0})
         prompt = select_tests.build_prompt(
@@ -307,12 +411,55 @@ class TestMain(unittest.TestCase):
         self.assertEqual(record["reason"], "no changed files")
 
     def test_bad_effort_env_is_rejected(self) -> None:
+        stderr = io.StringIO()
         with (
             mock.patch.dict(os.environ, {"LLM_TD_EFFORT": "bogus"}),
+            mock.patch.object(select_tests, "select") as select,
+            mock.patch("sys.stderr", stderr),
             self.assertRaises(SystemExit),
-            mock.patch("sys.stderr"),
         ):
             select_tests.main(["--print-prompt"])
+        select.assert_not_called()
+        self.assertIn("LLM_TD_EFFORT='bogus' is not one of", stderr.getvalue())
+
+    def test_too_many_changed_files_runs_all(self) -> None:
+        changed = "".join(f"torch/f{i}.py\n" for i in range(select_tests.MAX_CHANGED_FILES + 1))  # fmt: skip
+        with (
+            mock.patch.object(select_tests, "git", return_value=changed),
+            mock.patch.object(select_tests, "get_test_times") as times,
+        ):
+            record = self.run_main()
+        times.assert_not_called()
+        self.assertTrue(record["run_all"])
+
+    def test_query_model_failures_run_all(self) -> None:
+        def completed(stdout: str) -> subprocess.CompletedProcess:
+            return subprocess.CompletedProcess([], 0, stdout, "err")
+
+        timeout = subprocess.TimeoutExpired(["claude", "-p", "<prompt>"], 600)
+        for run, error in [
+            (completed("not json"), "not jsonerr"),
+            (completed(json.dumps({"is_error": True, "result": "overloaded"})), "overloaded"),
+            (completed(json.dumps({"result": "", "total_cost_usd": 0.5})), "no structured output"),
+            (mock.Mock(side_effect=timeout), "model call timed out after 600s"),
+            (mock.Mock(side_effect=FileNotFoundError("claude")), "FileNotFoundError: claude"),
+        ]:  # fmt: skip
+            run = run if isinstance(run, mock.Mock) else mock.Mock(return_value=run)
+            with (
+                tempfile.TemporaryDirectory() as tmp,
+                mock.patch.object(select_tests, "git", return_value="docs/a.md\n"),
+                mock.patch.object(select_tests, "get_test_times", return_value={"env": {"default": {"test_nn": 1.0}}}),
+                mock.patch.object(select_tests.subprocess, "run", run),
+            ):  # fmt: skip
+                output = Path(tmp) / "out.json"
+                select_tests.main(["--title", "t", "--output", str(output)])
+                record = json.loads(output.read_text())
+            self.assertTrue(record["run_all"], error)
+            self.assertEqual(record["error"], error)
+            cmd = run.call_args.args[0]
+            self.assertEqual(cmd[:2], ["claude", "-p"])
+            self.assertEqual(cmd[cmd.index("--tools") + 1], "")
+            self.assertEqual(json.loads(cmd[cmd.index("--json-schema") + 1]), select_tests.SCHEMA)  # fmt: skip
 
     def test_infra_change_runs_all(self) -> None:
         with (
