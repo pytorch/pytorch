@@ -2279,9 +2279,9 @@ class CommonTemplate:
 
     @unittest.skipIf(TEST_WITH_ASAN, "inf to int cast is UB under sanitizers")
     def test_index_propagation_to_dtype_inf(self):
-        if self.device == "cpu" and not cpu_vec_isa.pick_vec_isa():
+        if is_cpp_backend(self.device) and not cpu_vec_isa.pick_vec_isa():
             raise unittest.SkipTest(
-                "inf to int cast is UB, and scalar CPU code doesn't match eager"
+                "inf to int cast is UB; scalar C++ results depend on the compiler"
             )
 
         def fn():

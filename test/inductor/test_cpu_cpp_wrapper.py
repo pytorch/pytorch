@@ -45,6 +45,8 @@ except unittest.SkipTest:
 
 
 _desired_test_bases = get_desired_device_type_test_bases()
+# Unlike inductor_utils.RUN_CPU, this ignores PYTORCH_TEST_INDUCTOR_RUN_CPU to
+# keep this suite's cost out of the nogpu_* CI jobs.
 RUN_CPU = (
     HAS_CPU
     and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)

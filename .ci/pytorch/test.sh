@@ -407,9 +407,9 @@ elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   # valgrind cannot decode AVX-512 instructions
   export VALGRIND=OFF
 fi
-if [[ $TEST_CONFIG == nogpu_* ]]; then
-  # A CUDA build sets ONLY_FOR=cuda, which turns off inductor's CPU test classes;
-  # these machines have no GPU, so the CPU tests are the ones to run.
+if [[ $TEST_CONFIG == *nogpu* ]]; then
+  # A CUDA build sets ONLY_FOR=cuda, which turns off inductor's RUN_CPU test
+  # classes; bring them back on these GPU-less machines.
   export PYTORCH_TEST_INDUCTOR_RUN_CPU=1
 fi
 

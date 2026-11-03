@@ -38,6 +38,8 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     LazyVal,
+    NOTEST_CPU,
+    TEST_INDUCTOR_RUN_CPU,
     TestCase,
 )
 
@@ -119,13 +121,15 @@ RUN_GPU = HAS_GPU and any(
 )
 
 # PYTORCH_TEST_INDUCTOR_RUN_CPU=1 runs the CPU tests even when
-# PYTORCH_TESTING_DEVICE_ONLY_FOR leaves CPU out. CI sets it for the nogpu_*
+# PYTORCH_TESTING_DEVICE_ONLY_FOR leaves CPU out (but not when
+# PYTORCH_TESTING_DEVICE_EXCEPT_FOR excludes it). CI sets it for the nogpu_*
 # jobs, which run a CUDA build (so ONLY_FOR=cuda) on machines without a GPU.
+# test_cpu_cpp_wrapper keeps its own check, which ignores the flag.
 RUN_CPU = LazyVal(
     lambda: HAS_CPU
     and (
         any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
-        or os.environ.get("PYTORCH_TEST_INDUCTOR_RUN_CPU") == "1"
+        or (TEST_INDUCTOR_RUN_CPU and not NOTEST_CPU)
     )
 )
 

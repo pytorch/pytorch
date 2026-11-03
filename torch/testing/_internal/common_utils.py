@@ -1924,6 +1924,11 @@ TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
     env_var="PYTORCH_TEST_WITH_PERIODIC",
     implied_by_fn=lambda: TEST_CONFIG == "periodic",
 )
+# See inductor_utils.RUN_CPU
+TEST_INDUCTOR_RUN_CPU: bool = TestEnvironment.def_flag(
+    "TEST_INDUCTOR_RUN_CPU",
+    env_var="PYTORCH_TEST_INDUCTOR_RUN_CPU",
+)
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
     "TEST_WITH_SLOW",
