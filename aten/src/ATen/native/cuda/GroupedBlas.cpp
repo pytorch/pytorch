@@ -20,7 +20,6 @@
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/native/GroupedMMUtils.h>
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
-#include <ATen/cuda/detail/CublasLtUtils.h>
 #include <ATen/native/cuda/CublasGroupedArgs.h>
 #endif
 #include <ATen/native/cuda/ScaledGroupMM.h>
@@ -187,7 +186,7 @@ void _check_cublaslt_grouped_inputs(
   const auto major = at::cuda::getCurrentDeviceProperties()->major;
   const bool hopper = is_hopper_block_impl(impl);
   if (impl == ScaledGemmImplementation::MNK4_1x32 || impl == ScaledGemmImplementation::MNK4_1x128) {
-    at::cuda::blas::detail::check_mnk4_support();
+    scaled_blas::check_mnk4_support();
   }
   const bool nvfp4 = impl == ScaledGemmImplementation::NVFP4_NVFP4 ||
       impl == ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE;
@@ -257,7 +256,6 @@ void _check_mslk_grouped_kernel_inputs(
   TORCH_CHECK_VALUE(
       batch_count >= 1 && batch_count <= 1024,
       "MSLK ", recipe, " grouped GEMM batchCount must be in [1, 1024], got ", batch_count);
-  // Shared cuBLASLt recipes can reach the MSLK fallback with non-bf16 output.
   TORCH_CHECK_VALUE(
       out.scalar_type() == kBFloat16,
       "MSLK ", recipe, " grouped GEMM requires BFloat16 output, got ", out.scalar_type());
