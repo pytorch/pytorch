@@ -49,9 +49,11 @@ RUN_ALL_PATTERNS = [
     r"^torch/testing/_internal/common_utils\.py$",
     r"^torch/testing/_internal/common_device_type\.py$",
     r"^tools/testing/",
-    r"^tools/stats/import_test_stats\.py$",
-    r"^\.ci/pytorch/(test|win-test|macos-test|common|common-build|common_utils|torch_trace)\.sh$",
-    r"^\.github/workflows/_(linux|win|mac|rocm|xpu)-test(-no-dind)?\.yml$",
+    r"^test/pytest_shard_custom\.py$",
+    r"^tools/stats/(import_test_stats|upload_metrics)\.py$",
+    r"^\.ci/pytorch/(test|multigpu-test|win-test|macos-test|macos-common|common|common-build|common_utils|torch_trace)\.sh$",
+    r"^\.ci/pytorch/win-test-helpers/(setup_pytorch_env\.bat|test_python_shard\.bat|installation-helpers/activate_miniconda3\.bat)$",
+    r"^\.github/workflows/_(linux|win|mac|rocm|xpu|s390x|tpu)-test(-no-dind)?\.yml$",
     r"^\.github/actions/(setup-linux|setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts)/",
     r"^\.github/scripts/filter_test_configs\.py$",
     # The CI test images: a new package version or toolchain can break any test.
@@ -97,6 +99,11 @@ def importers(
     return {n for f in grep(pattern) if (n := normalize_test_name(f, candidates))}
 
 
+def unmatched_tests(out: dict, candidates: set[str]) -> list[str]:
+    """The `tests` names of a well-formed model answer that match no candidate."""
+    return [t["file"] for t in out["tests"] if normalize_test_name(t["file"], candidates) is None]  # fmt: skip
+
+
 def needs_run_all(changed_files: list[str]) -> bool:
     return any(re.search(p, f) for p in RUN_ALL_PATTERNS for f in changed_files)
 
@@ -105,7 +112,8 @@ def parse_model_output(out: object, candidates: set[str]) -> tuple[set[str], set
     """The files and sweeps a model answer names; ValueError if it is malformed.
 
     A `dirs` entry is a directory prefix such as "dynamo"; one that matches no
-    candidate is malformed, so a misspelled directory cannot select nothing."""
+    candidate is malformed, and so is a non-empty `tests` list none of whose
+    names matches a candidate, so misspelled names cannot select nothing."""
     if not isinstance(out, dict):
         raise ValueError("not an object")
     tests, dirs, sweeps = out.get("tests"), out.get("dirs", []), out.get("sweeps", [])
@@ -117,6 +125,8 @@ def parse_model_output(out: object, candidates: set[str]) -> tuple[set[str], set
     if not isinstance(out.get("run_all", False), bool):
         raise ValueError("run_all is not a boolean")
     files = {n for t in tests if (n := normalize_test_name(t["file"], candidates))}
+    if tests and not files:
+        raise ValueError("no tests entry matches a test file")
     for d in dirs:
         prefix = re.sub(r"(/\*\*?)?/*$", "", d.strip()).removeprefix("./").removeprefix("test/")  # fmt: skip
         in_dir = {c for c in candidates if c.startswith(prefix + "/")}
