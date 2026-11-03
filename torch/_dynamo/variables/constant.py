@@ -90,9 +90,9 @@ class _ConstantTables:
         self.getset: dict[type, dict[str, GetSet]] = {}
         self.members: dict[type, dict[str, Member]] = {}
         for ty in (int, bool, float, complex, str, bytes, type(None), type(...)):
-            methods = self.methods[ty] = {}
-            getset = self.getset[ty] = {}
-            members = self.members[ty] = {}
+            methods = self.methods.setdefault(ty, {})
+            getset = self.getset.setdefault(ty, {})
+            members = self.members.setdefault(ty, {})
             for klass in reversed(ty.__mro__[:-1]):
                 for name, d in klass.__dict__.items():
                     if isinstance(d, types.MethodDescriptorType):
@@ -104,9 +104,12 @@ class _ConstantTables:
 
     @staticmethod
     def of(tables: dict[type, dict[str, Any]], value: object) -> dict[str, Any]:
-        for ty in type(value).__mro__:
+        mro = type(value).__mro__
+        for i, ty in enumerate(mro):
             if ty in tables:
-                return tables[ty]
+                # A user subclass's own attributes shadow the builtin's members.
+                shadowed = {n for sub in mro[:i] for n in sub.__dict__}
+                return {n: e for n, e in tables[ty].items() if n not in shadowed}
         return {}
 
 
