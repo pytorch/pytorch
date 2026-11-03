@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata
+import importlib.util
+import os
 import platform
 import re
 import shlex
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -24,6 +28,7 @@ from torch._inductor.runtime.cache_dir_utils import cache_dir
 class CuteDSLAOTExportRequest:
     compiled: Any
     prefix: str
+    runtime_archive: str | None = None
 
 
 class CuteDSLAOTBackend:
@@ -49,20 +54,29 @@ class CuteDSLAOTBackend:
         output_dir: str,
     ) -> ExternalAOTArtifact:
         output = Path(output_dir)
-        object_path, header_path = export_external_aot_files(
-            output,
-            request.prefix,
-            lambda directory: request.compiled.export_to_c(
+
+        def export(directory: Path) -> None:
+            request.compiled.export_to_c(
                 file_path=str(directory),
                 file_name=request.prefix,
                 function_prefix=request.prefix,
-            ),
+            )
+            if request.runtime_archive is not None:
+                _merge_runtime_archive(
+                    directory / f"{request.prefix}.o",
+                    request.runtime_archive,
+                )
+
+        object_path, header_path = export_external_aot_files(
+            output,
+            request.prefix,
+            export,
         )
         artifact = ExternalAOTArtifact.from_files(
             spec=spec,
             object_path=object_path,
             header_path=header_path,
-            link_args=(),
+            link_args=("-lcuda", "-ldl") if request.runtime_archive else (),
             payload={
                 "prefix": request.prefix,
                 "calling_convention": "typed_header",
@@ -241,6 +255,44 @@ def _distribution_version(name: str) -> str | None:
 _CUTEDSL_AOT_BACKEND = CuteDSLAOTBackend()
 
 
+def _cutedsl_runtime_archive() -> str:
+    spec = importlib.util.find_spec("nvidia_cutlass_dsl")
+    if spec is None or not spec.submodule_search_locations:
+        raise RuntimeError("CuteDSL AOT runtime package is unavailable")
+    archive_name = "libcuda_dialect_runtime_static.a"
+    found = []
+    for root in spec.submodule_search_locations:
+        for directory, _dirs, files in os.walk(root):
+            if archive_name in files:
+                found.append(os.path.join(directory, archive_name))
+    if not found:
+        raise RuntimeError(f"CuteDSL package does not contain {archive_name}")
+    try:
+        import torch
+
+        cuda_major = int((torch.version.cuda or "").split(".", 1)[0])
+    except (TypeError, ValueError):
+        cuda_major = -1
+    for path in sorted(found):
+        if f"{os.sep}cu{cuda_major}{os.sep}" in path:
+            return path
+    return max(found)
+
+
+def _merge_runtime_archive(object_path: Path, runtime_archive: str) -> None:
+    linker = shutil.which("ld.lld") or shutil.which("ld")
+    if linker is None:
+        raise RuntimeError("CuteDSL AOT requires a relocatable linker")
+    merged = object_path.with_suffix(".merged.o")
+    subprocess.run(
+        [linker, "-r", str(object_path), runtime_archive, "-o", str(merged)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    os.replace(merged, object_path)
+
+
 def compile_cutedsl_external_source(
     kernel_name: str,
     source_code: str,
@@ -297,6 +349,7 @@ def compile_cutedsl_external_source(
         CuteDSLAOTExportRequest(
             compiled=compiled,
             prefix=f"cutedsl_{spec.digest[:24]}",
+            runtime_archive=_cutedsl_runtime_archive(),
         ),
         spec,
         output_dir,
