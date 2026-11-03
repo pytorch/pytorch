@@ -1208,7 +1208,7 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
         Point = namedtuple("Point", ["x", "y"])
         python_pytree._register_namedtuple(
             Point,
-            serialized_type_name="test_pytree.test_pytree_deserialize_names.Point",
+            serialized_type_name=f"test_pytree.test_pytree_deserialize_names.{case}",
         )
         self.addCleanup(python_pytree._deregister_pytree_node, Point)
         serialized = python_pytree.treespec_dumps(
