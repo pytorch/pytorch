@@ -13046,16 +13046,6 @@ aot_autograd_failures = {
         "linalg.householder_product",
         decorator=unittest.skipIf(IS_MACOS and IS_X86, "flaky"),
     ),
-    # Eager vs compiled gradients differ by ~1.4e-5 (default atol is 1e-5) with
-    # MKL 2026.2.
-    decorate(
-        "linalg.pinv",
-        decorator=toleranceOverride({torch.float32: tol(atol=5e-05, rtol=1.3e-06)}),
-    ),
-    decorate(
-        "pinverse",
-        decorator=toleranceOverride({torch.float32: tol(atol=5e-05, rtol=1.3e-06)}),
-    ),
     decorate(
         "linalg.pinv",
         "singular",
@@ -13109,6 +13099,26 @@ aot_autograd_failures.update(
     }
 )
 
+if TEST_MKL:
+    # Eager vs compiled gradients differ by ~1.4e-5 (default atol is 1e-5) with
+    # MKL 2026.2.
+    aot_autograd_failures.update(
+        {
+            decorate(
+                "linalg.pinv",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=5e-05, rtol=1.3e-06)}
+                ),
+            ),
+            decorate(
+                "pinverse",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=5e-05, rtol=1.3e-06)}
+                ),
+            ),
+        }
+    )
+
 symbolic_aot_autograd_failures = {
     xfail(
         "linalg.lstsq", ""
@@ -13131,12 +13141,6 @@ symbolic_aot_autograd_failures = {
     decorate(
         "linalg.householder_product",
         decorator=unittest.skipIf(IS_MACOS and IS_X86, "flaky"),
-    ),
-    # Eager vs compiled gradients differ by up to ~4.3e-3 with MKL 2026.2
-    # (disable_functionalization + dynamic shapes is the worst case).
-    decorate(
-        "linalg.householder_product",
-        decorator=toleranceOverride({torch.float32: tol(atol=1e-02, rtol=1.3e-06)}),
     ),
 }
 

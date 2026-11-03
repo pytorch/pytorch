@@ -1611,7 +1611,8 @@ op_db: list[OpInfo] = [
                 "test_aot_autograd_symbolic_exhaustive",
             ),
             DecorateInfo(
-                toleranceOverride({torch.float32: tol(atol=4e-3, rtol=2e-5)}),
+                # Eager vs compiled gradients differ by up to ~4.3e-3 with MKL 2026.2
+                toleranceOverride({torch.float32: tol(atol=5e-3, rtol=2e-5)}),
                 "TestEagerFusionOpInfo",
                 "test_aot_autograd_disable_functionalization_symbolic_exhaustive",
             ),
