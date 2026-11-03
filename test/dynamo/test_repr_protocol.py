@@ -155,7 +155,9 @@ class TpReprTests(TestCase):
         obj = Plain()
         x = torch.randn(4)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(x, obj), compiled(x, obj))
+        self.assertEqual(
+            compiled(x, obj), f"<{__name__}.{Plain.__qualname__} object at 0x...>"
+        )
 
     def test_repr_returning_non_string_raises(self):
         class BadRepr:

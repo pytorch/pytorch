@@ -232,6 +232,8 @@ class WrapperDescriptorVariable(DescriptorVariable):
                 return sd.wrapper(obj, tx, impl, rest, kwargs)
         elif objclass is type and name == "__init__":
             return type_init(tx, rest, kwargs)
+        elif objclass is type and name == "__repr__":
+            return VariableTracker.build(tx, type.__repr__(obj.as_python_constant()))
         elif isinstance(obj, UserDefinedObjectVariable):
             return obj.call_base_method(tx, name, rest, kwargs)
         sd = obj.lookup_slotdefs(name)
