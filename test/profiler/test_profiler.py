@@ -2431,6 +2431,17 @@ with open(sys.argv[1], "w") as f:
                 p.toggle_collection_dynamic(False, [ProfilerActivity.CPU])
                 p.toggle_collection_dynamic(True, [ProfilerActivity.CPU])
 
+        # Toggling CUDA also toggles XPU, so a session that collects XPU must
+        # not be told the call does nothing.
+        p = profile(activities=[ProfilerActivity.CPU, ProfilerActivity.XPU])
+        p.profiler = MagicMock()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            p.toggle_collection_dynamic(False, [ProfilerActivity.CUDA])
+        p.profiler.toggle_collection_dynamic.assert_called_once_with(
+            False, {ProfilerActivity.CUDA}
+        )
+
 
 class SimpleNet(nn.Module):
     def __init__(self) -> None:

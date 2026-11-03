@@ -824,7 +824,11 @@ class _KinetoProfile:
         if self.profiler is None:
             return
         activities = set(activities)
-        if missing := activities - self.activities:
+        # Kineto toggles CUDA and XPU together, so either one reaches a session
+        # that collects the other.
+        gpu = {ProfilerActivity.CUDA, ProfilerActivity.XPU}
+        collected = self.activities | gpu if self.activities & gpu else self.activities
+        if missing := activities - collected:
             names = ", ".join(sorted(activity.name for activity in missing))
             warn(
                 f"toggle_collection_dynamic has no effect on {names}, which this "
