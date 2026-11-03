@@ -77,7 +77,7 @@ env:
   OPT_OUT_LABEL: "no automated review"
   # Skip PRs too large to review usefully or affordably. Recorded as
   # skipped_too_large rather than silently dropped.
-  MAX_CHANGED_FILES: 100
+  MAX_CHANGED_FILES: 300
   MAX_DIFF_BYTES: 400000
 
 jobs:
