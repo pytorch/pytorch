@@ -4886,9 +4886,11 @@ class TestTheReviewInputsAreKept(unittest.TestCase):
             if s.startswith(f"name: {self.NAME}\n")
         ]
 
-    def test_every_s3_write_in_the_review_job_is_under_the_traces_prefix(self):
+    def test_every_s3_bucket_url_in_the_review_job_is_under_the_traces_prefix(self):
+        # The four `s3://${S3_BUCKET}/` literals: the inputs' DEST and the
+        # three trace uploads. A new one must be added here deliberately.
         targets = re.findall(r"s3://\$\{S3_BUCKET\}/(\S*)", self.review)
-        self.assertGreaterEqual(len(targets), 4, targets)
+        self.assertEqual(len(targets), 4, targets)
         for t in targets:
             self.assertTrue(t.startswith("pr_review_traces/"), t)
 
@@ -4903,6 +4905,7 @@ class TestTheReviewInputsAreKept(unittest.TestCase):
         self.assertNotIn("continue-on-error", self.step)
         names = re.findall(r"(?m)^      - name: (.+)$", self.review)
         here = names.index(self.NAME)
+        self.assertLess(names.index("Configure AWS credentials via OIDC"), here)
         self.assertLess(names.index("Build the diff and apply the size gate"), here)
         self.assertLess(names.index("Write the PR conversation"), here)
         self.assertLess(here, names.index('"Stage A: pr-review"'))
@@ -4951,30 +4954,27 @@ class TestTheReviewInputsAreKept(unittest.TestCase):
                 uploaded = sorted(p.name for p in staged.iterdir())
             if staged_manifest.exists():
                 manifest = json.loads(staged_manifest.read_text())
-            recorded = log.read_text() if log.exists() else ""
+            recorded = log.read_text().replace(td, "TD") if log.exists() else ""
         return proc, manifest, uploaded, recorded
 
     def test_it_uploads_the_inputs_and_a_manifest(self):
         proc, manifest, uploaded, recorded = self._run(0)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(uploaded, sorted(self.INPUTS))
-        lines = recorded.splitlines()
         # Each upload runs under a timeout, and the manifest goes last, alone.
-        self.assertTrue(
-            lines[0].startswith("timeout 120 aws s3 cp --recursive "), recorded
-        )
-        self.assertEqual(
-            lines[-2:],
-            [f"timeout 30 aws {lines[-1]}", lines[-1]],
-            recorded,
-        )
         dest = "s3://b/pr_review_traces/CTX/CTX_CTX_input/"
-        self.assertRegex(lines[1], rf"^s3 cp --recursive \S+/pr-review-input {dest}$")
-        self.assertRegex(
-            lines[-1], rf"^s3 cp \S+/pr-review-manifest\.json {dest}manifest\.json$"
+        inputs = f"s3 cp --recursive TD/pr-review-input {dest}"
+        marker = f"s3 cp TD/pr-review-manifest.json {dest}manifest.json"
+        self.assertEqual(
+            recorded.splitlines(),
+            [
+                f"timeout 120 aws {inputs}",
+                inputs,
+                *(f"{f}=content of {f}" for f in sorted(self.INPUTS)),
+                f"timeout 30 aws {marker}",
+                marker,
+            ],
         )
-        for f in self.INPUTS:
-            self.assertIn(f"{f}=content of {f}\n", recorded)
         self.assertEqual(
             manifest,
             {
@@ -5024,9 +5024,10 @@ class TestTheReviewInputsAreKept(unittest.TestCase):
         """The replay recipe, on a real repo: merge base + pr-diff.txt from the
         real diff step gives head_tree_sha (an edit, add, delete, rename, chmod)."""
         with tempfile.TemporaryDirectory() as td:
-            # No developer git config (hooks, signing) reaches the fixture.
-            env = {"PATH": "/usr/bin:/bin", "HOME": td, "GIT_CONFIG_NOSYSTEM": "1"}
-            env["GIT_CONFIG_GLOBAL"] = os.devnull
+            # No developer or system git config reaches the fixture or the step.
+            sealed = {"HOME": td, "GIT_CONFIG_NOSYSTEM": "1"}
+            sealed["GIT_CONFIG_GLOBAL"] = os.devnull
+            env = {"PATH": "/usr/bin:/bin", **sealed}
 
             def sh(script):
                 return subprocess.run(
@@ -5055,6 +5056,7 @@ class TestTheReviewInputsAreKept(unittest.TestCase):
                     "MERGE_BASE_SHA": base,
                     "MAX_CHANGED_FILES": "100",
                     "MAX_DIFF_BYTES": "9999",
+                    **sealed,
                 },
                 {},
                 rewrite=lambda body: body.replace("/tmp/", f"{td}/"),
