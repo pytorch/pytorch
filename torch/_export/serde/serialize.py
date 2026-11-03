@@ -1616,7 +1616,8 @@ class GraphModuleSerializer(metaclass=Final):
                 f"Cannot serialize flat_apply node {node.name}: its input spec "
                 f"cannot be saved: {e}"
             ) from e
-        if loaded_spec != in_spec_value:
+        # An IntEnum key loads back as an equal int, so compare the reprs too.
+        if loaded_spec != in_spec_value or repr(loaded_spec) != repr(in_spec_value):
             raise SerializeError(
                 f"Cannot serialize flat_apply node {node.name}: its input spec "
                 "would load back different, because JSON cannot store a part of "

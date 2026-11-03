@@ -3068,9 +3068,10 @@ class TestPredispatchSerialization(TestCase):
                 torch.export.save(keyed(Key.A), io.BytesIO())
 
         with self.subTest("dict key that JSON cannot store"):
-            # The tuple key would load back as a list, which run cannot hash.
-            with self.assertRaisesRegex(SerializeError, "would load back different"):
-                torch.export.save(keyed((0, 1)), io.BytesIO())
+            # A tuple key would load back as a list, and an IntEnum key as an int.
+            for key in ((0, 1), enum.IntEnum("IntKey", ["A"]).A):
+                with self.assertRaisesRegex(SerializeError, "load back different"):
+                    torch.export.save(keyed(key), io.BytesIO())
 
     def test_predispatch_flat_apply_save_load_by_name(self):
         Scale = self._scale_function()
