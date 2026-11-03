@@ -16,6 +16,7 @@ from unittest import mock
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 from tools.testing.discover_tests import BLOCKLISTED_PATTERNS, TESTS
+from tools.testing.do_target_determination_for_s3 import td_results_json
 from tools.testing.llm_td import select_tests, selection
 from tools.testing.llm_td.selection import (
     apply_selection,
@@ -23,12 +24,16 @@ from tools.testing.llm_td.selection import (
     load_previous_failures,
     needs_run_all,
     normalize_test_name,
-    previous_failures,
     Selection,
+    split_tests,
 )
 from tools.testing.target_determination import gen_artifact
 from tools.testing.target_determination.heuristics import previously_failed_in_pr
 from tools.testing.target_determination.heuristics.interface import TestPrioritizations
+from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
+    get_all_previous_failures,
+    PREVIOUS_FAILURES_KEY,
+)
 from tools.testing.test_run import TestRun
 
 
@@ -159,17 +164,31 @@ class TestSelection(unittest.TestCase):
             "test_ops.py": 'load("cpp_extensions/my_ext.cpp")\n',
             "test_nn.py": "class TestNN(TestCase):\n",
             "dynamo/test_misc.py": "from test_nn import TestNN\n",
-        }
-        candidates = CANDIDATES | {"test_public_bindings"}
+            "test_tensorboard.py": 'class TestTensorBoardSummary(TestCase):\n    path = "TestTensorBoard." + name\n',
+            "distributed/launcher/test_run.py": 'path("bin/test_script.py")\n',
+            "distributed/launcher/bin/test_script.py": "",
+            "distributed/launcher/bin/unused.py": "",
+        }  # fmt: skip
+        candidates = CANDIDATES | {"test_public_bindings", "test_tensorboard", "distributed/launcher/test_run"}  # fmt: skip
         for changed, expected in [
             ("test/allowlist_for_publicAPI.json", {"test_public_bindings"}),
             ("test/cpp_extensions/my_ext.cpp", {"test_ops"}),
-            ("test/cpp_extensions/ext.cpp", set()),
             ("test/expect/TestNNCPU.test_x-y.expect", {"test_nn", "dynamo/test_misc"}),
+            # test_tensorboard.py builds this path for TestTensorBoardSummary.
+            ("test/expect/TestTensorBoard.test_x.expect", {"test_tensorboard"}),
+            # test_run.py runs this file by its path.
+            ("test/distributed/launcher/bin/test_script.py", {"distributed/launcher/test_run"}),
             ("test/cpp/api/any.cpp", set()),
-        ]:
+            ("test/README.md", set()),
+            ("test/cpython/v3_13/test_set.diff", set()),
+        ]:  # fmt: skip
             sel = self.select_in_tree(sources, candidates, [changed])
             self.assertEqual((sel.files, sel.run_all), (expected, False), changed)
+        for changed in ("test/cpp_extensions/ext.cpp", "test/expect/TestGone.test_x.expect", "test/distributed/launcher/bin/unused.py"):  # fmt: skip
+            sel = self.select_in_tree(sources, candidates, ["test/allowlist_for_publicAPI.json", changed])  # fmt: skip
+            self.assertEqual((sel.run_all, sel.reason), (True, f"nothing found that reads {changed}"))  # fmt: skip
+        many = [f"test/data{i}.json" for i in range(selection.MAX_DATA_FILES + 1)]
+        self.assertTrue(self.select_in_tree(sources, candidates, many).run_all)
 
     def test_endless_import_chain_runs_all(self) -> None:
         calls: list[str] = []
@@ -240,10 +259,12 @@ class TestSelection(unittest.TestCase):
             with mock.patch("sys.stderr", stderr):
                 self.assertIsNone(Selection.load(p))
             self.assertEqual(stderr.getvalue(), "")
-            valid = Selection().to_json()
-            p.write_text(json.dumps(valid))
-            self.assertEqual(Selection.load(p), Selection())
-            bad = [{**valid, "version": 2}, {**valid, "version": True}, {**valid, "files": "test_nn"}, {**valid, "files": [1]}, {**valid, "run_all": "false"}, {**valid, "enforce": "false"}, {**valid, "reason": 1}, {**valid, "candidates": [1]}]  # fmt: skip
+            for sel in (Selection(candidates={"test_nn"}), Selection(run_all=True)):
+                p.write_text(json.dumps(sel.to_json()))
+                self.assertEqual(Selection.load(p), sel)
+            valid = Selection(candidates={"test_nn"}).to_json()
+            # Without candidates, a selection would skip every file it does not name.
+            bad = [{**valid, "version": 2}, {**valid, "version": True}, {**valid, "files": "test_nn"}, {**valid, "files": [1]}, {**valid, "run_all": "false"}, {**valid, "enforce": "false"}, {**valid, "reason": 1}, {**valid, "candidates": [1]}, {**valid, "candidates": None}]  # fmt: skip
             bad += [{k: v for k, v in valid.items() if k != key} for key in ("version", "candidates", "enforce")]  # fmt: skip
             for text in (
                 "{",
@@ -261,27 +282,47 @@ class TestSelection(unittest.TestCase):
             p.write_text(json.dumps(sel.to_json()))
             self.assertEqual(Selection.load(p), sel)
 
-    def test_previous_failures_tolerates_malformed_files(self) -> None:
+    def test_previous_failures_skip_bad_entries_like_td(self) -> None:
+        def scored() -> set[str]:
+            tp = previously_failed_in_pr.PreviouslyFailedInPR().get_prediction_confidence(["test_nn", "test_ops"])  # fmt: skip
+            return {str(x) for x in tp.get_all_tests() if tp.get_score(x) > 0}
+
         with (
             tempfile.TemporaryDirectory() as d,
             mock.patch.object(previously_failed_in_pr, "REPO_ROOT", Path(d)),
+            mock.patch("sys.stdout"),
+            mock.patch("sys.stderr"),
         ):
             folder = Path(d) / ".additional_ci_files"
             folder.mkdir()
-            self.assertEqual(previous_failures(), set())
+            self.assertEqual(get_all_previous_failures(), set())
             (folder / "previous_failures.json").write_text(
                 '{"test/test_nn.py::TestNN::test_a": true}'
             )
-            (folder / "previous_failures_additional.json").write_text('["test_ops"]')
-            stdout = io.StringIO()
-            with mock.patch("sys.stdout", stdout), mock.patch("sys.stderr"):
-                self.assertEqual(previous_failures(), {"test_nn", "test_ops"})
-                for name in ("previous_failures.json", "previous_failures_additional.json"):  # fmt: skip
-                    for text in ("{", "1", "[1]", '[["x"]]', "[[1]]", "[" * 100_000):
-                        (folder / name).write_text(text)
-                        self.assertEqual(previous_failures(), set(), (name, text[:10]))
-                    (folder / name).write_text("[]")
-            self.assertEqual(stdout.getvalue(), "")
+            (folder / "previous_failures_additional.json").write_text('[1, "test_ops"]')
+            self.assertEqual(get_all_previous_failures(), {"test_nn", "test_ops"})
+            self.assertEqual(scored(), {"test_nn", "test_ops"})
+            for name in ("previous_failures.json", "previous_failures_additional.json"):
+                for text in ("{", "1", '[["x"]]', "[[1]]", "[" * 100_000):
+                    (folder / name).write_text(text)
+                    self.assertIsNone(get_all_previous_failures(), (name, text[:10]))
+                    with self.assertRaises(Exception):
+                        scored()
+                (folder / name).write_text("[]")
+
+    def test_td_results_round_trip(self) -> None:
+        tp = TestPrioritizations(["test_nn", "test_ops"], {TestRun("test_nn"): 1})
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "td_results.json"
+            for failed in ({"test_ops", "elsewhere", "test_nn"}, set(), None):
+                td_results = td_results_json(tp, failed)
+                if failed is not None:
+                    self.assertEqual(td_results[PREVIOUS_FAILURES_KEY], sorted(failed))
+                p.write_text(json.dumps(td_results))
+                with mock.patch("sys.stderr"):
+                    self.assertEqual(load_previous_failures(p), failed)
+                loaded = TestPrioritizations.from_json(json.loads(p.read_text()))
+                self.assertEqual([(str(x), loaded.get_score(x)) for x in loaded.get_all_tests()], [("test_nn", 1), ("test_ops", 0)])  # fmt: skip
 
     def test_load_previous_failures(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -691,6 +732,52 @@ def import_test_dashboard() -> Any:
     return test_dashboard
 
 
+class TestSplitTests(unittest.TestCase):
+    """run_test.py's wiring of the selection."""
+
+    def run_split(self, sel: Selection | None, emit: mock.Mock | None) -> tuple[selection.TestSplit, str]:  # fmt: skip
+        tp = TestPrioritizations(["a", "p"], {TestRun("p"): 1})
+        include, exclude = tp.get_top_per_tests(25)
+        stderr = io.StringIO()
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(selection, "get_pr_number", return_value=1),
+            mock.patch("sys.stderr", stderr),
+        ):
+            selection_file, td_results = Path(tmp) / "sel.json", Path(tmp) / "td.json"
+            if sel is not None:
+                selection_file.write_text(json.dumps(sel.to_json()))
+            td_results.write_text(json.dumps(td_results_json(tp, set())))
+            split = split_tests(include, exclude, tp.get_score, {"a": 1, "p": 1}, selection_file=selection_file, td_results=td_results, test_config="default", td_enabled=True, percent=25, emit=emit)  # fmt: skip
+        return split, stderr.getvalue()
+
+    def test_wiring(self) -> None:
+        stats: dict[str, object] = {"stat": 1}
+        for sel, enforced in [(None, False), (Selection(files={"a"}, candidates={"a"}), False), (Selection(files={"a"}, enforce=True, candidates={"a"}), True)]:  # fmt: skip
+            emit = mock.Mock()
+            split, stderr = self.run_split(sel, emit)
+            self.assertEqual(split.enforced, enforced)
+            self.assertEqual([str(x) for x in split.include], ["p", "a"] if enforced else ["p"])  # fmt: skip
+            self.assertEqual(split.source, gen_artifact.LLM_SELECTION_SOURCE if enforced else "td")  # fmt: skip
+            self.assertNotIn("::warning::", stderr)
+            self.assertEqual("Running 25% of tests based on TD" in stderr, not enforced)
+            split.report_failure(TestRun("p"), ["p"], stats)
+            failure = {"selected_tests": ["p"], "failure": "p", "llm_enforced": enforced, "stat": 1}  # fmt: skip
+            calls = [mock.call("td_test_failure_stats_v2", failure)]
+            if split.llm is not None:
+                selected = mock.call("llm_td_shadow_selection", split.llm.selection_metric)  # fmt: skip
+                shadow = mock.call("llm_td_shadow_failure", split.llm.failure_metric(TestRun("p")))  # fmt: skip
+                calls = [selected, *calls, shadow]
+            self.assertEqual(emit.call_args_list, calls)
+
+    def test_no_metrics_outside_ci(self) -> None:
+        split, _ = self.run_split(
+            Selection(files={"a"}, enforce=True, candidates={"a"}), emit=None
+        )
+        self.assertTrue(split.enforced)
+        split.report_failure(TestRun("p"), ["p"], {})
+
+
 class TestDashboardExclusions(unittest.TestCase):
     def test_exclusions_are_grouped_by_source(self) -> None:
         test_dashboard = import_test_dashboard()
@@ -942,8 +1029,8 @@ class TestMain(unittest.TestCase):
         self.assertTrue(record["run_all"])
 
     def test_only_a_deliberate_run_all_is_enforced(self) -> None:
-        def run(changed: str, answer: dict, times: dict) -> dict:
-            with tempfile.TemporaryDirectory() as tmp:
+        def run(changed: str, answer: dict, times: dict, *argv: str) -> dict:
+            with tempfile.TemporaryDirectory() as tmp, clean_env():
                 output = Path(tmp) / "out.json"
                 with (
                     mock.patch.object(select_tests, "git", return_value=changed),
@@ -952,26 +1039,27 @@ class TestMain(unittest.TestCase):
                     ),
                     mock.patch.object(select_tests, "query_model", return_value=answer),
                 ):
-                    select_tests.main(
-                        ["--title", "t", "--output", str(output), "--enforce"]
-                    )
+                    select_tests.main(["--title", "t", "--output", str(output), *argv])
                 return json.loads(output.read_text())
 
         times = {"env": {"default": {"test_nn": 1.0}}}
         model_run_all = {"structured_output": {"run_all": True, "reason": "", "sweeps": [], "dirs": [], "tests": []}}  # fmt: skip
+        normal = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": [{"file": "test_nn", "confidence": "high"}]}}  # fmt: skip
         error = {"is_error": True, "result": "overloaded"}
         malformed = {"structured_output": {"run_all": False, "tests": "test_nn"}}
-        for changed, answer, t, enforced in [
-            ("test/run_test.py\n", error, times, True),
-            ("docs/a.md\n", model_run_all, times, True),
-            ("docs/a.md\n", error, times, False),
-            ("docs/a.md\n", malformed, times, False),
-            ("docs/a.md\n", model_run_all, {}, False),
-            ("", model_run_all, times, False),
+        for changed, answer, t, enforced, argv in [
+            ("test/run_test.py\n", error, times, True, ["--enforce"]),
+            ("docs/a.md\n", model_run_all, times, True, ["--enforce"]),
+            ("docs/a.md\n", normal, times, True, ["--enforce"]),
+            ("docs/a.md\n", normal, times, False, []),
+            ("docs/a.md\n", error, times, False, ["--enforce"]),
+            ("docs/a.md\n", malformed, times, False, ["--enforce"]),
+            ("docs/a.md\n", model_run_all, {}, False, ["--enforce"]),
+            ("", model_run_all, times, False, ["--enforce"]),
         ]:
-            record = run(changed, answer, t)
-            self.assertTrue(record["run_all"])
-            self.assertEqual(record["enforce"], enforced, (changed, answer, t))
+            record = run(changed, answer, t, *argv)
+            self.assertEqual(record["run_all"], answer is not normal)
+            self.assertEqual(record["enforce"], enforced, (changed, answer, t, argv))
 
     def run_in_repo(self, answer: dict) -> tuple[dict, str]:
         env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "LLM_TD_", "CLAUDE_CODE_"))}  # fmt: skip
@@ -986,7 +1074,9 @@ class TestMain(unittest.TestCase):
             git("config", "user.name", "a")
             (Path(repo) / "test" / "nn").mkdir(parents=True)
             (Path(repo) / "test" / "test_foo.py").write_text("x = 1\n" * 50)
-            (Path(repo) / "test" / "test_bar.py").write_text("import test_foo\n")
+            (Path(repo) / "test" / "test_bar.py").write_text(
+                'import test_foo\nrun("test_ select nothing.py")\n'
+            )
             git("add", "-A")
             git("commit", "-qm", "base")
             git("mv", "test/test_foo.py", "test/nn/test_foo.py")

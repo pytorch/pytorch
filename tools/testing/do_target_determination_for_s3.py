@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -22,11 +23,14 @@ from tools.stats.import_test_stats import (
 )
 from tools.stats.upload_metrics import emit_metric
 from tools.testing.discover_tests import TESTS
-from tools.testing.llm_td.selection import previous_failures, PREVIOUS_FAILURES_KEY
 from tools.testing.target_determination.determinator import get_test_prioritizations
 from tools.testing.target_determination.heuristics.interface import (
     AggregatedHeuristics,
     TestPrioritizations,
+)
+from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
+    get_all_previous_failures,
+    PREVIOUS_FAILURES_KEY,
 )
 
 
@@ -44,6 +48,18 @@ def import_results() -> TestPrioritizations:
         tp = TestPrioritizations.from_json(td_results)
 
     return tp
+
+
+def td_results_json(
+    test_prioritizations: TestPrioritizations, previous_failures: set[str] | None
+) -> dict[str, Any]:
+    """TD's ranking and the previous failures, unless they are unknown, stored
+    with it so that every shard sees the same ones; TestPrioritizations.from_json
+    ignores the extra key."""
+    td_results = test_prioritizations.to_json()
+    if previous_failures is not None:
+        td_results[PREVIOUS_FAILURES_KEY] = sorted(previous_failures)
+    return td_results
 
 
 def main() -> None:
@@ -79,10 +95,7 @@ def main() -> None:
             {"aggregated_heuristics": aggregated_heuristics.to_json()},
         )
 
-    # Stored with the ranking so that every shard sees the same previous
-    # failures; TestPrioritizations.from_json ignores the extra key.
-    td_results = test_prioritizations.to_json()
-    td_results[PREVIOUS_FAILURES_KEY] = sorted(previous_failures())
+    td_results = td_results_json(test_prioritizations, get_all_previous_failures())
     with open(REPO_ROOT / "td_results.json", "w") as f:
         f.write(json.dumps(td_results))
 
