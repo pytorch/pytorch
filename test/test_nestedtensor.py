@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     NestedTensorTestCase,
     parametrize,
     run_tests,
+    runWithoutCompiledAutograd,
     serialTest,
     skipIfCppFakeTensor,
     skipIfSlowGradcheckEnv,
@@ -5856,6 +5857,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                     else:
                         self.assertTrue(t.grad is None)
 
+    @runWithoutCompiledAutograd("NestedTensor is not supported by compiled autograd")
     @dtypes(torch.float32)
     @parametrize("lengths", [(5, 7, 9), (7, 7, 7), (7,), (0, 7, 0), (0,)])
     @parametrize("container", [list, tuple])
@@ -5901,6 +5903,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         )
         self.assertEqual(nt.unbind(), tuple(tensors))
 
+    @runWithoutCompiledAutograd("NestedTensor is not supported by compiled autograd")
     @dtypes(torch.double)
     @parametrize("to_cpu", [False, True])
     def test_as_nested_tensor_jagged_dim_conversion(self, device, dtype, to_cpu):
