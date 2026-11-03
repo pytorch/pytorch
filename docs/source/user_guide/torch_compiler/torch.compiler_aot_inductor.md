@@ -227,9 +227,9 @@ doesn't count as a warm-up.
 - Replayed outputs are copies: they don't alias the inputs, and views among
   outputs come back as separate tensors. Eager calls return the model's own
   outputs.
-- If a capture fails but the eager call succeeds, that layout runs eagerly from
-  then on, with a warning the first time; after 8 failures in a row, new
-  layouts run eagerly too.
+- If a capture fails but the eager call succeeds, the model instance stops
+  capturing, with a warning: its existing graphs keep replaying, and new
+  layouts run eagerly.
 - Capturing needs PyTorch's native CUDA caching allocator: under
   `PYTORCH_ALLOC_CONF=backend:cudaMallocAsync`, models run eagerly, with a
   warning.
