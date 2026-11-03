@@ -20,6 +20,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -574,6 +575,283 @@ class TestDecomp(NNTestCase):
                 ]
                 self.assertTrue(r_expr_types[0] == og_t1_expr_types[0])
                 self.assertTrue(r_expr_types[1] == og_t2_expr_types[1])
+
+
+class TestAddmmZeroAlpha(NNTestCase):
+    @parametrize("alpha", [0, 0.0, -0.0])
+    @parametrize("shape", [(1, 4, 1), (1, 4, 4), (4, 1, 4)])
+    def test_zero_alpha_decomposition(self, device, alpha, shape):
+        from torch._inductor.decomposition import addmm
+
+        m, k, n = shape
+        args = (
+            torch.ones(n, device=device),
+            torch.ones(m, k, device=device),
+            torch.ones(k, n, device=device),
+        )
+        self.assertIs(addmm(*args, alpha=alpha), NotImplemented)
+
+    @parametrize("dtype", [torch.float32, torch.float64, torch.float16, torch.bfloat16])
+    @parametrize(
+        "shape,operand,value,beta",
+        [
+            ((1, 4, 1), 1, float("nan"), 1),
+            ((1, 4, 4), 2, float("inf"), -2),
+            ((4, 1, 4), 1, -float("inf"), 0),
+            ((8, 32, 8), 0, float("nan"), 0),
+            ((8, 32, 8), 0, float("nan"), 1),
+            ((8, 32, 8), 2, float("nan"), 0),
+        ],
+    )
+    def test_zero_alpha_numerics(self, device, dtype, shape, operand, value, beta):
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=0, beta=beta)
+
+        m, k, n = shape
+        args = (
+            torch.ones(n, device=device, dtype=dtype),
+            torch.ones(m, k, device=device, dtype=dtype),
+            torch.ones(k, n, device=device, dtype=dtype),
+        )
+        args[operand].fill_(value)
+        expected = fn(*args)
+        with config.patch(cpp_wrapper=False):
+            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertIn("torch.ops.aten.addmm.default", "\n".join(code))
+
+    @parametrize("bias_kind", ["scalar", "vector", "expanded", "transposed"])
+    @parametrize("k", [0, 3])
+    def test_zero_alpha_shapes(self, device, bias_kind, k):
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=0, beta=-2)
+
+        a = torch.ones(k, 2, device=device).t()
+        b = torch.ones(4, k, device=device).t()
+
+        if bias_kind == "scalar":
+            inp = torch.tensor(2.0, device=device)
+        elif bias_kind == "vector":
+            inp = torch.arange(8.0, device=device)[::2]
+        elif bias_kind == "expanded":
+            inp = torch.ones(1, 4, device=device).expand(2, 4)
+        else:
+            inp = torch.arange(8.0, device=device).view(4, 2).t()
+
+        expected = fn(inp, a, b)
+        actual = torch.compile(fn, fullgraph=True)(inp, a, b)
+        self.assertEqual(actual, expected, exact_stride=True)
+
+    def test_zero_alpha_dynamic_backward(self, device):
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=0, beta=-2).square().sum()
+
+        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+
+        for m, k, n in [(2, 3, 4), (5, 6, 7)]:
+            args = (
+                torch.randn(n, device=device, requires_grad=True),
+                torch.randn(m, k, device=device, requires_grad=True),
+                torch.randn(k, n, device=device, requires_grad=True),
+            )
+            expected = fn(*args)
+            expected_grad = torch.autograd.grad(expected, args)
+
+            actual = compiled(*args)
+            actual_grad = torch.autograd.grad(actual, args)
+
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual_grad, expected_grad)
+
+    @parametrize("bad", ["matrices", "bias"])
+    def test_zero_alpha_invalid_shapes(self, device, bad):
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=0)
+
+        inp = torch.ones(5 if bad == "bias" else 4, device=device)
+        a = torch.ones(2, 3, device=device)
+        b = torch.ones(5 if bad == "matrices" else 3, 4, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "shape|size|dim|expand"):
+            fn(inp, a, b)
+        with self.assertRaisesRegex(RuntimeError, "shape|size|dim|expand"):
+            torch.compile(fn, fullgraph=True)(inp, a, b)
+
+    @onlyCPU
+    @parametrize("alpha,beta", [(1, 1), (0, 1), (2, 1), (1, 0.5), (2, 0.5), (1, 0)])
+    def test_addmm_mem_bound_scalars(self, device, alpha, beta):
+        from torch._inductor.fx_passes import decompose_mem_bound_mm
+        from torch._inductor.fx_passes.split_cat import construct_pattern_matcher_pass
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=alpha, beta=beta)
+
+        args = (torch.ones(4), torch.ones(1, 4), torch.ones(4, 4))
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        expected = gm(*args)
+
+        with config.patch(post_grad_fusion_options={"decompose_mm_pass": {}}):
+            node = next(
+                n for n in gm.graph.nodes if n.target == torch.ops.aten.addmm.default
+            )
+            self.assertTrue(
+                decompose_mem_bound_mm.should_decompose_mm(node.args[1], node.args[2])
+            )
+            construct_pattern_matcher_pass("decompose_mm_pass").apply(gm)
+
+        gm.graph.lint()
+        gm.recompile()
+        addmms = [
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.addmm.default
+        ]
+        self.assertEqual(len(addmms), int((alpha, beta) != (1, 1)))
+        self.assertEqual(gm(*args), expected)
+
+    @parametrize("alpha,beta", [(1, 1), (0, 1), (2, 1), (1, 0.5), (2, 0.5), (1, 0)])
+    def test_addmm_binary_folding_scalars(self, device, alpha, beta):
+        from torch._inductor.fx_passes.binary_folding import binary_folding_init
+        from torch._inductor.fx_passes.freezing_patterns import binary_folding_pass
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+
+        bias = torch.ones(4, device=device)
+        weight = torch.ones(3, 4, device=device)
+        other = torch.ones(4, device=device)
+
+        def fn(a):
+            return torch.addmm(bias, a, weight, alpha=alpha, beta=beta) + other
+
+        a = torch.ones(2, 3, device=device)
+        gm = make_fx(fn)(a)
+        FakeTensorProp(gm, mode=FakeTensorMode(allow_non_fake_inputs=True)).propagate(a)
+        expected = gm(a)
+
+        binary_folding_init()
+        with config.patch(enable_linear_binary_folding=True):
+            matches = binary_folding_pass.apply(gm)
+
+        gm.graph.lint()
+        gm.recompile()
+        self.assertEqual(matches > 0, (alpha, beta) == (1, 1))
+        self.assertEqual(gm(a), expected)
+
+    @parametrize(
+        "alpha,beta,mixed",
+        [
+            (1, 1, False),
+            (0, 1, False),
+            (2, 1, False),
+            (1, 0.5, False),
+            (2, 0.5, False),
+            (0, 1, True),
+            (2, 1, True),
+            (1, 0.5, True),
+        ],
+    )
+    def test_addmm_concat_scalars(self, device, alpha, beta, mixed):
+        from unittest import mock
+
+        from torch._inductor.fx_passes import freezing_patterns
+        from torch._inductor.pattern_matcher import (
+            PatternMatcherPass,
+            stable_topological_sort,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+
+        weights = tuple(
+            torch.full((4, 4), float(i + 1), device=device) for i in range(3)
+        )
+        biases = tuple(torch.full((4,), float(i + 1), device=device) for i in range(3))
+        coefficients = [(alpha, beta), (1, 1), (1, 1)] if mixed else [(alpha, beta)] * 3
+
+        def fn(x):
+            return tuple(
+                torch.addmm(bias, x, weight, alpha=a, beta=b)
+                for bias, weight, (a, b) in zip(biases, weights, coefficients)
+            )
+
+        x = torch.arange(16.0, device=device).reshape(4, 4)
+        gm = make_fx(fn)(x)
+        expected = gm(x)
+        FakeTensorProp(gm, mode=FakeTensorMode(allow_non_fake_inputs=True)).propagate(x)
+        concat_pass = PatternMatcherPass()
+        with config.patch({"cpp.enable_concat_linear": True}):
+            # Register the real concat rules without unrelated freezing passes.
+            with mock.patch.object(freezing_patterns, "pass_patterns", [concat_pass]):
+                with FakeTensorMode():
+                    freezing_patterns.addmm_patterns_init.__wrapped__()
+            matches = concat_pass.apply(gm)
+        stable_topological_sort(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        default_scalars = (alpha, beta) == (1, 1)
+        self.assertEqual(matches, int(default_scalars))
+        self.assertEqual(
+            sum(n.target == torch.ops.aten.addmm.default for n in gm.graph.nodes),
+            1 if default_scalars else 3,
+        )
+        self.assertEqual(gm(x), expected, atol=0, rtol=0)
+
+    def test_zero_alpha_pointwise(self, device):
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=0).relu()
+
+        args = (
+            torch.ones(4, device=device),
+            torch.full((2, 3), float("nan"), device=device),
+            torch.ones(3, 4, device=device),
+        )
+        expected = fn(*args)
+        with config.patch(cpp_wrapper=False):
+            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertIn("torch.ops.aten.addmm.default", "\n".join(code))
+
+
+class TestAddmmZeroAlphaGuards(NNTestCase):
+    @parametrize("alpha", [0, 1])
+    def test_zero_alpha_unfuse_guard(self, alpha):
+        from torch._inductor.fx_passes.post_grad import should_prefer_unfused_addmm
+        from torch._inductor.pattern_matcher import Arg, CallFunction, KeywordArg, Match
+
+        graph = torch.fx.Graph()
+        inp, a, b = [graph.placeholder(name) for name in ("inp", "a", "b")]
+        out = graph.call_function(
+            torch.ops.aten.addmm.default,
+            (inp, a, b),
+            {"alpha": alpha, "beta": 1},
+        )
+        graph.output(graph.call_function(torch.ops.aten.relu.default, (out,)))
+        with FakeTensorMode():
+            inp.meta["val"] = torch.empty(4, device="cuda")
+            a.meta["val"] = torch.empty(2, 3, device="cuda")
+            b.meta["val"] = torch.empty(3, 4, device="cuda")
+            out.meta["val"] = torch.empty(2, 4, device="cuda")
+        pattern = CallFunction(
+            torch.ops.aten.addmm.default,
+            KeywordArg("inp"),
+            Arg(),
+            Arg(),
+            alpha=KeywordArg("alpha"),
+            beta=KeywordArg("beta"),
+        )
+        match = pattern.match(out)
+        self.assertIsInstance(match, Match)
+        self.assertEqual(should_prefer_unfused_addmm(match), alpha != 0)
+
+
+instantiate_parametrized_tests(TestAddmmZeroAlphaGuards)
+instantiate_device_type_tests(
+    TestAddmmZeroAlpha, globals(), only_for=("cpu", GPU_TYPE), allow_xpu=True
+)
 
 
 device_types = ("cpu", GPU_TYPE)

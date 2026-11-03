@@ -532,6 +532,10 @@ def addmm(
     if out_dtype is not None:
         return NotImplemented
 
+    # Zero-alpha NaN/Inf behavior depends on the native GEMM backend.
+    if statically_known_true(alpha == 0):
+        return NotImplemented
+
     def add_input(out: torch.Tensor) -> torch.Tensor:
         # Unconditional: `if alpha != 1` would guard on an unbacked alpha.
         out = alpha * out
