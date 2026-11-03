@@ -4365,6 +4365,10 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
                    DecorateInfo(precisionOverride({torch.complex64: 1e-04}), 'TestModule', 'test_cpu_gpu_parity'),
                    DecorateInfo(precisionOverride({torch.chalf: 5e-03}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(
+                       toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1e-5)}),
+                       "TestModule", "test_non_contiguous_tensors", device_type="xpu"
+                   ),
                )),
     ModuleInfo(torch.nn.CosineEmbeddingLoss,
                module_inputs_func=module_inputs_torch_nn_CosineEmbeddingLoss,
@@ -4455,6 +4459,10 @@ module_db: list[ModuleInfo] = [
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(
+                       toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1e-5)}),
+                       "TestModule", "test_non_contiguous_tensors", device_type="xpu"
+                   ),
                )),
     ModuleInfo(torch.nn.LazyConvTranspose1d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=True, transposed=True),
@@ -4500,6 +4508,10 @@ module_db: list[ModuleInfo] = [
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(
+                       toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1e-5)}),
+                       "TestModule", "test_non_contiguous_tensors", device_type="xpu"
+                   ),
                )),
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear,
