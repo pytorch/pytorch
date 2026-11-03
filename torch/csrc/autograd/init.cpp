@@ -1705,9 +1705,9 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
     if (mode_key == c10::impl::TorchDispatchModeKey::FAKE) {
       auto cpp_mode = c10::impl::FakeTensorModeTLS::get_state();
       if (cpp_mode != nullptr) {
-        // Clear first: a failed wrapper rebuild must not leave it installed
-        c10::impl::FakeTensorModeTLS::reset_state();
+        // Get the wrapper first, so a failed rebuild leaves the mode installed
         auto py_mode = torch::fake_tensor::getCppFakeTensorModePyObj(cpp_mode);
+        c10::impl::FakeTensorModeTLS::reset_state();
         return py_mode.release().ptr();
       }
     }
