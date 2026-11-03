@@ -12121,9 +12121,11 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         ):
             f(torch.randn(2, 2, requires_grad=True))
 
-        # AOT tracing keeps the traceback as a warning so sentinel exception
-        # messages stay intact. Eager detect_anomaly attaches it to the exception.
-        combined = str(cm.exception) + "".join(str(x.message) for x in w)
+        # Trace is attached to the original exception (or still warned). AOT
+        # matching depends on exception type, which wrapping no longer changes.
+        combined = str(cm.exception) + "".join(
+            getattr(cm.exception, "__notes__", ())
+        ) + "".join(str(x.message) for x in w)
         self.assertIn("forward call that caused the error", combined)
 
     def test_py_guards_mark_dynamic(self):

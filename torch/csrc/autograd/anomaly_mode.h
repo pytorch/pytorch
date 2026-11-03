@@ -60,10 +60,13 @@ class TORCH_API DetectAnomalyGuard {
 struct TORCH_API AnomalyMetadata {
   virtual ~AnomalyMetadata();
   virtual void store_stack();
+  // Emit the stored forward traceback as a UserWarning. Still used by C++
+  // callers that invoke it directly. The engine attaches via format_stack.
   virtual void print_stack(const std::string& current_node_name);
   // Format the stored forward traceback for `current_node_name` (and parents).
-  // Used to attach the trace to the backward exception rather than emit a
-  // UserWarning (see issue #101069).
+  // The engine calls this and attaches the result to the original backward
+  // exception (c10::Error::add_context / Python BaseException.add_note).
+  // See issue #101069.
   virtual std::string format_stack(const std::string& current_node_name);
   virtual void assign_parent(const c10::intrusive_ptr<Node>& parent_node);
 

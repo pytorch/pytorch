@@ -6502,10 +6502,14 @@ Done""",
         self.assertIn("Error detected in PowBackward0", str(cm.exception))
         self.assertIn("Traceback of forward", str(cm.exception))
 
+    def _anomaly_trace_text(self, exc):
+        notes = getattr(exc, "__notes__", ())
+        return str(exc) + "".join(notes)
+
     def test_anomaly_preserves_fake_tensor_exception_type(self):
         # AOT joint tracing enables detect_anomaly and matches FakeTensor
-        # exception types. Wrapping would turn DataDependentOutputException
-        # into a generic RuntimeError and break tracing.
+        # exception types. The trace is attached to the original exception
+        # (add_note / add_context) so the type is preserved.
         from torch._subclasses.fake_tensor import (
             DataDependentOutputException,
             FakeTensorMode,
@@ -6526,9 +6530,57 @@ Done""",
                 b.register_hook(fail)
                 with self.assertRaises(DataDependentOutputException) as cm:
                     b.sum().backward()
-        self.assertNotIn(
+        self.assertIn(
             "Traceback of forward call that caused the error",
-            str(cm.exception),
+            self._anomaly_trace_text(cm.exception),
+        )
+
+    def test_anomaly_preserves_python_exception_type(self):
+        class Boom(Exception):
+            pass
+
+        class RaiseValueError(Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                raise ValueError("boom from backward")
+
+        class RaiseCustom(Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                raise Boom("custom boom")
+
+        inp = torch.randn(2, requires_grad=True)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", "Anomaly Detection has been enabled."
+            )
+            with detect_anomaly(check_nan=False):
+                with self.assertRaises(ValueError) as cm:
+                    RaiseValueError.apply(inp).sum().backward()
+        self.assertIn("boom from backward", str(cm.exception))
+        self.assertIn(
+            "Traceback of forward", self._anomaly_trace_text(cm.exception)
+        )
+
+        inp = torch.randn(2, requires_grad=True)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", "Anomaly Detection has been enabled."
+            )
+            with detect_anomaly(check_nan=False):
+                with self.assertRaises(Boom) as cm:
+                    RaiseCustom.apply(inp).sum().backward()
+        self.assertIn("custom boom", str(cm.exception))
+        self.assertIn(
+            "Traceback of forward", self._anomaly_trace_text(cm.exception)
         )
 
     def test_anomaly_assign_parent_cleanup(self):
