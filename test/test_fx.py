@@ -4458,6 +4458,10 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         self.assertTrue(torch.fx.graph_module._has_attr(root, "sub.weight"))
         self.assertFalse(torch.fx.graph_module._has_attr(root, "sub.missing"))
         self.assertFalse(torch.fx.graph_module._has_attr(root, "missing.weight"))
+        # A prefix that is not a Module is followed too, as _get_attr does.
+        root.t = torch.ones(1)
+        self.assertTrue(torch.fx.graph_module._has_attr(root, "t.shape"))
+        self.assertFalse(torch.fx.graph_module._has_attr(root, "t.missing"))
 
     def test_fx_stateless(self):
         class MockModule(torch.nn.Module):
