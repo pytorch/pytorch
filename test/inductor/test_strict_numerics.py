@@ -367,21 +367,42 @@ class StrictNumericsCompileTest(TestCase):
 
     @dtypes(torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
-    def test_erfcx_segments(self, device, dtype, numerics):
-        centers = (
-            400.0 / torch.arange(1, 101, dtype=torch.float64, device=device) - 4
-        ).to(dtype)
-        below = torch.nextafter(centers, torch.full_like(centers, -float("inf")))
-        above = torch.nextafter(centers, torch.full_like(centers, float("inf")))
-        x = torch.cat(
-            (centers, below, above, -centers, _min_max_specials(dtype, device))
-        )
-        actual = torch.compile(
-            torch.special.erfcx, fullgraph=True, options={"numerics": numerics}
-        )(x)
-        self.assertEqual(
-            actual.view(torch.int32), torch.special.erfcx(x).view(torch.int32)
-        )
+    @parametrize(
+        "op_name",
+        (
+            "erfcx",
+            "i0",
+            "i1",
+            "modified_bessel_i0",
+            "modified_bessel_i1",
+            "bessel_j0",
+            "bessel_j1",
+            "bessel_y0",
+            "bessel_y1",
+        ),
+    )
+    def test_special_function_boundaries(self, device, dtype, numerics, op_name):
+        if op_name == "erfcx":
+            centers = (
+                400.0 / torch.arange(1, 101, dtype=torch.float64, device=device) - 4
+            ).to(dtype)
+            below = torch.nextafter(centers, torch.full_like(centers, -float("inf")))
+            above = torch.nextafter(centers, torch.full_like(centers, float("inf")))
+            values = torch.cat((centers, below, above, -centers))
+        else:
+            centers = torch.tensor(
+                [-8.0, -5.0, -0.0, 0.0, 1e-5, 5.0, 8.0, 88.0],
+                device=device,
+                dtype=dtype,
+            ).view(torch.int32)
+            bits = centers[:, None] + torch.arange(
+                -8, 9, device=device, dtype=torch.int32
+            )
+            values = bits.flatten().view(dtype)
+        x = torch.cat((values, _min_max_specials(dtype, device)))
+        fn = getattr(torch.special, op_name)
+        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(x)
+        self.assertEqual(actual.view(torch.int32), fn(x).view(torch.int32))
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -429,33 +450,6 @@ class StrictNumericsCompileTest(TestCase):
             options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
         )(x)
         self.assertEqual(actual.view(torch.int16), fn(x).view(torch.int16))
-
-    @dtypes(torch.float32)
-    @parametrize("numerics", ("strict_pointwise", "strict"))
-    @parametrize(
-        "op_name",
-        (
-            "i0",
-            "i1",
-            "modified_bessel_i0",
-            "modified_bessel_i1",
-            "bessel_j0",
-            "bessel_j1",
-            "bessel_y0",
-            "bessel_y1",
-        ),
-    )
-    def test_bessel_branch_boundaries(self, device, dtype, numerics, op_name):
-        centers = torch.tensor(
-            [-8.0, -5.0, -0.0, 0.0, 1e-5, 5.0, 8.0, 88.0],
-            device=device,
-            dtype=dtype,
-        ).view(torch.int32)
-        bits = centers[:, None] + torch.arange(-8, 9, device=device, dtype=torch.int32)
-        x = torch.cat((bits.flatten().view(dtype), _min_max_specials(dtype, device)))
-        fn = getattr(torch.special, op_name)
-        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(x)
-        self.assertEqual(actual.view(torch.int32), fn(x).view(torch.int32))
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -536,36 +530,22 @@ class StrictNumericsCompileTest(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))
-    def test_double_to_narrow_rounding(self, device, dtype, numerics, upcast):
-        mantissa_bits = 10 if dtype == torch.float16 else 7
-        midpoint = 1.0 + 2.0 ** (-mantissa_bits - 1)
-        values = [midpoint - 2**-40, midpoint, midpoint + 2**-40]
-        x = torch.tensor(
-            values + [-v for v in values], device=device, dtype=torch.float64
-        )
+    @parametrize("operation", ("cast", "cube"))
+    def test_narrow_intermediate_rounding(
+        self, device, dtype, numerics, upcast, operation
+    ):
+        if operation == "cast":
+            mantissa_bits = 10 if dtype == torch.float16 else 7
+            midpoint = 1.0 + 2.0 ** (-mantissa_bits - 1)
+            values = [midpoint - 2**-40, midpoint, midpoint + 2**-40]
+            x = torch.tensor(
+                values + [-v for v in values], device=device, dtype=torch.float64
+            )
+        else:
+            x = _exhaustive_16bit(dtype, device)
 
         def fn(x):
-            result = x.to(dtype)
-            return result, result.double()
-
-        actual = torch.compile(
-            fn,
-            fullgraph=True,
-            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
-        )(x)
-        self.assertEqual(
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in actual),
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(x)),
-        )
-
-    @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("numerics", ("strict_pointwise", "strict"))
-    @parametrize("upcast", (False, True))
-    def test_cube_intermediate_rounding(self, device, dtype, numerics, upcast):
-        x = _exhaustive_16bit(dtype, device)
-
-        def fn(x):
-            result = x.pow(3)
+            result = x.to(dtype) if operation == "cast" else x.pow(3)
             return result, result.double()
 
         actual = torch.compile(
@@ -3002,14 +2982,16 @@ class PointwiseStrictNumericsTest(TestCase):
             )
 
     @ops(POINTWISE_OPS)
-    def test_pointwise_bitwise(self, device, dtype, op):
-        mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
+    @parametrize("sample_kind", ("opinfo", "edges"))
+    def test_pointwise_bitwise(self, device, dtype, op, sample_kind):
+        calls = self._edge_calls(op, device, dtype) if sample_kind == "edges" else None
+        mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG, calls=calls)
         self._assert_ledger(
             mismatches,
             op,
             dtype,
-            "forward",
-            POINTWISE_XFAIL | NONFLOAT_XFAIL,
+            f"{sample_kind} forward",
+            POINTWISE_XFAIL | NONFLOAT_XFAIL if sample_kind == "opinfo" else (),
             "POINTWISE_XFAIL/NONFLOAT_XFAIL",
         )
 
@@ -3207,12 +3189,6 @@ class PointwiseStrictNumericsTest(TestCase):
             ]
         return calls
 
-    @ops(POINTWISE_OPS)
-    def test_pointwise_edges(self, device, dtype, op):
-        calls = self._edge_calls(op, device, dtype)
-        mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG, calls=calls)
-        self.assertFalse(mismatches, f"{_op_id(op)} {dtype} edge outputs: {mismatches}")
-
     def _upstream_grads(self, outputs, *, edge):
         values = (
             [_pointwise_grad_values(out.dtype, out.device) for out in outputs]
@@ -3375,20 +3351,23 @@ class PointwiseStrictNumericsTest(TestCase):
         return mismatches
 
     @ops(BACKWARD_OPS, dtypes=OpDTypes.supported_backward)
-    def test_pointwise_backward(self, device, dtype, op):
-        mismatches = self._sweep_backward(device, op, dtype, POINTWISE_STRICT_CFG)
-        self._assert_ledger(
-            mismatches, op, dtype, "backward", BACKWARD_XFAIL, "BACKWARD_XFAIL"
+    @parametrize("sample_kind", ("opinfo", "edges"))
+    def test_pointwise_backward(self, device, dtype, op, sample_kind):
+        calls = (
+            self._edge_calls(op, device, dtype, backward=True)
+            if sample_kind == "edges"
+            else None
         )
-
-    @ops(BACKWARD_OPS, dtypes=OpDTypes.supported_backward)
-    def test_pointwise_edges_backward(self, device, dtype, op):
-        calls = self._edge_calls(op, device, dtype, backward=True)
         mismatches = self._sweep_backward(
             device, op, dtype, POINTWISE_STRICT_CFG, calls=calls
         )
-        self.assertFalse(
-            mismatches, f"{_op_id(op)} {dtype} edge gradients: {mismatches}"
+        self._assert_ledger(
+            mismatches,
+            op,
+            dtype,
+            f"{sample_kind} backward",
+            BACKWARD_XFAIL if sample_kind == "opinfo" else (),
+            "BACKWARD_XFAIL",
         )
 
 
