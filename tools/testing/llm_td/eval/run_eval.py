@@ -21,10 +21,15 @@ import traceback
 from pathlib import Path
 
 from tools.testing.llm_td.eval import REPO
-from tools.testing.llm_td.select_tests import build_prompt, query_model, test_minutes
+from tools.testing.llm_td.select_tests import (
+    build_prompt,
+    query_model,
+    QUERY_TIMEOUT,
+    test_minutes,
+)
 
 
-TIMED_OUT = "model call timed out after 1800s"
+TIMED_OUT = f"model call timed out after {QUERY_TIMEOUT}s"
 TRANSIENT = re.compile(
     r"Throttl|rate limit|overloaded|\b(500|529)\b|timed out", re.IGNORECASE
 )
@@ -64,10 +69,11 @@ def run_one(
     transient = None
     for attempt in range(4):
         try:
-            d = query_model(prompt, args.model, args.effort, checkout=wt, timeout=1800)
+            d = query_model(prompt, args.model, args.effort, checkout=wt)
         except subprocess.TimeoutExpired:
             # Final rather than retried: in CI a hung call runs everything, so score it that way.
             d = {"is_error": True, "result": TIMED_OUT}
+            transient = None
             break
         transient = not d.get("structured_output") and TRANSIENT.search(
             str(d.get("result"))
@@ -127,11 +133,7 @@ def main() -> None:
                     flush=True,
                 )
                 continue
-            if r.pop("transient") or (
-                r["error"] not in (None, TIMED_OUT)
-                and r["out"] is None
-                and not r["cost_usd"]
-            ):
+            if r.pop("transient"):
                 print(
                     "transient failure, left for a rerun:",
                     sid,
