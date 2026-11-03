@@ -38,6 +38,9 @@ FLEX_GEMM_OP_SPECS = {
     torch.ops.aten.bmm.default: FlexGemmOpSpec("bmm", 0, 1),
     torch.ops.aten.baddbmm.default: FlexGemmOpSpec("baddbmm", 1, 2, bias_index=0),
     torch.ops.aten._scaled_mm_v2.default: FlexGemmOpSpec("scaled_mm", 0, 1),
+    torch.ops.aten._scaled_grouped_mm_v2.default: FlexGemmOpSpec(
+        "scaled_grouped_mm", 0, 1
+    ),
     torch.ops.aten._grouped_mm.default: FlexGemmOpSpec("grouped_mm", 0, 1),
 }
 FLEX_GEMM_OP_ALIASES = {
@@ -185,6 +188,29 @@ def nvfp4_pack(input: torch.Tensor) -> torch.Tensor:
     return packed.contiguous().view(torch.float4_e2m1fn_x2)
 
 
+def validate_grouped_mm_offs(input_matrix, offs, op_name):
+    if (
+        not isinstance(offs, torch.Tensor)
+        or offs.ndim != 1
+        or offs.dtype is not torch.int32
+        or not offs.is_contiguous()
+        or offs.numel() == 0
+        or offs.device != input_matrix.device
+    ):
+        raise ValueError(
+            f"{op_name} offs must be nonempty contiguous 1-D int32 end offsets on the input device"
+        )
+
+
+def grouped_mm_offset_lengths(offs, total, message):
+    """Validate group-end values on device and return their int64 lengths."""
+    ends = offs.to(torch.int64)
+    starts = torch.cat((ends.new_zeros(1), ends[:-1]))
+    lengths = ends - starts
+    torch._assert_async(((lengths >= 0) & (ends <= total)).all(), message)
+    return lengths
+
+
 @torch.library.custom_op("flex_gemm::to_blocked", mutates_args=())
 def to_blocked(input_matrix: torch.Tensor) -> torch.Tensor:
     """Rearrange a scale matrix into the cuBLAS 128x4 blocked format.
@@ -246,7 +272,7 @@ def check_flex_gemm_alias_and_mutation(
 # NOTE [FlexGEMM scaled-mm surrogate]
 # ProxyTensor cannot carry an OpOverload whose schema requires exact strides as
 # a HOP input. The HOP therefore carries stride-neutral aten.mm while its body
-# contains aten._scaled_mm_v2; static kwargs identify the body op for analysis.
+# contains the scaled native op; static kwargs identify the body op for analysis.
 # TODO: Remove this surrogate and its decoder once _scaled_mm_v2's
 # needs_exact_strides tag is replaced with lowering-time layout constraints;
 # pass aten._scaled_mm_v2 directly to the HOP instead.
@@ -256,6 +282,8 @@ def flex_gemm_body_gemm_op(
     """Return the GEMM op captured inside the FlexGEMM body graph."""
     if gemm_kwargs.get("flex_gemm_op") == "scaled_mm":
         return torch.ops.aten._scaled_mm_v2.default
+    if gemm_kwargs.get("flex_gemm_op") == "scaled_grouped_mm":
+        return torch.ops.aten._scaled_grouped_mm_v2.default
     return gemm_op
 
 
@@ -392,13 +420,20 @@ def validate_scaled_mm(
     recipe_b: Sequence[int],
     swizzle_a: Sequence[int],
     swizzle_b: Sequence[int],
+    *,
+    grouped: bool = False,
 ) -> str:
     """Validate the fused scaled-mm operands and return their shared QuACK format."""
+    op_name = "scaled_grouped_mm" if grouped else "scaled_mm"
     recipe = tuple(recipe_a)
+    if grouped and recipe == (_BLOCKWISE_1X16,):
+        raise ValueError(
+            "FlexGEMM scaled_grouped_mm NVFP4 requires BlockWise1x16 and TensorWise scales"
+        )
     contract = QUACK_BLOCKSCALED_RECIPES.get(recipe)
     if contract is None or tuple(recipe_b) != recipe:
         raise NotImplementedError(
-            "FlexGEMM scaled-mm requires matching BlockWise1x32 MXFP8 or "
+            f"FlexGEMM {op_name} requires matching BlockWise1x32 MXFP8 or "
             "BlockWise1x16 NVFP4 recipes, with optional NVFP4 TensorWise global scales"
         )
     format_name, swizzles, data_dtype, scale_dtype = contract
@@ -409,7 +444,7 @@ def validate_scaled_mm(
         or len(scale_b) != len(recipe)
     ):
         raise NotImplementedError(
-            "FlexGEMM scaled-mm requires one SWIZZLE_32_4_4 block scale per operand "
+            f"FlexGEMM {op_name} requires one SWIZZLE_32_4_4 block scale per operand "
             "and optional unswizzled NVFP4 TensorWise scales"
         )
     if (mat_a.dtype, mat_b.dtype, scale_a[0].dtype, scale_b[0].dtype) != (
@@ -419,10 +454,23 @@ def validate_scaled_mm(
         scale_dtype,
     ):
         raise NotImplementedError(
-            f"FlexGEMM {format_name} scaled-mm requires "
+            f"FlexGEMM {format_name} {op_name} requires "
             f"{data_dtype} data and {scale_dtype} scales"
         )
     for scale in (*scale_a[1:], *scale_b[1:]):
+        if grouped:
+            if (
+                scale.dtype is not torch.float32
+                or scale.ndim != 1
+                or (mat_b.ndim == 3 and scale.shape[0] != mat_b.shape[0])
+                or not scale.is_contiguous()
+                or scale.device != mat_a.device
+            ):
+                raise ValueError(
+                    "FlexGEMM NVFP4 scaled_grouped_mm TensorWise scales must be "
+                    "contiguous Float32 tensors of shape (G,) on the input device"
+                )
+            continue
         if scale.dtype is not torch.float32 or tuple(scale.shape) not in (
             (),
             (1,),
@@ -439,13 +487,16 @@ def flex_gemm_scaled_mm(
     epilogue_fn: Callable[[Any], Any],
     gemm_kwargs: dict[str, Any],
     kernel_options: dict[str, Any],
+    *,
+    grouped: bool = False,
 ) -> Any:
     """Normalize the public scaled-mm call without allowing an unfused fallback."""
+    op_name = "scaled_grouped_mm" if grouped else "scaled_mm"
     if kernel_options.get("backend", "TRITON") != "QUACK":
-        raise NotImplementedError("FlexGEMM F.scaled_mm requires backend='QUACK'")
+        raise NotImplementedError(f"FlexGEMM F.{op_name} requires backend='QUACK'")
     if len(gemm_args) != 4:
         raise RuntimeError(
-            "FlexGEMM F.scaled_mm expects gemm_args=(mat_a, mat_b, scale_a, scale_b)"
+            f"FlexGEMM F.{op_name} expects gemm_args=(mat_a, mat_b, scale_a, scale_b)"
         )
     mat_a, mat_b, scale_a_arg, scale_b_arg = gemm_args
     scale_a = scaled_mm_arg_list(scale_a_arg, "scale_a")
@@ -479,27 +530,60 @@ def flex_gemm_scaled_mm(
     bias = options.pop("bias", None)
     if bias is not None:
         raise NotImplementedError(
-            "FlexGEMM F.scaled_mm tensor bias is not supported yet"
+            f"FlexGEMM F.{op_name} tensor bias is not supported yet"
         )
+    offs = options.pop("offs", None) if grouped else None
     output_dtype = options.pop("output_dtype", torch.bfloat16)
     contraction_dim = tuple(options.pop("contraction_dim", ()))
     use_fast_accum = options.pop("use_fast_accum", False)
     if contraction_dim or use_fast_accum:
         raise NotImplementedError(
-            "FlexGEMM scaled-mm does not support custom contraction or fast accumulation"
+            f"FlexGEMM F.{op_name} does not support custom contraction or fast accumulation"
         )
     if options:
         raise RuntimeError(
-            f"unsupported FlexGEMM F.scaled_mm options: {sorted(options)}"
+            f"unsupported FlexGEMM F.{op_name} options: {sorted(options)}"
         )
-    validate_scaled_mm(
-        mat_a, mat_b, scale_a, scale_b, recipe_a, recipe_b, swizzle_a, swizzle_b
+    format_name = validate_scaled_mm(
+        mat_a,
+        mat_b,
+        scale_a,
+        scale_b,
+        recipe_a,
+        recipe_b,
+        swizzle_a,
+        swizzle_b,
+        grouped=grouped,
     )
+    if grouped:
+        validate_scaled_grouped_mm(
+            mat_a, mat_b, scale_a[0], scale_b[0], offs, output_dtype, format_name
+        )
     scale_a_end = 2 + len(scale_a)
     flat_gemm_args = (mat_a, mat_b, *scale_a, *scale_b)
-    gemm_kwargs = {"flex_gemm_op": "scaled_mm"}
+    if grouped:
+        flat_gemm_args = (*flat_gemm_args, offs)
+    gemm_kwargs = {"flex_gemm_op": "scaled_grouped_mm" if grouped else "scaled_mm"}
 
     def body_fn(*args: Any) -> Any:
+        if grouped:
+            return epilogue_fn(
+                torch.ops.aten._scaled_grouped_mm_v2.default(
+                    args[0],
+                    args[1],
+                    list(args[2:scale_a_end]),
+                    list(recipe_a),
+                    list(swizzle_a),
+                    list(args[scale_a_end:-1]),
+                    list(recipe_b),
+                    list(swizzle_b),
+                    args[-1],
+                    None,
+                    output_dtype,
+                    [],
+                    False,
+                )
+            )
         return epilogue_fn(
             torch.ops.aten._scaled_mm_v2.default(
                 args[0],
@@ -524,6 +608,88 @@ def flex_gemm_scaled_mm(
         gemm_kwargs,
         kernel_options,
     )
+
+
+def validate_scaled_grouped_mm(
+    mat_a, mat_b, scale_a, scale_b, offs, output_dtype, format_name
+):
+    """Validate the public block-scaled grouped contract before layout adaptation."""
+    if output_dtype not in (None, torch.bfloat16):
+        raise ValueError("FlexGEMM scaled_grouped_mm supports BF16 output only")
+    if mat_a.ndim != 2 or mat_b.ndim not in (2, 3):
+        raise ValueError("FlexGEMM scaled_grouped_mm requires 2-D A and 2-D or 3-D B")
+    validate_grouped_mm_offs(mat_a, offs, "scaled_grouped_mm")
+    tensors = (mat_a, mat_b, scale_a, scale_b, offs)
+    if any(t.device != mat_a.device for t in tensors) or mat_a.device.type != "cuda":
+        raise NotImplementedError(
+            "FlexGEMM scaled_grouped_mm operands must share a CUDA device"
+        )
+    if mat_a.stride(-1) != 1 or mat_b.stride(-2) != 1:
+        raise NotImplementedError(
+            "FlexGEMM scaled_grouped_mm requires row-major A and column-major B"
+        )
+    nvfp4 = format_name == "nvfp4"
+    if nvfp4 and mat_b.ndim != 3:
+        raise NotImplementedError(
+            "FlexGEMM NVFP4 scaled_grouped_mm supports grouped-M only"
+        )
+    k_alignment = 16 if nvfp4 else 32
+    if mat_a.shape[-1] != mat_b.shape[-2] or mat_a.shape[-1] % k_alignment:
+        raise ValueError(
+            "FlexGEMM scaled_grouped_mm requires matching storage K divisible "
+            f"by {k_alignment}"
+        )
+    if mat_b.shape[-1] % 16 or (
+        mat_a.shape[-1] != 0 and (mat_a.stride(-2) % 16 or mat_b.stride(-1) % 16)
+    ):
+        raise ValueError(
+            "FlexGEMM scaled_grouped_mm requires N and operand leading strides divisible by 16"
+        )
+    if (
+        scale_a.ndim != 2
+        or scale_b.ndim != 2
+        or not scale_a.is_contiguous()
+        or not scale_b.is_contiguous()
+    ):
+        raise ValueError(
+            "FlexGEMM scaled_grouped_mm requires contiguous 2-D blocked scales"
+        )
+    if scale_a.shape[0] < mat_a.shape[0] or (
+        mat_b.ndim == 2 and scale_b.shape[0] < mat_b.shape[-1]
+    ):
+        raise ValueError(
+            "FlexGEMM scaled_grouped_mm blocked scale rows must cover the operand rows"
+        )
+    if mat_b.ndim == 3:
+        scale_tile_k = 32 if nvfp4 else 128
+        expected_b = (
+            ((mat_b.shape[-1] + 127) // 128)
+            * ((mat_b.shape[-2] + scale_tile_k - 1) // scale_tile_k)
+            * 512
+        )
+        if mat_b.shape[0] != offs.numel() or scale_b.shape != (
+            offs.numel(),
+            expected_b,
+        ):
+            raise ValueError(
+                "FlexGEMM scaled_grouped_mm B and scale_b must match the offs groups"
+            )
+    for scale in (scale_a,) if mat_b.ndim == 3 else (scale_a, scale_b):
+        if scale.shape[0] % 128:
+            raise ValueError(
+                "FlexGEMM scaled_grouped_mm scale rows must be multiples of 128"
+            )
+    if mat_b.ndim == 3:
+        block_k = 8 if nvfp4 else 32
+        expected_columns = ((mat_a.shape[-1] // block_k + 3) // 4) * 4
+        if scale_a.shape[1] != expected_columns:
+            raise ValueError(
+                "FlexGEMM scaled_grouped_mm scale_a columns must match padded K/block_size"
+            )
+    elif any(scale.numel() % 512 for scale in (scale_a, scale_b)):
+        raise ValueError(
+            "FlexGEMM scaled_grouped_mm scales must contain whole 512-byte blocks"
+        )
 
 
 def flex_gemm_grouped_mm(
@@ -588,10 +754,12 @@ def flex_gemm(
     if gemm_op in (
         torch.ops.aten._scaled_mm_v2,
         torch.ops.aten._scaled_mm_v2.default,
+        torch.ops.aten._scaled_grouped_mm_v2,
+        torch.ops.aten._scaled_grouped_mm_v2.default,
     ):
         raise RuntimeError(
-            "FlexGEMM direct aten._scaled_mm_v2 calls are unsupported; "
-            "use torch.nn.functional.scaled_mm"
+            "FlexGEMM direct scaled aten calls are unsupported; "
+            "use torch.nn.functional.scaled_mm or scaled_grouped_mm"
         )
     if gemm_op in (
         torch._scaled_grouped_mm,
@@ -599,11 +767,15 @@ def flex_gemm(
         torch.ops.aten._scaled_grouped_mm.default,
     ):
         raise NotImplementedError(
-            "FlexGEMM scaled grouped GEMMs are not supported yet; "
-            "only bf16 torch.nn.functional.grouped_mm with offs is supported"
+            "FlexGEMM legacy scaled grouped GEMMs are unsupported; use "
+            "torch.nn.functional.grouped_mm or scaled_grouped_mm with offs"
         )
     if gemm_op is torch.nn.functional.scaled_mm:
         return flex_gemm_scaled_mm(gemm_args, epilogue_fn, gemm_kwargs, kernel_options)
+    if gemm_op is torch.nn.functional.scaled_grouped_mm:
+        return flex_gemm_scaled_mm(
+            gemm_args, epilogue_fn, gemm_kwargs, kernel_options, grouped=True
+        )
 
     gemm_op = cast(torch._ops.OpOverload, FLEX_GEMM_OP_ALIASES.get(gemm_op, gemm_op))
     if gemm_op is torch.ops.aten._grouped_mm.default:
