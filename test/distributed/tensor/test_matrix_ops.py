@@ -30,10 +30,12 @@ from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_MX_GEMM,
     SM90OrLater,
 )
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_quantized import to_blocked
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -536,6 +538,128 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
 
             self.assertEqual(comm_mode.get_total_counts(), 0)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
+    @with_comms
+    @skip_unless_torch_gpu
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    def test_scaled_mm_v2(self):
+        device_mesh = self.build_device_mesh()
+        shrd0 = Shard(0)
+        shrd1 = Shard(1)
+        repl = Replicate()
+        part = Partial()
+
+        ws = self.world_size
+        m, n, k = 16, 32 * ws, 16 * ws
+
+        t1 = torch.randn(m, k, device=self.device_type, dtype=torch.bfloat16)
+        t2 = torch.randn(n, k, device=self.device_type, dtype=torch.bfloat16)
+
+        for (
+            recipe,
+            output_spec,
+            t1_spec,
+            t2_spec,
+            scale1_shape,
+            scale2_shape,
+            scale1_spec,
+            scale2_spec,
+        ) in [
+            # Tensor-wise scaling
+            (F.ScalingType.TensorWise, repl, repl, repl, (), (), repl, repl),
+            (F.ScalingType.TensorWise, shrd1, repl, shrd0, (1, 1), (1, 1), repl, repl),
+            (F.ScalingType.TensorWise, part, shrd1, shrd1, (1,), (1,), repl, repl),
+            # Row-wise scaling
+            (F.ScalingType.RowWise, repl, repl, repl, (m, 1), (n, 1), repl, repl),
+            (F.ScalingType.RowWise, shrd1, repl, shrd0, (m, 1), (n, 1), repl, shrd0),
+            (F.ScalingType.RowWise, part, shrd1, shrd1, (m, 1), (n, 1), repl, repl),
+        ]:
+            full_ref_res = t1 @ t2.t()
+
+            t1_fp8, scale1 = scale_for_fp8(t1, scale1_shape)
+            t2_fp8, scale2 = scale_for_fp8(t2, scale2_shape)
+
+            dist_t1_fp8 = distribute_tensor(t1_fp8, device_mesh, [t1_spec])
+            dist_t2_fp8 = distribute_tensor(t2_fp8, device_mesh, [t2_spec])
+            dist_scale1 = distribute_tensor(scale1, device_mesh, [scale1_spec])
+            dist_scale2 = distribute_tensor(scale2, device_mesh, [scale2_spec])
+
+            with CommDebugMode() as comm_mode:
+                dist_res = cast(
+                    DTensor,
+                    F.scaled_mm(
+                        dist_t1_fp8,
+                        dist_t2_fp8.t(),
+                        scale_a=dist_scale1,
+                        scale_recipe_a=recipe,
+                        scale_b=dist_scale2.t(),
+                        scale_recipe_b=recipe,
+                        output_dtype=torch.bfloat16,
+                    ),
+                )
+
+            self.assertEqual(dist_res.placements[0], output_spec)
+
+            full_dist_res = dist_res.full_tensor()
+            # Fp8 matmuls are quite inaccurate, we need high tolerances
+            self.assertEqual(full_dist_res, full_ref_res, atol=1.5, rtol=7e-2)
+
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @skipIfRocm
+    @with_comms
+    @skip_unless_torch_gpu
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "MX GEMM is not supported")
+    def test_scaled_mm_v2_swizzled_scales(self):
+        """Sharded data with replicated swizzled MXFP8 scales must be gathered
+        before the GEMM instead of slicing the swizzled scale tensor. With
+        m=128 a row shard cuts through a 128-row scale tile, so slicing the
+        swizzled scale like the data would be wrong."""
+        device_mesh = self.build_device_mesh()
+        m, n, k = 128, 128, 128
+
+        a = torch.randn(m, k, device=self.device_type).to(torch.float8_e4m3fn)
+        b = torch.randn(n, k, device=self.device_type).to(torch.float8_e4m3fn)
+        scale_a = to_blocked(
+            torch.ones(m, k // 32, device=self.device_type, dtype=torch.float8_e8m0fnu)
+        )
+        scale_b = to_blocked(
+            torch.ones(n, k // 32, device=self.device_type, dtype=torch.float8_e8m0fnu)
+        )
+        ref = F.scaled_mm(
+            a,
+            b.t(),
+            scale_a=scale_a,
+            scale_recipe_a=F.ScalingType.BlockWise1x32,
+            scale_b=scale_b,
+            scale_recipe_b=F.ScalingType.BlockWise1x32,
+            swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
+            output_dtype=torch.bfloat16,
+        )
+
+        # NCCL cannot broadcast float8_e8m0fnu, and the scales are identical on
+        # every rank, so wrap them as replicated DTensors without communication.
+        dist_res = F.scaled_mm(
+            distribute_tensor(a, device_mesh, [Shard(0)]),
+            distribute_tensor(b, device_mesh, [Replicate()]).t(),
+            scale_a=DTensor.from_local(
+                scale_a, device_mesh, [Replicate()], run_check=False
+            ),
+            scale_recipe_a=F.ScalingType.BlockWise1x32,
+            scale_b=DTensor.from_local(
+                scale_b, device_mesh, [Replicate()], run_check=False
+            ),
+            scale_recipe_b=F.ScalingType.BlockWise1x32,
+            swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
+            output_dtype=torch.bfloat16,
+        )
+        self.assertEqual(cast(DTensor, dist_res).full_tensor(), ref)
+
     def test_scaled_mm_blockwise_1d_scale_placement(self):
         """Test that _scaled_mm_scale_placement handles 1D blockwise scales correctly.
 
@@ -614,6 +738,60 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
         )
         self.assertIsNotNone(result)
         self.assertEqual(result, Replicate())
+
+    def test_scaled_mm_v2_swizzled_operand_is_not_sharded(self):
+        """A swizzled scale's tiled layout does not map to slices of its data
+        operand, so the _scaled_mm_v2 strategy must not shard that operand."""
+        from torch.distributed.tensor._dtensor_spec import TensorMeta
+        from torch.distributed.tensor._ops._matrix_ops import (
+            scaled_mm_v2_single_dim_strategy,
+        )
+
+        m, k, n = 128, 256, 128
+        no_swizzle = int(F.SwizzleType.NO_SWIZZLE)
+        swizzle = int(F.SwizzleType.SWIZZLE_32_4_4)
+        recipe = int(F.ScalingType.BlockWise1x32)
+
+        def meta(*shape):
+            return TensorMeta(torch.Size(shape), (1,) * len(shape), torch.float32)
+
+        def strategies(swizzle_a, swizzle_b):
+            args = (
+                meta(m, k),
+                meta(k, n),
+                [meta(m, k // 32)],
+                [recipe],
+                swizzle_a,
+                [meta(n, k // 32)],
+                [recipe],
+                swizzle_b,
+                None,
+                torch.bfloat16,
+                [],
+                False,
+            )
+            return scaled_mm_v2_single_dim_strategy(
+                torch.ops.aten._scaled_mm_v2.default, args, {}
+            )
+
+        def sharded(p):
+            return isinstance(p, (_ShardingPlaceholder, Shard))
+
+        unswizzled = strategies([no_swizzle], [no_swizzle])
+        self.assertTrue(any(sharded(s[1]) for s in unswizzled))
+        self.assertTrue(any(sharded(s[2]) for s in unswizzled))
+        # An empty swizzle list means no swizzle. (_ShardingPlaceholder has no
+        # __eq__, so compare the reprs.)
+        self.assertEqual(str(strategies([], [])), str(unswizzled))
+
+        only_a = strategies([swizzle], [no_swizzle])
+        self.assertFalse(any(sharded(s[1]) or sharded(s[3]) for s in only_a))
+        self.assertTrue(any(sharded(s[2]) for s in only_a))
+
+        both = strategies([swizzle], [swizzle])
+        self.assertFalse(any(sharded(p) for s in both for p in s[1:]))
+        # Partial inputs (row-parallel style reductions) stay allowed.
+        self.assertTrue(any(isinstance(s[1], Partial) for s in both))
 
     @with_comms
     def test_matmul(self):
