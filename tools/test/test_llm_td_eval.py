@@ -536,14 +536,15 @@ class TestScore(unittest.TestCase):
         # recorded time (test_e, as if newly added); test_a's partial run counts.
         cut = top25_per_config(tp, cands, SECONDS)
         self.assertEqual(cut, {"default": ["test_a", "test_e"], "slow": ["test_a", "test_e"]})  # fmt: skip
-        cut = top25_per_config(tp, ["test_a", "test_b", "test_c", "test_d"], SECONDS)
-        self.assertEqual(cut, {"default": ["test_a", "test_c"], "slow": ["test_a"]})
+        timed = top25_per_config(tp, ["test_a", "test_b", "test_c", "test_d"], SECONDS)
+        self.assertEqual(timed, {"default": ["test_a", "test_c"], "slow": ["test_a"]})
         td = {"top25": ["test_a", "test_e"], "top25_cfg": cut}
         choice = pick("td25", None, td)
         self.assertTrue(choice.covers("test_a", "slow"))
+        self.assertTrue(choice.covers("test_e", "slow"))
         self.assertFalse(choice.covers("test_c", "slow"))
         self.assertTrue(choice.covers("test_e", "not_in_test_times"))
-        self.assertEqual(choice.files(), {"test_a", "test_c"})
+        self.assertEqual(choice.files(), {"test_a", "test_e"})
 
     def test_cost_fraction(self) -> None:
         cands = {"test_a", "test_b", "test_c"}
@@ -580,6 +581,7 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_unmapped", "2026-10-02 00:00:00", sha="u", br="gh/y"),
             fail("test_edge_in", "2026-09-21 00:00:01", sha="o", br="gh/x"),
             fail("test_edge_out", "2026-09-21 00:00:00", sha="o", br="gh/x"),
+            fail("test_ahead", "2026-10-05 06:00:00", sha="o", br="gh/x"),
         ]
         disabled = [{"d": "2026-09-30", "name": "test_disabled (__main__.TestA)"}]
         t = "2026-10-05 00:00:00"
@@ -587,7 +589,7 @@ class TestBuildDataset(unittest.TestCase):
             fail(name, t, pr=1, **kw)
             for name, kw in [("test_real", {}), ("test_green", {"job_green": True}), ("test_main", {}),
                              ("test_other", {}), ("test_mine", {}), ("test_old", {}), ("test_disabled", {}), ("test_landed", {}), ("test_landed_pr", {}),
-                             ("test_unmapped", {}), ("test_edge_in", {}), ("test_edge_out", {})]
+                             ("test_unmapped", {}), ("test_edge_in", {}), ("test_edge_out", {}), ("test_ahead", {})]
         ]  # fmt: skip
         rows.append(fail("test_unstable", t, pr=1, job="pull / test (default, 1, 1, unstable)"))  # fmt: skip
         rows.append(fail("test_after_landing", "2026-10-06 00:00:00", pr=1))
@@ -606,7 +608,7 @@ class TestBuildDataset(unittest.TestCase):
             flags,
             {"test_real": False, "test_green": True, "test_main": True, "test_other": True, "test_mine": False,
              "test_old": False, "test_disabled": True, "test_landed": False, "test_landed_pr": False, "test_unmapped": True, "test_unstable": True,
-             "test_edge_in": True, "test_edge_out": False, "test_after_landing": True},
+             "test_edge_in": True, "test_edge_out": False, "test_after_landing": True, "test_ahead": True},
         )  # fmt: skip
 
     def test_pr_caused_failures(self) -> None:
@@ -625,6 +627,19 @@ class TestBuildDataset(unittest.TestCase):
             # Another author's failure outside MAIN_WINDOW does not excuse it.
             fail("test_far", "2026-10-05 00:00:00", "a"),
             fail("test_far", "2026-09-25 00:00:00", "b"),
+            # MAIN_WINDOW is 4 days, exclusive, for main and other authors.
+            fail("test_main_in", "2026-10-05 00:00:00", "a"),
+            fail("test_main_in", "2026-10-01 00:00:01", "m", br="main"),
+            fail("test_main_out", "2026-10-05 00:00:00", "a"),
+            fail("test_main_out", "2026-10-01 00:00:00", "m", br="main"),
+            fail("test_other_in", "2026-10-05 00:00:00", "a"),
+            fail("test_other_in", "2026-10-01 00:00:01", "b"),
+            fail("test_other_out", "2026-10-05 00:00:00", "a"),
+            fail("test_other_out", "2026-10-01 00:00:00", "b"),
+            fail("test_before", "2026-09-30 23:59:59", "a"),
+            # A fork's main is a PR branch.
+            fail("test_fork_main", "2026-10-05 00:00:00", "a"),
+            fail("test_fork_main", "2026-10-06 00:00:00", "f", br="f/pytorch:main"),
             fail("test_unstable", "2026-10-05 00:00:00", "a", job=unstable),
             # After PR 1 landed, main and other PRs cannot excuse its failures, so they are dropped.
             fail("test_after_landing", "2026-10-08 00:00:00", "a"),
@@ -645,11 +660,11 @@ class TestBuildDataset(unittest.TestCase):
         landed = {1: dt.datetime(2026, 10, 7, 12, tzinfo=dt.timezone.utc)}
         with (
             patch_ci_jobs({True: {("pull", "pull", "default")}, False: {("rocm-rx7900", "pull", "default")}}),
-            mock.patch.object(bd, "pr_of_shas", return_value={"a": 1, "b": 2}),
-            mock.patch.object(bd, "pr_authors", return_value={1: "me", 2: "x"}),
+            mock.patch.object(bd, "pr_of_shas", return_value={"a": 1, "b": 2, "f": 3}),
+            mock.patch.object(bd, "pr_authors", return_value={1: "me", 2: "x", 3: "y"}),
         ):  # fmt: skip
             keep, main = bd.pr_caused_failures(rows, dt.date(2026, 10, 1), dt.date(2026, 10, 26), landed)  # fmt: skip
-        self.assertEqual(sorted((r["test"], r["pr"]) for r in keep), [("test_broke", 1), ("test_broke_pr", 1), ("test_cls", 1), ("test_far", 1), ("test_real", 1)])  # fmt: skip
+        self.assertEqual(sorted((r["test"], r["pr"]) for r in keep), [("test_broke", 1), ("test_broke_pr", 1), ("test_cls", 1), ("test_far", 1), ("test_main_out", 1), ("test_other_out", 1), ("test_other_out", 2), ("test_real", 1)])  # fmt: skip
         self.assertEqual(len(main[("test_a", "TestA", "test_main")]), 1)
         self.assertNotIn(("test_a", "TestA", "test_unmapped"), main)
 
@@ -740,7 +755,7 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "write_sample") as write,
         ):  # fmt: skip
             bd.revert_samples(Path(out), 1, dt.date(2026, 10, 1), dt.date(2026, 10, 26))
-        truth_jobs.assert_called_once_with({"test_a", "test_b"}, mock.ANY, "1")
+        truth_jobs.assert_called_once_with({"test_a", "test_b"}, "c" * 40, mock.ANY, "1")  # fmt: skip
         kw = write.call_args.kwargs
         self.assertEqual((kw["truth"], kw["truth_jobs"]), (["test_a"], jobs))
         with (
@@ -760,6 +775,8 @@ class TestBuildDataset(unittest.TestCase):
     def test_neutral_samples(self) -> None:
         start, end = dt.date(2026, 10, 1), dt.date(2026, 10, 26)
         titles: dict[str, str] = {"a" * 40: "Fix foo", "b" * 40: "[ghstack] Revert bar", "c" * 40: "Reland: baz", "d" * 40: "Add RevertibleOp"}  # fmt: skip
+        # Reverted by a message, by the autorevert bot, and with a rev_ sample.
+        titles |= {"e" * 40: "Add e", "f" * 40: "Add f", "0" * 40: "Add 0"}
         calls = []
 
         def git(*args: str) -> str:
@@ -768,14 +785,15 @@ class TestBuildDataset(unittest.TestCase):
                 return titles[args[-1]] + "\n\nbody"
             if "--first-parent" in args:
                 return "".join(f"{sha} {t}\n" for sha, t in titles.items())
-            return ""
+            return f"Revert\n\nThis reverts commit {'e' * 40}.\n"
 
         with (
             tempfile.TemporaryDirectory() as out,
             mock.patch.object(bd, "git", git),
-            mock.patch.object(bd, "query", return_value=[]),
+            mock.patch.object(bd, "query", return_value=[{"commit_sha": "f" * 40}]),
             mock.patch.object(bd, "write_sample") as write,
         ):
+            (Path(out) / f"rev_{'0' * 12}.json").write_text("{}")
             bd.neutral_samples(Path(out), start, end, 10)
         self.assertEqual(sorted(c.args[1] for c in write.call_args_list), ["neu_" + "a" * 12, "neu_" + "d" * 12])  # fmt: skip
         log = next(c for c in calls if "--first-parent" in c)

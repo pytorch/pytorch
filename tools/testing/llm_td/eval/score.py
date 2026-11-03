@@ -15,8 +15,8 @@ test time (N defaults to 100*LLM_TD_HEDGE). `final+tdN` falls back
 to TD's own cut when the model call failed or its answer is malformed, as CI
 does: select_tests never enforces such a selection, so
 selection.apply_selection keeps TD's split. Under enforcement
-Selection.split also always runs the files that already failed on the PR;
-the samples carry no such signal, so the hedge here has no `always` set,
+Selection.split also always runs the files that already failed on the PR
+and that TD's split runs; the samples carry no such signal, so the hedge here has no `always` set,
 which understates both what enforcement runs and what it catches on a PR's
 later pushes.
 The tag `td` scores the replayed in-repo TD (see td_replay.py) under the
