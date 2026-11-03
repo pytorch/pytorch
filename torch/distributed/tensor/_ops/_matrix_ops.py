@@ -3,6 +3,7 @@
 
 
 import copy
+from typing_extensions import TypeIs
 
 import torch
 from torch._ops import OpOverload
@@ -381,11 +382,13 @@ def scaled_mm_v2_single_dim_strategy(
         swizzle_b, (list, tuple)
     ):
         raise AssertionError
-    no_swizzle = int(torch.nn.functional.SwizzleType.NO_SWIZZLE)
+    no_swizzle = torch.nn.functional.SwizzleType.NO_SWIZZLE.value
     self_swizzled = any(s != no_swizzle for s in swizzle_a)
     mat2_swizzled = any(s != no_swizzle for s in swizzle_b)
 
-    def _is_sharded(p: Placement | _ShardingPlaceholder) -> bool:
+    def _is_sharded(
+        p: Placement | _ShardingPlaceholder,
+    ) -> TypeIs[Shard | _ShardingPlaceholder]:
         return isinstance(p, (_ShardingPlaceholder, Shard))
 
     # "mk,kn->mn": self_contracting_dim=1, mat2_contracting_dim=0
