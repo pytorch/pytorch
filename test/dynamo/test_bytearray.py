@@ -524,13 +524,14 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             lambda: Items(next_error=TypeError("next")),
             lambda: Items(next_error=ValueError("next")),
         ]
-        for make_items in cases:
+        for i, make_items in enumerate(cases):
             torch._dynamo.reset()
             compiled = torch.compile(f, backend="eager", fullgraph=True)
             for outer in (False, True):
-                self.assertEqual(
-                    compiled(make_items, outer, x), f(make_items, outer, x)
-                )
+                with self.subTest(case=i, outer=outer):
+                    self.assertEqual(
+                        compiled(make_items, outer, x), f(make_items, outer, x)
+                    )
 
     def test_join_length_hint_first_iterator(self):
         seen = []
@@ -608,6 +609,49 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(x), f(x))
+
+    def test_join_length_hint_errors(self):
+        class MyTypeError(TypeError):
+            pass
+
+        class Items:
+            def __init__(self, error):
+                self.error = error
+                self.items = [b"a", b"b"]
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if not self.items:
+                    raise StopIteration
+                return self.items.pop(0)
+
+        class LenRaises(Items):
+            def __len__(self):
+                raise self.error
+
+        class HintRaises(Items):
+            def __length_hint__(self):
+                raise self.error
+
+        def f(cls, error_type, x):
+            try:
+                return bytearray(b",").join(cls(error_type("x"))), x + 1
+            except Exception as e:
+                return type(e), str(e), x + 1
+
+        x = torch.ones(1)
+        # A TypeError, subclasses included, selects the default hint; any
+        # other error propagates.
+        for cls in (LenRaises, HintRaises):
+            for error_type in (TypeError, MyTypeError, ValueError):
+                with self.subTest(cls=cls.__name__, error=error_type.__name__):
+                    torch._dynamo.reset()
+                    compiled = torch.compile(f, backend="eager", fullgraph=True)
+                    self.assertEqual(
+                        compiled(cls, error_type, x), f(cls, error_type, x)
+                    )
 
     def test_join_separator_mutation_graph_break(self):
         class Items:

@@ -100,8 +100,10 @@ def index(
 
 def sequence_fast(iterable: Iterable[T], message: str) -> list[T]:
     # Mirrors CPython's PySequence_Fast for an argument that is not a list or
-    # tuple. list(it) is spelled out because it calls iter() again and asks
-    # the first iterator for a length hint before reading the items.
+    # tuple. list(it) is spelled out because Dynamo's list() does not ask for a
+    # length hint: call iter() on it once more, ask it for a hint with list()'s
+    # default of 8, then read with next(), since a for loop would call
+    # __iter__ a third time.
     # CPython replaces the TypeError instead of chaining to it, so raise
     # outside the handler.
     failed = False

@@ -44,7 +44,7 @@ from .. import graph_break_hints, polyfills, variables
 from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
-    ObservedTypeError,
+    ObservedException,
     ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
@@ -2708,23 +2708,32 @@ class BuiltinVariable(BaseBuiltinVariable):
         else:
             default = ConstantVariable.create(0)
 
+        from ..symbolic_convert import pyerr_given_exception_match
+
+        def raised_type_error() -> bool:
+            # Like PyErr_ExceptionMatches, this also matches TypeError subclasses.
+            exc = tx.exn_vt_stack.get_raised_exception()
+            return pyerr_given_exception_match(exc, TypeError)
+
         obj_type = maybe_get_python_type(obj)
 
         if type_implements_sq_length(obj_type) or type_implements_mp_length(obj_type):
             try:
                 return generic_size(tx, obj)
-            except ObservedTypeError:
+            except ObservedException:
                 # CPython clears the TypeError and falls back to __length_hint__.
-                # ObservedTypeError is only produced for TypeError itself, not for
-                # subclasses; those are rare enough to revisit if they show up.
+                if not raised_type_error():
+                    raise
                 handle_observed_exception(tx)
 
         if getattr(obj_type, "__length_hint__", None) is None:
             return default
         try:
             hint = obj.call_method(tx, "__length_hint__", [], {})
-        except ObservedTypeError:
+        except ObservedException:
             # Ditto: a TypeError from __length_hint__ selects the default.
+            if not raised_type_error():
+                raise
             handle_observed_exception(tx)
             return default
 
