@@ -2459,27 +2459,15 @@ def cat(inputs, dim=0):
     exclude: OrderedSet[str] = OrderedSet([recombined]) if recombined else OrderedSet()
     fusable_reduction = any(can_fuse_reduction(t, exclude) for t in inputs)
 
-    def should_lower_cat_input(x, numel=None) -> bool:
-        # The cat input's own numel; unwrapping a view below reaches its base.
-        if numel is None:
-            numel = x.get_numel()
+    def should_lower_cat_input(x) -> bool:
         # Unrealized inputs will not be storage and layouts, and we don't want to realize
         # them in case we want to fuse
         if ir.is_storage_and_layout(x):
             storage, _ = ir.as_storage_and_layout(x, freeze=False)
-            if ir.ConcatKernel.can_realize_into_without_copy(storage):
-                return False
-            # Copying all of a buffer Inductor computes can fuse into its
-            # producer, which is cheaper than re-reading it in a pointwise cat.
-            return not (
-                config.cat_fuse_computed_input_copies
-                and isinstance(storage.data, ir.ComputedBuffer)
-                and not storage.data.is_no_op()
-                and V.graph.sizevars.statically_known_equals(numel, storage.get_numel())
-            )
+            return not ir.ConcatKernel.can_realize_into_without_copy(storage)
 
         if isinstance(x, (TensorBox, ir.StorageBox)):
-            return should_lower_cat_input(unwrap_tensor(x), numel)
+            return should_lower_cat_input(unwrap_tensor(x))
 
         if isinstance(x, ir.Pointwise):
             return True

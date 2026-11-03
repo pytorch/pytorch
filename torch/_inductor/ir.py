@@ -3998,6 +3998,9 @@ class View(GenericView):
 
             return cls(data=x, size=list(new_size), reindex=fake_reindex)
 
+        elif (view := StackUnitDimView.try_create(x, old_size, new_size)) is not None:
+            return view
+
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
         elif is_contiguous:
             # Input is contiguous, output can use contiguous strides
@@ -4224,6 +4227,53 @@ class View(GenericView):
             return tuple(sympy_subs(x, replacements) for x in view_expr)
 
         return reindex
+
+
+class StackUnitDimView(GenericView):
+    """
+    The size-1 unsqueeze of a stack input, when the cat is the only consumer of
+    the view. A ReinterpretView would freeze the buffer so ConcatKernel could not
+    place it; since only the cat sees this view, it stays lazy (an index remap)
+    and the cat places the buffer in its output slot, as a plain cat would.
+    """
+
+    @classmethod
+    def try_create(
+        cls, x: IRNode, old_size: Sequence[Expr], new_size: Sequence[Expr]
+    ) -> StackUnitDimView | None:
+        if not (
+            isinstance(x, StorageBox)
+            and isinstance(x.data, ComputedBuffer)
+            and isinstance(x.data.layout, FlexibleLayout)
+        ):
+            return None
+        node = V.graph.current_node
+        source = node.args[0] if node is not None and node.args else None
+        if not (
+            node is not None
+            and node.target is torch.ops.aten.unsqueeze.default
+            and len(node.users) == 1
+            and next(iter(node.users)).target is torch.ops.aten.cat.default
+            and isinstance(source, torch.fx.Node)
+            and len(source.users) == 1
+        ):
+            return None
+        sizevars = V.graph.sizevars
+        is_one = partial(sizevars.statically_known_equals, right=1)
+        old_dims = [i for i, s in enumerate(old_size) if not is_one(s)]
+        new_dims = [i for i, s in enumerate(new_size) if not is_one(s)]
+        if not sizevars.statically_known_list_equals(
+            [old_size[i] for i in old_dims], [new_size[i] for i in new_dims]
+        ):
+            return None
+
+        def reindex(index: Sequence[Expr]) -> Sequence[Expr]:
+            result: list[Expr] = [sympy.S.Zero] * len(old_size)
+            for old, new in zip(old_dims, new_dims):
+                result[old] = index[new]
+            return result
+
+        return cls(data=x, size=list(new_size), reindex=reindex)
 
 
 @ir_dataclass
@@ -7252,6 +7302,11 @@ class ConcatKernel(NopKernel):
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
             return cls.realize_into(src.data, dst, allow_alias)
+
+        if isinstance(src, StackUnitDimView) and allow_alias:
+            # place the buffer itself, in the slot with the same size-1 change
+            slot = View.create(dst, src.data.get_size())
+            return cls.realize_into(src.data, slot, allow_alias)
 
         if isinstance(src, StorageBox) and allow_alias:
             src.realize()
