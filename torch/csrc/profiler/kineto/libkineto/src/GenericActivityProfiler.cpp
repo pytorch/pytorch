@@ -605,9 +605,9 @@ void GenericActivityProfiler::toggleCollectionDynamic(const bool enable) {
   //
   // Both to prevent the synchronization event from showing up in traces.
   //
-  // A trace that did not allow GPU tracing must not arm it here either; its
-  // stop would never disarm it.
-  const bool traceGpu = shouldTraceGpu();
+  // Only a running trace that armed GPU tracing may toggle it. A trace that
+  // opted out, or one that already stopped, would never disarm it.
+  const bool traceGpu = gpuTracingArmed_.load();
   if (!enable) {
     for (auto& session : sessions_) {
       session->toggleCollectionDynamic(enable);
@@ -655,6 +655,7 @@ void GenericActivityProfiler::stopTraceInternal(
           setupOverhead_, duration_cast<microseconds>(t2 - timestamp).count());
     }
   }
+  gpuTracingArmed_.store(false);
 
   for (auto& session : sessions_) {
     LOG(INFO) << "Stopping child profiler session";

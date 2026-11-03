@@ -52,6 +52,9 @@ TEST_F(CuptiPMSamplingIntegrationTest, ProfilerHonorsGpuTracingOptOut) {
       config.parse("PERFORMANCE_METRICS_DEVICE_ID=2\n"
                    "PERFORMANCE_METRICS=sm__cycles_active.avg\n"
                    "GPU_TRACING_ENABLED=false"));
+  // Without a timestamp source the session fails to prepare, which would hide
+  // a missing gate.
+  configureCuptiTimestampSource(false);
   CuptiPMSamplingProfiler profiler;
 
   EXPECT_EQ(

@@ -172,6 +172,22 @@ TEST(SyncActivityProfilerHandler, DynamicToggleFollowsTraceConfig) {
   EXPECT_EQ(profiler.syncCalls, 2);
 }
 
+TEST(SyncActivityProfilerHandler, ToggleAfterStopDoesNotArmGpu) {
+  GpuHookCounter profiler;
+  SyncActivityProfilerHandler handler(profiler);
+
+  prepareTrace(handler, "");
+  handler.startTrace();
+  handler.stopTrace();
+  ASSERT_EQ(profiler.enableCalls, 1);
+  ASSERT_EQ(profiler.disableCalls, 1);
+
+  // No trace is left to disarm GPU tracing, so a toggle must not arm it.
+  handler.toggleCollectionDynamic(true);
+  EXPECT_EQ(profiler.enableCalls, 1);
+  EXPECT_EQ(profiler.syncCalls, 0);
+}
+
 TEST(SyncActivityProfilerHandler, EveryTraceStartsToggledOn) {
   GpuHookCounter profiler;
   SyncActivityProfilerHandler handler(profiler);
