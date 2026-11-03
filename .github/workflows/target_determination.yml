@@ -111,19 +111,6 @@ jobs:
           if-no-files-found: error
           path: td_results.json
 
-      # Downloaded by download-td-artifacts; the jobs that use it @main (Linux, ROCm no-dind) only
-      # get it once this lands. Under the LLM selection, run_test.py always runs these files.
-      - name: Store the previous failures on GHA
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: steps.td.outcome == 'success'
-        continue-on-error: true
-        with:
-          name: previous_failures
-          retention-days: 1
-          if-no-files-found: ignore
-          include-hidden-files: true
-          path: .additional_ci_files/previous_failures*.json
-
       # One selection per workflow run, so every shard of a test job applies the same one.
       - name: Resolve the LLM test selection
         id: llm-td
