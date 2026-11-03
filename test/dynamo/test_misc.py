@@ -2389,6 +2389,17 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(TypeError):
             opt(5)
 
+    def test_int_base_symint_type_error(self):
+        def fn(x):
+            try:
+                return int(x.size(0), 16)
+            except TypeError as e:
+                return str(e)
+
+        opt = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        x = torch.ones(5)
+        self.assertEqual(opt(x), fn(x))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
         def f1(x, y):
