@@ -289,6 +289,41 @@ TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
   EXPECT_EQ(result_impl->fake_tensor_mode(), mode);
 }
 
+TEST(TestNative, MarkFakeStorage) {
+  auto mode = std::make_shared<c10::FakeTensorMode>(nullptr, nullptr);
+  auto make_fake = [&]() {
+    auto t = at::empty({2}, at::device(at::kMeta));
+    auto* impl = t.unsafeGetTensorImpl();
+    at::set_and_normalize_fake_device(impl, c10::Device(c10::kCPU));
+    impl->set_fake_tensor_mode(mode);
+    at::mark_fake_storage(impl, *mode);
+    return t;
+  };
+  struct CaptureWarnings : c10::WarningHandler {
+    std::vector<std::string> messages;
+    void process(const c10::Warning& warning) override {
+      messages.push_back(warning.msg());
+    }
+  };
+  CaptureWarnings handler;
+  c10::WarningUtils::WarningHandlerGuard handler_guard(&handler);
+  c10::WarningUtils::WarnAlways warn_always;
+
+  // Reading the data pointer of a fake of a default mode warns
+  auto fake = make_fake();
+  fake.mutable_data_ptr();
+  ASSERT_EQ(handler.messages.size(), 1);
+  EXPECT_NE(
+      handler.messages[0].find("Accessing the data pointer of FakeTensor"),
+      std::string::npos);
+
+  // Disallowing unsafe access makes fakes created afterwards throw
+  mode->allow_unsafe_data_ptr_access_ = false;
+  EXPECT_THROW(make_fake().mutable_data_ptr(), c10::Error);
+  fake.mutable_data_ptr();
+  EXPECT_EQ(handler.messages.size(), 2);
+}
+
 TEST(TestNative, InKernelInvocationReportsMetaDevice) {
   auto t = at::empty({2}, at::device(at::kMeta));
   at::set_and_normalize_fake_device(
