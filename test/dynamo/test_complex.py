@@ -187,6 +187,34 @@ class ComplexTests(ComplexDynamoTestCase):
         a.add_(1)
         self.assertEqual(a, b)
 
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_conj_output(self, backend):
+        def f(x):
+            a = x * 2
+            return a, a.conj(), (x + 1).conj()
+
+        x = torch.randn(5, dtype=torch.complex64)
+        a, c, d = torch.compile(f, backend=backend, fullgraph=True)(x)
+        self.assertTrue(c.is_conj())
+        self.assertTrue(d.is_conj())
+        self.assertEqual((a, c, d), f(x))
+        self.assertEqual(c.untyped_storage().data_ptr(), a.untyped_storage().data_ptr())
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_saved_conj_of_complex_input(self, backend):
+        def f(a, y):
+            return a * y
+
+        a = torch.rand(3, dtype=torch.double, requires_grad=True)
+        y = torch.rand(3, dtype=torch.cdouble)
+        a_ref = a.detach().clone().requires_grad_()
+        out = torch.compile(f, backend=backend, fullgraph=True)(a, y)
+        ref = f(a_ref, y)
+        self.assertEqual(out, ref)
+        out.abs().sum().backward()
+        ref.abs().sum().backward()
+        self.assertEqual(a.grad, a_ref.grad)
+
     def test_aliasing_semantics(self):
         def mutate():
             a = torch.ones(2, 2, dtype=torch.complex64)
