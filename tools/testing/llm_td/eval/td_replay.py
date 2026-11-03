@@ -22,9 +22,9 @@ scores. A file counts as run in a config if any TestRun of it is in the cut,
 which slightly favors TD when a heuristic scored only some of its classes.
 
 The historical-stats artifacts are read from STATS (default
-REPO/.additional_ci_files, fetched by tools/stats/import_test_stats.py). This
-is optimistic for TD: today's artifacts already contain the failures being
-predicted.
+REPO/.additional_ci_files, written by get_test_file_ratings() and its siblings
+in tools/stats/import_test_stats.py). This is optimistic for TD: today's
+artifacts already contain the failures being predicted.
 """
 
 from __future__ import annotations
@@ -38,6 +38,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
+from tools.stats.import_test_stats import (
+    ADDITIONAL_CI_FILES_FOLDER,
+    TD_HEURISTIC_HISTORICAL_EDITED_FILES,
+    TD_HEURISTIC_PROFILING_FILE,
+    TEST_FILE_RATINGS_FILE,
+)
 from tools.testing.llm_td.eval import REPO, write_json
 from tools.testing.llm_td.eval.score import Seconds, test_seconds
 
@@ -50,9 +56,9 @@ if TYPE_CHECKING:
 
 H = "tools.testing.target_determination.heuristics."
 ARTIFACTS = [
-    "test-file-ratings.json",
-    "td_heuristic_historical_edited_files.json",
-    "td_heuristic_profiling.json",
+    TEST_FILE_RATINGS_FILE,
+    TD_HEURISTIC_HISTORICAL_EDITED_FILES,
+    TD_HEURISTIC_PROFILING_FILE,
 ]
 
 
@@ -74,26 +80,26 @@ def main() -> None:
     )
     p.add_argument("--data", type=Path, required=True)
     p.add_argument("--out", type=Path, help="default: DATA/td")
-    p.add_argument("--stats", type=Path, default=REPO / ".additional_ci_files")
+    p.add_argument("--stats", type=Path, default=REPO / ADDITIONAL_CI_FILES_FOLDER)
     p.add_argument("--ids", type=Path, help="only these samples")
     p.add_argument("--shard", type=int, nargs=2, default=[0, 1], metavar=("I", "N"), help="0-indexed: every N-th sample from the I-th")  # fmt: skip
     args = p.parse_args()
     which, n = args.shard
     if not 0 <= which < n:
         p.error(f"--shard I N needs 0 <= I < N, got {which} {n}")
-    if args.stats.name != ".additional_ci_files":
-        raise SystemExit("--stats must be a directory named .additional_ci_files")
+    if args.stats.name != ADDITIONAL_CI_FILES_FOLDER.name:
+        raise SystemExit(f"--stats must be a directory named {ADDITIONAL_CI_FILES_FOLDER}")  # fmt: skip
     missing = [a for a in ARTIFACTS if not (args.stats / a).exists()]
     if missing:
         raise SystemExit(
-            f"{args.stats} lacks {missing}; fetch them with tools/stats/import_test_stats.py"
+            f"{args.stats} lacks {missing}; fetch them with get_test_file_ratings(), get_td_heuristic_historial_edited_files_json() and get_td_heuristic_profiling_json() from tools/stats/import_test_stats.py"
         )
 
     from tools.testing.target_determination.determinator import get_test_prioritizations
 
     seconds = test_seconds(args.data / "test-times.json")
     current: dict = {}
-    stats_root = args.stats.resolve().parent
+    stats_root = args.stats.absolute().parent
     patches = {
         # The heuristics read their artifacts as REPO_ROOT / ".additional_ci_files/...".
         "utils.REPO_ROOT": stats_root,
