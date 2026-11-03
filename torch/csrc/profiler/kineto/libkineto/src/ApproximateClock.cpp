@@ -78,14 +78,16 @@ std::function<time_t(approx_time_t)> ApproximateClockToUnixTimeConverter::
         static_cast<double>(dt - static_cast<time_t>(dt_approx)); // NOLINT
   }
   std::ranges::sort(t0_correction);
-  t0 += static_cast<time_t>(
-      t0_correction[t0_correction.size() / 2 + 1]); // NOLINT
+  t0 += static_cast<time_t>(t0_correction[t0_correction.size() / 2]); // NOLINT
 
   return [=](approx_time_t t_approx) {
     // See above for why this is more stable than `A * t_approx + B`.
+    // Cast `t_approx - t0_approx` to signed `time_t` before `double` because
+    // `approx_time_t` may be `uint64_t`, where `t_approx < t0_approx` wraps to
+    // a huge positive value instead of a negative delta.
     return t_approx > 0
         ? static_cast<time_t>(
-              static_cast<double>(static_cast<int64_t>(t_approx - t0_approx)) *
+              static_cast<double>(static_cast<time_t>(t_approx - t0_approx)) *
               scale_factor) +
             t0
         : 0;
