@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 #include <vector>
 
 constexpr int blocksize = 256;
@@ -301,12 +302,25 @@ namespace {
 // distance to the last addressable element, which stops matching the element
 // count as soon as the accessor is strided.
 //
-// A pairing writes +0 to the neighbour, which no value check can see. The sign
-// bit gives it away, since (-0.0) + (+0.0) == +0.0, so a buffer seeded with
-// -0.0 answers "was this slot touched". Same trick as
+// A pairing adds -0.0 to the neighbour, which leaves any non-NaN value
+// unchanged but quiets a signaling NaN, so a buffer seeded with a signaling
+// NaN answers "was this slot touched". Same trick as
 // TestFastAtomicAdd.VectorizedBounds in
 // test/cpp/aoti_abi_check/cuda/test_kernel_utils.cu, for the pointer form.
-constexpr uint16_t kNegZeroBits = 0x8000; // -0.0 as both fp16 and bf16
+template <typename scalar_t>
+constexpr uint16_t kSignalingNaNBits =
+    std::is_same_v<scalar_t, at::Half> ? 0x7c01 : 0x7f81;
+
+// The buffer holds signaling NaNs except for the target, which starts at 0.
+template <typename scalar_t>
+std::vector<scalar_t> seededBuffer(int64_t buf_numel, int64_t target) {
+  std::vector<scalar_t> buf(buf_numel);
+  for (auto& v : buf) {
+    v.x = kSignalingNaNBits<scalar_t>;
+  }
+  buf[target] = static_cast<scalar_t>(0);
+  return buf;
+}
 
 template <typename scalar_t>
 __global__ void accessor_scatter_kernel(
@@ -347,7 +361,7 @@ std::vector<scalar_t> accessorScatter(
 
 template <typename scalar_t>
 bool wasWritten(scalar_t v) {
-  return v.x != kNegZeroBits;
+  return v.x != kSignalingNaNBits<scalar_t>;
 }
 
 template <typename scalar_t>
@@ -360,23 +374,15 @@ void test_accessor_bounds() {
   // is the positive control, while (1,2) at offset 5 can only look right, past
   // the last element, and must fall back to a scalar atomic.
   {
-    std::vector<scalar_t> buf(buf_numel);
-    for (auto& v : buf) {
-      v.x = kNegZeroBits;
-    }
-    const auto out =
-        accessorScatter<scalar_t>(std::move(buf), offset, 3, 1, 0, 1);
+    const auto out = accessorScatter<scalar_t>(
+        seededBuffer<scalar_t>(buf_numel, offset + 1), offset, 3, 1, 0, 1);
     EXPECT_EQ(static_cast<float>(out[offset + 1]), 1.0f);
     EXPECT_TRUE(wasWritten(out[offset + 2])) << "offset 1 should pair right";
     EXPECT_FALSE(wasWritten(out[0])) << "wrote below the start";
   }
   {
-    std::vector<scalar_t> buf(buf_numel);
-    for (auto& v : buf) {
-      v.x = kNegZeroBits;
-    }
-    const auto out =
-        accessorScatter<scalar_t>(std::move(buf), offset, 3, 1, 1, 2);
+    const auto out = accessorScatter<scalar_t>(
+        seededBuffer<scalar_t>(buf_numel, offset + 5), offset, 3, 1, 1, 2);
     EXPECT_EQ(static_cast<float>(out[offset + 5]), 1.0f);
     EXPECT_FALSE(wasWritten(out[offset + 6])) << "paired past the last element";
     EXPECT_FALSE(wasWritten(out[buf_numel - 1])) << "wrote past the end";
@@ -384,15 +390,12 @@ void test_accessor_bounds() {
 
   // Non-contiguous 2x3, strides 6/2: element count is still 6, but the last
   // addressable offset is 10, so memory_span is 11. Writing (1, 2) lands there
-  // and pairs left into offset 9, a gap the view steps over -- legal, and what
-  // a numel-derived bound of 6 would wrongly have refused.
+  // and pairs left into offset 9, a gap the view steps over. This overload
+  // allows that because its callers own the whole span (see KernelUtils.cuh);
+  // a numel-derived bound of 6 would have refused.
   {
-    std::vector<scalar_t> buf(buf_numel);
-    for (auto& v : buf) {
-      v.x = kNegZeroBits;
-    }
-    const auto out =
-        accessorScatter<scalar_t>(std::move(buf), offset, 6, 2, 1, 2);
+    const auto out = accessorScatter<scalar_t>(
+        seededBuffer<scalar_t>(buf_numel, offset + 10), offset, 6, 2, 1, 2);
     EXPECT_EQ(static_cast<float>(out[offset + 10]), 1.0f);
     EXPECT_TRUE(wasWritten(out[offset + 9])) << "declined to pair inside the region";
     EXPECT_FALSE(wasWritten(out[offset + 11])) << "paired past the region";
