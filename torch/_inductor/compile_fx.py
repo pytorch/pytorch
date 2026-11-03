@@ -20,9 +20,8 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
-from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
-from unittest import mock
+from typing import Any, Generic, Never, TYPE_CHECKING, TypeVar
+from typing_extensions import override, ParamSpec, Protocol, TypedDict, Unpack
 
 import torch._inductor.async_compile
 import torch.fx
@@ -103,6 +102,7 @@ from torch._inductor.utils import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._logging import trace_structured
+from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
@@ -965,7 +965,7 @@ def fake_tensor_prop(
             ctx = (
                 contextlib.nullcontext()
                 if not force_allow_non_fake_inputs
-                else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
+                else allow_non_fake_inputs_temporarily(fake_mode)
             )
             with ctx:  # type: ignore[attr-defined]
                 FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
@@ -1601,7 +1601,7 @@ class _InProcessFxCompile(FxCompile):
 
             # lift the maximum depth of the Python interpreter stack
             # to adapt large/deep models
-            sys.setrecursionlimit(max(sys.getrecursionlimit(), 2000))
+            sys.setrecursionlimit(max(sys.getrecursionlimit(), 3000))
 
             _step_logger()(
                 logging.INFO,
@@ -2597,7 +2597,7 @@ def fw_compiler_freezing(
         if tracing_context.fw_metadata:
             static_input_idxs = tracing_context.fw_metadata.static_input_indices
 
-    with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+    with allow_non_fake_inputs_temporarily(fake_mode):
         optimized_function = inner_compile(
             opt_model,
             aot_example_inputs,
@@ -3207,15 +3207,8 @@ def compile_fx(
             # wrapper_fxir.py); neither is rank-portable, so refuse rather than silently
             # emit a non-portable artifact.
             #
-            # NB cudagraphs is deliberately NOT refused here. Its device dependence
-            # (CompiledFxGraph.device_idxs, which cudagraph_post_compile passes to
-            # cudagraphify as device_index) lives in the wrapper-level artifact, and that
-            # artifact is not shared across ranks today: the FX graph cache key embeds the
-            # device, so each rank builds its own. Only the kernel/cubin layer is shared,
-            # and that is what the device-agnostic launcher handles. Whoever makes the FX
-            # graph cache key device-agnostic must revisit device_idxs (and re-check that
-            # graph-partition functions still define _coor_device_idx in their own scope)
-            # before cudagraphs can ride on a shared artifact.
+            # cudagraphs is not refused: CompiledFxGraph.device_index() resolves its
+            # device at load time, so the shared artifact carries no rank's index.
             raise RuntimeError(
                 "compile-on-one-rank (device-as-parameter) is not supported with "
                 "cpp_wrapper/AOTInductor or fx_wrapper: the device guard bakes the "

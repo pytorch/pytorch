@@ -78,6 +78,12 @@ HERE_MANIFEST = Path(__file__).resolve().parent / "_suite_manifest.py"
 # disables the test in the parent too, silently.
 REENTRY_MARKER = "PR_REVIEW_ENTRY_POINT_CHILD"
 PR_REVIEW_SKILL = REPO / ".agents" / "skills" / "pr-review" / "SKILL.md"
+# THE skills stage A installs and may read: pr-review, and the sibling skills
+# installed beside it, which an installed skill may refer to as `../<name>/`.
+# This is the one list a change widening the review's trusted skill surface has
+# to edit; the install step, the Read grants, the prompt hash and those links
+# are each checked against it.
+INSTALLED_SKILLS = ("pr-review", "cuda-streams")
 # The two claude-code-action steps: stage A reviews, stage B maps its review.
 MODEL_STEP_IDS = ("a", "claude")
 
@@ -1215,9 +1221,11 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         # Stage A: pr-review as an interactive session runs it, read-only.
         "a": (
             "Skill,"
-            # The trusted copy of pr-review, installed as a user skill.
-            "Read(~/.claude/skills/pr-review/**),"
-            "Read(/${{ github.workspace }}/pr/**),"
+            # The trusted copies of the installed skills, one grant each. A
+            # denied read reaches the model as an ordinary tool failure: it
+            # carries on and reviews without the skill.
+            + "".join(f"Read(~/.claude/skills/{s}/**)," for s in INSTALLED_SKILLS)
+            + "Read(/${{ github.workspace }}/pr/**),"
             "Grep(/${{ github.workspace }}/pr/**),"
             "Glob(/${{ github.workspace }}/pr/**),"
             "Read(//tmp/pr-diff.txt),"
@@ -1414,7 +1422,7 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         """
         text = STAGE2.read_text()
         offenders = []
-        for job in ("prepare", "review", "publish"):
+        for job in ("prepare", "announce", "review", "publish"):
             lines = job_block(text, job).splitlines()
             starts = [
                 i for i, ln in enumerate(lines) if re.match(r"^      -(\s|$)", ln)
@@ -1463,21 +1471,21 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             bots = re.findall(r"(?m)^\s*allowed_bots:\s*(.*)$", inputs)
             self.assertEqual(bots, ['"pytorch-bot[bot]"'], f"step {step_id}")
 
-    def test_stage2_declares_exactly_the_three_jobs_that_were_reviewed(self):
+    def test_stage2_declares_exactly_the_jobs_that_were_reviewed(self):
         """Stage 1 pins its job set; Stage 2 did not.
 
-        A fourth job declaring `environment: bedrock`, assuming the publisher
-        role and checking out the PR head is green today, because every
-        role-separation test inspects the job literally named `review`.
+        A fifth job declaring `environment: bedrock`, assuming the publisher
+        role and checking out the PR head would be green, because every
+        role-separation test inspects the jobs by name.
         """
         after = strip_comments(STAGE2.read_text()).split("\njobs:", 1)[1]
         jobs = re.findall(rf"(?m)^  (\S.*?):{HEADER_TAIL}", after)
         self.assertEqual(
             jobs,
-            ["prepare", "review", "publish"],
+            ["prepare", "announce", "review", "publish"],
             f"Stage 2's jobs are {jobs}. Every role, environment and "
-            "checkout assertion in this file names one of three; a fourth is "
-            "covered by none of them.",
+            "checkout assertion in this file names one of these four; a fifth "
+            "is covered by none of them.",
         )
 
     # The review job's step set, by name and in order. Stage 1 pins jobs,
@@ -1596,12 +1604,6 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             "scripts/pr_review/emit_row.py",
             # Decides which comments the review is shown.
             "scripts/pr_review/fetch_pr_comments.py",
-            # Stage A's skill. It carries the review logic, so omitting it lets
-            # the whole checklist be rewritten under an unmoved hash.
-            ".agents/skills/pr-review/SKILL.md",
-            ".agents/skills/pr-review/review-checklist.md",
-            ".agents/skills/pr-review/bc-guidelines.md",
-            ".agents/skills/pr-review/ci-runner-naming.md",
         }
         # THE EXACT SET, both ways. A file MISSING means a change there moves
         # the review's behaviour without moving the hash that identifies it; an
@@ -1610,21 +1612,76 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         self.assertEqual(
             hashed,
             required,
-            f"the prompt hash covers {sorted(hashed)}, not {sorted(required)}",
+            f"the prompt hash names {sorted(hashed)}, not {sorted(required)}",
         )
         for path in sorted(required):
             self.assertTrue(
                 (REPO / path).is_file(), f"the hash names a missing file: {path}"
             )
-        # Stage A may read any file of its pr-review copy, named in SKILL.md or
-        # not, so each must move the hash; and that copy is the trusted one.
-        skill = REPO / ".agents" / "skills" / "pr-review"
-        readable = {str(p.relative_to(REPO)) for p in skill.rglob("*") if p.is_file()}
-        self.assertLessEqual(readable, hashed, "a pr-review file is not hashed")
-        self.assertIn(
-            "cp -rT trusted/.agents/skills/pr-review ~/.claude/skills/pr-review",
-            model_step(strip_comments(self.review), "aprompt"),
+        # The installed skills carry the review logic, and stage A may read any
+        # file of them, so each skill's whole directory is hashed: exactly the
+        # installed ones, which are exactly the ones stage A copies.
+        self.assertEqual(
+            set(hashed_skill_dirs(step)),
+            {f".agents/skills/{s}" for s in INSTALLED_SKILLS},
+            "the prompt hash does not cover exactly the installed skills",
         )
+        # Exactly these skills, copied from the trusted checkout, and nothing
+        # else: one copied but not listed would be in front of stage A's
+        # `Skill` tool with its files outside the hash. The whole step body is
+        # pinned, because any other spelling of a copy (`$HOME/...`, a glob)
+        # escapes a pattern search.
+        install = model_step(strip_comments(self.review), "aprompt")
+        body = [ln.strip() for ln in indented_block(install, "run:") if ln.strip()]
+        self.assertEqual(
+            body,
+            ["set -euo pipefail", "mkdir -p ~/.claude/skills"]
+            + [
+                f"cp -rT trusted/.agents/skills/{s} ~/.claude/skills/{s}"
+                for s in INSTALLED_SKILLS
+            ],
+            "stage A does not install exactly INSTALLED_SKILLS",
+        )
+        skills = REPO / ".agents" / "skills"
+        for name in INSTALLED_SKILLS:
+            self.assertTrue((skills / name / "SKILL.md").is_file())
+        self.assertEqual(skill_reference_problems(skills, INSTALLED_SKILLS), [])
+
+    def test_the_skill_reference_lint_fails_and_passes_where_it_should(self):
+        """The lint on a fake tree with skill `a` installed and `other` not."""
+        bad = [
+            ("x.md", "[s](../other/SKILL.md)"),  # @lint-ignore
+            ("x.md", "`../other/SKILL.md`"),
+            ("sub/x.md", "see `../../other/x`."),
+            ("x.md", "../a/../other/x"),
+            ("x.md", "../absent/SKILL.md"),
+            ("x.md", "the `other`\nskill"),
+            ("x.md", "the `absent` skill"),
+            ("x.md", "~/.claude/skills/other/SKILL.md"),
+            ("x.md", "the other skill"),
+            ("x.txt", ".agents/skills/./a/x"),
+            ("x.md", ".claude/skills/a/x"),
+        ]
+        good = [
+            ("x.md", "~/.claude/skills/a/SKILL.md and the `a` skill"),
+            ("x.md", "../a/SKILL.md"),
+            ("sub/x.md", "../other/x"),
+            ("x.md", "my-other skill; other skillset"),
+        ]
+        for (rel, text), fails in [(c, True) for c in bad] + [(c, False) for c in good]:
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
+                skills = Path(tmp)
+                for d in ("a", "other"):
+                    (skills / d).mkdir()
+                    (skills / d / "SKILL.md").write_text("x")
+                (skills / "a" / rel).parent.mkdir(parents=True, exist_ok=True)
+                (skills / "a" / rel).write_text(text)
+                self.assertEqual(bool(skill_reference_problems(skills, ("a",))), fails)
+        with tempfile.TemporaryDirectory() as tmp:
+            skills = Path(tmp)
+            (skills / "real").mkdir()
+            (skills / "a").symlink_to(skills / "real")
+            self.assertTrue(skill_reference_problems(skills, ("a",)))
 
     def test_the_exported_hash_is_the_digest_of_every_file_it_names(self):
         """RUN the step: naming a file is not hashing it, and four text pins
@@ -1641,10 +1698,27 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         """
         step = "\n".join(indented_block(self.review_prepare(), "run:"))
         # Order matters to the digest and is the workflow's to choose, so it is
-        # read from the step rather than pinned. WHICH files are named is
-        # pinned, exactly, by the test above.
+        # read from the step rather than pinned. WHICH files and skill
+        # directories are named is pinned, exactly, by the test above.
         named = re.findall(r"([\w./-]+\.(?:py|sh|md|yml))", step)
         self.assertEqual(len(named), len(set(named)), f"a file is named twice: {named}")
+        dirs = hashed_skill_dirs(step)
+        # A fake tree for each skill directory: the real skills' file lists
+        # are not this test's to know. Not only `*.md`, and names a
+        # newline-separated `find | xargs` would split, so a narrowed `find`
+        # or dropped NUL handling leaves a file out of the hash.
+        tree = {
+            f"{d}/{rel}"
+            for d in dirs
+            for rel in (
+                "SKILL.md",
+                "guide.md",
+                "sub/nested.md",
+                "scripts/tool",
+                ".hidden",
+                "sub/has space.txt",
+            )
+        }
 
         def run(bodies: dict) -> tuple:
             with tempfile.TemporaryDirectory() as td:
@@ -1658,7 +1732,16 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
                 return proc, out.read_text()
 
         def digest(bodies: dict) -> str:
-            return hashlib.sha256(b"".join(bodies[rel] for rel in named)).hexdigest()
+            # The named files' bytes in order, then one `sha256sum` line per
+            # skill file, sorted by path, so a skill file's path counts as well
+            # as its bytes.
+            lines = b"".join(
+                f"{hashlib.sha256(bodies[rel]).hexdigest()}  {rel}\n".encode()
+                for rel in sorted(r for r in bodies if r not in named)
+            )
+            return hashlib.sha256(
+                b"".join(bodies[rel] for rel in named) + lines
+            ).hexdigest()
 
         def check(bodies: dict, why: str) -> None:
             # SUCCESS AND THE RECOMPUTED VALUE, on every case. Asserting only
@@ -1674,15 +1757,37 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
                 f"files it names ({digest(bodies)[:16]}) as its one output",
             )
 
-        bodies = {rel: f"content of {rel}\n".encode() for rel in named}
+        bodies = {rel: f"content of {rel}\n".encode() for rel in [*named, *tree]}
         check(bodies, "unperturbed")
-        for rel in named:
+        for rel in bodies:
             with self.subTest(perturbed=rel):
                 # The digest is recomputed from the perturbed fixture, so this
                 # asserts the hash MOVED TO THE RIGHT VALUE rather than merely
                 # moved — and a file dropped from the `cat` leaves it unmoved
                 # while the expected value changes.
                 check(dict(bodies, **{rel: bodies[rel] + b"x"}), f"perturbed {rel}")
+        for rel in named:
+            with self.subTest(missing=rel):
+                # Fails closed: a hash of whatever was readable would label a
+                # run as something it was not.
+                proc, written = run({k: v for k, v in bodies.items() if k != rel})
+                self.assertNotEqual(proc.returncode, 0, f"{rel} missing")
+                self.assertNotIn("hash=", written, f"{rel} missing")
+        for d in dirs:
+            with self.subTest(missing=d):
+                proc, written = run(
+                    {k: v for k, v in bodies.items() if not k.startswith(f"{d}/")}
+                )
+                self.assertNotEqual(proc.returncode, 0, f"{d} missing")
+                self.assertNotIn("hash=", written, f"{d} missing")
+            with self.subTest(added_to=d):
+                # A file nobody listed is hashed too: that is the point of
+                # hashing the directory.
+                check(dict(bodies, **{f"{d}/sub/new file": b"new\n"}), f"added to {d}")
+            with self.subTest(renamed_in=d):
+                moved = dict(bodies)
+                moved[f"{d}/renamed.md"] = moved.pop(f"{d}/guide.md")
+                check(moved, f"renamed in {d}")
 
     def review_prepare(self) -> str:
         """The `Hash the trusted prompt surface` step, in `prepare`."""
@@ -1691,6 +1796,62 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         rest = prepare[i:]
         nxt = re.search(r"(?m)^      -(?: |$)", rest)
         return rest[: nxt.start()] if nxt else rest
+
+
+def skill_reference_problems(skills: Path, installed) -> list:
+    """Ways the installed skills under `skills` could send stage A to a skill
+    copy it does not install, whose only reachable copy is then the PR's."""
+    problems = []
+    root = skills.resolve()
+    uninstalled = [d.name for d in skills.iterdir() if d.name not in installed]
+    for name in installed:
+        # `find -type f` skips a symlink that `cp -rT` copies into stage A's
+        # reach, so one would be readable without moving the hash; that
+        # includes the skill directory itself.
+        tree = [skills / name, *(skills / name).rglob("*")]
+        if any(p.is_symlink() for p in tree):
+            problems.append(f"{name} is or contains a symlink")
+            continue
+        for path in sorted(p for p in tree if p.is_file()):
+            text = path.read_text(errors="replace")
+            where = path.relative_to(skills)
+            # A repo path to a skill resolves only in the PR checkout
+            # (`.claude/skills` links to it), installed or not.
+            if re.search(r"\.agents/skills\b|(?<!~/)\.claude/skills\b", text):
+                problems.append(
+                    f"{where} names a skill by its repo path; use ../<name>/"
+                )
+            # A home path or a backticked name must name an installed skill,
+            # whether or not the other one exists in the tree.
+            named = re.findall(r"~/\.claude/skills/([\w-]+)", text)
+            named += re.findall(r"(?<![\w-])`([\w-]+)`\s+skills?\b", text)
+            for other in sorted(set(named) - set(installed)):
+                problems.append(f"{where} names the uninstalled {other} skill")
+            # Named in plain prose, an uninstalled skill is one the `Skill`
+            # tool cannot load.
+            for other in uninstalled:
+                if re.search(rf"(?<![\w-])`?{re.escape(other)}`?\s+skills?\b", text):
+                    problems.append(f"{where} names the uninstalled {other} skill")
+            # A relative reference, resolved whole from its file, that lands in
+            # another skill's directory, existing or not.
+            for rel in re.findall(r"(?<![\w./])\.\./[\w./-]*", text):
+                target = (path.parent / rel).resolve()
+                if target.is_relative_to(root) and target != root:
+                    other = target.relative_to(root).parts[0]
+                    if other not in installed:
+                        problems.append(
+                            f"{where} refers to the uninstalled {other} skill"
+                        )
+    return problems
+
+
+def hashed_skill_dirs(step: str) -> list:
+    """The skill directories the prompt-hash step hands to `find`, in order."""
+    # Joined across `\`-newline continuations, as the shell joins them.
+    step = step.replace("\\\n", " ")
+    found = re.findall(r"\bfind\s+((?:\.agents/skills/[\w-]+\s+)+)-type f", step)
+    assert len(found) == 1, f"expected one `find` over skill directories: {found}"
+    return found[0].split()
 
 
 class TestCredentialDuration(unittest.TestCase):
@@ -1766,10 +1927,12 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         "scripts/pr_review/**",
         ".github/workflows/hardened-pr-review.yml",
         ".github/workflows/hardened-pr-review-run.yml",
-        # The skill: an edit to it changes what the review reports and moves
-        # the prompt hash, and without this line it schedules no run of the
-        # suite that asserts either.
-        ".agents/skills/pr-review/**",
+        # Every skill, not just the installed ones: an edit to an installed
+        # skill changes what the review reports and moves the prompt hash,
+        # and without this line it schedules no run of the suite that asserts
+        # either. One broad entry costs a run of a few seconds and never goes
+        # stale when a skill is installed.
+        ".agents/skills/**",
         # This file's OWN path. Without it, an edit that rewires or weakens the
         # wiring is the one change that schedules no run of the suite checking
         # the wiring.
@@ -2264,8 +2427,8 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
 
         Whole entries, because substring membership is not the same test and
         the difference defeats exactly the coverage this filter provides: both
-        `"!.agents/skills/pr-review/**"` — an EXCLUSION — and
-        `".agents/skills/pr-review/**/*.py"` — a NARROWING that misses
+        `"!.agents/skills/**"` — an EXCLUSION — and
+        `".agents/skills/**/*.py"` — a NARROWING that misses
         `SKILL.md` — contain the required string while the filter no longer
         schedules the run.
         """
@@ -2961,35 +3124,37 @@ class TestEachReviewCheckoutFetchesTheCommitItNames(unittest.TestCase):
 
 
 class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
-    """The review job's two checkouts were pinned. Stage 2 has FOUR.
+    """The review job's two checkouts were pinned. Stage 2 has FIVE.
 
-    `prepare` and `publish` each check this repository out at the workspace
-    root and then run `scripts/pr_review/emit_row.py` from it — `prepare` with
-    GITHUB_TOKEN and the publisher AWS session, `publish` with those plus
-    `pull-requests: write`. Pointing either `ref:` at the
-    pull request's head is one token, and runs pull-request-authored Python
-    with all of it. It is the same mutation the review job's trusted checkout
-    is already pinned against, one job over, where nothing looked.
+    `prepare`, `announce` and `publish` each check this repository out at the
+    workspace root and then run a `scripts/pr_review/` program from it —
+    `prepare` with GITHUB_TOKEN and the publisher AWS session, `announce` with
+    GITHUB_TOKEN and `pull-requests: write`, `publish` with all of those.
+    Pointing any of their `ref:`s at the pull request's head is one token, and
+    runs pull-request-authored Python with all of it. It is the same mutation
+    the review job's trusted checkout is already pinned against, one job over,
+    where nothing looked.
 
-    Every checkout in the file is enumerated, so a fifth one cannot be added
+    Every checkout in the file is enumerated, so a sixth one cannot be added
     unnoticed either.
     """
 
     # (job, path) -> the `ref:` that checkout must fetch. `None` for `path:`
     # means the checkout lands on the workspace root, which is legitimate in
-    # the two jobs that never fetch pull-request code and forbidden in `review`
+    # the three jobs that never fetch pull-request code and forbidden in `review`
     # (see TestBothReviewCheckoutsStayOutOfTheWorkspaceRoot).
     EXPECTED = {
         ("prepare", None): "${{ github.sha }}",
         ("review", "trusted"): "${{ github.sha }}",
         ("review", "pr"): "${{ needs.prepare.outputs.head_sha }}",
+        ("announce", None): "${{ github.sha }}",
         ("publish", None): "${{ github.sha }}",
     }
 
     def test_no_job_checks_out_pull_request_code_it_is_not_allowed_to(self):
         text = STAGE2.read_text()
         seen = {}
-        for job in ("prepare", "review", "publish"):
+        for job in ("prepare", "announce", "review", "publish"):
             for step in steps_using(job_block(text, job), "actions/checkout"):
                 inputs = mapping_items(with_block(step))
                 key = (job, inputs.get("path"))
@@ -3058,7 +3223,7 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
         self.assertEqual(
             {
                 job: mapping_items(indented_block(job_block(text, job), "permissions:"))
-                for job in ("prepare", "review", "publish")
+                for job in ("prepare", "announce", "review", "publish")
             },
             {
                 "prepare": {
@@ -3067,6 +3232,7 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
                     "pull-requests": "read",
                     "id-token": "write",
                 },
+                "announce": {"contents": "read", "pull-requests": "write"},
                 "review": {"contents": "read", "id-token": "write"},
                 "publish": {
                     "contents": "read",
@@ -4876,6 +5042,70 @@ class TestPublishMovesNoLabels(unittest.TestCase):
         self.assertNotIn("Labelable", source)
 
 
+class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
+    """`announce` edits one review body with GITHUB_TOKEN and nothing else.
+
+    It runs beside the review job, so it must not become a second publisher: no
+    environment (the publisher role trusts the `bedrock` one), no AWS step, no
+    direct API call, and only post_review.py's `--mark-pending` mode.
+    """
+
+    def setUp(self):
+        self.job = strip_comments(job_block(STAGE2.read_text(), "announce"))
+
+    def test_it_names_no_environment_and_assumes_no_role(self):
+        self.assertNotIn("environment:", self.job)
+        self.assertNotIn("configure-aws-credentials", self.job)
+        self.assertNotIn("id-token", self.job)
+
+    def test_it_only_marks_the_previous_review(self):
+        runs = re.findall(r"(?m)^\s*run:\s*(.*)$", self.job)
+        self.assertEqual(
+            runs, ["python3 scripts/pr_review/post_review.py --mark-pending"]
+        )
+        for needle in ("gh api", "gh pr", "/labels"):
+            self.assertNotIn(needle, self.job)
+
+    def test_each_mode_gets_the_inputs_main_reads(self):
+        """main() turns a missing input into a warning and exit 0, so a dropped
+        `RUN_ID` would leave every restore doing nothing with CI green."""
+        text = strip_comments(STAGE2.read_text())
+        pr = "${{ needs.prepare.outputs.pr_number }}"
+        sha = "${{ needs.prepare.outputs.head_sha }}"
+        run_id = "${{ github.run_id }}"
+        label = "${{ env.OPT_OUT_LABEL }}"
+        expected = {
+            ("announce", "Mark the previous automated review in progress"): {
+                "PR_NUMBER": pr,
+                "REVIEWED_SHA": sha,
+                "RUN_ID": run_id,
+                "OPT_OUT_LABEL": label,
+            },
+            ("publish", "Post the automated review on the PR"): {
+                "PR_NUMBER": pr,
+                "REVIEWED_SHA": sha,
+                "OPT_OUT_LABEL": label,
+            },
+            ("publish", "Put back the previous review"): {
+                "PR_NUMBER": pr,
+                "RUN_ID": run_id,
+            },
+        }
+        for (job, name), env in expected.items():
+            step = job_block(text, job).split(f"- name: {name}", 1)[1]
+            step = re.split(r"\n      - ", step, maxsplit=1)[0]
+            for var, value in env.items():
+                with self.subTest(step=name, var=var):
+                    self.assertEqual(env_values(step, var), [value])
+
+    def test_publish_waits_for_it_and_always_puts_the_review_back(self):
+        publish = strip_comments(job_block(STAGE2.read_text(), "publish"))
+        self.assertIn("needs: [prepare, announce, review]", publish)
+        step = publish.split("- name: Put back the previous review", 1)[1]
+        self.assertIn("if: always()", step.split("run:", 1)[0])
+        self.assertIn("post_review.py --restore-pending", step)
+
+
 class TestSymlinkScrubIsNulSafe(unittest.TestCase):
     """A newline in a path component must not split one entry into two.
 
@@ -5290,6 +5520,38 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         self.assertIsNotNone(m, "stage B no longer states a message budget")
         self.assertLessEqual(int(m.group(1)), MAX_MESSAGE * 0.8)
 
+    def test_a_blocking_point_is_major_and_changes_requested(self):
+        # The sanitizer refuses ready_for_human_review with a major finding, so
+        # whatever makes a finding major must also make the verdict
+        # changes_requested, even under Needs Discussion (pytorch#202251).
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        self.assertIn(
+            "unless the review names a defect that must be fixed before approval:"
+            ' then it is "changes_requested"',
+            prompt,
+        )
+        # Not every point that holds up approval is a defect to fix.
+        self.assertIn(
+            "An open question, a request for data or discussion, or files left"
+            " unreviewed is not such a defect.",
+            prompt,
+        )
+        self.assertIn(
+            "reason for Request Changes or as a defect that must be fixed before"
+            " approval",
+            prompt,
+        )
+        # The summary keeps the Recommendation and explains an override.
+        self.assertIn("summary and its Recommendation", prompt)
+        self.assertIn("under Approve or Needs Discussion, say so in words", prompt)
+
+    def test_the_prompt_names_every_file_kind_that_cannot_anchor(self):
+        # parse_diff's KNOWN LIMITS: findings on these files are discarded,
+        # and a change request left with none is refused.
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        for kind in ("deletion", "pure rename", "mode-only change", "binary file"):
+            self.assertIn(kind, prompt)
+
     def test_the_findings_file_comes_from_the_structured_output(self):
         names = re.findall(r"(?m)^      - name: (.+)$", self.review)
         write = "Write stage B's result to the findings file"
@@ -5660,7 +5922,7 @@ class TestTheStage1ArtifactDownloadRetries(unittest.TestCase):
     """A miss here skips every downstream step: no review AND no terminal row.
 
     `actions/download-artifact@v4` carries no retry and intermittently fails to
-    find a cross-run artifact that exists. `claude-issue-triage-run.yml` already
+    find a cross-run artifact that exists. `issue-triage-pi.yml` already
     documents that failure in this repository.
     """
 
@@ -5813,8 +6075,9 @@ class TestTheSizeGateShortCircuitsBeforeTheRunner(unittest.TestCase):
         )
 
     def test_both_downstream_jobs_stand_down_when_prepare_says_too_large(self):
-        """`publish` too: it is `always()`, so skipping `review` is not enough."""
-        for job in ("review", "publish"):
+        """`publish` too: it is `always()`, so skipping `review` is not enough.
+        `announce` too: it would mark a review no run will replace."""
+        for job in ("announce", "review", "publish"):
             # `job_if`, not `block.split("runs-on:")[0]`. YAML mappings are
             # unordered, so moving an unchanged `runs-on:` above `if:` emptied
             # that region and red the test — the identical defect already found
@@ -6402,7 +6665,7 @@ def stage_a_system_prompt() -> str:
 
 
 COMMENTS = "/tmp/pr-comments.json"
-# Every gh/git command the pr-review skill runs, and what stage A's system prompt
+# Every gh/git command the installed skills run, and what stage A's system prompt
 # names in its place (None: in a mode a bare `/pr-review <N>` never selects).
 SKILL_COMMANDS = {
     # Local CLI mode.
@@ -6413,6 +6676,8 @@ SKILL_COMMANDS = {
     "gh api --paginate repos/pytorch/pytorch/pulls/<PR_NUMBER>/reviews": COMMENTS,
     "gh api --paginate repos/pytorch/pytorch/pulls/<PR_NUMBER>/comments": COMMENTS,
     "gh api repos/pytorch/pytorch/collaborators/<LOGIN>/permission --jq .user.permissions": "`role`",
+    "gh api repos/pytorch/pytorch/pulls/comments/<COMMENT_ID>/reactions": "`reactions`",
+    "gh api repos/pytorch/pytorch/issues/comments/<COMMENT_ID>/reactions": "`reactions`",
     # GitHub Actions mode.
     "git diff origin/<baseBranch>...HEAD": None,
     "git diff --stat origin/<baseBranch>...HEAD": None,
@@ -6433,20 +6698,102 @@ class TestStageACoversTheSkillOffline(unittest.TestCase):
 
     def test_every_skill_command_is_covered_offline(self):
         found = set()
-        for md in PR_REVIEW_SKILL.parent.glob("*.md"):
+        # Every skill stage A installs, subdirectories included.
+        skills = REPO / ".agents" / "skills"
+        mds = [
+            md
+            for name in INSTALLED_SKILLS
+            for md in sorted((skills / name).rglob("*.md"))
+        ]
+        for md in mds:
             for ln in md.read_text().splitlines():
                 if re.match(r"(gh|git) [a-z]", ln.strip()):
                     found.add(ln.strip())
         self.assertEqual(
             found,
             set(SKILL_COMMANDS),
-            "the pr-review skill's gh/git commands changed; stage A runs offline, "
+            "the installed skills' gh/git commands changed; stage A runs offline, "
             "so map each new one in its system prompt, then update SKILL_COMMANDS",
         )
         offline = stage_a_system_prompt()
         for command, source in SKILL_COMMANDS.items():
             if source:
                 self.assertIn(source, offline, f"stage A no longer maps {command!r}")
+
+
+class TestStageAFanOut(unittest.TestCase):
+    """Stage A's Fan-out section and the skill's Step 2 and Step 5 rules it relies on.
+    A reviewer renamed in one place and not the other, or a hand-off sentence moved
+    out of its section, would ask for reviewers or rules that no longer exist."""
+
+    @staticmethod
+    def sections() -> dict[str, str]:
+        """Stage A's system prompt by `## ` heading, in order."""
+        parts = re.split(r"(?m)^## (.+)\n", stage_a_system_prompt())
+        return dict(zip(parts[1::2], parts[2::2]))
+
+    @staticmethod
+    def skill_step(n: int) -> str:
+        """SKILL.md's Step n, up to the next heading."""
+        step = re.search(
+            rf"^### Step {n}:.*?\n(.*?)(?=^##)",
+            PR_REVIEW_SKILL.read_text(),
+            re.S | re.M,
+        )
+        assert step is not None, f"premise changed: SKILL.md has no Step {n}"
+        return step.group(1)
+
+    def test_sections_are_in_the_order_above_and_below_assume(self):
+        self.assertEqual(list(self.sections()), ["Offline", "Fan-out", "Security"])
+
+    def test_fan_out_names_the_skill_reviewers(self):
+        listed = re.search(r"(\w+) reviewers \(([^)]*)\)", self.sections()["Fan-out"])
+        self.assertIsNotNone(
+            listed, "the Fan-out section no longer lists the reviewers"
+        )
+        names = [n.strip().lower() for n in re.split(r",\s*", listed.group(2))]
+        skill = re.findall(r"^- \*\*([^*]+?):?\*\*", self.skill_step(2), re.M)
+        self.assertEqual(
+            names,
+            [n.lower() for n in skill],
+            "the Fan-out section's reviewer list no longer matches SKILL.md Step 2; update both",
+        )
+        word = listed.group(1)
+        count = (
+            int(word)
+            if word.isdigit()
+            else {"three": 3, "four": 4, "five": 5, "six": 6}.get(word)
+        )
+        self.assertIsNotNone(
+            count, f"unknown reviewer count {word!r}; extend the table"
+        )
+        self.assertEqual(
+            count, len(names), "the Fan-out section's reviewer count is out of date"
+        )
+
+    def test_sub_agents_get_the_offline_and_security_rules(self):
+        sections = self.sections()
+        self.assertTrue(
+            sections["Offline"]
+            .rstrip()
+            .endswith("Your final message is the whole review."),
+            "the Fan-out hand-off drops the Offline section's last line; it must stay the final-message line",
+        )
+        self.assertIn(
+            "the Offline section above, without its last line", sections["Fan-out"]
+        )
+        self.assertIn("the Security section below, verbatim", sections["Fan-out"])
+        self.assertIn(
+            "Sub-agent reports are built from pull request content",
+            sections["Security"],
+        )
+
+    def test_skill_requires_the_fan_out_and_a_fact_check(self):
+        self.assertIn("whatever the PR's size", self.skill_step(2))
+        self.assertIn(
+            "When Step 4 leaves findings and you have the Agent tool, spawn at least one agent",
+            self.skill_step(5),
+        )
 
 
 if __name__ == "__main__":

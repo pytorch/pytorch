@@ -1122,12 +1122,8 @@ main()
 
         def bytecode_hook(code, out_code):
             import dis
-            import sys
 
-            if sys.version_info < (3, 11):
-                call_op = "CALL_FUNCTION"
-            else:
-                call_op = "CALL"
+            call_op = "CALL"
 
             insts = list(dis.get_instructions(out_code))
             # Find the CALL that invokes the compiled graph function
@@ -1265,7 +1261,6 @@ main()
 
         def bytecode_hook(code, out_code):
             import dis
-            import sys
 
             nonlocal match_done
 
@@ -1273,10 +1268,7 @@ main()
             # graph is tested, we skip the bytecode hook checks for future
             # frames.
             if not match_done:
-                if sys.version_info < (3, 11):
-                    call_op = "CALL_FUNCTION"
-                else:
-                    call_op = "CALL"
+                call_op = "CALL"
 
                 insts = list(dis.get_instructions(out_code))
                 # Find the CALL that invokes the compiled graph function
@@ -5636,7 +5628,6 @@ xfail_by_backend = {
         "test_reentrant_with_callbacks_both_depths",  # queue_callback
         "test_reentrant_with_callbacks_depth_0",  # queue_callback
         "test_reentrant_with_callbacks_depth_1",  # queue_callback
-        "test_checkpoint_graph_execution_group",  # Attempted to call function marked as skipped
         "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
         "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
         "test_post_accumulate_grad_hook_ordering",  # accuracy error

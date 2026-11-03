@@ -104,6 +104,16 @@
       ]
     }
   ],
+  "GB5828": [
+    {
+      "Gb_type": "repr() on object without a known value",
+      "Context": "{fn.__name__}() on {self}",
+      "Explanation": "Dynamo cannot compute {fn.__name__}() of {self.python_type_name()} because the underlying Python object is not known at trace time.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0005": [
     {
       "Gb_type": "Attempted to a str() method implemented in C/C++",
@@ -1179,6 +1189,17 @@
       "Hints": []
     }
   ],
+  "GB8974": [
+    {
+      "Gb_type": "synchronize with no accelerator available",
+      "Context": "device={device}",
+      "Explanation": "torch.accelerator.current_device_index() failed while resolving an index-less device for synchronize, so the index cannot be baked into the graph.",
+      "Hints": [
+        "Pass an explicit device index to synchronize.",
+        "Make an accelerator visible to the process."
+      ]
+    }
+  ],
   "GB0072": [
     {
       "Gb_type": "Inplace op on input tensor",
@@ -2065,6 +2086,16 @@
       "Hints": []
     }
   ],
+  "GB9613": [
+    {
+      "Gb_type": "current_stream device mismatch",
+      "Context": "requested={requested_type}, tracking={tracked_type}",
+      "Explanation": "Dynamo stream mismatch: Requested '{requested_type}' stream, but SymbolicStreamState is tracking '{tracked_type}'. Dynamo only tracks streams of the default accelerator (plus stream contexts entered during tracing). Please ensure you are using the default accelerator.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB9186": [
     {
       "Gb_type": "using `torch.autograd.grad` with `torch._dynamo.config.trace_autograd_ops=False`",
@@ -2357,6 +2388,16 @@
       "Context": "call_id {self}",
       "Explanation": "call_id() not supported for sourceless TensorVariable.",
       "Hints": []
+    }
+  ],
+  "GB4188": [
+    {
+      "Gb_type": "unsupported __new__ method",
+      "Context": "tp_new_impl for {self.value}",
+      "Explanation": "Dynamo does not know how to construct `{self.value}` via `{self.value.__new__}`, which is not a supported constructor (not a plain Python __new__, and not one of the recognized C-level __new__ methods).",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB0142": [
@@ -3650,6 +3691,16 @@
       "Explanation": "{type(arg.value)} has a C/C++ based repr method. This is not supported.",
       "Hints": [
         "Write the repr method in Python"
+      ]
+    }
+  ],
+  "GB8395": [
+    {
+      "Gb_type": "mapping proxy of class with pending attribute mutation",
+      "Context": "class: {vt.value}",
+      "Explanation": "The class __dict__ does not reflect class attributes set earlier in the traced code.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -5109,6 +5160,26 @@
       ]
     }
   ],
+  "GB1586": [
+    {
+      "Gb_type": "__init__ called through a builtin class",
+      "Context": "{cls.__name__}.__init__ on {obj}",
+      "Explanation": "Dynamo does not support {cls.__name__}.__init__ on an instance of the subclass {obj.python_type_name()}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3832": [
+    {
+      "Gb_type": "bytearray.__init__ with non-constant arguments",
+      "Context": "bytearray.__init__ {self}",
+      "Explanation": "Dynamo only models bytearray.__init__ with constant arguments.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0285": [
     {
       "Gb_type": "unsupported arguments to torch.accelerator.current_stream",
@@ -5332,6 +5403,24 @@
       "Explanation": "random.Random() with > 1 arg or with kwargs is not supported.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB8503": [
+    {
+      "Gb_type": "missing tp_new",
+      "Context": "tp_new_impl not implemented for {klass.__name__}",
+      "Explanation": "Dynamo does not know how to trace __new__ on `{self.debug_repr()}`.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "missing tp_new",
+      "Context": "tp_new_impl not implemented for {self.python_type_name()}",
+      "Explanation": "Dynamo does not know how to trace __new__ on `{self.debug_repr()}`.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
     }
   ],
