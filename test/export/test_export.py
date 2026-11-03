@@ -1080,7 +1080,28 @@ class TestExport(TestCase):
         ep = torch.export.export(ScanInVmap(), (xs,), strict=True)
         for node in ep.graph.output_node().args[0]:
             self.assertNotIn(0, node.meta["val"].stride(), node.name)
+        ep = export(ScanInVmap(), (xs,), strict=True)
         self.assertEqual(ep.module()(xs), ScanInVmap()(xs))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_scan_in_vmap_inplace_write_strict_export(self) -> None:
+        # Writing a batched value in place into a scan output needs that output
+        # to be batched too.
+        def combine(carry, x):
+            return carry + x, carry * 2
+
+        class WriteIntoScanOutput(torch.nn.Module):
+            def forward(self, xs, other):
+                def per_sample(x, o):
+                    _, ys = scan(combine, torch.zeros_like(x[0]), x)
+                    return ys.add_(o)
+
+                return torch.vmap(per_sample)(xs, other)
+
+        inp = (torch.randn(3, 5, 4), torch.randn(3, 5, 4))
+        m = WriteIntoScanOutput()
+        self.assertEqual(export(m, inp, strict=True).module()(*inp), m(*inp))
 
     @skipIfCrossRef
     @skipIfTorchDynamo("export inside dynamo is not supported")
@@ -1103,6 +1124,7 @@ class TestExport(TestCase):
                     fake_tensor_propagate_real_tensors=real
                 ):
                     ep = torch.export.export(CondInVmap(), inp, strict=True)
+                    exported = export(CondInVmap(), inp, strict=True)
                 placeholders = [
                     node
                     for name in ("true_graph_0", "false_graph_0")
@@ -1118,7 +1140,7 @@ class TestExport(TestCase):
                     else:
                         self.assertTrue(is_fake_tensor(val), node.name)
                 for args in (inp, (torch.randn(3, 4), -torch.ones(2))):
-                    self.assertEqual(ep.module()(*args), CondInVmap()(*args))
+                    self.assertEqual(exported.module()(*args), CondInVmap()(*args))
 
     @skipIfCrossRef
     @skipIfTorchDynamo("export inside dynamo is not supported")
@@ -1137,7 +1159,7 @@ class TestExport(TestCase):
                 return torch.zeros(step.item())
 
         xs = torch.randn(5, 4)
-        ep = torch.export.export(StepCounter(), (xs,), strict=False)
+        ep = export(StepCounter(), (xs,), strict=False)
         self.assertEqual(ep.module()(xs).shape, (5,))
 
     # run_decompositions fails on a TwoTensor input, with or without vmap.
