@@ -988,8 +988,8 @@ aborts; it does not run on a user-requested abort or shutdown. Check
 {attr}`~torch.distributed.ProcessGroup.supports_abort_hooks` first.
 
 {meth}`ProcessGroup.register_completion_hook <torch.distributed.ProcessGroup.register_completion_hook>`
-registers a hook that runs on its own thread after each operation completes
-successfully. Correlate
+registers a hook that runs on its own thread after each operation on the
+default backend completes successfully. Correlate
 {attr}`~torch.distributed.distributed_c10d.CompletionHookArgs.completion_key`
 with {attr}`~torch.distributed.Work.completion_key` from a post-hook. Check
 {attr}`~torch.distributed.ProcessGroup.supports_completion_hooks` first.

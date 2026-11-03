@@ -1,5 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
+import subprocess
+import sys
+import tempfile
+import threading
+import weakref
 from unittest import mock
 
 import torch
@@ -11,11 +17,40 @@ from torch.distributed._hooks.collective_annotations import (
 )
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
-from torch.testing._internal.common_utils import HardwareClassification, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 
 
 # The annotation hooks only register on NCCL groups; let them hook these Gloo groups.
 _PGS_TO_ANNOTATE = "torch.distributed._hooks.collective_annotations._pgs_to_annotate"
+
+TIMEOUT = 60
+
+
+class _CompletionCollector:
+    """Records completion_key -> duration_ms; waits without sleeping."""
+
+    def __init__(self):
+        self.cv = threading.Condition()
+        self.calls = {}
+
+    def __call__(self, args):
+        with self.cv:
+            self.calls[args.completion_key] = args.duration_ms
+            self.cv.notify_all()
+
+    def wait_for(self, keys):
+        """Returns the durations of ``keys``; other keys may be reported too."""
+        with self.cv:
+            ok = self.cv.wait_for(lambda: set(keys) <= self.calls.keys(), TIMEOUT)
+            calls = dict(self.calls)
+        if not ok:
+            raise AssertionError(f"expected {keys}, got {calls}")
+        return [calls[key] for key in keys]
 
 
 class TestProcessGroupHooks(MultiProcContinuousTest):
@@ -220,6 +255,154 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         self.assertEqual(metadata["Process Group Name"], group.group_name)
         dist.destroy_process_group(group)
 
+        dist.barrier()
+
+    def test_completion_hooks_unsupported(self):
+        pg = _get_default_group()
+        self.assertFalse(pg.supports_completion_hooks)
+        with self.assertRaisesRegex(RuntimeError, "does not support"):
+            pg.register_completion_hook(0, lambda args: None)
+        with self.assertRaisesRegex(TypeError, "callable"):
+            pg.register_completion_hook(0, 1)
+
+
+_EXIT_SCRIPT = """
+import atexit
+import sys
+import weakref
+
+
+def check():
+    # Registered before torch's exit handler, so it runs after it.
+    try:
+        dist.group.WORLD.register_completion_hook(1, print)
+    except RuntimeError as e:
+        if "shutting down" in str(e) and ref() is None:
+            print("exit ok", flush=True)
+
+
+atexit.register(check)
+
+import torch
+import torch.distributed as dist
+
+
+def hook(args):
+    pass
+
+
+torch.cuda.set_device(0)
+dist.init_process_group(
+    sys.argv[1], rank=0, world_size=1, store=dist.FileStore(sys.argv[2], 1)
+)
+ref = weakref.ref(hook)
+dist.group.WORLD.register_completion_hook(0, hook)
+del hook
+for _ in range(100):
+    dist.all_reduce(torch.ones(1024, device="cuda"))
+"""
+
+
+@instantiate_parametrized_tests
+class TestProcessGroupCompletionHooks(MultiProcContinuousTest):
+    """Completion hooks on each backend that supports them."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    world_size = 2
+
+    @classmethod
+    def backend_str(cls):
+        return "gloo"
+
+    def _skip_unless(self, backend):
+        if not dist.is_backend_available(backend):
+            self.skipTest(f"{backend} is not available")
+        if torch.cuda.device_count() < self.world_size:
+            self.skipTest(f"requires {self.world_size} GPUs")
+
+    @parametrize("backend", ["nccl2", "nccl-lazy"])
+    def test_completion_hooks(self, backend):
+        self._skip_unless(backend)
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        env = mock.patch.dict(os.environ, {"TORCH_NCCL_ENABLE_TIMING": "0"})
+        env.start()
+        self.addCleanup(env.stop)
+        pg = dist.new_group(backend=backend)
+        self.addCleanup(dist.destroy_process_group, pg)
+        self.assertTrue(pg.supports_completion_hooks)
+        # nccl-lazy has no _enable_collectives_timing.
+        timed = backend == "nccl2"
+        if timed:
+            pg._enable_collectives_timing()
+
+        ops = {}
+        pg.register_post_hook(
+            0, lambda args: ops.__setitem__(args.work.completion_key, args.name)
+        )
+        self.addCleanup(pg.unregister_post_hook, 0)
+
+        def run_ops():
+            ops.clear()
+            t = torch.ones(8, device=device)
+            dist.all_reduce(t, group=pg)
+            if self.rank == 0:
+                dist.send(t, dst=1, group=pg)
+            else:
+                dist.recv(t, src=0, group=pg)
+            return dict(ops)
+
+        # Registered before the p2p comm exists.
+        first = _CompletionCollector()
+        pg.register_completion_hook(0, first)
+        self.addCleanup(pg.unregister_completion_hook, 0)
+        keys = run_ops()
+        p2p = "SEND" if self.rank == 0 else "RECV"
+        self.assertEqual(sorted(op.name for op in keys.values()), ["ALLREDUCE", p2p])
+        for duration in first.wait_for(keys):
+            if not timed:
+                self.assertIsNone(duration)
+                continue
+            self.assertIsInstance(duration, float)
+            self.assertGreaterEqual(duration, 0.0)
+
+        # Registered after the p2p comm exists.
+        second = _CompletionCollector()
+        pg.register_completion_hook(1, second)
+        self.addCleanup(pg.unregister_completion_hook, 1)
+        with self.assertRaisesRegex(ValueError, "already registered"):
+            pg.register_completion_hook(1, second)
+        keys = run_ops()
+        first.wait_for(keys)
+        second.wait_for(keys)
+
+        released = weakref.ref(second)
+        del second
+        pg.unregister_completion_hook(1)
+        self.assertIsNone(released())
+        # Unknown ids are ignored.
+        pg.unregister_completion_hook(1)
+        # The id can be reused.
+        again = _CompletionCollector()
+        pg.register_completion_hook(1, again)
+        again.wait_for(run_ops())
+
+        dist.barrier()
+
+    @parametrize("backend", ["nccl2", "nccl-lazy"])
+    def test_exit_with_registered_hook(self, backend):
+        self._skip_unless(backend)
+        if self.rank == 0:
+            with tempfile.TemporaryDirectory() as tmp:
+                proc = subprocess.run(
+                    [sys.executable, "-c", _EXIT_SCRIPT, backend, f"{tmp}/store"],
+                    capture_output=True,
+                    text=True,
+                    timeout=TIMEOUT,
+                )
+            self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+            self.assertIn("exit ok", proc.stdout, msg=proc.stderr)
         dist.barrier()
 
 
