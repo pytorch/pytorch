@@ -641,10 +641,12 @@ def exit_on_tensor_parallel_error(args):
     if args.tp_size > 1:
         # Peers may still be in model collectives. Skip CUDA cleanup and let
         # torchrun terminate them instead of entering another collective.
-        log.exception("Tensor-parallel worker failed")
-        sys.stdout.flush()
-        sys.stderr.flush()
-        os._exit(1)
+        try:
+            log.exception("Tensor-parallel worker failed")
+            sys.stdout.flush()
+            sys.stderr.flush()
+        finally:
+            os._exit(1)
 
 
 def tensor_parallel_identity(args):
@@ -716,7 +718,7 @@ def print_summary_table(data, print_dataframe=False):
                 print(col.ljust(width), f"{data[col].mean():.3f}")
             elif col in ("compilation_latency"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f} seconds")
-            elif col == "eager_latency":
+            elif col in ("abs_latency", "eager_latency"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f} ms")
             elif col in ("input_tokens_per_second", "output_tokens_per_second"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f} tokens/s")
@@ -4291,7 +4293,7 @@ def run_tp_worker_group(cmd, tp_size, timeout, env):
     proc = subprocess.Popen(cmd, env=env)
     try:
         returncode = proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    except BaseException:
         # torchrun forwards SIGTERM to its workers, which run in their own
         # sessions, and SIGKILLs them after a grace period. Killing torchrun
         # outright would orphan workers blocked in collectives.
@@ -4330,7 +4332,6 @@ def run_tp_model(name, cmd, args, env):
         rows = read_rows()[previous_rows:]
         if not rows:
             status = status or "missing_result"
-            write_csv_when_exception(args, name, status)
         elif len(rows) != 1 or rows[0].get("name") != name:
             status = status or "invalid_results"
         elif args.accuracy:
@@ -4346,6 +4347,8 @@ def run_tp_model(name, cmd, args, env):
                 valid = False
             if not valid:
                 status = status or "performance_failed"
+        if not any(row.get("name") == name for row in rows):
+            write_csv_when_exception(args, name, status)
 
     if status is not None:
         output_signpost({"name": name}, args, "huggingface", error=status)
@@ -4367,6 +4370,8 @@ def main(runner, original_dir=None, args=None):
     if original_dir:
         os.chdir(original_dir)
     args = parse_args() if not args else parse_args(args)
+    if args.hf_inference_mode != "generate":
+        runner.validate_args(args)
     if args.baseline:
         args.baseline = os.path.abspath(args.baseline)
 
