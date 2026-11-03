@@ -46,7 +46,11 @@ from torch.fx.passes import graph_manipulation
 from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx._lazy_graph_module import _use_lazy_graph_module
-from torch.fx.passes.split_module import split_module, split_module_simple
+from torch.fx.passes.split_module import (
+    _split_module,
+    split_module,
+    split_module_simple,
+)
 from torch.fx.passes.annotate_getitem_nodes import annotate_getitem_nodes
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -1164,8 +1168,8 @@ terrible spacing
     def test_split_module_reads_treespec_get_attr_in_partition(
         self, keep_original_order, read_specs
     ):
-        # By default a partition takes a pytree spec as an input. When asked, it
-        # reads the spec with get_attr, like a submodule.
+        # By default a partition takes a pytree spec as an input, as with the
+        # public split_module. When asked, it reads the spec with get_attr.
         root = torch.nn.Module()
         root.spec = pytree.tree_flatten((0, 0))[1]
         graph = torch.fx.Graph()
@@ -1173,7 +1177,7 @@ terrible spacing
         spec = graph.get_attr("spec")
         graph.output(graph.call_function(pytree.tree_unflatten, ([x, x], spec)))
         gm = torch.fx.GraphModule(root, graph)
-        split_gm = split_module(
+        split_gm = _split_module(
             gm,
             None,
             lambda node: 0,

@@ -661,7 +661,7 @@ def sequential_split(
     based on the node_call_back. It doesn't mutate the input graph module. The node_call_back should return
     True if the node is a delimiter.  Delimiter will be the first node in the next submodule.
     """
-    from torch.fx.passes.split_module import split_module
+    from torch.fx.passes.split_module import _split_module
 
     split_map = {}
     split_id = 0
@@ -670,7 +670,7 @@ def sequential_split(
             split_id += 1
         split_map[node] = split_id
 
-    new_gm = split_module(
+    new_gm = _split_module(
         gm,
         gm,
         lambda node: split_map[node],

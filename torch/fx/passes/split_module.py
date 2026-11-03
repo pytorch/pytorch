@@ -69,7 +69,6 @@ def split_module(
     *,
     partition_affix: str | None = None,
     tuple_return: bool = False,
-    read_pytree_specs_in_partition: bool = False,
 ) -> GraphModule:
     """
     Creates subgraphs out of main graph
@@ -97,14 +96,12 @@ def split_module(
         tuple_return: bool: If True, submodule outputs are always wrapped in a tuple,
             even when there is only a single output value.  This makes all subgraphs
             conform to the convention expected by ``torch._inductor.compile_fx``.
-        read_pytree_specs_in_partition: bool: A partition reads each submodule it
-            uses with ``get_attr``, and takes other attributes as inputs. If True,
-            it also reads each pytree spec it uses with ``get_attr``. Export uses
-            this, because it turns some partitions into the bodies of higher order
-            ops, whose inputs must be values.
 
     Returns:
         GraphModule: the module after split.
+
+    A partition reads each submodule it uses with ``get_attr``, and takes other
+    attributes, such as tensors, as inputs.
 
     Example:
 
@@ -178,7 +175,37 @@ def split_module(
             > self.assertEqual(orig_out, submodules_out)
             True
     """
+    return _split_module(
+        m,
+        root_m,
+        split_callback,
+        qualname_map,
+        keep_original_order,
+        keep_original_node_name,
+        keep_original_input_name,
+        partition_affix=partition_affix,
+        tuple_return=tuple_return,
+    )
 
+
+def _split_module(
+    m: GraphModule,
+    root_m: torch.nn.Module,
+    split_callback: Callable[[Node], int],
+    qualname_map: dict[str, str] | None = None,
+    keep_original_order: bool | None = False,
+    keep_original_node_name: bool | None = False,
+    keep_original_input_name: bool = True,
+    *,
+    partition_affix: str | None = None,
+    tuple_return: bool = False,
+    read_pytree_specs_in_partition: bool = False,
+) -> GraphModule:
+    """
+    ``split_module``, where a partition can also read each pytree spec it uses
+    with ``get_attr`` instead of taking it as an input. Then its inputs are only
+    tensors and other values that a graph can pass, such as symbolic sizes.
+    """
     log.debug(
         "%s",
         lazy_format_graph_code("pre split_module", m, colored=True),
