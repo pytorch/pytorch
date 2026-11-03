@@ -6,6 +6,11 @@ from typing import Any
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor.freezing_utils import maybe_set_is_frozen_param
+from torch._inductor.fx_utils import (
+    get_mutated_base_nodes,
+    get_mutated_storages,
+    get_node_storage,
+)
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -80,6 +85,14 @@ def is_const_source(
 
 
 class ConstantFolder(torch.fx.Interpreter):
+    """
+    Interprets a graph and records in node_replacements the values of nodes that
+    depend only on constants (get_attr tensors, plus lifted constants when
+    lifted_constant_names is given). Placeholders, reads of inputs, parameters or
+    buffers the graph mutates, and nodes rejected by skip_folding_node_fn stay
+    unknown, and so does anything computed from them.
+    """
+
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -99,6 +112,21 @@ class ConstantFolder(torch.fx.Interpreter):
         self.lifted_constant_names = lifted_constant_names
         self.deferred_value = object()
         self.skip_folding_node_fn = skip_folding_node_fn
+        # Writes to intermediates are not tracked: a chain computed only from
+        # constants gives the same result on every call, so it can still fold.
+        persistent = OrderedSet(
+            n for n in gm.graph.nodes if n.op in ("placeholder", "get_attr")
+        )
+        persistent_storages = OrderedSet(get_node_storage(n) for n in persistent)
+        self.mutated_storages = get_mutated_storages(gm) & persistent_storages
+        # Fallback for written buffers without a fake tensor in meta["val"]
+        self.mutated_nodes = get_mutated_base_nodes(gm) & persistent
+
+    def _reads_mutated_value(self, node: torch.fx.Node) -> bool:
+        if node in self.mutated_nodes:
+            return True
+        storage = get_node_storage(node)
+        return storage is not None and storage in self.mutated_storages
 
     def _support_dynamic_shape(self) -> bool:
         # ConstantFolder not support dynamic shape now
@@ -214,6 +242,12 @@ class ConstantFolder(torch.fx.Interpreter):
         ):
             return self.unknown_value
 
+        # Values read from storage written in the graph (e.g. a buffer updated in
+        # forward) must remain runtime reads, otherwise later calls reuse the
+        # folded value.
+        if self._reads_mutated_value(node):
+            return self.unknown_value
+
         # TODO - fix errors with this
         if (
             node.op == "call_function"
@@ -313,8 +347,9 @@ class ConstantFolder(torch.fx.Interpreter):
             env[n] = self.unknown_value  # type: ignore[assignment]
         if self.lifted_constant_names is None:
             return
+        names = self.lifted_constant_names
         for n in self.module.graph.nodes:  # type: ignore[union-attr]
-            if n.name in (self.lifted_constant_names or ()):
+            if n.name in names and not self._reads_mutated_value(n):
                 env[n] = self.deferred_value
 
 

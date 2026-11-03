@@ -8480,6 +8480,54 @@ for dtype in (torch.int32, torch.int64):
                 msg=lambda msg: f"{msg}\nunexpected fold decision for dtype={dtype}",
             )
 
+    def test_constant_folder_buffer_written_through_view_without_fake_values(self):
+        # Without meta["val"] there are no storages to compare, so a buffer
+        # written through one view must still not fold when read through another.
+        import torch.fx as fx
+        from torch._inductor.constant_folding import ConstantFolder
+
+        mod = torch.nn.Module()
+        mod.register_buffer("buf", torch.zeros(4, device=self.device))
+        graph = fx.Graph()
+        buf = graph.get_attr("buf")
+        head = graph.call_function(torch.ops.aten.slice.Tensor, args=(buf, 0, 0, 2))
+        graph.call_function(torch.ops.aten.add_.Tensor, args=(head, 1.0))
+        tail = graph.call_function(torch.ops.aten.slice.Tensor, args=(buf, 0, 2, 4))
+        out = graph.call_function(torch.ops.aten.mul.Tensor, args=(tail, 2.0))
+        graph.output(out)
+
+        folder = ConstantFolder(fx.GraphModule(mod, graph))
+        folder.run()
+
+        self.assertNotIn(tail, folder.node_replacements)
+        self.assertNotIn(out, folder.node_replacements)
+
+    def test_constant_folder_folds_inplace_write_to_constant_intermediate(self):
+        # Reinplacing can turn a chain computed only from constants into an
+        # in-place write to an intermediate; the chain should still fold.
+        import torch.fx as fx
+        from torch._inductor.constant_folding import ConstantFolder
+
+        mod = torch.nn.Module()
+        mod.register_buffer("w", torch.ones(4, device=self.device))
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["val"] = torch.empty(4, device=self.device)
+        w = graph.get_attr("w")
+        w.meta["val"] = mod.w
+        t = graph.call_function(torch.ops.aten.mul.Tensor, args=(w, 2.0))
+        t.meta["val"] = torch.empty(4, device=self.device)
+        add_ = graph.call_function(torch.ops.aten.add_.Tensor, args=(t, 1.0))
+        add_.meta["val"] = t.meta["val"]
+        out = graph.call_function(torch.ops.aten.mul.Tensor, args=(add_, x))
+        graph.output(out)
+
+        folder = ConstantFolder(fx.GraphModule(mod, graph))
+        folder.run()
+
+        self.assertIn(add_, folder.node_replacements)
+        self.assertEqual(folder.node_replacements[add_], torch.full_like(mod.w, 3.0))
+
     def test_mul_by_zero_extremal(self):
         # End-to-end: x * 0 must preserve NaN/Inf to match eager (nan*0=nan,
         # inf*0=nan); folding x * 0 -> 0 would drop them. Via CommonTemplate this
