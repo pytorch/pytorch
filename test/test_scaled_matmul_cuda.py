@@ -4474,6 +4474,8 @@ torch.cuda.synchronize()
             ("2d/3d", "jagged_m"), ("3d/2d", "jagged_n"), ("2d/2d", "partial_k"),
             ("2d/2d", "zero_group"), ("2d/3d", "zero_group"), ("3d/2d", "zero_group"),
         )
+    ] + [
+        ("3d/2d", "jagged_n", torch.float8_e4m3fn, torch.float8_e4m3fn, torch.float32, False),
     ])
     @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
     def test_scaled_grouped_gemm_cublaslt_mnk4(
@@ -4847,13 +4849,13 @@ print("tunableop_keys_ok")
             message = "16-byte aligned"
         elif case == "missing_swizzle":
             swizzle_b = []
-            message = "Invalid scaling configuration for grouped GEMM"
+            message = "packed MNxK4 requires"
         elif case == "mismatched_swizzle":
             swizzle_b = SwizzleType.SWIZZLE_32_4_4
-            message = "Invalid scaling configuration for grouped GEMM"
+            message = "packed MNxK4 requires"
         else:
             recipe_b = ScalingType.TensorWise
-            message = "Invalid scaling configuration for grouped GEMM"
+            message = "packed MNxK4 requires"
         with self.assertRaisesRegex(ValueError, message):
             scaled_grouped_mm(a, b, scale_a, recipe, scale_b, recipe_b,
                               swizzle_a=swizzle_a, swizzle_b=swizzle_b)
@@ -5310,7 +5312,7 @@ print("tunableop_keys_ok")
             scale = torch.empty(2, 64, device=device, dtype=torch.float8_e8m0fnu)
             recipe_a = recipe_b = ScalingType.BlockWise1x32
             swizzle_a = swizzle_b = SwizzleType.SWIZZLE_MN_K4
-            message = "Invalid scaling configuration for grouped GEMM"
+            message = "packed MNxK4 requires"
             if case == "block_block":
                 recipe_a = recipe_b = ScalingType.BlockWise128x128
                 swizzle_a = swizzle_b = None
