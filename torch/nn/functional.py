@@ -6527,8 +6527,8 @@ scaled_dot_product_attention = _add_docstr(
             - `Memory-Efficient Attention`_
             - A PyTorch implementation defined in C++ matching the above formulation
 
-        The function may call optimized kernels for improved performance when using the CUDA backend.
-        For all other backends, the PyTorch implementation will be used.
+        The function may call optimized kernels for improved performance when using the CUDA, XPU, CPU or MPS backends,
+        and falls back to the PyTorch implementation otherwise.
 
         All implementations are enabled by default. Scaled dot product attention attempts to automatically select the
         most optimal implementation based on the inputs. In order to provide more fine-grained control over what implementation
@@ -6539,6 +6539,8 @@ scaled_dot_product_attention = _add_docstr(
             - :func:`torch.backends.cuda.enable_flash_sdp`: Globally enables or disables FlashAttention.
             - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Globally enables or disables  Memory-Efficient Attention.
             - :func:`torch.backends.cuda.enable_math_sdp`: Globally enables or disables  the PyTorch C++ implementation.
+
+        Despite their ``torch.backends.cuda`` namespace, these global toggles apply to every device.
 
         Each of the fused kernels has specific input limitations. If the user requires the use of a specific fused implementation,
         disable the PyTorch C++ implementation using :func:`torch.nn.attention.sdpa_kernel`.

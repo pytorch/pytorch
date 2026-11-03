@@ -872,6 +872,10 @@ Tensor scaled_dot_product_attention(
             query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.guard_float("attention.cpp", 735));
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
       }
+      if (query_device_type == DeviceType::MPS) {
+        return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
+            query_, key, value, attn_mask, dropout_p, is_causal, std::nullopt /*dropout_mask*/, scale, enable_gqa));
+      }
       // For the CPU case we do not need to pad the last dim
       return std::get<0>(at::_scaled_dot_product_flash_attention_for_cpu(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
@@ -892,19 +896,6 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(std::move(out_lse_softmax));
     }
     case SDPBackend::math: {
-      const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
-      if (query_device_type == c10::kMPS && !(at::GradMode::is_enabled() && any_inputs_require_grad)) {
-        return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
-            query_,
-            key,
-            value,
-            attn_mask,
-            dropout_p,
-            is_causal,
-            std::nullopt, /*dropout_mask*/
-            scale,
-            enable_gqa));
-      }
       return std::get<0>(at::_scaled_dot_product_attention_math(
           query_,
           key,
