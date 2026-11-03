@@ -7,6 +7,9 @@ import os
 import torch
 import torch.distributed.checkpoint as dist_cp
 from torch import distributed as dist
+from torch.distributed.checkpoint._consolidate_hf_safetensors import (
+    consolidate_safetensors_files_on_every_rank,
+)
 from torch.distributed.checkpoint.quantized_hf_storage import (
     QuantizedHuggingFaceStorageReader,
 )
@@ -108,20 +111,61 @@ class TestSingleRankSaveLoad(TestCase):
 
         CHECKPOINT_DIR = self.temp_dir
 
+        weight = torch.rand(4, 4)
+        with self.assertWarnsRegex(UserWarning, r"\['mtp\.bias', 'mtp\.weight'\]"):
+            dist_cp.save(
+                state_dict={"weight": weight},
+                storage_writer=dist_cp.HuggingFaceStorageWriter(
+                    path=CHECKPOINT_DIR,
+                    fqn_to_index_mapping={"weight": 1, "mtp.weight": 1, "mtp.bias": 2},
+                    save_distributed=True,
+                    enable_consolidation=True,
+                ),
+            )
+
+        loaded = load_file(CHECKPOINT_DIR + "/model-00001-of-00002.safetensors")
+        self.assertEqual(loaded, {"weight": weight})
+        self.assertFalse(
+            os.path.exists(CHECKPOINT_DIR + "/model-00002-of-00002.safetensors")
+        )
+        with open(CHECKPOINT_DIR + "/model.safetensors.index.json") as f:
+            self.assertEqual(
+                json.load(f),
+                {
+                    "metadata": {"total_size": 64},
+                    "weight_map": {"weight": "model-00001-of-00002.safetensors"},
+                },
+            )
+
+    @with_temp_dir
+    def test_consolidate_on_every_rank_skips_unsaved_mapping_entries(self) -> None:
+        try:
+            from safetensors.torch import load_file
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        CHECKPOINT_DIR = self.temp_dir
+        sharded_dir = CHECKPOINT_DIR + "/sharded"
+
+        weight = torch.rand(4, 4)
         dist_cp.save(
-            state_dict={"weight": torch.rand(4, 4)},
+            state_dict={"weight": weight},
             storage_writer=dist_cp.HuggingFaceStorageWriter(
-                path=CHECKPOINT_DIR,
-                fqn_to_index_mapping={"weight": 1, "mtp.weight": 1},
-                save_distributed=True,
-                enable_consolidation=True,
+                path=sharded_dir, save_distributed=True
             ),
         )
+        fqn_to_index_mapping = {"weight": 1, "mtp.weight": 1, "mtp.bias": 2}
+        with self.assertWarnsRegex(UserWarning, r"\['mtp\.bias', 'mtp\.weight'\]"):
+            consolidate_safetensors_files_on_every_rank(
+                sharded_dir, CHECKPOINT_DIR, fqn_to_index_mapping=fqn_to_index_mapping
+            )
 
-        loaded = load_file(CHECKPOINT_DIR + "/model-00001-of-00001.safetensors")
-        self.assertEqual(loaded.keys(), {"weight"})
-        with open(CHECKPOINT_DIR + "/model.safetensors.index.json") as f:
-            self.assertEqual(json.load(f)["weight_map"].keys(), {"weight"})
+        loaded = load_file(CHECKPOINT_DIR + "/model-00001-of-00002.safetensors")
+        self.assertEqual(loaded, {"weight": weight})
+        self.assertFalse(
+            os.path.exists(CHECKPOINT_DIR + "/model-00002-of-00002.safetensors")
+        )
 
     @with_temp_dir
     def test_load(self) -> None:

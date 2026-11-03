@@ -69,6 +69,10 @@ class HuggingFaceStorageWriter(FileSystemWriter):
                               Indices are from 1 to N, where N is the number of files. If not provided,
                               the tensors will be written to a single file. If none, then all the tensors on the
                               same rank will be written to the same file.
+                              With save_distributed and enable_consolidation, entries for tensors that were not
+                              saved are skipped with a warning and left out of the consolidated files and
+                              model.safetensors.index.json. File names keep -of-N with N the highest index, and an
+                              index whose tensors were all skipped gets no file.
             thread_count: Number of threads to use to write distributed checkpoint. Default to 1.
             save_distributed: If True, save the checkpoint using distributed APIs where every rank saves its own shard.
                         Default is False which assumes rank-0 checkpointing of the full state_dict.
