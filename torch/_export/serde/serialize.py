@@ -919,10 +919,14 @@ def _check_helper_call_values(
     _find_autograd_function(args[0] if args else None)
 
 
-def _has_pytree_constant(spec: pytree.TreeSpec) -> bool:
-    return pytree.is_constant_class(spec.type) or any(
-        _has_pytree_constant(child) for child in spec.children()
-    )
+def _find_in_spec(spec: pytree.TreeSpec, pred: Callable[..., bool]) -> bool:
+    return pred(spec) or any(_find_in_spec(c, pred) for c in spec.children())
+
+
+def _has_enum_key(spec: pytree.TreeSpec) -> bool:
+    # Load refuses a plain enum key, and JSON writes others as their base type.
+    keys = spec.context if spec.type in (dict, OrderedDict) else ()
+    return any(isinstance(k, Enum) for k in keys)
 
 
 def _find_flat_apply_func(
@@ -1602,7 +1606,7 @@ class GraphModuleSerializer(metaclass=Final):
                 f"Cannot serialize flat_apply node {node.name}: expected its function "
                 "and input spec to be TreeSpec graph attributes"
             )
-        if _has_pytree_constant(in_spec_value):
+        if _find_in_spec(in_spec_value, lambda s: pytree.is_constant_class(s.type)):
             raise SerializeError(
                 f"Cannot serialize flat_apply node {node.name}: an input is a "
                 "pytree constant, which an input spec cannot store"
@@ -1616,8 +1620,7 @@ class GraphModuleSerializer(metaclass=Final):
                 f"Cannot serialize flat_apply node {node.name}: its input spec "
                 f"cannot be saved: {e}"
             ) from e
-        # An IntEnum key loads back as an equal int, so compare the reprs too.
-        if loaded_spec != in_spec_value or repr(loaded_spec) != repr(in_spec_value):
+        if loaded_spec != in_spec_value or _find_in_spec(in_spec_value, _has_enum_key):
             raise SerializeError(
                 f"Cannot serialize flat_apply node {node.name}: its input spec "
                 "would load back different, because JSON cannot store a part of "

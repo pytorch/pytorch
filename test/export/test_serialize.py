@@ -3068,8 +3068,8 @@ class TestPredispatchSerialization(TestCase):
                 torch.export.save(keyed(Key.A), io.BytesIO())
 
         with self.subTest("dict key that JSON cannot store"):
-            # A tuple key would load back as a list, and an IntEnum key as an int.
-            for key in ((0, 1), enum.IntEnum("IntKey", ["A"]).A):
+            # A tuple key would load back as a list, and a float enum key as a float.
+            for key in ((0, 1), enum.Enum("FloatKey", {"A": 0.5}, type=float).A):
                 with self.assertRaisesRegex(SerializeError, "load back different"):
                     torch.export.save(keyed(key), io.BytesIO())
 
