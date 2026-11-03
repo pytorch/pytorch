@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/core/TensorBase.h>
+#include <ATen/cuda/detail/IntegerDivider.cuh>
 #include <c10/util/irange.h>
 #include <torch/headeronly/cuda/Atomic.h>
 #include <torch/headeronly/cuda/KernelUtils.h>
@@ -40,24 +41,52 @@ using torch::headeronly::fastSpecializedAtomicAdd;
 //   matrix: the row and column of an offset are its quotient and remainder,
 //   and only elements of the same row are paired.
 // - Anything else, e.g. x[::2]: row_numel is 0, which disables pairing.
+namespace detail {
+// On CUDA, out of line so the compiler branches around the division for
+// single-row (dense) bounds instead of predicating it on every element.
+template <typename index_t>
+#if defined(USE_ROCM)
+__device__ __forceinline__ index_t fast_atomic_add_column(
+#else
+__device__ __noinline__ index_t fast_atomic_add_column(
+#endif
+    index_t offset,
+    index_t row_stride) {
+  return offset % row_stride;
+}
+} // namespace detail
+
 struct FastAtomicAddBounds {
+  static constexpr int64_t kSingleRow = std::numeric_limits<int64_t>::max();
+
   int64_t row_stride;
   int64_t row_numel;
+  // row_stride as a multiply-shift divider, set when row_stride <= INT32_MAX.
+  // Left zeroed otherwise, in which case mod(n) == n: the column is the whole
+  // offset and only row 0 can pair, which is still inside the tensor.
+  at::cuda::detail::IntDivider<unsigned int> row_divider{};
 
   // Column of the element at offset; pass (data + offset - column, column,
-  // row_numel) to fastAtomicAdd. Computed in the caller's index type, since a
-  // 64-bit modulo is noticeably slower than a 32-bit one; row_stride is below
-  // any offset that is not in the first row, so it fits that type.
+  // row_numel) to fastAtomicAdd. A 32-bit index_t requires
+  // canUse32BitIndexMath on the tensor, so offsets and row_stride fit in
+  // int32 and row_divider replaces the division.
   template <typename index_t>
   __device__ __forceinline__ index_t column(index_t offset) const {
-    return static_cast<int64_t>(offset) < row_stride
-        ? offset
-        : offset % static_cast<index_t>(row_stride);
+    if (row_stride == kSingleRow) {
+      return offset;
+    }
+    if constexpr (sizeof(index_t) <= sizeof(unsigned int)) {
+      return static_cast<index_t>(
+          row_divider.mod(static_cast<unsigned int>(offset)));
+    } else {
+      return detail::fast_atomic_add_column(
+          offset, static_cast<index_t>(row_stride));
+    }
   }
 };
 
 inline FastAtomicAddBounds fast_atomic_add_bounds(const TensorBase& self) {
-  constexpr int64_t kSingleRow = std::numeric_limits<int64_t>::max();
+  constexpr int64_t kSingleRow = FastAtomicAddBounds::kSingleRow;
   if (self.is_non_overlapping_and_dense()) {
     return {kSingleRow, self.numel()};
   }
@@ -76,26 +105,26 @@ inline FastAtomicAddBounds fast_atomic_add_bounds(const TensorBase& self) {
   if (row_numel == 0 || row_stride < row_numel) {
     return {kSingleRow, 0};
   }
-  return {row_stride, row_numel};
+  FastAtomicAddBounds bounds{row_stride, row_numel};
+  if (row_stride <= std::numeric_limits<int32_t>::max()) {
+    bounds.row_divider = at::cuda::detail::IntDivider<unsigned int>(
+        static_cast<unsigned int>(row_stride));
+  }
+  return bounds;
 }
 
 // Scatter into a packed accessor without naming a bound.
 //
-// fastAtomicAdd needs to know how far it may look for a pairing partner -- see
-// Note [Passing pointer and offset to fastAtomicAdd] in GridSampler.cu. A
-// caller holding a raw pointer supplies that by hand, and too large a value
-// lets the pairing write past the allocation. An accessor already carries what
-// it would be derived from:
+// fastAtomicAdd needs to know which neighbours it may pair with -- see
+// Note [fastAtomicAdd bounds for strided tensors]. The accessor's sizes and
+// strides give that directly:
 //
-//   memory_span = 1 + sum over d of (size[d] - 1) * stride[d]
-//
-// the distance to the last addressable element rather than the element count,
-// which is what at::native::storage_size_for computes on the host. The two
-// differ for a strided view, whose gaps are inside the region but belong to
-// whatever the view was taken from. Pairing adds -0.0 to them, which preserves
-// non-NaN values but is still a write the view does not own, so only use this
-// overload on tensors whose whole memory span is owned by the kernel, such as
-// freshly allocated gradients.
+// - Contiguous (row-major, ignoring size-1 dims): every slot of its memory is
+//   an element, so any neighbour inside the tensor may be paired.
+// - Innermost stride 1 otherwise: pair only within the innermost row, e.g. a
+//   padded or column-sliced gradient.
+// - Anything else: no pairing, since the neighbouring slots may belong to
+//   whatever the accessor was taken from.
 template <
     typename scalar_t,
     size_t N,
@@ -107,16 +136,34 @@ __device__ __forceinline__ void fastAtomicAdd(
     scalar_t value,
     Idx... indices) {
   static_assert(
-      sizeof...(Idx) == N, "fastAtomicAdd needs one index per dimension");
+      N > 0 && sizeof...(Idx) == N,
+      "fastAtomicAdd needs one index per dimension");
   const index_t index[N] = {static_cast<index_t>(indices)...};
   index_t offset = 0;
-  index_t memory_span = 1;
+  index_t numel = 1;
+  bool contiguous = true;
 #pragma unroll
-  for (size_t d = 0; d < N; ++d) {
+  for (size_t i = 0; i < N; ++i) {
+    const size_t d = N - 1 - i;
     offset += index[d] * accessor.stride(d);
-    memory_span += (accessor.size(d) - 1) * accessor.stride(d);
+    if (accessor.size(d) != 1 && accessor.stride(d) != numel) {
+      contiguous = false;
+    }
+    numel *= accessor.size(d);
   }
-  fastAtomicAdd(accessor.data(), offset, memory_span, value, true);
+  if (contiguous) {
+    fastAtomicAdd(accessor.data(), offset, numel, value, true);
+  } else if (accessor.stride(N - 1) == 1) {
+    const index_t column = index[N - 1];
+    fastAtomicAdd(
+        accessor.data() + offset - column,
+        column,
+        accessor.size(N - 1),
+        value,
+        true);
+  } else {
+    fastAtomicAdd(accessor.data(), offset, index_t{0}, value, true);
+  }
 }
 
 __device__ __forceinline__ size_t
