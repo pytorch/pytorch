@@ -163,6 +163,7 @@ class FlexGemmRuntimeLocalReducePlan:
     prepass_combine: str | None = None
     prepass_finalize: Callable[..., Any] | str | None = None
     output_layout: FlexGemmOutputStorageLayout | None = None
+    row_offsets: torch.Tensor | None = None
 
     def __post_init__(self) -> None:
         if not self.stores and not self.feeds_main:
@@ -501,11 +502,28 @@ def gemm_epilogue(
                 if local_reduce.axis == 1
                 else (a.shape[-2] // local_reduce.group, b.shape[-1])
             )
-            if local_reduce_out.numel() != rows * cols:
+            if (
+                local_reduce.output_layout.varlen_m
+                or local_reduce_out.numel() != rows * cols
+            ):
+                # Group stores skip padding rows; initialize every unused scale byte.
                 initialize_local_reduce_out = local_reduce_out
+            groups = 1
+            if local_reduce.output_layout.varlen_m:
+                if cu_seqlens_m is None or local_reduce.row_offsets is None:
+                    raise RuntimeError(
+                        "grouped blocked output requires group row offsets"
+                    )
+                if local_reduce.row_offsets.numel() != cu_seqlens_m.numel():
+                    raise ValueError(
+                        "grouped output row offsets must match cu_seqlens_m length"
+                    )
+                groups = cu_seqlens_m.numel() - 1
             local_reduce_out = local_reduce.output_layout.runtime_view(
-                local_reduce_out, 1, rows, cols
+                local_reduce_out, groups, rows, cols
             )
+            if local_reduce.output_layout.varlen_m:
+                local_reduce_out = (local_reduce_out, local_reduce.row_offsets)
         if local_reduce.prepass is not None:
             operands[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = None
             if local_reduce.stores:

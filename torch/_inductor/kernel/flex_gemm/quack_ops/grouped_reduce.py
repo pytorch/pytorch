@@ -125,6 +125,7 @@ import cutlass
 import cutlass.cute as cute
 from cutlass import const_expr, Float32
 
+import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_COMBINE_NAMES,
     LOCAL_REDUCE_FINALIZE_NAMES,
@@ -281,6 +282,13 @@ class GroupedLocalReduceOutputLayout:
     validates the runtime carrier; ``fake_shape_fn`` rebuilds its symbolic
     signature in async workers. QuACK fingerprints and invokes the callbacks
     but does not interpret the physical layout.
+
+    With ``varlen_m=True``, the argument is ``(carrier, row_offsets)`` and the
+    first carrier-shape argument is the group count. ``row_offsets`` is a
+    contiguous same-device int64 prefix of G+1 row offsets, starting at zero;
+    its increments are ``ceil(group_length / 128) * 128``, derived from the
+    GEMM's cu_seqlens_m. Stores select each group's compact padded row offset
+    in the singleton-batch carrier before applying its physical layout.
     """
 
     name: str
@@ -290,6 +298,7 @@ class GroupedLocalReduceOutputLayout:
     carrier_ndim: int
     supports_config_fn: Callable[..., Any] | None = None
     validate_carrier_fn: Callable[..., Any] | None = None
+    varlen_m: bool = False
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -320,6 +329,7 @@ class GroupedLocalReduceOutputLayout:
             semantic_value_key(self.carrier_shape_fn, OrderedSet(), force_source=True),
             semantic_value_key(self.fake_shape_fn, OrderedSet(), force_source=True),
             self.carrier_ndim,
+            self.varlen_m,
             semantic_value_key(
                 self.supports_config_fn, OrderedSet(), force_source=True
             ),
@@ -516,6 +526,7 @@ class _GroupedOutputLayoutParams(NamedTuple):
     tensor: object
     logical_extent: object
     logical_groups: object
+    row_offsets: object
 
 
 class GroupedReduceBase(EpiOp):
@@ -728,6 +739,24 @@ class GroupedReduceBase(EpiOp):
             return None
         from torch._vendor.quack.cute_dsl_utils import torch2cute_dtype_map
 
+        if self.output_layout is not None and self.output_layout.varlen_m:
+            if not isinstance(value, tuple) or len(value) != 2:
+                raise ValueError(
+                    f"{self.name}: grouped output requires carrier and row offsets"
+                )
+            value, row_offsets = value
+            if value is None:
+                raise ValueError(f"{self.name}: output-layout carrier is required")
+            if (
+                row_offsets.ndim != 1
+                or row_offsets.numel() < 2
+                or row_offsets.dtype is not torch.int64
+                or not row_offsets.is_contiguous()
+                or row_offsets.device != value.device
+            ):
+                raise ValueError(
+                    f"{self.name}: grouped output row offsets must be contiguous 1-D int64 on the carrier device"
+                )
         if self.output_layout is not None:
             if value.ndim != self.output_layout.carrier_ndim:
                 raise ValueError(
@@ -759,14 +788,6 @@ class GroupedReduceBase(EpiOp):
         **_,
     ):
         """Validate caller-owned carrier geometry against the GEMM problem."""
-        if varlen_m:
-            if self.axis != 1 or self.output_layout is not None:
-                raise ValueError(
-                    f"{self.name}: varlen_m supports compressed N-group reductions only"
-                )
-            # The compressed buffer is [total_m, groups]; the store offsets each
-            # sequence's rows by cu_seqlens_m.
-            batch = None
         if value is None:
             if self.keep_tensorless:
                 return
@@ -776,7 +797,32 @@ class GroupedReduceBase(EpiOp):
                 else "output-layout carrier"
             )
             raise ValueError(f"{self.name}: {kind} is required")
-        self.host_arg_key(value)
+        grouped_layout = self.output_layout is not None and self.output_layout.varlen_m
+        if grouped_layout:
+            self.host_arg_key(value)
+            value, row_offsets = value
+            if batch is not None and row_offsets.numel() != batch + 1:
+                raise ValueError(
+                    f"{self.name}: grouped row offsets must match the GEMM groups"
+                )
+            batch = row_offsets.numel() - 1
+            if not varlen_m:
+                raise ValueError(
+                    f"{self.name}: grouped output layout requires varlen_m"
+                )
+        if varlen_m:
+            if self.axis != 1 or (
+                self.output_layout is not None and not grouped_layout
+            ):
+                raise ValueError(
+                    f"{self.name}: varlen_m supports compressed N-group reductions only"
+                )
+            # The compressed buffer is [total_m, groups]; the store offsets each
+            # sequence's rows by cu_seqlens_m.
+            if not grouped_layout:
+                batch = None
+        if not grouped_layout:
+            self.host_arg_key(value)
         dim = m if self.axis == 0 else n
         physical_axis = 1 - self.axis if swap_ab else self.axis
         tile = tile_M if physical_axis == 0 else tile_N
@@ -824,16 +870,26 @@ class GroupedReduceBase(EpiOp):
                 (m, n // self.group) if self.axis == 1 else (m // self.group, n)
             )
             shape = self.output_layout.fake_shape_fn(fctx.l, rows, cols)
-            return make_fake_tensor(
+            carrier = make_fake_tensor(
                 dtype,
                 shape,
                 leading_dim=self.output_layout.carrier_ndim - 1,
                 divisibility=1,
             )
+            if self.output_layout.varlen_m:
+                return carrier, make_fake_tensor(
+                    cutlass.Int64, (cute.sym_int(),), leading_dim=0, divisibility=1
+                )
+            return carrier
         groups = cute.sym_int()
         inner = (m, groups) if self.axis == 1 else (groups, n)
         shape = (fctx.l, *inner) if ndim == 3 else inner
         return make_fake_tensor(dtype, shape, leading_dim=ndim - 1, divisibility=1)
+
+    def arg_spec_type(self, const=False):
+        if self.output_layout is not None and self.output_layout.varlen_m:
+            return tuple[cute.Tensor, cute.Tensor]
+        return super().arg_spec_type(const)
 
     def param_fields(self):
         return [(self.name, object, None)]
@@ -844,6 +900,9 @@ class GroupedReduceBase(EpiOp):
 
     def to_params(self, gemm, args):
         tensor = getattr(args, self.name)
+        row_offsets = None
+        if self.output_layout is not None and self.output_layout.varlen_m:
+            tensor, row_offsets = tensor
         if self.output_layout is not None:
             tensor = self.output_layout.tensor_fn(tensor, gemm.a_transposed)
             if const_expr(cute.rank(tensor) != 3):
@@ -857,7 +916,7 @@ class GroupedReduceBase(EpiOp):
             )
             return {
                 self.name: _GroupedOutputLayoutParams(
-                    tensor, logical_extent, logical_groups
+                    tensor, logical_extent, logical_groups, row_offsets
                 )
             }
         if const_expr(gemm.a_transposed):
@@ -933,6 +992,15 @@ class GroupedReduceBase(EpiOp):
             self.physical_axis(gemm),
             self.group,
         )
+        if const_expr(
+            self.output_layout is not None
+            and self.output_layout.varlen_m
+            and self.fragment_reduced
+        ):
+            if const_expr(geom.cols < self.group or geom.fragments_per_group != 1):
+                raise NotImplementedError(
+                    "grouped quantization requires one complete N group per fragment"
+                )
         frag = None
         coord = None
         if const_expr(param is not None):
@@ -1045,6 +1113,7 @@ class GroupedReduceBase(EpiOp):
         the runtime extents of the compressed tensor bound the group index so
         ragged tiles write fewer groups.
         """
+        output_params = param
         if const_expr(self.output_layout is not None):
             logical_extent = param.logical_extent
             logical_groups = param.logical_groups
@@ -1057,7 +1126,11 @@ class GroupedReduceBase(EpiOp):
         tile = tile_M if const_expr(axis == 0) else tile_N
         groups_per_cta = const_expr(tile // self.group)
         batch_idx = tile_coord_mnkl[3]
-        if const_expr(cute.rank(param) == 3):
+        if const_expr(self.output_layout is not None and self.output_layout.varlen_m):
+            mReduce = cute.domain_offset(
+                (output_params.row_offsets[batch_idx], 0), param[0, None, None]
+            )
+        elif const_expr(cute.rank(param) == 3):
             mReduce = param[batch_idx, None, None]
         elif const_expr(varlen_manager.varlen_m):
             mReduce = cute.domain_offset(
@@ -1069,7 +1142,7 @@ class GroupedReduceBase(EpiOp):
             tile_shape = (tile_M, groups_per_cta)
             if const_expr(self.output_layout is not None):
                 if const_expr(varlen_manager.varlen_m):
-                    raise AssertionError("output layouts do not support varlen_m")
+                    logical_extent = varlen_manager.len_m(batch_idx)
                 limit_groups = logical_groups
             else:
                 logical_extent = varlen_manager.len_m(batch_idx)
