@@ -2799,6 +2799,71 @@ class RelationalGuard : public LeafGuard {
   virtual void reset_state() = 0;
 };
 
+// Shared state for one ordered receiver-alias pattern.
+struct ObjectAliasPatternState {
+  explicit ObjectAliasPatternState(size_t size) : representatives(size) {
+    classes.reserve(size);
+  }
+
+  bool check(PyObject* value, size_t alias) {
+    dirty = true;
+    if (representatives[alias]) {
+      return representatives[alias].ptr() == value;
+    }
+    if (!classes.emplace(value, alias).second) {
+      return false;
+    }
+    // Accessors can return temporary objects; keep them alive until reset.
+    representatives[alias] = py::reinterpret_borrow<py::object>(value);
+    return true;
+  }
+
+  void reset() {
+    if (!dirty) {
+      return;
+    }
+    classes.clear();
+    for (auto& value : representatives) {
+      value = py::object();
+    }
+    dirty = false;
+  }
+
+  std::vector<py::object> representatives;
+  std::unordered_map<PyObject*, size_t> classes;
+  bool dirty = false;
+};
+
+class OBJECT_ALIAS_PATTERN : public RelationalGuard {
+ public:
+  OBJECT_ALIAS_PATTERN(
+      RootGuardManager* root,
+      std::shared_ptr<ObjectAliasPatternState> state,
+      size_t alias,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : RelationalGuard(
+            root,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _state(std::move(state)),
+        _alias(alias) {}
+
+  bool check_nopybind(PyObject* value) override {
+    return _state->check(value, _alias);
+  }
+
+  void reset_state() final {
+    _state->reset();
+  }
+
+  std::shared_ptr<OBJECT_ALIAS_PATTERN> clone(RootGuardManager* root);
+
+ private:
+  std::shared_ptr<ObjectAliasPatternState> _state;
+  size_t _alias;
+};
+
 struct NNModuleHookMembership {
   py::object hooks;
   py::object flags;
@@ -3446,6 +3511,7 @@ GuardManager* clone_guard_manager(
     GuardManager* from,
     RootGuardManager* root,
     const py::function& clone_filter_fn);
+
 void add_relational_guard_resetter_to_cloned_root(
     RootGuardManager* root,
     std::shared_ptr<RelationalGuard> guard);
@@ -3825,6 +3891,10 @@ class GuardManager {
       GuardManager* cloned_mgr,
       const py::function& clone_filter_fn) {
     for (auto guard : _leaf_guards) {
+      if (auto pattern =
+              std::dynamic_pointer_cast<OBJECT_ALIAS_PATTERN>(guard)) {
+        guard = pattern->clone(cloned_root);
+      }
       if (auto membership =
               std::dynamic_pointer_cast<NN_MODULE_HOOK_MEMBERSHIP>(guard)) {
         guard = membership->clone(cloned_root);
@@ -4477,9 +4547,9 @@ class GuardManager {
 
  protected:
   void add_dict_tag_replay_guard(const std::shared_ptr<LeafGuard>& guard) {
-#ifdef Py_GIL_DISABLED
-    // A concurrent replacement can free a cached dictionary after its watcher
-    // runs. Keep the full traversal until replay can acquire a safe reference.
+#if defined(Py_GIL_DISABLED) || !IS_PYTHON_3_12_PLUS
+    // Replay requires live watched dictionaries and the GIL. Python 3.11 has
+    // no watchers; a replacement can free the cached borrowed pointer.
     _has_unoptimized_relational_guard = true;
 #else
     _dict_tag_replay_guards.push_back(guard);
@@ -4643,6 +4713,17 @@ class RootGuardManager : public GuardManager {
 
   std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard() {
     return _no_tensor_aliasing_guard;
+  }
+
+  std::shared_ptr<ObjectAliasPatternState> clone_alias_pattern_state(
+      const std::shared_ptr<ObjectAliasPatternState>& state) {
+    auto [it, inserted] =
+        _alias_pattern_clones.try_emplace(state.get(), nullptr);
+    if (inserted) {
+      it->second = std::make_shared<ObjectAliasPatternState>(
+          state->representatives.size());
+    }
+    return it->second;
   }
 
   // Adds the relational guard resetter
@@ -4936,6 +5017,10 @@ class RootGuardManager : public GuardManager {
   // when the guard evaluates to False. This ensures that guard state is reset
   // on guard failure so that next invocation is clean.
   std::vector<std::shared_ptr<RelationalGuard>> _relational_guard_resetters;
+  std::unordered_map<
+      const ObjectAliasPatternState*,
+      std::shared_ptr<ObjectAliasPatternState>>
+      _alias_pattern_clones;
 
   // These guards are lambda guards, i.e., the guards that lack C++
   // implementation. For simplicity, we add these guards at the root. They
@@ -5336,6 +5421,16 @@ GuardManager* clone_guard_manager(
     RootGuardManager* cloned_root,
     const py::function& clone_filter_fn) {
   return from->clone(cloned_root, clone_filter_fn);
+}
+
+std::shared_ptr<OBJECT_ALIAS_PATTERN> OBJECT_ALIAS_PATTERN::clone(
+    RootGuardManager* root) {
+  return std::make_shared<OBJECT_ALIAS_PATTERN>(
+      root,
+      root->clone_alias_pattern_state(_state),
+      _alias,
+      verbose_code_parts(),
+      get_user_stack());
 }
 
 void add_relational_guard_resetter_to_cloned_root(
@@ -7676,6 +7771,24 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
   py::object _accessor_fn;
 };
 
+void install_object_alias_pattern_guard(
+    const std::vector<GuardManager*>& managers,
+    const std::vector<size_t>& aliases,
+    py::object verbose_code_parts,
+    py::object user_stack) {
+  TORCH_CHECK(!managers.empty() && managers.size() == aliases.size());
+  auto* root = managers[0]->get_root();
+  auto state = std::make_shared<ObjectAliasPatternState>(managers.size());
+  for (size_t i = 0; i < managers.size(); ++i) {
+    TORCH_CHECK(
+        managers[i]->get_root() == root && aliases[i] < managers.size());
+    auto guard = std::make_shared<OBJECT_ALIAS_PATTERN>(
+        root, state, aliases[i], verbose_code_parts, user_stack);
+    root->add_relational_guard_resetter(guard);
+    managers[i]->add_permitted_leaf_guard(std::move(guard));
+  }
+}
+
 void install_nn_module_hook_membership_guard(
     GuardManager* hooks,
     GuardManager* flags,
@@ -9386,6 +9499,12 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("guard_manager_enum"),
           py::return_value_policy::reference);
 
+  py::class_<
+      OBJECT_ALIAS_PATTERN,
+      RelationalGuard,
+      std::shared_ptr<OBJECT_ALIAS_PATTERN>>(py_m, "OBJECT_ALIAS_PATTERN");
+  py_m.def(
+      "install_object_alias_pattern_guard", install_object_alias_pattern_guard);
   py_m.def(
       "install_nn_module_hook_membership_guard",
       install_nn_module_hook_membership_guard);

@@ -31,6 +31,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import is_constant_source, is_from_local_source
 from ..utils import (
     _item_debug_repr,
+    check_constant_args,
     cmp_name_to_op_mapping,
     istype,
     lazily_unpack,
@@ -41,7 +42,12 @@ from ..utils import (
 )
 from .base import Member, Method, readonly_setter, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .hashable import guard_key_collisions, HashableTracker, is_hashable
+from .hashable import (
+    _builtin_method_sources,
+    guard_key_collisions,
+    HashableTracker,
+    is_hashable,
+)
 from .object_protocol import repr_guard
 
 
@@ -169,6 +175,19 @@ class BaseSetVariable(VariableTracker):
         # with a side-effecting __hash__).  Check element constness directly.
         return all(k.vt.is_python_constant() for k in self.set_items)
 
+    def _hashable_key(self, value: VariableTracker) -> HashableTracker:
+        key = HashableTracker(value)
+        guard_key_collisions(self.items, (key,))
+        return key
+
+    def _insert_key(self, key: HashableTracker) -> None:
+        guard_key_collisions(self.items, (key,))
+        self.items[key] = BaseSetVariable._default_value()
+
+    def _update_items(self, items: dict[HashableTracker, VariableTracker]) -> None:
+        guard_key_collisions(self.items, items)
+        self.items.update(items)
+
     def __contains__(self, vt: VariableTracker) -> bool:
         if not isinstance(vt, VariableTracker):
             raise AssertionError(f"Expected VariableTracker, got {type(vt)}")
@@ -177,8 +196,7 @@ class BaseSetVariable(VariableTracker):
         # tx.exn_vt_stack as a side effect.
         if not is_hashable(vt):
             return False
-        key = HashableTracker(vt)
-        guard_key_collisions(self.items, (key,))
+        key = self._hashable_key(vt)
         return key in self.items
 
     def has_new_items(self) -> bool:
@@ -274,8 +292,7 @@ class BaseSetVariable(VariableTracker):
             return
 
         for item in lazily_unpack(tx, other):
-            key = HashableTracker(item)
-            guard_key_collisions(self.items, (key,))
+            key = self._hashable_key(item)
             yield key
 
     def _operand_keys(
@@ -318,8 +335,7 @@ class BaseSetVariable(VariableTracker):
             # container types, set allows membership testing with a set key, even
             # though it is not hashable.
             item = FrozensetVariable(item.items)  # type: ignore[missing-attribute]
-        key = HashableTracker(item)
-        guard_key_collisions(self.items, (key,))
+        key = self._hashable_key(item)
         contains = key in self.items
         self.install_set_contains_guard(tx, key, contains)
         return VariableTracker.build(tx, contains)
@@ -331,13 +347,32 @@ class BaseSetVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker | None":
+        pending = [*args, *kwargs.values()]
+        while pending:
+            value = pending.pop()
+            # Mapping operands consume keys without realizing or rehashing them.
+            if isinstance(value, variables.ConstDictVariable):
+                return None
+            if isinstance(value, variables.LazyVariableTracker):
+                if value.is_realized():
+                    pending.append(value.realize())
+                elif value.source is None or any(
+                    _builtin_method_sources(value.original_value(), value.source)
+                ):
+                    return None
+                continue
+            if isinstance(value, variables.BoundBuiltinMethodVariable):
+                return None
+            if isinstance(value, variables.BaseListVariable):
+                pending.extend(value.items)
+            elif isinstance(value, BaseSetVariable):
+                return None
         # Only literal operands can be materialized without losing identity.
         # For example, converting (receiver.count,) to a Python constant can
         # copy receiver, changing method equality against the original set.
         if (
-            all(isinstance(arg, ConstantVariable) for arg in args)
-            and not kwargs
-            and not any(key.has_builtin_method for key in self.items)
+            not any(key.has_builtin_method for key in self.items)
+            and check_constant_args(args, kwargs)
             and self.python_type() in (set, frozenset)
         ):
             py_type = self.python_type()
@@ -636,9 +671,8 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
     ) -> VariableTracker:
         # Convert add to __setitem__ with None value
         tx.output.side_effects.mutation(self)
-        key = HashableTracker(args[0])
-        guard_key_collisions(self.items, (key,))
-        self.items[key] = BaseSetVariable._default_value()
+        key = self._hashable_key(args[0])
+        self._insert_key(key)
         return ConstantVariable.create(None)
 
     def pop(
@@ -670,7 +704,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
         tx.output.side_effects.mutation(self)
         self.should_reconstruct_all = True
         self.items.clear()
-        self.items.update(kept)
+        self._update_items(kept)
         return ConstantVariable.create(None)
 
     def difference_update(
@@ -700,7 +734,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
         tx.output.side_effects.mutation(self)
         self.should_reconstruct_all = True
         self.items.clear()
-        self.items.update(new_items)
+        self._update_items(new_items)
         return ConstantVariable.create(None)
 
     def update(
@@ -773,7 +807,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
         temp_set_vt = SourcelessBuilder.create(tx, set).call_set(tx, *args, **kwargs)
         tx.output.side_effects.mutation(self)
         self.items.clear()
-        self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
+        self._update_items(temp_set_vt.items)  # type: ignore[missing-attribute]
         return ConstantVariable.create(None)
 
     def nb_inplace_or_impl(
@@ -784,8 +818,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
             return ConstantVariable.create(NotImplemented)
 
         tx.output.side_effects.mutation(self)
-        guard_key_collisions(self.items, other.items)
-        self.items.update(other.items)  # type: ignore[missing-attribute]
+        self._update_items(other.items)
         return self
 
     def nb_inplace_subtract_impl(
@@ -1146,7 +1179,7 @@ class OrderedSetVariable(BaseSetVariable):  # noqa: RVT001
         tx.output.side_effects.mutation(self)
         self.should_reconstruct_all = True
         self.items.clear()
-        self.items.update(new_items)
+        self._update_items(new_items)
         return ConstantVariable.create(None)
 
     tp_methods = {

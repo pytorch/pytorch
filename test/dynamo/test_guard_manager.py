@@ -319,6 +319,57 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_object_alias_pattern_guard(self):
+        root = RootGuardManager()
+        first, second = [], []
+        values = [first, first, second]
+        managers = [
+            root.dict_getitem_manager(str(i), str(i), value, default_mgr_enum)
+            for i, value in enumerate(values)
+        ]
+        guards.install_object_alias_pattern_guard(
+            managers, [0, 0, 2], ["receiver alias pattern"], None
+        )
+        cloned = root.clone_manager(lambda manager: True)
+        for manager in (root, cloned, root):
+            self.assertTrue(manager.check(dict(zip(map(str, range(3)), values))))
+            self.assertFalse(manager.check({"0": first, "1": second, "2": second}))
+            self.assertFalse(manager.check({"0": first, "1": first, "2": first}))
+            self.assertFalse(
+                manager.check_verbose({"0": first, "1": second, "2": second}).result
+            )
+            self.assertTrue(manager.check({"0": second, "1": second, "2": first}))
+
+        # Reentrant evaluation of a clone must not clear the original's state.
+        managers[0].add_lambda_guard(
+            lambda value: cloned.check({"0": first, "1": first, "2": second}),
+            ["check independent clone"],
+            None,
+        )
+        self.assertFalse(root.check({"0": first, "1": second, "2": []}))
+
+    def test_object_alias_pattern_temporary_lifetimes(self):
+        class Value:
+            pass
+
+        class Owner:
+            @property
+            def item(self):
+                return Value()
+
+        root = RootGuardManager()
+        owner = Owner()
+        managers = [
+            root.getattr_manager("item", str(i), Value(), default_mgr_enum)
+            for i in range(2)
+        ]
+        guards.install_object_alias_pattern_guard(
+            managers, [0, 1], ["distinct temporary receivers"], None
+        )
+        for manager in (root, root.clone_manager(lambda node: True)):
+            self.assertTrue(manager.check(owner))
+            self.assertTrue(manager.check(owner))
+
     def test_empty_dict_identity_guard(self):
         mapping = {}
         root = RootGuardManager()

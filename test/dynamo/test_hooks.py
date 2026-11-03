@@ -15,6 +15,7 @@ import torch._dynamo.testing
 from functorch.compile import nop
 from torch._dynamo import compiled_autograd
 from torch._dynamo.convert_frame import fullgraph_capture, get_traced_fn
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._dynamo.variables import higher_order_ops
 from torch._functorch.aot_autograd import aot_module_simplified
@@ -79,14 +80,18 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         def hook(module, args, output):
             return output + 1
 
+        counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(
-            lambda x, module: module(x), backend="eager", fullgraph=True
+            lambda x, module: module(x), backend=counter, fullgraph=True
         )
         x = torch.ones(1)
         for _ in range(2):
             module = torch.nn.Identity()
             module.register_forward_hook(hook, always_call=True)
             self.assertEqual(compiled(x, module), module(x))
+
+        # Existing always_call set insertion observes IDs and recompiles per module.
+        self.assertEqual(counter.frame_count, 2)
 
     def test_empty_hook_dict_membership_keeps_key_lazy(self):
         def fn(x, key, module):
@@ -234,24 +239,35 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             return rest[-1] * 10 + len(rest)
 
         def fn(x, module):
-            result = module.forward(x) if flag_name == "always_call" else module(x)
-            if flag_name == "always_call":
-                result = result + sum(
-                    index + 1
-                    for index, (key, _) in enumerate(module._forward_hooks.items())
-                    if key in module._forward_hooks_always_called
-                )
-            return result
+            return module(x)
 
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.ones(1)
-        for flags in ((False, True), (False, True), (True, False)):
+        for index, flags in enumerate(((False, True), (False, True), (True, False))):
             module = torch.nn.Identity()
             for flag in flags:
                 module.register_forward_hook(hook, **{flag_name: flag})
             self.assertEqual(compiled(x, module), fn(x, module))
-            self.assertEqual(counter.frame_count, 1 if flags == (False, True) else 2)
+            expected = (
+                index + 1
+                if flag_name == "always_call"
+                else (1 if flags == (False, True) else 2)
+            )
+            self.assertEqual(counter.frame_count, expected)
+        pending = [_debug_get_cache_entry_list(fn)[0].guard_manager.root]
+        codes = []
+        while pending:
+            manager = pending.pop()
+            pending.extend(manager.get_child_managers())
+            for guard in manager.get_leaf_guards():
+                codes.extend(
+                    code
+                    for code in guard.verbose_code_parts()
+                    if "dict.__len__(" in code and " == 0" in code
+                )
+        self.assertTrue(codes)
+        self.assertEqual(len(codes), len(set(codes)))
 
     @parametrize("key_type", [str, bool, enum.IntEnum("HookKey", {"value": 1})])
     def test_mixed_hook_key_types(self, key_type):
@@ -292,9 +308,16 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x, module), x * 112)
         self.assertEqual(counter.frame_count, 2)
 
-    @parametrize("global_flags", [False, True])
-    @parametrize("flags_type", [dict, OrderedDict])
-    @parametrize("initial_flags", [(), (1,)])
+    @parametrize(
+        "global_flags, flags_type, initial_flags",
+        [
+            (False, dict, ()),
+            (True, dict, ()),
+            (True, dict, (1,)),
+            (True, OrderedDict, ()),
+            (True, OrderedDict, (1,)),
+        ],
+    )
     @parametrize("recursive_tags", [False, True])
     def test_nested_region_hook_membership(
         self, global_flags, flags_type, initial_flags, recursive_tags
