@@ -211,19 +211,22 @@ class StrictNumericsConfigTest(TestCase):
         )
 
 
+def _compile_without_decompositions(gm, inputs):
+    from torch._inductor.compile_fx import compile_fx
+
+    return compile_fx(gm, inputs, decompositions={})
+
+
 class StrictNumericsFallbackTest(TestCase):
     @dtypes(torch.float32, torch.float64)
     @parametrize("numerics", NUMERICS_MODES)
     def test_log_ndtr_without_decompositions(self, device, dtype, numerics):
-        from torch._inductor.compile_fx import compile_fx
-
-        def backend(gm, inputs):
-            return compile_fx(gm, inputs, decompositions={})
-
         x = _min_max_specials(dtype, device)
         with config.patch(numerics=numerics):
             actual = torch.compile(
-                torch.special.log_ndtr, backend=backend, fullgraph=True
+                torch.special.log_ndtr,
+                backend=_compile_without_decompositions,
+                fullgraph=True,
             )(x)
         self.assertEqual(
             actual.view(_BIT_VIEW[dtype]),
@@ -236,17 +239,14 @@ class StrictNumericsFallbackTest(TestCase):
     def test_round_decimals_without_decompositions(
         self, device, dtype, numerics, decimals
     ):
-        from torch._inductor.compile_fx import compile_fx
-
-        def backend(gm, inputs):
-            return compile_fx(gm, inputs, decompositions={})
-
         def fn(x):
             return torch.round(x, decimals=decimals)
 
         x = torch.arange(-1000, 1000, device=device, dtype=dtype) / 777
         with config.patch(numerics=numerics):
-            actual = torch.compile(fn, backend=backend, fullgraph=True)(x)
+            actual = torch.compile(
+                fn, backend=_compile_without_decompositions, fullgraph=True
+            )(x)
         self.assertEqual(actual.view(_BIT_VIEW[dtype]), fn(x).view(_BIT_VIEW[dtype]))
 
     @ops(
@@ -255,15 +255,12 @@ class StrictNumericsFallbackTest(TestCase):
     )
     @parametrize("numerics", NUMERICS_MODES)
     def test_without_decompositions(self, device, dtype, op, numerics):
-        from torch._inductor.compile_fx import compile_fx
-
-        def backend(gm, inputs):
-            return compile_fx(gm, inputs, decompositions={})
-
         x = _min_max_specials(dtype, device)
         y = x.roll(1)
         with config.patch(numerics=numerics):
-            result = torch.compile(op.op, backend=backend, fullgraph=True)(x, y)
+            result = torch.compile(
+                op.op, backend=_compile_without_decompositions, fullgraph=True
+            )(x, y)
         self.assertEqual(result.view(torch.int32), op.op(x, y).view(torch.int32))
 
 
@@ -272,6 +269,19 @@ class StrictNumericsFallbackTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
+    def _assert_bitwise_equal(self, actual, expected):
+        def bits(t):
+            return t.view(_BIT_VIEW.get(t.dtype, t.dtype))
+
+        self.assertEqual(tree_map(bits, actual), tree_map(bits, expected))
+
+    def _check_bitwise(self, fn, *args, numerics, upcast=None):
+        options = {"numerics": numerics}
+        if upcast is not None:
+            options["triton.codegen_upcast_to_fp32"] = upcast
+        actual = torch.compile(fn, fullgraph=True, options=options)(*args)
+        self._assert_bitwise_equal(actual, fn(*args))
+
     @dtypes(torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_mvlgamma_unbacked_size(self, device, dtype, numerics):
@@ -349,9 +359,8 @@ class StrictNumericsCompileTest(TestCase):
                     )
                     if index == 0:
                         self.assertIn("@triton.jit", "\n".join(codes))
-                    bits = _BIT_VIEW[dtype]
-                    self.assertEqual(result.view(bits), expected.view(bits))
-                    self.assertEqual(grads[0].view(bits), expected_grad.view(bits))
+                    self._assert_bitwise_equal(result, expected)
+                    self._assert_bitwise_equal(grads[0], expected_grad)
                     if index < 2:
                         self.assertGreater(
                             counters["aot_autograd"]["autograd_cache_miss"], misses
@@ -401,8 +410,7 @@ class StrictNumericsCompileTest(TestCase):
             values = bits.flatten().view(dtype)
         x = torch.cat((values, _min_max_specials(dtype, device)))
         fn = getattr(torch.special, op_name)
-        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(x)
-        self.assertEqual(actual.view(torch.int32), fn(x).view(torch.int32))
+        self._check_bitwise(fn, x, numerics=numerics)
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -414,12 +422,7 @@ class StrictNumericsCompileTest(TestCase):
         def fn(grad, x):
             return torch.ops.aten.softshrink_backward.default(grad, x, lambd)
 
-        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(
-            grad, x
-        )
-        self.assertEqual(
-            actual.view(_BIT_VIEW[dtype]), fn(grad, x).view(_BIT_VIEW[dtype])
-        )
+        self._check_bitwise(fn, grad, x, numerics=numerics)
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     def test_softshrink_backward_overflow(self, device, dtype):
@@ -444,12 +447,7 @@ class StrictNumericsCompileTest(TestCase):
     def test_bessel_opmath(self, device, dtype, numerics, op_name, upcast):
         x = _exhaustive_16bit(dtype, device)
         fn = getattr(torch.special, op_name)
-        actual = torch.compile(
-            fn,
-            fullgraph=True,
-            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
-        )(x)
-        self.assertEqual(actual.view(torch.int16), fn(x).view(torch.int16))
+        self._check_bitwise(fn, x, numerics=numerics, upcast=upcast)
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -479,12 +477,7 @@ class StrictNumericsCompileTest(TestCase):
         def fn(grad, x):
             return torch.ops.aten.logit_backward.default(grad, x, eps)
 
-        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(
-            grad, x
-        )
-        self.assertEqual(
-            actual.view(_BIT_VIEW[dtype]), fn(grad, x).view(_BIT_VIEW[dtype])
-        )
+        self._check_bitwise(fn, grad, x, numerics=numerics)
 
     @dtypes(torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -494,8 +487,7 @@ class StrictNumericsCompileTest(TestCase):
         def fn(x):
             return torch.xlogy(x, 2.7296853065490723)
 
-        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(x)
-        self.assertEqual(actual.view(torch.int32), fn(x).view(torch.int32))
+        self._check_bitwise(fn, x, numerics=numerics)
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -503,12 +495,7 @@ class StrictNumericsCompileTest(TestCase):
     def test_copysign_storage_bits(self, device, dtype, numerics, scalar):
         x = _exhaustive_16bit(dtype, device)
         y = -float("nan") if scalar else x.flip(0)
-        actual = torch.compile(
-            torch.copysign, fullgraph=True, options={"numerics": numerics}
-        )(x, y)
-        self.assertEqual(
-            actual.view(torch.int16), torch.copysign(x, y).view(torch.int16)
-        )
+        self._check_bitwise(torch.copysign, x, y, numerics=numerics)
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -524,8 +511,7 @@ class StrictNumericsCompileTest(TestCase):
             result = float("nan") * x if left else x * float("nan")
             return result.t().view(-1)
 
-        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(x)
-        self.assertEqual(actual.view(_BIT_VIEW[dtype]), fn(x).view(_BIT_VIEW[dtype]))
+        self._check_bitwise(fn, x, numerics=numerics)
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -548,15 +534,7 @@ class StrictNumericsCompileTest(TestCase):
             result = x.to(dtype) if operation == "cast" else x.pow(3)
             return result, result.double()
 
-        actual = torch.compile(
-            fn,
-            fullgraph=True,
-            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
-        )(x)
-        self.assertEqual(
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in actual),
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(x)),
-        )
+        self._check_bitwise(fn, x, numerics=numerics, upcast=upcast)
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @parametrize("op_name", ("floor_divide", "remainder", "true_divide"))
@@ -572,15 +550,7 @@ class StrictNumericsCompileTest(TestCase):
             result = getattr(torch, op_name)(a, b)
             return result, result.double()
 
-        actual = torch.compile(
-            fn,
-            fullgraph=True,
-            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
-        )(a, b)
-        self.assertEqual(
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in actual),
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(a, b)),
-        )
+        self._check_bitwise(fn, a, b, numerics=numerics, upcast=upcast)
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("op_name", ("sub", "rsub", "logaddexp2", "ldexp", "mul"))
@@ -612,10 +582,7 @@ class StrictNumericsCompileTest(TestCase):
             y,
         )
         self.assertIn("@triton.jit", "\n".join(code))
-        self.assertEqual(
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in actual),
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(x, y)),
-        )
+        self._assert_bitwise_equal(actual, fn(x, y))
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -634,10 +601,7 @@ class StrictNumericsCompileTest(TestCase):
         for value in (0.7, 0.6, -0.7):
             expected = torch.autograd.grad(fn(*inputs, value), inputs, grad)
             actual = torch.autograd.grad(compiled(*inputs, value), inputs, grad)
-            self.assertEqual(
-                tuple(x.view(_BIT_VIEW[dtype]) for x in actual),
-                tuple(x.view(_BIT_VIEW[dtype]) for x in expected),
-            )
+            self._assert_bitwise_equal(actual, expected)
 
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -659,15 +623,9 @@ class StrictNumericsCompileTest(TestCase):
         )
         result, codes = run_and_get_code(compiled, a, b)
         self.assertIn("@triton.jit", "\n".join(codes))
-        self.assertEqual(
-            tuple(t.view(torch.int64) for t in result),
-            tuple(t.view(torch.int64) for t in fn(a, b)),
-        )
+        self._assert_bitwise_equal(result, fn(a, b))
         for scalar in (float("nan"), -float("nan"), 0.7):
-            self.assertEqual(
-                tuple(t.view(torch.int64) for t in compiled(scalar, nans)),
-                tuple(t.view(torch.int64) for t in fn(scalar, nans)),
-            )
+            self._assert_bitwise_equal(compiled(scalar, nans), fn(scalar, nans))
 
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -691,10 +649,7 @@ class StrictNumericsCompileTest(TestCase):
 
         compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
         for scalar in scalars:
-            self.assertEqual(
-                compiled(x, scalar).view(torch.int64),
-                fn(x, scalar).view(torch.int64),
-            )
+            self._assert_bitwise_equal(compiled(x, scalar), fn(x, scalar))
 
     @dtypes(torch.float64)
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -719,7 +674,7 @@ class StrictNumericsCompileTest(TestCase):
         )
         expected = torch.autograd.grad(torch.acos(x), x, grad)[0]
         actual = torch.autograd.grad(compiled(x), x, grad)[0]
-        self.assertEqual(actual.view(torch.int64), expected.view(torch.int64))
+        self._assert_bitwise_equal(actual, expected)
 
     @ops(
         [op for op in op_db if op.name in ("abs", "neg", "angle", "frexp", "signbit")],
@@ -763,10 +718,7 @@ class StrictNumericsCompileTest(TestCase):
             x,
         )
         self.assertIn("@triton.jit", "\n".join(codes))
-        self.assertEqual(
-            tuple(t.view(_BIT_VIEW.get(t.dtype, t.dtype)) for t in result),
-            tuple(t.view(_BIT_VIEW.get(t.dtype, t.dtype)) for t in fn(x)),
-        )
+        self._assert_bitwise_equal(result, fn(x))
 
     @ops(
         [op for op in op_db if op.name in ("abs", "neg", "angle")],
@@ -793,10 +745,7 @@ class StrictNumericsCompileTest(TestCase):
         compiled = torch.compile(
             op.op, fullgraph=True, options={"numerics": "strict_pointwise"}
         )
-        self.assertEqual(
-            compiled([x], [y])[0].view(torch.int16),
-            op.op([x], [y])[0].view(torch.int16),
-        )
+        self._assert_bitwise_equal(compiled([x], [y])[0], op.op([x], [y])[0])
 
     @ops(
         [op for op in op_db if op.name in ("minimum", "maximum", "fmin", "fmax")],
@@ -814,10 +763,7 @@ class StrictNumericsCompileTest(TestCase):
         )
         result, codes = run_and_get_code(compiled, a, b)
         self.assertIn("@triton.jit", "\n".join(codes))
-        self.assertEqual(
-            result.view(_BIT_VIEW[dtype]),
-            op.op(a, b).view(_BIT_VIEW[dtype]),
-        )
+        self._assert_bitwise_equal(result, op.op(a, b))
 
     @ops(
         [op for op in op_db if op.name in ("minimum", "maximum", "fmin", "fmax")],
@@ -858,11 +804,7 @@ class StrictNumericsCompileTest(TestCase):
         self.assertNotIn("aten.view.dtype(", "\n".join(codes))
         for bound in bounds:
             actual, expected = compiled(x, bound), fn(x, bound)
-            int_dtype = _BIT_VIEW[expected[0].dtype]
-            self.assertEqual(
-                tuple(t.view(int_dtype) for t in actual),
-                tuple(t.view(int_dtype) for t in expected),
-            )
+            self._assert_bitwise_equal(actual, expected)
 
     @ops(
         [op for op in op_db if op.name in ("fmin", "fmax")],
@@ -886,10 +828,7 @@ class StrictNumericsCompileTest(TestCase):
                 "triton.codegen_upcast_to_fp32": upcast,
             },
         )
-        self.assertEqual(
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in compiled(a, b)),
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(a, b)),
-        )
+        self._assert_bitwise_equal(compiled(a, b), fn(a, b))
 
     @ops(
         [op for op in op_db if op.name in ("minimum", "maximum", "fmin", "fmax")],
@@ -924,10 +863,7 @@ class StrictNumericsCompileTest(TestCase):
         result, codes = run_and_get_code(compiled, a, b)
         if shared:
             self.assertEqual(sum(code.count("@triton.jit") for code in codes), 1)
-        self.assertEqual(
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in result),
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(a, b)),
-        )
+        self._assert_bitwise_equal(result, fn(a, b))
 
     @ops(
         [op for op in op_db if op.name in ("byte", "char", "short")],
@@ -1004,8 +940,7 @@ class StrictNumericsCompileTest(TestCase):
             x,
         )
         code = "\n".join(codes)
-        int_dtype = _BIT_VIEW[dtype]
-        self.assertEqual(result.view(int_dtype), op.op(x).view(int_dtype))
+        self._assert_bitwise_equal(result, op.op(x))
         self.assertIn("libdevice.exp", code)
         self.assertIn("libdevice.rcp_rn", code)
         self.assertNotIn("tl.sigmoid", code)
@@ -1076,12 +1011,8 @@ class StrictNumericsCompileTest(TestCase):
         self.assertIn("@triton.jit", "\n".join(codes))
         result_grads, codes = run_and_get_code(torch.autograd.grad, result[0], x, grad)
         self.assertIn("@triton.jit", "\n".join(codes))
-        self.assertEqual(
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in result),
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in expected),
-        )
-        int_dtype = _BIT_VIEW[dtype]
-        self.assertEqual(result_grads[0].view(int_dtype), expected_grad.view(int_dtype))
+        self._assert_bitwise_equal(result, expected)
+        self._assert_bitwise_equal(result_grads[0], expected_grad)
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("upcast", (False, True))
@@ -1095,15 +1026,9 @@ class StrictNumericsCompileTest(TestCase):
         vector = torch.full((17,), 0 if scalar_grad else 1, device=device, dtype=dtype)
         grad, output = (scalar, vector) if scalar_grad else (vector, scalar)
         fn = torch.ops.aten.tanh_backward.default
-        result = torch.compile(
-            fn,
-            fullgraph=True,
-            options={
-                "numerics": "strict_pointwise",
-                "triton.codegen_upcast_to_fp32": upcast,
-            },
-        )(grad, output)
-        self.assertEqual(result.view(torch.int16), fn(grad, output).view(torch.int16))
+        self._check_bitwise(
+            fn, grad, output, numerics="strict_pointwise", upcast=upcast
+        )
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("upcast", (False, True))
@@ -1129,7 +1054,7 @@ class StrictNumericsCompileTest(TestCase):
             },
         )(grad, x, **kwargs)
         self.assertEqual(result.dtype, expected.dtype)
-        self.assertEqual(result.view(torch.int16), expected.view(torch.int16))
+        self._assert_bitwise_equal(result, expected)
 
     @ops(
         [
@@ -1209,13 +1134,12 @@ class StrictNumericsCompileTest(TestCase):
             x,
         )
         expected, expected_below_lower = fn(x)
-        int_dtype = _BIT_VIEW[dtype]
-        self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
+        self._assert_bitwise_equal(result, expected)
         self.assertEqual(below_lower, expected_below_lower)
         self.assertIn("tl.where", "\n".join(codes))
         expected_grad = torch.autograd.grad(expected, x, torch.ones_like(x))[0]
         result_grad = torch.autograd.grad(result, x, torch.ones_like(x))[0]
-        self.assertEqual(result_grad.view(int_dtype), expected_grad.view(int_dtype))
+        self._assert_bitwise_equal(result_grad, expected_grad)
 
     @config.patch(
         numerics="strict_pointwise", max_fusion_size=1, realize_opcount_threshold=0
@@ -1235,7 +1159,7 @@ class StrictNumericsCompileTest(TestCase):
         x = _exhaustive_16bit(dtype, device)
         metrics.reset()
         result = torch.compile(fn, fullgraph=True)(x)
-        self.assertEqual(result.view(torch.int16), fn(x).view(torch.int16))
+        self._assert_bitwise_equal(result, fn(x))
         self.assertGreater(metrics.generated_kernel_count, 1)
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
@@ -1273,7 +1197,7 @@ class StrictNumericsCompileTest(TestCase):
         result, *masks = torch.compile(
             fn, fullgraph=True, options={"numerics": numerics}
         )(x, lo, hi)
-        self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
+        self._assert_bitwise_equal(result, expected)
         self.assertEqual(masks, expected_masks)
         expected_grads = torch.autograd.grad(
             expected, (x, lo, hi), torch.ones_like(expected), allow_unused=True
@@ -1285,7 +1209,7 @@ class StrictNumericsCompileTest(TestCase):
             if wanted is None:
                 self.assertIsNone(actual)
             else:
-                self.assertEqual(actual.view(int_dtype), wanted.view(int_dtype))
+                self._assert_bitwise_equal(actual, wanted)
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("zero_dim", (False, True))
@@ -1319,8 +1243,7 @@ class StrictNumericsCompileTest(TestCase):
                 hi = hi[None]
             expected = fn(x, lo, hi)
             result = compiled(x, lo, hi)
-            int_dtype = _BIT_VIEW[expected.dtype]
-            self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
+            self._assert_bitwise_equal(result, expected)
 
     @dtypes(torch.int32, torch.int64, torch.uint32, torch.uint64)
     @parametrize("upcast", (False, True))
@@ -1358,10 +1281,7 @@ class StrictNumericsCompileTest(TestCase):
             },
         )(x, lo, hi)
         expected = fn(x, lo, hi)
-        self.assertEqual(
-            tuple(t.view(torch.int16) for t in actual),
-            tuple(t.view(torch.int16) for t in expected),
-        )
+        self._assert_bitwise_equal(actual, expected)
 
     @dtypes(torch.float32)
     @parametrize("op", ("argmax", "argmin"))
@@ -1371,15 +1291,7 @@ class StrictNumericsCompileTest(TestCase):
             return getattr(x, op)(-1).to(torch.bfloat16)
 
         x = torch.randn((16, 16), device=device, dtype=dtype)
-        actual = torch.compile(
-            fn,
-            fullgraph=True,
-            options={
-                "numerics": "strict_pointwise",
-                "triton.codegen_upcast_to_fp32": upcast,
-            },
-        )(x)
-        self.assertEqual(actual.view(torch.int16), fn(x).view(torch.int16))
+        self._check_bitwise(fn, x, numerics="strict_pointwise", upcast=upcast)
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @parametrize("bound_kind", ("min", "max"))
@@ -1399,10 +1311,7 @@ class StrictNumericsCompileTest(TestCase):
             fn, fullgraph=True, options={"numerics": "strict_pointwise"}
         )
         for bound in (-0.0, 0.7, 1e-42, float("nan")):
-            self.assertEqual(
-                compiled(x, bound).view(_BIT_VIEW[dtype]),
-                fn(x, bound).view(_BIT_VIEW[dtype]),
-            )
+            self._assert_bitwise_equal(compiled(x, bound), fn(x, bound))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True, specialize_float=False)
     @config.patch(
@@ -1438,19 +1347,13 @@ class StrictNumericsCompileTest(TestCase):
         for bound in bounds:
             if bound_source == "python":
                 bound = bound.item()
-            self.assertEqual(
-                compiled(x, bound).view(_BIT_VIEW[dtype]),
-                fn(x, bound).view(_BIT_VIEW[dtype]),
-            )
+            self._assert_bitwise_equal(compiled(x, bound), fn(x, bound))
 
         if bound_source == "python":
             hits = counters["aot_autograd"]["autograd_cache_hit"]
             torch._dynamo.reset()
             bound = bounds[1].item()
-            self.assertEqual(
-                compiled(x, bound).view(_BIT_VIEW[dtype]),
-                fn(x, bound).view(_BIT_VIEW[dtype]),
-            )
+            self._assert_bitwise_equal(compiled(x, bound), fn(x, bound))
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hits + 1)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
@@ -1481,10 +1384,7 @@ class StrictNumericsCompileTest(TestCase):
             expected = fn(x, bound)
             actual = compiled(x, bound)
             self.assertEqual(actual[0].stride(), expected[0].stride())
-            self.assertEqual(
-                tuple(t.view(_BIT_VIEW[dtype]) for t in actual),
-                tuple(t.view(_BIT_VIEW[dtype]) for t in expected),
-            )
+            self._assert_bitwise_equal(actual, expected)
 
     @ops(
         [op for op in op_db if op.name in ("clamp", "nn.functional.hardtanh")],
@@ -1523,12 +1423,10 @@ class StrictNumericsCompileTest(TestCase):
             options={"numerics": numerics},
         )(x)
         expected = fn(x)
-        self.assertEqual(result.view(_BIT_VIEW[dtype]), expected.view(_BIT_VIEW[dtype]))
+        self._assert_bitwise_equal(result, expected)
         expected_grad = torch.autograd.grad(expected, x, torch.ones_like(x))[0]
         result_grad = torch.autograd.grad(result, x, torch.ones_like(x))[0]
-        self.assertEqual(
-            result_grad.view(_BIT_VIEW[dtype]), expected_grad.view(_BIT_VIEW[dtype])
-        )
+        self._assert_bitwise_equal(result_grad, expected_grad)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True, specialize_float=False)
     @config.patch(numerics="strict_pointwise", _use_fp64_for_unbacked_floats=False)
@@ -1578,7 +1476,7 @@ class StrictNumericsCompileTest(TestCase):
                     bound = torch.tensor(bound, dtype=torch.float64)
                 expected = fn(x, bound)
                 result = compiled(x, bound)
-                self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
+                self._assert_bitwise_equal(result, expected)
         # Python bounds generalize once; tensor bounds recompile once for NaN.
         self.assertEqual(counter.frame_count, 2)
 
@@ -1606,17 +1504,12 @@ class StrictNumericsCompileTest(TestCase):
         )
         if from_tensor:
             bounds = tuple(torch.tensor(b, dtype=torch.float64) for b in bounds)
-        result = torch.compile(
-            fn, fullgraph=True, options={"numerics": "strict_pointwise"}
-        )(x, *bounds)
-        self.assertEqual(result.view(torch.int32), fn(x, *bounds).view(torch.int32))
+        self._check_bitwise(fn, x, *bounds, numerics="strict_pointwise")
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_softshrink_strict_symbolic_lambd(self, device, dtype, numerics):
         from torch._dynamo.testing import CompileCounterWithBackend
-
-        bits = _BIT_VIEW[dtype]
 
         def fn(x, lambd):
             return torch.nn.functional.softshrink(x, lambd)
@@ -1646,8 +1539,8 @@ class StrictNumericsCompileTest(TestCase):
                 expected_grad = torch.autograd.grad(expected, x, grad_output)[0]
                 result = compiled(x, lambd)
                 result_grad = torch.autograd.grad(result, x, grad_output)[0]
-                self.assertEqual(result.view(bits), expected.view(bits))
-                self.assertEqual(result_grad.view(bits), expected_grad.view(bits))
+                self._assert_bitwise_equal(result, expected)
+                self._assert_bitwise_equal(result_grad, expected_grad)
         if dtype == torch.float32:
             # Half-precision inputs round lambd with scalar_tensor, which
             # tensorify cannot handle, so lambd is specialized there.
@@ -1668,7 +1561,7 @@ class StrictNumericsCompileTest(TestCase):
             y,
         )
 
-        self.assertEqual(result.view(torch.int32), (x / y).view(torch.int32))
+        self._assert_bitwise_equal(result, x / y)
         self.assertIn("div_rn", "\n".join(codes))
 
 
