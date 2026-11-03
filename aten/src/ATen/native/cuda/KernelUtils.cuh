@@ -1,10 +1,10 @@
 #pragma once
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/core/TensorBase.h>
-#include <ATen/cuda/detail/IntegerDivider.cuh>
 #include <c10/util/irange.h>
 #include <torch/headeronly/cuda/Atomic.h>
 #include <torch/headeronly/cuda/KernelUtils.h>
+#include <ATen/cuda/detail/IntegerDivider.cuh>
 
 #if !(defined(USE_ROCM) || ((defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))))
 #include <cuda_bf16.h>
@@ -18,8 +18,8 @@
 #include <torch/headeronly/cuda/detail/ROCmMacros.h>
 #endif
 
-#include <cstdint>
 #include <algorithm>
+#include <cstdint>
 #include <limits>
 
 namespace at::native {

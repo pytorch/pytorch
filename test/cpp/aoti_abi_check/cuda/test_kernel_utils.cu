@@ -22,6 +22,18 @@ namespace {
     }                                                      \
   } while (0)
 
+// Packed fp16 atomics need sm_70 and packed bf16 atomics sm_80; below that
+// fastAtomicAdd never pairs, so the pairing assertions do not apply.
+int computeCapabilityMajor() {
+  int device = 0;
+  cudaDeviceProp prop{};
+  if (cudaGetDevice(&device) != cudaSuccess ||
+      cudaGetDeviceProperties(&prop, device) != cudaSuccess) {
+    return 0;
+  }
+  return prop.major;
+}
+
 #define CUDA_ASSERT_OK(expr)                                        \
   do {                                                              \
     cudaError_t err_ = (expr);                                      \
@@ -226,14 +238,24 @@ TEST(TestFastAtomicAdd, ScatterAdd) {
 
 TEST(TestFastAtomicAdd, VectorizedBounds) {
   SKIP_IF_NO_CUDA();
-  testVectorizedBounds<torch::headeronly::Half>();
-  testVectorizedBounds<torch::headeronly::BFloat16>();
+  const int major = computeCapabilityMajor();
+  if (major >= 7) {
+    testVectorizedBounds<torch::headeronly::Half>();
+  }
+  if (major >= 8) {
+    testVectorizedBounds<torch::headeronly::BFloat16>();
+  }
 }
 
 TEST(TestFastAtomicAdd, PairedNeighbourUnchanged) {
   SKIP_IF_NO_CUDA();
-  testPairedNeighbourUnchanged<torch::headeronly::Half>();
-  testPairedNeighbourUnchanged<torch::headeronly::BFloat16>();
+  const int major = computeCapabilityMajor();
+  if (major >= 7) {
+    testPairedNeighbourUnchanged<torch::headeronly::Half>();
+  }
+  if (major >= 8) {
+    testPairedNeighbourUnchanged<torch::headeronly::BFloat16>();
+  }
 }
 
 TEST(TestFastAtomicAdd, FastSpecializedAtomicAdd) {
