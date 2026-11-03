@@ -22186,16 +22186,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                          "test_fn_grad", device_type="xpu"),
             DecorateInfo(unittest.expectedFailure, "TestBwdGradients",
                          "test_fn_gradgrad", device_type="xpu"),
-            # TestDecomp runs the complete OpInfo sample set and reaches the same
-            # unsupported XPU 5-D bicubic sample.
-            # XPU does not support bicubic interpolation with 5-D input.
-            # https://github.com/intel/torch-xpu-ops/issues/5542
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                device_type="xpu",
-            ),
         )),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
