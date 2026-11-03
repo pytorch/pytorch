@@ -38,36 +38,68 @@ WORKDIR /opt/pytorch
 COPY . .
 RUN git submodule update --init --recursive
 
-FROM python-deps as pytorch-installs
+# The torch packages and the index they come from, in one place so that the
+# stage that resolves them and the stage that installs them cannot disagree.
+# Sourced by `sh`; expects TARGETPLATFORM, INSTALL_CHANNEL and CUDA_PATH.
+FROM scratch as torch-pip-args
+COPY <<'EOF' /torch_pip_args.sh
+case "${TARGETPLATFORM}" in
+    "linux/arm64") TORCH_INDEX_ARGS="--extra-index-url https://download.pytorch.org/whl/cpu/" ;;
+    *)             TORCH_INDEX_ARGS="--index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH}/" ;;
+esac
+TORCH_PACKAGES="torch torchvision torchaudio"
+# torchaudio does not publish wheels against the CUDA 13.2 index yet,
+# so skip it when CUDA_PATH=cu132 to keep this Dockerfile building.
+if [ "${TARGETPLATFORM}" != "linux/arm64" ] && [ "${CUDA_PATH}" = "cu132" ]; then
+    TORCH_PACKAGES="torch torchvision"
+fi
+EOF
+
+# Work out exactly which versions `pip install torch torchvision torchaudio`
+# would install, without downloading any wheels (pip reads the small PEP 658
+# .metadata files). The result is split in two lock files:
+#   /torch.lock  torch, torchvision and torchaudio. Different every night.
+#   /deps.lock   everything they depend on (nvidia-*, triton, sympy, ...). These
+#                are pinned exactly by the torch wheel, so on most nights the
+#                file is byte-identical to the previous night's.
+# The `official` stage installs the two in separate layers. The layer that holds
+# the (large) dependencies is keyed on the contents of /deps.lock, so it is only
+# rebuilt, and clients only re-download it, when a dependency actually changes.
+FROM dev-base as resolve-torch-deps
 ARG CUDA_PATH=cu121
 ARG INSTALL_CHANNEL=whl/nightly
 # Automatically set by buildx
 ARG TARGETPLATFORM
+# Passed a new value on every build so that this cheap step always sees the
+# current index and is never served from the build cache.
+ARG RESOLVE_CACHE_BUST
+RUN --mount=type=bind,from=torch-pip-args,source=/torch_pip_args.sh,target=/torch_pip_args.sh <<'EOF'
+set -eu
+. /torch_pip_args.sh
+echo "Resolving ${TORCH_PACKAGES} from ${TORCH_INDEX_ARGS} (${RESOLVE_CACHE_BUST:-})"
+# shellcheck disable=SC2086
+pip3 install --dry-run --ignore-installed --quiet --report /tmp/report.json ${TORCH_INDEX_ARGS} ${TORCH_PACKAGES}
+python3 - <<'PY'
+import json
 
-# torchaudio does not publish wheels against the CUDA 13.2 index yet,
-# so skip it when CUDA_PATH=cu132 to keep this Dockerfile building.
-RUN case ${TARGETPLATFORM} in \
-         "linux/arm64")  pip3 install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
-         *) \
-             if [ "${CUDA_PATH}" = "cu132" ]; then \
-                 pip3 install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH}/ torch torchvision; \
-             else \
-                 pip3 install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH}/ torch torchvision torchaudio; \
-             fi \
-             ;; \
-    esac
-RUN pip3 install torchelastic
-RUN IS_CUDA=$(python3 -c 'import torch ; print(torch.cuda._is_compiled())'); \
-    echo "Is torch compiled with cuda: ${IS_CUDA}"; \
-    if test "${IS_CUDA}" != "True" -a ! -z "${CUDA_VERSION}"; then \
-        exit 1; \
-    fi
+TORCH = {"torch", "torchvision", "torchaudio"}
+deps, torch = [], []
+for item in json.load(open("/tmp/report.json"))["install"]:
+    meta = item["metadata"]
+    (torch if meta["name"].lower() in TORCH else deps).append(f"{meta['name']}=={meta['version']}")
+# Sorted, so that equal dependency sets always give a byte-identical file.
+for path, pins in (("/deps.lock", deps), ("/torch.lock", torch)):
+    with open(path, "w") as f:
+        f.write("".join(f"{pin}\n" for pin in sorted(pins, key=str.lower)))
+PY
+cat /torch.lock /deps.lock
+EOF
 
 FROM ${BASE_IMAGE} as official
-ARG PYTORCH_VERSION
-ARG TRITON_VERSION
 ARG TARGETPLATFORM
 ARG CUDA_VERSION
+ARG CUDA_PATH=cu121
+ARG INSTALL_CHANNEL=whl/nightly
 LABEL com.nvidia.volumes.needed="nvidia_driver"
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -78,14 +110,48 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         python3-dev \
         python3-pip \
         && rm -rf /var/lib/apt/lists/*
-# Copy Python packages from pytorch-installs stage
-COPY --from=pytorch-installs /usr/local/lib/python3.12 /usr/local/lib/python3.12
-COPY --from=pytorch-installs /usr/local/bin /usr/local/bin
 RUN if test -n "${CUDA_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
         apt-get update -qq && \
         DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc && \
         rm -rf /var/lib/apt/lists/*; \
     fi
+
+# The Python environment is installed here, directly into the image, in layers
+# ordered from the one that changes least to the one that changes every night.
+# Installing in a build stage and copying the result in, as this file used to,
+# fuses everything into a single multi-GB layer that is replaced nightly: with
+# the cu130 nightly, 3.4 GB of a 3.5 GB image was re-downloaded every day, of
+# which only ~0.7 GB is the torch wheels themselves.
+#
+# 1. The packages `python-deps` installs (same commands, so the image contents
+#    are unchanged). Changes when requirements*.txt does.
+RUN --mount=type=bind,source=requirements.txt,target=/tmp/req/requirements.txt \
+    --mount=type=bind,source=requirements-build.txt,target=/tmp/req/requirements-build.txt \
+    pip3 install --break-system-packages --no-cache-dir --upgrade --ignore-installed pip setuptools wheel && \
+    pip3 install --break-system-packages --no-cache-dir cmake pyyaml numpy ipython -r /tmp/req/requirements.txt
+# 2. What torch depends on (nvidia-*, triton, ...): see `resolve-torch-deps`.
+#    Changes when the torch wheel's pins do, not on every nightly.
+RUN --mount=type=bind,from=torch-pip-args,source=/torch_pip_args.sh,target=/torch_pip_args.sh \
+    --mount=type=bind,from=resolve-torch-deps,source=/deps.lock,target=/tmp/deps.lock \
+    . /torch_pip_args.sh && \
+    pip3 install --break-system-packages --no-cache-dir ${TORCH_INDEX_ARGS} -r /tmp/deps.lock
+# 3. torch, torchvision and torchaudio, at the exact versions that were resolved
+#    together with the dependencies above. This is the nightly layer.
+RUN --mount=type=bind,from=torch-pip-args,source=/torch_pip_args.sh,target=/torch_pip_args.sh \
+    --mount=type=bind,from=resolve-torch-deps,source=/torch.lock,target=/tmp/torch.lock \
+    . /torch_pip_args.sh && \
+    pip3 install --break-system-packages --no-cache-dir --no-deps ${TORCH_INDEX_ARGS} -r /tmp/torch.lock
+RUN pip3 install --break-system-packages --no-cache-dir torchelastic
+RUN IS_CUDA=$(python3 -c 'import torch ; print(torch.cuda._is_compiled())'); \
+    echo "Is torch compiled with cuda: ${IS_CUDA}"; \
+    if test "${IS_CUDA}" != "True" -a ! -z "${CUDA_VERSION}"; then \
+        exit 1; \
+    fi
+
+# Declared only now. A build arg that is in scope for a RUN can invalidate its
+# cache, and these change on every nightly build.
+ARG PYTORCH_VERSION
+ARG TRITON_VERSION
 ENV NVIDIA_VISIBLE_DEVICES all
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
 ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64
