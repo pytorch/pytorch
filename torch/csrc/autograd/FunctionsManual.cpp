@@ -993,7 +993,8 @@ Tensor mean_backward(
     bool keepdim) {
   bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
   auto n = is_all_reduce ? numel : _safe_size(shape, opt_dim.value());
-  return sum_backward(grad, shape, opt_dim, keepdim) / std::move(n);
+  // Keep double backward finite for empty reductions.
+  return sum_backward(grad / n.max(1), shape, opt_dim, keepdim);
 }
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
