@@ -31,6 +31,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import is_constant_source, is_from_local_source
 from ..utils import (
     _item_debug_repr,
+    check_constant_args,
     cmp_name_to_op_mapping,
     istype,
     lazily_unpack,
@@ -41,7 +42,12 @@ from ..utils import (
 )
 from .base import Member, Method, readonly_setter, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .hashable import HashableTracker, is_hashable
+from .hashable import (
+    _builtin_method_sources,
+    guard_key_collisions,
+    HashableTracker,
+    is_hashable,
+)
 from .object_protocol import repr_guard
 
 
@@ -68,7 +74,7 @@ def pyset_check(obj: VariableTracker) -> TypeIs["SetVariable"]:
     return issubclass(obj.python_type(), set)
 
 
-def set_copy(obj: VariableTracker) -> VariableTracker:
+def set_copy(obj: "BaseSetVariable") -> "BaseSetVariable":
     """Mirrors CPython's internal `set_copy` (Objects/setobject.c).
 
     Always allocates a fresh set/frozenset with a shallow-copied items dict.
@@ -130,7 +136,7 @@ class BaseSetVariable(VariableTracker):
         # Items can be either VariableTrackers or HashableTrackers (from set ops).
         # For VariableTrackers, realize them to ensure aliasing guards are installed
         # when the same object appears multiple times.
-        hashable_items = []
+        hashable_items: list[HashableTracker] = []
         for item in items:
             if isinstance(item, HashableTracker):
                 # Already a HashableTracker from a set operation
@@ -141,6 +147,8 @@ class BaseSetVariable(VariableTracker):
                 hashable_items.append(HashableTracker(item.realize()))
         # Internal representation as dict allows for simple integration with
         # OrderedSet, notably polyfills. Using set moves complexity to OrderedSet
+        if hashable_items:
+            guard_key_collisions(hashable_items)
         self.items = dict.fromkeys(hashable_items, BaseSetVariable._default_value())
         self.should_reconstruct_all = (
             not is_from_local_source(self.source) if self.source else True
@@ -167,6 +175,19 @@ class BaseSetVariable(VariableTracker):
         # with a side-effecting __hash__).  Check element constness directly.
         return all(k.vt.is_python_constant() for k in self.set_items)
 
+    def _hashable_key(self, value: VariableTracker) -> HashableTracker:
+        key = HashableTracker(value)
+        guard_key_collisions(self.items, (key,))
+        return key
+
+    def _insert_key(self, key: HashableTracker) -> None:
+        guard_key_collisions(self.items, (key,))
+        self.items[key] = BaseSetVariable._default_value()
+
+    def _update_items(self, items: dict[HashableTracker, VariableTracker]) -> None:
+        guard_key_collisions(self.items, items)
+        self.items.update(items)
+
     def __contains__(self, vt: VariableTracker) -> bool:
         if not isinstance(vt, VariableTracker):
             raise AssertionError(f"Expected VariableTracker, got {type(vt)}")
@@ -175,7 +196,7 @@ class BaseSetVariable(VariableTracker):
         # tx.exn_vt_stack as a side effect.
         if not is_hashable(vt):
             return False
-        key = HashableTracker(vt)
+        key = self._hashable_key(vt)
         return key in self.items
 
     def has_new_items(self) -> bool:
@@ -212,16 +233,15 @@ class BaseSetVariable(VariableTracker):
         return VariableTracker.build(tx, hasattr(self.python_type(), name))
 
     def install_set_contains_guard(
-        self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
+        self, tx: "InstructionTranslatorBase", key: HashableTracker, contains: bool
     ) -> None:
-        if not self.source:
+        if not self.source or key.has_builtin_method:
             return
 
         if tx.output.side_effects.is_modified(self):
             return
 
-        contains = args[0] in self
-        if args[0].source is None and args[0].is_python_constant():
+        if key.vt.source is None and key.vt.is_python_constant():
             guard_fn = (
                 type(self).CONTAINS_GUARD if contains else type(self).NOT_CONTAINS_GUARD
             )
@@ -229,7 +249,7 @@ class BaseSetVariable(VariableTracker):
                 self.make_guard(
                     functools.partial(
                         guard_fn,
-                        key=args[0].as_python_constant(),
+                        key=key.vt.as_python_constant(),
                     )
                 )
             )
@@ -262,11 +282,16 @@ class BaseSetVariable(VariableTracker):
         # matching CPython's hash-at-insert behavior.
         from .dicts import ConstDictVariable
 
+        if isinstance(other, ConstDictVariable):
+            other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
+            guard_key_collisions(self.items, other.items)
             yield from other.items.keys()
             return
 
-        yield from (HashableTracker(item) for item in lazily_unpack(tx, other))
+        for item in lazily_unpack(tx, other):
+            key = self._hashable_key(item)
+            yield key
 
     def _operand_keys(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
@@ -276,9 +301,14 @@ class BaseSetVariable(VariableTracker):
         # protocol.
         from .dicts import ConstDictVariable
 
+        if isinstance(other, ConstDictVariable):
+            other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
-            return list(other.items.keys())
-        return [HashableTracker(x) for x in unpack_iterable(tx, other)]
+            keys = list(other.items.keys())
+        else:
+            keys = [HashableTracker(x) for x in unpack_iterable(tx, other)]
+        guard_key_collisions(self.items, keys)
+        return keys
 
     def _new_set(self, items: "Iterable[HashableTracker]") -> "BaseSetVariable":
         # Build a fresh set of the same concrete type (set / frozenset /
@@ -301,8 +331,9 @@ class BaseSetVariable(VariableTracker):
             # container types, set allows membership testing with a set key, even
             # though it is not hashable.
             item = FrozensetVariable(item.items)  # type: ignore[missing-attribute]
-        self.install_set_contains_guard(tx, [item])
-        contains = item in self
+        key = self._hashable_key(item)
+        contains = key in self.items
+        self.install_set_contains_guard(tx, key, contains)
         return VariableTracker.build(tx, contains)
 
     def _try_fast_set_method(
@@ -312,16 +343,31 @@ class BaseSetVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker | None":
-        from ..utils import check_constant_args
-        from .dicts import ConstDictVariable
-
-        # Constant, exact-builtin fast path: materialize and call the real
-        # method. Set/dict operands take the slow VT path below so their keys
-        # are not re-hashed (CPython's do-not-rehash-dict-keys fast path);
-        # OrderedSet is excluded because its methods are pure Python, so there
-        # is no C fast path to mirror.
+        pending = [*args, *kwargs.values()]
+        while pending:
+            value = pending.pop()
+            # Mapping operands consume keys without realizing or rehashing them.
+            if isinstance(value, variables.ConstDictVariable):
+                return None
+            if isinstance(value, variables.LazyVariableTracker):
+                if value.is_realized():
+                    pending.append(value.realize())
+                elif value.source is None or any(
+                    _builtin_method_sources(value.original_value(), value.source)
+                ):
+                    return None
+                continue
+            if isinstance(value, variables.BoundBuiltinMethodVariable):
+                return None
+            if isinstance(value, variables.BaseListVariable):
+                pending.extend(value.items)
+            elif isinstance(value, BaseSetVariable):
+                return None
+        # Only literal operands can be materialized without losing identity.
+        # For example, converting (receiver.count,) to a Python constant can
+        # copy receiver, changing method equality against the original set.
         if (
-            not any(isinstance(a, (BaseSetVariable, ConstDictVariable)) for a in args)
+            not any(key.has_builtin_method for key in self.items)
             and check_constant_args(args, kwargs)
             and self.python_type() in (set, frozenset)
         ):
@@ -369,7 +415,9 @@ class BaseSetVariable(VariableTracker):
             return fast
         out_items = dict(self.items)
         for other in args:
-            for key in self._operand_keys(tx, other):
+            keys = self._operand_keys(tx, other)
+            guard_key_collisions(out_items, keys)
+            for key in keys:
                 out_items.setdefault(key, BaseSetVariable._default_value())
         return self._new_set(out_items)
 
@@ -463,6 +511,7 @@ class BaseSetVariable(VariableTracker):
         result = set_copy(self_)
         if self_ is other_:
             return result
+        guard_key_collisions(result.items, other_.items)
         result.items.update(other_.items)  # type: ignore[missing-attribute]
         return result
 
@@ -479,6 +528,7 @@ class BaseSetVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
 
         result = set_copy(self_)
+        guard_key_collisions(result.items, other_.items)
         for k in list(other_.items.keys()):  # type: ignore[missing-attribute]
             result.items.pop(k, None)  # type: ignore[missing-attribute]
         return result
@@ -549,6 +599,7 @@ class BaseSetVariable(VariableTracker):
         other_items: set["HashableTracker"],
         op: str,
     ) -> VariableTracker:
+        guard_key_collisions(self_items, other_items)
         # Accessing the item sets directly is correct: CPython's set_richcompare
         # operates on the internal C struct (PySet_GET_SIZE, set_next,
         # set_contains_entry) -- it never calls __len__ or __contains__.
@@ -616,7 +667,8 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
     ) -> VariableTracker:
         # Convert add to __setitem__ with None value
         tx.output.side_effects.mutation(self)
-        self.items[HashableTracker(args[0])] = BaseSetVariable._default_value()
+        key = self._hashable_key(args[0])
+        self._insert_key(key)
         return ConstantVariable.create(None)
 
     def pop(
@@ -648,7 +700,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
         tx.output.side_effects.mutation(self)
         self.should_reconstruct_all = True
         self.items.clear()
-        self.items.update(kept)
+        self._update_items(kept)
         return ConstantVariable.create(None)
 
     def difference_update(
@@ -678,7 +730,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
         tx.output.side_effects.mutation(self)
         self.should_reconstruct_all = True
         self.items.clear()
-        self.items.update(new_items)
+        self._update_items(new_items)
         return ConstantVariable.create(None)
 
     def update(
@@ -751,7 +803,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
         temp_set_vt = SourcelessBuilder.create(tx, set).call_set(tx, *args, **kwargs)
         tx.output.side_effects.mutation(self)
         self.items.clear()
-        self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
+        self._update_items(temp_set_vt.items)  # type: ignore[missing-attribute]
         return ConstantVariable.create(None)
 
     def nb_inplace_or_impl(
@@ -762,7 +814,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
             return ConstantVariable.create(NotImplemented)
 
         tx.output.side_effects.mutation(self)
-        self.items.update(other.items)  # type: ignore[missing-attribute]
+        self._update_items(other.items)
         return self
 
     def nb_inplace_subtract_impl(
@@ -776,6 +828,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
         # Removal-only, so has_new_items() alone would miss it and the
         # mutation replay would be skipped (difference_update sets this too).
         self.should_reconstruct_all = True
+        guard_key_collisions(self.items, other.items)
         for k in list(other.items.keys()):  # type: ignore[missing-attribute]
             self.items.pop(k, None)
         return self
@@ -920,7 +973,7 @@ class OrderedSetVariable(BaseSetVariable):  # noqa: RVT001
     # ``set.__contains__`` on an OrderedSet, and the guard manager expects a
     # dict at a key-order source.
     def install_set_contains_guard(
-        self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
+        self, tx: "InstructionTranslatorBase", key: HashableTracker, contains: bool
     ) -> None:
         pass
 
@@ -1113,16 +1166,16 @@ class OrderedSetVariable(BaseSetVariable):  # noqa: RVT001
         # Build first, mutate second: eager __init__ hashes every element via
         # dict.fromkeys before touching _dict, so a TypeError leaves the set
         # unchanged. Clearing first would empty it on the caught-exception path.
-        new_items = {}
+        new_items: dict[HashableTracker, VariableTracker] = {}
         for item in items:
             # pyrefly: ignore [bad-argument-type]
-            new_items[HashableTracker(item.realize())] = (
-                BaseSetVariable._default_value()
-            )
+            key = HashableTracker(item.realize())
+            guard_key_collisions(new_items, (key,))
+            new_items[key] = BaseSetVariable._default_value()
         tx.output.side_effects.mutation(self)
         self.should_reconstruct_all = True
         self.items.clear()
-        self.items.update(new_items)
+        self._update_items(new_items)
         return ConstantVariable.create(None)
 
     tp_methods = {
@@ -1167,13 +1220,7 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
         return frozenset({k.vt.as_python_constant() for k in self.set_items})
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(
-            lambda: codegen.extend_output(
-                [
-                    codegen.create_load_global("frozenset"),
-                ]
-            )
-        )
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "frozenset"))
         codegen.foreach([x.vt for x in self.set_items])
         codegen.extend_output(
             [
@@ -1247,7 +1294,9 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
         from .hashable import RawHash
         from .object_protocol import generic_hash_impl
 
-        if self.is_python_constant():
+        if self.is_python_constant() and not any(
+            key.has_builtin_method for key in self.items
+        ):
             return hash(self.as_python_constant()), False
         is_fake = False
         raw_hashes = []
@@ -1278,7 +1327,7 @@ class DictKeySetVariable(BaseSetVariable):
             return "dict_keys([" + ", ".join(items) + "])"
 
     def install_set_contains_guard(
-        self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
+        self, tx: "InstructionTranslatorBase", key: HashableTracker, contains: bool
     ) -> None:
         # Already EQUALS_MATCH guarded
         pass
@@ -1330,6 +1379,8 @@ class DictKeySetVariable(BaseSetVariable):
     ) -> "SetVariable":
         from .dicts import ConstDictVariable
 
+        if isinstance(vt, ConstDictVariable):
+            vt.install_dict_order_guard(tx)
         if isinstance(vt, (BaseSetVariable, ConstDictVariable)):
             items: list[Any] = list(vt.items.keys())
         else:

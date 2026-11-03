@@ -67,6 +67,7 @@ from torch._C._dynamo.guards import (
     GuardDebugInfo,
     GuardManager,
     install_no_tensor_aliasing_guard,
+    install_object_alias_pattern_guard,
     install_object_aliasing_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
@@ -263,6 +264,8 @@ verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards"
 
 
 def _sequence_length(value: object) -> int:
+    if issubclass(type(value), dict):
+        return dict.__len__(cast(dict[Any, Any], value))
     if isinstance(value, set):
         return set.__len__(value)
     if isinstance(value, frozenset):
@@ -948,6 +951,14 @@ def uninteresting_files() -> set[str]:
     return {inspect.getfile(m) for m in mods}
 
 
+def _receiver_alias_pattern(receivers: tuple[object, ...]) -> tuple[int, ...]:
+    positions: dict[int, int] = {}
+    return tuple(
+        positions.setdefault(id(receiver), index)
+        for index, receiver in enumerate(receivers)
+    )
+
+
 _CLOSURE_VARS: dict[str, object] | None = None
 
 
@@ -956,6 +967,7 @@ def _get_closure_vars() -> dict[str, object]:
     if _CLOSURE_VARS is None:
         _CLOSURE_VARS = {
             "___check_type_id": check_type_id,
+            "___receiver_alias_pattern": _receiver_alias_pattern,
             "___check_obj_id": check_obj_id,
             "___odict_getitem": collections.OrderedDict.__getitem__,
             "___key_to_id": key_to_id,
@@ -1874,17 +1886,17 @@ class GuardBuilder(GuardBuilderBase):
         | None,
     ) -> GuardManagerType:
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
+        example_type: type[object] = type(example_value)
         if self.requires_key_order_guarding(source):
-            # Fix this if condition
-            if isinstance(example_value, dict_keys):
+            if issubclass(example_type, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
-            elif isinstance(example_value, (set, frozenset)):
+            elif issubclass(example_type, (set, frozenset)):
                 # we don't need to guard on key order for set/frozenset
                 # but the if above will be true for these types as set is
                 # implemented using a dict in Dynamo
                 guard_manager_enum = GuardManagerType.GUARD_MANAGER
             else:
-                if not isinstance(example_value, dict):
+                if not issubclass(example_type, dict):
                     raise AssertionError(f"Expected dict, got {type(example_value)}")
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
         return guard_manager_enum
@@ -3526,12 +3538,14 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard)
         length = _sequence_length(value)
 
-        if not isinstance(value, dict):
+        if not issubclass(type(value), dict):
             # C++ DICT_LENGTH checks for type
             self.TYPE_MATCH(guard)
 
         code = []
-        if isinstance(value, set):
+        if issubclass(type(value), dict):
+            code.append(f"dict.__len__({ref}) == {length}")
+        elif isinstance(value, set):
             code.append(f"set.__len__({ref}) == {length}")
         elif isinstance(value, frozenset):
             code.append(f"frozenset.__len__({ref}) == {length}")
@@ -3541,7 +3555,7 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"len({ref}) == {length}")
 
         self._set_guard_export_info(guard, code)
-        if isinstance(value, dict):
+        if issubclass(type(value), dict):
             self.get_guard_manager(guard).add_dict_length_check_guard(
                 length,
                 get_verbose_code_parts(code, guard),
@@ -3656,6 +3670,26 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_lambda_guard(
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @skip_guard_check_spec
+    def BUILTIN_METHOD_RECEIVER_ALIAS(
+        self, guard: Guard, sources: tuple[Source, ...], aliases: tuple[int, ...]
+    ) -> None:
+        if self.save_guards:
+            for source in sources:
+                if name := get_local_source_name(source):
+                    self.check_fn_manager.additional_used_local_vars.add(name)
+                if name := get_global_source_name(source):
+                    self.check_fn_manager.additional_used_global_vars.add(name)
+        refs = ", ".join(self.arg_ref(source.name) for source in sources)
+        code = [f"___receiver_alias_pattern(({refs},)) == {aliases!r}"]
+        self._set_guard_export_info(guard, code)
+        install_object_alias_pattern_guard(
+            [self.get_guard_manager_from_source(source) for source in sources],
+            aliases,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
         )
 
     # Multi-source guard (two inputs aliasing) — not expressible as a
@@ -5373,9 +5407,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(
             obj, (types.MethodDescriptorType, types.ClassMethodDescriptorType)
         ):
+            from .variables.object_protocol import Py_TPFLAGS_IMMUTABLETYPE
+
             owner = obj.__objclass__
             flags = type.__dict__["__flags__"].__get__(owner, type(owner))
-            if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
+            if not flags & Py_TPFLAGS_IMMUTABLETYPE:
                 raise torch._dynamo.exc.PackageError(
                     f"Cannot serialize {type(obj).__name__} with a mutable owner"
                 )
@@ -5651,6 +5687,19 @@ def _resolves_by_reference(value: object) -> bool:
             _resolves_by_reference(owner)
             and isinstance(value.name, str)
             and getattr(owner, value.name, None) is value
+        )
+    if isinstance(value, (types.MethodDescriptorType, types.ClassMethodDescriptorType)):
+        from .variables.object_protocol import Py_TPFLAGS_IMMUTABLETYPE
+
+        owner = value.__objclass__
+        # Match GuardsStatePickler's immutable-owner descriptor reducer.
+        flags = type.__dict__["__flags__"].__get__(owner, type(owner))
+        return (
+            bool(flags & Py_TPFLAGS_IMMUTABLETYPE)
+            and _resolves_by_reference(owner)
+            and any(
+                item is value for item in get_type_dict_no_user_code(owner).values()
+            )
         )
     if _is_nested_named_tuple_type(value):
         # GuardsStatePickler.reducer_override rebuilds it as a fresh class.

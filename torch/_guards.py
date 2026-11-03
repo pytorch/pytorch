@@ -845,6 +845,8 @@ class InvokeSubgraphReuseCondition:
     # of these to detect mutations on captured variables.
     traced_sources: OrderedSet[Source] = dataclasses.field(default_factory=OrderedSet)
 
+    guard_on_key_order: set[Source] = dataclasses.field(default_factory=set)
+
 
 class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:

@@ -2799,9 +2799,71 @@ class RelationalGuard : public LeafGuard {
   virtual void reset_state() = 0;
 };
 
-/**
- * Checks that object x is object y.
- */
+// Shared state for one ordered receiver-alias pattern.
+struct ObjectAliasPatternState {
+  explicit ObjectAliasPatternState(size_t size) : representatives(size) {
+    classes.reserve(size);
+  }
+
+  bool check(PyObject* value, size_t alias) {
+    dirty = true;
+    if (representatives[alias]) {
+      return representatives[alias].ptr() == value;
+    }
+    if (!classes.emplace(value, alias).second) {
+      return false;
+    }
+    // Accessors can return temporary objects; keep them alive until reset.
+    representatives[alias] = py::reinterpret_borrow<py::object>(value);
+    return true;
+  }
+
+  void reset() {
+    if (!dirty) {
+      return;
+    }
+    classes.clear();
+    for (auto& value : representatives) {
+      value = py::object();
+    }
+    dirty = false;
+  }
+
+  std::vector<py::object> representatives;
+  std::unordered_map<PyObject*, size_t> classes;
+  bool dirty = false;
+};
+
+class OBJECT_ALIAS_PATTERN : public RelationalGuard {
+ public:
+  OBJECT_ALIAS_PATTERN(
+      RootGuardManager* root,
+      std::shared_ptr<ObjectAliasPatternState> state,
+      size_t alias,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : RelationalGuard(
+            root,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _state(std::move(state)),
+        _alias(alias) {}
+
+  bool check_nopybind(PyObject* value) override {
+    return _state->check(value, _alias);
+  }
+
+  void reset_state() final {
+    _state->reset();
+  }
+
+  std::shared_ptr<OBJECT_ALIAS_PATTERN> clone(RootGuardManager* root);
+
+ private:
+  std::shared_ptr<ObjectAliasPatternState> _state;
+  size_t _alias;
+};
+
 class OBJECT_ALIASING : public RelationalGuard {
  public:
   OBJECT_ALIASING(
@@ -3360,6 +3422,7 @@ GuardManager* clone_guard_manager(
     GuardManager* from,
     RootGuardManager* root,
     const py::function& clone_filter_fn);
+
 void add_relational_guard_resetter_to_cloned_root(
     RootGuardManager* root,
     std::shared_ptr<RelationalGuard> guard);
@@ -3733,9 +3796,14 @@ class GuardManager {
       GuardManager* cloned_mgr,
       const py::function& clone_filter_fn) {
     for (const auto& guard : _leaf_guards) {
-      cloned_mgr->_leaf_guards.emplace_back(guard);
+      auto cloned_guard = guard;
+      if (auto pattern =
+              std::dynamic_pointer_cast<OBJECT_ALIAS_PATTERN>(guard)) {
+        cloned_guard = pattern->clone(cloned_root);
+      }
+      cloned_mgr->_leaf_guards.emplace_back(cloned_guard);
       if (std::shared_ptr<RelationalGuard> relational_guard =
-              std::dynamic_pointer_cast<RelationalGuard>(guard)) {
+              std::dynamic_pointer_cast<RelationalGuard>(cloned_guard)) {
         // Cloned roots do not own the dedicated NO_TENSOR_ALIASING replay
         // guard. Preserve only the classification needed to prevent ordinary
         // dict-tag skips from omitting an unoptimized relational guard.
@@ -4507,6 +4575,17 @@ class RootGuardManager : public GuardManager {
     return _no_tensor_aliasing_guard;
   }
 
+  std::shared_ptr<ObjectAliasPatternState> clone_alias_pattern_state(
+      const std::shared_ptr<ObjectAliasPatternState>& state) {
+    auto [it, inserted] =
+        _alias_pattern_clones.try_emplace(state.get(), nullptr);
+    if (inserted) {
+      it->second = std::make_shared<ObjectAliasPatternState>(
+          state->representatives.size());
+    }
+    return it->second;
+  }
+
   // Adds the relational guard resetter
   void add_relational_guard_resetter(
       std::shared_ptr<RelationalGuard> relational_guard) {
@@ -4533,6 +4612,9 @@ class RootGuardManager : public GuardManager {
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
+    auto reset_relational_guards =
+        c10::make_scope_exit([this] { _reset_relational_guard_state(); });
+
     // Clean up dict pointer recording for tag safe roots
     reset_dict_tag_recording_variables();
 
@@ -4544,7 +4626,6 @@ class RootGuardManager : public GuardManager {
     CurrentDeviceIndexCacheScope current_device_index_cache_scope;
 
     if (!GuardManager::check_leaf_guards_nopybind(value)) {
-      _reset_relational_guard_state();
       return false;
     }
 
@@ -4564,19 +4645,16 @@ class RootGuardManager : public GuardManager {
     });
 
     if (!GuardManager::check_accessors_nopybind(value)) {
-      _reset_relational_guard_state();
       return false;
     }
 
     // Iterate over epilogue leaf guards.
     for (const auto& guard : _epilogue_lambda_guards) {
       if (!guard->check_nopybind(value)) { // early exit
-        _reset_relational_guard_state();
         return false;
       }
     }
 
-    _reset_relational_guard_state();
     return true;
   }
 
@@ -4598,6 +4676,9 @@ class RootGuardManager : public GuardManager {
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
+    auto reset_relational_guards =
+        c10::make_scope_exit([this] { _reset_relational_guard_state(); });
+
     // Get the local state. This will be used for TENSOR_MATCH guards.
     if (_init_local_state) {
       LocalState state;
@@ -4615,7 +4696,6 @@ class RootGuardManager : public GuardManager {
             value, num_guards_executed);
 
     if (!debug_info_leaf.result) {
-      _reset_relational_guard_state();
       return debug_info_leaf;
     }
 
@@ -4632,7 +4712,6 @@ class RootGuardManager : public GuardManager {
             value, num_guards_executed);
 
     if (!debug_info_accessors.result) {
-      _reset_relational_guard_state();
       return debug_info_accessors;
     }
 
@@ -4642,7 +4721,6 @@ class RootGuardManager : public GuardManager {
           guard->check_verbose_nopybind(value);
       num_guards_executed++;
       if (!tmp_debug_info.result) {
-        _reset_relational_guard_state();
         return GuardDebugInfo(
             false,
             tmp_debug_info.verbose_code_parts,
@@ -4650,7 +4728,6 @@ class RootGuardManager : public GuardManager {
             tmp_debug_info.user_stack);
       }
     }
-    _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
   }
 
@@ -4784,6 +4861,10 @@ class RootGuardManager : public GuardManager {
   // when the guard evaluates to False. This ensures that guard state is reset
   // on guard failure so that next invocation is clean.
   std::vector<std::shared_ptr<RelationalGuard>> _relational_guard_resetters;
+  std::unordered_map<
+      const ObjectAliasPatternState*,
+      std::shared_ptr<ObjectAliasPatternState>>
+      _alias_pattern_clones;
 
   // These guards are lambda guards, i.e., the guards that lack C++
   // implementation. For simplicity, we add these guards at the root. They
@@ -4902,11 +4983,6 @@ class DictGuardManager : public GuardManager {
       return false;
     }
 
-    // Early return
-    if (_size == 0) {
-      return true;
-    }
-
     // Invokes the base class's check_nopybind method. We permit a limited set
     // of leaf guards and accessors within the DictGuardManager framework.
     // Integrating certain guards or accessors directly within the
@@ -4958,11 +5034,6 @@ class DictGuardManager : public GuardManager {
     if (PyDict_Size(obj) != _size) {
       return GuardDebugInfo(
           false, "len(" + get_source() + ") != " + std::to_string(_size), 0);
-    }
-
-    // Early return
-    if (_size == 0) {
-      return GuardDebugInfo(true, 0);
     }
 
     // Invokes the base class's check_nopybind method. We permit a limited set
@@ -5182,6 +5253,16 @@ GuardManager* clone_guard_manager(
     RootGuardManager* cloned_root,
     const py::function& clone_filter_fn) {
   return from->clone(cloned_root, clone_filter_fn);
+}
+
+std::shared_ptr<OBJECT_ALIAS_PATTERN> OBJECT_ALIAS_PATTERN::clone(
+    RootGuardManager* root) {
+  return std::make_shared<OBJECT_ALIAS_PATTERN>(
+      root,
+      root->clone_alias_pattern_state(_state),
+      _alias,
+      verbose_code_parts(),
+      get_user_stack());
 }
 
 void add_relational_guard_resetter_to_cloned_root(
@@ -7515,6 +7596,24 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
   py::object _accessor_fn;
 };
 
+void install_object_alias_pattern_guard(
+    const std::vector<GuardManager*>& managers,
+    const std::vector<size_t>& aliases,
+    py::object verbose_code_parts,
+    py::object user_stack) {
+  TORCH_CHECK(!managers.empty() && managers.size() == aliases.size());
+  auto* root = managers[0]->get_root();
+  auto state = std::make_shared<ObjectAliasPatternState>(managers.size());
+  for (size_t i = 0; i < managers.size(); ++i) {
+    TORCH_CHECK(
+        managers[i]->get_root() == root && aliases[i] < managers.size());
+    auto guard = std::make_shared<OBJECT_ALIAS_PATTERN>(
+        root, state, aliases[i], verbose_code_parts, user_stack);
+    root->add_relational_guard_resetter(guard);
+    managers[i]->add_permitted_leaf_guard(std::move(guard));
+  }
+}
+
 void install_object_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
@@ -9201,6 +9300,12 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("guard_manager_enum"),
           py::return_value_policy::reference);
 
+  py::class_<
+      OBJECT_ALIAS_PATTERN,
+      RelationalGuard,
+      std::shared_ptr<OBJECT_ALIAS_PATTERN>>(py_m, "OBJECT_ALIAS_PATTERN");
+  py_m.def(
+      "install_object_alias_pattern_guard", install_object_alias_pattern_guard);
   py_m.def("install_object_aliasing_guard", install_object_aliasing_guard);
   py_m.def(
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);

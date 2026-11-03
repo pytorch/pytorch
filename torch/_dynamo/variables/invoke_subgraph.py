@@ -6,10 +6,12 @@ higher-order operator.
 
 import collections
 import enum
+import functools
 import logging
 import traceback
 import types
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from typing import Any, cast, NamedTuple, TYPE_CHECKING, TypeGuard
 
 import torch
@@ -20,6 +22,7 @@ from torch._dynamo.guards import (
     extract_tensor_metadata,
     GUARD_VALUE_DISPATCH,
     GuardCheckSpec,
+    install_guard,
     SKIP_GUARD,
     UnsupportedGuardCheckSpec,
 )
@@ -477,6 +480,10 @@ def is_reuse_eligible(
     go stale from mutations.
     """
     if not has_reuse_hash_fn:
+        if tracing_info.has_builtin_method_keys:
+            # Stamp-out does not replay remapped receiver-alias guards. Trace
+            # each region to retain its runtime identity constraints.
+            return False
         if tracing_info.side_effect_stack is not None:
             stack_msg = "\n" + "".join(
                 traceback.format_list(tracing_info.side_effect_stack)
@@ -586,11 +593,13 @@ def build_reuse_condition(
 
     # Collect all guards for sources accessed during the subgraph trace
     # and for the flattened arg sources.
-    all_sources = set(traced_sources)
+    all_sources = OrderedSet(traced_sources)
     all_sources.update(s for s in fingerprint.arg_sources if s is not None)
-    all_relevant_guards: set[Guard] = set()
+    all_relevant_guards: OrderedSet[Guard] = OrderedSet()
     for source in all_sources:
-        all_relevant_guards.update(tx.output.guards.get_guards_for_source(source))
+        all_relevant_guards.update(
+            sorted(tx.output.guards.get_guards_for_source(source), key=Guard.sort_key)
+        )
 
     guard_tuples: list[tuple[Source, GuardCheckSpec, object, Guard]] = []
     for guard in all_relevant_guards:
@@ -629,6 +638,7 @@ def build_reuse_condition(
         guards=guard_tuples,
         treespec=fingerprint.treespec,
         traced_sources=traced_sources,
+        guard_on_key_order=tx.output.guard_on_key_order.intersection(traced_sources),
     )
 
 
@@ -642,6 +652,109 @@ def build_source_replacement(
         for old, new in zip(old_arg_sources, new_arg_sources)
         if old is not None and new is not None and old != new
     }
+
+
+def remap_guard(guard: Guard, remap_source: Callable[[Source], Source]) -> Guard:
+    def remap(value: Any) -> Any:
+        if isinstance(value, Source):
+            return remap_source(value)
+        if type(value) is tuple:
+            items = tuple(remap(item) for item in value)
+            return value if all(a is b for a, b in zip(value, items)) else items
+        return value
+
+    source = remap(guard.originating_source)
+    create_fn = guard.create_fn
+    if isinstance(create_fn, functools.partial):
+        args = tuple(remap(arg) for arg in create_fn.args)
+        keywords = {key: remap(value) for key, value in create_fn.keywords.items()}
+        if any(a is not b for a, b in zip(args, create_fn.args)) or any(
+            value is not create_fn.keywords[key] for key, value in keywords.items()
+        ):
+            create_fn = functools.partial(create_fn.func, *args, **keywords)
+    if source is guard.originating_source and create_fn is guard.create_fn:
+        return guard
+    return replace(
+        guard,
+        originating_source=source,
+        create_fn=create_fn,
+        guard_types=None,
+        code_list=None,
+        obj_weakref=None,
+        guarded_class_weakref=None,
+        _hash=None,
+    )
+
+
+def equivalent_guards(left: Guard, right: Guard) -> bool:
+    """Compare guard behavior, excluding the trace stack and export metadata."""
+
+    def same_payload(a: Any, b: Any) -> bool:
+        if a is b:
+            return True
+        if type(a) is not type(b):
+            return False
+        if isinstance(a, Source) or type(a) in (str, int, bool, bytes, type(None)):
+            return a == b
+        if type(a) is tuple:
+            return len(a) == len(b) and all(same_payload(x, y) for x, y in zip(a, b))
+        if type(a) is dict:
+            return a.keys() == b.keys() and all(same_payload(a[k], b[k]) for k in a)
+        return False
+
+    if (
+        left.originating_source != right.originating_source
+        or left._force_dict_keys_match != right._force_dict_keys_match
+    ):
+        return False
+    if left.inner_create_fn() is not right.inner_create_fn():
+        return False
+    a, b = left.create_fn, right.create_fn
+    return same_payload(
+        getattr(a, "args", ()), getattr(b, "args", ())
+    ) and same_payload(getattr(a, "keywords", {}), getattr(b, "keywords", {}))
+
+
+@dataclass
+class SubgraphReuseMatch:
+    """Work shared by one reuse check and its stamp-out, never cached across calls."""
+
+    entry: InvokeSubgraphReuseEntry
+    source_replacement: dict[Source, Source]
+    resolve_globals: dict[str, Any]
+    condition: InvokeSubgraphReuseCondition | None
+    resolve_locals: dict[str, Any] = field(default_factory=dict)
+    resolved_values: dict[Source, Any] = field(default_factory=dict)
+    cloned_sources: dict[Source, Source] = field(default_factory=dict)
+    runtime_guards: list[Guard] = field(default_factory=list)
+
+    @classmethod
+    def create(
+        cls,
+        tx: "InstructionTranslatorBase",
+        entry: InvokeSubgraphReuseEntry,
+        fingerprint: InputFingerprint,
+        condition: InvokeSubgraphReuseCondition | None = None,
+    ) -> "SubgraphReuseMatch":
+        return cls(
+            entry,
+            build_source_replacement(entry.arg_sources, fingerprint.arg_sources),
+            {"G": tx.output.root_tx.f_globals, "L": tx.output.root_tx.f_locals},
+            condition,
+        )
+
+    def remap_source(self, source: Source) -> Source:
+        if not self.source_replacement:
+            return source
+        if source not in self.cloned_sources:
+            cloned = source.clone(lambda s: self.source_replacement.get(s, s))
+            self.cloned_sources[source] = source if cloned == source else cloned
+        return self.cloned_sources[source]
+
+    def resolve(self, source: Source) -> Any:
+        return source.get_value(
+            self.resolve_globals, self.resolve_locals, self.resolved_values
+        )
 
 
 def _treespecs_identical(a: pytree.TreeSpec, b: pytree.TreeSpec, /) -> bool:
@@ -662,7 +775,7 @@ def is_reusable(
     tx: "InstructionTranslatorBase",
     condition: "InvokeSubgraphReuseCondition",
     fingerprint: InputFingerprint,
-    cached_entry: InvokeSubgraphReuseEntry,
+    match: SubgraphReuseMatch,
 ) -> bool:
     """Check if a cached subgraph can be reused for the current call.
 
@@ -673,8 +786,8 @@ def is_reusable(
     (2) Check for mutations on the remapped traced_sources — if any source
         the subgraph read has been mutated since the original trace, the
         cached guards would evaluate against stale values.
-    (3) Build a source replacement mapping (old sources → new sources) and
-        re-evaluate the snapshotted guards under the new sources.
+    (3) Use the match's remapped sources to re-evaluate snapshotted guards.
+        Record them on this invocation's match for runtime replay on stamp-out.
     """
     # Structural check: treespec must match first.
     if condition.treespec is not None and (
@@ -763,8 +876,8 @@ def is_reusable(
                 # If both the cached and current arg have sources, source
                 # replacement in stamp_out will resolve the correct value.
                 cached_src = (
-                    cached_entry.arg_sources[i]
-                    if i < len(cached_entry.arg_sources)
+                    match.entry.arg_sources[i]
+                    if i < len(match.entry.arg_sources)
                     else None
                 )
                 new_src = (
@@ -782,50 +895,23 @@ def is_reusable(
                     )
                     return False
 
-    source_replacement = build_source_replacement(
-        cached_entry.arg_sources, fingerprint.arg_sources
-    )
-
-    # Parameterized source - this function gives you new sources parameterized
-    # on the arg_sources. For example, if the input to the nested compile region
-    # is a nn Module layer with source `layers[0]`, then old source
-    # `layers[0].weight` gets remapped to `layers[1].weight`. This
-    # parameterization is central in getting the new sources and then running
-    # guards on them.
-    def replacement_fn(s: Source) -> Source:
-        return source_replacement.get(s, s)
-
-    # Check for mutations on remapped traced_sources.
-    if source_replacement:
-        remapped = OrderedSet(s.clone(replacement_fn) for s in condition.traced_sources)
-    else:
-        remapped = condition.traced_sources
+    # Check mutations before reusing the resolved guard values for stamp-out.
+    remapped = OrderedSet(match.remap_source(s) for s in condition.traced_sources)
     if has_mutated_vars(tx, remapped):
         return False
-
-    # If no sources changed, all guards were already checked during the
-    # original trace and will trivially pass again.
-    if not source_replacement:
+    if not match.source_replacement:
         return True
 
-    # Shared resolution context so source.get_value memoizes intermediate
-    # results (e.g. common base sources) across all guards in this check.
-    resolve_globals: dict[str, Any] = {
-        "G": tx.output.root_tx.f_globals,
-        "L": tx.output.root_tx.f_locals,
-    }
-    resolve_locals: dict[str, Any] = {}
-    resolve_cache: dict[Source, Any] = {}
-
     for source, handler, expected, guard in condition.guards:
-        new_source = source.clone(replacement_fn)
-        # Source unchanged after replacement — guard already passed during
-        # the original trace, skip re-evaluation.
-        if new_source == source:
+        new_guard = remap_guard(guard, match.remap_source)
+        # Both the originating source and any bound sources are unchanged.
+        if new_guard is guard:
             continue
+        match.runtime_guards.append(new_guard)
+        new_source = new_guard.originating_source
 
         try:
-            value = new_source.get_value(resolve_globals, resolve_locals, resolve_cache)
+            value = match.resolve(new_source)
         except Exception:
             hc_log.debug(
                 "subgraph_reuse: reuse failed -- cannot resolve source\n"
@@ -885,7 +971,7 @@ def find_reuse_match(
     tx: "InstructionTranslatorBase",
     fn_var: Any,
     fingerprint: InputFingerprint,
-) -> InvokeSubgraphReuseEntry | None:
+) -> SubgraphReuseMatch | None:
     from torch._guards import InvokeSubgraphCache
 
     invoke_subgraph_cache = tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
@@ -900,12 +986,20 @@ def find_reuse_match(
     # this evaluator function is called one by one for all the invoke subgraph
     # reuse entries - the one that evaluates to True is stamped out in the
     # graph.
+    match = None
+
     def evaluator(
         cond: "InvokeSubgraphReuseCondition", entry: InvokeSubgraphReuseEntry
     ) -> bool:
-        return is_reusable(tx, cond, fingerprint, entry)
+        nonlocal match
+        candidate = SubgraphReuseMatch.create(tx, entry, fingerprint, cond)
+        if not is_reusable(tx, cond, fingerprint, candidate):
+            return False
+        match = candidate
+        return True
 
-    return invoke_subgraph_cache.find_reuse_entry(fn_code, evaluator)
+    invoke_subgraph_cache.find_reuse_entry(fn_code, evaluator)
+    return match
 
 
 def save_reuse_entry(
@@ -1052,7 +1146,7 @@ def find_reuse_entry_by_key(
 def stamp_out_subgraph(
     tx: "InstructionTranslatorBase",
     fingerprint: InputFingerprint,
-    cached: InvokeSubgraphReuseEntry,
+    match: SubgraphReuseMatch,
 ) -> VariableTracker:
     """Emit a new invoke_subgraph call by stamping out a cached subgraph.
 
@@ -1064,21 +1158,30 @@ def stamp_out_subgraph(
     from torch._dynamo.variables.builder import VariableBuilder
     from torch._dynamo.variables.higher_order_ops import add_call_function, make_attr
 
+    cached = match.entry
     flat_proxies = get_flat_proxies(fingerprint)
-    new_arg_sources = fingerprint.arg_sources
-
-    source_replacement = build_source_replacement(cached.arg_sources, new_arg_sources)
+    for guard in match.runtime_guards:
+        if guard.create_fn_name() == "TENSOR_MATCH":
+            # Build even shape-only captures, while deduplicating lifted inputs
+            # and tensor alias guards through VariableBuilder's existing cache.
+            source = guard.originating_source
+            VariableBuilder(tx, source)(match.resolve(source))
+        elif not any(
+            equivalent_guards(guard, existing)
+            for existing in tx.output.guards.get_guards_for_source(
+                guard.originating_source
+            )
+        ):
+            install_guard(guard)
+    if match.condition is not None:
+        tx.output.guard_on_key_order.update(
+            match.remap_source(source) for source in match.condition.guard_on_key_order
+        )
+        tx.output.current_tracer.traced_sources.update(
+            match.remap_source(source) for source in match.condition.traced_sources
+        )
 
     new_lifted_args = []
-    # Shared resolution context so get_value memoizes intermediate results
-    # (e.g. L['self'].layers) across all freevars in this stamp-out.
-    resolve_globals: dict[str, Any] = {
-        "G": tx.output.root_tx.f_globals,
-        "L": tx.output.root_tx.f_locals,
-    }
-    resolve_locals: dict[str, Any] = {}
-    resolve_cache: dict[Source, Any] = {}
-
     # Find the args for the about-to-be-inserted invoke_subgraph call.
     for subgraph_input in cached.subgraph_input_mapping:
         if isinstance(subgraph_input, LiftedUserArg):
@@ -1094,15 +1197,13 @@ def stamp_out_subgraph(
         elif isinstance(subgraph_input, LiftedSyntheticObject):
             ctor_args = subgraph_input.ctor_args
             ctor_arg_sources = subgraph_input.ctor_arg_sources
-            if ctor_arg_sources and source_replacement:
+            if ctor_arg_sources and match.source_replacement:
                 new_ctor_args = []
                 new_ctor_arg_sources = []
                 for val, arg_src in zip(ctor_args, ctor_arg_sources):
                     if arg_src is not None:
-                        new_src = arg_src.clone(lambda s: source_replacement.get(s, s))
-                        val = new_src.get_value(
-                            resolve_globals, resolve_locals, resolve_cache
-                        )
+                        new_src = match.remap_source(arg_src)
+                        val = match.resolve(new_src)
                         arg_src = new_src
                     new_ctor_args.append(val)
                     new_ctor_arg_sources.append(arg_src)
@@ -1113,12 +1214,10 @@ def stamp_out_subgraph(
             )
             new_lifted_args.append(vt.as_proxy())
         elif isinstance(subgraph_input, LiftedCapturedSource):
-            new_source = subgraph_input.source
-            if source_replacement:
-                new_source = new_source.clone(lambda s: source_replacement.get(s, s))
+            new_source = match.remap_source(subgraph_input.source)
             # VariableBuilder deduplicates via input_source_to_var,
             # so this reuses existing graph placeholders automatically.
-            value = new_source.get_value(resolve_globals, resolve_locals, resolve_cache)
+            value = match.resolve(new_source)
             vt = VariableBuilder(tx, new_source)(value)
             new_lifted_args.append(vt.as_proxy())
 
@@ -1384,7 +1483,11 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 )
                 fingerprint = build_input_fingerprint(tx, fn_args_vt, kwargs)
                 with dynamo_timed("invoke_subgraph_reuse_stamp_out"):
-                    return stamp_out_subgraph(tx, fingerprint, cached)
+                    return stamp_out_subgraph(
+                        tx,
+                        fingerprint,
+                        SubgraphReuseMatch.create(tx, cached, fingerprint),
+                    )
 
         # Automatic reuse lookup (guard-based): check fn_code first (cheap) to
         # avoid the expensive pytree flatten in build_input_fingerprint on
@@ -1401,7 +1504,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 hc_log.debug(
                     "subgraph_reuse: cache hit for '%s', reusing subgraph '%s'",
                     fn_var,
-                    match.body_name,
+                    match.entry.body_name,
                 )
                 with dynamo_timed("invoke_subgraph_reuse_stamp_out"):
                     return stamp_out_subgraph(tx, fingerprint, match)
@@ -1419,6 +1522,9 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 body_graph_output_vts,
                 tracing_info,
             ) = self.create_wrapped_node(tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME)
+
+        # Fresh child traces contribute dependencies just like stamped-out ones.
+        tx.output.current_tracer.traced_sources.update(tracing_info.traced_sources)
 
         if len(p_kwargs) > 0:
             unimplemented(

@@ -83,6 +83,132 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
+    def test_nested_lazy_constant_aggregate_does_not_specialize_values(self):
+        def fn(x, value):
+            return x + 1, ((value, None),)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for value in (1234567, 2345678, 1234567):
+            self.assertEqual(compiled(x, value), fn(x, value))
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("value", [None, True, False, Ellipsis, NotImplemented, torch.float32])
+    def test_sourced_singleton_aggregate_uses_load_const(self, value):
+        constants = []
+
+        def hook(instructions):
+            constants.extend(
+                i.argval
+                for i in instructions
+                if i.opname == "LOAD_CONST" and type(i.argval) is tuple
+            )
+
+        def fn(x, value):
+            return x + 1, (value, None)
+
+        x = torch.ones(1)
+        with self.register_bytecode_hook(hook):
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x, value),
+                fn(x, value),
+            )
+        self.assertIn((value, None), constants)
+
+    @parametrize(
+        "factory",
+        [
+            lambda: torch.device("cpu"),
+            lambda: float("1.23456789"),
+            lambda: int("1234567890123456"),
+            lambda: b"configuration-value".decode(),
+        ],
+    )
+    def test_sourced_non_singleton_aggregate_identity(self, factory):
+        def fn(x, value):
+            return x + 1, ((value,),), frozenset((value,)), slice(value, None)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        values = [factory(), factory()]
+        self.assertIsNot(values[0], values[1])
+        x = torch.ones(1)
+        for value in values:
+            result = compiled(x, value)
+            self.assertIs(result[1][0][0], value)
+            self.assertIs(next(iter(result[2])), value)
+            self.assertIs(result[3].start, value)
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("mapping_type", [dict, collections.OrderedDict])
+    def test_dict_input_key_snapshot_reused(self, mapping_type):
+        def hook(instructions):
+            attrs = [i.argval for i in instructions if i.opname == "LOAD_ATTR"]
+            self.assertEqual(attrs.count("keys"), 1)
+
+        def fn(mapping):
+            a, b, c = mapping.values()
+            return a + b * c
+
+        mapping = mapping_type((object(), torch.full((1,), i)) for i in range(1, 4))
+        if mapping_type is collections.OrderedDict:
+            mapping.move_to_end(next(iter(mapping)))
+        with self.register_bytecode_hook(hook):
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(compiled(mapping), fn(mapping))
+
+    @parametrize("container_type", [None, list, dict, set])
+    @parametrize("nested", [False, True])
+    def test_sourced_constant_in_aggregates(self, container_type, nested):
+        def fn(x, key):
+            contents = key
+            if container_type is not None:
+                contents = (
+                    {key: None} if container_type is dict else container_type((key,))
+                )
+            value = slice(contents, None)
+            if nested:
+                value = ((slice(value, None),),)
+            return x + 1, ((key,),), frozenset((key,)), value
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        keys = [b"layer0weight".decode() for _ in range(2)]
+        self.assertIsNot(keys[0], keys[1])
+        x = torch.ones(1)
+        previous = None
+        for key in keys:
+            result = compiled(x, key)
+            self.assertEqual(result, fn(x, key))
+            self.assertIs(result[1][0][0], key)
+            self.assertIs(next(iter(result[2])), key)
+            contents = result[3][0][0].start.start if nested else result[3].start
+            if container_type is None:
+                self.assertIs(contents, key)
+            else:
+                self.assertIs(next(iter(contents)), key)
+                self.assertIsNot(contents, previous)
+                previous = contents
+        if container_type is None:
+            self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("graph_break", [False, True])
+    def test_dynamic_slice_reconstruct(self, graph_break):
+        def fn(x):
+            result = x + 1
+            value = slice(0, x.shape[0] - 1)
+            if graph_break:
+                torch._dynamo.graph_break()
+            return result, value
+
+        compiled = torch.compile(
+            fn, backend="eager", dynamic=True, fullgraph=not graph_break
+        )
+        for size in (4, 6):
+            x = torch.randn(size)
+            self.assertEqual(compiled(x), fn(x))
+
     def _compile_and_capture_side_effects(self, fn, *args):
         """Compile fn and return side-effect metadata from bytecode hooks."""
         captured = {}
