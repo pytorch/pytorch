@@ -1130,6 +1130,38 @@ def forward(self, sin, cos):
         }
         self.assertEqual(spec_targets, {"sub.spec"})
 
+    def test_set_grad_pass_converts_dotted_graph_module(self):
+        # A graph module read under a dotted name, here a cond branch on a
+        # submodule, gets its own regions converted and is written back there.
+        branch = torch.fx.Graph()
+        a = branch.placeholder("a")
+        branch.call_function(torch._C._set_grad_enabled, (False,))
+        b = branch.call_function(torch.ops.aten.sin.default, (a,))
+        branch.call_function(torch._C._set_grad_enabled, (True,))
+        branch.output((b,))
+        root = torch.nn.Module()
+        root.sub = torch.nn.Module()
+        root.sub.body = torch.fx.GraphModule(torch.nn.Module(), branch)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        pred = graph.call_function(
+            torch.ops.aten.gt.Scalar,
+            (graph.call_function(torch.ops.aten.sum.default, (x,)), 0),
+        )
+        body = graph.get_attr("sub.body")
+        out = graph.call_function(torch.ops.higher_order.cond, (pred, body, body, (x,)))
+        graph.output((graph.call_function(operator.getitem, (out, 0)),))
+        gm = torch.fx.GraphModule(root, graph)
+        with FakeTensorMode() as mode:
+            fake_x = mode.from_tensor(torch.ones(2))
+            FakeTensorProp(gm.sub.body, mode).propagate(fake_x)
+            FakeTensorProp(gm, mode).propagate(fake_x)
+        new_gm, _ = replace_set_grad_with_hop_pass(gm, None)
+        new_body = torch.fx.graph_module._get_attr(new_gm, "sub.body")
+        region = torch.ops.higher_order.wrap_with_set_grad_enabled
+        self.assertTrue(new_body.graph.find_nodes(op="call_function", target=region))
+        self.assertEqual(new_gm(torch.ones(2)), (torch.ones(2).sin(),))
+
     def test_node_inline_renames_colliding_attribute(self):
         # The inlined graph reads an attribute under a name that the outer
         # module uses for another object, so it is stored under a new name. A
