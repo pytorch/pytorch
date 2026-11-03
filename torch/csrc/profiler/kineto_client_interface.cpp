@@ -1,5 +1,5 @@
 #ifdef USE_KINETO
-#include <ATen/Context.h>
+#include <c10/util/env.h>
 #include <libkineto.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
 #include <torch/csrc/mtia/profiler/MTIAMemoryProfiler.h>

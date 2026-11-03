@@ -264,8 +264,8 @@ void ActivityTraceWrapper::save(const std::string& path) {
 }
 
 bool isDevicePresent() {
-  return at::hasCUDA() || at::hasXPU() || at::hasMTIA() ||
-      c10::get_privateuse1_backend() != "privateuseone";
+  return at::hasCUDA() || at::hasXPU() || at::hasMTIA() || at::hasHPU() ||
+      c10::is_privateuse1_backend_registered();
 }
 
 bool collectivesProfilerExists() {
@@ -302,7 +302,7 @@ static const std::string appendCustomConfig(
 #endif
 
 void prepareTrace(
-    const bool cpuOnly,
+    const std::optional<bool> cpuOnly,
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config,
     const std::string& trace_id,
@@ -311,7 +311,8 @@ void prepareTrace(
 #ifdef USE_KINETO
   libkineto::api().resetKinetoTLS();
   if (!libkineto::api().isProfilerRegistered()) {
-    libkineto_init(/*cpuOnly=*/cpuOnly, /*logOnError=*/true);
+    libkineto_init(
+        /*cpuOnly=*/cpuOnly.value_or(!isDevicePresent()), /*logOnError=*/true);
     libkineto::api().suppressLogMessages();
   }
 
@@ -450,12 +451,17 @@ void prepareTrace(
     extraConfig += value;
     extraConfig += '\n';
   }
-  // libkineto is registered once per process, so cpuOnly only says whether the
-  // process has a device. A trace that requested no device activity must leave
-  // the device tracer alone, since another tool may own it.
-  extraConfig += has_device_activity ? "GPU_TRACING_ENABLED=true\n"
-                                     : "GPU_TRACING_ENABLED=false\n";
-  const std::string configStr =
+  // Registration fixes only whether libkineto can trace a GPU; this key says
+  // whether this trace may. A trace that requested no device activity leaves
+  // the GPU tracer alone, since another tool may own it. Any device activity
+  // allows it, not only CUDA or XPU, because libkineto also emits its default
+  // device rows only when it may trace a GPU. The key goes first because
+  // libkineto stops parsing at the first malformed line, and a custom config
+  // can contain one.
+  const std::string gpuTracingConfig = has_device_activity
+      ? "GPU_TRACING_ENABLED=true\n"
+      : "GPU_TRACING_ENABLED=false\n";
+  const std::string configStr = gpuTracingConfig +
       appendCustomConfig(traceIdStr, config.custom_profiler_config) +
       extraConfig;
 

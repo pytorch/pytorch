@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 
 // Skip Kineto dependency on mobile unless explicitly asked for.
@@ -114,13 +115,19 @@ using ActivityFilter = std::unordered_map<
     std::unordered_set<std::string>>;
 using ProfilerExtensionMap = std::unordered_map<std::string, std::string>;
 
-// Whether this process has a device that Kineto could trace. A PrivateUse1
-// backend counts once it has registered its own name. Asking can initialize a
-// device driver; for CUDA it calls cudaGetDeviceCount.
+// Whether this process may have a device that Kineto could trace. For XPU this
+// only says that PyTorch was built with XPU support. A PrivateUse1 backend
+// counts once it has registered its own name, which it has not yet done while
+// torch._C initializes. Asking can initialize a device driver; for CUDA it
+// calls cudaGetDeviceCount, as libkineto does anyway when a trace stops.
 bool isDevicePresent();
 
+// cpuOnly matters only when this call registers libkineto, which happens once
+// per process. It then fixes whether libkineto can trace a device at all, and
+// isDevicePresent decides when it is empty. Each trace arms device tracing only
+// if activities request a device.
 TORCH_API void prepareTrace(
-    const bool cpuOnly,
+    const std::optional<bool> cpuOnly,
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config,
     const std::string& trace_id = "",
