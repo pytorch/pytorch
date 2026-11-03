@@ -798,6 +798,9 @@ class _KinetoProfile:
         Args:
             activities (iterable): list of activity groups to use in profiling, supported values:
                 ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``
+        Raises:
+            ValueError: if ``activities`` includes an activity this profiler does not collect.
+                CUDA and XPU count as one, since Kineto toggles them together.
         Examples:
 
         .. code-block:: python
@@ -830,10 +833,9 @@ class _KinetoProfile:
         collected = self.activities | gpu if self.activities & gpu else self.activities
         if missing := activities - collected:
             names = ", ".join(sorted(activity.name for activity in missing))
-            warn(
-                f"toggle_collection_dynamic has no effect on {names}, which this "
-                "profiler does not collect.",
-                stacklevel=2,
+            raise ValueError(
+                f"Cannot toggle activities this profiler does not collect: {names}. "
+                "Add them to the profiler's activities."
             )
         self.profiler.toggle_collection_dynamic(enable, activities)
 

@@ -747,6 +747,11 @@ static void toggleCPUCollectionDynamic(bool enable) {
 void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities) {
+  TORCH_CHECK_VALUE(
+      !activities.contains(torch::autograd::profiler::ActivityType::CPU) ||
+          profilerStateInfo() != nullptr,
+      "Cannot toggle CPU activity, which this profiler does not collect. "
+      "Add CPU to the profiler's activities.");
   if (activities.contains(torch::autograd::profiler::ActivityType::CPU) &&
       (!activities.contains(torch::autograd::profiler::ActivityType::CUDA) ||
        !activities.contains(torch::autograd::profiler::ActivityType::XPU))) {

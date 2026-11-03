@@ -407,6 +407,16 @@ if not any(e.device_type == DeviceType.CUDA for e in prof.events()):
                 y = torch.mm(x, x)
         self.assertGreater(len(p.events()), 0)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_toggle_cpu_without_cpu_raises(self):
+        # The legacy profiler forwards the toggle straight to C++, which used to
+        # crash when the session had no CPU collection.
+        with torch.autograd.profiler.profile(
+            use_cpu=False, use_device="cuda", use_kineto=True
+        ) as p:
+            with self.assertRaisesRegex(ValueError, "Cannot toggle CPU"):
+                p.toggle_collection_dynamic(True, [ProfilerActivity.CPU])
+
     @unittest.skipIf(TEST_WITH_ROCM, "not supported on ROCm")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_dict_syntax(self, device):
@@ -2422,22 +2432,18 @@ with open(sys.argv[1], "w") as f:
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
             p.stop()
 
-    def test_toggle_uncollected_activity_warns(self):
+    def test_toggle_uncollected_activity_raises(self):
         with profile(activities=[ProfilerActivity.CPU]) as p:
-            with self.assertWarnsRegex(UserWarning, "no effect on CUDA"):
+            with self.assertRaisesRegex(ValueError, "does not collect: CUDA"):
                 p.toggle_collection_dynamic(False, [ProfilerActivity.CUDA])
-            with warnings.catch_warnings():
-                warnings.simplefilter("error")
-                p.toggle_collection_dynamic(False, [ProfilerActivity.CPU])
-                p.toggle_collection_dynamic(True, [ProfilerActivity.CPU])
+            p.toggle_collection_dynamic(False, [ProfilerActivity.CPU])
+            p.toggle_collection_dynamic(True, [ProfilerActivity.CPU])
 
-        # Toggling CUDA also toggles XPU, so a session that collects XPU must
-        # not be told the call does nothing.
+        # Toggling CUDA also toggles XPU, so a session that collects XPU may
+        # toggle CUDA.
         p = profile(activities=[ProfilerActivity.CPU, ProfilerActivity.XPU])
         p.profiler = MagicMock()
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")
-            p.toggle_collection_dynamic(False, [ProfilerActivity.CUDA])
+        p.toggle_collection_dynamic(False, [ProfilerActivity.CUDA])
         p.profiler.toggle_collection_dynamic.assert_called_once_with(
             False, {ProfilerActivity.CUDA}
         )
