@@ -204,19 +204,18 @@ def cudagraphs(dynamo_model: torch.fx.GraphModule, dynamo_inputs: Sequence[Any])
                 f"skipping cudagraphs due to {skip_msg}"
             )
 
-            # See [Backward Generation Handling]
-            device_idx = boxed_device_index.value
-            if device_idx is None:
-                device_idx = 0  # Default to device 0 if not set
-            manager = torch._inductor.cudagraph_trees.get_manager(
-                device_idx, create_if_none_exists=False
-            )
-            if manager is None:
-                raise AssertionError("cudagraph manager must exist for backward")
-
+            # See [Backward Generation Handling]. Looked up when the backward runs,
+            # as in output_code.maybe_handle_backward_generation: an eagerly
+            # lowered backward gets here before the forward creates the manager.
             def fn(inputs: list[Any]) -> Any:
-                # pyrefly: ignore [missing-attribute]
-                manager.set_to_running_backward()
+                device_idx = boxed_device_index.value
+                if device_idx is None:
+                    device_idx = 0  # Default to device 0 if not set
+                manager = torch._inductor.cudagraph_trees.get_manager(
+                    device_idx, create_if_none_exists=False
+                )
+                if manager is not None:
+                    manager.set_to_running_backward()
                 return aot_model(inputs)
 
             fn._boxed_call = True  # type: ignore[attr-defined]
