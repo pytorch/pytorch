@@ -5124,8 +5124,9 @@ class TestPrecompileDynamoCapture(TestCase):
                 "def cos(x: torch.Tensor) -> torch.Tensor:\n    return x.cos()\n"
                 "cos.register_fake(torch.empty_like)\nclass Model(torch.nn.Module):\n"
                 "    def forward(self, x):\n        torch._dynamo.graph_break()\n        return cos(x)\n"
-                "if save:\n    with capture(single, artifact_path=a, cache_path=c, backend='eager') as cap:\n"
-                "        cap(Model(), x)\nelse:\n    f = load(a, c)\n"
+                "if save:\n    with torch._dynamo.config.patch(nested_graph_breaks=False):\n"
+                "        with capture(single, artifact_path=a, cache_path=c, backend='eager') as cap:\n"
+                "            cap(Model(), x)\nelse:\n    f = load(a, c)\n"
                 "    assert f.installed and f(Model(), x).equal(x.cos().sum(dim=0))\n"
             )
         for save in ("1", ""):
@@ -5877,6 +5878,7 @@ class TestPrecompileDynamoCapture(TestCase):
 
     @skipIfCrossRef
     @parametrize("given", ["options", "mode"])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_serve_time_compiles_take_the_capture_options(self, given):
         from torch._inductor import list_mode_options
         from torch._precompile import _parse_artifact_metadata
@@ -5925,6 +5927,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("compiled with the capture options", out.stdout)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_serve_time_compiles_refuse_options_without_a_literal_form(self):
         from torch._precompile import _parse_artifact_metadata
 
@@ -11584,6 +11587,7 @@ class TestPrecompileCustomOpRecording(TestCase):
 
     @parametrize("key", ["CPU", "CompositeExplicitAutograd"])
     def test_an_op_only_a_fake_impl_calls_is_not_checked(self, key):
+        from torch._precompile import _parse_artifact_metadata
         from torch.library import _scoped_library
 
         # The helper lives in a module the server need not import: the op's own
@@ -11607,8 +11611,9 @@ class TestPrecompileCustomOpRecording(TestCase):
         fn = importlib.import_module(entry).fn
         python_code = self._capture_fn(fn, tracer=DynamoTracer())
         self.assertIn("CUSTOM_OPS = (('precompile_fake_helper::op', ''),)", python_code)
-        # The op has no known module, so only the entry's is imported.
-        self.assertIn(f"\nCUSTOM_OP_MODULES = {(entry,)!r}\n", python_code)
+        modules = _parse_artifact_metadata(python_code)["CUSTOM_OP_MODULES"]
+        self.assertIn(entry, modules)
+        self.assertNotIn(name, modules)
 
     @parametrize("mode", ["standalone", "installed"])
     def test_a_served_module_that_fails_to_import_fails_the_load(self, mode):
