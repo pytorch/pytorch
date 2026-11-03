@@ -6,6 +6,7 @@
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -37,7 +38,7 @@ static inline bool is_innnermost_dim(
   maybe_wrap_dims(dims, ndim);
   std::sort(dims.begin(), dims.end(), std::greater<int64_t>());
   bool is_innermost = dims.empty() || dims[0] == ndim - 1;
-  for (size_t i = 1; i < dims.size(); ++i) {
+  for (const auto i : c10::irange(1, dims.size())) {
     is_innermost = is_innermost && (dims[i] == dims[i-1] - 1);
   }
   return is_innermost;

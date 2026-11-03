@@ -2,6 +2,7 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <c10/metal/common.h>
+#include <cstring>
 #include <functional>
 #include <mutex>
 #include <stdexcept>
@@ -852,22 +853,33 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
 }
 
 std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getLibraryPipelineState(
-    id<MTLLibrary> lib,
-    const std::string& fname) {
-  auto key = fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname);
-  std::lock_guard guard(cache_mutex);
-  auto found_cpl = cplMap.find(key);
-  if (found_cpl != cplMap.end()) {
-    return found_cpl->second;
+    const std::string& fname,
+    id<MTLLibrary> lib) {
+  auto key = lib ? fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname) : fname;
+  {
+    std::lock_guard guard(cache_mutex);
+    auto found_cpl = cplMap.find(key);
+    if (found_cpl != cplMap.end()) {
+      return found_cpl->second;
+    }
   }
 
+  if (!lib) {
+    lib = getLibraryForFunc(fname);
+  }
   NSError* error = nil;
   id<MTLFunction> func = [lib newFunctionWithName:[NSString stringWithUTF8String:fname.c_str()]];
   TORCH_CHECK(func, "Failed to create function state object for: ", fname);
   auto cpl = [[lib device] newComputePipelineStateWithFunction:func error:&error];
   TORCH_CHECK(cpl, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
 
-  return cplMap.try_emplace(std::move(key), cpl, func).first->second;
+  std::lock_guard guard(cache_mutex);
+  auto [it, inserted] = cplMap.try_emplace(std::move(key), cpl, func);
+  if (!inserted) {
+    [cpl release];
+    [func release];
+  }
+  return it->second;
 }
 
 bool MetalShaderLibrary::hasFunction(const std::string& fname) {
@@ -907,7 +919,7 @@ std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
 }
 
 std::shared_ptr<MetalKernelFunction> MetalShaderLibrary::getKernelFunction(const std::string& name) {
-  auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
+  auto [cpl, func] = getLibraryPipelineState(name);
   return std::make_shared<MetalKernelFunction>(cpl, func);
 }
 
@@ -920,10 +932,10 @@ MetalKernelFunction* MetalShaderLibrary::getCachedKernelFunctionPtr(const std::s
     }
   }
 
-  // Both of these take the lock, so build the kernel before reacquiring it. A
-  // racing thread may have cached `name` first, in which case try_emplace keeps
-  // the winner and this one is dropped.
-  auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
+  // getLibraryPipelineState() takes the lock, so build the kernel before
+  // reacquiring it. A racing thread may have cached `name` first, in which case
+  // try_emplace keeps the winner and this one is dropped.
+  auto [cpl, func] = getLibraryPipelineState(name);
   auto kernel = std::make_unique<MetalKernelFunction>(cpl, func);
   std::lock_guard guard(cache_mutex);
   return kernelCache.try_emplace(name, std::move(kernel)).first->second.get();
@@ -933,21 +945,43 @@ class BundledShaderLibrary : public MetalShaderLibrary {
  public:
   BundledShaderLibrary() : MetalShaderLibrary("") {}
 
+  std::vector<std::string> getFunctionNames() override {
+    auto rc = MetalShaderLibrary::getFunctionNames();
+    std::erase_if(rc, [&](const auto& name) { return variantLibraries.contains(name); });
+    for (const auto& it : variantLibraries) {
+      rc.push_back(it.first);
+    }
+    return rc;
+  }
+
  protected:
   id<MTLLibrary> getLibrary() override {
     std::lock_guard guard(cache_mutex);
     if (C10_UNLIKELY(!library)) {
-      auto device = MPSDevice::getInstance()->device();
-      NSError* error = nil;
-#ifdef CAN_BUILD_METAL_4
-      // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
-      // cooperative-tensor ABI) and holds the only kernels has_mpp() gates.
-      const auto section_name = has_mpp() ? "metal_40" : "metal_basic";
-#else
-      const auto section_name = "metal_basic";
+      // Listed newest first: a kernel defined by several sections resolves to the first one
+      const std::vector<std::pair<std::string, bool (*)()>> variantSections = {
+#ifdef CAN_BUILD_METAL_41
+          {"metal_41", has_metal_4_1},
 #endif
-      library = [device newLibraryWithData:getSectionData(section_name) error:&error];
-      TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
+#ifdef CAN_BUILD_METAL_4
+          // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
+          // cooperative-tensor ABI); every kernel it defines shadows the
+          // metal_basic one when has_mpp() holds.
+          {"metal_40", has_mpp},
+#endif
+      };
+      for (const auto& [section, isSupported] : variantSections) {
+        if (!isSupported()) {
+          continue;
+        }
+        auto lib = loadSection(section);
+        @autoreleasepool {
+          for (NSString* name in [lib functionNames]) {
+            variantLibraries.try_emplace([name UTF8String], lib);
+          }
+        }
+      }
+      library = loadSection("metal_basic");
     }
     return library;
   }
@@ -956,7 +990,20 @@ class BundledShaderLibrary : public MetalShaderLibrary {
     TORCH_CHECK(false, "Should never be called");
   }
 
+  id<MTLLibrary> getLibraryForFunc(const std::string& fname) override {
+    auto basicLibrary = getLibrary();
+    auto it = variantLibraries.find(fname);
+    return it != variantLibraries.end() ? it->second : basicLibrary;
+  }
+
  private:
+  static id<MTLLibrary> loadSection(const std::string& name) {
+    NSError* error = nil;
+    auto lib = [MPSDevice::getInstance()->device() newLibraryWithData:getSectionData(name) error:&error];
+    TORCH_CHECK(lib, "Failed to create metal library, error: ", [[error description] UTF8String]);
+    return lib;
+  }
+
   static dispatch_data_t getSectionData(const std::string& name) {
     uint32_t idx = 0;
     for (const auto cnt : c10::irange(_dyld_image_count())) {
@@ -975,6 +1022,8 @@ class BundledShaderLibrary : public MetalShaderLibrary {
                                 ^(){
                                 });
   }
+
+  std::unordered_map<std::string, id<MTLLibrary>> variantLibraries;
 };
 
 // Inner extent below which the per-element strided kernel beats the ILP tile.
@@ -1573,7 +1622,9 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
 void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
                                              const std::string& name,
                                              std::optional<c10::Scalar> alpha,
-                                             std::optional<c10::ScalarType> scalar_arg_type) {
+                                             std::optional<c10::ScalarType> scalar_arg_type,
+                                             std::optional<c10::Scalar> beta) {
+  TORCH_INTERNAL_ASSERT(!beta || alpha, "beta requires alpha");
   // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
   // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
   // double as common dtype (because Python floating point are always 64-bit values)
@@ -1589,7 +1640,7 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
   // names for the 3-input op and fail at pipeline creation.
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_ternary_kernel(sub_iter, name, alpha, scalar_arg_type);
+      exec_ternary_kernel(sub_iter, name, alpha, scalar_arg_type, beta);
     }
     return;
   }
@@ -1622,7 +1673,9 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
   const auto compute_dtype = iter.maybe_common_dtype().value_or(out.scalar_type());
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
   const auto alpha_type = scalar_arg_type.value_or(compute_dtype);
-  const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
+  using namespace std::string_view_literals;
+  const auto alpha_suffix =
+      alpha.has_value() ? fmt::format("_{}{}", scalarToMetalTypeString(alpha_type), beta ? "_pair"sv : ""sv) : "";
   // TODO: Implicitly pass both input and output types to non-cast kernels
   const auto direct_name = fmt::format(
       "{}_{}_{}_{}{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input), alpha_suffix);
@@ -1648,7 +1701,16 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
       // everything that follows one slot down, so keep the index runtime
       unsigned idx = 4;
       if (alpha) {
-        mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), idx++);
+        const auto a = getMPSScalar(*alpha, alpha_type);
+        if (beta) {
+          const auto b = getMPSScalar(*beta, alpha_type);
+          std::array<uint8_t, 2 * sizeof(a.value)> params;
+          std::memcpy(params.data(), &a.value, a.size);
+          std::memcpy(params.data() + a.size, &b.value, b.size);
+          mtl_setBytes(computeEncoder, c10::ArrayRef<uint8_t>(params.data(), a.size + b.size), idx++);
+        } else {
+          mtl_setBytes(computeEncoder, a, idx++);
+        }
       }
       const std::array<int, 4> types = {static_cast<int>(input.scalar_type()),
                                         static_cast<int>(other1.scalar_type()),
@@ -1685,7 +1747,20 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
         const auto ndim = iter.ndim();
         const auto dim0 = static_cast<NSUInteger>(iter.shape()[0]);
         const auto dim1 = ndim > 1 ? static_cast<NSUInteger>(iter.shape()[1]) : 1;
-        mtl_dispatch3DJob(computeEncoder, binaryPSO, dim0, dim1, static_cast<NSUInteger>(iter.numel()) / (dim0 * dim1));
+        const auto dim2 = static_cast<NSUInteger>(iter.numel()) / (dim0 * dim1);
+        bool transposed = false;
+        for (const auto i : c10::irange(1, iter.ntensors())) {
+          const auto strides = iter.strides(i);
+          transposed |= ndim > 1 && strides[1] > 0 && strides[0] > strides[1];
+        }
+        if (transposed) {
+          const auto tg_x = std::min<NSUInteger>(32, dim0);
+          const auto tg_y = std::min({8UL, dim1, [binaryPSO maxTotalThreadsPerThreadgroup] / tg_x});
+          [computeEncoder dispatchThreads:MTLSizeMake(dim0, dim1, dim2)
+                    threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, 1)];
+        } else {
+          mtl_dispatch3DJob(computeEncoder, binaryPSO, dim0, dim1, dim2);
+        }
       }
       getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
     }
