@@ -5297,20 +5297,9 @@ from user code:
         self.assertTrue(advice.endswith(caveat), advice)
         self.assertNotIn("Every guard tree raised", message)
 
-    def test_no_match_message_qualifies_a_rejection_that_followed_a_cpp_throw(self):
-        # The stub above raises from Python; this is the raise the caveat's clause
-        # is about, out of a real tree. TENSOR_MATCH on a strided nested tensor
-        # fires a TORCH_CHECK, and that throw skips the reset on
-        # check_nopybind_template's exits, so NO_TENSOR_ALIASING still holds
-        # L['x'] from the scan when the second pass visits x's manager -- before
-        # y's, whose leaf threw -- and rejects the call there. That stale
-        # rejection is the one the advice rests on; the report's re-check runs on
-        # the state that rejection reset and quotes y's mismatch instead. Two
-        # orderings besides the reset carry this: root accessors stay in
-        # Guard.sort_key order (L['x'] before L['y']; the throw leaves before the
-        # fail-count bump and sort in check_accessors_nopybind), and
-        # TensorCheck::check_verbose compares dispatch key sets before it reads
-        # strides, so the re-check names L['y'] rather than throwing again.
+    def test_no_match_message_resets_relational_guards_after_a_cpp_throw(self):
+        # TENSOR_MATCH on a strided nested tensor throws after checking x.
+        # Both dispatch passes must report y, without stale tensor-alias state.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(PairModule(), fullgraph=True, backend="eager")
         model._aot_compile(
@@ -5334,27 +5323,19 @@ from user code:
         self.assertIsNone(cause.__cause__)
         self.assertEqual(sum(ln.startswith("  [") for ln in lines), 1, message)
         entry = next(ln for ln in lines if ln.startswith("  ["))
-        self.assertNotIn("<guard check raised", entry)
-        self.assertIn("L['y']", entry)
-        self.assertIn("[0]'s guard check raised while checking this call", message)
-        advice = next(ln for ln in lines if ln.startswith("Add a ModelInput"))
-        # Collapsed as _raise_text collapses it: under TORCH_SHOW_CPP_STACKTRACES=1,
-        # which run_test.py sets on a retry, str(cause) carries the multi-line C++
-        # backtrace, and the report is one line per paragraph.
-        collapsed = " ".join(str(cause).splitlines())
-        caveat = CAVEAT_AFTER_A_RAISE.format("", f"[0] <RuntimeError: {collapsed}>")
-        self.assertTrue(advice.endswith(caveat), advice)
-        self.assertNotIn("Every guard tree raised", message)
-        # The residue itself, probed after the dispatch under test so that
-        # dispatch ran on a tree nothing here had touched: the evaluation right
-        # after the throw fails on x as a duplicate.
+        self.assertIn("<guard check raised RuntimeError:", entry)
+        self.assertIn("doesn't support strides", entry)
+        self.assertIn("guard check raised while checking this call", message)
         result = model.forward.compiled_results[0]
         tree = result._live_guard_manager()
         f_locals = result.prepare_f_locals(model.forward.model, x, nested)
         with self.assertRaisesRegex(RuntimeError, "doesn't support strides"):
             tree.check(f_locals)
-        stale = tree.check_verbose(f_locals).verbose_code_parts
-        self.assertEqual(stale, ["Duplicate tensor found where not expected!"])
+        diagnostic = tree.check_verbose(f_locals).verbose_code_parts
+        self.assertIn("L['y']", " ".join(diagnostic))
+        valid = result.prepare_f_locals(model.forward.model, x, torch.randn(3, 3))
+        self.assertTrue(tree.check(valid))
+        self.assertTrue(tree.check(valid))
 
     def test_no_match_message_trusts_one_rejection_taken_before_a_raise(self):
         # One trusted rejection is enough to leave the advice unqualified: [0]
