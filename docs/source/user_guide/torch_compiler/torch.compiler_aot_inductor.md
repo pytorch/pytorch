@@ -217,9 +217,9 @@ doesn't count as a warm-up.
 
 - On each model instance (see `num_runners`), a new input layout (shapes and
   strides) runs eagerly on its first call, is captured on its next call and
-  replayed after that. Only a thread that has already finished an eager call on
-  that instance captures on it, since some libraries set up per thread; any
-  thread replays.
+  replayed after that. Only a thread that has already finished an eager call of
+  that layout on that instance captures it, since some libraries set up per
+  thread; any thread replays.
 - Each model instance keeps up to `AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS` graphs
   (an environment variable read when the model is loaded, default 8; a bad
   value makes every `run_with_lazy_cuda_graphs` call fail) in its own memory
@@ -227,8 +227,8 @@ doesn't count as a warm-up.
 - Replayed outputs are copies: they don't alias the inputs, and views among
   outputs come back as separate tensors. Eager calls return the model's own
   outputs.
-- If a capture fails but the eager call succeeds, the model instance stops
-  capturing, with a warning: its existing graphs keep replaying, and new
+- If a capture fails, the call runs eagerly instead and the model instance
+  stops capturing, with a warning: its existing graphs keep replaying, and new
   layouts run eagerly.
 - Capturing needs PyTorch's native CUDA caching allocator: under
   `PYTORCH_ALLOC_CONF=backend:cudaMallocAsync`, models run eagerly, with a
