@@ -971,7 +971,8 @@ print("RETRIED")
             self.assertEqual(proc.returncode, 0, msg=proc.stderr)
             self.assertIn("RETRIED", proc.stdout)
             if expect_message:
-                self.assertIn(marker, proc.stderr)
+                # Once for the first attempt and once for the retry.
+                self.assertGreaterEqual(proc.stderr.count(marker), 2, proc.stderr)
             else:
                 self.assertNotIn(marker, proc.stderr)
 
