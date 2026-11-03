@@ -2426,6 +2426,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.stores = IndentedBuffer()
 
         self.atomic_add_found = False
+        self.atomic_minmax_found = False
         self.num_load = 0
         self.num_store = 0
         self.num_reduction = 0

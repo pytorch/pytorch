@@ -5629,6 +5629,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # PyTorch bool accumulation has OR semantics.
             atomic_op = "atomic_or" if dtype == torch.bool else "atomic_add"
             line = f"tl.{atomic_op}({var} + ({indexing_str}), {value}, {indexing.mask_str}, sem='relaxed')"
+        elif mode in ("atomic_max", "atomic_min") and is_sympy_integer_like(index):
+            # Scalar target (reduction_atomic_epilogue): reduce the block, then
+            # issue one atomic per program through a scalar pointer.
+            self.atomic_minmax_found = True
+            red, neutral = ("max", "-inf") if mode == "atomic_max" else ("min", "inf")
+            # The constant index carries no masks, so mask every active range
+            # (including reduction ranges when fused into a reduction kernel).
+            trees = [
+                t
+                for t in self.range_trees
+                if self.inside_reduction or not t.is_reduction
+            ]
+            masks = [t.mask_name() for t in trees if not self._has_constant_mask(t)]
+            if self._load_mask:
+                masks.append(self._load_mask)
+            if masks:
+                value = f"tl.where({' & '.join(masks)}, {value}, float('{neutral}'))"
+            line = f"tl.{mode}({var} + {int(index)}, tl.{red}({value}), sem='relaxed')"
         else:
             raise NotImplementedError(f"store mode={mode}")
 
