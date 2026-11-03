@@ -45,6 +45,8 @@ class TestFindCompatibleOpOverload(common_utils.TestCase):
 
 
 class TestInsertTypePromotion(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_materializes_only_scalar_without_compatible_overload(self):
         class Model(torch.nn.Module):
             def forward(self, x, mask):
@@ -93,9 +95,7 @@ class TestTypePromotionONNXExport(common_utils.TestCase):
             verbose=False,
         )
 
-        onnx_testing.assert_onnx_program(
-            onnx_program, args=(x, mask), strategy=None
-        )
+        onnx_testing.assert_onnx_program(onnx_program, args=(x, mask), strategy=None)
 
     def test_where_with_bool_tensor_and_mixed_scalars_exports(self):
         class WhereModel(torch.nn.Module):
