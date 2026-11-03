@@ -20,20 +20,21 @@ Selection.split also always runs the files that already failed on the PR and
 that TD's split runs; the samples carry no such signal, so the hedge here has
 no `always` set, which understates both what enforcement runs and what it
 catches on a PR's later pushes.
-As in select_tests.select, a sample with no changed files or more than
-MAX_CHANGED_FILES runs everything under every model policy, at no model cost
-(with no changed files it is an error, so `final+tdN` keeps TD's cut).
+As in select_tests.select, a sample with no changed files, a change to test
+infrastructure (needs_run_all) or more than MAX_CHANGED_FILES runs everything
+under every model policy, at no model cost (with no changed files it is an
+error, so `final+tdN` keeps TD's cut). A malformed answer counts as an error,
+as select_tests records it.
 The tag `td` scores the replayed in-repo TD (see td_replay.py) under the
 single policy `td25`, its CI cut of the top 25% per config, and ignores
 --policies.
 
 Every tag and policy is scored on the same samples: those with a TD replay
-and a result for every model tag; the rest are counted on stderr. The test
-files that import an edited test file are found with git grep at the sample's
-head; a sample whose head is not in this clone is scored without them and
-counted on stderr too, with how many of those run everything or add the
-dynamo_wrapped sweep only because an edited failure list could not be looked
-up (in CI the grep works).
+of the current test-times.json and sample (see replay_inputs) and a result
+for every model tag; the rest are counted on stderr. The test files that
+import an edited test file are found with git grep at the sample's head; a
+sample on which that fails (its head is not in this clone?) is left out and
+counted on stderr too, as in CI the grep works.
 
 run_test.py applies TD, and so the selection, only in the pull, trunk and
 ROCm workflows, and not on macOS, in xpu or onnx builds, under NO_TD (from
@@ -61,6 +62,7 @@ import argparse
 import collections
 import contextlib
 import functools
+import hashlib
 import json
 import re
 import statistics as st
@@ -74,7 +76,6 @@ import yaml
 from tools.testing.llm_td.eval import REPO
 from tools.testing.llm_td.select_tests import git_grep, MAX_CHANGED_FILES
 from tools.testing.llm_td.selection import (
-    failure_list_sources,
     LLM_TD_HEDGE,
     needs_run_all,
     parse_model_output,
@@ -269,15 +270,17 @@ def hedge(
     share: float,
     config: str,
     td_cut: Collection[str],
+    untimed: Collection[str],
 ) -> set[str]:
     """TD's positive-score files that fit in `share` of `seconds`' total, filled greedily in TD's order.
 
     As in selection.Selection.split, files the selection already covers cost
     nothing, and a file that does not fit is skipped while smaller ones after
     it may still fit. Files with no recorded time are skipped rather than added
-    for free. If the selection covers none of `seconds`' files and nothing is
-    hedged, it is TD's cut `td_cut`. Unlike split it takes any share and has no
-    `always` files (see the module docstring)."""
+    for free. If the selection covers none of `seconds`' files and the
+    `untimed` ones and nothing is hedged, it is TD's cut `td_cut`. Unlike
+    split it takes any share and has no `always` files (see the module
+    docstring)."""
     budget = share * sum(seconds.values())
     out = set()
     for f in scored:
@@ -285,7 +288,7 @@ def hedge(
         if t > 0 and t <= budget and not sel.covers(f, config):
             budget -= t
             out.add(f)
-    if not out and not any(sel.covers(f, config) for f in seconds):
+    if not out and not any(sel.covers(f, config) for f in [*seconds, *untimed]):
         return set(td_cut)
     return out
 
@@ -344,12 +347,7 @@ def policy(
         if td is None:
             return None
         share = float(m.group(1)) / 100 if m.group(1) else LLM_TD_HEDGE
-        failed = out is None
-        try:
-            parse_model_output(out, cands)
-        except ValueError:
-            failed = True
-        if failed and not needs_run_all(s["changed_files"]):
+        if malformed(out, cands):
             # Not enforced, so apply_selection keeps TD's split.
             return policy("td25", s, r, td, seconds)
         sel = Selection.from_model_output(out, cands, s["changed_files"], grep)
@@ -363,12 +361,13 @@ def policy(
         for fs in times.values():
             for f, t in fs.items():
                 total[f] += t
-        cut = td["top25_cfg"]
+        # As in td_replay.top25_per_config, untimed files are in every job.
+        cut, untimed = td["top25_cfg"], cands - set(total)
         per_config = {
-            c: hedge(sel, td["scored"], fs, share, c, cut.get(c, ()))
+            c: hedge(sel, td["scored"], fs, share, c, cut.get(c, ()), untimed)
             for c, fs in times.items()
         }
-        other = hedge(sel, td["scored"], total, share, "", td["top25"])
+        other = hedge(sel, td["scored"], total, share, "", td["top25"], untimed)
         return Choice(sel, per_config, other)
     if name == "final-hm":
         # A malformed answer is left for from_model_output to fall back on.
@@ -381,14 +380,23 @@ def policy(
 
 def unasked(s: dict) -> bool:
     """Whether select_tests.select runs everything on `s` without asking the model."""
-    return not s["changed_files"] or len(s["changed_files"]) > MAX_CHANGED_FILES
+    changed = s["changed_files"]
+    return not changed or needs_run_all(changed) or len(changed) > MAX_CHANGED_FILES
 
 
-def grep_forced(changed_files: list[str]) -> set[str]:
-    """The failure lists of `changed_files` that are missing (see
-    selection.failure_list_sources) only because git grep found nothing."""
-    found = failure_list_sources(changed_files, lambda p: ["test/x.py"])[1]
-    return failure_list_sources(changed_files, lambda p: [])[1] - found
+def malformed(out: object, cands: set[str]) -> bool:
+    """Whether select_tests.select records `out` as a failed call: missing or malformed."""
+    try:
+        parse_model_output(out, cands)
+    except ValueError:
+        return True
+    return False
+
+
+def replay_inputs(stats: str, times: bytes, sample: bytes) -> str:
+    """The `inputs` hash of a TD replay of `sample` under `times` and the digest `stats` of td_replay's STATS artifacts."""
+    parts = [stats, *(hashlib.sha256(b).hexdigest() for b in (times, sample))]
+    return hashlib.sha256(" ".join(parts).encode()).hexdigest()
 
 
 def cost_fraction(
@@ -428,25 +436,26 @@ def score(
     samples: Path,
     td_dir: Path,
 ) -> list[dict]:
-    """Rows of every tag and policy, all on the ids that have a TD replay and, unless `unasked`, a result for every tag but `td`."""
+    """Rows of every tag and policy, all on the ids that have a current TD replay, git grep at their head and, unless `unasked`, a result for every tag but `td`."""
     seconds = test_seconds(data / "test-times.json")
+    times = (data / "test-times.json").read_bytes()
     rows = []
     dropped: collections.Counter[str] = collections.Counter()
     ungrepped: set[str] = set()
-    forced: collections.Counter[str] = collections.Counter()
     no_workflow: set[str] = set()
     for sid in ids:
         loaded = {tag: load(data, tag, sid, samples, td_dir) for tag in tags}
-        s = next(iter(loaded.values()))[0]
-        missing = [] if (td_dir / f"{sid}.json").exists() else ["td replay"]
+        s, _, td = next(iter(loaded.values()))
+        missing = [] if td else ["td replay"]
+        if td and td.get("inputs") != replay_inputs(td.get("stats", ""), times, (samples / f"{sid}.json").read_bytes()):  # fmt: skip
+            missing = ["td replay of the current test-times.json and sample"]
         if not unasked(s):
             missing += [f"{tag} result" for tag, (_, r, _) in loaded.items() if tag != "td" and r is None]  # fmt: skip
         dropped.update(missing)
         if missing:
             continue
-        if any(wf is None for f in truth_files(s, strong) for wf, _ in truth_jobs(s, f)):  # fmt: skip
-            no_workflow.add(sid)
         pairs, cands = truth_pairs(s, strong), set(s["candidates"])
+        sample_rows = []
         for tag, (_, r, td) in loaded.items():
             skipped = tag != "td" and unasked(s)
             for pol in ["td25"] if tag == "td" else policies:
@@ -455,23 +464,23 @@ def score(
                     continue
                 hit = [choice.covers(f, c) for f, c in pairs]
                 cpu, gpu = cost_fraction(choice, cands, seconds, runs_td)
-                rows.append({
+                sample_rows.append({
                     "tag": tag, "policy": pol, "id": sid, "kind": s["kind"], "pairs": len(pairs), "hit": sum(hit),
                     "cpu": cpu, "gpu": gpu, "run_all": choice.sel.run_all, "files": len(choice.files()),
                     "cost_usd": 0.0 if skipped else (r or {}).get("cost_usd") or 0.0,
-                    "error": not s["changed_files"] if skipped else bool(r and r["error"]),
+                    "error": not s["changed_files"] if skipped else bool(r) and (bool(r["error"]) or malformed(r["out"], cands)),
                     "missed": [p for p, h in zip(pairs, hit) if not h],
                 })  # fmt: skip
-        if sid in ungrepped and (lists := grep_forced(s["changed_files"])):
-            forced["run everything" if "inductor" in lists else "add the dynamo_wrapped sweep"] += 1  # fmt: skip
+        if sid in ungrepped:
+            dropped["working git grep at their head (not in this clone?)"] += 1
+            continue
+        rows += sample_rows
+        if any(wf is None for f in truth_files(s, strong) for wf, _ in truth_jobs(s, f)):  # fmt: skip
+            no_workflow.add(sid)
     for why, n in sorted(dropped.items()):
         print(f"dropped {n} of {len(ids)} ids with no {why}", file=sys.stderr)
     if no_workflow:
         print(f"scored {len(no_workflow)} of {len(ids)} ids with truth jobs that record no workflow: a job name TD and non-TD workflows share counts as TD", file=sys.stderr)  # fmt: skip
-    if ungrepped:
-        print(f"scored {len(ungrepped)} of {len(ids)} ids without importers: git grep failed at their head (not in this clone?)", file=sys.stderr)  # fmt: skip
-    for why, n in sorted(forced.items()):
-        print(f"  {n} of them {why} under the final policies only because an edited failure list could not be looked up", file=sys.stderr)  # fmt: skip
     return rows
 
 

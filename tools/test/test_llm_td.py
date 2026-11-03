@@ -377,11 +377,13 @@ class TestSelection(unittest.TestCase):
         self.assertEqual(sel.files, {"cpython/v3_13/test_set"})
 
     def test_edited_tests_select_their_driver(self) -> None:
-        candidates = CANDIDATES | {"test_jit", "test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja"}  # fmt: skip
+        aot, autoload = {"test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja"}, {"test_autoload_enable", "test_autoload_disable"}  # fmt: skip
+        candidates = CANDIDATES | {"test_jit"} | aot | autoload
         for changed, expected in [
             ("test/jit/test_freezing.py", {"test_jit"}),
-            ("test/cpp_extensions/extension.cpp", {"test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja"}),
-            ("test/test_cpp_extensions_aot.py", {"test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja"}),
+            ("test/cpp_extensions/extension.cpp", aot | autoload),
+            ("test/test_cpp_extensions_aot.py", aot),
+            ("test/test_autoload.py", autoload),
             ("test/test_jit_fuser_te.py", set()),
         ]:  # fmt: skip
             sel = Selection.from_model_output({"tests": []}, candidates, [changed])
@@ -849,6 +851,14 @@ class TestMain(unittest.TestCase):
             record = self.run_main()
         times.assert_not_called()
         self.assertTrue(record["run_all"])
+
+    def test_query_model_runs_outside_the_checkout(self) -> None:
+        run = mock.Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
+        with mock.patch.object(select_tests.subprocess, "run", run):
+            select_tests.query_model("p", "m", "medium", checkout="/wt")
+        cmd = run.call_args.args[0]
+        self.assertEqual(cmd[cmd.index("--add-dir") + 1], "/wt")
+        self.assertNotEqual(run.call_args.kwargs["cwd"], "/wt")
 
     def test_query_model_failures_run_all(self) -> None:
         def completed(stdout: str) -> subprocess.CompletedProcess:
