@@ -15,7 +15,7 @@ from unittest import mock
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -60,6 +60,20 @@ def pick(name: str, r: dict | None, td: dict | None, s: dict = SAMPLE) -> Choice
     if choice is None:
         raise AssertionError(f"{name} chose nothing")
     return choice
+
+
+def write_data(d: str, files: Mapping[str, object]) -> Path:
+    """Write `files` under `d`, stamping each TD replay with its sample's current inputs."""
+    data = Path(d)
+    for name, obj in files.items():
+        (data / name).parent.mkdir(parents=True, exist_ok=True)
+        (data / name).write_text(json.dumps(obj))
+    times = (data / "test-times.json").read_bytes()
+    for p in (data / "td").glob("*.json"):
+        if (sample := data / "samples" / p.name).exists():
+            inputs = score.replay_inputs("", times, sample.read_bytes())
+            p.write_text(json.dumps({**json.loads(p.read_text()), "inputs": inputs}))
+    return data
 
 
 @contextlib.contextmanager
@@ -407,8 +421,10 @@ class TestScore(unittest.TestCase):
         r = {"out": {"tests": [{"file": "test_b"}]}}
         huge = {**SAMPLE, "changed_files": [f"torch/f{i}.py" for i in range(select_tests.MAX_CHANGED_FILES + 1)]}  # fmt: skip
         empty = {**SAMPLE, "changed_files": []}
+        infra = {**SAMPLE, "changed_files": ["test/run_test.py"]}
         for name in ("model", "final", "final-hm", "final+td45"):
             self.assertTrue(pick(name, r, td, huge).sel.run_all, name)
+            self.assertTrue(pick(name, r, td, infra).sel.run_all, name)
             choice = pick(name, r, td, empty)
             self.assertEqual(choice.sel.run_all, name != "final+td45", name)
         # With no changed files select_tests records an error, so TD's cut is kept.
@@ -422,10 +438,7 @@ class TestScore(unittest.TestCase):
             tempfile.TemporaryDirectory() as d,
             patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
         ):
-            data = Path(d)
-            for name, obj in files.items():
-                (data / name).parent.mkdir(parents=True, exist_ok=True)
-                (data / name).write_text(json.dumps(obj))
+            data = write_data(d, files)
             rows = score.score(data, ["a"], ["m"], ["model"], True, data / "samples", data / "td")  # fmt: skip
         self.assertEqual([(x["run_all"], x["cost_usd"], x["error"]) for x in rows], [(True, 0.0, False)])  # fmt: skip
 
@@ -439,6 +452,9 @@ class TestScore(unittest.TestCase):
         cut = {**td, "top25_cfg": {"slow": ["test_a"]}}
         self.assertEqual(pick("final+td5", NOTHING, cut).per_config["slow"], {"test_a"})
         r = {"out": {"tests": [{"file": "test_c"}]}}
+        self.assertEqual(pick("final+td5", r, cut).per_config["slow"], set())
+        # So does an untimed file, which is in every job's test list.
+        r = {"out": {"tests": [{"file": "test_e"}]}}
         self.assertEqual(pick("final+td5", r, cut).per_config["slow"], set())
         # The default share is 20%: 50s of default fits test_d (40s) and test_c, not test_b after them.
         ranked = {"scored": ["test_d", "test_c", "test_b"], "top25": [], "top25_cfg": {}}  # fmt: skip
@@ -527,10 +543,7 @@ class TestScore(unittest.TestCase):
             tempfile.TemporaryDirectory() as d,
             patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
         ):
-            data = Path(d)
-            for name, obj in files.items():
-                (data / name).parent.mkdir(parents=True, exist_ok=True)
-                (data / name).write_text(json.dumps(obj))
+            data = write_data(d, files)
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
                 rows = score.score(data, ["a", "b", "c"], ["m1", "m2", "td"], ["model"], True, data / "samples", data / "td")  # fmt: skip
@@ -569,41 +582,44 @@ class TestScore(unittest.TestCase):
             "td/a.json": {"scored": [], "top25": [], "top25_cfg": {}},
             "results/m/a.json": {"out": {"tests": []}, "error": None, "cost_usd": 0.1},
         }  # fmt: skip
-        for grep, files_a, msg in (
-            (mock.Mock(return_value=["test/test_a.py"]), {"test_a", "test_c"}, ""),
-            (mock.Mock(side_effect=RuntimeError("bad revision")), {"test_c"}, "scored 1 of 1 ids without importers: git grep failed at their head (not in this clone?)\n"),
+        for grep, n_files, msg in (
+            (mock.Mock(return_value=["test/test_a.py"]), [2, 2], ""),
+            (mock.Mock(side_effect=RuntimeError("bad revision")), [], "dropped 1 of 1 ids with no working git grep at their head (not in this clone?)\n"),
         ):  # fmt: skip
             with (
                 tempfile.TemporaryDirectory() as d,
                 patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
                 mock.patch.object(score, "grep_at", grep),
             ):
-                data = Path(d)
-                for name, obj in files.items():
-                    (data / name).parent.mkdir(parents=True, exist_ok=True)
-                    (data / name).write_text(json.dumps(obj))
+                data = write_data(d, files)
                 err = io.StringIO()
                 with contextlib.redirect_stderr(err):
                     rows = score.score(data, ["a"], ["m"], ["final", "final-hm"], True, data / "samples", data / "td")  # fmt: skip
-            self.assertEqual([x["files"] for x in rows], [len(files_a)] * 2)
+            self.assertEqual([x["files"] for x in rows], n_files)
             self.assertEqual(err.getvalue(), msg)
             self.assertEqual(grep.call_args.args[1], "abc")
-        # An edited failure list whose classes git grep cannot look up forces a run-all or a sweep.
-        for entry, why in (("inductor_skips", "run everything"), ("dynamo_skips", "add the dynamo_wrapped sweep")):  # fmt: skip
-            sample = {**SAMPLE, "sha": "abc", "changed_files": [f"test/{entry}/TestA.test_x"]}  # fmt: skip
-            with (
-                tempfile.TemporaryDirectory() as d,
-                patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
-                mock.patch.object(score, "grep_at", mock.Mock(side_effect=RuntimeError)),
-            ):  # fmt: skip
-                data = Path(d)
-                for name, obj in {**files, "samples/a.json": sample}.items():
-                    (data / name).parent.mkdir(parents=True, exist_ok=True)
-                    (data / name).write_text(json.dumps(obj))
-                err = io.StringIO()
-                with contextlib.redirect_stderr(err):
-                    score.score(data, ["a"], ["m"], ["final"], True, data / "samples", data / "td")  # fmt: skip
-            self.assertIn(f"\n  1 of them {why} under the final policies only because an edited failure list could not be looked up\n", err.getvalue())  # fmt: skip
+
+    def test_score_errors_and_stale_replays(self) -> None:
+        td = {"scored": [], "top25": [], "top25_cfg": {}}
+        files = {
+            "test-times.json": {"linux": {"default": {"test_a": 10.0}}},
+            "samples/a.json": SAMPLE, "samples/b.json": SAMPLE,
+            "td/a.json": td, "td/b.json": td,
+            "results/m/a.json": {"out": {"tests": [{"file": "bogus"}]}, "error": None, "cost_usd": 0.1},
+            "results/m/b.json": {"out": {"tests": []}, "error": None, "cost_usd": 0.1},
+        }  # fmt: skip
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
+        ):
+            data = write_data(d, files)
+            (data / "samples/b.json").write_text(json.dumps({**SAMPLE, "title": "rebuilt"}))  # fmt: skip
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rows = score.score(data, ["a", "b"], ["m"], ["model", "final"], True, data / "samples", data / "td")  # fmt: skip
+        # A malformed answer runs everything and counts as an error, as select_tests records it.
+        self.assertEqual([(x["id"], x["run_all"], x["error"]) for x in rows], [("a", True, True)] * 2)  # fmt: skip
+        self.assertEqual(err.getvalue(), "dropped 1 of 2 ids with no td replay of the current test-times.json and sample\n")  # fmt: skip
 
     def test_td25_per_config(self) -> None:
         cands = ["test_a", "test_b", "test_c", "test_d", "test_e"]
