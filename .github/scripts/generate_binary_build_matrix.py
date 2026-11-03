@@ -56,17 +56,10 @@ ROCM_ARCHES = ["10.0", "10.1"]
 class RocmPreviewLane(NamedTuple):
     arch: str
     channel: str
-    version: str
 
 
 # Preview is a stable channel, not a version; keep its external names together.
-ROCM_PREVIEW = RocmPreviewLane(
-    arch="preview",
-    channel="rocm-preview",
-    version=(REPO_ROOT / ".ci/docker/ci_commit_pins/rocm-preview.txt")
-    .read_text()
-    .strip(),
-)
+ROCM_PREVIEW = RocmPreviewLane(arch="preview", channel="rocm-preview")
 ROCM_PREVIEW_ARCHES = [ROCM_PREVIEW.arch]
 # Matches PYTORCH_ROCM_ARCH in .ci/docker/manywheel/build.sh. Preview's
 # device-all also pulls targets torch is not built for, e.g. gfx900.
@@ -133,10 +126,12 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     # dependency on latest patch version for (major, minor)
     "10.0": ("rocm[libraries,device-all]==10.0.*"),
     "10.1": ("rocm[libraries,device-all]==10.1.*"),
+    # binary_populate_env.sh appends ==<pin> at build time, so pin bumps
+    # don't change generated workflows.
     ROCM_PREVIEW.arch: (
         "rocm[libraries,"
         + ",".join(f"device-{gfx}" for gfx in ROCM_PREVIEW_DEVICES.split(";"))
-        + f"]=={ROCM_PREVIEW.version}"
+        + "]"
     ),
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.2 | "
@@ -381,6 +376,10 @@ FULL_PYTHON_VERSIONS = [
     "3.15",
     "3.15t",
 ]
+# Preview tracks a moving SDK; skip the oldest Python to keep the lane small.
+ROCM_PREVIEW_PYTHON_VERSIONS = FULL_PYTHON_VERSIONS[
+    FULL_PYTHON_VERSIONS.index("3.12") :
+]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -486,6 +485,12 @@ def generate_wheels_matrix(
                 else arch_version
             )
 
+            if (
+                arch_version == ROCM_PREVIEW.arch
+                and python_version not in ROCM_PREVIEW_PYTHON_VERSIONS
+            ):
+                continue
+
             # TODO: Enable python 3.14 for rest
             if os not in [
                 "linux",
@@ -589,22 +594,28 @@ def generate_libtorch_extraction_configs(
 ) -> list[dict[str, str]]:
     """Generate libtorch extraction configs from existing wheel build configs.
 
-    For each unique arch variant in wheel_configs, find the py3.11 config and
-    produce a config that the CI template uses to add an extraction job that
-    depends on that wheel's build job.
+    For each unique arch variant in wheel_configs, find the config for the
+    oldest built Python and produce a config that the CI template uses to add
+    an extraction job that depends on that wheel's build job.
 
-    NB: this must name a version that is actually in FULL_PYTHON_VERSIONS. If
-    it names one that isn't built, no wheel config matches and libtorch stops
-    being produced entirely, silently.
+    NB: the oldest built Python is per arch (py3.11 for most, later for lanes
+    such as preview that skip it), so no arch silently loses its libtorch.
     """
-    preferred_python = FULL_PYTHON_VERSIONS[0]
     arch = "arm64" if os == "windows-arm64" else "x86_64"
+
+    def python_rank(config: dict[str, str]) -> int:
+        version = config.get("python_version", "")
+        if version in FULL_PYTHON_VERSIONS:
+            return FULL_PYTHON_VERSIONS.index(version)
+        return len(FULL_PYTHON_VERSIONS)
 
     # Group wheel configs by (gpu_arch_type, gpu_arch_version)
     arch_to_config: dict[tuple[str, str], dict[str, str]] = {}
     for config in wheel_configs:
         key = (config["gpu_arch_type"], config.get("gpu_arch_version", ""))
-        if config.get("python_version") == preferred_python:
+        if key not in arch_to_config or python_rank(config) < python_rank(
+            arch_to_config[key]
+        ):
             arch_to_config[key] = config
 
     ret: list[dict[str, str]] = []

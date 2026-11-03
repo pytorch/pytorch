@@ -99,6 +99,12 @@ name: !{{ build_environment }}
   {%- set docker_registry_host = "" %}
   {%- set owner_if = "${{ github.repository_owner == 'pytorch' }}" %}
 {%- endif %}
+{#- Every preview lane needs get-preview-docker-tag, which only exists with
+    pinned images; drop the lanes otherwise. -#}
+{%- set preview_enabled = pin_docker_image and rocm_preview_configs|length > 0 %}
+{%- if not preview_enabled %}
+  {%- set rocm_preview_configs = [] %}
+{%- endif %}
 {%- set preview_docker_image_suffix = "${{ needs.get-preview-docker-tag.outputs.docker_image_suffix }}" %}
 {%- set preview_docker_registry_host = "${{ needs.get-preview-docker-tag.outputs.docker_registry_host }}" %}
 {%- set preview_if = "${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') && needs.get-preview-docker-tag.outputs.image_available == 'true' }}" %}
@@ -268,7 +274,7 @@ jobs:
 {%- endif %}
 {%- endif %}
 
-{%- if rocm_preview_configs and pin_docker_image %}
+{%- if preview_enabled %}
   # A missing preview image must not redirect or block the stable lanes. PRs
   # that change .ci/docker (e.g. pin bumps) build and extract from their own
   # ECR image; ROCm test runners cannot pull ECR, so preview tests are skipped.
@@ -828,7 +834,7 @@ jobs:
 
 {%- set libtorch_lanes = [] %}
 {%- set lt_main_configs = libtorch_extraction_configs | rejectattr('gpu_arch_version', 'equalto', 'preview') | list %}
-{%- set lt_preview_configs = libtorch_extraction_configs | selectattr('gpu_arch_version', 'equalto', 'preview') | list %}
+{%- set lt_preview_configs = (libtorch_extraction_configs | selectattr('gpu_arch_version', 'equalto', 'preview') | list) if preview_enabled else [] %}
 {%- if lt_main_configs %}
   {%- set _ = libtorch_lanes.append({
         'suffix': '',

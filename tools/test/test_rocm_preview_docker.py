@@ -166,10 +166,14 @@ class TestRocmPreviewWheels(unittest.TestCase):
             devices = ",".join(
                 f"device-{gfx}" for gfx in matrix.ROCM_PREVIEW_DEVICES.split(";")
             )
+            # Pinned at build time so pin bumps leave generated YAML alone.
             self.assertEqual(
                 config["pytorch_extra_install_requirements"],
-                f"rocm[libraries,{devices}]=={PREVIEW_PIN}",
+                f"rocm[libraries,{devices}]",
             )
+        self.assertEqual(
+            [c["python_version"] for c in preview], matrix.ROCM_PREVIEW_PYTHON_VERSIONS
+        )
         self.assertFalse(
             [
                 c
@@ -180,11 +184,28 @@ class TestRocmPreviewWheels(unittest.TestCase):
         libtorch = matrix.generate_libtorch_extraction_configs("linux", wheels)
         (lt_preview,) = [c for c in libtorch if c["gpu_arch_version"] == "preview"]
         self.assertEqual(lt_preview["upload_subfolder"], "rocm-preview")
+        self.assertEqual(
+            lt_preview["source_wheel_build_name"], "manywheel-py3_12-rocmpreview"
+        )
+        (lt_stable,) = [c for c in libtorch if c["gpu_arch_version"] == "10.1"]
+        self.assertEqual(
+            lt_stable["source_wheel_build_name"], "manywheel-py3_11-rocm10_1"
+        )
 
     def test_preview_build_version_records_pin(self) -> None:
-        for desired_cuda, local in (
-            ("rocmpreview", f"rocm{PREVIEW_PIN}"),
-            ("rocm10.1", "rocm10.1"),
+        for desired_cuda, local, requirement, pinned in (
+            (
+                "rocmpreview",
+                f"rocm{PREVIEW_PIN}",
+                "rocm[libraries,device-gfx942]",
+                f"rocm[libraries,device-gfx942]=={PREVIEW_PIN}",
+            ),
+            (
+                "rocm10.1",
+                "rocm10.1",
+                "rocm[libraries,device-all]==10.1.*",
+                "rocm[libraries,device-all]==10.1.*",
+            ),
         ):
             with (
                 self.subTest(desired_cuda=desired_cuda),
@@ -204,6 +225,7 @@ class TestRocmPreviewWheels(unittest.TestCase):
                         "DESIRED_CUDA": desired_cuda,
                         "GPU_ARCH_TYPE": "rocm",
                         "BINARY_ENV_FILE": str(envfile),
+                        "PYTORCH_EXTRA_INSTALL_REQUIREMENTS": requirement,
                     },
                     capture_output=True,
                     text=True,
@@ -215,11 +237,19 @@ class TestRocmPreviewWheels(unittest.TestCase):
                     if env_line.startswith("export PYTORCH_BUILD_VERSION=")
                 ]
                 self.assertTrue(line.endswith(f'+{local}"'), line)
+                (reqs,) = [
+                    env_line
+                    for env_line in envfile.read_text().splitlines()
+                    if env_line.startswith("export PYTORCH_EXTRA_INSTALL_REQUIREMENTS=")
+                ]
+                self.assertIn(f'="{pinned} | ', reqs)
 
     def test_workflow_isolates_preview_lane(self) -> None:
         workflow = (
             REPO_ROOT / ".github/workflows/generated-linux-binary-manywheel-nightly.yml"
         )
+        # A pin bump must not require regenerating workflows.
+        self.assertNotIn(PREVIEW_PIN, workflow.read_text())
         jobs = yaml.safe_load(workflow.read_text())["jobs"]
         preview = {n for n in jobs if "preview" in n}
         self.assertIn("get-preview-docker-tag", preview)
