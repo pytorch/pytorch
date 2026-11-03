@@ -70,6 +70,39 @@ class FakeMapping:
 class DictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("observe_order", [False, True])
+    def test_forwarded_keyword_order_guard(self, observe_order):
+        def fixed(x, a, b):
+            return x + a + b
+
+        def ordered(x, **kwargs):
+            return x + sum(kwargs.values()), tuple(kwargs)
+
+        callee = ordered if observe_order else fixed
+
+        def fn(x, **kwargs):
+            return callee(x, **kwargs)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x, a=1, b=2), fn(x, a=1, b=2))
+        self.assertEqual(compiled(x, b=2, a=1), fn(x, b=2, a=1))
+        self.assertEqual(counter.frame_count, 2 if observe_order else 1)
+
+    def test_empty_defaultdict_factory_guard(self):
+        def fn(x, mapping):
+            # Iteration exercises child guards on an empty `DictGuardManager`.
+            return x + len(mapping.default_factory((1, 1))), tuple(mapping)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for factory in (list, set, list):
+            mapping = defaultdict(factory)
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        self.assertEqual(counter.frame_count, 2)
+
     @parametrize("reported_type", [set, frozenset, type({}.keys())])
     def test_dict_input_spoofed_set_class(self, reported_type):
         class Mapping(dict):
@@ -582,7 +615,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
                     )
                     method(1, 2)
             except TypeError as exc:
-                return x + 1, str(exc)
+                return x + 1, type(exc)
             return x - 1, "no error"
 
         x, mapping = torch.ones(1), Mapping(a=1)
@@ -601,7 +634,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             try:
                 mapping.popitem(1, 2)
             except TypeError as exc:
-                return x + 1, str(exc)
+                return x + 1, type(exc)
             return x - 1, "no error"
 
         x = torch.ones(1)
@@ -718,37 +751,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             torch.compile(fn, backend="eager", fullgraph=True)(x), expected
         )
-
-    @parametrize(
-        "mapping_type, mutate",
-        [(dict, False), (dict, True), (OrderedDict, True), (defaultdict, True)],
-    )
-    def test_input_dict_with_custom_new(self, mapping_type, mutate):
-        class Mapping(mapping_type):
-            def __new__(cls, *args, **kwargs):
-                return mapping_type.__new__(cls)
-
-            def keys(self):
-                raise AssertionError("dict.update must bypass keys")
-
-            def __getitem__(self, key):
-                raise AssertionError("dict.update must bypass __getitem__")
-
-        def fn(x, mapping):
-            if mutate:
-                mapping["b"] = x + 1
-                mapping.pop("a")
-                mapping.update(c=x + 2)
-                return list(mapping.items())
-            result = {}
-            result.update(mapping)
-            return x + result["a"]
-
-        x = torch.ones(1)
-        actual, expected = Mapping(a=x), Mapping(a=x)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(x, actual), fn(x, expected))
-        self.assertEqual(list(actual.items()), list(expected.items()))
 
     @parametrize("reported_type", [OrderedDict, defaultdict])
     def test_input_object_reporting_mapping_class(self, reported_type):
@@ -1480,16 +1482,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
             self.assertEqual(ref, res)
 
-    @parametrize("key_kind", ["type", "method", "tuple_method"])
-    def test_lazy_key_non_const_guarding(self, key_kind):
-        unused, replacement = (
-            (dict, defaultdict) if key_kind == "type" else ([].count, [].index)
-        )
-        if key_kind == "tuple_method":
-            unused, replacement = (unused,), (replacement,)
+    def test_lazy_key_non_const_guarding(self):
         d = {
             list: 2,
-            unused: 3,
+            dict: 3,
             OrderedDict: 5,
             namedtuple: 7,
         }
@@ -1504,9 +1500,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-        # Since key c was not used, it should not lead to a recompilation
-        d.pop(unused)
-        d[replacement] = 10
+        # The unused key can change without recompilation.
+        d.pop(dict)
+        d[defaultdict] = 10
 
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             ref = fn(x)

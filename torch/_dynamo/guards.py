@@ -5377,9 +5377,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(
             obj, (types.MethodDescriptorType, types.ClassMethodDescriptorType)
         ):
+            from .variables.object_protocol import Py_TPFLAGS_IMMUTABLETYPE
+
             owner = obj.__objclass__
             flags = type.__dict__["__flags__"].__get__(owner, type(owner))
-            if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
+            if not flags & Py_TPFLAGS_IMMUTABLETYPE:
                 raise torch._dynamo.exc.PackageError(
                     f"Cannot serialize {type(obj).__name__} with a mutable owner"
                 )
@@ -5657,11 +5659,13 @@ def _resolves_by_reference(value: object) -> bool:
             and getattr(owner, value.name, None) is value
         )
     if isinstance(value, (types.MethodDescriptorType, types.ClassMethodDescriptorType)):
+        from .variables.object_protocol import Py_TPFLAGS_IMMUTABLETYPE
+
         owner = value.__objclass__
         # Match GuardsStatePickler's immutable-owner descriptor reducer.
         flags = type.__dict__["__flags__"].__get__(owner, type(owner))
         return (
-            bool(flags & (1 << 8))
+            bool(flags & Py_TPFLAGS_IMMUTABLETYPE)
             and _resolves_by_reference(owner)
             and any(
                 item is value for item in get_type_dict_no_user_code(owner).values()
