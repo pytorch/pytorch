@@ -709,7 +709,10 @@ void cascade_sum(TensorIterator &iter, bool sqrt_result = false) {
   if (sqrt_result) {
     const TensorBase& out = iter.output_base();
     auto sqrt_iter = TensorIteratorConfig().add_output(out).add_const_input(out).build();
-    cpu_kernel(sqrt_iter, [](out_t a) -> out_t { return std::sqrt(a); });
+    cpu_kernel_vec(
+        sqrt_iter,
+        [](out_t a) -> out_t { return std::sqrt(a); },
+        [](Vectorized<out_t> a) { return a.sqrt(); });
   }
 }
 
