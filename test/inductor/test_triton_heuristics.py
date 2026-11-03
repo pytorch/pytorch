@@ -533,7 +533,7 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(cfg.kwargs["R0_BLOCK"], 128)
 
     def test_reduction_min_block_rejects_yblock(self):
-        with self.assertRaisesRegex(AssertionError, "only support 2D X/R0 configs"):
+        with self.assertRaisesRegex(AssertionError, "do not support YBLOCK"):
             _enforce_reduction_config_block_minimums(
                 [triton.Config({"YBLOCK": 32, "XBLOCK": 8, "R0_BLOCK": 1024})],
                 {"x": 256, "y": 256, "r0_": 4096},
