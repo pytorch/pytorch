@@ -187,7 +187,9 @@ inline int cublasLtMatmulScaleMode(
 #if !defined(USE_ROCM) && CUBLAS_VERSION >= 130801
         return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_MN_K4_UE8M0;
 #else
-        TORCH_CHECK(false, "packed 1x32 MNxK4 scaling requires CUDA >= 13.4");
+        TORCH_CHECK_NOT_IMPLEMENTED(
+            false,
+            "packed MNxK4 scaling requires cuBLASLt >= 13.8.1 (bundled with CUDA 13.4)");
 #endif
       }
       if (swizzle_type == at::blas::SwizzleType::SWIZZLE_32_8) {
@@ -239,7 +241,9 @@ inline int cublasLtMatmulScaleMode(
             "MNxK4 scales must have dtype float8_e8m0fnu");
         return CUBLASLT_MATMUL_MATRIX_SCALE_VEC128_MN_K4_UE8M0;
 #else
-        TORCH_CHECK(false, "packed 1x128 MNxK4 scaling requires CUDA >= 13.4");
+        TORCH_CHECK_NOT_IMPLEMENTED(
+            false,
+            "packed MNxK4 scaling requires cuBLASLt >= 13.8.1 (bundled with CUDA 13.4)");
 #endif
       }
       TORCH_CHECK(scale_dtype == kFloat);
