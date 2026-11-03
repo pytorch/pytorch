@@ -352,8 +352,6 @@ def _build_spec(
     *,
     aot_arg_names: tuple[str, ...] | None,
 ) -> ExternalAOTBuildSpec:
-    shapes = metadata["precompile_shapes"]
-    strides = metadata["precompile_strides"]
     sources = (*metadata["tensor_names"], "output")
     arg_names = aot_arg_names
     if arg_names is None or len(arg_names) != len(sources):
@@ -363,17 +361,13 @@ def _build_spec(
         )
     tensor_args = []
     for name, source in zip(arg_names, sources):
-        shape = tuple(shapes[source])
-        stride = tuple(strides[source])
         tensor_args.append(
             ExternalAOTTensorArg(
                 name=name,
                 source=source,
                 dtype=str(metadata["precompile_dtypes"][source]),
-                dynamic_sizes=tuple(range(len(shape))),
-                dynamic_strides=tuple(
-                    index for index, value in enumerate(stride) if value != 1
-                ),
+                dynamic_sizes=(),
+                dynamic_strides=(),
             )
         )
     capability = metadata.get("device_capability")
