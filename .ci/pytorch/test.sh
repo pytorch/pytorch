@@ -852,16 +852,17 @@ test_inductor_core() {
   assert_git_not_dirty
 }
 
-# inductor_avx2 is the x86 AVX2 coverage of the inductor CPU tests (Inductor and
-# ATen generate different code per ISA). Fail unless the host's best CPU
-# capability is AVX2, so the job can't silently run on AVX-512/AMX hardware. cd
-# test, because from the repo root the source torch/ dir shadows the installed
-# wheel.
+# inductor_avx2 runs a subset of the inductor CPU tests on x86 AVX2 (Inductor and
+# ATen generate different code per ISA): the files whose CPU classes would
+# otherwise get AVX2 only from GPU jobs, without slow tests. Fail unless both
+# ATen's CPU capability and Inductor's vector ISA are AVX2, so the job can't
+# silently run on AVX-512/AMX hardware or without vectorized codegen. cd test,
+# because from the repo root the source torch/ dir shadows the installed wheel.
 assert_avx2_host() {
-  local cap
-  cap=$(cd test && env -u ATEN_CPU_CAPABILITY python -c "import torch; print(torch.backends.cpu.get_cpu_capability())")
-  if [[ "$cap" != "AVX2" ]]; then
-    echo "inductor_avx2 must run on a host whose best CPU capability is AVX2, but this one is $cap"
+  local isa
+  isa=$(cd test && env -u ATEN_CPU_CAPABILITY python -c "import torch; from torch._inductor import cpu_vec_isa; print(torch.backends.cpu.get_cpu_capability(), cpu_vec_isa.pick_vec_isa())")
+  if [[ "$isa" != "AVX2 avx2" ]]; then
+    echo "inductor_avx2 needs ATen and Inductor to both pick AVX2, but they picked: $isa"
     exit 1
   fi
 }
