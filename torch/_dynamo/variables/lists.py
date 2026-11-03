@@ -83,6 +83,7 @@ from .object_protocol import (
     pyindex_check,
     pyiter_next,
     pylong_as_ssize_t,
+    pylong_check,
     pynumber_as_ssize_t,
     pynumber_index,
     python_constant_repr_impl,
@@ -2134,14 +2135,22 @@ class ByteArrayVariable(VariableTracker):
 
     _nonvar_fields = {
         "data",
+        "is_sourceless_capture",
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, data: bytearray, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        data: bytearray,
+        *,
+        is_sourceless_capture: bool = False,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         if not isinstance(data, bytearray):
             raise AssertionError(f"data must be a bytearray, got {type(data).__name__}")
         self.data = data
+        self.is_sourceless_capture = is_sourceless_capture
 
     def python_type(self) -> type[bytearray]:  # type: ignore[type-arg]
         return bytearray
@@ -2241,7 +2250,7 @@ class ByteArrayVariable(VariableTracker):
             if value is not None:
                 value = value.realize()
             if value is None:
-                src = None
+                src: Any = None
             elif isinstance(value, ByteArrayVariable):
                 src = value.data
             elif isinstance(value, ConstantVariable):
@@ -2309,10 +2318,12 @@ class ByteArrayVariable(VariableTracker):
         # frame. A bytearray that existed before the frame may share its buffer
         # with a memoryview, tensor or ndarray, which would read stale bytes,
         # and eager raises BufferError for a resize at the store itself.
-        # A pre-existing bytearray reached without a source is still wrapped as
-        # a new copy, as lists and dicts are; that is a SourcelessBuilder
-        # limitation.
-        if isinstance(self.mutation_type, ValueMutationExisting):
+        # Source-less captures also refer to existing objects, even though their
+        # SourcelessBuilder copies have ValueMutationNew.
+        if (
+            isinstance(self.mutation_type, ValueMutationExisting)
+            or self.is_sourceless_capture
+        ):
             unimplemented(
                 gb_type="bytearray store to an existing bytearray",
                 context=f"bytearray: {self}",
@@ -2333,9 +2344,14 @@ class ByteArrayVariable(VariableTracker):
     def _has_python_index(member: VariableTracker) -> bool:
         from .tensor import SymNodeVariable
 
-        # Dynamo handles SymInt.__index__ itself; any other __index__ that is
-        # not a C slot is user code, also on int, float or str subclasses.
-        if istype(member, ConstantVariable) or isinstance(member, SymNodeVariable):
+        # PyLong_Check bypasses Python __index__ overrides on int subclasses;
+        # Dynamo handles SymInt separately. Other Python-defined __index__
+        # methods may run arbitrary code.
+        if (
+            istype(member, ConstantVariable)
+            or isinstance(member, SymNodeVariable)
+            or pylong_check(maybe_get_python_type(member))
+        ):
             return False
         index = inspect.getattr_static(maybe_get_python_type(member), "__index__", None)
         return index is not None and not isinstance(

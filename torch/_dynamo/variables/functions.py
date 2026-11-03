@@ -283,7 +283,12 @@ def bind_args_cached(
                 and config.skip_guards_on_constant_func_defaults
             ):
                 default_source = DefaultsSource(fn_source, idx)
-            ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
+            default_value = spec.defaults[idx]
+            if default_source is None and not isinstance(
+                default_value, VariableTracker
+            ):
+                default_value = wrap_sourceless_capture(tx, default_value)
+            ba[name] = wrap_bound_arg(tx, default_value, default_source)
         else:
             raise BindArgsTypeError(f"missing required positional argument: {name}")
 
@@ -304,7 +309,12 @@ def bind_args_cached(
             kwdefault_source = None
             if fn_source:
                 kwdefault_source = DefaultsSource(fn_source, name, is_kw=True)
-            ba[name] = wrap_bound_arg(tx, spec.kwdefaults[name], kwdefault_source)
+            kwdefault_value = spec.kwdefaults[name]
+            if kwdefault_source is None and not isinstance(
+                kwdefault_value, VariableTracker
+            ):
+                kwdefault_value = wrap_sourceless_capture(tx, kwdefault_value)
+            ba[name] = wrap_bound_arg(tx, kwdefault_value, kwdefault_source)
         else:
             raise BindArgsTypeError(f"Missing required keyword-only argument: {name}")
 
@@ -315,6 +325,21 @@ def bind_args_cached(
         raise BindArgsTypeError(f"Unexpected keyword arguments: {list(rem_kw)}")
 
     return ba
+
+
+def wrap_sourceless_capture(
+    tx: "InstructionTranslatorBase", value: Any
+) -> VariableTracker:
+    result = VariableTracker.build(tx, value)
+
+    def mark(variable: VariableTracker) -> None:
+        if isinstance(variable, variables.ByteArrayVariable):
+            # SourcelessBuilder copies these pre-existing captured objects and
+            # marks them new. Item/slice stores must not mutate only that copy.
+            variable.is_sourceless_capture = True
+
+    VariableTracker.visit(mark, result)
+    return result
 
 
 def wrap_bound_arg(
@@ -886,10 +911,12 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 # TODO figure out why source isn't available here, and whether
                 # we can fix that and remove this branch.
                 try:
-                    contents_var = VariableTracker.build(parent, cell.cell_contents)
+                    cell_contents = cell.cell_contents
                 except ValueError:
                     # Cell has not yet been assigned
                     contents_var = variables.DeletedVariable()
+                else:
+                    contents_var = wrap_sourceless_capture(parent, cell_contents)
                 cell_var = side_effects.track_cell_existing(None, cell, contents_var)
 
             result[name] = cell_var
