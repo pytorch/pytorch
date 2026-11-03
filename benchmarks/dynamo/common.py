@@ -634,7 +634,7 @@ def print_summary_table(data, print_dataframe=False):
                 print(col.ljust(width), f"{data[col].mean():.3f}")
             elif col in ("compilation_latency"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f} seconds")
-            elif col == "eager_latency":
+            elif col in ("abs_latency", "eager_latency"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f} ms")
             elif col == "input_tokens_per_second":
                 print(col.ljust(width), f"mean={data[col].mean():.3f} tokens/s")
@@ -4075,6 +4075,8 @@ def main(runner, original_dir=None, args=None):
     if original_dir:
         os.chdir(original_dir)
     args = parse_args() if not args else parse_args(args)
+    if args.hf_inference_mode != "generate":
+        runner.validate_args(args)
     if args.baseline:
         args.baseline = os.path.abspath(args.baseline)
 
