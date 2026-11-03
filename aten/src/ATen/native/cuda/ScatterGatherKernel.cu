@@ -289,11 +289,11 @@ struct _cuda_scatter_gather_internal_kernel {
       int64_t offset = ((scalar_t*)(self_ptr + offsets[0]) - base) +
           (is_scatter_like ? idx_dim * index_stride : 0);
       // Functors other than add ignore numel; 0 keeps the call self-consistent.
-      int64_t column = uses_fast_atomic_add<func_t> ? bounds.column(offset) : 0;
+      int64_t offset_in_row = uses_fast_atomic_add<func_t> ? bounds.offset_in_row(offset) : 0;
       int64_t row_numel = uses_fast_atomic_add<func_t> ? bounds.row_numel : 0;
       f(
-        base + offset - column,
-        column,
+        base + offset - offset_in_row,
+        offset_in_row,
         row_numel,
         (scalar_t*)(src_ptr + offsets[1]) + (is_scatter_like ? 0 : idx_dim * index_stride)
       );
@@ -542,9 +542,9 @@ struct _cuda_scatter_fill_internal_kernel {
       // See Note [Scatter index for fastAtomicAdd]
       auto base = (scalar_t*)self_base;
       int64_t offset = ((scalar_t*)(self_ptr + offsets[0]) - base) + idx_dim * index_stride;
-      int64_t column = uses_fast_atomic_add<func_t> ? bounds.column(offset) : 0;
+      int64_t offset_in_row = uses_fast_atomic_add<func_t> ? bounds.offset_in_row(offset) : 0;
       int64_t row_numel = uses_fast_atomic_add<func_t> ? bounds.row_numel : 0;
-      f(base + offset - column, column, row_numel, (scalar_t*)&src_val);
+      f(base + offset - offset_in_row, offset_in_row, row_numel, (scalar_t*)&src_val);
     };
 
     _launch_scatter_gather_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);

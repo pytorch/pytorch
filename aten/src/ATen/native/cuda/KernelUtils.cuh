@@ -19,8 +19,8 @@
 #endif
 
 #include <cstdint>
+#include <algorithm>
 #include <limits>
-#include <numeric>
 
 namespace at::native {
 
@@ -30,68 +30,79 @@ using torch::headeronly::fastSpecializedAtomicAdd;
 // Note [fastAtomicAdd bounds for strided tensors]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // fastAtomicAdd may pair a half/bfloat16 update with tensor[index +/- 1], so
-// its (tensor, index, numel) must describe memory that the destination owns.
+// its (tensor, index, numel) must describe elements that the destination owns.
 // Kernels that address a destination by element offset from its data pointer
-// get that from FastAtomicAddBounds, which views the destination as rows:
-// row r owns offsets [r * row_stride, r * row_stride + row_numel).
+// get those arguments from FastAtomicAddBounds, which views the destination
+// as rows: a row is a run of row_numel contiguous elements along the stride-1
+// dimension (whichever dimension that is), and rows start row_pitch apart.
+// An update may pair only with elements of its own row.
 //
 // - Non-overlapping and dense: a single row covering all of it.
-// - Rows of row_numel contiguous elements whose other strides are all
-//   multiples of row_stride >= row_numel, e.g. a column slice of a contiguous
-//   matrix: the row and column of an offset are its quotient and remainder,
-//   and only elements of the same row are paired.
-// - Anything else, e.g. x[::2]: row_numel is 0, which disables pairing.
+// - Padded rows: one dimension has stride 1, and every other stride is a
+//   multiple of the smallest one, row_pitch >= row_numel. Then an offset is
+//   (row start) + (offset in row), with the row start a multiple of
+//   row_pitch, so offset % row_pitch is the offset in its row.
+//   E.g. x = base.view(5, 6)[:, :5] has strides (6, 1): rows of 5 elements,
+//   6 apart. Offset 13 is element 1 of the row starting at 12, so it may pair
+//   with offsets 12 or 14, never with 17, the padding after the row.
+// - Anything else, e.g. x[::2]: row_numel is kNoPairing (0), which makes
+//   fastAtomicAdd use a single 16-bit atomic.
 namespace detail {
 // On CUDA, out of line so the compiler branches around the division for
 // single-row (dense) bounds instead of predicating it on every element.
 template <typename index_t>
 #if defined(USE_ROCM)
-__device__ __forceinline__ index_t fast_atomic_add_column(
+__device__ __forceinline__ index_t fast_atomic_add_offset_in_row(
 #else
-__device__ __noinline__ index_t fast_atomic_add_column(
+__device__ __noinline__ index_t fast_atomic_add_offset_in_row(
 #endif
     index_t offset,
-    index_t row_stride) {
-  return offset % row_stride;
+    index_t row_pitch) {
+  return offset % row_pitch;
 }
 } // namespace detail
 
 struct FastAtomicAddBounds {
   static constexpr int64_t kSingleRow = std::numeric_limits<int64_t>::max();
+  static constexpr int64_t kNoPairing = 0;
 
-  int64_t row_stride;
+  int64_t row_pitch;
   int64_t row_numel;
-  // row_stride as a multiply-shift divider, set when row_stride <= INT32_MAX.
-  // Left zeroed otherwise, in which case mod(n) == n: the column is the whole
-  // offset and only row 0 can pair, which is still inside the tensor.
-  at::cuda::detail::IntDivider<unsigned int> row_divider{};
+  // row_pitch as a multiply-shift divider, set when row_pitch <= INT32_MAX.
+  // Left zeroed otherwise, in which case mod(n) == n: the offset in row is the
+  // whole offset and only the first row can pair, which is still in bounds.
+  at::cuda::detail::IntDivider<unsigned int> pitch_divider{};
 
-  // Column of the element at offset; pass (data + offset - column, column,
-  // row_numel) to fastAtomicAdd. A 32-bit index_t requires
-  // canUse32BitIndexMath on the tensor, so offsets and row_stride fit in
-  // int32 and row_divider replaces the division.
+  // Offset of the element at offset within its row; pass
+  // (data + offset - offset_in_row, offset_in_row, row_numel) to
+  // fastAtomicAdd. A 32-bit index_t requires canUse32BitIndexMath on the
+  // tensor, so offsets and row_pitch fit in int32 and pitch_divider replaces
+  // the division.
   template <typename index_t>
-  __device__ __forceinline__ index_t column(index_t offset) const {
-    if (row_stride == kSingleRow) {
+  __device__ __forceinline__ index_t offset_in_row(index_t offset) const {
+    if (row_pitch == kSingleRow) {
       return offset;
     }
     if constexpr (sizeof(index_t) <= sizeof(unsigned int)) {
       return static_cast<index_t>(
-          row_divider.mod(static_cast<unsigned int>(offset)));
+          pitch_divider.mod(static_cast<unsigned int>(offset)));
     } else {
-      return detail::fast_atomic_add_column(
-          offset, static_cast<index_t>(row_stride));
+      return detail::fast_atomic_add_offset_in_row(
+          offset, static_cast<index_t>(row_pitch));
     }
   }
 };
 
 inline FastAtomicAddBounds fast_atomic_add_bounds(const TensorBase& self) {
   constexpr int64_t kSingleRow = FastAtomicAddBounds::kSingleRow;
+  constexpr int64_t kNoPairing = FastAtomicAddBounds::kNoPairing;
   if (self.is_non_overlapping_and_dense()) {
     return {kSingleRow, self.numel()};
   }
+  // Find the stride-1 dimension and the smallest other stride, ignoring
+  // size-1 dimensions, whose strides never contribute to an offset.
   int64_t row_numel = 0;
-  int64_t row_stride = 0;
+  int64_t row_pitch = kSingleRow;
   for (const auto d : c10::irange(self.dim())) {
     if (self.size(d) == 1) {
       continue;
@@ -99,16 +110,22 @@ inline FastAtomicAddBounds fast_atomic_add_bounds(const TensorBase& self) {
     if (self.stride(d) == 1 && row_numel == 0) {
       row_numel = self.size(d);
     } else {
-      row_stride = std::gcd(row_stride, self.stride(d));
+      row_pitch = std::min(row_pitch, self.stride(d));
     }
   }
-  if (row_numel == 0 || row_stride < row_numel) {
-    return {kSingleRow, 0};
+  if (row_numel == 0 || row_pitch == kSingleRow || row_pitch < row_numel) {
+    return {kSingleRow, kNoPairing};
   }
-  FastAtomicAddBounds bounds{row_stride, row_numel};
-  if (row_stride <= std::numeric_limits<int32_t>::max()) {
-    bounds.row_divider = at::cuda::detail::IntDivider<unsigned int>(
-        static_cast<unsigned int>(row_stride));
+  for (const auto d : c10::irange(self.dim())) {
+    if (self.size(d) != 1 && self.stride(d) != 1 &&
+        self.stride(d) % row_pitch != 0) {
+      return {kSingleRow, kNoPairing};
+    }
+  }
+  FastAtomicAddBounds bounds{row_pitch, row_numel};
+  if (row_pitch <= std::numeric_limits<int32_t>::max()) {
+    bounds.pitch_divider = at::cuda::detail::IntDivider<unsigned int>(
+        static_cast<unsigned int>(row_pitch));
   }
   return bounds;
 }
