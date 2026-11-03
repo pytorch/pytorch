@@ -247,8 +247,8 @@ def _is_allowed_in_pre_dispatch_graph(fn: object) -> bool:
     Whether one of the decorators below marked ``fn``. torch.export.save and
     torch.export.load accept a tensor subclass or autograd function by name only
     if a method in its class hierarchy is marked, because export only records
-    those. The mark
-    is read statically, so checking a name from a file runs no code of ``fn``.
+    those. The mark is read statically, so checking a name from a file runs no
+    code of ``fn``.
     """
     return bool(inspect.getattr_static(fn, _ALLOWED_IN_PRE_DISPATCH_GRAPH, False))
 

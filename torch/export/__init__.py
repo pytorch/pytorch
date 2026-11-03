@@ -356,8 +356,8 @@ def load(
     A program can call tensor subclasses and custom autograd functions. Load
     finds them by name in modules that are already imported, and does not
     import those modules itself, because importing a module runs its code. So
-    import the module that defines each one before loading, also when it is
-    part of torch::
+    import the module that each ``__module__`` names before loading, also when
+    it is part of torch::
 
         import my_project.ops  # defines a custom autograd function the program calls
 
