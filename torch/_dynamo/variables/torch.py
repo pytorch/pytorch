@@ -866,14 +866,16 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 }
             else:
                 annotation_dict = annotation.as_python_constant()
-            return FxTracebackAnnotateVariable(annotation_dict)
+            return FxTracebackAnnotateVariable.create(annotation_dict)
         elif self.value in (
             torch.fx.traceback._dynamo_annotate,
             torch.fx.traceback._dynamo_annotate.__wrapped__,  # type: ignore[attr-defined]
         ):
             if len(args) != 1 or kwargs:
                 raise AssertionError("_dynamo_annotate expects one positional argument")
-            return FxTracebackAnnotateVariable(dict(args[0].as_python_constant()))
+            return FxTracebackAnnotateVariable.create(
+                dict(args[0].as_python_constant())
+            )
         elif self.value in (
             torch.fx.traceback._dynamo_region_activation_memory_budget,
             torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
@@ -888,7 +890,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 raise AssertionError(
                     f"expected a float budget, got {type(budget).__name__}"
                 )
-            return FxTracebackAnnotateVariable(
+            return FxTracebackAnnotateVariable.create(
                 {torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY: budget}
             )
         elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
@@ -923,7 +925,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.autograd.profiler.profile,
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
-            return ProfilerContextVariable()
+            return ProfilerContextVariable()  # noqa: RVT001
         elif (
             self.value is torch._C.DisableTorchFunctionSubclass
             or self.value is torch._C.DisableTorchFunction
@@ -1174,14 +1176,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # pyrefly: ignore[missing-attribute]
                 example_value = args[0].proxy.node.meta["example_value"]
                 dks = self.value(example_value)
-                # Remove Python and PythonTLSSnapshot from the dispatch key set,
-                # as they originate from FakeTensor propagation.
-                # This should only be done if the example_value is a FakeTensor.
+                # Remove the keys that come from the example value being fake:
+                # Python and PythonTLSSnapshot from a Python FakeTensor, Fake
+                # from a C++ fake. The real tensor would not have them.
+                # This should only be done if the example_value is a fake.
                 # However, if tensor subclasses are present,
                 # it is reasonable for Python to remain in the dispatch key set.
                 if torch._subclasses.fake_tensor.is_fake_tensor(example_value):
                     dks = (
                         dks
+                        - torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
                         - torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
                         - torch._C.DispatchKeySet(
                             torch._C.DispatchKey.PythonTLSSnapshot
@@ -2154,8 +2158,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fill_value: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if isinstance(fill_value, variables.TensorVariable) and not issubclass(
-                fill_value.python_type(), torch.nn.Parameter
+            # Eager only accepts a 0-d tensor fill_value that does not require
+            # grad, and fill_ would make the result differentiable w.r.t. it.
+            if (
+                isinstance(fill_value, variables.TensorVariable)
+                and fill_value.ndim == 0
+                and not fill_value.requires_grad
             ):
                 dtype = kwargs.get("dtype")
                 out = kwargs.get("out")
@@ -2832,8 +2840,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> FuncTorchInterpreterVariable:
             # pyrefly: ignore[missing-attribute]
             cinterpreter = args[0].value
-            return FuncTorchInterpreterVariable(
-                torch._functorch.pyfunctorch.coerce_cinterpreter(cinterpreter)
+            return VariableTracker.build(
+                tx, torch._functorch.pyfunctorch.coerce_cinterpreter(cinterpreter)
             )
 
         @register(torch.tensor)
@@ -3166,7 +3174,44 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # Under compile-on-one-rank the index must stay None so the runtime
                 # resolves it per rank and one artifact serves them all.
                 if not _coor_enabled():
-                    device_index = 0
+                    # Everywhere else it has to be resolved here, at trace time, and
+                    # guarded. Inductor wraps the call in
+                    # `with torch.cuda._DeviceGuard(<graph device>):`, so an index
+                    # deferred to run time would resolve against the graph's device
+                    # rather than the caller's -- synchronizing whichever device the
+                    # graph happens to be laid out for.
+                    torch_source = ImportSource("torch")
+                    install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
+                    current_device_source = CallFunctionNoArgsSource(
+                        AttrSource(
+                            AttrSource(torch_source, "accelerator"),
+                            "current_device_index",
+                        )
+                    )
+                    install_guard(
+                        current_device_source.make_guard(GuardBuilder.EQUALS_MATCH)
+                    )
+                    try:
+                        device_index = torch.accelerator.current_device_index()
+                    except RuntimeError as e:
+                        # No visible accelerator. Break rather than surface this as
+                        # an InternalTorchDynamoError telling the user to file a bug;
+                        # running the call eagerly reproduces the same error eager
+                        # would have raised.
+                        unimplemented(
+                            gb_type="synchronize with no accelerator available",
+                            context=f"device={device}",
+                            explanation=(
+                                "torch.accelerator.current_device_index() failed while "
+                                "resolving an index-less device for synchronize, so the "
+                                "index cannot be baked into the graph."
+                            ),
+                            hints=[
+                                "Pass an explicit device index to synchronize.",
+                                "Make an accelerator visible to the process.",
+                            ],
+                            from_exc=e,
+                        )
 
             tx.output.create_proxy(
                 "call_function",
@@ -3944,7 +3989,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if source is not None:
                 if type(mro_lookup(type(self.value), name)) is property:
                     # Guarding the result would call the property getter again.
-                    return TorchInGraphFunctionVariable(member, source=source)
+                    return TorchInGraphFunctionVariable(  # noqa: RVT001
+                        member, source=source
+                    )
                 return TorchInGraphFunctionVariable.create_with_source(member, source)
             return _create_internal_torch_function(member)
         # Function metadata (__name__, __module__, __qualname__, ...) is
