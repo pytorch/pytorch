@@ -305,6 +305,7 @@ softmax(
     uint2 tptg [[threads_per_threadgroup]],
     uint2 tgid [[threadgroup_position_in_grid]]) {
   threadgroup float shared[kSoftmaxMaxThreads];
+  threadgroup uint shared_winner[kSoftmaxMaxThreads];
   const auto dim_size = params.dim_size;
   const auto inner_size = params.inner_size;
   const idx_t col = idx_t(tgid.x) * tptg.x + tid.x;
@@ -320,22 +321,30 @@ softmax(
     max_val = c10::metal::max(max_val, float(input[base + r * dim_stride]));
   }
   shared[shared_idx] = max_val;
+  shared_winner[shared_idx] = tid.y;
   threadgroup_barrier(mem_flags::mem_threadgroup);
   for (uint stride = tptg.y / 2; stride > 0; stride /= 2) {
     if (tid.y < stride) {
-      shared[shared_idx] = c10::metal::max(
-          shared[shared_idx], shared[shared_idx + stride * tptg.x]);
+      const uint other = shared_idx + stride * tptg.x;
+      if (shared[other] > shared[shared_idx] || isnan(shared[other])) {
+        shared[shared_idx] = shared[other];
+        shared_winner[shared_idx] = shared_winner[other];
+      }
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
   max_val = shared[tid.x];
+  bool skip_max = isfinite(max_val) && tid.y == shared_winner[tid.x];
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  float sum = 0;
+  float tail = 0;
   for (idx_t r = tid.y; active && r < dim_size; r += tptg.y) {
-    sum += precise::exp(float(input[base + r * dim_stride]) - max_val);
+    const float value = float(input[base + r * dim_stride]);
+    const bool omit = skip_max && value == max_val;
+    skip_max = skip_max && !omit;
+    tail += omit ? 0.0f : precise::exp(value - max_val);
   }
-  shared[shared_idx] = sum;
+  shared[shared_idx] = tail;
   threadgroup_barrier(mem_flags::mem_threadgroup);
   for (uint stride = tptg.y / 2; stride > 0; stride /= 2) {
     if (tid.y < stride) {
@@ -343,7 +352,7 @@ softmax(
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
-  const SoftmaxEpilogue<log_softmax> epilogue(max_val, shared[tid.x]);
+  const SoftmaxEpilogue<log_softmax, true> epilogue(max_val, shared[tid.x]);
 
   for (idx_t r = tid.y; active && r < dim_size; r += tptg.y) {
     output[out_base + r * inner_size] =

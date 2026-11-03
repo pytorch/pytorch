@@ -15522,6 +15522,25 @@ class TestCommon(TestCase):
 
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize("op", [F.softmax, F.log_softmax])
+    @parametrize("shape,dim", [((3, 33), 0), ((256, 33), 0), ((257, 4096), 1)])
+    @parametrize("values", [
+        (0, -17, -math.inf), (-17, 0, -math.inf), (-20, -math.inf, 0),
+        (0, 0, 0), (-math.inf, -math.inf, 0), (-math.inf, -math.inf, -math.inf),
+        (0, math.inf, 0), (0, math.nan, 0),
+    ])
+    def test_softmax_fallback_tail(self, device, dtype, op, shape, dim, values):
+        # Short strided reductions and many long contiguous rows use the fallback.
+        x = torch.full(shape, -math.inf, dtype=dtype)
+        for index, value in zip((0, shape[dim] // 2, shape[dim] - 1), values):
+            x.select(dim, index).fill_(value)
+        expected = op(x.double(), dim=dim).to(dtype)
+        actual = op(x.to(device), dim=dim).cpu()
+        self.assertEqual(actual, expected)
+        rtol = 1e-6 if op is F.log_softmax else 0
+        self.assertEqual(actual.amax(dim), expected.amax(dim), atol=0, rtol=rtol)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("op", [F.softmax, F.log_softmax])
     @parametrize("margin", [17.0, 20.0])
     @parametrize("max_col,other_col", [(0, 256), (128, 0), (255, 256), (2047, 2048), (4095, 4094)])
     @parametrize("layout", ["contiguous", "strided", "transposed"])
