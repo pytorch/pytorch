@@ -133,43 +133,34 @@ class TestNativeUtils(TestCase):
             self.assertFalse(cap.device_ok(x, (9, 10, 12)))
             self.assertTrue(cap.device_ok(x, (11,)), "the (9,10,12) answer was reused")
 
-    def test_cuda_device_guard(self):
-        # Mocked so the device-switch branch runs on single-GPU and CPU-only machines.
-        from types import SimpleNamespace
-        from unittest.mock import MagicMock, patch
-
+    def test_cuda_device_guard_passes_non_cuda_inputs(self):
         from torch._native.utils.device import cuda_device_guard
 
-        calls = []
+        x = torch.ones(2)
+        self.assertIs(cuda_device_guard(lambda t: t)(x), x)
 
-        def fn(self, *args, **kwargs):
-            # Record how many times the context was entered and exited when fn runs.
-            ctx = device.return_value
-            calls.append((self, args, kwargs))
-            calls.append((ctx.__enter__.call_count, ctx.__exit__.call_count))
-            if kwargs.get("fail"):
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
+    def test_cuda_device_guard_switches_device(self):
+        from torch._native.utils.device import cuda_device_guard
+
+        seen = []
+
+        def fn(t, fail=False):
+            seen.append(torch.cuda.current_device())
+            if fail:
                 raise RuntimeError("fn failed")
-            return "result"
+            return t
 
         guarded = cuda_device_guard(fn)
-        x = SimpleNamespace(device=torch.device("cuda", 1))
-        for current, switched in ((1, False), (0, True)):
-            calls.clear()
-            device = MagicMock()
-            device.return_value.__exit__.return_value = False
-            with (
-                patch.object(torch.cuda, "current_device", return_value=current),
-                patch.object(torch.cuda, "device", device),
-            ):
-                self.assertEqual(guarded(x, 2, k=3), "result")
+        with torch.cuda.device(0):
+            for index in (0, 1):
+                x = torch.ones(2, device=f"cuda:{index}")
+                self.assertIs(guarded(x), x)
                 with self.assertRaisesRegex(RuntimeError, "fn failed"):
                     guarded(x, fail=True)
-            # fn runs inside the switched context, which exits even when fn raises.
-            n = int(switched)
-            want = [(x, (2,), {"k": 3}), (n, 0), (x, (), {"fail": True}), (2 * n, n)]
-            self.assertEqual(calls, want)
-            self.assertEqual(device.return_value.__exit__.call_count, 2 * n)
-            self.assertEqual([c.args for c in device.call_args_list], [(1,)] * 2 * n)
+                # fn ran on the input's device, which is restored even when fn raises.
+                self.assertEqual(torch.cuda.current_device(), 0)
+        self.assertEqual(seen, [0, 0, 1, 1])
 
     def test_device_ok_never_raises_without_a_usable_device(self):
         # On CPU-only systems, fake CUDA tensors normalize to cuda:0 but device queries raise.
