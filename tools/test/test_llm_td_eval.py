@@ -13,6 +13,7 @@ from tools.testing.llm_td.eval.score import (
     config_of,
     cost_fraction,
     policy,
+    runs_everything,
     truth_pairs,
 )
 from tools.testing.llm_td.eval.td_replay import top25_per_config
@@ -68,6 +69,18 @@ class TestScore(unittest.TestCase):
         self.assertEqual(
             truth_pairs({**SAMPLE, "kind": "revert"}, strong=True),
             [("test_a", "slow"), ("test_b", "default")],
+        )
+
+    def test_runs_everything(self) -> None:
+        jobs = {
+            "test_a": [
+                "unit-test / linux-jammy-cpu-py3.12-gcc11-inductor / test (inductor, 1, 2, linux.2xlarge)",
+                "linux / test (inductor, 1, 2, linux.2xlarge)",
+            ],
+            "test_b": ["linux / test (default, 1, 2, linux.2xlarge)"],
+        }
+        self.assertEqual(
+            runs_everything({**SAMPLE, "truth_jobs": jobs}), {("test_a", "inductor")}
         )
 
     def test_hedge(self) -> None:
