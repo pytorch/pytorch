@@ -4085,6 +4085,49 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
         self.assertEqual(reopen.call_args_list, reopened)
 
 
+class TestGhstackMergeRetryEndToEnd(NoNetworkTestCase, GitTestCase):
+    """GitHubPR.merge_into cherry-picks a real ghstack stack onto the bot clone's
+    main and pushes it to a local bare origin. Only GitHub is patched."""
+
+    def setUp(self) -> None:
+        GitTestCase.setUp(self)
+        NoNetworkTestCase.setUp(self)
+        self.origin = self.git("remote", "get-url", "origin")
+        stack = self.push_stack()
+        self.git("fetch", "-q", "origin", cwd=self.repo.repo_dir)
+        self.prs = []
+        for entry in stack.entries:
+            pr = native_stack_pr(entry)
+            pr.is_ghstack_pr.return_value = True
+            pr.merge_changes_locally = MethodType(GitHubPR.merge_changes_locally, pr)
+            pr.merge_ghstack_into = MethodType(GitHubPR.merge_ghstack_into, pr)
+            self.prs.append(pr)
+        revs = [entry.head_oid for entry in stack.entries]
+        self.patch("trymerge.get_ghstack_prs", return_value=list(zip(self.prs, revs)))
+        self.patch("trymerge.find_matching_merge_rule", return_value=(None, [], [], {}))
+        self.patch("trymerge.can_skip_internal_checks", return_value=False)
+        self.patch("trymerge.check_greenlight_reviewed_head_sha")
+        self.patch("trymerge.save_merge_record")
+        self.patch("trymerge.time.sleep")
+        self.patch("trymerge.manually_close_merged_pr")
+
+    def test_retry_after_a_stacked_pr_check_lands_each_pr_once(self) -> None:
+        """#102's checks are pending on the first attempt, after #101 was
+        cherry-picked; merge() then calls merge_into again on the same clone."""
+        self.patch(
+            "trymerge.check_stacked_pr_merge_rule",
+            side_effect=[None, MandatoryChecksMissingError("pending"), None, None],
+        )
+        with self.assertRaises(MandatoryChecksMissingError):
+            GitHubPR.merge_into(self.prs[-1], self.repo, comment_id=1)
+        GitHubPR.merge_into(self.prs[-1], self.repo, comment_id=1)
+        revs = f"{self.root}..{TRUNK}"
+        log = self.git("log", "--reverse", "--format=%s", revs, cwd=self.origin)
+        self.assertEqual(
+            log.splitlines(), [f"Change {n} (#{n})" for n in (101, 102, 103)]
+        )
+
+
 class TestNativeStackRevertRefreshEndToEnd(NoNetworkTestCase, LineStackTestCase):
     """Stacks rebased with merge commits and landed by GitHubPR.merge_into, then
     reverted by try_revert, which refreshes the branches of the reverted PRs once it

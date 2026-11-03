@@ -1785,8 +1785,15 @@ class GitHubPR:
         :param skip_all_rule_checks: If true, skips all rule checks on ghstack PRs, useful for dry-running merge locally
         """
         branch_to_merge_into = self.default_branch() if branch is None else branch
-        if repo.current_branch() != branch_to_merge_into:
-            repo.checkout(branch_to_merge_into)
+        # Start from the remote tip: merge() retries on the same repo, and the commits
+        # an attempt cherry-picked before it failed would otherwise land again
+        repo.fetch(branch_to_merge_into)
+        repo._run_git(
+            "checkout",
+            "-B",
+            branch_to_merge_into,
+            f"refs/remotes/{repo.remote}/{branch_to_merge_into}",
+        )
 
         # It's okay to skip the commit SHA check for ghstack PRs since
         # authoring requires write access to the repo.
