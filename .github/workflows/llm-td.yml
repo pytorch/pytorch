@@ -3,8 +3,9 @@ name: llm-td
 # Shadow LLM test selection (tools/testing/llm_td). pull_request_target runs this
 # file from the default branch and the job checks out main, so the bedrock role is
 # only ever handed to reviewed code. The PR is read through git, never executed.
-# Test jobs fetch the result by head SHA in download-td-artifacts; run_test.py
-# only skips tests with it when the PR is labeled ci-llm-td and TD is enabled.
+# Test jobs fetch the result by PR number and head SHA in download-td-artifacts;
+# run_test.py only skips tests with it when the PR is labeled ci-llm-td and TD is
+# enabled.
 
 on:
   pull_request_target:
@@ -69,7 +70,8 @@ jobs:
       - name: Upload selection
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: llm_td_selection_${{ github.event.pull_request.head.sha }}
+          name: llm_td_selection_${{ github.event.pull_request.number }}_${{ github.event.pull_request.head.sha }}
+          overwrite: true
           retention-days: 3
           if-no-files-found: error
           path: llm_td_selection.json

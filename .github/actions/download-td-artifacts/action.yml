@@ -33,9 +33,10 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
       run: |
         python3 - >> "$GITHUB_OUTPUT" <<'EOF'
-        import json, os, urllib.request
+        import json, os, re, urllib.request
 
         def get(path):
             url = f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/{path}"
@@ -44,7 +45,11 @@ runs:
                 return json.load(r)
 
         sha = os.environ["HEAD_SHA"]
-        for a in get(f"actions/artifacts?per_page=10&name=llm_td_selection_{sha}")["artifacts"]:
+        # ciflow/<label>/<PR number> tag pushes carry the PR in the ref.
+        tag = re.fullmatch(r"refs/tags/ciflow/.+/(\d+)", os.environ["GITHUB_REF"])
+        pr = os.environ["PR_NUMBER"] or (tag and tag.group(1))
+        name = f"llm_td_selection_{pr}_{sha}"
+        for a in (get(f"actions/artifacts?per_page=10&name={name}")["artifacts"] if pr else []):
             run = get(f"actions/runs/{a['workflow_run']['id']}")
             if (
                 run["path"] == ".github/workflows/llm-td.yml"
@@ -52,7 +57,7 @@ runs:
                 and run["head_sha"] == sha
                 and run["head_repository"]["id"] == run["repository"]["id"]
             ):
-                print(f"run-id={run['id']}")
+                print(f"run-id={run['id']}\nname={name}")
                 break
         EOF
 
@@ -61,7 +66,7 @@ runs:
       continue-on-error: true
       uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
       with:
-        name: llm_td_selection_${{ github.event.pull_request.head.sha || github.sha }}
+        name: ${{ steps.llm-td.outputs.name }}
         run-id: ${{ steps.llm-td.outputs.run-id }}
         github-token: ${{ github.token }}
 
