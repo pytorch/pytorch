@@ -671,6 +671,33 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         finally:
             torch._dynamo.reset()
 
+    @skipIfTorchDynamo("uses torch.compile")
+    def test_compile_parameter_subclass_with_fake_input(self):
+        # Parameter.__new__ treats a C++ fake differently, so a graph traced for
+        # a real input must not be reused for one
+        if not CPP_FAKETENSOR:
+            self.skipTest("TENSOR_MATCH already tells a Python FakeTensor apart")
+
+        class MyParam(torch.nn.Parameter):
+            pass
+
+        def fn(x):
+            return MyParam(x, requires_grad=False)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        f = torch.compile(fn, backend=cnt, fullgraph=True)
+        try:
+            self.assertIs(type(f(torch.randn(2))), MyParam)
+            with FakeTensorMode():
+                out = f(torch.randn(2))
+            self.assertIs(type(out), torch.Tensor)
+            self.assertTrue(out._is_param)
+            self.assertEqual(cnt.frame_count, 2)
+            self.assertIs(type(f(torch.randn(2))), MyParam)
+            self.assertEqual(cnt.frame_count, 2)
+        finally:
+            torch._dynamo.reset()
+
     @skipIfCppFakeTensor("exercises Python FakeTensor parameter reconstruction")
     def test_parameter_state_reconstruction_from_dict(self):
         with FakeTensorMode():
@@ -5519,6 +5546,16 @@ class TestCppFakeTensorModeBindings(TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "Expected a plain meta tensor"):
             torch._C._from_meta_and_device(meta_subclass, torch.device("cpu"), mode)
+
+        class DispatchSubclass(torch.Tensor):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                return func(*args, **(kwargs or {}))
+
+        # A subclass made from a fake is rejected too, not silently unwrapped
+        fake_subclass = torch.Tensor._make_subclass(DispatchSubclass, meta_fake)
+        with self.assertRaisesRegex(RuntimeError, "Expected a plain meta tensor"):
+            torch._C._from_meta_and_device(fake_subclass, torch.device("cpu"), mode)
 
         # allow_meta is enforced
         with torch._functorch.config.patch(fake_tensor_allow_meta=False):
