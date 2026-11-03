@@ -3,13 +3,17 @@
 import importlib
 import json
 import os
-import tempfile
+import unittest
 
 import torch
 import torch.distributed.checkpoint as dist_cp
 from torch import distributed as dist
 from torch.distributed.checkpoint._consolidate_hf_safetensors import (
     _calculate_max_contiguous_elements,
+    _FqnData,
+    _InputFileData,
+    _OutputFileData,
+    _parse_input_metadata,
     _write_sub_tensor_to_file_optimized,
     consolidate_safetensors_files,
     consolidate_safetensors_files_on_every_rank,
@@ -17,7 +21,12 @@ from torch.distributed.checkpoint._consolidate_hf_safetensors import (
 from torch.distributed.checkpoint._hf_utils import _metadata_fn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Shard
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
     DTensorTestBase,
@@ -246,19 +255,15 @@ class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):
         self.assertTrue(torch.equal(loaded_dict["dtensor_col"], global_tensor))
 
 
-class TestConsolidateHFSafeTensorsNoProcessGroup(DTensorTestBase):
-    def test_parse_input_metadata_integer_bool_dtypes(self) -> None:
-        if importlib.util.find_spec("safetensors") is None:
-            self.skipTest("safetensors not installed")
-
-        from torch.distributed.checkpoint._consolidate_hf_safetensors import (
-            _FqnData,
-            _InputFileData,
-            _OutputFileData,
-            _parse_input_metadata,
-        )
-
-        for code, expected_size in (
+@instantiate_parametrized_tests
+@unittest.skipIf(
+    importlib.util.find_spec("safetensors") is None,
+    "safetensors not installed",
+)
+class TestConsolidateHFSafeTensorsDtypes(TestCase):
+    @parametrize(
+        "code,expected_size",
+        [
             ("I8", 1),
             ("U8", 1),
             ("I16", 2),
@@ -275,33 +280,39 @@ class TestConsolidateHFSafeTensorsNoProcessGroup(DTensorTestBase):
             ("U32", 4),
             ("U64", 8),
             ("C64", 8),
-        ):
-            with self.subTest(dtype=code):
-                inputs = {
-                    "shard": _InputFileData(
-                        metadata={
-                            "__metadata__": {
-                                "DCP_SHARDING_INFO": json.dumps(
-                                    {"weight": {"saved_offsets": [0]}}
-                                )
-                            },
-                            "weight": {"shape": [4], "dtype": code},
-                        }
-                    )
+        ],
+    )
+    def test_parse_input_metadata_dtype_sizes(
+        self, code: str, expected_size: int
+    ) -> None:
+        from safetensors.torch import _TYPES
+
+        if code not in _TYPES:
+            self.skipTest(f"{code} not supported by installed safetensors")
+
+        inputs = {
+            "shard": _InputFileData(
+                metadata={
+                    "__metadata__": {
+                        "DCP_SHARDING_INFO": json.dumps(
+                            {"weight": {"saved_offsets": [0]}}
+                        )
+                    },
+                    "weight": {"shape": [4], "dtype": code},
                 }
-                outputs = {"out": _OutputFileData(fqn_data={"weight": _FqnData()})}
+            )
+        }
+        outputs = {"out": _OutputFileData(fqn_data={"weight": _FqnData()})}
 
-                _parse_input_metadata(inputs, outputs)
-                result = outputs["out"].fqn_data["weight"]
+        _parse_input_metadata(inputs, outputs)
+        result = outputs["out"].fqn_data["weight"]
 
-                self.assertEqual(result.shape_in_file, [4])
-                self.assertEqual(result.dtype_str, code)
-                self.assertEqual(result.dtype_size, expected_size)
+        self.assertEqual(result.shape_in_file, [4])
+        self.assertEqual(result.dtype_str, code)
+        self.assertEqual(result.dtype_size, expected_size)
 
+    @with_temp_dir
     def test_consolidate_integer_bool_shards_cpu(self) -> None:
-        if importlib.util.find_spec("safetensors") is None:
-            self.skipTest("safetensors not installed")
-
         from safetensors.torch import load_file, save_file
 
         expected = {
@@ -310,60 +321,59 @@ class TestConsolidateHFSafeTensorsNoProcessGroup(DTensorTestBase):
             "mask": (torch.arange(16).view(4, 4) % 3 == 0),
         }
 
-        with tempfile.TemporaryDirectory() as root:
-            input_dir = os.path.join(root, "input")
-            output_dir = os.path.join(root, "output")
-            os.makedirs(input_dir)
-            os.makedirs(output_dir)
+        input_dir = os.path.join(self.temp_dir, "input")
+        output_dir = os.path.join(self.temp_dir, "output")
+        os.makedirs(input_dir)
+        os.makedirs(output_dir)
 
-            for rank in range(2):
-                start = rank * 2
-                shard = {
-                    "row": expected["row"][start : start + 2].contiguous(),
-                    "col": expected["col"][:, start : start + 2].contiguous(),
-                    "mask": expected["mask"][:, start : start + 2].contiguous(),
-                }
-                offsets = {
-                    "row": [start, 0],
-                    "col": [0, start],
-                    "mask": [0, start],
-                }
-                metadata = {
-                    "DCP_SHARDING_INFO": json.dumps(
-                        {
-                            name: {"saved_offsets": offset}
-                            for name, offset in offsets.items()
-                        }
-                    )
-                }
-                save_file(
-                    shard,
-                    os.path.join(input_dir, f"shard{rank}.safetensors"),
-                    metadata=metadata,
+        for rank in range(2):
+            start = rank * 2
+            shard = {
+                "row": expected["row"][start : start + 2].contiguous(),
+                "col": expected["col"][:, start : start + 2].contiguous(),
+                "mask": expected["mask"][:, start : start + 2].contiguous(),
+            }
+            offsets = {
+                "row": [start, 0],
+                "col": [0, start],
+                "mask": [0, start],
+            }
+            metadata = {
+                "DCP_SHARDING_INFO": json.dumps(
+                    {
+                        name: {"saved_offsets": offset}
+                        for name, offset in offsets.items()
+                    }
                 )
-
-            consolidate_safetensors_files(
-                input_dir,
-                output_dir,
-                fqn_to_index_mapping={name: 1 for name in expected},
+            }
+            save_file(
+                shard,
+                os.path.join(input_dir, f"shard{rank}.safetensors"),
+                metadata=metadata,
             )
 
-            loaded = load_file(
-                os.path.join(
-                    output_dir, "model-00001-of-00001.safetensors"
-                )
-            )
-            self.assertEqual(loaded.keys(), expected.keys())
-            for name, tensor in expected.items():
-                self.assertTrue(torch.equal(loaded[name], tensor), name)
+        consolidate_safetensors_files(
+            input_dir,
+            output_dir,
+            fqn_to_index_mapping={name: 1 for name in expected},
+        )
 
-            with open(os.path.join(output_dir, _metadata_fn)) as f:
-                index = json.load(f)
-            self.assertEqual(
-                index["metadata"]["total_size"],
-                sum(t.numel() * t.element_size() for t in expected.values()),
-            )
+        loaded = load_file(
+            os.path.join(output_dir, "model-00001-of-00001.safetensors")
+        )
 
+        self.assertEqual(loaded, expected)
+
+        with open(os.path.join(output_dir, _metadata_fn)) as f:
+            index = json.load(f)
+
+        self.assertEqual(
+            index["metadata"]["total_size"],
+            16 * 4 + 16 * 1 + 16 * 1,
+        )
+
+
+class TestConsolidateHFSafeTensorsNoProcessGroup(DTensorTestBase):
     def test_calculate_max_contiguous_elements_validations(self) -> None:
         """Test validation logic in _calculate_max_contiguous_elements function."""
 
