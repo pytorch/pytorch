@@ -63,6 +63,7 @@ from torch._inductor.aoti_eager import (
     load_aoti_eager_cache,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
+from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
@@ -17927,9 +17928,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         b = torch.randn(65, 2**24, device=self.device)
         fn(a, b)
 
-    # Skipped on ROCm until https://github.com/ROCm/triton/issues/443 resolved
     @slowTest
     def test_fuse_large_params(self):
+        # Only the C++ backend splits kernels that exceed MAX_FUSED_KERNEL_ARGS_NUM
+        if not is_cpp_backend(self.device):
+            raise unittest.SkipTest("cpp backend required")
+
         def pt2_optimizer_step(optimizer):
             @torch.compile()
             def f():
@@ -17939,13 +17943,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         params = [
             torch.rand(10, 10, dtype=torch.float32, device=self.device)
-            for _ in range(194)
+            for _ in range(110)
         ]
         for p in params:
             p.grad = torch.rand_like(p)
 
         o = torch.optim.AdamW(params)
-        pt2_optimizer_step(o)
+        _, code = run_and_get_cpp_code(pt2_optimizer_step, o)
+        kernel_args = [
+            sig.count(",") + 1
+            for sig in re.findall(r'extern "C"\s+void\s+\w+\(([^)]*)\)', code)
+        ]
+        max_args = CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM
+        self.assertGreater(sum(kernel_args), max_args)
+        # A kernel is flushed after the node that crosses the limit, so it can
+        # exceed the limit by that node's args
+        self.assertLess(max(kernel_args), max_args + 16)
 
     @xfail_if_mps  # float64 is not supported on MPS
     @skip_if_halide
