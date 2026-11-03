@@ -1782,8 +1782,8 @@ class GitHubPR:
         ignore_current_checks: set[tuple[int, str]] | None = None,
     ) -> list[GitHubPR]:
         """
-        Commits the PR, or the open PRs of its ghstack stack, onto `branch` (the
-        default branch when None) in `repo`, without pushing them.
+        Commits the PR, or the open PRs of its ghstack stack up to and including it,
+        onto `branch` (the default branch when None) in `repo`, without pushing them.
 
         First fetches `branch` from the remote, which needs network access, and
         force-resets the local `branch` to `<remote>/<branch>`, discarding any local

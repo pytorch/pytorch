@@ -3949,27 +3949,56 @@ def revert_native_pr(repo: GitRepo, pr: Any) -> None:
     try_revert(repo, pr, dry_run=False, comment_id=1, reason="broken trunk")
 
 
-class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
-    """GitHubPR.merge_into lands a real stack and try_revert reverts it: the bot clone
-    builds the commits and pushes them to a local bare origin. Only GitHub is
-    patched."""
+def patch_landing(case: NoNetworkTestCase) -> Any:
+    """Patches the merge gates and the GitHub follow-ups of a landing by
+    GitHubPR.merge_into, and returns the mock of manually_close_merged_pr"""
+    case.patch("trymerge.find_matching_merge_rule", return_value=(None, [], [], {}))
+    case.patch("trymerge.can_skip_internal_checks", return_value=False)
+    for name in (
+        "check_greenlight_reviewed_head_sha",
+        "save_merge_record",
+        "time.sleep",
+    ):
+        case.patch(f"trymerge.{name}")
+    return case.patch("trymerge.manually_close_merged_pr")
+
+
+def landing_subjects(*numbers: int) -> list[str]:
+    """The subjects of the commits that land the native_stack_pr PRs `numbers`"""
+    return [f"Change {n} (#{n})" for n in numbers]
+
+
+class LandingTestCase(NoNetworkTestCase, GitTestCase):
+    """GitHubPR.merge_into lands from the bot clone into the local bare origin, with
+    only GitHub patched"""
 
     def setUp(self) -> None:
         GitTestCase.setUp(self)
         NoNetworkTestCase.setUp(self)
         self.origin = self.git("remote", "get-url", "origin")
+        self.close = patch_landing(self)
+
+    def trunk_log(
+        self, since: str, fmt: str = "%H", cwd: str | None = None
+    ) -> list[str]:
+        """The commits on TRUNK after `since`, oldest first, in the origin or `cwd`"""
+        args = ("log", "--reverse", f"--format={fmt}", f"{since}..{TRUNK}")
+        return self.git(*args, cwd=cwd or self.origin).splitlines()
+
+
+class TestNativeStackMergeEndToEnd(LandingTestCase):
+    """GitHubPR.merge_into lands a real stack and try_revert reverts it: the bot clone
+    builds the commits and pushes them to a local bare origin. Only GitHub is
+    patched."""
+
+    def setUp(self) -> None:
+        super().setUp()
         self.stack = self.push_stack()
         self.prs = {e.number: native_stack_pr(e) for e in self.stack.entries}
         self.patch("trymerge.GitHubPR", side_effect=lambda _, __, num: self.prs[num])
         self.get_stack = self.patch(
             "trymerge.get_native_stack", return_value=self.stack
         )
-        self.patch("trymerge.find_matching_merge_rule", return_value=(None, [], [], {}))
-        self.patch("trymerge.can_skip_internal_checks", return_value=False)
-        self.patch("trymerge.check_greenlight_reviewed_head_sha")
-        self.patch("trymerge.save_merge_record")
-        self.patch("trymerge.time.sleep")
-        self.close = self.patch("trymerge.manually_close_merged_pr")
         self.patch("trymerge.build_native_stack_commits", side_effect=self.build)
         self.bases: list[str] = []
         self.races: list[Callable[[], object]] = []
@@ -3992,11 +4021,6 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
             native_stack=self.stack,
         )
 
-    def origin_log(self, since: str, fmt: str = "%H") -> list[str]:
-        revs = f"{since}..{TRUNK}"
-        log = self.git("log", "--reverse", f"--format={fmt}", revs, cwd=self.origin)
-        return log.splitlines()
-
     def message(self, number: int, *deps: int) -> str:
         msg = (
             f"Change {number} (#{number})\n\nBody {number}\n"
@@ -4010,9 +4034,9 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
     def test_pushes_one_commit_per_pr(self) -> None:
         trunk = self.add_commits(TRUNK)
         self.merge_stack()
-        landed = self.origin_log(trunk)
+        landed = self.trunk_log(trunk)
         authors = [author(n) for n in (101, 102, 103)]
-        self.assertEqual(self.origin_log(trunk, "%an <%ae>"), authors)
+        self.assertEqual(self.trunk_log(trunk, "%an <%ae>"), authors)
         origin = GitRepo(self.origin)
         raw = [origin._run_git("cat-file", "commit", commit) for commit in landed]
         self.assertEqual(
@@ -4033,8 +4057,8 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
     def test_rebases_onto_trunk_that_moved_before_the_push(self) -> None:
         self.races.append(lambda: self.add_commits(TRUNK))
         self.merge_stack()
-        subjects = [f"Update {TRUNK}", *(f"Change {n} (#{n})" for n in (101, 102, 103))]
-        self.assertEqual(self.origin_log(self.root, "%s"), subjects)
+        subjects = [f"Update {TRUNK}", *landing_subjects(101, 102, 103)]
+        self.assertEqual(self.trunk_log(self.root, "%s"), subjects)
         self.assertEqual(self.bases, [self.root])
 
     def merge_then_patch_revert(self) -> tuple[list[str], Any]:
@@ -4046,7 +4070,7 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
         self.get_stack.return_value = None
         self.patch("trymerge.gh_post_pr_comment")
         self.patch("trymerge.gh_post_commit_comment")
-        return self.origin_log(self.root), self.patch("trymerge.gh_update_pr_state")
+        return self.trunk_log(self.root), self.patch("trymerge.gh_update_pr_state")
 
     def revert_pr(self, number: int) -> None:
         self.git("pull", "-q", "--ff-only", cwd=self.repo.repo_dir)
@@ -4057,7 +4081,7 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
         in its order, each naming its PR and the revert comment on PR `target`."""
         origin = GitRepo(self.origin)
         comment = f"([comment]({pr_url(target)}#issuecomment-1))"
-        reverts = [origin.commit_message(sha) for sha in self.origin_log(since)]
+        reverts = [origin.commit_message(sha) for sha in self.trunk_log(since)]
         self.assertEqual(
             [message.splitlines()[:5] for message in reverts],
             [
@@ -4092,15 +4116,13 @@ SUITE_WITH_NEW_TEST = SUITE.replace(
 )
 
 
-class TestMergeChangesLocallyEndToEnd(NoNetworkTestCase, GitTestCase):
+class TestMergeChangesLocallyEndToEnd(LandingTestCase):
     """GitHubPR.merge_changes_locally commits a real ghstack stack or PR onto the bot
     clone's main, and merge_into pushes it to a local bare origin. Only GitHub is
     patched."""
 
     def setUp(self) -> None:
-        GitTestCase.setUp(self)
-        NoNetworkTestCase.setUp(self)
-        self.origin = self.git("remote", "get-url", "origin")
+        super().setUp()
         self.add_commits(TRUNK, files={"test_suite.py": SUITE})
         # #101 adds a test between two others, and trunk then changes the same file
         # elsewhere: cherry-picking #101 a second time is not empty, it adds the test
@@ -4123,19 +4145,7 @@ class TestMergeChangesLocallyEndToEnd(NoNetworkTestCase, GitTestCase):
             self.prs.append(pr)
         revs = [entry.head_oid for entry in stack.entries]
         self.patch("trymerge.get_ghstack_prs", return_value=list(zip(self.prs, revs)))
-        self.patch("trymerge.find_matching_merge_rule", return_value=(None, [], [], {}))
-        self.patch("trymerge.can_skip_internal_checks", return_value=False)
-        self.patch("trymerge.check_greenlight_reviewed_head_sha")
-        self.patch("trymerge.save_merge_record")
-        self.patch("trymerge.time.sleep")
-        self.patch("trymerge.manually_close_merged_pr")
         self.stacked_rule = self.patch("trymerge.check_stacked_pr_merge_rule")
-
-    def subjects(self, revs: str, cwd: str) -> list[str]:
-        return self.git("log", "--reverse", "--format=%s", revs, cwd=cwd).splitlines()
-
-    def changes(self, *numbers: int) -> list[str]:
-        return [f"Change {n} (#{n})" for n in numbers]
 
     def record_push_bases(self, count: int) -> list[str]:
         """Records the commit each push builds on, `count` commits below its tip"""
@@ -4163,15 +4173,12 @@ class TestMergeChangesLocallyEndToEnd(NoNetworkTestCase, GitTestCase):
         ]
         with self.assertRaises(MandatoryChecksMissingError):
             GitHubPR.merge_into(self.prs[-1], self.repo, comment_id=1)
-        left_over = self.subjects(f"origin/{TRUNK}..{TRUNK}", self.repo.repo_dir)
-        self.assertEqual(left_over, self.changes(101))
+        left_over = self.trunk_log(f"origin/{TRUNK}", "%s", self.repo.repo_dir)
+        self.assertEqual(left_over, landing_subjects(101))
         trunk = self.add_commits(TRUNK)
         bases = self.record_push_bases(3)
         GitHubPR.merge_into(self.prs[-1], self.repo, comment_id=1)
-        self.assertEqual(
-            self.subjects(f"{trunk}..{TRUNK}", self.origin),
-            self.changes(101, 102, 103),
-        )
+        self.assertEqual(self.trunk_log(trunk, "%s"), landing_subjects(101, 102, 103))
         self.assertEqual(bases, [trunk])
 
     def test_check_mergeability_starts_from_the_remote_tip(self) -> None:
@@ -4184,7 +4191,7 @@ class TestMergeChangesLocallyEndToEnd(NoNetworkTestCase, GitTestCase):
         )
         self.assertEqual(self.repo.rev_parse(f"{TRUNK}~3"), trunk)
         self.assertEqual(
-            self.subjects(f"{trunk}..{TRUNK}", clone), self.changes(101, 102, 103)
+            self.trunk_log(trunk, "%s", clone), landing_subjects(101, 102, 103)
         )
         self.stacked_rule.assert_not_called()
 
@@ -4200,13 +4207,12 @@ class TestMergeChangesLocallyEndToEnd(NoNetworkTestCase, GitTestCase):
         moved = self.add_commits(TRUNK)
         bases = self.record_push_bases(1)
         GitHubPR.merge_into(pr, self.repo, comment_id=1)
-        self.assertEqual(
-            self.subjects(f"{moved}..{TRUNK}", self.origin), ["Change 201 (#201)"]
-        )
+        self.assertEqual(self.trunk_log(moved, "%s"), landing_subjects(201))
         self.assertEqual(bases, [moved])
 
     def test_failed_fetch_names_the_branch_and_keeps_the_clone(self) -> None:
         clone = self.repo.repo_dir
+        self.git("commit", "-q", "--allow-empty", "-m", "Left over", cwd=clone)
         before = self.repo.rev_parse(TRUNK)
         missing = os.path.join(os.path.dirname(self.origin), "missing.git")
         self.git("remote", "set-url", "origin", missing, cwd=clone)
@@ -4229,16 +4235,8 @@ class TestNativeStackRevertRefreshEndToEnd(NoNetworkTestCase, LineStackTestCase)
         self.prs = {e.number: native_stack_pr(e) for e in self.stack.entries}
         self.patch("trymerge.GitHubPR", side_effect=lambda _, __, num: self.prs[num])
         self.patch("trymerge.get_native_stack", side_effect=self.read_stack)
-        self.patch("trymerge.find_matching_merge_rule", return_value=(None, [], [], {}))
-        self.patch("trymerge.can_skip_internal_checks", return_value=False)
-        for name in (
-            "check_greenlight_reviewed_head_sha",
-            "save_merge_record",
-            "time.sleep",
-            "manually_close_merged_pr",
-            "gh_post_commit_comment",
-        ):
-            self.patch(f"trymerge.{name}")
+        patch_landing(self)
+        self.patch("trymerge.gh_post_commit_comment")
         self.post = self.patch("trymerge.gh_post_pr_comment")
         # The heads of the stack's branches when each PR was reopened
         self.reopened: dict[int, dict[str, str]] = {}
