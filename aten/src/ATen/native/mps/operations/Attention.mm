@@ -16,6 +16,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_fused_sdp_choice_native.h>
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
 #include <ATen/ops/empty.h>
 #endif
@@ -415,14 +416,14 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
 
 // The Metal kernels above are exposed as the flash attention backend; anything
 // they can not handle (dropout, backward) goes to the math backend.
-static int64_t _fused_sdp_choice_mps(const Tensor& query,
-                                     const Tensor& key,
-                                     const Tensor& value,
-                                     const std::optional<Tensor>& attn_mask,
-                                     double dropout_p,
-                                     bool /*is_causal*/,
-                                     std::optional<double> /*scale*/,
-                                     bool /*enable_gqa*/) {
+int64_t _fused_sdp_choice_mps(const Tensor& query,
+                              const Tensor& key,
+                              const Tensor& value,
+                              const std::optional<Tensor>& attn_mask,
+                              double dropout_p,
+                              bool /*is_causal*/,
+                              std::optional<double> /*scale*/,
+                              bool /*enable_gqa*/) {
   auto& ctx = at::globalContext();
   const bool requires_grad = GradMode::is_enabled() &&
       (query.requires_grad() || key.requires_grad() || value.requires_grad() ||
@@ -440,9 +441,9 @@ static int64_t _fused_sdp_choice_mps(const Tensor& query,
     return static_cast<int64_t>(sdp::SDPBackend::flash_attention);
   }
   TORCH_CHECK(ctx.userEnabledMathSDP(),
-              "No available kernel for scaled_dot_product_attention on MPS: flash attention was not used because ",
+              "Flash attention kernel not used because ",
               reason,
-              " and the math backend is disabled.");
+              ". No available kernel.  Aborting execution.");
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 

@@ -12743,23 +12743,37 @@ class TestSDPA(TestCaseMPS):
                 F.scaled_dot_product_attention(q, q, q, dropout_p=0.2)
 
     def test_flash_attention_backend_selected(self):
-        # Inputs the Metal kernels handle but CPU flash attention constraints would reject
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+        # Inputs the Metal kernels handle but CPU flash attention constraints would reject,
+        # plus cases the math backend used to cover on MPS through sdpa_kernel(MATH)
         q = torch.randn(2, 4, 8, 16, device="mps")
         q5 = torch.randn(2, 3, 4, 8, 16, device="mps")
         mask = torch.ones(8, 8, dtype=torch.bool, device="mps").tril()
+        q_b, kv_b = torch.randn(1, 4, 4, 64, device="mps"), torch.randn(2, 4, 16, 64, device="mps")
         cases = {
             "5d": ((q5, q5, q5), {}),
             "mT": ((q, torch.randn(2, 4, 16, 8, device="mps").mT, q), {}),
             "dv_ne_d": ((q, q, torch.randn(2, 4, 8, 32, device="mps")), {}),
             "gqa": ((torch.randn(2, 8, 8, 16, device="mps"), q, q), {"enable_gqa": True}),
             "bool_mask": ((q, q, q), {"attn_mask": mask}),
+            "negative_scale": ((q, q, q), {"scale": -1.0}),
+            "broadcast_batch": ((q_b, kv_b, kv_b), {"attn_mask": torch.randn(1, 4, 4, 16, device="mps")}),
         }
         for name, (qkv, kwargs) in cases.items():
             with self.subTest(name):
-                with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.FLASH_ATTENTION]):
-                    y = F.scaled_dot_product_attention(*qkv, **kwargs)
-                cpu_kwargs = {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in kwargs.items()}
-                self.assertEqual(y.cpu(), F.scaled_dot_product_attention(*(t.cpu() for t in qkv), **cpu_kwargs))
+                self.assertEqual(torch._fused_sdp_choice(*qkv, **kwargs), SDPBackend.FLASH_ATTENTION.value)
+                with sdpa_kernel([SDPBackend.MATH]):
+                    self.assertEqual(torch._fused_sdp_choice(*qkv, **kwargs), SDPBackend.MATH.value)
+                    y_math = F.scaled_dot_product_attention(*qkv, **kwargs)
+                with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+                    y_flash = F.scaled_dot_product_attention(*qkv, **kwargs)
+                self.assertEqual(y_flash, y_math)
+
+        # The Metal kernels have no backward
+        grad_mask = torch.zeros(8, 8, device="mps", requires_grad=True)
+        self.assertEqual(torch._fused_sdp_choice(q, q, q, attn_mask=grad_mask), SDPBackend.MATH.value)
+        with torch.no_grad():
+            self.assertEqual(torch._fused_sdp_choice(q, q, q, attn_mask=grad_mask), SDPBackend.FLASH_ATTENTION.value)
 
     @parametrize("dtype", [torch.float32, torch.float16])
     @parametrize("head_dim", [64, 128])
