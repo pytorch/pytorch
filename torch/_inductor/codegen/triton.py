@@ -969,7 +969,7 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
             ret = str(int(expr))
         else:
             # Use base class method to handle double precision floats
-            # in order to avoid literal trunctation
+            # in order to avoid literal truncation
             float_literal = super()._print_Float(expr)
             if config.is_fbcode() and torch.version.hip:
                 ret = f"{float_literal}"

@@ -15433,12 +15433,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @parametrize("prefer_nd_tiling", (False, True))
     def test_float_repr_dynamic_shapes(self, prefer_nd_tiling):
-
         @torch.compile(dynamic=True)
         def fn(x):
             return F.interpolate(x, scale_factor=1 / 300, mode="linear")
 
-        with torch._inductor.config.patch({"triton.prefer_nd_tiling": prefer_nd_tiling}):
+        with torch._inductor.config.patch(
+            {"triton.prefer_nd_tiling": prefer_nd_tiling}
+        ):
             self.common(fn, [torch.randn(1, 8, 396 * 300)])
 
     def test_broadcast_symbolic_size_one_dynamic_shapes(self):
