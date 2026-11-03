@@ -14,7 +14,7 @@ from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils._triton import has_triton
 
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import ChoiceCaller, is_unaligned, Layout, TensorBox
+from ..ir import ChoiceCaller, fixed_layout_snapshot, is_unaligned, Layout, TensorBox
 from ..lowering import fallback_handler, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -165,8 +165,9 @@ def use_flydsl_grouped_mm_template(
         return False
 
     sizevars = V.graph.sizevars
-    mat1_stride = mat_a.get_stride()
-    mat2_stride = mat_b.get_stride()
+    # FlyDSLTemplateCaller freezes the inputs to these layouts if selected
+    mat1_stride = fixed_layout_snapshot(mat_a).stride
+    mat2_stride = fixed_layout_snapshot(mat_b).stride
     out_stride = layout.stride
     if not sizevars.statically_known_equals(mat1_stride[-1], 1):
         return False
@@ -825,10 +826,11 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
         return []
     scale_k = k_static // MXFP8_SCALE_BLOCK
 
-    mat_a_stride = mat_a.get_stride()
-    mat_b_stride = mat_b.get_stride()
-    scale_a_stride = scale_a.get_stride()
-    scale_b_stride = scale_b.get_stride()
+    # FlyDSLTemplateCaller freezes the inputs to these layouts if selected
+    mat_a_stride = fixed_layout_snapshot(mat_a).stride
+    mat_b_stride = fixed_layout_snapshot(mat_b).stride
+    scale_a_stride = fixed_layout_snapshot(scale_a).stride
+    scale_b_stride = fixed_layout_snapshot(scale_b).stride
     out_stride = layout.stride
 
     # A is (M, K) row-major and its scales are (M, K // 32) row-major.
