@@ -1081,7 +1081,10 @@ class TestSerialization(TestCase, SerializationMixin):
     def test_load_preserves_storage_sharing(self, load_mode):
         self._test_load_preserves_storage_sharing(load_mode)
 
+    # tempfile wrapper __getattr__ mutates state while guards are built.
+    # TODO: Re-enable NGB when gh-197322 lands.
     @parametrize('weights_only', (True, False))
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_serialization_zipfile(self, weights_only):
         data = self._test_serialization_data()
 

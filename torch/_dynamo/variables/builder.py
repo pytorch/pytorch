@@ -199,7 +199,6 @@ from ..utils import (
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
-    iter_mro_static_attrs,
     list_reverseiterator,
     list_reverseiterator_backing_list,
     list_reverseiterator_len,
@@ -325,6 +324,7 @@ from .nn_module import (
     UnspecializedBuiltinNNModuleVariable,
     UnspecializedNNModuleVariable,
 )
+from .object_protocol import has_custom_metaclass_accessor
 from .optimizer import OptimizerVariable
 from .script_object import CustomClassObjectVariable, CustomClassVariable
 from .sdpa import SDPAParamsVariable
@@ -706,16 +706,7 @@ def normalize_descriptor_source(
     if isinstance(source.base, AttrSource) and source.base.member == "__dict__":
         cls = tx.output.resolve_source_value(source.base.base)
         if issubclass(type(cls), type):
-            metacls = type(cls)
-            custom_getattribute = (
-                next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
-                is not type.__dict__["__getattribute__"]
-            )
-            custom_dict = (
-                next(iter_mro_static_attrs(metacls, "__dict__"), None)
-                is not type.__dict__["__dict__"]
-            )
-            if custom_getattribute or custom_dict:
+            if has_custom_metaclass_accessor(cls, "__dict__"):
                 unimplemented(
                     gb_type="Unsupported descriptor source",
                     context="class __dict__ source",
@@ -2173,16 +2164,7 @@ class VariableBuilder:
             if isinstance(descriptor, types.ClassMethodDescriptorType) and issubclass(
                 type(method_self), type
             ):
-                metacls = type(method_self)
-                custom_getattribute = (
-                    next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
-                    is not type.__dict__["__getattribute__"]
-                )
-                custom_dict = (
-                    next(iter_mro_static_attrs(metacls, "__dict__"), None)
-                    is not type.__dict__["__dict__"]
-                )
-                if custom_getattribute or custom_dict:
+                if has_custom_metaclass_accessor(method_self, "__dict__"):
                     unimplemented(
                         gb_type="Bound builtin classmethod with custom metaclass",
                         context=f"{descriptor.__qualname__} bound to a class with a custom metaclass",

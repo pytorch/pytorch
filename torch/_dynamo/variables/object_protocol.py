@@ -43,6 +43,7 @@ from ..source import (
     AttrSource,
     DictGetItemSource,
     GetItemSource,
+    is_constant_source,
     Source,
     TypeDictSource,
     TypeMROSource,
@@ -2274,14 +2275,27 @@ def mro_lookup(py_type: type, name: str) -> object:
     return NO_SUCH_SUBOBJ
 
 
+def has_custom_metaclass_accessor(klass: type, name: str) -> bool:
+    r"""Whether reading class metadata can invoke a custom metaclass accessor."""
+    metacls = type(klass)
+    if metacls is type:
+        return False
+    return (
+        next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
+        is not type.__dict__["__getattribute__"]
+        or next(iter_mro_static_attrs(metacls, name), None) is not type.__dict__[name]
+    )
+
+
 def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
-    """Source for ``klass.__mro__[idx]``.
+    r"""Source for ``klass.__mro__[idx]``.
 
     Entry 0 is spelled as the class itself when it is the class, which it is for
     every MRO CPython computes. A metaclass overriding ``mro()`` can put
     something else there, so check rather than assume.
     """
-    if not idx and get_type_mro_no_user_code(klass)[0] is klass:
+    base = get_type_mro_no_user_code(klass)[idx]
+    if not idx and base is klass:
         return klass_source
     return GetItemSource(TypeMROSource(klass_source), idx)
 
@@ -2292,34 +2306,45 @@ def mro_attr_source(
     klass_source: Source,
     name: str,
 ) -> "DictGetItemSource | None":
-    """Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
+    r"""Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
 
     Reading the attribute back as ``klass_source.name`` would go through
     ``type.__getattribute__``, where a data descriptor on the metaclass wins over
     the class chain -- a different object than `mro_lookup` returned. Index the
     owning class's ``__dict__`` instead.
 
-    Returns None if *name* is absent from the whole MRO; callers decide whether
-    that is an error.
+    Guards absence in every skipped class, including a complete MRO miss.
+    Returns None on a complete miss; callers decide whether that is an error.
     """
     entries = tuple(iter_mro_static_dicts(klass))
     for idx, (base, namespace) in enumerate(entries):
+        if not is_constant_source(klass_source):
+            direct = not idx and base is klass
+            attr = None
+            if has_custom_metaclass_accessor(base, "__dict__"):
+                attr = "__dict__"
+            elif not direct and has_custom_metaclass_accessor(klass, "__mro__"):
+                attr = "__mro__"
+            if attr is not None:
+                unimplemented(
+                    gb_type="Custom metaclass metadata access",
+                    context=f"metadata={attr}, name={name}",
+                    explanation="Dynamo cannot safely construct a class metadata source "
+                    "through custom metaclass accessors.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
         if name not in namespace:
+            # Repeated MRO walks share absence guards for the same class and name.
+            absent_key = (id(base), name)
+            if absent_key not in tx.output.guarded_mro_absent_keys:
+                entry_source = _mro_entry_source(klass, klass_source, idx)
+                tx.output.guarded_mro_absent_keys.add(absent_key)
+                install_guard(
+                    TypeDictSource(entry_source).make_guard(
+                        partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
+                    )
+                )
             continue
-
-        # Guard the classes we walked past, so the owner stays the owner if one
-        # of them later gains *name*. Deduplicated by (id(klass), name): the
-        # caller's TYPE_MATCH pins the MRO, so an id always means the same class.
-        for absent_idx in range(idx):
-            absent_key = (id(entries[absent_idx][0]), name)
-            if absent_key in tx.output.guarded_mro_absent_keys:
-                continue
-            tx.output.guarded_mro_absent_keys.add(absent_key)
-            install_guard(
-                TypeDictSource(
-                    _mro_entry_source(klass, klass_source, absent_idx)
-                ).make_guard(partial(GuardBuilder.DICT_NOT_CONTAINS, key=name))
-            )
 
         # Reuse the source when the same owner is reached again for the same
         # name, even from a differently-sourced object, so it does not collect

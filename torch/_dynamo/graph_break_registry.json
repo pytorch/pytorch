@@ -1251,6 +1251,16 @@
       "Hints": []
     }
   ],
+  "GB0705": [
+    {
+      "Gb_type": "Custom metaclass metadata access",
+      "Context": "metadata={attr}, name={name}",
+      "Explanation": "Dynamo cannot safely construct a class metadata source through custom metaclass accessors.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB6012": [
     {
       "Gb_type": "Cannot trace user-defined __len__",
@@ -2746,6 +2756,16 @@
       "Explanation": "Dynamo does not know how to trace calling `next()` on variable `{self}`.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB9713": [
+    {
+      "Gb_type": "Custom metaclass metadata in __getattr__",
+      "Context": "metadata={attr}, name={name}",
+      "Explanation": "Dynamo cannot safely guard __getattr__ fallback through custom metaclass metadata accessors.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
