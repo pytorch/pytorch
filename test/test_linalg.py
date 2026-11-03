@@ -12134,14 +12134,19 @@ class TestLinalgCudaOnly(TestCase):
 
                 # One "finding fastest for" from FindFastest, one more from
                 # the borrow's FindFastestAmong; the repeat must log nothing.
-                # Searches after the tune. A borrow runs FindFastestAmong over
-                # exactly Default and the donor, which is what proves it was
-                # measured and not trusted; the repeat must add none. With
-                # recording off nothing is borrowed, so there is no search.
-                tuned = parse_tunable_log(result.stdout)
-                counts = [v["candidate_count"] for v in tuned.values()]
+                # Raw matches, not parse_tunable_log: that keys on
+                # (op_sig, param_sig), so a second validation of the same shape
+                # overwrites the first and the repeat goes unseen -- which is
+                # the regression this test exists for. Two candidates means
+                # FindFastestAmong ran over Default and the donor, proof the
+                # donor was measured. With recording off nothing is borrowed.
+                validations = len(
+                    re.findall(
+                        r"finding fastest for .*out of 2 candidates", result.stdout
+                    )
+                )
                 self.assertEqual(
-                    counts[1:], [2] if record_borrowed else [], result.stdout
+                    validations, 1 if record_borrowed else 0, result.stdout
                 )
 
     @onlyCUDA
@@ -12304,6 +12309,7 @@ class TestLinalgCudaOnly(TestCase):
             self.assertTrue(torch.cuda.tunable.read_file(filename))
             before = len(torch.cuda.tunable.get_results())
             self.assertGreater(before, 0)
+            before_rows = self._results_file_rows()
 
             torch.cuda.tunable.tuning_enable(False)
             torch.cuda.tunable._nearest_match_enable(True)
@@ -12314,6 +12320,9 @@ class TestLinalgCudaOnly(TestCase):
             torch.matmul(A2, B)
 
             self.assertGreater(len(torch.cuda.tunable.get_results()), before)
+            # "persisted" in the name: the verdict must reach the file, which
+            # get_results() alone does not show.
+            self.assertGreater(len(self._results_file_rows()), len(before_rows))
 
     @onlyCUDA
     @dtypes(torch.float)
