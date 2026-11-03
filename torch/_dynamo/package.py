@@ -28,8 +28,7 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
-from typing_extensions import Never
+from typing import Any, IO, Never, NewType, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.exc import PackageError

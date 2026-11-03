@@ -316,7 +316,8 @@ struct C10_API ExtraMeta {
   // The dispatch keys of the real tensor this fake stands for, when recorded
   // (Python FakeTensor.dispatch_keys); guards are built from these. Copied by
   // the copy constructor, so a shallow copy such as detach keeps them, as
-  // Python FakeTensor's detach does.
+  // Python FakeTensor's detach does. Unlike Python, fake.data = other gives
+  // the fake other's keys, as set_data replaces the whole ExtraMeta.
   std::optional<c10::DispatchKeySet> fake_dispatch_keys_ = std::nullopt;
   // The real constant this fake was created from (via
   // FakeTensorMode::set_constant), or null.
