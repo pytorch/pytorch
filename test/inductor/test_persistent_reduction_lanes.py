@@ -8,7 +8,12 @@ from torch._inductor.choices import InductorChoices
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 # The padded producer's rows are wider than its groups, so its write and the
@@ -29,6 +34,8 @@ def stacked_lanes(x, y):
 
 
 class TestPersistentReductionLanes(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         self.enterContext(
