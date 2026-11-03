@@ -68,13 +68,11 @@ class FlyDSLTemplateKernel(Kernel):
 
     def gen_imports(self) -> str:
         imports = IndentedBuffer()
-        imports.splice(
-            """
+        imports.splice("""
             import torch
             import flydsl.compiler as flyc
             import flydsl.expr as fx
-            """
-        )
+            """)
         return imports.getvalue()
 
     def gen_defines(self, **kwargs) -> str:
@@ -151,6 +149,30 @@ class FlyDSLTemplateKernel(Kernel):
 
     def call_kernel(self, name: str, node=None):
         wrapper = V.graph.wrapper_code
+        if getattr(V.graph, "aot_mode", False):
+            from torch._inductor.codegen.flydsl.aot_backend import (
+                emit_flydsl_external_call,
+            )
+
+            template_inputs = {}
+            for arg_name, input_node in self._template_input_args:
+                reinterpret_view = self._get_reinterpret_view(input_node)
+                template_inputs[arg_name.removeprefix("arg_")] = (
+                    reinterpret_view if reinterpret_view is not None else input_node
+                )
+            artifact = wrapper.external_aot_artifacts[name]
+            binding: dict[str, Any] = {
+                "output": self.output_node,
+                **template_inputs,
+            }
+            emit_flydsl_external_call(
+                wrapper,
+                artifact,
+                binding,
+                device=self.output_node.get_device(),
+            )
+            return
+
         call_args = []
         arg_types = []
 
