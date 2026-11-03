@@ -578,6 +578,17 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
+# Minimum number of streaming multiprocessors a GPU needs for max_autotune_gemm
+# to consider the Triton GEMM templates. Autotuning them costs compile time
+# that only pays off on larger GPUs, so small ones fall back to ATen. None
+# keeps the per-device default (68 for CUDA, 16 for XPU); lower it for GPUs
+# such as Jetson (16-20 SMs) where the autotuned kernels still win.
+max_autotune_gemm_min_sms: int | None = (
+    int(os.environ["TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_MIN_SMS"])
+    if "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_MIN_SMS" in os.environ
+    else None
+)
+
 # When True, autotuning is spread across real kernel invocations instead of
 # blocking on the first call. Each run() call executes one config and records
 # timing via CUDA events, progressively eliminating underperforming configs.
@@ -1007,6 +1018,9 @@ delay_realize_cheap_outputs: bool = Config(
 fallback_random = False
 
 # align random/dropout as eager mode(aten) behavior, maintaining fused possibility and faster gpu kernel
+# TODO: Currently only aligned, contiguous fp32/fp16/bf16 dropout approximately matches
+# eager. Not yet handled: fp64 or misaligned/non-dense dropout, torch.rand values (and
+# fp64 offsets), randn/randint/bernoulli/uniform_, and multi-round Halide kernels.
 align_random_eager = False
 
 # Use tl.rand4x/randn4x for 1D CUDA Triton random. Disabled pending
@@ -2324,6 +2338,12 @@ class triton:
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
 
+    # Let Triton contract multiply-adds in Inductor's generated kernels into FMAs.
+    # Which multiply-adds become FMAs can depend on the block size, so disable this
+    # for results that do not depend on the configs autotuning picks.
+    # emulate_precision_casts also disables it.
+    enable_fp_fusion = os.environ.get("TORCHINDUCTOR_ENABLE_FP_FUSION", "1") == "1"
+
     # max autotune gemm with cublasLt
     autotune_cublasLt = True
 
@@ -2770,7 +2790,7 @@ class aot_inductor:
     # but performance for that interface may be degraded.
     use_minimal_arrayref_interface: bool = False
 
-    # Set to True if we want to use Pytorch's CUDACachingAllocator for weight management
+    # Set to True to allocate weights with PyTorch's caching allocator (CUDA and XPU)
     weight_use_caching_allocator: bool = (
         os.environ.get("AOT_INDUCTOR_WEIGHT_USE_CACHING_ALLOCATOR", "0") == "1"
     )
@@ -3035,6 +3055,8 @@ class xpu(cutlass):
 
 
 class rocm:
+    """ROCm-specific inductor configuration (arch list, CK, origami, etc.)."""
+
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
     # If empty, the `native` arch is used
     arch: list[str] = []
@@ -3110,9 +3132,13 @@ class rocm:
     # When True, the rocm-origami pip package is consulted at GEMM compile time
     # to pre-select a top-K of Triton configs from the DEFAULT search space,
     # reducing autotuning cost while keeping runtime within ~5% of full
-    # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI;
-    # toggling at runtime via config.patch has no effect because the rocm-origami
-    # module import is cached at heuristics/template/triton.py load time.
+    # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI.
+    #
+    # config.patch behaviour:
+    #   patching to False  -- disables origami at call time (_origami_enabled()).
+    #   patching to True   -- no effect; the rocm-origami import is cached at
+    #                         heuristics/template/triton.py load time and cannot
+    #                         be re-triggered by a runtime patch.
     #
     # Active only when all of these hold:
     #   - IS_ROCM (torch.version.hip is not None)
@@ -3120,7 +3146,6 @@ class rocm:
     #   - config.rocm.origami (this knob)
     #   - config.max_autotune_gemm_search_space == "DEFAULT"
     #   - rocm-origami is installed (else the import gate sets it inert)
-    #   - ROCm version < 10.0 (origami not supported on 10.0+)
     # Outside DEFAULT (e.g. EXHAUSTIVE) origami is silently bypassed with a
     # one-time warning; the regular config generator runs instead.
     #
@@ -3286,6 +3311,13 @@ class trace:
     # Add Inductor kernel stack traces back into exported PyTorch profiler timelines.
     provenance_tracking_to_timeline = (
         os.environ.get("TORCH_COMPILE_DEBUG_EXTEND", "0") == "1"
+    )
+
+    # Emit a zero-length profiler event "inductor_provenance:<kernel>:<debug_handle>"
+    # before each Python wrapper kernel launch that has a provenance debug handle,
+    # so kernels in any profiler trace can be joined to the provenance artifacts.
+    provenance_profiler_markers = (
+        os.environ.get("TORCHINDUCTOR_PROVENANCE_PROFILER_MARKERS", "0") == "1"
     )
 
     # Maximum number of trace events to process in profiler timeline post-processing.
@@ -3504,7 +3536,11 @@ emulate_precision_casts: bool = (
 # Targeted variant of emulate_precision_casts for saved low-precision outputs.
 # When a low-precision pointwise result is saved for backward and also used by
 # later forward math, this inserts a downcast-upcast at the saved value so
-# forward and backward consume the same precision.
+# forward and backward consume the same precision.  It also gates the
+# downcast-upcast that lowerings emit when they split one user-visible
+# low-precision op into several nodes (e.g. peeling the bias off a
+# convolution), so a fused consumer sees the op's declared output precision
+# whether or not the output is saved.
 emulate_precision_casts_on_saved_tensors: bool = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS_ON_SAVED_TENSORS", "1") == "1"
 )
