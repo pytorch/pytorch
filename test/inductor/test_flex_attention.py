@@ -1311,9 +1311,10 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestFlexAttention(InductorTestCase):
     def setUp(self):
-        super().setUp()
+        # Skip before InductorTestCase.setUp enters state that only tearDown undoes.
         if self.device_type == "cpu" and LONG_COMPILATION_ON_CPU:
             self.skipTest("skip UT for CPU due to long compilation time found in CI")
+        super().setUp()
 
     def _check_equal(
         self,
@@ -4726,7 +4727,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         block_mask = create_block_mask(
             noop_mask, B, H, S, S, BLOCK_SIZE=BLOCK_SIZE, device=device
         )
-        inputs = (_rel_bias, dtype, device, B, H, S, qk_d, B, H, S)
+        inputs = (_rel_causal, dtype, device, B, H, S, qk_d, B, H, S)
         self.run_test(*inputs, V_D=v_d, block_mask=block_mask)
         self.run_test_with_paged_attention(*inputs, V_D=v_d, block_mask=block_mask)
 
@@ -10107,9 +10108,10 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestPagedAttention(InductorTestCase):
     def setUp(self):
-        super().setUp()
+        # Skip before InductorTestCase.setUp enters state that only tearDown undoes.
         if self.device_type == "cpu" and LONG_COMPILATION_ON_CPU:
             self.skipTest("skip UT for CPU due to long compilation time found in CI")
+        super().setUp()
 
     def _check_equal(
         self,
@@ -10620,9 +10622,10 @@ supports_learnable_bias = unittest.skipUnless(
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
-        super().setUp()
+        # Skip before InductorTestCase.setUp enters state that only tearDown undoes.
         if self.device_type == "cpu" and LONG_COMPILATION_ON_CPU:
             self.skipTest("skip UT for CPU due to long compilation time found in CI")
+        super().setUp()
         self.dtype = torch.float32
         self.atol = 3e-2
         self.rtol = 3e-2
