@@ -2841,8 +2841,21 @@ class TestPredispatchSerialization(TestCase):
         torch.export.save(ep, buffer)
         buffer.seek(0)
         loaded_ep = torch.export.load(buffer)
+        loaded_nodes = loaded_ep.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.flat_apply
+        )
+        self.assertEqual(len(loaded_nodes), 3)
+        for node in loaded_nodes:
+            spec_input = node.args[1]
+            self.assertEqual(spec_input.op, "get_attr")
+            spec = getattr(loaded_ep.graph_module, spec_input.target)
+            self.assertTrue(pytree._is_pytreespec_instance(spec))
         self.assertEqual(expected, loaded_ep.module()(*inp))
-        torch.export.save(loaded_ep, io.BytesIO())
+        # The loaded program saves again, and that file loads and runs.
+        buffer = io.BytesIO()
+        torch.export.save(loaded_ep, buffer)
+        buffer.seek(0)
+        self.assertEqual(expected, torch.export.load(buffer).module()(*inp))
 
         # A spec that lives on a submodule, as in a hand-built graph, is read
         # with its dotted get_attr target.
@@ -3481,7 +3494,7 @@ class TestPredispatchSerialization(TestCase):
         buffer = io.BytesIO()
         torch.export.save(ep, buffer)
         buffer.seek(0)
-        self.assertEqual(torch.export.load(buffer).module()(x), ep.module()(x))
+        self.assertEqual(torch.export.load(buffer).module()(x), x * 2)
 
         # Inputs after a keyword input are matched with their own values, so an
         # operator overload after one loads.
