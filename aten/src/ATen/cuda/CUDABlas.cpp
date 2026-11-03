@@ -120,7 +120,7 @@ void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda) {
     *lda = std::max<int64_t>(m, 1);
 }
 
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+#if (!defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000) || (defined(USE_ROCM) && ROCM_VERSION >= 100000)
 class CuBlasSMCarveoutGuard {
  public:
   explicit CuBlasSMCarveoutGuard(cublasHandle_t handle) : handle_(handle) {
@@ -135,14 +135,23 @@ class CuBlasSMCarveoutGuard {
           smCount - 1,
           " (num_sms-1), got ",
           carveout);
+#ifndef USE_ROCM
       TORCH_CUDABLAS_CHECK(
           cublasSetSmCountTarget(handle_, smCount - carveout));
+#else
+      TORCH_CUDABLAS_CHECK(
+          hipblasLtSetSmCountTarget(handle_, smCount - carveout));
+#endif
       enabled_ = true;
     }
   }
   ~CuBlasSMCarveoutGuard() {
     if (enabled_) {
+#ifndef USE_ROCM
       cublasSetSmCountTarget(handle_, 0);
+#else
+      hipblasLtSetSmCountTarget(handle_, 0);
+#endif
     }
   }
   CuBlasSMCarveoutGuard(const CuBlasSMCarveoutGuard&) = delete;
@@ -157,7 +166,7 @@ class CuBlasSMCarveoutGuard {
 #define CUBLAS_SM_CARVEOUT_GUARD(handle)
 #endif
 
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && ROCM_VERSION < 100000
 static c10::cuda::CUDAStream _getCarveoutStream(int32_t value) {
   // 0 is default value, meaning full CUs i.e. no mask
   if (value == 0) {
@@ -323,7 +332,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, opa);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, opb);
   auto stream = at::cuda::getCurrentCUDAStream();
-#ifndef USE_ROCM
+#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 100000)
   if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
     computeDesc.setAttribute<int32_t>(
         CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
@@ -438,7 +447,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
       ltworkspace.ptr,
       ltworkspace.size,
       stream);
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && ROCM_VERSION < 100000
     if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
       _syncCurrentWithCarveoutStream(stream, false);
     }
@@ -1675,7 +1684,7 @@ bool gemm_and_bias(
   cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, transb);
   auto stream = at::cuda::getCurrentCUDAStream();
-#ifndef USE_ROCM
+#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 100000)
   if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
     computeDesc.setAttribute<int32_t>(
         CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
@@ -1760,7 +1769,7 @@ bool gemm_and_bias(
       ltworkspace.ptr,
       ltworkspace.size,
       stream);
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && ROCM_VERSION < 100000
     if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
       _syncCurrentWithCarveoutStream(stream, false);
     }
@@ -2002,7 +2011,7 @@ void scaled_gemm(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
   }
   auto stream = at::cuda::getCurrentCUDAStream();
-#ifndef USE_ROCM
+#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 100000)
   if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
     computeDesc.setAttribute<int32_t>(
         CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
@@ -2015,7 +2024,7 @@ void scaled_gemm(
         at::globalContext()._SMCarveout_EXPERIMENTAL().value());
     _syncCurrentWithCarveoutStream(stream, true);
   }
-#endif // ifndef USE_ROCM
+#endif // if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 100000)
 #ifndef USE_ROCM
   const int8_t fastAccuMode = use_fast_accum ? 1 : 0;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
@@ -2179,7 +2188,7 @@ void scaled_gemm(
       ltworkspace.ptr,
       ltworkspace.size,
       stream);
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && ROCM_VERSION < 100000
   if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
     _syncCurrentWithCarveoutStream(stream, false);
   }
@@ -2236,7 +2245,7 @@ void int8_gemm(
   cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, transb);
   auto stream = at::cuda::getCurrentCUDAStream();
-#ifndef USE_ROCM
+#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 100000)
   if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
     computeDesc.setAttribute<int32_t>(
         CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
@@ -2250,7 +2259,6 @@ void int8_gemm(
     _syncCurrentWithCarveoutStream(stream, true);
   }
 #endif
-
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
   CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
@@ -2339,7 +2347,7 @@ void int8_gemm(
       computeType,
       " scaleType ",
       scaleType);
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && ROCM_VERSION < 100000
   if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
     _syncCurrentWithCarveoutStream(stream, false);
   }

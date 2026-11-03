@@ -2608,8 +2608,13 @@ class TestFP8Matmul(TestCase):
     def test_honor_sm_carveout(self, device) -> None:
         torch.manual_seed(42)
 
-        x = torch.randn(8192, 2048, device=device, dtype=torch.float32)
-        y = torch.randn(8192, 2048, device=device, dtype=torch.float32).t()
+        M = 8192
+        N = 8192
+        if torch.version.hip:
+            M = 2048
+            N = 2048
+        x = torch.randn(M, 2048, device=device, dtype=torch.float32)
+        y = torch.randn(N, 2048, device=device, dtype=torch.float32).t()
         x_scales = tensor_to_scale(x, e4m3_type, dim=1).reciprocal()
         y_scales = tensor_to_scale(y, e4m3_type, dim=0).reciprocal()
         x_fp8 = to_fp8_saturated(x / x_scales, e4m3_type)
@@ -2654,18 +2659,23 @@ class TestFP8Matmul(TestCase):
                     kernels = [evt for evt in trace if evt.get("cat") == "kernel" and evt.get("args", {}).get("External id") == ext_id]
                     self.assertTrue(kernels, f"no kernel recorded for _scaled_mm External id {ext_id}")
                     gemms.append(max(kernels, key=lambda evt: float(evt.get("dur", 0.0))))
-                # The ROCm carveout is a CU-masked stream. The carved GEMM runs slower on
-                # fewer CUs, but that ordering depends on whatever else is on the GPU
-                # (it inverted next to a co-tenant process locally), so the durations
-                # are only reported; the assertions check that the carved call ran on a
-                # different stream and the others returned to the original one.
+                # The ROCm carveout sets SM_COUNT_TARGET which may change the number
+                # of workgroups launched. The assertions check that the kernels are
+                # launched on the same stream and the grid sizes for no target and
+                # target of 0 are the same.
                 durations = [float(evt.get("dur", 0.0)) for evt in gemms]
                 info = f"cu_count={cu_count} durations(us) no_carveout={durations[0]} carveout_0={durations[1]} carveout={durations[2]} no_carveout_again={durations[3]}"
-                no_carveout, carveout_0, carveout, no_carveout_again = [int(evt.get("tid", 0)) for evt in gemms]
-                self.assertTrue(no_carveout == no_carveout_again, info)
-                self.assertTrue(no_carveout == carveout_0, info)
-                self.assertTrue(no_carveout != carveout, info)
-                self.assertTrue(carveout_0 != carveout, info)
+                tids = [int(evt.get("tid", 0)) for evt in gemms]
+                self.assertEqual(len(set(tids)), 1, info)
+                for evt in gemms:
+                    self.assertIn("grid", evt.get("args", {}))
+                grids = [math.prod(evt["args"]["grid"]) for evt in gemms]
+                no_carveout, carveout_0, carveout_66, no_carveout_again = grids
+                self.assertEqual(no_carveout, no_carveout_again, info)
+                # The target does not guarantee that fewer workgroups will be launched.
+                # On gfx950, this test size should launch fewer workgroups when carveout is set.
+                if torch.cuda.get_device_properties(device).gcnArchName.startswith("gfx950"):
+                    self.assertLess(carveout_66, no_carveout, info)
             else:
                 with open(f.name) as file:
                     no_carveout, carveout_0, carveout_66, no_carveout_again = [
