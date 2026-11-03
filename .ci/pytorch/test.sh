@@ -1475,6 +1475,7 @@ test_huggingface_tp_benchmark() {
   mkdir -p "$TEST_REPORTS_DIR"
 
   local validation_status=0
+  local mode="${1:-accuracy}"
   local tp_size=2
   local phase
   for phase in prefill decode; do
@@ -1482,6 +1483,13 @@ test_huggingface_tp_benchmark() {
       --ci --inference --bfloat16 --inductor --disable-cudagraphs --device cuda --nopython
       --tp-size="$tp_size" --batch-size=1 --hf-inference-mode="$phase"
     )
+    if [[ "$mode" == "performance" ]]; then
+      # Keep performance success independent of accuracy baselines and unit tests.
+      python benchmarks/dynamo/huggingface.py --performance "${tp_args[@]}" \
+        --output "$TEST_REPORTS_DIR/inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp${tp_size}_${phase}_performance.csv" \
+        || validation_status=$?
+      continue
+    fi
     python benchmarks/dynamo/huggingface.py --accuracy --timing --explain \
       "${tp_args[@]}" --output "$TEST_REPORTS_DIR/${phase}_huggingface.csv" \
       || validation_status=$?
@@ -1494,14 +1502,12 @@ test_huggingface_tp_benchmark() {
       --actual "$TEST_REPORTS_DIR/${phase}_huggingface.csv" \
       --expected "benchmarks/dynamo/ci_expected_accuracy/${TEST_CONFIG}_${phase}.csv" \
       || validation_status=$?
-    # benchmarks/dynamo/perf_cli.py parses this name for summaries and repros.
-    python benchmarks/dynamo/huggingface.py --performance "${tp_args[@]}" \
-      --output "$TEST_REPORTS_DIR/inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp${tp_size}_${phase}_performance.csv" \
-      || validation_status=$?
   done
   # The process-launching TP tests only run with PYTORCH_TEST_WITH_SLOW=1.
-  PYTORCH_TEST_WITH_SLOW=1 python test/run_test.py --include dynamo/test_benchmark_runner \
-    -k TensorParallel --verbose || validation_status=$?
+  if [[ "$mode" == "accuracy" ]]; then
+    PYTORCH_TEST_WITH_SLOW=1 python test/run_test.py --include dynamo/test_benchmark_runner \
+      -k TensorParallel --verbose || validation_status=$?
+  fi
   return "$validation_status"
 }
 
@@ -2747,7 +2753,9 @@ elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   fi
   if [[ "${TEST_CONFIG}" == *unbacked_parity* ]]; then
     test_unbacked_parity_smoketest
-  elif [[ "${TEST_CONFIG}" == *huggingface_tp* ]]; then
+  elif [[ "${TEST_CONFIG}" == "inductor_huggingface_tp_perf" ]]; then
+    test_huggingface_tp_benchmark performance
+  elif [[ "${TEST_CONFIG}" == "inductor_huggingface_tp" ]]; then
     test_huggingface_tp_benchmark
   else
     test_dynamo_benchmark huggingface "$id"
