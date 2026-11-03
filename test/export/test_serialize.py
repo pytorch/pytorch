@@ -2960,14 +2960,17 @@ class TestPredispatchSerialization(TestCase):
 
             return export(Foo(), (torch.randn(4, 4),), strict=False)
 
-        with self.subTest("class defined inside a function"):
+        with self.subTest("class defined inside a function or a class"):
             # Even in an imported module, it cannot be found by name.
             class Local(TwoTensor):
                 pass
 
-            Local.__module__ = TwoTensor.__module__
-            with self.assertRaisesRegex(SerializeError, "Only top-level classes"):
-                torch.export.save(builds(Local), io.BytesIO())
+            module = self._import_test_module(Outer=type("Outer", (), {}))
+            nested = (module.__name__, "Outer.Local")
+            for names in ((TwoTensor.__module__, Local.__qualname__), nested):
+                Local.__module__, Local.__qualname__ = names
+                with self.assertRaisesRegex(SerializeError, "not a top-level class"):
+                    torch.export.save(builds(Local), io.BytesIO())
 
         with self.subTest("name that finds a different class"):
 
@@ -3135,7 +3138,7 @@ class TestPredispatchSerialization(TestCase):
             torch.export.load(buffer)
         self.assertIsInstance(cm.exception.__cause__, SerializeError)
         self.assertIn(
-            f"{module.__name__} is not an imported module", str(cm.exception.__cause__)
+            f"module {module.__name__} is not imported", str(cm.exception.__cause__)
         )
 
     @staticmethod
@@ -3214,7 +3217,7 @@ class TestPredispatchSerialization(TestCase):
             ),
             subtest(
                 ("function", "os.system", "not a class or function defined"),
-                name="os_system",
+                name="alias_os_system",
             ),
             subtest(
                 ("function", "torch.utils.model_dump.__main__.main", "__main__ module"),
@@ -3279,7 +3282,7 @@ class TestPredispatchSerialization(TestCase):
         "replaced,name,reason",
         [
             subtest(
-                ("function", "flat_apply_side_effect.F", "not an imported module"),
+                ("function", "flat_apply_side_effect.F", "is not imported"),
                 name="new",
             ),
             subtest(
@@ -3291,7 +3294,7 @@ class TestPredispatchSerialization(TestCase):
                 name="getattr",
             ),
             subtest(
-                ("class", "flat_apply_side_effect.F", "not an imported module"),
+                ("class", "flat_apply_side_effect.F", "is not imported"),
                 name="class",
             ),
         ],

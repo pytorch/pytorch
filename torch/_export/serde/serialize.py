@@ -731,14 +731,29 @@ def _find_imported(name: str) -> Any:
     """
     module_name, _, attr = name.rpartition(".")
     if not {"__main__", "__mp_main__"}.isdisjoint(module_name.split(".")):
-        raise SerializeError(f"{name} is in a __main__ module")
+        raise SerializeError(
+            f"{name} is in a __main__ module, which another process cannot "
+            "import. Define it in a module that can be imported."
+        )
     module = sys.modules.get(module_name)
     if module is None:
+        # A local or nested class has a qualified name that is not a module
+        # name: it goes through a function or through a class of a module.
+        parts = module_name.split(".")
+        owners = [sys.modules.get(".".join(parts[:i])) for i in range(1, len(parts))]
+        if "<locals>" in parts or any(
+            isinstance(inspect.getattr_static(owner, part, None), type)
+            for owner, part in zip(owners, parts[1:])
+            if owner is not None
+        ):
+            raise SerializeError(
+                f"{name} is not a top-level class or function. Define it at the "
+                "top level of a module."
+            )
         raise SerializeError(
-            f"{name} cannot be found: {module_name} is not an imported module. "
-            "Only top-level classes and functions of imported modules are "
-            "found, and no module is imported here, because importing a "
-            "module runs its code."
+            f"{name} cannot be found: module {module_name} is not imported. "
+            "Import it before loading. Load does not import modules, because "
+            "importing a module runs its code."
         )
     # Reading an attribute can run code: getattr calls a module __getattr__,
     # and any attribute read on a lazily loaded module loads it. So the lookup
