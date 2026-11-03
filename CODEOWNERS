@@ -637,6 +637,7 @@
 # /test/test_view_ops.py
 # /test/test_weak.py
 /test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
+/test/REVIEW.md @fffrog
 #
 # [backend_device_runtime]
 # /test/custom_backend/
@@ -1379,7 +1380,7 @@
 # /.github/workflows/claude-autorevert-advisor.yml
 # /.github/workflows/claude-code.yml
 # /.github/workflows/claude-distributed-triage-cron.yml
-# /.github/workflows/claude-distributed-triage.yml
+# /.github/workflows/distributed-triage-pi.yml
 # /.github/workflows/issue-triage-pi.yml
 # /.github/workflows/issue-triage.yml
 # /.github/workflows/pi-agent-tests.yml
@@ -1388,6 +1389,7 @@
 # /AI_POLICY.md
 # /CLAUDE.md
 # /torch/_dynamo/CLAUDE.md
+/torch/REVIEW.md @albanD
 #
 # [docs_general]
 # /CITATION.cff

@@ -797,13 +797,12 @@ def pylong_from_base(
         raise_observed_exception(
             ValueError, tx, args=["int() base must be >= 2 and <= 36, or 0"]
         )
+    if not issubclass(x.python_type(), (str, bytes, bytearray)):
+        raise_type_error(tx, "int() can't convert non-string with explicit base")
     if not x.is_python_constant():
         return None
-    xval = x.as_python_constant()
-    if not isinstance(xval, (str, bytes, bytearray)):
-        raise_type_error(tx, "int() can't convert non-string with explicit base")
     try:
-        return ConstantVariable.create(int(xval, base))
+        return ConstantVariable.create(int(x.as_python_constant(), base))
     except ValueError as e:
         raise_observed_exception(ValueError, tx, args=list(e.args))
 
@@ -1178,11 +1177,11 @@ def generic_getiter(
             raise_type_error(tx, err_str)
         return res
     elif pysequence_check(T):
-        from .functions import UserFunctionVariable
+        from .builder import SourcelessBuilder
 
-        return UserFunctionVariable(polyfills.builtins.sequence_iterator).call_function(
-            tx, [obj], {}
-        )
+        return SourcelessBuilder.create_internal_user_function(
+            polyfills.builtins.sequence_iterator
+        ).call_function(tx, [obj], {})
     else:
         raise_type_error(tx, f"'{obj.python_type_name()}' object is not iterable")
 
@@ -1933,6 +1932,22 @@ def python_constant_repr_impl(
         raise_observed_exception(type(e), tx, args=list(e.args))
 
 
+def type_init(
+    tx: "InstructionTranslatorBase",
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    """type_init (a class's tp_init): only validates the arguments.
+
+    https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c#L3385-L3405
+    """
+    if len(args) == 1 and kwargs:
+        raise_type_error(tx, "type.__init__() takes no keyword arguments")
+    if len(args) not in (1, 3):
+        raise_type_error(tx, "type.__init__() takes 1 or 3 arguments")
+    return ConstantVariable.create(None)
+
+
 # _Py_SwappedOp: https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L987
 _REFLECTED_OP: dict[str, str] = {
     "__lt__": "__gt__",
@@ -2071,11 +2086,12 @@ def generic_hash(
     Wraps the result in ConstantVariable or FakeIdVariable depending on
     whether the hash depends on a sourceless object's identity.
     """
-    from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
+    from .builder import SourcelessBuilder
+    from .constant import ConstantVariable, FakeValueKind
 
     h, is_fake = generic_hash_impl(tx, obj)
     if is_fake:
-        return FakeIdVariable(h, kind=FakeValueKind.HASH)
+        return SourcelessBuilder.create_internal_fake_id(h, kind=FakeValueKind.HASH)
     return ConstantVariable.create(h)
 
 
@@ -2339,6 +2355,8 @@ def _resolve_descriptor_get(
     """
     import types as _types
 
+    from .builder import VariableBuilder
+
     if isinstance(type_attr, property):
         # The property object lives on the type, not the instance: anchoring it at
         # obj.source would make PropertyVariable's fget source read the *result* of
@@ -2348,17 +2366,17 @@ def _resolve_descriptor_get(
             if obj.source
             else None
         )
-        prop_vt = variables.PropertyVariable(type_attr, source=prop_source)
+        prop_vt = variables.PropertyVariable.create(type_attr, prop_source)
         return prop_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.MemberDescriptorType):
-        md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
+        md_vt = variables.MemberDescriptorVariable.create(type_attr, source)
         return md_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.GetSetDescriptorType):
-        gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
+        gs_vt = variables.GetSetDescriptorVariable.create(type_attr, source)
         return gs_vt.tp_descr_get_impl(tx, obj, class_vt)
     _tuplegetter = collections._tuplegetter  # pyrefly: ignore[missing-attribute]
     if isinstance(type_attr, _tuplegetter):
-        tg_vt = variables.TupleGetterVariable(type_attr, source=source)
+        tg_vt = variables.TupleGetterVariable.create(type_attr, source)
         return tg_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, staticmethod):
         sm_vt = variables.StaticMethodVariable.from_descriptor(
@@ -2371,21 +2389,21 @@ def _resolve_descriptor_get(
         )
         return cm_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.ClassMethodDescriptorType):
-        cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
+        cmd_vt = variables.ClassMethodDescriptorVariable.create(type_attr, source)
         return cmd_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.WrapperDescriptorType):
-        wd_vt = variables.WrapperDescriptorVariable(
+        wd_vt = VariableBuilder.create_internal_wrapper_descriptor(
             type_attr, owner=class_vt, source=source
         )
         return wd_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.MethodDescriptorType):
-        md_vt = variables.MethodDescriptorVariable(
+        md_vt = VariableBuilder.create_internal_method_descriptor(
             type_attr, owner=class_vt, source=source
         )
         return md_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.FunctionType):
         return variables.UserMethodVariable(
-            variables.UserFunctionVariable(
+            VariableBuilder.create_internal_user_function(
                 type_attr, source=source and AttrSource(source, "__func__")
             ),
             obj,

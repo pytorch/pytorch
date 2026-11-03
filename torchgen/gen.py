@@ -8,8 +8,7 @@ import os
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, TYPE_CHECKING, TypeVar
-from typing_extensions import assert_never
+from typing import Any, assert_never, Literal, TYPE_CHECKING, TypeVar
 
 import yaml
 
