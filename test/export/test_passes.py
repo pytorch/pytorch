@@ -1095,8 +1095,12 @@ def forward(self, sin, cos):
             FakeTensorProp(gm, mode).propagate(mode.from_tensor(torch.ones(2)))
         new_gm, _ = replace_set_grad_with_hop_pass(gm, None)
         region = torch.ops.higher_order.wrap_with_set_grad_enabled
+        (region_node,) = new_gm.graph.find_nodes(op="call_function", target=region)
+        # The region gets only tensors, and its body reads the spec itself.
+        self.assertEqual([n.op for n in region_node.args[2:]], ["placeholder"])
+        body = torch.fx.graph_module._get_attr(new_gm, region_node.args[1].target)
         self.assertEqual(
-            nodes_count(new_gm.graph.nodes, lambda n: n.target is region), 1
+            [n.target for n in body.graph.find_nodes(op="get_attr")], ["sub.spec"]
         )
         self.assertEqual(new_gm(torch.ones(2)), gm(torch.ones(2)))
         # The parts outside the region are inlined back and read the one spec.
