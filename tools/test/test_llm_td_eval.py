@@ -531,14 +531,15 @@ class TestScore(unittest.TestCase):
         # recorded time (test_e, as if newly added); test_a's partial run counts.
         cut = top25_per_config(tp, cands, SECONDS)
         self.assertEqual(cut, {"default": ["test_a", "test_e"], "slow": ["test_a", "test_e"]})  # fmt: skip
-        cut = top25_per_config(tp, ["test_a", "test_b", "test_c", "test_d"], SECONDS)
-        self.assertEqual(cut, {"default": ["test_a", "test_c"], "slow": ["test_a"]})
+        timed = top25_per_config(tp, ["test_a", "test_b", "test_c", "test_d"], SECONDS)
+        self.assertEqual(timed, {"default": ["test_a", "test_c"], "slow": ["test_a"]})
         td = {"top25": ["test_a", "test_e"], "top25_cfg": cut}
         choice = pick("td25", None, td)
         self.assertTrue(choice.covers("test_a", "slow"))
+        self.assertTrue(choice.covers("test_e", "slow"))
         self.assertFalse(choice.covers("test_c", "slow"))
         self.assertTrue(choice.covers("test_e", "not_in_test_times"))
-        self.assertEqual(choice.files(), {"test_a", "test_c"})
+        self.assertEqual(choice.files(), {"test_a", "test_e"})
 
     def test_cost_fraction(self) -> None:
         cands = {"test_a", "test_b", "test_c"}
