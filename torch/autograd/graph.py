@@ -235,10 +235,8 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
         )
     grad_fn = _get_grad_fn_or_grad_acc(tensor)
 
-    # Python-based Node are owned by the C++ side meaning the python grad_fn
-    # object we hold here does NOT keep the C++ graph alive.
-    # Create an ownership token by creating a new C++ node that own the graph
-    # we care about here.
+    # THPFunction owns its PyNode, so this Python grad_fn keeps that node alive.
+    # ownership_token is an additional C++ view of the same graph.
     token = None
     if isinstance(grad_fn, torch._C._FunctionBase):
         with torch.enable_grad():

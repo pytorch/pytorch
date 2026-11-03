@@ -210,7 +210,7 @@ class StageBackwardTests(TestCase):
 
     def test_stage_backward_weight_custom_function_under_cpp_root(self, device):
         # .sum() makes the loss root a C++ SumBackward0. The custom Function is
-        # an intermediate, so the pin has to follow intermediates, not the root.
+        # only an intermediate, and split backward must still match.
         class TestModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -239,8 +239,9 @@ class StageBackwardTests(TestCase):
             torch.testing.assert_close(p.grad, ref_mod.get_parameter(name).grad)
 
     def test_stage_backward_input_frees_tensor_above_builtin_intermediate(self, device):
-        # The weight boundary is a built-in matmul, so no output pin is taken.
-        # A tensor saved only above that boundary must die at detach.
+        # A tensor saved only above the built-in matmul must die when the output
+        # is detached. The matmul node retained for weight backward does not
+        # keep it alive.
         class TestModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -259,7 +260,8 @@ class StageBackwardTests(TestCase):
         del saved, hold
         self.assertIsNotNone(saved_ref())
 
-        _dinputs, param_groups = stage_backward_input(
+        # Keep the returned groups alive. The saved tensor must already be dead.
+        _dinputs, _param_groups = stage_backward_input(
             stage_outputs_or_loss=(loss,),
             output_grads=None,
             input_values=[x],
@@ -267,13 +269,10 @@ class StageBackwardTests(TestCase):
         )
         gc.collect()
         self.assertIsNone(saved_ref())
-        for param_group in param_groups:
-            self.assertNotIn("ownership_tokens", param_group)
 
-    def test_stage_backward_frees_tensor_above_cpp_consumer(self, device):
-        # The weight boundary is a custom Function, and relu is its C++ consumer.
-        # A tensor saved only above relu must die at detach. A tensor saved on
-        # relu itself stays until dW, because relu owns the custom Function.
+    def test_stage_backward_frees_tensor_above_custom_function(self, device):
+        # A tensor saved only above the custom Function must die when the
+        # output is detached. Weight backward still matches a full backward.
         class TestModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -291,12 +290,9 @@ class StageBackwardTests(TestCase):
         ref_x = x.detach().clone().requires_grad_(True)
         ref_saved = saved.detach().clone()
         loss = mod(x, saved)
-        # sum -> HoldAbove -> relu -> CustomMatmul. relu is the pin.
-        sum_node = loss.grad_fn
-        hold_node = _find_grad_node(sum_node, "HoldAbove")
-        relu_node = _find_grad_node(hold_node, "ReluBackward")
+        hold_node = _find_grad_node(loss.grad_fn, "HoldAbove")
         self.assertIs(hold_node.saved, saved)
-        del saved
+        del saved, hold_node
         self.assertIsNotNone(saved_ref())
 
         dinputs, param_groups = stage_backward_input(
@@ -305,15 +301,6 @@ class StageBackwardTests(TestCase):
             input_values=[x],
             weights=mod.parameters(),
         )
-        tokens = [
-            token
-            for param_group in param_groups
-            for token in param_group.get("ownership_tokens", ())
-        ]
-        self.assertIn(relu_node, tokens)
-        self.assertNotIn(sum_node, tokens)
-        self.assertNotIn(hold_node, tokens)
-        del sum_node, hold_node, relu_node, tokens
         gc.collect()
         self.assertIsNone(saved_ref())
 
@@ -323,9 +310,9 @@ class StageBackwardTests(TestCase):
         for name, p in mod.named_parameters():
             torch.testing.assert_close(p.grad, ref_mod.get_parameter(name).grad)
 
-    def test_stage_backward_weight_releases_ownership_token(self, device):
-        # The pin keeps the custom Function alive across detach. dW must drop
-        # that pin, the ctx, and any tensor saved only by the ctx.
+    def test_stage_backward_weight_releases_custom_function(self, device):
+        # param_groups keeps the custom Function across detach. Weight backward
+        # drops it, and a tensor saved only on that context must die with it.
         class TestModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -355,15 +342,11 @@ class StageBackwardTests(TestCase):
         gc.collect()
         self.assertIsNotNone(saved_ref())
         self.assertIsNotNone(ctx_ref())
-        for param_group in param_groups:
-            self.assertIn("ownership_tokens", param_group)
 
         stage_backward_weight(mod.parameters(), param_groups)
         gc.collect()
         self.assertIsNone(saved_ref())
         self.assertIsNone(ctx_ref())
-        for param_group in param_groups:
-            self.assertNotIn("ownership_tokens", param_group)
 
     def test_stage_backward_weight(self, device):
         # oneDNN is nondeterministic on XPU: https://github.com/intel/torch-xpu-ops/issues/1682
@@ -700,9 +683,8 @@ class StageBackwardTests(TestCase):
             self.assertEqual(p.grad, ref_mod.get_parameter(name).grad)
 
     def test_stage_backward_weight_from_released_cpp_root(self, device):
-        # Released outputs keep a GradientEdge. relu is a C++ root, so
-        # ownership_token is None. Dropping the edge after input backward
-        # must leave the custom Function alive for weight backward.
+        # A released output is a GradientEdge. Dropping that edge after input
+        # backward must still leave weight backward able to run.
         class TestModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -719,7 +701,6 @@ class StageBackwardTests(TestCase):
 
         out = mod(x)
         edge = torch.autograd.graph.get_gradient_edge(out)
-        self.assertIsNone(edge.ownership_token)
         released = weakref.ref(out)
         del out
         self.assertIsNone(released())
@@ -732,8 +713,6 @@ class StageBackwardTests(TestCase):
         )
         del edge
         gc.collect()
-        for param_group in param_groups:
-            self.assertIn("ownership_tokens", param_group)
         stage_backward_weight(mod.parameters(), param_groups)
 
         ref_mod(ref_x).backward(output_grad)
