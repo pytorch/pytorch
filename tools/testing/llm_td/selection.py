@@ -15,13 +15,16 @@ from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
+
+    from tools.testing.test_run import TestRun
 
 
 SWEEPS = ("dynamo_wrapped", "crossref")
 LLM_TD_SELECTION_FILE = "llm_td_selection.json"
 # When enforcing, run_test.py also runs TD's top-ranked files up to this share of
-# the job's test time: TD and the model miss largely different failures.
+# the config's test time (all shards together): TD and the model miss largely different failures.
 LLM_TD_HEDGE = 0.05
 
 # Changes to these paths alter how every test is collected or run, so no
@@ -102,6 +105,33 @@ class Selection:
 
     def covers(self, test_file: str, test_config: str) -> bool:
         return self.run_all or test_config in self.sweeps or test_file in self.files
+
+    def split(
+        self,
+        ranked: list[TestRun],
+        score: Callable[[TestRun], float],
+        file_time: dict[str, float],
+        test_config: str,
+    ) -> tuple[list[TestRun], list[TestRun], set[str]]:
+        """Split TD's ranked TestRuns into (include, exclude, hedged files).
+
+        Include holds the covered files plus a hedge: TD's positively scored
+        files, greedily in rank order, that fit in LLM_TD_HEDGE of the config's
+        test time. Files without a time are not hedged. Partial TestRuns of one
+        file share its time, so a file is charged once and lands in one batch."""
+        files = dict.fromkeys(x.test_file for x in ranked)
+        covered = {f for f in files if self.covers(f, test_config)}
+        budget = LLM_TD_HEDGE * sum(file_time.get(f, 0) for f in files)
+        hedged: set[str] = set()
+        for x in ranked:
+            f, t = x.test_file, file_time.get(x.test_file, 0)
+            if f in covered or f in hedged or score(x) <= 0 or not t or t > budget:
+                continue
+            budget -= t
+            hedged.add(f)
+        chosen = covered | hedged
+        include = [x for x in ranked if x.test_file in chosen]
+        return include, [x for x in ranked if x.test_file not in chosen], hedged
 
     def to_json(self) -> dict:
         return {

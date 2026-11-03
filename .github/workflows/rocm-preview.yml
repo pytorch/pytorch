@@ -72,6 +72,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      actions: read
     name: linux-noble-rocm-preview-py3.11-mi350
     uses: ./.github/workflows/_rocm-test.yml
     needs:
