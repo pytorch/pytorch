@@ -603,7 +603,7 @@ def get_symbolic_inputs(inputs: Sequence[IRNode]) -> list[Expr]:
     sym_vars: OrderedSet[Expr] = OrderedSet()
     for inp in inputs:
         sym_vars |= get_free_symbols(inp.get_size(), unbacked_only=False)
-        sym_vars |= get_free_symbols(inp.get_stride(), unbacked_only=False)
+        sym_vars |= get_free_symbols(inp.get_stride_hint(), unbacked_only=False)
 
     return list(sym_vars)
 
@@ -884,6 +884,17 @@ class IRNode:
         except NotImplementedError:
             return None
 
+    def get_stride_hint(self) -> Sequence[_IntLike]:
+        """get_stride(), but tolerates an unfrozen FlexibleLayout; see
+        Layout.stride_hint for when this is appropriate."""
+        return self.get_stride()
+
+    def maybe_get_stride_hint(self) -> Sequence[_IntLike] | None:
+        try:
+            return self.get_stride_hint()
+        except NotImplementedError:
+            return None
+
     def get_name(self) -> str:
         raise NotImplementedError(type(self).__name__)
 
@@ -1155,7 +1166,7 @@ class Loops(IRNode):
         opcounter = OpCounterCSE(V.MockHandler())
         with (
             V.set_ops_handler(opcounter),
-            patch.object(FlexibleLayout, "allow_indexing", True),
+            allow_layout_analysis(),
         ):
             self.inner_fn(*self.inner_fn_args())
             return opcounter.getvalue()
@@ -1205,7 +1216,7 @@ class Loops(IRNode):
         return handler.usages
 
     def get_reads(self) -> OrderedSet[Dep]:
-        with patch.object(FlexibleLayout, "allow_indexing", True):
+        with allow_layout_analysis():
             if self.get_reduction_type():
                 return extract_read_writes(
                     self.make_loader(),
@@ -1584,7 +1595,7 @@ class Reduction(Loops):
                 # No need to split.
                 return ReductionHint.INNER, split
             if input_node is not None and isinstance(input_node, TensorBox):
-                with patch.object(FlexibleLayout, "allow_indexing", True):
+                with allow_layout_analysis():
                     (
                         new_ranges,
                         new_reduction_ranges,
@@ -1626,6 +1637,11 @@ class Reduction(Loops):
             src_dtype=src_dtype,
             reduction_hint=ReductionHint.DEFAULT,
         )
+
+        def stride_of(layout: OutputSpec) -> Sequence[Expr] | None:
+            if isinstance(layout, Layout):
+                return layout.stride_hint()
+            return getattr(layout, "stride", None)
 
         def get_read_indices(r: Reduction) -> tuple[Sequence[Expr], bool]:
             device = r.get_device()
@@ -1678,9 +1694,10 @@ class Reduction(Loops):
                 if is_full_size_read or is_broadcasted_reduction_read:
                     if md.name in V.graph.name_to_buffer:
                         buf = V.graph.name_to_buffer[md.name]
-                        original_stride = getattr(buf.layout, "stride", None)
+                        # hint read: comparing pre- vs post-freeze strides
+                        original_stride = stride_of(buf.layout)
                         buf.decide_layout()
-                        if getattr(buf.layout, "stride", None) != original_stride:
+                        if stride_of(buf.layout) != original_stride:
                             changed = True
             return indices or broadcasted_reduction_indices, changed
 
@@ -1986,7 +2003,7 @@ class Reduction(Loops):
         if split == -1:
             if input_node is None:
                 raise AssertionError("Expected input_node is not None")
-            with patch.object(FlexibleLayout, "allow_indexing", True):
+            with allow_layout_analysis():
                 new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
                     input_node
                 )
@@ -3422,7 +3439,7 @@ def is_contiguous_storage_and_layout(x: IRNode) -> bool:
                 layout.device,
                 layout.dtype,
                 layout.size,
-                layout._pad_strides(layout.stride, layout.size, layout.dtype),
+                layout._pad_strides(layout.stride_hint(), layout.size, layout.dtype),
                 layout.offset,
                 layout.is_pinned,
             )
@@ -3502,6 +3519,24 @@ def as_storage_and_layout(
         )
         return buffer, x.layout
     raise NotImplementedError
+
+
+def freeze_storage_layout(x: IRNode) -> None:
+    """
+    Freeze the layout of the storage backing x, looking through boxes and
+    views. Required before reading strides/offsets from x for anything that
+    outlives layout freezing; a flexible layout's strides may still change
+    (stride reordering, comprehensive padding).
+    """
+    if isinstance(x, MutableBox):
+        freeze_storage_layout(x.data)
+    elif isinstance(x, BaseView):
+        freeze_storage_layout(x.unwrap_view())
+    elif isinstance(x.maybe_get_layout(), MutationLayoutSHOULDREMOVE):
+        # strides delegate to the mutation target's layout; freeze that
+        freeze_storage_layout(x.get_layout().target)  # type: ignore[attr-defined]
+    else:
+        as_storage_and_layout(x)
 
 
 def is_stride_order_storage_and_layout(
@@ -3607,7 +3642,7 @@ class BaseView(IRNode):
         return self.data.get_read_names()
 
     def get_reads(self) -> OrderedSet[Dep]:
-        with patch.object(FlexibleLayout, "allow_indexing", True):
+        with allow_layout_analysis():
             return extract_read_writes(
                 self.make_loader(),
                 self.get_size(),
@@ -3786,6 +3821,10 @@ class PermuteView(BaseView):
         ):
             raise AssertionError("dims must be a permutation of range(len(dims))")
         stride = self.data.get_stride()
+        return [stride[i] for i in self.dims]
+
+    def get_stride_hint(self) -> Sequence[Expr]:
+        stride = self.data.get_stride_hint()
         return [stride[i] for i in self.dims]
 
     def make_reindexer(
@@ -4228,7 +4267,7 @@ class View(GenericView):
 
 @ir_dataclass
 class ReinterpretView(BaseView):
-    """Pretend our storage has a different layout"""
+    """Pretend our storage has a different layout (a view over raw storage)"""
 
     layout: Layout
 
@@ -4236,6 +4275,18 @@ class ReinterpretView(BaseView):
         super().__post_init__()
         if isinstance(self.data, BaseView):
             object.__setattr__(self, "data", self.data.unwrap_view())
+        # self.layout indexes raw storage, so it is only valid if the base
+        # buffer's strides can no longer change. A flexible base can still be
+        # reordered or padded at freeze time (e.g. comprehensive padding),
+        # which would silently invalidate this view. See #192575.
+        base_layout = self.data.maybe_get_layout()
+        if config.strict_flexible_layout_strides and isinstance(
+            base_layout, FlexibleLayout
+        ):
+            raise AssertionError(
+                f"ReinterpretView created over a flexible layout: {base_layout}. "
+                "Freeze the base first, e.g. via as_storage_and_layout(x)."
+            )
 
     def __str__(self) -> str:
         return self.str_helper(
@@ -4641,6 +4692,16 @@ class Layout(OutputSpec):
     def stride(self, value: Sequence[Expr]) -> None:
         self._stride = value
 
+    def stride_hint(self) -> Sequence[Expr]:
+        """
+        Like .stride, but tolerates an unfrozen FlexibleLayout, whose strides
+        are provisional and may change when the layout is frozen (stride
+        reordering, comprehensive padding). Only use this for heuristics and
+        predicates whose answer is allowed to go stale; never persist the
+        result. To persist strides, freeze first (as_storage_and_layout).
+        """
+        return self.stride
+
     @property
     def offset(self) -> Expr:
         return self._offset
@@ -4660,7 +4721,7 @@ class Layout(OutputSpec):
             is_pinned_str = f", is_pinned={self.is_pinned}"
         return (
             f"{type(self).__name__}('{self.device.type}{device_index_str}', {self.dtype}, "
-            f"size={self.size}, stride={self.stride}{offset}{is_pinned_str})"
+            f"size={self.size}, stride={self.stride_hint()}{offset}{is_pinned_str})"
         )
 
     __repr__ = __str__
@@ -4672,14 +4733,14 @@ class Layout(OutputSpec):
         with V.fake_mode:
             return torch.empty_strided(
                 convert_shape_to_symint(self.size),
-                convert_shape_to_symint(self.stride),
+                convert_shape_to_symint(self.stride_hint()),
                 dtype=self.dtype,
                 device=self.device,
                 pin_memory=self.is_pinned,
             )
 
     def is_contiguous(self) -> bool:
-        return is_contiguous_strides_for_shape(self.stride, self.size)
+        return is_contiguous_strides_for_shape(self.stride_hint(), self.size)
 
     @staticmethod
     def is_channels_last_contiguous(
@@ -4701,7 +4762,7 @@ class Layout(OutputSpec):
 
     def is_transposed(self) -> bool:
         for left, right, size in zip(
-            self.stride,
+            self.stride_hint(),
             reversed(FlexibleLayout.contiguous_strides(list(reversed(self.size)))),
             self.size,
         ):
@@ -4729,7 +4790,8 @@ class Layout(OutputSpec):
         )
 
     def is_stride_ordered(self, order: Sequence[int]) -> bool:
-        if len(self.stride) != len(order):
+        stride_hint = self.stride_hint()
+        if len(stride_hint) != len(order):
             raise AssertionError("Expected len(self.stride) == len(order)")
 
         # ignore dimensions of size 1, they don't affect layout
@@ -4739,7 +4801,7 @@ class Layout(OutputSpec):
             if not V.graph.sizevars.statically_known_equals(dim, 1)
         ]
 
-        stride = [self.stride[i] for i in non_1_indices]
+        stride = [stride_hint[i] for i in non_1_indices]
         order: Sequence[int] = [order[i] for i in non_1_indices]
 
         def sorted_indices(arr: Sequence[int]) -> Sequence[int]:
@@ -4767,7 +4829,7 @@ class Layout(OutputSpec):
 
     def is_channels_last_stride_ordered(self) -> bool:
         # create channels_last order(NCHW, NCDHW, the C is the first order).
-        order = [0] + list(reversed(range(1, len(self.stride) - 1)))
+        order = [0] + list(reversed(range(1, len(self.stride_hint()) - 1)))
         order = [len(order)] + order
         return self.is_stride_ordered(order)
 
@@ -4853,9 +4915,9 @@ class Layout(OutputSpec):
     def pad_strides(self) -> None:
         if not isinstance(self, FlexibleLayout):
             raise AssertionError(type(self))
-        if self.stride is None:
+        if self._stride is None:
             raise AssertionError("Expected self.stride is not None")
-        self.stride = self._pad_strides(self.stride, self.size, self.dtype)
+        self.stride = self._pad_strides(self._stride, self.size, self.dtype)
 
     def should_pad_strides(self) -> bool:
         return config.comprehensive_padding and isinstance(self, FlexibleLayout)
@@ -4870,7 +4932,7 @@ class Layout(OutputSpec):
             self.device,
             self.dtype,
             self.size,
-            self.stride,
+            self._stride,
             self.offset,
             self.is_pinned,
         )
@@ -4886,13 +4948,14 @@ class Layout(OutputSpec):
             and self.device == other.device
             and self.dtype == other.dtype
             and self.size == other.size
-            and self.stride == other.stride
+            and self.stride_hint() == other.stride_hint()
             and self.offset == other.offset
             and self.is_pinned == other.is_pinned
         )
 
     def storage_size(self) -> Expr:
-        return compute_required_storage_length(self.size, self.stride, self.offset)  # type: ignore[arg-type]
+        stride = self.stride_hint()
+        return compute_required_storage_length(self.size, stride, self.offset)  # type: ignore[arg-type]
 
     @cache_on_self_and_args("Layout")
     def get_free_symbol_uses(
@@ -4900,7 +4963,7 @@ class Layout(OutputSpec):
     ) -> OrderedSet[sympy.Symbol]:
         return (
             get_free_symbols(self.size, unbacked_only)
-            | get_free_symbols(self.stride, unbacked_only)
+            | get_free_symbols(self.stride_hint(), unbacked_only)
             | get_free_symbols(self.offset, unbacked_only)
         )
 
@@ -4921,6 +4984,12 @@ class FlexibleLayout(Layout):
     """
 
     allow_indexing = False
+    # Permit reading provisional strides without freezing or erroring; only
+    # set within analysis extents (see allow_layout_analysis).
+    allow_stride_reads = False
+
+    def stride_hint(self) -> Sequence[Expr]:
+        return self._stride
 
     def get_fixed_layout_without_freezing(self) -> FixedLayout:
         """
@@ -5028,6 +5097,21 @@ class FlexibleLayout(Layout):
 
     @property
     def stride(self) -> Sequence[Expr]:
+        # 0-dim layouts have no strides that freezing could change, so reading
+        # them is always safe (e.g. scalar carried inputs of while_loop).
+        if (
+            config.strict_flexible_layout_strides
+            and not FlexibleLayout.allow_stride_reads
+            and len(self._stride) > 0
+        ):
+            raise AssertionError(
+                "Reading strides of an unfrozen FlexibleLayout. These strides "
+                "are provisional and may change when the layout is frozen "
+                "(stride reordering, comprehensive padding); persisting them "
+                "causes silent wrong results. Freeze first via "
+                "as_storage_and_layout(x), or use stride_hint() in heuristics "
+                "that tolerate stale values."
+            )
         return self._stride
 
     @stride.setter
@@ -5104,11 +5188,12 @@ class FlexibleLayout(Layout):
 
     def get_initial_free_symbol_uses(self) -> dict[tuple[str, bool], sympy.Symbol]:
         initial_free_symbols = {}
-        for name in ["size", "stride", "offset"]:
+        values = {"size": self.size, "stride": self._stride, "offset": self.offset}
+        for name, value in values.items():
             for unbacked_only in [True, False]:
                 key = (name, unbacked_only)
                 initial_free_symbols[key] = OrderedSet(
-                    get_free_symbols(getattr(self, name), unbacked_only)
+                    get_free_symbols(value, unbacked_only)
                 )
 
         return initial_free_symbols
@@ -5139,6 +5224,21 @@ class FlexibleLayout(Layout):
         # record the initial free symbols to check that we do not add new free symbols
         # later when modifying sizes, strides, and offsets.
         self.initial_free_symbols = self.get_initial_free_symbol_uses()
+
+
+def allow_layout_analysis() -> contextlib.ExitStack:
+    """
+    Context for analysis extents (op counting, dep extraction, constant
+    evaluation) that trace loop bodies without persisting anything: permits
+    indexing and provisional stride reads on FlexibleLayouts, without
+    freezing them. The flags are separate so tests can, e.g., combine
+    allow_stride_reads with a patched _stride to evaluate a body against
+    hypothetical strides.
+    """
+    stack = contextlib.ExitStack()
+    stack.enter_context(patch.object(FlexibleLayout, "allow_indexing", True))
+    stack.enter_context(patch.object(FlexibleLayout, "allow_stride_reads", True))
+    return stack
 
 
 class NonOwningLayout(Layout):
@@ -5273,6 +5373,9 @@ class MutationLayoutSHOULDREMOVE(Layout):
     @stride.setter  # type: ignore[override]
     def stride(self, value: Never) -> None:
         pass  # ignore setting of stride
+
+    def stride_hint(self) -> Sequence[Expr]:
+        return self.real_layout().stride_hint()
 
     def storage_size(self) -> Expr:
         return self.real_layout().storage_size()
@@ -5436,6 +5539,9 @@ class Buffer(IRNode, CodegenSymbol):
 
     def get_stride(self) -> list[Expr]:
         return [*self.get_layout().stride]
+
+    def get_stride_hint(self) -> list[Expr]:
+        return [*self.get_layout().stride_hint()]
 
     def get_offset(self) -> Expr:
         return self.get_layout().offset
@@ -5733,7 +5839,7 @@ class ComputedBuffer(OperationBuffer):
                 index_exprs=OrderedSet(),
             )
 
-        with patch.object(FlexibleLayout, "allow_indexing", True):
+        with allow_layout_analysis():
             if self.data.get_reduction_type():
                 return extract_read_writes(
                     self.get_store_function(),
@@ -7841,9 +7947,10 @@ class ExternKernel(InputsKernel):
     @classmethod
     def require_stride1(cls, x: IRNode) -> IRNode:
         if is_storage_and_layout(x):
-            if len(x.get_stride()) == 0:
+            # hint is safe: every freeze keeps some stride equal to 1
+            if len(x.get_stride_hint()) == 0:
                 return x
-            for stride in x.get_stride():
+            for stride in x.get_stride_hint():
                 if stride == 1:
                     return x
         return cls.copy_input(x)
@@ -10995,6 +11102,9 @@ class MutableBox(IRNode):
 
     def get_stride(self) -> Sequence[_IntLike]:
         return self.data.get_stride()
+
+    def get_stride_hint(self) -> Sequence[_IntLike]:
+        return self.data.get_stride_hint()
 
     def get_name(self) -> str:
         return self.data.get_name()
