@@ -34,7 +34,6 @@ from tools.testing.llm_td.selection import (
     parse_model_output,
     Selection,
     SWEEPS,
-    unmatched_tests,
 )
 
 
@@ -261,6 +260,7 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     with contextlib.redirect_stdout(sys.stderr):
         test_times = get_test_times()
     if not test_times and not args.print_prompt:
+        record["error"] = "no test times"
         return Selection(run_all=True, reason="no test times")
     diffstat, diff = diffstat_and_diff(merge_base, args.head)
     # TESTS comes from the checkout this script runs from, which in CI is the
@@ -295,7 +295,6 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     else:
         try:
             parse_model_output(out, set(candidates))
-            record["unmatched"] = unmatched_tests(out, set(candidates))
         except ValueError as e:
             record["error"] = f"malformed model output: {e}"[:2000]
     return Selection.from_model_output(
@@ -339,7 +338,6 @@ def main(argv: list[str] | None = None) -> None:
         "cost_usd": None,
         "error": None,
         "model_output": None,
-        "unmatched": [],
     }
     try:
         selection = select(args, record)
@@ -356,12 +354,16 @@ def main(argv: list[str] | None = None) -> None:
     if selection is None:
         return
     selection.enforce = args.enforce
-    args.output.write_text(json.dumps({**selection.to_json(), **record}, indent=1))
+    args.output.write_text(
+        json.dumps({**selection.to_json(), "diagnostics": record}, indent=1)
+    )
     print(
         f"LLM TD: run_all={selection.run_all} sweeps={sorted(selection.sweeps)} files={len(selection.files)}"
     )
-    # json.dumps keeps a model-written newline from starting a workflow command.
-    print(f"LLM TD: {json.dumps(selection.reason)}")
+    # json.dumps keeps a model-written newline from starting a workflow command,
+    # and escaping "#" keeps the runner from parsing a legacy ##[command].
+    reason = json.dumps(selection.reason).replace("#", "\\u0023")
+    print(f"LLM TD: {reason}")
 
 
 if __name__ == "__main__":
