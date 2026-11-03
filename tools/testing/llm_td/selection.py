@@ -272,7 +272,8 @@ class Selection:
         sources, missing = failure_list_sources(changed_files, grep)
         if "inductor" in missing:
             return cls(run_all=True, reason="an edited inductor failure list names an unknown test class")  # fmt: skip
-        if "dynamo" in missing:
+        # dynamo_wrapped also runs with compiled autograd on (see common_utils).
+        if missing & {"dynamo", "compiled_autograd"}:
             sweeps.add("dynamo_wrapped")
         files |= edited_tests(changed_files, candidates)
         if grep is not None:
@@ -294,33 +295,31 @@ class Selection:
         score: Callable[[TestRun], float],
         file_time: dict[str, float],
         test_config: str,
+        *,
         previously_failed: Collection[str] = (),
     ) -> Split:
-        """Split TD's ranked TestRuns into the covered files plus a hedge
-        within LLM_TD_HEDGE (20%) of the config's test time, spent greedily in
-        rank order first on the `previously_failed` files (those that already
-        failed on the PR) and then on the files with a positively scored
-        TestRun. One positive class-level run hedges its whole file at the
-        file's full time. Files without a time are never charged, so they run
-        only if covered. Partial TestRuns of one file share its time, so a
-        file is charged once and lands in one batch."""
+        """Split TD's ranked TestRuns into the covered files, the
+        `previously_failed` files (those that already failed on the PR), which
+        always run whatever their size or TD score, and a hedge. The previous
+        failures are charged first to a budget of LLM_TD_HEDGE (20%) of the
+        config's test time; what is left (at least 0) is spent greedily in
+        rank order on the files with a positively scored TestRun. One positive
+        class-level run hedges its whole file at the file's full time. Files
+        without a time are never hedged. Partial TestRuns of one file share
+        its time, so a file is charged once and lands in one batch."""
         files = dict.fromkeys(x.test_file for x in ranked)
         covered = {f for f in files if self.covers(f, test_config)}
+        prev = {f for f in files if f in previously_failed} - covered
         budget = LLM_TD_HEDGE * sum(file_time.get(f, 0) for f in files)
-        left = budget
-        prev: set[str] = set()
+        left = max(0.0, budget - sum(file_time.get(f, 0) for f in prev))
         hedged: set[str] = set()
-        chosen = set(covered)
-        for charged, eligible in (
-            (prev, lambda x: x.test_file in previously_failed),
-            (hedged, lambda x: score(x) > 0),
-        ):
-            for x in ranked:
-                f, t = x.test_file, file_time.get(x.test_file, 0)
-                if f not in chosen and eligible(x) and t and t <= left:
-                    left -= t
-                    charged.add(f)
-                    chosen.add(f)
+        chosen = covered | prev
+        for x in ranked:
+            f, t = x.test_file, file_time.get(x.test_file, 0)
+            if f not in chosen and score(x) > 0 and t and t <= left:
+                left -= t
+                hedged.add(f)
+                chosen.add(f)
         include = [x for x in ranked if x.test_file in chosen]
         exclude = [x for x in ranked if x.test_file not in chosen]
         return Split(include, exclude, covered, prev, hedged, budget)
@@ -421,14 +420,16 @@ def apply_selection(
     exclude: list[TestRun],
     score: Callable[[TestRun], float],
     test_times: dict[str, float],
+    *,
     test_config: str,
     td_enabled: bool,
 ) -> AppliedSelection:
     """Apply the selection to TD's (include, exclude) split.
 
     The selection replaces TD's split only on a PR with TD enabled and the
-    selection's enforce set, and only if the config has test times to size
-    the hedge with."""
+    selection's enforce set, and only if some of the files have a test time.
+    run_test.py falls back to the default job's times for a config without its
+    own, so in practice that fails only without test-times.json."""
     ranked = include + exclude
     td_include = {x.test_file for x in include}
     # Partial TestRuns of one file share its time, so account per file.
@@ -438,8 +439,10 @@ def apply_selection(
     enforced = td_enabled and selection.enforce and get_pr_number() is not None
     if enforced and not time_total:
         enforced = False
-        print("LLM selection: no test times for this config, using TD", file=sys.stderr)
-    split = selection.split(ranked, score, file_time, test_config, previous_failures())
+        print("LLM selection: no test times, using TD", file=sys.stderr)
+    split = selection.split(
+        ranked, score, file_time, test_config, previously_failed=previous_failures()
+    )
     if enforced:
         include, exclude = split.include, split.exclude
         print(
