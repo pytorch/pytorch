@@ -239,6 +239,7 @@ def compile_flydsl_external_source(
     precompile_metadata: dict[str, Any],
     *,
     template_name: str,
+    tensor_names: tuple[str, ...] | None,
 ) -> tuple[ExternalAOTArtifact, ExternalAOTBuildSpec]:
     import torch
     from torch._inductor.codecache import PyCodeCache
@@ -246,6 +247,9 @@ def compile_flydsl_external_source(
 
     metadata = dict(precompile_metadata)
     metadata["template_name"] = template_name
+    if tensor_names is None:
+        raise NotImplementedError("FlyDSL AOT requires ordered tensor names")
+    metadata["tensor_names"] = tensor_names
     key, source_path = PyCodeCache.write(source_code)
     module = PyCodeCache.load_by_key_path(key, source_path)
     main = getattr(module, f"{kernel_name}_main")

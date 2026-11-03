@@ -68,6 +68,7 @@ class CuteDSLScheduling(BaseScheduling):
         node_schedule,
         precompile_metadata=None,
         aot_arg_names=None,
+        aot_tensor_names=None,
     ) -> str:
         """Produce the kernel string
         Args:
@@ -126,6 +127,7 @@ class CuteDSLScheduling(BaseScheduling):
                     src_code_str,
                     precompile_metadata,
                     aot_arg_names=aot_arg_names,
+                    tensor_names=aot_tensor_names,
                 )
                 register_cutedsl_external_artifact(
                     wrapper,
@@ -187,6 +189,9 @@ class CuteDSLScheduling(BaseScheduling):
 
         precompile_metadata = self._build_precompile_metadata(kernel, ctb)
         aot_arg_names = getattr(kernel, "_external_aot_arg_names", None)
+        aot_tensor_names = tuple(
+            arg_name.removeprefix("arg_") for arg_name, _ in kernel._template_input_args
+        )
 
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node]
@@ -195,6 +200,7 @@ class CuteDSLScheduling(BaseScheduling):
                 node_schedule,
                 precompile_metadata,
                 aot_arg_names=aot_arg_names,
+                aot_tensor_names=aot_tensor_names,
             )
         self.codegen_comment(node_schedule, kernel_name)
         kernel.call_kernel(kernel_name, ctb)
@@ -247,10 +253,6 @@ class CuteDSLScheduling(BaseScheduling):
             device_capability = torch.cuda.get_device_capability(device_index)
 
         metadata: dict[str, object] = {
-            "tensor_names": tuple(
-                arg_name.removeprefix("arg_")
-                for arg_name, _ in kernel._template_input_args
-            ),
             "precompile_shapes": precompile_shapes,
             "precompile_strides": precompile_strides,
             "precompile_dtypes": precompile_dtypes,

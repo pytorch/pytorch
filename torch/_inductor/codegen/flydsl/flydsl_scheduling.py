@@ -67,6 +67,7 @@ class FlyDSLScheduling(BaseScheduling):
         node_schedule,
         precompile_metadata=None,
         template_name=None,
+        aot_tensor_names=None,
     ) -> str:
         wrapper = V.graph.wrapper_code
 
@@ -116,6 +117,7 @@ class FlyDSLScheduling(BaseScheduling):
                     src_code_str,
                     precompile_metadata,
                     template_name=template_name,
+                    tensor_names=aot_tensor_names,
                 )
                 register_flydsl_external_artifact(wrapper, kernel_name, artifact)
             else:
@@ -165,6 +167,9 @@ class FlyDSLScheduling(BaseScheduling):
             src_code_str = src_code
 
         precompile_metadata = self._build_precompile_metadata(kernel, ftb)
+        aot_tensor_names = tuple(
+            arg_name.removeprefix("arg_") for arg_name, _ in kernel._template_input_args
+        )
 
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node]
@@ -173,6 +178,7 @@ class FlyDSLScheduling(BaseScheduling):
                 node_schedule,
                 precompile_metadata,
                 template_name=ftb.template.name,
+                aot_tensor_names=aot_tensor_names,
             )
         self.codegen_comment(node_schedule, kernel_name)
         kernel.call_kernel(kernel_name, ftb)
@@ -221,10 +227,6 @@ class FlyDSLScheduling(BaseScheduling):
             device_capability = torch.cuda.get_device_capability(device_index)
 
         metadata: dict[str, object] = {
-            "tensor_names": tuple(
-                arg_name.removeprefix("arg_")
-                for arg_name, _ in kernel._template_input_args
-            ),
             "precompile_shapes": precompile_shapes,
             "precompile_strides": precompile_strides,
             "precompile_dtypes": precompile_dtypes,
