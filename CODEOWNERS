@@ -1396,6 +1396,7 @@
 # /AI_POLICY.md
 # /CLAUDE.md
 # /torch/_dynamo/CLAUDE.md
+/torch/REVIEW.md @albanD
 #
 # [docs_general]
 # /CITATION.cff
