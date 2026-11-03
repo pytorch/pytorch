@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -69,6 +70,12 @@ FAILURE_LIST_RE = re.compile(FAILURE_LIST_DIR_RE.pattern + r"(?:.*-)?(\w+)\.[^./
 DEVICE_SUFFIX_RE = re.compile(r"(CPU|CUDA|MPS|XPU|HPU|META|LAZY|PRIVATEUSE1)$")
 # assertExpected reads test/expect/<TestClass>.<test>[-<name>].expect.
 EXPECT_RE = re.compile(r"^test/expect/(\w+)\.")
+# Edited files under test/ that need no reader: docs, the notes on CPython's
+# tests, and the C++ tests, which are never candidates and so always run.
+NO_READER_RE = re.compile(r"\.(md|rst|diff)$|^test/cpp/")
+# More edited files under test/ than this that are neither tests nor failure
+# lists are not looked up one by one.
+MAX_DATA_FILES = 50
 
 # Changes to these paths alter how every test is collected or run, so no
 # subset is safe whatever the model says.
@@ -149,26 +156,32 @@ def importers(
         if hop == MAX_IMPORT_HOPS:
             return None
         seen |= frontier
-        # A module is imported by any dotted suffix of its path, a package by its
-        # directory, and load_test_module (a SourceFileLoader) takes the path.
-        # A parenthesized `from <package> import (` may span lines, so it counts
-        # as importing every frontier module of that package.
-        mods = sorted(f[5:-3].removesuffix("/__init__") for f in frontier)
-        parts = [m.split("/") for m in mods]
-        names = alts(".".join(p[i:]) for p in parts for i in range(len(p)))
-        bases = alts(p[-1] for p in parts)
-        parents = alts(".".join(p[i:-1]) for p in parts for i in range(len(p) - 1))
-        paths = alts(n for m in mods for n in (m, m.replace("/", ".")))
-        end = "([^[:alnum:]_]|$)"
-        forms = [
-            rf"(from|import)[[:space:]]+\.*({names}){end}",
-            rf"from[[:space:]]+\.+[[:space:]]+import[[:space:]]+(.*[^[:alnum:]_.])?({bases}){end}",
-        ]
-        if parents:
-            forms.append(rf"from[[:space:]]+\.*({parents})[[:space:]]+import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})")  # fmt: skip
-        pattern = rf"""^[[:space:]]*({"|".join(forms)})|load_test_module\(["']({paths})["']\)"""
-        frontier = {f for f in grep(pattern) if f.endswith(".py")}
+        frontier = {f for f in grep(import_pattern(frontier)) if f.endswith(".py")}
     return None
+
+
+def import_pattern(modules: Iterable[str]) -> str:
+    """A `git grep -E` pattern for importing one of `modules`, .py paths under test/."""
+    # A module is imported by any dotted suffix of its path, a package by its
+    # directory, and load_test_module (a SourceFileLoader) takes the path.
+    # A parenthesized `from <package> import (` may span lines, so it counts
+    # as importing every module of that package.
+    mods = sorted(f[5:-3].removesuffix("/__init__") for f in modules)
+    parts = [m.split("/") for m in mods]
+    names = alts(".".join(p[i:]) for p in parts for i in range(len(p)))
+    bases = alts(p[-1] for p in parts)
+    parents = alts(".".join(p[i:-1]) for p in parts for i in range(len(p) - 1))
+    paths = alts(n for m in mods for n in (m, m.replace("/", ".")))
+    end = "([^[:alnum:]_]|$)"
+    forms = [
+        rf"(from|import)[[:space:]]+\.*({names}){end}",
+        rf"from[[:space:]]+\.+[[:space:]]+import[[:space:]]+(.*[^[:alnum:]_.])?({bases}){end}",
+    ]
+    if parents:
+        forms.append(rf"from[[:space:]]+\.*({parents})[[:space:]]+import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})")  # fmt: skip
+    return (
+        rf"""^[[:space:]]*({"|".join(forms)})|load_test_module\(["']({paths})["']\)"""
+    )
 
 
 def alts(names: Iterable[str]) -> str:
@@ -176,24 +189,49 @@ def alts(names: Iterable[str]) -> str:
     return "|".join(re.sub(r"[.^$*+?()\[\]{}|\\]", r"\\\g<0>", n) for n in sorted(set(names)))  # fmt: skip
 
 
-def class_pattern(classes: Iterable[str]) -> str:
+def class_pattern(classes: Iterable[str], prefix: bool = False) -> str:
     """A `git grep -E` pattern for the definition of one of `classes` or of
-    the generic class instantiate_device_type_tests made it from."""
+    the generic class instantiate_device_type_tests made it from, or with
+    `prefix` of a class whose name starts with one of them."""
     names = alts(n for c in classes for n in (c, DEVICE_SUFFIX_RE.sub("", c)))
-    return rf"^[[:space:]]*class[[:space:]]+({names})([^[:alnum:]_]|$)"
+    end = "" if prefix else "([^[:alnum:]_]|$)"
+    return rf"^[[:space:]]*class[[:space:]]+({names}){end}"
 
 
-def data_file_readers(changed_files: list[str], grep: Callable[[str], list[str]]) -> list[str]:  # fmt: skip
-    """The paths under test/ that may read an edited non-.py file under test/
-    other than a failure list: those naming the file and, for an expect file
-    (see EXPECT_RE), those defining its test class. A file that no test file
-    names, such as a C++ test or a README, is taken to be read by none."""
-    data = [f for f in changed_files if f.startswith("test/") and not f.endswith(".py") and not FAILURE_LIST_DIR_RE.match(f)]  # fmt: skip
-    names = alts(f.rsplit("/", 1)[-1] for f in data)
-    readers = grep(rf"(^|[^[:alnum:]_.-])({names})([^[:alnum:]_.-]|$)") if data else []
-    if classes := {m[1] for f in data if (m := EXPECT_RE.match(f))}:
-        readers += grep(class_pattern(classes))
-    return readers
+def data_file_readers(
+    changed_files: list[str], candidates: set[str], grep: Callable[[str], list[str]]
+) -> tuple[list[str], list[str]] | None:
+    """The paths under test/ that may read an edited file under test/ that is
+    neither a failure list nor a test (see edited_tests), and those edited
+    files, apart from the ones NO_READER_RE matches, that nothing reads. None
+    for more than MAX_DATA_FILES of them. A file is read by the paths naming
+    it, as test_run.py runs bin/test_script.py; a .py file also by its
+    importers; and an expect file (see EXPECT_RE) also by the paths defining a
+    class whose name starts with its test class, as test_tensorboard.py builds
+    the path of TestTensorBoard.*.expect for TestTensorBoardSummary."""
+    data = [f for f in changed_files if f.startswith("test/") and not FAILURE_LIST_DIR_RE.match(f) and not edited_tests([f], candidates)]  # fmt: skip
+    exempt = [f for f in data if NO_READER_RE.search(f)]
+    data = [f for f in data if f not in exempt]
+    if len(data) > MAX_DATA_FILES:
+        return None
+
+    def name_pattern(files: list[str]) -> str:
+        names = alts(f.rsplit("/", 1)[-1] for f in files)
+        return rf"(^|[^[:alnum:]_.-])({names})([^[:alnum:]_.-]|$)"
+
+    readers = grep(name_pattern(exempt)) if exempt else []
+    unread = []
+    for f in data:
+        patterns = [name_pattern([f])]
+        if m := EXPECT_RE.match(f):
+            patterns.append(class_pattern([m[1]], prefix=True))
+        if f.endswith(".py"):
+            patterns.append(import_pattern([f]))
+        found = [r for r in grep("|".join(f"({p})" for p in patterns)) if r != f]
+        readers += found
+        if not found:
+            unread.append(f)
+    return readers, unread
 
 
 def failure_list_sources(
@@ -284,8 +322,9 @@ class Selection:
         """Turn the model's structured output into a Selection.
 
         A missing or malformed output, a change to test infrastructure, an
-        edited inductor failure list naming an unknown class, and too many
-        import hops all fall back to running everything. Test files the change
+        edited inductor failure list naming an unknown class, too many import
+        hops, and with `grep` an edited file under test/ that nothing reads
+        (see data_file_readers) all fall back to running everything. Test files the change
         edits and their drivers are always selected, and with `grep` so are the
         test files that import them (see importers), those defining the tests
         that an edited failure list names (see failure_list_sources), and those
@@ -308,7 +347,12 @@ class Selection:
             sweeps.add("dynamo_wrapped")
         files |= edited_tests(changed_files, candidates)
         if grep is not None:
-            readers = data_file_readers(changed_files, grep)
+            data = data_file_readers(changed_files, candidates, grep)
+            if data is None:
+                return cls(run_all=True, reason=f"more than {MAX_DATA_FILES} edited files under test/ are not tests")  # fmt: skip
+            readers, unread = data
+            if unread:
+                return cls(run_all=True, reason=f"nothing found that reads {unread[0]}")  # fmt: skip
             found = importers(changed_files + sources + readers, candidates, grep)
             if found is None:
                 return cls(run_all=True, reason="test modules import the change through too many hops")  # fmt: skip
@@ -335,7 +379,8 @@ class Selection:
     @classmethod
     def from_json(cls, d: dict) -> Selection:
         """The selection in `d`; ValueError, KeyError or TypeError unless `d`
-        is a selection file of SELECTION_VERSION."""
+        is a selection file of SELECTION_VERSION. Without candidates it covers
+        only the files it names, so it must be run_all."""
         if not isinstance(d, dict) or type(d.get("version")) is not int or d["version"] != SELECTION_VERSION:  # fmt: skip
             raise ValueError(f"not a selection file of version {SELECTION_VERSION}")
         files, sweeps, candidates = d["files"], d["sweeps"], d["candidates"]
@@ -349,6 +394,8 @@ class Selection:
             raise TypeError("run_all and enforce must be booleans")
         if not isinstance(reason, str):
             raise TypeError("reason must be a string")
+        if candidates is None and not run_all:
+            raise ValueError("a selection without candidates must be run_all")
         return cls(
             set(files),
             set(sweeps),
@@ -360,8 +407,16 @@ class Selection:
 
     @classmethod
     def load(cls, path: Path) -> Selection | None:
+        """The selection at `path`, or None if there is none or, with a
+        ::warning::, if it is malformed."""
+        if not path.exists():
+            return None
         try:
             with open(path) as f:
                 return cls.from_json(json.load(f))
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError, RecursionError) as e:
+            print(
+                f"::warning::Ignoring the LLM selection in {path}: {e!r}",
+                file=sys.stderr,
+            )
             return None
