@@ -3,7 +3,8 @@ name: llm-td
 # Shadow LLM test selection (tools/testing/llm_td). pull_request_target runs this
 # file from the default branch and the job checks out main, so the bedrock role is
 # only ever handed to reviewed code. The PR is read through git, never executed.
-# Test jobs fetch the result by PR number and head SHA in download-td-artifacts;
+# Test jobs fetch the result by PR number and head SHA in download-td-artifacts,
+# waiting up to 10 minutes for a run of this file on the same head to finish;
 # run_test.py only skips tests with it when the PR is labeled ci-llm-td and TD is
 # enabled.
 
