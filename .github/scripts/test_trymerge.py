@@ -1535,6 +1535,7 @@ class TestGitHubPRGhstackDependencies(TestCase):
         autospec=True,
         side_effect=lambda pr: pr.pr_num in (106032, 106033),
     )
+    @mock.patch("trymerge.can_skip_internal_checks", return_value=True)
     @mock.patch("trymerge.find_matching_merge_rule")
     @mock.patch("trymerge.GitRepo")
     @mock.patch("trymerge.get_ghstack_prs")
@@ -1543,6 +1544,7 @@ class TestGitHubPRGhstackDependencies(TestCase):
         mock_get_ghstack_prs: mock.MagicMock,
         mock_repo: mock.MagicMock,
         mock_find_matching_merge_rule: mock.MagicMock,
+        mock_can_skip_internal_checks: mock.MagicMock,
         _mock_is_closed: mock.MagicMock,
         *args: Any,
     ) -> None:
@@ -1566,7 +1568,7 @@ class TestGitHubPRGhstackDependencies(TestCase):
         mock_repo.amend_commit_message.return_value = None
 
         # Call the method under test
-        res = pr.merge_ghstack_into(mock_repo, False)
+        res = pr.merge_ghstack_into(mock_repo, False, comment_id=7)
 
         self.assertEqual(res, [pr2, pr])
         mock_get_ghstack_prs.assert_called_once_with(mock_repo, pr, open_only=False)
@@ -1581,9 +1583,10 @@ class TestGitHubPRGhstackDependencies(TestCase):
             pr2,
             mock_repo,
             skip_mandatory_checks=False,
-            skip_internal_checks=False,
+            skip_internal_checks=True,
             ignore_current_checks=None,
         )
+        mock_can_skip_internal_checks.assert_called_once_with(pr, 7)
 
         # Each cherry-pick is followed by the amend of its own message
         self.assertEqual(
@@ -1709,6 +1712,10 @@ class TestGitHubPRGhstackDependencies(TestCase):
         self.assertEqual(
             mock_find_matching_merge_rule.call_args.kwargs["ignore_current_checks"],
             waivers,
+        )
+        self.assertIs(
+            mock_find_matching_merge_rule.call_args.kwargs["skip_mandatory_checks"],
+            True,
         )
 
 
