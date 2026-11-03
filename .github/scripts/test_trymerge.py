@@ -55,6 +55,7 @@ from test_native_stack import (
     author,
     GitTestCase,
     LineStackTestCase,
+    make_entry,
     pr_url,
     TRUNK,
     VIABLE_STRICT,
@@ -4085,16 +4086,34 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
         self.assertEqual(reopen.call_args_list, reopened)
 
 
-class TestGhstackMergeRetryEndToEnd(NoNetworkTestCase, GitTestCase):
-    """GitHubPR.merge_into cherry-picks a real ghstack stack onto the bot clone's
-    main and pushes it to a local bare origin. Only GitHub is patched."""
+SUITE = "class Test:\n    def test_a(self):\n        pass\n\n    def test_z(self):\n        pass\n"
+SUITE_WITH_NEW_TEST = SUITE.replace(
+    "    def test_z", "    def test_new(self):\n        pass\n\n    def test_z"
+)
+
+
+class TestMergeChangesLocallyEndToEnd(NoNetworkTestCase, GitTestCase):
+    """GitHubPR.merge_changes_locally commits a real ghstack stack or PR onto the bot
+    clone's main, and merge_into pushes it to a local bare origin. Only GitHub is
+    patched."""
 
     def setUp(self) -> None:
         GitTestCase.setUp(self)
         NoNetworkTestCase.setUp(self)
         self.origin = self.git("remote", "get-url", "origin")
-        stack = self.push_stack()
-        self.git("fetch", "-q", "origin", cwd=self.repo.repo_dir)
+        self.add_commits(TRUNK, files={"test_suite.py": SUITE})
+        # #101 adds a test between two others, and trunk then changes the same file
+        # elsewhere: cherry-picking #101 a second time is not empty, it adds the test
+        # again.
+        changes = (
+            {"test_suite.py": SUITE_WITH_NEW_TEST},
+            {"file102.txt": "102\n"},
+            {"file103.txt": "103\n"},
+        )
+        stack = self.push_stack(changes=changes)
+        renamed = SUITE.replace("test_a", "test_b")
+        self.add_commits(TRUNK, files={"test_suite.py": renamed})
+        self.git("pull", "-q", "--ff-only", cwd=self.repo.repo_dir)
         self.prs = []
         for entry in stack.entries:
             pr = native_stack_pr(entry)
@@ -4110,22 +4129,90 @@ class TestGhstackMergeRetryEndToEnd(NoNetworkTestCase, GitTestCase):
         self.patch("trymerge.save_merge_record")
         self.patch("trymerge.time.sleep")
         self.patch("trymerge.manually_close_merged_pr")
+        self.stacked_rule = self.patch("trymerge.check_stacked_pr_merge_rule")
+
+    def subjects(self, revs: str, cwd: str) -> list[str]:
+        return self.git("log", "--reverse", "--format=%s", revs, cwd=cwd).splitlines()
+
+    def changes(self, *numbers: int) -> list[str]:
+        return [f"Change {n} (#{n})" for n in numbers]
+
+    def record_push_bases(self, count: int) -> list[str]:
+        """Records the commit each push builds on, `count` commits below its tip"""
+        bases: list[str] = []
+        push = self.repo.push
+
+        def push_recording_base(branch: str, dry_run: bool) -> None:
+            bases.append(self.repo.rev_parse(f"{branch}~{count}"))
+            push(branch, dry_run)
+
+        patcher = mock.patch.object(self.repo, "push", side_effect=push_recording_base)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return bases
 
     def test_retry_after_a_stacked_pr_check_lands_each_pr_once(self) -> None:
         """#102's checks are pending on the first attempt, after #101 was
-        cherry-picked; merge() then calls merge_into again on the same clone."""
-        self.patch(
-            "trymerge.check_stacked_pr_merge_rule",
-            side_effect=[None, MandatoryChecksMissingError("pending"), None, None],
-        )
+        cherry-picked onto the clone's main. Trunk moves before merge() calls
+        merge_into again on the same clone."""
+        self.stacked_rule.side_effect = [
+            None,
+            MandatoryChecksMissingError("pending"),
+            None,
+            None,
+        ]
         with self.assertRaises(MandatoryChecksMissingError):
             GitHubPR.merge_into(self.prs[-1], self.repo, comment_id=1)
+        left_over = self.subjects(f"origin/{TRUNK}..{TRUNK}", self.repo.repo_dir)
+        self.assertEqual(left_over, self.changes(101))
+        trunk = self.add_commits(TRUNK)
+        bases = self.record_push_bases(3)
         GitHubPR.merge_into(self.prs[-1], self.repo, comment_id=1)
-        revs = f"{self.root}..{TRUNK}"
-        log = self.git("log", "--reverse", "--format=%s", revs, cwd=self.origin)
         self.assertEqual(
-            log.splitlines(), [f"Change {n} (#{n})" for n in (101, 102, 103)]
+            self.subjects(f"{trunk}..{TRUNK}", self.origin),
+            self.changes(101, 102, 103),
         )
+        self.assertEqual(bases, [trunk])
+
+    def test_check_mergeability_starts_from_the_remote_tip(self) -> None:
+        """main() calls merge_changes_locally alone for --check-mergeability"""
+        clone = self.repo.repo_dir
+        self.git("commit", "-q", "--allow-empty", "-m", "Left over", cwd=clone)
+        trunk = self.add_commits(TRUNK)
+        self.prs[-1].merge_changes_locally(
+            self.repo, skip_mandatory_checks=True, skip_all_rule_checks=True
+        )
+        self.assertEqual(self.repo.rev_parse(f"{TRUNK}~3"), trunk)
+        self.assertEqual(
+            self.subjects(f"{trunk}..{TRUNK}", clone), self.changes(101, 102, 103)
+        )
+        self.stacked_rule.assert_not_called()
+
+    def test_squash_merge_starts_from_the_remote_tip(self) -> None:
+        trunk = self.git("rev-parse", TRUNK)
+        head = self.push_branch("user/pr", trunk)
+        pr = native_stack_pr(make_entry(1, 201, "user/pr", head, TRUNK))
+        pr.get_commit_sha_at_comment.return_value = head
+        pr.merge_changes_locally = MethodType(GitHubPR.merge_changes_locally, pr)
+        self.patch("trymerge.GitHubPR", return_value=pr)
+        clone = self.repo.repo_dir
+        self.git("commit", "-q", "--allow-empty", "-m", "Left over", cwd=clone)
+        moved = self.add_commits(TRUNK)
+        bases = self.record_push_bases(1)
+        GitHubPR.merge_into(pr, self.repo, comment_id=1)
+        self.assertEqual(
+            self.subjects(f"{moved}..{TRUNK}", self.origin), ["Change 201 (#201)"]
+        )
+        self.assertEqual(bases, [moved])
+
+    def test_failed_fetch_names_the_branch_and_keeps_the_clone(self) -> None:
+        clone = self.repo.repo_dir
+        before = self.repo.rev_parse(TRUNK)
+        missing = os.path.join(os.path.dirname(self.origin), "missing.git")
+        self.git("remote", "set-url", "origin", missing, cwd=clone)
+        with self.assertRaisesRegex(RuntimeError, "Could not fetch main from origin"):
+            self.prs[-1].merge_changes_locally(self.repo, skip_all_rule_checks=True)
+        self.assertEqual(self.repo.rev_parse(TRUNK), before)
 
 
 class TestNativeStackRevertRefreshEndToEnd(NoNetworkTestCase, LineStackTestCase):
