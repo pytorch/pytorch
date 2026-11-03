@@ -17,6 +17,7 @@ from packaging.version import Version
 
 import torch
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
 )
@@ -526,6 +527,43 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
             else (layer.keys, layer.values)
             for layer, is_linear in zip(model.cache.layers, model.cache.is_linear)
         ]
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_qwen_recurrent_state_matches_native_cache(self, device, dtype):
+        from transformers import StaticCache
+
+        model = self._make_model("Qwen3_5", device, dtype)
+        prompt = torch.randint(0, 32, (2, 4), device=device)
+        tokens = torch.randint(0, 32, (2, 6), device=device)
+        with torch.no_grad():
+            for _ in range(2):
+                model.prepare_for_prefill(prompt)
+                native = StaticCache(
+                    config=model.model.config, max_cache_len=model.cache_capacity
+                )
+                for layer, linear in zip(model.cache.layers, model.cache.is_linear):
+                    if linear:
+                        self.assertEqual(layer.conv_states[0].dtype, dtype)
+                        self.assertEqual(layer.recurrent_states[0].dtype, torch.float32)
+                        self.assertEqual(
+                            layer.recurrent_states[0],
+                            torch.zeros_like(layer.recurrent_states[0]),
+                        )
+                for ids in (prompt, *tokens.split(1, dim=1)):
+                    expected = model.model(
+                        ids, past_key_values=native, use_cache=True, logits_to_keep=1
+                    ).logits[:, -1, :]
+                    self.assertEqual(model(ids), expected, atol=0, rtol=0)
+                    for actual, reference, linear in zip(
+                        model.cache.layers, native.layers, model.cache.is_linear
+                    ):
+                        if linear:
+                            self.assertEqual(
+                                actual.recurrent_states[0],
+                                reference.recurrent_states[0],
+                                atol=0,
+                                rtol=0,
+                            )
 
     @parametrize("model_type", ("Llama", "Gemma2", "Qwen3", "Qwen3_5"))
     def test_prefill_resets_cache(self, device, model_type):
