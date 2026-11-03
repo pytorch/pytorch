@@ -799,6 +799,13 @@ def _row_args(
     )
 
 
+def _require_current(device: torch.device) -> None:
+    # Plans compile and launch on the current device, so a plan keyed under another
+    # device would be handed to that device's later calls.
+    if device.index != torch.cuda.current_device():
+        raise AssertionError(f"run {device} inputs on the current device")
+
+
 def _launch_itree(
     trait: Any,
     trait_key: str,
@@ -827,6 +834,7 @@ def _launch_itree(
         itree=plan,
     )
 
+    _require_current(device)
     # Destination types are baked, so include them to prevent a wrong cached plan.
     key = (
         tag,
@@ -1144,6 +1152,7 @@ def reduce_row_tile(
             Int32(N),
         )
 
+    _require_current(x.device)
     # Pointer-dependent alignment is compiled, so include it in the key.
     dts = tuple(out_dtypes[:ndst])
     key = (
