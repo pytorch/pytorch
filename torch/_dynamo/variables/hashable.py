@@ -16,7 +16,7 @@ from typing import cast, TYPE_CHECKING
 import torch
 from torch._subclasses.fake_tensor import maybe_get_fake_constant
 
-from .. import variables
+from .. import graph_break_hints, variables
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import (
@@ -96,6 +96,12 @@ class BuiltinMethodKeyTracker:
         self.has_method_keys = False
         self.has_custom_keys = False
 
+    def clear(self) -> None:
+        self.receivers.clear()
+        self.input_methods.clear()
+        self.has_method_keys = False
+        self.has_custom_keys = False
+
     def install_alias_guard(self) -> None:
         if len(self.receivers) < 2:
             return
@@ -139,14 +145,7 @@ class BuiltinMethodKeyTracker:
         if source is None:
             return None
         if is_from_skip_guard_source(source):
-            unimplemented(
-                gb_type="Unguardable builtin method key receiver",
-                context=source.name,
-                explanation="Builtin method keys require guards on receiver aliasing.",
-                hints=[
-                    "Keep these dictionary or set operations outside the compiled region."
-                ],
-            )
+            return tx.output.resolve_source_value(source)
         receiver = tx.output.resolve_source_value(source)
         self.receivers.setdefault(source, receiver)
         return receiver
@@ -156,7 +155,12 @@ def guard_key_collisions(*collections: Iterable["HashableTracker"]) -> None:
     """Guard only keys that can meet in this dictionary or set operation."""
     from ..symbolic_convert import InstructionTranslator
 
-    tx = InstructionTranslator.current_tx()
+    try:
+        tx = InstructionTranslator.current_tx()
+    except AttributeError:
+        return
+    if tx is None:
+        return
     tracker = tx.output.builtin_method_keys
     # Most operations contain neither methods nor custom equality. These frame
     # flags avoid scanning their keys; they never install a guard themselves.
@@ -185,9 +189,7 @@ def guard_key_collisions(*collections: Iterable["HashableTracker"]) -> None:
             gb_type="Builtin method keys with custom metaclass equality",
             context="builtin method key hashing",
             explanation="Dynamo cannot trace custom metaclass equality against builtin method keys.",
-            hints=[
-                "Keep these dictionary or set operations outside the compiled region."
-            ],
+            hints=[*graph_break_hints.SUPPORTABLE],
         )
     if None in receivers:
         unimplemented(
@@ -195,9 +197,7 @@ def guard_key_collisions(*collections: Iterable["HashableTracker"]) -> None:
             context="builtin method key hashing",
             explanation="Custom key equality can observe runtime method hash collisions, "
             "but a locally created receiver has no guardable identity.",
-            hints=[
-                "Keep these dictionary or set operations outside the compiled region."
-            ],
+            hints=[*graph_break_hints.SUPPORTABLE],
         )
     for source in receivers:
         if source is not None:
@@ -272,10 +272,10 @@ class HashableTracker:
                     vt = vt.realize()
         from ..symbolic_convert import InstructionTranslator
 
-        tx = InstructionTranslator.current_tx()
         if not isinstance(vt, variables.LazyVariableTracker) and isinstance(
             vt, BoundBuiltinMethodVariable
         ):
+            tx = InstructionTranslator.current_tx()
             self._hash, self._hash_is_identity = vt.key_hash_impl(tx)
             self.has_builtin_method = True
             self.method_receivers = (vt.obj.source,)
@@ -328,14 +328,14 @@ class HashableTracker:
             ):
                 is_metaclass = key_type is not None and issubclass(key_type, type)
                 if (
-                    is_metaclass
-                    and inspect.getattr_static(key_type, "__eq__") is object.__eq__
+                    key_type is not None
+                    and inspect.getattr_static(key_type, "__eq__", None)
+                    is object.__eq__
                 ):
-                    # Identity-only class equality cannot match a builtin method.
+                    # Identity-only equality cannot match a builtin method.
                     continue
                 self.has_custom_equality = True
                 self.has_custom_metaclass_equality |= is_metaclass
-                tx.output.builtin_method_keys.add_custom_key()
 
         # Fast path for unrealized LazyVariableTrackers: check and hash without
         # realizing, to avoid inserting guards.  If the fast-path check fails,
@@ -347,8 +347,16 @@ class HashableTracker:
         ):
             # Preserve unused input-key laziness, including methods inside tuples.
             # Activate guards when a constructed method key can compare with them.
-            for source in input_methods:
-                tx.output.builtin_method_keys.add_input_method(tx, source)
+            if input_methods or self.has_custom_equality:
+                try:
+                    tx = InstructionTranslator.current_tx()
+                except AttributeError:
+                    tx = None
+                if tx is not None and self.has_custom_equality:
+                    tx.output.builtin_method_keys.add_custom_key()
+                if tx is not None:
+                    for source in input_methods:
+                        tx.output.builtin_method_keys.add_input_method(tx, source)
             self.has_builtin_method = bool(input_methods)
             self.method_receivers = tuple(
                 AttrSource(source, "__self__") for source in input_methods
@@ -358,6 +366,9 @@ class HashableTracker:
             self.vt = vt
             return
 
+        tx = InstructionTranslator.current_tx()
+        if self.has_custom_equality:
+            tx.output.builtin_method_keys.add_custom_key()
         vt = vt.realize()
         if type(vt) is variables.TupleVariable or (
             isinstance(vt, variables.FrozensetVariable)
