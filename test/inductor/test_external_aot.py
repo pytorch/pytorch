@@ -194,7 +194,7 @@ int32_t cute_dsl_{function_prefix}_wrapper(
             backend.make_deferred_call(artifact).generate(wrapper)
             code = wrapper.prefix.getvalue()
             self.assertIn("cute_kernel_Tensor_x_t", code)
-            self.assertIn("c10::call_once", code)
+            self.assertIn("std::call_once", code)
             self.assertIn("dynamic_shapes[0]", code)
             self.assertIn("dynamic_strides[0]", code)
 
