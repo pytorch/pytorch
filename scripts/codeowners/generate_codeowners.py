@@ -376,9 +376,10 @@ def main() -> int:
             emit_lint_error(
                 path="CODEOWNERS",
                 description=(
-                    "CODEOWNERS is generated from OWNERSHIP.yaml. Run "
-                    "`python scripts/codeowners/generate_codeowners.py` or "
-                    "`lintrunner -a` to regenerate it."
+                    "CODEOWNERS is generated from OWNERSHIP.yaml, so direct edits to "
+                    "CODEOWNERS are discarded. Make the change in OWNERSHIP.yaml, then "
+                    "run `lintrunner -a` or "
+                    "`python scripts/codeowners/generate_codeowners.py` to regenerate it."
                 ),
                 original=current,
                 replacement=generated,
@@ -387,7 +388,9 @@ def main() -> int:
     if args.check:
         if current != generated:
             print(
-                "CODEOWNERS is out of date; run scripts/codeowners/generate_codeowners.py"
+                "CODEOWNERS is out of date. Direct edits to CODEOWNERS are discarded: "
+                "make the change in OWNERSHIP.yaml, then run "
+                "scripts/codeowners/generate_codeowners.py"
             )
             return 1
         return 0
