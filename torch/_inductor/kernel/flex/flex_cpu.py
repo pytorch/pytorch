@@ -274,9 +274,9 @@ def lower_cpu(
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
     B = Bq
 
-    # Construct output layout with strides matching the query.
+    # The independent output only uses the query's stride order as a preference.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    out_strides = infer_dense_strides(out_size, query.get_stride())
+    out_strides = infer_dense_strides(out_size, query.get_stride_hint())
 
     layout = FixedLayout(
         query.get_device(),
