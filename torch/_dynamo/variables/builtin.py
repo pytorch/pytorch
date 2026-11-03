@@ -3614,7 +3614,7 @@ class BuiltinTypeVariable(VariableTracker):
         return self._fn
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return VariableTracker.build(tx, repr(self._fn))
+        return VariableTracker.build(tx, type.__repr__(self.as_python_constant()))
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load_global(self._fn.__name__, add=True))
@@ -3692,16 +3692,6 @@ class BuiltinTypeVariable(VariableTracker):
     ) -> VariableTracker:
         # A builtin type is an instance of type, so its tp_init is type_init.
         return type_init(tx, args, kwargs)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # Unbound method call, e.g. int.__add__(1, 2): args[0] is the instance.
-        return super().call_method(tx, name, args, kwargs)
 
     # type_as_number.nb_or = _Py_union_type_or, e.g. list | tuple
     def nb_or_impl(
@@ -4351,6 +4341,22 @@ class ListBuiltinVariable(BuiltinTypeVariable):
         return ListVariable.tp_new_impl(self, tx, args, kwargs)
 
 
+def constant_fold(
+    fn: Callable,
+    tx: "InstructionTranslatorBase",
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    try:
+        res = fn(
+            *(a.as_python_constant() for a in args),
+            **{k: v.as_python_constant() for k, v in kwargs.items()},
+        )
+    except Exception as e:
+        raise_observed_exception(type(e), tx, args=list(e.args))
+    return VariableTracker.build(tx, res)
+
+
 def _constant_fold_classmethod(name: str) -> Method:
     """tp_methods entry for a classmethod of a builtin type (e.g. int.from_bytes)
     that is evaluated at trace time on constant arguments."""
@@ -4361,14 +4367,7 @@ def _constant_fold_classmethod(name: str) -> Method:
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        try:
-            res = getattr(self._fn, name)(
-                *(a.as_python_constant() for a in args),
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
-        except Exception as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        return VariableTracker.build(tx, res)
+        return constant_fold(getattr(self._fn, name), tx, args, kwargs)
 
     return Method(handler)
 
@@ -4393,14 +4392,7 @@ def _constant_fold_on_unsupported(
             if not check_unspec_or_constant_args(args, kwargs):
                 raise
             exc.remove_from_stats()
-        try:
-            res = self._fn(
-                *(a.as_python_constant() for a in args),
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
-        except Exception as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        return VariableTracker.build(tx, res)
+        return constant_fold(self._fn, tx, args, kwargs)
 
     return wrapper
 
@@ -4562,21 +4554,7 @@ class ComplexBuiltinVariable(BuiltinTypeVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if check_unspec_or_constant_args(args, kwargs):
-            try:
-                res = complex(
-                    *(a.as_python_constant() for a in args),
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                )
-            except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-            return VariableTracker.build(tx, res)
-        unimplemented(
-            gb_type="complex() with non-constant arguments",
-            context=f"complex(*{args}, **{kwargs})",
-            explanation="Attempted to call complex() with non-constant args.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
+        return constant_fold(self._fn, tx, args, kwargs)
 
 
 class BoolBuiltinVariable(BuiltinTypeVariable):
