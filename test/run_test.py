@@ -2642,8 +2642,7 @@ def main():
                     },
                 )
                 # Only tests that ran can fail, so with TD on these are failures in
-                # TD's include (shadow) or in the selection, previous failures and hedge
-                # (enforced).
+                # TD's include (shadow) or in the selection and its hedge (enforced).
                 if llm is not None:
                     emit_metric("llm_td_shadow_failure", llm.failure_metric(test))
             gen_additional_test_failures_file(
