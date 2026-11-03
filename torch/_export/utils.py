@@ -883,7 +883,7 @@ def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
                     *prefix, field = new_target_name.split(".")
                     owner = gm
                     for item in prefix:
-                        if not hasattr(owner, item):
+                        if getattr(owner, item, None) is None:
                             setattr(owner, item, torch.nn.Module())
                         owner = getattr(owner, item)
                     # setattr keeps a tensor a plain attribute, while

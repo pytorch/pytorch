@@ -1167,8 +1167,8 @@ def forward(self, sin, cos):
     def test_node_inline_renames_colliding_attribute(self):
         # The inlined graph reads an attribute under a name that the outer
         # module uses for another object, so it is stored under a new name. A
-        # dotted name that the outer module lacks is added as it is. Neither
-        # becomes a buffer.
+        # dotted name whose owner the outer module lacks, or holds as None, is
+        # added as it is. Neither becomes a buffer.
         inner_root = torch.nn.Module()
         inner_root.c = torch.tensor([1.0])
         inner_root.sub = torch.nn.Module()
@@ -1187,6 +1187,7 @@ def forward(self, sin, cos):
         call = graph.call_module("inner", (x,))
         graph.output(graph.call_function(torch.mul, (call, graph.get_attr("c"))))
         gm = torch.fx.GraphModule(root, graph)
+        gm.sub = None
         node_inline_(call)
         gm.recompile()
         targets = [n.target for n in gm.graph.find_nodes(op="get_attr")]
