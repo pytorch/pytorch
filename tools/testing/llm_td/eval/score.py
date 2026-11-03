@@ -52,6 +52,7 @@ HEDGE = re.compile(r"final\+td(\d+(?:\.\d+)?)?")
 MATRIX_CONFIG = re.compile(r'config: "([^"]+)"')
 MATRIX_NEEDS = re.compile(r"needs\.([\w-]+)\.outputs\.test-matrix")
 VERSION = re.compile(r"\d+(\.\d+)*")
+MATRIX_SUFFIX = re.compile(r" \([^()]*\)")
 
 # config -> file -> [cpu, gpu] seconds
 Seconds = dict[str, dict[str, list[float]]]
@@ -108,7 +109,8 @@ def ci_jobs(
     """Whether TD runs -> the (job name, config) pairs of the test jobs that run so.
 
     A reusable workflow's jobs are named and classified under each caller, as
-    GitHub reports them ('unit-test / inductor-test') and sets GITHUB_WORKFLOW."""
+    GitHub reports them ('unit-test / inductor-test') and sets GITHUB_WORKFLOW,
+    and also under its own name if it has triggers of its own."""
     wfs = {p.name: yaml.safe_load(p.read_text()) for p in workflows.glob("*.yml")}
 
     def test_jobs(file: str) -> set[tuple[str, str]]:
@@ -131,7 +133,8 @@ def ci_jobs(
 
     out: dict[bool, set[tuple[str, str]]] = {True: set(), False: set()}
     for file, wf in wfs.items():
-        if isinstance(wf, dict) and "workflow_call" not in (wf.get(True) or {}):
+        on = wf.get(True) if isinstance(wf, dict) else None
+        if set([on] if isinstance(on, str) else on or []) - {"workflow_call"}:
             out[td_workflow(wf.get("name", ""))] |= test_jobs(file)
     return out
 
@@ -145,29 +148,22 @@ def runs_td(config: str) -> bool:
 def job_runs_td(job: str) -> bool:
     """Whether the test job named `job` runs with TD.
 
-    It is looked up by name, then with versions wildcarded (CI has moved to
-    newer CUDA and Python since), then by config alone. A job that matches
-    both TD and non-TD jobs counts as TD."""
+    It is looked up by name, then without matrix suffixes ('dynamo-test (3.11)')
+    and with versions wildcarded (CI has moved to newer CUDA and Python since),
+    then by config alone. A job that matches both TD and non-TD jobs counts as TD."""
     name, c = job.rsplit(" / ", 1)[0], config_of(job)
     jobs = ci_jobs()
-    for norm in (lambda n: n, lambda n: VERSION.sub("#", n)):
+    for norm in (lambda n: n, lambda n: VERSION.sub("#", MATRIX_SUFFIX.sub("", n))):
         td, other = ({(norm(n), k) for n, k in jobs[b]} for b in (True, False))
         if (norm(name), c) in td | other:
             return (norm(name), c) in td
     return runs_td(c)
 
 
-def runs_everything(s: dict) -> set[tuple[str, str]]:
-    """(file, config) pairs that some job without TD failed on, which no policy changes."""
-    return {
-        (f, config_of(j))
-        for f, jobs in s.get("truth_jobs", {}).items()
-        for j in jobs
-        if not job_runs_td(j)
-    }
-
-
 def truth_pairs(s: dict, strong: bool) -> list[tuple[str, str]]:
+    """The (file, config) failures of `s` in jobs that run TD.
+
+    A file with no recorded job counts as failing in `default`."""
     truth: list[str] = s["truth"]
     if strong and s["kind"] == "pr":
         truth = s.get("truth_strong", truth)
@@ -175,8 +171,9 @@ def truth_pairs(s: dict, strong: bool) -> list[tuple[str, str]]:
     pairs = set()
     for f in truth:
         if f in cands:
-            jobs = s.get("truth_jobs", {}).get(f) or ["(default)"]
-            pairs |= {(f, config_of(j)) for j in jobs}
+            jobs = s.get("truth_jobs", {}).get(f)
+            td_jobs = [j for j in jobs if job_runs_td(j)] if jobs else ["(default)"]
+            pairs |= {(f, config_of(j)) for j in td_jobs}
     return sorted(pairs)
 
 
@@ -299,8 +296,7 @@ def score(
         s, r, td = load(data, tag, sid, samples, td_dir)
         if tag != "td" and r is None:
             continue
-        always = runs_everything(s)
-        pairs = [p for p in truth_pairs(s, strong) if p not in always]
+        pairs = truth_pairs(s, strong)
         cands = set(s["candidates"])
         for pol in policies:
             choice = policy(pol, s, r, td, seconds)

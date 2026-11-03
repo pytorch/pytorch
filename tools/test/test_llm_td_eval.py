@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import contextlib
 import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -51,6 +57,18 @@ def pick(name: str, r: dict | None, td: dict | None) -> Choice:
     return choice
 
 
+@contextlib.contextmanager
+def patch_ci_jobs(jobs: dict[bool, set[tuple[str, str]]]) -> Iterator[None]:
+    with mock.patch.object(score, "ci_jobs", lambda: jobs):
+        score.job_runs_td.cache_clear()
+        score.runs_td.cache_clear()
+        try:
+            yield
+        finally:
+            score.job_runs_td.cache_clear()
+            score.runs_td.cache_clear()
+
+
 class TestScore(unittest.TestCase):
     def test_config_of(self) -> None:
         self.assertEqual(
@@ -64,16 +82,17 @@ class TestScore(unittest.TestCase):
         self.assertEqual(config_of(" weird job "), "weird job")
 
     def test_truth_pairs(self) -> None:
-        self.assertEqual(truth_pairs(SAMPLE, strong=True), [("test_a", "slow")])
-        # test_b has no jobs and falls back to the default config; test_gone is not a candidate.
-        self.assertEqual(
-            truth_pairs(SAMPLE, strong=False),
-            [("test_a", "slow"), ("test_b", "default")],
-        )
-        self.assertEqual(
-            truth_pairs({**SAMPLE, "kind": "revert"}, strong=True),
-            [("test_a", "slow"), ("test_b", "default")],
-        )
+        with patch_ci_jobs({True: {("linux", "slow")}, False: set()}):
+            self.assertEqual(truth_pairs(SAMPLE, strong=True), [("test_a", "slow")])
+            # test_b has no jobs and falls back to the default config; test_gone is not a candidate.
+            self.assertEqual(
+                truth_pairs(SAMPLE, strong=False),
+                [("test_a", "slow"), ("test_b", "default")],
+            )
+            self.assertEqual(
+                truth_pairs({**SAMPLE, "kind": "revert"}, strong=True),
+                [("test_a", "slow"), ("test_b", "default")],
+            )
 
     def test_ci_jobs(self) -> None:
         workflows = {
@@ -112,6 +131,26 @@ class TestScore(unittest.TestCase):
                       test-matrix: |
                         { include: [{ config: "inductor_core", shard: 1 }] }
             """,
+            "trunk.yml": """
+                name: trunk
+                on: push
+                jobs:
+                  dynamo-unittest:
+                    name: dynamo-unittest
+                    uses: ./.github/workflows/dynamo-unittest.yml
+            """,
+            "dynamo-unittest.yml": """
+                name: dynamo-unittest
+                on:
+                  workflow_call:
+                  pull_request:
+                jobs:
+                  dynamo-test:
+                    uses: ./.github/workflows/_linux-test.yml
+                    with:
+                      test-matrix: |
+                        { include: [{ config: "dynamo_core", shard: 1 }] }
+            """,
             "periodic.yml": """
                 name: periodic
                 on: schedule
@@ -128,33 +167,43 @@ class TestScore(unittest.TestCase):
             for name, text in workflows.items():
                 (Path(d) / name).write_text(textwrap.dedent(text))
             jobs = ci_jobs(Path(d))
-        self.assertEqual(jobs[True], {("linux-jammy-py3.10-gcc11", "default")})
+        self.assertEqual(
+            jobs[True],
+            {
+                ("linux-jammy-py3.10-gcc11", "default"),
+                ("dynamo-unittest / dynamo-test", "dynamo_core"),
+            },
+        )
         self.assertEqual(
             jobs[False],
             {
                 ("unit-test / inductor-test", "inductor_core"),
+                ("dynamo-test", "dynamo_core"),
                 ("linux-jammy-cuda13.2-py3-gcc11-slow-gradcheck", "default"),
             },
         )
         truth_jobs = {
             "test_a": ["unit-test / inductor-test / test (inductor_core, 1, 2, linux.2xlarge)"],
-            # An older CUDA version of the periodic job.
-            "test_b": ["linux-jammy-cuda12.8-py3-gcc11-slow-gradcheck / test (default, 1, 2, linux.2xlarge)"],
-            "test_c": ["linux-jammy-py3.10-gcc11 / test (default, 1, 2, linux.2xlarge)"],
+            # The periodic job at an older CUDA version, and a pull job: only the pull failure counts.
+            "test_b": [
+                "linux-jammy-cuda12.8-py3-gcc11-slow-gradcheck / test (default, 1, 2, linux.2xlarge)",
+                "linux-jammy-py3.10-gcc11 / test (default, 1, 2, linux.2xlarge)",
+            ],
+            # dynamo-unittest under trunk, with a matrix suffix, and under its own pull_request trigger.
+            "test_c": [
+                "dynamo-unittest / dynamo-test (3.11) / test (dynamo_core, 1, 2, linux.2xlarge)",
+                "dynamo-test (3.12) / test (dynamo_core, 1, 2, linux.2xlarge)",
+            ],
             # Unknown jobs fall back to their config.
             "test_d": ["linux-old / test (default, 1, 1, linux.2xlarge)", "linux-old / test (slow, 1, 1, linux.2xlarge)"],
         }  # fmt: skip
-        with mock.patch.object(score, "ci_jobs", lambda: jobs):
-            score.job_runs_td.cache_clear()
-            score.runs_td.cache_clear()
-            try:
-                got = score.runs_everything({**SAMPLE, "truth_jobs": truth_jobs})
-            finally:
-                score.job_runs_td.cache_clear()
-                score.runs_td.cache_clear()
+        sample = {**SAMPLE, "kind": "revert", "truth": list(truth_jobs), "candidates": list(truth_jobs), "truth_jobs": truth_jobs}  # fmt: skip
+        with patch_ci_jobs(jobs):
+            got = truth_pairs(sample, strong=True)
+            self.assertFalse(score.job_runs_td(truth_jobs["test_c"][1]))
         self.assertEqual(
             got,
-            {("test_a", "inductor_core"), ("test_b", "default"), ("test_d", "slow")},
+            [("test_b", "default"), ("test_c", "dynamo_core"), ("test_d", "default")],
         )
 
     def test_hedge(self) -> None:
