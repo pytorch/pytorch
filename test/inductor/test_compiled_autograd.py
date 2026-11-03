@@ -1122,12 +1122,8 @@ main()
 
         def bytecode_hook(code, out_code):
             import dis
-            import sys
 
-            if sys.version_info < (3, 11):
-                call_op = "CALL_FUNCTION"
-            else:
-                call_op = "CALL"
+            call_op = "CALL"
 
             insts = list(dis.get_instructions(out_code))
             # Find the CALL that invokes the compiled graph function
@@ -1265,7 +1261,6 @@ main()
 
         def bytecode_hook(code, out_code):
             import dis
-            import sys
 
             nonlocal match_done
 
@@ -1273,10 +1268,7 @@ main()
             # graph is tested, we skip the bytecode hook checks for future
             # frames.
             if not match_done:
-                if sys.version_info < (3, 11):
-                    call_op = "CALL_FUNCTION"
-                else:
-                    call_op = "CALL"
+                call_op = "CALL"
 
                 insts = list(dis.get_instructions(out_code))
                 # Find the CALL that invokes the compiled graph function

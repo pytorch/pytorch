@@ -3,8 +3,7 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Any, cast, Literal, Protocol, runtime_checkable, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, cast, Literal, Protocol, runtime_checkable, Self, TYPE_CHECKING
 
 import torch
 from torch.distributed import Work
