@@ -655,6 +655,12 @@ static inline void mtl_dispatch3DJob(id<MTLComputeCommandEncoder> encoder,
   [encoder dispatchThreads:MTLSizeMake(dim0, dim1, dim2) threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
 }
 
+static inline void mtl_dispatch3DJob(id<MTLComputeCommandEncoder> encoder,
+                                     id<MTLComputePipelineState> cplState,
+                                     MTLSize grid) {
+  mtl_dispatch3DJob(encoder, cplState, grid.width, grid.height, grid.depth);
+}
+
 inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1) {
   return @{p1.getMPSGraphTensor() : p1.getMPSGraphTensorData()};
 }
