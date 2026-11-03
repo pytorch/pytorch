@@ -489,8 +489,12 @@ class TestScore(unittest.TestCase):
         self.assertEqual(
             pick("final-hm", {"out": {"tests": tests}}, None).sel.files, {"test_b"}
         )
-        # Filtering never makes a well-formed answer malformed: only unmatched names are left at high confidence.
+        # An unmatched name makes the answer malformed under both.
         tests = [{"file": "test_a", "confidence": "low"}, {"file": "bogus", "confidence": "high"}]  # fmt: skip
+        for name in ("final", "final-hm"):
+            self.assertTrue(pick(name, {"out": {"tests": tests}}, None).sel.run_all)
+        # Filtering out every name leaves a well-formed empty answer.
+        tests = [{"file": "test_a", "confidence": "low"}]
         self.assertEqual(pick("final", {"out": {"tests": tests}}, None).sel.files, {"test_a"})  # fmt: skip
         empty = pick("final-hm", {"out": {"tests": tests}}, None).sel
         self.assertEqual((empty.run_all, empty.files), (False, set()))
