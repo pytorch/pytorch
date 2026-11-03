@@ -395,7 +395,6 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
     return;
   }
   params.dims = static_cast<int32_t>(input.dim());
-  fill_pool_size_strides(params, grad_input, grad_output, indices);
 
   // The 2D kernel gathers and is deterministic. See Note [Enabling Deterministic Operations]
   // The other kernel is normally nondeterministic because of atomic accumulation
@@ -409,8 +408,20 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
     grad_input.copy_(grad_input_float);
     return;
   }
-  if (!is_2d) {
+  PoolingBackwardParams<5> backward_params{};
+  if (is_2d) {
+    fill_pool_size_strides(params, grad_input, grad_output, indices);
+  } else {
     grad_input.fill_(0);
+    backward_params.dims = params.dims;
+    backward_params.pooling_dims = params.pooling_dims;
+    for (const auto dim : c10::irange(params.dims)) {
+      backward_params.grad_input_sizes[dim] = safe_downcast<int32_t, int64_t>(grad_input.size(dim));
+      backward_params.grad_input_strides[dim] = safe_downcast<int32_t, int64_t>(grad_input.stride(dim));
+      backward_params.grad_output_sizes[dim] = safe_downcast<int32_t, int64_t>(grad_output.size(dim));
+      backward_params.grad_output_strides[dim] = safe_downcast<int32_t, int64_t>(grad_output.stride(dim));
+      backward_params.indices_strides[dim] = safe_downcast<int32_t, int64_t>(indices.stride(dim));
+    }
   }
   const auto grid = is_2d
       ? pool_grid(grad_input, is_2d, params.channels_last, 1, pool2d_backward_tile_cols)
@@ -428,7 +439,11 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
 
       getMPSProfiler().beginProfileKernel(maxPoolPSO, op_name, {input}, mpsStream);
       [computeEncoder setComputePipelineState:maxPoolPSO];
-      mtl_setArgs(computeEncoder, grad_input, grad_output, indices, params);
+      if (is_2d) {
+        mtl_setArgs(computeEncoder, grad_input, grad_output, indices, params);
+      } else {
+        mtl_setArgs(computeEncoder, grad_input, grad_output, indices, backward_params);
+      }
 
       mtl_dispatch3DJob(computeEncoder, maxPoolPSO, grid.width, grid.height, grid.depth);
       getMPSProfiler().endProfileKernel(maxPoolPSO, mpsStream);

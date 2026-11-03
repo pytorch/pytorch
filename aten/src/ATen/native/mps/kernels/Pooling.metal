@@ -772,7 +772,7 @@ void max_pool_backward_impl(
     T grad_output_element,
     int32_t input_index,
     constant int32_t* grad_input_sizes,
-    constant int64_t* grad_input_strides,
+    constant int32_t* grad_input_strides,
     int32_t grad_input_leading_offset,
     int32_t pooling_dims) {
   int32_t size_prod = 1;
@@ -780,8 +780,8 @@ void max_pool_backward_impl(
 
   for (auto dim = pooling_dims - 1; dim >= 0; dim--) {
     auto next_size_prod = grad_input_sizes[dim] * size_prod;
-    pool_offset += int32_t(grad_input_strides[dim]) *
-        ((input_index % next_size_prod) / size_prod);
+    pool_offset +=
+        grad_input_strides[dim] * ((input_index % next_size_prod) / size_prod);
     size_prod *= grad_input_sizes[dim];
   }
 
@@ -795,19 +795,19 @@ void max_pool_backward_kernel_impl(
     device AtomicType_t<T>* grad_input,
     device const T* grad_output,
     device const int64_t* indices,
-    constant PoolingParams<5>& params,
+    constant PoolingBackwardParams<5>& params,
     uint tid) {
   auto pooling_dims = params.pooling_dims;
   auto dims = params.dims;
-  auto grad_input_sizes = params.input_sizes.data();
-  auto grad_input_strides = params.input_strides.data();
-  auto grad_output_sizes = params.output_sizes.data();
-  auto grad_output_strides = params.output_strides.data();
+  auto grad_input_sizes = params.grad_input_sizes.data();
+  auto grad_input_strides = params.grad_input_strides.data();
+  auto grad_output_sizes = params.grad_output_sizes.data();
+  auto grad_output_strides = params.grad_output_strides.data();
   auto indices_strides = params.indices_strides.data();
 
   auto leading_dims = dims - pooling_dims;
 
-  auto offsets = find_pool_offsets<int32_t, int64_t>(
+  auto offsets = find_pool_offsets<int32_t>(
       grad_output_sizes,
       grad_output_strides,
       indices_strides,
@@ -833,7 +833,7 @@ kernel void max_pool_backward(
     device AtomicType_t<T>* grad_input [[buffer(0)]],
     device const T* grad_output [[buffer(1)]],
     device const int64_t* indices [[buffer(2)]],
-    constant PoolingParams<5>& params [[buffer(3)]],
+    constant PoolingBackwardParams<5>& params [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   if IF_CONSTEXPR (!serial) {
     max_pool_backward_kernel_impl<T>(
@@ -842,7 +842,7 @@ kernel void max_pool_backward(
   }
   uint pool_size = 1;
   for (auto dim = params.dims - params.pooling_dims; dim < params.dims; dim++) {
-    pool_size *= params.output_sizes[dim];
+    pool_size *= params.grad_output_sizes[dim];
   }
   for (uint pool_idx = 0; pool_idx < pool_size; pool_idx++) {
     max_pool_backward_kernel_impl<T>(
@@ -1784,7 +1784,7 @@ kernel void avg_pool2d_backward(
       device AtomicType_t<DTYPE> * grad_input [[buffer(0)]],               \
       device const DTYPE* grad_output_ [[buffer(1)]],                      \
       device const int64_t* grad_indices_ [[buffer(2)]],                   \
-      constant PoolingParams<5>& params [[buffer(3)]],                     \
+      constant PoolingBackwardParams<5>& params [[buffer(3)]],             \
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_AVG_POOL_BACKWARD(DTYPE, SERIAL)                          \
