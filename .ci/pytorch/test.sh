@@ -960,7 +960,7 @@ test_inductor_cpp_wrapper_shard() {
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
+    --include inductor/test_torchinductor inductor/test_max_autotune \
               inductor/test_triton_kernels inductor/test_combo_kernels \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
@@ -1847,11 +1847,7 @@ test_libtorch_profiler() {
   # Kineto's own unit tests, under torch/csrc/profiler/kineto. The binaries
   # are globbed rather than listed so a test added to Kineto runs here without
   # a matching change to this script.
-  if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
-    # Kineto's xpu tests compile SYCL device code through an ExternalProject,
-    # so the PyTorch build leaves them out. See cmake/Dependencies.cmake.
-    echo "Skipping Kineto C++ tests on XPU"
-  elif [[ "${TEST_CONFIG}" == *nogpu* ]]; then
+  if [[ "${TEST_CONFIG}" == *nogpu* ]]; then
     # CUDA builds link Kineto's tests against CUPTI, which segfaults without
     # a driver present rather than letting the tests skip.
     echo "Skipping Kineto C++ tests on nogpu"
@@ -1860,9 +1856,13 @@ test_libtorch_profiler() {
     local kineto_bin_dir="${BUILD_BIN_DIR}/kineto"
     local kineto_tests=()
     local kineto_test
+    local kineto_name
     for kineto_test in "${kineto_bin_dir}"/*; do
-      [[ -x "${kineto_test}" ]] || continue
-      kineto_tests+=("cpp/$(basename "${kineto_test}")")
+      kineto_name="${kineto_test##*/}"
+      # run_test.py leaves __pycache__ in this directory, and the xpu tests'
+      # SYCL kernel library sits next to them; shared libraries are executable.
+      [[ -f "${kineto_test}" && -x "${kineto_test}" && "${kineto_name}" != *.so* ]] || continue
+      kineto_tests+=("cpp/${kineto_name}")
     done
     if [[ ${#kineto_tests[@]} -eq 0 ]]; then
       echo "ERROR: no Kineto test binaries found in ${kineto_bin_dir}"
@@ -2739,6 +2739,12 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
     collect_tlparse_output
   fi
+elif [[ "${TEST_CONFIG}" == inductor_cpp_wrapper_cpu ]]; then
+  # All of CPUReproTests under cpp_wrapper. The default CPU jobs run only the
+  # curated subset in test_cpu_cpp_wrapper.
+  setup_torch_trace
+  TORCHINDUCTOR_CPP_WRAPPER=1 python test/run_test.py --include inductor/test_cpu_repro --verbose
+  collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchvision
   setup_torch_trace
