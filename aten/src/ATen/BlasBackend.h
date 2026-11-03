@@ -45,7 +45,7 @@ enum class SwizzleType : std::uint8_t {
   NO_SWIZZLE = 0,
   SWIZZLE_32_4_4 = 1, // cuBLAS 128x4-tiled block scales
   SWIZZLE_32_8 = 2, // hipBLASLt BLK32_UE8M0_32_8
-  SWIZZLE_MNxK4 = 3, // cuBLAS MN-major scales with four values packed along K
+  SWIZZLE_MN_K4 = 3, // cuBLAS MN-major scales with four values packed along K
 };
 
 inline const char* ScalingTypeToString(ScalingType value) {
@@ -75,8 +75,8 @@ inline const char* SwizzleTypeToString(SwizzleType value) {
       return "SWIZZLE_32_4_4";
     case SwizzleType::SWIZZLE_32_8:
       return "SWIZZLE_32_8";
-    case SwizzleType::SWIZZLE_MNxK4:
-      return "SWIZZLE_MNxK4";
+    case SwizzleType::SWIZZLE_MN_K4:
+      return "SWIZZLE_MN_K4";
     default:
       return "UnknownSwizzleType";
   }

@@ -502,7 +502,7 @@ _scaled_gemm(
       swizzle_choice_a,
       swizzle_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
-  if (swizzle_choice_a == SwizzleType::SWIZZLE_MNxK4 || swizzle_choice_b == SwizzleType::SWIZZLE_MNxK4) {
+  if (swizzle_choice_a == SwizzleType::SWIZZLE_MN_K4 || swizzle_choice_b == SwizzleType::SWIZZLE_MN_K4) {
     TORCH_CHECK_VALUE(
         args.transa == 't' && args.transb == 'n',
         "packed MNxK4 scaling requires row-major mat_a and column-major mat_b");
@@ -1027,7 +1027,7 @@ Tensor& _scaled_mnk4(
       reinterpret_cast<uintptr_t>(scale_b.const_data_ptr()) % 16 == 0,
       "For packed MNxK4 scaling scale_b must have a 16-byte aligned data pointer");
   return _scaled_gemm(
-      mat_a, mat_b, scale_a, scale_b, scaling_type, scaling_type, SwizzleType::SWIZZLE_MNxK4, SwizzleType::SWIZZLE_MNxK4, bias, use_fast_accum, out, epilogue);
+      mat_a, mat_b, scale_a, scale_b, scaling_type, scaling_type, SwizzleType::SWIZZLE_MN_K4, SwizzleType::SWIZZLE_MN_K4, bias, use_fast_accum, out, epilogue);
 }
 
 Tensor&
@@ -1710,7 +1710,7 @@ void scaled_mm_cuda_v2_impl(
     "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (", ceil_div<int64_t>(mat_a.size(0), 128), ", ", ceil_div<int64_t>(mat_a.size(1), 128), ") and scale_b should be (", ceil_div<int64_t>(mat_b.size(0), 128), ", ", ceil_div<int64_t>(mat_b.size(1), 128), "), and both should be near-inner-dim-major (with 16-byte aligned strides).\n"
     "- For Blockwise 1x32 scaling, a and b should be float8, scales should be float8_e8m0fnu, scale_a should have ", round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_a.size(1), 32), 4), " elements and scale_b should have ", round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_b.size(0), 32), 4), " elements, and both should be contiguous.\n"
     "- For Blockwise 1x16 scaling, a and b should be float4 (packed 2x), scales should be float8_e4m3fn, scale_a should have ", round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_a.size(1) * 2, 16), 4), " elements and scale_b should have ", round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_b.size(0) * 2, 16), 4), " elements, and both should be contiguous.\n"
-    "- For BlockWise1x32 or BlockWise1x128 packed MNxK4 scaling, a and b should be float8 and both scales should be contiguous float8_e8m0fnu tensors with SWIZZLE_MNxK4.\n"
+    "- For BlockWise1x32 or BlockWise1x128 packed MNxK4 scaling, a and b should be float8 and both scales should be contiguous float8_e8m0fnu tensors with SWIZZLE_MN_K4.\n"
     "Got mat_a.dtype()=", mat_a.scalar_type(), ", scale_a[0].dtype()=", scale_a[0].scalar_type(), ", scale_a[0].size()=", scale_a[0].sizes(), ", scale_a[0].stride()=", scale_a[0].strides(), ", ",
     "mat_b.dtype()=", mat_b.scalar_type(), ", scale_b[0].dtype()=", scale_b[0].scalar_type(), ", scale_b[0].size()=", scale_b[0].sizes(), " and scale_b[0].stride()=", scale_b[0].strides()
   );
