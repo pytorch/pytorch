@@ -1121,7 +1121,8 @@ class TestExport(TestCase):
     @skipIfTorchDynamo("export inside dynamo is not supported")
     def test_scan_output_keeps_no_constant(self) -> None:
         # Tracing runs the combine function for one step, and the outputs of
-        # scan must not keep the constant values of that step.
+        # scan must not keep the constant values of that step. Outside vmap the
+        # output takes meta["val"], which holds none, not the combine output.
 
         def combine(carry, x):
             step, acc = carry
