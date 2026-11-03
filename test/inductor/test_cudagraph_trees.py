@@ -6090,8 +6090,6 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(backwards(), 1)
             self.assertIsNone(self.get_manager())
 
-        # Under graph partition the backend ignores CPU ops when it checks for skips.
-        @torch._inductor.config.patch("graph_partition", False)
         @torch._inductor.config.patch("graph_partition", False)
         @torch._inductor.config.patch("triton.cudagraph_capture_sizes", (2,))
         def test_skipped_backward_without_partition_of_a_forward_without_graph(self):
@@ -6115,6 +6113,8 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(backwards(), 1)
             self.assertIsNone(self.get_manager())
 
+        # Under graph partition the backend ignores CPU ops when it checks for skips.
+        @torch._inductor.config.patch("graph_partition", False)
         @torch._functorch.config.patch("force_non_lazy_backward_lowering", True)
         def test_cudagraphs_backend_with_eagerly_lowered_skipped_backward(self):
             # The backward round-trips through the CPU, so it runs without a CUDA
