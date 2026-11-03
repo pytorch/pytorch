@@ -7,6 +7,8 @@
 import cutlass
 import cutlass.cute as cute
 from cutlass import Boolean, const_expr, Float32, Int32, Int64
+from cutlass._mlir.dialects import llvm
+from cutlass.cutlass_dsl import dsl_user_op, T as _T
 
 
 WARP = 32
@@ -79,6 +81,27 @@ class SumOps:
         return acc[0]
 
 
+@dsl_user_op
+def _square_rn(a, *, loc=None, ip=None):
+    """Float32 a * a rounded on its own: ptxas never contracts mul.rn into an add."""
+    if type(a) is not Float32:
+        raise TypeError(f"_square_rn takes Float32, got {type(a).__name__}")
+    x = a.ir_value(loc=loc, ip=ip)
+    return Float32(
+        llvm.inline_asm(
+            _T.f32(),
+            [x, x],
+            "mul.rn.f32 $0, $1, $2;",
+            "=f,f,f",
+            has_side_effects=False,
+            is_align_stack=False,
+            asm_dialect=llvm.AsmDialect.AD_ATT,
+            loc=loc,
+            ip=ip,
+        )
+    )
+
+
 class NormOps:
     # acc = (sum(|x|**p),); project raises it to 1/p.
     nfields = 1
@@ -94,7 +117,9 @@ class NormOps:
         if const_expr(self.p == 1.0):
             return a
         elif const_expr(self.p == 2.0):
-            return a * a
+            # Kernels fold leaves in different shapes; a contractible square would let
+            # the compiler fuse it into some adds and not others.
+            return _square_rn(a)
         else:
             # |x|**p via exp(p*log|x|); log(0)=-inf so 0**p -> exp(-inf)=0 for p>0.
             return cute.math.exp(self.acc(self.p) * cute.math.log(a))
