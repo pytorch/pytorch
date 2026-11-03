@@ -1760,7 +1760,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                                     value,
                                     dropout_p,
                                     false,                                // return dropout_randval
-                                    custom_mask_type == 0 ? false : true, // is_causal
+                                    custom_mask_type != static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask), // is_causal
+                                    custom_mask_type == static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft), // causal_top_left
                                     softmax_scale,
                                     bias,
                                     out,

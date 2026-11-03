@@ -621,7 +621,8 @@ _efficient_attention_backward(
                      max_seqlen_k,
                      float(dropout_p),
                      my_softmax_scale,
-                     custom_mask_type == 0 ? false : true, // is_causal
+                     custom_mask_type != static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask), // is_causal
+                     custom_mask_type == static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft), // causal_top_left
                      false, // deterministic
                      false, // zero_tensors
                      ck_philox_seed,

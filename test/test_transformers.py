@@ -3638,6 +3638,45 @@ class TestSDPAAccelerator(NNTestCase):
             if prev_fa_library is not None:
                 torch.backends.cuda.preferred_rocm_fa_library(prev_fa_library)
 
+    @unittest.skipIf(not TEST_WITH_ROCM or not PLATFORM_SUPPORTS_CK_SDPA, "CK SDPA is ROCm-only")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Efficient Attention is not supported on this system")
+    @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
+    @parametrize("seq_lens", [(256, 1024), (1024, 256), (1, 128), (512, 512)])
+    def test_mem_eff_attention_causal_variants_ck(self, device, causal_variant, seq_lens):
+        # CK used to build a bottom-right mask for every causal variant, so the
+        # top-left is_causal=True was wrong whenever seq_len_q != seq_len_k.
+        seq_len_q, seq_len_k = seq_lens
+        if causal_variant == CausalVariant.LOWER_RIGHT and seq_len_q > seq_len_k:
+            self.skipTest("Lower right causal mask has fully masked rows when seq_len_q > seq_len_k")
+        dtype = torch.float16
+        q = torch.randn(2, 4, seq_len_q, 64, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(2, 4, seq_len_k, 64, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(2, 4, seq_len_k, 64, device=device, dtype=dtype, requires_grad=True)
+        grad_out = torch.randn(2, 4, seq_len_q, 64, device=device, dtype=dtype)
+
+        def sdpa(q, k, v):
+            if causal_variant == CausalVariant.UPPER_LEFT:
+                return F.scaled_dot_product_attention(q, k, v, is_causal=True)
+            return F.scaled_dot_product_attention(q, k, v, attn_mask=causal_lower_right(seq_len_q, seq_len_k))
+
+        q_ref, k_ref, v_ref = (t.detach().float().requires_grad_() for t in (q, k, v))
+        with sdpa_kernel(SDPBackend.MATH):
+            out_ref = sdpa(q_ref, k_ref, v_ref)
+        out_ref.backward(grad_out.float())
+
+        prev_fa_library = torch.backends.cuda.preferred_rocm_fa_library()
+        torch.backends.cuda.preferred_rocm_fa_library("ck")
+        try:
+            with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+                out = sdpa(q, k, v)
+            out.backward(grad_out)
+        finally:
+            torch.backends.cuda.preferred_rocm_fa_library(prev_fa_library)
+
+        self.assertEqual(out, out_ref.to(dtype), atol=2e-3, rtol=2e-3)
+        for t, t_ref in ((q, q_ref), (k, k_ref), (v, v_ref)):
+            self.assertEqual(t.grad, t_ref.grad.to(dtype), atol=1e-2, rtol=1e-2)
+
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_sm107_runtime_version(self, device):
