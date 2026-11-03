@@ -50,27 +50,35 @@ class TestColumnConfig(TestCase):
         return ct.select_col_config(**args)
 
     def test_default_geometry(self):
-        """Size column geometry from the reduced and column extents by default."""
+        """Fill about _TARGET_LANES threads, narrowing vec before chunks get short."""
         cfg = self.select(size=16, columns=256)
         self.assertEqual(cfg.rule, "default")
         self.assertEqual(cfg.threads_per_block, 32)
-        self.assertEqual(cfg.npar, 256)
-        self.assertEqual(cfg.vec, 4)
+        # Wider vectors would leave 16-row chunks; 256 lanes take 512 chunks of 32 rows.
+        self.assertEqual((cfg.npar, cfg.vec), (512, 1))
         self.assertEqual(cfg.partial_layout, "column")
-        # Half-width elements double the reduced rows in the same bytes.
-        cfg = self.select(dtype=torch.float16, size=16, columns=256)
-        self.assertEqual(cfg.npar, 512)
-        self.assertEqual(cfg.vec, 4)
+        # Tall views keep full-width vectors: 1024 lanes split 128 ways.
+        cfg = self.select(size=256, columns=4096)
+        self.assertEqual((cfg.npar, cfg.vec), (128, 4))
+        # 16 columns keep vec 1 for lanes.
+        cfg = self.select(size=16, columns=16)
+        self.assertEqual((cfg.npar, cfg.vec), (8192, 1))
+        # Short views reduce in one stage.
+        cfg = self.select(rows=64, columns=4096)
+        self.assertEqual((cfg.npar, cfg.vec), (1, 2))
+        # Two lanes would want 65536 chunks; grid y holds 65535.
+        cfg = self.select(rows=1 << 20, columns=2)
+        self.assertEqual((cfg.npar, cfg.vec), (65535, 1))
         # Partition-major partials start at B * C >= 8192 kept outputs.
         for kw in ({"columns": 8192}, {"columns": 1024, "batches": 8}):
             self.assertEqual(self.select(**kw).partial_layout, "partition")
 
-    def test_partitions_keep_int32_partial_indices(self):
-        """Cap default partitions at Int32 partial indices; reject explicit overflow."""
-        cfg = self.select(rows=1 << 20, columns=1 << 20)
-        self.assertEqual(cfg.npar, 2047)
+    def test_explicit_partitions_are_bounded(self):
+        """Reject explicit partitions past Int32 partial indices or grid y."""
         with self.assertRaisesRegex(ValueError, "overflows Int32"):
             self.select(rows=1 << 20, columns=1 << 20, npar=2048)
+        with self.assertRaisesRegex(ValueError, "grid y"):
+            self.select(rows=1 << 20, columns=2, npar=65536)
 
     @parametrize(
         "dtype,size,columns,key,fields,rule",
