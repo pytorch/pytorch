@@ -429,18 +429,26 @@ class TestScore(unittest.TestCase):
         self.assertEqual((hm.sel.run_all, hm.sel.files), (False, {"sub/test_x"}))
 
     def test_score_same_ids(self) -> None:
+        sample = {**SAMPLE, "truth_jobs": {"test_a": [["pull", "linux / test (default, 1, 2, linux.2xlarge)"]]}}  # fmt: skip
         td = {"scored": [], "top25": ["test_a"], "top25_cfg": {"default": ["test_a"]}}
         result = {
             "out": {"tests": [{"file": "test_a"}]},
             "error": None,
             "cost_usd": 0.1,
         }
+        failed = {"out": None, "error": "boom", "cost_usd": 0.0}
+        # The top-level "default" is run_test.py's fallback for unknown jobs, not a job to price.
+        times = {
+            "linux": {"default": {"test_a": 10.0, "test_b": 5.0}},
+            "linux-cuda": {"default": {"test_a": 20.0}},
+            "default": {"default": {"test_a": 1000.0, "test_b": 1000.0}},
+        }
         files = {
-            "test-times.json": {"linux": {"default": {"test_a": 10.0, "test_b": 5.0}}},
-            "samples/a.json": SAMPLE, "samples/b.json": SAMPLE, "samples/c.json": SAMPLE,
+            "test-times.json": times,
+            "samples/a.json": sample, "samples/b.json": sample, "samples/c.json": sample,
             "td/a.json": td, "td/b.json": td,
             "results/m1/a.json": result, "results/m1/b.json": result, "results/m1/c.json": result,
-            "results/m2/a.json": result, "results/m2/c.json": result,
+            "results/m2/a.json": failed, "results/m2/c.json": failed,
         }  # fmt: skip
         with (
             tempfile.TemporaryDirectory() as d,
@@ -455,6 +463,30 @@ class TestScore(unittest.TestCase):
                 rows = score.score(data, ["a", "b", "c"], ["m1", "m2", "td"], ["model"], True, data / "samples", data / "td")  # fmt: skip
         self.assertEqual({(x["tag"], x["policy"], x["id"]) for x in rows}, {("m1", "model", "a"), ("m2", "model", "a"), ("td", "td25", "a")})  # fmt: skip
         self.assertEqual(err.getvalue(), "dropped 1 of 3 ids with no m2 result\ndropped 1 of 3 ids with no td replay\n")  # fmt: skip
+        fields = ("pairs", "hit", "missed", "cpu", "gpu", "run_all", "files", "error")
+        by_tag = {x["tag"]: tuple(x[k] for k in fields) for x in rows}
+        self.assertEqual(by_tag, {
+            "m1": (1, 1, [], 10 / 15, 1.0, False, 1, False),
+            "m2": (1, 1, [], 1.0, 1.0, True, 0, True),
+            "td": (1, 1, [], 10 / 15, 1.0, False, 1, False),
+        })  # fmt: skip
+
+    def test_summarize(self) -> None:
+        row = {"tag": "t", "policy": "p", "kind": "pr", "cost_usd": 0.1, "error": False, "cpu": 0.5, "gpu": 0.0}  # fmt: skip
+        run_all = {"files": 0, "run_all": True, "cpu": 1.0, "gpu": 1.0, "error": True}
+        rows = [
+            {**row, "pairs": 2, "hit": 1, "files": 3, "run_all": False},
+            {**row, "pairs": 1, "hit": 1, "files": 5, "run_all": False},
+            {**row, "pairs": 0, "hit": 0, "files": 9, "run_all": False},
+            {**row, "pairs": 1, "hit": 1, **run_all},
+        ]
+        (s,) = score.summarize(rows)
+        self.assertEqual(s, {
+            "tag": "t", "policy": "p", "kind": "pr", "n": 4, "n_failing": 3,
+            "caught_any": 1.0, "caught_all": 2 / 3, "pair_recall": 3 / 4,
+            "cpu": 0.625, "gpu": 0.25, "run_all": 1, "median_files": 5,
+            "usd_per_call": 0.1, "errors": 1,
+        })  # fmt: skip
 
     def test_score_grep(self) -> None:
         sample = {**SAMPLE, "sha": "abc", "changed_files": ["test/test_c.py"]}
@@ -495,8 +527,11 @@ class TestScore(unittest.TestCase):
         self.assertEqual(
             {t.test_file for t in tp.get_top_per_tests(25)[0]}, {"test_e", "test_a"}
         )
-        # The cut is 25% + 1 of each config's own runs; in "slow" test_a's partial run comes first and counts.
+        # The cut is 25% + 1 of each config's own runs plus the files with no
+        # recorded time (test_e, as if newly added); test_a's partial run counts.
         cut = top25_per_config(tp, cands, SECONDS)
+        self.assertEqual(cut, {"default": ["test_a", "test_e"], "slow": ["test_a", "test_e"]})  # fmt: skip
+        cut = top25_per_config(tp, ["test_a", "test_b", "test_c", "test_d"], SECONDS)
         self.assertEqual(cut, {"default": ["test_a", "test_c"], "slow": ["test_a"]})
         td = {"top25": ["test_a", "test_e"], "top25_cfg": cut}
         choice = pick("td25", None, td)
@@ -509,9 +544,11 @@ class TestScore(unittest.TestCase):
         cands = {"test_a", "test_b", "test_c"}
         choice = Choice(Selection({"test_b"}), {"slow": {"test_a"}})
         self.assertEqual(cost_fraction(choice, cands, SECONDS), (50 / 160, 250 / 250))
+        only_b = Choice(Selection({"test_b"}))
+        self.assertEqual(cost_fraction(only_b, cands, SECONDS), (50 / 160, 50 / 250))
         self.assertEqual(
-            cost_fraction(choice, cands, SECONDS, lambda c: c == "default"),
-            (50 / 160, 1.0),
+            cost_fraction(only_b, cands, SECONDS, lambda c: c == "default"),
+            (50 / 160, 50 / 50),
         )
         self.assertEqual(
             cost_fraction(Choice(Selection(run_all=True)), cands, SECONDS), (1.0, 1.0)

@@ -70,7 +70,10 @@ from tools.testing.llm_td.selection import (
     LLM_TD_SELECTION_FILE,
     Selection,
 )
-from tools.testing.target_determination.gen_artifact import gen_ci_artifact
+from tools.testing.target_determination.gen_artifact import (
+    gen_ci_artifact,
+    LLM_SELECTION_SOURCE,
+)
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
 )
@@ -2564,8 +2567,8 @@ def main():
             exclude,
             test_prioritizations.get_score,
             test_file_times_dict,
-            TEST_CONFIG,
-            options.enable_td,
+            test_config=TEST_CONFIG,
+            td_enabled=options.enable_td,
         )
         include, exclude = llm.include, llm.exclude
         if IS_CI:
@@ -2584,7 +2587,7 @@ def main():
         gen_ci_artifact(
             [x.to_json() for x in include],
             [x.to_json() for x in exclude],
-            "llm_selection" if llm_enforced else "td",
+            LLM_SELECTION_SOURCE if llm_enforced else "td",
         )
 
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
@@ -2638,6 +2641,7 @@ def main():
                     {
                         "selected_tests": selected_tests,
                         "failure": str(test),
+                        "llm_enforced": llm_enforced,
                         **test_stats,
                     },
                 )
