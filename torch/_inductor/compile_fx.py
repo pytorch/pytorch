@@ -126,7 +126,7 @@ from .decomposition import select_decomp_table
 from .exc import InductorError
 from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import (
-    decompose_triton_kernel_wrapper_functional,
+    decompose_user_kernel_wrapper_functional,
     post_grad_passes,
     view_to_reshape,
 )
@@ -783,30 +783,35 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
         _propagate_invoke_subgraph_nested_region_config(gm)
         with _patch_nested_region_inductor_config(gm):
             if not config.use_post_grad_passes:
-                # triton_kernel_wrapper_functional (a user-defined Triton kernel already
-                # in the model) has no inductor lowering; post_grad_passes normally
-                # decomposes it into its mutation form, which lowers to a
-                # UserDefinedTritonKernel and compiles into the AOT artifact. With
-                # post-grad passes disabled (e.g. lite mode / fallback_by_default), still
-                # run just that decomposition -- it is a correctness pass, not an
-                # optimization -- so such kernels keep compiling instead of hard-erroring
-                # at lowering (the functional HOP is neither an OpOverload with a lowering
-                # nor serializable by the proxy executor). Gated on the graph actually
-                # containing one so a lite-mode graph without user Triton kernels -- the
-                # common case -- pays neither the pattern match nor the recompile.
+                # A user-kernel functional HOP (e.g. triton_kernel_wrapper_functional,
+                # a user-defined Triton kernel already in the model) has no inductor
+                # lowering; post_grad_passes normally decomposes it into its mutation
+                # form, which lowers to a UserDefined*Kernel and compiles into the AOT
+                # artifact. With post-grad passes disabled (e.g. lite mode /
+                # fallback_by_default), still run just that decomposition -- it is a
+                # correctness pass, not an optimization -- so such kernels keep
+                # compiling instead of hard-erroring at lowering (the functional HOP is
+                # neither an OpOverload with a lowering nor serializable by the proxy
+                # executor). Gated on the graph actually containing one so a lite-mode
+                # graph without user kernels -- the common case -- pays neither the
+                # pattern match nor the recompile.
                 #
                 # Reinplacing must run FIRST: the decomposition emits "clone(s) + the
                 # mutation node" and relies on it to mark which clones are unnecessary,
-                # so without it every user Triton kernel pays a device-to-device copy.
-                if gm.graph.find_nodes(
-                    op="call_function",
-                    target=torch.ops.higher_order.triton_kernel_wrapper_functional,
+                # so without it every user kernel pays a device-to-device copy.
+                from torch._higher_order_ops.user_kernel_hop import (
+                    user_kernel_hop_infos,
+                )
+
+                if any(
+                    gm.graph.find_nodes(op="call_function", target=info.functional)
+                    for info in user_kernel_hop_infos()
                 ):
                     from .fx_passes.reinplace import reinplace_inplaceable_ops
                     from .fx_utils import FakeTensorUpdater
 
                     reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
-                    decompose_triton_kernel_wrapper_functional(gm.graph)
+                    decompose_user_kernel_wrapper_functional(gm.graph)
                     gm.recompile()
                 return
 

@@ -1833,16 +1833,13 @@ def _should_save_eager_input_vals(
     args_kwargs: tuple[tuple[Argument, ...], dict[str, Argument]] | None = None,
 ) -> bool:
     from torch._higher_order_ops.invoke_subgraph import InvokeSubgraphHOP
+    from torch._higher_order_ops.user_kernel_hop import get_user_kernel_hop_info
 
     if not callable(target):
         return False
-    if isinstance(
-        target,
-        (
-            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperFunctional,
-            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
-            InvokeSubgraphHOP,
-        ),
+    if (
+        isinstance(target, InvokeSubgraphHOP)
+        or get_user_kernel_hop_info(target) is not None
     ):
         return True
     if args_kwargs is not None and (
