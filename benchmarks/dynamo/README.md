@@ -82,8 +82,8 @@ A complete list of options can be seen by running each of the runners with the `
 
 Registered Hugging Face text-generation models use `--hf-inference-mode=generate`
 by default. Prefill is opt-in and supports `meta-llama/Llama-3.2-1B`,
-`google/gemma-2-2b`, `Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B` with fixed,
-unpadded prompts:
+`google/gemma-2-2b`, `google/gemma-3-1b-it`, `Qwen/Qwen2.5-0.5B-Instruct`,
+`Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B` with fixed, unpadded prompts:
 
 ```
 ./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
@@ -110,8 +110,8 @@ CSV `abs_latency` and `eager_latency` are milliseconds for all
 elements. Default output and profiler trace names get a `_prefill` suffix; use
 separate files for different input dimensions.
 
-Decode is opt-in and supports `meta-llama/Llama-3.2-1B`, `Qwen/Qwen3-0.6B`, and
-`Qwen/Qwen3.5-0.8B`:
+Decode is opt-in and supports `meta-llama/Llama-3.2-1B`,
+`Qwen/Qwen2.5-0.5B-Instruct`, `Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B`:
 
 ```
 ./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
@@ -124,7 +124,7 @@ Each decode request prefills the prompt eagerly into the static cache outside
 the timed region, then times `--decode-length` (default 128, at most 1999)
 single-token compiled forwards. Decode feeds fixed random tokens rather than
 sampled ones and returns the last step's logits. It shares prefill's cache
-capacity and flag restrictions. `gemma-2-2b` is excluded because its
+capacity and flag restrictions. The Gemma models are excluded because their
 sliding-window cache recompiles on every step.
 
 CSV `abs_latency` and `eager_latency` are milliseconds for all
@@ -144,8 +144,8 @@ measure TP scaling.
 The peak-memory columns include an extra model-weight copy in single-GPU runs,
 while TP runs share each rank's weights. These columns cannot directly measure
 single-GPU-to-TP memory savings.
-Both phases support `meta-llama/Llama-3.2-1B`, `Qwen/Qwen3-0.6B`, and
-`Qwen/Qwen3.5-0.8B`.
+Both phases support `meta-llama/Llama-3.2-1B`, `Qwen/Qwen2.5-0.5B-Instruct`,
+`Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B`.
 
 ```
 ./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
@@ -175,7 +175,8 @@ torchrun --nproc-per-node=2 benchmarks/dynamo/huggingface.py --performance \
 Each worker uses `LOCAL_RANK` for its GPU and torchrun's rendezvous settings.
 TP requires `--bfloat16`, `--float16`, or `--float32`, which is passed to
 `from_pretrained`, and `N` must divide the model's attention and KV
-heads (Qwen3.5-0.8B has two KV heads, so it supports at most `--tp-size=2`).
+heads (Qwen2.5-0.5B and Qwen3.5-0.8B have two KV heads, so they support at most
+`--tp-size=2`).
 Ranks broadcast the request tokens from rank 0 and allocate their own
 TP-local static caches. Eager, compiled, and accuracy-reference passes share the
 loaded shards rather than deep-copying the model; each pass gets a fresh cache.
