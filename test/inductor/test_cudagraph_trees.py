@@ -288,6 +288,18 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(len(get_all_cudagraph_segments()), 0)
             warnings.resetwarnings()
 
+        def _spy_on_backward_generation(self):
+            # Counts the backwards that post-compile handed to the manager.
+            spy = mock.patch.object(
+                torch._inductor.output_code,
+                "maybe_handle_backward_generation",
+                wraps=torch._inductor.output_code.maybe_handle_backward_generation,
+            )
+            handled = self.enterContext(spy)
+            return lambda: sum(
+                c.args[0].fx_kwargs["is_backward"] for c in handled.call_args_list
+            )
+
         def get_manager(self, device_index=None):
             return torch._inductor.cudagraph_trees.get_container(
                 device_index if device_index else self.device_idx
@@ -6017,7 +6029,12 @@ if HAS_CUDA_AND_TRITON:
             def foo(x):
                 return x.sin().sum() + w.sum()
 
-            for _ in range(3):
+            backwards = self._spy_on_backward_generation()
+            out = foo(torch.rand([20], device="cuda"))
+            # Lowered with the forward, before the forward's first call.
+            self.assertEqual(backwards(), 1)
+            out.backward()
+            for _ in range(2):
                 foo(torch.rand([20], device="cuda")).backward()
 
             self.assertEqual(w.grad, torch.full_like(w, 3))
@@ -6063,9 +6080,11 @@ if HAS_CUDA_AND_TRITON:
             def foo(x):
                 return x.sin().sum() + w.sum()
 
+            backwards = self._spy_on_backward_generation()
             for _ in range(3):
                 foo(torch.rand([20], device="cuda")).backward()
             self.assertEqual(w.grad, torch.full_like(w, 3))
+            self.assertEqual(backwards(), 1)
             self.assertIsNone(self.get_manager())
 
         # Under graph partition the backend ignores CPU ops when it checks for skips.
@@ -6089,7 +6108,12 @@ if HAS_CUDA_AND_TRITON:
             x = torch.rand([20], device="cuda", requires_grad=True)
             expected = 2 * torch.cos(2 * x.detach())
             compiled = torch.compile(foo, backend="cudagraphs")
-            for _ in range(3):
+            out = compiled(x)
+            # The backward was skipped when it was lowered, with the forward.
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            out.backward()
+            self.assertEqual(x.grad, expected)
+            for _ in range(2):
                 x.grad = None
                 compiled(x).backward()
                 self.assertEqual(x.grad, expected)
