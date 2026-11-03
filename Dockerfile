@@ -57,14 +57,22 @@ EOF
 
 # Work out exactly which versions `pip install torch torchvision torchaudio`
 # would install, without downloading any wheels (pip reads the small PEP 658
-# .metadata files). The result is split in two lock files:
-#   /torch.lock  torch, torchvision and torchaudio. Different every night.
-#   /deps.lock   everything they depend on (nvidia-*, triton, sympy, ...). These
-#                are pinned exactly by the torch wheel, so on most nights the
-#                file is byte-identical to the previous night's.
-# The `official` stage installs the two in separate layers. The layer that holds
-# the (large) dependencies is keyed on the contents of /deps.lock, so it is only
-# rebuilt, and clients only re-download it, when a dependency actually changes.
+# .metadata files). The result is split in three lock files, by how often the
+# contents change:
+#   /deps-pinned.lock    packages whose version the torch, torchvision or
+#                        torchaudio wheel (or a pinned package, transitively)
+#                        fixes with `==`: nvidia-*, cuda-toolkit, triton, ... These
+#                        are the large wheels, and they change only when torch
+#                        or cuda-toolkit bumps a pin.
+#   /deps-floating.lock  everything else they depend on (setuptools, fsspec,
+#                        sympy, numpy, pillow, ...). Their requirements are open
+#                        ranges, so pip takes the newest release of each: small,
+#                        but they change whenever one of them is released.
+#   /torch.lock          torch, torchvision and torchaudio. Different every night.
+# The `official` stage installs the three in separate layers, in that order. A
+# layer is keyed on the contents of its lock file, so the large pinned layer is
+# rebuilt, and clients re-download it, only when a pin changes. A new release of
+# a floating package replaces only the small layer after it.
 FROM dev-base as resolve-torch-deps
 ARG CUDA_PATH=cu121
 ARG INSTALL_CHANNEL=whl/nightly
@@ -85,18 +93,61 @@ echo "Resolving ${TORCH_PACKAGES} with pip $(pip3 --version | cut -d' ' -f2) fro
 pip3 install --dry-run --ignore-installed --quiet --report /tmp/report.json ${TORCH_INDEX_ARGS} ${TORCH_PACKAGES}
 python3 - <<'PY'
 import json
+import re
 
 TORCH = {"torch", "torchvision", "torchaudio"}
-deps, torch = [], []
+# One requirement line of a wheel's METADATA: name, extras, then either a
+# parenthesised or a bare specifier, then an optional environment marker.
+REQUIREMENT = re.compile(
+    r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*"
+    r"(?:\(([^)]*)\)|([<>=!~][^;]*))?\s*(?:;.*)?$"
+)
+# `==1.2.3`, or `==1.2.*` as cuda-toolkit pins the nvidia-* wheels: either one fixes
+# the version, give or take a patch release.
+EXACT = re.compile(r"==\s*[^\s,]+")
+
+
+def normalize(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def exact_pins(requires_dist):
+    """Names that a wheel requires with a single `==` specifier."""
+    for requirement in requires_dist or ():
+        match = REQUIREMENT.match(requirement)
+        if match and EXACT.fullmatch((match[2] or match[3] or "").strip()):
+            yield normalize(match[1])
+
+
+metadata = {}
 for item in json.load(open("/tmp/report.json"))["install"]:
-    meta = item["metadata"]
-    (torch if meta["name"].lower() in TORCH else deps).append(f"{meta['name']}=={meta['version']}")
-# Sorted, so that equal dependency sets always give a byte-identical file.
-for path, pins in (("/deps.lock", deps), ("/torch.lock", torch)):
+    metadata[normalize(item["metadata"]["name"])] = item["metadata"]
+
+# A package is pinned if the torch packages, or a package that is itself pinned,
+# require it with `==`. Only packages that are being installed count, which
+# also drops requirements behind an extra or marker that does not apply.
+pinned, todo = set(), [name for name in metadata if name in TORCH]
+while todo:
+    for dep in exact_pins(metadata[todo.pop()].get("requires_dist")):
+        if dep in metadata and dep not in TORCH and dep not in pinned:
+            pinned.add(dep)
+            todo.append(dep)
+
+locks = {"/torch.lock": [], "/deps-pinned.lock": [], "/deps-floating.lock": []}
+for name, meta in metadata.items():
+    if name in TORCH:
+        path = "/torch.lock"
+    elif name in pinned:
+        path = "/deps-pinned.lock"
+    else:
+        path = "/deps-floating.lock"
+    locks[path].append(f"{meta['name']}=={meta['version']}")
+# Sorted, so that equal sets of packages always give a byte-identical file.
+for path, pins in locks.items():
     with open(path, "w") as f:
         f.write("".join(f"{pin}\n" for pin in sorted(pins, key=str.lower)))
 PY
-cat /torch.lock /deps.lock
+cat /torch.lock /deps-pinned.lock /deps-floating.lock
 EOF
 
 FROM ${BASE_IMAGE} as official
@@ -133,13 +184,21 @@ RUN --mount=type=bind,source=requirements.txt,target=/tmp/req/requirements.txt \
     --mount=type=bind,source=requirements-build.txt,target=/tmp/req/requirements-build.txt \
     pip3 install --break-system-packages --no-cache-dir --upgrade --ignore-installed pip setuptools wheel && \
     pip3 install --break-system-packages --no-cache-dir cmake pyyaml numpy ipython -r /tmp/req/requirements.txt
-# 2. What torch depends on (nvidia-*, triton, ...): see `resolve-torch-deps`.
-#    Changes when the torch wheel's pins do, not on every nightly.
+# 2. The large packages torch pins exactly (nvidia-*, cuda-toolkit, triton, ...):
+#    see `resolve-torch-deps`. Changes when torch bumps a pin, not every nightly.
+#    The lock lists the whole closure, so nothing is resolved here.
 RUN --mount=type=bind,from=torch-pip-args,source=/torch_pip_args.sh,target=/torch_pip_args.sh \
-    --mount=type=bind,from=resolve-torch-deps,source=/deps.lock,target=/tmp/deps.lock \
+    --mount=type=bind,from=resolve-torch-deps,source=/deps-pinned.lock,target=/tmp/deps-pinned.lock \
     . /torch_pip_args.sh && \
-    pip3 install --break-system-packages --no-cache-dir ${TORCH_INDEX_ARGS} -r /tmp/deps.lock
-# 3. torch, torchvision and torchaudio, at the exact versions that were resolved
+    pip3 install --break-system-packages --no-cache-dir --no-deps ${TORCH_INDEX_ARGS} -r /tmp/deps-pinned.lock
+# 3. The small packages with open version ranges (setuptools, fsspec, sympy,
+#    numpy, pillow, ...). Changes whenever one of them has a new release; after
+#    layer 2 so that it does not invalidate it.
+RUN --mount=type=bind,from=torch-pip-args,source=/torch_pip_args.sh,target=/torch_pip_args.sh \
+    --mount=type=bind,from=resolve-torch-deps,source=/deps-floating.lock,target=/tmp/deps-floating.lock \
+    . /torch_pip_args.sh && \
+    pip3 install --break-system-packages --no-cache-dir --no-deps ${TORCH_INDEX_ARGS} -r /tmp/deps-floating.lock
+# 4. torch, torchvision and torchaudio, at the exact versions that were resolved
 #    together with the dependencies above. This is the nightly layer.
 RUN --mount=type=bind,from=torch-pip-args,source=/torch_pip_args.sh,target=/torch_pip_args.sh \
     --mount=type=bind,from=resolve-torch-deps,source=/torch.lock,target=/tmp/torch.lock \
