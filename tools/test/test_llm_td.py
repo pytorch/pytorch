@@ -89,7 +89,11 @@ class TestSelection(unittest.TestCase):
         self.assertTrue(Selection.from_json(sel.to_json()).covers("test_nn", "default"))
 
     def select_in_tree(
-        self, sources: dict[str, str], candidates: set[str], changed: list[str]
+        self,
+        sources: dict[str, str],
+        candidates: set[str],
+        changed: list[str],
+        deleted: tuple[str, ...] = (),
     ) -> Selection:
         """from_model_output with an empty answer and a grep over `sources`, a test/ tree."""
         with tempfile.TemporaryDirectory() as d:
@@ -102,7 +106,7 @@ class TestSelection(unittest.TestCase):
                 found = subprocess.run(cmd, cwd=d, capture_output=True, text=True).stdout.split()  # fmt: skip
                 return [f"test/{f.removeprefix('./')}" for f in found]
 
-            return Selection.from_model_output({"tests": []}, candidates, changed, grep)
+            return Selection.from_model_output({"tests": []}, candidates, changed, grep, deleted)  # fmt: skip
 
     def test_importers_are_selected(self) -> None:
         sources = {
@@ -152,11 +156,18 @@ class TestSelection(unittest.TestCase):
             "distributed/launcher/test_run.py": 'path("bin/test_script.py")\n',
             "distributed/launcher/bin/test_script.py": "",
             "distributed/launcher/bin/unused.py": "",
+            "README.md": "notes.txt\n",
+            "run_test.py": 'open("run_only.json")\n',
+            "cpp/api/CMakeLists.txt": "cpp_data.bin\n",
         }  # fmt: skip
-        candidates = CANDIDATES | {"test_public_bindings", "test_tensorboard", "distributed/launcher/test_run"}  # fmt: skip
+        drivers = {"test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja", "test_autoload_enable", "test_autoload_disable"}  # fmt: skip
+        candidates = CANDIDATES | drivers | {"test_public_bindings", "test_tensorboard", "distributed/launcher/test_run"}  # fmt: skip
         for changed, expected in [
             ("test/allowlist_for_publicAPI.json", {"test_public_bindings"}),
-            ("test/cpp_extensions/my_ext.cpp", {"test_ops"}),
+            # The drivers build every extension, and test_ops loads this one by its path.
+            ("test/cpp_extensions/my_ext.cpp", {"test_ops"} | drivers),
+            ("test/cpp_extensions/ext.cpp", drivers),
+            ("test/cpp_data.bin", set()),
             ("test/expect/TestNNCPU.test_x-y.expect", {"test_nn", "dynamo/test_misc"}),
             # test_tensorboard.py builds this path for TestTensorBoardSummary.
             ("test/expect/TestTensorBoard.test_x.expect", {"test_tensorboard"}),
@@ -168,9 +179,19 @@ class TestSelection(unittest.TestCase):
         ]:  # fmt: skip
             sel = self.select_in_tree(sources, candidates, [changed])
             self.assertEqual((sel.files, sel.run_all), (expected, False), changed)
-        for changed in ("test/cpp_extensions/ext.cpp", "test/expect/TestGone.test_x.expect", "test/distributed/launcher/bin/unused.py"):  # fmt: skip
+        # Named only by a README, by run_test.py, which no test imports, or by
+        # another edited data file that nothing reads.
+        for changed in ("test/expect/TestGone.test_x.expect", "test/distributed/launcher/bin/unused.py", "test/notes.txt", "test/run_only.json"):  # fmt: skip
             sel = self.select_in_tree(sources, candidates, ["test/allowlist_for_publicAPI.json", changed])  # fmt: skip
             self.assertEqual((sel.run_all, sel.reason), (True, f"nothing found that reads {changed}"))  # fmt: skip
+        sel = self.select_in_tree(sources | {"allowlist_for_publicAPI.json": "b.json\n"}, candidates, ["test/allowlist_for_publicAPI.json", "test/b.json"])  # fmt: skip
+        self.assertEqual((sel.run_all, sel.reason), (True, "nothing found that reads test/b.json"))  # fmt: skip
+        sel = self.select_in_tree(sources, CANDIDATES, ["test/cpp_extensions/ext.cpp"])
+        self.assertEqual((sel.run_all, sel.reason), (True, "nothing found that reads test/cpp_extensions/ext.cpp"))  # fmt: skip
+        # A deleted file, or the old path of a moved one, needs no reader.
+        gone = ["test/gone.json", "test/distributed/launcher/bin/unused.py"]
+        sel = self.select_in_tree(sources, candidates, gone, deleted=tuple(gone))
+        self.assertEqual((sel.files, sel.run_all), (set(), False))
         many = [f"test/data{i}.json" for i in range(selection.MAX_DATA_FILES + 1)]
         self.assertTrue(self.select_in_tree(sources, candidates, many).run_all)
 
@@ -586,9 +607,11 @@ class TestMain(unittest.TestCase):
             (Path(repo) / "test" / "test_bar.py").write_text(
                 'import test_foo\nrun("test_ select nothing.py")\n'
             )
+            (Path(repo) / "test" / "unused.json").write_text("")
             git("add", "-A")
             git("commit", "-qm", "base")
             git("mv", "test/test_foo.py", "test/nn/test_foo.py")
+            git("rm", "-q", "test/unused.json")
             (Path(repo) / "test" / "test_ select nothing.py").write_text("")
             (Path(repo) / "test" / "jit").mkdir()
             (Path(repo) / "test" / "jit" / "test_new.py").write_text("")

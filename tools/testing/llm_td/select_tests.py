@@ -292,8 +292,12 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
             parse_model_output(out, set(candidates))
         except ValueError as e:
             record["error"] = f"malformed model output: {e}"[:2000]
+    # A deleted file, or the old path of a moved one, needs no reader.
+    deleted = git(
+        "diff", "--name-only", "--no-renames", "--diff-filter=D", merge_base, args.head
+    ).splitlines()
     return Selection.from_model_output(
-        out, set(candidates), changed, lambda p: git_grep(p, args.head)
+        out, set(candidates), changed, lambda p: git_grep(p, args.head), set(deleted)
     )
 
 
