@@ -288,19 +288,12 @@ class TestSumCuteDSLOverride(TestCase):
     def test_non_current_device(self):
         """Launch functional and out variants on the input tensor's device."""
         previous = torch.cuda.current_device()
+        # A single-kernel plan and a split plan, whose two stages both key the device.
+        shapes = ((17, 8192), (3, 262144))
+        self.assertEqual(rt.itree_plan(262144, 3, 4).shape, "split")
         try:
             torch.cuda.set_device(0)
             rt._CACHE.clear()
-            x0 = torch.ones(17, 8192, device="cuda:0")
-            x0[:, 0] = 2
-            # Warm cuda:0 first; device-keyed plans keep cuda:1 from reusing them.
-            x0.sum(dim=1)
-            torch.prod(x0, dim=1, out=torch.empty(17, device="cuda:0"))
-            x = x0.to("cuda:1")
-            with torch.backends.python_native.cutedsl.disabled():
-                expected_sum = x.sum(dim=1)
-                expected_prod = x.prod(dim=1)
-
             reduce_row_itree = rt.reduce_row_itree
             launch_devices = []
 
@@ -308,20 +301,38 @@ class TestSumCuteDSLOverride(TestCase):
                 launch_devices.append(torch.cuda.current_device())
                 return reduce_row_itree(*args, **kwargs)
 
-            with mock.patch.object(rt, "reduce_row_itree", side_effect=record):
-                got_sum = x.sum(dim=1)
-                got_prod = torch.empty(17, device="cuda:1")
-                torch.prod(x, dim=1, out=got_prod)
+            for m, n in shapes:
+                x0 = torch.ones(m, n, device="cuda:0")
+                x0[:, 0] = 2
+                # Warm cuda:0 first; device-keyed plans keep cuda:1 from reusing them.
+                x0.sum(dim=1)
+                torch.prod(x0, dim=1, out=torch.empty(m, device="cuda:0"))
+                x = x0.to("cuda:1")
+                with torch.backends.python_native.cutedsl.disabled():
+                    expected_sum = x.sum(dim=1)
+                    expected_prod = x.prod(dim=1)
 
-            self.assertEqual(launch_devices, [1, 1])
-            keys = [k for k in rt._CACHE if k[0].startswith("rowitree")]
-            for device in ("cuda:0", "cuda:1"):
-                self.assertTrue(any(device in k for k in keys), f"no plan for {device}")
+                with mock.patch.object(rt, "reduce_row_itree", side_effect=record):
+                    got_sum = x.sum(dim=1)
+                    got_prod = torch.empty(m, device="cuda:1")
+                    torch.prod(x, dim=1, out=got_prod)
+
+                self.assertEqual(got_sum.device, torch.device("cuda:1"))
+                self.assertEqual(got_prod.device, torch.device("cuda:1"))
+                self.assertEqual(got_sum, expected_sum)
+                self.assertEqual(got_prod, expected_prod)
+
+            self.assertEqual(launch_devices, [1] * 2 * len(shapes))
             self.assertEqual(torch.cuda.current_device(), 0)
-            self.assertEqual(got_sum.device, torch.device("cuda:1"))
-            self.assertEqual(got_prod.device, torch.device("cuda:1"))
-            self.assertEqual(got_sum, expected_sum)
-            self.assertEqual(got_prod, expected_prod)
+            tags = ("rowitree", "rowitree1", "rowitree2")
+            keys = {(k[0], k[1], k[7]) for k in rt._CACHE if k[0] in tags}
+            want = {
+                (tag, f"itree_{op}", f"cuda:{index}")
+                for tag in tags
+                for op in ("sum", "prod")
+                for index in (0, 1)
+            }
+            self.assertEqual(keys, want)
         finally:
             torch.cuda.set_device(previous)
 
