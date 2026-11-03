@@ -1,6 +1,6 @@
 """Ask an LLM which test files a change can break.
 
-    python -m tools.testing.llm_td.select_tests --base origin/main --output llm_td_selection.json
+    python -m tools.testing.llm_td.select_tests --base origin/main --head <pr-head-sha> --output llm_td_selection.json
 
 The prompt holds the PR title and description, the diff, and every test file
 CI can run annotated with its CI cost. Nothing from the change is executed:
@@ -34,6 +34,7 @@ from tools.testing.llm_td.selection import (
     parse_model_output,
     Selection,
     SWEEPS,
+    unmatched_tests,
 )
 
 
@@ -212,6 +213,16 @@ def git_grep(pattern: str, rev: str) -> list[str]:
     return [line.split(":", 1)[1] for line in p.stdout.splitlines()]
 
 
+def changed_files(merge_base: str, head: str) -> list[str]:
+    # Without renames a moved file is listed at both paths, and its new path is
+    # an added file.
+    return git("diff", "--name-only", "--no-renames", merge_base, head).splitlines()
+
+
+def diffstat_and_diff(merge_base: str, head: str) -> tuple[str, str]:
+    return git("diff", "--stat=200", "--no-renames", merge_base, head), git("diff", merge_base, head)  # fmt: skip
+
+
 def pr_text(args: argparse.Namespace) -> tuple[str, str]:
     if args.title is not None:
         return args.title, args.body or ""
@@ -231,11 +242,10 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     merge_base = git("merge-base", args.base, args.head).strip()
     record["merge_base"] = merge_base
     record["head"] = git("rev-parse", args.head).strip()
-    # Without renames a moved file is listed at both paths, and its new path is
-    # an added file below.
-    changed = git(
-        "diff", "--name-only", "--no-renames", merge_base, args.head
-    ).splitlines()
+    changed = changed_files(merge_base, args.head)
+    if not changed and not args.print_prompt:
+        record["error"] = "no changed files"
+        return Selection(run_all=True, reason="no changed files")
     if needs_run_all(changed) and not args.print_prompt:
         return Selection(run_all=True, reason="change touches test infrastructure")
     # get_test_times reports its download on stdout, where --print-prompt writes.
@@ -243,8 +253,7 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
         test_times = get_test_times()
     if not test_times and not args.print_prompt:
         return Selection(run_all=True, reason="no test times")
-    diffstat = git("diff", "--stat=200", "--no-renames", merge_base, args.head)
-    diff = git("diff", merge_base, args.head)
+    diffstat, diff = diffstat_and_diff(merge_base, args.head)
     # TESTS comes from the checkout this script runs from, which in CI is the
     # trusted default branch rather than the PR; add the test files the PR adds
     # that run_test.py would discover.
@@ -277,6 +286,7 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     else:
         try:
             parse_model_output(out, set(candidates))
+            record["unmatched"] = unmatched_tests(out, set(candidates))
         except ValueError as e:
             record["error"] = f"malformed model output: {e}"[:2000]
     return Selection.from_model_output(
@@ -296,10 +306,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--body")
     # An unset repository variable reaches the workflow as an empty string.
     parser.add_argument("--model", default=os.environ.get("LLM_TD_MODEL") or DEFAULT_MODEL)  # fmt: skip
+    efforts = ["low", "medium", "high", "xhigh", "max"]
     parser.add_argument(
-        "--effort",
-        default=os.environ.get("LLM_TD_EFFORT") or "medium",
-        choices=["low", "medium", "high", "xhigh", "max"],
+        "--effort", default=os.environ.get("LLM_TD_EFFORT") or "medium", choices=efforts
     )
     parser.add_argument("--output", type=Path, default=REPO_ROOT / LLM_TD_SELECTION_FILE)  # fmt: skip
     parser.add_argument(
@@ -309,6 +318,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--print-prompt", action="store_true")
     args = parser.parse_args(argv)
+    # argparse checks choices only for values given on the command line.
+    if args.effort not in efforts:
+        parser.error(f"LLM_TD_EFFORT={args.effort!r} is not one of {efforts}")
 
     record: dict = {
         "model": args.model,
@@ -318,6 +330,7 @@ def main(argv: list[str] | None = None) -> None:
         "cost_usd": None,
         "error": None,
         "model_output": None,
+        "unmatched": [],
     }
     try:
         selection = select(args, record)
