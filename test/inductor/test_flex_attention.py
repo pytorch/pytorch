@@ -7167,12 +7167,15 @@ class GraphModule(torch.nn.Module):
 
         choices = RecordingChoices()
         torch._dynamo.reset()
+        # V.set_choices_handler is thread-local; keep the lazily compiled
+        # backward on this thread instead of the reused autograd device thread.
         with (
             config.patch(
                 force_disable_caches=True,
                 inductor_choices_class=lambda: choices,
             ),
             V.set_choices_handler(choices),
+            torch.autograd.set_multithreading_enabled(False),
         ):
             torch.compile(compiled_attention, fullgraph=True)(
                 query, key, value, score_bias

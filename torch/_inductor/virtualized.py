@@ -57,7 +57,7 @@ supported.
 
 from __future__ import annotations
 
-from contextlib import AbstractContextManager, contextmanager, nullcontext
+from contextlib import AbstractContextManager, contextmanager
 from threading import local
 from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar
 
@@ -138,6 +138,9 @@ class NullHandler:
 # from the parent.
 _PoisonedVirtual = object()
 
+# Marks a virtualized value that has not been set on this thread.
+_UNSET = object()
+
 
 class Virtualized(Generic[T]):
     """
@@ -158,7 +161,8 @@ class Virtualized(Generic[T]):
         self._default = default
 
     def _set_handler(self, value: T) -> AbstractContextManager[None]:
-        prior = self._get_handler(False)
+        # Read the raw slot: restoring a lazily built default would pin it.
+        prior = getattr(threadlocal, self._key, _UNSET)
         setattr(threadlocal, self._key, value)
 
         @contextmanager
@@ -166,7 +170,10 @@ class Virtualized(Generic[T]):
             try:
                 yield
             finally:
-                self._set_handler(prior)
+                if prior is _UNSET:
+                    vars(threadlocal).pop(self._key, None)
+                else:
+                    setattr(threadlocal, self._key, prior)
 
         return ctx()
 
@@ -248,73 +255,28 @@ _active_user_lowering_ops: Virtualized[OrderedSet[Any]] = Virtualized(
 )
 
 
-_CHOICES_DEFAULT_KEY = "__torchinductor_choices_default"
-_UNSET_HANDLER = object()
-
-
 def _choices_default():
     """
-    Return this thread's choices handler built from config.
+    Build the choices handler from config when none is set on this thread.
 
     We virtualize InductorChoices to allow changing inductor heuristics from out of tree.
 
-    The handler is cached per thread and rebuilt when config.inductor_choices_class
-    or the registered choices change, so threads that never set a handler (such as
-    the autograd engine thread that lowers lazily compiled backwards) follow the
-    same config that the compile cache key is computed from.
+    Not stored on the thread: inductor_choices_class and the registered choices
+    may change between compiles, and compile_fx_inner installs the resolved
+    handler for the duration of each compile.
     """
-    from torch._inductor import choices, config
+    from torch._inductor import config
+    from torch._inductor.choices import create_inductor_choices
     from torch._inductor.heuristics.template import tlx
 
     # Has to precede the inductor_choices_class read: installing the torchTLX
     # integration is what sets it.
     tlx.maybe_install()
 
-    factory = config.inductor_choices_class
-    # (Un)registration replaces the registry dict, so identity tracks changes.
-    registrations = choices._registered_inductor_choices
-    cached = getattr(threadlocal, _CHOICES_DEFAULT_KEY, None)
-    if cached is not None and cached[0] is factory and cached[1] is registrations:
-        return cached[2]
-    rv = choices._create_inductor_choices(factory, tuple(registrations.items()))
-    setattr(threadlocal, _CHOICES_DEFAULT_KEY, (factory, registrations, rv))
-    return rv
+    return create_inductor_choices(config.inductor_choices_class)
 
 
-class _ChoicesVirtualized(Virtualized["InductorChoices"]):
-    def _set_handler(self, value: InductorChoices) -> AbstractContextManager[None]:
-        # Restore "unset" rather than the config-derived default, which would
-        # otherwise pin that handler for the thread and ignore later config changes.
-        prior = getattr(threadlocal, self._key, _UNSET_HANDLER)
-        setattr(threadlocal, self._key, value)
-
-        @contextmanager
-        def ctx():
-            try:
-                yield
-            finally:
-                if prior is _UNSET_HANDLER:
-                    delattr(threadlocal, self._key)
-                else:
-                    setattr(threadlocal, self._key, prior)
-
-        return ctx()
-
-
-_choices = _ChoicesVirtualized("choices", _choices_default)
-
-
-def use_config_choices_handler() -> AbstractContextManager[None]:
-    """
-    Pin the config-derived choices handler for one compile.
-
-    Resolving it reads config (~µs), so hot-path V.choices reads should hit the
-    thread-local slot instead. An explicitly set handler is left in place.
-    Kept off V: _VirtualizedSerializer treats every V.set_* as a one-argument setter.
-    """
-    if getattr(threadlocal, _choices._key, _UNSET_HANDLER) is not _UNSET_HANDLER:
-        return nullcontext()
-    return _choices._set_handler(_choices_default())
+_choices: Virtualized[InductorChoices] = Virtualized("choices", _choices_default)
 
 
 class OpsValue:
