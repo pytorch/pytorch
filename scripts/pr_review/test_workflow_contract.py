@@ -1937,6 +1937,9 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         # wiring is the one change that schedules no run of the suite checking
         # the wiring.
         ".github/workflows/pr-review-scripts-test.yml",
+        # test_extract_verdict.py reads the stack-size limit from it, so an
+        # edit to the limit alone must run the suite.
+        "CONTRIBUTING.md",
     )
 
     def setUp(self):

@@ -73,7 +73,9 @@ MAX_STRUCTURED_BYTES = 1024 * 1024  # whole-document ceiling, applied before par
 # bottom and everything above it get changes requested.
 STACK_POSITION_LIMIT = 10
 # One ghstack stack-list entry, "* #12345" or "* __->__ #12345" for the current
-# PR. The same pattern .github/scripts/filter_test_configs.py skips CI with.
+# PR. The entry pattern .github/scripts/filter_test_configs.py fails CI with,
+# but CI counts every entry after the marker; ghstack_position counts only the
+# stack list.
 _GHSTACK_ENTRY = re.compile(r"\* (?:__->__ )?#\d+\s*")
 _GHSTACK_CURRENT = "__->__"
 
@@ -996,7 +998,7 @@ def ghstack_position(body: str) -> int:
     """
     if not body or _GHSTACK_CURRENT not in body:
         return 0
-    lines = body.splitlines()
+    lines = body.split("\n")
     for i, line in enumerate(lines):
         if _GHSTACK_CURRENT in line and _GHSTACK_ENTRY.fullmatch(line):
             below = 0
@@ -1038,7 +1040,7 @@ def apply_stack_policy(result: dict, body: str, touched: dict[str, set[int]]) ->
         f["severity"] != "major" for f in findings
     ):
         findings = [{**f, "severity": "major"} for f in findings]
-    # Majors first, so making room for the policy finding never drops one.
+    # Majors first, so making room for the policy finding drops a minor if any.
     findings.sort(key=lambda f: f["severity"] != "major")
     for path in sorted(p for p, lines in touched.items() if lines):
         finding = {

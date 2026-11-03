@@ -16,6 +16,8 @@ on:
       # are installed. Without this a skill-only change skips the one
       # check that would catch it.
       - ".agents/skills/**"
+      # test_extract_verdict.py reads the stack-size limit from it.
+      - "CONTRIBUTING.md"
   pull_request:
     paths:
       - "scripts/pr_review/**"
@@ -28,6 +30,8 @@ on:
       # are installed. Without this a skill-only change skips the one
       # check that would catch it.
       - ".agents/skills/**"
+      # test_extract_verdict.py reads the stack-size limit from it.
+      - "CONTRIBUTING.md"
 
 permissions:
   contents: read
