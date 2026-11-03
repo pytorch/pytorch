@@ -1,14 +1,17 @@
 # Owner(s): ["oncall: distributed checkpointing"]
 
+import contextlib
 import importlib
 import json
 import os
+import warnings
 
 import torch
 import torch.distributed.checkpoint as dist_cp
 from torch import distributed as dist
 from torch.distributed.checkpoint._consolidate_hf_safetensors import (
     _calculate_max_contiguous_elements,
+    _warn_skipped_fqns,
     _write_sub_tensor_to_file_optimized,
     consolidate_safetensors_files,
     consolidate_safetensors_files_on_every_rank,
@@ -166,7 +169,6 @@ class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):
 
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
     def test_consolidate_with_two_ranks(self):
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
@@ -181,10 +183,19 @@ class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):
 
         global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
 
-        fqn_to_index_mapping = {"dtensor": 1, "dtensor_col": 2}
-        consolidate_safetensors_files_on_every_rank(
-            checkpoint_dir, output_dir, fqn_to_index_mapping=fqn_to_index_mapping
-        )
+        # mtp.weight was not saved; rank 1 owns its file, rank 0 reports it
+        fqn_to_index_mapping = {"dtensor": 1, "dtensor_col": 2, "mtp.weight": 1}
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            consolidate_safetensors_files_on_every_rank(
+                checkpoint_dir, output_dir, fqn_to_index_mapping=fqn_to_index_mapping
+            )
+        skipped = [
+            str(w.message) for w in caught if "fqn_to_index_mapping" in str(w.message)
+        ]
+        self.assertEqual(len(skipped), 1 if self.rank == 0 else 0)
+        if self.rank == 0:
+            self.assertRegex(skipped[0], r"^Skipping 1 tensor\(s\) .*: mtp\.weight\. ")
 
         file1_path = os.path.join(output_dir, "model-00001-of-00002.safetensors")
         file2_path = os.path.join(output_dir, "model-00002-of-00002.safetensors")
@@ -210,6 +221,49 @@ class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):
                 },
             )
 
+        dist.barrier()
+
+    @with_comms
+    @with_temp_dir
+    def test_consolidate_raises_on_every_rank_when_no_mapping_entry_was_saved(self):
+        if importlib.util.find_spec("safetensors") is None:
+            print("safetensors not installed")
+            return
+
+        output_dir = os.path.join(self.temp_dir, "consolidated")
+        os.makedirs(output_dir, exist_ok=True)
+        self._create_d_tensors()
+
+        with self.assertRaisesRegex(ValueError, r"None of the 1 tensor\(s\)"):
+            consolidate_safetensors_files_on_every_rank(
+                self.temp_dir, output_dir, fqn_to_index_mapping={"mtp.weight": 1}
+            )
+        self.assertFalse(os.path.exists(os.path.join(output_dir, _metadata_fn)))
+        dist.barrier()
+
+    @with_comms
+    @with_temp_dir
+    def test_consolidate_warns_after_writing_the_index(self):
+        if importlib.util.find_spec("safetensors") is None:
+            print("safetensors not installed")
+            return
+
+        output_dir = os.path.join(self.temp_dir, "consolidated")
+        os.makedirs(output_dir, exist_ok=True)
+        self._create_d_tensors()
+
+        # Raising the warning on rank 0 before the barrier would block the other ranks
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", message="Skipping", category=UserWarning)
+            with (
+                self.assertRaisesRegex(UserWarning, r"^Skipping 1 tensor\(s\)")
+                if self.rank == 0
+                else contextlib.nullcontext()
+            ):
+                consolidate_safetensors_files_on_every_rank(
+                    self.temp_dir, output_dir, {"dtensor": 1, "mtp.weight": 2}
+                )
+        self.assertTrue(os.path.exists(os.path.join(output_dir, _metadata_fn)))
         dist.barrier()
 
     @with_comms
@@ -379,6 +433,18 @@ class TestConsolidateHFSafeTensorsNoProcessGroup(DTensorTestBase):
         expected_tensor[:, 3:5] = sub_tensor_data.view(3, 2)
 
         self.assertTrue(torch.equal(result_tensor, expected_tensor))
+
+    def test_warn_skipped_fqns(self) -> None:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _warn_skipped_fqns(set())
+        self.assertEqual(caught, [])
+
+        with self.assertWarnsRegex(
+            UserWarning,
+            r"Skipping 21 tensor\(s\) .*: t00, .*, t19, \.\.\. \(truncated\)\. ",
+        ):
+            _warn_skipped_fqns({f"t{i:02d}" for i in range(21)})
 
 
 if __name__ == "__main__":
