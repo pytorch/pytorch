@@ -8,6 +8,7 @@ import itertools
 import os
 import re
 import sys
+import types
 import unittest
 import warnings
 from collections import defaultdict
@@ -28,7 +29,7 @@ from torch._inductor.cudagraph_trees import (
     cudagraphify_impl as tree_cudagraphify_impl,
     ExecutionState,
 )
-from torch._inductor.cudagraph_utils import PlaceholderInfo
+from torch._inductor.cudagraph_utils import check_for_mutation, PlaceholderInfo
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._ops import OpOverload
@@ -236,13 +237,10 @@ class CUDAGraphAPIOnlyTests(TestCase):
         self.assertEqual(tuple(containers), existing_devices)
 
     def test_check_for_mutation_counts_a_user_input_without_trees(self):
-        import types
-
-        from torch._inductor.cudagraph_utils import check_for_mutation
-
-        # Input 0 is a user input, 1 a static one; both are mutated.
+        # Input 0 is a user input, 1 a static one; both are mutated, the static
+        # one listed first, so its trace would be the one reported.
         func = types.SimpleNamespace(
-            mutated_input_idxs=[0, 1],
+            mutated_input_idxs=[1, 0],
             static_input_idxs=[1],
             placeholders=[
                 PlaceholderInfo(f"arg{i}", None, [], f"mutates arg{i}") for i in (0, 1)
@@ -919,6 +917,11 @@ if HAS_CUDA_AND_TRITON:
         @torch._dynamo.config.patch("cudagraph_backend_support_input_mutation", True)
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
         def test_mutation_on_inp(self, backend, trees_off_after_build):
+            if trees_off_after_build and backend == "cudagraphs":
+                # The backend's static inputs exclude an inlined module's tensor,
+                # so this mutation skips with trees on, before they turn off.
+                self.skipTest("nothing for trees_off_after_build to change")
+
             def foo(x):
                 x.add_(2)
                 return x
@@ -962,7 +965,8 @@ if HAS_CUDA_AND_TRITON:
             for i in range(3):
                 if i == 1 and trees_off_after_build:
                     # A tree wrapper is built once, so it keeps the tree rule.
-                    self.enterContext(config.patch("triton.cudagraph_trees", False))
+                    trees_off = config.patch("triton.cudagraph_trees", False)
+                    self.graph_stack.enter_context(trees_off)
                 self.assertEqual(foo(mod, inp()), mod2(inp()))
                 self.assertEqual(mod.buf, mod2.buf)
 
@@ -1078,7 +1082,8 @@ if HAS_CUDA_AND_TRITON:
                     if i == 1 and trees_off_after_build:
                         # A tree wrapper (the cudagraphs backend builds only those)
                         # is built once, so it keeps the tree rule.
-                        self.enterContext(config.patch("triton.cudagraph_trees", False))
+                        trees_off = config.patch("triton.cudagraph_trees", False)
+                        self.graph_stack.enter_context(trees_off)
                     torch.compiler.cudagraph_mark_step_begin()
                     inp = torch.rand([4], device="cuda")
 
@@ -6100,6 +6105,9 @@ if HAS_CUDA_AND_TRITON:
                     compiled(torch.rand([20], device="cuda")).backward()
                     self.assertEqual(w.grad, torch.ones_like(w))
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hits)
+                # Before the fix the hit's post-compile raised, which the cache
+                # caught as a bypass.
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
                 # The backward told the manager it ran: one graph, none pending.
                 manager = self.get_manager()
                 self.assertEqual(manager.new_graph_id().id, 1)
@@ -6125,6 +6133,29 @@ if HAS_CUDA_AND_TRITON:
 
         # Under graph partition the backend ignores CPU ops when it checks for skips.
         @torch._inductor.config.patch("graph_partition", False)
+        @torch._inductor.config.patch("graph_partition", False)
+        @torch._inductor.config.patch("triton.cudagraph_capture_sizes", (2,))
+        def test_skipped_backward_without_partition_of_a_forward_without_graph(self):
+            # Lazily lowered, without partition: capture sizes run the forward
+            # eagerly (no manager), and the backward's own fail reason takes
+            # post-compile's skip branch, which hands it to the manager.
+            w = torch.rand([20], device="cuda", requires_grad=True)
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return (x.sin() * w).sum()
+
+            backwards = self._spy_on_backward_generation()
+            for _ in range(3):
+                x = torch.rand([20], device="cuda")
+                out = foo(x)
+                w.grad = None
+                with config.patch(force_disable_cudagraph_TESTING_ONLY=True):
+                    out.backward()
+                self.assertEqual(w.grad, x.sin())
+            self.assertEqual(backwards(), 1)
+            self.assertIsNone(self.get_manager())
+
         @torch._functorch.config.patch("force_non_lazy_backward_lowering", True)
         def test_cudagraphs_backend_with_eagerly_lowered_skipped_backward(self):
             # The backward round-trips through the CPU, so it runs without a CUDA
