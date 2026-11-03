@@ -1229,7 +1229,7 @@ if(USE_NCCL)
 endif()
 
 # ---[ NCCL EP
-# __caffe2_nccl_ep supplies EP headers and the optional static library.
+# __caffe2_nccl_ep supplies EP headers and the static or shared library.
 # Only torch._nccl_ep links this target; keep it out of Caffe2_CUDA_DEPENDENCY_LIBS
 # so importing torch does not require the external nccl-extensions package.
 if(USE_NCCL_EP)

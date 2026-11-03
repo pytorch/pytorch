@@ -1,7 +1,7 @@
 if(NOT __NCCL_EP_INCLUDED)
   set(__NCCL_EP_INCLUDED TRUE)
 
-  # Both modes compile the bindings against the pinned public headers.
+  # EP sources are needed with both source and system NCCL.
   set(__NCCL_EP_SOURCE_DIR "${PROJECT_SOURCE_DIR}/third_party/nccl-extensions")
   if(NOT EXISTS "${__NCCL_EP_SOURCE_DIR}")
     # Keep the bundled notices in third_party/nccl_ep in sync with this pin.
@@ -16,20 +16,6 @@ if(NOT __NCCL_EP_INCLUDED)
       SOURCE_DIR "${__NCCL_EP_SOURCE_DIR}"
     )
     FetchContent_Populate(nccl_extensions)
-  endif()
-
-  set(NCCL_EP_INCLUDE_DIRS "${CMAKE_CURRENT_BINARY_DIR}/nccl_ep/include")
-  configure_file("${__NCCL_EP_SOURCE_DIR}/nccl_ep/include/nccl_ep.h"
-    "${NCCL_EP_INCLUDE_DIRS}/nccl_ep.h" COPYONLY)
-  configure_file("${__NCCL_EP_SOURCE_DIR}/nccl_ep/include/ep_enums.h"
-    "${NCCL_EP_INCLUDE_DIRS}/nccl_ep/ep_enums.h" COPYONLY)
-
-  add_library(__caffe2_nccl_ep INTERFACE)
-  target_include_directories(__caffe2_nccl_ep INTERFACE ${NCCL_EP_INCLUDE_DIRS})
-
-  if(USE_SYSTEM_NCCL_EP)
-    # The nccl-extensions package supplies the shared runtime.
-    return()
   endif()
 
   # NCCL is built (Makefile) into this tree by cmake/External/nccl.cmake.
@@ -67,17 +53,21 @@ if(NOT __NCCL_EP_INCLUDED)
     set(__NCCL_EP_ARCH_ARG "-DCMAKE_CUDA_ARCHITECTURES=${__NCCL_EP_ARCHS}")
   endif()
 
-  # Embedded EP uses PyTorch's selected NCCL, whether built or installed.
+  # Link EP statically with source NCCL and dynamically with system NCCL.
   if(USE_SYSTEM_NCCL)
     list(GET NCCL_INCLUDE_DIRS 0 __nccl_inc)
     get_filename_component(__NCCL_EP_NCCL_HOME "${__nccl_inc}" DIRECTORY)
+    set(__NCCL_EP_TARGET nccl_ep_shared)
+    set(__NCCL_EP_LIB "libnccl_ep.so")
     set(__NCCL_EP_DEPENDS "")
   else()
     set(__NCCL_EP_NCCL_HOME "${__NCCL_BUILD_DIR}")
+    set(__NCCL_EP_TARGET nccl_ep_static)
+    set(__NCCL_EP_LIB "libnccl_ep.a")
     set(__NCCL_EP_DEPENDS nccl_external)
   endif()
 
-  message(STATUS "Configuring NCCL EP (__caffe2_nccl_ep): libnccl_ep.a against NCCL at ${__NCCL_EP_NCCL_HOME}")
+  message(STATUS "Configuring NCCL EP (__caffe2_nccl_ep): ${__NCCL_EP_LIB} against NCCL at ${__NCCL_EP_NCCL_HOME}")
   ExternalProject_Add(nccl_ep_external
     SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/nccl_ep_build
     BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/nccl_ep
@@ -96,18 +86,21 @@ if(NOT __NCCL_EP_INCLUDED)
       -DNCCL_EP_BUILDDIR=${__NCCL_EP_OUTPUT_DIR}
       -DNCCL_EP_SOURCE_DIR=${__NCCL_EP_SOURCE_DIR}/nccl_ep
     BUILD_COMMAND "${CMAKE_COMMAND}" --build <BINARY_DIR> --config $<CONFIG>
-      --target nccl_ep_static
-    BUILD_BYPRODUCTS "${__NCCL_EP_OUTPUT_DIR}/lib/libnccl_ep.a"
+      --target ${__NCCL_EP_TARGET}
+    BUILD_BYPRODUCTS "${__NCCL_EP_OUTPUT_DIR}/lib/${__NCCL_EP_LIB}"
     BUILD_ALWAYS TRUE
     INSTALL_COMMAND ""
     # Wait for nccl_external only when core NCCL is built from source.
     DEPENDS ${__NCCL_EP_DEPENDS}
   )
 
-  set(NCCL_EP_LIBRARIES "${__NCCL_EP_OUTPUT_DIR}/lib/libnccl_ep.a")
+  set(NCCL_EP_LIBRARIES "${__NCCL_EP_OUTPUT_DIR}/lib/${__NCCL_EP_LIB}")
+  set(NCCL_EP_INCLUDE_DIRS "${__NCCL_EP_OUTPUT_DIR}/include")
 
+  add_library(__caffe2_nccl_ep INTERFACE)
   add_dependencies(__caffe2_nccl_ep nccl_ep_external)
   target_link_libraries(__caffe2_nccl_ep INTERFACE ${NCCL_EP_LIBRARIES})
+  target_include_directories(__caffe2_nccl_ep INTERFACE ${NCCL_EP_INCLUDE_DIRS})
   # libnccl_ep's JIT calls CUDA Driver APIs; pull in libcuda.so.
   if(TARGET CUDA::cuda_driver)
     target_link_libraries(__caffe2_nccl_ep INTERFACE CUDA::cuda_driver)

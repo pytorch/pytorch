@@ -1,6 +1,4 @@
 // Standalone Python extension (torch._nccl_ep) for the NCCL EP bindings.
-//
-// The Python loader preloads libnccl_ep for external EP builds.
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_ep.hpp>
 #include <torch/csrc/utils/pybind.h>
 
@@ -10,8 +8,6 @@ namespace py = pybind11;
 
 PYBIND11_MODULE(_nccl_ep, m) {
   using namespace c10d::nccl_ep;
-
-  m.attr("_use_system_nccl_ep") = bool(USE_SYSTEM_NCCL_EP);
 
   py::enum_<NcclEpLayout>(m, "Layout")
       .value("FLAT", NcclEpLayout::Flat)

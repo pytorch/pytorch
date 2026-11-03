@@ -25,7 +25,7 @@ def _prepare_nccl_extensions() -> None:
             "Install it with `pip install nccl-extensions==0.1.0`."
         ) from e
 
-    # The public API loads libnccl_ep with RTLD_GLOBAL for our native bindings.
+    # Preload the package's CUDA-specific library for the extension's SONAME.
     ep.get_lib_version()
 
 
@@ -33,11 +33,11 @@ def _import_nccl_ep() -> Any:
     if importlib.util.find_spec("torch._nccl_ep") is None:
         raise ImportError("TokenSwitchNCCL requires PyTorch built with USE_NCCL_EP=1.")
     try:
-        # Embedded EP imports without the external Python package.
+        # Static EP and shared builds with a discoverable library import directly.
         # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
         import torch._nccl_ep as _ep
     except ImportError as e:
-        if "undefined symbol: ncclEp" not in str(e):
+        if "libnccl_ep.so" not in str(e) or "No such file or directory" not in str(e):
             raise
         _prepare_nccl_extensions()
         # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
