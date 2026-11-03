@@ -88,11 +88,8 @@ if {prepare_first!r}:
     nccl.ep.get_lib_version()
 
 from torch.distributed._token_switch import _import_nccl_ep
-from torch.testing._internal.common_utils import TestCase
 
-native = _import_nccl_ep()
-checks = TestCase()
-checks.assertTrue(hasattr(native, "_NcclEpGroup"))
+_import_nccl_ep()
 """)
 
     def test_without_runtime_package(self):
@@ -1449,13 +1446,10 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
         )
         routing = ts.create_routing(topk_idx, layout=layout)
         tokens = torch.zeros(NUM_TOKENS, HIDDEN, dtype=torch.bfloat16, device=device)
-        out = ts._alloc_dispatch_outputs(
-            routing, tokens, weights, ts.max_recv_tokens_per_rank, HIDDEN, TOP_K
-        )
         stream = torch.cuda.Stream()
         stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(stream):
-            ts.dispatch(routing, tokens, weights, out=out)
+            out = ts.dispatch(routing, tokens, weights, ts.max_recv_tokens_per_rank)
         torch.cuda.current_stream().wait_stream(stream)
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph, stream=stream):

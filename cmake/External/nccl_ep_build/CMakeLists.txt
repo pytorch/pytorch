@@ -14,18 +14,16 @@ string(REPLACE "." ";" __cuda_ver_parts "${CUDAToolkit_VERSION}")
 list(GET __cuda_ver_parts 0 CUDA_MAJOR)
 list(GET __cuda_ver_parts 1 CUDA_MINOR)
 
+# The updated EP layout moved this generated header under nccl_ep/.
+file(REMOVE "${NCCL_EP_BUILDDIR}/include/ep_enums.h")
 add_subdirectory("${NCCL_EP_SOURCE_DIR}" nccl_ep)
 
-# The static EP target's CUDA device link does not need a separate libnccl.so.
-get_target_property(libs nccl_ep_static LINK_LIBRARIES)
-list(REMOVE_ITEM libs -lnccl)
-set_property(TARGET nccl_ep_static PROPERTY LINK_LIBRARIES "${libs}")
-
-# Keep matching core and EP headers together for the JIT include path and cache
-# fingerprint. Copy only core headers, excluding stale EP headers in NCCL_HOME.
-file(GLOB_RECURSE nccl_device_headers CONFIGURE_DEPENDS
-  RELATIVE "${NCCL_HOME}/include" "${NCCL_HOME}/include/nccl_device/*")
-foreach(header nccl.h nccl_device.h ${nccl_device_headers})
-  configure_file("${NCCL_HOME}/include/${header}"
-    "${NCCL_EP_BUILDDIR}/include/${header}" COPYONLY)
-endforeach()
+# System NCCL headers must also be available in EP's generated JIT include path.
+# Copy only core headers so stale EP headers cannot overwrite the pinned ones.
+if(NOT "${NCCL_HOME}" STREQUAL "${NCCL_EP_BUILDDIR}")
+  file(COPY
+    "${NCCL_HOME}/include/nccl.h"
+    "${NCCL_HOME}/include/nccl_device.h"
+    "${NCCL_HOME}/include/nccl_device"
+    DESTINATION "${NCCL_EP_BUILDDIR}/include")
+endif()
