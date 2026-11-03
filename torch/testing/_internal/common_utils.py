@@ -71,6 +71,7 @@ from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
 from torch._utils_internal import get_writable_path
 from torch._logging.scribe import open_source_signpost
 from torch.nn import (
+    BufferDict,
     ModuleDict,
     ModuleList,
     ParameterDict,
@@ -5078,7 +5079,7 @@ class TestCase(expecttest.TestCase):
                 ScriptList,
                 torch.utils.data.dataset.Subset,
             ),
-            mapping_types=(Mapping, ModuleDict, ParameterDict, ScriptDict),
+            mapping_types=(Mapping, BufferDict, ModuleDict, ParameterDict, ScriptDict),
             rtol=rtol,
             rtol_override=self.rel_tol,
             atol=atol,
