@@ -509,6 +509,9 @@ def is_aligned_realized_tensor(x: Buffer | TensorBox, alignment: int) -> bool:
     if (
         not isinstance(x, IRNode)
         or x.maybe_get_stride() is None
+        # FlexibleLayout strides are provisional: the layout can still be frozen in a
+        # different order (e.g. by decide_layout() in ExternKernel.process_kernel).
+        or isinstance(x.maybe_get_layout(), FlexibleLayout)
         or free_unbacked_symbols(x.get_stride())
         or free_unbacked_symbols(x.get_size())
     ):
