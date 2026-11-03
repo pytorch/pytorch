@@ -127,7 +127,7 @@ A single line of code can have deep cross-cutting implications: a missing device
 
 ### Using sub-agents
 
-The review checklist is large. You cannot hold the full context of every infrastructure system in your head. **Spawn sub-agents** to investigate whether checklist items apply: read surrounding code or infrastructure the PR should be using. Spawn them in parallel for independent areas. A typical medium PR should spawn 3-8 sub-agents.
+The review checklist is large, and a single pass over a diff misses problems that an independent second pass catches. You cannot hold the full context of every infrastructure system in your head. Fan out whatever the PR's size, under the conditions in Step 2. Also **spawn sub-agents** to investigate whether checklist items apply: read surrounding code or infrastructure the PR should be using. Spawn them in parallel for independent areas.
 
 Sub-agents overlap on purpose. Expect the same defect back from two or three of them in different words; that signals importance, not multiplicity. Reconcile in Step 4, before spending verification agents on it.
 
@@ -173,7 +173,16 @@ Before reviewing, build understanding of what the PR touches and why:
 
 Go through **every changed line** in the diff and evaluate it against the review checklist in [review-checklist.md](review-checklist.md).
 
-Review every changed file covered by a `REVIEW.md` with its rules applied, in a sub-agent where possible; split the work along `REVIEW.md` directories. Give each sub-agent the `REVIEW.md` paths covering its files; it reads them and applies them alongside the checklist, including any rules they relax.
+When you have the Agent tool, whatever the PR's size, and unless the Time Budget's convergence or posting window is open (see "Time Budget"), spawn these reviewers in parallel, each over the full diff with the checklist's path and the `REVIEW.md` paths covering the changed files, with which files each one covers (Step 1, item 5), and each told to report every candidate problem with its `file:line` and evidence:
+
+- **Correctness and security:** logic, edge cases, error handling, concurrency, dtype, device and shape handling, and the checklist's security items.
+- **Tests:** missing coverage, tests that cannot fail or do not check what they claim, flakiness.
+- **API and compatibility** (also give it [bc-guidelines.md](bc-guidelines.md)): public names, backward compatibility, docstrings, error messages, documentation.
+- **Conventions and PyTorch infrastructure:** existing utilities and idioms the PR should use, the checklist's PyTorch Infrastructure items, performance.
+
+A sub-agent does not see your system prompt, so give every reviewer, and every other sub-agent you spawn, the diff (its file path, or the diff itself when it is command output) and where the checkout is, and any rules your system prompt sets about untrusted pull request content, verbatim. When they return, review the diff yourself as well. Their reports are candidates, not findings: Step 4 merges them and Step 5 checks them.
+
+Review every changed file covered by a `REVIEW.md` with its rules applied, including any rules they relax. With the fan-out, the reviewers above do this; without it, apply them yourself.
 
 ### Step 3: Check Backward Compatibility
 
@@ -193,7 +202,7 @@ Only then assign each survivor to exactly one section (see "One finding, one sec
 
 ### Step 5: Fact-Check
 
-Fact-check the **consolidated** list, never the raw candidates. Scale the number of agents to the task: group findings that touch the same code or subsystem into one agent, and give a finding its own agent only when verifying it needs deep investigation. A small PR usually needs 1-2 agents; rarely spawn more than 5.
+Fact-check the **consolidated** list, never the raw candidates. Scale the number of agents to the task: group findings that touch the same code or subsystem into one agent, and give a finding its own agent only when verifying it needs deep investigation. When Step 4 leaves findings and you have the Agent tool, spawn at least one agent, even for a small PR, unless the convergence or posting window is open (see "Time Budget"); otherwise fact-check them yourself. Rarely spawn more than 5.
 
 Spawn the agents in parallel. Each independently verifies its findings by re-reading the relevant code and surrounding context (give each agent the paths of any `REVIEW.md` covering its findings' files), and returns **valid**, **invalid**, or **needs rewording** for each. Drop invalid issues, reword the rest. If unsure, leave the issue with a comment for the author that this is low confidence.
 
