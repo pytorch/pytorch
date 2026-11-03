@@ -9865,7 +9865,7 @@ class FallbackKernel(ExternKernelAlloc):
         )
 
     def codegen_outputs(self) -> Sequence[Any]:
-        if self.outputs:
+        if self.outputs or isinstance(self.layout, MultiOutputLayout):
             return self.outputs
         if isinstance(self.layout, Layout):
             return [self]
@@ -10190,6 +10190,8 @@ class FallbackKernel(ExternKernelAlloc):
             wrapper.generate_fallback_kernel(self)
 
         self.codegen_unbacked_symbol_defs(wrapper)
+        # After the unbacked symbol defs, which may read an unused output's size.
+        wrapper.codegen_free_unused_outputs(self)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
             self.codegen_alignment_asserts(wrapper)
@@ -12235,6 +12237,14 @@ class _CollectiveKernel(FallbackKernel):
 
     def has_side_effects(self) -> bool:
         return True
+
+    def codegen_outputs(self) -> Sequence[Any]:
+        # See NOTE: [special handling of all_reduce_coalesced_'s return value]
+        # Collective lowerings such as batch_p2p_ops carry list returns as
+        # mutation outputs, so empty `outputs` does not mean an empty return.
+        if not self.outputs and isinstance(self.layout, MultiOutputLayout):
+            return self.mutation_outputs
+        return super().codegen_outputs()
 
     # This is identical to FallbackKernel.set_cpp_kernel(), minus the
     # part that checks against input aliasing and mutation.
