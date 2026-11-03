@@ -3615,6 +3615,11 @@ class TestSyncDecisionCrossRanksAccelerator(_SyncDecisionCrossRanksBase):
         self.assertEqual(mock_node_2.override_estimated_runtime, 0.3)
         self.assertEqual(mock_node_3.override_estimated_runtime, 0.5)
 
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+class TestSyncDecisionCrossRanksCUDA(_SyncDecisionCrossRanksBase):
+    hw_classification = HardwareClassification.CUDA
+
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_benchmark_collective_with_symint_args(self):
@@ -3669,11 +3674,6 @@ class TestSyncDecisionCrossRanksAccelerator(_SyncDecisionCrossRanksBase):
         for n in (7, 11):
             x = torch.randn(n, HIDDEN, device=self.device)
             compiled(x, w, group_size, group_name)
-
-
-@requires_accelerator_dist_backend(["nccl", "xccl"])
-class TestSyncDecisionCrossRanksCUDA(_SyncDecisionCrossRanksBase):
-    hw_classification = HardwareClassification.CUDA
 
     @skip_if_lt_x_gpu(2)
     def test_all_gather_comm_analysis(self):
