@@ -68,6 +68,7 @@ from torch._C._dynamo.guards import (
     GuardManager,
     install_nn_module_hook_membership_guard,
     install_no_tensor_aliasing_guard,
+    install_object_alias_pattern_guard,
     install_object_aliasing_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
@@ -3704,8 +3705,11 @@ class GuardBuilder(GuardBuilderBase):
         refs = ", ".join(self.arg_ref(source.name) for source in sources)
         code = [f"___receiver_alias_pattern(({refs},)) == {aliases!r}"]
         self._set_guard_export_info(guard, code)
-        self.add_python_lambda_leaf_guard_to_root(
-            code, get_verbose_code_parts(code, guard)
+        install_object_alias_pattern_guard(
+            [self.get_guard_manager_from_source(source) for source in sources],
+            aliases,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
         )
 
     # Multi-source guard (two inputs aliasing) — not expressible as a
@@ -3848,13 +3852,16 @@ class GuardBuilder(GuardBuilderBase):
         if not flags:
             # Empty flags make every membership false, independent of hook IDs.
             # Keep the logical relation for nested reuse, but use a tag-safe leaf.
-            code = [f"dict.__len__({flags_source.name}) == 0"]
+            code = f"dict.__len__({flags_source.name}) == 0"
+            if code in self.already_added_code_parts:
+                return
+            self.already_added_code_parts.add(code)
             self.get_guard_manager_from_source(
                 flags_source
             ).add_dict_length_check_guard(
-                0, get_verbose_code_parts(code, guard), guard.user_stack
+                0, get_verbose_code_parts([code], guard), guard.user_stack
             )
-            self._set_guard_export_info(guard, code)
+            self._set_guard_export_info(guard, [code])
             return
         membership = tuple(key in flags for key in dict.keys(self.get(hooks_source)))
         code = (
@@ -5479,9 +5486,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(
             obj, (types.MethodDescriptorType, types.ClassMethodDescriptorType)
         ):
+            from .variables.object_protocol import Py_TPFLAGS_IMMUTABLETYPE
+
             owner = obj.__objclass__
             flags = type.__dict__["__flags__"].__get__(owner, type(owner))
-            if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
+            if not flags & Py_TPFLAGS_IMMUTABLETYPE:
                 raise torch._dynamo.exc.PackageError(
                     f"Cannot serialize {type(obj).__name__} with a mutable owner"
                 )
@@ -5759,11 +5768,13 @@ def _resolves_by_reference(value: object) -> bool:
             and getattr(owner, value.name, None) is value
         )
     if isinstance(value, (types.MethodDescriptorType, types.ClassMethodDescriptorType)):
+        from .variables.object_protocol import Py_TPFLAGS_IMMUTABLETYPE
+
         owner = value.__objclass__
         # Match GuardsStatePickler's immutable-owner descriptor reducer.
         flags = type.__dict__["__flags__"].__get__(owner, type(owner))
         return (
-            bool(flags & (1 << 8))
+            bool(flags & Py_TPFLAGS_IMMUTABLETYPE)
             and _resolves_by_reference(owner)
             and any(
                 item is value for item in get_type_dict_no_user_code(owner).values()

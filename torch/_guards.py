@@ -817,9 +817,6 @@ class InvokeSubgraphReuseEntry:
     # The graph may have additional outputs from side-effect intermediates;
     # stamp_out_subgraph uses this to return only the user-visible slice.
     num_user_outputs: int = 0
-    # Reinstall guards under each stamped-out call's sources.
-    guard_on_key_order: set[Source] = dataclasses.field(default_factory=set)
-    traced_sources: OrderedSet[Source] = dataclasses.field(default_factory=OrderedSet)
 
 
 @dataclass
@@ -847,6 +844,8 @@ class InvokeSubgraphReuseCondition:
     # On cache hit, we check if any modified VT's source is a base of one
     # of these to detect mutations on captured variables.
     traced_sources: OrderedSet[Source] = dataclasses.field(default_factory=OrderedSet)
+
+    guard_on_key_order: set[Source] = dataclasses.field(default_factory=set)
 
 
 class InvokeSubgraphCache(HopSubgraphCache):

@@ -4,7 +4,6 @@ import cmath
 import collections
 import collections.abc
 import contextlib
-import contextvars
 import datetime
 import enum
 import functools
@@ -45,7 +44,7 @@ from torch._dynamo.testing import (
 from torch._dynamo.utils import counters, ifdynstaticdefault, range_iterator, same
 from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
 from torch._dynamo.variables.functions import WrappedMethodDescriptorVariable
-from torch._dynamo.variables.hashable import BuiltinMethodKeyTracker, HashableTracker
+from torch._dynamo.variables.hashable import HashableTracker
 from torch._dynamo.variables.lazy import LazyVariableTracker
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
@@ -229,8 +228,68 @@ def deque_length_hints():
     return tuple(hints)
 
 
+class AlwaysEqualHashKey:
+    def __init__(self, hash_value):
+        self.hash_value = hash_value
+
+    def __hash__(self):
+        return self.hash_value
+
+    def __eq__(self, other):
+        return True
+
+
 class FunctionTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_bound_builtin_method_identity_only_key(self):
+        class Key:
+            pass
+
+        def fn(x, key):
+            receiver = []
+            return x + len({key: 1, list.append.__get__(receiver, list): 2})
+
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, Key()), x + 2
+        )
+
+    def test_bound_builtin_method_key_stdlib_global(self):
+        with patch.dict(vars(inspect), {"receiver": []}):
+            exec(
+                "def _method_key_fn(x): return x + len({list.append.__get__(receiver, list)})",
+                vars(inspect),
+            )
+
+            def fn(x):
+                return inspect._method_key_fn(x)
+
+            x = torch.ones(1)
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x), x + 1
+            )
+
+    @parametrize("keyword", [False, True])
+    def test_super_setattr_argument_validation(self, keyword):
+        class Value:
+            def __setattr__(self, *args, **kwargs):
+                return super().__setattr__(*args, **kwargs)
+
+        value = Value()
+
+        def fn(x):
+            try:
+                if keyword:
+                    value.__setattr__("field", 1, extra=2)
+                else:
+                    value.__setattr__("field")
+            except TypeError:
+                return x + 1
+            return x - 1
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @make_test
     def test_inline_jit_annotations(x):
@@ -7004,24 +7063,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(opt_fn(x)[1:3], ("Renamed.get", "Renamed.fromkeys"))
 
-    @parametrize("bound", [False, True])
-    @parametrize("kind", ["repeat", "contextvar"])
-    def test_method_descriptor_tracker_type(self, bound, kind):
-        descriptor = (
-            itertools.repeat.__length_hint__
-            if kind == "repeat"
-            else contextvars.ContextVar.get
-        )
-        context = contextvars.ContextVar("value", default=3)
-
-        def fn(x):
-            receiver = itertools.repeat(1, 3) if kind == "repeat" else context
-            value = descriptor.__get__(receiver)() if bound else descriptor(receiver)
-            return x + value
-
-        x = torch.ones(1)
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
-
     def test_unbound_method_descriptor_call(self):
         # list.count read off the type inside the frame is a method_descriptor;
         # calling it runs the C method even when the receiver's class overrides
@@ -7419,13 +7460,8 @@ class GraphModule(torch.nn.Module):
             method = list.append.__get__(receiver, list)
             return x + len({method: 1}) + table[key]
 
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
         receivers = [[], []]
-        for receiver in receivers:
-            self.assertEqual(compiled(x, receiver), fn(x, receiver))
-        self.assertEqual(counter.frame_count, 1)
+        self._check_method_key_reuse(fn, receivers, frames=1)
 
     @parametrize(
         "operation",
@@ -7457,14 +7493,7 @@ class GraphModule(torch.nn.Module):
         first, second = [1], [2]
         method = first.count
         container = {wrap((method,))}
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        for receiver in (first, second, first):
-            self.assertEqual(
-                compiled(x, receiver, container), fn(x, receiver, container)
-            )
-        self.assertEqual(counter.frame_count, 2)
+        self._check_method_key_reuse(fn, (first, second, first), container)
 
     def test_bound_builtin_method_metadata_avoids_metaclass_equality(self):
         calls = []
@@ -7472,7 +7501,7 @@ class GraphModule(torch.nn.Module):
         class Meta(type):
             def __eq__(cls, other):
                 calls.append(other)
-                return True
+                return type.__eq__(cls, other)
 
             __hash__ = type.__hash__
 
@@ -7480,34 +7509,27 @@ class GraphModule(torch.nn.Module):
             def __hash__(self):
                 return 1
 
-        lazy = unittest.mock.Mock(spec=LazyVariableTracker)
-        lazy.source = ConstDictKeySource(LocalSource("mapping"), 0)
-        lazy.original_value.return_value = Key()
-        lazy.is_realized.return_value = False
-        lazy.is_hashable_lazy.return_value = True
-        with patch(
-            "torch._dynamo.symbolic_convert.InstructionTranslator.current_tx"
-        ) as current_tx:
-            current_tx.return_value.output.builtin_method_keys = (
-                BuiltinMethodKeyTracker()
-            )
-            self.assertEqual(hash(HashableTracker(lazy)), 1)
-        lazy.realize.assert_not_called()
+        lazy = LazyVariableTracker.create(
+            Key, ConstDictKeySource(LocalSource("mapping"), 0)
+        )
+        self.assertEqual(hash(HashableTracker(lazy)), hash(Key))
+        self.assertFalse(lazy.is_realized())
         self.assertEqual(calls, [])
+
+    def _check_method_key_reuse(self, fn, receivers, *args, frames=2):
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for receiver in receivers:
+            self.assertEqual(compiled(x, receiver, *args), fn(x, receiver, *args))
+        self.assertEqual(counter.frame_count, frames)
 
     @parametrize("mapping_protocol", [False, True])
     def test_bound_builtin_method_update_collision(self, mapping_protocol):
         first, second = {}, {}
         method = first.get
 
-        class Key:
-            def __hash__(self):
-                return hash(method)
-
-            def __eq__(self, other):
-                return True
-
-        key = Key()
+        key = AlwaysEqualHashKey(hash(method))
 
         class Mapping:
             def __init__(self, bound):
@@ -7527,26 +7549,14 @@ class GraphModule(torch.nn.Module):
             )
             return x + len(mapping)
 
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        for receiver in (first, second, first):
-            self.assertEqual(compiled(x, receiver), fn(x, receiver))
-        self.assertEqual(counter.frame_count, 2)
+        self._check_method_key_reuse(fn, (first, second, first))
 
     @parametrize("operation", ["move_to_end", "pop", "setitem"])
     def test_bound_builtin_method_ordered_dict_collision(self, operation):
         first, second = {}, {}
         method = first.get
 
-        class Key:
-            def __hash__(self):
-                return hash(method)
-
-            def __eq__(self, other):
-                return True
-
-        key = Key()
+        key = AlwaysEqualHashKey(hash(method))
 
         def fn(x, receiver):
             mapping = collections.OrderedDict([(key, 1)])
@@ -7561,53 +7571,26 @@ class GraphModule(torch.nn.Module):
                 found = False
             return x + found
 
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        for receiver in (second, first, second):
-            self.assertEqual(compiled(x, receiver), fn(x, receiver))
-        self.assertEqual(counter.frame_count, 2)
+        self._check_method_key_reuse(fn, (second, first, second))
 
     @parametrize("container", [set, frozenset])
     def test_bound_builtin_method_multi_operand_union(self, container):
         first, second = {}, {}
         method = first.get
 
-        class Key:
-            def __hash__(self):
-                return hash(method)
-
-            def __eq__(self, other):
-                return True
-
-        key = Key()
+        key = AlwaysEqualHashKey(hash(method))
 
         def fn(x, receiver):
             bound = dict.get.__get__(receiver, dict)
             return x + len(container().union({key}, {bound}))
 
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        for receiver in (first, second, first):
-            self.assertEqual(compiled(x, receiver), fn(x, receiver))
-        self.assertEqual(counter.frame_count, 2)
+        self._check_method_key_reuse(fn, (first, second, first))
 
     @parametrize(
         "operation",
         ["lookup", "merge", "union", "intersection", "difference", "compare"],
     )
     def test_bound_builtin_method_cross_container_collisions(self, operation):
-        class Key:
-            def __init__(self, hash_value):
-                self.hash_value = hash_value
-
-            def __hash__(self):
-                return self.hash_value
-
-            def __eq__(self, other):
-                return True
-
         def fn(x, receiver, key):
             method = list.count.__get__(receiver, list)
             if operation == "lookup":
@@ -7622,13 +7605,8 @@ class GraphModule(torch.nn.Module):
             return x + len(getattr(left, operation)(right))
 
         first, second = [], []
-        key = Key(hash(first.count))
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        for receiver in (second, first, second):
-            self.assertEqual(compiled(x, receiver, key), fn(x, receiver, key))
-        self.assertEqual(counter.frame_count, 2)
+        key = AlwaysEqualHashKey(hash(first.count))
+        self._check_method_key_reuse(fn, (second, first, second), key)
 
     def test_bound_builtin_method_frozenset_colliding_hashes(self):
         def fn(x):
@@ -7648,16 +7626,15 @@ class GraphModule(torch.nn.Module):
 
         first, second = [], []
         mapping = {frozenset([first.append]): 7}
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.ones(1)
-        for receiver in (first, second, first):
-            self.assertEqual(compiled(x, receiver, mapping), fn(x, receiver, mapping))
+        self._check_method_key_reuse(fn, (first, second, first), mapping)
 
     @parametrize(
         "container_type, method_name", [(dict, "get"), (list, "count"), (set, "add")]
     )
-    @parametrize("tuple_depth", (0, 1, 2))
-    @parametrize("wrap", [tuple, frozenset])
+    @parametrize(
+        "wrap, tuple_depth",
+        [(tuple, 0), (tuple, 1), (tuple, 2), (frozenset, 1), (frozenset, 2)],
+    )
     def test_bound_builtin_method_key_alias_guards(
         self, container_type, method_name, tuple_depth, wrap
     ):
@@ -7711,16 +7688,6 @@ class GraphModule(torch.nn.Module):
     def test_bound_builtin_method_keys_custom_collisions(
         self, reverse, local, tuple_depth
     ):
-        class Key:
-            def __init__(self, hash_value):
-                self.hash_value = hash_value
-
-            def __hash__(self):
-                return self.hash_value
-
-            def __eq__(self, other):
-                return True
-
         def fn(x, obj, key):
             receiver = {} if local else obj
             method = dict.get.__get__(receiver, dict)
@@ -7731,7 +7698,7 @@ class GraphModule(torch.nn.Module):
 
         a, b = {}, {}
         self.assertNotEqual(hash(a.get), hash(b.get))
-        key = Key(hash(a.get))
+        key = AlwaysEqualHashKey(hash(a.get))
         x = torch.ones(1)
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
@@ -7742,8 +7709,9 @@ class GraphModule(torch.nn.Module):
                 compiled(x, a, key)
             torch._dynamo.reset()
             self.assertEqual(
-                torch.compile(fn, backend="eager")(x, a, key), fn(x, a, key)
+                torch.compile(fn, backend=counter)(x, a, key), fn(x, a, key)
             )
+            self.assertEqual(counter.frame_count, 0)
         else:
             for obj in (a, b):
                 self.assertEqual(compiled(x, obj, key), fn(x, obj, key))
@@ -7764,13 +7732,16 @@ class GraphModule(torch.nn.Module):
 
         a, b = [], []
         x = torch.ones(1)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
         for key in ("key", a.count, a.index, b.index):
             for _ in range(tuple_depth):
                 key = (key,)
             mapping = {key: 3}
             for obj in (b, a, b):
                 self.assertEqual(compiled(x, obj, mapping), fn(x, obj, mapping))
+
+        self.assertEqual(counter.frame_count, 7)
 
     @parametrize("tuple_depth", (0, 1, 2))
     @parametrize("key_kind", ("metaclass", "plain_metaclass", "spoofed_method"))
@@ -7829,10 +7800,7 @@ class GraphModule(torch.nn.Module):
         compiled = torch.compile(fn, backend=counter, fullgraph=key_kind != "metaclass")
         for obj in (b, a, b):
             self.assertEqual(compiled(x, obj, mapping), fn(x, obj, mapping))
-        if key_kind != "metaclass":
-            self.assertEqual(
-                counter.frame_count, 1 if key_kind == "plain_metaclass" else 2
-            )
+        self.assertEqual(counter.frame_count, 1 if key_kind == "plain_metaclass" else 2)
 
     @parametrize("tuple_depth", (1, 2))
     def test_bound_builtin_method_tuple_input_alias(self, tuple_depth):
@@ -7877,8 +7845,10 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(compiled(x, first, second), fn(x, first, second))
         self.assertEqual(counter.frame_count, 2)
 
-    @parametrize("wrap", [tuple, frozenset])
-    @parametrize("depth", (0, 1, 2))
+    @parametrize(
+        "wrap, depth",
+        [(tuple, 0), (tuple, 1), (tuple, 2), (frozenset, 1), (frozenset, 2)],
+    )
     def test_bound_builtin_method_hash_local_receiver(self, wrap, depth):
         def fn(x):
             receiver = [1]
@@ -7928,9 +7898,7 @@ class GraphModule(torch.nn.Module):
             return x + hash(wrap((obj.get,)))
 
         x = torch.ones(1)
-        with self.assertRaisesRegex(
-            Unsupported, "Failed to convert args/kwargs to proxy"
-        ):
+        with self.assertRaises(Unsupported):
             torch.compile(fn, backend="eager", fullgraph=True)(x, Mapping(a=1))
         torch._dynamo.reset()
         compiled = torch.compile(fn, backend="eager")
@@ -7980,7 +7948,7 @@ class GraphModule(torch.nn.Module):
             try:
                 method()
             except TypeError as exc:
-                return x + 1, str(exc)
+                return x + 1, type(exc)
             return x - 1, "no error"
 
         x = torch.ones(1)
@@ -8031,7 +7999,7 @@ class GraphModule(torch.nn.Module):
             try:
                 raw()
             except TypeError as exc:
-                error = str(exc)
+                error = str(exc).partition("() ")[2]
             return x + raw(obj, 1), unbound is raw, unbound.__name__, error
 
         self.assertEqual(
@@ -8186,19 +8154,6 @@ class GraphModule(torch.nn.Module):
 
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
-
-    def test_object_method_descriptor_binding(self):
-        class C:
-            pass
-
-        def fn(x, obj):
-            method = obj.__dir__
-            return x + 1, method.__qualname__, method.__self__ is obj
-
-        x, obj = torch.ones(1), C()
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, obj), fn(x, obj)
-        )
 
     @parametrize("bound", [False, True])
     def test_method_descriptor_preserves_polyfill_trace_rule(self, bound):

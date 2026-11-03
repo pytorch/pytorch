@@ -459,6 +459,12 @@ class FuncKwDefaultsGuardAccessor(GuardAccessor): ...
 class GetAttrGuardAccessor(GuardAccessor):
     def get_attr_name(self) -> str: ...
 
+def install_object_alias_pattern_guard(
+    guard_managers: Sequence[GuardManager],
+    aliases: Sequence[int],
+    verbose_code_parts: list[str],
+    user_stack: traceback.StackSummary | None,
+) -> None: ...
 def install_nn_module_hook_membership_guard(
     hooks: GuardManager,
     flags: GuardManager,

@@ -2531,8 +2531,7 @@ class VariableBuilder:
                 source=self.source,
                 tx=self.tx,
             )
-        elif issubclass(type(value), dict):
-            # Input instances already ran __new__, including any subclass override.
+        elif issubclass(type(value), dict) and type(value).__new__ is dict.__new__:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
