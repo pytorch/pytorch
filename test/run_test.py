@@ -64,10 +64,11 @@ from tools.testing.discover_tests import (
     parse_test_module,
     TESTS,
 )
-from tools.testing.do_target_determination_for_s3 import import_results
+from tools.testing.do_target_determination_for_s3 import import_results, TD_RESULTS
 from tools.testing.llm_td.selection import (
     apply_selection,
     LLM_TD_SELECTION_FILE,
+    load_previous_failures,
     Selection,
 )
 from tools.testing.target_determination.gen_artifact import (
@@ -2569,6 +2570,7 @@ def main():
             test_file_times_dict,
             test_config=TEST_CONFIG,
             td_enabled=options.enable_td,
+            previously_failed=load_previous_failures(TD_RESULTS),
         )
         include, exclude = llm.include, llm.exclude
         if IS_CI:
@@ -2646,7 +2648,8 @@ def main():
                     },
                 )
                 # Only tests that ran can fail, so with TD on these are failures in
-                # TD's include (shadow) or in the selection and its hedge (enforced).
+                # TD's include (shadow) or in the selection, the previous failures
+                # in TD's include and the hedge (enforced).
                 if llm is not None:
                     emit_metric("llm_td_shadow_failure", llm.failure_metric(test))
             gen_additional_test_failures_file(
