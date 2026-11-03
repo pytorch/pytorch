@@ -1930,8 +1930,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return None
             if arg.source is None:
                 return VariableTracker.build(tx, False)
-            install_guard(arg.source.make_guard(GuardBuilder.FAKE_TENSOR_MATCH))
             is_fake = torch._C._is_fake_tensor(arg.get_real_value())
+            guard_fn = functools.partial(
+                GuardBuilder.FAKE_TENSOR_MATCH, expected=is_fake
+            )
+            install_guard(arg.source.make_guard(guard_fn))
             return VariableTracker.build(tx, is_fake)
 
         @register(torch._C._is_torch_function_all_disabled)
