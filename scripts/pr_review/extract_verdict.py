@@ -73,9 +73,9 @@ MAX_STRUCTURED_BYTES = 1024 * 1024  # whole-document ceiling, applied before par
 # bottom and everything above it get changes requested.
 STACK_POSITION_LIMIT = 10
 # One ghstack stack-list entry, "* #12345" or "* __->__ #12345" for the current
-# PR. The entry pattern .github/scripts/filter_test_configs.py fails CI with,
-# but CI counts every entry after the marker; ghstack_position counts only the
-# stack list.
+# PR, pinned by a test to the pattern .github/scripts/filter_test_configs.py
+# fails CI with. CI counts every entry after the marker; ghstack_position
+# counts only the stack list.
 _GHSTACK_ENTRY = re.compile(r"\* (?:__->__ )?#\d+\s*")
 _GHSTACK_CURRENT = "__->__"
 
@@ -1040,7 +1040,9 @@ def apply_stack_policy(result: dict, body: str, touched: dict[str, set[int]]) ->
         f["severity"] != "major" for f in findings
     ):
         findings = [{**f, "severity": "major"} for f in findings]
-    # Majors first, so making room for the policy finding drops a minor if any.
+    # At the cap, one finding makes room for the policy finding. Majors first,
+    # so it is the model's last non-major if there is one; either way the drop
+    # is recorded.
     findings.sort(key=lambda f: f["severity"] != "major")
     for path in sorted(p for p, lines in touched.items() if lines):
         finding = {
@@ -1055,12 +1057,15 @@ def apply_stack_policy(result: dict, body: str, touched: dict[str, set[int]]) ->
     else:
         # Like build(), never publish an objection with no finding to point at.
         return result
+    over = max(len(findings) - MAX_FINDINGS, 0)
+    detail = result["dropped_detail"] + [{"reason": "over_cap"}] * over
     return {
         **result,
         "verdict": "changes_requested",
         "summary": summary,
         "findings": findings[:MAX_FINDINGS],
-        "findings_dropped": result["findings_dropped"] + len(findings[MAX_FINDINGS:]),
+        "findings_dropped": result["findings_dropped"] + over,
+        "dropped_detail": detail[:MAX_DROPPED_TRACKED],
     }
 
 

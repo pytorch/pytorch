@@ -671,12 +671,16 @@ bottom of a stack before adding more on top, and use
 [`[no-ci]`](#skip-ci-while-iterating) on PRs that don't need CI yet. PRs with
 `[no-ci]` still count toward the limit.
 
-For `ghstack` stacks, two checks read the stack list in the PR body:
+For `ghstack` stacks, two checks read the PR body:
 
-- CI fails before the build starts on a PR with 10 or more PRs below it,
-  unless the PR has the `ciflow/trunk` label.
 - The automated review in the [PR lifecycle](#pr-lifecycle) requests changes
   on a PR that is 10th or higher from the bottom of its stack.
+- CI fails before the build starts on a PR with 10 or more PRs below it
+  (11th or higher from the bottom), unless the PR has the `ciflow/trunk`
+  label; after adding the label, rerun the failed workflows. CI counts every
+  line that is only `* #N` after the current PR's line, not just the stack
+  list, so don't write other PR references that way in the PR body (`ghstack`
+  copies your commit message into it when it creates the PR).
 
 `ghstack` only rewrites the stack list when you submit, so once the PRs below
 land, rebase the stack and submit it again.
