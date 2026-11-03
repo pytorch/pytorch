@@ -18,6 +18,10 @@ from torch.utils._ordered_set import OrderedSet
 STRICT_FLEXIBLE_LAYOUT_STRIDES_FILES = OrderedSet(
     [
         "test_layout_freezing",
+        "test_lookup_table",
+        "test_max_autotune",
+        "test_select_algorithm",
+        "test_subgraph_choice",
     ]
 )
 
