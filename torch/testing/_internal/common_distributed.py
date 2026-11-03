@@ -589,7 +589,7 @@ def requires_multicast_support():
 def evaluate_platform_supports_symm_mem():
     if TEST_CUDA:
         if TEST_WITH_ROCM:
-            arch_list = ["gfx942", "gfx950"]
+            arch_list = ["gfx942", "gfx950", "gfx1250"]
             for arch in arch_list:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
@@ -1751,7 +1751,9 @@ def _dynamo_dist_per_rank_init(
 
     if init_pg:
         if fake_pg:
-            store = torch.testing._internal.distributed.fake_pg.FakeStore()
+            from torch.testing._internal.distributed.fake_pg import FakeStore
+
+            store = FakeStore()
             c10d.init_process_group(
                 backend="fake",
                 world_size=world_size,
