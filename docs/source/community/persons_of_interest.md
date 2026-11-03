@@ -13,6 +13,8 @@ orphan: true
 - Maintain public user and development documentation
 - Run meetings and share minutes plus roadmap on a half or quarterly basis
 
+See the [maintainer guide](maintainer_guide.md) for how to triage and review issues and pull requests.
+
 ## Lead Core Maintainer
 
 - Alban Desmaison ([albanD](https://github.com/albanD))
@@ -238,7 +240,7 @@ orphan: true
 
 ### AArch64 CPU
 
-- Sunita Nadampalli ([snadampal](https://github.com/snadampal))
+- (emeritus) Sunita Nadampalli ([snadampal](https://github.com/snadampal))
 
 ### Out-of-tree Backend Integration (PrivateUse1)
 
