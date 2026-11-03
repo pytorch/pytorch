@@ -64,7 +64,7 @@ from .autograd_cache import (
 from .codegen import aggregate_runtime_wrapper_sources
 from .descriptors import AOTOutput, ForwardTokenAOTInput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
-from .logging_utils import track_graph_compiling
+from .logging_utils import get_aot_graph_name, track_graph_compiling
 from .runtime_wrappers import (
     _should_disable_saved_tensors_hooks,
     AOTDedupeWrapper,
@@ -104,6 +104,7 @@ from .utils import (
     contain_metadata_mutation_ops,
     get_default_generator,
     make_boxed_func,
+    maybe_wrap_compiled_graph,
     simple_wraps,
     strict_zip,
     unlift_tokens,
@@ -2451,6 +2452,7 @@ def _aot_stage2b_bw_compile(
 
                     placeholder_list[i] = ph_arg.as_strided(ph_size, inductor_stride)
             compiled_bw_func = None
+            graph_name: str | None = None
             if (
                 num_symints_saved_for_bw > 0
                 or aot_config.force_non_lazy_backward_lowering
@@ -2462,6 +2464,7 @@ def _aot_stage2b_bw_compile(
                         # GraphModule. Deepcopying tensors under fake mode is not supported and will
                         # raise when attempting to set storage.
                         bw_module_copy = copy.deepcopy(bw_module)
+                    graph_name = get_aot_graph_name()
                     compiled_bw_func = bw_compiler(bw_module_copy, placeholder_list)
                     del bw_module_copy
                 except Exception as e:
@@ -2484,6 +2487,14 @@ def _aot_stage2b_bw_compile(
                         "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
                         exc_info=True,
                     )
+            # Outside the try: a wrapper raising is a consumer bug, not a
+            # backward-lowering failure, and must not be reported as one.
+            if compiled_bw_func is not None:
+                if graph_name is None:
+                    raise AssertionError("graph_name must be set after backward compilation")
+                compiled_bw_func = maybe_wrap_compiled_graph(
+                    compiled_bw_func, "backward", graph_name=graph_name
+                )
             # Compiled autograd will run the bw_module in the backward pass,
             # so recompilation need happen anyway if the backward pass is ever
             # called.
@@ -2894,9 +2905,15 @@ def _aot_stage2b_compile_forward_or_inference(
                 fw_module, adjusted_flat_args, aot_config.decompositions
             )
 
+        graph_name = get_aot_graph_name()
         with TracingContext.report_output_strides() as fwd_output_strides:
             # pyrefly: ignore[not-callable]
             compiled_fw_func = compiler(fw_module, adjusted_flat_args)
+        compiled_fw_func = maybe_wrap_compiled_graph(
+            compiled_fw_func,
+            "inference" if is_inference else "forward",
+            graph_name=graph_name,
+        )
 
         # Make boxed if needed
         if not getattr(compiled_fw_func, "_boxed_call", False):
