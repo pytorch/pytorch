@@ -38,7 +38,7 @@ ATTEMPTS = 4
 
 def checkout(root: Path, slot: int, sha: str) -> str:
     wt = root / f"slot{slot}"
-    if not wt.exists():
+    if not (wt / ".git").exists():
         subprocess.run(
             ["git", "worktree", "add", "--detach", "-f", str(wt), sha],
             cwd=REPO,
@@ -74,7 +74,8 @@ def run_one(
         try:
             d = query_model(prompt, args.model, args.effort, checkout=wt)
         except subprocess.TimeoutExpired:
-            # Final rather than retried: in CI a hung call runs everything, so score it that way.
+            # Final rather than retried, as in CI: scored as a failed call, so as
+            # run-all under final and TD's own split under final+tdN.
             d, out, transient = {"is_error": True, "result": TIMED_OUT}, None, False
             break
         cost += d.get("total_cost_usd") or 0.0
@@ -110,7 +111,7 @@ def main() -> None:
     p.add_argument("--data", type=Path, required=True)
     p.add_argument("--tag", required=True)
     p.add_argument("--model", required=True)
-    p.add_argument("--effort", default="medium")
+    p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])  # fmt: skip
     p.add_argument("--ids", type=Path, required=True)
     p.add_argument("--jobs", type=int, default=8)
     p.add_argument("--agentic", action="store_true")

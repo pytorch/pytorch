@@ -12,12 +12,18 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from tools.testing.target_determination.heuristics.edited_by_pr import (
     ADDITIONAL_MAPPINGS,
 )
+from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
+    get_previous_failures,
+    read_additional_test_failures_file,
+)
+from tools.testing.target_determination.heuristics.utils import get_pr_number
 
 
 # Directories that discover_tests.py blocklists because a driver runs their files.
@@ -55,9 +61,11 @@ RUN_ALL_PATTERNS = [
     r"^torch/testing/_internal/common_utils\.py$",
     r"^torch/testing/_internal/common_device_type\.py$",
     r"^tools/testing/",
-    r"^tools/stats/import_test_stats\.py$",
-    r"^\.ci/pytorch/(test|win-test|macos-test|common|common-build|common_utils|torch_trace)\.sh$",
-    r"^\.github/workflows/_(linux|win|mac|rocm|xpu)-test(-no-dind)?\.yml$",
+    r"^test/pytest_shard_custom\.py$",
+    r"^tools/stats/(import_test_stats|upload_metrics)\.py$",
+    r"^\.ci/pytorch/(test|multigpu-test|win-test|macos-test|macos-common|common|common-build|common_utils|torch_trace)\.sh$",
+    r"^\.ci/pytorch/win-test-helpers/(setup_pytorch_env\.bat|test_python_shard\.bat|installation-helpers/activate_miniconda3\.bat)$",
+    r"^\.github/workflows/_(linux|win|mac|rocm|xpu|s390x|tpu)-test(-no-dind)?\.yml$",
     r"^\.github/actions/(setup-linux|setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts)/",
     r"^\.github/scripts/filter_test_configs\.py$",
     # The CI test images: a new package version or toolchain can break any test.
@@ -103,15 +111,30 @@ def importers(
     return {n for f in grep(pattern) if (n := normalize_test_name(f, candidates))}
 
 
+def unmatched_tests(out: dict, candidates: set[str]) -> list[str]:
+    """The `tests` names of a well-formed model answer that match no candidate."""
+    return [t["file"] for t in out["tests"] if normalize_test_name(t["file"], candidates) is None]  # fmt: skip
+
+
 def needs_run_all(changed_files: list[str]) -> bool:
     return any(re.search(p, f) for p in RUN_ALL_PATTERNS for f in changed_files)
+
+
+def previous_failures() -> set[str]:
+    """The test files that already failed on this PR, or none if the files are malformed."""
+    try:
+        return get_previous_failures() | read_additional_test_failures_file()
+    except (OSError, ValueError, TypeError, RecursionError) as e:
+        print(f"Ignoring the previous failures: {e!r}")
+        return set()
 
 
 def parse_model_output(out: object, candidates: set[str]) -> tuple[set[str], set[str]]:
     """The files and sweeps a model answer names; ValueError if it is malformed.
 
     A `dirs` entry is a directory prefix such as "dynamo"; one that matches no
-    candidate is malformed, so a misspelled directory cannot select nothing."""
+    candidate is malformed, and so is a non-empty `tests` list none of whose
+    names matches a candidate, so misspelled names cannot select nothing."""
     if not isinstance(out, dict):
         raise ValueError("not an object")
     tests, dirs, sweeps = out.get("tests"), out.get("dirs", []), out.get("sweeps", [])
@@ -123,6 +146,8 @@ def parse_model_output(out: object, candidates: set[str]) -> tuple[set[str], set
     if not isinstance(out.get("run_all", False), bool):
         raise ValueError("run_all is not a boolean")
     files = {n for t in tests if (n := normalize_test_name(t["file"], candidates))}
+    if tests and not files:
+        raise ValueError("no tests entry matches a test file")
     for d in dirs:
         prefix = re.sub(r"(/\*\*?)?/*$", "", d.strip()).removeprefix("./").removeprefix("test/")  # fmt: skip
         in_dir = {c for c in candidates if c.startswith(prefix + "/")}
@@ -235,3 +260,98 @@ class Selection:
         except (OSError, ValueError, KeyError, TypeError, RecursionError) as e:
             print(f"Ignoring the LLM selection in {path}: {e!r}")
             return None
+
+
+@dataclass
+class AppliedSelection:
+    """A Selection applied to TD's split of one CI config in run_test.py.
+
+    include and exclude are the split to run: the selection's when enforced,
+    TD's otherwise."""
+
+    selection: Selection
+    test_config: str
+    td_enabled: bool
+    enforced: bool
+    include: list[TestRun]
+    exclude: list[TestRun]
+    td_include: set[str]
+    hedged: set[str]
+    previously_failed: set[str]
+    selection_metric: dict[str, object]
+
+    def failure_metric(self, test: TestRun) -> dict[str, object]:
+        f = test.test_file
+        return {
+            "failure": str(test),
+            "covered": self.selection.covers(f, self.test_config),
+            "enforced": self.enforced,
+            "td_enabled": self.td_enabled,
+            "in_td_include": f in self.td_include,
+            "hedged": f in self.hedged,
+            "previously_failed": f in self.previously_failed,
+        }
+
+
+def apply_selection(
+    selection: Selection,
+    include: list[TestRun],
+    exclude: list[TestRun],
+    score: Callable[[TestRun], float],
+    test_times: dict[str, float],
+    test_config: str,
+    td_enabled: bool,
+) -> AppliedSelection:
+    """Apply the selection to TD's (include, exclude) split.
+
+    The selection replaces TD's split only on a PR with TD enabled and the
+    selection's enforce set, and only if the config has test times to size
+    the hedge with."""
+    ranked = include + exclude
+    td_include = {x.test_file for x in include}
+    # Partial TestRuns of one file share its time, so account per file.
+    files = list(dict.fromkeys(x.test_file for x in ranked))
+    covered = {f for f in files if selection.covers(f, test_config)}
+    file_time = {f: test_times.get(f, 0) for f in files}
+    time_total = sum(file_time.values())
+    prev_failed = previous_failures()
+    enforced = td_enabled and selection.enforce and get_pr_number() is not None
+    if enforced and not time_total:
+        enforced = False
+        print("LLM selection: no test times for this config, using TD", file=sys.stderr)
+    llm_include, llm_exclude, hedged = selection.split(
+        ranked, score, file_time, test_config, prev_failed
+    )
+    if enforced:
+        include, exclude = llm_include, llm_exclude
+        num_run = len({x.test_file for x in include})
+        budget = LLM_TD_HEDGE * time_total
+        print(
+            f"LLM selection: running {num_run} of {len(files)} test files ({len(covered)} selected, {len(hedged)} hedged within {budget:.0f}s)",
+            file=sys.stderr,
+        )
+    metric: dict[str, object] = {
+        "enforced": enforced,
+        "td_enabled": td_enabled,
+        "run_all": selection.run_all,
+        "num_tests": len(files),
+        "num_covered": len(covered),
+        "num_td_include": len(td_include),
+        "num_hedged": len(hedged),
+        "num_previously_failed": len(prev_failed & set(files)),
+        "time_total": time_total,
+        "time_covered": sum(file_time[f] for f in covered),
+        "time_hedged": sum(file_time[f] for f in hedged),
+    }
+    return AppliedSelection(
+        selection,
+        test_config,
+        td_enabled,
+        enforced,
+        include,
+        exclude,
+        td_include,
+        hedged,
+        prev_failed,
+        metric,
+    )
