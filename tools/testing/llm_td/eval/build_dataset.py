@@ -166,9 +166,11 @@ def pr_caused_failures(
     """Split failures into main and PR runs and keep the PR failures in [start, end), in TD jobs, attributable to the PR.
 
     `rows` may extend past the window on both sides, so failures near its edges
-    are still checked against main and other authors. Failures after the PR
-    landed (`landed`, see landed_times) may be its own breakage and are not
-    held against it. Failures on branches with no known PR count against PR
+    are still checked against main and other authors, within MAIN_WINDOW.
+    Failures after the PR landed (`landed`, see landed_times) may be its own
+    breakage and are not held against it, so its own failures from then on
+    cannot be checked and are dropped. Unstable jobs are not truth, as in
+    flaky_flags. Failures on branches with no known PR count against PR
     failures here like main's, but only main's are returned."""
     sha2pr = pr_of_shas(sorted({r["sha"] for r in rows if not is_main(r["br"])}))
     main, unmapped = collections.defaultdict(list), collections.defaultdict(list)
@@ -187,8 +189,8 @@ def pr_caused_failures(
     keep = []
     for r in pr_rows:
         k, t, cutoff = (r["tf"], r["classname"], r["test"]), ts(r["t"]), landed.get(r["pr"], NEVER)  # fmt: skip
-        others = {who for wt, who in authors[k] if wt < cutoff} - {author.get(r["pr"], r["pr"])}  # fmt: skip
-        if lo <= t < hi and job_runs_td(r["job"], r["wf"]) and not others and not any(abs(t - m) < MAIN_WINDOW and m < cutoff for m in main.get(k, []) + unmapped.get(k, [])):  # fmt: skip
+        others = {who for wt, who in authors[k] if abs(wt - t) < MAIN_WINDOW and wt < cutoff} - {author.get(r["pr"], r["pr"])}  # fmt: skip
+        if lo <= t < min(hi, cutoff) and "unstable" not in r["job"] and job_runs_td(r["job"], r["wf"]) and not others and not any(abs(t - m) < MAIN_WINDOW and m < cutoff for m in main.get(k, []) + unmapped.get(k, [])):  # fmt: skip
             keep.append(r)
     return keep, main
 
@@ -335,7 +337,7 @@ def pr_samples(
 def landed_times(since: dt.date) -> dict[int, dt.datetime]:
     """PR number -> when it first landed on main, from the merge bot's `Pull Request resolved:` line."""
     out: dict[int, dt.datetime] = {}
-    for c in git("log", "origin/main", f"--since={since}", "--format=%ct %b%x00").split("\0"):
+    for c in git("log", "origin/main", f"--since={since} 00:00 +0000", "--format=%ct %b%x00").split("\0"):
         if m := re.search(r"^\s*(\d+) .*?Pull Request resolved: \S+/pull/(\d+)", c, re.DOTALL):
             t = dt.datetime.fromtimestamp(int(m.group(1)), tz=dt.timezone.utc)
             out[int(m.group(2))] = min(t, out.get(int(m.group(2)), t))
@@ -350,7 +352,8 @@ def flaky_flags(rows: list[dict], start: dt.date, end: dt.date) -> list[dict]:
     the test was disabled, or the same test failed on another author's PR, or
     on main, before the PR landed and within FLAKY_WINDOW. A PR's own breakage
     that landed and failed on main or on PRs based on it until its revert does
-    not make it flaky."""
+    not make it flaky, so a failure after the PR landed cannot be checked and
+    counts as flaky."""
     # `rows` start at start - FLAKY_WINDOW, so look back a full window from there.
     w, lo = FLAKY_WINDOW, start - 2 * FLAKY_WINDOW
     others = pull_failures(lo, end + w)
@@ -374,7 +377,7 @@ def flaky_flags(rows: list[dict], start: dt.date, end: dt.date) -> list[dict]:
         t, me, cutoff = ts(r["t"]), author.get(r["pr"], r["pr"]), landed.get(r["pr"], NEVER)
         near = {who for wt, who in seen[(r["tf"], r["classname"], r["test"])] if abs(wt - t) < w and wt < cutoff}
         was_disabled = any(abs(d - t) < w for d in disabled[(r["classname"], r["test"])])
-        r["flaky"] = r["job_green"] or "unstable" in r["job"] or bool(near - {me}) or was_disabled
+        r["flaky"] = r["job_green"] or "unstable" in r["job"] or bool(near - {me}) or was_disabled or t >= cutoff
     return rows
 
 
@@ -487,6 +490,9 @@ def revert_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
         }
         try:
             truth_jobs = revert_truth_jobs(signal, commit_time(sha), r["reverted_at"])
+            if not truth_jobs:
+                print(f"skipping revert {sha}: no main job failed on its signal tests", flush=True)  # fmt: skip
+                return
             title, _, body = git("log", "-1", "--format=%B", sha).partition("\n")
             write_sample(out, f"rev_{sha[:12]}", "revert", sha, sha + "^", title, strip_trailers(body), date=r["reverted_at"],
                          truth=sorted(truth_jobs), truth_jobs=truth_jobs)  # fmt: skip
@@ -502,14 +508,14 @@ def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
         "log",
         "--first-parent",
         "--format=%H %s",
-        f"--since={start}",
-        f"--until={end}",
+        f"--since={start} 00:00 +0000",
+        f"--until={end} 00:00 +0000",
         "origin/main",
     ).splitlines()
     reverted = set(
         re.findall(
             r"This reverts commit ([0-9a-f]{40})",
-            git("log", "--format=%B", f"--since={start}", "origin/main"),
+            git("log", "--format=%B", f"--since={start} 00:00 +0000", "origin/main"),
         )
     )
     shas = [
@@ -518,7 +524,8 @@ def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
         if not re.match(r"(Revert|Reland)", title) and sha not in reverted
     ]
     # The autorevert bot's record and the rev_ samples also cover reverts whose
-    # message differs. They filter the sample rather than the population so the
+    # message differs, as does the title check for a revert or reland named
+    # anywhere in it. They filter the sample rather than the population so the
     # checked-in neutral ids stay a subset of the earlier draw.
     reverted |= {
         r["commit_sha"]
@@ -528,9 +535,9 @@ def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
     }
     reverted_ids = {p.stem.removeprefix("rev_") for p in out.glob("rev_*.json")}
     for sha in random.Random(0).sample(shas, min(n, len(shas))):
-        if sha in reverted or sha[:12] in reverted_ids:
-            continue
         title, _, body = git("log", "-1", "--format=%B", sha).partition("\n")
+        if sha in reverted or sha[:12] in reverted_ids or re.search(r"\b(revert|reland)\b", title, re.IGNORECASE):  # fmt: skip
+            continue
         try:
             write_sample(out, f"neu_{sha[:12]}", "neutral", sha, sha + "^", title, strip_trailers(body), truth=[])  # fmt: skip
         except subprocess.CalledProcessError as e:

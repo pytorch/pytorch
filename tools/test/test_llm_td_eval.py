@@ -434,18 +434,26 @@ class TestScore(unittest.TestCase):
         self.assertEqual((hm.sel.run_all, hm.sel.files), (False, {"sub/test_x"}))
 
     def test_score_same_ids(self) -> None:
+        sample = {**SAMPLE, "truth_jobs": {"test_a": [["pull", "linux / test (default, 1, 2, linux.2xlarge)"]]}}  # fmt: skip
         td = {"scored": [], "top25": ["test_a"], "top25_cfg": {"default": ["test_a"]}}
         result = {
             "out": {"tests": [{"file": "test_a"}]},
             "error": None,
             "cost_usd": 0.1,
         }
+        failed = {"out": None, "error": "boom", "cost_usd": 0.0}
+        # The top-level "default" is run_test.py's fallback for unknown jobs, not a job to price.
+        times = {
+            "linux": {"default": {"test_a": 10.0, "test_b": 5.0}},
+            "linux-cuda": {"default": {"test_a": 20.0}},
+            "default": {"default": {"test_a": 1000.0, "test_b": 1000.0}},
+        }
         files = {
-            "test-times.json": {"linux": {"default": {"test_a": 10.0, "test_b": 5.0}}},
-            "samples/a.json": SAMPLE, "samples/b.json": SAMPLE, "samples/c.json": SAMPLE,
+            "test-times.json": times,
+            "samples/a.json": sample, "samples/b.json": sample, "samples/c.json": sample,
             "td/a.json": td, "td/b.json": td,
             "results/m1/a.json": result, "results/m1/b.json": result, "results/m1/c.json": result,
-            "results/m2/a.json": result, "results/m2/c.json": result,
+            "results/m2/a.json": failed, "results/m2/c.json": failed,
         }  # fmt: skip
         with (
             tempfile.TemporaryDirectory() as d,
@@ -460,6 +468,30 @@ class TestScore(unittest.TestCase):
                 rows = score.score(data, ["a", "b", "c"], ["m1", "m2", "td"], ["model"], True, data / "samples", data / "td")  # fmt: skip
         self.assertEqual({(x["tag"], x["policy"], x["id"]) for x in rows}, {("m1", "model", "a"), ("m2", "model", "a"), ("td", "td25", "a")})  # fmt: skip
         self.assertEqual(err.getvalue(), "dropped 1 of 3 ids with no m2 result\ndropped 1 of 3 ids with no td replay\n")  # fmt: skip
+        fields = ("pairs", "hit", "missed", "cpu", "gpu", "run_all", "files", "error")
+        by_tag = {x["tag"]: tuple(x[k] for k in fields) for x in rows}
+        self.assertEqual(by_tag, {
+            "m1": (1, 1, [], 10 / 15, 1.0, False, 1, False),
+            "m2": (1, 1, [], 1.0, 1.0, True, 0, True),
+            "td": (1, 1, [], 10 / 15, 1.0, False, 1, False),
+        })  # fmt: skip
+
+    def test_summarize(self) -> None:
+        row = {"tag": "t", "policy": "p", "kind": "pr", "cost_usd": 0.1, "error": False, "cpu": 0.5, "gpu": 0.0}  # fmt: skip
+        run_all = {"files": 0, "run_all": True, "cpu": 1.0, "gpu": 1.0, "error": True}
+        rows = [
+            {**row, "pairs": 2, "hit": 1, "files": 3, "run_all": False},
+            {**row, "pairs": 1, "hit": 1, "files": 5, "run_all": False},
+            {**row, "pairs": 0, "hit": 0, "files": 9, "run_all": False},
+            {**row, "pairs": 1, "hit": 1, **run_all},
+        ]
+        (s,) = score.summarize(rows)
+        self.assertEqual(s, {
+            "tag": "t", "policy": "p", "kind": "pr", "n": 4, "n_failing": 3,
+            "caught_any": 1.0, "caught_all": 2 / 3, "pair_recall": 3 / 4,
+            "cpu": 0.625, "gpu": 0.25, "run_all": 1, "median_files": 5,
+            "usd_per_call": 0.1, "errors": 1,
+        })  # fmt: skip
 
     def test_score_grep(self) -> None:
         sample = {**SAMPLE, "sha": "abc", "changed_files": ["test/test_c.py"]}
@@ -500,8 +532,11 @@ class TestScore(unittest.TestCase):
         self.assertEqual(
             {t.test_file for t in tp.get_top_per_tests(25)[0]}, {"test_e", "test_a"}
         )
-        # The cut is 25% + 1 of each config's own runs; in "slow" test_a's partial run comes first and counts.
+        # The cut is 25% + 1 of each config's own runs plus the files with no
+        # recorded time (test_e, as if newly added); test_a's partial run counts.
         cut = top25_per_config(tp, cands, SECONDS)
+        self.assertEqual(cut, {"default": ["test_a", "test_e"], "slow": ["test_a", "test_e"]})  # fmt: skip
+        cut = top25_per_config(tp, ["test_a", "test_b", "test_c", "test_d"], SECONDS)
         self.assertEqual(cut, {"default": ["test_a", "test_c"], "slow": ["test_a"]})
         td = {"top25": ["test_a", "test_e"], "top25_cfg": cut}
         choice = pick("td25", None, td)
@@ -514,9 +549,11 @@ class TestScore(unittest.TestCase):
         cands = {"test_a", "test_b", "test_c"}
         choice = Choice(Selection({"test_b"}), {"slow": {"test_a"}})
         self.assertEqual(cost_fraction(choice, cands, SECONDS), (50 / 160, 250 / 250))
+        only_b = Choice(Selection({"test_b"}))
+        self.assertEqual(cost_fraction(only_b, cands, SECONDS), (50 / 160, 50 / 250))
         self.assertEqual(
-            cost_fraction(choice, cands, SECONDS, lambda c: c == "default"),
-            (50 / 160, 1.0),
+            cost_fraction(only_b, cands, SECONDS, lambda c: c == "default"),
+            (50 / 160, 50 / 50),
         )
         self.assertEqual(
             cost_fraction(Choice(Selection(run_all=True)), cands, SECONDS), (1.0, 1.0)
@@ -553,6 +590,7 @@ class TestBuildDataset(unittest.TestCase):
                              ("test_unmapped", {}), ("test_edge_in", {}), ("test_edge_out", {})]
         ]  # fmt: skip
         rows.append(fail("test_unstable", t, pr=1, job="pull / test (default, 1, 1, unstable)"))  # fmt: skip
+        rows.append(fail("test_after_landing", "2026-10-06 00:00:00", pr=1))
         landed = dt.datetime(2026, 10, 5, 12, tzinfo=dt.timezone.utc)
         with (
             mock.patch.object(bd, "pull_failures", return_value=others) as pull,
@@ -568,13 +606,14 @@ class TestBuildDataset(unittest.TestCase):
             flags,
             {"test_real": False, "test_green": True, "test_main": True, "test_other": True, "test_mine": False,
              "test_old": False, "test_disabled": True, "test_landed": False, "test_landed_pr": False, "test_unmapped": True, "test_unstable": True,
-             "test_edge_in": True, "test_edge_out": False},
+             "test_edge_in": True, "test_edge_out": False, "test_after_landing": True},
         )  # fmt: skip
 
     def test_pr_caused_failures(self) -> None:
-        def fail(test: str, t: str, sha: str, br: str = "gh/x", cls: str = "TestA", wf: str = "pull") -> dict:  # fmt: skip
-            return {"tf": "test_a", "classname": cls, "test": test, "t": t, "sha": sha, "br": br, "wf": wf, "job": "pull / test (default, 1, 1)"}  # fmt: skip
+        def fail(test: str, t: str, sha: str, br: str = "gh/x", cls: str = "TestA", wf: str = "pull", job: str = "pull / test (default, 1, 1)") -> dict:  # fmt: skip
+            return {"tf": "test_a", "classname": cls, "test": test, "t": t, "sha": sha, "br": br, "wf": wf, "job": job}  # fmt: skip
 
+        unstable = "pull / test (default, 1, 1, unstable)"
         rows = [
             fail("test_real", "2026-10-05 00:00:00", "a"),
             fail("test_main", "2026-10-05 00:00:00", "a"),
@@ -583,6 +622,12 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_cls", "2026-10-05 00:00:00", "m", br="main", cls="TestB"),
             fail("test_shared", "2026-10-05 00:00:00", "a"),
             fail("test_shared", "2026-10-06 00:00:00", "b"),
+            # Another author's failure outside MAIN_WINDOW does not excuse it.
+            fail("test_far", "2026-10-05 00:00:00", "a"),
+            fail("test_far", "2026-09-25 00:00:00", "b"),
+            fail("test_unstable", "2026-10-05 00:00:00", "a", job=unstable),
+            # After PR 1 landed, main and other PRs cannot excuse its failures, so they are dropped.
+            fail("test_after_landing", "2026-10-08 00:00:00", "a"),
             fail("test_late", "2026-10-26 00:00:00", "a"),
             fail("test_early", "2026-10-01 00:00:00", "a"),
             fail("test_early", "2026-09-28 00:00:00", "m", br="main"),
@@ -604,7 +649,7 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "pr_authors", return_value={1: "me", 2: "x"}),
         ):  # fmt: skip
             keep, main = bd.pr_caused_failures(rows, dt.date(2026, 10, 1), dt.date(2026, 10, 26), landed)  # fmt: skip
-        self.assertEqual(sorted((r["test"], r["pr"]) for r in keep), [("test_broke", 1), ("test_broke_pr", 1), ("test_cls", 1), ("test_real", 1)])  # fmt: skip
+        self.assertEqual(sorted((r["test"], r["pr"]) for r in keep), [("test_broke", 1), ("test_broke_pr", 1), ("test_cls", 1), ("test_far", 1), ("test_real", 1)])  # fmt: skip
         self.assertEqual(len(main[("test_a", "TestA", "test_main")]), 1)
         self.assertNotIn(("test_a", "TestA", "test_unmapped"), main)
 
@@ -650,10 +695,11 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "has_commit", return_value=True),
             mock.patch.object(bd, "git", return_value="base\n"),
             mock.patch.object(bd, "commit_time", return_value=dt.datetime(2026, 10, 4, tzinfo=dt.timezone.utc)),
-            mock.patch.object(bd, "pr_text", side_effect=error),
+            mock.patch.object(bd, "pr_text", side_effect=error) as pr_text,
             mock.patch.object(bd, "write_sample") as write,
         ):  # fmt: skip
             bd.pr_samples(keep, {}, Path(out), 1, dt.date(2026, 10, 1), {})
+        pr_text.assert_called_once_with(1)
         write.assert_not_called()
 
     def test_pr_samples_main_after_landing(self) -> None:
@@ -697,14 +743,69 @@ class TestBuildDataset(unittest.TestCase):
         truth_jobs.assert_called_once_with({"test_a", "test_b"}, mock.ANY, "1")
         kw = write.call_args.kwargs
         self.assertEqual((kw["truth"], kw["truth_jobs"]), (["test_a"], jobs))
+        with (
+            tempfile.TemporaryDirectory() as out,
+            mock.patch.object(bd, "query", return_value=rows),
+            mock.patch.object(bd, "fetch"),
+            mock.patch.object(bd, "has_commit", return_value=True),
+            mock.patch.object(bd, "commit_time"),
+            mock.patch.object(bd, "revert_truth_jobs", return_value={}),
+            mock.patch.object(bd, "git", return_value="t\nb"),
+            mock.patch.object(bd, "write_sample") as write,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):  # fmt: skip
+            bd.revert_samples(Path(out), 1, dt.date(2026, 10, 1), dt.date(2026, 10, 26))
+        write.assert_not_called()
+
+    def test_neutral_samples(self) -> None:
+        start, end = dt.date(2026, 10, 1), dt.date(2026, 10, 26)
+        titles: dict[str, str] = {"a" * 40: "Fix foo", "b" * 40: "[ghstack] Revert bar", "c" * 40: "Reland: baz", "d" * 40: "Add RevertibleOp"}  # fmt: skip
+        calls = []
+
+        def git(*args: str) -> str:
+            calls.append(args)
+            if args[:2] == ("log", "-1"):
+                return titles[args[-1]] + "\n\nbody"
+            if "--first-parent" in args:
+                return "".join(f"{sha} {t}\n" for sha, t in titles.items())
+            return ""
+
+        with (
+            tempfile.TemporaryDirectory() as out,
+            mock.patch.object(bd, "git", git),
+            mock.patch.object(bd, "query", return_value=[]),
+            mock.patch.object(bd, "write_sample") as write,
+        ):
+            bd.neutral_samples(Path(out), start, end, 10)
+        self.assertEqual(sorted(c.args[1] for c in write.call_args_list), ["neu_" + "a" * 12, "neu_" + "d" * 12])  # fmt: skip
+        log = next(c for c in calls if "--first-parent" in c)
+        self.assertIn("--since=2026-10-01 00:00 +0000", log)
+        self.assertIn("--until=2026-10-26 00:00 +0000", log)
+
+    def test_checked_in_ids(self) -> None:
+        ids = {n: set((REPO_ROOT / "tools/testing/llm_td/eval/ids" / f"{n}.txt").read_text().split()) for n in ("eval", "dev", "agentic", "neutral", "head")}  # fmt: skip
+        self.assertLessEqual(ids["neutral"], ids["eval"])
+        self.assertLessEqual(ids["agentic"], ids["eval"])
+        self.assertEqual(ids["dev"] & ids["eval"], set())
+        every = set().union(*ids.values())
+        shas = {k: {i.removeprefix(f"{k}_") for i in every if i.startswith(f"{k}_")} for k in ("neu", "rev")}  # fmt: skip
+        self.assertEqual(shas["neu"] & shas["rev"], set())
+        prs = {i for i in ids["eval"] | ids["dev"] if i.startswith("pr_")}
+        self.assertEqual({f"pr_{i.split('_')[1]}" for i in ids["head"]} - prs, set())
 
     def test_candidates_at(self) -> None:
         ls = "test/test_a.py\ntest/ao/test_b.py\ntest/fx/test_c.py\ntest/test_skip.py\ntest/helper.py\n"
         added = "test/test_new.py\ntest/ao/test_d.py\ntest/fx/test_e.py\ntest/helper_new.py\n"
         named = 'BLOCKLISTED_PATTERNS = ["ao"]\nTESTS = discover_tests(blocklisted_patterns=BLOCKLISTED_PATTERNS, blocklisted_tests=["test_skip"], extra_tests=["extra"])\n'  # fmt: skip
         inline = 'TESTS = discover_tests(blocklisted_patterns=["fx"], blocklisted_tests=["test_skip"])\n'  # fmt: skip
+
+        def git(*a: str) -> str:
+            if a[0] == "diff" and not {"--diff-filter=A", "--no-renames"} <= set(a):
+                raise AssertionError(f"not only the added files: {a}")
+            return {"show": src, "ls-tree": ls, "diff": added}[a[0]]
+
         for src, want, new in ((named, ["extra", "fx/test_c", "test_a"], ["fx/test_e", "test_new"]), (inline, ["ao/test_b", "test_a"], ["ao/test_d", "test_new"])):  # fmt: skip
-            with mock.patch.object(bd, "git", lambda *a, src=src: {"show": src, "ls-tree": ls, "diff": added}[a[0]]):  # fmt: skip
+            with mock.patch.object(bd, "git", git):
                 self.assertEqual(bd.candidates_at("b"), want)
                 self.assertEqual(bd.candidates_at("b", "s"), sorted(want + new))
 

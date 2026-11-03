@@ -14,7 +14,7 @@ OUT/<id>.json with:
 
   scored     files TD gives a positive score, best first (what the hedge draws from)
   top25      CI's top-25% cut over all candidates
-  top25_cfg  config -> files of that cut per config of test-times.json
+  top25_cfg  config -> files of that cut per config of test-times.json (see top25_per_config)
 
 CI computes the scores once and each job cuts them to its own test list
 (TestPrioritizations.amend_tests), so the per-config cut reuses the global
@@ -65,11 +65,16 @@ ARTIFACTS = [
 def top25_per_config(
     tp: TestPrioritizations, cands: list[str], seconds: Seconds
 ) -> dict[str, list[str]]:
-    """The files of CI's top-25% cut in each config, cutting the scores to the candidates in that config."""
+    """The files of CI's top-25% cut in each config, cutting the scores to the candidates in that config.
+
+    A job's test list is its config's recorded files plus the candidates with
+    no recorded time anywhere: CI amends to the job's whole selected_tests, so
+    a newly added file is in every job's list."""
+    known = set().union(*seconds.values())
     out = {}
     for c, files in seconds.items():
         job = copy.deepcopy(tp)
-        job.amend_tests([f for f in cands if f in files])
+        job.amend_tests([f for f in cands if f in files or f not in known])
         out[c] = sorted({t.test_file for t in job.get_top_per_tests(25)[0]})
     return out
 
