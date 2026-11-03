@@ -40,13 +40,15 @@ DEFAULT_MODEL = (
 SYSTEM_PROMPT = (Path(__file__).parent / "prompt.md").read_text()
 DIFF_BUDGET = 120_000
 BODY_BUDGET = 4_000
-# Well under the CI job's 20 minute timeout, so a hung call still yields run_all.
+# Well under the CI job's 15 minute timeout, so a hung call still yields run_all.
 QUERY_TIMEOUT = 600
 # Room for the note that replaces a truncated file's tail.
 TRUNCATION_MARKER = 40
 # The PR text is wrapped in these tags and the prompt marks it as untrusted, so
 # the PR must not be able to close them.
-CLOSING_TAG_RE = re.compile(r"</(pr_title|pr_description|diff)\s*>", re.IGNORECASE)
+CLOSING_TAG_RE = re.compile(
+    r"</(pr_title|pr_description|changed_files|diff)\s*>", re.IGNORECASE
+)
 
 SCHEMA = {
     "type": "object",
@@ -131,12 +133,14 @@ def build_prompt(
     body = body.strip()
     if len(body) > BODY_BUDGET:
         body = body[:BODY_BUDGET] + "\n...[truncated]"
-    title, body, diff = (CLOSING_TAG_RE.sub(r"<\\/\1>", t) for t in (title, body, diff))
+    title, body, diffstat, diff = (
+        CLOSING_TAG_RE.sub(r"<\\/\1>", t) for t in (title, body, diffstat, diff)
+    )
     return "\n".join(
         [
             f"# PR title\n<pr_title>\n{title}\n</pr_title>",
             f"# PR description\n<pr_description>\n{body or '(none)'}\n</pr_description>",
-            f"# Changed files\n{diffstat}",
+            f"# Changed files\n<changed_files>\n{diffstat}\n</changed_files>",
             f"# Diff\n<diff>\n{truncate_diff(diff)}\n</diff>",
             f"# Candidate test files ({len(candidates)})",
             "\n".join(f"{c} [{minutes.get(c, 0):.0f}m]" for c in candidates),
@@ -229,7 +233,7 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
         | {
             f.removeprefix("test/").removesuffix(".py")
             for f in added
-            if re.match(r"test/(.*/)?test_[^/]*\.py$", f)
+            if re.match(r"test/([\w/]+/)?test_\w+\.py$", f)
         }
     )
     title, body = pr_text(args)
