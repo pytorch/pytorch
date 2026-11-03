@@ -1360,7 +1360,7 @@ _scaled_mxfp4_mxfp4(
   TORCH_CHECK_VALUE(scale_a.is_contiguous() && scale_b.is_contiguous(),
         "For Blockwise scaling both scales should be contiguous");
 
-  TORCH_CHECK_VALUE(out.scalar_type() == out_dtype, "expected out.scalar_type() to be ", out_dtype, ", but got ", out_dtype);
+  TORCH_CHECK_VALUE(out.scalar_type() == out_dtype, "expected out.scalar_type() to be ", out_dtype, ", but got ", out.scalar_type());
 
 #ifdef USE_ROCM
   // AMD
@@ -1379,7 +1379,12 @@ _scaled_mxfp4_mxfp4(
 
   return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, swizzle_a, swizzle_b, bias, false /* use_fast_accum */, out);
 #else
-  // NVIDIA
+  // NVIDIA: cuBLASLt has no MXFP4 kernel, so this path uses MSLK's f4f4bf16,
+  // which writes row-major bf16 into out.data_ptr() and has no bias epilogue.
+  TORCH_CHECK_VALUE(out_dtype == ScalarType::BFloat16,
+      "MXFP4 scaled_mm on CUDA only supports bfloat16 output, got ", out_dtype);
+  TORCH_CHECK_VALUE(!bias.has_value(), "MXFP4 scaled_mm on CUDA does not support bias");
+  TORCH_CHECK_VALUE(out.is_contiguous(), "MXFP4 scaled_mm on CUDA requires a contiguous output tensor");
   mslk::gemm::f4f4bf16(
       mat_a,
       mat_b.transpose(-2, -1),
