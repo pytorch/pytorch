@@ -228,7 +228,7 @@ class TestTraitDevice(TestCase):
             torch.backends.python_native.cutedsl.disabled(),
             mock.patch.object(kg, "_launch", record),
         ):
-            # Full tiles drop address clamps but must keep the leaf validity select.
+            # Unselected full-tile leaves must still round as materialized squares.
             split = {"allow_split": True, "full_tiles": True}
             ct.reduce_ordered_col(
                 T.NormOps(2), "rounded_norm2", x, [torch.float32], 1, **split
