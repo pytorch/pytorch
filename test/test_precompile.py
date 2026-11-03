@@ -5124,8 +5124,9 @@ class TestPrecompileDynamoCapture(TestCase):
                 "def cos(x: torch.Tensor) -> torch.Tensor:\n    return x.cos()\n"
                 "cos.register_fake(torch.empty_like)\nclass Model(torch.nn.Module):\n"
                 "    def forward(self, x):\n        torch._dynamo.graph_break()\n        return cos(x)\n"
-                "if save:\n    with capture(single, artifact_path=a, cache_path=c, backend='eager') as cap:\n"
-                "        cap(Model(), x)\nelse:\n    f = load(a, c)\n"
+                "if save:\n    with torch._dynamo.config.patch(nested_graph_breaks=False):\n"
+                "        with capture(single, artifact_path=a, cache_path=c, backend='eager') as cap:\n"
+                "            cap(Model(), x)\nelse:\n    f = load(a, c)\n"
                 "    assert f.installed and f(Model(), x).equal(x.cos().sum(dim=0))\n"
             )
         for save in ("1", ""):
@@ -5877,6 +5878,7 @@ class TestPrecompileDynamoCapture(TestCase):
 
     @skipIfCrossRef
     @parametrize("given", ["options", "mode"])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_serve_time_compiles_take_the_capture_options(self, given):
         from torch._inductor import list_mode_options
         from torch._precompile import _parse_artifact_metadata
@@ -5925,6 +5927,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("compiled with the capture options", out.stdout)
 
     @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_serve_time_compiles_refuse_options_without_a_literal_form(self):
         from torch._precompile import _parse_artifact_metadata
 
