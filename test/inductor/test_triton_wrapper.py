@@ -132,6 +132,28 @@ class TestTritonWrapper(TestCase):
         )
         self.assertEqual(len(args), 4)
 
+    def test_get_args_aliased_inputs_with_dynamic_shapes(self):
+        @torch.compile(dynamic=True)
+        def f(x, y):
+            return x.sum(1) + y.sum(1)
+
+        base = torch.randn(8, 10, device=GPU_TYPE)
+        x, y = base[:, :3], base[:, 3:]
+        f(x, y)
+
+        compiled_module = self.get_compiled_module()
+        recreated_x, recreated_y = [
+            a for a in compiled_module.get_args() if isinstance(a, torch.Tensor)
+        ]
+        self.assertEqual(
+            recreated_x.untyped_storage().data_ptr(),
+            recreated_y.untyped_storage().data_ptr(),
+        )
+        for recreated, original in ((recreated_x, x), (recreated_y, y)):
+            self.assertEqual(recreated.shape, original.shape)
+            self.assertEqual(recreated.stride(), original.stride())
+            self.assertEqual(recreated.storage_offset(), original.storage_offset())
+
 
 if __name__ == "__main__":
     if HAS_GPU:
