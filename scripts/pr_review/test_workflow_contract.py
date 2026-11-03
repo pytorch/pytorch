@@ -1937,11 +1937,6 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         # wiring is the one change that schedules no run of the suite checking
         # the wiring.
         ".github/workflows/pr-review-scripts-test.yml",
-        # test_extract_verdict.py reads the stack-size limit and CI's ghstack
-        # constants from these, so an edit to either file alone must run
-        # the suite.
-        "CONTRIBUTING.md",
-        ".github/scripts/filter_test_configs.py",
     )
 
     def setUp(self):

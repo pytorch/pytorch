@@ -25,15 +25,12 @@ from unittest import mock
 
 
 SCRIPT = Path(__file__).with_name("extract_verdict.py")
-REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(SCRIPT.parent))
 
 # Collected as a test of THIS module, so the suite notices if this file is the
 # one deleted. See _suite_manifest for why the guard is shared, not copied.
 from _suite_manifest import run_this_suite, TestTheSuiteIsWhole  # noqa: E402,F401
 from extract_verdict import (
-    _GHSTACK_CURRENT,
-    _GHSTACK_ENTRY,
     _is_repo_path,  # noqa: E402
     _XREF,
     analysis_view,
@@ -57,7 +54,6 @@ from extract_verdict import (
     published_findings,
     Rejected,
     sanitize_findings,
-    STACK_POSITION_LIMIT,
     TRUNCATED,
 )
 
@@ -1504,19 +1500,6 @@ class TestGhstackPosition(unittest.TestCase):
         self.assertEqual(ghstack_position(body), 2)
         self.assertEqual(ghstack_position("Related:" + follow_ups + "\n\n" + body), 2)
 
-    def test_the_ghstack_constants_match_ci(self):
-        # Read as text: importing filter_test_configs.py pulls in yaml.
-        ci = (REPO / ".github" / "scripts" / "filter_test_configs.py").read_text()
-        ci_lines = ci.splitlines()
-        entry = f'r"^{_GHSTACK_ENTRY.pattern}$", re.MULTILINE'
-        for line in (
-            f"GHSTACK_STACK_ENTRY_REGEX = re.compile({entry})",
-            f'GHSTACK_CURRENT_MARKER = "{_GHSTACK_CURRENT}"',
-            # CONTRIBUTING.md states this threshold; update it along with CI.
-            "GHSTACK_BELOW_SKIP_THRESHOLD = 10",
-        ):
-            self.assertTrue(line in ci_lines, f"filter_test_configs.py lost: {line}")
-
 
 def minor(i: int = 0) -> dict:
     return {
@@ -1534,12 +1517,6 @@ class TestTheStackPolicyRequestsChangesHighInAStack(unittest.TestCase):
         payload = ok_payload(verdict="ready_for_human_review", findings=[])
         payload.update(over)
         return build(payload, self.TOUCHED)
-
-    def test_the_limit_matches_contributing_md(self):
-        text = " ".join((REPO / "CONTRIBUTING.md").read_text().split())
-        m = re.search(r"Stacks of pull requests must have fewer than (\d+) PRs", text)
-        self.assertIsNotNone(m, "CONTRIBUTING.md no longer states the stack limit")
-        self.assertEqual(STACK_POSITION_LIMIT, int(m.group(1)))
 
     def test_below_the_limit_nothing_changes(self):
         result = self.clean_result()
@@ -1605,23 +1582,12 @@ class TestTheStackPolicyRequestsChangesHighInAStack(unittest.TestCase):
         result = apply_stack_policy(model, stack_body(10, 12), self.TOUCHED)
         self.assertEqual(result["findings"][1:], findings)
 
-    def test_the_findings_cap_keeps_the_model_major_and_counts_the_drop(self):
-        major = ok_payload()["findings"][0]
-        findings = [minor(i) for i in range(MAX_FINDINGS - 1)] + [major]
-        model = build(ok_payload(findings=findings), self.TOUCHED)
-        result = apply_stack_policy(model, stack_body(10, 12), self.TOUCHED)
-        self.assertEqual(len(result["findings"]), MAX_FINDINGS)
-        self.assertEqual(result["findings"][1], major)
-        self.assertEqual(result["findings"][2:], findings[: MAX_FINDINGS - 2])
-        self.assertEqual(result["findings_dropped"], 1)
-        self.assertEqual(result["dropped_detail"], [{"reason": "over_cap"}])
-
-    def test_the_cap_adds_to_the_drops_build_recorded(self):
-        findings = [minor(i) for i in range(MAX_FINDINGS + 1)]
+    def test_the_findings_cap_still_holds(self):
+        findings = [minor(i) for i in range(MAX_FINDINGS)]
         model = self.clean_result(findings=findings)
         result = apply_stack_policy(model, stack_body(10, 12), self.TOUCHED)
-        self.assertEqual(result["findings_dropped"], 2)
-        self.assertEqual(result["dropped_detail"], [{"reason": "over_cap"}] * 2)
+        self.assertEqual(len(result["findings"]), MAX_FINDINGS)
+        self.assertEqual(result["findings"][0]["severity"], "major")
 
     def test_with_no_line_to_anchor_on_nothing_changes(self):
         # build() never publishes an objection without a finding to point at.

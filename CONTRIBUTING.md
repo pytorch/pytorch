@@ -663,27 +663,14 @@ commit-message directive, which applies only to the commit that contains it.
 
 ### Keep PR stacks small
 
-Stacks of pull requests must have fewer than 10 PRs. This applies to every
-contributor, with or without AI tools. Each PR of a stack runs CI on every
-push, and those results go stale as soon as a PR below it changes, so large
-stacks use up shared CI resources and slow down CI for everyone. Land the
-bottom of a stack before adding more on top, and use
-[`[no-ci]`](#skip-ci-while-iterating) on PRs that don't need CI yet. PRs with
-`[no-ci]` still count toward the limit.
+Stacks of pull requests must have fewer than 10 PRs. Every PR in a stack runs
+CI on each push, so large stacks use up shared CI resources. Land the bottom of
+a stack before adding more on top, and use
+[`[no-ci]`](#skip-ci-while-iterating) on PRs that don't need CI yet.
 
-For `ghstack` stacks, two checks read the PR body:
-
-- The automated review in the [PR lifecycle](#pr-lifecycle) requests changes
-  on a PR that is 10th or higher from the bottom of its stack.
-- CI fails before the build starts on a PR with 10 or more PRs below it
-  (11th or higher from the bottom), unless the PR has the `ciflow/trunk`
-  label; after adding the label, rerun the failed workflows. CI counts every
-  line that is only `* #N` after the current PR's line, not just the stack
-  list, so don't write other PR references that way in the PR body (`ghstack`
-  copies your commit message into it when it creates the PR).
-
-`ghstack` only rewrites the stack list when you submit, so once the PRs below
-land, rebase the stack and submit it again.
+For `ghstack` stacks, the automated review requests changes on a PR that is
+10th or higher from the bottom, and CI fails on a PR with 10 or more PRs below
+it unless the PR has the `ciflow/trunk` label.
 
 ## Merging your Change
 The labels described in the [PR lifecycle](#pr-lifecycle) and the pytorchbot comment on your PR represent the status of your PR, including what the next step is and who is expected to take it.
