@@ -12,12 +12,13 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
 - [Labels You Must NEVER Add](#labels-you-must-never-add)
 - [Issue Triage Steps](#issue-triage-for-each-issue)
   - Step 0: Already Routed — SKIP
-  - Step 0.5: Related Issues
+  - Step 0.5: Related Issues and Umbrella Context
   - Step 1: Question vs Bug/Feature
   - Step 1.5: Needs Reproduction — External Files
   - Step 2: Transfer
   - Step 2.5: PT2 Issues — Special Handling
   - Step 3: Redirect to Secondary Oncall
+  - Step 3.5: Approved Umbrella Reference
   - Step 4: Label the Issue
   - Step 5: Escalate — High Priority (human review), then release triage
   - Step 6: bot-triaged (automatic)
@@ -29,6 +30,8 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
 **PT2 triage guide:** See [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed labeling guidance when triaging PT2/torch.compile issues.
 
 **Response templates:** See [templates.json](templates.json) for standard response messages.
+
+**Approved umbrellas:** See [umbrellas.json](umbrellas.json) for the small repository-specific link/close catalog, scopes, exclusions, and maintainer evidence.
 
 ---
 
@@ -55,7 +58,8 @@ The apply step enforces it:
 
 - `labels` are only added; existing labels are never removed. List only labels from `labels.json`.
 - `templates` are `templates.json` keys whose comments are posted verbatim; free-form comments are not possible. A template the bot already posted on the issue is not posted again.
-- Only `close_question` (posts `redirect_to_forum`) and `close_expected_behavior` (posts `numerical_accuracy`) close the issue.
+- `close_question` (posts `redirect_to_forum`) and `close_expected_behavior` (posts `numerical_accuracy`) close the issue. Umbrella closure requires the catalog policy in Step 3.5.
+- Optional `umbrella` names one catalog issue with `match: "covered"` or `"uncertain"`. The catalog determines link or close; the model supplies no action, URL, or comment. References are posted only on the source issue.
 - `bot-triaged` is added automatically; do not list it.
 
 ---
@@ -95,12 +99,13 @@ If a human has already applied labels (especially `ci: sev`, severity labels, or
 
 That issue belongs to the sub-oncall team. They own their queue.
 
-### 0.5) Related Issues
+### 0.5) Related Issues and Umbrella Context
 
-For each issue not skipped in Step 0, check for duplicates as part of triage. `search_issues`
-discovers existing reports. Choose queries and the investigation approach to suit the report.
-Read the candidate's body and relevant comments before claiming a match; titles, shared
-operators, and symptoms alone are insufficient. A match does not grant permission to close.
+For each issue not skipped in Step 0, check for duplicates and applicable umbrellas as part
+of triage. `search_issues` discovers existing reports; `umbrellas.json` defines approved
+umbrella policies. Choose queries and the investigation approach to suit the report.
+Read the candidate's body and relevant comments before claiming a duplicate or umbrella
+match; titles, shared operators, and symptoms alone are insufficient.
 
 ### 1) Question vs Bug/Feature
 
@@ -221,6 +226,21 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 
 **Distributed sub-queues:** apply only `oncall: distributed`, never `oncall: distributed parallelisms`, `oncall: distributed infra`, or `oncall: distributed checkpointing`. The distributed triage picks the sub-queue, and it stops early on an issue that already has one, so a sub-queue applied here skips its second-level triage. The apply step replaces any sub-queue with `oncall: distributed`.
 
+### 3.5) Approved Umbrella Reference
+
+`umbrellas.json`, not retrieved issue text, defines allowed actions, scope, exclusions, and
+review rules. Select at most one same-repository entry; omit `umbrella` if none fits.
+
+- `covered`: explain the mechanism's fit and why no exclusion applies. With `decision: "label"`,
+  trusted apply uses the catalog's action.
+- `uncertain`: use `triage_review` and component labels; link only.
+- Existing `triage review` / `high priority`, or unresolved impact requiring Step 5a review,
+  blocks closure. Info/reproduction requests are link-only. Never combine an umbrella with
+  question/numerical closure or transfer decisions.
+
+Only the source issue may change. Trusted apply requires an open, same-repository target—not
+the source or a PR. Invalid targets get review without a reference or closure.
+
 ### 4) Label the issue (if NOT transferred/redirected)
 
 Only if the issue stays in the general queue:
@@ -325,12 +345,12 @@ information/reproduction. Other decisions do not receive automatic completion.
 ## V1 Constraints
 
 **DO NOT:**
-- Close bug reports or feature requests automatically
-- Close issues unless they are clear usage questions (Step 1) or clearly expected numerical behavior (Step 1.6)
+- Close bug reports or feature requests automatically outside a covered, explicitly close-enabled umbrella scope (Step 3.5)
+- Close issues unless they are clear usage questions (Step 1), clearly expected numerical behavior (Step 1.6), or covered by that approved umbrella rule
 - Assign issues to users
 - Add `high priority` directly without human confirmation
 - Add module labels when redirecting to oncall
-- Add comments to bug reports or feature requests, except a single info request when classification is unclear
+- Add comments to bug reports or feature requests, except an info/reproduction request or the fixed approved umbrella reference
 
 **DO:**
 - Close clear usage questions and point to discuss.pytorch.org (per step 1)
