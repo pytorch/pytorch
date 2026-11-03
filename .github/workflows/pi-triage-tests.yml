@@ -1,0 +1,42 @@
+# Owner(s): ["module: ci"]
+name: Pi triage tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/issue_triage_pi/**"
+      - ".github/pi/**"
+      - ".github/actions/pi-agent/**"
+      - ".github/workflows/*triage*.yml"
+      - ".agents/skills/triaging-issues/**"
+      - ".agents/skills/distributed-triage/**"
+  pull_request:
+    paths:
+      - "scripts/issue_triage_pi/**"
+      - ".github/pi/**"
+      - ".github/actions/pi-agent/**"
+      - ".github/workflows/*triage*.yml"
+      - ".agents/skills/triaging-issues/**"
+      - ".agents/skills/distributed-triage/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Test triage plans and workflow contracts
+        run: |
+          python3 -m pip install --quiet pyyaml==6.0.2
+          python3 -m unittest discover -s scripts/issue_triage_pi -v

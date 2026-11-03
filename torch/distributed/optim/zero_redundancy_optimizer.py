@@ -20,6 +20,7 @@ import torch.distributed as dist
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.distributed.optim.utils import functional_optim_map
 from torch.optim import Optimizer
+from torch.optim._utils import _preserve_state_dtype_on_load
 
 
 __all__ = ["ZeroRedundancyOptimizer"]
@@ -1214,7 +1215,11 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     if torch.is_tensor(state_value) and state_value.dim() == 0:
                         self.optim.state[param][state_name] = state_value.cpu()
 
-        super().load_state_dict(state_dict)
+        # The local optimizer preserves dtypes; silence the wrapper's default warning.
+        with torch.optim.preserve_state_dtype_on_load(
+            _preserve_state_dtype_on_load.get() or False
+        ):
+            super().load_state_dict(state_dict)
 
         # Sync the input state with the exposed and local optimizer states
         self._sync_param_groups(state_dict["param_groups"], self.param_groups)
