@@ -63,6 +63,8 @@ def register_binary_linear_inplace(
     def impl(
         lhs: ComplexTensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
     ) -> ComplexTensor:
+        if not lhs.dtype.is_complex:
+            raise TypeError("result type can't be cast to the desired output type")
         result = out_of_place_impl(lhs, rhs, *args, **kwargs)
         lhs.copy_(result)
         return lhs
