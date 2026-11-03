@@ -2155,6 +2155,11 @@ class ByteArrayVariable(VariableTracker):
     def python_type(self) -> type[bytearray]:  # type: ignore[type-arg]
         return bytearray
 
+    @staticmethod
+    def create(data: bytearray) -> "ByteArrayVariable":
+        """Wrap a bytearray freshly allocated by the operation being traced."""
+        return ByteArrayVariable(data, mutation_type=ValueMutationNew())
+
     def as_python_constant(self) -> bytearray:
         return bytearray(self.data)
 
@@ -2181,7 +2186,7 @@ class ByteArrayVariable(VariableTracker):
                 raise_observed_exception(
                     ValueError, tx, args=["slice step cannot be zero"]
                 )
-            return VariableTracker.build(tx, bytearray(self.data[index]))
+            return ByteArrayVariable.create(bytearray(self.data[index]))
         else:
             raise_type_error(
                 tx,
@@ -2318,8 +2323,8 @@ class ByteArrayVariable(VariableTracker):
         # frame. A bytearray that existed before the frame may share its buffer
         # with a memoryview, tensor or ndarray, which would read stale bytes,
         # and eager raises BufferError for a resize at the store itself.
-        # Source-less captures also refer to existing objects, even though their
-        # SourcelessBuilder copies have ValueMutationNew.
+        # SourcelessBuilder copies can also refer to existing objects, without
+        # a source through which to write the changes back.
         if (
             isinstance(self.mutation_type, ValueMutationExisting)
             or self.is_sourceless_capture
@@ -2419,7 +2424,7 @@ class ByteArrayVariable(VariableTracker):
             new_data = self.data * n
         except (MemoryError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
-        return VariableTracker.build(tx, new_data)
+        return ByteArrayVariable.create(new_data)
 
     def sq_inplace_repeat_impl(
         self,
@@ -2464,7 +2469,7 @@ class ByteArrayVariable(VariableTracker):
         other: VariableTracker,
     ) -> VariableTracker:
         # bytearray_concat: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
-        return VariableTracker.build(tx, self.data + self._concat_operand(tx, other))
+        return ByteArrayVariable.create(self.data + self._concat_operand(tx, other))
 
     def sq_inplace_concat_impl(
         self,
@@ -2510,7 +2515,7 @@ class ByteArrayVariable(VariableTracker):
                 result = self.data % other.as_python_constant()
             except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
-            return VariableTracker.build(tx, bytearray(result))
+            return ByteArrayVariable.create(bytearray(result))
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.operator.mod),
             [self, other],
@@ -2633,7 +2638,11 @@ class ByteArrayVariable(VariableTracker):
             return None
         try:
             return VariableTracker.build(
-                tx, getattr(self.data, method)(*const_args, **const_kwargs)
+                tx,
+                [
+                    ByteArrayVariable.create(part)
+                    for part in getattr(self.data, method)(*const_args, **const_kwargs)
+                ],
             )
         except (MemoryError, OverflowError, TypeError, ValueError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
@@ -2828,7 +2837,7 @@ class ByteArrayVariable(VariableTracker):
         # enforces arity before this handler runs, so args/kwargs are
         # always empty here (same no-arg pattern as list_copy).
         result = getattr(self.data, method_name)()
-        return VariableTracker.build(tx, result)
+        return ByteArrayVariable.create(result)
 
     def bytearray_upper(
         self,

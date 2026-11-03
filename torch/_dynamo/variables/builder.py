@@ -6016,7 +6016,9 @@ class SourcelessBuilder:
             [create(tx, x) for x in value]
         )
         handlers[bytearray] = lambda tx, value: ByteArrayVariable(
-            bytearray(value), mutation_type=ValueMutationNew()
+            bytearray(value),
+            is_sourceless_capture=True,
+            mutation_type=ValueMutationNew(),
         )
         handlers[torch.Size] = lambda tx, value: SizeVariable(
             [create(tx, x) for x in value]

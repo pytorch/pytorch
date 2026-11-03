@@ -72,6 +72,20 @@ def make_sourceless_store_class(binding, container_kind, operation="setitem"):
     else:
         payload = {"x": [value]}
 
+    if binding == "class_attribute":
+
+        class Holder:
+            buf = payload
+
+        holder = Holder
+    elif binding == "module_attribute":
+        holder = types.ModuleType("bytearray_holder")
+        holder.buf = payload
+    elif binding == "function_defaults":
+
+        def captured_default(target=payload):
+            return target
+
     def write_target(target):
         if container_kind == "list":
             target = target[0]
@@ -103,10 +117,18 @@ def make_sourceless_store_class(binding, container_kind, operation="setitem"):
 
             def store(self, captured=payload):
                 return write_target(captured)
-        else:
+        elif binding == "keyword_default":
 
             def store(self, *, captured=payload):
                 return write_target(captured)
+        elif binding == "function_defaults":
+
+            def store(self):
+                return write_target(captured_default.__defaults__[0])
+        else:
+
+            def store(self):
+                return write_target(holder.buf)
 
     return Store, value
 
@@ -1182,7 +1204,51 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(torch.ones(1)), torch.ones(1) + 1)
         self.assertEqual(value, expected)
 
-    @parametrize("binding", ["closure", "positional_default", "keyword_default"])
+    @parametrize(
+        "binding",
+        [
+            "class_attribute",
+            "module_attribute",
+            "function_defaults",
+        ],
+    )
+    @parametrize(
+        "operation,expected",
+        [
+            ("setitem", bytearray(b"Zbc")),
+            ("setslice", bytearray(b"aXYc")),
+            ("delitem", bytearray(b"bc")),
+            ("delslice", bytearray(b"b")),
+        ],
+    )
+    def test_sourceless_bytearray_attribute_store(self, binding, operation, expected):
+        Store, value = make_sourceless_store_class(binding, "direct", operation)
+
+        def f(x):
+            Store().store()
+            return x + 1
+
+        compiled = torch.compile(f, backend="eager")
+        self.assertEqual(compiled(torch.ones(1)), torch.ones(1) + 1)
+        self.assertEqual(value, expected)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "bytearray store to an existing bytearray",
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(torch.ones(1))
+
+    @parametrize(
+        "binding",
+        [
+            "closure",
+            "positional_default",
+            "keyword_default",
+            "class_attribute",
+            "module_attribute",
+            "function_defaults",
+        ],
+    )
     def test_sourceless_bytearray_read_still_compiles(self, binding):
         Store, _ = make_sourceless_store_class(binding, "direct", "read")
 
@@ -1204,7 +1270,17 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(value, bytearray(b"abc"))
         view.release()
 
-    @parametrize("binding", ["closure", "positional_default", "keyword_default"])
+    @parametrize(
+        "binding",
+        [
+            "closure",
+            "positional_default",
+            "keyword_default",
+            "class_attribute",
+            "module_attribute",
+            "function_defaults",
+        ],
+    )
     def test_sourceless_bytearray_store_with_export(self, binding):
         Store, value = make_sourceless_store_class(binding, "direct", "setslice")
 
@@ -1217,6 +1293,64 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             with self.assertRaisesRegex(BufferError, "Existing exports of data"):
                 compiled(torch.ones(1))
         self.assertEqual(value, bytearray(b"abc"))
+
+    @parametrize(
+        "operation",
+        [
+            "empty",
+            "literal",
+            "encoding",
+            "iterable",
+            "copy",
+            "slice",
+            "repeat",
+            "concat",
+            "format",
+            "split",
+            "rsplit",
+            "upper",
+            "lower",
+            "title",
+        ],
+    )
+    def test_store_to_bytearray_operation_result(self, operation):
+        def f(source, x):
+            if operation == "empty":
+                value = bytearray()
+            elif operation == "literal":
+                value = bytearray(b"abc")
+            elif operation == "encoding":
+                value = bytearray("abc", "ascii")
+            elif operation == "iterable":
+                value = bytearray(range(3))
+            elif operation == "copy":
+                value = bytearray(source)
+            elif operation == "slice":
+                value = source[:]
+            elif operation == "repeat":
+                value = source * 2
+            elif operation == "concat":
+                value = source + b"d"
+            elif operation == "format":
+                value = bytearray(b"%s") % b"abc"
+            elif operation == "split":
+                value = source.split(b"b")[0]
+            elif operation == "rsplit":
+                value = source.rsplit(b"b")[0]
+            elif operation == "upper":
+                value = source.upper()
+            elif operation == "lower":
+                value = source.lower()
+            else:
+                value = source.title()
+            value[:1] = b"Z"
+            del value[1:2]
+            return value, x + 1
+
+        source = bytearray(b"abc")
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(source, torch.ones(1)), f(source, torch.ones(1)))
+        self.assertEqual(source, bytearray(b"abc"))
 
     def test_new_bytearray_in_function_default_still_compiles(self):
         def f(x):
