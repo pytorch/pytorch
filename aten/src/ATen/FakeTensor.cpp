@@ -41,4 +41,18 @@ void set_and_normalize_fake_device(
   impl->set_fake_device(fake_device);
 }
 
+void mark_fake_storage(
+    c10::TensorImpl* impl,
+    const c10::FakeTensorMode& mode) {
+  if (!impl->has_storage()) {
+    return;
+  }
+  auto* storage_impl = impl->storage().unsafeGetStorageImpl();
+  if (mode.allow_unsafe_data_ptr_access_) {
+    storage_impl->set_warn_deprecated_on_mutable_data_ptr();
+  } else {
+    storage_impl->set_throw_on_mutable_data_ptr();
+  }
+}
+
 } // namespace at
