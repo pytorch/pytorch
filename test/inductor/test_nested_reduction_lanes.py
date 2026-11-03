@@ -5,11 +5,18 @@ from torch._dynamo.testing import CompileCounterWithBackend
 from torch._inductor import config, metrics
 from torch._inductor.utils import run_and_get_kernels
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 class TestPitchedLaneSources(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @parametrize(
         "mode", ["escape", "dynamic", "misaligned", "cross_row", "input_mutation"]
     )
