@@ -3009,6 +3009,43 @@ class cuda(cutlass):
     # wildcard entries; existing rows in a loaded file still satisfy lookups.
     autotune_tunableop_dynamic_dims_wildcard: bool = False
 
+    # Compile-time TunableOp integration for GEMMs, on both backends TunableOp
+    # supports: hipBLASLt on ROCm and cuBLASLt on CUDA. "tune" tunes GEMMs during
+    # autotuning and records the solutions; with autotune_tunableop_ladder it also
+    # tunes a range of sizes of each GEMM's dynamic dim, the traced shape among
+    # them. A GEMM the ladder skips -- ladder off, static shape, more than one
+    # dynamic symbol, dynamic K, a non-dense operand, an operand still flexible
+    # after finalize() -- has its traced shape tuned only where autotune leaves
+    # it more than one choice, so the aten candidate is benchmarked and routed
+    # through the worker. With max-autotune off there is only the aten choice,
+    # autotune returns without benchmarking, and the shape is covered only with
+    # PYTORCH_TUNABLEOP_ENABLED set on a later run. Tuning happens while
+    # lowering, so a warm FxGraphCache or AOTAutogradCache hit tunes nothing at
+    # all: a tune pass needs a cold cache, or force_disable_caches. "reuse"
+    # instead borrows the nearest recorded shape, benchmarks it against the
+    # default kernel, and records the winner. Run as separate passes: "tune"
+    # builds the results file, "reuse" consumes it.
+    # pyrefly: ignore [bad-assignment]
+    autotune_tunableop_mode: Literal["off", "tune", "reuse"] = os.environ.get(
+        "TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE", "off"
+    )  # type: ignore[assignment]
+
+    # Seconds allowed per GEMM for compile-time TunableOp work. hipBLASLt tuning
+    # can hang, which subprocess isolation alone does not fix, so the wait is
+    # bounded. Set below about a minute only the traced shape is tuned: a rung
+    # needs a slice big enough to be a fair trial rather than a timeout.
+    autotune_tunableop_timeout: float = float(
+        os.environ.get("TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_TIMEOUT", "900")
+    )
+
+    # Whether "tune" mode also tunes a ladder of sizes of each GEMM's dynamic dim.
+    # The ladder is what gives runtime a chance of an exact hit on a size the
+    # compile never saw, and is also nearly all of the tuning cost. With it off,
+    # tuning is limited to the traced shape of each GEMM.
+    autotune_tunableop_ladder: bool = (
+        os.environ.get("TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_LADDER", "1") == "1"
+    )
+
 
 @inherit_fields_from(cutlass)
 class xpu(cutlass):

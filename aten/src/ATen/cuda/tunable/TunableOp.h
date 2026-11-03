@@ -92,21 +92,8 @@ class TunableOp {
             }
           }
         }
-        else {
-          if (!concrete_hit) {
-            // Record before the wildcard lookup, not after it. A wildcard is
-            // an approximation -- the kernel was tuned for a different
-            // concrete shape and is merely reused here -- so offline tuning
-            // still needs to see this shape even when a wildcard serves it.
-            if (ctx->IsRecordUntunedEnabled()) {
-              mgr.RecordUntuned(
-                  ctx->GetUntunedFile(), op_sig, concrete_sig,
-                  params->BLASSignature());
-            }
-            if (ctx->IsWildcardFallbackEnabled()) {
-              result = mgr.LookupWildcardFallback(op_sig, concrete_sig);
-            }
-          }
+        else if (!concrete_hit) {
+          result = ResolveWithoutExactHit(mgr, params, op_sig, concrete_sig);
         }
       }
 
@@ -185,6 +172,106 @@ class TunableOp {
       return false;
     }
 #endif
+
+    // A donor is only usable if this process can run it: FindFastestAmong
+    // TORCH_CHECKs the op. cuBLASLt builds candidates on demand, and even on
+    // ROCm a file can name one this build never registered (hipBLASLt is
+    // skipped for complex, and by HIPBLASLT_ENABLED=0). Unusable is a miss.
+    bool DonorIsUsable(
+        const ResultEntry& donor,
+        [[maybe_unused]] const ParamsT* params) {
+#ifndef USE_ROCM
+      if (!RegisterOpForResult(donor, params)) {
+        return false;
+      }
+#endif
+      return GetOp(donor.GetKey()) != nullptr;
+    }
+
+    // Reuse pass, shape with no exact entry. Borrowing is a guess, so check it
+    // rather than trust it: the same comparison tuning makes, restricted to the
+    // donor. Default is candidate 0 for every GEMM, so the borrow only wins on
+    // merit.
+    ResultEntry ResolveWithoutExactHit(
+        TuningResultsManager& mgr,
+        const ParamsT* params,
+        const std::string& op_sig,
+        const std::string& concrete_sig) {
+      TuningContext* ctx = getTuningContext();
+
+      auto borrowed = ResultEntry::Null();
+      if (ctx->IsNearestMatchEnabled()) {
+        borrowed = mgr.LookupNearest(op_sig, concrete_sig);
+        if (borrowed != ResultEntry::Null() && !DonorIsUsable(borrowed, params)) {
+          borrowed = ResultEntry::Null();
+        }
+        // No usable nearest donor: try the wildcard as a second donor, or
+        // the worker measures Default while runtime runs the wildcard and
+        // autotune ranks a kernel that never runs. Validated like any borrow;
+        // Default wildcards skipped, as profiling the fallback twice is moot.
+        if (borrowed == ResultEntry::Null() && ctx->IsWildcardFallbackEnabled()) {
+          auto wildcard = mgr.LookupWildcardFallback(op_sig, concrete_sig);
+          if (wildcard != ResultEntry::Null() &&
+              wildcard != ResultEntry::Default() &&
+              DonorIsUsable(wildcard, params)) {
+            borrowed = wildcard;
+          }
+        }
+      }
+      const bool will_validate = (borrowed != ResultEntry::Null());
+
+      // Only a validated donor persists this shape, leaving offline tuning
+      // nothing to find. Report unless a persisted verdict is coming; the
+      // capture path re-reports when validation is skipped, so the shape
+      // cannot drop out of both files. After the lookup: it needs that.
+      if (ctx->IsRecordUntunedEnabled() &&
+          !(will_validate && ctx->IsRecordBorrowedEnabled())) {
+        mgr.RecordUntuned(
+            ctx->GetUntunedFile(), op_sig, concrete_sig,
+            params->BLASSignature());
+      }
+
+      if (will_validate) {
+        // Tuning under stream capture is forbidden (see the tuning path
+        // above): FindFastestAmong allocates, memcpys and synchronizes events,
+        // any of which invalidates the capture. While capturing, report
+        // untuned (unless reported above) and return Default unvalidated.
+        bool can_validate = true;
+#ifndef USE_ROCM
+        can_validate =
+            c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
+            c10::cuda::CaptureStatus::None;
+#endif
+        if (!can_validate) {
+          if (ctx->IsRecordUntunedEnabled() && ctx->IsRecordBorrowedEnabled()) {
+            mgr.RecordUntuned(
+                ctx->GetUntunedFile(), op_sig, concrete_sig,
+                params->BLASSignature());
+          }
+          return ResultEntry::Default();
+        }
+        {
+          auto result = FindFastestAmong(
+              params, {ResultEntry::Default().GetKey(), borrowed.GetKey()});
+          // Always persisted: IsNearestMatchEnabled() is false unless
+          // recording is on. Default too -- the shape becomes an exact hit, so
+          // neither the search nor this comparison is repeated. Final: tuning
+          // it properly means tuning from a file without these entries.
+          mgr.RecordBorrowed(op_sig, concrete_sig, result);
+          return result;
+        }
+      }
+      // Nearest match takes precedence: once it is on, a miss with no usable
+      // donor of either kind (nearest or wildcard) is a miss rather than a
+      // reason to return an unvalidated wildcard hint.
+      if (ctx->IsNearestMatchEnabled()) {
+        return ResultEntry::Default();
+      }
+      if (ctx->IsWildcardFallbackEnabled()) {
+        return mgr.LookupWildcardFallback(op_sig, concrete_sig);
+      }
+      return ResultEntry::Null();
+    }
 
   private:
     static void WarmUp(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
@@ -266,11 +353,19 @@ class TunableOp {
 
   protected:
     virtual ResultEntry FindFastest(const ParamsT* params) {
+      return FindFastestAmong(params, CandidateNames(params));
+    }
+
+    // Benchmark an explicit candidate set. Restricting it is how a single borrowed
+    // solution is checked against the default without re-enumerating every solution
+    // the backend offers.
+    ResultEntry FindFastestAmong(
+        const ParamsT* params,
+        const std::vector<std::string>& candidate_names) {
       TuningContext* ctx = getTuningContext();
       auto op_sig = Signature();
       auto params_sig = params->Signature();
       auto blas_sig = params->BLASSignature();
-      auto candidate_names = CandidateNames(params);
       TUNABLE_LOG2("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", candidate_names.size(), " candidates");
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";

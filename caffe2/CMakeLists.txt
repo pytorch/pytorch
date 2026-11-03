@@ -2193,6 +2193,11 @@ if(BUILD_TEST)
       if(USE_CUDNN AND ${test_name} MATCHES "cudnn")
         target_link_libraries(${test_name} torch::cudnn)
       endif()
+      if(${test_name} MATCHES "tunable")
+        # GemmCommon.h includes <fmt/printf.h>, and c10 links fmt PRIVATE, so
+        # the include dir does not reach consumers of torch_library.
+        target_link_libraries(${test_name} fmt::fmt-header-only)
+      endif()
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
@@ -2258,6 +2263,11 @@ if(BUILD_TEST)
         add_executable(${test_name} "${test_src}")
       endif()
       target_link_libraries(${test_name} torch_library gtest_main)
+      if(${test_name} MATCHES "tunable")
+        # See the CUDA loop above: GemmCommon.h needs fmt's include dir, which
+        # torch_library does not propagate.
+        target_link_libraries(${test_name} fmt::fmt-header-only)
+      endif()
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDE})
       target_compile_options(${test_name} PRIVATE ${HIP_CXX_FLAGS})

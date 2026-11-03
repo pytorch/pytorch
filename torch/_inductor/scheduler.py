@@ -7240,13 +7240,18 @@ class Scheduler:
                 node.node, ir.MultiTemplateBuffer
             ):
                 multi_node = node.node
-                if (
-                    not config.test_configs.force_extern_kernel_in_multi_template
-                    and not self._has_layout_conflict_for_template(multi_node)
+                # The conflict check freezes flexible input layouts, so keep
+                # the original short-circuit past it under the force-extern
+                # flag. Unevaluated there reads as no conflict.
+                force_extern = config.test_configs.force_extern_kernel_in_multi_template
+                if not force_extern and not self._has_layout_conflict_for_template(
+                    multi_node
                 ):
+                    has_layout_conflict = False
                     # TODO (PaulZhang12): Potentially support recompilation/benchmark for new strides
                     min_node_unfused, _ = multi_node.get_min_choice()
                 else:
+                    has_layout_conflict = not force_extern
                     extern_choices = [
                         c
                         for c in multi_node.choices
@@ -7288,8 +7293,16 @@ class Scheduler:
                         node.node.finalize_as_triton_caller(min_node_unfused)
                     continue
 
+                # aten won, so widen its coverage across the dynamic dim.
+                # Unlike the select_algorithm sites this runs after finalize(),
+                # so it already sees decided layouts. Not on the conflict
+                # fallback: the rebuild reads the constraint.
                 with ir.IRNode.current_origins(multi_node.origins):
                     out_tensorbox = min_node_unfused.output_node()
+                if not has_layout_conflict:
+                    torch._inductor.select_algorithm._maybe_pretune_tunableop(
+                        min_node_unfused
+                    )
                 out_storage = out_tensorbox.data  # type: ignore[union-attr]
                 if not isinstance(out_storage, ir.StorageBox):
                     raise AssertionError("expected out_storage to be an ir.StorageBox")
