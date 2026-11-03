@@ -3238,6 +3238,27 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         for arg in [(), (object(),), (), (_IS_TEST_SENTINEL,), (object(),)]:
             self.assertEqual(opt_fn(x, *arg), fn(x, *arg))
 
+    def test_identity_guards_only_from_is(self):
+        # `in` and dict lookups also compare by identity internally, but only
+        # an explicit `is` should add a relation guard.
+        class Key:
+            pass
+
+        def fn(x, items, table, key):
+            return x + (key in items) + (key in table)
+
+        guards = []
+        opt_fn = torch._dynamo.optimize(
+            "eager", guard_export_fn=lambda gs: guards.extend(gs)
+        )(fn)
+        x = torch.ones(2)
+        args = (x, [Key(), Key()], {Key(): 0, Key(): 1}, Key())
+        self.assertEqual(opt_fn(*args), fn(*args))
+        relation_guards = {"IDENTITY_COMPARE", "DUPLICATE_INPUT"}
+        self.assertFalse(
+            [g for g in guards if g.create_fn_name() in relation_guards]
+        )
+
     def test_is_floating_point(self):
         def fn(a, b):
             x = a + 1.0
