@@ -332,8 +332,9 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             raise AssertionError("rendered FlexGEMM choices require a pinned config")
         kwargs = [f", config={config.quack_config!r}"]
         if config.blockscaled_format is not None:
+            scale_index = 3 if config.varlen_axis is not None else 2
             kwargs.append(
-                f", SFA={input_args[2]}, SFB={input_args[3]}, "
+                f", SFA={input_args[scale_index]}, SFB={input_args[scale_index + 1]}, "
                 f"blockscaled_format={config.blockscaled_format!r}"
             )
         if config.varlen_axis is not None:

@@ -8,6 +8,7 @@ See ``lower_quack_flex_gemm`` for the template flow.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import functools
 import importlib.util
@@ -23,11 +24,15 @@ from torch._higher_order_ops.flex_gemm import (
     flex_gemm_body_gemm_op,
     flex_gemm_hop,
     FLEX_GEMM_OP_SPECS,
+    grouped_mm_offset_lengths,
+    validate_scaled_grouped_mm,
     validate_scaled_mm,
 )
 from torch._inductor import config
+from torch._inductor.virtualized import V
 from torch._logging import warning_once
 from torch.fx.operator_schemas import normalize_function
+from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.utils._ordered_set import OrderedSet
 
 from ... import ir
@@ -137,6 +142,7 @@ QUACK_EPILOGUE_FEATURE_OPS = frozenset(
     (
         torch.ops.aten.mm.default,
         torch.ops.aten._scaled_mm_v2.default,
+        torch.ops.aten._scaled_grouped_mm_v2.default,
         torch.ops.aten._grouped_mm.default,
     )
 )
@@ -144,7 +150,7 @@ QUACK_EPILOGUE_FEATURE_OPS = frozenset(
 
 @dataclasses.dataclass(frozen=True)
 class QuackBlockScaledContract:
-    """One traced aten._scaled_mm_v2 call resolved to QuACK's block-scaled main loop.
+    """One traced scaled GEMM call resolved to QuACK's block-scaled main loop.
 
     ``gemm_inputs`` is (A, B, SFA, SFB) in template-input order;
     ``tensorwise_scales`` are the optional NVFP4 global scales folded into the
@@ -156,20 +162,23 @@ class QuackBlockScaledContract:
     tensorwise_scales: tuple[torch.fx.Node, ...]
 
 
-def quack_blockscaled_contract(gemm_fx_node: torch.fx.Node) -> QuackBlockScaledContract:
+def quack_blockscaled_contract(
+    gemm_fx_node: torch.fx.Node, call=None
+) -> QuackBlockScaledContract:
     """Resolve the traced native call to the fused block-scaled input contract."""
-    normalized = normalize_function(
-        torch.ops.aten._scaled_mm_v2.default,
-        gemm_fx_node.args,
-        gemm_fx_node.kwargs,
-        normalize_to_only_use_kwargs=True,
-    )
-    if normalized is None:
-        raise AssertionError("aten._scaled_mm_v2 arguments must bind to its schema")
-    call = normalized.kwargs
+    if call is None:
+        normalized = normalize_function(
+            cast(torch._ops.OpOverload, gemm_fx_node.target),
+            gemm_fx_node.args,
+            gemm_fx_node.kwargs,
+            normalize_to_only_use_kwargs=True,
+        )
+        if normalized is None:
+            raise AssertionError("scaled GEMM arguments must bind to its schema")
+        call = normalized.kwargs
     if call["bias"] is not None or call["contraction_dim"] or call["use_fast_accum"]:
         raise NotImplementedError(
-            "FlexGEMM scaled-mm does not support bias, custom contraction, or fast accumulation"
+            "FlexGEMM scaled GEMMs do not support bias, custom contraction, or fast accumulation"
         )
     scale_a, scale_b = tuple(call["scale_a"]), tuple(call["scale_b"])
     format_name = validate_scaled_mm(
@@ -181,6 +190,7 @@ def quack_blockscaled_contract(gemm_fx_node: torch.fx.Node) -> QuackBlockScaledC
         call["recipe_b"],
         call["swizzle_a"],
         call["swizzle_b"],
+        grouped=gemm_fx_node.target is torch.ops.aten._scaled_grouped_mm_v2.default,
     )
     return QuackBlockScaledContract(
         format_name,
@@ -235,11 +245,145 @@ def quack_grouped_mm_contract(
     return (mat_a, mat_b, offs), "k"
 
 
+def quack_scaled_grouped_mm_contract(gemm_fx_node):
+    normalized = normalize_function(
+        torch.ops.aten._scaled_grouped_mm_v2.default,
+        gemm_fx_node.args,
+        gemm_fx_node.kwargs,
+        normalize_to_only_use_kwargs=True,
+    )
+    if normalized is None:
+        raise AssertionError(
+            "aten._scaled_grouped_mm_v2 arguments must bind to its schema"
+        )
+    call = normalized.kwargs
+    a, b, offs = call["input"], call["mat2"], call["offs"]
+    sa, sb = call["scale_a"], call["scale_b"]
+    blockscaled = quack_blockscaled_contract(gemm_fx_node, call)
+    validate_scaled_grouped_mm(
+        a.meta["val"],
+        b.meta["val"],
+        sa[0].meta["val"],
+        sb[0].meta["val"],
+        None if offs is None else offs.meta["val"],
+        call["out_dtype"],
+        blockscaled.format,
+    )
+    axis = "m" if b.meta["val"].ndim == 3 else "k"
+    return (a, b, offs, sa[0], sb[0]), axis, blockscaled
+
+
+def repack_grouped_scale(scale, cu_seqlens, total, mn, rk, axis, row_offsets=None):
+    """Map compact per-group blocked scales to QuACK's padded varlen tile offsets."""
+    groups = cu_seqlens.numel() - 1
+    padded = (total + 127) // 128 + groups - 1
+    shape = (
+        (1, padded, rk, 32, 4, 4)
+        if axis == "m"
+        else (1, (mn + 127) // 128, padded, 32, 4, 4)
+    )
+    cu_seqlens = cu_seqlens.to(torch.int64)
+    if row_offsets is None:
+        row_offsets = grouped_scale_row_offsets(cu_seqlens, total)
+    tiles = (row_offsets[1:] - row_offsets[:-1]) // 128
+    outer = rk if axis == "m" else (mn + 127) // 128
+    torch._assert_async(
+        tiles.sum() * outer * 512 <= scale.numel(),
+        "scaled_grouped_mm scale buffer is too small for the groups",
+    )
+    if scale.numel() == 0:
+        return torch.zeros(shape, device=scale.device, dtype=torch.uint8).view(
+            scale.dtype
+        )
+    compact = row_offsets[:-1] // 128
+    starts = cu_seqlens[:-1] // 128 + torch.arange(groups, device=scale.device)
+    target = torch.arange(padded, device=scale.device)
+    owner = torch.bucketize(target, starts, right=True) - 1
+    local = target - starts[owner]
+    inner = torch.arange(512, device=scale.device)
+    if axis == "m":
+        cols = torch.arange(rk, device=scale.device)
+        index = (
+            (compact[owner] + local)[:, None, None] * rk + cols[None, :, None]
+        ) * 512 + inner
+        valid = (local < tiles[owner])[:, None, None]
+    else:
+        rows = torch.arange((mn + 127) // 128, device=scale.device)
+        index = (
+            compact[owner][None, :, None] * rows.numel()
+            + rows[:, None, None] * tiles[owner][None, :, None]
+            + local[None, :, None]
+        ) * 512 + inner
+        valid = (local < tiles[owner])[None, :, None]
+    values = scale.view(torch.uint8).reshape(-1)[index.clamp(0, scale.numel() - 1)]
+    return torch.where(valid, values, 0).reshape(shape).view(scale.dtype)
+
+
+def lower_grouped_scale_subgraph(fn, inputs, name):
+    from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
+    from torch._inductor.decomposition import select_decomp_table
+    from torch._inductor.ir import ir_node_to_tensor
+    from torch.fx.experimental.proxy_tensor import make_fx
+
+    with V.fake_mode:
+        graph = make_fx(
+            fn, decomposition_table=select_decomp_table(), tracing_mode="symbolic"
+        )(*(ir_node_to_tensor(node) for node in inputs))
+    return inline_subgraph_to_ir_nodes(graph, inputs, name)
+
+
+def lower_grouped_scale(
+    scale, cu_seqlens, row_offsets, mat_a, mat_b, *, axis, rhs, format_name
+):
+    from torch._vendor.quack.blockscaled.operand import BlockScaledFormat
+
+    format = BlockScaledFormat.from_name(format_name)
+
+    def repack(scale, cu_seqlens, row_offsets, a, b):
+        total = a.shape[0] if axis == "m" else a.shape[-1]
+        mn = b.shape[-1] if rhs else a.shape[0]
+        return repack_grouped_scale(
+            scale,
+            cu_seqlens,
+            total,
+            mn,
+            (format.logical_k(a.shape[-1]) + 4 * format.sf_vec_size - 1)
+            // (4 * format.sf_vec_size),
+            axis,
+            row_offsets,
+        )
+
+    return lower_grouped_scale_subgraph(
+        repack,
+        [scale, cu_seqlens, row_offsets, mat_a, mat_b],
+        "flex_gemm_grouped_scale",
+    )
+
+
+def grouped_scale_row_offsets(cu_seqlens, total):
+    lengths = grouped_mm_offset_lengths(
+        cu_seqlens[1:],
+        total,
+        "grouped blocked output offsets must be nondecreasing and within the input rows",
+    )
+    return torch.cat((lengths.new_zeros(1), ((lengths + 127) // 128).cumsum(0) * 128))
+
+
+def lower_grouped_scale_row_offsets(cu_seqlens, mat_a, axis="m"):
+    def offsets(cu_seqlens, a):
+        return grouped_scale_row_offsets(
+            cu_seqlens, a.shape[0] if axis == "m" else a.shape[-1]
+        )
+
+    return lower_grouped_scale_subgraph(
+        offsets, [cu_seqlens, mat_a], "flex_gemm_grouped_scale_offsets"
+    )
+
+
 def flex_gemm_cu_seqlens_benchmark_input(
     node: IRNode, total_length: _IntLike
 ) -> torch.Tensor:
     """Build evenly spaced M/K boundaries for autotune benchmarks."""
-    from torch._inductor.virtualized import V
 
     sizevars = V.graph.sizevars
     return torch.linspace(
@@ -381,7 +525,6 @@ def require_lane_domain_row_captures(
 
 def validate_flex_gemm_matrix_layout(name: str, layout: ir.Layout) -> None:
     """Reject matrix layouts that cannot satisfy QuACK's TMA argument ABI."""
-    from torch._inductor.virtualized import V
 
     if any(statically_known_equal(size, 0) for size in layout.size):
         return
@@ -414,7 +557,6 @@ def require_tma_loadable_tile_captures(
     are aligned. Unknown producer layouts are constrained to padded strides; symbolic
     layouts can specialize on stride divisibility.
     """
-    from torch._inductor.virtualized import V
 
     sizevars = V.graph.sizevars
 
@@ -601,7 +743,6 @@ def flex_gemm_quack_configs(
         flex_gemm_problem,
         selection_callback,
     )
-    from torch._inductor.virtualized import V
     from torch._vendor.quack.gemm_config import cta_tile_shape_m
     from torch._vendor.quack.gemm_runtime.autotune import legal_mod_configs
 
@@ -654,7 +795,6 @@ def flex_gemm_autotune_view_input(node: ir.ReinterpretView) -> torch.Tensor:
         AlgorithmSelectorCache,
         get_strides_with_layout_constraints,
     )
-    from torch._inductor.virtualized import V
 
     value = AlgorithmSelectorCache.benchmark_example_value(node)
     base = value if value._base is None else value._base
@@ -747,7 +887,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     mat1_index = op_spec.mat1_index
     gemm_fx_node = flex_gemm_node(subgraph.graph_module, gemm_op)
     scaled_mm = gemm_op is torch.ops.aten._scaled_mm_v2.default
-    grouped_mm = gemm_op is torch.ops.aten._grouped_mm.default
+    scaled_grouped_mm = gemm_op is torch.ops.aten._scaled_grouped_mm_v2.default
+    grouped_mm = gemm_op is torch.ops.aten._grouped_mm.default or scaled_grouped_mm
     placeholders = [
         node for node in subgraph.graph_module.graph.nodes if node.op == "placeholder"
     ]
@@ -755,7 +896,13 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     blockscaled = None
     varlen_axis: Literal["m", "k"] | None = None
     mainloop_scale_nodes: tuple[torch.fx.Node, ...] = ()
-    if scaled_mm:
+    if scaled_grouped_mm:
+        gemm_operand_nodes, varlen_axis, blockscaled = quack_scaled_grouped_mm_contract(
+            gemm_fx_node
+        )
+        mainloop_scale_nodes = blockscaled.tensorwise_scales
+        alpha, beta = 1.0, 0.0
+    elif scaled_mm:
         blockscaled = quack_blockscaled_contract(gemm_fx_node)
         gemm_operand_nodes = blockscaled.gemm_inputs
         mainloop_scale_nodes = blockscaled.tensorwise_scales
@@ -784,11 +931,74 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         if not isinstance(gemm_arg, TensorBox):
             raise NotImplementedError("FlexGEMM lowering expects tensor GEMM operands")
         gemm_args.append(gemm_arg)
+    if scaled_grouped_mm and statically_known_equal(gemm_args[0].get_size()[-1], 0):
+
+        def validate_zero_offsets(offs, a):
+            total = a.shape[0] if varlen_axis == "m" else a.shape[-1]
+            message = (
+                "scaled_grouped_mm offsets must be zero when K is zero"
+                if varlen_axis == "k"
+                else "scaled_grouped_mm offsets must be nondecreasing and within the grouped dimension"
+            )
+            return grouped_mm_offset_lengths(offs, total, message)
+
+        lower_grouped_scale_subgraph(
+            validate_zero_offsets,
+            [gemm_args[2], gemm_args[0]],
+            "flex_gemm_zero_k_offsets",
+        )
+        # Zero contraction has no MMA work; lower the captured epilogue over zeros.
+        zero_graph = copy.deepcopy(subgraph.graph_module)
+        zero_gemm = flex_gemm_node(zero_graph, gemm_op)
+        zero_operands, _, _ = quack_scaled_grouped_mm_contract(zero_gemm)
+        meta = zero_gemm.meta["val"]
+        with zero_graph.graph.inserting_before(zero_gemm):
+            sizes = []
+            dimensions = (
+                ((zero_operands[2], 0), (zero_operands[0], 0), (zero_operands[1], -1))
+                if varlen_axis == "k"
+                else ((zero_operands[0], 0), (zero_operands[1], -1))
+            )
+            for operand, dimension in dimensions:
+                size = zero_graph.graph.call_function(
+                    torch.ops.aten.sym_size.int, (operand, dimension)
+                )
+                size.meta["val"] = operand.meta["val"].shape[dimension]
+                sizes.append(size)
+        zero_gemm.target = torch.ops.aten.full.default
+        zero_gemm.args = (sizes, 0)
+        zero_gemm.kwargs = {"dtype": meta.dtype, "device": meta.device}
+        zero_graph.recompile()
+        fake_inputs = [
+            node.meta["val"]
+            for node in zero_graph.graph.nodes
+            if node.op == "placeholder"
+        ]
+        FakeTensorProp(zero_graph, V.fake_mode).propagate(*fake_inputs)
+        return process_subgraph_nodes(zero_graph, list(args))
     check_quack_fp32_operand(gemm_args[mat1_index])
     if grouped_mm:
         # QuACK's varlen path reads [0, *offs]; pad in-graph so Inductor owns
         # the buffer instead of the runtime allocating during CUDA graph capture.
         gemm_args[2] = constant_pad_nd(gemm_args[2], [1, 0])
+    grouped_row_offsets = None
+    if grouped_mm and blockscaled is not None:
+        grouped_row_offsets = lower_grouped_scale_row_offsets(
+            gemm_args[2], gemm_args[0], varlen_axis
+        )
+        for index in (3, 4):
+            if index == 4 and varlen_axis == "m":
+                continue
+            gemm_args[index] = lower_grouped_scale(
+                gemm_args[index],
+                gemm_args[2],
+                grouped_row_offsets,
+                gemm_args[0],
+                gemm_args[1],
+                axis=varlen_axis,
+                rhs=index == 4,
+                format_name=blockscaled.format,
+            )
     if varlen_axis == "k":
         # The contract checked FX metadata; pointwise producers would otherwise
         # realize contiguous, turning m-major A into K-major storage. The cast
@@ -993,7 +1203,10 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     )
     mainloop_scale_count = len(mainloop_scale_nodes)
     epilogue_arg_kinds = (
-        *("scalar" for _ in range(mainloop_scale_count)),
+        *(
+            ("group" if scaled_grouped_mm else "scalar")
+            for _ in range(mainloop_scale_count)
+        ),
         *infer_flex_gemm_epilogue_arg_kinds(
             gemm_op, epilogue_args[mainloop_scale_count:], epilogue_lane_size
         ),
@@ -1168,7 +1381,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 "no supported GemmConfig matches "
                 f"config_constraints={config_constraints!r} for this call"
             )
-    from torch._inductor.virtualized import V
 
     sizevars = V.graph.sizevars
     mat1, mat2 = (gemm_input_nodes[i] for i in (op_spec.mat1_index, op_spec.mat2_index))
@@ -1244,8 +1456,16 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Dispatch FlexGEMM to ordinary Inductor lowering or the QUACK template."""
     backend = kernel_options.get("backend", "TRITON")
     body_gemm_op = flex_gemm_body_gemm_op(gemm_op, gemm_kwargs)
-    if body_gemm_op is torch.ops.aten._scaled_mm_v2.default and backend != "QUACK":
-        raise NotImplementedError("FlexGEMM F.scaled_mm requires backend='QUACK'")
+    if (
+        body_gemm_op
+        in (
+            torch.ops.aten._scaled_mm_v2.default,
+            torch.ops.aten._scaled_grouped_mm_v2.default,
+        )
+        and backend != "QUACK"
+    ):
+        op_name = FLEX_GEMM_OP_SPECS[body_gemm_op].name
+        raise NotImplementedError(f"FlexGEMM F.{op_name} requires backend='QUACK'")
     if backend == "NVGEMM" and gemm_op in FLEX_GEMM_OP_SPECS:
         mat1 = args[FLEX_GEMM_OP_SPECS[gemm_op].mat1_index]
         if isinstance(mat1, TensorBox) and is_bf16x9_matmul(

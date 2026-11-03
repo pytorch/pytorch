@@ -248,7 +248,10 @@ def flex_gemm_epimod(
     if epimod is not None:
         return epimod
 
-    from torch._inductor.kernel.flex_gemm.quack_ops.col_load import ScalarColVecLoad
+    from torch._inductor.kernel.flex_gemm.quack_ops.col_load import (
+        GroupScalar,
+        ScalarColVecLoad,
+    )
     from torch._inductor.kernel.flex_gemm.quack_ops.interleaved import (
         InterleavedMainStore,
         InterleavedTileLoad,
@@ -258,6 +261,7 @@ def flex_gemm_epimod(
 
     op_types = {
         "scalar": epi_ops.Scalar,
+        "group": GroupScalar,
         "row": epi_ops.RowVecLoad,
         "col": epi_ops.ColVecLoad,
         "tile": epi_ops.TileLoad,
@@ -434,12 +438,20 @@ def gemm_epilogue(
     if blockscaled_format is not None:
         if SFA is None or SFB is None:
             raise RuntimeError("FlexGEMM block-scaled GEMMs require SFA and SFB")
-        SFA = quack_blockscaled_scale_view(
-            SFA, a.shape[0], a.shape[1], blockscaled_format
-        )
-        SFB = quack_blockscaled_scale_view(
-            SFB, b.shape[1], b.shape[0], blockscaled_format
-        )
+        if cu_seqlens_m is not None:
+            SFB = SFB.view(
+                b.shape[0],
+                *quack_blockscaled_scale_view(
+                    SFB[0], b.shape[-1], b.shape[-2], blockscaled_format
+                ).shape,
+            )
+        elif cu_seqlens_k is None:
+            SFA = quack_blockscaled_scale_view(
+                SFA, a.shape[0], a.shape[1], blockscaled_format
+            )
+            SFB = quack_blockscaled_scale_view(
+                SFB, b.shape[1], b.shape[0], blockscaled_format
+            )
     if (
         isinstance(output_transform, FlexGemmOutputContraction)
         and output_transform.chunked
