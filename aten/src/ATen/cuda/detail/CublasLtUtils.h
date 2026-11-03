@@ -183,7 +183,7 @@ inline int cublasLtMatmulScaleMode(
   switch (scaling_type) {
     case at::blas::ScalingType::BlockWise1x32:
       TORCH_CHECK(scale_dtype == kFloat8_e8m0fnu);
-      if (swizzle_type == at::blas::SwizzleType::SWIZZLE_MNxK4) {
+      if (swizzle_type == at::blas::SwizzleType::SWIZZLE_MN_K4) {
 #if !defined(USE_ROCM) && CUBLAS_VERSION >= 130801
         return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_MN_K4_UE8M0;
 #else
@@ -232,7 +232,7 @@ inline int cublasLtMatmulScaleMode(
           "and above");
 #endif
     case at::blas::ScalingType::BlockWise1x128:
-      if (swizzle_type == at::blas::SwizzleType::SWIZZLE_MNxK4) {
+      if (swizzle_type == at::blas::SwizzleType::SWIZZLE_MN_K4) {
 #if !defined(USE_ROCM) && CUBLAS_VERSION >= 130801
         TORCH_CHECK(
             scale_dtype == kFloat8_e8m0fnu,

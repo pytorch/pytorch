@@ -14,12 +14,6 @@ using at::blas::SwizzleType;
 
 namespace at::native::scaled {
 
-TORCH_API
-bool uses_swizzle(
-    ArrayRef<SwizzleType> swizzle_a,
-    ArrayRef<SwizzleType> swizzle_b,
-    SwizzleType swizzle);
-
 /**
  * Track concrete implementations available
  */
@@ -101,7 +95,6 @@ std::vector<EnumType> convert_int_to_enum(ArrayType& v) {
 /**
  * Both inputs must be fp8,
  * Each needs a single scale, {Tensorwise (float)}
- * Neither input may use SWIZZLE_MNxK4.
  */
 TORCH_API
 bool check_tensorwise_recipe(
@@ -117,7 +110,6 @@ bool check_tensorwise_recipe(
 /**
  * Both inputs must be fp8,
  * Each needs scales, {Rowwise (float)}
- * Neither input may use SWIZZLE_MNxK4.
  */
 TORCH_API
 bool check_rowwise_recipe(
@@ -134,7 +126,6 @@ bool check_rowwise_recipe(
  * Two-level scaling, canonical NVFP4
  * Both inputs must be fp4
  * A, B need 2 scales, {Blockwise_1x16 (e4m3), Tensorwise (fp32)}
- * Neither input may use SWIZZLE_MNxK4.
  */
 TORCH_API
 bool check_nvfp4_recipe(
@@ -151,7 +142,6 @@ bool check_nvfp4_recipe(
  * Single-level scaling, what PyT currently understands
  * Both inputs must be fp4
  * A, B need 1 scale, {Blockwise_1x16 (e4m3)}
- * Neither input may use SWIZZLE_MNxK4.
  */
 TORCH_API
 bool check_nvfp4_recipe_single_scale(
@@ -168,7 +158,7 @@ bool check_nvfp4_recipe_single_scale(
  * Both inputs must be fp8
  * A, B must only have 1 scale each, A: {Blockwise_1x128 (float), B:
  * {Blockwise_128x128 (float)
- * Neither input may use SWIZZLE_MNxK4.
+ * Neither input may use SWIZZLE_MN_K4.
  */
 TORCH_API
 bool check_deepseek_recipe(
@@ -186,7 +176,6 @@ bool check_deepseek_recipe(
 /**
  * Both inputs must be fp8
  * A, B must have 1 scale each, {Blockwise_1x32, e8m0}
- * Neither input may use SWIZZLE_MNxK4.
  */
 TORCH_API
 bool check_mxfp8_recipe(
@@ -202,7 +191,6 @@ bool check_mxfp8_recipe(
 /**
  * Both inputs must be fp4
  * A, B must have 1 scale each, {Blockwise_1x32, e8m0}
- * Neither input may use SWIZZLE_MNxK4.
  */
 TORCH_API
 bool check_mxfp4_recipe(
@@ -221,7 +209,7 @@ bool is_valid_cublaslt_input_pair(c10::ScalarType type_a, c10::ScalarType type_b
 /**
  * Both inputs must be float8_e4m3fn/e5m2, with at least one float8_e4m3fn.
  * Each input needs one float8_e8m0fnu scale and expected_recipe.
- * Both inputs require exactly one SWIZZLE_MNxK4 entry.
+ * Both inputs require exactly one SWIZZLE_MN_K4 entry.
  */
 TORCH_API
 bool check_mnk4_recipe(

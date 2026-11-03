@@ -7293,7 +7293,7 @@ def scaled_mm(
     scale_recipe_a and scale_recipe_b respectively.
 
     Packed MNxK4 scaling uses matching ``BlockWise1x32`` or ``BlockWise1x128`` recipes
-    with ``SWIZZLE_MNxK4`` on both inputs. Inputs must be ``float8_e4m3fn`` or
+    with ``SWIZZLE_MN_K4`` on both inputs. Inputs must be ``float8_e4m3fn`` or
     ``float8_e5m2``, with at least one ``float8_e4m3fn`` input.
     It requires cuBLASLt 13.8.1 or later
     (bundled with CUDA 13.4) on SM10.x/SM11.x, and supports bfloat16, float16, and
@@ -7305,7 +7305,7 @@ def scaled_mm(
     the physical row-major byte order is ``[ceil(K / (4 * B)), round_up(O, 4), 4]``:
     four consecutive K-block scales are packed together for each outer position.
     Each scale buffer has ``16 * ceil(O / 4) * ceil(K / (4 * B))`` elements.
-    M need not be a multiple of four; N must be divisible by 16. Padding entries are ignored.
+    M need not be a multiple of four; K and N must be divisible by 16. Padding entries are ignored.
 
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
@@ -7503,7 +7503,7 @@ def scaled_grouped_mm(
     Both inputs must be ``float8_e4m3fn`` or ``float8_e5m2``, with at least one ``float8_e4m3fn`` input.
     At most 1024 groups are supported.
     TensorWise scaling requires CUDA 13.4 or later on SM9.x-SM11.x; swizzle metadata is ignored
-    except ``SWIZZLE_MNxK4``, which is rejected.
+    except ``SWIZZLE_MN_K4``, which is rejected.
     It supports bfloat16, float16, and float32 outputs.
 
     Hopper block scaling requires CUDA 13.4 or later on SM9.x and supports recipe pairs
@@ -7522,8 +7522,8 @@ def scaled_grouped_mm(
     described in :func:`scaled_mm`, independently for each group. A 3D operand uses
     scale shape ``(groups, elements_per_group)``; a 2D operand concatenates each
     group's flattened scale buffer in offset order. Each group starts at a 16-byte
-    boundary. Per-group M need not be a multiple of four. The total N dimension
-    must be divisible by 16, including when ``offs`` splits N. Group output
+    boundary. Per-group M need not be a multiple of four. K and the total N
+    dimension must be divisible by 16, including when ``offs`` splits N. Group output
     starts must be 16-byte aligned: starting N offsets must be multiples of 8
     for bfloat16/float16 output or 4 for float32 output. Invalid group output
     alignment triggers a device assertion. It requires
