@@ -2515,7 +2515,7 @@ class StackPR(NamedTuple):
     labels: set[str]
     head_sha: str
     # What a PR below must be an ancestor of to count as built into this one: the
-    # ghstack orig branch (ghstack head commits share no history), else the head.
+    # ghstack orig (ghstack head commits share no history), else the head.
     content_ref: str
 
 
@@ -2681,6 +2681,48 @@ def gh_get_stack_prs(org: str, project: str, numbers: list[int]) -> list[Any]:
     return [found[f"pr{n}"] for n in numbers if found.get(f"pr{n}") is not None]
 
 
+def gh_get_ghstack_tips(
+    org: str, project: str, infos: list[Any]
+) -> dict[int, tuple[str, str]]:
+    """The commits of the head and orig branches of each ghstack PR in `infos`,
+    read together in one query. A PR's headRefOid can lag its head branch after a
+    push, which could pair an old head with a new orig. A missing head branch falls
+    back to headRefOid, and a missing orig branch to its name, which the compare
+    then fails on."""
+    if not infos:
+        return {}
+    refs: dict[str, str] = {}
+    for info in infos:
+        refs[f"head{info['number']}"] = info["headRefName"]
+        refs[f"orig{info['number']}"] = re.sub(r"/head$", "/orig", info["headRefName"])
+    params = " ".join(f"${alias}: String!" for alias in refs)
+    fields = " ".join(
+        f"{alias}: ref(qualifiedName: ${alias}) {{ target {{ oid }} }}"
+        for alias in refs
+    )
+    query = (
+        f"query ($owner: String!, $name: String!, {params}) {{"
+        f" repository(owner: $owner, name: $name) {{ {fields} }} }}"
+    )
+    found = gh_graphql(
+        query,
+        owner=org,
+        name=project,
+        **{alias: f"refs/heads/{ref}" for alias, ref in refs.items()},
+    )["data"]["repository"]
+
+    def oid(alias: str) -> str | None:
+        return ((found.get(alias) or {}).get("target") or {}).get("oid")
+
+    return {
+        info["number"]: (
+            oid(f"head{info['number']}") or info["headRefOid"],
+            oid(f"orig{info['number']}") or refs[f"orig{info['number']}"],
+        )
+        for info in infos
+    }
+
+
 CIFLOW_LOOKUP_ERRORS = (OSError, GHGraphQLError, NativeStackError)
 
 
@@ -2732,19 +2774,27 @@ def get_open_prs_above(
             head_ref.split("/")[1] == user
         )
 
-    return bool(listed), [
-        StackPR(
-            info["number"],
-            {node["name"] for node in info["labels"]["nodes"]},
-            info["headRefOid"],
-            re.sub(r"/head$", "/orig", info["headRefName"])
-            if user is not None
-            else info["headRefOid"],
-        )
+    infos = [
+        info
         for info in gh_get_stack_prs(pr.org, pr.project, candidates)
         if not info["closed"]
         and not info["isCrossRepository"]
         and in_stack(info["headRefName"])
+    ]
+    tips = (
+        gh_get_ghstack_tips(pr.org, pr.project, infos)
+        if user is not None
+        else {
+            info["number"]: (info["headRefOid"], info["headRefOid"]) for info in infos
+        }
+    )
+    return bool(listed), [
+        StackPR(
+            info["number"],
+            {node["name"] for node in info["labels"]["nodes"]},
+            *tips[info["number"]],
+        )
+        for info in infos
     ]
 
 

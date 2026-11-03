@@ -4718,15 +4718,41 @@ class TestPrsAbove(NoNetworkTestCase):
             },
             "errors": [not_a_pr],
         }
+        tips = {
+            "head1003": {"target": {"oid": "sha-1003"}},
+            "orig1003": {"target": {"oid": "orig-sha-1003"}},
+        }
         gql = self.patch(
             "trymerge.gh_graphql",
-            side_effect=GHGraphQLError("not a PR", response),
+            side_effect=[
+                GHGraphQLError("not a PR", response),
+                {"data": {"repository": tips}},
+            ],
+        )
+        self.assertEqual(
+            get_open_prs_above(pr, lambda: None),
+            (True, [StackPR(1003, {"ciflow/inductor"}, "sha-1003", "orig-sha-1003")]),
+        )
+        stack_query, tips_query = gql.call_args_list
+        self.assertIn("pr1007: pullRequest(number: 1007)", stack_query.args[0])
+        self.assertEqual(tips_query.kwargs["head1003"], "refs/heads/gh/alice/3/head")
+        self.assertEqual(tips_query.kwargs["orig1003"], "refs/heads/gh/alice/3/orig")
+
+    def test_missing_ghstack_branches_fall_back_to_the_pr_record(self) -> None:
+        pr = stacked_pr(1002)
+        pr.is_ghstack_pr.return_value = True
+        pr.head_ref.return_value = "gh/alice/2/head"
+        pr.get_body.return_value = GHSTACK_BODY.replace("* #1004\n", "")
+        stack = {"pr1003": stack_pr_info(1003, "gh/alice/3/head")}
+        tips = {"head1003": None, "orig1003": {"target": None}}
+        self.patch(
+            "trymerge.gh_graphql",
+            side_effect=[{"data": {"repository": d}} for d in (stack, tips)],
         )
         self.assertEqual(
             get_open_prs_above(pr, lambda: None),
             (True, [StackPR(1003, {"ciflow/inductor"}, "sha-1003", "gh/alice/3/orig")]),
         )
-        self.assertIn("pr1007: pullRequest(number: 1007)", gql.call_args.args[0])
 
     def test_native_stack_entries_above(self) -> None:
         stack = make_stack(stack_entry(1), stack_entry(2), stack_entry(3, closed=True))
@@ -5010,21 +5036,33 @@ class TestCiflowCoveringRuns(NoNetworkTestCase):
         self.above.assert_not_called()
         stack.assert_not_called()
 
-    def test_a_ghstack_pr_is_covered_through_the_orig_branch_above(self) -> None:
+    def test_a_ghstack_pr_above_covers_through_its_branches_read_together(
+        self,
+    ) -> None:
         self.above.side_effect = get_open_prs_above
         self.top.is_ghstack_pr.return_value = True
         self.top.head_ref.return_value = "gh/alice/2/head"
         self.top.get_body.return_value = GHSTACK_BODY
         above = {"pr1003": stack_pr_info(1003, "gh/alice/3/head")}
-        self.patch("trymerge.gh_graphql", return_value={"data": {"repository": above}})
+        tips = {
+            "head1003": {"target": {"oid": "sha-1003-resubmitted"}},
+            "orig1003": {"target": {"oid": "orig-sha-1003"}},
+        }
+        self.patch(
+            "trymerge.gh_graphql",
+            side_effect=[{"data": {"repository": d}} for d in (above, tips)],
+        )
         self.assertEqual(
             find_ciflow_covers(
                 self.top, [(self.top, "orig-1002")], self.rules, lambda: None
             ),
-            ([CiflowCover("ciflow/inductor", 1003, "sha-1003", [1002])], []),
+            (
+                [CiflowCover("ciflow/inductor", 1003, "sha-1003-resubmitted", [1002])],
+                [],
+            ),
         )
         compare = self.fetch.call_args.args[0]
-        self.assertTrue(compare.endswith("/compare/orig-1002...gh/alice/3/orig"))
+        self.assertTrue(compare.endswith("/compare/orig-1002...orig-sha-1003"))
 
     def test_ignore_current_waives_the_runs_current_failures(self) -> None:
         self.failed_run()
