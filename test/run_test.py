@@ -2570,10 +2570,11 @@ def main():
         llm_enforced = (
             options.enable_td and llm_selection.enforce and get_pr_number() is not None
         )
+        llm_include, llm_exclude, llm_hedged = llm_selection.split(
+            ranked, test_prioritizations.get_score, file_time, TEST_CONFIG
+        )
         if llm_enforced:
-            include, exclude, llm_hedged = llm_selection.split(
-                ranked, test_prioritizations.get_score, file_time, TEST_CONFIG
-            )
+            include, exclude = llm_include, llm_exclude
             print_to_stderr(
                 f"LLM selection: running {len(covered | llm_hedged)} of {len(files)} test files ({len(covered)} selected)"
             )
@@ -2590,6 +2591,7 @@ def main():
                     "num_hedged": len(llm_hedged),
                     "time_total": sum(file_time.values()),
                     "time_covered": sum(file_time[f] for f in covered),
+                    "time_hedged": sum(file_time[f] for f in llm_hedged),
                 },
             )
 
