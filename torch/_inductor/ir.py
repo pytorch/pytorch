@@ -16,11 +16,14 @@ from functools import partial
 from numbers import Number
 from typing import (
     Any,
+    assert_never,
     cast,
     ClassVar,
     Literal,
+    Never,
     overload,
     Protocol,
+    Self,
     SupportsFloat,
     SupportsInt,
     TYPE_CHECKING,
@@ -28,15 +31,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import (
-    assert_never,
-    Never,
-    override,
-    ParamSpec,
-    Self,
-    TypedDict,
-    TypeIs,
-)
+from typing_extensions import override, ParamSpec, TypedDict, TypeIs
 from unittest.mock import patch
 
 import sympy
@@ -509,6 +504,9 @@ def is_aligned_realized_tensor(x: Buffer | TensorBox, alignment: int) -> bool:
     if (
         not isinstance(x, IRNode)
         or x.maybe_get_stride() is None
+        # FlexibleLayout strides are provisional: the layout can still be frozen in a
+        # different order (e.g. by decide_layout() in ExternKernel.process_kernel).
+        or isinstance(x.maybe_get_layout(), FlexibleLayout)
         or free_unbacked_symbols(x.get_stride())
         or free_unbacked_symbols(x.get_size())
     ):
@@ -10190,6 +10188,8 @@ class FallbackKernel(ExternKernelAlloc):
             wrapper.generate_fallback_kernel(self)
 
         self.codegen_unbacked_symbol_defs(wrapper)
+        # After the unbacked symbol defs, which may read an unused output's size.
+        wrapper.codegen_free_unused_outputs(self)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
             self.codegen_alignment_asserts(wrapper)
