@@ -1,7 +1,9 @@
 # Column-reduction driver for tile.TileReduce, with launch policy and plan cache, plus the
-# PartialColumns stage-two kernel.
-# Threads own vectorized kept-axis outputs without lane merging. Splitting the reduced
-# axis provides parallelism; unsplit (65536, 256) took 7830us versus ATen's 15.8us.
+# PartialColumns stage-two kernel and the ordered (inner-tree) column kernel.
+# TileReduce threads own vectorized kept-axis outputs without lane merging. Splitting the
+# reduced axis provides parallelism; unsplit (65536, 256) took 7830us versus ATen's 15.8us.
+# Ordered column threads each own one output and replay the row inner-tree DAG with loads
+# strided by C.
 
 from collections.abc import Sequence
 from typing import Any, NamedTuple
