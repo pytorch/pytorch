@@ -5570,8 +5570,9 @@ class TestMetadataJsonFormatCUDA(TestCase):
     def _assert_kernel_dims(self, acts):
         kernels = [act for act in acts if act.type() == "kernel"]
         self.assertTrue(kernels, "expected at least one kernel event")
-        # ROCm launch API events carry the grid and block they were given;
-        # CUPTI runtime events carry none.
+        # ROCm launch API events carry grid/block (global work sizes are
+        # converted to workgroups for hipExtModuleLaunchKernel and
+        # hipHccModuleLaunchKernel); CUPTI runtime events carry neither.
         launches = {}
         for act in acts:
             if act.type() == "cuda_runtime":

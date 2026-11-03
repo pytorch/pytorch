@@ -115,8 +115,8 @@ struct kernel_args {
   hipStream_t stream{nullptr};
   uint32_t privateSize{0};
   uint32_t groupSize{0};
-  rocprofiler_dim3_t workgroupSize{0, 0, 0};
-  rocprofiler_dim3_t gridSize{0, 0, 0};
+  rocprofiler_dim3_t grid{0, 0, 0}; // numBlocks / gridDim* / globalWorkSize*
+  rocprofiler_dim3_t block{0, 0, 0}; // dimBlocks / blockDim* / localWorkSize*
   rocprofiler_callback_tracing_kind_t kind;
   rocprofiler_tracing_operation_t operation;
 };
@@ -135,37 +135,35 @@ auto extract_kernel_args =
   if (strcmp("stream", arg_name) == 0)
     args.stream = *(reinterpret_cast<const hipStream_t*>(arg_value_addr));
   else if (strcmp("numBlocks", arg_name) == 0)
-    args.workgroupSize =
-        *(reinterpret_cast<const rocprofiler_dim3_t*>(arg_value_addr));
+    args.grid = *(reinterpret_cast<const rocprofiler_dim3_t*>(arg_value_addr));
   else if (strcmp("dimBlocks", arg_name) == 0)
-    args.gridSize =
-        *(reinterpret_cast<const rocprofiler_dim3_t*>(arg_value_addr));
+    args.block = *(reinterpret_cast<const rocprofiler_dim3_t*>(arg_value_addr));
   else if (strcmp("sharedMemBytes", arg_name) == 0)
     args.groupSize = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
   else if (strcmp("gridDimX", arg_name) == 0)
-    args.workgroupSize.x = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
+    args.grid.x = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
   else if (strcmp("gridDimY", arg_name) == 0)
-    args.workgroupSize.y = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
+    args.grid.y = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
   else if (strcmp("gridDimZ", arg_name) == 0)
-    args.workgroupSize.z = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
+    args.grid.z = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
   else if (strcmp("blockDimX", arg_name) == 0)
-    args.gridSize.x = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
+    args.block.x = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
   else if (strcmp("blockDimY", arg_name) == 0)
-    args.gridSize.y = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
+    args.block.y = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
   else if (strcmp("blockDimZ", arg_name) == 0)
-    args.gridSize.z = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
+    args.block.z = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
   else if (strcmp("globalWorkSizeX", arg_name) == 0)
-    args.workgroupSize.x = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
+    args.grid.x = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
   else if (strcmp("globalWorkSizeY", arg_name) == 0)
-    args.workgroupSize.y = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
+    args.grid.y = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
   else if (strcmp("globalWorkSizeZ", arg_name) == 0)
-    args.workgroupSize.z = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
+    args.grid.z = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
   else if (strcmp("localWorkSizeX", arg_name) == 0)
-    args.gridSize.x = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
+    args.block.x = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
   else if (strcmp("localWorkSizeY", arg_name) == 0)
-    args.gridSize.y = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
+    args.block.y = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
   else if (strcmp("localWorkSizeZ", arg_name) == 0)
-    args.gridSize.z = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
+    args.block.z = *(reinterpret_cast<const uint32_t*>(arg_value_addr));
   return 0;
 };
 
@@ -850,12 +848,9 @@ void RocprofLogger::api_callback(
                 ROCPROFILER_HIP_RUNTIME_API_ID_hipExtModuleLaunchKernel ||
             record.operation ==
                 ROCPROFILER_HIP_RUNTIME_API_ID_hipHccModuleLaunchKernel) {
-          args.workgroupSize.x =
-              workgroupCount(args.workgroupSize.x, args.gridSize.x);
-          args.workgroupSize.y =
-              workgroupCount(args.workgroupSize.y, args.gridSize.y);
-          args.workgroupSize.z =
-              workgroupCount(args.workgroupSize.z, args.gridSize.z);
+          args.grid.x = workgroupCount(args.grid.x, args.block.x);
+          args.grid.y = workgroupCount(args.grid.y, args.block.y);
+          args.grid.z = workgroupCount(args.grid.z, args.block.z);
         }
 
         rocprofKernelRow* row = new rocprofKernelRow(
@@ -868,12 +863,12 @@ void RocprofLogger::api_callback(
             endTime,
             nullptr,
             nullptr,
-            args.workgroupSize.x,
-            args.workgroupSize.y,
-            args.workgroupSize.z,
-            args.gridSize.x,
-            args.gridSize.y,
-            args.gridSize.z,
+            args.grid.x,
+            args.grid.y,
+            args.grid.z,
+            args.block.x,
+            args.block.y,
+            args.block.z,
             args.groupSize,
             args.stream);
         insert_row_to_buffer(row);

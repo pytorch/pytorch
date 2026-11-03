@@ -56,6 +56,7 @@ using namespace libkineto::test;
 // API ID macros for rocprofiler-sdk
 #define HIP_LAUNCH_KERNEL ROCPROFILER_HIP_RUNTIME_API_ID_hipLaunchKernel
 #define HIP_MEMCPY ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy
+#define HIP_MEMSET ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetAsync
 #define HIP_MALLOC ROCPROFILER_HIP_RUNTIME_API_ID_hipMalloc
 #define HIP_FREE ROCPROFILER_HIP_RUNTIME_API_ID_hipFree
 #define RUNTIME_DOMAIN ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API
@@ -167,6 +168,26 @@ struct MockRocLogger {
         end_ns,
         nullptr,
         1);
+    activities_.push_back(row);
+  }
+
+  void addRuntimeMemsetActivity(
+      uint32_t cid,
+      int64_t start_ns,
+      int64_t end_ns,
+      int64_t correlation,
+      size_t size,
+      uint64_t stream = 0) {
+    rocprofMemsetRow* row = new rocprofMemsetRow(
+        correlation,
+        RUNTIME_DOMAIN,
+        cid,
+        processId(),
+        systemThreadId(),
+        start_ns,
+        end_ns,
+        size,
+        reinterpret_cast<hipStream_t>(stream));
     activities_.push_back(row);
   }
 
@@ -285,21 +306,65 @@ class MockRocActivities : public RocprofActivityApi {
       }
       externalCorrelations.clear();
     }
-    detail::backfillAsyncStreams(
-        activityLogger->activities_, [](const rocprofAsyncRow& async) {
-          return isAsyncCopy(async) || isAsyncKernel(async);
-        });
+    // Mirror RocprofActivityApi::processActivities: classify the fill/copy
+    // dispatches issued for memset/memcpy calls, backfill the streams of the
+    // logged GPU rows, then apply the type-based filter before logging.
+    detail::classifyRuntimeInternalDispatches(activityLogger->activities_);
+    if (isLogged(ActivityType::GPU_MEMCPY) ||
+        isLogged(ActivityType::GPU_MEMSET) ||
+        isLogged(ActivityType::CONCURRENT_KERNEL)) {
+      detail::backfillAsyncStreams(
+          activityLogger->activities_, [this](const rocprofAsyncRow& async) {
+            return (isAsyncCopy(async) || isAsyncKernel(async)) &&
+                detail::isAsyncRowLogged(async, activityMask);
+          });
+    }
     for (auto& item : activityLogger->activities_) {
-      handler(item);
-      ++count;
+      bool filtered = false;
+      if (item->type != ROCTRACER_ACTIVITY_ASYNC &&
+          !isLogged(ActivityType::CUDA_RUNTIME)) {
+        filtered = true;
+      } else {
+        switch (item->domain) {
+          case ROCPROFILER_BUFFER_TRACING_MEMORY_COPY:
+            if (!isLogged(ActivityType::GPU_MEMCPY)) {
+              filtered = true;
+            }
+            break;
+          case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
+          default:
+            if (item->type == ROCTRACER_ACTIVITY_ASYNC) {
+              filtered = !detail::isAsyncRowLogged(
+                  *reinterpret_cast<rocprofAsyncRow*>(item), activityMask);
+            } else if (!isLogged(ActivityType::CONCURRENT_KERNEL)) {
+              filtered = true;
+            }
+            break;
+        }
+      }
+      if (!filtered) {
+        handler(item);
+        ++count;
+      }
     }
     return count;
+  }
+
+  bool isLogged(ActivityType atype) const {
+    return activityMask & (1u << static_cast<uint32_t>(atype));
   }
 
   std::unique_ptr<MockRocLogger> activityLogger;
   bool available{true};
   mutable int availabilityChecks{0};
   int processActivitiesCalls{0};
+  // Types logged by the default config the fixture uses; tests that want a
+  // narrower set overwrite this.
+  uint32_t activityMask{
+      (1u << static_cast<uint32_t>(ActivityType::CUDA_RUNTIME)) |
+      (1u << static_cast<uint32_t>(ActivityType::CONCURRENT_KERNEL)) |
+      (1u << static_cast<uint32_t>(ActivityType::GPU_MEMCPY)) |
+      (1u << static_cast<uint32_t>(ActivityType::GPU_MEMSET))};
 };
 
 // Common setup / teardown and helper functions
@@ -649,6 +714,68 @@ TEST_F(
   // stream 7), so HW-queue ambiguity no longer matters -- it joins the shared
   // stream index 1 instead of being dropped to 0.
   EXPECT_EQ(memcpyActivity->resourceId(), 1);
+}
+
+// Sends a hipMemsetAsync call and the fill dispatch it triggers through the
+// full profiler pipeline (processTrace -> handleRocprofActivity) and checks
+// the exported type, bytes and stream.
+TEST_F(RocmActivityProfilerTest, RuntimeMemsetIsExportedAsGpuMemset) {
+  RocmActivityProfiler profiler(rocActivities_, /*cpu only*/ false);
+  int64_t start_time_ns =
+      libkineto::timeSinceEpoch(std::chrono::system_clock::now());
+  int64_t duration_ns = 300;
+  auto start_time = timePointFromNs(start_time_ns);
+  profiler.configure(*cfg_, start_time);
+  profiler.startTrace(start_time);
+  profiler.stopTrace(timePointFromNs(start_time_ns + duration_ns));
+
+  auto gpuOps = std::make_unique<MockRocLogger>();
+  // The fill dispatch (correlation 1) shares its correlation id with the
+  // hipMemsetAsync call on HIP stream 7; correlation 2 is a user kernel on
+  // stream 8.
+  gpuOps->addRuntimeMemsetActivity(
+      HIP_MEMSET, start_time_ns + 10, start_time_ns + 15, 1, 64, 7);
+  gpuOps->addKernelActivity(start_time_ns + 16, start_time_ns + 19, 1, 0);
+  gpuOps->addRuntimeKernelActivity(
+      HIP_LAUNCH_KERNEL, start_time_ns + 20, start_time_ns + 25, 2, 8);
+  gpuOps->addKernelActivity(start_time_ns + 26, start_time_ns + 29, 2, 0);
+  rocActivities_.activityLogger = std::move(gpuOps);
+
+  auto logger = std::make_unique<MemoryTraceLogger>(*cfg_);
+  profiler.processTrace(*logger);
+  profiler.reset();
+
+  ActivityTrace trace(std::move(logger), loggerFactory);
+  const ITraceActivity* memsetCall = nullptr;
+  const ITraceActivity* memsetEvent = nullptr;
+  const ITraceActivity* kernelEvent = nullptr;
+  for (const auto& activity : *trace.activities()) {
+    if (activity->type() == ActivityType::GPU_MEMSET) {
+      memsetEvent = activity;
+    } else if (activity->type() == ActivityType::CONCURRENT_KERNEL) {
+      kernelEvent = activity;
+    } else if (activity->name() == "hipMemsetAsync") {
+      memsetCall = activity;
+    }
+  }
+
+  // The runtime event carries the call's byte count.
+  ASSERT_NE(memsetCall, nullptr);
+  const auto callMd =
+      nlohmann::json::parse("{" + memsetCall->metadataJson() + "}");
+  EXPECT_EQ(callMd["bytes"].get<uint64_t>(), 64u);
+
+  // The fill dispatch is exported as a gpu_memset taking the call's bytes
+  // and stream (stream 7 remaps to dense index 1, stream 8 to index 2).
+  ASSERT_NE(memsetEvent, nullptr);
+  EXPECT_EQ(memsetEvent->name(), "Memset (Device)");
+  const auto eventMd =
+      nlohmann::json::parse("{" + memsetEvent->metadataJson() + "}");
+  EXPECT_EQ(eventMd["bytes"].get<uint64_t>(), 64u);
+  EXPECT_EQ(memsetEvent->resourceId(), 1);
+
+  ASSERT_NE(kernelEvent, nullptr);
+  EXPECT_EQ(kernelEvent->resourceId(), 2);
 }
 
 TEST_F(RocmActivityProfilerTest, GpuNCCLCollectiveTest) {

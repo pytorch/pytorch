@@ -377,11 +377,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             and "stream" in ev.get("args", {})
             and ev["ts"] < barrier_ts
         ]
-        # ROCm records no memset/memcpy activities for these ops, most likely
-        # because HIP lowers a small fill and the pointer-array uploads to blit
-        # kernels, so there is nothing to check the stream of there.
-        if not TEST_WITH_ROCM:
-            self.assertGreater(len(mem_events), 0)
+        # On ROCm the fills and pointer-array uploads reach the device as blit
+        # kernels; kineto reports those as gpu_memset/gpu_memcpy events with
+        # the stream of the API call, so the check applies on both platforms.
+        self.assertGreater(len(mem_events), 0)
         for ev in mem_events:
             self.assertEqual(ev["args"]["stream"], user_stream, ev["name"])
 

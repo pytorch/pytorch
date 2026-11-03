@@ -264,6 +264,27 @@ inline const std::string RuntimeActivity<rocprofCopyRow>::metadataJson() const {
 }
 
 template <>
+inline void RuntimeActivity<rocprofMemsetRow>::visitTypedMetadata(
+    ITypedMetadataVisitor& visitor) const {
+  visitor.visit(RocmMetadataFields::kCid, static_cast<uint64_t>(raw().cid));
+  visitor.visit(
+      RocmMetadataFields::kCorrelation, static_cast<uint64_t>(raw().id));
+  // The memset may report no size (unknown arguments); omit rather than 0.
+  if (raw().size > 0) {
+    visitor.visit(
+        RocmMetadataFields::kBytes, static_cast<uint64_t>(raw().size));
+  }
+}
+
+template <>
+inline const std::string RuntimeActivity<rocprofMemsetRow>::metadataJson()
+    const {
+  libkineto::internal::JsonTypedMetadataVisitor visitor;
+  visitTypedMetadata(visitor);
+  return std::move(visitor).json();
+}
+
+template <>
 inline void RuntimeActivity<rocprofMallocRow>::visitTypedMetadata(
     ITypedMetadataVisitor& visitor) const {
   if (raw().cid == ROCPROFILER_HIP_RUNTIME_API_ID_hipMalloc) {

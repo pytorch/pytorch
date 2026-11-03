@@ -201,9 +201,12 @@ void RocmActivityProfiler::handleRocprofActivity(
     ActivityLogger* logger) {
   switch (record->type) {
     case ROCTRACER_ACTIVITY_DEFAULT:
-    case ROCTRACER_ACTIVITY_MEMSET:
       handleRuntimeActivity(
           reinterpret_cast<const rocprofRow*>(record), logger);
+      break;
+    case ROCTRACER_ACTIVITY_MEMSET:
+      handleRuntimeActivity(
+          reinterpret_cast<const rocprofMemsetRow*>(record), logger);
       break;
     case ROCTRACER_ACTIVITY_KERNEL:
       handleRuntimeActivity(
