@@ -263,6 +263,15 @@ bool is_blockwise_128x128_scaling(const at::Tensor& t, const at::Tensor& scale) 
           scale, 1, ceil_div<int64_t>(t.size(1), 128), 1));
 }
 
+#ifndef USE_ROCM
+// Recover the operand layout after cuBLAS preparation, including operand swaps.
+const char* mm_operand_layout(const cublasCommonArgs& args, bool is_mat_a) {
+  const char trans = is_mat_a != args.swapped_mn ? args.transa : args.transb;
+  const bool row_major = (trans != 'n') != args.swapped_mn;
+  return row_major ? "row-major" : "column-major";
+}
+#endif
+
 bool is_desired_scaling(const at::Tensor& t, const at::Tensor& scale, ScalingType desired_scaling) {
   switch (desired_scaling) {
     case ScalingType::TensorWise:
@@ -518,6 +527,24 @@ _scaled_gemm(
   if (tn_only) {
     TORCH_CHECK(args.transa == 't' && args.transb == 'n', tn_only_msg);
   }
+#ifndef USE_ROCM
+  // Non-TN MXFP8 on SM12x requires cuBLAS 13.6 (CUDA 13.3 Update 1).
+  // Check the loaded library: newer kernels do not require newer headers.
+  if (isFloat8Type(mat1.scalar_type()) && isFloat8Type(mat2.scalar_type()) &&
+      (scaling_choice_a == ScalingType::BlockWise1x32 ||
+       scaling_choice_b == ScalingType::BlockWise1x32)) {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    const bool block_scaled_tn_only =
+        dprops->major == 12 && cublasLtGetVersion() < 130600;
+    TORCH_CHECK(!block_scaled_tn_only || (args.transa == 't' && args.transb == 'n'),
+        "MXFP8 scaled_mm requires a row-major mat_a and a column-major mat_b "
+        "(the TN layout) on compute capability ", dprops->major, ".", dprops->minor,
+        " with cuBLAS ", cublasLtGetVersion(), ": the other layouts need cuBLAS "
+        "13.6.0 (CUDA 13.3 Update 1) or newer. Got mat_a ",
+        mm_operand_layout(args, /*is_mat_a=*/true), " and mat_b ",
+        mm_operand_layout(args, /*is_mat_a=*/false), ".");
+  }
+#endif
   std::optional<Tensor> effective_accumulator = epilogue.accumulator;
   // Some cuBLASLt algorithms skip the D write for distinct C/D when M=1.
   if (effective_accumulator && mat1.size(0) == 1 &&
@@ -625,8 +652,9 @@ _scaled_rowwise_rowwise(
 // Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
 // If output matrix type is 16 or 32-bit type, scale_result is not applied.
 // Known limitations:
-//  - Only row-major mat1 x column-major mat2 is supported on CUDA SM90, and on ROCm for
-//    every scaling recipe other than tensorwise
+//  - Only row-major mat1 x column-major mat2 is supported on CUDA SM90, on CUDA SM120
+//    for MXFP8 with cuBLAS older than 13.6.0, and on ROCm for every scaling recipe
+//    other than tensorwise
 //  - Only works if matrices sizes are divisible by 32
 //  - If 1-dimensional tensors are used then scale_a should be size = mat1.size(0)
 //    and scale_b should have size = to mat2.size(1)

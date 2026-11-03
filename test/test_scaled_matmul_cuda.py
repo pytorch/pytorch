@@ -916,6 +916,54 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @skipIfRocm
+    @skipIfTorchDynamo("error message checks rely on eager exception types")
+    def test_mxfp8_tn_only_on_sm120(self, device) -> None:
+        # Non-TN MXFP8 on SM12x requires cuBLAS 13.6 (CUDA 13.3 Update 1).
+        major, _ = torch.cuda.get_device_capability(0)
+        if major != 12:
+            raise unittest.SkipTest("restriction only applies to compute capability 12.x")
+
+        M, K, N = 128, 128, 128
+        x = torch.randn(M, K, device=device).to(e4m3_type)
+        y = torch.randn(N, K, device=device).to(e4m3_type)
+        out_ref = (x.float() @ y.t().float()).to(torch.bfloat16)
+        # Unit scales leave only the input cast's quantization error.
+        num_scales = 128 * ceil_div(ceil_div(K, 32), 4) * 4
+        x_scale = torch.ones(num_scales, device=device, dtype=torch.float8_e8m0fnu)
+        y_scale = torch.ones(num_scales, device=device, dtype=torch.float8_e8m0fnu)
+
+        def mm(a, b):
+            return scaled_mm_wrap(
+                a,
+                b,
+                scale_a=x_scale,
+                scale_b=y_scale,
+                scale_recipe_a=ScalingType.BlockWise1x32,
+                scale_recipe_b=ScalingType.BlockWise1x32,
+                swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+                swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+                out_dtype=torch.bfloat16,
+            )
+
+        self.assertEqual(mm(x, y.t()), out_ref, atol=1e-2, rtol=1e-2)
+
+        for a, b, layouts in [
+            (x, y.t().contiguous(), "mat_a row-major and mat_b row-major"),
+            (x.t().contiguous().t(), y.t(), "mat_a column-major and mat_b column-major"),
+        ]:
+            try:
+                out = mm(a, b)
+            except RuntimeError as e:
+                # Check the runtime cuBLAS version, not the build's CUDA version.
+                match = re.search(rf"TN layout\).* with cuBLAS (\d+):.* Got {layouts}\.", str(e))
+                self.assertIsNotNone(match, str(e))
+                self.assertLess(int(match.group(1)), 130600)
+            else:
+                self.assertEqual(out, out_ref, atol=1e-2, rtol=1e-2)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_basics_invalid_out_dtype(self, device) -> None:
         with self.assertRaises(
