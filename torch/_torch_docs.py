@@ -1419,38 +1419,17 @@ memory with :attr:`obj`. If :attr:`requires_grad` is ``True`` (or ``None``, and
 a gradient, and if :attr:`obj` is also a tensor with an autograd history then the
 returned tensor will have the same history.
 
-An object with a ``__dlpack__`` method, other than a tensor or, in builds with NumPy
-support, a NumPy array, is read through DLPack, even if it also implements Python's buffer
-protocol or ``__cuda_array_interface__``. (In builds with NumPy support,
-:func:`torch.tensor` and :func:`torch.as_tensor` read ``__cuda_array_interface__``
-first.) By default it may export a copy when it cannot share its memory. With
-``copy=False`` it is asked not to, and if reading :attr:`obj` through DLPack fails, a
-``ValueError`` is raised from that error. As in :func:`torch.from_dlpack`, a
-``__dlpack__`` method that raises a ``TypeError`` is called again with fewer arguments,
-at last without ``copy``, and its export is then trusted to share memory. The DLPack read-only
-flag isn't checked either, so writing to a tensor that shares a read-only producer's
-memory is undefined behavior.
-
-If reading :attr:`obj` through DLPack fails and :attr:`copy` is not ``False``, :attr:`obj`
-is read another way if it can be, with a warning. If its buffer can be obtained, is
-non-empty and C-contiguous, and has a format that maps to a PyTorch datatype (even when
-:attr:`dtype` is given), it is read into a flat tensor of that datatype, which :attr:`dtype`
-then converts. Otherwise, in
-builds with NumPy support where NumPy can be imported, its ``__cuda_array_interface__`` is
-read. If neither applies, the error is propagated.
+An object that has a ``__dlpack__`` method but isn't a tensor or NumPy array is read
+through DLPack, even if it also implements Python's buffer protocol or
+``__cuda_array_interface__``. By default it may export a copy when it cannot share its
+memory. With ``copy=False`` it is asked not to, and if it raises a ``BufferError`` because
+it can't, a ``ValueError`` is raised from it. Any other error reading :attr:`obj` through
+DLPack is propagated.
 
 .. versionchanged:: 2.16
-    An object with a ``__dlpack__`` method is read through DLPack ahead of its buffer
-    protocol and ``__cuda_array_interface__``, so the result keeps its shape and device,
-    :attr:`dtype` converts its values instead of reinterpreting its bytes, and
-    :attr:`copy` is honored, subject to the trusted exports above. If that read fails,
-    ``copy=False`` raises a ``ValueError``, and otherwise the fallback above warns. To
-    reinterpret such an object's bytes, use :func:`torch.frombuffer`. For a CPU tensor
-    from a producer on another device, pass ``device="cpu"``, which makes a copy, and
-    convert the datatype afterwards if the producer's device doesn't support the one you
-    need. ``copy=True`` now also copies an object that only has
-    ``__cuda_array_interface__``, and a copy of a buffer made with ``requires_grad=True``
-    is now a leaf.
+    An object with a ``__dlpack__`` method is read through DLPack rather than its buffer
+    protocol or ``__cuda_array_interface__``, so the result keeps its shape and device, and
+    :attr:`dtype` converts its values instead of reinterpreting its bytes.
 
 When :attr:`obj` is not a tensor, NumPy array, or object with DLPack support but implements
 Python's buffer protocol then the buffer is interpreted as an array of bytes grouped
@@ -1474,7 +1453,8 @@ current default device, and not share its memory.
     :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
     :func:`torch.frombuffer` creates a tensor that always shares memory from objects that
     implement the buffer protocol.
-    :func:`torch.from_dlpack` creates a tensor from an object with DLPack support.
+    :func:`torch.from_dlpack` creates a tensor that shares memory with an object with
+    DLPack support, unless the object exports a copy.
 
 Args:
     obj (object): a tensor, NumPy array, an object with DLPack support (a ``__dlpack__``
@@ -1489,8 +1469,7 @@ Keyword args:
            Default: ``None``, which causes the returned tensor to share memory with :attr:`obj`
            whenever possible. If ``True`` then the returned tensor does not share its memory.
            If ``False`` then the returned tensor shares its memory with :attr:`obj` and an
-           error is thrown if it cannot, except that the export of a ``__dlpack__`` method
-           called without ``copy``, as described above, is trusted to share it.
+           error is thrown if it cannot.
     device (:class:`torch.device`, optional): the device of the returned tensor.
            Default: ``None``, which causes the device of :attr:`obj` to be used. Or, if
            :attr:`obj` is a Python sequence, the current default device will be used.
