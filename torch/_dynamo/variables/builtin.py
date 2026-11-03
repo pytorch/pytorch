@@ -3576,7 +3576,7 @@ class BuiltinTypeVariable(VariableTracker):
         return self._fn
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return VariableTracker.build(tx, repr(self._fn))
+        return VariableTracker.build(tx, type.__repr__(self.as_python_constant()))
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load_global(self._fn.__name__, add=True))
@@ -3654,16 +3654,6 @@ class BuiltinTypeVariable(VariableTracker):
     ) -> VariableTracker:
         # A builtin type is an instance of type, so its tp_init is type_init.
         return type_init(tx, args, kwargs)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # Unbound method call, e.g. int.__add__(1, 2): args[0] is the instance.
-        return super().call_method(tx, name, args, kwargs)
 
     # type_as_number.nb_or = _Py_union_type_or, e.g. list | tuple
     def nb_or_impl(
@@ -4313,6 +4303,29 @@ class ListBuiltinVariable(BuiltinTypeVariable):
         return ListVariable.tp_new_impl(self, tx, args, kwargs)
 
 
+def constant_fold(
+    fn: Callable,
+    tx: "InstructionTranslatorBase",
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    if not check_unspec_or_constant_args(args, kwargs):
+        unimplemented(
+            gb_type="constant_fold on non-constant arguments",
+            context=f"{fn.__name__}(*{args}, **{kwargs})",
+            explanation=f"Dynamo only evaluates {fn.__name__}() at trace time when all arguments are constants.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+    try:
+        res = fn(
+            *(a.as_python_constant() for a in args),
+            **{k: v.as_python_constant() for k, v in kwargs.items()},
+        )
+    except Exception as e:
+        raise_observed_exception(type(e), tx, args=list(e.args))
+    return VariableTracker.build(tx, res)
+
+
 def _constant_fold_classmethod(name: str) -> Method:
     """tp_methods entry for a classmethod of a builtin type (e.g. int.from_bytes)
     that is evaluated at trace time on constant arguments."""
@@ -4323,14 +4336,7 @@ def _constant_fold_classmethod(name: str) -> Method:
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        try:
-            res = getattr(self._fn, name)(
-                *(a.as_python_constant() for a in args),
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
-        except Exception as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        return VariableTracker.build(tx, res)
+        return constant_fold(getattr(self._fn, name), tx, args, kwargs)
 
     return Method(handler)
 
@@ -4355,14 +4361,7 @@ def _constant_fold_on_unsupported(
             if not check_unspec_or_constant_args(args, kwargs):
                 raise
             exc.remove_from_stats()
-        try:
-            res = self._fn(
-                *(a.as_python_constant() for a in args),
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
-        except Exception as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        return VariableTracker.build(tx, res)
+        return constant_fold(self._fn, tx, args, kwargs)
 
     return wrapper
 
@@ -4391,22 +4390,6 @@ class ByteArrayBuiltinVariable(BuiltinTypeVariable):
     def __repr__(self) -> str:
         return "ByteArrayBuiltinVariable()"
 
-    def _constant_fold_constructor(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        all_args = [a.as_python_constant() for a in args]
-        all_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-        try:
-            result = bytearray(*all_args, **all_kwargs)
-        except TypeError as e:
-            raise_type_error(tx, str(e))
-        except ValueError as e:
-            raise_observed_exception(ValueError, tx, args=list(e.args))
-        return VariableTracker.build(tx, result)
-
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -4421,12 +4404,12 @@ class ByteArrayBuiltinVariable(BuiltinTypeVariable):
                 v.is_python_constant() for v in kwargs.values()
             ):
                 raise_type_error(tx, "bytearray() takes only constant arguments")
-            return self._constant_fold_constructor(tx, args, kwargs)
+            return constant_fold(self._fn, tx, args, kwargs)
 
         arg = args[0]
 
         if arg.is_python_constant():
-            return self._constant_fold_constructor(tx, args, kwargs)
+            return constant_fold(self._fn, tx, args, kwargs)
 
         try:
             unpacked = arg.unpack_var_sequence(tx)
@@ -4524,21 +4507,7 @@ class ComplexBuiltinVariable(BuiltinTypeVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if check_unspec_or_constant_args(args, kwargs):
-            try:
-                res = complex(
-                    *(a.as_python_constant() for a in args),
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                )
-            except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-            return VariableTracker.build(tx, res)
-        unimplemented(
-            gb_type="complex() with non-constant arguments",
-            context=f"complex(*{args}, **{kwargs})",
-            explanation="Attempted to call complex() with non-constant args.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
+        return constant_fold(self._fn, tx, args, kwargs)
 
 
 class BoolBuiltinVariable(BuiltinTypeVariable):
@@ -4582,21 +4551,7 @@ class StrBuiltinVariable(BuiltinTypeVariable):
             return ConstantVariable.create("")
         if len(args) == 1 and not kwargs:
             return generic_str(tx, args[0])
-        if check_unspec_or_constant_args(args, kwargs):
-            try:
-                res = str(
-                    *(a.as_python_constant() for a in args),
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                )
-            except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-            return VariableTracker.build(tx, res)
-        unimplemented(
-            gb_type="str() with non-constant arguments",
-            context=f"str(*{args}, **{kwargs})",
-            explanation="Attempted to call str() with non-constant args.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
+        return constant_fold(self._fn, tx, args, kwargs)
 
 
 class BytesBuiltinVariable(BuiltinTypeVariable):
@@ -4614,21 +4569,7 @@ class BytesBuiltinVariable(BuiltinTypeVariable):
     ) -> VariableTracker:
         if not args and not kwargs:
             return ConstantVariable.create(b"")
-        if check_unspec_or_constant_args(args, kwargs):
-            try:
-                res = bytes(
-                    *(a.as_python_constant() for a in args),
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                )
-            except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-            return VariableTracker.build(tx, res)
-        unimplemented(
-            gb_type="bytes() with non-constant arguments",
-            context=f"bytes(*{args}, **{kwargs})",
-            explanation="Attempted to call bytes() with non-constant args.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
+        return constant_fold(self._fn, tx, args, kwargs)
 
 
 # pyrefly: ignore [deprecated]
