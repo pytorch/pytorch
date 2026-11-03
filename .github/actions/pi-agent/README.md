@@ -104,7 +104,7 @@ through the `model` dispatch input. Distributed triage uses the same default:
 1. **plan** (`pi-triage-plan.yml`, shared with distributed triage; Bedrock, `issues: read`,
    egress blocked): the model reads the issue through
    read-only `gh` tools (`.github/pi/extensions/github-issue-tools.ts`: `get_issue`,
-   `get_issue_comments`, `search_issues`, fixed to this repository) and submits a plan
+   `get_issue_comments`, `search_issues`, fixed to the workflow repository) and submits a plan
    matching `.github/pi/schemas/issue-triage-plan.json`.
 2. **apply** (`issues: write`, no AWS): `scripts/issue_triage_pi/apply_plan.py` filters the
    plan with the skill's label rules (forbidden → `triage review`; unknown and redundant
@@ -112,10 +112,26 @@ through the `model` dispatch input. Distributed triage uses the same default:
    posted, closes only usage questions and expected numerical behavior, and adds
    `bot-triaged`. It then hands the issue to `distributed-triage-pi.yml`.
 
+Related-issue discovery uses the existing `search_issues` tool with GitHub search syntax,
+with `get_issue` / `get_issue_comments` for candidate evidence. Triage includes checking for
+duplicates, without a prescribed query strategy or tool-call sequence.
+A match requires inspecting candidate context. Before calling GitHub,
+the tool rejects `repo:`, `org:`, and `user:` qualifiers, unquoted `OR`, grouping, and malformed
+quotes. The workflow fixes `TRIAGE_REPO`; it is not a model input. Search responses are also
+filtered to issues in `TRIAGE_REPO`, excluding pull requests, `TRIAGE_SOURCE_ISSUE` (bound
+by the workflow), and the replayed issue. Each call returns at most 10 matches; it does not
+prove absence, decide duplicates, or authorize closure. Search and follow-up reads have no
+separate discovery-specific session budget.
+
+The offline issue-tool tests run against Pi installed from the action lockfile, use its real
+argument validator, and replace only `gh` with controlled fixtures (no GitHub access):
+`PI_TEST_RUNTIME=/absolute/path/to/node_modules/@earendil-works/pi-coding-agent node --test .github/pi/tests/github-issue-tools.mjs`.
+
 Run it manually with `mode`: `replay` shows already-triaged issues as they were before the
 triage bot acted (their labels and human comments from before its first label event) and
-compares each plan with the labels added since; `dry-run` plans against the issues as they
-are now; `apply` writes and accepts exactly one issue per run. `replay` and `dry-run`
+compares each plan with the labels added since. Source titles/bodies and duplicate-candidate
+evidence are current, including candidates filed later; replay is not a frozen historical snapshot.
+`dry-run` plans against the issues as they are now; `apply` writes and accepts exactly one issue per run. `replay` and `dry-run`
 can process batches. Issue transfers become `triage review`. A `request_reproduction` plan
 redacts download/storage links from the current issue body using a fixed policy and posts
 the self-contained-reproduction template. Other issue text is preserved; the model cannot
