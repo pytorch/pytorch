@@ -1019,13 +1019,13 @@ def forward(self, sin, cos):
         buffer = io.BytesIO()
         torch.export.save(ep, buffer)
         buffer.seek(0)
-        modules = (ep.module(), torch.export.load(buffer).module())
-        modules += (ep.run_decompositions().module(),)
+        loaded = torch.export.load(buffer).module()
+        modules = (ep.module(), loaded, ep.run_decompositions().module())
         # x and -x take different branches.
         for inp in (x, -x):
             for module in modules:
                 self.assertEqual(module(inp), m(inp))
-        return ep
+        return ep, loaded
 
     def test_set_grad_region_with_cond(self):
         class NoGrad(torch.nn.Module):
@@ -1037,11 +1037,14 @@ def forward(self, sin, cos):
                 return y + x
 
         m, x = NoGrad(), torch.randn(4, requires_grad=True)
-        ep = self._check_region_with_cond(m, x, "wrap_with_set_grad_enabled")
-        self.assertEqual(
-            torch.autograd.grad(ep.module()(x).sum(), x),
-            torch.autograd.grad(m(x).sum(), x),
-        )
+        ep, loaded = self._check_region_with_cond(m, x, "wrap_with_set_grad_enabled")
+        # run_decompositions traces an inference graph, so it is left out here.
+        for inp in (x, -x):
+            for module in (ep.module(), loaded):
+                self.assertEqual(
+                    torch.autograd.grad(module(inp).sum(), inp),
+                    torch.autograd.grad(m(inp).sum(), inp),
+                )
 
     def test_autocast_region_with_cond(self):
         class Autocast(torch.nn.Module):
