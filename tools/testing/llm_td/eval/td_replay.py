@@ -7,18 +7,20 @@ N-th sample starting at the I-th.
 
 Runs get_test_prioritizations over each sample's candidates, as the
 target-determination job does, with the change (changed files, commit text)
-patched in and every PR-local input (previous failures, the pytest cache, LLM
-mappings, linked issue bodies) empty. A sample on which a heuristic raised
+patched in, the sample's `previous_failures` (head samples; see
+build_dataset) as the PR's previous failures, and every other PR-local input
+(LLM mappings, linked issue bodies) empty. A sample on which a heuristic raised
 gets no file, and the run exits non-zero, so a rerun recomputes it. Writes
 OUT/<id>.json with:
 
   inputs     a hash of test-times.json, the sample and `stats` (see
              score.replay_inputs); a file with another hash is recomputed,
              and score.py drops one that does not match its inputs
-  stats      a hash of the STATS artifacts and the TD code (see score.replay_stats)
+  stats      a hash of the STATS artifacts and the replay code (see score.replay_stats)
   scored     files TD gives a positive score, best first (what the hedge draws from)
   top25      CI's top-25% cut over all candidates
-  top25_cfg  config -> files of that cut per config of test-times.json (see top25_per_config)
+  top25_cfg  config -> files of that cut per config of test-times.json, over
+             the config's job test list (see score.job_files)
 
 CI computes the scores once and each job cuts them to its own test list
 (TestPrioritizations.amend_tests), so the per-config cut reuses the global
@@ -45,9 +47,9 @@ from unittest import mock
 from tools.stats.import_test_stats import ADDITIONAL_CI_FILES_FOLDER
 from tools.testing.llm_td.eval import REPO, write_json
 from tools.testing.llm_td.eval.score import (
+    job_files,
     replay_inputs,
     replay_stats,
-    Seconds,
     STATS_ARTIFACTS,
     test_seconds,
 )
@@ -63,18 +65,13 @@ H = "tools.testing.target_determination.heuristics."
 
 
 def top25_per_config(
-    tp: TestPrioritizations, cands: list[str], seconds: Seconds
+    tp: TestPrioritizations, jobs: dict[str, set[str]]
 ) -> dict[str, list[str]]:
-    """The files of CI's top-25% cut in each config, cutting the scores to the candidates in that config.
-
-    A job's test list is its config's recorded files plus the candidates with
-    no recorded time anywhere: CI amends to the job's whole selected_tests, so
-    a newly added file is in every job's list."""
-    known = set().union(*seconds.values())
+    """The files of CI's top-25% cut in each config, cutting the scores to that config's job test list `jobs[c]` (see score.job_files)."""
     out = {}
-    for c, files in seconds.items():
+    for c, files in jobs.items():
         job = copy.deepcopy(tp)
-        job.amend_tests([f for f in cands if f in files or f not in known])
+        job.amend_tests(sorted(files))
         out[c] = sorted({t.test_file for t in job.get_top_per_tests(25)[0]})
     return out
 
@@ -111,7 +108,9 @@ def main() -> None:
         # The heuristics read their artifacts as REPO_ROOT / ".additional_ci_files/...".
         "utils.REPO_ROOT": stats_root,
         "historical_class_failure_correlation.REPO_ROOT": stats_root,
-        "previously_failed_in_pr.get_previous_failures": set,
+        "previously_failed_in_pr.get_previous_failures": lambda: set(
+            current.get("previous_failures", ())
+        ),
         "previously_failed_in_pr.read_additional_test_failures_file": set,
         "llm.LLM.get_mappings": lambda self: {},
         "mentioned_in_pr.get_git_commit_info": lambda: current["title"]
@@ -167,7 +166,7 @@ def main() -> None:
                 "stats": stats,
                 "scored": list(dict.fromkeys(scored)),
                 "top25": sorted({t.test_file for t in tp.get_top_per_tests(25)[0]}),
-                "top25_cfg": top25_per_config(tp, cands, seconds),
+                "top25_cfg": top25_per_config(tp, job_files(current, seconds)),
             })  # fmt: skip
     if failed:
         raise SystemExit(

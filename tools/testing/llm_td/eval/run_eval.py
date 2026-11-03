@@ -8,7 +8,8 @@ same command to fill in samples that crashed. Throttling and 5xx errors, which
 the eval's own concurrency provokes, are retried; a call that still fails after
 ATTEMPTS is written as an error, so it is scored as the failed call it would be
 in CI, which calls the model once. Timeouts are final. A tag's results must all
-come from one --model, --effort and --agentic. Samples that
+come from one --model, --effort and --agentic, and from what the model is sent
+for the sample now (see prompt_sha). Samples that
 select_tests answers without the model (see score.unasked) are skipped. With
 --agentic, each worker checks the sample's head out into its own worktree
 under DIR/worktrees/<tag> and lets the model Read/Grep/Glob it.
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures as cf
+import hashlib
 import json
 import re
 import subprocess
@@ -31,6 +33,8 @@ from tools.testing.llm_td.select_tests import (
     build_prompt,
     query_model,
     QUERY_TIMEOUT,
+    SCHEMA,
+    SYSTEM_PROMPT,
     test_minutes,
 )
 
@@ -61,17 +65,19 @@ def checkout(root: Path, slot: int, sha: str) -> str:
     return str(wt)
 
 
+def sample_prompt(sample: dict, minutes: dict) -> str:
+    return build_prompt(sample["title"], sample["body"] or "", sample["diffstat"], sample["diff"], sample["candidates"], minutes)  # fmt: skip
+
+
+def prompt_sha(prompt: str) -> str:
+    """A hash of everything the model is sent: the system prompt, SCHEMA and `prompt`."""
+    return hashlib.sha256(json.dumps([SYSTEM_PROMPT, SCHEMA, prompt]).encode()).hexdigest()  # fmt: skip
+
+
 def run_one(
     sample: dict, minutes: dict, args: argparse.Namespace, wt: str | None
 ) -> dict:
-    prompt = build_prompt(
-        sample["title"],
-        sample["body"] or "",
-        sample["diffstat"],
-        sample["diff"],
-        sample["candidates"],
-        minutes,
-    )
+    prompt = sample_prompt(sample, minutes)
     cost = 0.0
     for attempt in range(ATTEMPTS):
         if attempt:
@@ -103,6 +109,7 @@ def run_one(
         # The last call's latency; cost_usd sums every attempt's.
         "wall_s": round(time.time() - t0, 1),
         "prompt_chars": len(prompt),
+        "prompt_sha": prompt_sha(prompt),
         "cost_usd": cost,
         "usage": d.get("usage"),
         "num_turns": d.get("num_turns"),
@@ -135,6 +142,9 @@ def main() -> None:
     done = {x.stem: json.loads(x.read_text()) for x in out.glob("*.json")}
     if other := sorted(i for i, r in done.items() if {k: r.get(k) for k in want} != want):  # fmt: skip
         p.error(f"{len(other)} results in {out}, e.g. {other[0]}, were made with other settings than {want}; use another --tag")  # fmt: skip
+    sent = {i: prompt_sha(sample_prompt(json.loads(x.read_text()), minutes)) for i in done if (x := args.data / "samples" / f"{i}.json").exists()}  # fmt: skip
+    if stale := sorted(i for i, h in sent.items() if done[i].get("prompt_sha") != h):
+        p.error(f"{len(stale)} results in {out}, e.g. {stale[0]}, were made from another prompt, schema or sample; use another --tag")  # fmt: skip
     ids = [i for i in args.ids.read_text().split() if i not in done]
     print(f"{args.tag}: {len(ids)} to run", flush=True)
 

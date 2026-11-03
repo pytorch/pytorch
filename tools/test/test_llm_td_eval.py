@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
-from tools.testing.llm_td import select_tests
+from tools.testing.llm_td import select_tests, selection
 from tools.testing.llm_td.eval import score
 from tools.testing.llm_td.eval.run_eval import run_one
 from tools.testing.llm_td.eval.score import (
@@ -34,7 +34,7 @@ from tools.testing.llm_td.eval.score import (
     truth_pairs,
 )
 from tools.testing.llm_td.eval.td_replay import top25_per_config
-from tools.testing.llm_td.selection import Selection
+from tools.testing.llm_td.selection import apply_selection, Selection
 from tools.testing.target_determination.heuristics.interface import TestPrioritizations
 from tools.testing.test_run import TestRun
 
@@ -65,11 +65,13 @@ def pick(name: str, r: dict | None, td: dict | None, s: dict = SAMPLE) -> Choice
 
 
 def write_data(d: str, files: Mapping[str, object]) -> Path:
-    """Write `files` under `d`, stamping each TD replay with its sample's current inputs."""
+    """Write `files` under `d` (str values as is, others as JSON), stamping each TD replay with its sample's current inputs."""
     data = Path(d)
     for name, obj in files.items():
         (data / name).parent.mkdir(parents=True, exist_ok=True)
-        (data / name).write_text(json.dumps(obj))
+        (data / name).write_text(obj if isinstance(obj, str) else json.dumps(obj))
+    if not (data / "test-times.json").exists():
+        return data
     times = (data / "test-times.json").read_bytes()
     for p in (data / "td").glob("*.json"):
         if (sample := data / "samples" / p.name).exists():
@@ -200,6 +202,33 @@ class TestRunEval(unittest.TestCase):
             ):
                 run_eval.main()
         self.assertIn("1 results in", err.getvalue())
+
+    def test_main_refuses_another_prompt(self) -> None:
+        from tools.testing.llm_td.eval import run_eval
+
+        sample = {"id": "a", "sha": "f" * 40, "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a"], "changed_files": ["torch/foo.py"]}  # fmt: skip
+        sent = run_eval.prompt_sha(run_eval.sample_prompt(sample, {}))
+        result = {"model": "m", "effort": "medium", "agentic": False}
+        for prompt_sha, schema, refused in ((sent, run_eval.SCHEMA, False), (None, run_eval.SCHEMA, True), (sent, {}, True)):  # fmt: skip
+            with tempfile.TemporaryDirectory() as d:
+                data = write_data(d, {"samples/a.json": sample, "test-times.json": {}, "results/t/a.json": {**result, "prompt_sha": prompt_sha}})  # fmt: skip
+                (data / "ids.txt").write_text("a")
+                argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt")]  # fmt: skip
+                with (
+                    mock.patch.object(sys, "argv", argv),
+                    mock.patch.object(run_eval, "SCHEMA", schema),
+                    mock.patch("sys.stderr", io.StringIO()) as err,
+                    mock.patch("sys.stdout", io.StringIO()),
+                    mock.patch.object(run_eval, "query_model") as query,
+                ):
+                    try:
+                        run_eval.main()
+                    except SystemExit:
+                        self.assertTrue(refused)
+                        self.assertIn("another prompt", err.getvalue())
+                    else:
+                        self.assertFalse(refused)
+                query.assert_not_called()
 
 
 class TestScore(unittest.TestCase):
@@ -560,9 +589,50 @@ class TestScore(unittest.TestCase):
             job = [*seconds, *untimed]
             sel = Selection(set(rng.sample(files, rng.randint(0, 2))), candidates=set(files))  # fmt: skip
             ranked = [TestRun(f) for f in scored if f in job] + [TestRun(f) for f in job if f not in scored]  # fmt: skip
-            split = sel.split(ranked, lambda x: float(x.test_file in scored), seconds, "c")  # fmt: skip
-            got = score.hedge(sel, scored, seconds, score.LLM_TD_HEDGE, "c", {"TD"}, untimed)  # fmt: skip
-            self.assertEqual(got, {"TD"} if split.kept_td else split.hedged, (scored, seconds, untimed, sel))  # fmt: skip
+            cut = set(rng.sample(job, min(len(job), 2)))
+            prev = set(rng.sample(files, rng.randint(0, 2)))
+            split = sel.split(ranked, lambda x: float(x.test_file in scored), seconds, "c", previously_failed=prev, td_include=cut)  # fmt: skip
+            got = score.hedge(sel, scored, seconds, score.LLM_TD_HEDGE, "c", cut, untimed, prev)  # fmt: skip
+            want = cut if split.kept_td or not sum(seconds.values()) else split.previously_failed | split.hedged  # fmt: skip
+            self.assertEqual(got, want, (scored, seconds, untimed, sel, cut, prev))
+
+    def test_policy_matches_apply_selection(self) -> None:
+        # What final+td runs in a job is what apply_selection runs there, including a job with no test times.
+        rng = random.Random(0)
+        files = [f"test_{i}" for i in range(8)]
+        for _ in range(300):
+            seconds = {f: float(rng.choice([0, 0, 5, 20, 60])) for f in files if rng.random() < 0.6}  # fmt: skip
+            job = [*seconds, *(f for f in files if f not in seconds and rng.random() < 0.5)]  # fmt: skip
+            rng.shuffle(job)
+            n = rng.randint(0, len(job))
+            include, exclude = [TestRun(f) for f in job[:n]], [TestRun(f) for f in job[n:]]  # fmt: skip
+            scored = [f for f in job if rng.random() < 0.6]
+            picked = rng.sample(job, min(len(job), rng.randint(0, 2)))
+            prev = rng.sample(files, rng.randint(0, 2))
+            s = {**SAMPLE, "candidates": job, "truth": [], "previous_failures": prev}
+            td = {"scored": scored, "top25": [], "top25_cfg": {"c": job[:n]}}
+            r = {"out": {"tests": [{"file": f} for f in picked]}}
+            choice = policy("final+td", s, r, td, {"c": {f: [t, 0.0] for f, t in seconds.items()}})  # fmt: skip
+            if choice is None:
+                raise AssertionError("final+td chose nothing")
+            sel = Selection(set(picked), candidates=set(job), enforce=True)
+            with (
+                mock.patch.object(selection, "get_pr_number", return_value=1),
+                mock.patch("sys.stderr", io.StringIO()),
+            ):
+                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config="c", td_enabled=True, previously_failed=prev)  # fmt: skip
+            ran = {x.test_file for x in applied.include}
+            self.assertEqual({f for f in job if choice.covers(f, "c")}, ran, (seconds, job, n, scored, picked, prev))  # fmt: skip
+
+    def test_hedge_previous_failures(self) -> None:
+        # Previous failures in TD's cut run outside the budget; test_b is not in the cut.
+        td = {"scored": ["test_a", "test_c"], "top25": ["test_a"], "top25_cfg": {"default": ["test_a"], "slow": []}}  # fmt: skip
+        s = {**SAMPLE, "previous_failures": ["test_a", "test_b"]}
+        choice = pick("final+td5", NOTHING, td, s)
+        self.assertEqual(choice.per_config, {"default": {"test_a", "test_c"}, "slow": set()})  # fmt: skip
+        # Without fallback times other jobs are not enforced and run TD's cut.
+        self.assertEqual(choice.other, {"test_a"})
+        self.assertEqual(pick("final+td5", NOTHING, td).per_config["default"], {"test_c"})  # fmt: skip
 
     def test_hedge_failed_call_keeps_td(self) -> None:
         td = {"scored": ["test_a"], "top25": ["test_e"], "top25_cfg": {"default": ["test_a"], "slow": []}}  # fmt: skip
@@ -713,14 +783,22 @@ class TestScore(unittest.TestCase):
             for p in [*(stats / a for a in score.STATS_ARTIFACTS), code / "heuristics/h.py"]:  # fmt: skip
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text("1")
-            with mock.patch.object(score, "TD_CODE", code):
+            replay = Path(d) / "td_replay.py"
+            replay.write_text("1")
+            with (
+                mock.patch.object(score, "TD_CODE", code),
+                mock.patch.object(score, "REPLAY_CODE", [replay]),
+            ):
                 digests = [score.replay_stats(stats)]
                 (stats / score.STATS_ARTIFACTS[0]).write_text("2")
                 digests.append(score.replay_stats(stats))
                 (code / "heuristics/h.py").write_text("2")
                 digests += [score.replay_stats(stats), score.replay_stats(stats)]
-        self.assertEqual(len(set(digests)), 3)
+                replay.write_text("2")
+                digests.append(score.replay_stats(stats))
+        self.assertEqual(len(set(digests)), 4)
         self.assertEqual(digests[2], digests[3])
+        self.assertIn(Path(score.__file__).with_name("td_replay.py"), score.REPLAY_CODE)
 
     def test_td25_per_config(self) -> None:
         cands = ["test_a", "test_b", "test_c", "test_d", "test_e"]
@@ -735,10 +813,17 @@ class TestScore(unittest.TestCase):
         )
         # The cut is 25% + 1 of each config's own runs plus the files with no
         # recorded time (test_e, as if newly added); test_a's partial run counts.
-        cut = top25_per_config(tp, cands, SECONDS)
+        s = {"candidates": cands, "truth": []}
+        cut = top25_per_config(tp, score.job_files(s, SECONDS))
         self.assertEqual(cut, {"default": ["test_a", "test_e"], "slow": ["test_a", "test_e"]})  # fmt: skip
-        timed = top25_per_config(tp, ["test_a", "test_b", "test_c", "test_d"], SECONDS)
-        self.assertEqual(timed, {"default": ["test_a", "test_c"], "slow": ["test_a"]})
+        timed = {**s, "candidates": ["test_a", "test_b", "test_c", "test_d"]}
+        self.assertEqual(top25_per_config(tp, score.job_files(timed, SECONDS)), {"default": ["test_a", "test_c"], "slow": ["test_a"]})  # fmt: skip
+        # A file that failed in slow was in slow's job, though slow records no time of it.
+        failed = {**timed, "truth": ["test_d"], "truth_jobs": {"test_d": [["pull", "linux / test (slow, 1, 1)"]]}}  # fmt: skip
+        self.assertEqual(score.job_files(failed, SECONDS)["slow"], {"test_a", "test_c", "test_d"})  # fmt: skip
+        tp_d = TestPrioritizations(timed["candidates"], {TestRun("test_d"): 1.0})
+        self.assertNotIn("test_d", top25_per_config(tp_d, score.job_files(timed, SECONDS))["slow"])  # fmt: skip
+        self.assertEqual(top25_per_config(tp_d, score.job_files(failed, SECONDS))["slow"], ["test_d"])  # fmt: skip
         td = {"top25": ["test_a", "test_e"], "top25_cfg": cut}
         choice = pick("td25", None, td)
         self.assertTrue(choice.covers("test_a", "slow"))
