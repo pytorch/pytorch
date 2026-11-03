@@ -1058,23 +1058,26 @@ def forward(self, sin, cos):
             Autocast(), torch.randn(4, 4), "wrap_with_autocast"
         )
 
-    def test_set_grad_region_with_flat_apply(self):
+    def _check_region_with_flat_apply(self, ctx, region):
         # Indexing inside vmap is traced as flat_apply calls, whose input specs
         # are read with get_attr inside the region.
         from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
         class IndexInVmap(torch.nn.Module):
             def forward(self, x, indices):
-                with torch.no_grad(), TransformGetItemToIndex():
+                with ctx(), TransformGetItemToIndex():
                     return torch.vmap(lambda i: x[i])(indices)
 
         m, inp = IndexInVmap(), (torch.arange(4.0), torch.tensor([3, 1]))
         ep = export(m, inp)
-        region = torch.ops.higher_order.wrap_with_set_grad_enabled
-        (region_node,) = ep.graph.find_nodes(op="call_function", target=region)
-        body = torch.fx.graph_module._get_attr(
-            ep.graph_module, region_node.args[1].target
+        target = getattr(torch.ops.higher_order, region)
+        (region_node,) = ep.graph.find_nodes(op="call_function", target=target)
+        (body_node,) = (
+            a
+            for a in region_node.args
+            if isinstance(a, torch.fx.Node) and a.op == "get_attr"
         )
+        body = torch.fx.graph_module._get_attr(ep.graph_module, body_node.target)
         self.assertTrue(
             body.graph.find_nodes(
                 op="call_function", target=torch.ops.higher_order.flat_apply
@@ -1090,6 +1093,15 @@ def forward(self, sin, cos):
         self.assertTrue(specs)
         self.assertEqual(ep.module()(*inp), m(*inp))
         self.assertEqual(ep.run_decompositions().module()(*inp), m(*inp))
+
+    def test_set_grad_region_with_flat_apply(self):
+        self._check_region_with_flat_apply(torch.no_grad, "wrap_with_set_grad_enabled")
+
+    def test_autocast_region_with_flat_apply(self):
+        self._check_region_with_flat_apply(
+            lambda: torch.autocast("cpu", dtype=torch.bfloat16),
+            "wrap_with_autocast",
+        )
 
     def test_set_grad_pass_reads_nested_spec(self):
         # A pytree spec that lives on a submodule is read with a dotted
