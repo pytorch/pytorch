@@ -1,6 +1,6 @@
 """The test selection an LLM makes for one change, and how CI applies it.
 
-A selection names test files (paths under test/ without .py), whole test
+A selection names test files (paths under test/ without .py), every file of the model's
 directories, and wrapper sweeps (configs such as dynamo_wrapped that re-run
 ordinary test files in a special mode). A test file runs in a given CI config
 when the selection names the file, names that config as a sweep, or is run_all,
@@ -110,7 +110,8 @@ RUN_ALL_PATTERNS = [
     r"^tools/testing/",
     r"^test/pytest_shard_custom\.py$",
     r"^tools/stats/(import_test_stats|upload_metrics|upload_test_stats|upload_stats_lib|test_dashboard)\.py$",
-    r"^\.ci/pytorch/(test|multigpu-test|win-test|macos-test|macos-common|common|common-build|common_utils|torch_trace)\.sh$",
+    # build.sh runs from the PR in the build jobs and decides what the test jobs get.
+    r"^\.ci/pytorch/(build|test|multigpu-test|win-test|macos-test|macos-common|common|common-build|common_utils|torch_trace)\.sh$",
     r"^\.ci/pytorch/numba-cuda-13\.patch$",
     r"^scripts/onnx/test\.sh$",
     r"^\.ci/pytorch/win-test-helpers/(setup_pytorch_env\.bat|test_python_shard\.bat|test_python_jit_legacy\.bat|installation-helpers/activate_miniconda3\.bat)$",
@@ -165,7 +166,7 @@ def importers(
     drivers: test/jit/test_freezing.py selects test_jit, which runs it, and
     test_jit_legacy, which does `from test_jit import *`. `grep` lists the paths
     under test/ that match a `git grep -E` pattern at the change's head. None if
-    a chain of importers reaches MAX_IMPORT_HOPS modules."""
+    following the importers takes more than MAX_IMPORT_HOPS hops (grep rounds)."""
     found: set[str] = set()
     seen: set[str] = set()
     frontier = {f for f in sources if f.startswith("test/") and f.endswith(".py")}
@@ -387,6 +388,8 @@ class Selection:
         if not isinstance(out, dict):
             raise AssertionError("parse_model_output accepts only objects")
         sources, missing = failure_list_sources(changed_files, grep)
+        # Also every inductor failure-list edit without `grep` or naming more
+        # than MAX_FAILURE_LIST_CLASSES classes, and an entry without exactly one ".".
         if "inductor" in missing:
             return cls(run_all=True, reason="an edited inductor failure list names an unknown test class")  # fmt: skip
         # dynamo_wrapped also runs with compiled autograd on (see common_utils).
