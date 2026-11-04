@@ -183,6 +183,7 @@ class TestRunEval(unittest.TestCase):
             with (
                 contextlib.chdir(data.parent),  # --data is relative to this cwd.
                 mock.patch.object(sys, "argv", argv),
+                mock.patch.dict(os.environ, {"LLM_TD_AGENTIC_SANDBOX": "1"}),
                 mock.patch.object(run_eval, "checkout", return_value="wt") as co,
                 mock.patch.object(run_eval, "query_model", return_value={"type": "result", "is_error": True, "result": "529"}) as query,
                 mock.patch.object(run_eval.time, "sleep"),
@@ -228,6 +229,56 @@ class TestRunEval(unittest.TestCase):
         self.assertEqual((query.call_count, write.call_count), (2, 2))
         self.assertEqual(write.call_args.args[0].name, "b.json")
         self.assertIn("a failed, left for a rerun", out.getvalue())
+        # c needs no result, so it is not counted as missing one.
+        self.assertTrue(out.getvalue().startswith("t: 2 without a result\n"))
+
+    def test_main_stops_on_ctrl_c(self) -> None:
+        import signal
+
+        from tools.testing.llm_td.eval import run_eval
+
+        def killed(*args: object, **kwargs: object) -> dict:
+            # Ctrl-C reaches the main thread, and the claude child dies with output that is not JSON.
+            os.kill(os.getpid(), signal.SIGINT)
+            return {"is_error": True, "result": "killed"}
+
+        with tempfile.TemporaryDirectory() as d:
+            data = write_data(d, {f"samples/{i}.json": {**SAMPLE, "id": i} for i in "abc"})  # fmt: skip
+            (data / "test-times.json").write_text("{}")
+            (data / "ids.txt").write_text("a b c")
+            argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt"), "--jobs", "1"]  # fmt: skip
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch("sys.stdout", io.StringIO()) as out,
+                mock.patch.object(run_eval, "query_model", side_effect=killed) as query,
+                self.assertRaises(KeyboardInterrupt),
+            ):
+                old = signal.signal(signal.SIGINT, signal.default_int_handler)
+                try:
+                    run_eval.main()
+                finally:
+                    signal.signal(signal.SIGINT, old)
+            self.assertEqual(list((data / "results/t").iterdir()), [])
+        # The killed call is not saved, and no further id is paid for.
+        self.assertEqual(query.call_count, 1)
+        self.assertIn("interrupted", out.getvalue())
+
+    def test_main_refuses_agentic_outside_a_sandbox(self) -> None:
+        from tools.testing.llm_td.eval import run_eval
+
+        argv = ["run_eval", "--data", "x", "--tag", "t", "--model", "m", "--ids", "x", "--agentic"]  # fmt: skip
+        for env in ({}, {"LLM_TD_AGENTIC_SANDBOX": "0"}):
+            env = {k: v for k, v in os.environ.items() if k != "LLM_TD_AGENTIC_SANDBOX"} | env  # fmt: skip
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch("sys.stderr", io.StringIO()) as err,
+                mock.patch.object(run_eval, "query_model") as query,
+                self.assertRaises(SystemExit),
+            ):
+                run_eval.main()
+            self.assertIn("LLM_TD_AGENTIC_SANDBOX=1", err.getvalue())
+            query.assert_not_called()
 
     def test_main_refuses_tag_td(self) -> None:
         from tools.testing.llm_td.eval import run_eval
@@ -321,6 +372,7 @@ class TestRunEval(unittest.TestCase):
                 argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt"), "--agentic"]  # fmt: skip
                 with (
                     mock.patch.object(sys, "argv", argv),
+                    mock.patch.dict(os.environ, {"LLM_TD_AGENTIC_SANDBOX": "1"}),
                     mock.patch("sys.stderr", io.StringIO()) as err,
                     mock.patch("sys.stdout", io.StringIO()),
                     mock.patch.object(run_eval, "checkout", return_value="wt"),
@@ -642,8 +694,8 @@ class TestScore(unittest.TestCase):
         # The TEST_CONFIG patterns of test.sh's top-level dispatch that set NO_TD, inline or through a function they call.
         # A setter the scan cannot map to a pattern (a helper no branch calls, or a top-level NO_TD=) fails it.
         func_def = re.compile(r"(?:function\s+(\w+)|(\w+)\s*\(\s*\))")
-        dispatch = re.compile(r'(?:el)?if \[\[ "?\$\{?TEST_CONFIG\}?"? ==? "?([^ "]+)')
-        func, sets_no_td, branch, calls = None, set(), None, {}
+        dispatch = re.compile(r'(?:el)?if \[\[ "?\$\{?TEST_CONFIG\}?"? ==? ["\']?([^ "\']+)')  # fmt: skip
+        func, sets_no_td, branch, calls, compound = None, set(), None, {}, set()
         for line in (REPO_ROOT / ".ci/pytorch/test.sh").read_text().splitlines():
             if line.lstrip().startswith("#"):
                 continue
@@ -653,6 +705,8 @@ class TestScore(unittest.TestCase):
                 func = None
             if m := dispatch.match(line):
                 branch = m.group(1)
+                if re.search(r"&&|\|\||-a |-o ", line):
+                    compound.add(branch)
             elif re.match(r"\S", line):
                 branch = None
             elif branch:
@@ -663,6 +717,8 @@ class TestScore(unittest.TestCase):
         self.assertTrue(calls, "found no TEST_CONFIG dispatch in test.sh")
         self.assertFalse(unmapped, f"cannot map test.sh's NO_TD to TEST_CONFIG patterns (setters outside the dispatch: {unmapped}); update this scan or NO_TD_CONFIGS")  # fmt: skip
         dispatched = {p for p, words in calls.items() if p in sets_no_td or words & sets_no_td}  # fmt: skip
+        # NO_TD_CONFIGS matches TEST_CONFIG alone, so it cannot express a branch's other conditions.
+        self.assertFalse(dispatched & compound, f"test.sh sets NO_TD under compound conditions: {dispatched & compound}")  # fmt: skip
         self.assertEqual(dispatched, set(score.NO_TD_CONFIGS))
 
     def test_unasked(self) -> None:
