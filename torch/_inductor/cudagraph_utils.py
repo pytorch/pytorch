@@ -13,7 +13,6 @@ from torch._subclasses.fake_tensor import get_plain_tensors, is_fake
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
-from .utils import is_using_cudagraph_partition
 
 
 if TYPE_CHECKING:
@@ -347,15 +346,12 @@ def _get_use_stack_trace(node: torch.fx.Node) -> str | None:
 def check_multiple_devices_or_any_cpu_nodes(
     device_node_mapping: dict[torch.device, torch.fx.Node],
     *,
-    use_cudagraph_partition: bool | None = None,
+    cudagraphs_per_partition: bool,
 ) -> str | None:
     # meta tensors are supported since there is no compute
     device_node_mapping.pop(torch.device("meta"), None)
 
-    # dynamo cudagraph does not support graph partition
-    if use_cudagraph_partition is None:
-        use_cudagraph_partition = is_using_cudagraph_partition()
-    if use_cudagraph_partition:
+    if cudagraphs_per_partition:
         # graph partition supports splitting on cpu op. So we can ignore cpu nodes.
         device_node_mapping.pop(torch.device("cpu"), None)
 
@@ -405,13 +401,13 @@ def check_caching_allocator_for_cudagraphs() -> str | None:
 def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node],
     *,
-    use_cudagraph_partition: bool,
+    cudagraphs_per_partition: bool,
 ) -> str | None:
     return (
         check_caching_allocator_for_cudagraphs()
         or check_multiple_devices_or_any_cpu_nodes(
             device_node_mapping,
-            use_cudagraph_partition=use_cudagraph_partition,
+            cudagraphs_per_partition=cudagraphs_per_partition,
         )
     )
 

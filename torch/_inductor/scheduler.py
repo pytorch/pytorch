@@ -6082,36 +6082,23 @@ class Scheduler:
         return sum(1 for node in nodes if not isinstance(node, NopKernelSchedulerNode))
 
     def _count_subgraph_kernel_nodes(self, subgraph: ir.Subgraph | None) -> int:
-        """Count the kernels an invoke_subgraph body is expected to emit.
-
-        Counted from the lowered operations rather than from a Scheduler built for
-        the occasion. Scheduler.__init__ finalizes MultiTemplateBuffers, which
-        rewrites the body's operation list in place, so the Scheduler codegen
-        builds later would start from already-finalized templates and lose the
-        epilogue fusions it would otherwise make.
-
-        The count is therefore pre-fusion and reads high for a body whose buffers
-        later fuse (two fusable pointwise buffers count as two, not one), so the
-        threshold errs toward capturing. Fusion decisions are not available
-        without a Scheduler, and this is a coarse size heuristic.
-        """
+        """Pre-fusion kernel estimate from the lowered body; building a Scheduler
+        would finalize the body's MultiTemplateBuffers in place."""
         if subgraph is None or subgraph.graph is None:
             return 0
 
         count = 0
-        # Nested bodies are counted under this region's patches, as codegen sees them.
-        with config.patch(subgraph.inductor_config_patches or {}):
-            for op in subgraph.graph.operations:
-                if not isinstance(op, ir.IRNode):
-                    continue
-                nested_subgraphs = op.get_subgraphs()
-                if nested_subgraphs:
-                    count += sum(
-                        self._count_subgraph_kernel_nodes(nested)
-                        for nested in nested_subgraphs
-                    )
-                elif not isinstance(op, ir.MultiOutput) and not op.is_no_op():
-                    count += 1
+        for op in subgraph.graph.operations:
+            if not isinstance(op, ir.IRNode):
+                continue
+            nested_subgraphs = op.get_subgraphs()
+            if nested_subgraphs:
+                count += sum(
+                    self._count_subgraph_kernel_nodes(nested)
+                    for nested in nested_subgraphs
+                )
+            elif not isinstance(op, ir.MultiOutput) and not op.is_no_op():
+                count += 1
         return count
 
     def _count_partition_kernel_nodes(self, nodes: Sequence[BaseSchedulerNode]) -> int:
@@ -6142,7 +6129,9 @@ class Scheduler:
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self._graph_partition_counter = itertools.count()
         self._fusion_memory_state: FusionMemoryState | None = None
-        self._invoke_subgraph_cudagraph_skip_reason_cache: dict[str, str | None] = {}
+        # Keyed by subgraph name for bodies and by call-site name for families.
+        self._invoke_subgraph_body_skip_reason_cache: dict[str, str | None] = {}
+        self._invoke_subgraph_family_skip_reason_cache: dict[str, str | None] = {}
 
         self.completed_operations: OrderedSet[str] = OrderedSet()
         self.available_buffer_names = OrderedSet(
@@ -12068,14 +12057,18 @@ class Scheduler:
     def _invoke_subgraph_body_cudagraph_skip_reason(
         self, invoke_subgraph: ir.InvokeSubgraph
     ) -> str | None:
-        region_name = invoke_subgraph.get_name()
-        if region_name in self._invoke_subgraph_cudagraph_skip_reason_cache:
-            return self._invoke_subgraph_cudagraph_skip_reason_cache[region_name]
         subgraph = invoke_subgraph.subgraph
-        unsafe_symints = self._get_subgraph_cudagraph_unsafe_unbacked_symints(subgraph)
-        reason = self._subgraph_cudagraph_skip_reason(subgraph, unsafe_symints)
-        self._invoke_subgraph_cudagraph_skip_reason_cache[region_name] = reason
-        return reason
+        if subgraph is None:
+            raise AssertionError("expected invoke_subgraph to have a subgraph")
+        cache = self._invoke_subgraph_body_skip_reason_cache
+        if subgraph.name not in cache:
+            unsafe_symints = self._get_subgraph_cudagraph_unsafe_unbacked_symints(
+                subgraph
+            )
+            cache[subgraph.name] = self._subgraph_cudagraph_skip_reason(
+                subgraph, unsafe_symints
+            )
+        return cache[subgraph.name]
 
     def _get_subgraph_cudagraph_unsafe_unbacked_symints(
         self, subgraph: ir.Subgraph | None
@@ -12114,7 +12107,7 @@ class Scheduler:
             # mapping is copied because the check pops the entries it tolerates,
             # meta among them -- a meta tensor implies no compute to capture.
             if reason := check_multiple_devices_or_any_cpu_nodes(
-                dict(graph.device_node_mapping), use_cudagraph_partition=False
+                dict(graph.device_node_mapping), cudagraphs_per_partition=False
             ):
                 return f"invoke_subgraph body has {reason}"
             for op in graph.operations:
@@ -12159,6 +12152,9 @@ class Scheduler:
     def _invoke_subgraph_family_cudagraph_skip_reason(
         self, node: BaseSchedulerNode, region: ir.InvokeSubgraph
     ) -> str | None:
+        cache = self._invoke_subgraph_family_skip_reason_cache
+        if (region_name := region.get_name()) in cache:
+            return cache[region_name]
         family: list[ir.OperationBuffer] = [region]
         if region.outputs is not None:
             family.extend(
@@ -12166,22 +12162,17 @@ class Scheduler:
                 for output in region.outputs
                 if isinstance(output, ir.MultiOutput)
             )
+        reason = None
         for ir_node in family:
-            family_node = node if node.node is ir_node else None
-            if family_node is None:
-                buffer = self.name_to_buf.get(ir_node.get_name())
-                if buffer is None:
-                    raise AssertionError(
-                        f"missing scheduler buffer for {ir_node.get_name()}"
-                    )
-                family_node = self.name_to_node.get(buffer.defining_op_name())
-                if family_node is None:
-                    raise AssertionError(
-                        f"missing scheduler node for {buffer.defining_op_name()}"
-                    )
+            family_node = (
+                node
+                if node.node is ir_node
+                else self.name_to_node[ir_node.get_operation_name()]
+            )
             if reason := self._scheduler_node_cudagraph_skip_reason(family_node):
-                return reason
-        return None
+                break
+        cache[region_name] = reason
+        return reason
 
     @staticmethod
     def _get_invoke_subgraph_region(
@@ -12842,7 +12833,7 @@ class Scheduler:
             try:
                 return (
                     self._codegen_partitions()
-                    if V.graph.graph_partition
+                    if V.graph.split_into_partitions
                     else self._codegen(self.nodes)
                 )
             finally:
