@@ -578,6 +578,8 @@ def reduce_row_itree(
     if not x.is_cuda:
         raise AssertionError(f"want a CUDA input, got {x.device}")
     check_current(x.get_device())
+    if out.device != x.device:
+        raise AssertionError(f"out on {out.device}, but x on {x.device}")
     M, N = x.shape
     itree = itree_plan(N, M, x.element_size())
     if itree is None:

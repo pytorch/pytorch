@@ -1,6 +1,7 @@
 # Column-reduction driver for tile.TileReduce, with launch policy and plan cache.
 # Threads own vectorized kept-axis outputs without lane merging. Splitting the reduced
 # axis provides parallelism; unsplit (65536, 256) took 7830us versus ATen's 15.8us.
+# Inputs must be on the current device.
 
 from typing import Any
 

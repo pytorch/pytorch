@@ -1,7 +1,7 @@
 # Reduction dispatcher and general-axis plan for the shared TileReduce kernel.
 # TensorIterator geometry handles every layout. Runtime values keep kernel count
 # O(op * dtype * pair-count); cache_sig compiles decode depths, outputs, index mode,
-# projection/partial mode, and fold clamps.
+# projection/partial mode, and fold clamps. Inputs must be on the current device.
 
 import math
 from collections.abc import Sequence
@@ -180,8 +180,8 @@ def _launch(
 ) -> None:
     # _PLAN caches boxed geometry (~6us); _COMPILE_CACHE deduplicates structural kernels.
     op_name = key[1]
+    # Entry points check that this device is current.
     device = ins[0].get_device()
-    check_current(device)
     key = (device,) + key
     plan = _PLAN.get((key, op.geom_sig))
     if plan is None:
@@ -537,6 +537,7 @@ def _reduce(
     # TI drives all dimensions and layouts through this path; return nouts tensors.
     if not x.is_cuda:
         raise AssertionError(f"need a CUDA input, got {x.device}")
+    check_current(x.get_device())
     red_axes = (
         range(x.dim()) if dims is None else ([dims] if isinstance(dims, int) else dims)
     )
@@ -710,6 +711,7 @@ def _reduce_all(
     # All preserve flat indices because reduce-all is a single row.
     if not x.is_cuda:
         raise AssertionError(f"reduce-all needs a CUDA input, got {x.device}")
+    check_current(x.get_device())
     if not x.is_contiguous():
         if getattr(trait, "has_index", False):
             x = x.contiguous()
