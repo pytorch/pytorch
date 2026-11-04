@@ -1370,6 +1370,57 @@ class TestReductionsDevice(TestCase):
         tensor = tensor.unsqueeze(1)
         self.assertEqual(tensor.var(0), 0.03125)
 
+    # The CPU kernel scans a non-innermost dim of a contiguous tensor row by
+    # row; each column must still add up exactly as in a last-dim scan.
+    @onlyCPU
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @parametrize("threads", [1, 2, 4, 8])
+    def test_cumsum_outer_dim_matches_inner(self, device, dtype, threads):
+        def make(shape):
+            x = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
+            if dtype.is_floating_point:
+                x[x.abs() < 1] = -0.0
+            return x
+
+        # Inner sizes around the 256-column block, small, size-1 and empty scan
+        # dims, and enough blocks to split over 8 threads.
+        cases = [(make(shape), dim) for shape, dim in (
+            ((9, 1), 0), ((4, 9, 255), 1), ((9, 256), 0), ((4, 9, 257), -2), ((9, 513), 0), ((3, 7, 517), 1),
+            ((1, 300), 0), ((2, 300), 0), ((3, 1, 257), 1), ((0, 5), 0), ((5, 0), 0), ((3, 0, 4), 1),
+            ((2, 5, 3, 86), 1), ((64, 1024), 0), ((130, 600), 0), ((4, 128, 260), 1), ((8, 128, 3), 1),
+        )]
+        # Transposed, sliced, expanded and permuted inputs keep the strided scan.
+        cases += [
+            (make((300, 5)).t(), 0),
+            (make((5, 600))[:, ::2], 0),
+            (make((1, 300)).expand(5, 300), 0),
+            (make((517, 3, 7)).permute(1, 2, 0), 1),
+            (make((6, 300))[1:], 0),  # contiguous, with a storage offset
+        ]
+        # Without dtype= integral inputs are promoted to int64.
+        dtype_kwargs = ({}, {"dtype": dtype}) if dtype in integral_types() else ({},)
+        num_threads = torch.get_num_threads()
+        torch.set_num_threads(threads)
+        try:
+            for (x, dim), kwargs in product(cases, dtype_kwargs):
+                expected = x.movedim(dim, -1).contiguous().cumsum(-1, **kwargs).movedim(-1, dim)
+                out = torch.empty(x.shape, dtype=expected.dtype, device=device)
+                torch.cumsum(x, dim, **kwargs, out=out)
+                msg = f"shape={tuple(x.shape)}, stride={x.stride()}, dim={dim}, {kwargs}"
+                for actual in (x.cumsum(dim, **kwargs), out):
+                    self.assertEqual(actual, expected, atol=0, rtol=0, msg=msg)
+                    # assertEqual does not tell -0.0 from 0.0
+                    if expected.is_floating_point():
+                        self.assertEqual(actual.signbit(), expected.signbit(), msg=msg)
+        finally:
+            torch.set_num_threads(num_threads)
+
+    @onlyCPU
+    def test_cumsum_outer_dim_partial_overlap(self, device):
+        x = torch.rand(10, device=device)
+        with self.assertRaisesRegex(RuntimeError, "unsupported operation"):
+            torch.cumsum(x[:8].view(2, 4), 0, out=x[2:].view(2, 4))
+
     @dtypes(torch.bfloat16, torch.float16)
     @skipIfMPS
     def test_sum_noncontig_lowp(self, device, dtype) -> None:
