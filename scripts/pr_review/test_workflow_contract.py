@@ -46,6 +46,7 @@ import textwrap
 import unittest
 import unittest.mock
 from pathlib import Path
+from typing import Callable
 
 
 HERE = Path(__file__).resolve().parent
@@ -672,7 +673,14 @@ def sole_outputs(case: unittest.TestCase, written: str) -> dict:
     return dict(pairs)
 
 
-def run_step(text: str, marker: str, td: str, env: dict, stubs: dict) -> tuple:
+def run_step(
+    text: str,
+    marker: str,
+    td: str,
+    env: dict,
+    stubs: dict,
+    rewrite: Callable[[str], str] | None = None,
+) -> tuple:
     """Extract the `run:` body of the step NAMED `marker` and EXECUTE it.
 
     Text assertions establish that a guard is written down. Only running it
@@ -694,6 +702,9 @@ def run_step(text: str, marker: str, td: str, env: dict, stubs: dict) -> tuple:
     inherited from whoever ran the suite. It is NOT a model of a runner's
     environment — callers must pass what the step's own `env:` declares.
 
+    `rewrite`, if given, maps the extracted body to the one executed, e.g. to
+    point `/tmp/` at the temp directory.
+
     Returns `(CompletedProcess, Path to the step's $GITHUB_OUTPUT)`.
     """
     hits = list(re.finditer(rf"(?m)^      - name: {re.escape(marker)}[ \t]*$", text))
@@ -703,6 +714,8 @@ def run_step(text: str, marker: str, td: str, env: dict, stubs: dict) -> tuple:
     body = textwrap.dedent(
         scalar_block(rest if nxt is None else rest[: nxt.start() + 1], "run")
     )
+    if rewrite is not None:
+        body = rewrite(body)
     bin_dir = Path(td) / "bin"
     bin_dir.mkdir(exist_ok=True)
     for name, script in stubs.items():
@@ -1131,9 +1144,10 @@ class TestPreparePermissions(unittest.TestCase):
 class TestEgressAllowlistCoversItsOwnWrites(unittest.TestCase):
     """Every host the review job actually talks to must be allowlisted.
 
-    The trace upload is this job's single write capability. It is best-effort
-    (`|| echo ::warning::`), so a blocked endpoint costs a silent, permanent
-    loss of every transcript plus a reasoning_uri pointing at nothing.
+    The job's S3 writes (the traces and the review inputs) are its only write
+    capability. They are best-effort (a failure is a `::warning::`), so a
+    blocked endpoint costs a silent, permanent loss of every transcript and
+    snapshot, plus a reasoning_uri pointing at nothing.
     """
 
     def setUp(self):
@@ -1859,8 +1873,9 @@ class TestCredentialDuration(unittest.TestCase):
 
     `prepare` and `publish` take the 900s STS minimum. The review job takes
     3600s, the role's ceiling, because its model step may run for 55 minutes; its
-    role is Bedrock-only. Omitting the line does not fail anything — it silently
-    defaults the credential to an hour — so every value is pinned.
+    role grants Bedrock and S3 writes under `pr_review_traces/`. Omitting the
+    line does not fail anything — it silently defaults the credential to an
+    hour — so every value is pinned.
     """
 
     EXPECTED = ("900", "3600", "900")
@@ -2855,6 +2870,7 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
             "HARNESS",
             "HARNESS_VERSION",
             "HEAD_SHA",
+            "HEAD_TREE_SHA",
             "IS_FORK",
             "MAX_CHANGED_FILES",
             "MAX_DIFF_BYTES",
@@ -5013,6 +5029,209 @@ class TestThePrConversationReachesTheReview(unittest.TestCase):
             "the conversation is fetched after the `started` row, so a fetch "
             "failure leaves a started row with no review behind it.",
         )
+
+
+class TestTheReviewInputsAreKept(unittest.TestCase):
+    """The review job uploads the files the model is handed, best-effort.
+
+    The review role may write only `pr_review_traces/`, so another prefix loses
+    every snapshot silently; and a snapshot failure must never fail the review.
+    """
+
+    NAME = "Upload the review inputs to S3"
+    INPUTS = ("pr-diff.txt", "pr-files.txt", "pr-comments.json")
+
+    def setUp(self):
+        self.review = strip_comments(job_block(STAGE2.read_text(), "review"))
+        (self.step,) = [
+            s
+            for s in re.split(r"(?m)^      -(?: |$)", self.review)
+            if s.startswith(f"name: {self.NAME}\n")
+        ]
+
+    def test_every_s3_bucket_url_in_the_review_job_is_under_the_traces_prefix(self):
+        # The four `s3://${S3_BUCKET}/` literals: the inputs' DEST and the
+        # three trace uploads. A new one must be added here deliberately.
+        targets = re.findall(r"s3://\$\{S3_BUCKET\}/(\S*)", self.review)
+        self.assertEqual(len(targets), 4, targets)
+        for t in targets:
+            self.assertTrue(t.startswith("pr_review_traces/"), t)
+
+    def test_it_runs_on_credentials_after_every_input_is_written_and_before_the_model(
+        self,
+    ):
+        self.assertEqual(
+            uncommented(re.search(r"(?m)^        if: (.*)$", self.step).group(1)),
+            "steps.aws.outcome == 'success'",
+        )
+        model_step(self.review, "aws")
+        self.assertNotIn("continue-on-error", self.step)
+        names = re.findall(r"(?m)^      - name: (.+)$", self.review)
+        here = names.index(self.NAME)
+        self.assertLess(names.index("Configure AWS credentials via OIDC"), here)
+        self.assertLess(names.index("Build the diff and apply the size gate"), here)
+        self.assertLess(names.index("Write the PR conversation"), here)
+        self.assertLess(here, names.index('"Stage A: pr-review"'))
+
+    def _run(self, aws_exit: int, block_staging=False):
+        with tempfile.TemporaryDirectory() as td:
+            for f in self.INPUTS:
+                Path(td, f).write_text(f"content of {f}")
+            if block_staging:
+                Path(td, "pr-review-input").write_text("a file, not a directory")
+            log = Path(td) / "argv.log"
+            # `timeout` records its limit and runs the rest; `aws` records what
+            # it was ASKED to upload: the recursive source must be the staging
+            # directory, and each file is logged with its content.
+            stubs = {
+                "timeout": f'#!/bin/bash\necho "timeout $*" >> {log}\nshift\nexec "$@"\n',
+                "aws": (
+                    f'#!/bin/bash\nprintf "%s\\n" "$*" >> {log}\n'
+                    f'if [ "$3" = --recursive ]; then [ "$4" = "{td}/pr-review-input" ] || exit 3\n'
+                    f'for f in "$4"/*; do printf "%s=%s\\n" "${{f##*/}}" "$(head -1 "$f")"; done >> {log}\n'
+                    f"fi\nexit {aws_exit}\n"
+                ),
+            }
+            proc, _ = run_step(
+                STAGE2.read_text(),
+                self.NAME,
+                td,
+                {
+                    "S3_BUCKET": "b",
+                    "REPO": "o/r",
+                    "PR_NUMBER": "7",
+                    "HEAD_SHA": "h" * 40,
+                    "BASE_SHA": "b" * 40,
+                    "MERGE_BASE_SHA": "m" * 40,
+                    "HEAD_TREE_SHA": "t" * 40,
+                },
+                stubs,
+                rewrite=lambda body: re.sub(r"\$\{\{[^}]*\}\}", "CTX", body).replace(
+                    "/tmp/", f"{td}/"
+                ),
+            )
+            staged = Path(td, "pr-review-input")
+            staged_manifest = Path(td, "pr-review-manifest.json")
+            manifest, uploaded = None, []
+            if staged.is_dir():
+                uploaded = sorted(p.name for p in staged.iterdir())
+            if staged_manifest.exists():
+                manifest = json.loads(staged_manifest.read_text())
+            recorded = log.read_text().replace(td, "TD") if log.exists() else ""
+        return proc, manifest, uploaded, recorded
+
+    def test_it_uploads_the_inputs_and_a_manifest(self):
+        proc, manifest, uploaded, recorded = self._run(0)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(uploaded, sorted(self.INPUTS))
+        # Each upload runs under a timeout, and the manifest goes last, alone.
+        dest = "s3://b/pr_review_traces/CTX/CTX_CTX_input/"
+        inputs = f"s3 cp --recursive TD/pr-review-input {dest}"
+        marker = f"s3 cp TD/pr-review-manifest.json {dest}manifest.json"
+        self.assertEqual(
+            recorded.splitlines(),
+            [
+                f"timeout 120 aws {inputs}",
+                inputs,
+                *(f"{f}=content of {f}" for f in sorted(self.INPUTS)),
+                f"timeout 30 aws {marker}",
+                marker,
+            ],
+        )
+        self.assertEqual(
+            manifest,
+            {
+                "repo": "o/r",
+                "pr_number": 7,
+                "head_sha": "h" * 40,
+                "base_sha": "b" * 40,
+                "merge_base_sha": "m" * 40,
+                "head_tree_sha": "t" * 40,
+            },
+        )
+        self.assertNotIn("::warning::", proc.stdout)
+
+    def test_a_failed_upload_only_warns_and_writes_no_manifest(self):
+        proc, _, _, recorded = self._run(1)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("::warning::review input upload failed", proc.stdout)
+        self.assertEqual(recorded.count("aws s3 cp"), 1, recorded)
+        self.assertRegex(recorded, r"(?m)^s3 cp --recursive ")
+        self.assertNotIn("manifest.json", recorded)
+
+    def test_a_staging_failure_only_warns_and_uploads_nothing(self):
+        proc, _, _, recorded = self._run(0, block_staging=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("::warning::review input upload failed", proc.stdout)
+        self.assertNotIn("s3 cp", recorded)
+
+    def test_the_manifest_sources_and_key_are_the_runs_own(self):
+        """`_run` binds the env itself, so the bindings and key are pinned here."""
+        for name, value in {
+            "REPO": "github.repository",
+            "PR_NUMBER": "needs.prepare.outputs.pr_number",
+            "HEAD_SHA": "needs.prepare.outputs.head_sha",
+            "BASE_SHA": "needs.prepare.outputs.base_sha",
+            "MERGE_BASE_SHA": "needs.prepare.outputs.merge_base_sha",
+            "HEAD_TREE_SHA": "steps.diff.outputs.head_tree_sha",
+        }.items():
+            self.assertEqual(env_values(self.step, name), [f"${{{{ {value} }}}}"])
+        stem = (
+            "s3://${S3_BUCKET}/pr_review_traces/${{ github.repository }}/"
+            "${{ github.run_id }}_${{ github.run_attempt }}"
+        )
+        self.assertIn(f'"{stem}.json"', self.review)
+        self.assertIn(f'DEST="{stem}_input/"', self.step)
+
+    def test_merge_base_plus_the_diff_rebuilds_the_recorded_tree(self):
+        """The replay recipe, on a real repo: merge base + pr-diff.txt from the
+        real diff step gives head_tree_sha (an edit, add, delete, rename, chmod)."""
+        with tempfile.TemporaryDirectory() as td:
+            # No developer or system git config reaches the fixture or the step.
+            sealed = {"HOME": td, "GIT_CONFIG_NOSYSTEM": "1"}
+            sealed["GIT_CONFIG_GLOBAL"] = os.devnull
+            env = {"PATH": "/usr/bin:/bin", **sealed}
+
+            def sh(script):
+                return subprocess.run(
+                    ["bash", "-ec", script],
+                    cwd=td,
+                    env=env,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+
+            base = sh(
+                "git init -q pr; cd pr; git config user.email t@t; git config user.name t\n"
+                "seq 20 > a.py; seq 30 > old.py; echo bye > gone.py; echo hi > run.sh\n"
+                "git add -A; git commit -qm base; git rev-parse HEAD"
+            )
+            sh(
+                "cd pr; echo 21 >> a.py; echo new > new.py; git rm -q gone.py\n"
+                "git mv old.py moved.py; chmod +x run.sh; git add -A; git commit -qm head"
+            )
+            proc, out = run_step(
+                STAGE2.read_text(),
+                "Build the diff and apply the size gate",
+                f"{td}/pr",
+                {
+                    "MERGE_BASE_SHA": base,
+                    "MAX_CHANGED_FILES": "100",
+                    "MAX_DIFF_BYTES": "9999",
+                    **sealed,
+                },
+                {},
+                rewrite=lambda body: body.replace("/tmp/", f"{td}/"),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            tree = sole_outputs(self, out.read_text())["head_tree_sha"]
+            self.assertEqual(tree, sh("git -C pr rev-parse 'HEAD^{tree}'"))
+            replayed = sh(
+                f"git -C pr worktree add -q --detach ../replay {base}; cd replay\n"
+                "git apply --index ../pr-diff.txt; git write-tree"
+            )
+            self.assertEqual(replayed, tree)
 
 
 class TestPublishMovesNoLabels(unittest.TestCase):
