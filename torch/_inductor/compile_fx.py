@@ -2709,7 +2709,10 @@ def fw_compiler_freezing(
         if tracing_context.fw_metadata:
             static_input_idxs = tracing_context.fw_metadata.static_input_indices
 
-    with allow_non_fake_inputs_temporarily(fake_mode):
+    with (
+        allow_non_fake_inputs_temporarily(fake_mode),
+        cudagraph_annotation_context(compiler_config_extra.cudagraphs),
+    ):
         optimized_function = inner_compile(
             opt_model,
             aot_example_inputs,
