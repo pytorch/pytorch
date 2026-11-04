@@ -10,6 +10,68 @@
 
 namespace c10d {
 
+// PyBackendOptions is a pybind11 trampoline class to allow a Python class to
+// inherit from torch.distributed.Backend.Options. ProcessGroup::splitGroup()
+// clones the options it hands to a child backend; clone() calls the Python
+// object's __copy__ so the copy keeps the Python subclass and its attributes.
+class PyBackendOptions : public Backend::Options {
+ public:
+  using Backend::Options::Options;
+
+  explicit PyBackendOptions(const Backend::Options& other)
+      : Backend::Options(other) {}
+
+  c10::intrusive_ptr<Backend::Options> clone() const override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::object self;
+    if (PyObject* ptr = pyobj_slot()->load_pyobj()) {
+      self = pybind11::reinterpret_borrow<pybind11::object>(ptr);
+    } else {
+      // Returns the registered Python object if there is one.
+      self = pybind11::cast(
+          static_cast<const Backend::Options*>(this),
+          pybind11::return_value_policy::reference);
+    }
+    // Otherwise pybind wraps this as a plain Backend.Options: the Python
+    // object and its attributes are already gone.
+    TORCH_CHECK(
+        !pybind11::type::of(self).is(pybind11::type::of<Backend::Options>()),
+        "cannot clone Python Backend.Options: its Python object was destroyed");
+    auto copy = self.attr("__copy__")();
+    checkCopy(self, copy);
+    return castAndPreserve(copy);
+  }
+
+  // Checks that copy is a new instance of self's type (or a subclass), so a
+  // copy never slices or aliases the original. Requires the GIL.
+  static void checkCopy(
+      const pybind11::handle& self,
+      const pybind11::handle& copy) {
+    auto cls = pybind11::type::of(self);
+    TORCH_CHECK_TYPE(
+        !copy.is(self) && pybind11::isinstance(copy, cls),
+        "copy of ",
+        pybind11::str(cls).cast<std::string>(),
+        " must return a new instance of that type or a subclass, got ",
+        pybind11::repr(copy).cast<std::string>());
+  }
+
+  // Casts a Python Options object to C++ and keeps the Python object alive
+  // while C++ holds a reference, so the attributes of a Python subclass are
+  // not lost when the last Python reference is dropped. Requires the GIL.
+  static c10::intrusive_ptr<Backend::Options> castAndPreserve(
+      const pybind11::object& o) {
+    auto opts = o.cast<c10::intrusive_ptr<Backend::Options>>();
+    if (dynamic_cast<PyBackendOptions*>(opts.get()) == nullptr) {
+      return opts;
+    }
+    auto* pyobj = torch::utils::PyObjectPreservation::get_or_init(
+        *opts, [&]() { return Py_NewRef(o.ptr()); });
+    Py_DECREF(pyobj);
+    return opts;
+  }
+};
+
 // PyBackend is a pybind11 trampoline class to allow a Python
 // class to inherit from torch.distributed.Backend
 class PyBackend : public Backend {
@@ -303,7 +365,12 @@ class PyBackend : public Backend {
   c10::intrusive_ptr<Options> getBackendOptions() override {
     pybind11::gil_scoped_acquire gil;
     if (auto o = getPropertyOverride("options")) {
-      return o->cast<c10::intrusive_ptr<Options>>();
+      // None means no backend-specific options; callers such as
+      // ProcessGroup::splitGroup dereference the result.
+      if (o->is_none()) {
+        return c10::make_intrusive<Options>(getBackendName());
+      }
+      return PyBackendOptions::castAndPreserve(*o);
     }
     return Backend::getBackendOptions();
   }
@@ -533,7 +600,9 @@ class PyBackend : public Backend {
         void, Backend, "unregister_abort_hook", unregisterAbortHook, hook_id);
   }
 
- private:
+  // Casts a Python backend to C++ and keeps the Python object alive while C++
+  // holds a reference, so a Python subclass's overrides outlive its last
+  // Python reference. Requires the GIL.
   static c10::intrusive_ptr<Backend> initSlotAndCast(py::object o) {
     // None (e.g. split() on non-members) maps to nullptr.
     if (o.is_none()) {
@@ -546,6 +615,7 @@ class PyBackend : public Backend {
     return backend;
   }
 
+ private:
   // Returns the value of the Python subclass's override of the readonly
   // property `name`, or std::nullopt if it doesn't override it. get_override
   // can't see properties (or plain class attributes), so compare the attribute
