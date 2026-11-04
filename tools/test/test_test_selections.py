@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import functools
 import io
 import json
@@ -945,6 +946,23 @@ class TestRunTestSplit(LlmSelectorTestCase):
                 self.assertEqual(
                     (split.llm_enforced, split.llm.kept_td), (enforced, not enforced)
                 )
+
+    def test_run_test_main_wiring(self) -> None:
+        tree = ast.parse((REPO_ROOT / "test" / "run_test.py").read_text())
+        main = next(n for n in tree.body if getattr(n, "name", None) == "main")
+        nodes = list(ast.walk(main))
+        src = ast.unparse(main)
+        self.assertIn("add_global_metric('call_id', ", src)
+        self.assertIn("test_prioritizations, previous_failures = import_results()", src)
+        call = next(n for n in nodes if isinstance(n, ast.Call) and ast.unparse(n.func) == "run_test_split")  # fmt: skip
+        self.assertEqual(
+            ast.unparse(call),
+            "run_test_split(test_prioritizations, test_file_times_dict, previous_failures=previous_failures, test_config=TEST_CONFIG, td_enabled=options.enable_td, is_ci=IS_CI)",
+        )
+        loops = {ast.unparse(n.iter).split("(")[0]: [ast.unparse(b) for b in n.body] for n in nodes if isinstance(n, ast.For)}  # fmt: skip
+        emit = ["emit_metric(name, payload)"]
+        for method in ("selection_metrics", "failure_metrics"):
+            self.assertEqual(loops.get(f"split.{method}"), emit)
 
 
 if __name__ == "__main__":
