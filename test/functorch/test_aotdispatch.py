@@ -6862,6 +6862,8 @@ def _make_effectful_op(name):
 
 
 class TestPartitioning(AOTTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_recompute_partitioning(self):
         def fn(a, b):
@@ -8234,6 +8236,189 @@ def forward(self, primals_1, tangents_1):
 
         result = wrapper([10, 20])
         self.assertIsNone(result)
+
+    # An AOTAutogradCache hit skips the fw/bw compilers, so the backend never captures a graph.
+    @torch._functorch.config.patch(enable_autograd_cache=False)
+    def test_force_save_effectful_ops(self):
+        """Test that effectful op outputs are saved, not recomputed.
+
+        This test traces a function with a with_effects node and verifies
+        that the getitem outputs are marked MUST_SAVE.
+        """
+        from torch._functorch.partitioners import (
+            CheckpointPolicy,
+            force_save_effectful_ops,
+        )
+        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::effectful_op", mutates_args=())
+        def effectful_op(x: torch.Tensor) -> torch.Tensor:
+            return x * 2
+
+        @effectful_op.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        handle = _register_effectful_op(effectful_op, EffectType.ORDERED)
+
+        try:
+            gm = None
+
+            def graph_capture_backend(graph_module, example_inputs):
+                """Custom backend that captures the graph before passing to inductor."""
+                nonlocal gm
+
+                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+
+                def log_and_compile(graph_module, example_inputs, **kwargs):
+                    nonlocal gm
+                    gm = graph_module
+                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
+
+                return compile_fx(
+                    graph_module, example_inputs, inner_compile=log_and_compile
+                )
+
+            @torch.compile(backend=graph_capture_backend)
+            def fn(x, weight):
+                a = torch.ops.test.effectful_op(x)
+                return a.sum() * weight
+
+            x = torch.randn(4, 4)
+            weight = torch.randn(4, 4)
+            fn(x, weight)
+            self.assertIsNotNone(gm, "backend did not capture a graph")
+
+            force_save_effectful_ops(gm)
+
+            with_effects_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function" and n.target == with_effects
+            ]
+            self.assertEqual(
+                len(with_effects_nodes), 1, "should have one with_effects node"
+            )
+
+            getitem_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+                and n.target == operator.getitem
+                and n.args[0] == with_effects_nodes[0]
+            ]
+
+            def is_must_save(node):
+                return node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
+
+            must_save_count = sum(1 for n in getitem_nodes if is_must_save(n))
+            self.assertEqual(
+                must_save_count,
+                2,
+                lambda msg: f"{msg}\n2 items should be MUST_SAVE, got {must_save_count}",
+            )
+            self.assertEqual(
+                len(getitem_nodes),
+                must_save_count,
+                "all getitem nodes should be MUST_SAVE",
+            )
+        finally:
+            handle.destroy()
+
+    # An AOTAutogradCache hit skips the fw/bw compilers, so the backend never captures a graph.
+    @torch._functorch.config.patch(enable_autograd_cache=False)
+    def test_force_save_effectful_ops_nested_tuple(self):
+        """Test that effectful ops returning tuples have all tensor outputs marked MUST_SAVE.
+
+        This test creates a custom op that returns a tuple, registers it as effectful,
+        and verifies that all tensor getitems are marked MUST_SAVE after tracing.
+        """
+        from torch._functorch.partitioners import (
+            CheckpointPolicy,
+            force_save_effectful_ops,
+        )
+        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::effectful_tuple_op", mutates_args=())
+        def effectful_tuple_op(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return x * 2, x + 1
+
+        @effectful_tuple_op.register_fake
+        def _(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return torch.empty_like(x), torch.empty_like(x)
+
+        handle = _register_effectful_op(effectful_tuple_op, EffectType.ORDERED)
+
+        try:
+            gm = None
+
+            def graph_capture_backend(graph_module, example_inputs):
+                """Custom backend that captures the graph before passing to inductor."""
+                nonlocal gm
+
+                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+
+                def log_and_compile(graph_module, example_inputs, **kwargs):
+                    nonlocal gm
+                    gm = graph_module
+                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
+
+                return compile_fx(
+                    graph_module, example_inputs, inner_compile=log_and_compile
+                )
+
+            @torch.compile(backend=graph_capture_backend)
+            def fn(x):
+                a, b = torch.ops.test.effectful_tuple_op(x)
+                return a.sum() + b.sum()
+
+            x = torch.randn(4, 4)
+            fn(x)
+            self.assertIsNotNone(gm, "backend did not capture a graph")
+
+            with_effects_node = None
+            for node in gm.graph.nodes:
+                if node.op == "call_function" and node.target == with_effects:
+                    with_effects_node = node
+                    break
+            self.assertIsNotNone(with_effects_node, "should have a with_effects node")
+
+            getitem_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+                and n.target == operator.getitem
+                and n.args[0] == with_effects_node
+            ]
+
+            force_save_effectful_ops(gm)
+
+            def is_must_save(node):
+                return node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
+
+            tensor_getitem_count = 0
+            must_save_count = 0
+            for node in getitem_nodes:
+                val = node.meta.get("val")
+                if isinstance(val, torch.Tensor):
+                    tensor_getitem_count += 1
+                    if is_must_save(node):
+                        must_save_count += 1
+
+            self.assertEqual(
+                tensor_getitem_count,
+                3,
+                lambda msg: f"{msg}\nexpected 3 getitems, got {tensor_getitem_count}",
+            )
+            self.assertEqual(
+                must_save_count,
+                tensor_getitem_count,
+                lambda msg: f"{msg}\nall {tensor_getitem_count} tensor getitems should be MUST_SAVE, got {must_save_count}",
+            )
+        finally:
+            handle.destroy()
 
     # --- FunctionalizedRngRuntimeWrapper codegen tests ---
 
@@ -10045,6 +10230,27 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(metadata.output_info[1].output_type, OutputType.non_alias)
         self.assertEqual(metadata.num_intermediate_bases, 0)
 
+    def test_register_hook_in_checkpoint_accumulated_grad(self):
+        def body(y):
+            y.register_hook(lambda grad: grad * 0.5)
+            return y.clone()
+
+        def fn(x):
+            y = x * 2
+            z = torch.utils.checkpoint.checkpoint(body, y, use_reentrant=False)
+            return z + y
+
+        x = torch.randn(4, requires_grad=True)
+        out = fn(x)
+        out.sum().backward()
+        eager_grad = x.grad.clone()
+
+        x2 = x.detach().clone().requires_grad_(True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        out2 = opt_fn(x2)
+        out2.sum().backward()
+        self.assertEqual(x2.grad, eager_grad)
+
     def test_size_of_void_returning_nodes(self):
         # Void-returning ops have no `val` metadata. _size_of must return 0
         # for them instead of raising RuntimeError.
@@ -10449,183 +10655,115 @@ class TestPartitioningCudaOnly(AOTTestCase):
         res.sum().backward()
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_force_save_effectful_ops(self):
-        """Test that effectful op outputs are saved, not recomputed.
+    def test_control_deps_mixed_fwd_bw_deps_e2e(self):
+        """Forward compilation and backward must not crash when
+        wait_stream's control_deps collects forward deps."""
 
-        This test traces a function with a with_effects node and verifies
-        that the getitem outputs are marked MUST_SAVE.
-        """
-        from torch._functorch.partitioners import (
-            CheckpointPolicy,
-            force_save_effectful_ops,
-        )
-        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
-        from torch._library.effects import EffectType
+        def fn(x, w):
+            s1 = torch.cuda.Stream()
+            s1.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s1):
+                h = x @ w
+            ev = torch.cuda.Event()
+            ev.record(s1)
+            ev.wait()
+            return h
 
-        @torch.library.custom_op("test::effectful_op", mutates_args=())
-        def effectful_op(x: torch.Tensor) -> torch.Tensor:
-            return x * 2
-
-        @effectful_op.register_fake
-        def _(x: torch.Tensor) -> torch.Tensor:
-            return torch.empty_like(x)
-
-        handle = _register_effectful_op(effectful_op, EffectType.ORDERED)
-
-        try:
-            gm = None
-
-            def graph_capture_backend(graph_module, example_inputs):
-                """Custom backend that captures the graph before passing to inductor."""
-                nonlocal gm
-
-                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
-
-                def log_and_compile(graph_module, example_inputs, **kwargs):
-                    nonlocal gm
-                    gm = graph_module
-                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
-
-                return compile_fx(
-                    graph_module, example_inputs, inner_compile=log_and_compile
-                )
-
-            @torch.compile(backend=graph_capture_backend)
-            def fn(x, weight):
-                a = torch.ops.test.effectful_op(x)
-                return a.sum() * weight
-
-            x = torch.randn(4, 4)
-            weight = torch.randn(4, 4)
-            fn(x, weight)
-
-            force_save_effectful_ops(gm)
-
-            with_effects_nodes = [
-                n
-                for n in gm.graph.nodes
-                if n.op == "call_function" and n.target == with_effects
-            ]
-            self.assertEqual(
-                len(with_effects_nodes), 1, "should have one with_effects node"
-            )
-
-            getitem_nodes = [
-                n
-                for n in gm.graph.nodes
-                if n.op == "call_function"
-                and n.target == operator.getitem
-                and n.args[0] == with_effects_nodes[0]
-            ]
-
-            def is_must_save(node):
-                return node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
-
-            must_save_count = sum(1 for n in getitem_nodes if is_must_save(n))
-            self.assertEqual(
-                must_save_count,
-                2,
-                lambda msg: f"{msg}\n2 items should be MUST_SAVE, got {must_save_count}",
-            )
-            self.assertEqual(
-                len(getitem_nodes),
-                must_save_count,
-                "all getitem nodes should be MUST_SAVE",
-            )
-        finally:
-            handle.destroy()
+        w = torch.randn(64, 64, device="cuda", requires_grad=True)
+        x = torch.randn(4, 64, device="cuda", requires_grad=True)
+        compiled = torch.compile(fn, backend="aot_eager")
+        out = compiled(x, w)
+        out.sum().backward()
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_force_save_effectful_ops_nested_tuple(self):
-        """Test that effectful ops returning tuples have all tensor outputs marked MUST_SAVE.
+    def test_min_cut_partitions_device_valued_node(self):
+        """A device-valued node must be placeable, not just sizeable.
 
-        This test creates a custom op that returns a tuple, registers it as effectful,
-        and verifies that all tensor getitems are marked MUST_SAVE after tracing.
+        Sizing it as zero (test_size_of_device_valued_node) only gets past the first
+        gate. solve_min_cut still has to put the node somewhere, and it has no tensor
+        to weigh: get_node_weight gives a non-tensor output infinite weight, and the
+        op is not in the recomputable allowlist, so it can be neither saved across the
+        boundary nor recomputed in the backward.
+
+        Reaching that needs two things at once, which is why a device-valued node on
+        its own does not show it:
+          - a current_device() node, from any device= operand, and
+          - a cheap cast of a parameter, which min-cut elects to recompute in the
+            backward rather than save, dragging the device node across with it.
+        Drop either -- make the parameter already bf16, or the cast dtype-only -- and
+        min-cut keeps the device node in the forward and never has to classify it.
+
+        Mixed-precision casting of a parameter is the ordinary way a real model hits
+        this. Note the default partitioner config is the one that fails;
+        aggressive_recomputation=True happens to route around it.
         """
-        from torch._functorch.partitioners import (
-            CheckpointPolicy,
-            force_save_effectful_ops,
+        from functorch.compile import min_cut_rematerialization_partition
+        from torch._dynamo.backends.common import aot_autograd
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
+
+            def forward(self, x):
+                w = self.w.to(device="cuda", dtype=torch.bfloat16)
+                return (x @ w).relu().sum()
+
+        backend = aot_autograd(
+            fw_compiler=lambda gm, _: gm.forward,
+            bw_compiler=lambda gm, _: gm.forward,
+            partition_fn=min_cut_rematerialization_partition,
         )
-        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
-        from torch._library.effects import EffectType
+        torch._dynamo.reset()
+        model = M().cuda()
+        x = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        with torch.compiler.config.patch(compile_on_one_rank=True):
+            torch.compile(model, backend=backend, fullgraph=True)(x).backward()
+        self.assertIsNotNone(x.grad)
 
-        @torch.library.custom_op("test::effectful_tuple_op", mutates_args=())
-        def effectful_tuple_op(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-            return x * 2, x + 1
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_min_cut_partitions_must_save_device_valued_node(self):
+        """A device-valued node tagged MUST_SAVE by selective AC must still be placeable.
 
-        @effectful_tuple_op.register_fake
-        def _(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-            return torch.empty_like(x), torch.empty_like(x)
+        compile_on_one_rank emits one current_device() node per graph, at the first
+        device= operand. When that operand is inside a checkpointed region whose
+        policy says MUST_SAVE, the node inherits the tag, and the same node later
+        feeds the parameter cast that min-cut recomputes in the backward (see
+        test_min_cut_partitions_device_valued_node). A MUST_SAVE node is banned from
+        recompute, and a device cannot be saved, so no finite cut existed.
+        """
+        from functorch.compile import min_cut_rematerialization_partition
+        from torch._dynamo.backends.common import aot_autograd
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
 
-        handle = _register_effectful_op(effectful_tuple_op, EffectType.ORDERED)
+        def must_save(ctx, op, *args, **kwargs):
+            return CheckpointPolicy.MUST_SAVE
 
-        try:
-            gm = None
+        context_fn = partial(create_selective_checkpoint_contexts, must_save)
+        w = torch.randn(64, 64, device="cuda", requires_grad=True)
 
-            def graph_capture_backend(graph_module, example_inputs):
-                """Custom backend that captures the graph before passing to inductor."""
-                nonlocal gm
+        def inner(x):
+            return x.sin() + torch.zeros(x.shape, device="cuda", dtype=x.dtype)
 
-                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+        def f(x):
+            y = checkpoint(inner, x, use_reentrant=False, context_fn=context_fn)
+            return (y @ w.to(device="cuda", dtype=torch.bfloat16)).relu().sum()
 
-                def log_and_compile(graph_module, example_inputs, **kwargs):
-                    nonlocal gm
-                    gm = graph_module
-                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
-
-                return compile_fx(
-                    graph_module, example_inputs, inner_compile=log_and_compile
-                )
-
-            @torch.compile(backend=graph_capture_backend)
-            def fn(x):
-                a, b = torch.ops.test.effectful_tuple_op(x)
-                return a.sum() + b.sum()
-
-            x = torch.randn(4, 4)
-            fn(x)
-
-            with_effects_node = None
-            for node in gm.graph.nodes:
-                if node.op == "call_function" and node.target == with_effects:
-                    with_effects_node = node
-                    break
-            self.assertIsNotNone(with_effects_node, "should have a with_effects node")
-
-            getitem_nodes = [
-                n
-                for n in gm.graph.nodes
-                if n.op == "call_function"
-                and n.target == operator.getitem
-                and n.args[0] == with_effects_node
-            ]
-
-            force_save_effectful_ops(gm)
-
-            def is_must_save(node):
-                return node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
-
-            tensor_getitem_count = 0
-            must_save_count = 0
-            for node in getitem_nodes:
-                val = node.meta.get("val")
-                if isinstance(val, torch.Tensor):
-                    tensor_getitem_count += 1
-                    if is_must_save(node):
-                        must_save_count += 1
-
-            self.assertEqual(
-                tensor_getitem_count,
-                3,
-                lambda msg: f"{msg}\nexpected 3 getitems, got {tensor_getitem_count}",
-            )
-            self.assertEqual(
-                must_save_count,
-                tensor_getitem_count,
-                lambda msg: f"{msg}\nall {tensor_getitem_count} tensor getitems should be MUST_SAVE, got {must_save_count}",
-            )
-        finally:
-            handle.destroy()
+        backend = aot_autograd(
+            fw_compiler=lambda gm, _: gm.forward,
+            bw_compiler=lambda gm, _: gm.forward,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        torch._dynamo.reset()
+        x = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        with torch.compiler.config.patch(compile_on_one_rank=True):
+            torch.compile(f, backend=backend, fullgraph=True)(x).backward()
+        self.assertIsNotNone(x.grad)
+        self.assertIsNotNone(w.grad)
 
     # --- FunctionalizedRngRuntimeWrapper codegen tests ---
 
@@ -10929,139 +11067,6 @@ class TestPartitioningCudaOnly(AOTTestCase):
         finally:
             h1.destroy()
             h2.destroy()
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_register_hook_in_checkpoint_accumulated_grad(self):
-        def body(y):
-            y.register_hook(lambda grad: grad * 0.5)
-            return y.clone()
-
-        def fn(x):
-            y = x * 2
-            z = torch.utils.checkpoint.checkpoint(body, y, use_reentrant=False)
-            return z + y
-
-        x = torch.randn(4, device="cuda", requires_grad=True)
-        out = fn(x)
-        out.sum().backward()
-        eager_grad = x.grad.clone()
-
-        x2 = x.detach().clone().requires_grad_(True)
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        out2 = opt_fn(x2)
-        out2.sum().backward()
-        self.assertEqual(x2.grad, eager_grad)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_control_deps_mixed_fwd_bw_deps_e2e(self):
-        """Forward compilation and backward must not crash when
-        wait_stream's control_deps collects forward deps."""
-
-        def fn(x, w):
-            s1 = torch.cuda.Stream()
-            s1.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(s1):
-                h = x @ w
-            ev = torch.cuda.Event()
-            ev.record(s1)
-            ev.wait()
-            return h
-
-        w = torch.randn(64, 64, device="cuda", requires_grad=True)
-        x = torch.randn(4, 64, device="cuda", requires_grad=True)
-        compiled = torch.compile(fn, backend="aot_eager")
-        out = compiled(x, w)
-        out.sum().backward()
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_min_cut_partitions_device_valued_node(self):
-        """A device-valued node must be placeable, not just sizeable.
-
-        Sizing it as zero (test_size_of_device_valued_node) only gets past the first
-        gate. solve_min_cut still has to put the node somewhere, and it has no tensor
-        to weigh: get_node_weight gives a non-tensor output infinite weight, and the
-        op is not in the recomputable allowlist, so it can be neither saved across the
-        boundary nor recomputed in the backward.
-
-        Reaching that needs two things at once, which is why a device-valued node on
-        its own does not show it:
-          - a current_device() node, from any device= operand, and
-          - a cheap cast of a parameter, which min-cut elects to recompute in the
-            backward rather than save, dragging the device node across with it.
-        Drop either -- make the parameter already bf16, or the cast dtype-only -- and
-        min-cut keeps the device node in the forward and never has to classify it.
-
-        Mixed-precision casting of a parameter is the ordinary way a real model hits
-        this. Note the default partitioner config is the one that fails;
-        aggressive_recomputation=True happens to route around it.
-        """
-        from functorch.compile import min_cut_rematerialization_partition
-        from torch._dynamo.backends.common import aot_autograd
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = torch.nn.Parameter(torch.randn(64, 64, device="cuda"))
-
-            def forward(self, x):
-                w = self.w.to(device="cuda", dtype=torch.bfloat16)
-                return (x @ w).relu().sum()
-
-        backend = aot_autograd(
-            fw_compiler=lambda gm, _: gm.forward,
-            bw_compiler=lambda gm, _: gm.forward,
-            partition_fn=min_cut_rematerialization_partition,
-        )
-        torch._dynamo.reset()
-        model = M().cuda()
-        x = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
-        with torch.compiler.config.patch(compile_on_one_rank=True):
-            torch.compile(model, backend=backend, fullgraph=True)(x).backward()
-        self.assertIsNotNone(x.grad)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_min_cut_partitions_must_save_device_valued_node(self):
-        """A device-valued node tagged MUST_SAVE by selective AC must still be placeable.
-
-        compile_on_one_rank emits one current_device() node per graph, at the first
-        device= operand. When that operand is inside a checkpointed region whose
-        policy says MUST_SAVE, the node inherits the tag, and the same node later
-        feeds the parameter cast that min-cut recomputes in the backward (see
-        test_min_cut_partitions_device_valued_node). A MUST_SAVE node is banned from
-        recompute, and a device cannot be saved, so no finite cut existed.
-        """
-        from functorch.compile import min_cut_rematerialization_partition
-        from torch._dynamo.backends.common import aot_autograd
-        from torch.utils.checkpoint import (
-            checkpoint,
-            CheckpointPolicy,
-            create_selective_checkpoint_contexts,
-        )
-
-        def must_save(ctx, op, *args, **kwargs):
-            return CheckpointPolicy.MUST_SAVE
-
-        context_fn = partial(create_selective_checkpoint_contexts, must_save)
-        w = torch.randn(64, 64, device="cuda", requires_grad=True)
-
-        def inner(x):
-            return x.sin() + torch.zeros(x.shape, device="cuda", dtype=x.dtype)
-
-        def f(x):
-            y = checkpoint(inner, x, use_reentrant=False, context_fn=context_fn)
-            return (y @ w.to(device="cuda", dtype=torch.bfloat16)).relu().sum()
-
-        backend = aot_autograd(
-            fw_compiler=lambda gm, _: gm.forward,
-            bw_compiler=lambda gm, _: gm.forward,
-            partition_fn=min_cut_rematerialization_partition,
-        )
-        torch._dynamo.reset()
-        x = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
-        with torch.compiler.config.patch(compile_on_one_rank=True):
-            torch.compile(f, backend=backend, fullgraph=True)(x).backward()
-        self.assertIsNotNone(x.grad)
-        self.assertIsNotNone(w.grad)
 
 
 class TestAOTDispatch(AOTTestCase):
