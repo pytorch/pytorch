@@ -12197,7 +12197,7 @@ class TestGroupedMM(TestCase):
     def _check_grouped_gemm(self, device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype):
         sizes = a_shape[-2:] + b_shape[-2:] + tuple(offsets or ())
         unaligned = any(size % (16 // dtype.itemsize) for size in sizes)
-        if self.device_type == "cuda" and dtype != torch.float32 and unaligned:
+        if self.device_type == "cuda" and not torch.version.hip and dtype != torch.float32 and unaligned:
             self.skipTest("Unaligned cases require the CUDA float32 fallback")
         a = self._make_grouped_mm_matrix(a_shape, a_row_major, device, dtype, strided)
         b = self._make_grouped_mm_matrix(b_shape, b_row_major, device, dtype, strided)
@@ -12254,7 +12254,7 @@ class TestGroupedMM(TestCase):
         with mock.patch.dict(os.environ, {"ROCM_ALLOW_GROUP_GEMM_CK_TILE": "1"}):
             for a_shape, b_shape, offsets, backward in (c.arg_values for c in _GROUPED_MM_CASES + _GROUPED_MM_CK_TILE_CASES):
                 if any(size % alignment for size in a_shape[-2:] + b_shape[-2:] + tuple(offsets or ())):
-                    continue  # unaligned 16-bit cases never reach ck_tile
+                    continue  # unaligned cases are correctness-tested in test_grouped_gemm_rocm_backend
                 for strided, a_row_major, b_row_major in itertools.product([False, True], repeat=3):
                     a = self._make_grouped_mm_matrix(a_shape, a_row_major, device, dtype, strided)
                     b = self._make_grouped_mm_matrix(b_shape, b_row_major, device, dtype, strided)
