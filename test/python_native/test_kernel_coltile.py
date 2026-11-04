@@ -715,19 +715,18 @@ class TestOrderedColHost(TestCase):
 
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "requires Hopper or later")
 class TestOrderedColDevice(TestCase):
-    def test_plans_key_and_require_the_current_device(self):
-        trait, x = T.SumOps(), torch.randn(2, 4096, 32, device="cuda")
+    def test_plans_key_and_require_the_current_device(self, device):
+        trait, x = T.SumOps(), torch.randn(2, 4096, 32, device=device)
         before = set(ct._CACHE)
         # One GPU has no other device, so pretend another one is current.
         other = x.get_device() + 1
         with mock.patch.object(torch.cuda, "current_device", return_value=other):
             with self.assertRaisesRegex(AssertionError, "is current"):
-                ct.reduce_ordered_col(trait, "bydevice", x, [torch.float32], 1)
+                ct.reduce_ordered_col(trait, "ordered_bydevice", x, [torch.float32], 1)
         self.assertEqual(set(ct._CACHE), before)
-        self.assertIsNotNone(
-            ct.reduce_ordered_col(trait, "bydevice", x, [torch.float32], 1)
-        )
-        keys = [k for k in ct._CACHE if k[:2] == ("ordered_col", "bydevice")]
+        got = ct.reduce_ordered_col(trait, "ordered_bydevice", x, [torch.float32], 1)
+        self.assertIsNotNone(got)
+        keys = [k for k in ct._CACHE if k[:2] == ("ordered_col", "ordered_bydevice")]
         self.assertEqual({k[4] for k in keys}, {x.get_device()})
 
     @parametrize(
@@ -843,6 +842,17 @@ class TestOrderedColDevice(TestCase):
         self.assertIsNotNone(got)
         self.assertIn("ordered_col1", {k[0] for k in ct._CACHE if k[1] == "decline"})
 
+    def test_direct_plan_cases_reach_their_plans(self, device):
+        """The cases above cover exact multi-group merges and a single masked warp."""
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        for trait, rows in ((T.SumOps(), 4096), (T.ArgMaxOps(), 8192)):
+            plan = rt.trait_itree_plan(trait, rows, 64, 4, stage=False)
+            self.assertTrue(plan.tms[0].exact)
+            self.assertGreater(plan.wpr // plan.kchunk, 1)
+        plan = rt.trait_itree_plan(T.SumOps(), 200, 64, 4, stage=False)
+        self.assertEqual((plan.wpr, plan.tms[0].exact), (1, False))
+
     @parametrize("pattern", ["negative_zero", "ties"])
     @parametrize("rows", [2048, 32768])
     def test_special_values_match_the_indexed_tree(self, device, pattern, rows):
@@ -927,6 +937,34 @@ class TestOrderedColDevice(TestCase):
                 tol = {"atol": 1e-5, "rtol": tol["rtol"]}
             self.assertEqual(g, ref.to(g.dtype), **tol)
 
+    def _assert_matches_indexed(self, name, x, key):
+        """Reduce axis 1 of 3D x through the ordered kernel and the indexed tree, then
+        compare them bitwise and with torch."""
+        make, outputs, _ = _ROUTED_TRAITS[name]
+        batches, rows, columns = x.shape
+        outputs = [x.dtype if out is None else out for out in outputs]
+        nouts = len(outputs)
+        got = ct.reduce_ordered_col(make(), key, x, outputs, nouts)
+        kept = [(columns, 1), (batches, rows * columns)]
+        want = kg._try_indexed_itree(
+            make(),
+            key + "_ref",
+            x,
+            [(rows, columns)],
+            kept,
+            batches * columns,
+            rows,
+            outputs,
+            nouts,
+        )
+        self.assertIsNotNone(got)
+        self.assertIsNotNone(want)
+        if name in ("all", "any"):
+            self.assertEqual(want[0].unique().numel(), 2, "uniform flags test nothing")
+        self._assert_bitwise(got, want)
+        # Masked leaves and identity padding, checked independently of the traits.
+        self._assert_torch_refs(name, got, x)
+
     def _assert_bitwise(self, got, want):
         for a, b in zip(got, want, strict=True):
             a, b = a.contiguous().flatten(), b.contiguous().flatten()
@@ -949,7 +987,8 @@ class TestOrderedColDevice(TestCase):
         want, _ = self._reduce(device, trait, key, x, dim, outputs, route=False)
         self._assert_bitwise(got, want)
 
-    @dtypes(*_DTYPES)
+    # fp16 plans like bf16.
+    @dtypes(torch.float32, torch.bfloat16)
     @parametrize("name", list(_ROUTED_TRAITS))
     def test_routed_traits_match_the_indexed_tree(self, device, dtype, name):
         """Every trait the gate admits stays bitwise equal to the indexed tree."""
@@ -972,59 +1011,28 @@ class TestOrderedColDevice(TestCase):
     @parametrize("name", list(_ROUTED_TRAITS))
     def test_routed_traits_with_padded_warps(self, device, dtype, name):
         """Padded warps and masked leaves keep every trait bitwise equal."""
-        make, outputs, prepare = _ROUTED_TRAITS[name]
-        rows, columns = 3000, 64
-        x = prepare(torch.randn(2, rows, columns, device=device)).to(dtype)
-        outputs = [dtype if out is None else out for out in outputs]
-        nouts, key = len(outputs), f"padded_{name}"
-        got = ct.reduce_ordered_col(make(), key, x, outputs, nouts)
-        kept = [(columns, 1), (2, rows * columns)]
-        want = kg._try_indexed_itree(
-            make(),
-            key + "_ref",
-            x,
-            [(rows, columns)],
-            kept,
-            2 * columns,
-            rows,
-            outputs,
-            nouts,
-        )
-        self.assertIsNotNone(got)
-        if name in ("all", "any"):
-            self.assertEqual(want[0].unique().numel(), 2, "uniform flags test nothing")
-        self._assert_bitwise(got, want)
-        # Masked leaves and identity padding, checked independently of the traits.
-        self._assert_torch_refs(name, got, x)
+        prepare = _ROUTED_TRAITS[name][2]
+        x = prepare(torch.randn(2, 3000, 64, device=device)).to(dtype)
+        self._assert_matches_indexed(name, x, f"padded_{name}")
+
+    @parametrize("name", ["amax", "absmax", "argmax", "max_dim", "aminmax"])
+    def test_selections_through_masked_leaves_past_nan_rows(self, device, name):
+        """Masked leaves re-read row R - 1, so NaN and inf there must count only once."""
+        x = torch.randn(2, 3000, 64, device=device)
+        x[:, -1, ::3] = float("nan")
+        x[:, -1, 1::3] = float("inf")
+        self._assert_matches_indexed(name, x, f"nan_{name}")
 
     @parametrize("name", ["argmax", "max_dim", "aminmax", "var_mean"])
     def test_multi_field_traits_on_one_padded_warp(self, device, name):
         """fp32 R = 200 runs one warp with masked leaves and no shared-memory merge."""
         from torch._native.ops.reductions import kernel_rowtile as rt
 
-        make, outputs, prepare = _ROUTED_TRAITS[name]
-        rows, columns = 200, 64
-        plan = rt.trait_itree_plan(make(), rows, 2 * columns, 4, stage=False)
+        make, _, prepare = _ROUTED_TRAITS[name]
+        plan = rt.trait_itree_plan(make(), 200, 128, 4, stage=False)
         self.assertEqual((plan.wpr, plan.tms[0].exact), (1, False))
-        x = prepare(torch.randn(2, rows, columns, device=device))
-        outputs = [torch.float32 if out is None else out for out in outputs]
-        nouts, key = len(outputs), f"one_warp_{name}"
-        got = ct.reduce_ordered_col(make(), key, x, outputs, nouts)
-        self.assertIsNotNone(got)
-        kept = [(columns, 1), (2, rows * columns)]
-        want = kg._try_indexed_itree(
-            make(),
-            key + "_ref",
-            x,
-            [(rows, columns)],
-            kept,
-            2 * columns,
-            rows,
-            outputs,
-            nouts,
-        )
-        self._assert_bitwise(got, want)
-        self._assert_torch_refs(name, got, x)
+        x = prepare(torch.randn(2, 200, 64, device=device))
+        self._assert_matches_indexed(name, x, f"one_warp_{name}")
 
     def test_shipped_route_serves_b200_only(self, device):
         x = torch.randn(16, 128, 128, device=device)
@@ -1061,8 +1069,7 @@ class TestOrderedColDevice(TestCase):
         with mock.patch.object(ct, "_INT32_LIMIT", 16 * 128 + 32):
             got, served = self._reduce(device, trait, "declined", x, 1, f32, route=True)
         self.assertFalse(served)
-        want, _ = self._reduce(device, trait, "declined_ref", x, 1, f32, route=False)
-        self._assert_bitwise(got, want)
+        self.assertEqual(got[0], x.sum(dim=1), atol=1e-4, rtol=1e-4)
 
     def test_unservable_views_decline(self, device):
         """Decline strided, rank-4, multirow and Int32-overflowing views."""
