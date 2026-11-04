@@ -572,6 +572,13 @@ class BenchmarkJobCallTest(TestCase):
         )
         self.assertEqual(calls[0], ("set_device", 3))
         self.assertEqual(calls[1], ("set_filename", "w.csv", False))
+        # The values, not just the order: the job's flags are what gets
+        # applied, and both are turned off again for the measured call.
+        self.assertIn(("tuning_enable", True), calls)
+        self.assertIn(("_nearest_match_enable", True), calls)
+        self.assertIn(("_record_borrowed_enable", False), calls)
+        self.assertEqual(calls[-3], ("tuning_enable", False))
+        self.assertEqual(calls[-2], ("_nearest_match_enable", False))
         # benchmark_run_fn captures if either is set, so both must be cleared.
         self.assertFalse(job.bmreq.benchmark_with_cudagraphs)
         self.assertFalse(job.bmreq.config_cudagraph_benchmarking)
@@ -611,8 +618,11 @@ class BenchmarkJobCallTest(TestCase):
         kinds = [c[0] for c in calls]
         entered, exited = kinds.index("enter"), kinds.index("exit")
         self.assertEqual(calls[entered], ("enter", (True, False, True, False)))
-        # Every benchmark must fall inside the scope, however many there are.
-        self.assertTrue(entered < kinds.index("benchmark") < exited)
+        # Every benchmark must fall inside the scope, however many there are:
+        # the warm call and the measured call both run under the mask.
+        benchmarks = [i for i, k in enumerate(kinds) if k == "benchmark"]
+        self.assertEqual(len(benchmarks), 2, kinds)
+        self.assertTrue(all(entered < i < exited for i in benchmarks), kinds)
 
     def test_call_skips_the_mask_when_it_would_select_nothing(self):
         for name, mask in (("unset", None), ("all false", (False,) * 4)):
@@ -889,16 +899,30 @@ class TunableOpRealGpuWorkerTest(TestCase):
             self.assertIn("GemmTunableOp", content)
 
 
-def _extern_caller(choice_name="mm", cuda_out=True):
+def _extern_caller(choice_name="mm", cuda_out=True, metas=True):
     """An ExternKernelCaller stand-in for routing tests (no GPU, no bmreq build)."""
     from types import SimpleNamespace
 
     from torch._inductor import select_algorithm as sa
+    from torch._inductor.autotune_process import TensorMeta
 
     caller = mock.Mock(spec=sa.ExternKernelCaller)
     caller.name = choice_name
     caller.choice = SimpleNamespace(name=choice_name)
     caller.bmreq = mock.Mock()
+    # A real TensorMeta, because routing checks the type: [] is what
+    # ExternKernelCaller.__init__ leaves behind when from_irnodes raises.
+    caller.bmreq.output_tensor_meta = (
+        TensorMeta(
+            device=torch.device("cuda", 0),
+            dtype=torch.float32,
+            sizes=[32, 32],
+            strides=[32, 1],
+            offset=0,
+        )
+        if metas
+        else []
+    )
     caller.bmreq.benchmark_with_cudagraphs = False
     caller.bmreq.config_cudagraph_benchmarking = False
     caller.bmreq.benchmark.return_value = 2.0
@@ -918,6 +942,18 @@ class ExternRoutingTest(TestCase):
     """ExternKernelCaller.benchmark routes only tunable GEMMs to the worker."""
 
     hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        # A test that installs a fake worker must not leave it behind for the
+        # next one, including when it fails part way through.
+        self.addCleanup(setattr, tunableop, "_worker", None)
+        self.addCleanup(setattr, tunableop, "_worker_key", None)
+        # The breaker is process-global and these tests are not under
+        # fresh_cache(), so a tripped one would silently stop every later
+        # routing test from routing at all.
+        tunableop._routing_breaker.cache_clear()
+        self.addCleanup(tunableop._routing_breaker.cache_clear)
 
     def _benchmark(self, caller, out):
         from torch._inductor import select_algorithm as sa
@@ -946,7 +982,111 @@ class ExternRoutingTest(TestCase):
         self.assertTrue(job.tuning)
         self.assertFalse(job.nearest_match)
         self.assertFalse(job.record_borrowed)
+        self.assertTrue(job.measure)
         self.assertEqual(job.dyn_dims_mask, (True, False, False, False))
+
+    def test_reuse_mode_candidate_borrows_and_records(self):
+        # The other half of the mode split: tune mode above tunes and does not
+        # borrow, reuse mode borrows and records without tuning. Both must
+        # measure, since the returned time ranks aten against the templates.
+        from torch._inductor import tunableop as _top
+
+        caller, out = _extern_caller("mm")
+        seen = {}
+
+        def _fake_submit(job, timeout=None):
+            seen["job"] = job
+            return _top.Outcome(1.5, "ok")
+
+        with (
+            mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
+            mock.patch("torch._inductor.tunableop.is_tune_mode", return_value=False),
+            mock.patch("torch._inductor.tunableop.is_reuse_mode", return_value=True),
+            mock.patch("torch._inductor.tunableop.submit", side_effect=_fake_submit),
+        ):
+            self.assertEqual(self._benchmark(caller, out), 1.5)
+        job = seen["job"]
+        self.assertFalse(job.tuning)
+        self.assertTrue(job.nearest_match)
+        self.assertTrue(job.record_borrowed)
+        self.assertTrue(job.measure)
+
+    def test_broken_metas_stay_inline(self):
+        # __init__ warns and leaves the metas [] when TensorMeta.from_irnodes
+        # raises. The worker calls benchmark() with no args, which asserts on
+        # exactly that -- a guaranteed kill for a candidate the inline path
+        # handles, since inline passes a real out.
+        caller, out = _extern_caller("mm", metas=False)
+        with (
+            mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
+            mock.patch(
+                "torch._inductor.tunableop.submit",
+                side_effect=AssertionError("must not submit"),
+            ),
+        ):
+            self.assertEqual(self._benchmark(caller, out), 2.0)
+
+    def test_verify_mode_stays_inline(self):
+        # VERIFY benchmarks choices[0] for its output, not its time. The
+        # routed path builds its tensors in the worker and never writes out,
+        # so expected would be a clone of an untouched buffer.
+        from torch._inductor import select_algorithm as sa
+
+        caller, out = _extern_caller("mm")
+        with (
+            mock.patch.object(sa, "VERIFY", {"atol": 1e-2}),
+            mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
+            mock.patch(
+                "torch._inductor.tunableop.submit",
+                side_effect=AssertionError("must not submit"),
+            ),
+        ):
+            self.assertEqual(self._benchmark(caller, out), 2.0)
+
+    def test_routing_gives_up_after_three_consecutive_faults(self):
+        from torch._inductor import tunableop as _top
+
+        calls = []
+
+        def _fake_submit(job, timeout=None):
+            calls.append(job)
+            return _top.Outcome(None, "crash")
+
+        with (
+            mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
+            mock.patch("torch._inductor.tunableop.submit", side_effect=_fake_submit),
+            mock.patch("torch.cuda.tunable", mock.Mock()),
+        ):
+            for _ in range(5):
+                caller, out = _extern_caller("mm")
+                self.assertEqual(self._benchmark(caller, out), 2.0)
+        # Three faults trip it; the fourth and fifth never reach the worker.
+        self.assertEqual(len(calls), _top._TUNABLEOP_MAX_ROUTING_FAULTS)
+        self.assertFalse(_top.routing_is_open())
+
+    def test_a_routing_success_clears_the_fault_count(self):
+        # Consecutive, not cumulative: an isolated fault between successes
+        # must not creep the breaker shut over a long compile.
+        from torch._inductor import tunableop as _top
+
+        statuses = ["crash", "crash", "ok", "crash", "crash"]
+        calls = []
+
+        def _fake_submit(job, timeout=None):
+            status = statuses[len(calls)]
+            calls.append(job)
+            return _top.Outcome(1.5 if status == "ok" else None, status)
+
+        with (
+            mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
+            mock.patch("torch._inductor.tunableop.submit", side_effect=_fake_submit),
+            mock.patch("torch.cuda.tunable", mock.Mock()),
+        ):
+            for _ in statuses:
+                caller, out = _extern_caller("mm")
+                self._benchmark(caller, out)
+        self.assertEqual(len(calls), len(statuses))
+        self.assertTrue(_top.routing_is_open())
 
     def test_non_gemm_candidate_stays_inline(self):
         caller, out = _extern_caller("convolution")
@@ -1013,8 +1153,6 @@ class ExternRoutingTest(TestCase):
                 outcome = tunableop.submit(tunableop.BenchmarkJob(None, tuning=False))
             self.assertEqual(outcome.status, "error", f"value={bad!r}")
             self.assertIsNone(outcome.time)
-        tunableop._worker = None
-        tunableop._worker_key = None
 
 
 @instantiate_parametrized_tests
@@ -1027,7 +1165,9 @@ class WarmMeasureTest(TestCase):
         bmreq = mock.Mock()
         bmreq.benchmark_with_cudagraphs = True
         bmreq.config_cudagraph_benchmarking = True
-        bmreq.benchmark.return_value = 3.0
+        # Distinct per call: with one value, returning the warm time instead of
+        # the measured one would pass, which is the whole point of the split.
+        bmreq.benchmark.side_effect = [10.0, 3.0]
         return tunableop.BenchmarkJob(bmreq, tuning=True, **kwargs)
 
     def test_measure_runs_warm_then_measured(self):
@@ -1036,6 +1176,7 @@ class WarmMeasureTest(TestCase):
             mock.patch("torch.cuda.set_device"),
             mock.patch("torch.cuda.tunable", mock.Mock()),
         ):
+            # The second call's time, not the warm 10.0.
             self.assertEqual(job(0, "", {}), 3.0)
         # Warm + measured: two full benchmarks.
         self.assertEqual(job.bmreq.benchmark.call_count, 2)
@@ -1091,7 +1232,9 @@ class WarmMeasureTest(TestCase):
             mock.patch("torch.cuda.set_device"),
             mock.patch("torch.cuda.tunable", mock.Mock()),
         ):
-            self.assertEqual(job(0, "", {}), 3.0)
+            # The warm call's own time: the caller discards it, and there is
+            # no second benchmark to take a time from.
+            self.assertEqual(job(0, "", {}), 10.0)
         self.assertEqual(job.bmreq.benchmark.call_count, 1)
 
 

@@ -158,6 +158,20 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
       const std::string& params_signature, const std::string& blas_signature);
     void ClearUntuned();
 
+    // Signatures this pass has already failed to borrow for, either because
+    // no donor was usable or because validating one threw. A failure records
+    // nothing, so without this every later call of the same shape repeats
+    // LookupNearest -- which copies the op's whole map under the lock and
+    // parses every signature -- and, where validation threw, repeats the
+    // allocation it threw out of. Memory only; nothing reaches the file.
+    //
+    // Any Add clears it: a newly recorded entry can be the donor the next
+    // lookup would have found, and a stale negative would hide it.
+    void MarkBorrowUnavailable(const std::string& op_signature,
+        const std::string& params_signature);
+    bool BorrowUnavailable(const std::string& op_signature,
+        const std::string& params_signature);
+
     void ClearAll();
 
     void InitRealtimeAppend(
@@ -177,6 +191,9 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
         const std::string& params_signature,
         ResultEntry best,
         bool force_persist);
+
+    // op_signature + '\0' + params_signature; see MarkBorrowUnavailable.
+    std::unordered_set<std::string> borrow_unavailable_;
 
     std::mutex lock_;
     std::mutex realtime_file_mutex_;
@@ -270,11 +287,11 @@ class TORCH_CUDA_CPP_API TuningContext {
     void EnableWildcardFallback(bool value);
     bool IsWildcardFallbackEnabled() const;
 
-    // Policy for the compile-time reuse pass: set from Python, read back by
-    // the pass through these C++ accessors (the Python query helpers exist
-    // only for tests). Read by dispatch too, in ResolveWithoutExactHit.
-    // Runtime-settable because the pass and the
-    // follows it share a process and need opposite values.
+    // Policy for the compile-time reuse pass: set from Python, read by
+    // dispatch in ResolveWithoutExactHit, which is the only reader (the Python
+    // query helpers exist only for tests). Runtime-settable because the pass
+    // and the measured call that follows it share a process and need opposite
+    // values.
     void EnableNearestMatch(bool value);
     bool IsNearestMatchEnabled() const;
 

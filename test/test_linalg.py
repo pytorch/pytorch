@@ -11896,6 +11896,11 @@ class TestLinalgCudaOnly(TestCase):
 
         script = (
             "import torch\n"
+            # Read before anything sets them: a pristine process is the only
+            # place the C++ defaults are visible, since the suite fixture
+            # clears both before every in-process test.
+            "print(torch.cuda.tunable._nearest_match_is_enabled(),\n"
+            "      torch.cuda.tunable._record_borrowed_is_enabled())\n"
             "torch.cuda.tunable._nearest_match_enable(True)\n"
             "torch.cuda.tunable._record_borrowed_enable(True)\n"
             "print(torch.cuda.tunable._nearest_match_is_enabled(),\n"
@@ -11909,6 +11914,10 @@ class TestLinalgCudaOnly(TestCase):
             env.pop("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", None)
             env.pop("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", None)
             env.update(env_overrides)
+            # The child resolves its own interpreter and modules; ours
+            # describe this process and can leave it unable to import torch.
+            env.pop("PYTHONPATH", None)
+            env.pop("PYTHONHOME", None)
             out = subprocess.run(
                 [sys.executable, "-c", script],
                 capture_output=True,
@@ -11917,25 +11926,31 @@ class TestLinalgCudaOnly(TestCase):
                 cwd=os.path.dirname(__file__),
                 check=True,
             ).stdout.split()
-            return out[-2], out[-1]
+            # Four values: the pristine defaults, then the post-enable pair.
+            return (out[-4], out[-3]), (out[-2], out[-1])
 
         # Control: without the env vars the enable calls take effect, so a
         # False below is the kill switch and not some unrelated failure.
-        self.assertEqual(run({}), ("True", "True"))
+        defaults, enabled = run({})
+        # Both off until a compile-time pass asks for them. The in-process
+        # tests cannot see this -- _set_tunableop_defaults has already run.
+        self.assertEqual(defaults, ("False", "False"))
+        self.assertEqual(enabled, ("True", "True"))
         self.assertEqual(
-            run({"PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED": "0"}), ("False", "True")
+            run({"PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED": "0"})[1], ("False", "True")
         )
         # Borrowing requires recording, so this var turns both off.
         self.assertEqual(
-            run({"PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED": "0"}), ("False", "False")
+            run({"PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED": "0"})[1],
+            ("False", "False"),
         )
         # Only "0" vetoes. 1 means "leave it to the pass", which is what the
         # script then enables, and an unparsable value warns and does the same.
         self.assertEqual(
-            run({"PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED": "1"}), ("True", "True")
+            run({"PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED": "1"})[1], ("True", "True")
         )
         self.assertEqual(
-            run({"PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED": "no"}), ("True", "True")
+            run({"PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED": "no"})[1], ("True", "True")
         )
 
     @dtypes(torch.float16, torch.float32)
@@ -12167,10 +12182,107 @@ class TestLinalgCudaOnly(TestCase):
 
     @onlyCUDA
     @dtypes(torch.float)
+    def test_unusable_donor_is_never_benchmarked_tunableop(self, device, dtype):
+        # The in-process twin, test_unusable_donor_records_nothing, cannot tell
+        # the guard from its absence: without DonorIsUsable the benchmark
+        # throws on the missing kernel, the catch in ResolveWithoutExactHit
+        # swallows it, and get_results() is unchanged either way. The log is
+        # the only place the two differ, so this one counts it in a subprocess.
+        import os
+        import shutil
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        script = textwrap.dedent(
+            """
+            import torch
+
+            results_filename = {results_filename!r}
+            try:
+                torch.cuda.tunable.enable(False)
+                torch.cuda.tunable.record_untuned_enable(False)
+                torch.cuda.tunable.tuning_enable(False)
+                torch.cuda.tunable.set_filename(results_filename, False)
+                torch.cuda.tunable.enable(True)
+                assert torch.cuda.tunable.read_file(results_filename)
+
+                torch.cuda.tunable._nearest_match_enable(True)
+                torch.cuda.tunable._record_borrowed_enable(True)
+
+                device = {device!r}
+                dtype = {dtype}
+                B = torch.randn(64, 32, device=device, dtype=dtype)
+                A2 = torch.randn(32, 64, device=device, dtype=dtype)
+                torch.matmul(A2, B)
+            finally:
+                torch.cuda.tunable.enable(False)
+            """
+        )
+
+        donor_dir = tempfile.mkdtemp(prefix="tunableop_unusable_donor_")
+        results_filename = os.path.join(donor_dir, "results.csv")
+        try:
+            with self._tunableop_ctx():
+                torch.cuda.tunable.set_max_tuning_iterations(1)
+                A = torch.randn(64, 64, device=device, dtype=dtype)
+                B = torch.randn(64, 32, device=device, dtype=dtype)
+                torch.matmul(A, B)
+                filename = torch.cuda.tunable.get_filename()
+                # Every row renamed to a kernel this build does not register,
+                # the same way the in-process test builds its donor.
+                self._rewrite_results_file(
+                    filename,
+                    lambda row: [row[0], row[1], "NoSuchKernel_xyz", row[3]],
+                )
+                shutil.copyfile(filename, results_filename)
+
+            env = os.environ.copy()
+            env.pop("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", None)
+            env.pop("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", None)
+            env["PYTORCH_TUNABLEOP_VERBOSE"] = "3"
+            env["PYTORCH_TUNABLEOP_VERBOSE_FILENAME"] = "out"
+            # The child resolves its own interpreter and modules; ours
+            # describe this process and can leave it unable to import torch.
+            env.pop("PYTHONPATH", None)
+            env.pop("PYTHONHOME", None)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    script.format(
+                        results_filename=results_filename,
+                        device=device,
+                        dtype=dtype,
+                    ),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=os.path.dirname(__file__),
+                check=True,
+            )
+        finally:
+            shutil.rmtree(donor_dir, ignore_errors=True)
+
+        # Turned away before anything is benchmarked. Drop DonorIsUsable and
+        # both appear: the search first, then the throw it runs into.
+        self.assertNotIn("finding fastest", result.stdout, result.stdout)
+        self.assertNotIn("borrow validation failed", result.stdout, result.stdout)
+
+    @onlyCUDA
+    @dtypes(torch.float)
     def test_nearest_match_off_by_default_tunableop(self, device, dtype):
-        # Execution must never borrow, since a borrowed solution is unmeasured for
-        # the shape it is applied to. Off unless a compile-time pass turns it on.
+        # Borrowing is off unless a compile-time pass turns it on: a runtime
+        # process has no reason to pay a nearest-match scan and a validation
+        # benchmark on every miss.
         with self._tunableop_ctx():
+            # These pin the fixture, not the C++ default, which
+            # _set_tunableop_defaults has already cleared -- and the fixture
+            # is worth pinning, since every borrow test below starts from it.
+            # The real default is checked in a pristine process, by
+            # test_reuse_pass_kill_switch_tunableop.
             self.assertFalse(torch.cuda.tunable._nearest_match_is_enabled())
             self.assertFalse(torch.cuda.tunable._record_borrowed_is_enabled())
 
@@ -12275,18 +12387,26 @@ class TestLinalgCudaOnly(TestCase):
     @onlyCUDA
     @dtypes(torch.float)
     def test_nearest_match_precedes_wildcard_fallback_tunableop(self, device, dtype):
-        # Both mechanisms answer a concrete miss. A borrow is benchmarked and
-        # persisted here; a wildcard hit is an unvalidated reuse of a kernel tuned
-        # for a different shape and records nothing. So with both enabled the
-        # borrow takes the branch, which the new entry is evidence of.
+        # Both mechanisms answer a concrete miss. With nearest match on, a
+        # nearest donor is preferred over the wildcard and whichever is used is
+        # benchmarked and persisted; with it off, a wildcard hit is served
+        # unvalidated and records nothing. So with both enabled the borrow
+        # takes the branch, which the new entry is evidence of.
         with self._tunableop_ctx():
             torch.cuda.tunable.set_max_tuning_iterations(1)
 
             K, M = 64, 32
             A = torch.randn(64, K, device=device, dtype=dtype)
             B = torch.randn(K, M, device=device, dtype=dtype)
-            torch.matmul(A, B)
+            # Tuned under the mask so a wildcard row exists alongside the
+            # concrete one: with no wildcard present there is nothing for
+            # nearest match to take precedence over.
+            with torch.cuda.tunable.dynamic_dims_mask(M=True):
+                torch.matmul(A, B)
             after_tuning = self._force_nondefault_donor()
+            rows = self._results_file_rows()
+            self.assertTrue(any("*" in r[1] for r in rows), rows)
+            self.assertTrue(any("*" not in r[1] for r in rows), rows)
 
             torch.cuda.tunable.tuning_enable(False)
             torch.cuda.tunable._nearest_match_enable(True)
@@ -12373,8 +12493,9 @@ class TestLinalgCudaOnly(TestCase):
             self.assertEqual(len(torch.cuda.tunable.get_results()), before)
 
     def _results_file_rows(self):
-        # What was actually persisted. get_results() is the in-memory map,
-        # which a borrow may legitimately populate without writing.
+        # What was actually persisted, as opposed to get_results(), which is
+        # the in-memory map. Asserting on the file is what proves a borrow
+        # reached disk rather than only memory.
         import csv
         import os
         filename = torch.cuda.tunable.get_filename()

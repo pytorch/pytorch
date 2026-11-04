@@ -60,8 +60,15 @@ struct FlagGuard {
     auto* ctx = getTuningContext();
     tuning_ = ctx->IsTuningEnabled();
     untuned_ = ctx->IsRecordUntunedEnabled();
-    nearest_ = ctx->IsNearestMatchEnabled();
     borrowed_ = ctx->IsRecordBorrowedEnabled();
+    // IsNearestMatchEnabled() folds in recording, so reading it directly
+    // would snapshot false whenever recording is off and the destructor would
+    // then clear the raw setting. Recording on makes it report the raw member.
+    // Not under an env kill switch, where it stays false -- but there nothing
+    // the restore could get wrong is reachable either.
+    ctx->EnableRecordBorrowed(true);
+    nearest_ = ctx->IsNearestMatchEnabled();
+    ctx->EnableRecordBorrowed(borrowed_);
   }
   ~FlagGuard() {
     auto* ctx = getTuningContext();
@@ -124,10 +131,10 @@ class TunableNearestTest : public ::testing::Test {
 };
 
 TEST_F(TunableNearestTest, LookupNearestIgnoresPolicyFlags) {
-  // Calling LookupNearest is itself the opt-in: dispatch never reaches it, so
-  // it answers the question asked rather than re-deciding from the pass's
-  // mutable policy flags. The env kill switch IS still honoured here -- see
-  // EnvKillSwitchVetoesLookupAndRecord below.
+  // Calling LookupNearest is itself the opt-in: ResolveWithoutExactHit checks
+  // the policy flags before it calls in, so LookupNearest answers the question
+  // asked rather than re-deciding from them. The env kill switch IS still
+  // honoured here -- see EnvKillSwitchVetoesLookupAndRecord below.
   FlagGuard g;
   auto* ctx = getTuningContext();
   TuningResultsManager mgr;
@@ -313,18 +320,38 @@ TEST_F(TunableNearestTest, RecordBorrowedDoesNotWidenAddPersistence) {
 }
 
 TEST_F(TunableNearestTest, LookupNearestIgnoresAnExistingExactEntry) {
-  // Unconditional by design: an exact entry, a recorded Default included, does
-  // not suppress the scan, because a candidate equal to the query differs in no
-  // dim and so never matches. Callers must miss Lookup first --
-  // ResolveWithoutExactHit is reached only on !concrete_hit, which is what
-  // keeps a recorded verdict from being validated twice.
+  // Unconditional by design: an exact entry does not suppress the scan,
+  // because a candidate equal to the query differs in no dim and so never
+  // matches. Callers must miss Lookup first -- ResolveWithoutExactHit is
+  // reached only on !concrete_hit, which is what keeps a recorded verdict
+  // from being validated twice.
   FlagGuard g;
   TempResultsFile results("tunableop-exact-skip-");
   TuningResultsManager mgr;
   SeedDonor(mgr);
-  mgr.RecordBorrowed(kOp, kQSig, ResultEntry::Default());
-  EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), Key(ResultEntry::Default()));
+  // Non-Default on purpose: the scan drops Default candidates before it
+  // compares any shape, so a recorded Default would pass this without the
+  // equal-shape rejection ever running.
+  mgr.RecordBorrowed(kOp, kQSig, Donor("exact"));
+  EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), Key(Donor("exact")));
   EXPECT_EQ(Key(mgr.LookupNearest(kOp, kQSig)), Key(Donor("k64")));
+}
+
+TEST_F(TunableNearestTest, BorrowUnavailableIsClearedByANewEntry) {
+  // The memo is what stops a shape with nothing to borrow from rescanning the
+  // whole map on every call: the miss records nothing, so there is otherwise
+  // no state saying the scan already happened. It must not outlive the map it
+  // summarises -- a later entry can be the donor the scan would now find.
+  FlagGuard g;
+  TempResultsFile results("tunableop-borrow-memo-");
+  TuningResultsManager mgr;
+  SeedDonor(mgr);
+  mgr.MarkBorrowUnavailable(kOp, kQSig);
+  EXPECT_TRUE(mgr.BorrowUnavailable(kOp, kQSig));
+  // Per signature, not per op.
+  EXPECT_FALSE(mgr.BorrowUnavailable(kOp, "NN_16_512_256_ld_16_256_16"));
+  mgr.RecordBorrowed(kOp, "NN_64_512_256_ld_64_256_64", Donor("later"));
+  EXPECT_FALSE(mgr.BorrowUnavailable(kOp, kQSig));
 }
 
 TEST_F(TunableNearestTest, EnvKillSwitchVetoesLookupAndRecord) {

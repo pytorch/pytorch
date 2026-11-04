@@ -204,10 +204,10 @@ class TunableOp {
       return GetOp(donor.GetKey()) != nullptr;
     }
 
-    // Reuse pass, shape with no exact entry. Borrowing is a guess, so check it
-    // rather than trust it: the same comparison tuning makes, restricted to the
-    // donor. Default is candidate 0 for every GEMM, so the borrow only wins on
-    // merit.
+    // Every miss with tuning off, which for a reuse pass is every shape it has
+    // no exact entry for. Borrowing is a guess, so check it rather than trust
+    // it: the same comparison tuning makes, restricted to the donor. Default is
+    // candidate 0 for every GEMM, so the borrow only wins on merit.
     ResultEntry ResolveWithoutExactHit(
         TuningResultsManager& mgr,
         const ParamsT* params,
@@ -216,7 +216,12 @@ class TunableOp {
       TuningContext* ctx = getTuningContext();
 
       auto borrowed = ResultEntry::Null();
-      if (ctx->IsNearestMatchEnabled()) {
+      // Skipped once this shape is known to have nothing to borrow: the scan
+      // below copies the op's map and parses every signature, and nothing
+      // records the miss, so otherwise every call of this shape repeats it.
+      const bool may_borrow = ctx->IsNearestMatchEnabled() &&
+          !mgr.BorrowUnavailable(op_sig, concrete_sig);
+      if (may_borrow) {
         borrowed = mgr.LookupNearest(op_sig, concrete_sig);
         if (borrowed != ResultEntry::Null() && !DonorIsUsable(borrowed, params)) {
           borrowed = ResultEntry::Null();
@@ -235,6 +240,9 @@ class TunableOp {
         }
       }
       const bool will_validate = (borrowed != ResultEntry::Null());
+      if (may_borrow && !will_validate) {
+        mgr.MarkBorrowUnavailable(op_sig, concrete_sig);
+      }
 
       // Only a validated donor persists this shape, leaving offline tuning
       // nothing to find. Report unless a persisted verdict is coming; the
@@ -276,6 +284,17 @@ class TunableOp {
           mgr.RecordBorrowed(op_sig, concrete_sig, result);
           return result;
         }
+        catch (const c10::AcceleratorError&) {
+          // Not a failed validation but an unusable device: tunableop.py
+          // relies on this reaching Python so the worker is torn down.
+          throw;
+        }
+        catch (const c10::OutOfMemoryError&) {
+          // FindFastestAmong frees its copies only on the normal path, so
+          // swallowing a repeatable OOM leaks again on every later dispatch
+          // of this signature. Fail the job; the caller then times inline.
+          throw;
+        }
         catch (const c10::Error& e) {
           // FindFastestAmong TORCH_CHECKs the calls it makes and allocates
           // copies, so it can throw. Nothing was measured, so the promise
@@ -287,6 +306,10 @@ class TunableOp {
           TUNABLE_LOG2(
               "borrow validation failed for ", op_sig, '(', concrete_sig,
               "), recording untuned: ", e.what());
+          // The donor is registered but will not run this shape, which no
+          // later call changes: without this the throw repeats, and with it
+          // the allocation it threw out of leaks only once per signature.
+          mgr.MarkBorrowUnavailable(op_sig, concrete_sig);
           if (ctx->IsRecordUntunedEnabled()) {
             mgr.RecordUntuned(
                 ctx->GetUntunedFile(), op_sig, concrete_sig,
@@ -299,7 +322,9 @@ class TunableOp {
       }
       // Nearest match takes precedence: once it is on, a miss with no usable
       // donor of either kind (nearest or wildcard) is a miss rather than a
-      // reason to return an unvalidated wildcard hint.
+      // reason to return an unvalidated wildcard hint. Memoized or not -- the
+      // memo records that there was nothing to borrow, which is the same
+      // answer the scan gave.
       if (ctx->IsNearestMatchEnabled()) {
         return ResultEntry::Default();
       }

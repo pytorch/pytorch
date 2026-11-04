@@ -7294,9 +7294,9 @@ class Scheduler:
                     continue
 
                 # aten won, so widen its coverage across the dynamic dim.
-                # Unlike the select_algorithm sites this runs after finalize(),
-                # so it already sees decided layouts. Not on the conflict
-                # fallback: the rebuild reads the constraint.
+                # Queued like the select_algorithm sites, so it runs once the
+                # graph's layouts are final. Not on the conflict fallback: the
+                # rebuild reads the constraint.
                 with ir.IRNode.current_origins(multi_node.origins):
                     out_tensorbox = min_node_unfused.output_node()
                 if not has_layout_conflict:
