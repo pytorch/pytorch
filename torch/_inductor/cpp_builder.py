@@ -1356,16 +1356,6 @@ def _get_torch_cpp_wrapper_definition() -> list[str]:
     return defs
 
 
-def _get_libtorch_provides_shims_macro(aot_mode: bool) -> list[str]:
-    # The libtorch loaded in the process provides the shims: cpp_wrapper code
-    # runs in the Python process, and AOTI code expects libtorch unless
-    # link_libtorch=False, where another library may provide them.
-    # AOTI_TORCH_ERROR_CODE_CHECK then uses the stable C ABI.
-    if not aot_mode or config.aot_inductor.link_libtorch:
-        return ["AOTI_LIBTORCH_PROVIDES_SHIMS"]
-    return []
-
-
 def _use_custom_generated_macros() -> list[str]:
     return [" C10_USING_CUSTOM_GENERATED_MACROS"]
 
@@ -1899,7 +1889,6 @@ def get_cpp_torch_options(
         + fb_macro_passthrough_args
         + mmap_self_macros
         + caching_allocator_macros
-        + _get_libtorch_provides_shims_macro(aot_mode)
     )
     include_dirs = (
         sys_libs_include_dirs
