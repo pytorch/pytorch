@@ -381,9 +381,10 @@ class TestMetaConverter(TestCase):
         self.assertEqual(csr_desc.values.size, csr.values().size())
 
     def test_describe_cpp_fake_dispatches_to_fake(self):
-        # A C++ fake's metadata queries still reach the Fake key while it is
-        # described, through the key in its own key set, also inside a wrapper
-        # without the key, unless the caller excluded Fake
+        # Describing takes Fake out of the TLS include set rather than excluding
+        # it, so a C++ fake's metadata queries still reach the Fake key through
+        # its own key set, also inside a wrapper without the key, unless the
+        # caller excluded Fake
         from torch.testing._internal.two_tensor import TwoTensor
 
         fake = torch._C.DispatchKey.Fake

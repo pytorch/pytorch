@@ -4572,36 +4572,22 @@ def safe_repr(x: object) -> str:
     if isinstance(x, dict):
         items = ", ".join(f"{safe_repr(k)}: {safe_repr(v)}" for k, v in x.items())
         return f"{{{items}}}"
-    if isinstance(x, BaseException):
-        # BaseException.__repr__ is ClassName(*args), with each arg repr'd
-        return f"{type(x).__name__}({', '.join(safe_repr(a) for a in x.args)})"
     return f"<{type(x).__name__}>"
 
 
 def summarize_example_value(v: object) -> str:
     """A short description of a graph input's example value for logs and
-    errors. Tensors, including those in a list or tuple, show their class and
-    size and, as a tensor's repr does, a non-default dtype or device and their
-    autograd state, without calling repr, since a fake tensor's repr can be
-    large or can raise."""
+    errors. Tensors, including those in a list or tuple, are shown as in
+    TensorVariable.debug_repr rather than by repr, since a real tensor input's
+    repr can be large and a tensor subclass's repr can raise; other values go
+    through safe_repr."""
     if isinstance(v, torch.Tensor):
-        fields = [f"size={tuple(v.shape)}"]
-        if v.dtype != torch.get_default_dtype():
-            fields.append(f"dtype={v.dtype}")
-        if v.device.type != torch._C._get_default_device():
-            fields.append(f"device='{v.device}'")
-        try:
-            grad_fn = v.grad_fn
-        except RuntimeError:
-            # As in a tensor's repr: reading grad_fn raises for a view created
-            # and modified in place in no-grad mode (#99968)
-            fields.append("grad_fn=<Invalid>")
-        else:
-            if grad_fn is not None:
-                fields.append(f"grad_fn=<{type(grad_fn).__name__}>")
-            elif v.requires_grad:
-                fields.append("requires_grad=True")
-        return f"{type(v).__name__}(..., {', '.join(fields)})"
+        from torch._subclasses.fake_tensor import is_fake_tensor
+
+        from .variables.tensor import _tensor_debug_repr
+
+        type_name = "FakeTensor" if is_fake_tensor(v) else type(v).__name__
+        return _tensor_debug_repr(v, type_name)
     if isinstance(v, (list, tuple)):
         items = ", ".join(summarize_example_value(e) for e in v)
         return f"{type(v).__name__}[{items}]"
