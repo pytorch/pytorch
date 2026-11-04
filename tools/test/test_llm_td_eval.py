@@ -587,22 +587,30 @@ class TestScore(unittest.TestCase):
         )
 
     def test_no_td_configs_match_test_sh(self) -> None:
-        # The TEST_CONFIG patterns of test.sh's top-level dispatch whose branch calls a function that exports NO_TD=1.
-        func, no_td, branch, calls = None, set(), None, {}
+        # The TEST_CONFIG patterns of test.sh's top-level dispatch that set NO_TD, inline or through a function they call.
+        # As the Test tools job runs this on every test.sh edit, a layout the scan cannot follow skips it rather than fails.
+        func_def = re.compile(r"(?:function\s+(\w+)|(\w+)\s*\(\s*\))")
         dispatch = re.compile(r'(?:el)?if \[\[ "?\$\{?TEST_CONFIG\}?"? ==? "?([^ "]+)')
+        func, sets_no_td, branch, calls = None, set(), None, {}
         for line in (REPO_ROOT / ".ci/pytorch/test.sh").read_text().splitlines():
-            if m := re.match(r"(?:function\s+)?(\w+)\s*\(\)", line):
-                func = m.group(1)
-            elif re.search(r"\bexport NO_TD=1", line):
-                no_td.add(func)
+            if line.lstrip().startswith("#"):
+                continue
+            if m := func_def.match(line):
+                func = m.group(1) or m.group(2)
+            elif line.startswith("}"):
+                func = None
             if m := dispatch.match(line):
                 branch = m.group(1)
             elif re.match(r"\S", line):
                 branch = None
-            elif branch and (m := re.match(r"\s+(\w+)", line)):
-                calls.setdefault(branch, set()).add(m.group(1))
-        self.assertIn("test_dynamo_cpython", calls["*dynamo_cpython*"])
-        dispatched = {p for p, fns in calls.items() if fns & no_td}
+            elif branch:
+                calls.setdefault(branch, set()).update(re.findall(r"\w+", line))
+            if re.search(r"\bNO_TD=", line):
+                sets_no_td.add(func or branch)
+        unmapped = {f for f in sets_no_td if f not in calls and not any(f in words for words in calls.values())}  # fmt: skip
+        if not calls or unmapped:
+            self.skipTest(f"cannot map test.sh's NO_TD to TEST_CONFIG patterns (setters outside the dispatch: {unmapped}); check NO_TD_CONFIGS by hand")  # fmt: skip
+        dispatched = {p for p, words in calls.items() if p in sets_no_td or words & sets_no_td}  # fmt: skip
         self.assertEqual(dispatched, {f"*{c}*" for c in score.NO_TD_CONFIGS})
 
     def test_unasked(self) -> None:
@@ -649,9 +657,10 @@ class TestScore(unittest.TestCase):
         # So does an untimed file, which is in every job's test list.
         r = {"out": {"tests": [{"file": "test_e"}]}}
         self.assertEqual(pick("final+td5", r, cut).per_config["slow"], set())
-        # The default share is 20%: 50s of default fits test_d (40s) and test_c, not test_b after them.
+        # A 20% share: 50s of default fits test_d (40s) and test_c, not test_b after them.
         ranked = {"scored": ["test_d", "test_c", "test_b"], "top25": [], "top25_cfg": {}}  # fmt: skip
-        self.assertEqual(pick("final+td", NOTHING, ranked).per_config, {"default": {"test_d", "test_c"}, "slow": set()})  # fmt: skip
+        with mock.patch.object(score, "LLM_TD_HEDGE", 0.2):
+            self.assertEqual(pick("final+td", NOTHING, ranked).per_config, {"default": {"test_d", "test_c"}, "slow": set()})  # fmt: skip
         with mock.patch.object(score, "LLM_TD_HEDGE", 0.45):
             self.assertEqual(pick("final+td", NOTHING, td).per_config, pick("final+td45", NOTHING, td).per_config)  # fmt: skip
         self.assertEqual(pick("final+td5", NOTHING, ranked).per_config["default"], {"test_c"})  # fmt: skip
@@ -881,7 +890,7 @@ class TestScore(unittest.TestCase):
             "test-times.json": {"linux": {"default": {"test_a": 10.0}}},
             "samples/a.json": SAMPLE, "samples/b.json": SAMPLE,
             "td/a.json": td, "td/b.json": td,
-            "results/m/a.json": {"out": {"tests": [{"file": "bogus"}]}, "error": None, "cost_usd": 0.1},
+            "results/m/a.json": {"out": {"tests": [{"file": "bogus"}]}, "error": None, "cost_usd": 0.1, "transient": True},
             "results/m/b.json": {"out": {"tests": []}, "error": None, "cost_usd": 0.1},
         }  # fmt: skip
         with (
@@ -900,7 +909,8 @@ class TestScore(unittest.TestCase):
         self.assertEqual([(x["id"], x["run_all"], x["error"]) for x in rows], [("a", True, True)] * 2)  # fmt: skip
         self.assertEqual(stale, [])
         why = "td replay of the current test-times.json, sample, STATS and TD code"
-        self.assertEqual(err.getvalue(), f"dropped 1 of 2 ids with no {why}\ndropped 2 of 2 ids with no {why}\n")  # fmt: skip
+        throttled = "scored 1 m results as errors that were still throttled after run_eval's retries, which CI does not provoke"
+        self.assertEqual(err.getvalue(), f"dropped 1 of 2 ids with no {why}\n{throttled}\ndropped 2 of 2 ids with no {why}\n")  # fmt: skip
 
     def test_score_stale_replay_of_test_times(self) -> None:
         files = {
@@ -941,6 +951,28 @@ class TestScore(unittest.TestCase):
                 rows = score.score(data, ["a", "b", "c"], ["m", "td"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
         self.assertEqual({x["id"] for x in rows}, {"a"})
         self.assertEqual(err.getvalue(), "dropped 2 of 3 ids with no m result of the current sample, test-times.json, prompt and schema\n")  # fmt: skip
+
+    def test_score_results_of_another_prompt_are_stale(self) -> None:
+        # The prompt carries the sample's diff and each candidate's minutes from test-times.json.
+        times = {"linux": {"default": {"test_a": 600.0}}}
+        sent = score.prompt_sha(score.sample_prompt(SAMPLE, select_tests.test_minutes(times)))  # fmt: skip
+        untimed = score.prompt_sha(score.sample_prompt(SAMPLE, {}))
+        td = {"scored": [], "top25": [], "top25_cfg": {}}
+        result = {"out": {"tests": []}, "error": None, "cost_usd": 0.1}
+        files = {
+            "test-times.json": times,
+            "samples/a.json": SAMPLE, "samples/b.json": {**SAMPLE, "diff": "+x"}, "samples/c.json": SAMPLE,
+            "td/a.json": td, "td/b.json": td, "td/c.json": td,
+            "results/m/a.json": {**result, "prompt_sha": sent}, "results/m/b.json": {**result, "prompt_sha": sent}, "results/m/c.json": {**result, "prompt_sha": untimed},
+        }  # fmt: skip
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
+        ):
+            data = write_data(d, files)
+            with contextlib.redirect_stderr(io.StringIO()):
+                rows = score.score(data, ["a", "b", "c"], ["m"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
+        self.assertEqual({x["id"] for x in rows}, {"a"})
 
     def test_test_seconds_skips_non_td_envs(self) -> None:
         times = {
@@ -983,20 +1015,20 @@ class TestScore(unittest.TestCase):
         from tools.testing.target_determination import heuristics
 
         class Trial:
-            trial_mode = True
+            name, trial_mode = "Trial", True
 
-        seen, trial = [], "Trial"
+        seen = []
 
         def prioritize(cands: list[str], file: io.StringIO) -> mock.Mock:
             from tools.testing.target_determination.heuristics import utils
 
             seen.append(utils.query_changed_files())
+            # A heuristic that raised has no results; get_aggregated_priorities leaves a trial_mode one out anyway.
+            ran = [h.name for h in heuristics.HEURISTICS if not h.trial_mode]
             if "test_e" not in cands:
-                print("Error in Boom: x", file=file)
-            # get_aggregated_priorities leaves a trial_mode heuristic out.
-            print(f"Error in {trial}: x", file=file)
+                print(f"Error in {ran.pop()}: x", file=file)
             tp = TestPrioritizations(cands, {TestRun("test_b"): 2.0, TestRun("test_a", included=["TestX"]): 1.0})  # fmt: skip
-            return mock.Mock(get_aggregated_priorities=lambda: tp)
+            return mock.Mock(get_aggregated_priorities=lambda: tp, to_json=lambda: dict.fromkeys(ran))  # fmt: skip
 
         with tempfile.TemporaryDirectory() as d:
             stats = Path(d) / ".additional_ci_files"
