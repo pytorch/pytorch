@@ -108,6 +108,14 @@ FAILURE_LIST_DIR_RE = re.compile(
 FAILURE_LIST_RE = re.compile(FAILURE_LIST_DIR_RE.pattern + r"(?:.*-)?(\w+)\.[^./]+$")
 # instantiate_device_type_tests names TestFooCPU after TestFoo.
 DEVICE_SUFFIX_RE = re.compile(r"(CPU|CUDA|MPS|XPU|HPU|META|LAZY|PRIVATEUSE1)$")
+# assertExpected reads test/expect/<TestClass>.<test>[-<name>].expect.
+EXPECT_RE = re.compile(r"^test/expect/(\w+)\.")
+# Edited files under test/ that need no reader: docs, the notes on CPython's
+# tests, and the C++ tests, which are never candidates and so always run.
+NO_READER_RE = re.compile(r"\.(md|rst|diff)$|^test/cpp/")
+# More edited files under test/ than this that are neither tests nor failure
+# lists are not looked up one by one.
+MAX_DATA_FILES = 50
 
 # Changes to these paths alter how every test is collected or run, so no
 # subset is safe whatever the model says.
@@ -253,6 +261,71 @@ def class_pattern(classes: Iterable[str], prefix: bool = False) -> str:
     return rf"^[[:space:]]*class[[:space:]]+({names}){end}"
 
 
+def data_file_readers(
+    changed_files: list[str],
+    candidates: set[str],
+    grep: Callable[[str], list[str]],
+    deleted: Collection[str] = (),
+) -> tuple[list[str], dict[str, list[str]]] | None:
+    """The paths under test/ that may read an edited file under test/ that is
+    neither a failure list nor a test file (see edited_tests), split into those
+    reading a file that needs no further reader and, by file, those reading a
+    file only they can read. A file needs no further reader when it is deleted,
+    when NO_READER_RE matches it, when a driver runs its directory (see
+    edited_tests), or when a C++ test names it outside a // comment line.
+    None for more than MAX_DATA_FILES files only their readers can read. A file
+    is read by the paths naming it outside a # comment line, as test_run.py
+    runs bin/test_script.py; a .py file also by its importers; and an expect
+    file (see EXPECT_RE) also by the paths defining a class whose name starts
+    with its test class, as test_tensorboard.py builds the path of
+    TestTensorBoard.*.expect for TestTensorBoardSummary."""
+    data = [
+        f
+        for f in changed_files
+        if f.startswith("test/")
+        and not FAILURE_LIST_DIR_RE.match(f)
+        and not (f.endswith(".py") and edited_tests([f], candidates))
+    ]
+    exempt = [
+        f
+        for f in data
+        if f in deleted or NO_READER_RE.search(f) or edited_tests([f], candidates)
+    ]
+    data = [f for f in data if f not in exempt]
+    if len(data) > MAX_DATA_FILES:
+        return None
+
+    def name_pattern(files: list[str], cpp: bool = False) -> str:
+        names = alts(f.rsplit("/", 1)[-1] for f in files)
+        first = "([^#/[:space:]]|/[^/])" if cpp else "[^#[:space:]]"
+        return rf"^[[:space:]]*([^#[:space:][:alnum:]_.-]|{first}.*[^[:alnum:]_.-])?({names})([^[:alnum:]_.-]|$)"
+
+    # A deleted expect file breaks the tests that still assert against it.
+    classes = [m[1] for f in exempt if (m := EXPECT_RE.match(f))]
+    patterns = [name_pattern(exempt)] + (
+        [class_pattern(classes, prefix=True)] if classes else []
+    )
+    readers = grep("|".join(f"({p})" for p in patterns)) if exempt else []
+    read_by: dict[str, list[str]] = {}
+    for f in data:
+        patterns = [name_pattern([f])]
+        if m := EXPECT_RE.match(f):
+            patterns.append(class_pattern([m[1]], prefix=True))
+        if f.endswith(".py"):
+            patterns.append(import_pattern([f]))
+        found = [r for r in grep("|".join(f"({p})" for p in patterns)) if r != f]
+        cpp = {
+            r
+            for r in found
+            if r.startswith("test/cpp/") and not r.endswith((".md", ".rst"))
+        }
+        if cpp and cpp & set(grep(name_pattern([f], cpp=True))):
+            readers += found
+        else:
+            read_by[f] = found
+    return readers, read_by
+
+
 def failure_list_sources(
     changed_files: list[str], grep: Callable[[str], list[str]] | None
 ) -> tuple[list[str], set[str]]:
@@ -369,6 +442,7 @@ class Selection:
         candidates: set[str],
         changed_files: list[str],
         grep: Callable[[str], list[str]] | None = None,
+        deleted: Collection[str] = (),
     ) -> Selection:
         """Turn the model's structured output into a Selection. Everything runs
         when failure_list_sources reports the inductor list or dynamo_cpython
@@ -376,12 +450,14 @@ class Selection:
         reports add the dynamo_wrapped sweep.
 
         A missing or malformed output, a change to test infrastructure, an
-        edited inductor failure list naming an unknown class and too many
-        import hops fall back to running everything; only a missing or
-        malformed output sets error. Test files the change edits and their
-        drivers are always selected, and with `grep` so are the test files that
-        import them (see importers) and those defining the tests that an edited
-        failure list names (see failure_list_sources), with their importers."""
+        edited inductor failure list naming an unknown class, too many import
+        hops, and with `grep` an edited file under test/ that no test reads
+        (see data_file_readers) all fall back to running everything; only a
+        missing or malformed output sets error. Test files the change edits
+        and their drivers are always selected, and with `grep` so are the
+        test files that import them (see importers), those defining the tests
+        that an edited failure list names (see failure_list_sources), and those
+        reading an edited data file (see data_file_readers), with their importers."""
         if out is None:
             return cls(
                 run_all=True,
@@ -417,15 +493,29 @@ class Selection:
         edited = edited_tests(changed_files, candidates)
         files |= edited
         if grep is not None:
-            # The drivers of edited non-.py files, such as test_jit for test/jit/*.txt, have importers too.
-            drivers = [f"test/{t}.py" for t in sorted(edited)]
-            found = importers(changed_files + sources + drivers, candidates, grep)
-            if found is None:
+            data = data_file_readers(changed_files, candidates, grep, deleted)
+            if data is None:
                 return cls(
                     run_all=True,
-                    reason="test modules import the change through too many hops",
+                    reason=f"more than {MAX_DATA_FILES} edited files under test/ are not tests",
                 )
-            files |= found
+            readers, read_by = data
+            # A file is read only if its readers lead to a test that runs.
+            # The drivers of edited non-.py files, such as test_jit for test/jit/*.txt, have importers too.
+            drivers = [f"test/{t}.py" for t in sorted(edited)]
+            for f, paths in [
+                (None, changed_files + sources + readers + drivers),
+                *read_by.items(),
+            ]:
+                found = importers(paths, candidates, grep)
+                if found is None:
+                    return cls(
+                        run_all=True,
+                        reason="test modules import the change through too many hops",
+                    )
+                if f is not None and not found:
+                    return cls(run_all=True, reason=f"nothing found that reads {f}")
+                files |= found
         run_all, reason = out["run_all"], str(out["reason"])
         return cls(files, sweeps, run_all, reason, candidates=set(candidates))
 
