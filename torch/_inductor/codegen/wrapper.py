@@ -5135,15 +5135,19 @@ class PythonWrapperCodegen(CodeGen):
         get_args() (benchmark_compiled_module), the line its rebuild_line() returns,
         which rebuilds it or raises why it cannot.
         """
-        from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
-        from torch._higher_order_ops.user_kernel_hop import constant_key
-        from torch._native.cutedsl.user_kernel import CuteDSLKernelLauncher
+        from torch._native.cutedsl.user_kernel import (
+            CuteDSLKernelLauncher,
+            key_constants,
+        )
 
         arg_names = tuple(runtime_args)
         # Every constant is a snapshot (a passed one is the side table's, a default
-        # is copied in split_args), so equal ones can share a launcher.
-        rules = CUTEDSL_CONSTANT_RULES
-        keys = {k: constant_key(v, rules) for k, v in constant_args.items()}
+        # is copied in split_args), so equal ones can share a launcher. Nothing has
+        # keyed a default yet (the side table and Dynamo see the passed constants
+        # only), so a default that constant_key refuses fails here, with the error
+        # the eager launch gives; one that refers to itself, which split_args
+        # cannot copy, failed there with that error.
+        keys = key_constants(kernel.name, constant_args)
         cache_key = (id(kernel), arg_names, tuple(keys.items()))
         if cache_key in self.user_defined_cutedsl_kernel_cache:
             return self.user_defined_cutedsl_kernel_cache[cache_key]

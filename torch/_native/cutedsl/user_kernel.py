@@ -91,6 +91,34 @@ def _compile(
     return cute.compile(fn, **copies)
 
 
+def key_constants(
+    name: str,
+    constant_args: Mapping[str, Any],
+    keys: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """The constant_key of each of ``constant_args``, constants of kernel ``name`` by
+    parameter, taking the ones in ``keys`` as given. A constant that constant_key
+    refuses raises its TypeError or ValueError, naming the kernel and the parameter:
+    the eager launch, a launcher and the definition of a kernel in Inductor's Python
+    or C++ wrapper report it alike. Inductor keys the defaults a call leaves out when
+    it defines the call's kernel, or first, in ir.UserDefinedCuteDSLKernel.split_args,
+    if one of them cannot be copied."""
+    from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
+    from torch._higher_order_ops.user_kernel_hop import constant_key
+
+    given = keys or {}
+    result: dict[str, object] = {}
+    for param, value in constant_args.items():
+        if param in given:
+            result[param] = given[param]
+            continue
+        try:
+            result[param] = constant_key(value, CUTEDSL_CONSTANT_RULES)
+        except (TypeError, ValueError) as e:
+            raise type(e)(f"CuTeDSL kernel {name}: parameter {param!r}: {e}") from None
+    return result
+
+
 def launch_cutedsl_kernel(
     fn: Callable[..., Any],
     args: Mapping[str, Any],
@@ -106,7 +134,7 @@ def launch_cutedsl_kernel(
         CUTEDSL_CONSTANT_RULES,
         get_host_fn_info,
     )
-    from torch._higher_order_ops.user_kernel_hop import _snapshot, constant_key
+    from torch._higher_order_ops.user_kernel_hop import _snapshot
 
     info = get_host_fn_info(fn)
     name = info.name
@@ -118,16 +146,7 @@ def launch_cutedsl_kernel(
     # Keyed on every launch, as the caller may change a constant between launches;
     # the launcher binds snapshots, which keep matching the key.
     rules = CUTEDSL_CONSTANT_RULES
-    given = constant_keys or {}
-    keys: dict[str, object] = {}
-    for param, value in constant_args.items():
-        if param in given:
-            keys[param] = given[param]
-            continue
-        try:
-            keys[param] = constant_key(value, rules)
-        except (TypeError, ValueError) as e:
-            raise type(e)(f"CuTeDSL kernel {name}: parameter {param!r}: {e}") from None
+    keys = key_constants(name, constant_args, constant_keys)
     names = tuple(runtime_args)
     key = (names, tuple(keys.items()))
     launchers = _eager_launchers.setdefault(fn, {})
@@ -180,7 +199,11 @@ class CuteDSLKernelLauncher:
     kernel in Inductor's generated Python wrapper, where ``name`` is its name, or the
     eager launches of ``fn`` with these argument names and constants (see
     launch_cutedsl_kernel), named after ``fn``. While the profiler runs, each launch
-    is a record function of that name, as a user Triton kernel's launch is.
+    is a record function of that name, as a user Triton kernel's launch is, with the
+    keyword values ``kernel_backend`` ("cutedsl"), ``kernel_name`` (the host
+    function's name, also in generated code, where the record has the launcher's
+    name: unlike a Triton launch's, it is not the record's name) and ``stream`` (the
+    raw CUDA stream of the launch).
 
     ``run(*args, stream=...)`` takes the kernel arguments (``arg_names``: tensors and
     runtime scalars, in host-function signature order) positionally. Everything else
@@ -190,6 +213,16 @@ class CuteDSLKernelLauncher:
     functions it uses by device and argument signature, so a launch keys only its own
     arguments. Both users bind snapshots as constants (see
     ir.UserDefinedCuteDSLKernel.split_args), so their key cannot go stale.
+
+    Known limitation: run() wraps every tensor with from_dlpack at every launch, and
+    a compile is specialized to the exact shape and stride of each tensor (cute
+    tensors from from_dlpack have static layouts), so a graph compiled with dynamic
+    shapes compiles the host function again for each new size, inside its call().
+    Compiling once for dynamic layouts is not a drop-in change: host code may read a
+    layout as static values (the grid it launches, a branch on an extent). The
+    follow-up, after measuring, is to compile host functions that accept dynamic
+    layouts against fake operands through tvm-ffi and pass the torch tensors
+    directly, as torch/_native/cutedsl/launch.py does for the native ops.
     """
 
     def __init__(
@@ -201,18 +234,17 @@ class CuteDSLKernelLauncher:
         *,
         constant_keys: Mapping[str, object] | None = None,
     ) -> None:
-        # Imported here, not at module level: this module imports without cutlass.
         import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
         from cutlass.cute.runtime import from_dlpack
 
         from torch._higher_order_ops.cutedsl_kernel_wrap import (
-            CUTEDSL_CONSTANT_RULES,
             get_host_fn_info,
             python_scalar,
         )
-        from torch._higher_order_ops.user_kernel_hop import constant_key
         from torch._native.cutedsl.launch import stream, supported_alignment
 
+        # Imported here, not at module level (this module imports without cutlass),
+        # for run() to use.
         self._cu_stream = cuda.CUstream
         self._from_dlpack = from_dlpack
         self._python_scalar = python_scalar
@@ -232,7 +264,6 @@ class CuteDSLKernelLauncher:
         # part of the compile cache key.
         self._fixed_args: dict[str, Any] = {}
         fixed_key: list[object] = []
-        keys = constant_keys or {}
         for param in info.params:
             if param == info.stream_param or param in self.arg_names:
                 continue
@@ -244,14 +275,8 @@ class CuteDSLKernelLauncher:
                 annotation = info.numeric_params.get(param)
                 value = python_scalar(value, annotation)
                 fixed_key.append((param, annotation or type(value)))
-            elif param in keys:
-                fixed_key.append((param, keys[param]))
             else:
-                try:
-                    key = constant_key(value, CUTEDSL_CONSTANT_RULES)
-                except (TypeError, ValueError) as e:
-                    msg = f"CuTeDSL kernel {kernel_name}: parameter {param!r}: {e}"
-                    raise type(e)(msg) from None
+                key = key_constants(kernel_name, {param: value}, constant_keys)[param]
                 fixed_key.append((param, key))
             self._fixed_args[param] = value
         self._fixed_key = tuple(fixed_key)
@@ -344,7 +369,21 @@ class CuteDSLKernelLauncher:
             if compiled is None:
                 compiled = self._get_compiled(device, tuple(key), values, cu_stream)
             if autograd_profiler._is_profiler_enabled:
-                with torch._C._profiler._RecordFunctionFast(self.name, args):
+                # As CachingAutotuner.get_profiler_kwargs describes a Triton launch;
+                # there is no kernel file or hash: the DSL compiles in memory. One
+                # difference is deliberate: Triton's kernel_name is the record's name,
+                # while this one names the host function also in generated code,
+                # where the record is named after the launcher (cutedsl_add_kernel_0
+                # for add_kernel), so that every launcher of a host function and its
+                # eager launches share it.
+                profiler_kwargs = {
+                    "kernel_backend": "cutedsl",
+                    "kernel_name": self._kernel_name,
+                    "stream": int(cu_stream),
+                }
+                with torch._C._profiler._RecordFunctionFast(
+                    self.name, args, profiler_kwargs
+                ):
                     compiled(*call_args)
             else:
                 compiled(*call_args)

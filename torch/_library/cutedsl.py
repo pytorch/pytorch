@@ -83,6 +83,9 @@ def wrap_cutedsl(
     cannot see a raw call of a host function. Dynamo (``torch.compile``, strict
     ``torch.export``) captures a call of the wrapper as well as a raw call written as
     for eager, with ``from_dlpack(t)`` tensors and ``cutlass.torch.current_stream()``.
+    Dynamo takes the wrapper for its host function and write set: in the compiled
+    region it reads the wrapper's ``kernel`` and ``mutates_args``, while reading any
+    other attribute (``hasattr()`` included) or setting any attribute graph-breaks.
 
     ``host_fn`` must have exactly one parameter annotated ``cuda.CUstream``; callers
     of the returned wrapper do not pass it, because the kernel is launched on the
@@ -118,10 +121,14 @@ def wrap_cutedsl(
     ones included. Each is cloned in the functionalized graph; a graph input passed
     to the call becomes a mutated input, copied back after the graph runs and listed
     in ``graph_signature.user_inputs_to_mutate`` by strict ``torch.export``; and the
-    same tensor passed for two parameters, or views that may overlap, graph-break
-    (two written arguments that share memory cannot be functionalized), although
-    eager runs the call. To give the precise write set, call the kernel through
-    ``wrap_cutedsl(host_fn, mutates_args=[...])`` instead.
+    same non-empty tensor passed for two parameters, or views that may overlap,
+    graph-break (two written arguments that share memory cannot be functionalized),
+    although eager runs the call. To give the precise write set, call the kernel
+    through ``wrap_cutedsl(host_fn, mutates_args=[...])`` instead. With
+    ``torch._dynamo.config.capture_cutedsl_raw_calls = False``, Dynamo graph-breaks
+    on a raw call instead of capturing it, and the call runs eagerly, so
+    ``fullgraph=True`` and strict ``torch.export`` refuse it; a call of a wrapper is
+    captured either way.
 
     Examples:
 

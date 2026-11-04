@@ -693,6 +693,18 @@ capture_func_transforms = True
 # are treated as nullcontext.
 capture_profiler_record_function: bool = False
 
+# Whether Dynamo captures a raw call of a CuTeDSL host function: a @cute.jit function
+# called as in eager code, with from_dlpack(t) for each tensor and
+# cutlass.torch.current_stream() for the stream. When True, the call is captured as
+# the call of torch._library.cutedsl.wrap_cutedsl(fn, mutates_args="unknown"): every
+# tensor argument counts as written, read-only ones included, so each is cloned in
+# the functionalized graph, and a graph input passed to the call becomes a mutated
+# input (strict torch.export lists it in user_inputs_to_mutate). When False, Dynamo
+# graph-breaks on a raw call, which then runs eagerly (fullgraph=True and strict
+# torch.export refuse it). A call of a wrapper that wrap_cutedsl returns is captured
+# either way.
+capture_cutedsl_raw_calls: bool = True
+
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
 

@@ -538,10 +538,10 @@ def _stable_repr(value: object, inside: frozenset[int] = frozenset()) -> str:
     if id(value) in inside:
         what = type(value).__name__
         raise ValueError(f"a constant kernel argument of type {what} refers to itself")
-    rec = functools.partial(_stable_repr, inside=inside | {id(value)})
+    rec = functools.partial(_stable_repr, inside=inside | frozenset([id(value)]))
     if isinstance(value, (tuple, list)):
         return f"{type(value).__name__}({', '.join(rec(v) for v in value)})"
-    if isinstance(value, (set, frozenset)):
+    if isinstance(value, (set, frozenset)):  # noqa: set_linter
         items = sorted(rec(v) for v in value)
         return f"{type(value).__name__}({', '.join(items)})"
     if isinstance(value, dict):
@@ -613,22 +613,36 @@ def cutedsl_kernel_prefix(
     return f"cutedsl_{name}_{arch.replace('_', '')}_{h.hexdigest()[:16]}"
 
 
-def _cute_dtype(dtype: torch.dtype) -> Any:
+def _cute_dtype(host_fn: Callable[..., Any], spec: TensorParamSpec) -> Any:
+    """The CuTe type of tensor parameter ``spec`` (torch2cute); a dtype the table does
+    not map is refused with an error that names the kernel and the parameter."""
+    from torch._higher_order_ops.cutedsl_kernel_wrap import cutedsl_kernel_name
     from torch._native.cutedsl.dtypes import torch2cute
 
-    if dtype not in torch2cute:
+    if spec.dtype not in torch2cute:
+        supported = ", ".join(map(str, torch2cute))
         raise NotImplementedError(
-            f"CuTeDSL user kernels: tensor dtype {dtype} is not supported"
+            f"CuTeDSL kernel {cutedsl_kernel_name(host_fn)}: parameter {spec.name!r}: "
+            f"tensor dtype {spec.dtype} is not supported by the C++ wrapper "
+            f"(AOTInductor or cpp_wrapper); supported: {supported}"
         )
-    return torch2cute[dtype]
+    return torch2cute[spec.dtype]
 
 
-def _fake_args(specs: Sequence[ParamSpec]) -> list[Any]:
+def _fake_args(host_fn: Callable[..., Any], specs: Sequence[ParamSpec]) -> list[Any]:
     """Compile-time stand-ins: fake tensors with a fresh 32-bit symbol per dynamic size
-    and a 64-bit symbol per dynamic stride, hint values for runtime scalars, the
-    constants themselves and a fake stream."""
+    and a 64-bit symbol per dynamic stride, hint values for runtime scalars, copies of
+    the constants and a fake stream. As in the eager compile
+    (torch._native.cutedsl.user_kernel._compile), the constants are copied (see
+    _snapshot) because the host code that the compile runs can change one (cache a
+    layout on a kernel object, say): the C++ wrapper passes the side table's own
+    snapshots, which must keep the contents that the side table and the export key
+    (_export_key) keyed them by."""
     import cutlass.cute as cute
     from cutlass.cute.runtime import make_fake_stream, make_fake_tensor
+
+    from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
+    from torch._higher_order_ops.user_kernel_hop import _snapshot
 
     args: list[Any] = []
     for spec in specs:
@@ -637,13 +651,13 @@ def _fake_args(specs: Sequence[ParamSpec]) -> list[Any]:
             stride = tuple(cute.sym_int64() if s is None else s for s in spec.strides)
             args.append(
                 make_fake_tensor(
-                    _cute_dtype(spec.dtype), shape, stride, assumed_align=spec.align
+                    _cute_dtype(host_fn, spec), shape, stride, assumed_align=spec.align
                 )
             )
         elif isinstance(spec, ScalarParamSpec):
             args.append(spec.annotation(spec.hint))
         elif isinstance(spec, ConstantParamSpec):
-            args.append(spec.value)
+            args.append(_snapshot(spec.value, CUTEDSL_CONSTANT_RULES))
         else:
             args.append(make_fake_stream())
     return args
@@ -689,9 +703,11 @@ def _check_specs(host_fn: Callable[..., Any], specs: Sequence[ParamSpec]) -> Non
             "its C wrapper's parameters the host function's names, which must not be "
             "C++ keywords or module, ret or args (names that wrapper declares itself)"
         )
-    for s in specs:
+    for s in specs:  # fail before a compile the export would reject
         if isinstance(s, ScalarParamSpec):
-            scalar_ctype(s.annotation)  # fail before a compile the export would reject
+            scalar_ctype(s.annotation)
+        elif isinstance(s, TensorParamSpec):
+            _cute_dtype(host_fn, s)
 
 
 def host_target_option() -> str | None:
@@ -721,7 +737,10 @@ def export_cutedsl_kernel(
     ``out_dir/<prefix>.h`` + ``out_dir/<prefix>.o``.
 
     The object's host code is compiled for the generic CPU of this machine's
-    architecture where the DSL can do so (see host_target_option).
+    architecture where the DSL can do so (see host_target_option). The compile gets
+    copies of the constants (see _fake_args) and is logged to native_dsl_compile
+    (TORCH_LOGS and TLParse) under the kernel's name, keyed by ``prefix``, as the
+    eager compile is (see torch._native.cutedsl.plan_cache.cached_plan).
 
     Files are written to a private temporary directory, validated (header ABI vs
     specs, object symbols vs prefix) and only then moved into ``out_dir``, the header
@@ -738,8 +757,10 @@ def export_cutedsl_kernel(
 
     import cutlass.cute as cute
 
+    from torch._higher_order_ops.cutedsl_kernel_wrap import cutedsl_kernel_name
     from torch._native.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
     from torch._native.cutedsl.export import warm_up_exporter
+    from torch._native.instrumentation import instrument_cutedsl_compile
 
     options = f"--gpu-arch {arch}"
     host_opt = host_target_option()
@@ -749,9 +770,13 @@ def export_cutedsl_kernel(
     os.makedirs(out_dir, exist_ok=True)
     tmp_dir = tempfile.mkdtemp(prefix=f".{prefix}.", dir=out_dir)
     try:
-        args = _fake_args(specs)
+        args = _fake_args(host_fn, specs)
+        # compiled=True: every call compiles (export_for_link caches the exports).
+        compile_ = instrument_cutedsl_compile(
+            cutedsl_kernel_name(host_fn), key_fn=lambda: prefix, compiled=True
+        )(lambda: cute.compile(host_fn, *args, options=options))
         with CUTEDSL_COMPILE_LOCK:
-            compiled = cute.compile(host_fn, *args, options=options)
+            compiled = compile_()
             compiled.export_to_c(
                 file_path=tmp_dir, file_name=prefix, function_prefix=prefix
             )
@@ -775,16 +800,19 @@ _exports: weakref.WeakKeyDictionary[
 _exports_lock = threading.Lock()
 
 
-def _export_key(specs: Sequence[ParamSpec], arch: str) -> tuple[Any, ...]:
-    from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
-    from torch._higher_order_ops.user_kernel_hop import constant_key
+def _export_key(
+    host_fn: Callable[..., Any], specs: Sequence[ParamSpec], arch: str
+) -> tuple[Any, ...]:
+    """The key of an export of ``host_fn`` in _exports (see export_for_link)."""
+    from torch._higher_order_ops.cutedsl_kernel_wrap import cutedsl_kernel_name
+    from torch._native.cutedsl.user_kernel import key_constants
 
+    constants = {s.name: s.value for s in specs if isinstance(s, ConstantParamSpec)}
+    keys = key_constants(cutedsl_kernel_name(host_fn), constants)
     return (
         arch,
         *(
-            (s.name, constant_key(s.value, CUTEDSL_CONSTANT_RULES))
-            if isinstance(s, ConstantParamSpec)
-            else _spec_key(s)
+            (s.name, keys[s.name]) if isinstance(s, ConstantParamSpec) else _spec_key(s)
             for s in specs
         ),
     )
@@ -812,16 +840,17 @@ def export_for_link(
 
     Exports are reused within this process only, keyed by the host function object
     and the specs: the prefix does not cover every value a kernel reads, so a new
-    process exports again. The files go to ``out_root/<prefix>.<hash of their
-    bytes>``, so exporting the same kernel again under the same prefix (see
-    _stable_repr) yields the same paths (and with them the same JIT wrapper cache
-    key) and no new files.
+    process exports again. The constants are keyed by key_constants
+    (torch._native.cutedsl.user_kernel), which refuses a constant that constant_key
+    refuses with the eager launch's error, naming the kernel and the parameter. The
+    files go to ``out_root/<prefix>.<hash of their bytes>``, so exporting the same
+    kernel again under the same prefix (see _stable_repr) yields the same paths (and
+    with them the same JIT wrapper cache key) and no new files.
     """
     specs = tuple(specs)
+    key = _export_key(host_fn, specs, arch)
     with _exports_lock:
-        cached = _exports.setdefault(host_fn, {}).setdefault(
-            _export_key(specs, arch), []
-        )
+        cached = _exports.setdefault(host_fn, {}).setdefault(key, [])
         # An export whose cache directory was removed since cannot be linked.
         cached[:] = [e for e in cached if os.path.exists(e.object_path)]
         for exported in cached:
@@ -1114,12 +1143,12 @@ def emit_cpp_launch(
     p = exported.prefix
     structs = {s.param: s for s in abi.tensor_structs}
     scalars = [n for c, n in abi.params if n not in structs and c != "cudaStream_t"]
-    booleans = {
+    booleans = OrderedSet(
         s.name
         for s in exported.specs
         if isinstance(s, ScalarParamSpec)
         and getattr(s.annotation, "__name__", None) == "Boolean"
-    }
+    )
     if OrderedSet(tensor_args) != OrderedSet(structs):
         raise ValueError(
             f"{p}: tensor_args {sorted(tensor_args)} != tensors {sorted(structs)}"
@@ -1129,10 +1158,8 @@ def emit_cpp_launch(
             f"{p}: scalar_args {sorted(scalar_args)} != scalars {sorted(scalars)}"
         )
     if not OrderedSet(check_align) <= OrderedSet(structs):
-        raise ValueError(
-            f"{p}: check_align names {sorted(set(check_align) - set(structs))} are "
-            "not tensors"
-        )
+        extra = sorted(OrderedSet(check_align) - OrderedSet(structs))
+        raise ValueError(f"{p}: check_align names {extra} are not tensors")
 
     lines = ["{", f"  // CuTeDSL user kernel {p}"]
 

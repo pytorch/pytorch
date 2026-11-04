@@ -23,6 +23,7 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
+from torch._higher_order_ops.reinplace_trigger import TRIGGER_DSLS
 from torch._higher_order_ops.triton_kernel_wrap import (
     generate_ttir,
     maybe_unpack_host_tma_descriptor,
@@ -361,6 +362,23 @@ scale_kernel_hop_info = UserKernelHOPInfo(
     reinplace_trigger=ReInplaceTrigger.USER_KERNEL_OPS,
     serializable=False,
 )
+
+# Another HOP pair, which test_user_kernel_hop_registry only registers.
+other_kernel_wrapper_mutation = _ScaleKernelWrapper("other_kernel_wrapper_mutation")
+other_kernel_wrapper_functional = _ScaleKernelWrapper("other_kernel_wrapper_functional")
+
+
+@other_kernel_wrapper_functional.py_impl(DispatchKey.CompositeExplicitAutograd)
+def other_kernel_wrapper_functional_dense(
+    *, kwargs, tensors_to_clone, tensor_bases=None
+):
+    return functional_hop_dense(
+        other_kernel_wrapper_mutation,
+        hop_kwargs={},
+        kwargs=kwargs,
+        tensors_to_clone=tensors_to_clone,
+        tensor_bases=tensor_bases,
+    )
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
@@ -1270,6 +1288,24 @@ def forward(self, x_1, output_1):
         )
         with self.assertRaisesRegex(RuntimeError, msg):
             register_user_kernel_hop(dataclasses.replace(info))
+        # Only a DSL of another name is refused a member other than USER_KERNEL_OPS
+        # (test_user_kernel_hop_registration_refused): a third DSL can count its
+        # reinplacing under USER_KERNEL_OPS as the scale DSL does, and a DSL can
+        # register a second pair with its own member, as the triton DSL does here.
+        for dsl, trigger in (
+            ("other", ReInplaceTrigger.USER_KERNEL_OPS),
+            ("triton", ReInplaceTrigger.TRITON_OPS),
+        ):
+            other = dataclasses.replace(
+                info,
+                dsl=dsl,
+                mutation=other_kernel_wrapper_mutation,
+                functional=other_kernel_wrapper_functional,
+                reinplace_trigger=trigger,
+            )
+            with mock.patch.dict(_user_kernel_hops):
+                register_user_kernel_hop(other)
+                self.assertEqual(user_kernel_hop_infos(), [*infos, info, other])
 
     @mock.patch.dict(_user_kernel_hops)
     def test_user_kernel_hop_info_with_unhashable_callable(self):
@@ -1360,6 +1396,17 @@ def forward(self, x_1, output_1):
                 TypeError,
                 "'USER_KERNEL_OPS' is not a ReInplaceTrigger",
             ),
+            common_utils.subtest(
+                (
+                    "reinplace_trigger",
+                    ReInplaceTrigger.TRITON_OPS,
+                    ValueError,
+                    "ReInplaceTrigger.TRITON_OPS belongs to the triton DSL; register "
+                    "the scale DSL with ReInplaceTrigger.USER_KERNEL_OPS or a member "
+                    "of its own",
+                ),
+                name="reinplace_trigger_TRITON_OPS",
+            ),
         ],
         name_fn=lambda field, value, error, msg: f"{field}_{value}",
     )
@@ -1383,6 +1430,39 @@ def forward(self, x_1, output_1):
             scale_kernel_hop_info, reinplace_trigger=ReInplaceTrigger[trigger]
         )
         msg = "register the scale DSL with ReInplaceTrigger.USER_KERNEL_OPS"
+        with self.assertRaisesRegex(ValueError, msg):
+            register_user_kernel_hop(info)
+        self.assertEqual(_user_kernel_hops, registry)
+
+    @mock.patch.dict(_user_kernel_hops, clear=True)
+    def test_user_kernel_hop_trigger_refused_before_its_dsl_registers(self):
+        # TRITON_OPS belongs to the triton DSL whether or not Triton has registered
+        # yet (it registers when triton_kernel_wrap is first imported), so another DSL
+        # registering first cannot take it and make Triton's own registration fail.
+        msg = (
+            "ReInplaceTrigger.TRITON_OPS belongs to the triton DSL; register the scale "
+            "DSL with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
+        )
+        info = dataclasses.replace(
+            scale_kernel_hop_info, reinplace_trigger=ReInplaceTrigger.TRITON_OPS
+        )
+        with self.assertRaisesRegex(ValueError, msg):
+            register_user_kernel_hop(info)
+        self.assertEqual(_user_kernel_hops, {})
+
+    @mock.patch.dict(TRIGGER_DSLS, clear=True)
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_trigger_without_an_entry_refused(self):
+        # A DSL-specific member without a TRIGGER_DSLS entry belongs to no DSL, so no
+        # DSL can register with it: a DSL that adds a member must add its entry.
+        registry = dict(_user_kernel_hops)
+        info = dataclasses.replace(
+            scale_kernel_hop_info, reinplace_trigger=ReInplaceTrigger.TRITON_OPS
+        )
+        msg = (
+            "^ReInplaceTrigger.TRITON_OPS has no entry in TRIGGER_DSLS; add one naming "
+            "the DSL it belongs to$"
+        )
         with self.assertRaisesRegex(ValueError, msg):
             register_user_kernel_hop(info)
         self.assertEqual(_user_kernel_hops, registry)
@@ -1797,7 +1877,10 @@ def forward(self, x_1, output_1):
         self.assertEqual(bw_inputs, ["x_1", "getitem", "tangents_1"])
 
     @requires_gpu
-    @inductor_config.patch(force_disable_caches=True)
+    @inductor_config.patch(
+        force_disable_caches=True,
+        triton_kernel_default_layout_constraint="needs_fixed_stride_order",
+    )
     def test_user_kernel_hop_get_mutated_tensors_args(self):
         # What UserKernelHOPInfo.get_mutated_tensors is documented to be passed. With
         # caches on, a graph compiled before would not be lowered again.

@@ -2229,6 +2229,11 @@ static inline void ensure_triton_kernel_compiles_started() {{
         else:
             major, minor = torch.cuda.get_device_capability(device)
             arch = _cuda_arch_with_compile_suffix(f"{major}{minor}")
+        # export_for_link keys the constants with key_constants, as the Python
+        # wrapper does, so one that constant_key refuses (a default, say, which only
+        # Inductor keys) fails with the error the eager launch gives. A default that
+        # cannot be copied (one that refers to itself, say) fails before this, in
+        # split_args, with the eager launch's error too.
         exported = export_for_link(
             kernel.fn,
             specs,
