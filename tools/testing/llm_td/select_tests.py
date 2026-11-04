@@ -6,8 +6,9 @@ The prompt holds the PR title and description, the diff, and every test file
 CI can run annotated with its CI cost. Nothing from the change is executed:
 in CI this script runs from the default branch and only reads the PR through git. The model answers through `claude -p`
 with a JSON schema; on Bedrock set CLAUDE_CODE_USE_BEDROCK=1 and AWS
-credentials. Any failure yields a run_all selection, so CI never skips tests
-because the selector broke.
+credentials. A failure of git, the model call or its output, or the test times
+yields a run_all selection, so CI never skips tests because the selector broke;
+a bad LLM_TD_EFFORT or a failed write of --output writes no file.
 """
 
 from __future__ import annotations
@@ -52,6 +53,9 @@ MAX_CHANGED_FILES = 1000
 QUERY_TIMEOUT = 600
 # Room for the note that replaces a truncated file's tail.
 TRUNCATION_MARKER = 40
+# With a checkout, the model may use these tools on it, and the prompt starts with this.
+AGENTIC_TOOLS = "Read,Grep,Glob"
+CHECKOUT_PREAMBLE = "A checkout of the repository at this change is at {checkout}; use Read/Grep/Glob to find what exercises the changed code. Keep exploration focused.\n\n"
 # The PR text is wrapped in these tags and the prompt marks it as untrusted, so
 # the PR must not be able to close them.
 CLOSING_TAG_RE = re.compile(
@@ -171,7 +175,7 @@ def query_model(
     """Run `claude -p` and return its JSON result.
 
     With `checkout`, the model may Read/Grep/Glob that tree; otherwise it has no tools."""
-    tools = "Read,Grep,Glob" if checkout else ""
+    tools = AGENTIC_TOOLS if checkout else ""
     cmd = [
         "claude", "-p", "--bare", "--no-session-persistence",
         "--model", model,
@@ -183,7 +187,7 @@ def query_model(
     ]  # fmt: skip
     if checkout:
         cmd += ["--allowed-tools", tools, "--add-dir", checkout]
-        prompt = f"A checkout of the repository at this change is at {checkout}; use Read/Grep/Glob to find what exercises the changed code. Keep exploration focused.\n\n{prompt}"
+        prompt = CHECKOUT_PREAMBLE.format(checkout=checkout) + prompt
     # An empty working directory keeps the CLI from picking up any project
     # settings, also those of a checkout, which it reads only through --add-dir.
     with tempfile.TemporaryDirectory() as tmp:
