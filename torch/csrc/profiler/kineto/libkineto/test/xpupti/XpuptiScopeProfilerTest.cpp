@@ -19,8 +19,6 @@
 
 #include <gtest/gtest.h>
 
-#include <string_view>
-
 namespace KN = KINETO_NAMESPACE;
 
 class XpuptiScopeProfilerTest : public ::testing::Test {
