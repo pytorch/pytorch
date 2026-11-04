@@ -2213,13 +2213,18 @@ class CudaReproTests(TestCase):
 
         f1_out, f1_grad = run(f, True)
         eager_out, eager_grad = run(f, False)
-        output_atol = grad_atol = 1e-5
+        out_tol = grad_tol = {"atol": 1e-5, "rtol": 1e-5}
         if device_type == "xpu":
-            # Eager oneDNN fuses bias; Inductor adds it separately. The FP32
-            # output and gradient differ slightly between these paths.
-            output_atol, grad_atol = 2e-4, 1e-4
-        self.assertEqual(f1_out, eager_out, atol=output_atol, rtol=1e-5)
-        self.assertEqual(f1_grad, eager_grad, atol=grad_atol, rtol=1e-5)
+            # Eager oneDNN fuses the bias add, Inductor peels it into a separate
+            # add, so the two round differently. bias -1000 puts the conv output
+            # near 1000, where one fp32 ulp is 6.1e-5, so the paths disagree in
+            # whole ulps: 1.8e-4 (3 ulps) on the output, 7.3e-5 on t.grad via
+            # log_softmax and conv backward. 6 ulps leaves room for one more
+            # rounding on another SKU; a bf16/fp16 cast would be ~4 or ~0.5.
+            out_tol = {"atol": 4e-4, "rtol": 1e-5}
+            grad_tol = {"atol": 2e-4, "rtol": 1e-5}
+        self.assertEqual(f1_out, eager_out, **out_tol)
+        self.assertEqual(f1_grad, eager_grad, **grad_tol)
 
         opt_fn = torch.compile(f, backend="inductor", fullgraph=True)
         _, codes = run_and_get_code(opt_fn, x.clone().requires_grad_())
