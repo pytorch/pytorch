@@ -23,7 +23,8 @@ the hedge budget; td_replay ranks them first, as TD's PreviouslyFailedInPR
 does.
 As in select_tests.select, a sample with no changed files, a change to test
 infrastructure (needs_run_all) or more than MAX_CHANGED_FILES runs everything
-under every model policy, at no model cost. A malformed answer counts as an
+under every model policy, at no model cost; `final+tdN` keeps TD's cut in a
+config with no test time there too, as it does for any run-all. A malformed answer counts as an
 error, as select_tests records it.
 The tag `td` scores the replayed in-repo TD (see td_replay.py) under the
 single policy `td25`, its CI cut of the top 25% per config, and ignores
@@ -31,7 +32,8 @@ single policy `td25`, its CI cut of the top 25% per config, and ignores
 
 Every tag and policy is scored on the same samples: those with a TD replay
 of the current test-times.json, sample, STATS artifacts and replay code
-(see replay_inputs and replay_stats) and a result for every model tag; the rest are counted on stderr. The test files that
+(see replay_inputs and replay_stats) and a result for every model tag made
+from the prompt the sample gives now (see prompt_sha); the rest are counted on stderr. The test files that
 import an edited test file are found with git grep at the sample's head; a
 sample on which that fails (its head is not in this clone?) is left out and
 counted on stderr too, as in CI the grep works.
@@ -52,6 +54,12 @@ CI applies the TD cut and the hedge per job over that job's own test list;
 this models a job as a config of test-times.json (see job_files), and hedges a config no job
 of test-times.json records over its fallback job's times, as run_test.py
 does: default/<config>, else default/default (see fallback_seconds).
+CI applies them, and their fallbacks, per run_test.py call, and this pools
+a config's calls into one list. That differs where test.sh makes several
+calls with their own --include lists: inductor's two, which run no newly
+added file, and small extra calls on default's shard 1. Modelling inductor's
+calls apart moves no failure and the mean cost shares by under 0.6 points,
+except td25's GPU share on the eval set (-2 points).
 
 `files` in the summary is the median number of files selected among the
 selections that do not run everything.
@@ -82,7 +90,14 @@ from tools.stats.import_test_stats import (
     TEST_FILE_RATINGS_FILE,
 )
 from tools.testing.llm_td.eval import REPO
-from tools.testing.llm_td.select_tests import git_grep, MAX_CHANGED_FILES
+from tools.testing.llm_td.select_tests import (
+    build_prompt,
+    git_grep,
+    MAX_CHANGED_FILES,
+    SCHEMA,
+    SYSTEM_PROMPT,
+    test_minutes,
+)
 from tools.testing.llm_td.selection import (
     LLM_TD_HEDGE,
     needs_run_all,
@@ -100,6 +115,8 @@ HEDGE = re.compile(r"final\+td(\d+(?:\.\d+)?)?")
 MATRIX_CONFIG = re.compile(r'config: "([^"]+)"')
 VERSION = re.compile(r"\d+(\.\d+)*")
 MATRIX_SUFFIX = re.compile(r" \([^()]*\)")
+# run_test.py never runs TD on macOS or in xpu or onnx builds.
+NO_TD_ENV = re.compile("macos|xpu|onnx")
 # .ci/pytorch/test.sh runs a TEST_CONFIG containing one of these through a function that exports NO_TD=1.
 NO_TD_CONFIGS = ("dynamo_cpython",)
 # The historical-stats artifacts td_replay reads, and the TD code it runs.
@@ -144,12 +161,13 @@ def config_of(job: str) -> str:
 def test_seconds(path: Path) -> Seconds:
     """config -> file -> [cpu, gpu] seconds of one full CI pass.
 
-    The "default" job is run_test.py's fallback for unknown jobs, not a job (see select_tests.test_minutes)."""
+    The "default" job is run_test.py's fallback for unknown jobs, not a job
+    (see select_tests.test_minutes), and environments that never run TD are left out."""
     out: dict = collections.defaultdict(
         lambda: collections.defaultdict(lambda: [0.0, 0.0])
     )
     for env, configs in json.loads(path.read_text()).items():
-        if env == "default":
+        if env == "default" or NO_TD_ENV.search(env):
             continue
         gpu = int(bool(GPU_ENV.search(env)))
         for c, files in configs.items():
@@ -256,7 +274,7 @@ def job_runs_td(job: str, workflow: str | None = None) -> bool:
         td, other = ({(norm(n), k) for w, n, k in jobs[b] if workflow in (None, w)} for b in (True, False))  # fmt: skip
         if (key := (norm(name), c)) in td | other:
             return key in td and (workflow is None or key not in other)
-    return not re.search("macos|xpu|onnx", name) and runs_td(c)
+    return not NO_TD_ENV.search(name) and runs_td(c)
 
 
 def truth_jobs(s: dict, f: str) -> list[tuple[str | None, str]]:
@@ -347,7 +365,8 @@ def grep_head(s: dict, sid: str, failed: set[str]) -> Callable[[str], list[str]]
     def grep(pattern: str) -> list[str]:
         if sid not in failed:
             try:
-                return grep_at(pattern, s["sha"])
+                # A copy: selection.data_file_readers extends what grep returns.
+                return list(grep_at(pattern, s["sha"]))
             except RuntimeError:
                 failed.add(sid)
         return []
@@ -377,31 +396,22 @@ def policy(
         return Choice(Selection(), cut, set(td["top25"]), {*cut, ""})
     if name not in ("model", "final", "final-hm") and not HEDGE.fullmatch(name):
         raise ValueError(f"unknown policy {name!r}")
-    if unasked(s):
-        return Choice(Selection(run_all=True))
     out = (r or {}).get("out")
-    if name == "model":
-        return Choice(
-            Selection(run_all=True)
-            if out is None
-            else Selection.from_model_output(out, cands, [])
-        )
     if m := HEDGE.fullmatch(name):
         if td is None:
             return None
         share = float(m.group(1)) / 100 if m.group(1) else LLM_TD_HEDGE
-        sel = Selection.from_model_output(out, cands, s["changed_files"], grep, s.get("deleted", []))  # fmt: skip
+        sel = Selection(run_all=True) if unasked(s) else Selection.from_model_output(out, cands, s["changed_files"], grep, s.get("deleted", []))  # fmt: skip
         if sel.error is not None:
             # Not enforced, so apply_selection keeps TD's split.
             return policy("td25", s, r, td, seconds)
-        if sel.run_all:
-            return Choice(sel)
         times = {
             c: {f: cpu + gpu for f, (cpu, gpu) in fs.items() if f in cands}
             for c, fs in seconds.items()
         }
         cut, jobs = td["top25_cfg"], job_files(s, seconds)
         prev = set(s.get("previous_failures", ()))
+        # Under run-all hedge adds nothing, but a config with no test time still keeps TD's cut.
         per_config = {c: hedge(sel, td["scored"], fs, share, c, cut.get(c, ()), jobs[c] - fs.keys(), prev) for c, fs in times.items()}  # fmt: skip
         # A config no job records is hedged over the fallback job's times, and its test list is every candidate.
         fb = {c: {f: t for f, t in fs.items() if f in cands} for c, fs in (fallback or {}).items()}  # fmt: skip
@@ -412,6 +422,14 @@ def policy(
         other = hedge(sel, td["scored"], fs, share, "", td["top25"], cands - set(fs), prev)  # fmt: skip
         unenforced = {c for c, fs in [*times.items(), ("", fs)] if not sum(fs.values())}  # fmt: skip
         return Choice(sel, per_config, other, unenforced)
+    if unasked(s):
+        return Choice(Selection(run_all=True))
+    if name == "model":
+        return Choice(
+            Selection(run_all=True)
+            if out is None
+            else Selection.from_model_output(out, cands, [])
+        )
     if name == "final-hm":
         # A malformed answer is left for from_model_output to fall back on.
         with contextlib.suppress(ValueError):
@@ -425,6 +443,15 @@ def unasked(s: dict) -> bool:
     """Whether select_tests.select runs everything on `s` without asking the model."""
     changed = s["changed_files"]
     return not changed or needs_run_all(changed) or len(changed) > MAX_CHANGED_FILES
+
+
+def sample_prompt(sample: dict, minutes: dict) -> str:
+    return build_prompt(sample["title"], sample["body"] or "", sample["diffstat"], sample["diff"], sample["candidates"], minutes)  # fmt: skip
+
+
+def prompt_sha(prompt: str) -> str:
+    """A hash of everything the model is sent: the system prompt, SCHEMA and `prompt`."""
+    return hashlib.sha256(json.dumps([SYSTEM_PROMPT, SCHEMA, prompt]).encode()).hexdigest()  # fmt: skip
 
 
 def replay_inputs(stats: str, times: bytes, sample: bytes) -> str:
@@ -479,10 +506,11 @@ def score(
     td_dir: Path,
     stats: str,
 ) -> list[dict]:
-    """Rows of every tag and policy, all on the ids that have a TD replay of the current inputs under `stats` (see replay_stats), git grep at their head and, unless `unasked`, a result for every tag but `td`."""
+    """Rows of every tag and policy, all on the ids that have a TD replay of the current inputs under `stats` (see replay_stats), git grep at their head and, unless `unasked`, a result for every tag but `td` of the prompt the sample gives now (see prompt_sha)."""
     seconds = test_seconds(data / "test-times.json")
     fallback = fallback_seconds(data / "test-times.json")
     times = (data / "test-times.json").read_bytes()
+    minutes = test_minutes(json.loads(times))
     rows = []
     dropped: collections.Counter[str] = collections.Counter()
     ungrepped: set[str] = set()
@@ -496,7 +524,10 @@ def score(
                 "td replay of the current test-times.json, sample, STATS and TD code"
             ]
         if not unasked(s):
-            missing += [f"{tag} result" for tag, (_, r, _) in loaded.items() if tag != "td" and r is None]  # fmt: skip
+            results = {tag: r for tag, (_, r, _) in loaded.items() if tag != "td"}
+            missing += [f"{tag} result" for tag, r in results.items() if r is None]
+            sent = prompt_sha(sample_prompt(s, minutes))
+            missing += [f"{tag} result of the current sample, test-times.json, prompt and schema" for tag, r in results.items() if r is not None and r.get("prompt_sha") != sent]  # fmt: skip
         dropped.update(missing)
         if missing:
             continue
@@ -504,6 +535,7 @@ def score(
         sample_rows = []
         for tag, (_, r, td) in loaded.items():
             skipped = tag != "td" and unasked(s)
+            error = not skipped and bool(r) and (bool(r["error"]) or Selection.from_model_output(r["out"], cands, []).error is not None)  # fmt: skip
             for pol in ["td25"] if tag == "td" else policies:
                 choice = policy(
                     pol, s, r, td, seconds, grep_head(s, sid, ungrepped), fallback
@@ -515,8 +547,8 @@ def score(
                 sample_rows.append({
                     "tag": tag, "policy": pol, "id": sid, "kind": s["kind"], "pairs": len(pairs), "hit": sum(hit),
                     "cpu": cpu, "gpu": gpu, "run_all": choice.sel.run_all, "files": len(choice.files()),
-                    "cost_usd": 0.0 if skipped else (r or {}).get("cost_usd") or 0.0,
-                    "error": not skipped and bool(r) and (bool(r["error"]) or Selection.from_model_output(r["out"], cands, []).error is not None),
+                    "cost_usd": None if skipped else (r or {}).get("cost_usd") or 0.0,
+                    "error": error,
                     "missed": [p for p, h in zip(pairs, hit) if not h],
                 })  # fmt: skip
         if sid in ungrepped:
@@ -539,6 +571,8 @@ def summarize(rows: list[dict]) -> list[dict]:
     out = []
     for (tag, pol, kind), xs in groups.items():
         failing = [x for x in xs if x["pairs"]]
+        # Samples select_tests answers without the model have no cost.
+        costs = [x["cost_usd"] for x in xs if x["cost_usd"] is not None] or [0.0]
         subset = [x["files"] for x in xs if not x["run_all"]] or [0]
         out.append({
             "tag": tag, "policy": pol, "kind": kind, "n": len(xs), "n_failing": len(failing),
@@ -547,7 +581,7 @@ def summarize(rows: list[dict]) -> list[dict]:
             "pair_recall": sum(x["hit"] for x in failing) / max(sum(x["pairs"] for x in failing), 1),
             "cpu": st.mean(x["cpu"] for x in xs), "gpu": st.mean(x["gpu"] for x in xs),
             "run_all": sum(x["run_all"] for x in xs), "median_files": st.median(subset),
-            "usd_per_call": st.mean(x["cost_usd"] for x in xs), "errors": sum(x["error"] for x in xs),
+            "usd_per_call": st.mean(costs), "errors": sum(x["error"] for x in xs),
         })  # fmt: skip
     return out
 
