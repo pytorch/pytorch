@@ -609,9 +609,11 @@ class TestCuda(TestCase):
         for _ in range(2):
             t = torch.empty(1024 * 1024, dtype=torch.float32, pin_memory=True)
             t.cuda(non_blocking=True)
-            torch.cuda.synchronize()
             del t
             gc.collect()
+            # free() records the reuse-safety event when t is destroyed.
+            # Synchronize after destruction so the event is complete before draining it.
+            torch.cuda.synchronize()
             # Drain via process_events_for_specific_size(-1, ...).
             torch._C._host_emptyCache()
 
