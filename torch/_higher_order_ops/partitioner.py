@@ -381,10 +381,15 @@ class HopGraphMinCutPartitioner:
         Returns a HopPartitionedGraph
         """
         from torch._functorch.partitioners import min_cut_rematerialization_partition
+        from torch.utils.checkpoint import _tag_recompute_for_partitioner
 
-        joint_graph: HopJointGraph = create_hop_joint_graph(
-            fw_fn, fw_args, functionalize=True
-        )
+        # SAC's eager path traces the recompute into the joint graph, and
+        # min-cut's CSE merges it back into the forward. Make checkpoint write
+        # recompute tags instead, so min-cut follows the policy.
+        with _tag_recompute_for_partitioner():
+            joint_graph: HopJointGraph = create_hop_joint_graph(
+                fw_fn, fw_args, functionalize=True
+            )
         return joint_graph.partition(
             min_cut_rematerialization_partition, always_recompute_complex_exprs
         )
