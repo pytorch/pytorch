@@ -22,7 +22,7 @@ from tools.testing.target_determination.heuristics.edited_by_pr import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection
+    from collections.abc import Callable, Collection, Iterable
     from pathlib import Path
 
 
@@ -66,6 +66,8 @@ LLM_SELECTION_FILE = "llm_selection.json"
 # The selector runs from the default branch and run_test.py from the PR, so
 # bump this whenever an older reader would misread the selection file.
 SELECTION_VERSION = 1
+# Longest chain of test modules importing each other that importers() follows.
+MAX_IMPORT_HOPS = 8
 
 # Tests that run the files a change matches although they do not import them:
 # the drivers of the directories discover_tests.py blocklists (except
@@ -164,6 +166,72 @@ def edited_tests(changed_files: list[str], candidates: set[str]) -> set[str]:
     return edited
 
 
+def importers(
+    sources: list[str], candidates: set[str], grep: Callable[[str], list[str]]
+) -> set[str] | None:
+    """The candidates among `sources` (paths under test/), the candidates that
+    import one of them directly or through other modules under test/, and their
+    drivers: test/jit/test_freezing.py selects test_jit, which runs it, and
+    test_jit_legacy, which does `from test_jit import *`. `grep` lists the paths
+    under test/ that match a `git grep -E` pattern at the change's head. None if
+    following the importers takes more than MAX_IMPORT_HOPS hops (grep rounds)."""
+    found: set[str] = set()
+    seen: set[str] = set()
+    frontier = {f for f in sources if f.startswith("test/") and f.endswith(".py")}
+    for hop in range(MAX_IMPORT_HOPS + 1):
+        tests = edited_tests(sorted(frontier), candidates)
+        found |= tests
+        frontier = (frontier | {f"test/{t}.py" for t in tests}) - seen
+        if not frontier:
+            return found
+        if hop == MAX_IMPORT_HOPS:
+            return None
+        seen |= frontier
+        frontier = {f for f in grep(import_pattern(frontier)) if f.endswith(".py")}
+    return None
+
+
+def import_pattern(modules: Iterable[str]) -> str:
+    """A `git grep -E` pattern for importing one of `modules`, .py paths under test/."""
+    # A module is imported by any dotted suffix of its path, optionally prefixed
+    # with `test.`, or by importlib.import_module of one; a package by its
+    # directory; and load_test_module (a SourceFileLoader) takes the path.
+    # The CPython tests under test/cpython redirect test.<name> to <name>, so
+    # `from test import <name>` imports their sibling module <name>.
+    # A parenthesized `from <package> import (` may span lines, so it counts
+    # as importing every module of that package. A bare name that is also a
+    # standard library module, such as random, imports that module instead.
+    mods = sorted(f[5:-3].removesuffix("/__init__") for f in modules)
+    parts = [m.split("/") for m in mods]
+    names = alts(
+        ".".join(p[i:])
+        for p in parts
+        for i in range(len(p))
+        if i < len(p) - 1 or p[i] not in sys.stdlib_module_names
+    )
+    bases = alts(p[-1] for p in parts)
+    parents = alts(".".join(p[i:-1]) for p in parts for i in range(len(p) - 1))
+    paths = alts(n for m in mods for n in (m, m.replace("/", ".")))
+    end = "([^[:alnum:]_]|$)"
+    forms = [
+        rf"(from|import)[[:space:]]+\.*(test\.)?({names}){end}",
+        rf"from[[:space:]]+(\.+|test)[[:space:]]+import[[:space:]]+(.*[^[:alnum:]_.])?({bases}){end}",
+    ]
+    if parents:
+        forms.append(
+            rf"from[[:space:]]+\.*(test\.)?({parents})[[:space:]]+import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})"
+        )
+    quoted = rf"""load_test_module\(["']({paths})["']\)|import_module\(["'](test\.)?({names})["']\)"""
+    return rf"^[[:space:]]*({'|'.join(forms)})|{quoted}"
+
+
+def alts(names: Iterable[str]) -> str:
+    """An extended regex alternation of the literal `names`."""
+    return "|".join(
+        re.sub(r"[.^$*+?()\[\]{}|\\]", r"\\\g<0>", n) for n in sorted(set(names))
+    )
+
+
 def needs_run_all(changed_files: list[str]) -> bool:
     return any(re.search(p, f) for p in RUN_ALL_PATTERNS for f in changed_files)
 
@@ -176,9 +244,8 @@ def parse_model_output(
     A `dirs` entry is a directory prefix such as "dynamo"; one that matches no
     candidate is malformed, and so is a `tests` name that matches no
     candidate: the model was told to copy the names from the candidate list.
-    With `grep`, which lists the paths under test/ that match a `git grep -E`
-    pattern, a name of a file that a driver runs, such as jit/test_freezing,
-    names the driver instead."""
+    With `grep` (see importers), a name of a file that a driver runs, such as
+    jit/test_freezing, names the driver instead."""
     if not isinstance(out, dict):
         raise ValueError("not an object")
     if missing := sorted({"tests", "dirs", "sweeps", "run_all", "reason"} - out.keys()):
@@ -247,10 +314,11 @@ class Selection:
     ) -> Selection:
         """Turn the model's structured output into a Selection.
 
-        A missing or malformed output and a change to test infrastructure fall
-        back to running everything; only a missing or malformed output sets
-        error. Test files the change edits and their drivers are always
-        selected."""
+        A missing or malformed output, a change to test infrastructure and too
+        many import hops fall back to running everything; only a missing or
+        malformed output sets error. Test files the change edits and their
+        drivers are always selected, and with `grep` so are the test files that
+        import them (see importers)."""
         if out is None:
             return cls(
                 run_all=True,
@@ -271,6 +339,16 @@ class Selection:
             raise AssertionError("parse_model_output accepts only objects")
         edited = edited_tests(changed_files, candidates)
         files |= edited
+        if grep is not None:
+            # The drivers of edited non-.py files, such as test_jit for test/jit/*.txt, have importers too.
+            drivers = [f"test/{t}.py" for t in sorted(edited)]
+            found = importers(changed_files + drivers, candidates, grep)
+            if found is None:
+                return cls(
+                    run_all=True,
+                    reason="test modules import the change through too many hops",
+                )
+            files |= found
         run_all, reason = out["run_all"], str(out["reason"])
         return cls(files, sweeps, run_all, reason, candidates=set(candidates))
 
