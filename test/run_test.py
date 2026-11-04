@@ -66,16 +66,20 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results
-from tools.testing.llm_td.selection import LLM_TD_SELECTION_FILE, split_tests
-from tools.testing.target_determination.gen_artifact import gen_ci_artifact
+from tools.testing.llm_td.selection import (
+    apply_selection,
+    LLM_TD_SELECTION_FILE,
+    Selection,
+)
+from tools.testing.target_determination.gen_artifact import (
+    gen_ci_artifact,
+    LLM_SELECTION_SOURCE,
+    TD_SOURCE,
+)
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
 )
-from tools.testing.target_determination.heuristics.utils import (
-    get_pr_number,
-    td_enabled_job,
-    td_enabled_workflow,
-)
+from tools.testing.target_determination.heuristics.utils import td_enabled_default
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
     calculate_shards,
@@ -1795,16 +1799,17 @@ def parse_args():
         help="Set a timeout based on the test times json file.  Only works if there are test times available",
         default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
     )
-    GITHUB_WORKFLOW = os.environ.get("GITHUB_WORKFLOW", "slow")
-    no_td = strtobool(os.environ.get("NO_TD", "False"))
     parser.add_argument(
         "--enable-td",
         action="store_true",
         help="Enables removing tests based on TD",
-        default=IS_CI
-        and get_pr_number() is not None
-        and td_enabled_job(BUILD_ENVIRONMENT, macos=IS_MACOS, no_td=no_td)
-        and td_enabled_workflow(GITHUB_WORKFLOW),
+        default=td_enabled_default(
+            BUILD_ENVIRONMENT,
+            os.environ.get("GITHUB_WORKFLOW", "slow"),
+            is_ci=IS_CI,
+            macos=IS_MACOS,
+            no_td=strtobool(os.environ.get("NO_TD", "False")),
+        ),
     )
     parser.add_argument(
         "--shard",
@@ -2547,21 +2552,46 @@ def main():
             s += "".join(f"    {test}\n" for test in parallel)
             return s.strip()
 
-    # TD's split, or the LLM test selection's if CI downloaded one; see tools/testing/llm_td.
-    split = split_tests(
-        test_prioritizations=test_prioritizations,
-        test_times=test_file_times_dict,
-        selection_file=REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_TD_SELECTION_FILE,
-        test_config=TEST_CONFIG,
-        td_enabled=options.enable_td,
-        previous_failures=previous_failures,
-        gen_artifact=gen_ci_artifact if IS_CI else None,
+    percent_to_run = 25 if options.enable_td else 100
+    print_to_stderr(
+        f"Running {percent_to_run}% of tests based on TD"
+        if options.enable_td
+        else "Running all tests"
     )
-    test_batch = TestBatch("tests to run", split.include, False)
-    test_batch_exclude = TestBatch("excluded", split.exclude, True)
-    # emit_metric records its caller, so this stays in main().
-    if IS_CI and split.llm is not None:
-        emit_metric("llm_td_selection", split.llm.selection_metric)
+    include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
+    td_exclude = exclude
+    # The LLM test selection, if CI downloaded one, may replace TD's split; see tools/testing/llm_td.
+    llm = None
+    selection = Selection.load(
+        REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_TD_SELECTION_FILE
+    )
+    if selection is not None:
+        llm = apply_selection(
+            selection,
+            include,
+            exclude,
+            test_prioritizations.get_score,
+            test_file_times_dict,
+            test_config=TEST_CONFIG,
+            td_enabled=options.enable_td,
+            previous_failures=previous_failures,
+        )
+        if llm.enforced:
+            include, exclude = llm.split.include, llm.split.exclude
+    llm_enforced = llm is not None and llm.enforced
+
+    test_batch = TestBatch("tests to run", include, False)
+    test_batch_exclude = TestBatch("excluded", exclude, True)
+    if IS_CI:
+        gen_ci_artifact(
+            [x.to_json() for x in include],
+            [x.to_json() for x in exclude],
+            source=LLM_SELECTION_SOURCE if llm_enforced else TD_SOURCE,
+            td_excluded=[x.to_json() for x in td_exclude],
+        )
+        # emit_metric records its caller, so this stays in main().
+        if llm is not None:
+            emit_metric("llm_td_selection", llm.selection_metric)
 
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
@@ -2615,12 +2645,12 @@ def main():
                     {
                         "selected_tests": selected_tests,
                         "failure": str(test),
-                        "llm_enforced": split.enforced,
+                        "llm_enforced": llm_enforced,
                         **test_stats,
                     },
                 )
-                if split.llm is not None:
-                    emit_metric("llm_td_failure", split.llm.failure_metric(test))
+                if llm is not None:
+                    emit_metric("llm_td_failure", llm.failure_metric(test))
             gen_additional_test_failures_file(
                 [test.test_file for test, _ in all_failures]
             )
