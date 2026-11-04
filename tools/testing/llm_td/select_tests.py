@@ -208,19 +208,31 @@ def query_model(
             cmd, input=prompt, capture_output=True, text=True, cwd=tmp, timeout=timeout
         )
     try:
-        return json.loads(p.stdout)
+        result = json.loads(p.stdout)
     except json.JSONDecodeError:
+        result = None
+    if not isinstance(result, dict):
         return {"is_error": True, "result": (p.stdout + p.stderr)[-2000:]}
+    return result
+
+
+# Git options to list non-ASCII paths verbatim rather than quoted.
+UNQUOTED_PATHS = ("-c", "core.quotePath=false")
 
 
 def git(*args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=REPO_ROOT, text=True)
 
 
+def git_paths(*args: str) -> list[str]:
+    """The paths a git command lists one per line."""
+    return git(*UNQUOTED_PATHS, *args).splitlines()
+
+
 def git_grep(pattern: str, rev: str) -> list[str]:
     """The paths under test/ at `rev` with a line matching the extended regex `pattern`."""
     p = subprocess.run(
-        ["git", "grep", "-lE", pattern, rev, "--", "test/"],
+        ["git", *UNQUOTED_PATHS, "grep", "-lE", pattern, rev, "--", "test/"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -233,7 +245,7 @@ def git_grep(pattern: str, rev: str) -> list[str]:
 def changed_files(merge_base: str, head: str) -> list[str]:
     # Without renames a moved file is listed at both paths, and its new path is
     # an added file.
-    return git("diff", "--name-only", "--no-renames", merge_base, head).splitlines()
+    return git_paths("diff", "--name-only", "--no-renames", merge_base, head)
 
 
 def diffstat_and_diff(merge_base: str, head: str) -> tuple[str, str]:
@@ -282,9 +294,9 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     # TESTS comes from the checkout this script runs from, which in CI is the
     # trusted default branch rather than the PR; add the test files the PR adds
     # that run_test.py would discover.
-    added = git(
+    added = git_paths(
         "diff", "--name-only", "--no-renames", "--diff-filter=A", merge_base, args.head
-    ).splitlines()
+    )
     added_tests = {
         f.removeprefix("test/").removesuffix(".py")
         for f in added
@@ -305,9 +317,9 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     record["cost_usd"] = result.get("total_cost_usd")
     record["model_output"] = out
     # A deleted file, or the old path of a moved one, needs no reader.
-    deleted = git(
+    deleted = git_paths(
         "diff", "--name-only", "--no-renames", "--diff-filter=D", merge_base, args.head
-    ).splitlines()
+    )
     selection = Selection.from_model_output(
         out, set(candidates), changed, lambda p: git_grep(p, args.head), set(deleted)
     )
