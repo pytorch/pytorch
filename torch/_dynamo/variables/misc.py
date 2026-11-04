@@ -74,6 +74,7 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationExisting,
+    check_setattr_args,
     getset_build,
     Member,
     Method,
@@ -405,8 +406,8 @@ class SuperVariable(VariableTracker):
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
         ):
-            # type: ignore[arg-type]
-            return self.objvar.method_setattr_standard(tx, *args, **kwargs)
+            check_setattr_args(tx, args, kwargs)
+            return self.objvar.method_setattr_standard(tx, *args)
         elif inner_fn is object.__delattr__:
             attr = args[0]
             try:
@@ -446,6 +447,10 @@ class SuperVariable(VariableTracker):
             and self.objvar._base_methods is not None
             and inner_fn in self.objvar._base_methods
         ):
+            if isinstance(inner_fn, types.MethodDescriptorType):
+                return variables.BoundBuiltinMethodVariable(
+                    inner_fn, self.objvar
+                ).call_function(tx, args, kwargs)
             return self.objvar.call_base_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             attr_name = args[0].value  # type: ignore[attr-defined]
