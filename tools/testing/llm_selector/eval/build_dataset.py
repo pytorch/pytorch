@@ -4,29 +4,25 @@
     python -m tools.testing.llm_selector.eval.build_dataset --data DIR --start 2026-10-01 --end 2026-10-26 --kinds head
     python -m tools.testing.llm_selector.eval.build_dataset --data DIR --start 2026-04-01 --end 2026-10-26 --kinds revert
 
-eval/ids lists the samples the report scored, as sorted ids (file names under
-DIR/samples without .json), split by each sample's `date` (a PR sample's
-failure, a revert's revert time):
-  eval.txt    the pr_, rev_ and neu_ samples of the three builds above, less
-              pilot.txt
-  pilot.txt   the 10 neu_ samples of the pilot run made while writing the
-              prompt; its pr_ and rev_ samples are not in eval.txt either
+eval/ids holds sorted sample ids (file names under DIR/samples without .json).
+The report scores eval.txt, head.txt and their subsets; dev.txt and pilot.txt
+hold samples read while writing the prompt and are not scored:
+  eval.txt    the pr_ and rev_ samples dated (a PR's failure, a revert's
+              revert time) inside the pr and revert builds above, less dev.txt's
+              PRs, and neu_ samples drawn from main commits of that pr window
   neutral.txt the neu_ ids of eval.txt
-  head.txt    the head_ samples of the head build above, all of eval.txt's PRs
-  dev.txt     the pr_ samples of a build with --start 2026-09-20 --end
-              2026-10-26 dated before 2026-10-01 and the rev_ samples reverted
-              before 2026-04-01 (from 2025-11-11 on). A PR with own failures
-              on both sides of 2026-10-01 has a sample in this build and in
-              the --start 2026-10-01 one, so eval.txt leaves out dev.txt's
-              PRs (its PRs were first drawn from this build, as the samples
-              dated from 2026-10-01 on, and a build has one sample per PR);
-              test_checked_in_ids checks that no id is in both
-  agentic.txt the eval.txt samples the agentic rerun was made on, a subset
-              recorded with that run rather than derived from a build
-The checked-in pr_ and rev_ ids were built by the builder at tag
+  head.txt    the head_ samples with truth of eval.txt's PRs
+  agentic.txt the eval.txt samples the agentic rerun was made on, recorded with
+              that run, not cut by date
+  dev.txt     pr_ samples dated 2026-09-20 to 2026-09-30 and rev_ samples
+              reverted 2025-11-11 to 2026-03-31; test_checked_in_ids checks that
+              no id is in both dev.txt and eval.txt
+  pilot.txt   the 10 neu_ samples of the pilot prompt run, not cut by date; 48 of
+              its 50 pr_ and rev_ samples are in dev.txt, the other 2 in no list
+The pr_, rev_ and head_ ids come from one rebuild with the builder at tag
 llmtd-r17-pre-r39, which rebuilt only the PRs and reverts already in eval.txt;
-the neu_ and dev.txt samples are carried over from earlier builds. So a rebuild
-gives similar, not identical, lists.
+the neu_, dev.txt and pilot.txt samples are carried over from earlier builds.
+So a rebuild gives similar, not identical, lists.
 
 Four kinds of sample, each a JSON file under DIR/samples:
 
@@ -117,10 +113,10 @@ not the PR's own, and is dropped, if
   - the same test failed, without passing again in its job, on another PR's
     head whose change `merge_base` already has, so the head's diff leaves it
     out and the failure is the breakage of a PR below it in a stack (or of
-    one that landed before it). The author's own PRs count at any time until
-    they land, since a stack's lower PRs can sit for weeks; another author's
-    count only within WINDOW, so a long-landed PR that once broke the test
-    does not drop the failure. Within WINDOW and before the PR landed,
+    one that landed before it). The author's own PRs count until they land,
+    back to the loaded failures (--start - LOOKBACK), since a stack's lower PRs
+    can sit for weeks; another author's count only within WINDOW, so a
+    long-landed PR that once broke the test does not drop the failure. Within WINDOW and before the PR landed,
     other_failure already drops it, so for another author this rule only adds
     lower heads that failed after the PR landed, which other_failure leaves
     out because there it cannot tell this PR's breakage from theirs. The
@@ -190,8 +186,9 @@ KINDS = ("pr", "head", "revert", "neutral")
 BUILDER = 2
 WINDOW = dt.timedelta(days=14)
 # Failures this far before --start are loaded: heads are judged from
-# --start - WINDOW, against failures up to WINDOW earlier, and merge bases may be
-# older still.
+# --start - WINDOW, against failures up to WINDOW earlier, merge bases may be
+# older still, and History.stacked sees the author's own lower heads only this
+# far back.
 LOOKBACK = dt.timedelta(days=30)
 NEVER = dt.datetime.max.replace(tzinfo=dt.timezone.utc)
 SKIP_JOBS = ("rerun_disabled_tests", "mem_leak_check")
