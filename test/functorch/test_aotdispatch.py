@@ -13037,18 +13037,6 @@ aot_autograd_failures = {
     skip("linalg.lu_solve"),  # flaky
     decorate("matmul", decorator=unittest.skipIf(IS_ARM64, "flaky")),
     decorate("__rmatmul__", decorator=unittest.skipIf(IS_ARM64, "flaky")),
-    # Eager and AOTDispatcher gradients of matmul differ by up to 5.1e-5 in float32
-    # with MKL 2026.2 (measured on the AVX-512 CI runners; the default atol is 1e-5).
-    # 1e-4 leaves about 2x headroom for the AVX2 and AMD runners, where MKL picks other
-    # kernels. The value is shared by MKL and non-MKL builds.
-    decorate(
-        "matmul",
-        decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=4e-06)}),
-    ),
-    decorate(
-        "__rmatmul__",
-        decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=4e-06)}),
-    ),
     # overrides atol=1e-4, rtol=1e-5 would do as well
     decorate(
         "svd_lowrank",
@@ -13090,11 +13078,44 @@ aot_autograd_failures = {
     decorate("nn.functional.conv2d", decorator=unittest.skipIf(IS_ARM64, "flaky")),
 }
 
-if TEST_MKL:
-    # Eager vs compiled gradients differ by ~1.4e-5 (default atol is 1e-5) with
-    # MKL 2026.2.
+if not TEST_MKL:
     aot_autograd_failures.update(
         {
+            decorate(
+                "matmul",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=6e-05, rtol=4e-06)}
+                ),
+            ),
+            decorate(
+                "__rmatmul__",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=6e-05, rtol=4e-06)}
+                ),
+            ),
+        }
+    )
+
+if TEST_MKL:
+    # Eager and AOTDispatcher gradients of matmul differ by up to 5.1e-5 in float32
+    # with MKL 2026.2 (measured on the AVX-512 CI runners; the default atol is 1e-5).
+    # 1e-4 leaves about 2x headroom for the AVX2 and AMD runners, where MKL picks other
+    # kernels.
+    # linalg.pinv/pinverse gradients differ by ~1.4e-5 with MKL 2026.2.
+    aot_autograd_failures.update(
+        {
+            decorate(
+                "matmul",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=1e-04, rtol=4e-06)}
+                ),
+            ),
+            decorate(
+                "__rmatmul__",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=1e-04, rtol=4e-06)}
+                ),
+            ),
             decorate(
                 "linalg.pinv",
                 decorator=toleranceOverride(

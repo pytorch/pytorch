@@ -1607,34 +1607,34 @@ op_db: list[OpInfo] = [
                 dtypes=(torch.complex128,),
             ),
             DecorateInfo(
-                # Eager vs compiled gradients differ by up to 4.3e-4 with MKL 2026.2
-                # (measured on AVX-512 CI runners); 1e-3 leaves headroom for AVX2 and
-                # AMD runners. Builds without MKL keep the original tolerance.
-                toleranceOverride(
-                    {
-                        torch.float32: tol(
-                            atol=1e-3 if TEST_MKL else 6e-5,
-                            rtol=6e-6,
-                        )
-                    }
-                ),
+                toleranceOverride({torch.float32: tol(atol=6e-5, rtol=6e-6)}),
                 "TestEagerFusionOpInfo",
                 "test_aot_autograd_symbolic_exhaustive",
+                active_if=not TEST_MKL,
+            ),
+            DecorateInfo(
+                # Eager vs compiled gradients differ by up to 4.3e-4 with MKL 2026.2
+                # (measured on AVX-512 CI runners); 1e-3 leaves headroom for AVX2 and
+                # AMD runners.
+                toleranceOverride({torch.float32: tol(atol=1e-3, rtol=6e-6)}),
+                "TestEagerFusionOpInfo",
+                "test_aot_autograd_symbolic_exhaustive",
+                active_if=TEST_MKL,
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=4e-3, rtol=2e-5)}),
+                "TestEagerFusionOpInfo",
+                "test_aot_autograd_disable_functionalization_symbolic_exhaustive",
+                active_if=not TEST_MKL,
             ),
             DecorateInfo(
                 # Eager vs compiled gradients differ by up to ~4.3e-3 with MKL 2026.2
                 # (measured on AVX-512 CI runners); 7e-3 leaves headroom for AVX2 and
-                # AMD runners. Builds without MKL keep the original tolerance.
-                toleranceOverride(
-                    {
-                        torch.float32: tol(
-                            atol=7e-3 if TEST_MKL else 4e-3,
-                            rtol=2e-5,
-                        )
-                    }
-                ),
+                # AMD runners.
+                toleranceOverride({torch.float32: tol(atol=7e-3, rtol=2e-5)}),
                 "TestEagerFusionOpInfo",
                 "test_aot_autograd_disable_functionalization_symbolic_exhaustive",
+                active_if=TEST_MKL,
             ),
             # Exception: "orgqr_cpu" not implemented for 'Half'
             DecorateInfo(
