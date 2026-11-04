@@ -19,7 +19,9 @@ eager::
 
 ``from_dlpack(t)`` becomes a CuteDSLTensorVariable standing for ``t``, the stream a
 CuteDSLCurrentStreamVariable, and the call is captured as
-``wrap_cutedsl(add_kernel, mutates_args=RAW_CALL_MUTATES_ARGS)(x, y, out, n)``.
+``wrap_cutedsl(add_kernel, mutates_args=RAW_CALL_MUTATES_ARGS)(x, y, out, n)``, unless
+``torch._dynamo.config.capture_cutedsl_raw_calls`` is False: then it graph-breaks, and
+runs eagerly unless fullgraph=True or strict export refuses it.
 """
 
 import collections
@@ -48,7 +50,7 @@ from torch._higher_order_ops.cutedsl_kernel_wrap import (
 )
 from torch._higher_order_ops.user_kernel_hop import constant_contents, constant_key
 
-from .. import graph_break_hints
+from .. import config, graph_break_hints
 from ..exc import unimplemented
 from ..source import (
     AttrSource,
@@ -69,6 +71,7 @@ if TYPE_CHECKING:
     from torch._guards import Source
     from torch._higher_order_ops.user_kernel_hop import ConstantContents
 
+    from .constant import ConstantVariable
     from .dicts import ConstDictVariable
 
 
@@ -145,38 +148,53 @@ class _RegionWrites(NamedTuple):
 
 class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
     def raise_unsupported(self, msg: str) -> Never:
-        # A call or value that Dynamo cannot capture, whether or not eager takes it.
+        # A call that Dynamo cannot capture, whether or not eager takes it: msg says
+        # what Dynamo cannot take, and what to change.
         unimplemented(
             gb_type="CuTeDSL kernel unsupported feature",
-            context=msg,
+            context="",
             explanation="Dynamo cannot capture this call of a CuTeDSL host function, "
-            "or this use of a value made for one, which eager may run.",
+            f"or of from_dlpack for one, which eager may run: {msg}",
             hints=[
-                "Change the call as the developer debug context describes.",
-                "Without fullgraph=True, the call graph-breaks and runs eagerly.",
+                "Change the code as the explanation says.",
+                "To capture the launch as it is, make it in a custom operator (torch.library.custom_op), whose call Dynamo captures without tracing into it.",
             ],
         )
 
     def raise_user_error(self, exc: TypeError | ValueError) -> Never:
+        # Without exc's type: for a raw call, eager CuTeDSL raises its own (a
+        # DSLBaseError, say).
         unimplemented(
             gb_type="CuTeDSL kernel call error",
-            context=str(exc),
-            explanation="Eager refuses this call too: a call of a CuTeDSL host "
-            "function, of wrap_cutedsl or of the wrapper it returns, or of "
-            "from_dlpack or cutlass.torch.current_stream for a raw call. A raw call "
-            'is checked as the call of wrap_cutedsl(fn, mutates_args="unknown").',
+            context="",
+            explanation=f"Eager refuses this call too: {exc}",
             hints=[*graph_break_hints.USER_ERROR],
+        )
+
+    def raise_wrapper_error(
+        self, variable: "CuteDSLKernelVariable", exc: TypeError | ValueError
+    ) -> Never:
+        if variable.is_wrapper and not variable.raw_call:
+            self.raise_user_error(exc)
+        # A raw call, captured as the call of its wrapper (see wrap_raw), which
+        # refuses what eager CuTeDSL may run (a host function with a keyword-only
+        # parameter, say, or a constant holding a tensor), and some calls that eager
+        # CuTeDSL refuses too (a parameter left to a tensor default, a cute tensor
+        # for a cutlass Numeric parameter): all are refused as unsupported here.
+        name = cutedsl_kernel_name(variable.kernel)
+        self.raise_unsupported(
+            f"a raw call is captured as the call of wrap_cutedsl({name}, "
+            f"mutates_args={RAW_CALL_MUTATES_ARGS!r}), which refuses it: {exc}; "
+            "change the call or the host function so that the wrapper takes it"
         )
 
     def raise_modified(self, name: str, key: str, path: str) -> Never:
         # Dynamo applies a write made in the region only after the graph runs.
         self.raise_unsupported(
             f"CuTeDSL kernel {name}: parameter {key!r}: {path} is modified earlier in "
-            "the compiled region, and the kernel would not see the change"
+            "the compiled region, and the kernel would not see the change; make the "
+            "change before the compiled region"
         )
-
-    def get_value(self, val: VariableTracker) -> Any:
-        return val.as_python_constant()
 
     def is_tensor(self, val: VariableTracker) -> bool:
         from .tensor import NumpyNdarrayVariable
@@ -394,7 +412,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         modified = writes.under(val.source)
         if modified is not None:
             self.raise_modified(name, key, modified.name)
-        self.guard_contents(val.source, obj, tx, name, key, "", {}, writes)
+        self.guard_contents(val.source, obj, tx, variable, key, "", {}, writes)
         return obj
 
     def numpy_scalar(
@@ -426,20 +444,21 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         return value
 
     def raise_constant_error(
-        self, name: str, key: str, exc: TypeError | ValueError
+        self, variable: "CuteDSLKernelVariable", key: str, exc: TypeError | ValueError
     ) -> Never:
-        """Refuse a constant argument with ``exc``, an error of the side table's
-        walk, which the eager launch re-raises naming the kernel and the
-        parameter."""
+        """Refuse a constant argument of a call of ``variable`` with ``exc``, an
+        error of the side table's walk, which the eager launch of a wrapper re-raises
+        naming the kernel and the parameter (see raise_wrapper_error)."""
+        name = cutedsl_kernel_name(variable.kernel)
         msg = f"CuTeDSL kernel {name}: parameter {key!r}: {exc}"
-        self.raise_user_error(type(exc)(msg))
+        self.raise_wrapper_error(variable, type(exc)(msg))
 
     def guard_contents(
         self,
         source: "Source",
         value: object,
         tx: "InstructionTranslatorBase",
-        name: str,
+        variable: "CuteDSLKernelVariable",
         key: str,
         where: str,
         containers: dict[int, str],
@@ -457,9 +476,11 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         modified earlier, or whose class it modified, through whatever path; and,
         with the errors of the side table's walk, a tensor or a DSL object in it,
         which would be baked into the side table, and a value that holds itself.
-        ``name`` and ``key`` name the kernel and the parameter, ``where`` is the
-        walk's path to ``value`` from the argument, and ``containers`` maps the id of
-        each container on that path to the path it was entered at."""
+        ``variable`` is the wrapper called (wrap_raw's for a raw call) and ``key`` the
+        parameter, ``where`` is the walk's path to ``value`` from the argument, and
+        ``containers`` maps the id of each container on that path to the path it was
+        entered at."""
+        name = cutedsl_kernel_name(variable.kernel)
         if writes.modifies(value):
             self.raise_modified(name, key, source.name)
         # An attribute that an object does not hold is read from its class.
@@ -473,16 +494,16 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
             return
         if id(value) in containers:
             cycle = _cycle_error(type(value), where, containers[id(value)])
-            self.raise_constant_error(name, key, cycle)
+            self.raise_constant_error(variable, key, cycle)
         containers = {**containers, id(value): where}
         sources = self.content_sources(source, value, contents, tx, name, key)
         for item_source, (step, at, item) in zip(sources, contents.steps, strict=True):
             item_where = where + step.format(at)
             held = _held_error(type(item), isinstance(item, torch.Tensor), item_where)
             if held is not None:
-                self.raise_constant_error(name, key, held)
+                self.raise_constant_error(variable, key, held)
             self.guard_contents(
-                item_source, item, tx, name, key, item_where, containers, writes
+                item_source, item, tx, variable, key, item_where, containers, writes
             )
 
     def content_sources(
@@ -514,7 +535,8 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
                 self.raise_unsupported(
                     f"CuTeDSL kernel {name}: parameter {key!r}: cannot guard "
                     f"{source.name}: its class {cls.__name__} overrides "
-                    f"{', '.join(overridden)}, which the side table reads it through"
+                    f"{', '.join(overridden)}, which the side table reads it through; "
+                    f"pass a plain {base.__name__}"
                 )
 
         if isinstance(value, (tuple, list)):
@@ -542,9 +564,14 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
                 for i, k in enumerate(dict.keys(value))
             }
             half = len(contents.steps) // 2
-            keys = [sources[id(k)] for _, _, k in contents.steps[:half]]
-            items = [sources[id(k)] for _, k, _ in contents.steps[half:]]
-            return keys + [DictGetItemSource(source, k) for k in items]
+            item_sources: list[Source] = [
+                sources[id(k)] for _, _, k in contents.steps[:half]
+            ]
+            item_sources += [
+                DictGetItemSource(source, sources[id(k)])
+                for _, k, _ in contents.steps[half:]
+            ]
+            return item_sources
         install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
         fields = (
             {f.name for f in dataclasses.fields(value)}
@@ -559,7 +586,8 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         if any(type(attr) is not str for attr in contents.names):
             self.raise_unsupported(
                 f"CuTeDSL kernel {name}: parameter {key!r}: cannot guard "
-                f"{source.name}: it has an attribute whose name is not an exact str"
+                f"{source.name}: it has an attribute whose name is not an exact str; "
+                "name its attributes with exact str"
             )
         dict_source = AttrSource(source, "__dict__")
         install_guard(dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
@@ -575,34 +603,44 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
     ) -> None:
         """Guard ``value``, a constant that constant_key keys without walking it, on
         what constant_key keys it by: a cutlass Numeric, such as
-        cutlass.Float32(2.0), on its type and value, and a numpy bool, integer or
-        floating scalar on its type and .item(); a Python literal, a subclass of
-        int, float, complex, str or bytes (an enum member aside), a frozenset, a
-        range or a slice on its value, which EQUALS_MATCH checks with the exact type
-        (and, as Dynamo's guard on a float argument, takes -0.0 for 0.0, which
-        constant_key keys apart); anything else (a function, a class, an enum member,
-        another cutlass value) on its identity, kept alive with the compiled code if
-        it cannot be weakly referenced. Limitation: another value that constant_key
-        keys by equality (a Fraction, a Decimal, an attrs class instance) recompiles
-        for an equal new one, such as one built for each call: no Dynamo guard checks
-        its equality outside EQUALS_MATCH's types."""
+        cutlass.Float32(2.0), on its type and value, and a numpy bool, integer,
+        floating or complex scalar whose .item() is a Python one on its type and
+        .item(); a Python literal, a subclass of int, str or bytes (an enum member
+        aside), a frozenset, a range or a slice on its value, which EQUALS_MATCH
+        checks with the exact type, comparing an exact float or complex bitwise
+        (-0.0 is not 0.0, as for constant_key) and another value with ==; anything
+        else on its identity, kept alive with the compiled code if it cannot be
+        weakly referenced: a function, a class, an enum member, another cutlass
+        value, or a float or complex subclass that numpy does not define, which
+        EQUALS_MATCH would compare with ==, taking -0.0 for 0.0. Limitation: such a
+        subclass, and another value that constant_key keys by equality (a Fraction, a
+        Decimal, an attrs class instance), recompile for an equal new one, such as
+        one built for each call: no Dynamo guard checks its bits or its equality
+        outside EQUALS_MATCH's types."""
         from ..guards import GuardBuilder, install_guard
         from .constant import ConstantVariable
 
+        np = sys.modules.get("numpy")  # imported if value is a numpy scalar
         if CUTEDSL_CONSTANT_RULES.scalar_value(value) is not None:
             # A cutlass Numeric, which constant_key keys by its type and its value.
             install_guard(
                 source.make_guard(GuardBuilder.TYPE_MATCH),
                 AttrSource(source, "value").make_guard(GuardBuilder.CONSTANT_MATCH),
             )
-        elif _numpy_scalar_item(value) is not None:
+        elif _numpy_scalar_item(value) is not None or (
+            np is not None
+            and isinstance(value, np.complexfloating)
+            and type(value.item()) is complex
+        ):
+            # Its .item() is an exact bool, int, float or complex: np.float64 and
+            # np.complex128 subclass float and complex, which EQUALS_MATCH compares
+            # with ==.
             install_guard(
                 source.make_guard(GuardBuilder.TYPE_MATCH),
                 CallMethodItemSource(source).make_guard(GuardBuilder.CONSTANT_MATCH),
             )
         elif ConstantVariable.is_base_literal(value) or (
-            isinstance(value, (int, float, complex, str, bytes))
-            and not isinstance(value, enum.Enum)
+            isinstance(value, (int, str, bytes)) and not isinstance(value, enum.Enum)
         ):
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
         elif isinstance(value, (frozenset, range, slice)):
@@ -666,7 +704,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
             try:
                 constant_key(value, CUTEDSL_CONSTANT_RULES)
             except (TypeError, ValueError) as e:
-                self.raise_constant_error(name, key, e)
+                self.raise_constant_error(variable, key, e)
         constant_args_idx = cutedsl_kernel_side_table.add_constant_args(constant_args)
         meta = ConstDictVariable(graph_args)
         tx.output.create_proxy(
@@ -727,6 +765,53 @@ class CuteDSLKernelVariable(VariableTracker):
             return super().as_python_constant()
         return self.kernel
 
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # A wrapper stands for its host function and write set, the only attributes
+        # Dynamo reads of it: the host function as the variable built from its
+        # source (guarded on its identity, see builder.py), or as a constant if it
+        # has none, and the write set as a constant (guarded on its value for a
+        # wrapper passed in).
+        if not self.is_wrapper:
+            return super().tp_getattro_impl(tx, name)
+        if name == "kernel":
+            return VariableTracker.build(tx, self.kernel, self.kernel_source)
+        if name == "mutates_args":
+            return VariableTracker.build(tx, self.mutates_args)
+        unimplemented(
+            gb_type="CuTeDSL kernel wrapper attribute",
+            context="",
+            explanation=f"CuTeDSL kernel {cutedsl_kernel_name(self.kernel)}: Dynamo "
+            "takes a CuTeDSL kernel wrapper (what torch._library.cutedsl.wrap_cutedsl "
+            "returns) for its host function and write set, so in the compiled region "
+            f"it reads only the wrapper's kernel and mutates_args, not {name!r}.",
+            hints=[
+                "Read the attribute outside the compiled region and pass its value in.",
+                "To launch the kernel, call the wrapper itself, which Dynamo captures.",
+            ],
+        )
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "ConstantVariable":
+        if not self.is_wrapper:
+            return super().call_obj_hasattr(tx, name)
+        from .constant import ConstantVariable
+
+        self.tp_getattro_impl(tx, name)  # refuses any other attribute
+        return ConstantVariable.create(True)
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        if self.is_wrapper:
+            return super().tp_richcompare_impl(tx, other, op)
+        # A host function compares by identity, as any function does.
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # A wrapper made by wrap_cutedsl inside the region has no source of its own:
         # rebuild it from the host function's source.
@@ -747,6 +832,20 @@ class CuteDSLKernelVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if not self.is_wrapper and not config.capture_cutedsl_raw_calls:
+            name = cutedsl_kernel_name(self.kernel)
+            unimplemented(
+                gb_type="CuTeDSL raw call capture disabled",
+                context="",
+                explanation="torch._dynamo.config.capture_cutedsl_raw_calls is False, so "
+                f"Dynamo does not capture this raw call of the CuTeDSL host function {name} "
+                "(a call written as for eager, not through wrap_cutedsl): it graph-breaks "
+                "and runs eagerly, unless fullgraph=True or strict export, which refuse it.",
+                hints=[
+                    "To capture the call, call the kernel through torch._library.cutedsl.wrap_cutedsl(fn, mutates_args=[...]), naming the parameters it writes: Dynamo captures a call of the wrapper with this flag False too.",
+                    "Or set torch._dynamo.config.capture_cutedsl_raw_calls = True, which captures a raw call with every tensor argument counted as written.",
+                ],
+            )
         return dynamo_cutedsl_hopifier_singleton.call_cutedsl_kernel(
             self, list(args), kwargs, tx, raw=not self.is_wrapper
         )
@@ -823,7 +922,10 @@ class CuteDSLFromDlpackVariable(VariableTracker):
             first.POSITIONAL_ONLY,
             first.POSITIONAL_OR_KEYWORD,
         ):
-            hopifier.raise_unsupported(f"from_dlpack{signature}: unexpected signature")
+            hopifier.raise_unsupported(
+                f"from_dlpack{signature}: unexpected signature; pass the torch tensors "
+                "to a wrap_cutedsl wrapper of the host function instead"
+            )
         try:
             arguments = dict(signature.bind(*args, **kwargs).arguments)
         except TypeError as e:
@@ -880,8 +982,16 @@ class _CuteDSLValueVariable(VariableTracker):
     unreadable: ClassVar[str]
 
     def refuse_read(self, read: str) -> Never:
-        dynamo_cutedsl_hopifier_singleton.raise_unsupported(
-            f"{read}: {self.unreadable} (pass it to the host function)"
+        unimplemented(
+            gb_type="CuTeDSL raw-call value read",
+            context="",
+            explanation=f"{read}: {self.unreadable}: such a value, made by from_dlpack "
+            "or cutlass.torch.current_stream, only stands for its tensor or stream in "
+            "a raw call of a CuTeDSL host function.",
+            hints=[
+                "Pass the value to the host function without reading it in the compiled region.",
+                "Read what you need from the torch tensor (its dtype, shape or stride) or from torch.cuda.current_stream() instead, which Dynamo traces.",
+            ],
         )
 
     def tp_getattro_impl(
