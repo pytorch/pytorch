@@ -2,6 +2,7 @@
 #include <ATen/Context.h>
 #include <ATen/Config.h>
 #include <ATen/OpMathType.h>
+#include <ATen/native/LapackAlias.h>
 #include <ATen/native/cpu/ReducedPrecisionFloatGemvFastPathKernel.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -30,11 +31,11 @@ T* remove_const(const T* x) {
 
 #if AT_BUILD_WITH_BLAS()
 #ifndef _ARMPL_H
-extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);
-extern "C" void dscal_(int *n, double *a, double *x, int *incx);
-extern "C" void sscal_(int *n, float *a, float *x, int *incx);
-extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
-extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy);
+extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy) AT_LAPACK_ALIAS(ddot);
+extern "C" void dscal_(int *n, double *a, double *x, int *incx) AT_LAPACK_ALIAS(dscal);
+extern "C" void sscal_(int *n, float *a, float *x, int *incx) AT_LAPACK_ALIAS(sscal);
+extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy) AT_LAPACK_ALIAS(dgemv);
+extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy) AT_LAPACK_ALIAS(sgemv);
 #endif
 
 #if AT_BLAS_F2C()
@@ -44,11 +45,11 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 #endif
 
 #if AT_BLAS_USE_CBLAS_DOT()
-  extern "C" float cblas_sdot(const int n, const float *x, const int incx, const float *y, const int incy);
-  extern "C" void cblas_cdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
-  extern "C" void cblas_zdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
-  extern "C" void cblas_cdotc_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotc);
-  extern "C" void cblas_zdotc_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotc);
+  extern "C" float cblas_sdot(const int n, const float *x, const int incx, const float *y, const int incy) AT_LAPACK_ALIAS(cblas_sdot);
+  extern "C" void cblas_cdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu) AT_LAPACK_ALIAS(cblas_cdotu_sub);
+  extern "C" void cblas_zdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu) AT_LAPACK_ALIAS(cblas_zdotu_sub);
+  extern "C" void cblas_cdotc_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotc) AT_LAPACK_ALIAS(cblas_cdotc_sub);
+  extern "C" void cblas_zdotc_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotc) AT_LAPACK_ALIAS(cblas_zdotc_sub);
 
 #ifndef _ARMPL_H
   static inline ffloat sdot_(const int *n, const float *x, const int *incx, const float *y, const int *incy)
