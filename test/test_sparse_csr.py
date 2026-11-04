@@ -3751,7 +3751,7 @@ class TestSparseCompressedTritonKernelsDevice(TestCase):
             "_triton_bsr_dense_mm_out",
             "_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)",
             kernel_impl,
-            f"SparseCsr{device_type.upper()}"
+            f"SparseCsr{torch._C._dispatch_key_for_device(device_type)}"
         )
 
         # kernel != kernel_impl means dispatch was already registered.
