@@ -12,7 +12,12 @@ import cutlass.utils.blockscaled_layout as blockscaled_utils
 from cutlass.cute.nvgpu import cpasync, tcgen05
 from cutlass.pipeline import pipeline_init_arrive, pipeline_init_wait
 
-from ._clc_scheduler import ClcState, create_clc_pipeline, make_clc_problem_shape
+from ._clc_scheduler import (
+    cancel_phantom_clusters,
+    ClcState,
+    create_clc_pipeline,
+    make_clc_problem_shape,
+)
 
 
 _Int64x2 = tuple[cutlass.Int64, cutlass.Int64]
@@ -201,6 +206,8 @@ class Sm100GroupedBlockScaledGemmKernel:
     ACCUM_REG_REQUIREMENT = 168
     # CLC dispatch swizzle; currently mostly inert because work is along L.
     CLC_SWIZZLE_SIZE = 1
+    # Upper bound on serial cancels per retiring cluster, as in quack.
+    MAX_PHANTOM_CANCELS = 256
     # Height, in clusters, of the M-panels each group's tiles are walked in.
     L2_SWIZZLE_M_CLUSTERS = 8
 
@@ -626,6 +633,10 @@ class Sm100GroupedBlockScaledGemmKernel:
             # CLC response: (m_idx, n_idx, l_idx, valid).
             clc_mbar_ptr: cute.struct.MemRange[cutlass.Int64, self.num_clc_stage * 2]
             clc_response: cute.struct.MemRange[cutlass.Int32, self.num_clc_stage * 4]
+            clc_drain_response: cute.struct.Align[
+                cute.struct.MemRange[cutlass.Int32, 4], 16
+            ]
+            clc_drain_mbar_ptr: cute.struct.MemRange[cutlass.Int64, 1]
             # Non-uniform group metadata, per stage:
             #   [0] group_idx
             #   [1] cta_tile_idx_m
@@ -1059,16 +1070,34 @@ class Sm100GroupedBlockScaledGemmKernel:
         if warp_idx == self.scheduler_warp_id:
             cute.arch.setmaxregister_decrease(self.GENERIC_REG_REQUIREMENT)
             work_tile = clc_state.initial_work_tile_info(total_num_clusters[0])
+            retired_on_phantom = cutlass.Boolean(False)
+            last_cluster_idx = cutlass.Int32(0)
 
             while work_tile.is_valid_tile:
                 if is_leader_cluster_cta:
                     clc_state.prefetch_next_work()
                 clc_state.consumer_wait()
-                work_tile = clc_state.get_current_work(total_num_clusters[0])
+                work_tile, retired_on_phantom = clc_state.get_current_work_and_phantom(
+                    total_num_clusters[0]
+                )
+                last_cluster_idx = work_tile.tile_idx[2]
                 clc_state.consumer_release()
 
             if is_leader_cluster_cta:
                 clc_state.producer_tail()
+                # The 2d/3d grid is an upper bound on clusters (offs is on device).
+                if cutlass.const_expr(not self.uniform_mn_groups):
+                    budget = cutlass.Int32(0)
+                    if retired_on_phantom:
+                        budget = cutlass.min(
+                            self.MAX_PHANTOM_CANCELS,
+                            cute.arch.grid_dim()[2] - last_cluster_idx - 1,
+                        )
+                    cancel_phantom_clusters(
+                        budget,
+                        storage.clc_drain_response.data_ptr(),
+                        storage.clc_drain_mbar_ptr.data_ptr(),
+                    )
 
         if warp_idx == self.mainloop_load_warp_id:
             cute.arch.setmaxregister_decrease(self.GENERIC_REG_REQUIREMENT)

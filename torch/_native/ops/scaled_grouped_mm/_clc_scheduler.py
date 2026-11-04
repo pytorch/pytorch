@@ -76,6 +76,15 @@ class ClcState:
             return work_tile
         return self._mask_to_actual_problem(work_tile, total_num_clusters)
 
+    # Also reports a granted cluster past the real work. Grants are monotone,
+    # so such a phantom proves no real cluster is still pending.
+    def get_current_work_and_phantom(self, total_num_clusters):
+        work_tile = self._hw_scheduler.get_current_work()
+        is_phantom = work_tile.is_valid_tile & (
+            work_tile.tile_idx[2] >= total_num_clusters
+        )
+        return self._mask_to_actual_problem(work_tile, total_num_clusters), is_phantom
+
     def _mask_to_actual_problem(self, work_tile, total_num_clusters):
         is_valid = work_tile.is_valid_tile & (
             work_tile.tile_idx[2] < total_num_clusters
@@ -210,3 +219,30 @@ def create_clc_pipeline(
         tx_count=16,  # CLC response is 4 Int32s = 16 bytes per stage
         cta_layout_vmnk=cta_layout_vmnk,
     )
+
+
+# Cancels the unlaunched padding clusters of an upper-bound grid, so they don't
+# launch only to exit. Serial, each response observed before the next query, so
+# no query is in flight at exit; stops at the first failed cancel. Mirrors
+# quack's cancel_pending_tail (torch/_vendor/quack/tile_scheduler.py).
+@cute.jit
+def cancel_phantom_clusters(budget, response_ptr, mbar_ptr):
+    with cute.arch.elect_one():
+        cute.arch.mbarrier_init(mbar_ptr, 1)
+    cute.arch.mbarrier_init_fence()
+    cute.arch.sync_warp()
+    phase = cutlass.Int32(0)
+    cancelled = cutlass.Int32(0)
+    while cancelled < budget:
+        with cute.arch.elect_one():
+            cute.arch.mbarrier_arrive_and_expect_tx(mbar_ptr, 16)
+            cute.arch.issue_clc_query(mbar_ptr, response_ptr, multicast=False)
+        cute.arch.sync_warp()
+        cute.arch.mbarrier_wait(mbar_ptr, phase)
+        phase = phase ^ 1
+        _, _, _, valid = cute.arch.clc_response(response_ptr)
+        cute.arch.fence_view_async_shared()
+        if valid != 0:
+            cancelled = cancelled + 1
+        else:
+            cancelled = budget

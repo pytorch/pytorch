@@ -1,10 +1,27 @@
 if(NOT __NCCL_EP_INCLUDED)
   set(__NCCL_EP_INCLUDED TRUE)
 
+  # EP sources are needed with both source and system NCCL.
+  set(__NCCL_EP_SOURCE_DIR "${PROJECT_SOURCE_DIR}/third_party/nccl-extensions")
+  if(NOT EXISTS "${__NCCL_EP_SOURCE_DIR}")
+    # Keep the bundled notices in third_party/nccl_ep in sync with this pin.
+    file(READ "${PROJECT_SOURCE_DIR}/third_party/nccl_ep/pin.txt" __NCCL_EP_PIN)
+    string(STRIP "${__NCCL_EP_PIN}" __NCCL_EP_PIN)
+    include(FetchContent)
+    FetchContent_Declare(
+      nccl_extensions
+      GIT_REPOSITORY https://github.com/NVIDIA/nccl-extensions.git
+      GIT_TAG "${__NCCL_EP_PIN}"
+      GIT_SUBMODULES ""
+      SOURCE_DIR "${__NCCL_EP_SOURCE_DIR}"
+    )
+    FetchContent_Populate(nccl_extensions)
+  endif()
+
   # NCCL is built (Makefile) into this tree by cmake/External/nccl.cmake.
   set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
 
-  # Build contrib/nccl_ep as its own CMake project against that prebuilt NCCL
+  # Build NCCL EP as its own CMake project against that prebuilt NCCL
   # (headers + libnccl in __NCCL_BUILD_DIR). NCCL_EP_BUILDDIR == NCCL_HOME so
   # nccl_ep's artifacts (libnccl_ep.a, headers) land in the same tree, leaving
   # the core NCCL build untouched.
@@ -75,7 +92,7 @@ if(NOT __NCCL_EP_INCLUDED)
       ${__NCCL_EP_ARCH_ARG}
       -DNCCL_HOME=${__NCCL_EP_NCCL_HOME}
       -DNCCL_EP_BUILDDIR=${__NCCL_BUILD_DIR}
-      -DNCCL_EP_SOURCE_DIR=${PROJECT_SOURCE_DIR}/third_party/nccl/contrib/nccl_ep
+      -DNCCL_EP_SOURCE_DIR=${__NCCL_EP_SOURCE_DIR}/nccl_ep
     BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/${__NCCL_EP_LIB}"
     INSTALL_COMMAND ""
     # In the static path NCCL (Makefile) must finish first; in the system path

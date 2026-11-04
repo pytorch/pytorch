@@ -28,6 +28,7 @@ enum class MacOSVersion : uint32_t {
   MACOS_26_2,
   MACOS_26_4,
   MACOS_27_0,
+  MACOS_27_0_1,
 };
 
 // Metal language version to compile shaders with
@@ -107,6 +108,9 @@ TORCH_API MetalLanguageVersion metal_language_version();
 // OS is new enough, the Metal 4.0 shaders were compiled into this binary and
 // PYTORCH_MPS_METAL_VERSION did not ask for an older language version
 TORCH_API bool has_mpp();
+// Whether the Metal 4.1 shaders (native fp8 MPP operands) were compiled into
+// this binary and the OS (macOS 27+) can run them
+TORCH_API bool has_metal_4_1();
 TORCH_API at::Allocator* GetMPSAllocator();
 
 inline Device getDeviceFromPtr(void* ptr) {

@@ -93,23 +93,23 @@ jobs:
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi350.1" },
-          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi350.1" },
-          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi350.1" },
-          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi350.1" },
-          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi350.1" },
-          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi350.1" },
-          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi350.1" },
-          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi350.1" },
-          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi350.1" },
-          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
         ]}
       build-additional-packages: "fbgemm"
     secrets: inherit
 
   rocm-periodic-dynamo-benchmarks-test:
     name: rocm-periodic-dynamo-benchmarks-test
-    uses: ./.github/workflows/_rocm-test-no-dind.yml
+    uses: ./.github/workflows/_rocm-test.yml
     needs: rocm-periodic-dynamo-benchmarks-build
     with:
       build-environment: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.build-environment }}
@@ -170,11 +170,9 @@ jobs:
           { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
           { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
           { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
-          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
-          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
-          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
           { config: "dynamic_cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
           { config: "dynamic_cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "inductor_cpp_wrapper_cpu", shard: 1, num_shards: 1, runner: "mt-l-x86iavx512-16-128" },
           { config: "cpu_inductor_freezing_avx2_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iavx2-40-160" },
           { config: "cpu_inductor_freezing_avx2_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iavx2-40-160" },
           { config: "cpu_inductor_freezing_avx2_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iavx2-40-160" },

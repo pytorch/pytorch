@@ -22,7 +22,7 @@ def _select_kernel_config_fp8(M: int, N: int, K: int) -> _KernelConfig:
     # MSLK heuristic tends to over-select transpose_ab=True.
     if M >= 2048 and N >= 6144 and K >= 2048:
         return cfg_256_256_ab
-    if N == 5120 and K == 8192 and M <= 4096:
+    if N == 5120 and K == 8192 and 128 < M <= 4096:
         return cfg_256_256_ab
 
     if M <= 64:
