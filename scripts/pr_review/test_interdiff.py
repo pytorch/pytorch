@@ -60,6 +60,7 @@ class TestInterdiff(unittest.TestCase):
         cwd = os.getcwd()
         self.addCleanup(os.chdir, cwd)
         os.chdir(tmp.name)
+        self.addCleanup(setattr, interdiff, "REPO", interdiff.REPO)
         r = self.repo
         self.b0 = r.commit(None, {"a.txt": "1\n2\n3\n", "b.txt": "x\n"})
         self.v1 = r.commit(
@@ -99,7 +100,44 @@ class TestInterdiff(unittest.TestCase):
         text = interdiff.interdiff(self.v1, self.b0, b1, ["a.txt"])
         head, _, conflicted = text.partition(interdiff.CONFLICTED)
         self.assertNotIn("diff --git", head)
+        # Against the earlier commit, not the replayed tree and its conflict markers.
+        changed = [
+            ln
+            for ln in conflicted.splitlines()
+            if ln[:1] in "+-" and not ln.startswith(("+++", "---"))
+        ]
+        self.assertEqual(changed, ["-1-pr", "+1-pr-up"])
+
+    def test_the_prs_gitattributes_cannot_hide_a_conflict(self):
+        r = self.repo
+        b1 = r.commit(self.b0, {"a.txt": "1-up\n2\n3\n"})
+        # With `merge=union` honored, the replay would merge a.txt "cleanly" with both sides' lines.
+        v2 = r.commit(
+            b1, {"a.txt": "1-pr-up\n2\n3\n", ".gitattributes": "* merge=union\n"}
+        )
+        self.checkout(v2)
+        text = interdiff.interdiff(self.v1, self.b0, b1, ["a.txt", ".gitattributes"])
+        head, _, conflicted = text.partition(interdiff.CONFLICTED)
         self.assertIn("+1-pr-up", conflicted)
+        self.assertNotIn("a.txt", head)
+
+    def test_a_reverted_file_shows_up(self):
+        # The author answers a finding by dropping the PR's change to a.txt; the PR now changes only b.txt.
+        v2 = self.repo.commit(self.v1, {"a.txt": "1\n2\n3\n", "b.txt": "x-pr\n"})
+        self.checkout(v2)
+        text = interdiff.interdiff(self.v1, self.b0, self.b0, ["b.txt"])
+        self.assertIn("-1-pr", text)
+        self.assertIn("+x-pr", text)
+
+    def test_a_rebase_with_no_change_from_the_author_says_so(self):
+        r = self.repo
+        b1 = r.commit(self.b0, {"b.txt": "x-up\n"})
+        v2 = r.commit(b1, {"a.txt": "1-pr\n2\n3\n"})
+        self.checkout(v2)
+        self.assertEqual(
+            interdiff.interdiff(self.v1, self.b0, b1, ["a.txt"]),
+            interdiff.NOTE_BASE_ONLY.format(sha=self.v1),
+        )
 
     def test_without_a_rebase_it_is_the_plain_diff(self):
         v2 = self.repo.commit(self.v1, {"a.txt": "1-pr\n2-pr\n3\n"})
@@ -109,7 +147,7 @@ class TestInterdiff(unittest.TestCase):
         self.assertIn("-2\n", text)
 
     def test_notes_instead_of_failures(self):
-        self.checkout(self.v1)
+        self.checkout(self.b0)
         self.assertEqual(
             interdiff.interdiff("", "", self.b0, ["a.txt"]), interdiff.NOTE_NO_REVIEW
         )
@@ -148,6 +186,35 @@ class TestInterdiff(unittest.TestCase):
         interdiff.main([*args, "--max-bytes", "10"])
         self.assertEqual(out.read_text(), interdiff.NOTE_TOO_LARGE)
 
+    def test_main_reads_the_repo_it_is_given(self):
+        # As in the workflow: run from elsewhere with --repo pointing at the PR's working copy.
+        v2 = self.repo.commit(self.v1, {"a.txt": "1-pr\n2-pr\n3\n"})
+        self.checkout(v2)
+        elsewhere = tempfile.TemporaryDirectory()
+        self.addCleanup(elsewhere.cleanup)
+        os.chdir(elsewhere.name)
+        files, out = Path("files.z"), Path("out.txt")
+        files.write_bytes(b"a.txt\0")
+        interdiff.main(
+            [
+                "--repo",
+                str(self.repo.root),
+                "--previous",
+                self.v1,
+                "--previous-base",
+                self.b0,
+                "--base",
+                self.b0,
+                "--files",
+                str(files),
+                "--out",
+                str(out),
+                "--max-bytes",
+                "100000",
+            ]
+        )
+        self.assertIn("+2-pr", out.read_text())
+
     def test_file_names_are_literal_not_pathspec_magic(self):
         # As pathspec magic, this name means "every file but a.txt", which would pull in b.txt.
         name = ":(exclude)a.txt"
@@ -157,6 +224,9 @@ class TestInterdiff(unittest.TestCase):
         self.assertIn("+new", text)
         self.assertNotIn("b.txt", text)
 
+    @unittest.skipIf(
+        sys.platform == "darwin", "APFS rejects file names that are not UTF-8"
+    )
     def test_a_file_name_that_is_not_utf8_is_handled(self):
         name = os.fsdecode(b"bad-\xff.txt")
         v2 = self.repo.commit(self.v1, {name: "new\n"})
@@ -187,6 +257,10 @@ class TestInterdiff(unittest.TestCase):
             interdiff.interdiff(self.v1, self.b0, self.b0, ["a.txt"]),
             interdiff.NOTE_SAME,
         )
+        # Even when the earlier merge base could not be resolved.
+        self.assertEqual(
+            interdiff.interdiff(self.v1, "", self.b0, ["a.txt"]), interdiff.NOTE_SAME
+        )
 
     def test_an_unexpected_failure_is_a_note_not_a_failed_step(self):
         self.checkout(self.v1)
@@ -216,9 +290,7 @@ class TestInterdiff(unittest.TestCase):
             )
         finally:
             interdiff.interdiff = original
-        self.assertEqual(
-            out.read_text(), interdiff.NOTE_UNAVAILABLE.format(sha=self.v1)
-        )
+        self.assertEqual(out.read_text(), interdiff.NOTE_FAILED)
 
 
 if __name__ == "__main__":

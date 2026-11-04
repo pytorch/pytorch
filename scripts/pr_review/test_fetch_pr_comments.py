@@ -392,9 +392,22 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         )
 
     def test_the_commit_the_latest_review_saw_is_handed_on(self):
-        old, new = "1" * 40, "2" * 40
+        old, new, human = "1" * 40, "2" * 40, "4" * 40
+        # Latest by id, not by list order, and only the automated review's: a later human review is skipped.
+        later_human = {
+            "id": 52,
+            "user": user("maintainer"),
+            "body": "lgtm",
+            "state": "APPROVED",
+            "submitted_at": "2",
+            "commit_id": human,
+        }
         api = FakeApi(
-            reviews=[{**ours(50), "commit_id": old}, {**ours(51), "commit_id": new}]
+            reviews=[
+                {**ours(51), "commit_id": new},
+                {**ours(50), "commit_id": old},
+                later_human,
+            ]
         )
         self.assertEqual(
             fpc.collect(api, REPO, PR, "3" * 40)["previous_review_sha"], new

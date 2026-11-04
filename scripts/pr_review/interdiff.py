@@ -12,8 +12,12 @@ first replayed onto this run's merge base (`git merge-tree` with an explicit
 merge base, which needs no checkout and no shared history), and HEAD is diffed
 against that, so upstream changes cancel out. A file the replay cannot merge
 changed both upstream and in the PR; it gets the plain diff under a heading
-that says it includes upstream changes. Every other failure, and a result over
-the size cap, writes a one-line note, so the review never fails for this file.
+that says it includes upstream changes. Files the earlier version changed are
+included even if the PR no longer does, so a reverted file shows up. Git reads
+no attributes from the PR (`--attr-source` is the empty tree), so its
+`.gitattributes` cannot pick merge or diff drivers. Every other failure, and a
+result over the size cap, writes a one-line note, so the review never fails for
+this file.
 """
 
 from __future__ import annotations
@@ -32,6 +36,11 @@ NOTE_UNAVAILABLE = (
 )
 NOTE_NO_FILES = "# The PR changes no files.\n"
 NOTE_SAME = "# The last automated review saw this same commit: nothing changed since.\n"
+NOTE_FAILED = "# The changes since the last automated review could not be computed.\n"
+NOTE_BASE_ONLY = (
+    "# Nothing changed in this PR's files since the last automated review ({sha}) "
+    "apart from changes from the base.\n"
+)
 NOTE_TOO_LARGE = (
     "# The changes since the last automated review are too large to list.\n"
 )
@@ -48,13 +57,14 @@ CONFLICTED = (
 
 
 REPO = Path(".")
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 def git(*args: str) -> subprocess.CompletedProcess[bytes]:
     # Literal pathspecs everywhere: a PR file name is data, never pathspec magic.
-    return subprocess.run(
-        ["git", "-C", str(REPO), "--literal-pathspecs", *args], capture_output=True
-    )
+    # Attributes from the empty tree: the PR's .gitattributes picks no driver.
+    cmd = ["git", "-C", str(REPO), "--literal-pathspecs", f"--attr-source={EMPTY_TREE}"]
+    return subprocess.run([*cmd, *args], capture_output=True)
 
 
 def has_commit(sha: str) -> bool:
@@ -96,20 +106,25 @@ def interdiff(previous: str, previous_base: str, base: str, files: list[str]) ->
         return NOTE_NO_REVIEW
     if not files:
         return NOTE_NO_FILES
-    if not previous_base or not all(map(has_commit, (previous, previous_base, base))):
-        return NOTE_UNAVAILABLE.format(sha=previous)
     if git("rev-parse", "HEAD").stdout.decode().strip() == previous:
         return NOTE_SAME
+    if not previous_base or not all(map(has_commit, (previous, previous_base, base))):
+        return NOTE_UNAVAILABLE.format(sha=previous)
     replayed = replay(previous, previous_base, base)
     if replayed is None:
-        return NOTE_UNAVAILABLE.format(sha=previous)
+        return NOTE_FAILED
     tree, conflicted = replayed
-    clean = [f for f in files if f not in conflicted]
-    both = [f for f in files if f in conflicted]
-    text = HEADER.format(sha=previous) + diff(tree, clean)
-    if both:
-        text += CONFLICTED + diff(previous, both)
-    return text
+    earlier = git("diff", "--name-only", "-z", previous_base, previous)
+    if earlier.returncode != 0:
+        return NOTE_FAILED
+    files += [
+        f for f in os.fsdecode(earlier.stdout).split("\0") if f and f not in files
+    ]
+    clean = diff(tree, [f for f in files if f not in conflicted])
+    both = diff(previous, [f for f in files if f in conflicted])
+    if not clean and not both:
+        return NOTE_BASE_ONLY.format(sha=previous)
+    return HEADER.format(sha=previous) + clean + (CONFLICTED + both if both else "")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -135,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
         text = interdiff(args.previous, args.previous_base, args.base, files)
     except Exception as e:  # noqa: BLE001 - any failure is a note, never a failed review
         print(f"::warning::interdiff not built: {e}")
-        text = NOTE_UNAVAILABLE.format(sha=args.previous)
+        text = NOTE_FAILED
     if len(text.encode()) > args.max_bytes:
         text = NOTE_TOO_LARGE
     args.out.write_text(text)
