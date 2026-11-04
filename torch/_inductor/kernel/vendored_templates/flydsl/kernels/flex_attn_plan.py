@@ -274,6 +274,22 @@ def forward_kv_splits(
     return max(1, splits)
 
 
+def dualwave_plan(kv_seq_len, block_lists=False) -> dict:
+    """Which of the last two 64-key tiles hold keys past Sk; with
+    ``block_lists``, ``kv_blocks`` bounds the 128-key blocks."""
+    tail = kv_seq_len % 128
+    plan = {
+        "mask_last_tile": bool(tail != 0),
+        "mask_second_last_tile": bool((tail != 0) & (tail < 64)),
+    }
+    if block_lists:
+        kv_blocks = (kv_seq_len + 127) // 128
+        if not isinstance(kv_seq_len, int):
+            kv_blocks = _power_of_two_bound(kv_blocks)
+        plan["kv_blocks"] = kv_blocks
+    return plan
+
+
 def backward_plan(
     *,
     batch_size,

@@ -21,7 +21,9 @@ from torch._inductor.kernel.flex import flex_flydsl_attention, flex_flydsl_backw
 from torch._inductor.kernel.flex.flex_flydsl_attention import (
     _get_supported_bhsd_stride,
     _is_contiguous_shape_stride,
+    flex_flydsl_dualwave_forward_template,
     flex_flydsl_forward_template,
+    maybe_append_flydsl_dualwave_forward_choice,
     maybe_append_flydsl_flex_attention_choice,
 )
 from torch._inductor.kernel.flex.flex_flydsl_backward import (
@@ -768,6 +770,10 @@ _DYNAMIC_SHAPE_CASES = {
     ),
     # Four document captures, the 64x64 block states and a score_mod capture.
     "capture_table": _dynamic_case(_PREFILLS, "documents_64", score_mod=True),
+    # The causal dual-wave forward with Sk % 128 below 64.
+    "dualwave_tail": _dynamic_case(
+        [(3, 1000, 1050), (2, 700, 1960)], "dualwave_causal", heads=(8, 2)
+    ),
 }
 
 
@@ -798,7 +804,9 @@ def _dynamic_shape_runs(case, device, backend, dynamic, score_mods=None):
             & ((d2[q] == d2[kv]) | (d3[q] == d3[kv]))
         ),
         "kv_batch_1": lambda b, h, q, kv: kv >= 0,
+        "dualwave_causal": lambda b, h, q, kv: q >= kv,
     }
+    dualwave = mask == "dualwave_causal"
 
     def score_mod(score, b, h, q, kv):
         return score + bias[h]
@@ -811,6 +819,17 @@ def _dynamic_shape_runs(case, device, backend, dynamic, score_mods=None):
     if backend == "TRITON" and isinstance(block_size, tuple):
         kernel_options.update(_triton_tile_options(block_size))
     patches = []
+    if dualwave and backend == "FLYDSL":
+        # Offer only the dual-wave candidate.
+        kernel_options["FLYDSL_DUALWAVE_CAUSAL"] = True
+        patches = [
+            torch._inductor.config.patch(flydsl_enable_autotuning=True),
+            mock.patch.object(
+                flex_flydsl_attention,
+                "maybe_append_flydsl_flex_attention_choice",
+                return_value=(True, ""),
+            ),
+        ]
 
     def attention(q, k, v, block_mask):
         return flex_attention(
@@ -844,6 +863,12 @@ def _dynamic_shape_runs(case, device, backend, dynamic, score_mods=None):
         )
         if mask == "kv_batch_1":
             key, value = key[:1].clone(), value[:1].clone()
+        if dualwave:
+            # BHSD views of [B, S, H, D] memory.
+            query, key, value = (
+                t.transpose(1, 2).contiguous().transpose(1, 2)
+                for t in (query, key, value)
+            )
         block_mask = None
         if mask is not None:
             block_mask = create_block_mask(
@@ -870,7 +895,136 @@ def _dynamic_shape_runs(case, device, backend, dynamic, score_mods=None):
     return results
 
 
+def _dualwave_mod_case(
+    batch,
+    q_heads,
+    kv_heads,
+    seq_q,
+    seq_kv,
+    mask=None,
+    score_mod=None,
+    block=128,
+    dtype=torch.bfloat16,
+    dims=(128, 128),
+):
+    return batch, q_heads, kv_heads, seq_q, seq_kv, mask, score_mod, block, dtype, dims
+
+
 # Dual-wave forwards with mods; "kv_batch_1" cases read one K/V batch.
+_DUALWAVE_MOD_CASES = {
+    "alibi": _dualwave_mod_case(1, 8, 2, 1000, 1050, score_mod="alibi"),
+    "relative_bias_table": _dualwave_mod_case(
+        1, 4, 4, 512, 512, score_mod="relative_bias_table"
+    ),
+    "random_lists_per_kv_head": _dualwave_mod_case(2, 8, 2, 640, 1024, "random"),
+    "captured_bias_qk64_v128": _dualwave_mod_case(
+        2, 4, 4, 512, 640, score_mod="bias", dtype=torch.float16, dims=(64, 128)
+    ),
+    "window_gqa_cross_d96": _dualwave_mod_case(
+        2, 8, 2, 333, 1500, "window", dtype=torch.float16, dims=(96, 96)
+    ),
+    "softcap_fp16_qk128_v256": _dualwave_mod_case(
+        1, 8, 8, 1024, 1024, score_mod="softcap", dtype=torch.float16, dims=(128, 256)
+    ),
+    "causal_64_d256": _dualwave_mod_case(
+        1, 4, 2, 1024, 1024, "causal", block=64, dims=(256, 256)
+    ),
+    "four_documents_d192": _dualwave_mod_case(
+        1, 4, 4, 512, 768, "documents", dims=(192, 192)
+    ),
+    "kv_batch_1_qk192_v128": _dualwave_mod_case(
+        3, 4, 2, 512, 768, "document", dims=(192, 128)
+    ),
+}
+
+
+def _dualwave_wide(dims):
+    """Whether (QK, V) ``dims`` need FLYDSL_DUALWAVE_WIDE."""
+    return max(dims) > 128
+
+
+def _dualwave_mod_inputs(case, device):
+    """BHSD views of [B, S, H, D] Q/K/V, the BlockMask (or None), the BlockMask
+    for Triton, and the score_mod of a ``_DUALWAVE_MOD_CASES`` case."""
+    batch, q_heads, kv_heads, seq_q, seq_kv, mask, score_mod, block, dtype, dims = (
+        _DUALWAVE_MOD_CASES[case]
+    )
+    qk_dim, v_dim = dims
+    query, key, value = _make_qkv(
+        device=device,
+        batch=batch,
+        q_heads=q_heads,
+        kv_heads=kv_heads,
+        seq_q=seq_q,
+        seq_kv=seq_kv,
+        qk_dim=qk_dim,
+        v_dim=v_dim,
+        seed=seq_q + seq_kv,
+        transposed=True,
+        dtype=dtype,
+    )
+    if case.startswith("kv_batch_1"):
+        key, value = key[:1], value[:1]
+    torch.manual_seed(11)
+    if score_mod == "alibi":
+        score_mod = _alibi_mod
+    elif score_mod == "softcap":
+        score_mod = _softcap_mod
+    elif score_mod == "bias":
+        bias = torch.randn(batch, q_heads, seq_q, seq_kv, device=device)
+        score_mod = lambda score, b, h, q, kv: score + bias[b, h, q, kv]  # noqa: E731
+    elif score_mod == "relative_bias_table":
+        table = torch.randn(q_heads, seq_q + seq_kv - 1, device=device).bfloat16()
+        score_mod = lambda score, b, h, q, kv: score + table[h, q - kv + seq_kv - 1]  # noqa: E731
+    length = max(seq_q, seq_kv)
+    documents = [
+        (torch.arange(length, device=device) * 7 // size).to(torch.int64)
+        for size in (900, 500, 700, 1100)
+    ]
+    mask_mods = {
+        "causal": lambda b, h, q, kv: q >= kv,
+        "document": lambda b, h, q, kv: (documents[0][q] == documents[0][kv])
+        & (q >= kv),
+        "window": lambda b, h, q, kv: (q >= kv) & (q - kv < 300),
+        "documents": lambda b, h, q, kv: functools.reduce(
+            operator.and_, (doc[q] == doc[kv] for doc in documents[1:]), q >= kv
+        )
+        | (documents[0][q] == documents[0][kv]),
+        # Disagrees with the random lists and depends on the head.
+        "random": lambda b, h, q, kv: (q + 2 * kv + h) % 3 != 0,
+    }
+    if mask is None:
+        return query, key, value, None, None, score_mod
+    if mask != "random":
+        block_mask = create_block_mask(
+            mask_mods[mask],
+            batch if case.startswith("kv_batch_1") else 1,
+            1,
+            seq_q,
+            seq_kv,
+            device=device,
+            BLOCK_SIZE=block,
+        )
+        return query, key, value, block_mask, block_mask, score_mod
+    # A per-KV-head BlockMask serves every query head of its group.
+    generator = torch.Generator().manual_seed(seq_q)
+    lists = _random_block_lists(
+        generator, batch, kv_heads, -(-seq_q // block), -(-seq_kv // block), garbage=0
+    )
+
+    def from_lists(lists):
+        return BlockMask.from_kv_blocks(
+            *(t.to(device) for t in lists),
+            BLOCK_SIZE=block,
+            mask_mod=mask_mods["random"],
+            seq_lengths=(seq_q, seq_kv),
+        )
+
+    group = q_heads // kv_heads
+    reference = from_lists(
+        _sorted_block_lists([t.repeat_interleave(group, dim=1) for t in lists])
+    )
+    return query, key, value, from_lists(lists), reference, score_mod
 
 
 def _symbolic_graph(*hints):
@@ -930,6 +1084,88 @@ def _symbolic_forward_inputs(
 def _bshd_stride(batch, heads, sequence, dimension):
     del batch
     return [sequence * heads * dimension, dimension, heads * dimension, 1]
+
+
+def _dualwave_fake_inputs(
+    *,
+    batch=1,
+    q_heads=8,
+    kv_heads=None,
+    seq_q=1024,
+    seq_kv=None,
+    qk_dim=128,
+    v_dim=None,
+    dtype=torch.bfloat16,
+    bshd=True,
+    mask_fn=lambda b, h, q, kv: q >= kv,
+    block_mask_is_dense=False,
+    partial_width=None,
+    full_width=None,
+    mask_batch=1,
+    mask_heads=1,
+):
+    """Fake dual-wave gate inputs; the default metadata is a causal 128x128
+    ``create_block_mask``."""
+    kv_heads = q_heads if kv_heads is None else kv_heads
+    seq_kv = seq_q if seq_kv is None else seq_kv
+    v_dim = qk_dim if v_dim is None else v_dim
+
+    def node(heads, sequence, dimension):
+        size = (batch, heads, sequence, dimension)
+        stride = _bshd_stride(*size) if bshd else _contiguous_stride(size)
+        return _FakeNode(size, stride, dtype)
+
+    def meta(size):
+        return _FakeNode(size, _contiguous_stride(size), torch.int32)
+
+    q_blocks = -(-seq_q // 128)
+    kv_blocks = -(-seq_kv // 128)
+    if block_mask_is_dense:
+        mask_fn = lambda b, h, q, kv: torch.full((), True)  # noqa: E731
+        partial_width = 1 if partial_width is None else partial_width
+    partial_width = kv_blocks if partial_width is None else partial_width
+    full_width = kv_blocks if full_width is None else full_width
+    counts = [mask_batch, mask_heads, q_blocks]
+    return {
+        "query": node(q_heads, seq_q, qk_dim),
+        "key": node(kv_heads, seq_kv, qk_dim),
+        "value": node(kv_heads, seq_kv, v_dim),
+        "logsumexp": meta([batch, q_heads, seq_q]),
+        "max_scores": meta([batch, q_heads, seq_q]),
+        "kv_num_blocks": meta(counts),
+        "kv_indices": meta([*counts, partial_width]),
+        "full_kv_num_blocks": meta(counts),
+        "full_kv_indices": meta([*counts, full_width]),
+        "subgraph": SimpleNamespace(
+            graph_module=torch.fx.symbolic_trace(lambda score, b, h, q, kv: score)
+        ),
+        "mask_graph": SimpleNamespace(graph_module=_mask_graph(mask_fn)),
+        "score_mod_other_buffers": [],
+        "mask_mod_other_buffers": [],
+        "scale": qk_dim**-0.5,
+        "sparse_q_block_size": 128,
+        "sparse_kv_block_size": 128,
+        "block_mask_is_dense": block_mask_is_dense,
+    }
+
+
+def _dualwave_choice_result(inputs, *, autotuning=True, graph=None, **append_kwargs):
+    choices = []
+    with (
+        V.set_graph_handler(_fake_graph() if graph is None else graph),
+        mock.patch.object(
+            flex_flydsl_attention, "_is_gfx950_device", return_value=True
+        ),
+        mock.patch.object(
+            flex_flydsl_dualwave_forward_template, "maybe_append_choice"
+        ) as append,
+        torch._inductor.config.patch(flydsl_enable_autotuning=autotuning),
+    ):
+        _, reason = maybe_append_flydsl_dualwave_forward_choice(
+            choices, layout=mock.Mock(), **inputs, **append_kwargs
+        )
+    kwargs = append.call_args.kwargs if append.called else None
+    return kwargs, reason
 
 
 def _make_qkv(
@@ -1110,6 +1346,7 @@ def _spy_choices(fake_run=None, kinds=("forward", "backward")):
     each choice the templates of ``kinds`` register."""
     templates = {
         "forward": flex_flydsl_forward_template,
+        "dualwave": flex_flydsl_dualwave_forward_template,
         "backward": flex_flydsl_backward_template,
     }
     captured = []
@@ -3921,7 +4158,830 @@ class TestFlyDSLFlexModCodegen(TestCase):
         subprocess.check_call([sys.executable, "-c", script])
 
 
+def _document_mask_graph(count):
+    """A causal mask graph over ``count`` int64 document captures and their nodes."""
+    docs = tuple(torch.zeros(1024, dtype=torch.int64) for _ in range(count))
+    graph = _mask_graph(
+        lambda b, h, q, kv, *docs: functools.reduce(
+            operator.and_, (doc[q] == doc[kv] for doc in docs), q >= kv
+        ),
+        *docs,
+    )
+    return SimpleNamespace(graph_module=graph), [_capture_node(doc) for doc in docs]
+
+
+def _window_capture_mask_graph():
+    """A causal window over a 0-d int64 capture of its width, and its node."""
+    window = torch.tensor(256, dtype=torch.int64)
+    graph = _mask_graph(lambda b, h, q, kv, w: (q >= kv) & (q - kv < w), window)
+    return SimpleNamespace(graph_module=graph), [_capture_node(window)]
+
+
+# (QK, V) head dims of the 4-wave dual-wave forward; 160 and 224 also run on K/V
+# read in place, at the padded Q and O widths of the main forward.
+_WIDE_HEAD_DIMS = (
+    (64, 256),
+    (128, 256),
+    (192, 128),
+    (192, 192),
+    (256, 128),
+    (256, 256),
+)
+_NATIVE_WIDE_HEAD_DIMS = {(160, 160): (192, 192), (224, 224): (256, 256)}
+_DUALWAVE_INPUT_NAMES = (
+    "query",
+    "key",
+    "value",
+    "logsumexp",
+    "max_scores",
+    "kv_num_blocks",
+    "kv_indices",
+    "full_kv_num_blocks",
+    "full_kv_indices",
+)
+_SCALED_SCORE_MOD = SimpleNamespace(
+    graph_module=torch.fx.symbolic_trace(lambda score, b, h, q, kv: score * 2)
+)
+_SOFTCAP_SCORE_MOD = SimpleNamespace(
+    graph_module=torch.fx.symbolic_trace(
+        lambda score, b, h, q, kv: 30.0 * torch.tanh(score / 30.0)
+    )
+)
+
+
+class TestFlyDSLDualWaveForwardConfig(TestCase):
+    @_subtests(
+        "seq_kv,head_dims",
+        [
+            subtest((1024, (128, 128)), name="aligned"),
+            subtest((1000, (128, 128)), name="tail_104"),
+            subtest((1050, (128, 128)), name="tail_26"),
+            subtest((1025, (128, 128)), name="tail_1"),
+            subtest((1050, (64, 128)), name="tail_26_qk64_v128"),
+            subtest((1000, (96, 96)), name="tail_104_d96"),
+            subtest((1050, (192, 192)), name="tail_26_d192"),
+            subtest((1000, (256, 128)), name="tail_104_qk256_v128"),
+        ],
+    )
+    def test_symbolic_sizes_reach_the_dualwave_at_runtime(self, seq_kv, head_dims):
+        graph, (batch, seq_q, length_kv) = _symbolic_graph(3, 1000, seq_kv)
+
+        def bshd(heads, sequence, dim=head_dims[0]):
+            size = [batch, heads, sequence, dim]
+            stride = [sequence * heads * dim, dim, heads * dim, 1]
+            return _FakeNode(size, stride, numel=sympy.Mul(*size))
+
+        inputs = _dualwave_fake_inputs(
+            block_mask_is_dense=True, mask_fn=lambda b, h, q, kv: q >= 0
+        )
+        inputs.update(
+            query=bshd(8, seq_q),
+            key=bshd(8, length_kv),
+            value=bshd(8, length_kv, head_dims[1]),
+        )
+        config, reason = _dualwave_choice_result(
+            inputs, graph=graph, wide=_dualwave_wide(head_dims)
+        )
+        self.assertIsNotNone(config, reason)
+        self.assertEqual(
+            [config[name] for name in ("BATCH_SIZE", "SEQ_LEN", "KV_SEQ_LEN")],
+            [None, None, None],
+        )
+        qk, v = head_dims
+        self.assertEqual(config["Q_STRIDE"], (("seq", 8 * qk), qk, 8 * qk, 1))
+        self.assertEqual(config["O_STRIDE"], (("seq", 8 * v), v, 8 * v, 1))
+        self.assertTrue(config["RUNTIME_SIZES"])
+        self.assertEqual(
+            config["PLAN"],
+            {
+                "mask_last_tile": seq_kv % 128 != 0,
+                "mask_second_last_tile": 0 < seq_kv % 128 < 64,
+            },
+        )
+
+    @_subtests(
+        "input_kwargs,overrides,expected_reason",
+        [
+            subtest(
+                (
+                    {},
+                    {
+                        "query": _FakeNode(
+                            [1, 8, 1024, 128], [8 * 1024 * 132, 1024 * 132, 132, 1]
+                        )
+                    },
+                    "multiples of 8 elements",
+                ),
+                name="unaligned_rows",
+            ),
+            *(
+                subtest(
+                    ({"qk_dim": qk, "v_dim": v}, {}, "(QK, V) head dims"),
+                    name=f"qk{qk}_v{v}",
+                )
+                for qk, v in (
+                    (64, 64),
+                    (192, 128),
+                    (192, 192),
+                    (256, 128),
+                    (256, 256),
+                    (128, 256),
+                    (128, 64),
+                    (96, 128),
+                )
+            ),
+            subtest(
+                (
+                    {"qk_dim": 96},
+                    {"key": _FakeNode([1, 8, 1024, 80], _bshd_stride(1, 8, 1024, 80))},
+                    "(QK, V) head dims",
+                ),
+                name="key_narrower_than_query",
+            ),
+            subtest(({"seq_q": 256}, {}, "Sk >= 384"), name="too_short"),
+            subtest(
+                ({"seq_q": 1024, "seq_kv": 256}, {}, "Sk >= 384"),
+                name="cross_kv_too_short",
+            ),
+            subtest(
+                ({"seq_q": 1000, "seq_kv": 383}, {}, "Sk >= 384"),
+                name="ragged_kv_too_short",
+            ),
+            subtest(
+                ({"seq_q": 4, "seq_kv": 4096}, {}, "Sq < 128 to the decode forward"),
+                name="decode",
+            ),
+            subtest(
+                ({}, {"sparse_kv_block_size": 64}, "sparse Q/KV block sizes of 128"),
+                name="block_size_64",
+            ),
+            subtest(
+                ({}, {"subgraph": _SCALED_SCORE_MOD}, "only without a BlockMask"),
+                name="score_mod_with_causal_block_mask",
+            ),
+            subtest(
+                (
+                    {"mask_fn": lambda b, h, q, kv: (q >= kv) & (q - kv < 256)},
+                    {"subgraph": _SOFTCAP_SCORE_MOD},
+                    "only without a BlockMask",
+                ),
+                name="score_mod_with_window",
+            ),
+            subtest(
+                ({"mask_heads": 3}, {}, "BlockMask rows per batch and head"),
+                name="block_mask_heads_3",
+            ),
+            subtest(
+                (
+                    {"seq_q": 256, "seq_kv": 128 * 8193, "partial_width": 1},
+                    {},
+                    "at most 8192 128-key blocks",
+                ),
+                name="too_many_kv_blocks",
+            ),
+            subtest(
+                (
+                    {"block_mask_is_dense": True},
+                    {
+                        "subgraph": _SCALED_SCORE_MOD,
+                        "score_mod_other_buffers": [
+                            _FakeNode([1024], [1], torch.float16) for _ in range(5)
+                        ],
+                    },
+                    "at most 4 captures",
+                ),
+                name="score_capture_table",
+            ),
+            subtest(
+                (
+                    {},
+                    dict(
+                        zip(
+                            ("mask_graph", "mask_mod_other_buffers"),
+                            _document_mask_graph(5),
+                        )
+                    ),
+                    "at most 4 captures",
+                ),
+                name="mask_capture_table",
+            ),
+            subtest(
+                ({"q_heads": 8, "kv_heads": 3}, {}, "Hq divisible by Hkv"),
+                name="gqa_indivisible",
+            ),
+        ],
+    )
+    def test_unsupported_inputs_are_not_offered(
+        self, input_kwargs, overrides, expected_reason
+    ):
+        inputs = _dualwave_fake_inputs(**input_kwargs)
+        inputs.update(overrides)
+        kwargs, reason = _dualwave_choice_result(inputs, allow_causal_block_mask=True)
+        self.assertIsNone(kwargs)
+        self.assertIn(expected_reason, reason)
+
+    @_subtests(
+        "input_kwargs,overrides,expected_reason",
+        _cases(
+            fp32=({"dtype": torch.float32}, {}, "BF16 or FP16"),
+            mixed_dtypes=(
+                {"dtype": torch.float16},
+                {"value": _FakeNode([1, 8, 1024, 128], _bshd_stride(1, 8, 1024, 128))},
+                "of one dtype",
+            ),
+            head_dim_64=({"qk_dim": 64}, {}, "(QK, V) head dims"),
+            score_mod_with_block_mask=(
+                {},
+                {"subgraph": _SCALED_SCORE_MOD},
+                "only without a BlockMask",
+            ),
+        ),
+    )
+    def test_dualwave_limits_hold_if_shared_gate_widens(
+        self, input_kwargs, overrides, expected_reason
+    ):
+        inputs = _dualwave_fake_inputs(**input_kwargs)
+        inputs.update(overrides)
+        permissive = {"Q_STRIDE": None, "K_STRIDE": None, "V_STRIDE": None}
+        with mock.patch.object(
+            flex_flydsl_attention,
+            "_get_flydsl_common_config",
+            return_value=(permissive, ""),
+        ):
+            kwargs, reason = _dualwave_choice_result(
+                inputs, allow_causal_block_mask=True
+            )
+        self.assertIsNone(kwargs)
+        self.assertIn("dual-wave forward", reason)
+        self.assertIn(expected_reason, reason)
+
+    @_subtests(
+        "option,name",
+        [
+            ("dualwave_causal", "FLYDSL_DUALWAVE_CAUSAL"),
+            ("head_slow_order", "FLYDSL_HEAD_SLOW_ORDER"),
+            ("dualwave_wide", "FLYDSL_DUALWAVE_WIDE"),
+            ("single_pass", "FLYDSL_WIDE_SINGLE_PASS"),
+        ],
+    )
+    def test_invalid_bool_option(self, option, name):
+        with self.assertRaisesRegex(ValueError, f"{name} must be a bool"):
+            flex_flydsl_attention.create_flydsl_flex_attention_kernel(
+                **dict.fromkeys(
+                    (
+                        "query",
+                        "key",
+                        "value",
+                        "kv_num_blocks",
+                        "kv_indices",
+                        "full_kv_num_blocks",
+                        "full_kv_indices",
+                        "subgraph",
+                        "mask_graph",
+                        "score_mod_other_buffers",
+                        "mask_mod_other_buffers",
+                        "scale",
+                        "sparse_q_block_size",
+                        "sparse_kv_block_size",
+                        "subgraph_buffer",
+                        "mask_graph_buffer",
+                    )
+                ),
+                **{option: 1},
+            )
+
+    def _assert_dualwave_builder_rejects(self, overrides, expected):
+        if importlib.util.find_spec("flydsl") is None:
+            self.skipTest("requires the FlyDSL package")
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            build_flex_attn_fwd_dualwave_module,
+        )
+
+        kwargs = {
+            "batch_size": 1,
+            "num_q_heads": 8,
+            "num_kv_heads": 8,
+            "seq_len": 1024,
+            "scale": 128**-0.5,
+            "causal": True,
+            **overrides,
+        }
+        with self.assertRaisesRegex(ValueError, expected):
+            build_flex_attn_fwd_dualwave_module(**kwargs)
+
+    @_subtests(
+        "overrides,expected",
+        _cases(
+            head_dim=({"head_dim": 64}, r"\(QK, V\) head dims"),
+            v_head_dim=({"head_dim": 128, "v_head_dim": 64}, r"\(QK, V\) head dims"),
+            unaligned_row_stride=(
+                {"v_stride": (1024 * 8 * 132, 132, 8 * 132, 1)},
+                "value strides .* multiples of 8",
+            ),
+            short=({"seq_len": 256}, "Sk >= 384"),
+            short_kv=({"kv_seq_len": 256}, "Sk >= 384"),
+            empty_q=({"seq_len": 0}, "Sq > 0"),
+            dtype=({"dtype_str": "fp32"}, "bf16/f16"),
+            gqa_ratio=({"num_kv_heads": 3}, "Hq % Hkv"),
+            strided_head_dim=(
+                {"q_stride": (1024 * 8 * 256, 256, 8 * 256, 2)},
+                r"query strides \(B, H, S, 1\)",
+            ),
+        ),
+    )
+    def test_dualwave_builder_validates_contract(self, overrides, expected):
+        self._assert_dualwave_builder_rejects(overrides, expected)
+
+    @_subtests(
+        "input_kwargs,overrides,expected_reason",
+        _cases(
+            d64_d64=({"qk_dim": 64, "v_dim": 64}, {}, "(QK, V) head dims"),
+            d128_d64=({"qk_dim": 128, "v_dim": 64}, {}, "(QK, V) head dims"),
+            qk192_v128=({"qk_dim": 192, "v_dim": 128}, {}, "(QK, V) head dims"),
+            softcap_score_mod=(
+                {},
+                {"subgraph": _SOFTCAP_SCORE_MOD},
+                "only without a BlockMask",
+            ),
+            bf16_score_capture=(
+                {},
+                {
+                    "subgraph": _SCALED_SCORE_MOD,
+                    "score_mod_other_buffers": [_FakeNode([8], [1], torch.bfloat16)],
+                },
+                "only without a BlockMask",
+            ),
+            fp16_score_capture=(
+                {},
+                {
+                    "subgraph": _SCALED_SCORE_MOD,
+                    "score_mod_other_buffers": [_FakeNode([8], [1], torch.float16)],
+                },
+                "only without a BlockMask",
+            ),
+            scalar_score_capture=(
+                {},
+                {
+                    "subgraph": _SCALED_SCORE_MOD,
+                    "score_mod_other_buffers": [
+                        _FakeNode([], [], torch.float32, numel=1)
+                    ],
+                },
+                "only without a BlockMask",
+            ),
+        ),
+    )
+    def test_dualwave_rejects_inputs_the_upstream_forward_accepts(
+        self, input_kwargs, overrides, expected_reason
+    ):
+        inputs = _dualwave_fake_inputs(**input_kwargs)
+        inputs.update(overrides)
+        # Upstream registration realizes 0-d captures, which the fake graph can't run.
+        if all(buf.get_size() for buf in inputs["score_mod_other_buffers"]):
+            upstream_inputs = dict(inputs, subgraph_buffer=object())
+            del upstream_inputs["block_mask_is_dense"]
+            upstream_kwargs, upstream_reason = _fake_choice_result(upstream_inputs)
+            self.assertIsNotNone(upstream_kwargs, upstream_reason)
+        kwargs, reason = _dualwave_choice_result(inputs, allow_causal_block_mask=True)
+        self.assertIsNone(kwargs)
+        self.assertIn("dual-wave forward", reason)
+        self.assertIn(expected_reason, reason)
+
+    @_subtests(
+        "input_kwargs,expected",
+        _cases(
+            causal_longer_q=({"seq_q": 2048, "seq_kv": 1024}, True),
+            causal_longer_kv=({"seq_q": 128, "seq_kv": 2048}, True),
+            dense_longer_kv=(
+                {"seq_q": 1024, "seq_kv": 2048, "block_mask_is_dense": True},
+                False,
+            ),
+            causal_gqa=(
+                {"q_heads": 16, "kv_heads": 4, "seq_q": 512, "seq_kv": 4096},
+                True,
+            ),
+            causal_ragged=({"seq_q": 1000}, True),
+            dense_ragged=({"seq_q": 1000, "block_mask_is_dense": True}, False),
+            causal_ragged_kv=({"seq_q": 1024, "seq_kv": 1050}, True),
+            causal_gqa_ragged_q=(
+                {
+                    "batch": 2,
+                    "q_heads": 16,
+                    "kv_heads": 4,
+                    "seq_q": 333,
+                    "seq_kv": 1000,
+                },
+                True,
+            ),
+            dense_gqa_ragged_cross=(
+                {
+                    "q_heads": 16,
+                    "kv_heads": 4,
+                    "seq_q": 333,
+                    "seq_kv": 4097,
+                    "block_mask_is_dense": True,
+                },
+                False,
+            ),
+            causal_short_ragged=({"seq_q": 129, "seq_kv": 384}, True),
+            causal_fp16=({"dtype": torch.float16}, True),
+            dense_fp16=({"dtype": torch.float16, "block_mask_is_dense": True}, False),
+            causal_fp16_cross=(
+                {"dtype": torch.float16, "seq_q": 768, "seq_kv": 1280},
+                True,
+            ),
+            causal_fp16_ragged_cross=(
+                {"dtype": torch.float16, "seq_q": 777, "seq_kv": 1300},
+                True,
+            ),
+        ),
+    )
+    def test_dualwave_sequence_lengths_and_dtypes(self, input_kwargs, expected):
+        inputs = _dualwave_fake_inputs(**input_kwargs)
+        kwargs, reason = _dualwave_choice_result(inputs, allow_causal_block_mask=True)
+        self.assertIsNotNone(kwargs, reason)
+        b, hq, sq, d = inputs["query"].get_size()
+        _, hkv, sk, _ = inputs["key"].get_size()
+        self.assertEqual(
+            (kwargs["SEQ_LEN"], kwargs["KV_SEQ_LEN"], kwargs["CAUSAL"]),
+            (sq, sk, expected),
+        )
+        fp16 = inputs["query"].get_dtype() == torch.float16
+        self.assertEqual(kwargs["DTYPE_STR"], "f16" if fp16 else "bf16")
+        self.assertEqual(kwargs["Q_STRIDE"], tuple(_bshd_stride(b, hq, sq, d)))
+        self.assertEqual(kwargs["K_STRIDE"], tuple(_bshd_stride(b, hkv, sk, d)))
+
+    @_subtests("seq_kv,kv_blocks", [(1000, 32), (5000, 64)])
+    def test_symbolic_block_lists_bound_the_kv_blocks(self, seq_kv, kv_blocks):
+        graph, (batch, seq_q, length_kv) = _symbolic_graph(3, 1000, seq_kv)
+        inputs = _dualwave_fake_inputs(
+            mask_fn=lambda b, h, q, kv: (q >= kv) & (q - kv < 256)
+        )
+        symbolic = _symbolic_forward_inputs(batch, seq_q, length_kv, q_heads=8)
+
+        def bshd(heads, sequence):
+            size = [batch, heads, sequence, 128]
+            stride = [sequence * heads * 128, 128, heads * 128, 1]
+            return _FakeNode(size, stride, numel=sympy.Mul(*size))
+
+        inputs.update(
+            {
+                name: symbolic[name]
+                for name in (
+                    "kv_num_blocks",
+                    "kv_indices",
+                    "full_kv_num_blocks",
+                    "full_kv_indices",
+                )
+            },
+            query=bshd(8, seq_q),
+            key=bshd(8, length_kv),
+            value=bshd(8, length_kv),
+        )
+        config, reason = _dualwave_choice_result(inputs, graph=graph)
+        self.assertIsNotNone(config, reason)
+        self.assertTrue(config["BLOCK_LISTS"])
+        self.assertTrue(config["RUNTIME_SIZES"])
+        self.assertEqual(config["PLAN"]["kv_blocks"], kv_blocks)
+        self.assertIsNone(config["MAX_PARTIAL_BLOCKS"])
+
+    @_subtests(
+        "overrides,expected",
+        _cases(
+            mask_without_block_lists=(
+                {"causal": False, "mask_program": (("ge", 2, 3),)},
+                "mask programs on block lists",
+            ),
+            causal=({"block_lists": True}, "causal or block lists"),
+            too_many_kv_blocks=(
+                {"causal": False, "block_lists": True, "kv_seq_len": 128 * 8193},
+                "at most 8192 KV blocks",
+            ),
+            runtime_sk_without_bound=(
+                {
+                    "causal": False,
+                    "block_lists": True,
+                    "batch_size": None,
+                    "seq_len": None,
+                    "plan": {"mask_last_tile": False, "mask_second_last_tile": False},
+                },
+                "kv_blocks plan bound",
+            ),
+            block_mask_heads=(
+                {"causal": False, "block_lists": True, "block_mask_heads": 3},
+                "heads 1, Hkv or Hq",
+            ),
+        ),
+    )
+    def test_dualwave_builder_validates_mods(self, overrides, expected):
+        self._assert_dualwave_builder_rejects(overrides, expected)
+
+    @_subtests(
+        "head_dims,wide,input_kwargs,overrides,expected_reason",
+        [
+            *(
+                subtest(
+                    (dims, False, {}, {}, "and ((64, 256)"),
+                    name=f"qk{dims[0]}_v{dims[1]}_without_option",
+                )
+                for dims in _WIDE_HEAD_DIMS
+            ),
+            subtest(
+                (
+                    (192, 192),
+                    True,
+                    {},
+                    dict(
+                        zip(
+                            ("mask_graph", "mask_mod_other_buffers"),
+                            _window_capture_mask_graph(),
+                        )
+                    ),
+                    "widens to int64",
+                ),
+                name="window_capture",
+            ),
+            subtest(
+                (
+                    (256, 256),
+                    True,
+                    {},
+                    dict(
+                        zip(
+                            ("mask_graph", "mask_mod_other_buffers"),
+                            _document_mask_graph(4),
+                        )
+                    ),
+                    "at most 3 captures",
+                ),
+                name="four_documents_d256",
+            ),
+            subtest(
+                (
+                    (256, 256),
+                    True,
+                    {"block_mask_is_dense": True},
+                    {
+                        "subgraph": _SCALED_SCORE_MOD,
+                        "score_mod_other_buffers": [
+                            _FakeNode([1024], [1], torch.float16) for _ in range(4)
+                        ],
+                    },
+                    "at most 3 captures",
+                ),
+                name="four_score_captures_d256",
+            ),
+            subtest(
+                (
+                    (256, 256),
+                    True,
+                    {"seq_q": 256, "seq_kv": 128 * 6909, "partial_width": 1},
+                    {},
+                    "at most 6908 128-key blocks",
+                ),
+                name="too_many_kv_blocks_d256",
+            ),
+        ],
+    )
+    def test_wide_inputs_are_not_offered(
+        self, head_dims, wide, input_kwargs, overrides, expected_reason
+    ):
+        qk, v = head_dims
+        inputs = _dualwave_fake_inputs(qk_dim=qk, v_dim=v, **input_kwargs)
+        inputs.update(overrides)
+        kwargs, reason = _dualwave_choice_result(
+            inputs, allow_causal_block_mask=True, wide=wide
+        )
+        self.assertIsNone(kwargs)
+        self.assertIn(expected_reason, reason)
+
+    @_subtests(
+        "overrides,expected",
+        _cases(
+            four_waves_d128=({"head_dim": 128, "num_waves": 4}, "4-wave dual-wave"),
+            six_waves=({"head_dim": 128, "num_waves": 6}, "8 or 4 waves"),
+            eight_waves_d192=({"head_dim": 192}, r"\(QK, V\) head dims"),
+            kv_head_dims_8_waves=(
+                {"head_dim": 128, "kv_head_dims": (96, 96)},
+                "4 waves only",
+            ),
+            kv_head_dims_wider=(
+                {"head_dim": 192, "num_waves": 4, "kv_head_dims": (224, 224)},
+                "up to the head dims",
+            ),
+            too_many_kv_blocks_d256=(
+                {
+                    "head_dim": 256,
+                    "num_waves": 4,
+                    "causal": False,
+                    "block_lists": True,
+                    "kv_seq_len": 128 * 6909,
+                },
+                "at most 6908 KV blocks",
+            ),
+        ),
+    )
+    def test_dualwave_builder_validates_wide_geometry(self, overrides, expected):
+        self._assert_dualwave_builder_rejects(overrides, expected)
+
+
 class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
+    def _dualwave_inputs(
+        self,
+        device,
+        *,
+        batch,
+        q_heads,
+        kv_heads,
+        seq,
+        causal,
+        seq_kv=None,
+        dtype=torch.bfloat16,
+        head_dims=(128, 128),
+        layout="bshd",
+    ):
+        """``layout``: ``bshd`` and ``bhsd`` memory, or ``bshd_gap`` and
+        ``bhsd_gap`` with every row read from a twice-as-wide one."""
+        seq_kv = seq if seq_kv is None else seq_kv
+        query, key, value = _make_qkv(
+            device=device,
+            batch=batch,
+            q_heads=q_heads,
+            kv_heads=kv_heads,
+            seq_q=seq,
+            seq_kv=seq_kv,
+            qk_dim=head_dims[0],
+            v_dim=head_dims[1],
+            seed=seq + q_heads + kv_heads,
+            transposed=layout.startswith("bshd"),
+            dtype=dtype,
+        )
+        if layout.endswith("_gap"):
+
+            def with_gap(tensor):
+                b, h, s, d = tensor.shape
+                bshd = layout.startswith("bshd")
+                wide = tensor.new_full(
+                    (b, s, h, 2 * d) if bshd else (b, h, s, 2 * d), float("nan")
+                )
+                view = wide[..., :d].transpose(1, 2) if bshd else wide[..., :d]
+                return view.copy_(tensor)
+
+            query, key, value = (with_gap(t) for t in (query, key, value))
+        block_mask = None
+        if causal:
+            block_mask = create_block_mask(
+                lambda b, h, q, kv: q >= kv, None, None, seq, seq_kv, device=device
+            )
+        return query, key, value, block_mask
+
+    def _run_flydsl_forward(
+        self,
+        query,
+        key,
+        value,
+        block_mask,
+        *,
+        force_dualwave,
+        requires_grad=False,
+        scale=None,
+        score_mod=None,
+        dualwave_causal=True,
+        head_slow_order=True,
+    ):
+        """Compile with FlyDSL autotuning; ``force_dualwave`` drops the upstream choice."""
+        kernel_options = {"BACKEND": "FLYDSL"}
+        if block_mask is not None and dualwave_causal:
+            kernel_options["FLYDSL_DUALWAVE_CAUSAL"] = True
+        if not head_slow_order:
+            kernel_options["FLYDSL_HEAD_SLOW_ORDER"] = False
+        if _dualwave_wide((query.size(-1), value.size(-1))):
+            kernel_options["FLYDSL_DUALWAVE_WIDE"] = True
+
+        def run(q, k, v):
+            return flex_attention(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                score_mod=score_mod,
+                scale=scale,
+                enable_gqa=q.size(1) != k.size(1),
+                kernel_options=kernel_options,
+                return_aux=AuxRequest(lse=True, max_scores=True),
+            )
+
+        selected = []
+        select = flex_flydsl_attention.autotune_select_algorithm
+
+        def spy_select(name, choices, *args, **kwargs):
+            selected.append([choice.name for choice in choices])
+            return select(name, choices, *args, **kwargs)
+
+        patches = [
+            torch._inductor.config.patch(
+                {"flydsl_enable_autotuning": True, "fx_graph_cache": False}
+            ),
+            mock.patch.object(
+                flex_flydsl_attention, "autotune_select_algorithm", spy_select
+            ),
+        ]
+        if force_dualwave:
+            patches.append(
+                mock.patch.object(
+                    flex_flydsl_attention,
+                    "maybe_append_flydsl_flex_attention_choice",
+                    return_value=(True, ""),
+                )
+            )
+        inputs = (query, key, value)
+        if requires_grad:
+            inputs = tuple(t.detach().clone().requires_grad_() for t in inputs)
+        torch._dynamo.reset()
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            (output, aux), code = run_and_get_code(
+                torch.compile(run, fullgraph=True), *inputs
+            )
+        torch.cuda.synchronize()
+        return inputs, output, aux, "\n".join(code), selected
+
+    def _assert_matches_fp64(self, query, key, value, output, aux, causal):
+        group = query.size(1) // key.size(1)
+        key64 = key.double().repeat_interleave(group, dim=1)
+        value64 = value.double().repeat_interleave(group, dim=1)
+        scores = (query.double() @ key64.transpose(-2, -1)) * query.size(-1) ** -0.5
+        if causal:
+            keep = torch.ones(
+                query.size(2), key.size(2), device=query.device, dtype=torch.bool
+            ).tril()
+            scores = scores.masked_fill(~keep, -float("inf"))
+        reference = scores.softmax(-1) @ value64
+        self.assertEqual(output.double(), reference, atol=0.025, rtol=0.025)
+        self.assertEqual(aux.lse.double(), scores.logsumexp(-1), atol=0.025, rtol=0.01)
+        self.assertEqual(
+            aux.max_scores.double(), scores.amax(-1), atol=0.025, rtol=0.01
+        )
+
+    def _assert_matches_triton(self, query, key, value, output, aux, **kwargs):
+        """``output`` and its LSE match Triton's and eager fp64 flex attention
+        of ``query``, ``key`` and ``value`` with ``kwargs``."""
+        torch._dynamo.reset()
+        reference, reference_aux = torch.compile(
+            lambda q, k, v: flex_attention(
+                q,
+                k,
+                v,
+                kernel_options={"BACKEND": "TRITON"},
+                return_aux=AuxRequest(lse=True),
+                **kwargs,
+            ),
+            fullgraph=True,
+        )(query, key, value)
+        golden, golden_aux = flex_attention(
+            *(t.double() for t in (query, key, value)),
+            return_aux=AuxRequest(lse=True),
+            **{**kwargs, "block_mask": _with_listed_blocks(kwargs.get("block_mask"))},
+        )
+        self._assert_close_to_fp64(output, reference, golden, atol=0.02, rtol=0.02)
+        self._assert_close_to_fp64(
+            aux.lse, reference_aux.lse, golden_aux.lse, atol=0.02, rtol=0.01
+        )
+
+    def _check_dualwave_against_triton(self, device, case, head_dims=(128, 128)):
+        """Run a (B, Hq, Hkv, Sq, Sk, causal, dtype) ``case`` on the dual-wave
+        forward; return its code."""
+        self._require_runtime()
+        batch, q_heads, kv_heads, seq_q, seq_kv, causal, dtype = case
+        query, key, value, block_mask = self._dualwave_inputs(
+            device,
+            batch=batch,
+            q_heads=q_heads,
+            kv_heads=kv_heads,
+            seq=seq_q,
+            seq_kv=seq_kv,
+            causal=causal,
+            dtype=dtype,
+            head_dims=head_dims,
+        )
+        _, output, aux, code, selected = self._run_flydsl_forward(
+            query, key, value, block_mask, force_dualwave=True
+        )
+        self.assertIn("build_flex_attn_fwd_dualwave_module", code)
+        self.assertIn("dualwave", selected[0][0])
+        self._assert_matches_fp64(query, key, value, output, aux, causal)
+        self._assert_matches_triton(
+            query,
+            key,
+            value,
+            output,
+            aux,
+            block_mask=block_mask,
+            enable_gqa=q_heads != kv_heads,
+        )
+        return code
+
     @parametrize("case", list(_DYNAMIC_SHAPE_CASES))
     @torch._inductor.config.patch({"fx_graph_cache": False})
     @torch.fx.experimental._config.patch(use_duck_shape=False)
@@ -3935,6 +4995,396 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
                 self._assert_close_to_fp64(
                     actual, expected, exact, atol=0.04, rtol=0.03
                 )
+
+    @parametrize(
+        "batch,q_heads,kv_heads,seq,causal",
+        [
+            subtest((2, 16, 4, 640, False), name="dense_gqa_ragged"),
+            subtest((1, 8, 1, 384, True), name="causal_mqa_min_length"),
+            subtest((1, 16, 16, 4096, True), name="causal_mha_long"),
+        ],
+    )
+    def test_gfx950_dualwave_forward_matches_fp64(
+        self, device, batch, q_heads, kv_heads, seq, causal
+    ):
+        self._require_runtime()
+        query, key, value, block_mask = self._dualwave_inputs(
+            device,
+            batch=batch,
+            q_heads=q_heads,
+            kv_heads=kv_heads,
+            seq=seq,
+            causal=causal,
+        )
+        _, output, aux, code, selected = self._run_flydsl_forward(
+            query, key, value, block_mask, force_dualwave=True
+        )
+        self.assertIn("build_flex_attn_fwd_dualwave_module", code)
+        self.assertNotIn("build_flex_attn_fwd_module(", code)
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(len(selected[0]), 1)
+        self.assertIn("dualwave", selected[0][0])
+        self._assert_matches_fp64(query, key, value, output, aux, causal)
+
+    @parametrize(
+        *_paired(
+            (
+                "batch,q_heads,kv_heads,seq,head_dims",
+                [
+                    subtest((1, 8, 8, 16384, (128, 128)), name="mha"),
+                    subtest((2, 16, 4, 16500, (96, 96)), name="gqa_ragged_d96"),
+                    subtest((1, 8, 2, 16384, (64, 128)), name="gqa_qk64_v128"),
+                ],
+            ),
+            ("kernel", ["forward", "dualwave"]),
+        )
+    )
+    def test_gfx950_head_slow_order_is_bitwise(
+        self, device, kernel, batch, q_heads, kv_heads, seq, head_dims
+    ):
+        self._require_runtime()
+        query, key, value, _ = self._dualwave_inputs(
+            device,
+            batch=batch,
+            q_heads=q_heads,
+            kv_heads=kv_heads,
+            seq=seq,
+            causal=False,
+            head_dims=head_dims,
+        )
+        runs = []
+        for head_slow_order in (True, False):
+            with contextlib.ExitStack() as stack:
+                if kernel == "forward":
+                    stack.enter_context(
+                        mock.patch.object(
+                            flex_flydsl_attention,
+                            "maybe_append_flydsl_dualwave_forward_choice",
+                            return_value=(False, ""),
+                        )
+                    )
+                _, output, aux, code, _ = self._run_flydsl_forward(
+                    query,
+                    key,
+                    value,
+                    None,
+                    force_dualwave=kernel == "dualwave",
+                    head_slow_order=head_slow_order,
+                )
+            self.assertEqual("head_slow_order=HEAD_SLOW_ORDER" in code, head_slow_order)
+            runs.append((output, aux.lse, aux.max_scores))
+        for ordered, unordered in zip(*runs, strict=True):
+            self.assertTrue(torch.equal(ordered, unordered))
+        output, lse, max_scores = runs[0]
+        group = q_heads // kv_heads
+        # One head at a time keeps the fp64 scores to a few GiB.
+        for b, h in itertools.product(range(batch), range(q_heads)):
+            rows = (slice(b, b + 1), slice(h, h + 1))
+            kv_rows = (slice(b, b + 1), slice(h // group, h // group + 1))
+            self._assert_matches_fp64(
+                query[rows],
+                key[kv_rows],
+                value[kv_rows],
+                output[rows],
+                SimpleNamespace(lse=lse[rows], max_scores=max_scores[rows]),
+                False,
+            )
+
+    @parametrize(
+        "case",
+        [
+            subtest(
+                (2, 16, 4, 512, 2048, True, torch.float16), name="causal_gqa_cross_fp16"
+            ),
+            subtest(
+                (1, 8, 8, 1000, 1000, False, torch.float16), name="dense_ragged_fp16"
+            ),
+            subtest(
+                (1, 8, 8, 2048, 1050, True, torch.bfloat16),
+                name="causal_longer_q_ragged_kv",
+            ),
+            subtest((1, 8, 1, 129, 384, True, torch.bfloat16), name="causal_mqa_short"),
+        ],
+    )
+    def test_gfx950_dualwave_against_triton(self, device, case):
+        self._check_dualwave_against_triton(device, case)
+
+    @parametrize(
+        *_paired(
+            (
+                "head_dims",
+                [
+                    subtest(
+                        dims,
+                        name=f"qk{dims[0]}_v{dims[1]}"
+                        if dims[0] != dims[1]
+                        else f"d{dims[0]}",
+                    )
+                    for dims in (
+                        (64, 128),
+                        (96, 96),
+                        *_WIDE_HEAD_DIMS,
+                        *_NATIVE_WIDE_HEAD_DIMS,
+                    )
+                ],
+            ),
+            (
+                "case",
+                [
+                    subtest((1, 8, 8, 1024, 1024, False, torch.bfloat16), name="dense"),
+                    subtest(
+                        (1, 8, 8, 1024, 1024, True, torch.float16), name="causal_fp16"
+                    ),
+                    subtest(
+                        (2, 16, 4, 1000, 1000, True, torch.bfloat16),
+                        name="causal_gqa_ragged",
+                    ),
+                    subtest(
+                        (2, 16, 4, 333, 4097, False, torch.float16),
+                        name="dense_gqa_cross_ragged_fp16",
+                    ),
+                    subtest(
+                        (1, 8, 2, 777, 1050, True, torch.bfloat16),
+                        name="causal_gqa_cross_ragged",
+                    ),
+                ],
+            ),
+        )
+    )
+    def test_gfx950_dualwave_head_dims_against_triton(self, device, head_dims, case):
+        code = self._check_dualwave_against_triton(device, case, head_dims)
+        if head_dims in _NATIVE_WIDE_HEAD_DIMS:
+            self.assertIn(f"KV_HEAD_DIMS: fx.Constexpr = {head_dims}", code)
+        else:
+            self.assertIn(f"V_HEAD_DIM: fx.Constexpr = {head_dims[1]}", code)
+        if _dualwave_wide(head_dims):
+            self.assertIn("NUM_WAVES: fx.Constexpr = 4", code)
+
+    @parametrize("case", list(_DUALWAVE_MOD_CASES))
+    def test_gfx950_dualwave_mods_against_triton(self, device, case):
+        self._require_runtime()
+        query, key, value, block_mask, reference_mask, score_mod = _dualwave_mod_inputs(
+            case, device
+        )
+        _, output, aux, code, selected = self._run_flydsl_forward(
+            query,
+            key,
+            value,
+            block_mask,
+            force_dualwave=True,
+            score_mod=score_mod,
+            dualwave_causal=False,
+        )
+        self.assertIn("build_flex_attn_fwd_dualwave_module", code)
+        self.assertNotIn("build_flex_attn_fwd_module(", code)
+        self.assertEqual(selected, [[selected[0][0]]])
+        self.assertIn("dualwave", selected[0][0])
+        self._assert_matches_triton(
+            query,
+            key,
+            value,
+            output,
+            aux,
+            block_mask=reference_mask,
+            score_mod=score_mod,
+            enable_gqa=True,
+        )
+
+    @parametrize("case", ["dense", "causal", "key_only"])
+    def test_gfx950_dualwave_broadcast_kv_batch(self, device, case):
+        self._require_runtime()
+        batch, seq = 3, 1024
+        query, key, value, _ = self._dualwave_inputs(
+            device, batch=batch, q_heads=16, kv_heads=4, seq=seq, causal=False
+        )
+        causal = case == "causal"
+        block_mask = None
+        if case == "key_only":
+            # V keeps a batch per query batch, so only K is read from batch 0.
+            key = key[:1].expand(batch, -1, -1, -1)
+        elif causal:
+            key, value = key[:1], value[:1]
+            block_mask = create_block_mask(
+                lambda b, h, q, kv: q >= kv, batch, None, seq, seq, device=device
+            )
+        else:
+            # Without a BlockMask the K/V batch must match; expand it in place.
+            key, value = (t[:1].expand(batch, -1, -1, -1) for t in (key, value))
+        _, output, aux, code, _ = self._run_flydsl_forward(
+            query, key, value, block_mask, force_dualwave=True
+        )
+        self.assertIn("build_flex_attn_fwd_dualwave_module", code)
+        self.assertIn("K_STRIDE: fx.Constexpr = (0, ", code)
+        self._assert_matches_fp64(query, key, value, output, aux, causal)
+
+    @parametrize(
+        "q_heads,kv_heads,causal,head_dims",
+        [
+            subtest((16, 4, True, (128, 128)), name="causal_gqa_flydsl_bwd"),
+            subtest((8, 8, False, (96, 96)), name="dense_mha_flydsl_bwd_d96"),
+        ],
+    )
+    def test_gfx950_dualwave_lse_feeds_backward(
+        self, device, q_heads, kv_heads, causal, head_dims
+    ):
+        self._require_runtime()
+        seq = 640
+        query, key, value, block_mask = self._dualwave_inputs(
+            device,
+            batch=1,
+            q_heads=q_heads,
+            kv_heads=kv_heads,
+            seq=seq,
+            causal=causal,
+            head_dims=head_dims,
+        )
+        torch.manual_seed(24)
+        grad_output = torch.randn(
+            *query.shape[:-1], value.size(-1), device=device, dtype=query.dtype
+        )
+        inputs, output, _, code, _ = self._run_flydsl_forward(
+            query, key, value, block_mask, force_dualwave=True, requires_grad=True
+        )
+        self.assertIn("build_flex_attn_fwd_dualwave_module", code)
+        _, backward_code = run_and_get_code(lambda: output.backward(grad_output))
+        backward_code = "\n".join(backward_code)
+        self.assertIn("flydsl_fused_flex_attention_backward_", backward_code)
+        grads = [t.grad for t in inputs]
+
+        reference_inputs = tuple(
+            t.detach().clone().requires_grad_() for t in (query, key, value)
+        )
+        torch._dynamo.reset()
+        reference = torch.compile(
+            lambda q, k, v: flex_attention(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                enable_gqa=q_heads != kv_heads,
+                kernel_options={"BACKEND": "TRITON"},
+            ),
+            fullgraph=True,
+        )(*reference_inputs)
+        reference.backward(grad_output)
+        golden_inputs = tuple(
+            t.detach().double().requires_grad_() for t in (query, key, value)
+        )
+        golden = flex_attention(
+            *golden_inputs, block_mask=block_mask, enable_gqa=q_heads != kv_heads
+        )
+        golden.backward(grad_output.double())
+        self._assert_close_to_fp64(output, reference, golden, atol=0.03, rtol=0.02)
+        # A natural-log LSE from the forward would skew every gradient by ~ln 2.
+        for grad, reference_input, golden_input in zip(
+            grads, reference_inputs, golden_inputs
+        ):
+            self._assert_close_to_fp64(
+                grad, reference_input.grad, golden_input.grad, atol=0.04, rtol=0.03
+            )
+
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    def test_gfx950_dualwave_autotunes_against_upstream(self, device):
+        self._require_runtime()
+        query, key, value, block_mask = self._dualwave_inputs(
+            device, batch=1, q_heads=16, kv_heads=16, seq=2048, causal=True
+        )
+        _, output, aux, code, selected = self._run_flydsl_forward(
+            query, key, value, block_mask, force_dualwave=False
+        )
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(len(selected[0]), 2)
+        self.assertTrue(any("dualwave" in name for name in selected[0]))
+        self.assertTrue(
+            "build_flex_attn_fwd_dualwave_module" in code
+            or "build_flex_attn_fwd_module(" in code
+        )
+        self._assert_matches_fp64(query, key, value, output, aux, True)
+
+    @parametrize(
+        *_paired(
+            (
+                "seq,kv_heads,causal,head_dims",
+                [
+                    subtest((1024, 8, False, (128, 128)), name="dense"),
+                    subtest((1000, 2, False, (128, 128)), name="ragged_gqa"),
+                    subtest((1024, 8, True, (128, 128)), name="causal"),
+                    subtest((777, 4, False, (256, 256)), name="ragged_gqa_d256"),
+                ],
+            ),
+            ("layout", ("bhsd", "bshd_gap", "bhsd_gap")),
+        )
+    )
+    def test_gfx950_dualwave_strided_layouts(
+        self, device, layout, seq, kv_heads, causal, head_dims
+    ):
+        # Each (b, h) slab is bounded on its own, so ragged rows read zeros and
+        # drop their stores whichever batch or head follows in memory.
+        self._require_runtime()
+        query, key, value, block_mask = self._dualwave_inputs(
+            device,
+            batch=2,
+            q_heads=8,
+            kv_heads=kv_heads,
+            seq=seq,
+            causal=causal,
+            head_dims=head_dims,
+            layout=layout,
+        )
+        _, output, aux, code, _ = self._run_flydsl_forward(
+            query, key, value, block_mask, force_dualwave=True
+        )
+        self.assertIn("build_flex_attn_fwd_dualwave_module", code)
+        self.assertIn(f"CAUSAL: fx.Constexpr = {causal}", code)
+        self._assert_matches_fp64(query, key, value, output, aux, causal)
+
+    @parametrize(
+        "head_dims,dualwave",
+        [((128, 128), True), ((256, 256), True), ((192, 128), False)],
+    )
+    @torch._inductor.config.patch(
+        {"fx_graph_cache": False, "flydsl_enable_autotuning": False}
+    )
+    def test_gfx950_dense_bshd_prefill_default(self, device, head_dims, dualwave):
+        # Without autotuning, dense BSHD prefill with more Q blocks than CUs
+        # runs only the dual-wave forward at the head dims it is faster at.
+        self._require_runtime()
+        num_cus = torch.cuda.get_device_properties(device).multi_processor_count
+        heads = num_cus // 8 + 8
+        query, key, value, _ = self._dualwave_inputs(
+            device,
+            batch=1,
+            q_heads=heads,
+            kv_heads=heads,
+            seq=1024,
+            causal=False,
+            head_dims=head_dims,
+        )
+        selected = []
+        select = flex_flydsl_attention.autotune_select_algorithm
+
+        def spy_select(name, choices, *args, **kwargs):
+            selected.append([choice.name for choice in choices])
+            return select(name, choices, *args, **kwargs)
+
+        def run(q, k, v):
+            return flex_attention(
+                q,
+                k,
+                v,
+                kernel_options={"BACKEND": "FLYDSL"},
+                return_aux=AuxRequest(lse=True, max_scores=True),
+            )
+
+        torch._dynamo.reset()
+        with mock.patch.object(
+            flex_flydsl_attention, "autotune_select_algorithm", spy_select
+        ):
+            output, aux = torch.compile(run, fullgraph=True)(query, key, value)
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(len(selected[0]), 1)
+        self.assertEqual("dualwave" in selected[0][0], dualwave)
+        self._assert_matches_fp64(query, key, value, output, aux, False)
 
     # Past 2**26 32-bit elements, a byte bound counted in i32 bits wraps.
     @parametrize("elements", [(1 << 26) + 64, (1 << 27) + 64])
@@ -4016,6 +5466,227 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
 
     # A tile past the end of the source, as the last K/V tile of the first
     # K/V batch past Sk, must read zeros too.
+    @parametrize(*_paired(("offset", [0, 640, 2048 + 64]), ("dim", [16, 24])))
+    def test_dualwave_flat_buffer_views_address_memory(self, device, offset, dim):
+        # Generic buffer copies through the dual-wave's addressing run on any ROCm GPU.
+        if not flydsl_utils.runtime_available():
+            self.skipTest("requires ROCm and a built FlyDSL runtime")
+        import flydsl.compiler as flyc
+        import flydsl.expr as fx
+        from flydsl._mlir.dialects import fly
+        from flydsl.expr.typing import Vector
+
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_fwd_dualwave_gfx950 import (
+            flat_buffer_view,
+            tile_buffer_view,
+        )
+        from torch._inductor.runtime.flydsl_cache import temporary_env
+
+        batch, seq, heads = 2, 16, 4
+        elements = batch * seq * heads * dim
+        threads = elements // 8
+        stats_size = batch * heads * seq
+
+        @flyc.kernel(known_block_size=[threads, 1, 1])
+        def copy_kernel(
+            source: fx.Tensor, target: fx.Tensor, stats: fx.Tensor, offset: fx.Int32
+        ):
+            tid = fx.Index(fx.thread_idx.x)
+            # Like a ragged K/V tail: the bound ends where the source does.
+            source_view = tile_buffer_view(source, fx.Int32(elements), offset)
+            target_view = flat_buffer_view(target, fx.Int32(elements * 2))
+            stats_view = flat_buffer_view(stats)
+            copy_128 = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.Int32)
+            pack = fly.copy_atom_call_ssa(
+                [Vector.make_type(4, fx.Int32)],
+                copy_128,
+                fx.slice(source_view, (None, fx.Int32(tid * 8))),
+            )
+            register = fx.make_rmem_tensor(fx.make_layout(4, 1), fx.Int32)
+            fx.memref_store_vec(pack, register)
+            fx.copy(
+                copy_128, register, fx.slice(target_view, (None, fx.Int32(tid * 8)))
+            )
+            if tid < stats_size:
+                bits = Vector.from_elements(
+                    [fx.Float32(fx.Int32(tid))], fx.Float32
+                ).bitcast(fx.Int32)
+                stats_register = fx.make_rmem_tensor(fx.make_layout(1, 1), fx.Int32)
+                fx.memref_store_vec(bits, stats_register)
+                fx.copy(
+                    fx.make_copy_atom(fx.rocdl.BufferCopy32b(), fx.Int32),
+                    stats_register,
+                    fx.slice(stats_view, (None, fx.Int32(tid))),
+                )
+
+        @flyc.jit
+        def launch(
+            source: fx.Tensor,
+            target: fx.Tensor,
+            stats: fx.Tensor,
+            offset: fx.Int32,
+            stream: fx.Stream = fx.Stream(None),
+        ):
+            copy_kernel(source, target, stats, offset).launch(
+                grid=(1, 1, 1), block=(threads, 1, 1), stream=stream
+            )
+
+        # BHSD views of [B, S, H, D] memory, as the dual-wave kernel receives
+        # them; nonzero memory follows the source.
+        backing = torch.randn(2, batch, seq, heads, dim, device=device).bfloat16()
+        source = backing[0]
+        target = torch.zeros_like(source)
+        stats = torch.full((batch, heads, seq), -1.0, device=device)
+        # FlyDSL's disk cache key leaves out the dual-wave module's source.
+        with temporary_env({"FLYDSL_RUNTIME_ENABLE_CACHE": "0"}):
+            launch(
+                *(
+                    flyc.from_torch_tensor(tensor)
+                    for tensor in (
+                        source.transpose(1, 2),
+                        target.transpose(1, 2),
+                        stats,
+                    )
+                ),
+                offset,
+                torch.cuda.current_stream(),
+            )
+        torch.cuda.synchronize()
+        expected = torch.zeros_like(source).flatten()
+        expected[: max(elements - offset, 0)] = source.flatten()[offset:]
+        self.assertEqual(target.flatten(), expected, atol=0, rtol=0)
+        self.assertEqual(
+            stats.flatten(), torch.arange(stats_size, device=device).float()
+        )
+
+    @parametrize(
+        "q_blocks,kv_blocks,width,rows",
+        [
+            # Rows with no block, one block at 0, one past it, and a full row.
+            subtest((4, 5, 5, ((), (0,), (3,), (4, 3, 2, 1, 0))), name="edges"),
+            subtest((7, 200, 200, None), name="random_multi_chunk"),
+        ],
+    )
+    def test_dualwave_block_union_matches_lists(
+        self, device, q_blocks, kv_blocks, width, rows
+    ):
+        # The dual-wave's BlockMask union runs on any ROCm GPU.
+        if not flydsl_utils.runtime_available():
+            self.skipTest("requires ROCm and a built FlyDSL runtime")
+        import flydsl.compiler as flyc
+        import flydsl.expr as fx
+
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            flex_attn_fwd_dualwave_gfx950 as dualwave,
+        )
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils import (
+            make_global_view,
+        )
+        from torch._inductor.runtime.flydsl_cache import temporary_env
+
+        generator = torch.Generator().manual_seed(q_blocks * kv_blocks)
+        shape = (1, 1, q_blocks)
+        lists = []
+        for full in (False, True):
+            # Unsorted, duplicated and out-of-range blocks, garbage past each count.
+            counts = torch.randint(0, width + 1, shape, generator=generator)
+            indices = torch.randint(
+                -3, kv_blocks + 3, (*shape, width), generator=generator
+            )
+            if rows is not None:
+                counts.zero_()
+                for row, blocks in enumerate(rows):
+                    if not full:
+                        counts[0, 0, row] = len(blocks)
+                        indices[0, 0, row, : len(blocks)] = torch.tensor(blocks)
+            lists += [counts.int(), indices.int()]
+        pairs = -(-q_blocks // 2)
+        slots = kv_blocks + 4
+
+        @fx.struct
+        class Storage:
+            states: fx.Array[fx.Int32, 2 * kv_blocks + 1, 16]
+            union: fx.Array[fx.Int32, slots, 16]
+
+        @flyc.kernel(known_block_size=[512, 1, 1])
+        def union_kernel(
+            counts: fx.Tensor,
+            indices: fx.Tensor,
+            full_counts: fx.Tensor,
+            full_indices: fx.Tensor,
+            union: fx.Tensor,
+        ):
+            lds = fx.SharedAllocator().allocate(Storage).peek()
+            state_ptr, union_ptr = (
+                dualwave._lds_ptr_from_index(fx.Index(fx.ptrtoint(array.ptr)))
+                for array in (lds.states, lds.union)
+            )
+            pair = fx.Int32(fx.block_idx.x)
+            views = tuple(
+                (
+                    make_global_view(c, None, q_blocks, 1),
+                    make_global_view(i, None, q_blocks * width, 1),
+                    fx.Int32(width),
+                )
+                for c, i in ((counts, indices), (full_counts, full_indices))
+            )
+            dualwave.build_block_union(
+                views,
+                pair * fx.Int32(2),
+                pair * fx.Int32(2) + fx.Int32(1) < fx.Int32(q_blocks),
+                fx.Int32(kv_blocks),
+                state_ptr,
+                union_ptr,
+                kv_blocks,
+                512,
+            )
+            thread = fx.Int32(fx.thread_idx.x)
+            if thread < fx.Int32(slots):
+                fx.ptr_store(
+                    dualwave._lds_load_i32(union_ptr, thread),
+                    fx.add_offset(fx.get_iter(union), pair * fx.Int32(slots) + thread),
+                )
+
+        @flyc.jit
+        def launch(
+            counts: fx.Tensor,
+            indices: fx.Tensor,
+            full_counts: fx.Tensor,
+            full_indices: fx.Tensor,
+            union: fx.Tensor,
+            stream: fx.Stream = fx.Stream(None),
+        ):
+            union_kernel(counts, indices, full_counts, full_indices, union).launch(
+                grid=(pairs, 1, 1), block=(512, 1, 1), stream=stream
+            )
+
+        union = torch.full((pairs, slots), -1, dtype=torch.int32, device=device)
+        # FlyDSL's disk cache key leaves out the dual-wave module's source.
+        with temporary_env({"FLYDSL_RUNTIME_ENABLE_CACHE": "0"}):
+            launch(
+                *(flyc.from_torch_tensor(t.to(device)) for t in (*lists, union)),
+                torch.cuda.current_stream(),
+            )
+        torch.cuda.synchronize()
+        states = _dense_block_states(*lists, kv_blocks)[0, 0]
+        for pair in range(pairs):
+            rows_states = states[2 * pair : 2 * pair + 2]
+            if rows_states.size(0) == 1:
+                rows_states = torch.cat((rows_states, torch.zeros_like(rows_states)))
+            listed = (rows_states != 0).any(0).nonzero().flatten().tolist()
+            expected = [
+                block
+                | int(rows_states[0, block]) << 24
+                | int(rows_states[1, block]) << 26
+                for block in listed
+            ]
+            if not expected:
+                expected = [0, 1]
+            elif len(expected) == 1:
+                first = listed[0]
+                expected = [expected[0], 1] if first == 0 else [first - 1, expected[0]]
+            count = int(union[pair, kv_blocks + 2])
+            self.assertEqual(union[pair, :count].tolist(), expected)
 
     def test_tile_score_mod_readers_match_captures(self, device):
         # Capture-table reads are generic buffer loads and run on any ROCm GPU.
@@ -6466,17 +8137,21 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
             self.assertEqual(grad.double(), reference_grad, atol=0.04, rtol=0.03)
 
     @parametrize(
-        "dtype,value,seq",
+        "dtype,value,seq,dualwave",
         [
-            subtest((torch.bfloat16, 133120.0, 1024), name="bf16_seq1024"),
-            subtest((torch.float16, 32768.0, 1024), name="fp16_seq1024"),
-            subtest((torch.bfloat16, 133120.0, 1), name="bf16_seq1"),
-            subtest((torch.bfloat16, 176.0, 1024), name="bf16_moderate_seq1024"),
-            subtest((torch.float16, 176.0, 1), name="fp16_moderate_seq1"),
+            subtest((torch.bfloat16, 133120.0, 1024, False), name="bf16_seq1024"),
+            subtest((torch.float16, 32768.0, 1024, False), name="fp16_seq1024"),
+            subtest((torch.bfloat16, 133120.0, 1, False), name="bf16_seq1"),
+            subtest((torch.bfloat16, 176.0, 1024, False), name="bf16_moderate_seq1024"),
+            subtest((torch.float16, 176.0, 1, False), name="fp16_moderate_seq1"),
+            subtest(
+                (torch.bfloat16, 133120.0, 1024, True), name="bf16_seq1024_dualwave"
+            ),
+            subtest((torch.float16, 32768.0, 1000, True), name="fp16_seq1000_dualwave"),
         ],
     )
     @torch._inductor.config.patch({"fx_graph_cache": False})
-    def test_gfx950_large_logits_match_fp64(self, device, dtype, value, seq):
+    def test_gfx950_large_logits_match_fp64(self, device, dtype, value, seq, dualwave):
         # Q = K = V filled with one value gives equal, large logits.
         self._require_runtime()
         query, key, value_tensor = (
@@ -6485,19 +8160,31 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
             )
             for _ in range(3)
         )
-        inputs = [
-            t.detach().clone().requires_grad_() for t in (query, key, value_tensor)
-        ]
-        output, code = run_and_get_code(
-            torch.compile(
-                lambda q, k, v: flex_attention(
-                    q, k, v, scale=0.125, kernel_options={"BACKEND": "FLYDSL"}
+        if dualwave:
+            inputs, output, _, code, _ = self._run_flydsl_forward(
+                query,
+                key,
+                value_tensor,
+                None,
+                force_dualwave=True,
+                requires_grad=True,
+                scale=0.125,
+            )
+            self.assertIn("build_flex_attn_fwd_dualwave_module", code)
+        else:
+            inputs = [
+                t.detach().clone().requires_grad_() for t in (query, key, value_tensor)
+            ]
+            output, code = run_and_get_code(
+                torch.compile(
+                    lambda q, k, v: flex_attention(
+                        q, k, v, scale=0.125, kernel_options={"BACKEND": "FLYDSL"}
+                    ),
+                    fullgraph=True,
                 ),
-                fullgraph=True,
-            ),
-            *inputs,
-        )
-        self.assertIn("build_flex_attn_fwd_module", "\n".join(code))
+                *inputs,
+            )
+            self.assertIn("build_flex_attn_fwd_module", "\n".join(code))
         _, backward_code = run_and_get_code(lambda: output.sum().backward())
         self.assertIn(
             "build_flex_attn_bwd_module",

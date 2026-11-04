@@ -13,6 +13,7 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.nn.attention.flex_attention import _LARGE_SPARSE_BLOCK_SIZE
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 
+from ... import config
 from ...codegen.flydsl import flydsl_utils
 from ...codegen.flydsl.flydsl_flex_kernel import FlyDSLFlexTemplate
 from ...ir import ExternKernel, FixedLayout, Pointwise, Reduction, TensorBox
@@ -21,13 +22,17 @@ from ...ops_handler import ReductionType
 from ...select_algorithm import autotune_select_algorithm
 from ...virtualized import ops, V
 from ..vendored_templates.flydsl.kernels.flex_attn_bwd_utils import (
+    classify_mask_traversal,
+    DIRECT_RANGE_CAUSAL,
     forward_single_pass,
     forward_value_slice,
+    MASK_TRAVERSAL_UNMASKED,
     MAX_DIRECT_CAPTURES,
     SUPPORTED_HEAD_DIMS,
     WIDE_HEAD_DIMS,
 )
 from ..vendored_templates.flydsl.kernels.flex_attn_plan import (
+    dualwave_plan,
     forward_kv_splits,
     forward_plan,
     use_head_slow_order,
@@ -68,6 +73,10 @@ flex_flydsl_forward_template = FlyDSLFlexTemplate(
     name="flex_flydsl_forward",
     source=load_flex_template("flydsl_forward"),
 )
+flex_flydsl_dualwave_forward_template = FlyDSLFlexTemplate(
+    name="flex_flydsl_forward_dualwave",
+    source=load_flex_template("flydsl_forward_dualwave"),
+)
 flex_flydsl_split_kv_combine_template = FlyDSLFlexTemplate(
     name="flex_flydsl_split_kv_combine",
     source=load_flex_template("flydsl_split_kv_combine"),
@@ -77,6 +86,18 @@ _MAX_BUFFER_BYTES = 1 << 32
 _FLYDSL_DTYPES = {torch.bfloat16: "bf16", torch.float16: "fp16"}
 _SCORE_MOD_CAPTURE_DTYPES = (torch.float32, torch.bfloat16, torch.float16)
 _MAX_HEAD_DIM = max(max(dims) for dims in WIDE_HEAD_DIMS)
+# Below this the main forward is faster on dense prefill.
+_DUALWAVE_DEFAULT_MIN_SEQ_LEN = 512
+# (QK, V) head dims where the 4-wave dual-wave forward is the dense prefill
+# default. At (192, 128) and (64, 256) the main forward is faster.
+_DUALWAVE_WIDE_DEFAULT_HEAD_DIMS = (
+    (128, 256),
+    (160, 160),
+    (192, 192),
+    (224, 224),
+    (256, 128),
+    (256, 256),
+)
 
 
 def _contiguous_strides(shape):
@@ -1043,6 +1064,428 @@ def _append_template_choice(template, choices, **kwargs) -> tuple[bool, str]:
     return True, ""
 
 
+def _block_mask_rows_match(metadata, batch, heads, num_q_blocks) -> bool:
+    """Whether BlockMask metadata has one row per ``num_q_blocks`` Q block for
+    a batch of 1 or ``batch`` and one of ``heads``."""
+    count_shape = metadata.count_shape
+    return (
+        len(count_shape) == 3
+        and count_shape[0] in (1, batch)
+        and count_shape[1] in heads
+        and count_shape[2] == num_q_blocks
+        and metadata.full_count_shape == count_shape
+        and all(
+            len(shape) == 4 and shape[:3] == count_shape
+            for shape in (metadata.index_shape, metadata.full_index_shape)
+        )
+    )
+
+
+def _causal_block_mask_window(query, key, mask_graph, block_mask):
+    """``(causal, width)``: whether ``mask_graph`` is top-left causal, with
+    ``width`` its lookback ``W`` if it also keeps only ``q - kv < W``, and
+    ``block_mask`` has the shape of ``create_block_mask``'s 128-block metadata
+    for it. The BlockMask contents are not read."""
+    from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils import (
+        sliding_window_mask_width,
+    )
+
+    mask_config, _ = _get_mask_program_config(mask_graph, ())
+    metadata, _ = _get_block_mask_metadata(query, *block_mask)
+    if mask_config is None or metadata is None:
+        return False, None
+    batch, q_heads, seq_q, _ = _bhsd_sizes(query)
+    _, kv_heads, seq_kv, _ = _bhsd_sizes(key)
+    num_kv_blocks = _ceil_div(seq_kv, 128)
+    if not (
+        _block_mask_rows_match(
+            metadata, batch, (1, kv_heads, q_heads), _ceil_div(seq_q, 128)
+        )
+        and (metadata.index_shape[-1], metadata.full_index_shape[-1])
+        == (num_kv_blocks, num_kv_blocks)
+    ):
+        return False, None
+    width = sliding_window_mask_width(
+        mask_config["MASK_PROGRAM"], mask_config["MASK_PROGRAM_OUTPUT"], ()
+    )
+    if width is not None:
+        return True, width
+    traversal, direct_range_kind = classify_mask_traversal(
+        mask_config["MASK_PROGRAM"],
+        mask_config["MASK_PROGRAM_OUTPUT"],
+        sequence_length=_template_int(seq_q),
+        key_sequence_length=_template_int(seq_kv),
+        block_mask_is_dense=True,
+    )
+    return (
+        traversal != MASK_TRAVERSAL_UNMASKED
+        and direct_range_kind == DIRECT_RANGE_CAUSAL
+    ), None
+
+
+def _get_flydsl_dualwave_forward_config(
+    *,
+    query,
+    key,
+    value,
+    kv_num_blocks,
+    kv_indices,
+    full_kv_num_blocks,
+    full_kv_indices,
+    subgraph,
+    mask_graph,
+    score_mod_other_buffers,
+    mask_mod_other_buffers,
+    scale,
+    sparse_q_block_size,
+    sparse_kv_block_size,
+    block_mask_is_dense,
+    allow_causal_block_mask=False,
+    block_states=None,
+    head_slow_order=False,
+    wide=False,
+    kv_head_dims=None,
+) -> tuple[dict[str, Any] | None, str]:
+    """Gate the dual-wave forward: all of Sk without a BlockMask, top-left
+    causal tiles for an opted-in causal BlockMask, else the listed blocks.
+    ``head_slow_order``: as for ``_get_flydsl_flex_attention_forward_config``.
+    ``wide`` also offers the 4-wave variant at ``DUALWAVE_WIDE_HEAD_DIMS``, also
+    as the K/V widths ``kv_head_dims`` of ``_get_flydsl_flex_attention_forward_config``;
+    dense prefill sets it at ``_DUALWAVE_WIDE_DEFAULT_HEAD_DIMS``."""
+    from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_fwd_dualwave_gfx950 import (
+        DUALWAVE_HEAD_DIM,
+        DUALWAVE_HEAD_DIMS,
+        dualwave_max_kv_blocks,
+        DUALWAVE_MIN_SEQ_LEN,
+        DUALWAVE_WIDE_HEAD_DIMS,
+        DUALWAVE_WIDE_WAVES,
+    )
+
+    # Checked here as well as in the shared gate, which may admit more.
+    dtype = query.get_dtype()
+    if dtype not in (torch.bfloat16, torch.float16) or any(
+        node.get_dtype() != dtype for node in (key, value)
+    ):
+        return None, "dual-wave forward supports BF16 or FP16 Q/K/V of one dtype"
+    if not block_mask_is_dense and not is_trivial_score_graph(subgraph.graph_module):
+        return (
+            None,
+            "dual-wave forward takes a score_mod only without a BlockMask: with "
+            "both, its main loop spills",
+        )
+    if full_kv_num_blocks is None or full_kv_indices is None:
+        return None, "requires full_kv_num_blocks/full_kv_indices metadata"
+    common_config, reason = _get_flydsl_common_config(
+        query=query,
+        key=key,
+        value=value,
+        subgraph=subgraph,
+        score_mod_other_buffers=score_mod_other_buffers,
+        mask_mod_other_buffers=mask_mod_other_buffers,
+        allow_mask_mod_buffers=True,
+        allow_score_mod=True,
+    )
+    if common_config is None:
+        return None, reason
+    try:
+        (b, hq, sq, qk_dim), (bkv, hkv, sk, key_dim), (bv, hv, sv, v_dim) = (
+            _bhsd_sizes(node) for node in (query, key, value)
+        )
+        sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
+        sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
+        o_dim = v_dim
+        if kv_head_dims is not None:
+            if (key_dim, v_dim) != tuple(kv_head_dims):
+                return None, "received K/V widths that differ from kv_head_dims"
+            padded = kernel_head_dims(key_dim, v_dim)
+            if padded is None:
+                return None, "kv_head_dims must require head-dimension padding"
+            o_dim = padded[1]
+        output_stride = _syms(
+            infer_dense_strides(
+                [query.get_size()[0], hq, query.get_size()[2], o_dim],
+                query.get_stride(),
+            )
+        )
+    except (AttributeError, TypeError, ValueError):
+        return None, "requires backed tensor dimensions"
+
+    reason = f"dual-wave forward supports (QK, V) head dims {DUALWAVE_HEAD_DIMS}"
+    num_waves = 8
+    if kv_head_dims is not None or (qk_dim, v_dim) not in DUALWAVE_HEAD_DIMS:
+        if (key_dim, v_dim) in DUALWAVE_WIDE_HEAD_DIMS:
+            reason += f", and {DUALWAVE_WIDE_HEAD_DIMS} with FLYDSL_DUALWAVE_WIDE"
+        # Q and O rows are zero-padded past K/V read in place.
+        row_dims = (key_dim, v_dim)
+        if kv_head_dims is not None:
+            row_dims = kernel_head_dims(key_dim, v_dim)
+        if (
+            not wide
+            or (key_dim, v_dim) not in DUALWAVE_WIDE_HEAD_DIMS
+            or (qk_dim, o_dim) != row_dims
+        ):
+            return None, reason
+        num_waves = DUALWAVE_WIDE_WAVES
+    elif key_dim != qk_dim:
+        return None, reason
+    if (bkv, hkv, sk) != (bv, hv, sv) or bkv not in (1, b):
+        return None, "requires a K/V batch of 1 or B and matching K/V heads/lengths"
+    if hkv <= 0 or hq % hkv != 0:
+        return None, "requires Hq divisible by Hkv"
+    _broadcast_kv_batch(common_config, b, bkv)
+    if sq < 128:
+        return None, "leaves Sq < 128 to the decode forward"
+    if sk < DUALWAVE_MIN_SEQ_LEN:
+        return None, f"requires Sk >= {DUALWAVE_MIN_SEQ_LEN}"
+    element_size = torch._utils._element_size(dtype)
+    strides = {}
+    for name, stride, extents in (
+        ("Q_STRIDE", common_config["Q_STRIDE"], (b, hq, sq, qk_dim)),
+        ("K_STRIDE", common_config["K_STRIDE"], (b, hkv, sk, key_dim)),
+        ("V_STRIDE", common_config["V_STRIDE"], (b, hkv, sk, v_dim)),
+        ("O_STRIDE", output_stride, (b, hq, sq, o_dim)),
+    ):
+        encoded = _template_strides(stride, extents[2])
+        # Rows start 16-byte aligned for the K/V DMA and the Q/O vector accesses.
+        if None in encoded or any(
+            (entry if isinstance(entry, int) else entry[1]) % 8 for entry in encoded[:3]
+        ):
+            return None, "requires B/H/S strides that are multiples of 8 elements"
+        span = 1 + sum((size - 1) * step for size, step in zip(extents, stride))
+        if bool(span * element_size >= _MAX_BUFFER_BYTES):
+            return None, "requires every tensor to be smaller than 4 GiB"
+        strides[name] = encoded
+    if sparse_q_block_size != 128 or sparse_kv_block_size != 128:
+        return None, "requires sparse Q/KV block sizes of 128"
+
+    block_mask = (kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices)
+    # Other BlockMasks than create_block_mask's causal one are read as lists.
+    causal = (
+        not block_mask_is_dense
+        and allow_causal_block_mask
+        and block_states is None
+        and _causal_block_mask_window(query, key, mask_graph, block_mask)
+        == (True, None)
+    )
+    block_lists = not (block_mask_is_dense or causal)
+    mask_config, reason = _get_mask_program_config(
+        mask_graph,
+        mask_mod_other_buffers if block_lists else (),
+        block_states if block_lists else None,
+        query,
+    )
+    if mask_config is None:
+        return None, reason
+    score_mod_config, _, reason = _get_score_mod_config(
+        subgraph, score_mod_other_buffers, query, mask_config["MASK_BUFFER_COUNT"]
+    )
+    if score_mod_config is None:
+        return None, f"unsupported score_mod: {reason}"
+    if score_mod_config["CAPTURE_TABLE"]:
+        return (
+            None,
+            f"dual-wave forward reads at most {MAX_DIRECT_CAPTURES} captures: its "
+            "main loop with a capture table is longer than the main forward's",
+        )
+
+    metadata = None
+    mods = block_lists or score_mod_config["HAS_SCORE_MOD"]
+    if mods:
+        metadata, reason = _get_block_mask_metadata(query, *block_mask)
+        if metadata is None:
+            return None, reason
+    # The kernel bounds a runtime Sk's block lists by the plan's power of two.
+    plan = dualwave_plan(sk, block_lists=block_lists)
+    if block_lists:
+        if metadata is None:
+            raise AssertionError("expected BlockMask metadata")
+        if not _block_mask_rows_match(metadata, b, (1, hkv, hq), -(-sq // 128)):
+            return None, "requires ceil(Sq / 128) BlockMask rows per batch and head"
+        if min(metadata.index_shape[-1], metadata.full_index_shape[-1]) <= 0:
+            return None, "requires non-empty partial and full BlockMask storage"
+        max_kv_blocks = dualwave_max_kv_blocks(key_dim, v_dim, _target_limits(query))
+        if plan["kv_blocks"] > max_kv_blocks:
+            return (
+                None,
+                f"dual-wave block lists take at most {max_kv_blocks} 128-key blocks",
+            )
+    if num_waves == DUALWAVE_WIDE_WAVES:
+        if block_lists and any(
+            op[0] == "cast" and op[2] == "i64" for op in mask_config["MASK_PROGRAM"]
+        ):
+            return (
+                None,
+                "4-wave dual-wave forward takes no mask_mod that widens to int64: "
+                "its 64-bit compares spill SGPRs",
+            )
+        captures = mask_config["MASK_BUFFER_COUNT"] + score_mod_config.get(
+            "SCORE_MOD_BUFFER_COUNT", 0
+        )
+        if (key_dim, v_dim) == (256, 256) and captures > 3:
+            return (
+                None,
+                "4-wave dual-wave forward reads at most 3 captures at head dims "
+                "(256, 256): more spill VGPRs",
+            )
+
+    sizes = {
+        "BATCH_SIZE": _template_int(b),
+        "SEQ_LEN": _template_int(sq),
+        "KV_SEQ_LEN": _template_int(sk),
+    }
+    runtime = _is_runtime(list(sizes.values()))
+    config = {
+        **sizes,
+        "NUM_Q_HEADS": hq,
+        "NUM_KV_HEADS": hkv,
+        "CAUSAL": causal,
+        "DTYPE_STR": "bf16" if dtype == torch.bfloat16 else "f16",
+        "SM_SCALE": float(scale),
+        **strides,
+        "RUNTIME_SIZES": runtime
+        or _is_runtime(list(strides.values()))
+        or _is_runtime(mask_config["MASK_BUFFER_SHAPES"]),
+        "TARGET_LIMITS": tuple(_target_limits(query)),
+    }
+    if (qk_dim, v_dim) != (DUALWAVE_HEAD_DIM, DUALWAVE_HEAD_DIM):
+        config.update(QK_HEAD_DIM=qk_dim, V_HEAD_DIM=o_dim)
+    if num_waves == DUALWAVE_WIDE_WAVES:
+        config["NUM_WAVES"] = num_waves
+        if kv_head_dims is not None:
+            config["KV_HEAD_DIMS"] = (key_dim, v_dim)
+    if config["RUNTIME_SIZES"]:
+        config["PLAN"] = plan
+    if head_slow_order and use_head_slow_order(hq, sq):
+        config["HEAD_SLOW_ORDER"] = True
+    if metadata is not None:
+        config.update(
+            {
+                "BLOCK_LISTS": block_lists,
+                "BLOCK_MASK_BATCH": _template_int(metadata.count_shape[0]),
+                "BLOCK_MASK_HEADS": metadata.count_shape[1],
+                "NUM_Q_BLOCKS": _template_int(metadata.count_shape[2]),
+                "MAX_PARTIAL_BLOCKS": _template_int(metadata.index_shape[-1]),
+                "MAX_FULL_BLOCKS": _template_int(metadata.full_index_shape[-1]),
+                **mask_config,
+                **score_mod_config,
+            }
+        )
+    return config, ""
+
+
+def _prefers_dualwave_forward(query) -> bool:
+    """Whether the dual-wave forward beats the main forward on dense prefill:
+    measured on gfx950, once every CU has more than one 128-row Q block and Sq
+    is past ``_DUALWAVE_DEFAULT_MIN_SEQ_LEN``."""
+    try:
+        batch, q_heads, seq_q, _ = _bhsd_sizes(query)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if not all(isinstance(size, int) for size in (batch, seq_q)):
+        return False
+    q_blocks = batch * q_heads * _ceil_div(seq_q, 128)
+    return (
+        seq_q > _DUALWAVE_DEFAULT_MIN_SEQ_LEN
+        and q_blocks > _target_limits(query).num_cus
+    )
+
+
+def maybe_append_flydsl_dualwave_forward_choice(
+    choices,
+    *,
+    query,
+    key,
+    value,
+    logsumexp,
+    max_scores,
+    kv_num_blocks,
+    kv_indices,
+    full_kv_num_blocks,
+    full_kv_indices,
+    layout,
+    subgraph,
+    mask_graph,
+    score_mod_other_buffers,
+    mask_mod_other_buffers,
+    scale,
+    sparse_q_block_size,
+    sparse_kv_block_size,
+    block_mask_is_dense,
+    write_max_scores=True,
+    allow_causal_block_mask=False,
+    subgraph_buffer=None,
+    score_mod_inputs=None,
+    block_states=None,
+    head_slow_order=False,
+    wide=False,
+    kv_head_dims=None,
+    default=False,
+) -> tuple[bool, str]:
+    """Offer the dual-wave forward as an extra autotuning candidate, or with
+    ``default`` as the only one."""
+    if not (default or config.flydsl_enable_autotuning):
+        return False, "requires torch._inductor.config.flydsl_enable_autotuning"
+    dualwave_config, reason = _get_flydsl_dualwave_forward_config(
+        query=query,
+        key=key,
+        value=value,
+        kv_num_blocks=kv_num_blocks,
+        kv_indices=kv_indices,
+        full_kv_num_blocks=full_kv_num_blocks,
+        full_kv_indices=full_kv_indices,
+        subgraph=subgraph,
+        mask_graph=mask_graph,
+        score_mod_other_buffers=score_mod_other_buffers,
+        mask_mod_other_buffers=mask_mod_other_buffers,
+        scale=scale,
+        sparse_q_block_size=sparse_q_block_size,
+        sparse_kv_block_size=sparse_kv_block_size,
+        block_mask_is_dense=block_mask_is_dense,
+        allow_causal_block_mask=allow_causal_block_mask,
+        block_states=block_states,
+        head_slow_order=head_slow_order,
+        wide=wide,
+        kv_head_dims=kv_head_dims,
+    )
+    if dualwave_config is None:
+        return False, reason
+    dualwave_config["WRITE_MAX_SCORES"] = bool(write_max_scores)
+    mod_inputs, mod_kwargs = [], {}
+    if "BLOCK_LISTS" in dualwave_config:
+        mod_inputs, mod_kwargs, reason = _mod_inputs(
+            dualwave_config,
+            query,
+            subgraph,
+            subgraph_buffer,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+            block_states,
+            score_mod_inputs,
+        )
+        if mod_inputs is None:
+            return False, reason
+    return _append_template_choice(
+        flex_flydsl_dualwave_forward_template,
+        choices,
+        input_nodes=[
+            query,
+            key,
+            value,
+            logsumexp,
+            max_scores,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+            *mod_inputs,
+        ],
+        mutated_inputs=[logsumexp, max_scores],
+        layout=layout,
+        **mod_kwargs,
+        **dualwave_config,
+    )
+
+
 def _create_dense_metadata(query, key):
     """Materialize only the forward metadata for the frontend's no-mask sentinel."""
     num_q_blocks, num_kv_blocks = (
@@ -1870,13 +2313,19 @@ def create_flydsl_flex_attention_kernel(
     subgraph_buffer,
     mask_graph_buffer,
     write_max_scores=True,
+    dualwave_causal=False,
     head_slow_order=True,
     split_kv=False,
+    dualwave_wide=False,
     single_pass=False,
 ):
     """Lower the explicitly selected FlyDSL backend independently of Triton."""
+    if not isinstance(dualwave_causal, bool):
+        raise ValueError("FlyDSL FLYDSL_DUALWAVE_CAUSAL must be a bool")
     if not isinstance(head_slow_order, bool):
         raise ValueError("FlyDSL FLYDSL_HEAD_SLOW_ORDER must be a bool")
+    if not isinstance(dualwave_wide, bool):
+        raise ValueError("FlyDSL FLYDSL_DUALWAVE_WIDE must be a bool")
     if not isinstance(single_pass, bool):
         raise ValueError("FlyDSL FLYDSL_WIDE_SINGLE_PASS must be a bool")
     block_mask_is_dense = (
@@ -1978,9 +2427,11 @@ def create_flydsl_flex_attention_kernel(
         ):
             kv_head_dims = (qk_dim, v_dim)
             query = _require_bhsd_stride(query)
+            # The dual-wave wide variant takes zero-padded Q and O rows.
             qo_in_place = (
                 v_dim % 16 == 0
                 and kv_splits == 1
+                and not dualwave_wide
                 and _reads_in_place(query, padded_dims[0])
             )
         else:
@@ -2060,20 +2511,48 @@ def create_flydsl_flex_attention_kernel(
         block_states=block_states,
         head_slow_order=head_slow_order and block_mask_is_dense,
     )
-    appended, reason = maybe_append_flydsl_flex_attention_choice(
-        choices,
-        **choice_kwargs,
-        capture_table=next(iter(capture_tables), None),
+    dualwave_kwargs = dict(
+        block_mask_is_dense=block_mask_is_dense,
+        allow_causal_block_mask=dualwave_causal,
+        wide=dualwave_wide,
         kv_head_dims=kv_head_dims,
-        qo_in_place=qo_in_place,
-        kv_splits=kv_splits,
-        single_pass=single_pass,
     )
-    if not appended:
-        raise RuntimeError(
-            "BACKEND='FLYDSL' but the FlyDSL flex forward candidate "
-            f"could not be registered: {reason}"
+    default_wide = (
+        kv_head_dims is None and (qk_dim, v_dim) in _DUALWAVE_WIDE_DEFAULT_HEAD_DIMS
+    )
+    dualwave_default = (
+        not config.flydsl_enable_autotuning
+        and block_mask_is_dense
+        and kv_splits == 1
+        and is_trivial_score_graph(subgraph.graph_module)
+        and _prefers_dualwave_forward(query)
+        and maybe_append_flydsl_dualwave_forward_choice(
+            choices,
+            **choice_kwargs,
+            **{**dualwave_kwargs, "wide": dualwave_wide or default_wide},
+            default=True,
+        )[0]
+    )
+    if not dualwave_default:
+        appended, reason = maybe_append_flydsl_flex_attention_choice(
+            choices,
+            **choice_kwargs,
+            capture_table=next(iter(capture_tables), None),
+            kv_head_dims=kv_head_dims,
+            qo_in_place=qo_in_place,
+            kv_splits=kv_splits,
+            single_pass=single_pass,
         )
+        if not appended:
+            raise RuntimeError(
+                "BACKEND='FLYDSL' but the FlyDSL flex forward candidate "
+                f"could not be registered: {reason}"
+            )
+        appended, reason = maybe_append_flydsl_dualwave_forward_choice(
+            choices, **choice_kwargs, **dualwave_kwargs
+        )
+        if not appended:
+            log.debug("FlyDSL dual-wave flex forward not offered: %s", reason)
     out, _ = autotune_select_algorithm(
         "flex_attention_flydsl",
         choices,

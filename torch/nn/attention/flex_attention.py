@@ -283,6 +283,13 @@ class FlexKernelOptions(TypedDict, total=False):
     non-atomic accumulation and return gradients in the input dtype. This option
     does not affect forward."""
 
+    FLYDSL_DUALWAVE_CAUSAL: NotRequired[bool]
+    """Allow the FlyDSL dual-wave forward candidate (``flydsl_enable_autotuning``)
+    for causal BlockMasks. It computes top-left causal attention from the
+    BlockMask's shape alone, so the BlockMask must be the one
+    ``create_block_mask`` builds for that mask_mod: edited or sparser block
+    lists give different results. Default: False."""
+
     FLYDSL_HEAD_SLOW_ORDER: NotRequired[bool]
     """Let FlyDSL forwards (``BACKEND="FLYDSL"``) without a BlockMask, or with a
     dense one, run long, many-headed grids in head-slow workgroup order to keep
@@ -295,6 +302,16 @@ class FlexKernelOptions(TypedDict, total=False):
     split count from the grid size and Sk; an int sets an upper bound. Applies
     only to static sizes, one V launch and partial outputs that fit the split
     workspace; other inputs run unsplit. Default: False."""
+
+    FLYDSL_DUALWAVE_WIDE: NotRequired[bool]
+    """Also offer the FlyDSL dual-wave forward candidate (``flydsl_enable_autotuning``)
+    at QK or V head dims of 160 to 256, which its default 8-wave CTA cannot take,
+    as a 4-wave CTA with one wave per SIMD. Without autotuning, dense prefill
+    (Sq > 512, no BlockMask or a dense one, no score_mod) runs the dual-wave
+    forward by default where it is faster, taking the 4-wave CTA at some of
+    these head dims on its own and at all of them with this option. With it set, the main forward also
+    pads Q and O to the padded head dims rather than reading them in place.
+    Default: False."""
 
     FLYDSL_WIDE_SINGLE_PASS: NotRequired[bool]
     """At FlyDSL QK or V head dims above 256, compute the scores once per tile

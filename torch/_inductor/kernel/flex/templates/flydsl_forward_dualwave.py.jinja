@@ -1,0 +1,191 @@
+from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+    build_flex_attn_fwd_dualwave_module,
+)
+{%- set MODS = BLOCK_LISTS is defined %}
+{%- set buffer_args = [] %}
+{%- if MODS %}
+{%- for index in range(MASK_BUFFER_COUNT) %}{% set _ = buffer_args.append("mask_buffer_" ~ index) %}{% endfor %}
+{%- if HAS_SCORE_MOD %}{% for index in range(SCORE_MOD_BUFFER_COUNT) %}{% set _ = buffer_args.append("score_mod_buffer_" ~ index) %}{% endfor %}{% endif %}
+{%- endif %}
+from torch._inductor.runtime.flydsl_cache import (
+{% if RUNTIME_SIZES %}
+    flydsl_runtime_layout_arg,
+{% endif %}
+    LazyFlyDSLLauncher,
+    precompile_flydsl_template,
+    run_flydsl_template,
+)
+
+
+{{gen_defines()}}
+{%- if MODS and HAS_SCORE_MOD %}
+
+
+def score_mod(score, b, h, q_idx, kv_idx, aux):
+    {{ modification(
+        subgraph_number=0,
+        output_name="score_mod_out",
+        score="score",
+        b="b",
+        h="h",
+        m="q_idx",
+        n="kv_idx",
+    ) | indent_except_first(1) }}
+    return score_mod_out
+
+
+{{ scalar_defines() }}
+SCORE_MOD_AUX = {{ aux_slots() }}
+MOD_KEY = "{{ mod_key() }}"
+{%- endif %}
+
+
+_launcher = LazyFlyDSLLauncher(
+    lambda: build_flex_attn_fwd_dualwave_module(
+        batch_size=BATCH_SIZE,
+        num_q_heads=NUM_Q_HEADS,
+        num_kv_heads=NUM_KV_HEADS,
+        seq_len=SEQ_LEN,
+        kv_seq_len=KV_SEQ_LEN,
+{%- if QK_HEAD_DIM is defined %}
+        head_dim=QK_HEAD_DIM,
+        v_head_dim=V_HEAD_DIM,
+{%- endif %}
+{%- if NUM_WAVES is defined %}
+        num_waves=NUM_WAVES,
+{%- endif %}
+{%- if KV_HEAD_DIMS is defined %}
+        kv_head_dims=KV_HEAD_DIMS,
+{%- endif %}
+        scale=float(SM_SCALE),
+        causal=CAUSAL,
+        dtype_str=DTYPE_STR,
+        q_stride=Q_STRIDE,
+        k_stride=K_STRIDE,
+        v_stride=V_STRIDE,
+        o_stride=O_STRIDE,
+        write_max_scores=WRITE_MAX_SCORES,
+        target_limits=TARGET_LIMITS,
+{% if PLAN is defined %}
+        plan=PLAN,
+{% endif %}{% if HEAD_SLOW_ORDER is defined %}
+        head_slow_order=HEAD_SLOW_ORDER,
+{% endif %}
+{%- if MODS and HAS_SCORE_MOD %}
+        score_mod=score_mod,
+        score_mod_aux=SCORE_MOD_AUX,
+        score_mod_buffer_count=SCORE_MOD_BUFFER_COUNT,
+        score_mod_buffer_dtypes=SCORE_MOD_BUFFER_DTYPES,
+        mod_key=MOD_KEY,
+{%- endif %}
+{%- if MODS and BLOCK_LISTS %}
+        block_lists=True,
+        block_mask_batch=BLOCK_MASK_BATCH,
+        block_mask_heads=BLOCK_MASK_HEADS,
+        num_q_blocks=NUM_Q_BLOCKS,
+        max_partial_blocks=MAX_PARTIAL_BLOCKS,
+        max_full_blocks=MAX_FULL_BLOCKS,
+        mask_program=MASK_PROGRAM,
+        mask_program_output=MASK_PROGRAM_OUTPUT,
+        mask_buffer_shapes=MASK_BUFFER_SHAPES,
+        mask_buffer_strides=MASK_BUFFER_STRIDES,
+        mask_buffer_dtypes=MASK_BUFFER_DTYPES,
+{%- endif %}
+    )
+)
+
+
+def _run_flydsl_forward_dualwave(
+    query,
+    key,
+    value,
+    logsumexp,
+    max_scores,
+{%- if MODS %}
+    kv_num_blocks,
+    kv_indices,
+    full_kv_num_blocks,
+    full_kv_indices,
+{%- for name in buffer_args %}
+    {{name}},
+{%- endfor %}
+{%- endif %}
+    output,
+    stream,
+):
+    run_flydsl_template(
+        _launcher.get(query.device),
+{%- if MODS %}
+        (
+            query,
+            key,
+            value,
+            logsumexp,
+            max_scores,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+{%- for name in buffer_args %}
+            {{name}},
+{%- endfor %}
+            output,
+            stream,
+        ),
+{%- else %}
+        (query, key, value, logsumexp, max_scores, output, stream),
+{%- endif %}
+        compiler=flyc.compile,
+        tensor_converter={{ "flydsl_runtime_layout_arg" if RUNTIME_SIZES else "flyc.from_torch_tensor" }},
+    )
+    return output
+
+
+{% set kernel_args = [
+    "query", "key", "value", "logsumexp", "max_scores",
+    "kv_num_blocks", "kv_indices", "full_kv_num_blocks", "full_kv_indices",
+] + buffer_args %}
+{{def_kernel(*kernel_args)}}
+    output = {{get_output()}}
+    return _run_flydsl_forward_dualwave(
+        query,
+        key,
+        value,
+        logsumexp,
+        max_scores,
+{%- if MODS %}
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+{%- for name in buffer_args %}
+        {{name}},
+{%- endfor %}
+{%- endif %}
+        output,
+        stream,
+    )
+
+
+def {{kernel_name}}_precompile(
+    precompile_shapes,
+    precompile_strides,
+    precompile_dtypes,
+    device_index=0,
+    device_capability=None,
+    flydsl_gpu_arch=None,
+):
+    """Warm FlyDSL's disk cache using metadata-only fake tensors."""
+    del device_index, device_capability
+    precompile_flydsl_template(
+        {{kernel_name}}_main,
+        (
+{% for name in kernel_args %}
+            "{{name}}",
+{% endfor %}
+        ),
+        precompile_shapes,
+        precompile_strides,
+        precompile_dtypes,
+        flydsl_gpu_arch,
+    )
