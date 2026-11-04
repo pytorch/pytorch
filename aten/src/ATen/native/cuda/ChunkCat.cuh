@@ -5,7 +5,9 @@
 // torch/csrc/distributed/fsdp/ChunkCat.cu.
 
 #include <ATen/core/Tensor.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/util/TypeCast.h>
+#include <ATen/cuda/DeviceUtils.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -13,6 +15,7 @@
 #include <ATen/ops/empty.h>
 #endif
 
+#include <algorithm>
 #include <cstring>
 #include <utility>
 #include <vector>
@@ -212,9 +215,75 @@ inline std::pair<at::Tensor, std::vector<int64_t*>> pack_vecs(
   return std::make_pair(std::move(packed), std::move(ptrs));
 }
 
+// Each cast thread converts CAST_VEC elements per iteration (unit), and up to
+// CAST_MAX_UNITS_PER_THREAD units per launch (see cast_bytes_per_block).
+static constexpr int64_t CAST_VEC = 8;
+static constexpr int64_t CAST_MAX_UNITS_PER_THREAD = 4;
+
+// Output bytes per block for a cast launch that writes `out_bytes` bytes of
+// `out_elem_size`-byte elements. Threads take more units as the launch grows:
+// one unit up to three waves of resident threads, two up to six waves, and so
+// on, up to CAST_MAX_UNITS_PER_THREAD.
+inline int64_t cast_bytes_per_block(int64_t out_bytes, int64_t out_elem_size) {
+  const auto* properties = at::cuda::getCurrentDeviceProperties();
+  const int64_t wave_threads =
+      static_cast<int64_t>(properties->multiProcessorCount) *
+      properties->maxThreadsPerMultiProcessor;
+  const int64_t unit_bytes = CAST_VEC * out_elem_size;
+  const int64_t units_per_thread = std::clamp<int64_t>(
+      div_up(div_up(out_bytes, unit_bytes), 3 * wave_threads),
+      1,
+      CAST_MAX_UNITS_PER_THREAD);
+  return BLOCK_SIZE * units_per_thread * unit_bytes;
+}
+
+// Casts `num_units` units of CAST_VEC elements from `src` to `dst` and pads
+// zeros past `actual_num_elems`. `dst` must be 16-byte aligned and `src` must
+// be aligned to load_t.
+template <typename load_t, typename dst_t, typename src_t>
+__device__ __inline__ void cast_units_with_pad(
+    dst_t* dst,
+    const src_t* src,
+    int64_t num_units,
+    int64_t actual_num_elems,
+    int64_t thread_idx,
+    int64_t num_threads) {
+  static_assert(
+      sizeof(src_t) >= 2 && CAST_VEC * sizeof(dst_t) % sizeof(uint4) == 0);
+  constexpr int64_t num_loads = CAST_VEC * sizeof(src_t) / sizeof(load_t);
+  constexpr int64_t num_stores = CAST_VEC * sizeof(dst_t) / sizeof(uint4);
+  for (int64_t unit = thread_idx; unit < num_units; unit += num_threads) {
+    const int64_t i = unit * CAST_VEC;
+    alignas(16) src_t vals[CAST_VEC];
+    if (i + CAST_VEC <= actual_num_elems) {
+#pragma unroll
+      for (int64_t j = 0; j < num_loads; ++j) {
+        reinterpret_cast<load_t*>(vals)[j] =
+            doLdg(reinterpret_cast<const load_t*>(src + i) + j);
+      }
+    } else {
+#pragma unroll
+      for (int64_t j = 0; j < CAST_VEC; ++j) {
+        vals[j] = i + j < actual_num_elems ? src[i + j] : src_t(0);
+      }
+    }
+    alignas(16) dst_t out[CAST_VEC];
+#pragma unroll
+    for (int64_t j = 0; j < CAST_VEC; ++j) {
+      out[j] = c10::static_cast_with_inter_type<dst_t, src_t>::apply(vals[j]);
+    }
+    // Plain stores measured slightly faster than streaming (.cs) stores on
+    // large casts
+#pragma unroll
+    for (int64_t j = 0; j < num_stores; ++j) {
+      reinterpret_cast<uint4*>(dst + i)[j] = reinterpret_cast<uint4*>(out)[j];
+    }
+  }
+}
+
 // Copy `max_chunk_size` bytes from `src` to `dst` by `num_threads`, and pad
 // zero when `src` size (i.e., actual_chunk_size) is less than `max_chunk_size`.
-// Assume elements of src and dst have the same data type.
+// Casts when dst_t and src_t differ; otherwise copies bytes.
 template <typename dst_t, typename src_t>
 __device__ __inline__ void copy_chunk_with_pad(
     dst_t* dst_ptr,
@@ -223,21 +292,43 @@ __device__ __inline__ void copy_chunk_with_pad(
     int64_t actual_chunk_size,
     int64_t thread_idx,
     int64_t num_threads) {
-  // Supports type cast
-  if (!std::is_same_v<dst_t, src_t>) {
+  // Supports type cast. Split dst into a head that makes it 16-byte aligned,
+  // whole units, and a tail.
+  if constexpr (!std::is_same_v<dst_t, src_t>) {
     const int64_t max_num_elems = max_chunk_size / sizeof(dst_t);
     const int64_t actual_num_elems = actual_chunk_size / sizeof(src_t);
-    int64_t elem_index = thread_idx;
-    while (elem_index < actual_num_elems) {
-      dst_ptr[elem_index] =
-          c10::static_cast_with_inter_type<dst_t, src_t>::apply(
-              src_ptr[elem_index]);
-      elem_index += num_threads;
+    const int64_t align_off =
+        -reinterpret_cast<uintptr_t>(dst_ptr) % sizeof(uint4);
+    const int64_t head =
+        std::min<int64_t>(align_off / sizeof(dst_t), max_num_elems);
+    const int64_t num_units = (max_num_elems - head) / CAST_VEC;
+    const int64_t tail = head + num_units * CAST_VEC;
+    const auto elem = [&](int64_t i) {
+      dst_ptr[i] = i < actual_num_elems
+          ? c10::static_cast_with_inter_type<dst_t, src_t>::apply(src_ptr[i])
+          : dst_t(0);
+    };
+    if (thread_idx < head) {
+      elem(thread_idx);
     }
-    while (elem_index < max_num_elems) {
-      dst_ptr[elem_index] =
-          c10::static_cast_with_inter_type<dst_t, int>::apply(0);
-      elem_index += num_threads;
+    if (tail + thread_idx < max_num_elems) {
+      elem(tail + thread_idx);
+    }
+    dst_t* dst = dst_ptr + head;
+    const src_t* src = src_ptr + head;
+    const int64_t actual = actual_num_elems - head;
+    if (is_aligned<uint4>(src)) {
+      cast_units_with_pad<uint4>(
+          dst, src, num_units, actual, thread_idx, num_threads);
+    } else if (is_aligned<uint2>(src)) {
+      cast_units_with_pad<uint2>(
+          dst, src, num_units, actual, thread_idx, num_threads);
+    } else if (is_aligned<uint32_t>(src)) {
+      cast_units_with_pad<uint32_t>(
+          dst, src, num_units, actual, thread_idx, num_threads);
+    } else {
+      cast_units_with_pad<uint16_t>(
+          dst, src, num_units, actual, thread_idx, num_threads);
     }
     return;
   }

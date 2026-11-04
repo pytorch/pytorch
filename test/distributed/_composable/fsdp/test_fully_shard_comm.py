@@ -423,8 +423,8 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 class TestFullyShardChunkCatMixedDtype(TestCase):
     def test_numerics(self, device):
         bf16, fp16, fp32 = torch.bfloat16, torch.float16, torch.float32
-        # Dim-0 sizes that need padding, multi-dim, and one large enough to
-        # span several blocks per chunk
+        # Dim-0 sizes that need padding, multi-dim, and one large enough for
+        # the vectorized cast
         sizes = [(5, 3), (7,), (2049, 2, 2)]
         # On CUDA: the fused kernel, a composite fallback, then the fused kernel
         # casting fp16
@@ -447,6 +447,37 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
             self.assertEqual(out, expected, atol=0, rtol=0)
             # Autograd must see the in-place write to out
             self.assertGreater(out._version, version)
+
+    @onlyCUDA
+    def test_numerics_cast_alignments(self, device):
+        # The fp32 input shifts the destination alignment of every chunk, and the
+        # source alignment changes from chunk to chunk. Each chunk of the
+        # low-precision input spans several cast blocks, and its last chunk is
+        # one row, i.e. `width` elements, short. The (8, 1000) input with 5
+        # chunks has a last chunk that is all padding. The 50M-element input is
+        # large enough that each thread casts 4 units on GPUs with up to 304 SMs.
+        for dtype, num_chunks in itertools.product(
+            (torch.bfloat16, torch.float16), (3, 5)
+        ):
+            base = torch.randn(num_chunks * 8012 + 8, device=device, dtype=dtype)
+            cases = []
+            for dst_offset, width in itertools.product(range(1, 5), range(1, 12)):
+                num_rows = num_chunks * (8001 // width + 1) - 1
+                offset = (width + dst_offset) % 8
+                flat = base[offset : offset + num_rows * width]
+                cases.append((dst_offset, flat.view(num_rows, width)))
+            for size in ((8, 1000), (3 * 4194304 - 1, 4)):
+                cases.append((1, torch.randn(size, device=device, dtype=dtype)))
+            for dst_offset, low_precision in cases:
+                tensors = [
+                    torch.randn(num_chunks * dst_offset, device=device),
+                    low_precision,
+                ]
+                expected = torch._chunk_cat([t.float() for t in tensors], 0, num_chunks)
+                out = torch.full_like(expected, float("nan"))
+                torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, num_chunks, out=out)
+                msg = f"{dtype} {num_chunks} {dst_offset} {tuple(low_precision.shape)}"
+                self.assertEqual(out, expected, atol=0, rtol=0, msg=msg)
 
     def test_numerics_with_leading_dims(self, device):
         bf16, fp16, fp32 = torch.bfloat16, torch.float16, torch.float32

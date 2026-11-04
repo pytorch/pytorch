@@ -856,6 +856,36 @@ class TestShapeOps(TestCase):
             torch.ops.aten.unfold_backward(grad_in, input_sizes, 0, -1, 1)
 
 
+    @dtypes(torch.bfloat16)
+    def test_chunk_cat_float_out(self, device, dtype):
+        # The first input shifts the destination alignment of every chunk, and
+        # the source alignment changes from chunk to chunk. Each chunk of the
+        # second input spans several blocks, and its last chunk is one row, i.e.
+        # `width` elements, short. The (8, 1000) input with 5 chunks has a last
+        # chunk that is all padding. The 50M-element input is large enough that
+        # each thread casts 4 units on GPUs with up to 304 SMs. The 3-d inputs
+        # are chunked along dim 1.
+        make = partial(make_tensor, device=device, dtype=dtype)
+        for num_chunks in (3, 5):
+            base = make(num_chunks * 8012 + 8)
+            cases = []
+            for dst_offset, width in product(range(1, 5), range(1, 12)):
+                num_rows = num_chunks * (8001 // width + 1) - 1
+                offset = (width + dst_offset) % 8
+                flat = base[offset : offset + num_rows * width]
+                first = make(num_chunks * dst_offset)
+                cases.append(([first, flat.view(num_rows, width)], 0))
+            cases.append(([make(num_chunks), make(8, 1000)], 0))
+            cases.append(([make(num_chunks), make(3 * 4194304 - 1, 4)], 0))
+            cases.append(([make(2, num_chunks, 3), make(2, 4001, 7)], 1))
+            for tensors, dim in cases:
+                floats = [t.float() for t in tensors]
+                expected = torch._chunk_cat(floats, dim, num_chunks)
+                out = torch.full_like(expected, float("nan"))
+                torch._chunk_cat(tensors, dim, num_chunks, out=out)
+                msg = f"{num_chunks} {dim} {[tuple(t.shape) for t in tensors]}"
+                self.assertEqual(out, expected, atol=0, rtol=0, msg=msg)
+
 class TestShapeOpsCPUOnly(TestCase):
     hw_classification = HardwareClassification.CPU
 
