@@ -19,6 +19,7 @@
 
 #include <ATen/Context.h>
 #include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
+#include <ATen/xpu/XPUContext.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/xpu/XPUStream.h>
 #include <torch/csrc/inductor/static_launcher/common.h>
@@ -337,9 +338,7 @@ std::unique_ptr<sycl::kernel> loadKernel(
     int device_idx) {
   // Launching with more SLM than the device has hangs the GPU; fail the way
   // cuda.cpp does so autotune drops the config.
-  const auto slmLimit = static_cast<uint32_t>(
-      c10::xpu::get_raw_device(static_cast<c10::DeviceIndex>(device_idx))
-          .get_info<sycl::info::device::local_mem_size>());
+  const auto slmLimit = at::xpu::getDeviceLocalMemSize();
   TORCH_CHECK_WITH(
       OutOfMemoryError,
       sharedMemBytes <= slmLimit,
