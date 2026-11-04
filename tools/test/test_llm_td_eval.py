@@ -215,6 +215,7 @@ class TestRunEval(unittest.TestCase):
             with (
                 contextlib.chdir(data.parent),  # --data is relative to this cwd.
                 mock.patch.object(sys, "argv", argv),
+                mock.patch.dict(os.environ, {"LLM_TD_AGENTIC_SANDBOX": "1"}),
                 mock.patch.object(run_eval, "checkout", return_value="wt") as co,
                 mock.patch.object(run_eval, "query_model", return_value={"type": "result", "is_error": True, "result": "529"}) as query,
                 mock.patch.object(run_eval.time, "sleep"),
@@ -260,6 +261,56 @@ class TestRunEval(unittest.TestCase):
         self.assertEqual((query.call_count, write.call_count), (2, 2))
         self.assertEqual(write.call_args.args[0].name, "b.json")
         self.assertIn("a failed, left for a rerun", out.getvalue())
+        # c needs no result, so it is not counted as missing one.
+        self.assertTrue(out.getvalue().startswith("t: 2 without a result\n"))
+
+    def test_main_stops_on_ctrl_c(self) -> None:
+        import signal
+
+        from tools.testing.llm_td.eval import run_eval
+
+        def killed(*args: object, **kwargs: object) -> dict:
+            # Ctrl-C reaches the main thread, and the claude child dies with output that is not JSON.
+            os.kill(os.getpid(), signal.SIGINT)
+            return {"is_error": True, "result": "killed"}
+
+        with tempfile.TemporaryDirectory() as d:
+            data = write_data(d, {f"samples/{i}.json": {**SAMPLE, "id": i} for i in "abc"})  # fmt: skip
+            (data / "test-times.json").write_text("{}")
+            (data / "ids.txt").write_text("a b c")
+            argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt"), "--jobs", "1"]  # fmt: skip
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch("sys.stdout", io.StringIO()) as out,
+                mock.patch.object(run_eval, "query_model", side_effect=killed) as query,
+                self.assertRaises(KeyboardInterrupt),
+            ):
+                old = signal.signal(signal.SIGINT, signal.default_int_handler)
+                try:
+                    run_eval.main()
+                finally:
+                    signal.signal(signal.SIGINT, old)
+            self.assertEqual(list((data / "results/t").iterdir()), [])
+        # The killed call is not saved, and no further id is paid for.
+        self.assertEqual(query.call_count, 1)
+        self.assertIn("interrupted", out.getvalue())
+
+    def test_main_refuses_agentic_outside_a_sandbox(self) -> None:
+        from tools.testing.llm_td.eval import run_eval
+
+        argv = ["run_eval", "--data", "x", "--tag", "t", "--model", "m", "--ids", "x", "--agentic"]  # fmt: skip
+        for env in ({}, {"LLM_TD_AGENTIC_SANDBOX": "0"}):
+            env = {k: v for k, v in os.environ.items() if k != "LLM_TD_AGENTIC_SANDBOX"} | env  # fmt: skip
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch("sys.stderr", io.StringIO()) as err,
+                mock.patch.object(run_eval, "query_model") as query,
+                self.assertRaises(SystemExit),
+            ):
+                run_eval.main()
+            self.assertIn("LLM_TD_AGENTIC_SANDBOX=1", err.getvalue())
+            query.assert_not_called()
 
     def test_main_refuses_tag_td(self) -> None:
         from tools.testing.llm_td.eval import run_eval
@@ -353,6 +404,7 @@ class TestRunEval(unittest.TestCase):
                 argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt"), "--agentic"]  # fmt: skip
                 with (
                     mock.patch.object(sys, "argv", argv),
+                    mock.patch.dict(os.environ, {"LLM_TD_AGENTIC_SANDBOX": "1"}),
                     mock.patch("sys.stderr", io.StringIO()) as err,
                     mock.patch("sys.stdout", io.StringIO()),
                     mock.patch.object(run_eval, "checkout", return_value="wt"),
@@ -674,8 +726,8 @@ class TestScore(unittest.TestCase):
         # The TEST_CONFIG patterns of test.sh's top-level dispatch that set NO_TD, inline or through a function they call.
         # A setter the scan cannot map to a pattern (a helper no branch calls, or a top-level NO_TD=) fails it.
         func_def = re.compile(r"(?:function\s+(\w+)|(\w+)\s*\(\s*\))")
-        dispatch = re.compile(r'(?:el)?if \[\[ "?\$\{?TEST_CONFIG\}?"? ==? "?([^ "]+)')
-        func, sets_no_td, branch, calls = None, set(), None, {}
+        dispatch = re.compile(r'(?:el)?if \[\[ "?\$\{?TEST_CONFIG\}?"? ==? ["\']?([^ "\']+)')  # fmt: skip
+        func, sets_no_td, branch, calls, compound = None, set(), None, {}, set()
         for line in (REPO_ROOT / ".ci/pytorch/test.sh").read_text().splitlines():
             if line.lstrip().startswith("#"):
                 continue
@@ -685,6 +737,8 @@ class TestScore(unittest.TestCase):
                 func = None
             if m := dispatch.match(line):
                 branch = m.group(1)
+                if re.search(r"&&|\|\||-a |-o ", line):
+                    compound.add(branch)
             elif re.match(r"\S", line):
                 branch = None
             elif branch:
@@ -695,6 +749,8 @@ class TestScore(unittest.TestCase):
         self.assertTrue(calls, "found no TEST_CONFIG dispatch in test.sh")
         self.assertFalse(unmapped, f"cannot map test.sh's NO_TD to TEST_CONFIG patterns (setters outside the dispatch: {unmapped}); update this scan or NO_TD_CONFIGS")  # fmt: skip
         dispatched = {p for p, words in calls.items() if p in sets_no_td or words & sets_no_td}  # fmt: skip
+        # NO_TD_CONFIGS matches TEST_CONFIG alone, so it cannot express a branch's other conditions.
+        self.assertFalse(dispatched & compound, f"test.sh sets NO_TD under compound conditions: {dispatched & compound}")  # fmt: skip
         self.assertEqual(dispatched, set(score.NO_TD_CONFIGS))
 
     def test_unasked(self) -> None:
@@ -1511,6 +1567,7 @@ class TestClickhouse(unittest.TestCase):
         crowded = subprocess.CompletedProcess([], 1, "", "Code: 202. DB::Exception: Too many simultaneous queries")  # fmt: skip
         slow = subprocess.CompletedProcess([], 1, "", "Code: 159. DB::Exception: Timeout exceeded: elapsed 500 seconds")  # fmt: skip
         gateway = subprocess.CompletedProcess([], 1, "", "502 Bad Gateway")
+        token = subprocess.CompletedProcess([], 22, "", "curl: (22) The requested URL returned error: 503")  # fmt: skip
         bad = subprocess.CompletedProcess([], 2, "", "Code: 62. Syntax error")
         # A result that is not one, whose rows would look transient if searched.
         null = subprocess.CompletedProcess([], 0, '{"columns": null, "rows": [["connection timed out"]]}', "")  # fmt: skip
@@ -1522,6 +1579,7 @@ class TestClickhouse(unittest.TestCase):
             ([bad, ok], 1, "attempt 1 of 3 exited with code 2: Code: 62. Syntax error"),
             ([slow, ok], 1, "attempt 1 of 3 exited with code 1: Code: 159. DB::Exception: Timeout exceeded: elapsed 500 seconds"),
             ([gateway, ok], 2, [{"a": 1}]),
+            ([token, ok], 2, [{"a": 1}]),
             ([busy, hung, ok], 2, "attempt 2 of 3 timed out after 600s"),
             ([null, ok], 1, 'attempt 1 of 3 returned no result: {"columns": null, "rows": [["connection timed out"]]}'),
             ([busy, busy, busy], 3, "attempt 3 of 3 exited with code 1: HTTP 503 Service Unavailable"),
@@ -1548,14 +1606,28 @@ class TestBuildDataset(unittest.TestCase):
     def test_main_refuses_open_window(self) -> None:
         argv = ["build_dataset", "--data", "d", "--start", "2026-10-01", "--end", str(dt.date.today()), "--kinds", "head"]  # fmt: skip
         with (
-            mock.patch.object(sys, "argv", argv),
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(sys, "argv", [*argv[:2], tmp, *argv[3:]]),
             mock.patch.object(bd, "git") as git,
+            mock.patch.object(bd.History, "load") as load,
             contextlib.redirect_stderr(io.StringIO()) as err,
             self.assertRaises(SystemExit),
         ):  # fmt: skip
             bd.main()
         git.assert_not_called()
+        load.assert_not_called()
         self.assertIn("rerun on or after", err.getvalue())
+        # Head samples extend pr_ samples, so a DIR without any is refused before loading CI history.
+        closed = [*argv[:6], "2026-10-02", *argv[7:]]
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(sys, "argv", [*closed[:2], tmp, *closed[3:]]),
+            mock.patch.object(bd, "git") as git,
+            mock.patch.object(bd.History, "load") as load,
+            self.assertRaisesRegex(SystemExit, "no pr_ samples"),
+        ):  # fmt: skip
+            bd.main()
+        load.assert_not_called()
         # The guard is for PR truth only.
         with (
             tempfile.TemporaryDirectory() as tmp,
@@ -1644,6 +1716,9 @@ class TestBuildDataset(unittest.TestCase):
             # Main broke it 17 days after the merge base and 15 after this failure, before PR 1 landed.
             fail("test_base_later", "2026-09-17 00:00:00", "s"),
             fail("test_base_later", "2026-10-02 00:00:00", "m", br="main"),
+            # Main broke it 2 days after the merge base and 15 before this failure, before PR 1 landed.
+            fail("test_base_after", "2026-10-02 00:00:00", "s"),
+            fail("test_base_after", "2026-09-17 00:00:00", "m", br="main"),
             # Another author's failure 15 days after this one, still before PR 1 landed.
             fail("test_other_later", "2026-09-18 00:00:00", "s"),
             fail("test_other_later", "2026-10-03 00:00:00", "o"),
@@ -1666,7 +1741,7 @@ class TestBuildDataset(unittest.TestCase):
             h.load_green({"s"})
             got = {r["test"]: h.why_dropped(r) for r in h.heads["s"]}
             # The merge base with main at 09-15: main broke test_base_in 10 days before it.
-            near_base = {r["test"]: h.why_dropped(r, base_t=day(15, 9)) for r in h.heads["s"] if r["test"] in ("test_base_in", "test_base_out", "test_base_flaky", "test_base_later")}  # fmt: skip
+            near_base = {r["test"]: h.why_dropped(r, base_t=day(15, 9)) for r in h.heads["s"] if r["test"] in ("test_base_in", "test_base_out", "test_base_flaky", "test_base_later", "test_base_after")}  # fmt: skip
             other = {r["test"]: h.why_dropped(r) for r in h.heads["o"]}
             # Main breaks test_main_after near this merge base, but only after PR 1 landed.
             after = h.why_dropped(next(r for r in h.heads["s"] if r["test"] == "test_main_after"), base_t=day(4))  # fmt: skip
@@ -1680,9 +1755,9 @@ class TestBuildDataset(unittest.TestCase):
             "test_early": "window", "test_early_in": None, "test_after_landing": "after_landing", "test_own_flaky": "passed_in_job",
             "test_main_flaky": "other_failure", "test_other_flaky": "other_failure", "test_base_flaky": None,
             "test_disabled_before": None, "test_disabled_cls": None, "test_other_cls": None, "test_other_later": None,
-            "test_disabled_after": "disabled", "test_base_later": None,
+            "test_disabled_after": "disabled", "test_base_later": None, "test_base_after": None,
         })  # fmt: skip
-        self.assertEqual(near_base, {"test_base_in": "main_near_base", "test_base_out": None, "test_base_flaky": "main_near_base", "test_base_later": None})  # fmt: skip
+        self.assertEqual(near_base, {"test_base_in": "main_near_base", "test_base_out": None, "test_base_flaky": "main_near_base", "test_base_later": None, "test_base_after": "main_near_base"})  # fmt: skip
         self.assertEqual(other["test_own_flaky"], "other_failure")
         self.assertIsNone(after)
 
@@ -1779,30 +1854,36 @@ class TestBuildDataset(unittest.TestCase):
     def test_below_ignores_diff_config(self) -> None:
         # B has O's change but is not its descendant, so only the reverse-applied patch finds it.
         # O's two hunks are five lines apart, and it bumps a submodule.
-        lines = [f"{i}\n" for i in range(20)]
+        lines = [f"{i}\n" if i != 9 else "  9\n" for i in range(20)]
         changed = [*lines[:3], "o\n", *lines[4:15], "o\n", *lines[16:]]
         with scratch_repo():
             m = commit_files({"a": "".join(lines)}, links={"s": "1" * 40})
             bd.git("update-ref", "refs/remotes/origin/main", m)
             o = commit_files({"a": "".join(changed)}, m, links={"s": "2" * 40})
             b = commit_files({"a": "".join(changed), "z": "z\n"}, m, links={"s": "2" * 40})  # fmt: skip
+            # R only re-indents line 9, which m lacks; ignoring whitespace would find it in m.
+            r = commit_files({"a": "".join(lines[:9] + ["    9\n"] + lines[10:])}, m, links={"s": "1" * 40})  # fmt: skip
             want = bd.own_change(o)
             self.assertEqual(want.count(b"\n@@ "), 3)
             self.assertIn(b"+Subproject commit " + b"2" * 40, want)
             plain = (("diff.noprefix", "true"), ("diff.external", "false"), ("color.diff", "always"), ("apply.whitespace", "error"))  # fmt: skip
             cases = [(plain, {}), ((("diff.context", "0"),), {}), ((("diff.context", "1"),), {}), ((("diff.context", "5"), ("diff.interHunkContext", "10")), {}),
-                     ((("diff.submodule", "log"),), {}), ((("diff.submodule", "diff"),), {}), ((), {"GIT_DIFF_OPTS": "--unified=0"})]  # fmt: skip
+                     ((("diff.submodule", "log"),), {}), ((("diff.submodule", "diff"),), {}), ((), {"GIT_DIFF_OPTS": "--unified=0"}),
+                     ((("apply.ignoreWhitespace", "change"),), {})]  # fmt: skip
             for config, env in cases:
                 with self.subTest(config=config, env=env), mock.patch.dict(os.environ, env):  # fmt: skip
                     for k, v in config:
                         bd.git("config", k, v)
                     for c in (bd.own_change, bd.below):
                         c.cache_clear()
-                    self.assertEqual(bd.own_change(o), want)
-                    self.assertTrue(bd.below(o, b))
-                    self.assertFalse(bd.below(o, m))
-                    for k, _ in config:
-                        bd.git("config", "--unset", k)
+                    try:
+                        self.assertEqual(bd.own_change(o), want)
+                        self.assertTrue(bd.below(o, b))
+                        self.assertFalse(bd.below(o, m))
+                        self.assertFalse(bd.below(r, m))
+                    finally:
+                        for k, _ in config:
+                            bd.git("config", "--unset", k)
 
     def test_stacked_bounds(self) -> None:
         # U (pr 1, "me") is based on B, which has the changes of O (pr 2, another author's, landed),
@@ -1903,9 +1984,12 @@ class TestBuildDataset(unittest.TestCase):
         self.assertIn("(f.job_id, f.tf, f.classname, f.name) IN (SELECT * FROM passed) flaky", sql)  # fmt: skip
         self.assertNotIn("NOT IN", sql)
         # The last two-day chunk stops at `end`.
-        with mock.patch.object(bd, "query", return_value=[]) as query, contextlib.redirect_stdout(io.StringIO()):  # fmt: skip
+        with mock.patch.object(bd, "query", return_value=rows[:1]) as query, contextlib.redirect_stdout(io.StringIO()):  # fmt: skip
             bd.pull_failures(dt.date(2026, 10, 1), dt.date(2026, 10, 4))
         self.assertEqual([re.findall(r"time_inserted >= '(\S+)' AND time_inserted < '(\S+)'", c.args[0]) for c in query.call_args_list], [[("2026-10-01", "2026-10-03")], [("2026-10-03", "2026-10-04")]])  # fmt: skip
+        # Two days of CI with no failing test means the legacy store is no longer written.
+        with mock.patch.object(bd, "query", side_effect=[rows[:1], []]), contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(RuntimeError, "from 2026-10-03 to 2026-10-04"):  # fmt: skip
+            bd.pull_failures(dt.date(2026, 10, 1), dt.date(2026, 10, 4))
 
     def test_write_sample(self) -> None:
         with scratch_repo():
@@ -2090,6 +2174,8 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_x", t, "s", tf="test_b"),
             fail("test_x", t, "s", tf="test_b", job="win / test (default, 1, 1)"),
             fail("test_x", t, "s", tf="test_c"),
+            # A one-off: one environment, one head.
+            fail("test_x", t, "s", tf="test_d"),
             # Main broke test_a 10 days before the merge base with main, and test_c's test_y, another test of the file.
             fail("test_x", "2026-09-05 00:00:00", "m", br="main", tf="test_a"),
             fail("test_y", "2026-09-05 00:00:00", "m", br="main", tf="test_c"),
@@ -2121,7 +2207,7 @@ class TestBuildDataset(unittest.TestCase):
         commit_time.assert_called_once_with("main_mb")
         kw = write.call_args.kwargs
         win = ("pull", "win / test (default, 1, 1)")
-        self.assertEqual((kw["truth"], kw["truth_strong"], kw["truth_jobs"]), (["test_b", "test_c"], ["test_b", "test_c"], {"test_b": [("pull", JOB), win], "test_c": [("pull", JOB)]}))  # fmt: skip
+        self.assertEqual((kw["truth"], kw["truth_strong"], kw["truth_jobs"]), (["test_b", "test_c", "test_d"], ["test_b", "test_c"], {"test_b": [("pull", JOB), win], "test_c": [("pull", JOB)], "test_d": [("pull", JOB)]}))  # fmt: skip
         self.assertEqual({k: kw[k] for k in ("base", "merge_base", "main_base", "base_source")}, {"base": "lower", "merge_base": "lower", "main_base": "main_mb", "base_source": "ci"})  # fmt: skip
         self.assertIn("pr truth: dropped by rule over 1 heads: {'main_near_base': 1}", stdout.getvalue())  # fmt: skip
 
