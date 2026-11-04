@@ -65,7 +65,7 @@ def aten_cumprod(
 
     if dtype != -1:
         self = op.Cast(self, to=dtype)
-    if len(self.shape) == 0:
+    if len(self.shape) == 0:  # pyrefly: ignore [missing-attribute, bad-argument-type]
         # A scalar
         result = op.Identity(self)
     else:
