@@ -9517,12 +9517,12 @@ class TestNNDeviceType(NNTestCase):
         subtest(((256, 320), (512, 640), None), name="large_plane"),
     ])
     def test_upsamplingBilinear2d_nchw_kernel_paths(self, device, dtype, align_corners, layout, isize, osize, scale):
-        # The NCHW forward loops over planes per output pixel when the output
-        # plane is large enough to fill the device (large_plane). Otherwise it
-        # writes 4 outputs per thread when the output is contiguous,
-        # vector-aligned, width % 4 == 0, and the op upsamples, and one output
-        # per thread in every other case. The NaN prefill catches outputs no
-        # kernel writes.
+        # On ROCm, the NCHW forward loops over planes per output pixel when the
+        # output plane is large enough to fill the device (large_plane).
+        # Otherwise it writes 4 outputs per thread when the output is
+        # contiguous, vector-aligned, width % 4 == 0, and the op upsamples, and
+        # one output per thread in every other case. CUDA always loops over
+        # planes. The NaN prefill catches outputs no kernel writes.
         n, c = 2, 3
         ih, iw = isize
         if layout == "noncontig_input":

@@ -10,11 +10,13 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
-#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/LaunchUtils.h>
+#ifdef USE_ROCM
+#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <c10/util/string_view.h>
+#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -32,23 +34,6 @@
 
 namespace at::native {
 namespace {
-
-// Below this many output pixels per SM, upsample_bilinear2d_out_frame leaves
-// the device idle and the one-thread-per-element kernels are faster. One value
-// is used everywhere, except on architectures where a sweep put the tie
-// elsewhere. gfx942: the new kernels win 1.4-2.2x at 216 pixels/SM, tie at
-// 431, and lose from 1010 up. gfx950: they win up to 1.9x at 384 pixels/SM;
-// at 512 they trail by up to 14% with N*C <= 32 and win 1.2-1.4x with 256
-// planes; from 768 up they mostly tie or lose.
-int64_t plane_kernel_min_pixels_per_sm(
-    [[maybe_unused]] const cudaDeviceProp* props) {
-#ifdef USE_ROCM
-  if (c10::basic_string_view<char>(props->gcnArchName).starts_with("gfx950")) {
-    return 512;
-  }
-#endif
-  return 256;
-}
 
 // One thread per output pixel, looping over all N*C planes, so the source
 // coordinates are computed once per pixel. Only fast when OH*OW alone fills
@@ -100,6 +85,22 @@ __global__ void upsample_bilinear2d_out_frame(
       }
     }
   }
+}
+
+#ifdef USE_ROCM
+// On ROCm, below this many output pixels per CU, upsample_bilinear2d_out_frame
+// leaves the device idle and the one-thread-per-element kernels are faster.
+// One value is used on every ROCm architecture except where a sweep put the
+// tie elsewhere. gfx942: the new kernels win 1.4-2.2x at 216 pixels/CU, tie at
+// 431, and lose from 1010 up. gfx950: they win up to 1.9x at 384 pixels/CU;
+// at 512 they trail by up to 14% with N*C <= 32 and win 1.2-1.4x with 256
+// planes; from 768 up they mostly tie or lose. CUDA always uses
+// upsample_bilinear2d_out_frame.
+int64_t plane_kernel_min_pixels_per_sm(const cudaDeviceProp* props) {
+  if (c10::basic_string_view<char>(props->gcnArchName).starts_with("gfx950")) {
+    return 512;
+  }
+  return 256;
 }
 
 // One thread per output element, w2 fastest so neighbouring lanes store
@@ -206,6 +207,7 @@ __global__ void upsample_bilinear2d_out_frame_vec4(
     *reinterpret_cast<vec_t*>(odata + static_cast<int64_t>(index4) * 4) = out;
   }
 }
+#endif
 
 template <typename scalar_t, typename accscalar_t, typename index_t>
 C10_LAUNCH_BOUNDS_1(1024)
@@ -561,11 +563,9 @@ static void upsample_bilinear2d_out_cuda_template(
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       // non-channels_last case, not necessarily contiguous
-      const int64_t numel = output.numel();
-      if (numel == 0) {
-        return;
-      }
-      const auto* props = at::cuda::getCurrentDeviceProperties();
+      const int64_t num_kernels = output_height * output_width;
+      const int64_t num_threads = std::min(
+          at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
       cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
       using accscalar_t = at::acc_type<scalar_t, true>;
@@ -578,57 +578,62 @@ static void upsample_bilinear2d_out_cuda_template(
       const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
           input_width, output_width, align_corners, scales_w);
 
+#ifdef USE_ROCM
+      // Output planes too small to fill the device get one thread per output
+      // element instead of the plane loop below.
+      const auto* props = at::cuda::getCurrentDeviceProperties();
+      const int64_t numel = output.numel();
       const int64_t plane_numel =
           static_cast<int64_t>(output_height) * output_width;
-      const bool use_plane_kernel = plane_numel >=
-          static_cast<int64_t>(props->multiProcessorCount) *
-              plane_kernel_min_pixels_per_sm(props);
+      if (numel > 0 &&
+          plane_numel < static_cast<int64_t>(props->multiProcessorCount) *
+                  plane_kernel_min_pixels_per_sm(props)) {
+        constexpr int64_t elem_threads = 256;
+        const int64_t max_blocks = props->maxGridSize[0];
+        const bool use_32bit_indexing =
+            canUse32BitIndexMath(input) && canUse32BitIndexMath(output);
+        // vec4 helps only when upsampling: when downsampling, the input read
+        // dominates and the scalar kernel is faster.
+        const bool use_vec4 = use_32bit_indexing && output.is_contiguous() &&
+            output_width % 4 == 0 &&
+            reinterpret_cast<uintptr_t>(output.const_data_ptr()) %
+                    (4 * sizeof(scalar_t)) == 0 &&
+            static_cast<int64_t>(input_height) * input_width <= plane_numel;
 
-      if (use_plane_kernel) {
-        const int64_t plane_threads =
-            std::min<int64_t>(props->maxThreadsPerBlock, 1024);
-        upsample_bilinear2d_out_frame<scalar_t, accscalar_t>
-            <<<ceil_div(plane_numel, plane_threads), plane_threads, 0, stream>>>(
-                plane_numel, rheight, rwidth, align_corners, idata, odata);
+        if (use_vec4) {
+          const int64_t numel4 = numel / 4;
+          const int64_t num_blocks =
+              std::min(ceil_div(numel4, elem_threads), max_blocks);
+          upsample_bilinear2d_out_frame_vec4<scalar_t, accscalar_t>
+              <<<num_blocks, elem_threads, 0, stream>>>(
+                  static_cast<int32_t>(numel4), rheight, rwidth, align_corners,
+                  idata, output.mutable_data_ptr<scalar_t>(), channels,
+                  output_height, output_width);
+        } else {
+          const int64_t num_blocks =
+              std::min(ceil_div(numel, elem_threads), max_blocks);
+          if (use_32bit_indexing) {
+            upsample_bilinear2d_out_frame_per_element<scalar_t, accscalar_t, int32_t>
+                <<<num_blocks, elem_threads, 0, stream>>>(
+                    static_cast<int32_t>(numel), rheight, rwidth,
+                    align_corners, idata, odata);
+          } else {
+            upsample_bilinear2d_out_frame_per_element<scalar_t, accscalar_t, int64_t>
+                <<<num_blocks, elem_threads, 0, stream>>>(
+                    numel, rheight, rwidth, align_corners, idata, odata);
+          }
+        }
         C10_CUDA_KERNEL_LAUNCH_CHECK();
         return;
       }
+#endif
 
-      constexpr int64_t num_threads = 256;
-      const int64_t max_blocks = props->maxGridSize[0];
-      const bool use_32bit_indexing =
-          canUse32BitIndexMath(input) && canUse32BitIndexMath(output);
-      // vec4 helps only when upsampling: when downsampling, the input read
-      // dominates and the scalar kernel is faster.
-      const bool use_vec4 = use_32bit_indexing && output.is_contiguous() &&
-          output_width % 4 == 0 &&
-          reinterpret_cast<uintptr_t>(output.const_data_ptr()) %
-                  (4 * sizeof(scalar_t)) == 0 &&
-          static_cast<int64_t>(input_height) * input_width <= plane_numel;
-
-      if (use_vec4) {
-        const int64_t numel4 = numel / 4;
-        const int64_t num_blocks =
-            std::min(ceil_div(numel4, num_threads), max_blocks);
-        upsample_bilinear2d_out_frame_vec4<scalar_t, accscalar_t>
-            <<<num_blocks, num_threads, 0, stream>>>(
-                static_cast<int32_t>(numel4), rheight, rwidth, align_corners,
-                idata, output.mutable_data_ptr<scalar_t>(), channels,
-                output_height, output_width);
-      } else {
-        const int64_t num_blocks =
-            std::min(ceil_div(numel, num_threads), max_blocks);
-        if (use_32bit_indexing) {
-          upsample_bilinear2d_out_frame_per_element<scalar_t, accscalar_t, int32_t>
-              <<<num_blocks, num_threads, 0, stream>>>(
-                  static_cast<int32_t>(numel), rheight, rwidth, align_corners,
-                  idata, odata);
-        } else {
-          upsample_bilinear2d_out_frame_per_element<scalar_t, accscalar_t, int64_t>
-              <<<num_blocks, num_threads, 0, stream>>>(
-                  numel, rheight, rwidth, align_corners, idata, odata);
-        }
-      }
+      upsample_bilinear2d_out_frame<scalar_t, accscalar_t>
+          <<<ceil_div(num_kernels, num_threads),
+             num_threads,
+             0,
+             stream>>>(
+              num_kernels, rheight, rwidth, align_corners, idata, odata);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   });
