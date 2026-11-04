@@ -3234,6 +3234,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.constants,
             self.torchbind_constants,
             self.opaque_value_type_classes,
+            self.wrapper_code.user_defined_flydsl_launchers,
         ):
             if clash := attrs.keys() & named.keys():
                 raise AssertionError(f"module attributes bound twice: {sorted(clash)}")

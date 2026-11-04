@@ -2397,6 +2397,10 @@ class PythonWrapperCodegen(CodeGen):
         self.user_defined_kernel_cache: dict[
             tuple[Any, ...], tuple[str, Any, dict[str, Any]]
         ] = {}
+        # User FlyDSL kernels: cache key -> name, and name -> the launcher object
+        # the generated Python module is loaded with.
+        self.user_defined_flydsl_kernel_cache: dict[tuple[Any, ...], str] = {}
+        self.user_defined_flydsl_launchers: dict[str, Any] = {}
         # The names of the user kernels of every kind (see _new_user_kernel_name).
         self.user_defined_kernel_names: OrderedSet[str] = OrderedSet()
         self.unbacked_symbol_decls: OrderedSet[str] = (
@@ -5095,6 +5099,83 @@ class PythonWrapperCodegen(CodeGen):
         self.user_defined_kernel_cache[cache_key] = (name, triton_meta, inductor_meta)
         return name, triton_meta, inductor_meta, extra_launcher_call_args
 
+    def define_user_defined_flydsl_kernel(
+        self,
+        kernel,
+        arg_names: tuple[str, ...],
+        constant_args: dict[str, Any],
+        runtime_args: dict[str, Any],
+        device: torch.device | None,
+    ) -> str:
+        """Define a user FlyDSL kernel (a ``FlyDSLKernel`` side-table record) and
+        return its name in the generated code: the counterpart of
+        define_user_defined_triton_kernel.
+
+        The host function cannot be written out as source, so the generated module
+        gets a ``FlyDSLKernelLauncher`` object under that name when it is loaded
+        (``user_defined_flydsl_launchers``); its ``run(*args, stream=...)`` takes
+        ``arg_names`` positionally, with ``constant_args`` bound here. ``device``:
+        the device the kernel runs on.
+        """
+        from torch._higher_order_ops.flydsl_kernel_wrap import _constant_key
+
+        from ..runtime.flydsl_user_kernel import FlyDSLKernelLauncher
+
+        # A passed constant is the side table's snapshot and a default the host
+        # function's own object, so constants with equal keys can share a launcher.
+        cache_key = (
+            id(kernel),
+            arg_names,
+            tuple((k, _constant_key(v)) for k, v in constant_args.items()),
+        )
+        if cache_key in self.user_defined_flydsl_kernel_cache:
+            return self.user_defined_flydsl_kernel_cache[cache_key]
+        index = len(self.user_defined_flydsl_kernel_cache)
+        name = self._new_user_kernel_name(f"flydsl_{kernel.name}", index)
+        self.user_defined_flydsl_launchers[name] = FlyDSLKernelLauncher(
+            kernel.fn, arg_names, constant_args
+        )
+        # The user's function (a FlyDSL JitFunction has no __qualname__ of its own).
+        # Constants by name and type only: a repr can span lines or be huge.
+        fn = kernel.fn.func
+        types = ", ".join(f"{k}: {type(v).__name__}" for k, v in constant_args.items())
+        self.header.writeline(
+            f"# {name}: FlyDSL host function {fn.__module__}.{fn.__qualname__}, "
+            f"run(*{list(arg_names)}, stream) with constants {{{types}}}, bound when "
+            "this module is loaded"
+        )
+        self.user_defined_flydsl_kernel_cache[cache_key] = name
+        return name
+
+    def generate_user_defined_flydsl_kernel_call(
+        self,
+        kernel_name: str,
+        kernel,
+        runtime_args: dict[str, Any],
+        constant_args: dict[str, Any],
+        device: torch.device,
+    ) -> None:
+        """Launch a kernel defined by define_user_defined_flydsl_kernel on the
+        current stream of ``device``."""
+
+        def arg_str(arg: Any) -> str:
+            if isinstance(arg, ir.IRNode):
+                return arg.codegen_reference()
+            if isinstance(arg, (int, float, bool)):
+                return str(arg)
+            if not isinstance(arg, sympy.Basic):
+                raise NotImplementedError(
+                    f"FlyDSL kernel {kernel.name}: cannot pass a "
+                    f"{type(arg).__name__} as a runtime scalar"
+                )
+            return pexpr(V.graph.sizevars.simplify(arg))
+
+        stream_name = self._get_kernel_call_stream_name(
+            device, V.graph.name, V.graph.scheduler.current_stream_idx
+        )
+        args = ", ".join(arg_str(arg) for arg in runtime_args.values())
+        self.writeline(f"{kernel_name}.run({args}, stream={stream_name})")
+
     def generate_numel_expr(self, kernel_name: str, tree, suffix: str | None = None):
         sym_name = f"{kernel_name}_{tree.prefix}numel"
         if suffix is not None:
@@ -6797,6 +6878,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.src_to_kernel = root.src_to_kernel
         # Same here, only define user-defined Triton kernels in the main graph
         self.user_defined_kernel_cache = root.user_defined_kernel_cache
+        # and user-defined FlyDSL kernels, whose launchers the main module binds
+        self.user_defined_flydsl_kernel_cache = root.user_defined_flydsl_kernel_cache
+        self.user_defined_flydsl_launchers = root.user_defined_flydsl_launchers
         self.user_defined_kernel_names = root.user_defined_kernel_names
         # This subgraph's kernels are spliced into the root module.
         self.kernel_sources = root.kernel_sources
