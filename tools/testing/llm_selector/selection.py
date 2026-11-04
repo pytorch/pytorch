@@ -70,6 +70,10 @@ SELECTION_VERSION = 1
 MAX_IMPORT_HOPS = 8
 # More edited failure-list classes than this are not looked up one by one.
 MAX_FAILURE_LIST_CLASSES = 50
+# Flip only after the HUD and test-infra consumers of the TD exclusions and
+# recall stats handle llm_selection_exclusions and llm_enforced.
+ENFORCEMENT_ENABLED = False
+
 
 # Tests that run the files a change matches although they do not import them:
 # the drivers of the directories discover_tests.py blocklists (except
@@ -457,6 +461,11 @@ class Selection:
     # Why the selector got no usable answer (git, the model call or its output,
     # or the test times); None for a deliberate run_all.
     error: str | None = None
+    # Whether enforcement was asked for, even if a failed selector cleared enforce.
+    enforce_requested: bool = False
+
+    def __post_init__(self) -> None:
+        self.enforce_requested = self.enforce_requested or self.enforce
 
     @classmethod
     def from_model_output(
@@ -563,6 +572,7 @@ class Selection:
             "enforce": self.enforce,
             "candidates": None if self.candidates is None else sorted(self.candidates),
             "error": self.error,
+            "enforce_requested": self.enforce_requested,
         }
 
     @classmethod
@@ -583,13 +593,15 @@ class Selection:
             d["reason"],
             d["error"],
         )
+        # Older selectors, which CI runs from the default branch, omit it.
+        enforce_requested = d.get("enforce_requested", enforce)
         if not all(
             isinstance(v, list) and all(isinstance(x, str) for x in v)
             for v in (files, sweeps) + (() if candidates is None else (candidates,))
         ):
             raise TypeError("files, sweeps and candidates must be lists of strings")
-        if not isinstance(run_all, bool) or not isinstance(enforce, bool):
-            raise TypeError("run_all and enforce must be booleans")
+        if not all(isinstance(v, bool) for v in (run_all, enforce, enforce_requested)):
+            raise TypeError("run_all, enforce and enforce_requested must be booleans")
         if not isinstance(reason, str) or not isinstance(error, (str, type(None))):
             raise TypeError("reason must be a string and error a string or null")
         if candidates is None and not run_all:
@@ -602,6 +614,7 @@ class Selection:
             enforce,
             None if candidates is None else set(candidates),
             error,
+            bool(enforce_requested),
         )
 
     @classmethod

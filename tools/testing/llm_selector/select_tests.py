@@ -10,8 +10,8 @@ CI can run annotated with its CI cost. Nothing from the change is executed:
 in CI this script runs from the default branch and only reads the PR through git. The model answers through `claude -p`
 with a JSON schema; on Bedrock set CLAUDE_CODE_USE_BEDROCK=1 and AWS
 credentials. A failure of git, the model call or its output, or the test times
-yields a run_all selection, so CI never skips tests because the selector broke;
-a bad LLM_SELECTOR_EFFORT or a failed write of --output writes no file.
+yields a run_all selection that is never enforced; a bad LLM_SELECTOR_EFFORT or a
+failed write of --output writes no file. Either way run_test.py keeps TD's split.
 """
 
 from __future__ import annotations
@@ -456,11 +456,17 @@ def main(argv: list[str] | None = None) -> None:
         selection = Selection(
             run_all=True, reason=f"selector failed: {error[:500]}", error=error[:2000]
         )
-    if record["not_enforced"] is not None:
-        args.enforce = False
     if selection is None:
         return
-    selection.enforce = args.enforce
+    # A deliberate run_all (no changed files, test infrastructure, too many
+    # changed files, an inductor failure list naming an unknown class, too many
+    # edited files under test/ that are not tests, too many import hops, an
+    # edited file under test/ that nothing reads, or the model) is enforced once
+    # selection.ENFORCEMENT_ENABLED is flipped; a broken selector, or a
+    # not_enforced answer (see select), never is.
+    refused = selection.error is not None or record["not_enforced"] is not None
+    selection.enforce = args.enforce and not refused
+    selection.enforce_requested = args.enforce
     args.output.write_text(
         json.dumps({**selection.to_json(), "diagnostics": record}, indent=1)
     )
