@@ -5,6 +5,7 @@ import ast
 import collections
 import contextlib
 import datetime as dt
+import functools
 import io
 import json
 import os
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 from tools.testing.llm_td import select_tests, selection
-from tools.testing.llm_td.eval import build_dataset as bd, clickhouse, score
+from tools.testing.llm_td.eval import build_dataset as bd, clickhouse, score, td_replay
 from tools.testing.llm_td.eval.build_dataset import strip_trailers
 from tools.testing.llm_td.eval.run_eval import run_one
 from tools.testing.llm_td.eval.score import (
@@ -53,6 +54,10 @@ SECONDS = {
 }  # fmt: skip
 SAMPLE = {
     "kind": "pr",
+    "title": "t",
+    "body": None,
+    "diffstat": "",
+    "diff": "",
     "candidates": ["test_a", "test_b", "test_c", "test_d", "test_e"],
     "changed_files": ["torch/foo.py"],
     "truth": ["test_a", "test_b", "test_gone"],
@@ -70,7 +75,7 @@ def pick(name: str, r: dict | None, td: dict | None, s: dict = SAMPLE) -> Choice
 
 
 def write_data(d: str, files: Mapping[str, object]) -> Path:
-    """Write `files` under `d` (str values as is, others as JSON), stamping each TD replay with its sample's current inputs."""
+    """Write `files` under `d` (str values as is, others as JSON), stamping each TD replay with its sample's current inputs and each result with no prompt_sha with its sample's."""
     data = Path(d)
     for name, obj in files.items():
         (data / name).parent.mkdir(parents=True, exist_ok=True)
@@ -82,6 +87,12 @@ def write_data(d: str, files: Mapping[str, object]) -> Path:
         if (sample := data / "samples" / p.name).exists():
             inputs = score.replay_inputs("", times, sample.read_bytes())
             p.write_text(json.dumps({**json.loads(p.read_text()), "inputs": inputs}))
+    minutes = select_tests.test_minutes(json.loads(times))
+    for p in (data / "results").glob("*/*.json"):
+        r = json.loads(p.read_text())
+        if "prompt_sha" not in r and (sample := data / "samples" / p.name).exists():
+            sent = score.prompt_sha(score.sample_prompt(json.loads(sample.read_text()), minutes))  # fmt: skip
+            p.write_text(json.dumps({**r, "prompt_sha": sent}))
     return data
 
 
@@ -241,14 +252,14 @@ class TestRunEval(unittest.TestCase):
         sample = {"id": "a", "sha": "f" * 40, "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a"], "changed_files": ["torch/foo.py"]}  # fmt: skip
         sent = run_eval.prompt_sha(run_eval.sample_prompt(sample, {}))
         result = {"model": "m", "effort": "medium", "agentic": False}
-        for prompt_sha, schema, refused in ((sent, run_eval.SCHEMA, False), (None, run_eval.SCHEMA, True), (sent, {}, True)):  # fmt: skip
+        for prompt_sha, schema, refused in ((sent, score.SCHEMA, False), (None, score.SCHEMA, True), (sent, {}, True)):  # fmt: skip
             with tempfile.TemporaryDirectory() as d:
                 data = write_data(d, {"samples/a.json": sample, "test-times.json": {}, "results/t/a.json": {**result, "prompt_sha": prompt_sha}})  # fmt: skip
                 (data / "ids.txt").write_text("a")
                 argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt")]  # fmt: skip
                 with (
                     mock.patch.object(sys, "argv", argv),
-                    mock.patch.object(run_eval, "SCHEMA", schema),
+                    mock.patch.object(score, "SCHEMA", schema),
                     mock.patch("sys.stderr", io.StringIO()) as err,
                     mock.patch("sys.stdout", io.StringIO()),
                     mock.patch.object(run_eval, "query_model") as query,
@@ -545,6 +556,14 @@ class TestScore(unittest.TestCase):
         for name in ("model", "final", "final-hm", "final+td45"):
             for s in (huge, empty, infra):
                 self.assertTrue(pick(name, r, td, s).sel.run_all, name)
+        # As apply_selection does not enforce a job with no test times, even a run-all keeps TD's cut there.
+        zero = {**SECONDS, "zero": {"test_a": [0.0, 0.0]}}
+        cut = {**td, "top25_cfg": {"zero": ["test_b"]}}
+        for s, out in ((empty, None), (SAMPLE, {"tests": [], "run_all": True})):
+            choice = policy("final+td45", s, {"out": out}, cut, zero)
+            if choice is None:
+                raise AssertionError("final+td45 chose nothing")
+            self.assertEqual([choice.covers(f, c) for f, c in (("test_a", "zero"), ("test_b", "zero"), ("test_c", "default"))], [False, True, True])  # fmt: skip
         files = {
             "test-times.json": {"linux": {"default": {"test_a": 10.0}}},
             "samples/a.json": huge,
@@ -556,7 +575,7 @@ class TestScore(unittest.TestCase):
         ):
             data = write_data(d, files)
             rows = score.score(data, ["a"], ["m"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
-        self.assertEqual([(x["run_all"], x["cost_usd"], x["error"]) for x in rows], [(True, 0.0, False)])  # fmt: skip
+        self.assertEqual([(x["run_all"], x["cost_usd"], x["error"]) for x in rows], [(True, None, False)])  # fmt: skip
 
     def test_hedge(self) -> None:
         # test_e has no recorded time and test_d no positive score, so neither is ever added.
@@ -607,10 +626,11 @@ class TestScore(unittest.TestCase):
                 policy(bad, SAMPLE, NOTHING, td, SECONDS)
 
     def test_hedge_matches_split(self) -> None:
-        # hedge is Selection.split for any share; at LLM_TD_HEDGE they must agree.
+        # hedge is Selection.split for any share LLM_TD_HEDGE could be.
         rng = random.Random(0)
         files = [f"test_{i}" for i in range(8)]
-        for _ in range(500):
+        for i in range(500):
+            share = (0.05, 0.2, 0.45)[i % 3]
             scored = rng.sample(files, rng.randint(0, 8))
             seconds = {f: float(rng.choice([0, 1, 5, 20, 60])) for f in files if rng.random() < 0.7}  # fmt: skip
             untimed = [f for f in files if f not in seconds and rng.random() < 0.5]
@@ -619,16 +639,19 @@ class TestScore(unittest.TestCase):
             ranked = [TestRun(f) for f in scored if f in job] + [TestRun(f) for f in job if f not in scored]  # fmt: skip
             cut = set(rng.sample(job, min(len(job), 2)))
             prev = set(rng.sample(files, rng.randint(0, 2)))
-            split = sel.split(ranked, lambda x: float(x.test_file in scored), seconds, "c", previously_failed=prev, td_include=cut)  # fmt: skip
-            got = score.hedge(sel, scored, seconds, score.LLM_TD_HEDGE, "c", cut, untimed, prev)  # fmt: skip
+            with mock.patch.object(selection, "LLM_TD_HEDGE", share):
+                split = sel.split(ranked, lambda x: float(x.test_file in scored), seconds, "c", previously_failed=prev, td_include=cut)  # fmt: skip
+            got = score.hedge(sel, scored, seconds, share, "c", cut, untimed, prev)
             want = cut if split.chose_nothing or not sum(seconds.values()) else split.previously_failed | split.hedged  # fmt: skip
-            self.assertEqual(got, want, (scored, seconds, untimed, sel, cut, prev))
+            case = (share, scored, seconds, untimed, sel, cut, prev)
+            self.assertEqual(got, want, case)
 
     def test_policy_matches_apply_selection(self) -> None:
-        # What final+td runs in a job is what apply_selection runs there, including a job with no test times.
+        # What final+td runs in a job is what apply_selection runs there, including a job with
+        # no test times, a run-all, a failed or malformed answer, and a job timed by a fallback job.
         rng = random.Random(0)
         files = [f"test_{i}" for i in range(8)]
-        for _ in range(300):
+        for _ in range(600):
             seconds = {f: float(rng.choice([0, 0, 5, 20, 60])) for f in files if rng.random() < 0.6}  # fmt: skip
             job = [*seconds, *(f for f in files if f not in seconds and rng.random() < 0.5)]  # fmt: skip
             rng.shuffle(job)
@@ -637,20 +660,27 @@ class TestScore(unittest.TestCase):
             scored = [f for f in job if rng.random() < 0.6]
             picked = rng.sample(job, min(len(job), rng.randint(0, 2)))
             prev = rng.sample(files, rng.randint(0, 2))
-            s = {**SAMPLE, "candidates": job, "truth": [], "previous_failures": prev}
-            td = {"scored": scored, "top25": [], "top25_cfg": {"c": job[:n]}}
-            r = {"out": {"tests": [{"file": f} for f in picked]}}
-            choice = policy("final+td", s, r, td, {"c": {f: [t, 0.0] for f, t in seconds.items()}})  # fmt: skip
+            changed = rng.choice([["torch/foo.py"]] * 3 + [[]])
+            s = {**SAMPLE, "candidates": job, "truth": [], "previous_failures": prev, "changed_files": changed}  # fmt: skip
+            out = rng.choice([{"tests": [{"file": f} for f in picked]}] * 3 + [{"tests": [], "run_all": True}, {"tests": "test_0"}, None])  # fmt: skip
+            # The job's times are its own, the fallback job's for its config, or default/default's.
+            config, how = rng.choice([("c", "own"), ("c", "fallback"), ("unknown", "default")])  # fmt: skip
+            own = {"c": {f: [t, 0.0] for f, t in seconds.items()}} if how == "own" else {}  # fmt: skip
+            fallback = {} if how == "own" else {"c" if how == "fallback" else "default": seconds}  # fmt: skip
+            td = {"scored": scored, "top25": job[:n], "top25_cfg": {"c": job[:n]} if how == "own" else {}}  # fmt: skip
+            choice = policy("final+td", s, {"out": out}, td, own, None, fallback)
             if choice is None:
                 raise AssertionError("final+td chose nothing")
-            sel = Selection(set(picked), candidates=set(job), enforce=True)
+            # What select_tests writes: no model call without changed files, and an error is never enforced.
+            sel = Selection(run_all=True) if not changed else Selection.from_model_output(out, set(job), changed)  # fmt: skip
+            sel.enforce = sel.error is None
             with (
                 mock.patch.object(selection, "get_pr_number", return_value=1),
                 mock.patch("sys.stderr", io.StringIO()),
             ):
-                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config="c", td_enabled=True, previously_failed=prev, call_id="c")  # fmt: skip
+                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config=config, td_enabled=True, previously_failed=prev, call_id="c")  # fmt: skip
             ran = {x.test_file for x in applied.include}
-            self.assertEqual({f for f in job if choice.covers(f, "c")}, ran, (seconds, job, n, scored, picked, prev))  # fmt: skip
+            self.assertEqual({f for f in job if choice.covers(f, config)}, ran, (seconds, job, n, scored, out, prev, changed, how))  # fmt: skip
 
     def test_hedge_previous_failures(self) -> None:
         # Previous failures in TD's cut run outside the budget; test_b is not in the cut.
@@ -745,12 +775,13 @@ class TestScore(unittest.TestCase):
             {**row, "pairs": 1, "hit": 1, "files": 5, "run_all": False},
             {**row, "pairs": 0, "hit": 0, "files": 9, "run_all": False},
             {**row, "pairs": 1, "hit": 1, **run_all},
+            {**row, "pairs": 0, "hit": 0, **run_all, "error": False, "cost_usd": None},
         ]
         (s,) = score.summarize(rows)
         self.assertEqual(s, {
-            "tag": "t", "policy": "p", "kind": "pr", "n": 4, "n_failing": 3,
+            "tag": "t", "policy": "p", "kind": "pr", "n": 5, "n_failing": 3,
             "caught_any": 1.0, "caught_all": 2 / 3, "pair_recall": 3 / 4,
-            "cpu": 0.625, "gpu": 0.25, "run_all": 1, "median_files": 5,
+            "cpu": 0.7, "gpu": 0.4, "run_all": 2, "median_files": 5,
             "usd_per_call": 0.1, "errors": 1,
         })  # fmt: skip
 
@@ -779,6 +810,13 @@ class TestScore(unittest.TestCase):
             self.assertEqual(err.getvalue(), msg)
             self.assertEqual(grep.call_args.args[1], "abc")
 
+    def test_grep_head_copies(self) -> None:
+        cached = functools.cache(lambda pattern, sha: ["test/test_a.py"])
+        with mock.patch.object(score, "grep_at", cached):
+            grep = score.grep_head({"sha": "abc"}, "a", set())
+            grep("p").append("test/test_b.py")
+            self.assertEqual(grep("p"), ["test/test_a.py"])
+
     def test_score_errors_and_stale_replays(self) -> None:
         td = {"scored": [], "top25": [], "top25_cfg": {}}
         files = {
@@ -793,7 +831,7 @@ class TestScore(unittest.TestCase):
             patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
         ):
             data = write_data(d, files)
-            (data / "samples/b.json").write_text(json.dumps({**SAMPLE, "title": "rebuilt"}))  # fmt: skip
+            (data / "samples/b.json").write_text(json.dumps({**SAMPLE, "sha": "rebuilt"}))  # fmt: skip
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
                 rows = score.score(data, ["a", "b"], ["m"], ["model", "final"], True, data / "samples", data / "td", "")  # fmt: skip
@@ -805,6 +843,58 @@ class TestScore(unittest.TestCase):
         self.assertEqual(stale, [])
         why = "td replay of the current test-times.json, sample, STATS and TD code"
         self.assertEqual(err.getvalue(), f"dropped 1 of 2 ids with no {why}\ndropped 2 of 2 ids with no {why}\n")  # fmt: skip
+
+    def test_score_stale_replay_of_test_times(self) -> None:
+        files = {
+            "test-times.json": {"linux": {"default": {"test_a": 10.0}}},
+            "samples/a.json": SAMPLE,
+            "td/a.json": {"scored": [], "top25": [], "top25_cfg": {}},
+        }
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
+        ):
+            data = write_data(d, files)
+            (data / "test-times.json").write_text(json.dumps({"linux": {"default": {"test_a": 20.0}}}))  # fmt: skip
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rows = score.score(data, ["a"], ["td"], [], True, data / "samples", data / "td", "")  # fmt: skip
+        self.assertEqual(rows, [])
+        self.assertEqual(err.getvalue(), "dropped 1 of 1 ids with no td replay of the current test-times.json, sample, STATS and TD code\n")  # fmt: skip
+
+    def test_score_stale_results(self) -> None:
+        td = {"scored": [], "top25": [], "top25_cfg": {}}
+        result = {"out": {"tests": []}, "error": None, "cost_usd": 0.1}
+        files = {
+            "test-times.json": {"linux": {"default": {"test_a": 10.0}}},
+            "samples/a.json": SAMPLE, "samples/b.json": SAMPLE, "samples/c.json": SAMPLE,
+            "td/a.json": td, "td/b.json": td, "td/c.json": td,
+            "results/m/a.json": result, "results/m/b.json": {**result, "prompt_sha": "old"}, "results/m/c.json": result,
+        }  # fmt: skip
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
+        ):
+            data = write_data(d, files)
+            # run_eval always records prompt_sha, so a result without one is stale too.
+            (data / "results/m/c.json").write_text(json.dumps(result))
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rows = score.score(data, ["a", "b", "c"], ["m", "td"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
+        self.assertEqual({x["id"] for x in rows}, {"a"})
+        self.assertEqual(err.getvalue(), "dropped 2 of 3 ids with no m result of the current sample, test-times.json, prompt and schema\n")  # fmt: skip
+
+    def test_test_seconds_skips_non_td_envs(self) -> None:
+        times = {
+            "linux": {"default": {"test_a": 10.0}},
+            "macos-py3-arm64": {"default": {"test_a": 100.0}},
+            "linux-jammy-xpu-n-py3.10": {"default": {"test_a": 1000.0}},
+            "linux-jammy-py3-clang12-onnx": {"default": {"test_b": 5.0}},
+        }
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "test-times.json"
+            path.write_text(json.dumps(times))
+            self.assertEqual(score.test_seconds(path), {"default": {"test_a": [10.0, 0.0]}})  # fmt: skip
 
     def test_replay_stats(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -828,6 +918,52 @@ class TestScore(unittest.TestCase):
         self.assertEqual(len(set(digests)), 4)
         self.assertEqual(digests[2], digests[3])
         self.assertIn(Path(score.__file__).with_name("td_replay.py"), score.REPLAY_CODE)
+
+    def test_td_replay_main(self) -> None:
+        seen = []
+
+        def prioritize(cands: list[str], file: io.StringIO) -> mock.Mock:
+            from tools.testing.target_determination.heuristics import utils
+
+            seen.append(utils.query_changed_files())
+            if "test_e" not in cands:
+                print("Error in Boom: x", file=file)
+            tp = TestPrioritizations(cands, {TestRun("test_b"): 2.0, TestRun("test_a", included=["TestX"]): 1.0})  # fmt: skip
+            return mock.Mock(get_aggregated_priorities=lambda: tp)
+
+        with tempfile.TemporaryDirectory() as d:
+            stats = Path(d) / ".additional_ci_files"
+            stats.mkdir()
+            for a in score.STATS_ARTIFACTS:
+                (stats / a).write_text("{}")
+            broken = {**SAMPLE, "candidates": ["test_a", "test_b"]}
+            data = write_data(d, {"test-times.json": {"linux": {"default": {"test_a": 100.0, "test_c": 10.0}}}, "samples/a.json": SAMPLE, "samples/b.json": broken, "td/b.json": {}})  # fmt: skip
+
+            def replay(*argv: str) -> None:
+                with (
+                    mock.patch.object(sys, "argv", ["td_replay", "--data", d, "--stats", str(stats), *argv]),
+                    mock.patch("tools.testing.target_determination.determinator.get_test_prioritizations", prioritize),
+                    mock.patch("sys.stdout", io.StringIO()),
+                ):  # fmt: skip
+                    td_replay.main()
+
+            with self.assertRaisesRegex(SystemExit, r"a heuristic raised on 1 samples, left for a rerun: \['b'\]"):  # fmt: skip
+                replay()
+            self.assertEqual(seen, [["torch/foo.py"]] * 2)
+            self.assertFalse((data / "td/b.json").exists())
+            td = json.loads((data / "td/a.json").read_text())
+            self.assertEqual((td["scored"], td["top25"], td["top25_cfg"]), (["test_b", "test_a"], ["test_a", "test_b"], {"default": ["test_a", "test_b"]}))  # fmt: skip
+            # What score checks a replay against is what td_replay records.
+            with patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}):
+                rows = score.score(data, ["a"], ["td"], [], True, data / "samples", data / "td", score.replay_stats(stats))  # fmt: skip
+            self.assertEqual(len(rows), 1)
+            # A current replay is not recomputed.
+            (data / "ids.txt").write_text("a")
+            replay("--ids", str(data / "ids.txt"))
+            self.assertEqual(len(seen), 2)
+            for bad in (["--shard", "2", "2"], ["--stats", d]):
+                with self.assertRaises(SystemExit), mock.patch("sys.stderr", io.StringIO()):  # fmt: skip
+                    replay(*bad)
 
     def test_td25_per_config(self) -> None:
         cands = ["test_a", "test_b", "test_c", "test_d", "test_e"]
