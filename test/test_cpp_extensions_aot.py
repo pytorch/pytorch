@@ -162,7 +162,6 @@ class TestCppExtensionAOTCUDA(common.TestCase):
         z = cusolver_extension.noop_cusolver_function(x)
         self.assertEqual(z, x)
 
-    @common.skipIfRocm(msg="dlink build path has no ROCm arch handling")
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(

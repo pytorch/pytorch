@@ -849,6 +849,23 @@ class BuildExtension(_LazyBuildExt):
         if self.use_ninja:
             self.force = True
 
+    def build_extension(self, ext) -> None:
+        # Relocatable device code (HIP dlink) must be linked with hipcc so it
+        # performs the device link and registers the fat binary.
+        if IS_HIP_EXTENSION and '--hip-link' in (ext.extra_link_args or []):
+            # For C++ extensions distutils builds the link command from compiler_cxx/linker_so_cxx.
+            saved = {attr: getattr(self.compiler, attr)
+                     for attr in ("linker_so", "linker_so_cxx", "compiler_cxx") if hasattr(self.compiler, attr)}
+            for attr, cmd in saved.items():
+                setattr(self.compiler, attr, [_get_hipcc_path()] + cmd[1:])
+            try:
+                super().build_extension(ext)
+            finally:
+                for attr, cmd in saved.items():
+                    setattr(self.compiler, attr, cmd)
+        else:
+            super().build_extension(ext)
+
     def build_extensions(self) -> None:
         compiler_name, compiler_version = self._check_abi()
 
@@ -1728,7 +1745,18 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     dlink_libraries = kwargs.get('dlink_libraries', [])
     dlink = kwargs.get('dlink', False) or dlink_libraries
-    if dlink:
+    if dlink and IS_HIP_EXTENSION:
+        # ROCm has no separate device-link step: compile with relocatable device
+        # code and let hipcc do the device link as part of the final host link.
+        extra_compile_args = kwargs.get('extra_compile_args', {})
+        extra_compile_args['nvcc'] = list(extra_compile_args.get('nvcc', [])) + ['-fgpu-rdc']
+        kwargs['extra_compile_args'] = extra_compile_args
+        kwargs['extra_link_args'] = (
+            list(kwargs.get('extra_link_args', []))
+            + ['-fgpu-rdc', '--hip-link']
+        )
+        kwargs['libraries'] = list(kwargs.get('libraries', [])) + list(dlink_libraries)
+    elif dlink:
         extra_compile_args = kwargs.get('extra_compile_args', {})
 
         extra_compile_args_dlink = extra_compile_args.get('nvcc_dlink', [])
