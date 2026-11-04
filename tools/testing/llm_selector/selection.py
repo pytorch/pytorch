@@ -590,8 +590,11 @@ class Split:
 @dataclass
 class AppliedSelection:
     """A Selection applied to TD's split of one run_test.py call's test list;
-    kept_td records that an enforced selection fell back to TD's split, and
-    previous_failures_known that the TD results stored previous failures,
+    kept_td records that a selection with enforce set fell back to TD's split
+    in apply_selection (no test times, previous failures not recorded, or no
+    file chosen); a request the selector refused (enforce_requested without
+    enforce: a failed selector or a not_enforced answer) is not kept_td.
+    previous_failures_known records that the TD results stored previous failures,
     which the TD job does when its pytest cache download step succeeded. That
     step also succeeds without a cache, as on a PR whose only failures were in
     jobs that upload none (ROCm, fork PRs), so it does not mean every previous
@@ -616,8 +619,9 @@ class AppliedSelection:
         selector_error tells a failed selector, which is never enforced, from
         a deliberate run_all. enforce_requested is the selection's, also true
         when enforced and whether or not TD is on: the requested enforcements
-        that fell back to TD are the rows with enforcement_enabled,
-        enforce_requested and td_enabled but not enforced, on PR jobs."""
+        that ran TD are the rows with enforcement_enabled, enforce_requested
+        and td_enabled but not enforced, on PR jobs; of those, kept_td fell
+        back in apply_selection and the rest the selector refused."""
         split, times = self.split, self.file_time
         files = "\n".join(sorted(times)).encode()
         return {
@@ -708,6 +712,8 @@ def apply_selection(
     enforced = wanted and fallback is None
     if selection.error is not None and requested:
         print(f"LLM selection: the selector failed ({selection.error[:200]!r}), using TD", file=sys.stderr)  # fmt: skip
+    elif requested and not selection.enforce:
+        print("LLM selection: the selector did not enforce the request (see not_enforced in the selection file's diagnostics), using TD", file=sys.stderr)  # fmt: skip
     if wanted and not enforced:
         print(f"LLM selection: {fallback}, using TD", file=sys.stderr)
     if enforced:
