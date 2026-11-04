@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import os
@@ -64,6 +65,26 @@ class TestExportAPIDynamo(common_utils.TestCase):
     """Tests for the ONNX exporter API when dynamo=True."""
 
     hw_classification = HardwareClassification.GENERIC
+
+    def test_verbose_export_with_cp1252_stdout(self):
+        output = io.BytesIO()
+        with io.TextIOWrapper(output, encoding="cp1252", errors="strict") as stdout:
+            with contextlib.redirect_stdout(stdout):
+                onnx_program = torch.onnx.export(
+                    SampleModel(),
+                    (torch.randn(2),),
+                    io.BytesIO(),
+                    dynamo=True,
+                    verbose=True,
+                )
+            stdout.flush()
+            progress = output.getvalue().decode("cp1252")
+
+        self.assertIsNotNone(onnx_program)
+        self.assertIn("Obtain model graph", progress)
+        self.assertIn("strict=False)`... [OK]", progress)
+        self.assertIn("Run decompositions... [OK]", progress)
+        self.assertIn("Translate the graph into ONNX... [OK]", progress)
 
     def assert_export(
         self, *args, strategy: str | None = "TorchExportNonStrictStrategy", **kwargs
