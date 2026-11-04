@@ -2550,39 +2550,21 @@ def main():
             s += "".join(f"    {test}\n" for test in parallel)
             return s.strip()
 
-    percent_to_run = 25 if options.enable_td else 100
-    include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
-
     # The LLM test selection, if CI downloaded one; see tools/testing/llm_td.
-    selection_file = REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_TD_SELECTION_FILE
     split = split_tests(
-        include,
-        exclude,
-        test_prioritizations.get_score,
-        test_file_times_dict,
-        selection_file=selection_file,
+        test_prioritizations=test_prioritizations,
+        test_times=test_file_times_dict,
+        selection_file=REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_TD_SELECTION_FILE,
         test_config=TEST_CONFIG,
         td_enabled=options.enable_td,
         previously_failed=previous_failures,
+        gen_artifact=gen_ci_artifact if IS_CI else None,
     )
-    if not split.enforced:
-        print_to_stderr(
-            f"Running {percent_to_run}% of tests based on TD"
-            if options.enable_td
-            else "Running all tests"
-        )
-
     test_batch = TestBatch("tests to run", split.include, False)
     test_batch_exclude = TestBatch("excluded", split.exclude, True)
-    if IS_CI:
-        gen_ci_artifact(
-            [x.to_json() for x in split.include],
-            [x.to_json() for x in split.exclude],
-            source=split.source,
-            td_excluded=[x.to_json() for x in split.td_exclude],
-        )
-        if split.llm is not None:
-            emit_metric("llm_td_selection", split.llm.selection_metric)
+    # emit_metric records its caller, so these stay in main().
+    if IS_CI and split.llm is not None:
+        emit_metric("llm_td_selection", split.llm.selection_metric)
 
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
