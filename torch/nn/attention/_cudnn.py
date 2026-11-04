@@ -27,9 +27,9 @@ from torch._vendor.packaging.version import InvalidVersion, Version
 _CUDNN_MODULE_PATH = "cudnn.torch"
 _INSTALL_FN = "install_sdpa_overrides"
 # The first nvidia-cudnn-frontend release whose varlen overrides honor the
-# backend varlen_attn selected. install_sdpa_overrides() dates from 1.32, so
+# backend varlen_attn selected. install_sdpa_overrides() dates from 1.32.0, so
 # its presence alone does not tell the two apart.
-_MIN_FRONTEND_VERSION = "1.33"
+_MIN_FRONTEND_VERSION = "1.32.2"
 ENV_VAR = "TORCH_CUDNN_SDPA_USE_PYTHON"
 
 logger = logging.getLogger(__name__)
