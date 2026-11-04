@@ -4,17 +4,17 @@
 using namespace metal;
 using c10::metal::simdgroup_size;
 
-template <bool log_softmax, bool exclude_max = false>
+template <bool log_softmax>
 struct SoftmaxEpilogue {
   float max_val;
   float normalizer;
 
+  // For log_softmax, sum excludes one maximum; otherwise it is the full sum.
   SoftmaxEpilogue(float max_val, float sum) : max_val(max_val) {
     if IF_CONSTEXPR (log_softmax) {
-      normalizer = exclude_max ? c10::metal::log1p(sum) : precise::log(sum);
+      normalizer = c10::metal::log1p(sum);
     } else {
-      const float inv = 1.0f / (exclude_max ? 1.0f + sum : sum);
-      normalizer = exclude_max && sum < 1.0f ? metal::fma(-sum, inv, 1.0f) : inv;
+      normalizer = 1.0f / sum;
     }
   }
 
@@ -68,85 +68,23 @@ softmax_row(
     return;
   }
   const idx_t in_base = row * dim_size;
-  // Cache a bounded prefix to limit register pressure.
   if IF_CONSTEXPR (!log_softmax) {
-    if (dim_size <= 2 * simdgroup_size) {
-      float first = lane < dim_size ? float(input[in_base + lane]) : -INFINITY;
-      float second = lane + simdgroup_size < dim_size
-          ? float(input[in_base + lane + simdgroup_size])
-          : -INFINITY;
-      const auto winner = c10::metal::simd_argmax(c10::metal::max(first, second));
-      const bool skip_max = isfinite(winner.first) && lane == winner.second;
-      const bool omit_first = skip_max && first == winner.first;
-      const bool omit_second = skip_max && !omit_first;
-      first = lane < dim_size ? precise::exp(first - winner.first) : 0.0f;
-      second = lane + simdgroup_size < dim_size
-          ? precise::exp(second - winner.first)
-          : 0.0f;
-      const float tail = c10::metal::simd_sum(
-          (omit_first ? 0.0f : first) + (omit_second ? 0.0f : second));
-      const float inv = 1.0f / (1.0f + tail);
-      const float normalizer = tail < 1.0f ? metal::fma(-tail, inv, 1.0f) : inv;
-      if (lane < dim_size) {
-        output[in_base + lane] = static_cast<T>(first * normalizer);
-      }
-      if (lane + simdgroup_size < dim_size) {
-        output[in_base + lane + simdgroup_size] =
-            static_cast<T>(second * normalizer);
-      }
-      return;
+    float max_val = -INFINITY;
+    for (idx_t col = lane; col < dim_size; col += simdgroup_size) {
+      max_val = c10::metal::max(max_val, float(input[in_base + col]));
     }
-    if (dim_size <= 8 * simdgroup_size) {
-      float4 values = -INFINITY;
-      float max_val = -INFINITY;
-#pragma unroll
-      for (uint i = 0; i < 4; ++i) {
-        const idx_t col = lane + i * simdgroup_size;
-        if (col < dim_size) {
-          values[i] = float(input[in_base + col]);
-        }
-        max_val = c10::metal::max(max_val, values[i]);
-      }
-      for (idx_t col = lane + 4 * simdgroup_size; col < dim_size;
-           col += simdgroup_size) {
-        max_val = c10::metal::max(max_val, float(input[in_base + col]));
-      }
-      const auto winner = c10::metal::simd_argmax(max_val);
-      max_val = winner.first;
-      bool skip_max = isfinite(max_val) && lane == winner.second;
-      float tail = 0.0f;
-#pragma unroll
-      for (uint i = 0; i < 4; ++i) {
-        const idx_t col = lane + i * simdgroup_size;
-        const bool omit = skip_max && values[i] == max_val;
-        skip_max = skip_max && !omit;
-        values[i] = col < dim_size ? precise::exp(values[i] - max_val) : 0.0f;
-        tail += omit ? 0.0f : values[i];
-      }
-      for (idx_t col = lane + 4 * simdgroup_size; col < dim_size;
-           col += simdgroup_size) {
-        const float value = float(input[in_base + col]);
-        const bool omit = skip_max && value == max_val;
-        skip_max = skip_max && !omit;
-        tail += omit ? 0.0f : precise::exp(value - max_val);
-      }
-      tail = c10::metal::simd_sum(tail);
-      const float inv = 1.0f / (1.0f + tail);
-      const float normalizer = tail < 1.0f ? metal::fma(-tail, inv, 1.0f) : inv;
-#pragma unroll
-      for (uint i = 0; i < 4; ++i) {
-        const idx_t col = lane + i * simdgroup_size;
-        if (col < dim_size) {
-          output[in_base + col] = static_cast<T>(values[i] * normalizer);
-        }
-      }
-      for (idx_t col = lane + 4 * simdgroup_size; col < dim_size;
-           col += simdgroup_size) {
-        const float value = precise::exp(float(input[in_base + col]) - max_val);
-        output[in_base + col] = static_cast<T>(value * normalizer);
-      }
-      return;
+    max_val = c10::metal::simd_max(max_val);
+    float sum = 0;
+    for (idx_t col = lane; col < dim_size; col += simdgroup_size) {
+      sum += precise::exp(float(input[in_base + col]) - max_val);
     }
+    const SoftmaxEpilogue<log_softmax> epilogue(
+        max_val, c10::metal::simd_sum(sum));
+    for (idx_t col = lane; col < dim_size; col += simdgroup_size) {
+      output[in_base + col] =
+          static_cast<T>(epilogue(float(input[in_base + col])));
+    }
+    return;
   }
   float max_val = -INFINITY;
 #pragma unroll 4
@@ -168,33 +106,20 @@ softmax_row(
 
   tail = c10::metal::simd_sum(tail);
 
-  float normalizer;
-  if IF_CONSTEXPR (log_softmax) {
-    normalizer = c10::metal::log1p(tail);
-  } else {
-    const float inv = 1.0f / (1.0f + tail);
-    normalizer = tail < 1.0f ? metal::fma(-tail, inv, 1.0f) : inv;
-  }
+  const float normalizer = c10::metal::log1p(tail);
 
 #pragma unroll 4
   for (idx_t col = lane; col < dim_size; col += simdgroup_size) {
     const float shifted = float(input[in_base + col]) - max_val;
-    float value;
-    if IF_CONSTEXPR (log_softmax) {
-      value = shifted - normalizer;
-    } else {
-      value = precise::exp(shifted) * normalizer;
-    }
-
-    output[in_base + col] = static_cast<T>(value);
+    output[in_base + col] = static_cast<T>(shifted - normalizer);
   }
 }
 
 // First pass of the split path for long contiguous rows. Used when the
 // reduction width exceeds 2048 and there are at most 256 logical rows
 // and the input consists of contiguous rows.
-// Each partial stores its maximum and the sum excluding one occurrence of it.
-template <typename T, typename idx_t>
+// For log_softmax, each sum excludes one occurrence of its maximum.
+template <typename T, typename idx_t, bool log_softmax>
 [[max_total_threads_per_threadgroup(kSoftmaxThreads)]] [[kernel]] void
 softmax_partial(
     device const T* input,
@@ -216,25 +141,33 @@ softmax_partial(
   float max_val = -INFINITY;
   idx_t max_col = chunk_begin + ltid;
   for (idx_t col = chunk_begin + ltid; col < chunk_end; col += lsize) {
-    const float value = float(input[in_base + col]);
-    if (value > max_val || isnan(value)) {
-      max_val = value;
-      max_col = col;
+    if IF_CONSTEXPR (log_softmax) {
+      const float value = float(input[in_base + col]);
+      if (value > max_val || isnan(value)) {
+        max_val = value;
+        max_col = col;
+      }
+    } else {
+      max_val = c10::metal::max(max_val, float(input[in_base + col]));
     }
   }
-  max_col = c10::metal::threadgroup_argmax(
-      shared_max, shared_idx, max_val, max_col, ltid, lsize);
-  max_val = float(input[in_base + max_col]);
-  float tail = 0;
+  if IF_CONSTEXPR (log_softmax) {
+    max_col = c10::metal::threadgroup_argmax(
+        shared_max, shared_idx, max_val, max_col, ltid, lsize);
+    max_val = float(input[in_base + max_col]);
+  } else {
+    max_val = c10::metal::threadgroup_max(shared_max, max_val, ltid, lsize);
+  }
+  float sum = 0;
   for (idx_t col = chunk_begin + ltid; col < chunk_end; col += lsize) {
-    if (col != max_col || !isfinite(max_val)) {
-      tail += precise::exp(float(input[in_base + col]) - max_val);
+    if (!log_softmax || col != max_col || !isfinite(max_val)) {
+      sum += precise::exp(float(input[in_base + col]) - max_val);
     }
   }
-  tail = c10::metal::threadgroup_sum(shared_sum, tail, ltid, lsize);
+  sum = c10::metal::threadgroup_sum(shared_sum, sum, ltid, lsize);
   if (ltid == 0) {
     partials[idx_t(tgid.y) * params.n_chunks + tgid.x] =
-        float2(max_val, max_val == -INFINITY ? 0.f : tail);
+        float2(max_val, max_val == -INFINITY ? 0.f : sum);
   }
 }
 
@@ -263,27 +196,39 @@ softmax_finalize(
   float max_val = -INFINITY;
   idx_t max_chunk = ltid;
   for (idx_t i = ltid; i < n_chunks; i += lsize) {
-    const float value = row_partials[i].x;
-    if (value > max_val || isnan(value)) {
-      max_val = value;
-      max_chunk = i;
+    if IF_CONSTEXPR (log_softmax) {
+      const float value = row_partials[i].x;
+      if (value > max_val || isnan(value)) {
+        max_val = value;
+        max_chunk = i;
+      }
+    } else {
+      max_val = c10::metal::max(max_val, row_partials[i].x);
     }
   }
-  max_chunk = c10::metal::threadgroup_argmax(
-      shared_max, shared_idx, max_val, max_chunk, ltid, lsize);
-  max_val = row_partials[max_chunk].x;
-  float tail = 0;
+  if IF_CONSTEXPR (log_softmax) {
+    max_chunk = c10::metal::threadgroup_argmax(
+        shared_max, shared_idx, max_val, max_chunk, ltid, lsize);
+    max_val = row_partials[max_chunk].x;
+  } else {
+    max_val = c10::metal::threadgroup_max(shared_max, max_val, ltid, lsize);
+  }
+  float sum = 0;
   for (idx_t i = ltid; i < n_chunks; i += lsize) {
-    const float2 partial = row_partials[i];
-    const float scale = precise::exp(partial.x - max_val);
-    tail = metal::fma(partial.y, scale, tail);
-    // Restore the other chunks' omitted maxima.
-    if (i != max_chunk) {
-      tail += scale;
+    if IF_CONSTEXPR (log_softmax) {
+      const float2 partial = row_partials[i];
+      const float scale = precise::exp(partial.x - max_val);
+      sum = metal::fma(partial.y, scale, sum);
+      // Restore the other chunks' omitted maxima.
+      if (i != max_chunk) {
+        sum += scale;
+      }
+    } else {
+      sum += row_partials[i].y * precise::exp(row_partials[i].x - max_val);
     }
   }
-  tail = c10::metal::threadgroup_sum(shared_sum, tail, ltid, lsize);
-  const SoftmaxEpilogue<log_softmax, true> epilogue(max_val, tail);
+  sum = c10::metal::threadgroup_sum(shared_sum, sum, ltid, lsize);
+  const SoftmaxEpilogue<log_softmax> epilogue(max_val, sum);
   const idx_t row_base = idx_t(tgid.y) * dim_size;
   const idx_t chunk_begin = idx_t(tgid.x) * chunk_size;
   const idx_t chunk_end = min(chunk_begin + chunk_size, dim_size);
@@ -321,30 +266,44 @@ softmax(
     max_val = c10::metal::max(max_val, float(input[base + r * dim_stride]));
   }
   shared[shared_idx] = max_val;
-  shared_winner[shared_idx] = tid.y;
+  if IF_CONSTEXPR (log_softmax) {
+    shared_winner[shared_idx] = tid.y;
+  }
   threadgroup_barrier(mem_flags::mem_threadgroup);
   for (uint stride = tptg.y / 2; stride > 0; stride /= 2) {
     if (tid.y < stride) {
-      const uint other = shared_idx + stride * tptg.x;
-      if (shared[other] > shared[shared_idx] || isnan(shared[other])) {
-        shared[shared_idx] = shared[other];
-        shared_winner[shared_idx] = shared_winner[other];
+      if IF_CONSTEXPR (log_softmax) {
+        const uint other = shared_idx + stride * tptg.x;
+        if (shared[other] > shared[shared_idx] || isnan(shared[other])) {
+          shared[shared_idx] = shared[other];
+          shared_winner[shared_idx] = shared_winner[other];
+        }
+      } else {
+        shared[shared_idx] = c10::metal::max(
+            shared[shared_idx], shared[shared_idx + stride * tptg.x]);
       }
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
   max_val = shared[tid.x];
-  bool skip_max = isfinite(max_val) && tid.y == shared_winner[tid.x];
+  bool skip_max = false;
+  if IF_CONSTEXPR (log_softmax) {
+    skip_max = isfinite(max_val) && tid.y == shared_winner[tid.x];
+  }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  float tail = 0;
+  float sum = 0;
   for (idx_t r = tid.y; active && r < dim_size; r += tptg.y) {
-    const float value = float(input[base + r * dim_stride]);
-    const bool omit = skip_max && value == max_val;
-    skip_max = skip_max && !omit;
-    tail += omit ? 0.0f : precise::exp(value - max_val);
+    if IF_CONSTEXPR (log_softmax) {
+      const float value = float(input[base + r * dim_stride]);
+      const bool omit = skip_max && value == max_val;
+      skip_max = skip_max && !omit;
+      sum += omit ? 0.0f : precise::exp(value - max_val);
+    } else {
+      sum += precise::exp(float(input[base + r * dim_stride]) - max_val);
+    }
   }
-  shared[shared_idx] = tail;
+  shared[shared_idx] = sum;
   threadgroup_barrier(mem_flags::mem_threadgroup);
   for (uint stride = tptg.y / 2; stride > 0; stride /= 2) {
     if (tid.y < stride) {
@@ -352,7 +311,7 @@ softmax(
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
-  const SoftmaxEpilogue<log_softmax, true> epilogue(max_val, shared[tid.x]);
+  const SoftmaxEpilogue<log_softmax> epilogue(max_val, shared[tid.x]);
 
   for (idx_t r = tid.y; active && r < dim_size; r += tptg.y) {
     output[out_base + r * inner_size] =
@@ -360,24 +319,30 @@ softmax(
   }
 }
 
-// Online (max, tail) pair; tail excludes one maximum and is relative to max.
+// Online (max, sum) pair; log_softmax excludes one maximum from the sum.
+template <bool log_softmax>
 inline float2 softmax_combine(float2 a, float2 b) {
   const float m = c10::metal::max(a.x, b.x);
   if (m == -INFINITY) {
     return float2(m, 0.f);
   }
-  if (!isfinite(m)) {
-    return float2(m, NAN);
+  if IF_CONSTEXPR (log_softmax) {
+    if (!isfinite(m)) {
+      return float2(m, NAN);
+    }
+    const bool keep_a = a.x >= b.x;
+    const float2 hi = keep_a ? a : b;
+    const float2 lo = keep_a ? b : a;
+    const float scale = precise::exp(lo.x - m);
+    return float2(m, metal::fma(scale, lo.y, hi.y) + scale);
+  } else {
+    return float2(m, a.y * precise::exp(a.x - m) + b.y * precise::exp(b.x - m));
   }
-  const bool keep_a = a.x >= b.x;
-  const float2 hi = keep_a ? a : b;
-  const float2 lo = keep_a ? b : a;
-  const float scale = precise::exp(lo.x - m);
-  return float2(m, metal::fma(scale, lo.y, hi.y) + scale);
 }
 
 // Reduces a threadgroup's per-thread pairs along y, leaving the result in
 // shared[tid.x].
+template <bool log_softmax>
 inline float2 softmax_threadgroup_combine(
     threadgroup float2* shared,
     float2 val,
@@ -388,7 +353,7 @@ inline float2 softmax_threadgroup_combine(
   threadgroup_barrier(mem_flags::mem_threadgroup);
   for (uint stride = tptg.y / 2; stride > 0; stride /= 2) {
     if (tid.y < stride) {
-      shared[shared_idx] = softmax_combine(
+      shared[shared_idx] = softmax_combine<log_softmax>(
           shared[shared_idx], shared[shared_idx + stride * tptg.x]);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -399,8 +364,8 @@ inline float2 softmax_threadgroup_combine(
 // First pass of the strided split path. Used when the reduction dim is not
 // the innermost one and there are too few columns to fill the GPU: grid.z
 // splits the reduction dim into chunks and each threadgroup stores the
-// (max, tail) of its chunk for tptg.x columns.
-template <typename T, typename idx_t>
+// (max, sum) of its chunk for tptg.x columns, excluding one max for log_softmax.
+template <typename T, typename idx_t, bool log_softmax>
 [[max_total_threads_per_threadgroup(kSoftmaxMaxThreads)]] [[kernel]] void
 softmax_strided_partial(
     device const T* input,
@@ -420,10 +385,10 @@ softmax_strided_partial(
   const idx_t chunk_end = min(chunk_begin + params.chunk_size, params.dim_size);
   float2 acc(-INFINITY, 0.f);
   for (idx_t r = chunk_begin + tid.y; active && r < chunk_end; r += tptg.y) {
-    acc =
-        softmax_combine(acc, float2(float(input[base + r * dim_stride]), 0.f));
+    acc = softmax_combine<log_softmax>(
+        acc, float2(float(input[base + r * dim_stride]), log_softmax ? 0.f : 1.f));
   }
-  acc = softmax_threadgroup_combine(shared, acc, tid.xy, tptg.xy);
+  acc = softmax_threadgroup_combine<log_softmax>(shared, acc, tid.xy, tptg.xy);
   if (tid.y == 0 && active) {
     partials[row * params.n_chunks + tgid.z] = acc;
   }
@@ -450,13 +415,13 @@ softmax_strided_finalize(
   const bool active = col < inner_size;
   float2 acc(-INFINITY, 0.f);
   for (idx_t i = tid.y; active && i < n_chunks; i += tptg.y) {
-    acc = softmax_combine(acc, partials[row * n_chunks + i]);
+    acc = softmax_combine<log_softmax>(acc, partials[row * n_chunks + i]);
   }
-  acc = softmax_threadgroup_combine(shared, acc, tid.xy, tptg.xy);
+  acc = softmax_threadgroup_combine<log_softmax>(shared, acc, tid.xy, tptg.xy);
   if (!active) {
     return;
   }
-  const SoftmaxEpilogue<log_softmax, true> epilogue(acc.x, acc.y);
+  const SoftmaxEpilogue<log_softmax> epilogue(acc.x, acc.y);
   const idx_t base = input_row_offset(row, params);
   const idx_t out_base = out_row_offset(row, dim_size, inner_size);
   const idx_t dim_stride = params.strides[params.dim];
@@ -505,29 +470,29 @@ softmax_strided_finalize(
       constant SoftmaxParams<IDX_T>& params,                               \
       uint2 tid [[thread_position_in_threadgroup]],                        \
       uint2 tptg [[threads_per_threadgroup]],                              \
-      uint2 tgid [[threadgroup_position_in_grid]]);
-
-#define REGISTER_SOFTMAX_IDX(DTYPE, IDX_T, SUFFIX)                         \
-  REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, softmax, false)                \
-  REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, log_softmax, true)             \
+      uint2 tgid [[threadgroup_position_in_grid]]);                        \
   template                                                                 \
-      [[host_name("softmax_partial_" #DTYPE "_" #SUFFIX)]] [[kernel]] void \
-      softmax_partial<DTYPE, IDX_T>(                                       \
+      [[host_name(#NAME "_partial_" #DTYPE "_" #SUFFIX)]] [[kernel]] void  \
+      softmax_partial<DTYPE, IDX_T, LOG_SOFTMAX>(                          \
           device const DTYPE* input,                                       \
           device float2* partials,                                         \
           constant SoftmaxParams<IDX_T>& params,                           \
           uint2 tgid [[threadgroup_position_in_grid]],                     \
           uint2 tid [[thread_position_in_threadgroup]],                    \
           uint2 tptg [[threads_per_threadgroup]]);                         \
-  template [[host_name("softmax_strided_partial_" #DTYPE                   \
+  template [[host_name(#NAME "_strided_partial_" #DTYPE                    \
                        "_" #SUFFIX)]] [[kernel]] void                      \
-  softmax_strided_partial<DTYPE, IDX_T>(                                   \
+  softmax_strided_partial<DTYPE, IDX_T, LOG_SOFTMAX>(                      \
       device const DTYPE* input,                                           \
       device float2* partials,                                             \
       constant SoftmaxParams<IDX_T>& params,                               \
       uint3 tid [[thread_position_in_threadgroup]],                        \
       uint3 tptg [[threads_per_threadgroup]],                              \
       uint3 tgid [[threadgroup_position_in_grid]]);
+
+#define REGISTER_SOFTMAX_IDX(DTYPE, IDX_T, SUFFIX)                         \
+  REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, softmax, false)                \
+  REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, log_softmax, true)
 
 #define REGISTER_SOFTMAX(DTYPE)          \
   REGISTER_SOFTMAX_IDX(DTYPE, uint, u32) \

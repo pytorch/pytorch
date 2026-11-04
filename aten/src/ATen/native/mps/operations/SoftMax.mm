@@ -137,12 +137,12 @@ static void softmax_mps_impl(const Tensor& self, int64_t dim, bool half_to_float
       } else if (use_split) {
         const auto grid = MTLSizeMake(n_chunks, num_rows, 1);
         const auto group = MTLSizeMake(kSoftmaxThreads, 1, 1);
-        run_softmax(stream, "softmax_partial", self, use_u32, grid, group, params, self_, partials);
+        run_softmax(stream, kernel + "_partial", self, use_u32, grid, group, params, self_, partials);
         run_softmax(stream, kernel + "_finalize", self, use_u32, grid, group, params, self_, output, partials);
       } else if (use_strided_split) {
         const auto grid = MTLSizeMake(ceil_div(inner_size, tg_x), num_rows / inner_size, strided_chunks);
         const auto group = MTLSizeMake(tg_x, tg_y, 1);
-        run_softmax(stream, "softmax_strided_partial", self, use_u32, grid, group, params, self_, partials);
+        run_softmax(stream, kernel + "_strided_partial", self, use_u32, grid, group, params, self_, partials);
         run_softmax(stream, kernel + "_strided_finalize", self, use_u32, grid, group, params, self_, output, partials);
       } else {
         const auto grid = MTLSizeMake(ceil_div(inner_size, tg_x), num_rows / inner_size, 1);

@@ -15598,30 +15598,27 @@ class TestCommon(TestCase):
         self.assertEqual(actual_second, tuple(t.to(dtype) for t in expected_second), atol=1e-5, rtol=1e-4)
 
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
-    @parametrize("op", [F.softmax, F.log_softmax])
     @parametrize("shape,dim", [((3, 33), 0), ((256, 33), 0), ((257, 4096), 1)])
     @parametrize("values", [
         (0, -17, -math.inf), (-17, 0, -math.inf), (-20, -math.inf, 0),
         (0, 0, 0), (-math.inf, -math.inf, 0), (-math.inf, -math.inf, -math.inf),
         (0, math.inf, 0), (0, math.nan, 0),
     ])
-    def test_softmax_fallback_tail(self, device, dtype, op, shape, dim, values):
+    def test_log_softmax_fallback_tail(self, device, dtype, shape, dim, values):
         # Short strided reductions and many long contiguous rows use the fallback.
         x = torch.full(shape, -math.inf, dtype=dtype)
         for index, value in zip((0, shape[dim] // 2, shape[dim] - 1), values):
             x.select(dim, index).fill_(value)
-        expected = op(x.double(), dim=dim).to(dtype)
-        actual = op(x.to(device), dim=dim).cpu()
+        expected = F.log_softmax(x.double(), dim=dim).to(dtype)
+        actual = F.log_softmax(x.to(device), dim=dim).cpu()
         self.assertEqual(actual, expected)
-        rtol = 1e-6 if op is F.log_softmax else 0
-        self.assertEqual(actual.amax(dim), expected.amax(dim), atol=0, rtol=rtol)
+        self.assertEqual(actual.amax(dim), expected.amax(dim), atol=0, rtol=1e-6)
 
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
-    @parametrize("op", [F.softmax, F.log_softmax])
     @parametrize("margin", [17.0, 20.0])
     @parametrize("max_col,other_col", [(0, 256), (128, 0), (255, 256), (2047, 2048), (4095, 4094)])
     @parametrize("layout", ["contiguous", "strided", "transposed"])
-    def test_softmax_split_tail(self, device, dtype, op, margin, max_col, other_col, layout):
+    def test_log_softmax_split_tail(self, device, dtype, margin, max_col, other_col, layout):
         x = torch.full((33, 4096), -math.inf, dtype=dtype)
         x[:, max_col] = 0
         x[:, other_col] = -margin
@@ -15631,11 +15628,10 @@ class TestCommon(TestCase):
             dim = 0
             if layout == "strided":
                 x = x.contiguous()
-        expected = op(x.double(), dim=dim).to(dtype)
-        actual = op(x.to(device), dim=dim).cpu()
+        expected = F.log_softmax(x.double(), dim=dim).to(dtype)
+        actual = F.log_softmax(x.to(device), dim=dim).cpu()
         self.assertEqual(actual, expected)
-        rtol = 1e-6 if op is F.log_softmax else 0
-        self.assertEqual(actual.select(dim, max_col), expected.select(dim, max_col), atol=0, rtol=rtol)
+        self.assertEqual(actual.select(dim, max_col), expected.select(dim, max_col), atol=0, rtol=1e-6)
 
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize("op", [F.softmax, F.log_softmax])
