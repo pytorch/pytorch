@@ -250,8 +250,9 @@ struct C10_API FakeTensorMode {
   // only getCppFakeTensorModePyObj accesses it, under a lock.
   std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
 
-  // when false, disallow a fake tensor from having a 'meta' device
-  bool allow_meta_ = true;
+  // when false, disallow a fake tensor from having a 'meta' device. Atomic, as
+  // Python can assign it while another thread reads it.
+  std::atomic<bool> allow_meta_{true};
 
   // When true, real tensor inputs to an op are converted to fakes instead of
   // raising. A non-None fake_tensor_tls.allow_non_fake_inputs_override, a
@@ -261,12 +262,13 @@ struct C10_API FakeTensorMode {
 
   // Whether reading the mutable data pointer of a fake made afterwards only
   // warns (true) or throws (false); a storage's marking is never relaxed.
-  // Python's _allow_unsafe_data_ptr_access, exposed under that name.
-  bool allow_unsafe_data_ptr_access_ = true;
+  // Python's _allow_unsafe_data_ptr_access, exposed under that name. Atomic,
+  // like allow_meta_.
+  std::atomic<bool> allow_unsafe_data_ptr_access_{true};
 
   // Same as Python's FakeTensorMode.epoch. Kept here rather than on the Python
-  // wrapper, so a rebuilt wrapper sees it.
-  uint64_t epoch_ = 0;
+  // wrapper, so a rebuilt wrapper sees it. Atomic, like allow_meta_.
+  std::atomic<uint64_t> epoch_{0};
 
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,

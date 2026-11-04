@@ -3032,11 +3032,26 @@ Call this whenever a new thread is created in order to propagate values from
           py::arg("converter"),
           py::arg("shape_env"),
           py::arg("wrapper"))
-      .def_readwrite("allow_meta", &c10::FakeTensorMode::allow_meta_)
-      .def_readwrite(
+      .def_property(
+          "allow_meta",
+          [](const c10::FakeTensorMode& mode) { return mode.allow_meta_.load(); },
+          [](c10::FakeTensorMode& mode, bool value) {
+            mode.allow_meta_.store(value);
+          })
+      .def_property(
           "_allow_unsafe_data_ptr_access",
-          &c10::FakeTensorMode::allow_unsafe_data_ptr_access_)
-      .def_readwrite("epoch", &c10::FakeTensorMode::epoch_)
+          [](const c10::FakeTensorMode& mode) {
+            return mode.allow_unsafe_data_ptr_access_.load();
+          },
+          [](c10::FakeTensorMode& mode, bool value) {
+            mode.allow_unsafe_data_ptr_access_.store(value);
+          })
+      .def_property(
+          "epoch",
+          [](const c10::FakeTensorMode& mode) { return mode.epoch_.load(); },
+          [](c10::FakeTensorMode& mode, uint64_t value) {
+            mode.epoch_.store(value);
+          })
       .def_property_readonly(
           "fake_tensor_converter",
           [](const c10::FakeTensorMode& mode) -> py::object {
