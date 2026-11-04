@@ -327,8 +327,9 @@ class Selection:
     # The test files the model chose from. Any other file, such as a custom
     # run_test.py handler or a C++ test, is always covered. None covers no extra file.
     candidates: set[str] | None = None
-    # Why from_model_output got no usable model answer; not serialized.
-    error: str | None = field(default=None, compare=False, repr=False)
+    # Why the selector got no usable answer (git, the model call or its output,
+    # or the test times); None for a deliberate run_all.
+    error: str | None = None
 
     @classmethod
     def from_model_output(
@@ -399,6 +400,7 @@ class Selection:
             "reason": self.reason,
             "enforce": self.enforce,
             "candidates": None if self.candidates is None else sorted(self.candidates),
+            "error": self.error,
         }
 
     @classmethod
@@ -409,7 +411,7 @@ class Selection:
         if not isinstance(d, dict) or type(d.get("version")) is not int or d["version"] != SELECTION_VERSION:  # fmt: skip
             raise ValueError(f"not a selection file of version {SELECTION_VERSION}")
         files, sweeps, candidates = d["files"], d["sweeps"], d["candidates"]
-        run_all, enforce, reason = d["run_all"], d["enforce"], d["reason"]
+        run_all, enforce, reason, error = d["run_all"], d["enforce"], d["reason"], d["error"]  # fmt: skip
         if not all(
             isinstance(v, list) and all(isinstance(x, str) for x in v)
             for v in (files, sweeps) + (() if candidates is None else (candidates,))
@@ -417,8 +419,8 @@ class Selection:
             raise TypeError("files, sweeps and candidates must be lists of strings")
         if not isinstance(run_all, bool) or not isinstance(enforce, bool):
             raise TypeError("run_all and enforce must be booleans")
-        if not isinstance(reason, str):
-            raise TypeError("reason must be a string")
+        if not isinstance(reason, str) or not isinstance(error, (str, type(None))):
+            raise TypeError("reason must be a string and error a string or null")
         if candidates is None and not run_all:
             raise ValueError("a selection without candidates must be run_all")
         return cls(
@@ -428,6 +430,7 @@ class Selection:
             reason,
             enforce,
             None if candidates is None else set(candidates),
+            error,
         )
 
     @classmethod
