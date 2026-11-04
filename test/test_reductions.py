@@ -1402,6 +1402,17 @@ class TestReductionsDevice(TestCase):
                 for reduce_dim in reduce_dims:
                     helper(self, shape, reduce_dim, device, dtype)
 
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_sum_lowp_float_out(self, device, dtype) -> None:
+        # 257 * 131 elements is above GRAIN_SIZE, so the full reduction runs multithreaded
+        x = torch.randn(257, 131, device=device).to(dtype)
+        for t in (x, x.t(), x[::2], x.unsqueeze(1)):
+            for dim in (None, 0, 1, (0, -1)):
+                ref = t.double().sum(dim)
+                out = t.sum(dim, dtype=torch.float)
+                self.assertEqual(out.dtype, torch.float)
+                self.assertEqual(out, ref, atol=1e-3, rtol=1e-5, exact_dtype=False)
+                self.assertEqual(t.mean(dim), (ref / (t.numel() // ref.numel())).to(dtype))
 
     @dtypes(torch.bool, torch.double)
     @skipIfMPS

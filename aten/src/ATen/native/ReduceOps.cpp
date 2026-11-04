@@ -1286,7 +1286,7 @@ static inline bool should_use_acc_buffer(at::TensorIterator& iter) {
   if (!iter.device().is_cpu() || iter.noutputs() != 1) {
     return false;
   }
-  if (!at::isReducedFloatingType(iter.common_dtype())) {
+  if (!at::isReducedFloatingType(iter.dtype())) {
     return false;
   }
   if (ndim < 2) {
@@ -1307,7 +1307,13 @@ TORCH_IMPL_FUNC(sum_out)
  bool keepdim,
  std::optional<ScalarType> opt_dtype,
  const Tensor& result) {
-  auto iter = meta::make_reduction_from_out_ty(self, result, opt_dim, keepdim, result.scalar_type());
+  // The CPU sum kernel accumulates BF16/FP16 in float, so it can write a float
+  // result without reducing a float copy of the input.
+  const bool cpu_lowp_to_f32 = self.is_cpu() &&
+      at::isReducedFloatingType(self.scalar_type()) && result.scalar_type() == kFloat;
+  auto iter = cpu_lowp_to_f32
+      ? meta::make_reduction(self, result, opt_dim, keepdim, self.scalar_type())
+      : meta::make_reduction_from_out_ty(self, result, opt_dim, keepdim, result.scalar_type());
   if (iter.numel() == 0) {
     result.zero_();
   } else {
@@ -1477,13 +1483,6 @@ TORCH_IMPL_FUNC(mean_out)
     bool is_half_type = (dtype == kHalf || dtype == kBFloat16);
     auto sum_out_dtype = is_half_type ? ScalarType::Float : dtype;
     auto result_temp = is_half_type ? result.to(sum_out_dtype) : result;
-    // If dtype is FP16 or BF16, self (input tensor) will initially be cast to
-    // FP32 in sum_out. This results in having to read that FP32 tensor again,
-    // but maybe in the future, we could revise the implementation to not
-    // materialize that intermediate FP32 tensor. That approach would probably
-    // require some modifications in binary_kernel_reduce_vec(),
-    // TensorIteratorBase::for_each(), and
-    // TensorIteratorBase::serial_for_each(), apart from sum kernel for CPU.
     at::sum_out(result_temp, self, opt_dim, keepdim, sum_out_dtype).div_(dim_prod);
     // After sum & div, cast result_temp back to BF16 or FP16, if required.
     // It cannot be avoided copy_() if we promotion the out of sum op, because of
