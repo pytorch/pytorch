@@ -136,11 +136,11 @@ def error_inputs_linalg_vector_norm(op_info, device, **kwargs):
     )
     yield ErrorInput(
         SampleInput(
-            torch.randn(3, 4, device=device, dtype=torch.float16),
+            torch.randn(3, 4, device=device, dtype=torch.float32),
             args=(inf,),
-            kwargs=dict(dim=(5,)),
+            kwargs=dict(dim=(5,), dtype=torch.float16),
         ),
-        error_regex=r"linalg.vector_norm cannot compute the .* norm on the dimension 5",
+        error_regex=r"without narrowing",
         error_type=RuntimeError,
     )
 
