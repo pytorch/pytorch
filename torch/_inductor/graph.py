@@ -605,18 +605,20 @@ class GraphLowering(torch.fx.Interpreter):
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: str | None = None
         self.kernel_free_cudagraph: bool = False
-        # Whether codegen splits this graph into partition functions. Codegen
-        # reads this instead of config.graph_partition, which stays at what the
-        # user asked for and is still read by ConstructorMoverPass, the
-        # cpp_wrapper setup, the scheduler's partition-minimizing reorder and
-        # post-compile cudagraph wrapping.
+        # Whether codegen splits this graph into partition functions. Codegen and
+        # post-compile cudagraph wrapping read this instead of
+        # config.graph_partition, which stays at what the user asked for and is
+        # still read by ConstructorMoverPass, the cpp_wrapper setup and the
+        # scheduler's partition-minimizing reorder.
         self.split_into_partitions = (
             config.graph_partition
             if split_into_partitions is None
             else split_into_partitions
         )
         # Whether the partitions are for CUDA Graphs (or a customized partition
-        # wrapper).
+        # wrapper): the scheduler then splits off cudagraph-unsafe ops, the
+        # post-lowering cudagraph checks leave those ops to it, and call() leaves
+        # the input asserts to the partition functions.
         if cudagraphs_per_partition is None:
             cudagraphs_per_partition = self.split_into_partitions and (
                 config.triton.cudagraphs
@@ -1037,20 +1039,6 @@ class GraphLowering(torch.fx.Interpreter):
             split_into_partitions=False,
             cudagraphs_per_partition=False,
         )
-
-    @property
-    def partition_handles_cudagraph_unsafe_ops(self) -> bool:
-        """
-        Whether an op that cannot be CUDA Graph captured gets split into its own
-        partition rather than disabling capture for the whole graph.
-
-        It folds in cudagraphs_per_partition, so it is False for a graph that is
-        partitioned without triton.cudagraphs or a customized partition wrapper
-        asking for it. Only consult it where that case does not matter: under
-        `if cudagraphs:`, or to record disable_cudagraphs_reason, which matters
-        only when capture is on.
-        """
-        return self.cudagraphs_per_partition
 
     def find_nodes_prefer_channels_last(self) -> OrderedSet[Node]:
         """

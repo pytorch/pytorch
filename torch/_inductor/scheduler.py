@@ -78,7 +78,6 @@ from .runtime.hints import DeviceProperties, ReductionHint
 from .runtime.runtime_utils import green_text, is_power_of_2, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
-    _unstable_customized_partition_wrapper,
     cache_on_self,
     cache_on_self_and_args,
     cmp,
@@ -12012,10 +12011,7 @@ class Scheduler:
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings
         # benefit to cudagraph
-        if (
-            not torch._inductor.config.triton.cudagraphs
-            and _unstable_customized_partition_wrapper.wrapper is None
-        ):
+        if not V.graph.cudagraphs_per_partition:
             return "partition includes all ops when cudagraphs is disabled"
 
         if isinstance(node, FusedSchedulerNode):

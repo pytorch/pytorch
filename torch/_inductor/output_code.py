@@ -556,6 +556,7 @@ class CompiledFxGraph(OutputCode):
 
     cudagraph_info: CudagraphCachedInfo | None
     partition_maps: list[GraphPartitionMap] | None
+    split_into_partitions: bool
     has_uncaptured_partition: bool
     compile_region_name: str | None
     fx_kwargs: _CompileFxKwargs
@@ -655,6 +656,7 @@ class CompiledFxGraph(OutputCode):
         self.extern_libs_key = None
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
+        self.split_into_partitions = graph.split_into_partitions
         self.has_uncaptured_partition = graph.has_uncaptured_partition
         self._defers_input_alignment = getattr(graph, "_defers_input_alignment", False)
         storage_mutation_info = get_input_storage_mutation_info(gm)
@@ -875,7 +877,8 @@ class CompiledFxGraph(OutputCode):
         This runs whether or not we have a cache hit, and always runs directly after we get a CompiledFxGraph.
         The results of this function are *not* saved in the cache itself.
         """
-        if config.graph_partition and _unstable_customized_partition_wrapper.wrapper:
+        customized_wrapper = _unstable_customized_partition_wrapper.wrapper
+        if self.split_into_partitions and customized_wrapper:
             # Mechanically apply user-specified cudagraph wrappers without modification
             if self.recursively_apply_fns is None:
                 raise AssertionError("self.recursively_apply_fns must not be None")
@@ -886,7 +889,6 @@ class CompiledFxGraph(OutputCode):
                 CUDAGraphWrapperMetadata(num_partitions, i)
                 for i in range(num_partitions)
             ]
-            customized_wrapper = _unstable_customized_partition_wrapper.wrapper
             customized_wrappers_with_metadata = [
                 lambda f, m=metadata: customized_wrapper(f, m)
                 for metadata in wrapper_metadatas
@@ -940,8 +942,8 @@ class CompiledFxGraph(OutputCode):
                         "boxed_forward_device_index", None
                     )
 
-                if config.graph_partition and policy is None:
-                    # With graph_partition=True, we skip some cudagraph checks
+                if self.split_into_partitions and policy is None:
+                    # For a partitioned graph, we skip some cudagraph checks
                     # if it's supported with partition, so we use
                     # cudagraph_partition_post_compile.  When a CUDAGraphPolicy
                     # is active, we use cudagraph_post_compile instead so the
