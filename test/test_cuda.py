@@ -935,39 +935,44 @@ print(t.is_pinned())
     # not reliably OOM past the free memory, Jetson segfaults on this pattern.
     @unittest.skipIf(IS_WINDOWS and SM89OrLater, "Fails on windows with SM89+")
     @unittest.skipIf(IS_JETSON, "Segmentation fault (core dumped)")
-    @skipIfRocmArch(MI350_ARCH)
     @serialTest()
     def test_oom_retry_message_logged_at_info(self):
         # Regression test for #193195: the alloc_block OOM message fires on
-        # every failed cudaMalloc attempt (each one flags a costly
-        # release-and-retry cycle) but at INFO level, so recoverable retries
-        # are silent at the default WARNING log level and visible with
-        # TORCH_CPP_LOG_LEVEL=INFO. The message is written by C++ straight to
-        # stderr, so run the scenario in a subprocess and inspect its stderr.
+        # every failed cudaMalloc attempt, including the one before the
+        # release-and-retry, but at INFO level, so it is silent at the default
+        # WARNING log level and visible with TORCH_CPP_LOG_LEVEL=INFO. The
+        # message is written by C++ straight to stderr, so run the scenario in
+        # a subprocess and inspect its stderr. Requesting twice the device's
+        # memory makes cudaMalloc fail on the first attempt and on the retry
+        # without filling the GPU, so the test does not depend on how much
+        # memory the driver will actually hand out.
         marker = "memory allocation failed with OOM"
-        recoverable_script = """\
+        retry_script = """\
 import torch
-free, total = torch.cuda.mem_get_info()
-block = free // 32
-blocks = [torch.empty(block, dtype=torch.uint8, device="cuda") for _ in range(27)]
-del blocks  # freed but cached: the driver still sees the memory as used
-big = torch.empty(int(free * 0.7), dtype=torch.uint8, device="cuda")
+total = torch.cuda.get_device_properties(0).total_memory
+try:
+    torch.empty(2 * total, dtype=torch.uint8, device="cuda")
+except torch.OutOfMemoryError:
+    pass
+else:
+    raise AssertionError("allocating twice the device memory did not fail")
 if torch.cuda.memory_stats()["num_alloc_retries"] < 1:
     raise AssertionError("allocation did not exercise the release-and-retry path")
-print("RECOVERED")
+print("RETRIED")
 """
         for level, expect_message in (("WARNING", False), ("INFO", True)):
             proc = subprocess.run(
-                [sys.executable, "-c", recoverable_script],
+                [sys.executable, "-c", retry_script],
                 capture_output=True,
                 text=True,
                 timeout=120,
                 env={**os.environ, "TORCH_CPP_LOG_LEVEL": level},
             )
             self.assertEqual(proc.returncode, 0, msg=proc.stderr)
-            self.assertIn("RECOVERED", proc.stdout)
+            self.assertIn("RETRIED", proc.stdout)
             if expect_message:
-                self.assertIn(marker, proc.stderr)
+                # Once for the first attempt and once for the retry.
+                self.assertGreaterEqual(proc.stderr.count(marker), 2, proc.stderr)
             else:
                 self.assertNotIn(marker, proc.stderr)
 
@@ -3023,9 +3028,21 @@ raise RuntimeError("device assert did not fire")
                 b = torch.randn(n, device="cuda")
                 out = torch.empty(n, device="cuda", dtype=dtype)
                 torch.add(a, b, out=out)
-                self.assertEqual(
-                    out, (a.cpu().float() + b.cpu()).to(dtype), atol=0, rtol=0
-                )
+                out, a, b = out.cpu(), a.cpu(), b.cpu()
+                expected = (a.float() + b).to(dtype)
+                if TEST_WITH_ROCM:
+                    # RDNA fuses the add and the conversion (v_fma_mix*), rounding the
+                    # exact sum once instead of through float. Accept that more accurate
+                    # result too. Rounding the double sum to float with round-to-odd
+                    # makes the final .to(dtype) a correct single rounding; a plain
+                    # double .to(dtype) would round through float again.
+                    s = a.double() + b.double()
+                    f = s.float()
+                    trunc = f.view(torch.int32) - (f.double().abs() > s.abs()).int()
+                    odd = torch.where(f.double() == s, f.view(torch.int32), trunc | 1)
+                    once = odd.view(torch.float32).to(dtype)
+                    expected = torch.where(out == once, once, expected)
+                self.assertEqual(out, expected, atol=0, rtol=0)
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     @gcIfJetson

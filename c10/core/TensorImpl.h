@@ -238,7 +238,8 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 // storing shape env and converter from Python, we'll use these later
 // to implement sym ints, real tensor conversion, etc
 // this doesn't have caching because we're not implementing it
-// no in_kernel_invocation_manager since that's handled by dispatch keys in C++
+// no in_kernel_invocation flag; that state is thread-local in C++
+// (see Note [C++ in_kernel_invocation] in FakeTensorModeTLS.h)
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
@@ -2715,7 +2716,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // should never get called
   int64_t compute_numel() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!has_symbolic_sizes_strides_);
-#if C10_HAS_BUILTIN_OVERFLOW() && !defined(C10_MOBILE)
+#if C10_HAS_BUILTIN_OVERFLOW()
     // Use overflow checks if supported by the compiler
     return safe_compute_numel();
 #else

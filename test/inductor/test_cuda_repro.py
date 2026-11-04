@@ -352,12 +352,9 @@ class CudaReproTests(TestCase):
                 biases.extend(node.args[3] for node in nodes)
 
             torch._dynamo.reset()
-            with (
-                config.patch(
-                    numerics="strict" if strict else "default",
-                    joint_custom_post_pass=capture_bias,
-                ),
-                sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+            with config.patch(
+                numerics="strict" if strict else "default",
+                joint_custom_post_pass=capture_bias,
             ):
                 compiled = torch.compile(fn, fullgraph=True)
                 actual = compiled(*args)
@@ -378,9 +375,13 @@ class CudaReproTests(TestCase):
         # Only compiler-proven zero masks may be removed; a runtime mask must
         # remain an FX input because its contents can change between calls.
         def runtime_mask_fn(query, key, value, attention_mask):
-            return F.scaled_dot_product_attention(
-                query, key, value, attn_mask=attention_mask
-            )
+            return aten._scaled_dot_product_efficient_attention.default(
+                query,
+                key,
+                value,
+                attention_mask.expand(batch_size, num_heads, seq_len, seq_len),
+                False,
+            )[0]
 
         padding_mask = torch.zeros(
             batch_size,
@@ -399,11 +400,10 @@ class CudaReproTests(TestCase):
 
         # Reuse the same compiled graph with different mask contents.
         padding_mask.zero_()
-        with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
-            self.assertEqual(
-                compiled_runtime_mask_fn(query, key, value, padding_mask),
-                runtime_mask_fn(query, key, value, padding_mask),
-            )
+        self.assertEqual(
+            compiled_runtime_mask_fn(query, key, value, padding_mask),
+            runtime_mask_fn(query, key, value, padding_mask),
+        )
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
