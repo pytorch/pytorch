@@ -54,6 +54,7 @@ MAX_FAILURE_LIST_CLASSES = 50
 
 # Tests that run the files a change matches although they do not import them:
 # the drivers of the directories discover_tests.py blocklists (except
+# custom_backend, mobile and onnx_caffe2, which have none, and
 # torch_openreg/tests, whose driver test_openreg is never a candidate), and
 # TD's ADDITIONAL_MAPPINGS.
 DRIVER_MAPPINGS = {
@@ -67,6 +68,10 @@ DRIVER_MAPPINGS = {
         t: [r"^test/test_autoload\.py$", r"^test/cpp_extensions/"]
         for t in ("test_autoload_enable", "test_autoload_disable")
     },  # fmt: skip
+    # They build or load the extensions, which #include the headers there.
+    "test_cpp_extensions_jit": [r"^test/cpp_extensions/"],
+    "test_cpp_extensions_mtia_backend": [r"^test/cpp_extensions/"],
+    "test_cpp_extensions_stream_and_event": [r"^test/cpp_extensions/"],
     "test_ao_sparsity": [r"^test/ao/"],
     "test_autograd": [r"^test/autograd/"],
     "test_fx": [r"^test/fx/"],
@@ -190,10 +195,11 @@ def import_pattern(modules: Iterable[str]) -> str:
     # The CPython tests under test/cpython redirect test.<name> to <name>, so
     # `from test import <name>` imports their sibling module <name>.
     # A parenthesized `from <package> import (` may span lines, so it counts
-    # as importing every module of that package.
+    # as importing every module of that package. A bare name that is also a
+    # standard library module, such as random, imports that module instead.
     mods = sorted(f[5:-3].removesuffix("/__init__") for f in modules)
     parts = [m.split("/") for m in mods]
-    names = alts(".".join(p[i:]) for p in parts for i in range(len(p)))
+    names = alts(".".join(p[i:]) for p in parts for i in range(len(p)) if i < len(p) - 1 or p[i] not in sys.stdlib_module_names)  # fmt: skip
     bases = alts(p[-1] for p in parts)
     parents = alts(".".join(p[i:-1]) for p in parts for i in range(len(p) - 1))
     paths = alts(n for m in mods for n in (m, m.replace("/", ".")))
@@ -276,7 +282,8 @@ def failure_list_sources(
 ) -> tuple[list[str], set[str]]:
     """The paths under test/ that define the classes named by the edited
     failure-list entries (see FAILURE_LIST_RE), and the lists ("dynamo",
-    "inductor" or "compiled_autograd") naming a class that `grep` (see
+    "inductor", "compiled_autograd", or "dynamo_cpython" for a CPython entry,
+    which the dynamo_cpython config runs) naming a class that `grep` (see
     importers) does not find, holding an entry in a subdirectory, or holding an
     entry without exactly one ".", which dynamo_test_failures.py rejects at
     import for the dynamo and inductor lists."""
@@ -288,7 +295,7 @@ def failure_list_sources(
         if "/" in f[d.end() :] or (d[1] != "compiled_autograd" and f.rsplit("/", 1)[-1].count(".") != 1):  # fmt: skip
             unparsed.add(d[1])
         elif m := FAILURE_LIST_RE.match(f):
-            classes.setdefault(m[2], set()).add(m[1])
+            classes.setdefault(m[2], set()).add("dynamo_cpython" if f[d.end() :].startswith("CPython") else m[1])  # fmt: skip
     if grep is None or len(classes) > MAX_FAILURE_LIST_CLASSES:
         return [], unparsed.union(*classes.values())
     sources: list[str] = []
@@ -352,9 +359,9 @@ class Selection:
     sweeps: set[str] = field(default_factory=set)
     # The model's own run_all, or a fallback of from_model_output: those its
     # docstring lists, more than MAX_DATA_FILES edited files under test/ that
-    # are not tests, and an edited inductor failure list that is not looked up
-    # (an entry without exactly one ".", no grep, or more than
-    # MAX_FAILURE_LIST_CLASSES classes).
+    # are not tests, and an edited inductor failure list or CPython entry that
+    # is not looked up (an entry without exactly one "." or in a subdirectory,
+    # no grep, or more than MAX_FAILURE_LIST_CLASSES classes).
     run_all: bool = False
     reason: str = ""
     # Whether run_test.py should skip the files the selection does not cover,
@@ -402,6 +409,8 @@ class Selection:
         # than MAX_FAILURE_LIST_CLASSES classes, and an entry without exactly one ".".
         if "inductor" in missing:
             return cls(run_all=True, reason="an edited inductor failure list names an unknown test class")  # fmt: skip
+        if "dynamo_cpython" in missing:
+            return cls(run_all=True, reason="an edited dynamo failure list names an unknown CPython test class")  # fmt: skip
         # dynamo_wrapped also runs with compiled autograd on (see common_utils).
         if missing & {"dynamo", "compiled_autograd"}:
             sweeps.add("dynamo_wrapped")

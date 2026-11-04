@@ -292,14 +292,17 @@ g () {
             "README.md": "notes.txt\n",
             "run_test.py": 'open("run_only.json")\n',
             "cpp/api/CMakeLists.txt": "cpp_data.bin\n",
+            "test_torch.py": "import random\n",
+            "typing/fail/random.py": "",
         }  # fmt: skip
-        drivers = {"test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja", "test_autoload_enable", "test_autoload_disable"}  # fmt: skip
-        candidates = CANDIDATES | drivers | {"test_public_bindings", "test_tensorboard", "distributed/launcher/test_run"}  # fmt: skip
+        drivers = {"test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja", "test_cpp_extensions_jit", "test_cpp_extensions_mtia_backend", "test_cpp_extensions_stream_and_event", "test_autoload_enable", "test_autoload_disable"}  # fmt: skip
+        candidates = CANDIDATES | drivers | {"test_public_bindings", "test_tensorboard", "distributed/launcher/test_run", "test_torch"}  # fmt: skip
         for changed, expected in [
             ("test/allowlist_for_publicAPI.json", {"test_public_bindings"}),
             # The drivers build every extension, and test_ops loads this one by its path.
             ("test/cpp_extensions/my_ext.cpp", {"test_ops"} | drivers),
             ("test/cpp_extensions/ext.cpp", drivers),
+            ("test/cpp_extensions/doubler.h", drivers),
             ("test/cpp_data.bin", set()),
             ("test/expect/TestNNCPU.test_x-y.expect", {"test_nn", "dynamo/test_misc"}),
             # test_tensorboard.py builds this path for TestTensorBoardSummary.
@@ -314,8 +317,9 @@ g () {
             sel = self.select_in_tree(sources, candidates, [changed])
             self.assertEqual((sel.files, sel.run_all), (expected, False), changed)
         # Named only by a README, by run_test.py, which no test imports, by a
-        # comment line, or by another edited data file that nothing reads.
-        for changed in ("test/expect/TestGone.test_x.expect", "test/distributed/launcher/bin/unused.py", "test/notes.txt", "test/run_only.json", "test/comment_only.json"):  # fmt: skip
+        # comment line, or by another edited data file that nothing reads; and
+        # `import random` imports the standard library's random.
+        for changed in ("test/typing/fail/random.py", "test/expect/TestGone.test_x.expect", "test/distributed/launcher/bin/unused.py", "test/notes.txt", "test/run_only.json", "test/comment_only.json"):  # fmt: skip
             sel = self.select_in_tree(sources, candidates, ["test/allowlist_for_publicAPI.json", changed])  # fmt: skip
             self.assertEqual((sel.run_all, sel.reason, sel.error), (True, f"nothing found that reads {changed}", None))  # fmt: skip
         sel = self.select_in_tree(sources | {"allowlist_for_publicAPI.json": "b.json\n"}, candidates, ["test/allowlist_for_publicAPI.json", "test/b.json"])  # fmt: skip
@@ -393,6 +397,12 @@ g () {
         for changed in ("test/inductor_expected_failures/TestGone.test_x", "test/inductor_skips/TestGone.test_x", "test/inductor_skips/TestNN.test_x.y", "test/inductor_skips/sub/TestNN.test_x"):  # fmt: skip
             sel = self.select_in_tree(sources, CANDIDATES, [changed])
             self.assertEqual((sel.run_all, sel.error), (True, None), changed)
+        # The dynamo_cpython config, not dynamo_wrapped, runs the CPython tests.
+        reason = "an edited dynamo failure list names an unknown CPython test class"
+        sel = self.select_in_tree(sources, CANDIDATES, ["test/dynamo_expected_failures/CPython313-test_gone-TestGone.test_x"])  # fmt: skip
+        self.assertEqual((sel.run_all, sel.reason), (True, reason))
+        sel = Selection.from_model_output(answer(), CANDIDATES, ["test/dynamo_skips/CPython313-test_set-TestSet.test_x"])  # fmt: skip
+        self.assertEqual((sel.run_all, sel.reason), (True, reason))
         n = selection.MAX_FAILURE_LIST_CLASSES + 1
         many_sources = sources | {"test_nn.py": "".join(f"class TestNN{i}(TestCase):\n" for i in range(n))}  # fmt: skip
         many = [f"test/dynamo_skips/TestNN{i}.test_x" for i in range(n)]
