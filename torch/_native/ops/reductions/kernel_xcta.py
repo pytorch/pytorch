@@ -187,6 +187,8 @@ def _reduce_row_xcta(
         raise AssertionError(
             f"need a contiguous CUDA input, got {x.device} {x.stride()}"
         )
+    device = x.get_device()
+    _L.check_current(device)
     if x.dim() == 1:
         x = x.view(1, -1)
     M, N = x.shape
@@ -215,7 +217,7 @@ def _reduce_row_xcta(
         block,
         subrow_target,
         _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
-        str(x.device),
+        device,
     )
     geom = _GEOM.get(gkey)
     if geom is None and gkey not in _GEOM:
@@ -245,7 +247,7 @@ def _reduce_row_xcta(
         pn,
         s1nc,
         s1nw,
-        _L.stream(),
+        _L.stream(device),
     )
     # resize_ preserves ATen's non-aliasing scalar output; view-ness is observable.
     if flatten and M == 1:
@@ -265,7 +267,7 @@ def _build_geom(
     subrow_target: int,
 ) -> tuple[Any, ...] | None:
     # Derive C, then compile or reuse its bucket; memoized None records a decline.
-    device = x.device
+    device = x.get_device()
     elsize = x.element_size()
     vec = math.gcd(N, 128 // (elsize * 8))
     # C fixes both stages' geometry, so derive it from N alone for reuse across M.
@@ -300,7 +302,7 @@ def _build_geom(
         unroll,
         block,
         align,
-        str(device),
+        device,
     )
     # Stage-1 rolled-loop counts: vector groups, then waves of threads_per_row.
     s1_counts = (Int32(s // svec), Int32(-(-(s // svec) // threads_per_row)))
@@ -354,7 +356,7 @@ def _build_geom(
             [_fake_1d(d) for d in out_dtypes],
             *_s2_args(C, M, N),
             *s1_counts,
-            _L.stream(),
+            _L.stream(device),
         )
 
     fn = cached_plan(_PLAN, pkey, _build, op=f"aten::{trait_key}")
