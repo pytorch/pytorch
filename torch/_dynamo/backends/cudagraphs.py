@@ -125,7 +125,7 @@ def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> str | Non
 
     # This backend never partitions, whatever Inductor's graph_partition says.
     if skip := check_multiple_devices_or_any_cpu_nodes(
-        get_device_node_mapping(aot_model), cudagraphs_per_partition=False
+        get_device_node_mapping(aot_model), cpu_nodes_partitioned_out=False
     ):
         return skip
 

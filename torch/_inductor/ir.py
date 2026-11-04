@@ -7708,7 +7708,7 @@ class ExternKernel(InputsKernel):
             if not isinstance(example_output, (list, tuple))
             else example_output
         )
-        # When graph_partition is enabled, skip - partitioning handles sparse outputs
+        # Skip when partitioning splits off cudagraph-unsafe ops: it handles sparse outputs
         for t in example_out_li:
             if (
                 isinstance(t, torch.Tensor)
