@@ -237,8 +237,11 @@ class Conv1d(_ConvNd):
         \star \text{input}(N_i, k)
 
     where :math:`\star` is the valid `cross-correlation`_ operator,
-    :math:`N` is a batch size, :math:`C` denotes a number of channels,
-    :math:`L` is a length of signal sequence.
+    :math:`N` is a batch size, :math:`C_{\text{in}}` and :math:`C_{\text{out}}` correspond to
+    :attr:`in_channels` and :attr:`out_channels` respectively,
+    :math:`L` is the input signal sequence length.
+    See the Shape section below for how :math:`L_{\text{out}}` is derived from
+    :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, and :attr:`dilation`.
     """
         + r"""
 
@@ -577,7 +580,12 @@ class Conv3d(_ConvNd):
         out(N_i, C_{out_j}) = bias(C_{out_j}) +
                                 \sum_{k = 0}^{C_{in} - 1} weight(C_{out_j}, k) \star input(N_i, k)
 
-    where :math:`\star` is the valid 3D `cross-correlation`_ operator
+    where :math:`\star` is the valid 3D `cross-correlation`_ operator,
+    :math:`N` is a batch size, :math:`C_{\text{in}}` and :math:`C_{\text{out}}` correspond to
+    :attr:`in_channels` and :attr:`out_channels` respectively,
+    :math:`D`, :math:`H` and :math:`W` are the input depth, height and width.
+    See the Shape section below for how :math:`D_{\text{out}}`, :math:`H_{\text{out}}` and :math:`W_{\text{out}}`
+    are derived from :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, and :attr:`dilation`.
     """
         + r"""
 
