@@ -38,8 +38,8 @@ def _init_for_cuda_graphs() -> None:
     import torch
     from torch.profiler import profile, ProfilerActivity, supported_activities
 
-    # Only CUPTI needs the workaround. Kineto supports CUDA activity only with a
-    # GPU and a build that can trace it, and torch.version.cuda rules out ROCm.
+    # Only CUPTI needs the workaround, and only CUDA builds have CUPTI. ROCm
+    # builds also support the CUDA activity, but leave torch.version.cuda unset.
     if not torch.version.cuda or ProfilerActivity.CUDA not in supported_activities():
         return
     # Tracing CUDA is what initializes CUPTI ahead of graph capture.
