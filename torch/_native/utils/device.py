@@ -29,7 +29,7 @@ def cuda_device_guard(
     """
 
     @functools.wraps(fn)
-    def guarded(self: torch.Tensor, *args: P.args, **kwargs: P.kwargs) -> R:
+    def guarded(self: torch.Tensor, /, *args: P.args, **kwargs: P.kwargs) -> R:
         if not self.is_cuda:
             return fn(self, *args, **kwargs)
         # get_device() avoids building a torch.device.

@@ -373,19 +373,15 @@ def _general_norm(trait: Any) -> bool:
     return isinstance(trait, NormOps) and trait.p not in (1.0, 2.0)
 
 
-def _ordered_col_route_ok(
-    view: torch.Tensor, nfields: int, general_norm: bool = False
-) -> bool:
-    """Whether the ordered column kernel beats the indexed tree on this view.
-
-    Callers check _ORDERED_COL_CCS and _ORDERED_COL_DTYPES first.
-    """
+def _ordered_col_route_ok(view: torch.Tensor, trait: Any) -> bool:
+    """Whether the ordered column kernel beats the indexed tree at this view's shape and
+    output count. Callers check _ORDERED_COL_CCS and _ORDERED_COL_DTYPES."""
     B, R, C = (1, *view.shape) if view.dim() == 2 else view.shape
     # reduce_ordered_col tiles WARP columns, so narrower views decline anyway.
     if C < WARP:
         return False
-    min_outputs = _ORDERED_COL_MIN_OUTPUTS[min(nfields, 3)]
-    if general_norm:
+    min_outputs = _ORDERED_COL_MIN_OUTPUTS[min(trait.nfields, 3)]
+    if _general_norm(trait):
         min_outputs = _ORDERED_COL_GENERAL_NORM_MIN_OUTPUTS
     return _ORDERED_COL_MIN_R <= R <= _ORDERED_COL_MAX_R and B * C >= min_outputs
 
@@ -784,9 +780,7 @@ def _reduce(
                     col_view = _physical_col_view(
                         x, red_axes, red_pairs, kept_pairs, count, num_o
                     )
-                if col_view is not None and _ordered_col_route_ok(
-                    col_view, trait.nfields, _general_norm(trait)
-                ):
+                if col_view is not None and _ordered_col_route_ok(col_view, trait):
                     ordered = ct.reduce_ordered_col(
                         trait,
                         trait_key,
