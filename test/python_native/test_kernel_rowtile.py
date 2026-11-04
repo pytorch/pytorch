@@ -92,37 +92,43 @@ class TestKernelRowTile(TestCase):
         mine = [k for k in rt._CACHE if "bydevice" in k]
         self.assertEqual(sorted(k[5] for k in mine), [0, 1])
 
-    @unittest.skipIf(
-        torch.cuda.device_count() < 2 or torch.cuda.get_device_capability(1)[0] < 9,
-        "requires a second Hopper+ CUDA device",
-    )
-    def test_launchers_reject_a_non_current_device(self):
-        # Both entry points check before compiling, so nothing is cached under cuda:1.
+    def test_plans_key_the_device_index(self):
+        # The index follows the alignment in row-tile keys and the destination layout in
+        # inner-tree keys; without it, those slots would hold the next field.
         trait = T.SumOps(acc=cutlass.Float32)
-        x = torch.randn(64, 512, device="cuda:1")
-        out = torch.empty(64, device="cuda:1")
-        self.assertIsNotNone(rt.itree_plan(512, 64, 4))
+        x = torch.randn(64, 512, device="cuda")
+        rt._CACHE.clear()
+        rt.reduce_row_tile(trait, "bykey", x, [torch.float32], order="linear")
+        rt.reduce_row_itree(trait, "bykey", x, torch.empty(64, device="cuda"))
+        slots = {"rowtile": 5, "rowitree": 7}
+        devices = {(k[0], k[slots[k[0]]]) for k in rt._CACHE if k[1] == "bykey"}
+        index = x.get_device()
+        self.assertEqual(devices, {("rowtile", index), ("rowitree", index)})
+
+    def _assert_launchers_reject(self, x):
+        # Both entry points check before compiling, so nothing is cached.
+        trait = T.SumOps(acc=cutlass.Float32)
+        out = torch.empty(x.shape[0], device=x.device)
+        self.assertIsNotNone(rt.itree_plan(x.shape[1], x.shape[0], x.element_size()))
         before = set(rt._CACHE)
-        with torch.cuda.device(0):
-            with self.assertRaisesRegex(AssertionError, "is current"):
-                rt.reduce_row_tile(trait, "off", x, [torch.float32], order="linear")
-            with self.assertRaisesRegex(AssertionError, "is current"):
-                rt.reduce_row_itree(trait, "off", x, out)
+        with self.assertRaisesRegex(AssertionError, "is current"):
+            rt.reduce_row_tile(trait, "off", x, [torch.float32], order="linear")
+        with self.assertRaisesRegex(AssertionError, "is current"):
+            rt.reduce_row_itree(trait, "off", x, out)
         self.assertEqual(set(rt._CACHE), before)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
+    def test_launchers_reject_a_non_current_device(self):
+        x = torch.randn(64, 512, device="cuda:1")
+        with torch.cuda.device(0):
+            self._assert_launchers_reject(x)
 
     def test_plans_require_the_current_device(self):
         # One GPU has no other device, so pretend another one is current.
-        trait = T.SumOps(acc=cutlass.Float32)
         x = torch.randn(64, 512, device="cuda")
-        out = torch.empty(64, device="cuda")
-        before = set(rt._CACHE)
         other = x.get_device() + 1
         with mock.patch.object(torch.cuda, "current_device", return_value=other):
-            with self.assertRaisesRegex(AssertionError, "is current"):
-                rt.reduce_row_tile(trait, "off", x, [torch.float32], order="linear")
-            with self.assertRaisesRegex(AssertionError, "is current"):
-                rt.reduce_row_itree(trait, "off", x, out)
-        self.assertEqual(set(rt._CACHE), before)
+            self._assert_launchers_reject(x)
 
     def test_two_output_trait(self):
         # nouts=2 stores values and indices projected from one accumulator.
