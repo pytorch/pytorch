@@ -959,6 +959,9 @@ class TestRunTestSplit(LlmSelectorTestCase):
             ast.unparse(call),
             "run_test_split(test_prioritizations, test_file_times_dict, previous_failures=previous_failures, test_config=TEST_CONFIG, td_enabled=options.enable_td, is_ci=IS_CI)",
         )
+        batches = [ast.unparse(n) for n in nodes if isinstance(n, ast.Call) and ast.unparse(n.func) == "TestBatch"]  # fmt: skip
+        self.assertEqual(batches, ["TestBatch('tests to run', split.include, False)", "TestBatch('excluded', split.exclude, True)"])  # fmt: skip
+        self.assertIn("split = run_test_split(", src)
         loops = {ast.unparse(n.iter).split("(")[0]: [ast.unparse(b) for b in n.body] for n in nodes if isinstance(n, ast.For)}  # fmt: skip
         emit = ["emit_metric(name, payload)"]
         for method in ("selection_metrics", "failure_metrics"):
