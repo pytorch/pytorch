@@ -895,6 +895,10 @@ def reduce_ordered_col(
     bool bypasses the policy. An explicit full_tiles overrides the policy's, but with
     allow_split=None, split plans the policy does not select still decline.
     """
+    if not x.is_cuda:
+        raise AssertionError(f"want a CUDA input, got {x.device}")
+    device = x.get_device()
+    check_current(device)
     if x.dim() == 2 and x.is_contiguous():
         B, (R, C) = 1, x.shape
         out_shape = (C,)
@@ -994,8 +998,6 @@ def reduce_ordered_col(
                 tile_columns=columns,
             ),
         )
-    device = x.get_device()
-    check_current(device)
     outs = [
         torch.empty(out_shape, device=x.device, dtype=dtype)
         for dtype in out_dtypes[:nouts]
