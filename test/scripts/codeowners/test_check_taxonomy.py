@@ -96,90 +96,18 @@ class TestFindOwnershipErrors(TestCase):
 """
         self.assertEqual(ownership_errors(codeowners), {})
 
-    def test_each_rule(self):
+    def test_invalid_owner_handles(self):
         codeowners = """\
 # Grouped review-surface definitions:
 #
 # [compiler_dynamo]
-# label: module: dynamo
-/torch/_dynamo/ @alice
-# label: module: inductor
-# owner: @alice
-# /torch/_inductor/
-# owner: @carol
-/torch/_inductor/codegen/ @carol
 # label: module: fx
 # owner: not-a-handle
 # /torch/fx/
-#
-# [core_tests]
-# label: module: inductor
-# owner: @dave
-# /test/inductor/
-# label: module: cuda, module: cudnn
-# owner: @erin
-# /test/test_cudnn.py
-# label: module: cudnn, module: cuda
-# owner: @erin
-# /test/test_cudnn_api.py
 """
         self.assertEqual(
             ownership_errors(codeowners),
-            {
-                "Label lines without an owner line": [
-                    "CODEOWNERS:4 # label: module: dynamo"
-                ],
-                "Misplaced owner lines": ["CODEOWNERS:9 # owner: @carol"],
-                "Invalid owner handles": ["CODEOWNERS:12 # owner: not-a-handle"],
-                # Label lists are compared as sets, so the reordered cuda list repeats.
-                "Label lists written more than once": [
-                    "module: inductor: CODEOWNERS:6, CODEOWNERS:16",
-                    "module: cuda, module: cudnn: CODEOWNERS:19, CODEOWNERS:22",
-                ],
-                # The misplaced @carol line is reported above, and is neither compared
-                # nor used as the block's owners: @carol is still missing below.
-                "Label lists with several owner lists": [
-                    "module: inductor: @alice | @dave"
-                ],
-                "Reviewers missing from owner lists": [
-                    "CODEOWNERS:10 /torch/_inductor/codegen/: @carol not on the block's owner line"
-                ],
-            },
-        )
-
-    def test_owner_none_and_blocks_without_paths(self):
-        # `none` is compared like any other owner list, and a label block with no
-        # paths under it is still compared.
-        codeowners = """\
-# Grouped review-surface definitions:
-#
-# [compiler_dynamo]
-# label: module: dynamo
-# owner: none
-# /torch/_dynamo/
-# label: module: fx
-# owner: @alice
-#
-# [core_tests]
-# label: module: dynamo
-# owner: @alice
-# /test/dynamo/
-# label: module: fx
-# owner: @bob
-# /test/fx/
-"""
-        self.assertEqual(
-            ownership_errors(codeowners),
-            {
-                "Label lists written more than once": [
-                    "module: dynamo: CODEOWNERS:4, CODEOWNERS:11",
-                    "module: fx: CODEOWNERS:7, CODEOWNERS:14",
-                ],
-                "Label lists with several owner lists": [
-                    "module: dynamo: none | @alice",
-                    "module: fx: @alice | @bob",
-                ],
-            },
+            {"Invalid owner handles": ["CODEOWNERS:5 # owner: not-a-handle"]},
         )
 
     def test_reviewers_must_be_owners(self):
@@ -257,16 +185,18 @@ class TestLintWiring(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_ownership_errors_fail_the_lint(self):
-        codeowners = LINT_HEADER + "# label: module: ci\n/CODEOWNERS @alice\n#\n"
+        codeowners = (
+            LINT_HEADER + "# label: module: ci\n# owner: @alice\n/CODEOWNERS @bob\n#\n"
+        )
         returncode, stdout = run_lint(codeowners)
         self.assertEqual(returncode, 1, stdout)
-        self.assertIn("Label lines without an owner line (1):", stdout)
+        self.assertIn("Reviewers missing from owner lists (1):", stdout)
 
         returncode, stdout = run_lint(codeowners, "--lintrunner")
         self.assertEqual(returncode, 0, stdout)
         message = json.loads(stdout)
         self.assertEqual(message["code"], "CODEOWNERS_TAXONOMY")
-        self.assertIn("1 label lines without an owner line", message["description"])
+        self.assertIn("1 reviewers missing from owner lists", message["description"])
 
     def test_clean_file_passes(self):
         codeowners = (

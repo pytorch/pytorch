@@ -76,6 +76,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     isRocmArchAnyOf,
     lazy_skip_if,
+    MI300_ARCH,
     MI350_ARCH,
     parametrize,
     requires_accelerator,
@@ -376,11 +377,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             and "stream" in ev.get("args", {})
             and ev["ts"] < barrier_ts
         ]
-        # ROCm records no memset/memcpy activities for these ops, most likely
-        # because HIP lowers a small fill and the pointer-array uploads to blit
-        # kernels, so there is nothing to check the stream of there.
-        if not TEST_WITH_ROCM:
-            self.assertGreater(len(mem_events), 0)
+        # On ROCm the fills and pointer-array uploads reach the device as blit
+        # kernels; kineto reports those as gpu_memset/gpu_memcpy events with
+        # the stream of the API call, so the check applies on both platforms.
+        self.assertGreater(len(mem_events), 0)
         for ev in mem_events:
             self.assertEqual(ev["args"]["stream"], user_stream, ev["name"])
 
@@ -1710,6 +1710,12 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertTrue(after_open, "eager b waits for work queued after a")
 
 
+skip_if_no_rocm_async_mm = lazy_skip_if(
+    lambda: TEST_WITH_ROCM and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH),
+    "ROCm native async-TP kernel (AsyncMM.hip) is only built for gfx942/gfx950",
+)
+
+
 # We move AsyncTP tests to a separate test suite because 1) Async TP ops are not
 # the core symmetric memory APIs, they are more like applications, 2)
 # MultiProcContinuousTest will skip all the following tests if a test fails (
@@ -1800,9 +1806,10 @@ class AsyncTPTest(MultiProcContinuousTest):
     @parametrize("symm_mem_input", [True, False])
     @parametrize("is_b_row_major", [True, False])
     @skipIf(
-        SM100OrLater,
+        SM100OrLater and not TEST_WITH_ROCM,
         "https://github.com/pytorch/pytorch/issues/162917",
     )
+    @skip_if_no_rocm_async_mm
     @mock.patch.dict(os.environ, {"TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP": "1"})
     def test_fused_all_gather_matmul_native(
         self, symm_mem_input: bool, is_b_row_major: bool
@@ -1861,6 +1868,7 @@ class AsyncTPTest(MultiProcContinuousTest):
 
     @skipIf(not TEST_WITH_ROCM, "Native graph capture is only validated on ROCm")
     @skip_if_lt_x_gpu(2)
+    @skip_if_no_rocm_async_mm
     @mock.patch.dict(os.environ, {"TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP": "1"})
     def test_fused_all_gather_matmul_native_graph_capture(self) -> None:
         self._init_process()
@@ -2108,7 +2116,7 @@ class AsyncTPTest(MultiProcContinuousTest):
     @parametrize("scatter_dim", [0, 1])
     @parametrize("rowwise", [True, False])
     @skipIf(
-        SM100OrLater,
+        SM100OrLater and not TEST_WITH_ROCM,
         "https://github.com/pytorch/pytorch/issues/162940",
     )
     def test_fused_scaled_matmul_reduce_scatter(
