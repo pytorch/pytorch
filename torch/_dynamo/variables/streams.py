@@ -343,6 +343,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     _reenter_after_graph_break = False
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def create(
         tx: "InstructionTranslatorBase",
         stream_to_enter: "StreamVariable",
@@ -424,7 +425,9 @@ class StreamVariable(StreamContextVariable):
         ):
             from .tensor import CurrentDeviceVariable
 
-            current_device = CurrentDeviceVariable(torch.device(self.device.type))
+            current_device = CurrentDeviceVariable.create(
+                torch.device(self.device.type)
+            )
         self.current_device = current_device
 
         self.user_object_index = user_object_index
@@ -741,13 +744,6 @@ class EventVariable(VariableTracker):
         self.proxy = proxy
         self.value = value
         self.user_object_index = user_object_index
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def python_type(self) -> type:
         return type(self.value)

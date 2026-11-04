@@ -10,6 +10,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 
+#include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
 #include <utility>
@@ -761,6 +762,12 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
                              std::optional<std::string_view> driver) {
   at::native::checkIsMatrix(A, "linalg.svd");
   at::native::checkFloatingOrComplex(A, "linalg.svd");
+  if (driver.has_value()) {
+    TORCH_CHECK(
+        *driver == "gesvd" || *driver == "gesvdj" || *driver == "gesvda",
+        "torch.linalg.svd: unknown svd driver ", *driver,
+        ". Expected one of gesvd, gesvdj, or gesvda.");
+  }
 
   auto sizes = A.sizes().vec();
   const auto m = sizes.cend()[-2];
@@ -3147,6 +3154,14 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
                                  const Tensor & U,
                                  const Tensor & S,
                                  const Tensor & Vh) {
+  TORCH_CHECK(at::native::svd_uses_cusolver(A) || !driver.has_value(),
+    "torch.linalg.svd: keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend.");
+  if (driver.has_value() && at::globalContext().hasROCM()) {
+    TORCH_WARN_ONCE(
+        "torch.linalg.svd: the `driver` argument is ignored on ROCm; "
+        "the default algorithm and fallback behavior are unchanged.");
+  }
+
   // Half optimisation half precondition for some parts of the LAPACK / cuSOLVER
   // In particular, the call to lapackSvd to compute lwork fails otherwise
   if (A.numel() == 0) {
@@ -3164,12 +3179,6 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
     }
     return;
   }
-
-  // We need to distinguish the cuSOLVER case, as cuSOLVER expects F-contig matrices, but
-  // it computes V rather than Vh
-  const bool use_cusolver = at::native::svd_uses_cusolver(A);
-  TORCH_CHECK(use_cusolver || !driver.has_value(),
-    "torch.linalg.svd: keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend.");
 
   // A always needs to be copied as its contents will be destroyed during the computation of the SVD
   // Now, MAGMA needs the copy to be on CPU, while cuSOLVER needs it to be on CUDA, so we'll defer
@@ -3321,7 +3330,7 @@ DEFINE_DISPATCH(lstsq_stub);
   * 'residuals' - Tensor to store values of the residual sum of squares for each column of the solution.
   * 'rank' - Tensor to store the rank of A.
   * 'singular_values' - Tensor to store the singular values of A.
-  * 'infos' - Tensor to store error codes of linear algebra math library.
+  * 'infos' - Tensor to store error codes of linear algebra math library, one per element of the broadcast batch.
 
   For further details, please see the LAPACK documentation for GELS/GELSY/GELSS/GELSD routines.
 */
@@ -3361,7 +3370,6 @@ static void linalg_lstsq_out_info(
 
   TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
   TORCH_INTERNAL_ASSERT(infos.device() == input.device());
-  TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
   TORCH_INTERNAL_ASSERT(infos.is_contiguous());
 
   bool vector_case = linalg_solve_is_vector_rhs(input, other);
@@ -3371,6 +3379,7 @@ static void linalg_lstsq_out_info(
   TORCH_INTERNAL_ASSERT(input.size(-2) == other_2d.size(-2));
 
   std::vector<int64_t> expected_solution_shape = broadcast_batch_size(input, other_2d, input.dim() - 2);
+  TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, c10::multiply_integers(expected_solution_shape)));
   // the actual shape of the solution returned is (*, n,) or (*, n, nrhs)
   // but LAPACK requires extra dimensions to store raw residuals
   // so the expected shape is (*, max(m, n),) or (*, max(m, n), nrhs)
@@ -3612,7 +3621,9 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
     ? rcond.value()
     : _get_epsilon(c10::toRealValueType(input.scalar_type())) * static_cast<double>(std::max<int64_t>(input.size(-2), input.size(-1)));
 
-  auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
+  // The batched driver broadcasts input over other and writes one info per broadcast batch
+  std::vector<int64_t> batch_shape = broadcast_batch_size(input, other_2d, input.dim() - 2);
+  auto infos = at::zeros({std::max<int64_t>(1, c10::multiply_integers(batch_shape))}, input.options().dtype(kInt));
 
   // provided output tensor can be used directly if:
   // 1. the shape matches the expected shape
@@ -3620,7 +3631,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   // 3. the tensor is contiguous
 
   // Checks for the 'solution' tensor
-  std::vector<int64_t> expected_solution_shape = broadcast_batch_size(input, other_2d, input.dim() - 2);
+  std::vector<int64_t> expected_solution_shape = batch_shape;
   // the actual shape of the shape of the solution returned in (*, n,) or (*, n, nrhs)
   // but LAPACK requires extra dimensions so the expected shape is (*, max(m, n),) or (*, max(m, n), nrhs)
   expected_solution_shape.push_back(std::max(input.size(-1), input.size(-2)));
