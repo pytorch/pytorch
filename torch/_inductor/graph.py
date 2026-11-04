@@ -111,13 +111,13 @@ from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .sizevars import SizeVarAllocator
 from .utils import (
+    _unstable_customized_partition_wrapper,
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_donated_idxs,
     get_sympy_Expr_dtype,
     GraphPartitionMap,
     is_same_tensor,
-    is_using_cudagraph_partition,
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
@@ -605,9 +605,11 @@ class GraphLowering(torch.fx.Interpreter):
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: str | None = None
         self.kernel_free_cudagraph: bool = False
-        # Whether codegen splits this graph into partition functions.
-        # Everything that reasons about partitioning must read this rather than
-        # the ambient config, which stays at what the user asked for.
+        # Whether codegen splits this graph into partition functions. Codegen
+        # reads this instead of config.graph_partition, which stays at what the
+        # user asked for and is still read by ConstructorMoverPass, the
+        # cpp_wrapper setup, the scheduler's partition-minimizing reorder and
+        # post-compile cudagraph wrapping.
         self.split_into_partitions = (
             config.graph_partition
             if split_into_partitions is None
@@ -615,11 +617,16 @@ class GraphLowering(torch.fx.Interpreter):
         )
         # Whether the partitions are for CUDA Graphs (or a customized partition
         # wrapper).
-        self.cudagraphs_per_partition = (
-            is_using_cudagraph_partition()
-            if cudagraphs_per_partition is None
-            else cudagraphs_per_partition
-        )
+        if cudagraphs_per_partition is None:
+            cudagraphs_per_partition = self.split_into_partitions and (
+                config.triton.cudagraphs
+                or _unstable_customized_partition_wrapper.wrapper is not None
+            )
+        elif cudagraphs_per_partition and not self.split_into_partitions:
+            raise ValueError(
+                "cudagraphs_per_partition=True requires split_into_partitions=True"
+            )
+        self.cudagraphs_per_partition = cudagraphs_per_partition
 
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: dict[torch.device, torch.fx.Node] = {}
@@ -1037,12 +1044,11 @@ class GraphLowering(torch.fx.Interpreter):
         Whether an op that cannot be CUDA Graph captured gets split into its own
         partition rather than disabling capture for the whole graph.
 
-        Only consult this from a site that is already gated on cudagraphs being
-        requested. It folds in cudagraphs_per_partition, which is False whenever
-        capture was not asked for, so from an ungated site it reads as "no
-        partitioning" for a graph that is in fact partitioned. Every current
-        caller either sits under `if cudagraphs:` or only writes
-        disable_cudagraphs_reason, which nothing reads unless capture is on.
+        It folds in cudagraphs_per_partition, so it is False for a graph that is
+        partitioned without triton.cudagraphs or a customized partition wrapper
+        asking for it. Only consult it where that case does not matter: under
+        `if cudagraphs:`, or to record disable_cudagraphs_reason, which matters
+        only when capture is on.
         """
         return self.cudagraphs_per_partition
 
