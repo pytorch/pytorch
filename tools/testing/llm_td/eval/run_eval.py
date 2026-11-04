@@ -9,9 +9,10 @@ failed checkout), which get no file. A CLI crash is written as an error result,
 as CI scores it, and so is not rerun. Throttling and 5xx errors, which
 the eval's own concurrency provokes, are retried; a call that still fails after
 ATTEMPTS is written as an error, so it is scored as the failed call it would be
-in CI, which calls the model once. Timeouts are final. A tag's results must all
-come from one --model, --effort and --agentic, and from what the model is sent
-for the sample now (see score.prompt_sha), which score.py checks too. Samples that
+in CI, which calls the model once. A timeout of the call is final, but an API
+504 is a 5xx error and is retried. A tag's results must all come from one
+--model, --effort and --agentic, and from what the model is sent for the sample
+now (see score.prompt_sha), which score.py checks too. Samples that
 select_tests answers without the model (see score.unasked) are skipped. With
 --agentic, each worker checks the sample's head out into its own worktree
 under DIR/worktrees/<tag> and lets the model Read/Grep/Glob it.
@@ -131,7 +132,7 @@ def main() -> None:
         p.error(f"{len(other)} results in {out}, e.g. {other[0]}, were made with other settings than {want}; use another --tag")  # fmt: skip
     sent = {i: prompt_sha(sample_prompt(json.loads(x.read_text()), minutes), args.agentic) for i in done if (x := args.data / "samples" / f"{i}.json").exists()}  # fmt: skip
     if stale := sorted(i for i, h in sent.items() if done[i].get("prompt_sha") != h):
-        p.error(f"{len(stale)} results in {out}, e.g. {stale[0]}, were made from another prompt, schema or sample; use another --tag")  # fmt: skip
+        p.error(f"{len(stale)} results in {out}, e.g. {stale[0]}, were made from another prompt, schema, sample or test-times.json; use another --tag")  # fmt: skip
     ids = [i for i in dict.fromkeys(args.ids.read_text().split()) if i not in done]
     print(f"{args.tag}: {len(ids)} without a result", flush=True)
 
