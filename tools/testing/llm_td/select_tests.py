@@ -385,6 +385,7 @@ def main(argv: list[str] | None = None) -> None:
     # edited file under test/ that nothing reads, or the model) is enforced; a
     # broken selector leaves TD's split in place.
     selection.enforce = args.enforce and selection.error is None
+    selection.enforce_requested = args.enforce
     args.output.write_text(
         json.dumps({**selection.to_json(), "diagnostics": record}, indent=1)
     )

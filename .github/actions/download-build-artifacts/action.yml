@@ -30,9 +30,12 @@ runs:
       with:
         name: ${{ inputs.name }}
 
+    # Only target_determination.yml's LLM test selection counts (see download-td-artifacts).
     - name: Unzip artifacts
       shell: bash
-      run: unzip -o artifacts.zip
+      run: |
+        unzip -o artifacts.zip
+        rm -f .additional_ci_files/llm_td_selection.json
 
     - name: Remove artifacts.zip
       shell: bash
