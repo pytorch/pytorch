@@ -4721,6 +4721,8 @@ class CudagraphNcclMemPoolTest(MultiProcessTestCase):
     so a cudagraph-captured region can produce NCCL-registered ("userbuffer")
     buffers, which collectives then use directly."""
 
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         # Allowing multiple ranks on a single GPU requires on opt-in.
