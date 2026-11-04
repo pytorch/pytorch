@@ -42,7 +42,7 @@ def compile_and_run(node, inputs):
         wrapper, _ = graph.codegen()
     module = PyCodeCache.load(wrapper.value)
     (actual,) = module.call([inputs[name] for name in graph.graph_input_names])
-    return actual
+    return actual, wrapper.value
 
 
 class TestJaggedReductionIR(TestCase):
@@ -165,13 +165,16 @@ class TestJaggedReductionIR(TestCase):
             src_dtype=values.dtype,
             reduction_hint=ir.ReductionHint.DEFAULT,
         )
-        actual = compile_and_run(reduction, {"offsets": offsets, "values": values})
+        actual, _ = compile_and_run(reduction, {"offsets": offsets, "values": values})
         self.assertEqual(actual, torch.segment_reduce(values, "sum", offsets=offsets))
 
     @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_triton_row_sum_bjd_to_bd(self):
-        offsets = torch.tensor([0, 2, 2, 1029, 1030], device="cuda")
-        values = torch.randn(1030, 3, device="cuda")
+        # Enough rows that a (y, x) tiling would otherwise be picked.
+        lengths = torch.randint(0, 8, (256,), device="cuda")
+        lengths[1], lengths[2] = 0, 1027
+        offsets = torch.nn.functional.pad(lengths.cumsum(0), (1, 0))
+        values = torch.randn(int(offsets[-1]), 3, device="cuda")
         j_range = JaggedRange("j")
 
         def inner_fn(index, rindex):
@@ -187,13 +190,16 @@ class TestJaggedReductionIR(TestCase):
             device=values.device,
             dtype=values.dtype,
             inner_fn=inner_fn,
-            ranges=[4, 3],
+            ranges=[256, 3],
             reduction_ranges=[j_range],
             reduction_type="sum",
             src_dtype=values.dtype,
             reduction_hint=ir.ReductionHint.DEFAULT,
         )
-        actual = compile_and_run(reduction, {"offsets": offsets, "values": values})
+        actual, code = compile_and_run(
+            reduction, {"offsets": offsets, "values": values}
+        )
+        self.assertNotIn("ynumel", code)
         self.assertEqual(actual, torch.segment_reduce(values, "sum", offsets=offsets))
 
 
