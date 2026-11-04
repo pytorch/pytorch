@@ -274,6 +274,12 @@ class GuardManager:
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
+    def add_fake_tensor_match_guard(
+        self,
+        expected: bool,
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
     def add_true_match_guard(
         self,
         verbose_code_parts: list[str],
@@ -310,6 +316,7 @@ class GuardManager:
         user_stack: traceback.StackSummary | None,
         ptype: Any,
         dispatch_keys: Any,
+        device_index_is_current: bool = False,
     ) -> None: ...
     def add_dimension_marking_guard(
         self,
@@ -364,6 +371,12 @@ class GuardManager:
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
+    def add_autograd_saved_tensors_hooks_guard(
+        self,
+        graph_module_type: type[torch.fx.GraphModule],
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
     def add_float_is_nan_guard(
         self,
         value: float,
@@ -412,6 +425,7 @@ class RootGuardManager(GuardManager):
         self, clone_filter_fn: Callable[[GuardManager], bool]
     ) -> RootGuardManager: ...
     def attach_compile_id(self, compile_id: str) -> None: ...
+    def set_compile_on_one_rank(self, value: bool) -> None: ...
     def get_local_state(self) -> LocalState: ...
     def set_local_state(self, local_state: LocalState) -> None: ...
 

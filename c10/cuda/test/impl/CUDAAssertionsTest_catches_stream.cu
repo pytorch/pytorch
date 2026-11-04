@@ -61,6 +61,11 @@ void cuda_device_assertions_catches_stream() {
 
   try {
     c10::cuda::device_synchronize();
+    // The catch below is for c10::Error and asserts on the device-assertion
+    // text. A TORCH_CHECK here would be caught by it, so the failure would be
+    // reported as a substring mismatch on this sentinel rather than as the
+    // device assertion never firing.
+    // @allow-raw-throw: must not be catchable as c10::Error
     throw std::runtime_error("Test didn't fail, but should have.");
   } catch (const c10::Error& err) {
     const auto err_str = std::string(err.what());

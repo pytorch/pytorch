@@ -45,19 +45,18 @@ else
     PYTHON_EXE_NAME="python.exe"
 fi
 # Explicit per-minor patch pin. The old ".0" pin (gh-151035) froze every
-# minor on its oldest, CVE-laden release. Security-only minors (3.10-3.12)
+# minor on its oldest, CVE-laden release. Security-only minors (3.11-3.12)
 # are pinned to their last release that shipped a Windows installer; later
 # patches are source-only and 404. Bugfix minors (3.13+) point at the
 # current newest installer and should be bumped here deliberately. Keep this
 # in sync with the matrix in generated-windows-binary-wheel-nightly.yml.
 case "$PYTHON_BASE" in
-    3.10) PYTHON_FULL="3.10.11" ;;
     3.11) PYTHON_FULL="3.11.9" ;;
     3.12) PYTHON_FULL="3.12.10" ;;
     3.13) PYTHON_FULL="3.13.14" ;;
     3.14) PYTHON_FULL="3.14.6" ;;
-    # 3.15 is still pre-release; python.org ships only beta installers so far.
-    3.15) PYTHON_FULL="3.15.0b3" ;;
+    # 3.15 is still pre-release; python.org ships only pre-release installers so far.
+    3.15) PYTHON_FULL="3.15.0rc2" ;;
     *)
         echo "No patch pin for Python ${PYTHON_BASE}; add one to set_desired_python.sh" >&2
         exit 1
@@ -65,7 +64,7 @@ case "$PYTHON_BASE" in
 esac
 echo "Resolved ${DESIRED_PYTHON} to ${PYTHON_FULL}"
 # python.org keeps prerelease installers (aN/bN/rcN) under the final release
-# directory, e.g. /ftp/python/3.15.0/python-3.15.0b3-amd64.exe, so strip any
+# directory, e.g. /ftp/python/3.15.0/python-3.15.0rc2-amd64.exe, so strip any
 # prerelease suffix to get the download directory. Released versions such as
 # 3.14.6 are unchanged.
 PYTHON_DL_DIR="${PYTHON_FULL%%[a-z]*}"

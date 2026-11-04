@@ -4,12 +4,14 @@
 #include <c10/core/CopyBytes.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SymIntArrayRef.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/Logging.h>
 #include <c10/util/accumulate.h>
 #include <algorithm>
+#include <mutex>
 #include <optional>
 
 #include <utility>
@@ -206,7 +208,8 @@ void TensorImpl::set_fake_device(c10::Device fake_device) {
   // but since we have an extra field for fake_device_,
   // we can just set it upon FakeTensor creation
   // and determine in device_custom() which device to return
-  // (based on if DispatchKey::Fake is excluded or not)
+  // (based on FakeTensorModeTLS::in_kernel_invocation(), see
+  // Note [C++ in_kernel_invocation])
   get_extra_meta().fake_device_ = fake_device;
   key_set_ = key_set_.add(DispatchKey::Fake);
 
@@ -308,6 +311,58 @@ bool TensorImpl::try_incref_pyobject() const noexcept {
   return pyobj_slot_.try_incref();
 }
 
+// Guards ExtraMeta::fake_sym_memos_ of every tensor. Only the nonzero and
+// unique fake impls use these memos, so one lock is enough.
+static std::mutex& fake_sym_memo_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+void TensorImpl::set_fake_sym_memo(
+    const std::string& name,
+    c10::SymInt memo,
+    uint64_t epoch) {
+  // Read the version before touching the map: it throws if the version
+  // counter is disabled (e.g. after inference_tensor.data = tensor), which
+  // must not leave a partly recorded memo behind.
+  auto version = is_inference()
+      ? std::nullopt
+      : std::optional<uint32_t>(version_counter().current_version());
+  // The replaced memo may hold a Python SymNode, so destroy it after the lock
+  // is released.
+  c10::SymInt replaced;
+  std::lock_guard<std::mutex> lock(fake_sym_memo_mutex());
+  auto& entry = get_extra_meta().fake_sym_memos_[name];
+  replaced = std::exchange(entry.value, std::move(memo));
+  entry.version = version;
+  entry.epoch = epoch;
+}
+
+std::optional<c10::SymInt> TensorImpl::fake_sym_memo(
+    const std::string& name,
+    uint64_t epoch) {
+  // Like the replaced memo in set_fake_sym_memo, destroyed after unlocking.
+  c10::SymInt dropped;
+  std::lock_guard<std::mutex> lock(fake_sym_memo_mutex());
+  if (!extra_meta_) {
+    return std::nullopt;
+  }
+  auto& memos = extra_meta_->fake_sym_memos_;
+  auto it = memos.find(name);
+  if (it == memos.end()) {
+    return std::nullopt;
+  }
+  const auto& entry = it->second;
+  bool mutated = entry.version.has_value() &&
+      *entry.version != version_counter().current_version();
+  if (mutated || entry.epoch != epoch) {
+    dropped = std::move(it->second.value);
+    memos.erase(it);
+    return std::nullopt;
+  }
+  return entry.value;
+}
+
 void TensorImpl::release_resources() {
   if (extra_meta_ && extra_meta_->fake_constant_) {
     auto mode = extra_meta_->fake_tensor_mode_;
@@ -319,6 +374,8 @@ void TensorImpl::release_resources() {
     storage_ = {};
   }
   if (extra_meta_) {
+    extra_meta_->real_tensor_.reset();
+    extra_meta_->fake_sym_memos_.clear();
     extra_meta_->fake_tensor_mode_.reset();
   }
 }
@@ -428,7 +485,7 @@ c10::Device TensorImpl::device_custom() const {
     return (*c10::impl::getGlobalPyInterpreter())->device(this);
   }
   if (C10_UNLIKELY(extra_meta_ && extra_meta_->fake_device_.has_value())) {
-    if (c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
+    if (c10::impl::FakeTensorModeTLS::in_kernel_invocation()) {
       return device_default();
     }
     // has_value() is checked above; the dataflow check misses it here.
@@ -944,13 +1001,13 @@ void TensorImpl::set_sizes_and_strides(
 
   has_symbolic_sizes_strides_ = true;
   refresh_sizes_strides_policy();
-  if (!extra_meta_) {
-    extra_meta_ = std::make_unique<ExtraMeta>();
-    extra_meta_->symbolic_shape_meta_ =
+  auto& extra_meta{get_extra_meta()};
+  if (extra_meta.symbolic_shape_meta_ == nullptr) {
+    extra_meta.symbolic_shape_meta_ =
         std::make_unique<c10::SymbolicShapeMeta>();
-    extra_meta_->symbolic_shape_meta_->strides_valid_ = !is_sparse();
+    extra_meta.symbolic_shape_meta_->strides_valid_ = !is_sparse();
     if (!storage_offset.has_value()) {
-      extra_meta_->symbolic_shape_meta_->storage_offset_ = storage_offset_;
+      extra_meta.symbolic_shape_meta_->storage_offset_ = storage_offset_;
     }
   }
 
@@ -962,6 +1019,7 @@ void TensorImpl::set_sizes_and_strides(
 
   refresh_numel();
   refresh_contiguous();
+  symbolic_shape_meta().refresh_materialized();
 }
 
 void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
@@ -982,9 +1040,10 @@ void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
   refresh_sizes_strides_policy();
   auto& extra_meta{get_extra_meta()};
   if (extra_meta.symbolic_shape_meta_ == nullptr) {
-    extra_meta_->symbolic_shape_meta_ =
+    extra_meta.symbolic_shape_meta_ =
         std::make_unique<c10::SymbolicShapeMeta>();
-    extra_meta_->symbolic_shape_meta_->strides_valid_ = !is_sparse();
+    extra_meta.symbolic_shape_meta_->strides_valid_ = !is_sparse();
+    extra_meta.symbolic_shape_meta_->storage_offset_ = storage_offset_;
   }
 
   clone_symvec(sizes, symbolic_shape_meta().sizes_);
@@ -1037,6 +1096,7 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
   // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
   // exclusive see #24090
   refresh_contiguous();
+  sym_shape_meta.refresh_materialized();
   // hard code some known true settings, for unbacked case
   // TODO: avoid chundering into the guards for computing these
   switch (memory_format) {
