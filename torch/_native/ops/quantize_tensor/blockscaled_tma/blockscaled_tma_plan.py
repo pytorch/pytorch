@@ -39,6 +39,7 @@ def select_blockscaled_tma_plan(
     input_dtype: torch.dtype,
     quant_orientation_id: int,
     is_square_scaling: bool,
+    quant_block_size: tuple[int, int],
 ) -> BlockscaledTmaPlan:
     """Select the existing B200-tuned tile, cluster, masking, and grid policy."""
     if quant_orientation_id not in (
@@ -51,7 +52,7 @@ def select_blockscaled_tma_plan(
         )
     do_dim_k = quant_orientation_id != _QUANT_ORIENTATION_DIM_M
     do_dim_m = quant_orientation_id != _QUANT_ORIENTATION_DIM_K
-    scale_group_size = 32
+    scale_group_size = quant_block_size[1]
 
     s_num_row_blk_k = s_num_col_blk_k = None
     if do_dim_k:

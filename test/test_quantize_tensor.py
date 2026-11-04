@@ -851,7 +851,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             )
 
             matrix_layout = _plan_matrix_input(
-                data_hp, dim, square, swizzled, dual=False
+                data_hp, dim, square, swizzled, dual=False, quant_block_size=(1, 32)
             )
             with patch.object(
                 torch.Tensor,
@@ -944,7 +944,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
                 _plan_matrix_input,
             )
 
-            matrix_layout = _plan_matrix_input(data_hp, axes, False, True, dual=True)
+            matrix_layout = _plan_matrix_input(
+                data_hp, axes, False, True, dual=True, quant_block_size=(1, 32)
+            )
             with patch.object(
                 torch.Tensor,
                 "contiguous",
