@@ -565,7 +565,12 @@ class Split:
 @dataclass
 class AppliedSelection:
     """A Selection applied to TD's split of one run_test.py call's test list;
-    kept_td records that an enforced selection fell back to TD's split."""
+    kept_td records that an enforced selection fell back to TD's split, and
+    previous_failures_known that the TD results stored previous failures,
+    which the TD job does when its pytest cache download step succeeded. That
+    step also succeeds without a cache, as on a PR whose only failures were in
+    jobs that upload none (ROCm, fork PRs), so it does not mean every previous
+    failure is known."""
 
     selection: Selection
     split: Split
@@ -583,8 +588,10 @@ class AppliedSelection:
         one, so count one per (workflow run, run attempt, build_environment,
         config, list_id): list_id hashes only the call's test file names.
         selector_error tells a failed selector, which is never enforced, from
-        a deliberate run_all, and enforce_requested counts the requested
-        enforcements that fell back to TD."""
+        a deliberate run_all. enforce_requested is the selection's, also true
+        when enforced and whether or not TD is on: the requested enforcements
+        that fell back to TD are the rows with enforce_requested and
+        td_enabled but not enforced, on PR jobs."""
         split, times = self.split, self.file_time
         files = "\n".join(sorted(times)).encode()
         return {
@@ -642,8 +649,8 @@ def apply_selection(
     The selection is enforced, replacing TD's split, only on a PR with TD
     enabled, the selection's enforce set and no selector error, only if some
     of the files have a test time, only if `previous_failures` (the PR's
-    previous failures stored with TD's ranking, see import_results) is known,
-    and only if the split chooses some file.
+    previous failures stored with TD's ranking, see import_results) is not
+    None, and only if the split chooses some file.
     run_test.py falls back to the default job's times for a config without its
     own, so the times are missing when none of the call's files has a time
     (for example without test-times.json, or a call of only new test files).
