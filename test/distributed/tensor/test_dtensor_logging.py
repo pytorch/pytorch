@@ -10,7 +10,6 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor.debug import _clear_sharding_prop_cache
 from torch.testing._internal.common_utils import (
-    requires_accelerator,
     run_concurrently,
     run_tests,
     TestCase,
@@ -18,7 +17,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
-@requires_accelerator
 class TestDTensorLogging(TestCase):
     """Test DTensor logging."""
 
@@ -34,7 +32,8 @@ class TestDTensorLogging(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = torch.accelerator.current_accelerator().type
+        acc = torch.accelerator.current_accelerator()
+        self.device_type = acc.type if acc else "cpu"
 
     def test_sharding_prop_cache_logging(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
