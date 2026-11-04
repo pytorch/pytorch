@@ -9,6 +9,7 @@ import torch
 from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_integer_dtype,
+    Number,
     type_to_dtype,
 )
 from torch.utils._ordered_set import OrderedSet
@@ -187,6 +188,15 @@ class DtypePropagationOpsHandler:
             )
             setattr(self, op, fn)
 
+        # gather_template-style ops (out-of-tree backends) pass metadata
+        # strings and sympy Symbols as leading arguments; promote over the
+        # value arguments only.
+        if "gather_template" in rules:
+            self.gather_template = functools.partial(
+                self.op_dtype_rule_skip_str,
+                type_promotion_kind=rules["gather_template"].type_promotion_kind,
+            )
+
         # Set pointwise operation rules
         for op in torch._inductor.codegen.common.pointwise_overrides_data.values():
             if not hasattr(self, op.name):
@@ -219,6 +229,15 @@ class DtypePropagationOpsHandler:
         *args: DTypeArg, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
     ) -> torch.dtype:
         return promote_types(args, type_promotion_kind=type_promotion_kind)
+
+    @staticmethod
+    def op_dtype_rule_skip_str(
+        *args: DTypeArg, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
+    ) -> torch.dtype:
+        return promote_types(
+            tuple(a for a in args if isinstance(a, Number) or hasattr(a, "dtype")),
+            type_promotion_kind=type_promotion_kind,
+        )
 
     @staticmethod
     def return_dtype(*args: DTypeArg, dtype: torch.dtype) -> torch.dtype:
