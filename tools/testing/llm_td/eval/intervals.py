@@ -104,6 +104,8 @@ def main() -> None:
     p.add_argument("--latency", metavar="TAG", help="print TAG's call latency instead")
     p.add_argument("--ids", type=Path, default=Path(__file__).parent / "ids/eval.txt", help="--latency's samples")  # fmt: skip
     args = p.parse_args()
+    if args.b < 40:
+        p.error(f"--b {args.b}: a 95% interval needs at least 40 resamples")
     if args.latency:
         if args.data is None:
             p.error("--latency needs --data")

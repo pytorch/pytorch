@@ -26,10 +26,11 @@ Four kinds of sample, each a JSON file under DIR/samples:
               test that passes again leaves.
   rev_<sha12> a commit the autorevert bot reverted between --start and --end
               because it broke a test on main, where every test runs. The
-              truth is the test files of the reverting signal that failed on
-              main between landing and the revert, on the commits that
-              contain it, in every job that runs TD they failed in there. A
-              revert with no such failure is skipped.
+              truth is the test files whose signal tests (the reverting
+              signal's file::test keys) failed on main between landing and
+              the revert, on the commits that contain it, with every job that
+              runs TD they failed in there. A revert with no such failure is
+              skipped.
   neu_<sha12> an ordinary main commit from the 25 days before --end (--start
               is ignored), with no truth, used only to measure how much a
               selector runs on typical traffic. --neutral commits are drawn
@@ -51,9 +52,12 @@ TESTS from its main checkout when it runs, which this replaces with TESTS at
 the head's merge base with main (`main_base`), plus the test files the sample
 adds. PR samples carry the raw PR body.
 Samples are only written once, so rebuilding into an existing DIR keeps them.
+PR truth reads failures and disables up to --end + WINDOW, so pr and head
+refuse to run before that has passed; pr_ samples record their --start and
+--end as `window`, and head refuses pr_ samples of another window.
 PR and head samples carry the PR's title and body as of the build, which may
 have been edited after the failure; revert and neutral samples carry the
-landed commit message.
+landed commit message without what the merge bot added (see commit_text).
 
 PR and head samples judge a failure on a PR head with one rule set,
 History.why_dropped, with hindsight on both sides as Dr.CI does. A failure is
@@ -69,14 +73,21 @@ not the PR's own, and is dropped, if
     author's PR within WINDOW of the failure, before the PR landed;
   - the same test failed on main within WINDOW of the head's `main_base`,
     before the PR landed;
-  - the same test failed on another PR's head whose change `merge_base`
-    already has, so the head's diff leaves it out and the failure is the
-    breakage of a PR below it in a stack (or of one that landed before it).
+  - the same test failed, without passing again in its job, on another PR's
+    head whose change `merge_base` already has, so the head's diff leaves it
+    out and the failure is the breakage of a PR below it in a stack (or of
+    one that landed before it). The author's own PRs count at any time, since
+    a stack's lower PRs can sit for weeks; another author's count only within
+    WINDOW, as for other_failure, so a long-landed PR that once broke the
+    test does not drop the failure.
     In a GitHub-native stack that head is an ancestor of `merge_base`.
     ghstack bases each PR on a synthetic gh/USER/N/base commit with the tree
     of the PR below, so no lower head is an ancestor; there the lower head's
     diff against its merge base with main reverse-applies to `merge_base`
-    with one line of context, for every PR down the stack. A lower PR whose
+    with one line of context, for every PR down the stack, and none of its
+    hunks that only delete lines applies forward with full context (the
+    reverse of such a hunk is just context, which matches almost anywhere).
+    A lower PR whose
     changes a PR between them rewrote is missed, and keeps its failures. So
     does a lower head the diff contains, as for a PR that targets main but
     branches off another PR, or one diffed against main for want of a CI
@@ -174,6 +185,10 @@ def has_commit(sha: str) -> bool:
     return True
 
 
+def sql_str(s: str) -> str:
+    return "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
 def is_main(branch: str) -> bool:
     """pull_failures prefixes a fork's branches with its repository, so a fork's main is not main."""
     return branch == "main" or branch.startswith("trunk/")
@@ -183,7 +198,11 @@ def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
     """Every failing (job, test) in pytorch/pytorch CI, two days per query to stay under ClickHouse limits.
 
     `flaky` marks a test that also passed in the same job, as when
-    run_test.py's rerun of it in a new process passes."""
+    run_test.py's rerun of it in a new process passes.
+
+    These read tests.all_test_runs, which keeps about a year of runs, rather
+    than ci.runs, which keeps 14 days and so would not reach the backtest
+    window."""
     rows: list[dict] = []
     d = start
     while d < end:
@@ -273,7 +292,8 @@ def below(other: str, merge_base: str) -> bool:
     """Whether `merge_base` already has PR head `other`'s change, so a diff against it leaves that change out (see the module docstring).
 
     That is when `other` is an ancestor or its change reverse-applies to
-    `merge_base` with one line of context, so edits two lines away still match."""
+    `merge_base` with one line of context, so edits two lines away still match,
+    and none of its deletion-only hunks applies forward with full context."""
     if is_ancestor(other, merge_base):
         return True
     if not (patch := own_change(other)):
@@ -284,7 +304,23 @@ def below(other: str, merge_base: str) -> bool:
         def fails(*args: str, stdin: bytes | None = None) -> int:
             return subprocess.run(["git", *args], cwd=REPO, env=env, input=stdin, capture_output=True).returncode  # fmt: skip
 
-        return not fails("read-tree", merge_base) and not fails("apply", "--cached", "--check", "-R", "-C1", stdin=patch)  # fmt: skip
+        if fails("read-tree", merge_base) or fails("apply", "--cached", "--check", "-R", "-C1", stdin=patch):  # fmt: skip
+            return False
+        return all(fails("apply", "--cached", "--check", stdin=h) for h in deletion_hunks(patch))  # fmt: skip
+
+
+def deletion_hunks(patch: bytes) -> list[bytes]:
+    """Each hunk of `patch` that only deletes lines from a file that stays, as a patch of its own."""
+    out = []
+    for f in re.split(rb"(?m)^(?=diff --git )", patch):
+        header, *hunks = re.split(rb"(?m)^(?=@@ )", f)
+        if re.search(rb"(?m)^(new|deleted) file mode ", header):
+            continue
+        for h in hunks:
+            lines = h.splitlines()[1:]
+            if any(x.startswith(b"-") for x in lines) and not any(x.startswith(b"+") for x in lines):  # fmt: skip
+                out.append(header + h)
+    return out
 
 
 def key(r: dict) -> Key:
@@ -299,8 +335,8 @@ class History:
     end: dt.date
     # PR head sha -> its failures, each with its "pr".
     heads: dict[str, list[dict]]
-    # Every failure of a test: time, author ("main" for main and branches with no known PR), sha, PR.
-    seen: dict[Key, list[tuple[dt.datetime, str, str, int | None]]]
+    # Every failure of a test: time, author ("main" for main and branches with no known PR), sha, PR, flaky.
+    seen: dict[Key, list[tuple[dt.datetime, str, str, int | None, bool]]]
     main: dict[Key, list[dt.datetime]]
     author: dict[int, str]
     landed: dict[int, dt.datetime]
@@ -319,9 +355,11 @@ class History:
             collections.defaultdict(list),
         )
         for r in rows:
+            # ClickHouse returns the flag as 0/1; a cache may hold it as a string.
+            r["flaky"] = bool(int(r["flaky"]))
             pr = None if is_main(r["br"]) else sha2pr.get(r["sha"])
             who = "main" if pr is None else author.get(pr, str(pr))
-            seen[key(r)].append((ts(r["t"]), who, r["sha"], pr))
+            seen[key(r)].append((ts(r["t"]), who, r["sha"], pr, r["flaky"]))
             if is_main(r["br"]):
                 main[key(r)].append(ts(r["t"]))
             elif pr is not None:
@@ -355,17 +393,20 @@ class History:
             return "passed_in_job"
         if was_disabled(self.disabled, r):
             return "disabled"
-        if any(who != me and abs(wt - t) < WINDOW and wt < cutoff for wt, who, _, _ in self.seen.get(k, [])):  # fmt: skip
+        if any(who != me and abs(wt - t) < WINDOW and wt < cutoff for wt, who, _, _, _ in self.seen.get(k, [])):  # fmt: skip
             return "other_failure"
         if base_t is not None and any(abs(base_t - m) < WINDOW and m < cutoff for m in self.main.get(k, [])):  # fmt: skip
             return "main_near_base"
-        if bases is not None and any(pr not in (None, r["pr"]) and below(sha, bases["merge_base"]) for _, _, sha, pr in self.seen.get(k, [])):  # fmt: skip
+        if bases is not None and any(
+            pr not in (None, r["pr"]) and not fl and (who == me or abs(wt - t) < WINDOW) and below(sha, bases["merge_base"])
+            for wt, who, sha, pr, fl in self.seen.get(k, [])
+        ):  # fmt: skip
             return "stacked"
         return None
 
     def other_heads(self, shas: set[str]) -> set[str]:
         """The other PRs' heads that failed a test one of PR heads `shas` failed, which the stacked rule compares to them."""
-        return {o for sha in shas for r in self.heads.get(sha, []) for _, _, o, pr in self.seen.get(key(r), []) if pr not in (None, r["pr"])}  # fmt: skip
+        return {o for sha in shas for r in self.heads.get(sha, []) for _, _, o, pr, _ in self.seen.get(key(r), []) if pr not in (None, r["pr"])}  # fmt: skip
 
     def truth(self, sha: str, bases: dict[str, str], dropped: collections.Counter) -> list[dict] | None:  # fmt: skip
         """The failures on PR head `sha` that are the PR's own, counting the others in `dropped` by rule; None if its main_base is older than the loaded failures."""
@@ -483,10 +524,19 @@ def candidates_at(
 
 
 def strip_trailers(msg: str) -> str:
-    pat = r"^(Pull Request resolved|Approved by|ghstack-source-id|Pull-Request|Differential Revision|Co-authored-by|Co-Authored-By|Fixes|X-link):"
+    pat = r"^(Pull Request resolved|Pull-Request-resolved|Approved by|ghstack dependencies|Stack dependencies|ghstack-source-id|Pull-Request|Differential Revision|Co-authored-by|Co-Authored-By|Fixes|X-link):"
     return "\n".join(
         line for line in msg.splitlines() if not re.match(pat, line)
     ).strip()
+
+
+def commit_text(sha: str) -> tuple[str, str]:
+    """A landed commit's title and body as close to its PR's event as the commit
+    allows: without the " (#N)" the merge bot appends to the title and the
+    trailers it adds to the body (trymerge.py's gen_commit_message). The cc
+    line and ghstack stack list it removes from the body are not restored."""
+    title, _, body = git("log", "-1", "--format=%B", sha).partition("\n")
+    return re.sub(r" \(#\d+\)$", "", title.rstrip()), strip_trailers(body)
 
 
 def pr_text(pr: int, tries: int = 4) -> tuple[str, str]:
@@ -597,6 +647,8 @@ def pr_samples(h: History, out: Path, jobs: int) -> None:
     fetch(sorted({f["sha"] for f in first.values()}))
     fetch(sorted(h.other_heads({f["sha"] for f in first.values()})))
     ci = ci_bases({f["sha"]: pr for pr, f in first.items()})
+    # A base CI recorded after this head is not in its history, so fetch it as head_samples' fetch of the later head would.
+    fetch(sorted({b for bs in ci.values() for b in bs}))
     sources: list[str] = []
     dropped: list[collections.Counter] = []
 
@@ -614,7 +666,7 @@ def pr_samples(h: History, out: Path, jobs: int) -> None:
             try:
                 title, body = pr_text(pr)
                 write_sample(out, f"pr_{pr}", "pr", sha, title=title, body=body, **bases, pr=pr, date=first[pr]["t"][:19], truth=sorted(truth_jobs),
-                             truth_strong=sorted(strong), truth_jobs=truth_jobs)  # fmt: skip
+                             window=[str(h.start), str(h.end)], truth_strong=sorted(strong), truth_jobs=truth_jobs)  # fmt: skip
                 sources.append(bases["base_source"])
             except subprocess.CalledProcessError as e:
                 print(f"skipping PR {pr}: {e}", flush=True)
@@ -657,12 +709,15 @@ def head_samples(h: History, out: Path, jobs: int) -> None:
     if not prs:
         print(f"no head samples: there are no pr_ samples in {out}", flush=True)
         return
+    if other := sorted(n for n, s in prs.items() if s.get("window") != [str(h.start), str(h.end)]):
+        raise SystemExit(f"pr_ samples in {out}, e.g. pr_{other[0]}, were built with another --start/--end than {h.start}/{h.end}")  # fmt: skip
     shas = {sha for sha, rows in h.heads.items() if rows[0]["pr"] in prs}
     h.load_green(shas)
     shas = {sha for sha in shas if any(h.why_dropped(r) is None for r in h.heads[sha])}
     fetch(sorted(shas))
     fetch(sorted(h.other_heads(shas)))
     ci = ci_bases({sha: h.heads[sha][0]["pr"] for sha in shas})
+    fetch(sorted({b for bs in ci.values() for b in bs}))
     created = {sha: ts(t) for sha, t in head_created(sorted(shas)).items()}
     failed = collections.defaultdict(list)
     for other, rows in h.heads.items():
@@ -694,9 +749,12 @@ def head_samples(h: History, out: Path, jobs: int) -> None:
 
 
 def revert_truth_jobs(
-    signal: set[str], sha: str, landed: dt.datetime, reverted: str
+    signal: set[tuple[str, str]], sha: str, landed: dt.datetime, reverted: str
 ) -> dict[str, list[tuple[str, str]]]:
     """The main-branch (workflow, job)s that run TD each signal test file failed in between landing and the revert, on the main commits from `sha` up to the revert.
+
+    `signal` holds the (test file without .py, test name) pairs of the
+    autorevert signal; other tests of those files do not count.
 
     A failure is dropped as PR truth drops it when its job is unstable or
     passed on any attempt on the commit, or the test passed again in the job.
@@ -704,7 +762,7 @@ def revert_truth_jobs(
     `reverted` is when autorevert decided to revert, so the main commits that
     landed between that and the revert commit are left out: truth is only
     lost, never added."""
-    files = ",".join(f"'{t}.py'" for t in signal)
+    tests = ",".join(f"({sql_str(f + '.py')}, {sql_str(n)})" for f, n in sorted(signal))
     t0 = landed.strftime("%Y-%m-%d %H:%M:%S")
     with_change = git("rev-list", "--first-parent", "--ancestry-path", f"--until={reverted[:19]} +0000", "--invert-grep",
                       f"--grep=This reverts commit {sha}", f"{sha}^..origin/main").split()  # fmt: skip
@@ -722,7 +780,7 @@ def revert_truth_jobs(
         SELECT DISTINCT tf, sha, wf, job FROM (
           SELECT t.job_id, replaceRegexpOne(file, '\\.py$', '') tf, classname, t.name, j.head_sha sha, j.workflow_name wf, j.name job
           FROM tests.all_test_runs t JOIN j ON j.id = t.job_id
-          WHERE t.job_id IN (SELECT id FROM j) AND file IN ({files})
+          WHERE t.job_id IN (SELECT id FROM j) AND (file, t.name) IN ({tests})
             AND time_inserted >= toDateTime('{t0}') AND time_inserted <= parseDateTimeBestEffort('{reverted}') + INTERVAL 2 HOUR
           GROUP BY t.job_id, tf, classname, t.name, sha, wf, job
           -- A test that also passed in the job, as run_test.py's rerun of it in a new process does, is flaky there.
@@ -752,18 +810,14 @@ def revert_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
         r = rows[sha]
         if not has_commit(sha):
             return
-        signal = {
-            k.split("::")[0].removesuffix(".py")
-            for k in r["source_signal_keys"]
-            if "::" in k
-        }
+        signal = {(k.split("::")[0].removesuffix(".py"), k.split("::")[-1]) for k in r["source_signal_keys"] if "::" in k}  # fmt: skip
         try:
             truth_jobs = revert_truth_jobs(signal, sha, commit_time(sha), r["reverted_at"])  # fmt: skip
             if not truth_jobs:
                 print(f"skipping revert {sha}: no main job that runs TD failed on its signal tests", flush=True)  # fmt: skip
                 return
-            title, _, body = git("log", "-1", "--format=%B", sha).partition("\n")
-            write_sample(out, f"rev_{sha[:12]}", "revert", sha, sha + "^", title, strip_trailers(body), date=r["reverted_at"],
+            title, body = commit_text(sha)
+            write_sample(out, f"rev_{sha[:12]}", "revert", sha, sha + "^", title, body, date=r["reverted_at"],
                          truth=sorted(truth_jobs), truth_jobs=truth_jobs)  # fmt: skip
         except (subprocess.CalledProcessError, RuntimeError) as e:
             print(f"skipping revert {sha}: {e}", flush=True)
@@ -803,11 +857,11 @@ def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
     }
 
     def go(sha: str) -> None:
-        title, _, body = git("log", "-1", "--format=%B", sha).partition("\n")
+        title, body = commit_text(sha)
         if sha in reverted or re.search(r"\b(revert|reland)\b", title, re.IGNORECASE):  # fmt: skip
             return
         try:
-            write_sample(out, f"neu_{sha[:12]}", "neutral", sha, sha + "^", title, strip_trailers(body), truth=[])  # fmt: skip
+            write_sample(out, f"neu_{sha[:12]}", "neutral", sha, sha + "^", title, body, truth=[])  # fmt: skip
         except subprocess.CalledProcessError as e:
             print(f"skipping neutral {sha}: {e}", flush=True)
 
@@ -825,6 +879,8 @@ def main() -> None:
     p.add_argument("--jobs", type=int, default=8)
     p.add_argument("--kinds", nargs="+", choices=KINDS, default=KINDS)
     args = p.parse_args()
+    if {"pr", "head"} & set(args.kinds) and (closes := args.end + WINDOW) > dt.datetime.now(dt.timezone.utc).date():  # fmt: skip
+        p.error(f"PR truth looks for other authors' failures and disables up to --end + {WINDOW.days} days; rerun on or after {closes}")  # fmt: skip
     out = args.data / "samples"
     out.mkdir(parents=True, exist_ok=True)
     git("fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main")

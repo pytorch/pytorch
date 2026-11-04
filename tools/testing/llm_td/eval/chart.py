@@ -49,6 +49,45 @@ def caught(summary: dict, kind: str) -> tuple[float, int]:
     return 100 * summary["caught_any" if kind == "revert" else "caught_all"], n
 
 
+def panels(rows: list[dict], src: object = "the rows") -> dict[str, dict]:
+    """What each panel ("revert", "head") plots, from score.py --json rows:
+    per model and effort its label, color, marker and (cpu %, caught %) per
+    hedge, the hedge labels (on the proposed tag's head panel), the proposed
+    and TD points, the frontier and the failing-sample count."""
+    g = {(x["tag"], x["policy"], x["kind"]): x for x in summarize(rows)}
+
+    def summary(tag: str, pol: str, kind: str) -> dict:
+        if (tag, pol, kind) not in g:
+            raise SystemExit(f"no {kind} rows for {tag} {pol} in {src}")
+        return g[(tag, pol, kind)]
+
+    def point(tag: str, pol: str, kind: str) -> tuple[float, float]:
+        return 100 * summary(tag, pol, "neutral")["cpu"], caught(summary(tag, pol, kind), kind)[0]  # fmt: skip
+
+    # fmt: off
+    tags = sorted({t for t, _, _ in g if t != "td" and not t.endswith(("_r2", "_agentic"))})
+    if unknown := [t for t in tags if t not in COLOR or t.rsplit("_", 1)[0] not in MODELS or t.rsplit("_", 1)[1] not in MARKER]:
+        raise SystemExit(f"no name, color or marker for {unknown}; add them to MODELS, COLOR and MARKER")
+    out = {}
+    for kind in ["revert", "head"]:
+        lines, labels = [], []
+        for tag in tags:
+            prefix, effort = tag.rsplit("_", 1)
+            pols = [p for p in HEDGES if (tag, p, kind) in g]
+            if not pols:
+                raise SystemExit(f"no {kind} rows for {tag}")
+            xy = [point(tag, p, kind) for p in pols]
+            lines.append({"label": f"{MODELS[prefix]} {effort}", "color": COLOR[tag], "marker": MARKER[effort], "xy": xy})
+            if tag == PRODUCTION[0] and kind == "head":
+                labels = [(f"+{HEDGES[p]}% hedge" if HEDGES[p] else "no hedge", q) for p, q in zip(pols, xy)]
+        td = point("td", "td25", kind)
+        points = [q for line in lines for q in line["xy"]] + [td]
+        n = caught(summary("td", "td25", kind), kind)[1]
+        out[kind] = {"lines": lines, "labels": labels, "star": point(*PRODUCTION, kind), "td": td, "frontier": frontier(points), "n": n, "xmax": max(x for x, _ in points)}
+    # fmt: on
+    return out
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -56,59 +95,36 @@ def main() -> None:
     p.add_argument("rows", type=Path, help="score.py --json rows")
     p.add_argument("out", type=Path, help="the SVG to write")
     args = p.parse_args()
+    data = panels(json.loads(args.rows.read_text()), args.rows)
 
     import matplotlib
 
-    matplotlib.use("svg")
-    matplotlib.rcParams["svg.hashsalt"] = "llm_td"
     # Labels stay text, so they can be diffed against REPORT.md.
-    matplotlib.rcParams["svg.fonttype"] = "none"
-    import matplotlib.pyplot as plt
+    with matplotlib.rc_context({"svg.hashsalt": "llm_td", "svg.fonttype": "none"}):
+        svg = render(data)
+    # matplotlib ends path lines with a space, which the SPACES linter rejects.
+    args.out.write_text("".join(line.rstrip() + "\n" for line in svg.splitlines()))
 
-    rows = summarize(json.loads(args.rows.read_text()))
-    g = {(x["tag"], x["policy"], x["kind"]): x for x in rows}
 
-    def summary(tag: str, pol: str, kind: str) -> dict:
-        if (tag, pol, kind) not in g:
-            raise SystemExit(f"no {kind} rows for {tag} {pol} in {args.rows}")
-        return g[(tag, pol, kind)]
-
-    def cost(tag: str, pol: str) -> float:
-        return 100 * summary(tag, pol, "neutral")["cpu"]
-
-    def rate(tag: str, pol: str, kind: str) -> tuple[float, int]:
-        return caught(summary(tag, pol, kind), kind)
+def render(data: dict[str, dict]) -> str:
+    from matplotlib.figure import Figure
 
     # fmt: off
-    tags = sorted({t for t, _, _ in g if t != "td" and not t.endswith(("_r2", "_agentic"))})
-    if unknown := [t for t in tags if t not in COLOR or t.rsplit("_", 1)[0] not in MODELS or t.rsplit("_", 1)[1] not in MARKER]:
-        raise SystemExit(f"no name, color or marker for {unknown}; add them to MODELS, COLOR and MARKER")
     titles = {"revert": "Reverted commits caught", "head": "Failing PR pushes with every real failure selected"}
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.8))
-    for ax, kind in zip(axes, ["revert", "head"]):
-        points = []
-        for tag in tags:
-            prefix, effort = tag.rsplit("_", 1)
-            pols = [p for p in HEDGES if (tag, p, kind) in g]
-            if not pols:
-                raise SystemExit(f"no {kind} rows for {tag}")
-            xy = [(cost(tag, p), rate(tag, p, kind)[0]) for p in pols]
-            points += xy
-            ax.plot(*zip(*xy), color=COLOR[tag], marker=MARKER[effort], markersize=5, linewidth=1, label=f"{MODELS[prefix]} {effort}")
-            if tag == PRODUCTION[0] and kind == "head":
-                for p, (x, y) in zip(pols, xy):
-                    ax.annotate(f"+{HEDGES[p]}% hedge" if HEDGES[p] else "no hedge", (x, y), textcoords="offset points", xytext=(4, -10), fontsize=7)
-        x, y = cost(*PRODUCTION), rate(*PRODUCTION, kind)[0]
-        ax.scatter(x, y, s=220, marker="*", color="gold", edgecolors="black", zorder=5, label="proposed: Opus medium + 20% hedge")
-        td_x, (td_y, n) = cost("td", "td25"), rate("td", "td25", kind)
-        points.append((td_x, td_y))
-        ax.axhline(td_y, color="#d62728", linestyle=":", linewidth=1, zorder=0, label="TD today's level")
-        ax.scatter(td_x, td_y, s=70, marker="X", color="#d62728", zorder=5, label="TD today (top 25% of files)")
-        fx, fy = zip(*frontier(points))
-        ax.plot(fx, fy, color="gray", linestyle="--", linewidth=1, zorder=0, label="Pareto frontier")
-        ax.set_title(f"{titles[kind]} (n={n})", fontsize=10)
+    fig = Figure(figsize=(11, 4.8))
+    axes = fig.subplots(1, 2)
+    for ax, (kind, d) in zip(axes, data.items()):
+        for line in d["lines"]:
+            ax.plot(*zip(*line["xy"]), color=line["color"], marker=line["marker"], markersize=5, linewidth=1, label=line["label"])
+        for text, q in d["labels"]:
+            ax.annotate(text, q, textcoords="offset points", xytext=(4, -10), fontsize=7)
+        ax.scatter(*d["star"], s=220, marker="*", color="gold", edgecolors="black", zorder=5, label="proposed: Opus medium + 20% hedge")
+        ax.axhline(d["td"][1], color="#d62728", linestyle=":", linewidth=1, zorder=0, label="TD today's level")
+        ax.scatter(*d["td"], s=70, marker="X", color="#d62728", zorder=5, label="TD today (top 25% of files)")
+        ax.plot(*zip(*d["frontier"]), color="gray", linestyle="--", linewidth=1, zorder=0, label="Pareto frontier")
+        ax.set_title(f"{titles[kind]} (n={d['n']})", fontsize=10)
         ax.set_xlabel("CPU test time run on a typical change (% of a full pass, in seconds)")
-        ax.set_xlim(0, max(55, 5 + max(px for px, _ in points)))
+        ax.set_xlim(0, max(55, 5 + d["xmax"]))
         ax.grid(alpha=0.3)
     # fmt: on
     axes[0].set_ylabel("%")
@@ -117,9 +133,7 @@ def main() -> None:
     fig.tight_layout(rect=(0, 0.13, 1, 1))
     svg = io.StringIO()
     fig.savefig(svg, format="svg", metadata={"Date": None, "Creator": None})
-    # matplotlib ends path lines with a space, which the SPACES linter rejects.
-    lines = svg.getvalue().splitlines()
-    args.out.write_text("".join(line.rstrip() + "\n" for line in lines))
+    return svg.getvalue()
 
 
 if __name__ == "__main__":

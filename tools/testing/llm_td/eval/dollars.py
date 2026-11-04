@@ -55,7 +55,8 @@ def inductor_globs(labeler: Path) -> re.Pattern[str]:
     """The ciflow/inductor labeler globs as one regex: `*` and `?` stay within a
     path segment and `**` crosses them. Other glob syntax ({}, [], !) is
     rejected rather than matched literally."""
-    globs = (yaml.safe_load(labeler.read_text()) or {}).get("ciflow/inductor")
+    config = yaml.safe_load(labeler.read_text())
+    globs = config.get("ciflow/inductor") if isinstance(config, dict) else None
     if not isinstance(globs, list) or not globs or not all(isinstance(g, str) for g in globs):  # fmt: skip
         raise SystemExit(f"{labeler} has no list of ciflow/inductor globs")
     if bad := [g for g in globs if set(g) & set("{}[]!")]:
