@@ -1086,6 +1086,45 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
         self.assertEqual(counters["inductor"]["fuse_attention"], 0)
 
+    def _test_pattern_fails_with_zero_scale(self):
+        # https://github.com/pytorch/pytorch/issues/195591
+        def model(query, key, value):
+            scores = query @ key.transpose(-2, -1) / 0.0
+            return torch.softmax(scores, dim=-1) @ value
+
+        tensor_shape = (2, 4, 4, 4)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+        ]
+        self._check_common(model, args1=args, contains=False, has_fuse_pattern=False)
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+
+    def _test_pattern_fails_with_masked_zero_scale(self):
+        # https://github.com/pytorch/pytorch/issues/195591
+        def model(query, key, value, attn_mask):
+            scores = query @ key.transpose(-2, -1) / 0.0 + attn_mask
+            return torch.softmax(scores, dim=-1) @ value
+
+        tensor_shape = (2, 4, 4, 4)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn((1, 1, 4, 4), device=self.device),
+        ]
+        # A grad-requiring mask input blocks the fusion in the training phase,
+        # so check inference only where the zero scale actually matters.
+        self._check_common(
+            model,
+            args1=args,
+            contains=False,
+            has_fuse_pattern=False,
+            check_train=False,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+
     def _test_pattern_fails_with_unsupported_mask(self):
         if not self.use_static_shapes:
             self.skipTest("Causes shape specialization. TODO: investigate")
@@ -2257,6 +2296,12 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_pattern_fails_with_symfloat_scale_gpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_symfloat_scale
         )
+        test_pattern_fails_with_zero_scale_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_zero_scale
+        )
+        test_pattern_fails_with_masked_zero_scale_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_masked_zero_scale
+        )
         test_pattern_fails_with_unsupported_mask_gpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_unsupported_mask
         )
@@ -2414,6 +2459,12 @@ if HAS_CPU:
         )
         test_pattern_fails_with_symfloat_scale_cpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_symfloat_scale
+        )
+        test_pattern_fails_with_zero_scale_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_zero_scale
+        )
+        test_pattern_fails_with_masked_zero_scale_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_masked_zero_scale
         )
         test_pattern_fails_with_unsupported_mask_cpu = (
             TestSDPAPatternRewriterTemplate._test_pattern_fails_with_unsupported_mask

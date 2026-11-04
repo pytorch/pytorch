@@ -963,11 +963,24 @@ def _is_supported_scale(scale) -> bool:
     return isinstance(scale, (float, int, torch.SymInt))
 
 
-def _sfdp_params_check(match):
+def _is_zero_scale(scale) -> bool:
+    # The div-scale replacements invert the scale (1.0 / inv_scale), which
+    # raises ZeroDivisionError in Python for a concrete zero scale, so those
+    # fusions must be skipped. SymInt scales divide symbolically instead, and
+    # the mul-scale replacements never invert, so only concrete float/int
+    # zero is rejected here.
+    if isinstance(scale, torch.fx.Node):
+        scale = scale.meta.get("val")
+    return isinstance(scale, (float, int)) and scale == 0
+
+
+def _sfdp_params_check(match, invert_scale=False):
     if not all(k in match.kwargs for k in ("query", "key", "value")):
         raise AssertionError("expected query, key, value in match.kwargs")
     inv_scale = match.kwargs.get("inv_scale")
     if inv_scale is not None and not _is_supported_scale(inv_scale):
+        return False
+    if invert_scale and _is_zero_scale(inv_scale):
         return False
     query = match.kwargs["query"].meta["val"]
     key = match.kwargs["key"].meta["val"]
@@ -1031,6 +1044,12 @@ def _sfdp_extra_check(
             scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
             # Note: args[1] of the scale_factor_node is always the scale_factor for the current patterns.
             if not _is_supported_scale(scale_factor_node.args[1]):
+                return False
+            # Div-scale replacements invert the scale (1.0 / inv_scale); a
+            # concrete zero scale would raise ZeroDivisionError in Python.
+            if scale_factor_op is aten.div.Tensor and _is_zero_scale(
+                scale_factor_node.args[1]
+            ):
                 return False
         return _sfdp_params_check(match)
 
@@ -1179,42 +1198,42 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_5,
                 [g(), g(), g(), b()],
                 s,
-                _sfdp_params_check,
+                functools.partial(_sfdp_params_check, invert_scale=True),
             ),
             (
                 _sfdp_pattern_6,
                 _sfdp_replacement_6,
                 [g(), g(), g(), b()],
                 sd,
-                _sfdp_params_check,
+                functools.partial(_sfdp_params_check, invert_scale=True),
             ),
             (
                 _sfdp_pattern_7,
                 _sfdp_replacement_7,
                 [g(), g(), g()],
                 sd,
-                _sfdp_params_check,
+                functools.partial(_sfdp_params_check, invert_scale=True),
             ),
             (
                 _sfdp_pattern_8,
                 _sfdp_replacement_8,
                 [g(), g(), g()],
                 s,
-                _sfdp_params_check,
+                functools.partial(_sfdp_params_check, invert_scale=True),
             ),
             (
                 _sfdp_pattern_9,
                 _sfdp_replacement_9,
                 [g(), g(), g()],
                 sd,
-                _sfdp_params_check,
+                functools.partial(_sfdp_params_check, invert_scale=True),
             ),
             (
                 _sfdp_pattern_10,
                 _sfdp_replacement_10,
                 [g(), g(), g()],
                 s,
-                _sfdp_params_check,
+                functools.partial(_sfdp_params_check, invert_scale=True),
             ),
             (
                 _sfdp_pattern_11,
@@ -1277,28 +1296,28 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_18,
                 [g(), g(), g(), m_bool()],
                 sd,
-                _sfdp_params_check,
+                functools.partial(_sfdp_params_check, invert_scale=True),
             ),
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1_bool()],
                 sd,
-                _sfdp_params_check,
+                functools.partial(_sfdp_params_check, invert_scale=True),
             ),
             (
                 _sfdp_pattern_19,
                 _sfdp_replacement_19,
                 [g(), g(), g(), b_bool(), b_float()],
                 sd,
-                _sfdp_params_check,
+                functools.partial(_sfdp_params_check, invert_scale=True),
             ),
             (
                 _sfdp_pattern_20,
                 _sfdp_replacement_20,
                 [g(), g(), g(), m_2d()],
                 sd,
-                _sfdp_params_check,
+                functools.partial(_sfdp_params_check, invert_scale=True),
             ),
             (
                 _sfdp_pattern_21,
