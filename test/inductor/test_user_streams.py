@@ -2085,7 +2085,7 @@ class TestStreamOrderingStress(InductorTestCase):
             actual = compiled_fn(*args)
             # Full device sync as a safety net to ensure all stream work
             # is visible before comparing results.
-            device_module.synchronize()
+            torch.accelerator.synchronize()
             if not isinstance(expected, (tuple, list)):
                 expected, actual = [expected], [actual]
             for e, a in zip(expected, actual):
@@ -2110,14 +2110,14 @@ class TestStreamOrderingStress(InductorTestCase):
         N = self.N
 
         def fn(x, w):
-            s = device_module.Stream()
-            e = device_module.Event()
+            s = torch.Stream()
+            e = torch.Event()
 
             # Heavy producer on default stream — takes real GPU time
             a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
             e.record()
 
-            with device_module.stream(s):
+            with s:
                 e.wait()  # removing this would cause a race
                 b = a + 1
 
@@ -2136,21 +2136,21 @@ class TestStreamOrderingStress(InductorTestCase):
         N = self.N
 
         def fn(x, w):
-            s1 = device_module.Stream()
-            s2 = device_module.Stream()
-            e1 = device_module.Event()
-            e2 = device_module.Event()
+            s1 = torch.Stream()
+            s2 = torch.Stream()
+            e1 = torch.Event()
+            e2 = torch.Event()
 
-            with device_module.stream(s1):
+            with s1:
                 a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
                 e1.record(s1)
 
-            with device_module.stream(s2):
+            with s2:
                 e1.wait(s2)
                 b = TestStreamOrderingStress._heavy_matmul_chain(a, w)
                 e2.record(s2)
 
-            with device_module.stream(s1):
+            with s1:
                 e2.wait(s1)
                 c = b + a
 
@@ -2170,29 +2170,29 @@ class TestStreamOrderingStress(InductorTestCase):
         N = self.N
 
         def fn(x, w):
-            s1 = device_module.Stream()
-            s2 = device_module.Stream()
-            s3 = device_module.Stream()
-            e = device_module.Event()
-            e1 = device_module.Event()
-            e2 = device_module.Event()
-            e3 = device_module.Event()
+            s1 = torch.Stream()
+            s2 = torch.Stream()
+            s3 = torch.Stream()
+            e = torch.Event()
+            e1 = torch.Event()
+            e2 = torch.Event()
+            e3 = torch.Event()
 
             # Slow producer
             a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
             e.record()
 
-            with device_module.stream(s1):
+            with s1:
                 e.wait()
                 r1 = a * 2
                 e1.record(s1)
 
-            with device_module.stream(s2):
+            with s2:
                 e.wait()
                 r2 = a * 3
                 e2.record(s2)
 
-            with device_module.stream(s3):
+            with s3:
                 e.wait()
                 r3 = a * 4
                 e3.record(s3)
@@ -2219,23 +2219,23 @@ class TestStreamOrderingStress(InductorTestCase):
         N = self.N
 
         def fn(x, w):
-            s1 = device_module.Stream()
-            s2 = device_module.Stream()
-            e_fork = device_module.Event()
-            e1 = device_module.Event()
-            e2 = device_module.Event()
+            s1 = torch.Stream()
+            s2 = torch.Stream()
+            e_fork = torch.Event()
+            e1 = torch.Event()
+            e2 = torch.Event()
 
             base = x @ w
             e_fork.record()
 
-            with device_module.stream(s1):
+            with s1:
                 e_fork.wait()
                 branch1 = TestStreamOrderingStress._heavy_matmul_chain(
                     torch.relu(base), w
                 )
                 e1.record(s1)
 
-            with device_module.stream(s2):
+            with s2:
                 e_fork.wait()
                 branch2 = TestStreamOrderingStress._heavy_matmul_chain(
                     torch.sigmoid(base), w
@@ -2262,24 +2262,24 @@ class TestStreamOrderingStress(InductorTestCase):
         N = self.N
 
         def fn(x, w):
-            streams = [device_module.Stream() for _ in range(4)]
-            events = [device_module.Event() for _ in range(3)]
+            streams = [torch.Stream() for _ in range(4)]
+            events = [torch.Event() for _ in range(3)]
 
-            with device_module.stream(streams[0]):
+            with streams[0]:
                 h = TestStreamOrderingStress._heavy_matmul_chain(x, w, depth=4)
                 events[0].record(streams[0])
 
-            with device_module.stream(streams[1]):
+            with streams[1]:
                 events[0].wait(streams[1])
                 h = TestStreamOrderingStress._heavy_matmul_chain(h, w, depth=4)
                 events[1].record(streams[1])
 
-            with device_module.stream(streams[2]):
+            with streams[2]:
                 events[1].wait(streams[2])
                 h = TestStreamOrderingStress._heavy_matmul_chain(h, w, depth=4)
                 events[2].record(streams[2])
 
-            with device_module.stream(streams[3]):
+            with streams[3]:
                 events[2].wait(streams[3])
                 h = h + x  # quick consumer — races if wait is missing
 
@@ -2298,14 +2298,14 @@ class TestStreamOrderingStress(InductorTestCase):
         N = self.N
 
         def fn(x, w):
-            s = device_module.Stream()
-            e1 = device_module.Event()
-            e2 = device_module.Event()
+            s = torch.Stream()
+            e1 = torch.Event()
+            e2 = torch.Event()
 
             a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
             e1.record()
 
-            with device_module.stream(s):
+            with s:
                 e1.wait()
                 b = TestStreamOrderingStress._heavy_matmul_chain(a, w)
                 e2.record(s)
@@ -2329,10 +2329,10 @@ class TestStreamOrderingStress(InductorTestCase):
         N = self.N
 
         def fn(x, w):
-            s = device_module.Stream()
-            e = device_module.Event()
+            s = torch.Stream()
+            e = torch.Event()
 
-            with device_module.stream(s):
+            with s:
                 # Heavy matmul chain produces data on user stream
                 a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
                 # Triton pointwise on the same user stream — without fix
@@ -2362,7 +2362,7 @@ class TestGenericStreamCompile(InductorTestCase):
         stream = torch.Stream(GPU_TYPE)
 
         def fn(x):
-            stream.wait_stream(device_module.current_stream())
+            stream.wait_stream(torch.accelerator.current_stream())
             with stream:
                 a = x * 2
                 b = a + 1
@@ -2388,22 +2388,17 @@ class TestGenericStreamCompile(InductorTestCase):
         # Create stream and event outside compiled function
         stream = torch.Stream(GPU_TYPE)
         event = torch.Event(GPU_TYPE)
-        device_stream = device_module.Stream(
-            stream_id=stream.stream_id,
-            device_index=stream.device_index,
-            device_type=stream.device_type,
-        )
 
         def fn(x):
             # Work on default stream
             a = x * 2
             event.record()
 
-            with device_module.stream(device_stream):
+            with stream:
                 event.wait()
                 b = a + 1
 
-            device_stream.synchronize()
+            stream.synchronize()
             return b
 
         x = torch.randn(1024, device=GPU_TYPE)
@@ -2425,28 +2420,18 @@ class TestGenericStreamCompile(InductorTestCase):
         stream1 = torch.Stream(GPU_TYPE)
         stream2 = torch.Stream(GPU_TYPE)
         event = torch.Event(GPU_TYPE)
-        device_stream1 = device_module.Stream(
-            stream_id=stream1.stream_id,
-            device_index=stream1.device_index,
-            device_type=stream1.device_type,
-        )
-        device_stream2 = device_module.Stream(
-            stream_id=stream2.stream_id,
-            device_index=stream2.device_index,
-            device_type=stream2.device_type,
-        )
 
         def fn(x):
-            with device_module.stream(device_stream1):
+            with stream1:
                 a = x * 2
                 event.record()
 
-            with device_module.stream(device_stream2):
+            with stream2:
                 event.wait()
                 b = a + 1
 
-            device_stream1.synchronize()
-            device_stream2.synchronize()
+            stream1.synchronize()
+            stream2.synchronize()
             return b
 
         x = torch.randn(1024, device=GPU_TYPE)
@@ -2469,23 +2454,18 @@ class TestGenericStreamCompile(InductorTestCase):
         # Create stream and event outside compiled function
         stream = torch.Stream(GPU_TYPE)
         event = torch.Event(GPU_TYPE)
-        device_stream = device_module.Stream(
-            stream_id=stream.stream_id,
-            device_index=stream.device_index,
-            device_type=stream.device_type,
-        )
 
         def fn(x):
-            device_stream.wait_stream(device_module.current_stream())
-            with device_module.stream(device_stream):
+            stream.wait_stream(torch.accelerator.current_stream())
+            with stream:
                 a = x * 2
-                # Record event with explicit stream (using device_stream)
-                event.record(device_stream)
+                # Record event with an explicit stream argument
+                event.record(stream)
 
             event.wait()
             b = a + 1
 
-            device_stream.synchronize()
+            stream.synchronize()
             return b
 
         x = torch.randn(1024, device=GPU_TYPE)
@@ -2509,10 +2489,10 @@ class TestStreamIdentity(InductorTestCase):
         """Codegen should retrieve the user's stream via _get_stream_by_index."""
         from torch._inductor.utils import run_and_get_code
 
-        user_stream = device_module.Stream()
+        user_stream = torch.Stream()
 
         def fn(x):
-            with device_module.stream(user_stream):
+            with user_stream:
                 return x * 2
 
         x = torch.randn(1024, device=GPU_TYPE)
@@ -2526,15 +2506,15 @@ class TestStreamIdentity(InductorTestCase):
         """Each stream context should retrieve a different user stream object."""
         from torch._inductor.utils import run_and_get_code
 
-        stream_a = device_module.Stream()
-        stream_b = device_module.Stream()
+        stream_a = torch.Stream()
+        stream_b = torch.Stream()
 
         def fn(x):
-            event = device_module.Event()
-            with device_module.stream(stream_a):
+            event = torch.Event()
+            with stream_a:
                 a = x * 2
                 event.record()
-            with device_module.stream(stream_b):
+            with stream_b:
                 event.wait()
                 b = a + 1
             stream_b.synchronize()
