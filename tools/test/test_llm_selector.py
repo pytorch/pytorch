@@ -102,6 +102,8 @@ class TestSelection(unittest.TestCase):
             ".ci/docker/build.sh",
             ".ci/docker/ci_commit_pins/triton.txt",
             ".ci/docker/ubuntu/Dockerfile",
+            ".ci/docker/ubuntu-rocm/Dockerfile",
+            ".ci/docker/ubuntu-xpu/Dockerfile",
             ".ci/pytorch/test.sh",
             ".ci/pytorch/multigpu-test.sh",
             ".ci/pytorch/win-test.sh",
@@ -121,6 +123,8 @@ class TestSelection(unittest.TestCase):
             ".ci/pytorch/win-test-helpers/setup_pytorch_env.bat",
             ".ci/pytorch/win-test-helpers/test_python_shard.bat",
             ".ci/pytorch/win-test-helpers/installation-helpers/activate_miniconda3.bat",
+            ".ci/pytorch/win-test-helpers/installation-helpers/install_magma.bat",
+            ".ci/pytorch/win-test-helpers/installation-helpers/install_sccache.bat",
             ".github/workflows/_linux-test.yml",
             ".github/workflows/_win-test.yml",
             ".github/workflows/_mac-test.yml",
@@ -138,6 +142,7 @@ class TestSelection(unittest.TestCase):
             ".github/actions/setup-xpu/action.yml",
             ".github/actions/filter-test-configs/action.yml",
             ".github/actions/download-td-artifacts/action.yml",
+            ".github/actions/download-build-artifacts/action.yml",
             ".github/scripts/filter_test_configs.py",
             ".github/ci_commit_pins/vision.txt",
             ".github/ci_commit_pins/audio.txt",
@@ -187,6 +192,8 @@ class TestSelection(unittest.TestCase):
             ".github/workflows/_binary-build-linux.yml",
             ".github/workflows/docs-build.yml",
             ".github/actions/setup-linux/action.yml",
+            # A cross-build image; no test job runs in it.
+            ".ci/docker/ubuntu-cross-riscv/Dockerfile",
             ".github/ci_commit_pins/vllm.txt",
         ]:
             self.assertFalse(needs_run_all([f]), f)
