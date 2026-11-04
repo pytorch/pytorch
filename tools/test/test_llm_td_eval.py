@@ -1305,7 +1305,8 @@ class TestClickhouse(unittest.TestCase):
         ok = subprocess.CompletedProcess([], 0, 'log\n{"columns": [{"name": "a"}], "rows": [[1]]}', "")  # fmt: skip
         busy = subprocess.CompletedProcess([], 1, "", "HTTP 503 Service Unavailable")
         crowded = subprocess.CompletedProcess([], 1, "", "Code: 202. DB::Exception: Too many simultaneous queries")  # fmt: skip
-        slow = subprocess.CompletedProcess([], 1, "", "Code: 159. DB::Exception: Timeout exceeded: elapsed 300 seconds")  # fmt: skip
+        slow = subprocess.CompletedProcess([], 1, "", "Code: 159. DB::Exception: Timeout exceeded: elapsed 500 seconds")  # fmt: skip
+        gateway = subprocess.CompletedProcess([], 1, "", "502 Bad Gateway")
         bad = subprocess.CompletedProcess([], 2, "", "Code: 62. Syntax error")
         # A result that is not one, whose rows would look transient if searched.
         null = subprocess.CompletedProcess([], 0, '{"columns": null, "rows": [["connection timed out"]]}', "")  # fmt: skip
@@ -1315,7 +1316,8 @@ class TestClickhouse(unittest.TestCase):
             ([ok], 1, [{"a": 1}]),
             ([busy, crowded, ok], 3, [{"a": 1}]),
             ([bad, ok], 1, "attempt 1 of 3 exited with code 2: Code: 62. Syntax error"),
-            ([slow, ok], 1, "attempt 1 of 3 exited with code 1: Code: 159. DB::Exception: Timeout exceeded: elapsed 300 seconds"),
+            ([slow, ok], 1, "attempt 1 of 3 exited with code 1: Code: 159. DB::Exception: Timeout exceeded: elapsed 500 seconds"),
+            ([gateway, ok], 2, [{"a": 1}]),
             ([busy, hung, ok], 2, "attempt 2 of 3 timed out after 600s"),
             ([null, ok], 1, 'attempt 1 of 3 returned no result: {"columns": null, "rows": [["connection timed out"]]}'),
             ([busy, busy, busy], 3, "attempt 3 of 3 exited with code 1: HTTP 503 Service Unavailable"),
@@ -1331,6 +1333,7 @@ class TestClickhouse(unittest.TestCase):
                     self.assertEqual(str(e.exception), f"ClickHouse query failed, {want}\nSQL: SELECT 1")  # fmt: skip
                 self.assertEqual(run.call_count, calls)
                 self.assertEqual(run.call_args.kwargs["timeout"], clickhouse.TIMEOUT)
+                self.assertEqual(run.call_args.args[0][1:], ["datasources", "clickhouse", "query", "-d", clickhouse.CLICKHOUSE_UID, "--limit", "0", "-o", "json", "SELECT 1"])  # fmt: skip
 
 
 class TestBuildDataset(unittest.TestCase):
@@ -1349,6 +1352,15 @@ class TestBuildDataset(unittest.TestCase):
             bd.main()
         git.assert_not_called()
         self.assertIn("rerun on or after", err.getvalue())
+        # The guard is for PR truth only.
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(sys, "argv", [*argv[:2], tmp, *argv[3:-1], "revert"]),
+            mock.patch.object(bd, "git"),
+            mock.patch.object(bd, "revert_samples") as revert,
+        ):  # fmt: skip
+            bd.main()
+        revert.assert_called_once()
 
     def test_commit_text(self) -> None:
         # As trymerge.py's gen_commit_message lands a ghstack PR and native_stack.py a GitHub-native one.
@@ -1364,7 +1376,7 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_x", "2026-10-05 00:00:00", "a"),
             fail("test_x", "2026-10-05 00:00:00", "m", br="main", flaky=True),
             fail("test_x", "2026-10-05 00:00:00", "t", br="trunk/t"),
-            # A fork's main is a PR branch, here of no known PR.
+            # A fork's main is a PR branch, not main; here PR 2's, whose author is unknown.
             fail("test_x", "2026-10-05 00:00:00", "g", br="f/pytorch:main"),
             fail("test_x", "2026-10-05 00:00:00", "u"),
         ]
@@ -1514,7 +1526,8 @@ class TestBuildDataset(unittest.TestCase):
 
     def test_stacked_down_the_stack(self) -> None:
         # A ghstack stack L0 (pr 1) < L (pr 2) < U (pr 3): U's base has L's tree, and L's change edits a
-        # line two away from L0's, so L0's change still reverse-applies to U's base.
+        # line two away from L0's, so L0's change reverse-applies to U's base with one line of context
+        # but not with two.
         lines = [str(i) for i in range(1, 10)]
 
         def a(**edits: str) -> str:
@@ -1523,7 +1536,7 @@ class TestBuildDataset(unittest.TestCase):
         with scratch_repo():
             m = commit_files({"a": a(), "b": "b\n"})
             bd.git("update-ref", "refs/remotes/origin/main", m)
-            main, k0_files, k1_files = ({"a": a(**e), "b": "b\n"} for e in ({}, {"l2": "x"}, {"l2": "x", "l5": "y"}))  # fmt: skip
+            main, k0_files, k1_files = ({"a": a(**e), "b": "b\n"} for e in ({}, {"l2": "x"}, {"l2": "x", "l4": "y"}))  # fmt: skip
             k0 = commit_files(k0_files, commit_files(main, m))
             k1 = commit_files(k1_files, commit_files(k0_files, m))
             k2_base = commit_files(k1_files, m)
@@ -1549,13 +1562,15 @@ class TestBuildDataset(unittest.TestCase):
         # S (pr 3, mine) and F (pr 4, mine). O and S broke their tests 20 days before U's failure,
         # outside WINDOW; F's failure passed again in its job. D (pr 5, mine) deletes a line whose
         # context is two blank lines, which B has elsewhere, so D's change reverse-applies to B
-        # with one line of context though B does not have it.
-        main = {"a": "a\n\nX\n\nb\n\n\nc\n", "o": "o\n", "s": "s\n", "f": "f\n"}
+        # with one line of context though B does not have it. P (pr 6) and Q (pr 7), another author's,
+        # failed within WINDOW but after U landed, which other_failure leaves out; B has P's change only.
+        main = {"a": "a\n\nX\n\nb\n\n\nc\n", "o": "o\n", "s": "s\n", "f": "f\n", "p": "p\n", "q": "q\n"}  # fmt: skip
         with scratch_repo():
             m = commit_files(main)
             bd.git("update-ref", "refs/remotes/origin/main", m)
-            changed = dict.fromkeys("osf", "changed\n")
-            o, s, f = (commit_files({**main, k: v}, m) for k, v in changed.items())
+            changed = dict.fromkeys("osfp", "changed\n")
+            o, s, f, p = (commit_files({**main, k: v}, m) for k, v in changed.items())
+            q = commit_files({**main, "q": "changed\n"}, m)
             d = commit_files({**main, "a": "a\n\n\nb\n\n\nc\n"}, m)
             b = commit_files({**main, **changed}, m)
             u = commit_files({**main, **changed, "u": "u\n"}, b)
@@ -1564,8 +1579,11 @@ class TestBuildDataset(unittest.TestCase):
                 fail("test_s", "2026-09-17 00:00:00", s),
                 fail("test_f", "2026-10-06 00:00:00", f, flaky=True),
                 fail("test_d", "2026-10-06 00:00:00", d),
-            ] + [fail(t, "2026-10-07 00:00:00", u) for t in ("test_o", "test_s", "test_f", "test_d")]  # fmt: skip
-            h = history(rows, {u: 1, o: 2, s: 3, f: 4, d: 5}, {1: "me", 2: "x", 3: "me", 4: "me", 5: "me"}, {2: day(18, 9)})  # fmt: skip
+                fail("test_p", "2026-10-09 00:00:00", p),
+                fail("test_q", "2026-10-09 00:00:00", q),
+            ] + [fail(t, "2026-10-07 00:00:00", u) for t in ("test_o", "test_s", "test_f", "test_d", "test_p", "test_q")]  # fmt: skip
+            authors = {1: "me", 2: "x", 3: "me", 4: "me", 5: "me", 6: "y", 7: "y"}
+            h = history(rows, {u: 1, o: 2, s: 3, f: 4, d: 5, p: 6, q: 7}, authors, {2: day(18, 9), 1: day(8)})  # fmt: skip
             dropped: collections.Counter = collections.Counter()
             with (
                 patch_ci_jobs(TD_JOBS),
@@ -1574,11 +1592,11 @@ class TestBuildDataset(unittest.TestCase):
             ):  # fmt: skip
                 h.load_green({u})
                 kept = h.truth(u, {"base": b, "merge_base": b, "main_base": m, "base_source": "ci"}, dropped)  # fmt: skip
-            self.assertTrue(all(bd.below(x, b) for x in (o, s, f)))
-            self.assertFalse(bd.below(d, b))
+            self.assertTrue(all(bd.below(x, b) for x in (o, s, f, p)))
+            self.assertFalse(any(bd.below(x, b) for x in (d, q)))
             self.assertEqual(len(bd.deletion_hunks(bd.own_change(d))), 1)
-        self.assertEqual(sorted(r["test"] for r in kept or []), ["test_d", "test_f", "test_o"])  # fmt: skip
-        self.assertEqual(dropped, {"stacked": 1})
+        self.assertEqual(sorted(r["test"] for r in kept or []), ["test_d", "test_f", "test_o", "test_q"])  # fmt: skip
+        self.assertEqual(dropped, {"stacked": 2})
 
     def test_truth_skips_a_main_base_before_the_loaded_failures(self) -> None:
         h = history([fail("test_x", "2026-10-05 00:00:00", "s")], {"s": 1}, {1: "me"})
@@ -1688,7 +1706,7 @@ class TestBuildDataset(unittest.TestCase):
                 bd.revert_truth_jobs({("test_a", "test_x")}, commits["change"], landed, "2026-10-05 00:30:00")  # fmt: skip
                 self.assertEqual(green.call_args.args[0], [commits["change"]])
                 failed = failed[1:]
-                # Failing only in jobs that do not run TD, so revert_samples skips it.
+                # Without the TD job's row, only periodic, unstable and rerun-green rows remain, so revert_samples skips it.
                 none = bd.revert_truth_jobs({("test_a", "test_x"), ("test_b", "test_q'r")}, commits["change"], landed, "2026-10-05 04:00:00")  # fmt: skip
         self.assertEqual(got, {"test_a": [td]})
         self.assertEqual(none, {})
