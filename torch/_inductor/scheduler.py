@@ -12107,7 +12107,7 @@ class Scheduler:
             # mapping is copied because the check pops the entries it tolerates,
             # meta among them -- a meta tensor implies no compute to capture.
             if reason := check_multiple_devices_or_any_cpu_nodes(
-                dict(graph.device_node_mapping), cudagraphs_per_partition=False
+                dict(graph.device_node_mapping), cpu_nodes_partitioned_out=False
             ):
                 return f"invoke_subgraph body has {reason}"
             for op in graph.operations:
