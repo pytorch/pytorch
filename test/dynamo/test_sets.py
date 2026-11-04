@@ -12,6 +12,7 @@ import torch._dynamo.test_case
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     make_dynamo_test,
     munge_exc,
@@ -76,6 +77,64 @@ class CustomSetTests(_BaseSetTests):
     def test_custom_contains(self):
         s = self.thetype([1, 2])
         self.assertTrue(s.contains(3))
+
+
+class CustomNewSetTests(_BaseSetTests):
+    # No class between the leaf and set/frozenset overrides __new__ at all
+    # -- tp_new must resolve the owner by walking the MRO, not by checking
+    # self.value.__new__ identity for a fixed list of known base types.
+    class PlainSet(set):
+        pass
+
+    class GrandchildPlainSet(PlainSet):
+        pass
+
+    class PlainFrozenset(frozenset):
+        pass
+
+    class GrandchildPlainFrozenset(PlainFrozenset):
+        pass
+
+    @make_dynamo_test
+    def test_set_new_exact_type(self):
+        s = set.__new__(set)
+        s.add(1)
+        self.assertTrue(s == {1})
+
+    @make_dynamo_test
+    def test_frozenset_new_exact_type(self):
+        s = frozenset.__new__(frozenset)
+        self.assertTrue(s == frozenset())
+
+    @make_dynamo_test
+    def test_set_new_ignores_kwargs(self):
+        # set.__new__ (tp_new) silently ignores extra args/kwargs -- only
+        # set.__init__ (called separately) actually populates the set.
+        s = set.__new__(set, [1, 2], extra="ignored")
+        self.assertTrue(s == set())
+
+    @make_dynamo_test
+    def test_frozenset_new_rejects_kwargs(self):
+        self.assertRaises(
+            TypeError, lambda: frozenset.__new__(frozenset, [1, 2], extra=1)
+        )
+
+    @make_dynamo_test
+    def test_set_new_multilevel_no_override_ignores_extra_args(self):
+        s = self.GrandchildPlainSet.__new__(
+            self.GrandchildPlainSet, [1, 2], extra="ignored"
+        )
+        self.assertTrue(type(s) is self.GrandchildPlainSet)
+        self.assertTrue(s == set())
+
+    @make_dynamo_test
+    def test_frozenset_new_multilevel_no_override_rejects_kwargs(self):
+        self.assertRaises(
+            TypeError,
+            lambda: self.GrandchildPlainFrozenset.__new__(
+                self.GrandchildPlainFrozenset, [1, 2], extra=1
+            ),
+        )
 
 
 class MiscTests(torch._dynamo.test_case.TestCase):
@@ -209,11 +268,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
 
 @instantiate_parametrized_tests
-class TestSetGuards(LoggingTestCase):
-    @make_dynamo_test
-    def test_tensor_set_union(self):
+class DictSetOperandTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("operand", [[1], (1,), {1}])
+    def test_tensor_set_union(self, operand):
+        def fn(x):
+            result = {x}.union(operand)
+            return x + len(result), any(key is x for key in result)
+
         x = torch.ones(1)
-        self.assertEqual(len({x}.union({1})), 2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     @parametrize("first", [1.0, True])
     @parametrize("operand", [[1], (1,), range(1, 2)])
@@ -303,6 +368,8 @@ class TestSetGuards(LoggingTestCase):
             self.assertEqual(compiled(x, mapping), result)
         self.assertEqual(counter.frame_count, 2)
 
+
+class TestSetGuards(LoggingTestCase):
     def test_set_with_function(self):
         s = {
             torch._C._set_grad_enabled,

@@ -1035,6 +1035,8 @@ def _reads_a_builtin(source: Source, value: object) -> bool:
     ACT2FN-style table -- is a slot like any other, so this deliberately keys
     on where the read comes FROM rather than on who owns the value.
     """
+    from .variables.object_protocol import type_is_immutable
+
     return (
         isinstance(source, DictGetItemSource)
         and isinstance(source.base, GlobalSource)
@@ -1044,10 +1046,7 @@ def _reads_a_builtin(source: Source, value: object) -> bool:
             # Py_TPFLAGS_IMMUTABLETYPE: a static type CPython built, not a
             # class statement or type() call, whose __module__ is writable. Read
             # through type's descriptor, past any metaclass shadowing __flags__.
-            or (
-                isinstance(value, type)
-                and bool(vars(type)["__flags__"].__get__(value) & (1 << 8))
-            )
+            or (isinstance(value, type) and type_is_immutable(value))
         )
         and _owning_module(value) == "builtins"
         and getattr(value, "__name__", None) == source.index
@@ -1378,8 +1377,8 @@ def _object_identity(value: object) -> str:
 # never drops one, and the report compares them across variants.
 _SHAPE_BEARING_GUARD_TYPES = frozenset(
     {
-        "BOOL_MATCH",
         "BUILTIN_METHOD_RECEIVER_ALIAS",
+        "BOOL_MATCH",
         "CONSTANT_MATCH",
         "CONSTANT_SUBCLASS_MATCH",
         "COUNT_ITERATOR_MATCH",
@@ -1401,6 +1400,7 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "NOT_NONE_MATCH",
         "NOT_PRESENT_IN_GENERIC_DICT",
         "ORDERED_DICT_KEYS_MATCH",
+        "ORDERED_DICT_ORDER_MATCH",
         "RANGE_ITERATOR_MATCH",
         "SEQUENCE_LENGTH",
         "SET_CONTAINS",

@@ -61,7 +61,6 @@ from ..source import (
     UnspecializedNNModuleSource,
 )
 from ..utils import (
-    enumerate_items_with_dict_position,
     get_custom_getattr,
     get_fake_value,
     is_lazy_module,
@@ -1587,6 +1586,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        from .builder import _dict_input_snapshot
+
         if (
             tx.output.side_effects.is_attribute_mutation(self)
             and name
@@ -1629,6 +1630,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             # hooks guard via skip_nnmodule_hook_guards
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
                 hooks_dict = getattr(self.value, name)
+                if self.source is not None and hooks_dict in tx.output.side_effects:
+                    return VariableTracker.build(
+                        tx, hooks_dict, source=AttrSource(self.source, name)
+                    )
                 if isinstance(hooks_dict, dict) and len(hooks_dict) == 0:
                     hooks_source = (
                         AttrSource(self.source, name) if self.source else None
@@ -1650,7 +1655,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                         and name.startswith("_forward_")
                     ):
                         hooks_vt_cls = variables.NNModuleHooksDictVariable
-                    return hooks_vt_cls({}, source=hooks_source)
+                    result = hooks_vt_cls({}, source=hooks_source)
+                    if hooks_source is not None:
+                        return tx.output.side_effects.track_mutable(hooks_dict, result)
+                    return result
 
         # Hook IDs differ across equivalent module instances (RemovableHandle;
         # https://github.com/pytorch/pytorch/issues/125836). Track them lazily so
@@ -1680,7 +1688,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # Internal hashing keeps IDs dynamic; explicit user hashing guards them.
                 key_vt = LazyVariableTracker.create(k, source_key, tx=tx)
                 key = (
-                    HashableTracker.from_known_hash(key_vt, hash(k))
+                    HashableTracker(key_vt, known_hash=hash(k))
                     if type(k) is int
                     else HashableTracker(key_vt)
                 )
@@ -1691,12 +1699,13 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 return key, value
 
             result = dict(
-                build_key_value(i, k, v)
-                for i, k, v in enumerate_items_with_dict_position(hooks_dict)
+                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(hooks_dict)
             )
 
-            # noqa: RVT001
-            return variables.NNModuleHooksDictVariable(result, source=hooks_dict_source)
+            return tx.output.side_effects.track_mutable(
+                hooks_dict,
+                variables.NNModuleHooksDictVariable(result, source=hooks_dict_source),  # noqa: RVT001
+            )
         return super().tp_getattro_impl(tx, name)
 
     def manually_trace_nn_module_getattr(
