@@ -2285,9 +2285,8 @@ def forward(self, x_1, output_1):
     def test_triton_kernel_mutated_offset_view_inference_mode(self):
         # The gapped regression above traces with view tracking on, so the mutated
         # arg always carries a _base. inference_mode disables ADInplaceOrView;
-        # FunctionalTensor records ancestry in _inference_mode_base instead, but only
-        # under the export configs that populate it. If the base is lost here the
-        # clone goes back to spanning storage_offset + span of a buffer sized to the
+        # FunctionalTensor tracks ancestry in _inference_mode_base instead. If the
+        # base is lost here, the clone spans storage_offset + span of a buffer sized to the
         # view alone -- either the original silent miscompile, or the InductorError
         # the as_strided extent check now raises for it. Both fail this test.
         @triton.jit
