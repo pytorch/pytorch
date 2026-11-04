@@ -193,10 +193,7 @@ def _normalize_xpu_arch(arch: str | None) -> str:
         raise RuntimeError(
             "Unable to determine the XPU architecture to generate CUTLASS kernels "
             "for: the device codename is not recognized. Run on an XPU device "
-            "(the codename is read from torch.xpu.get_device_capability), or set "
-            "torch._inductor.config.xpu.arch to a numeric arch in [12, 50] and "
-            "clear cutlass_arch's cache via "
-            "torch._inductor.codegen.cutlass.utils.cutlass_arch.cache_clear()."
+            "(the codename is read from torch.xpu.get_device_capability)."
         )
     if arch.startswith("Xe"):
         return arch[2:]
@@ -211,9 +208,10 @@ def _normalize_cuda_arch(arch: str | None) -> str:
         raise RuntimeError(
             "Unable to determine the CUDA architecture to generate CUTLASS kernels "
             "for. Set torch._inductor.config.cuda.arch or run on a CUDA device. "
-            "Note that cutlass_arch caches its result (and a failed probe): after "
-            "setting the knob, clear it via "
-            "torch._inductor.codegen.cutlass.utils.cutlass_arch.cache_clear()."
+            "Note that the failed probe is cached by get_cuda_arch "
+            "(torch._inductor.codegen.cuda.cuda_env): after setting the knob, "
+            "re-run in a fresh process or use "
+            "torch._inductor.codecache.fresh_cache() to clear it."
         )
     arch_num = arch
     if isinstance(arch, str):
@@ -272,9 +270,16 @@ def toolkit_version(device_type: str) -> str:
         raise RuntimeError(
             f"Unable to determine the {device_type} toolkit version to generate "
             "CUTLASS kernels for. Run on a "
-            f"{device_type} device, or set torch._inductor.config.{device_type}.version "
-            "and clear this function's cache (it caches failed probes too) via "
-            "torch._inductor.codegen.cutlass.utils.toolkit_version.cache_clear()."
+            f"{device_type} device"
+            + (
+                " or set torch._inductor.config.cuda.version"
+                if device_type == "cuda"
+                else ""
+            )
+            + ". Note that a failed probe is cached by get_"
+            f"{device_type}_version (torch/_inductor/codegen/{device_type}/"
+            f"{device_type}_env.py): after setting the knob, re-run in a fresh "
+            "process or use torch._inductor.codecache.fresh_cache() to clear it."
         )
     return version
 
@@ -647,13 +652,12 @@ def cutlass_standalone_runner_compile_command(
         cutlass_compile_command = (
             torch._inductor.codegen.cuda.compile_utils.cuda_compile_command
         )
+        extra_args.append("-DCUTLASS_DEBUG_TRACE_LEVEL=1")
     else:
         raise NotImplementedError(
             f"CUTLASS standalone runner is not implemented for device type "
             f"{device_type!r}"
         )
-    if device_type == "cuda":
-        extra_args.append("-DCUTLASS_DEBUG_TRACE_LEVEL=1")
     compile_command = cutlass_compile_command(
         [str(srcpath)], str(exepath), "exe", extra_args=extra_args
     )

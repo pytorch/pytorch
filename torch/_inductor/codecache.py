@@ -3520,14 +3520,7 @@ end
             # Device types without a registered code cache (cpu, mps, npu
             # without a backend hook, ...) have no GPU kernels to link: skip
             # the GPU-kernel link step with an empty object list.
-            cache_cls = _lookup_device_codecache(device_type)
-            if cache_cls is not None:
-                gpu_codecache = cache_cls()
-                gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
-                # clear the list of aot kernels after each linking
-                gpu_codecache.aot_kernels_o.clear()
-            else:
-                gpu_kernels_o = []
+            gpu_kernels_o = aot_kernels_o_for_device(device_type)
 
             if gpu_kernels_o:
                 if config.aot_inductor.emit_multi_arch_kernel:
@@ -5929,7 +5922,11 @@ class DeviceCodeCacheProtocol(Protocol):
     - ``cache_clear()``: clears this cache's entries; in-tree caches clear
       ``aot_kernels_o`` here too, so that ``fresh_cache()`` does not link
       stale ``.o`` files into the next AOTI ``.so``. Out-of-tree caches
-      should follow the same contract.
+      should follow the same contract. Note that registration itself does
+      not add the class to Inductor's ``fresh_cache()`` bookkeeping: an
+      out-of-tree cache is cleared by ``fresh_cache()`` only if it applies
+      ``@clear_on_fresh_cache`` (from torch._inductor.utils) to its
+      ``cache_clear``-equivalent entry points.
     """
 
     aot_kernels_o: list[str]
@@ -5985,6 +5982,24 @@ def _lookup_device_codecache(device_type: str) -> type[DeviceCodeCacheProtocol] 
     return _DEVICE_CODECACHE_REGISTRY.get(device_type)
 
 
+def aot_kernels_o_for_device(device_type: str) -> list[str]:
+    """Return and clear the ``.o`` files to link into an AOTInductor ``.so``.
+
+    Used by the AOTI link step: resolves ``device_type`` to its registered
+    CodeCache class, instantiates it, copies its ``aot_kernels_o`` and clears
+    the list (so each link only sees kernels compiled for it). Device types
+    without a registered code cache have no GPU kernels to link and get an
+    empty list.
+    """
+    cache_cls = _lookup_device_codecache(device_type)
+    if cache_cls is None:
+        return []
+    gpu_codecache = cache_cls()
+    gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
+    gpu_codecache.aot_kernels_o.clear()
+    return gpu_kernels_o
+
+
 def get_device_codecache(device_type: str) -> type[DeviceCodeCacheProtocol]:
     """
     Return the CodeCache class registered for ``device_type``.
@@ -6008,17 +6023,16 @@ def get_device_codecache(device_type: str) -> type[DeviceCodeCacheProtocol]:
             f"No CodeCache registered for device type {device_type!r}. "
             f"Registered device types: {sorted(_DEVICE_CODECACHE_REGISTRY)}. "
             "Out-of-tree backends that override the code cache for an "
-            "existing device type (currently only 'cuda'/'xpu'; see "
-            "register_device_codecache) must call register_device_codecache() "
-            "from their backend registration hook. Compiling for device "
-            f"type {device_type!r} is not supported by Inductor."
+            "existing device type must call register_device_codecache() "
+            "from their backend registration hook."
         )
     return codecache_cls
 
 
-# Wire the built-in device code caches at import time. "rocm" is a build
-# flavor, not a device type: on a HIP build the "cuda" device is served by
-# ROCmCodeCache. Doing this at module level (rather than inside
+# Note [Device code cache registration]
+# The built-in device code caches are wired here at import time. "rocm" is a
+# build flavor, not a device type: on a HIP build the "cuda" device is served
+# by ROCmCodeCache. Doing this at module level (rather than inside
 # codegen.common._init_builtin_backend_registration) means an out-of-tree
 # backend calling register_device_codecache() from its own registration hook
 # simply replaces these entries.

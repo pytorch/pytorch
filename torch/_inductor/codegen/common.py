@@ -689,9 +689,8 @@ def _init_builtin_backend_registration() -> None:
             CppWrapperGpu,
             WrapperFxCodegen,
         )
-        # NOTE: the built-in "cuda" code cache (ROCmCodeCache on a HIP build,
-        # CUDACodeCache otherwise) is registered at module level in
-        # codecache.py, not here - see the comment there for why.
+        # The built-in "cuda" code cache is registered at module level in
+        # codecache.py -- see Note [Device code cache registration].
 
     if get_scheduling_for_device("tpu") is None:
         register_backend_for_device(
@@ -710,8 +709,8 @@ def _init_builtin_backend_registration() -> None:
             CppWrapperGpu,
             WrapperFxCodegen,
         )
-        # NOTE: the built-in "xpu" code cache is registered at module level in
-        # codecache.py, not here - see the comment there for why.
+        # The built-in "xpu" code cache is registered at module level in
+        # codecache.py -- see Note [Device code cache registration].
 
     if get_scheduling_for_device("tpu") is None:
         tpu_backends = {
@@ -784,16 +783,13 @@ def init_backend_registration() -> None:
             cpp_wrapper_codegen = getattr(device_mod, "CppWrapperCodegen", None)
             fx_wrapper_codegen = getattr(device_mod, "WrapperFxCodegen", None)
             if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:
-                register_backend_for_device(
-                    private_backend,
-                    device_scheduling,
-                    wrapper_codegen,
-                    cpp_wrapper_codegen,
-                    fx_wrapper_codegen,
-                )
-                # Optionally register the device's code cache class, if the
-                # device module exposes one under the CodeCache attribute
-                # (see autoload.md). Not required: devices without such an
+                # Register the device's code cache class first, if the device
+                # module exposes one under the CodeCache attribute (see
+                # autoload.md): register_device_codecache validates the class
+                # against DeviceCodeCacheProtocol and raises TypeError for a
+                # non-conforming one *before* register_backend_for_device
+                # marks the device as registered, so the failure is loud on
+                # every init_backend_registration() call. Devices without the
                 # attribute keep whatever register_device_codecache calls
                 # their integration code already made, or none at all.
                 device_codecache = getattr(device_mod, "CodeCache", None)
@@ -801,6 +797,13 @@ def init_backend_registration() -> None:
                     from ..codecache import register_device_codecache
 
                     register_device_codecache(private_backend, device_codecache)
+                register_backend_for_device(
+                    private_backend,
+                    device_scheduling,
+                    wrapper_codegen,
+                    cpp_wrapper_codegen,
+                    fx_wrapper_codegen,
+                )
 
 
 def index_prevent_reordering(

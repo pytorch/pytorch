@@ -36,6 +36,9 @@ class DeviceBackendInitTest(TestCase):
         self._orig_codegen = dict(common.device_codegens)
         self._orig_custom_passes = dict(common.custom_backend_passes)
         self._orig_custom_configs = dict(common.custom_backend_codegen_configs)
+        from torch._inductor.codecache import _DEVICE_CODECACHE_REGISTRY
+
+        self._orig_codecache = dict(_DEVICE_CODECACHE_REGISTRY)
         common._privateuse1_backend_init_in_progress = False
 
     def tearDown(self) -> None:
@@ -48,6 +51,10 @@ class DeviceBackendInitTest(TestCase):
         ]:
             for device in [d for d in registry if d not in orig]:
                 del registry[device]
+        from torch._inductor.codecache import _DEVICE_CODECACHE_REGISTRY
+
+        for device in [d for d in _DEVICE_CODECACHE_REGISTRY if d not in self._orig_codecache]:
+            del _DEVICE_CODECACHE_REGISTRY[device]
         if hasattr(torch, self.device):
             delattr(torch, self.device)
         sys.modules.pop(f"torch.{self.device}", None)
@@ -384,6 +391,84 @@ class DeviceBackendInitTest(TestCase):
         torch._inductor.aot_compile(exported.module(), (x,))
         self.assertEqual(calls["n"], 1)
         self.assertIsNotNone(get_scheduling_for_device(self.device))
+
+    # ------------------------------------------------------------------
+    # CodeCache attribute path
+    # ------------------------------------------------------------------
+
+    def test_codecache_attribute_registers_code_cache(self) -> None:
+        # A device module exposing Scheduling/PythonWrapperCodegen/
+        # CppWrapperCodegen plus a CodeCache attribute gets that class
+        # registered in the device code-cache registry under the device's
+        # own name.
+        from torch._inductor.codecache import get_device_codecache
+
+        class LegacyScheduling:
+            pass
+
+        class LegacyWrapper:
+            pass
+
+        class LegacyCppWrapper:
+            pass
+
+        MyCodeCache = type(
+            "MyCodeCache",
+            (),
+            {
+                "aot_kernels_o": [],
+                "write": classmethod(lambda cls, s, e: ("key", "path")),
+                "compile": classmethod(
+                    lambda cls, s, e, extra_args=None: ("dst", "key", "path")
+                ),
+                "load": classmethod(lambda cls, s, e: ("dll", "key", "path")),
+                "cache_clear": classmethod(lambda cls: None),
+            },
+        )
+        self._install_device_module(
+            Scheduling=LegacyScheduling,
+            PythonWrapperCodegen=LegacyWrapper,
+            CppWrapperCodegen=LegacyCppWrapper,
+            CodeCache=MyCodeCache,
+        )
+        init_backend_registration()
+        self.assertIs(get_device_codecache(self.device), MyCodeCache)
+
+    def test_codecache_attribute_rejects_nonconforming_class(self) -> None:
+        # A non-conforming CodeCache attribute raises TypeError from
+        # register_device_codecache *before* register_backend_for_device
+        # marks the device as registered, so the failure is loud and repeats
+        # on every init_backend_registration() call (the device stays out of
+        # the codegen registries).
+        class LegacyScheduling:
+            pass
+
+        class LegacyWrapper:
+            pass
+
+        class LegacyCppWrapper:
+            pass
+
+        class NotACodeCache:
+            pass  # missing write/compile/load/cache_clear/aot_kernels_o
+
+        self._install_device_module(
+            Scheduling=LegacyScheduling,
+            PythonWrapperCodegen=LegacyWrapper,
+            CppWrapperCodegen=LegacyCppWrapper,
+            CodeCache=NotACodeCache,
+        )
+        for _ in range(2):
+            with self.assertRaisesRegex(
+                TypeError, "does not satisfy DeviceCodeCacheProtocol"
+            ):
+                init_backend_registration()
+            # the failed registration left the device unregistered
+            self.assertIsNone(get_scheduling_for_device(self.device))
+            # and left no code-cache entry behind
+            from torch._inductor.codecache import _lookup_device_codecache
+
+            self.assertIsNone(_lookup_device_codecache(self.device))
 
 
 if __name__ == "__main__":

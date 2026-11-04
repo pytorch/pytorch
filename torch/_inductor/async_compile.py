@@ -37,7 +37,6 @@ from torch._inductor.codecache import (
     get_device_codecache,
     HalideCodeCache,
     LambdaFuture,
-    ROCmCodeCache,
     StaticAutotunerFuture,
     torch_key,
 )
@@ -766,22 +765,25 @@ class AsyncCompile:
         aot_compile=False,
     ):
         kernel_code_log.info("ROCm Kernel:\n%s", source_code)
-        # Deliberately NOT routed through get_device_codecache("cuda"): other
-        # ROCm sites (rocm_benchmark_request, rocm_cpp_scheduling) also use
-        # ROCmCodeCache directly, so an out-of-tree "cuda" override must not
-        # reach this entry point either. On a HIP build codegen emits
-        # async_compile.cuda(...), which does use the registry.
-        rocm_codecache = ROCmCodeCache
+        # Route through the registry like cuda()/xpu() do: on a HIP build the
+        # "cuda" entry resolves to ROCmCodeCache, so a custom CodeCache
+        # registered for "cuda" applies uniformly here, in the other ROCm
+        # sites (rocm_benchmark_request, rocm_cpp_scheduling), and in the
+        # AOTI link step (which reads aot_kernels_o from the registry
+        # class) -- an override can no longer make the link step miss the
+        # .o files this entry point appended.
+        cache_cls = get_device_codecache("cuda")
+        generate_test_runner = config.rocm.generate_test_runner
 
         def task():
             if aot_compile:
-                output_path, *_ = rocm_codecache.compile(
-                    source_code, dst_file_ext="o"
-                )
-                rocm_codecache.aot_kernels_o.append(output_path)
-            if config.rocm.generate_test_runner:
-                _ = rocm_codecache.compile(source_code, dst_file_ext="exe")
-            return rocm_codecache.load(source_code, dst_file_ext)[0]
+                # We rely on JITInductor to compile the CUDA code,
+                # so that we can load it into AOTInductor.
+                output_path, *_ = cache_cls.compile(source_code, dst_file_ext="o")
+                cache_cls.aot_kernels_o.append(output_path)
+            if generate_test_runner:
+                _ = cache_cls.compile(source_code, dst_file_ext="exe")
+            return cache_cls.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
 
