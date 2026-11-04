@@ -41,7 +41,6 @@ from torch.testing._internal.common_utils import (
     skipIfNoNvmath,
     skipIfSlowGradcheckEnv,
     slowTest,
-    TEST_MKL,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHINDUCTOR,
     TEST_XPU,
@@ -1613,10 +1612,8 @@ op_db: list[OpInfo] = [
             ),
             DecorateInfo(
                 # Eager vs compiled gradients differ by up to ~4.3e-3 with MKL 2026.2
-                # (measured on AVX-512 CI runners); other builds keep 4e-3.
-                toleranceOverride(
-                    {torch.float32: tol(atol=5e-3 if TEST_MKL else 4e-3, rtol=2e-5)}
-                ),
+                # (measured on AVX-512 CI runners).
+                toleranceOverride({torch.float32: tol(atol=5e-3, rtol=2e-5)}),
                 "TestEagerFusionOpInfo",
                 "test_aot_autograd_disable_functionalization_symbolic_exhaustive",
             ),

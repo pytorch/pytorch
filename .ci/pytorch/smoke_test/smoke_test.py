@@ -752,13 +752,13 @@ def test_linalg_svd_dlasd2() -> None:
         except torch.linalg.LinAlgError as e:
             raise RuntimeError(
                 "torch.linalg.svd failed on a well-conditioned matrix with MKL "
-                f"{mkl_version}, which should have the LAPACK DLASD2 fix (2026.2): "
+                f"{mkl_version[0]}.{mkl_version[1]}, which should have the DLASD2 fix: "
                 f"the bug is still there or has come back. {e}"
             ) from e
     finally:
         torch.set_num_threads(num_threads)
     recon_err = (A - U @ torch.diag(S).to(U.dtype) @ Vh).abs().max().item()
-    if recon_err > 1e-9:
+    if not math.isfinite(recon_err) or recon_err > 1e-9:
         raise AssertionError(f"SVD reconstruction error too large: {recon_err}")
 
 
