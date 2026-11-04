@@ -475,10 +475,10 @@ run() { python -m tools.testing.llm_td.eval.run_eval --data $DATA --tag $1 --mod
 run v3_opus55_low $OPUS low; run v3_opus55_medium $OPUS medium; run v3_opus55_high $OPUS high
 run v3_sonnet5_medium $SONNET medium; run v3_sonnet5_high $SONNET high; run v3_haiku45_low $HAIKU low
 run v3_opus55_medium_r2 $OPUS medium $IDS/eval.txt; run v3_opus55_low_r2 $OPUS low $IDS/eval.txt
-run v3_sonnet5_medium_agentic $SONNET medium $IDS/agentic.txt --agentic
+LLM_TD_AGENTIC_SANDBOX=1 run v3_sonnet5_medium_agentic $SONNET medium $IDS/agentic.txt --agentic
 ```
 
-`--agentic` gives the model Read, Grep and Glob with no path limits on untrusted PR text: run that line only in a sandbox with no credentials.
+`--agentic` gives the model Read, Grep and Glob with no path limits on untrusted PR text, so run_eval refuses it without `LLM_TD_AGENTIC_SANDBOX=1`: set that only in a sandbox whose only secret is the model credential.
 
 The order matters for the recorded $/call: runs that share a prompt prefix with an earlier run read it from cache (see Dollar model).
 
