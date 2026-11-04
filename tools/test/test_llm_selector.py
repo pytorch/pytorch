@@ -155,8 +155,20 @@ class TestSelection(unittest.TestCase):
         globs = tuple(b.strip("*") for b in branches if b.startswith("*"))
         self.assertEqual(globs, selection.TEST_SH_GLOBS)
         self.assertFalse([b for b in branches if not b.startswith("*") and "inductor" in b])  # fmt: skip
-        funcs = {"test_inductor_shard": "inductor", "test_inductor_cpp_wrapper_shard": "inductor_cpp_wrapper"}  # fmt: skip
-        runs = {funcs.get(f, f): tests for f, tests in inductor_includes(sh).items()}  # fmt: skip
+        # Each function that runs files with --inductor is called by exactly one branch of the chain, on a glob.
+        includes = inductor_includes(sh)
+        callers: dict[str, set[str]] = {f: set() for f in includes}
+        head = ""
+        for line in lines[start : lines.index("fi", start)]:
+            if re.match(r"(el)?if |else$", line):
+                head = line
+            callers.update((f, callers[f] | {head}) for f in includes if re.match(rf"\s+(\w+=\S+\s+)*{f}(\s|$)", line))  # fmt: skip
+        runs = {}
+        for f, tests in includes.items():
+            self.assertEqual(len(callers[f]), 1, f)
+            m = dispatch.match(next(iter(callers[f])))
+            self.assertTrue(m and m.group(1).startswith("*"), callers[f])
+            runs[m.group(1).strip("*")] = tests
         self.assertEqual(runs, selection.ALWAYS_COVERED)
         sel = Selection.from_model_output(answer(), CANDIDATES | {"test_torch"}, [])  # fmt: skip
         for config, covered in [("inductor_amx", True), ("inductor_avx2", True), ("inductor_cpp_wrapper", True), ("inductor_core", False), ("inductor_huggingface", False), ("default", False)]:  # fmt: skip
@@ -343,16 +355,21 @@ g () {
             sel = self.select_in_tree(sources, CANDIDATES, [changed])
             self.assertEqual((sel.run_all, sel.reason), (True, f"nothing found that reads {changed}"))  # fmt: skip
 
-    def test_endless_import_chain_runs_all(self) -> None:
-        calls: list[str] = []
+    def test_import_chain_hop_limit(self) -> None:
+        reason = "test modules import the change through too many hops"
+        for depth, run_all in [(selection.MAX_IMPORT_HOPS - 1, False), (selection.MAX_IMPORT_HOPS, True), (None, True)]:  # fmt: skip
+            calls: list[str] = []
 
-        def grep(pattern: str) -> list[str]:
-            calls.append(pattern)
-            return [f"test/m{len(calls)}.py"]
+            def grep(pattern: str) -> list[str]:
+                calls.append(pattern)
+                return [f"test/m{len(calls)}.py"] if depth is None or len(calls) <= depth else []  # fmt: skip
 
-        sel = Selection.from_model_output(answer(), CANDIDATES, ["test/test_nn.py"], grep)  # fmt: skip
-        self.assertEqual((sel.run_all, sel.error), (True, None))
-        self.assertEqual(len(calls), selection.MAX_IMPORT_HOPS)
+            sel = Selection.from_model_output(answer(), CANDIDATES, ["test/test_nn.py"], grep)  # fmt: skip
+            self.assertEqual((sel.run_all, sel.error), (run_all, None), depth)
+            self.assertEqual(sel.reason == reason, run_all, depth)
+            self.assertEqual(len(calls), min(selection.MAX_IMPORT_HOPS, (depth or selection.MAX_IMPORT_HOPS) + 1), depth)  # fmt: skip
+            if not run_all:
+                self.assertIn("test_nn", sel.files)
 
     def test_failure_list_edits_select_their_tests(self) -> None:
         sources = {
@@ -375,11 +392,14 @@ g () {
             ("test/dynamo_skips/TestNN_test_x", set(), {"dynamo_wrapped"}),
             ("test/dynamo_expected_failures/TestNN.test_x.y", set(), {"dynamo_wrapped"}),
             ("test/dynamo_skips/TestNN.x-TestNN.test_y", set(), {"dynamo_wrapped"}),
+            # dynamo_test_failures.py lists only the top of each directory.
+            ("test/dynamo_skips/sub/TestNN.test_x", set(), {"dynamo_wrapped"}),
+            ("test/compiled_autograd_skips/sub/TestNN.test_x", set(), {"dynamo_wrapped"}),
         ]:  # fmt: skip
             sel = self.select_in_tree(sources, CANDIDATES, [changed])
             self.assertFalse(sel.run_all, changed)
             self.assertEqual((sel.files, sel.sweeps), (files, sweeps), changed)
-        for changed in ("test/inductor_expected_failures/TestGone.test_x", "test/inductor_skips/TestGone.test_x", "test/inductor_skips/TestNN.test_x.y"):  # fmt: skip
+        for changed in ("test/inductor_expected_failures/TestGone.test_x", "test/inductor_skips/TestGone.test_x", "test/inductor_skips/TestNN.test_x.y", "test/inductor_skips/sub/TestNN.test_x"):  # fmt: skip
             sel = self.select_in_tree(sources, CANDIDATES, [changed])
             self.assertEqual((sel.run_all, sel.error), (True, None), changed)
         n = selection.MAX_FAILURE_LIST_CLASSES + 1
