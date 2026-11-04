@@ -6,7 +6,7 @@ import functools
 import logging
 from dataclasses import dataclass
 from typing import Any, Literal, NamedTuple, TYPE_CHECKING
-from typing_extensions import TypeVarTuple, Unpack
+from typing_extensions import TypeVarTuple
 
 import torch
 import torch.distributed as dist
@@ -258,6 +258,7 @@ class FSDPParamGroup:
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
+        # See Note [All-gather output fn] and Note [Reduce-scatter input fn]
         self._all_gather_output_fn: Callable = _default_all_gather_output_fn
         self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
         self._reduce_scatter_param_indices: list[int] = []
@@ -1410,8 +1411,8 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
     def jvp(
         ctx: Any,
         param_group_tangent: object,
-        *grad_inputs: Unpack[_GradInputs],
-    ) -> tuple[Unpack[_GradInputs]]:
+        *grad_inputs: *_GradInputs,
+    ) -> tuple[*_GradInputs]:
         # Drop the non-tensor param_group tangent. The output pre-backward hook
         # queues final post-backward after all primal/tangent paths finish.
         return grad_inputs

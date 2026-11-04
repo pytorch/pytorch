@@ -21,6 +21,7 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
+#include <c10/util/irange.h>
 #include <cmath>
 #include <limits>
 #include <type_traits>
@@ -130,14 +131,14 @@ void philox_distribution_kernel(
   const uint64_t* keys_ptr = key_flat.const_data_ptr<uint64_t>();
   constexpr int epc = elems_per_call<scalar_t>;
   int64_t chunks_per_key = (elems_per_key + epc - 1) / epc;
-  for (int64_t key_idx = 0; key_idx < num_keys; key_idx++) {
+  for (const auto key_idx : c10::irange(num_keys)) {
     uint64_t seed = keys_ptr[key_idx * 2];
     uint64_t offset = keys_ptr[key_idx * 2 + 1];
-    for (int64_t chunk = 0; chunk < chunks_per_key; chunk++) {
+    for (const auto chunk : c10::irange(chunks_per_key)) {
       auto sample = sample_func(seed, offset + static_cast<uint64_t>(chunk));
       int64_t base = key_idx * elems_per_key + chunk * epc;
       int64_t remaining = std::min(static_cast<int64_t>(epc), elems_per_key - chunk * epc);
-      for (int64_t j = 0; j < remaining; j++) {
+      for (const auto j : c10::irange(remaining)) {
         out_ptr[base + j] = param_func(sample[j]);
       }
     }
@@ -173,10 +174,10 @@ Tensor _philox_key_split_cpu(const Tensor& key, int64_t num_splits) {
   auto key_contig = key.contiguous();
   const uint64_t* input = key_contig.const_data_ptr<uint64_t>();
   uint64_t* out_ptr = output.data_ptr<uint64_t>();
-  for (int64_t key_idx = 0; key_idx < num_keys; key_idx++) {
+  for (const auto key_idx : c10::irange(num_keys)) {
     uint64_t seed = input[key_idx * 2];
     uint64_t offset = input[key_idx * 2 + 1];
-    for (int64_t split_idx = 0; split_idx < num_splits; split_idx++) {
+    for (const auto split_idx : c10::irange(num_splits)) {
       auto r = philox_4x32(seed, offset + static_cast<uint64_t>(split_idx));
       int64_t out = (split_idx * num_keys + key_idx) * 2;
       philox_derive_key(r, &out_ptr[out], &out_ptr[out + 1]);
@@ -203,7 +204,7 @@ static Tensor philox_key_fold_in_impl(const Tensor& key, uint64_t fold) {
   auto key_contig = key.contiguous();
   const uint64_t* input = key_contig.const_data_ptr<uint64_t>();
   uint64_t* out_ptr = output.data_ptr<uint64_t>();
-  for (int64_t idx = 0; idx < num_keys; idx++) {
+  for (const auto idx : c10::irange(num_keys)) {
     uint64_t seed = input[idx * 2];
     uint64_t offset = input[idx * 2 + 1];
     auto r = philox_4x32(seed, offset + fold);
