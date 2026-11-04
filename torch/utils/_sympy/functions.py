@@ -113,7 +113,12 @@ def is_integer_check_safe(expr: sympy.Basic) -> bool:
     expressions, so it is not safe to use for correctness-preserving
     canonicalization.
     """
-    return expr.func.__module__ == __name__ and expr.func.is_integer is True
+
+    return (
+        isinstance(expr, sympy.Integer)
+        or expr.func.__module__ == __name__
+        and expr.func.is_integer is True
+    )
 
 
 def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
@@ -594,8 +599,6 @@ class FloorToInt(sympy.Function):
         if number in (-sympy.oo, -int_oo):
             return -int_oo
         if is_integer_check_safe(number):
-            return number
-        if isinstance(number, sympy.Integer):
             return number
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))
