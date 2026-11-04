@@ -576,6 +576,8 @@ def reduce_ordered_col(
         out_shape = (B, C)
     else:
         return None
+    if len(out_dtypes) < nouts:
+        raise AssertionError(f"want {nouts} output dtypes, got {len(out_dtypes)}")
     # The last block's Int32 output index must not wrap past the outputs.
     last = B * C + WARP
     if C < WARP or last >= _INT32_LIMIT:
