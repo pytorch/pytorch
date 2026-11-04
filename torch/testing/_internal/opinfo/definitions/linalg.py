@@ -79,6 +79,36 @@ def sample_kwargs_vector_norm(t, **kwargs):
     return (((), dict(ord=o)) for o in ords())
 
 
+def sample_inputs_linalg_vector_norm(
+    op_info, device, dtype, requires_grad=False, **kwargs
+):
+    yield SampleInput(
+        torch.empty(0, 5, device=device, dtype=dtype, requires_grad=requires_grad),
+        dim=-1,
+    )
+
+
+def error_inputs_linalg_vector_norm(op_info, device, dtype, **kwargs):
+    yield ErrorInput(
+        SampleInput(
+            torch.empty(0, 5, device=device, dtype=dtype),
+            args=(float("inf"),),
+            kwargs=dict(dim=(-1, -2)),
+        ),
+        error_regex=r"linalg.vector_norm cannot compute the .* norm on the dimension -2",
+        error_type=RuntimeError,
+    )
+    yield ErrorInput(
+        SampleInput(
+            torch.empty(3, 0, device=device, dtype=dtype),
+            args=(float("inf"),),
+            kwargs=dict(dim=-3),
+        ),
+        error_regex=r"Dimension out of range",
+        error_type=IndexError,
+    )
+
+
 def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
     make_fullrank = make_fullrank_matrices_with_distinct_singular_values
     make_arg = partial(
@@ -2039,6 +2069,8 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         generate_args_kwargs=sample_kwargs_vector_norm,
+        sample_inputs_func=sample_inputs_linalg_vector_norm,
+        error_inputs_func=error_inputs_linalg_vector_norm,
         aten_name="linalg_vector_norm",
     ),
     OpInfo(

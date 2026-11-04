@@ -101,7 +101,7 @@ def diagonal(
 def _check_vector_norm_args(
     x: TensorLikeType, ord: float | int = 2, dim: DimsType | None = None
 ):
-    from torch.fx.experimental.symbolic_shapes import sym_or
+    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_or
 
     if not (ord < 0.0 or ord == float("inf")):
         return
@@ -116,17 +116,19 @@ def _check_vector_norm_args(
     )
 
     shape = x.shape
-    if dim is not None and not isinstance(dim, IntLike):
-        for d in dim:
-            d_wrapped = utils.canonicalize_dim(x.ndim, d)
-            # canonicalize_dim(0, d) wraps 0/-1 to 0 for a 0-d tensor,
-            # and shape[0] would then raise if unchecked.
-            torch._check(
-                sym_or(x.numel() != 0, d_wrapped < x.ndim and shape[d_wrapped] != 0),
-                lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
-                f"dimension {d} because this dimension is empty and the "
-                "operation does not have an identity",
-            )
+    if not statically_known_true(x.numel() != 0):
+        if dim is not None and not isinstance(dim, IntLike):
+            for d in dim:
+                d_wrapped = utils.canonicalize_dim(x.ndim, d)
+                torch._check(
+                    sym_or(
+                        x.numel() != 0,
+                        x.ndim > 0 and shape[d_wrapped] != 0,
+                    ),
+                    lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
+                    f"dimension {d} because this dimension is empty and the "
+                    "operation does not have an identity",
+                )
 
 
 @register_decomposition(torch._ops.ops.aten.linalg_vector_norm)
