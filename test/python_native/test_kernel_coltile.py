@@ -8,6 +8,7 @@ from unittest import mock
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     largeTensorTest,
 )
@@ -632,7 +633,7 @@ class TestOrderedColDevice(TestCase):
         self.assertEqual({k[4] for k in keys}, {x.get_device()})
 
     @parametrize(
-        "op,dtype,shape,split",
+        "op,in_dtype,shape,split",
         [
             ("sum", torch.float32, (2, 128, 33), False),
             ("sum", torch.float32, (8000, 32), False),
@@ -655,13 +656,13 @@ class TestOrderedColDevice(TestCase):
             ("var_mean", torch.bfloat16, (2, 100003, 32), True),
             ("sum", torch.float64, (32768, 32), True),
         ],
-        name_fn=lambda op, dtype, shape, split: "_".join(
-            [op, str(dtype)[6:], f"{len(shape)}d", str(shape[-2])] + ["split"] * split
+        name_fn=lambda op, dt, shape, split: "_".join(
+            [op, str(dt)[6:], f"{len(shape)}d", str(shape[-2])] + ["split"] * split
         ),
     )
-    def test_plan_matches_the_indexed_tree(self, device, op, dtype, shape, split):
+    def test_plan_matches_the_indexed_tree(self, device, op, in_dtype, shape, split):
         """Preserve each row's inner-tree DAG across plans, fields, ranks, and partials."""
-        x = torch.randn(shape, device=device).to(dtype)
+        x = torch.randn(shape, device=device).to(in_dtype)
         rows, columns = x.shape[-2:]
         batches = x.numel() // (rows * columns)
         kept = [(columns, 1)] + ([(batches, rows * columns)] if x.dim() == 3 else [])
@@ -672,7 +673,7 @@ class TestOrderedColDevice(TestCase):
             "var_mean": (T.VarMeanOps(correction=0), [torch.float32] * 2),
         }[op]
         nouts = len(outputs)
-        key = f"ordered_{op}_{dtype}_{shape}"
+        key = f"ordered_{op}_{in_dtype}_{shape}"
         got = ct.reduce_ordered_col(trait, key, x, outputs, nouts, allow_split=split)
         reference = kg._try_indexed_itree(
             trait,
@@ -806,9 +807,9 @@ class TestOrderedColDevice(TestCase):
         want, _ = self._reduce(device, trait, key, x, dim, outputs, route=False)
         self._assert_bitwise(got, want)
 
-    @parametrize("dtype", _DTYPES)
+    @dtypes(*_DTYPES)
     @parametrize("name", list(_ROUTED_TRAITS))
-    def test_routed_traits_match_the_indexed_tree(self, device, name, dtype):
+    def test_routed_traits_match_the_indexed_tree(self, device, dtype, name):
         """Every trait the gate admits stays bitwise equal to the indexed tree."""
         make, outputs, prepare = _ROUTED_TRAITS[name]
         # 32768 outputs clear the widest (three-field) gate threshold.
@@ -823,9 +824,11 @@ class TestOrderedColDevice(TestCase):
         self._assert_bitwise(got, want)
         self._assert_torch_refs(name, got, x)
 
-    @parametrize("dtype", _DTYPES)
+    # 16-bit rows plan 8 warps of vec 8 and fp32 rows 16 warps of vec 4, so their padding
+    # differs; fp16 pads like bf16.
+    @dtypes(torch.float32, torch.bfloat16)
     @parametrize("name", list(_ROUTED_TRAITS))
-    def test_routed_traits_with_padded_warps(self, device, name, dtype):
+    def test_routed_traits_with_padded_warps(self, device, dtype, name):
         """Padded warps and masked leaves keep every trait bitwise equal."""
         make, outputs, prepare = _ROUTED_TRAITS[name]
         rows, columns = 3000, 64
