@@ -2981,7 +2981,7 @@ Call this whenever a new thread is created in order to propagate values from
           py::arg("wrapper"))
       .def_readwrite("allow_meta", &c10::FakeTensorMode::allow_meta_)
       .def_readwrite(
-          "allow_unsafe_data_ptr_access",
+          "_allow_unsafe_data_ptr_access",
           &c10::FakeTensorMode::allow_unsafe_data_ptr_access_);
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
