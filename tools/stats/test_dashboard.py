@@ -161,6 +161,6 @@ def upload_additional_info(workflow_run_id: int, workflow_run_attempt: int) -> N
         upload_workflow_stats_to_s3(
             workflow_run_id,
             workflow_run_attempt,
-            "additional_info/llm_selector_exclusions",
+            "additional_info/llm_selection_exclusions",
             [exclusions[LLM_SELECTION_SOURCE]],
         )

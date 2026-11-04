@@ -353,7 +353,7 @@ class CallSplit:
         self, test: TestRun, selected_tests: list[str], test_stats: dict[str, Any]
     ) -> list[tuple[str, dict[str, Any]]]:
         """The (name, payload) metrics run_test.py emits in CI for a failed
-        `test`: td_test_failure_stats_v2 and, with a selection, llm_selector_failure."""
+        `test`: td_test_failure_stats_v2 and, with a selection, llm_selection_failure."""
         stats = {
             "selected_tests": selected_tests,
             "failure": str(test),
@@ -362,7 +362,7 @@ class CallSplit:
         }
         metrics = [("td_test_failure_stats_v2", stats)]
         if (llm := self.llm) is not None:
-            metrics += _llm_metric("llm_selector_failure", lambda: llm.failure_metric(test))  # fmt: skip
+            metrics += _llm_metric("llm_selection_failure", lambda: llm.failure_metric(test))  # fmt: skip
         return metrics
 
 
