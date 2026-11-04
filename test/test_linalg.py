@@ -572,6 +572,19 @@ class TestLinalg(TestCase):
             b = torch.rand(1, 3, 1, 3, m, dtype=dtype, device=device)
             check_correctness(a, b.unsqueeze(-1))
 
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_linalg_lstsq_broadcast_rank_deficient(self, device, dtype):
+        # The batched GPU path writes one info per broadcast batch element, so
+        # a rank-deficient a[1] is reported at broadcast element 8, which must
+        # be inside infos. CPU reports the input batch index instead.
+        a = torch.randn(2, 1, 4, 4, dtype=dtype, device=device)
+        a[1, 0, :, 3] = 0
+        b = torch.randn(2, 8, 4, 4, dtype=dtype, device=device)
+        with self.assertRaisesRegex(torch.linalg.LinAlgError, "full rank"):
+            torch.linalg.lstsq(a, b, driver="gels")
+
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
