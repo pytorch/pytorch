@@ -232,12 +232,12 @@ def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
         n = min(d + dt.timedelta(days=2), end)
         rows += query(f"""
             WITH f AS (
-              SELECT job_id, replaceRegexpOne(file, '\\.py$', '') tf, classname, name, min(time_inserted) t
+              SELECT job_id, replaceRegexpOne(file, '\\\\.py$', '') tf, classname, name, min(time_inserted) t
               FROM tests.all_test_runs
               WHERE time_inserted >= '{d}' AND time_inserted < '{n}' AND (failure_count > 0 OR error_count > 0)
               GROUP BY job_id, tf, classname, name)
             , passed AS (
-              SELECT DISTINCT job_id, replaceRegexpOne(file, '\\.py$', '') tf, classname, name FROM tests.all_test_runs
+              SELECT DISTINCT job_id, replaceRegexpOne(file, '\\\\.py$', '') tf, classname, name FROM tests.all_test_runs
               WHERE time_inserted >= toDate('{d}') - 1 AND time_inserted < toDate('{n}') + 1 AND job_id IN (SELECT job_id FROM f)
                 AND failure_count = 0 AND error_count = 0 AND skipped_count = 0)
             , j AS (
@@ -362,6 +362,8 @@ class History:
     end: dt.date
     # PR head sha -> its failures, each with its "pr".
     heads: dict[str, list[dict]]
+    # (PR head sha, test) -> the head's failures of that test.
+    head_fails: dict[tuple[str, Key], list[dict]]
     # Every failure of a test: time, author ("main" for main and branches with no known PR), sha, PR, flaky.
     seen: dict[Key, list[tuple[dt.datetime, str, str, int | None, bool]]]
     main: dict[Key, list[dt.datetime]]
@@ -376,7 +378,8 @@ class History:
         rows = pull_failures(start - LOOKBACK, end + WINDOW)
         sha2pr = pr_of_shas(sorted({r["sha"] for r in rows if not is_main(r["br"])}))
         author = pr_authors(sorted(set(sha2pr.values())))
-        seen, main, heads = (
+        seen, main, heads, head_fails = (
+            collections.defaultdict(list),
             collections.defaultdict(list),
             collections.defaultdict(list),
             collections.defaultdict(list),
@@ -391,7 +394,8 @@ class History:
                 main[key(r)].append(ts(r["t"]))
             elif pr is not None:
                 heads[r["sha"]].append({**r, "pr": pr})
-        return cls(start, end, dict(heads), seen, main, author, landed_times(start - LOOKBACK), disabled_tests(start - LOOKBACK, end + WINDOW))  # fmt: skip
+                head_fails[r["sha"], key(r)].append(heads[r["sha"]][-1])
+        return cls(start, end, dict(heads), dict(head_fails), seen, main, author, landed_times(start - LOOKBACK), disabled_tests(start - LOOKBACK, end + WINDOW))  # fmt: skip
 
     def load_green(self, shas: set[str]) -> None:
         todo = sorted(shas - self.green.keys())
@@ -438,7 +442,7 @@ class History:
         """The stacked rule: whether another PR's head below `merge_base` failed `r`'s test in a way that counts (see the module docstring)."""
         t, me, k = ts(r["t"]), self.author.get(r["pr"], str(r["pr"])), key(r)
         others = sorted({sha for _, _, sha, pr, _ in self.seen.get(k, []) if pr not in (None, r["pr"])})  # fmt: skip
-        for o in (o for sha in others for o in self.heads[sha] if key(o) == k):
+        for o in (o for sha in others for o in self.head_fails[sha, k]):
             mine = self.author.get(o["pr"], str(o["pr"])) == me
             near = t < self.landed.get(o["pr"], NEVER) if mine else abs(ts(o["t"]) - t) < WINDOW  # fmt: skip
             if near and not o["flaky"] and self.job_dropped(o) is None and below(o["sha"], merge_base):  # fmt: skip
@@ -721,6 +725,8 @@ def pr_samples(h: History, out: Path, jobs: int) -> None:
         if kept:
             truth_jobs = by_file(kept)
             strong = {r["tf"] for r in kept if (pr, *key(r)) in reproduced}
+            if (out / f"pr_{pr}.json").exists():
+                return
             try:
                 title, body = pr_text(pr)
                 if write_sample(out, f"pr_{pr}", "pr", sha, title=title, body=body, **bases, pr=pr, date=first[pr]["t"][:19], truth=sorted(truth_jobs),
@@ -835,10 +841,11 @@ def revert_truth_jobs(
             AND repository_full_name = 'pytorch/pytorch' AND (head_branch = 'main' OR head_branch LIKE 'trunk/%')
             AND head_sha IN ({shas})
             AND run_id IN (SELECT id FROM default.workflow_run WHERE head_repository.full_name = 'pytorch/pytorch'
-                           AND created_at >= toDateTime('{t0}') - INTERVAL 1 HOUR)
+                           AND created_at >= toDateTime('{t0}') - INTERVAL 1 HOUR
+                           AND created_at <= parseDateTimeBestEffort('{reverted}') + INTERVAL 1 HOUR)
             AND {" AND ".join(f"name NOT LIKE '%{s}%'" for s in SKIP_JOBS)})
         SELECT DISTINCT tf, classname, test, sha, wf, job FROM (
-          SELECT t.job_id, replaceRegexpOne(file, '\\.py$', '') tf, classname, t.name test, j.head_sha sha, j.workflow_name wf, j.name job
+          SELECT t.job_id, replaceRegexpOne(file, '\\\\.py$', '') tf, classname, t.name test, j.head_sha sha, j.workflow_name wf, j.name job
           FROM tests.all_test_runs t JOIN j ON j.id = t.job_id
           WHERE t.job_id IN (SELECT id FROM j) AND (file, t.name) IN ({tests})
             AND time_inserted >= toDateTime('{t0}') AND time_inserted <= parseDateTimeBestEffort('{reverted}') + INTERVAL 2 HOUR

@@ -22,7 +22,7 @@ from unittest import mock
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Callable, Iterator, Mapping
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -77,8 +77,8 @@ SAMPLE = {
 NOTHING = {"out": {"tests": []}}
 
 
-def pick(name: str, r: dict | None, td: dict | None, s: dict = SAMPLE) -> Choice:
-    choice = policy(name, s, r, td, SECONDS)
+def pick(name: str, r: dict | None, td: dict | None, s: dict = SAMPLE, grep: Callable[[str], list[str]] | None = None) -> Choice:  # fmt: skip
+    choice = policy(name, s, r, td, SECONDS, grep)
     if choice is None:
         raise AssertionError(f"{name} chose nothing")
     return choice
@@ -329,6 +329,24 @@ class TestRunEval(unittest.TestCase):
                         self.assertFalse(refused)
                 # Only the unfinished b is run, and only when a's result is accepted.
                 self.assertEqual(query.call_count, 0 if refused else 1)
+
+    def test_main_skips_a_prompt_git_cannot_build(self) -> None:
+        from tools.testing.llm_td.eval import run_eval
+
+        # The diff adds a candidate, which sample_prompt looks up at a main_base this clone lacks.
+        sample = {"id": "a", "sha": "f" * 40, "title": "t", "body": None, "diffstat": "", "diff": "diff --git a/test/test_new.py b/test/test_new.py\nnew file mode 100644\n", "candidates": ["test_new"], "changed_files": ["test/test_new.py"], "main_base": "0" * 40}  # fmt: skip
+        result = {"model": "m", "effort": "medium", "agentic": False, "prompt_sha": "x"}
+        with tempfile.TemporaryDirectory() as d:
+            data = write_data(d, {"samples/a.json": sample, "test-times.json": {}, "results/t/a.json": result})  # fmt: skip
+            (data / "ids.txt").write_text("a")
+            argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt")]  # fmt: skip
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch("sys.stdout", io.StringIO()) as out,
+                mock.patch.object(run_eval, "query_model") as query,
+            ):
+                run_eval.main()
+        self.assertEqual((out.getvalue(), query.call_count), ("t: 0 without a result\n", 0))  # fmt: skip
 
     def test_main_tops_up_agentic_results(self) -> None:
         from tools.testing.llm_td.eval import run_eval
@@ -854,6 +872,15 @@ class TestScore(unittest.TestCase):
         infra = {**SAMPLE, "changed_files": ["test/run_test.py"]}
         self.assertTrue(pick("final+td45", {"out": None}, td, infra).sel.run_all)
 
+    def test_policy_passes_deleted(self) -> None:
+        # A deleted data file under test/ needs no reader, as select_tests passes it.
+        s = {**SAMPLE, "changed_files": ["test/data/gone.json"], "deleted": ["test/data/gone.json"]}  # fmt: skip
+        td = {"scored": [], "top25": [], "top25_cfg": {"default": [], "slow": []}}
+        out = {"out": {"tests": [{"file": "test_a", "confidence": "low"}]}}
+        for name in ("final", "final-hm", "final+td45"):
+            self.assertFalse(pick(name, out, td, s, lambda p: []).sel.run_all, name)
+            self.assertTrue(pick(name, out, td, {**s, "deleted": []}, lambda p: []).sel.run_all, name)  # fmt: skip
+
     def test_final_hm_malformed(self) -> None:
         # Malformed answers run everything, as under final.
         tests = ["test_a", {"file": "test_c", "confidence": "low"}, {"file": "test_b", "confidence": "high"}]  # fmt: skip
@@ -987,6 +1014,27 @@ class TestScore(unittest.TestCase):
                 rows = score.score(data, ["a"], ["m", "td"], ["model"], True, *dirs, "")
         self.assertEqual((rows, err.getvalue()), ([], msg))
         has_head.assert_called_once_with("abc")
+
+    def test_score_drops_a_sample_without_main_base(self) -> None:
+        # The diff adds a candidate, which sample_prompt looks up at main_base.
+        diff = "diff --git a/test/test_e.py b/test/test_e.py\nnew file mode 100644\n"
+        sample = {**SAMPLE, "diff": diff, "changed_files": ["test/test_e.py"], "main_base": "0" * 40}  # fmt: skip
+        td = {"scored": [], "top25": [], "top25_cfg": {}}
+        result = {"out": {"tests": []}, "error": None, "cost_usd": 0.1, "prompt_sha": "x"}  # fmt: skip
+        files = {
+            "test-times.json": {}, "samples/a.json": SAMPLE, "samples/b.json": sample,
+            "td/a.json": td, "td/b.json": td, "results/m/a.json": {**result, "prompt_sha": score.prompt_sha(score.sample_prompt(SAMPLE, {}))}, "results/m/b.json": result,
+        }  # fmt: skip
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
+        ):
+            data = write_data(d, files)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rows = score.score(data, ["a", "b"], ["m", "td"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
+        self.assertEqual({x["id"] for x in rows}, {"a"})
+        self.assertEqual(err.getvalue(), "dropped 1 of 2 ids with no main_base (default base) in this clone\n")  # fmt: skip
 
     def test_grep_head_copies(self) -> None:
         cached = functools.cache(lambda pattern, sha: ["test/test_a.py"])
@@ -1192,6 +1240,26 @@ class TestScore(unittest.TestCase):
         self.assertEqual(len(set(digests)), 5)
         self.assertEqual(digests[2], digests[3])
         self.assertIn(Path(score.__file__).with_name("td_replay.py"), score.REPLAY_CODE)
+
+    def test_td_replay_cuts_as_ci(self) -> None:
+        # td_replay hard-codes split_tests' cut with TD on; replay_stats hashes td_replay but not test_selections.
+        from tools.testing import test_selections
+
+        class Scores:
+            def amend_tests(self, files: list[str]) -> None:
+                pass
+
+            def get_top_per_tests(self, percent: int) -> tuple[list, list]:
+                cuts.append(percent)
+                return [], []
+
+        cuts: list[int] = []
+        top25_per_config(Scores(), {"default": set()})  # type: ignore[arg-type]
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stderr(io.StringIO()):  # fmt: skip
+            test_selections.split_tests(Scores(), {}, selection_file=Path(d) / "none.json", test_config="default", td_enabled=True, previous_failures=None, record=False)  # type: ignore[arg-type]  # fmt: skip
+        self.assertEqual(cuts, [25, 25])
+        replay = Path(td_replay.__file__).read_text()
+        self.assertEqual(replay.count("get_top_per_tests(25)"), 2)
 
     def test_td_replay_main(self) -> None:
         from tools.testing.target_determination import heuristics
@@ -1442,6 +1510,9 @@ class TestChart(unittest.TestCase):
             (n,) = re.findall(rf">{name} \(n=(\d+)\)<", svg)
             self.assertIn(f"| {name} (n={n}) |", report)
         self.assertNotIn("Matplotlib v", svg)
+
+    def test_production_hedge(self) -> None:
+        self.assertAlmostEqual(chart.HEDGES[chart.PRODUCTION[1]], 100 * selection.LLM_TD_HEDGE)  # fmt: skip
 
     def test_panels(self) -> None:
         base = {"files": 1, "run_all": False, "gpu": 0.0, "cost_usd": 0.1, "error": False}  # fmt: skip
@@ -1714,8 +1785,11 @@ class TestDollars(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "cannot fit 4 prices to 16 results of rank 3"):  # fmt: skip
             self.cold(no_writes, {})
         few = {f"g{i}": [100 * (i + 1), 1000 * (i % 3), 500 * (i % 5), 10 * (i % 7) + 5] for i in range(15)}  # fmt: skip
-        with self.assertRaisesRegex(SystemExit, "cannot fit 4 prices to 15 results of rank 4"):  # fmt: skip
+        with self.assertRaisesRegex(SystemExit, "cannot fit 4 prices to 15 results$"):
             self.cold(few, {})
+        retried = {"r": {"cost_usd": 1.0, "error": None, "usage": dict.fromkeys(dollars.USAGE, 1), "attempts": 2}}  # fmt: skip
+        with self.assertRaisesRegex(SystemExit, "cannot fit 4 prices to 0 results$"):
+            self.cold({}, retried)
 
     def test_report_spend_matches_workflows(self) -> None:
         report = (REPO_ROOT / "tools/testing/llm_td/REPORT.md").read_text()
@@ -1732,9 +1806,11 @@ class TestLandTime(unittest.TestCase):
         runs = [{"id": i, "name": "pull", "event": "pull_request", "head_branch": "b", "head_sha": f"s{i}", "created": c, "run_attempt": 1, "conclusion": "success"} for i in (1, 2, 3)]  # fmt: skip
         runs.append({**runs[0], "id": 4, "name": "trunk", "event": "push", "head_branch": "ciflow/trunk/7"})  # fmt: skip
         runs += [{**runs[0], "id": 5}, {**runs[3], "id": 6}]
+        # smoke_b200 is TD-off through force-no-td, not by name.
+        b200 = [c + 1800, 1000, "smoke_b200", True, 1200, 60, "nv-l-arm64grace-16-200-gb300"]  # fmt: skip
         # (end, Test step seconds, config, GPU, job seconds, queue seconds, labels): a CPU and a TD-off job.
         tests = [[c + 3600, 3000, "default", False, 3500, 60, "l"], [c + 1800, 1000, "docs_test", False, 1200, 60, "l"]]  # fmt: skip
-        job = {"ncancel": 0, "nfail": 0, "last_build": c + 300, "last_other": 0}
+        job = {"ncancel": 0, "last_build": c + 300, "last_other": 0}
         # run_test.py runs every test in dynamo_cpython and on macOS, so those jobs do not shrink.
         cpython, mac = [[c + 3600, 3000, "dynamo_cpython", False, 3500, 60, "l"]], [[c + 3600, 3000, "default", False, 3500, 60, "macos-m1-14"]]  # fmt: skip
         files = {
@@ -1754,7 +1830,7 @@ class TestLandTime(unittest.TestCase):
             ]
             + [{**job, "run_id": 5, "tests": cpython}],  # fmt: skip
             "runs_trunk.json": [
-                {**job, "run_id": 4, "tests": json.loads(json.dumps(tests))},
+                {**job, "run_id": 4, "tests": [*json.loads(json.dumps(tests)), b200]},
                 {**job, "run_id": 6, "tests": mac},
             ],  # fmt: skip
             "runs_inductor.json": [],
@@ -1764,10 +1840,125 @@ class TestLandTime(unittest.TestCase):
         keep = land_time.fork_runs(cache, runs)
         # Run 3's head repository is unknown, so it is a fork PR's too.
         self.assertEqual(keep, {2, 3})
-        out = land_time.replay(cache, {"cpu": 0.5, "gpu": 1.0, "ind_cpu": 1.0, "ind_gpu": 1.0}, keep)  # fmt: skip
+        out = land_time.replay(cache, {"cpu": 0.5, "gpu": 0.8, "ind_cpu": 1.0, "ind_gpu": 1.0}, keep)  # fmt: skip
         self.assertEqual([(x["old"], x["new"]) for x in out["pull"]], [(60, 35), (60, 60), (60, 60), (60, 60)])  # fmt: skip
         self.assertEqual([(x["old"], x["new"]) for x in out["trunk"]], [(60, 35), (60, 60)])  # fmt: skip
+        # The TD-off jobs end before the shrunk one does, so check their ratios.
+        self.assertEqual([t[-1] for t in out["pull"][0]["tests"]], [0.5, 1.0])
+        self.assertEqual([t[-1] for t in out["trunk"][0]["tests"]], [0.5, 1.0, 1.0])
         self.assertAlmostEqual(land_time.pct([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 90), 9.1)
+
+    def test_rules_match_workflows(self) -> None:
+        jobs = ci_jobs()
+        td_configs = {c for w, _, c in jobs[True] | jobs[False] if w in ("pull", "trunk")}  # fmt: skip
+        self.assertLessEqual(land_time.NO_RUN_TEST, td_configs)
+        self.assertIn("smoke_b200", land_time.no_td_configs())
+        inductor = {(n, c) for w, n, c in jobs[False] if w == "inductor"}
+        self.assertTrue(inductor)
+        for n, c in inductor:
+            self.assertEqual(bool(land_time.BENCH.search(c)), not n.startswith("unit-test / "), (n, c))  # fmt: skip
+        report = (REPO_ROOT / "tools/testing/llm_td/REPORT.md").read_text()
+        self.assertIn(f"match(l, '{land_time.GPU_LABEL}')", report)
+        self.assertIn(f"'{land_time.BENCH.pattern}') bench", report)
+
+    def test_ratios_and_wait(self) -> None:
+        dollars_json = {"fractions": {"cpu": 0.3, "gpu": 0.3, "ind_cpu": 0.5, "ind_gpu": 0.4}, "td_fractions": {"cpu": 0.6, "gpu": 0.4, "ind_cpu": 1.0, "ind_gpu": 1.0}}  # fmt: skip
+        self.assertEqual(land_time.ratios(dollars_json), {"cpu": 0.5, "gpu": 0.75, "ind_cpu": 0.5, "ind_gpu": 0.4})  # fmt: skip
+        head = [{"c": 60, "end_old": 600, "end_new": 300}, {"c": 0, "end_old": 1200, "end_new": 240}]  # fmt: skip
+        self.assertEqual(land_time.wait([head], "end_old"), [20.0])
+        self.assertEqual(land_time.wait([head], "end_new"), [5.0])
+
+    def test_report(self) -> None:
+        end = 100 * 86400
+        c0 = end - 86400
+        # id -> (workflow, sha, creation offset).
+        spec = {1: ("pull", "a", 0), 4: ("pull", "a", 5000), 5: ("pull", "b", 0), 8: ("pull", "d", 0), 13: ("pull", "e", 0), 14: ("pull", "f", 0),
+                2: ("trunk", "a", 300), 6: ("trunk", "b", 3600), 9: ("trunk", "d", 100), 15: ("trunk", "f", 50),
+                3: ("inductor", "a", 100), 10: ("inductor", "d", 5000), 16: ("inductor", "f", 400), 11: ("rocm-mi300", "a", 0), 12: ("rocm-mi300", "b", 0)}  # fmt: skip
+        runs = [{"id": i, "name": wf, "event": "pull_request" if wf == "pull" else "push", "head_branch": "b" if wf == "pull" else f"ciflow/{wf}/7", "head_sha": sha, "created": c0 + o, "run_attempt": 1, "conclusion": "success"} for i, (wf, sha, o) in spec.items()]  # fmt: skip
+
+        def job(i: int, tests: list[tuple[int, int, str, bool]], **kw: int) -> dict:
+            c = c0 + spec[i][2]
+            return {"run_id": i, "ncancel": 0, "last_build": c + 300, "last_other": 0, **kw, "tests": [[c + e, t, cfg, gpu, t + 500, 60, "g" if gpu else "l"] for e, t, cfg, gpu in tests]}  # fmt: skip
+
+        cpu = [(3600, 3000, "default", False)]  # 60 -> 35 min
+        gpu = [(7200, 6000, "default", True)]  # 120 -> 95 min
+        # The benchmark keeps r = 1 and bounds the run; the unit-test config shrinks by ind_cpu.
+        ind = [(9000, 6000, "inductor_huggingface", True), (6000, 3000, "inductor_core", False)]  # fmt: skip
+        files = {
+            "meta.json": {"end": end},
+            "wfruns.json": runs,
+            "fork.json": {"run_head_repo": {str(i): "pytorch/pytorch" for i, (wf, _, _) in spec.items() if wf == "pull"}, "pr_head_repo": {"7": "pytorch/pytorch"}},  # fmt: skip
+            # Run 13's cancelled job is in a second chunk of its rows.
+            "runs_pull.json": [job(i, cpu) for i in (1, 4, 5, 8, 13, 14)] + [job(13, [], ncancel=1)],  # fmt: skip
+            # Run 2's rows come in two chunks: its last non-test job (110 min) bounds its new TTS.
+            "runs_trunk.json": [job(2, gpu), job(2, [(3000, 1000, "default", False)], last_other=c0 + 300 + 6600)] + [job(i, gpu) for i in (6, 9, 15)],  # fmt: skip
+            "runs_inductor.json": [job(3, ind), job(10, ind), job(16, [(3000, 2000, "inductor_core", False)])],  # fmt: skip
+            "runs_rocm-mi300.json": [job(11, cpu), job(12, cpu)],
+            "merges.json": [
+                # Started trunk run 2 (saved 10 min) and run 9 (saved 25 min).
+                {"pr": 1, "f": 0, "i": 0, "cc": c0 + 300, "mt": c0 + 300 + 130 * 60, "pt": c0, "sha": "a"},
+                {"pr": 2, "f": 0, "i": 0, "cc": c0 + 300, "mt": c0 + 300 + 140 * 60, "pt": c0, "sha": "d"},
+                # Trunk ran before the comment.
+                {"pr": 3, "f": 0, "i": 0, "cc": c0 + 1300, "mt": c0 + 1300 + 3 * 60, "pt": c0, "sha": "a"},
+                {"pr": 4, "f": 0, "i": 0, "cc": c0 + 1300, "mt": c0 + 1300 + 10 * 60, "pt": c0, "sha": "d"},
+                # Trunk run 6 started 400 s after the comment: neither.
+                {"pr": 5, "f": 0, "i": 0, "cc": c0 + 3200, "mt": c0 + 3200 + 600, "pt": c0, "sha": "b"},
+                # Forced, ignore-current and merged-before-comment rows.
+                {"pr": 6, "f": 1, "i": 0, "cc": c0, "mt": c0 + 60, "pt": c0, "sha": "a"},
+                {"pr": 7, "f": 0, "i": 1, "cc": c0 + 300, "mt": c0 + 300 + 60, "pt": c0, "sha": "a"},
+                {"pr": 8, "f": 0, "i": 0, "cc": c0 + 600, "mt": c0 + 300, "pt": None, "sha": "a"},
+            ],
+        }  # fmt: skip
+        cache = write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), files)  # fmt: skip
+        r = {"fractions": {"cpu": 0.3, "gpu": 0.3, "ind_cpu": 0.5, "ind_gpu": 0.4}, "td_fractions": {"cpu": 0.6, "gpu": 0.4, "ind_cpu": 1.0, "ind_gpu": 1.0}}  # fmt: skip
+        out = land_time.report(cache, r, all_prs=False)
+        # fmt: off
+        for line in [
+            "| pull | 5 | 60 | 35 | 60 | 35 | 25 | 0.0% | 0.0% |",
+            "| trunk | 4 | 120 | 95 | 120 | 106 | 21 | 0.0% | 25.0% |",
+            "| inductor | 3 | 150 | 150 | 150 | 150 | 6 | 0.0% | 0.0% |",
+            # Heads a (first pull run, not run 4), d and f; b's trunk run is an hour later and e's pull run was cancelled.
+            "| pull and trunk | 3 | 122 | 124 | 122 | 97 | 111 | 102 |",
+            # Heads a and f; d's inductor run is 5000 s after its pull run.
+            "| pull, trunk and inductor | 2 | 136 | 149 | 136 | 124 | 146 | 124 |",
+            "Inductor ends last for 50% of the pull, trunk and inductor heads, 50% after.",
+            "Merges without -f (n=6): comment to merge p50 10 / p90 135 min; first PR pull run to merge p50 0.8 / p90 2.3 h.",
+            "Merge comment started trunk (n=2): comment to merge p50 135 / p90 139 min, new p50 118 / p90 120 min. Trunk ran before the comment (n=2): p50 6 / p90 9 min.",
+        ]:
+            self.assertIn(line, out)
+        # fmt: on
+        files["runs_inductor.json"] = []
+        cache = write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), files)  # fmt: skip
+        with self.assertRaisesRegex(SystemExit, "^no included inductor runs in "):
+            land_time.report(cache, r, all_prs=False)
+
+    def test_fetch(self) -> None:
+        calls = []
+
+        def query(sql: str) -> list[dict]:
+            calls.append(sql)
+            if "default.pull_request" in sql or "head_repository.full_name repo" in sql:
+                return [{"k": "1", "repo": "pytorch/pytorch"}]
+            return [{"sql": len(calls)}]
+
+        cache = Path(self.enterContext(tempfile.TemporaryDirectory[str]())) / "c"
+        with mock.patch.object(clickhouse, "query", side_effect=query):
+            land_time.fetch(cache, 1000)
+        # The runs, ten 3-day job chunks per workflow, the two head-repository queries and the merges.
+        self.assertEqual(len(calls), 1 + 10 * len(land_time.WORKFLOWS) + 3)
+        pull = [c for c in calls if "workflow_name = 'pull'" in c]
+        self.assertEqual(len(pull), 10)
+        self.assertIn("INTERVAL 3 DAY AND created_at < toDateTime(1000) - INTERVAL 0 DAY", pull[0])  # fmt: skip
+        self.assertIn("INTERVAL 30 DAY AND created_at < toDateTime(1000) - INTERVAL 27 DAY", pull[-1])  # fmt: skip
+        self.assertIn("head_branch NOT LIKE 'release/%'", pull[0])
+        self.assertIn("head_branch LIKE 'ciflow/%'", calls[11])
+        self.assertEqual(len(json.loads((cache / "runs_pull.json").read_text())), 10)
+        self.assertEqual(json.loads((cache / "fork.json").read_text()), {"run_head_repo": {"1": "pytorch/pytorch"}, "pr_head_repo": {"1": "pytorch/pytorch"}})  # fmt: skip
+        self.assertEqual(json.loads((cache / "meta.json").read_text()), {"end": 1000})
+        with mock.patch.object(clickhouse, "query", side_effect=[[], RuntimeError("down")]), self.assertRaises(RuntimeError):  # fmt: skip
+            land_time.fetch(cache, 2000)
+        self.assertFalse((cache / "meta.json").exists())
 
 
 @unittest.skipUnless(importlib.util.find_spec("matplotlib"), "needs matplotlib")
@@ -2000,7 +2191,7 @@ class TestBuildDataset(unittest.TestCase):
         t = "2026-10-05 00:00:00"
         mine = ["test_real", "test_main", "test_main_after", "test_other_in", "test_other_out", "test_unmapped", "test_fork_main",
                 "test_same_author", "test_own_head", "test_disabled", "test_disabled_out", "test_base_in", "test_base_out",
-                "test_main_flaky", "test_other_flaky", "test_base_flaky", "test_disabled_before", "test_disabled_cls", "test_other_cls"]  # fmt: skip
+                "test_main_flaky", "test_other_flaky", "test_base_flaky", "test_disabled_before", "test_disabled_cls", "test_other_cls", "test_disabled_after"]  # fmt: skip
         rows = [fail(name, t, "s") for name in mine] + [
             fail("test_green", t, "s", job="pull / test (default, 2, 2)"),
             fail("test_unstable", t, "s", job="pull / test (default, 1, 1, unstable)"),
@@ -2031,6 +2222,9 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_own_head", "2026-10-06 00:00:00", "s2"),
             fail("test_base_in", "2026-09-05 00:00:00", "m", br="main"),
             fail("test_base_out", "2026-09-01 00:00:00", "m", br="main"),
+            # Main broke it 17 days after the merge base and 15 after this failure, before PR 1 landed.
+            fail("test_base_later", "2026-09-17 00:00:00", "s"),
+            fail("test_base_later", "2026-10-02 00:00:00", "m", br="main"),
             # Another author's failure 15 days after this one, still before PR 1 landed.
             fail("test_other_later", "2026-09-18 00:00:00", "s"),
             fail("test_other_later", "2026-10-03 00:00:00", "o"),
@@ -2042,6 +2236,7 @@ class TestBuildDataset(unittest.TestCase):
             ("2026-10-19", "test_disabled_out"),
             ("2026-09-20", "test_disabled_before"),
             ("2026-10-05", "test_disabled_cls", "TestB"),
+            ("2026-10-18", "test_disabled_after"),
         )
         h = history(rows, {"s": 1, "s2": 1, "o": 2, "c": 3}, {1: "me", 2: "x", 3: "me"}, {1: dt.datetime(2026, 10, 7, 12, tzinfo=dt.timezone.utc)}, disabled)  # fmt: skip
         with (
@@ -2052,7 +2247,7 @@ class TestBuildDataset(unittest.TestCase):
             h.load_green({"s"})
             got = {r["test"]: h.why_dropped(r) for r in h.heads["s"]}
             # The merge base with main at 09-15: main broke test_base_in 10 days before it.
-            near_base = {r["test"]: h.why_dropped(r, base_t=day(15, 9)) for r in h.heads["s"] if r["test"] in ("test_base_in", "test_base_out", "test_base_flaky")}  # fmt: skip
+            near_base = {r["test"]: h.why_dropped(r, base_t=day(15, 9)) for r in h.heads["s"] if r["test"] in ("test_base_in", "test_base_out", "test_base_flaky", "test_base_later")}  # fmt: skip
             other = {r["test"]: h.why_dropped(r) for r in h.heads["o"]}
             # Main breaks test_main_after near this merge base, but only after PR 1 landed.
             after = h.why_dropped(next(r for r in h.heads["s"] if r["test"] == "test_main_after"), base_t=day(4))  # fmt: skip
@@ -2066,8 +2261,9 @@ class TestBuildDataset(unittest.TestCase):
             "test_early": "window", "test_early_in": None, "test_after_landing": "after_landing", "test_own_flaky": "passed_in_job",
             "test_main_flaky": "other_failure", "test_other_flaky": "other_failure", "test_base_flaky": None,
             "test_disabled_before": None, "test_disabled_cls": None, "test_other_cls": None, "test_other_later": None,
+            "test_disabled_after": "disabled", "test_base_later": None,
         })  # fmt: skip
-        self.assertEqual(near_base, {"test_base_in": "main_near_base", "test_base_out": None, "test_base_flaky": "main_near_base"})  # fmt: skip
+        self.assertEqual(near_base, {"test_base_in": "main_near_base", "test_base_out": None, "test_base_flaky": "main_near_base", "test_base_later": None})  # fmt: skip
         self.assertEqual(other["test_own_flaky"], "other_failure")
         self.assertIsNone(after)
 
@@ -2196,12 +2392,13 @@ class TestBuildDataset(unittest.TestCase):
         # context is two blank lines, which B has elsewhere, so D's change reverse-applies to B
         # with one line of context though B does not have it. P (pr 6) and Q (pr 7), another author's,
         # failed within WINDOW but after U landed, which other_failure leaves out; B has P's change only.
-        main = {"a": "a\n\nX\n\nb\n\n\nc\n", "o": "o\n", "s": "s\n", "f": "f\n", "p": "p\n", "q": "q\n"}  # fmt: skip
+        # R (pr 8), another author's in B, failed 15 days after U.
+        main = {"a": "a\n\nX\n\nb\n\n\nc\n", "o": "o\n", "s": "s\n", "f": "f\n", "p": "p\n", "q": "q\n", "r": "r\n"}  # fmt: skip
         with scratch_repo():
             m = commit_files(main)
             bd.git("update-ref", "refs/remotes/origin/main", m)
-            changed = dict.fromkeys("osfp", "changed\n")
-            o, s, f, p = (commit_files({**main, k: v}, m) for k, v in changed.items())
+            changed = dict.fromkeys("osfpr", "changed\n")
+            o, s, f, p, r = (commit_files({**main, k: v}, m) for k, v in changed.items())  # fmt: skip
             q = commit_files({**main, "q": "changed\n"}, m)
             d = commit_files({**main, "a": "a\n\n\nb\n\n\nc\n"}, m)
             b = commit_files({**main, **changed}, m)
@@ -2213,9 +2410,10 @@ class TestBuildDataset(unittest.TestCase):
                 fail("test_d", "2026-10-06 00:00:00", d),
                 fail("test_p", "2026-10-09 00:00:00", p),
                 fail("test_q", "2026-10-09 00:00:00", q),
-            ] + [fail(t, "2026-10-07 00:00:00", u) for t in ("test_o", "test_s", "test_f", "test_d", "test_p", "test_q")]  # fmt: skip
-            authors = {1: "me", 2: "x", 3: "me", 4: "me", 5: "me", 6: "y", 7: "y"}
-            h = history(rows, {u: 1, o: 2, s: 3, f: 4, d: 5, p: 6, q: 7}, authors, {2: day(18, 9), 1: day(8)})  # fmt: skip
+                fail("test_r", "2026-10-22 00:00:00", r),
+            ] + [fail(t, "2026-10-07 00:00:00", u) for t in ("test_o", "test_s", "test_f", "test_d", "test_p", "test_q", "test_r")]  # fmt: skip
+            authors = {1: "me", 2: "x", 3: "me", 4: "me", 5: "me", 6: "y", 7: "y", 8: "y"}  # fmt: skip
+            h = history(rows, {u: 1, o: 2, s: 3, f: 4, d: 5, p: 6, q: 7, r: 8}, authors, {2: day(18, 9), 1: day(8)})  # fmt: skip
             dropped: collections.Counter = collections.Counter()
             with (
                 patch_ci_jobs(TD_JOBS),
@@ -2224,10 +2422,10 @@ class TestBuildDataset(unittest.TestCase):
             ):  # fmt: skip
                 h.load_green(set(h.heads))
                 kept = h.truth(u, {"base": b, "merge_base": b, "main_base": m, "base_source": "ci"}, dropped)  # fmt: skip
-            self.assertTrue(all(bd.below(x, b) for x in (o, s, f, p)))
+            self.assertTrue(all(bd.below(x, b) for x in (o, s, f, p, r)))
             self.assertFalse(any(bd.below(x, b) for x in (d, q)))
             self.assertEqual(len(bd.deletion_hunks(bd.own_change(d))), 1)
-        self.assertEqual(sorted(r["test"] for r in kept or []), ["test_d", "test_f", "test_o", "test_q"])  # fmt: skip
+        self.assertEqual(sorted(r["test"] for r in kept or []), ["test_d", "test_f", "test_o", "test_q", "test_r"])  # fmt: skip
         self.assertEqual(dropped, {"stacked": 2})
 
     def test_stacked_lower_rows(self) -> None:
@@ -2373,12 +2571,11 @@ class TestBuildDataset(unittest.TestCase):
                 patch_ci_jobs({True: {(*td, "default")}, False: {(*other, "default")}}),
                 mock.patch.object(bd, "git", lambda *a, check=True: run(*a, cwd=d)),
                 mock.patch.object(bd, "query", lambda sql: queries.append(sql) or failed),
-                mock.patch.object(bd, "green_jobs", return_value={(commits["change"], *rerun), (commits["after"], *td)}) as green,
+                mock.patch.object(bd, "green_jobs", return_value={(commits["change"], *rerun), (commits["after"], *td)}),
             ):  # fmt: skip
                 got = bd.revert_truth_jobs(signal, commits["change"], landed, "2026-10-05 04:00:00")  # fmt: skip
                 # Decided before the change landed: no commit qualifies, so only the change itself.
                 bd.revert_truth_jobs({("test_a", "", "test_x")}, commits["change"], landed, "2026-10-05 00:30:00")  # fmt: skip
-                self.assertEqual(green.call_args.args[0], [commits["change"]])
                 failed = failed[1:]
                 # Without the TD job's row, only periodic, unstable and rerun-green rows remain, so revert_samples skips it.
                 none = bd.revert_truth_jobs(signal, commits["change"], landed, "2026-10-05 04:00:00")  # fmt: skip
@@ -2387,6 +2584,7 @@ class TestBuildDataset(unittest.TestCase):
         # The change and the commit after it, not the revert or what landed after the decision.
         self.assertIn(f"head_sha IN ('{commits['after']}','{commits['change']}')", queries[0])  # fmt: skip
         self.assertIn(f"head_sha IN ('{commits['change']}')", queries[1])
+        self.assertEqual(queries[0].count("created_at <= parseDateTimeBestEffort('2026-10-05 04:00:00') + INTERVAL 1 HOUR"), 2)  # fmt: skip
         # Only the signal tests count, not every test of their files.
         self.assertIn("AND (file, t.name) IN (('test_a.py', 'test_x'),('test_b.py', 'test_q\\'r'),('test_c.py', 'test_y'))", queries[0])  # fmt: skip
         # A test that also passed in its job is not a failure there.
@@ -2433,6 +2631,9 @@ class TestBuildDataset(unittest.TestCase):
             contextlib.redirect_stdout(io.StringIO()) as stdout,
         ):  # fmt: skip
             bd.pr_samples(h, Path(out), 1)
+            # A rebuild keeps an existing sample without asking gh again.
+            (Path(out) / "pr_1.json").write_text("{}")
+            bd.pr_samples(h, Path(out), 1)
         pr_text.assert_called_once_with(1)
         write.assert_not_called()
         # Skipped by pr_samples' own handler, not counted by run_each as raising.
@@ -2475,8 +2676,10 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_y", "2026-09-05 00:00:00", "m", br="main", tf="test_c"),
             # The earliest failing head before --start is not the sample's.
             fail("test_x", "2026-09-30 00:00:00", "s0", tf="test_a"),
+            # A later head reproduces test_c.
+            fail("test_x", "2026-10-06 00:00:00", "s1", tf="test_c"),
         ]
-        h = history(rows, {"s": 1, "s0": 1}, {1: "me"})
+        h = history(rows, {"s": 1, "s0": 1, "s1": 1}, {1: "me"})
         merge_bases = {("origin/main", "s"): "main_mb", ("lower", "s"): "lower"}
         with (
             tempfile.TemporaryDirectory() as out,
@@ -2499,7 +2702,7 @@ class TestBuildDataset(unittest.TestCase):
         commit_time.assert_called_once_with("main_mb")
         kw = write.call_args.kwargs
         win = ("pull", "win / test (default, 1, 1)")
-        self.assertEqual((kw["truth"], kw["truth_strong"], kw["truth_jobs"]), (["test_b", "test_c"], ["test_b"], {"test_b": [("pull", JOB), win], "test_c": [("pull", JOB)]}))  # fmt: skip
+        self.assertEqual((kw["truth"], kw["truth_strong"], kw["truth_jobs"]), (["test_b", "test_c"], ["test_b", "test_c"], {"test_b": [("pull", JOB), win], "test_c": [("pull", JOB)]}))  # fmt: skip
         self.assertEqual({k: kw[k] for k in ("base", "merge_base", "main_base", "base_source")}, {"base": "lower", "merge_base": "lower", "main_base": "main_mb", "base_source": "ci"})  # fmt: skip
         self.assertIn("pr truth: dropped by rule over 1 heads: {'main_near_base': 1}", stdout.getvalue())  # fmt: skip
 

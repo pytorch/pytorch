@@ -150,8 +150,8 @@ Fork-PR runs keep TD, so their jobs are left unshrunk. The inductor rows assume 
 | pull and trunk, p50 | 181 | 169 |
 | pull and trunk, p90 | 291 | 262 |
 | pull and trunk, mean | 205 | 183 |
-| pull, trunk and inductor, p50 | 191 | 172 |
-| pull, trunk and inductor, p90 | 440 | 425 |
+| pull, trunk and inductor, p50 | 182 | 167 |
+| pull, trunk and inductor, p90 | 299 | 272 |
 | `@pytorchbot merge` that starts trunk, comment to merge, p50 | 185 | 179 |
 | `@pytorchbot merge` that starts trunk, comment to merge, p90 | 269 | 258 |
 
@@ -166,7 +166,7 @@ Time to signal (TTS) per workflow, in minutes:
 | inductor (follow-up) | 136 | 120 | 223 | 205 |
 | rocm-mi300 | 208 | 191 | 313 | 299 |
 
-- **Merge wait.** 1,643 PR heads ran pull and `ciflow/trunk` together. On those, the p50 drops by 12 minutes and the p90 by 29. Trunk is the later signal for nearly all of them in both. With `ciflow/inductor` as well (1,186 heads), the inductor benchmarks bound the wait.
+- **Merge wait.** 1,643 PR heads ran pull and `ciflow/trunk` together. On those, the p50 drops by 12 minutes and the p90 by 29. Trunk is the later signal for nearly all of them in both. 1,030 of them also ran `ciflow/inductor` within the same 10 minutes; inductor ends last on 15% of those (13% after), so trunk still bounds most of their wait.
 - **Trunk is where the latency is.** Its long test shards are the critical path, so the test shrinkage shows up as wall-clock time. Trunk's p50 moves less than its mean (14 min saved on average): 46% of its PR test hours are fork PRs', which keep TD, and its macOS jobs run every test under both policies.
 - **Pull leans toward build-bound.** Runs that wait on a build go from 12% to 22%. The floor is the xpu build (p50 40 / p90 49 min from creation to done) and the ROCm build (p50 23 / p90 53).
 - **The model matches real merges.** When the merge comment started trunk (n=337), comment to merge took p50 185 / p90 269 min, against a simulated trunk TTS of 182 / 277. Taking each of those trunk runs' replayed saving off its merge gives the new 179 / 258. When trunk had already run before the comment (n=533), the merge took p50 3 min.
@@ -322,7 +322,7 @@ How to read the chart:
 
 Saved per month at the 0.2 overhead, for Opus medium: $188k with no hedge, $165k at 5%, $147k at 10%, $128k at 15% and $108k at 20%.
 
-**Other models, 20% hedge.** $/call is the mean recorded cost over the 425 eval samples the model is asked about. Cold is the same calls with every cache read priced as a cache write (`dollars --cold`). p50 wall is the model call alone.
+**Other models, 20% hedge.** $/call is the mean recorded cost over the 425 eval samples the model is asked about. Cold is the same calls with every cache read priced as a cache write (`dollars --cold`); for every model all 425 were single-attempt calls with their usage recorded, so both columns cover the same 425. p50 wall is the model call alone.
 
 | Model / effort | Reverts caught | Pushes, every failure | Typical CPU | $/call | $/call, cold | p50 wall |
 |---|---|---|---|---|---|---|
@@ -339,7 +339,7 @@ Saved per month at the 0.2 overhead, for Opus medium: $188k with no hedge, $165k
   - The hedge closes most of that gap, since TD's heuristics rank recently failing tests high and many PR failures are in those. At 20%, Opus medium is still 2.5 points under TD (95% interval -5.9 to +0.8), low 3.4 under (-6.9 to 0.0) and high 3.8 under (-7.4 to -0.4).
   - Part of this is the censoring above, but how much cannot be measured offline.
   - Budgets above 20% were not swept. Each 5 points of hedge costs about $20k a month of the saving.
-- **Why medium effort.** At the 20% hedge, low, medium and high are within 3.7 points of each other on reverts and 1.2 on pushes. The push spread is well inside the bootstrap intervals; the revert spread is above the 1-2 points measured run to run (see below), so effort may matter on reverts. Medium is the only one of the three not significantly below TD on pushes at the 95% level, though that is a thin distinction. It was kept as the middle setting. Its p50 is 5s slower than low's, which is negligible next to the test jobs.
+- **Why medium effort.** At the 20% hedge, low, medium and high are within 3.7 points of each other on reverts and 1.3 on pushes. The push spread is well inside the bootstrap intervals; the revert spread is above the 1-2 points measured run to run (see below), so effort may matter on reverts. Only high is significantly below TD on pushes at the 95% level (-7.4 to -0.4); low's interval reaches 0.0 and medium's +0.8, so that does not separate low from medium. Medium was kept as the middle setting, ahead of low on both metrics (82.8% vs 80.6% on reverts, 91.5% vs 90.7% on pushes), though both gaps are within the noise. Its p50 is 5s slower than low's, which is negligible next to the test jobs.
 - **Model size matters more than effort.**
   - Opus at any effort beats Sonnet on reverts by 4-9 points at the 20% hedge. On pushes the two are level.
   - Haiku 4.5 does not support the effort setting, so its `low` label is nominal (select_tests.py always passes `--effort`, here `low`). It is well behind on both metrics.
@@ -478,6 +478,8 @@ run v3_opus55_medium_r2 $OPUS medium $IDS/eval.txt; run v3_opus55_low_r2 $OPUS l
 run v3_sonnet5_medium_agentic $SONNET medium $IDS/agentic.txt --agentic
 ```
 
+`--agentic` gives the model Read, Grep and Glob with no path limits on untrusted PR text: run that line only in a sandbox with no credentials.
+
 The order matters for the recorded $/call: runs that share a prompt prefix with an earlier run read it from cache (see Dollar model).
 
 **Scoring, chart, intervals and dollars.**
@@ -516,7 +518,7 @@ for t in v3_opus55_medium v3_opus55_low v3_opus55_high v3_sonnet5_medium v3_sonn
 **Intervals.**
 - The intervals are a paired bootstrap (10,000 resamples, seed 0) of the per-sample new-minus-old outcome, `v3_opus55_medium final+td20` against `td td25`.
 - Reverts are resampled per commit. Failing pushes are resampled per PR (the PR number is the second `_`-separated field of a head id) and, for reference, per push.
-- The p-values are an exact two-sided McNemar test on the discordant counts.
+- The p-values are an exact two-sided McNemar test on the discordant counts. On pushes it treats the 236 pushes as independent, ignoring that pushes of one PR are correlated, so those p-values are anti-conservative; the PR-resampled intervals are the ones to read.
 - The "without PR history" row reruns `td_replay` and `score` on a copy of `$DATA` whose head samples have `previous_failures` removed.
 - `dollars --json` writes the fractions, the per-workflow rows and the totals that the Spend table is built from.
 
@@ -555,8 +557,8 @@ SELECT workflow_name, round(sumIf(h, pr) / sum(h), 2) pr_share FROM (
     AND workflow_name IN ('pull', 'trunk', 'inductor', 'periodic', 'slow'))
 GROUP BY workflow_name;
 
--- Inductor's unit-test share (0.83 of CPU and 0.38 of GPU test hours): the rest are model benchmarks
-SELECT arrayExists(l -> match(l, 'gpu|nvidia|a10g|l4|t4|h100|b200|a100|rocm'), labels) gpu,
+-- Inductor's unit-test share (0.83 of CPU and 0.38 of GPU test hours): the rest are model benchmarks (land_time.GPU_LABEL and land_time.BENCH)
+SELECT arrayExists(l -> match(l, 'gpu|nvidia|-a10g|-l4|-t4|h100|h200|b200|gb[0-9]00|a100|rocm|xpu'), labels) gpu,
   match(extract(name, '/ test \\(([^,]+),'), 'huggingface|timm|torchbench|_perf') bench,
   round(sum(dateDiff('second', started_at, completed_at)) / 3600) h
 FROM default.workflow_job FINAL
@@ -592,14 +594,14 @@ GROUP BY same;
 
 **Time to land.** The replay in Time to land's Method was run from ClickHouse with five queries over the month to 2026-11-03. `eval/land_time.py` runs them and the simulation. The queries:
 - `default.workflow_run` for pull, trunk, inductor and rocm-mi300: event, head branch and sha, head repository, creation time, attempt, conclusion and PR number. PR runs are pull's `pull_request` runs and the others' `ciflow/` pushes.
-- `default.workflow_job`, first attempts only. Per run: the cancelled and failed job counts, and the last build and non-test job completion. Per test job: its completion time, `Test` step duration, config and whether its runner is a GPU one.
+- `default.workflow_job`, first attempts only. Per run: the cancelled job count, and the last build and non-test job completion. Per test job: its completion time, `Test` step duration, config and whether its runner is a GPU one.
 - `default.workflow_run` again for each PR run's head repository, and `default.pull_request` for the head repository of each PR a `ciflow/<label>/<PR>` push names: the fork-PR test.
 - `default.merges` joined with `default.issue_comment` and the main `pull` run of the merge commit: comment, merge and first PR run times, for the merge rows.
 
 The simulation works as follows:
 - It shrinks each same-repo test job's `Test` step by r and keeps its start time.
 - It recomputes each run's TTS as its last job's completion minus its creation.
-- It takes a PR head's wait as the latest end of its first pull and trunk runs, plus inductor's for those rows, minus the earliest of their creations. The pull and trunk rows count only heads whose trunk run was created within 600 s of pull.
+- It takes a PR head's wait as the latest end of its first pull and trunk runs, plus inductor's for those rows, minus the earliest of their creations. Both rows count only heads whose trunk (and inductor) run was created within 600 s of pull.
 - For the merges whose comment started trunk (a `ciflow/trunk` run created within 300 s of the comment), it takes that trunk run's replayed saving off the comment to merge time.
 - r is new over old test time on a typical change, from the unrounded shares: 29.96/49.41 = 0.606 CPU and 33.55/45.86 = 0.732 GPU where TD runs. For inductor's unit-test configs it is the new shares (0.498 / 0.403), against 1 today.
 - With `--all-prs`, fork-PR runs are shrunk too, for the "fork PRs were selected too" line.

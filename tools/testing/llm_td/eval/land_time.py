@@ -12,16 +12,16 @@ report replays the runs created between 29.5 days and 12 hours before the
 end. Each same-repo test job's `Test` step is shrunk by r, new over old test
 time on a typical change, from a dollars.py --json output: fractions over
 td_fractions where TD runs, and the inductor unit-test fractions (old = 1)
-in inductor, whose model benchmarks keep r = 1. Jobs run_test.py runs
-without TD (TD_NO and score.NO_TD_CONFIGS configs, score.NO_TD_ENV runner
-labels such as macOS) keep r = 1, and so do fork-PR runs, which keep TD,
-unless --all-prs. Each job keeps its start time; a run's time to signal
+in inductor, whose model benchmarks (BENCH) keep r = 1. Jobs run_test.py
+runs without TD keep r = 1 (see no_td_configs; the cache has no job names,
+so macOS and xpu jobs are told by score.NO_TD_ENV on their runner labels),
+and so do fork-PR runs, which keep TD, unless --all-prs. Each job keeps its start time; a run's time to signal
 (TTS) is its last job's completion minus its creation. Only first attempts
 count, and runs that did not conclude success or failure, have a cancelled
 job, ran no test job or have a TTS outside (0, 24 h] are left out. A PR
 head's merge wait is the latest end of its first pull and trunk runs (and
-inductor's) minus the earliest creation; the pull and trunk rows take only
-heads whose trunk run was created within 10 minutes of pull. The merges
+inductor's) minus the earliest creation, over the heads whose trunk (and
+inductor) run was created within 10 minutes of pull. The merges
 whose comment started trunk are replayed by taking that trunk run's saving
 off their comment to merge time.
 """
@@ -46,11 +46,13 @@ if TYPE_CHECKING:
 
 
 WORKFLOWS = ("pull", "trunk", "inductor", "rocm-mi300")
-# Configs run_test.py does not run with TD in TD workflows.
-TD_NO = {"backwards_compat", "docs_test", "pr_time_benchmarks", "verify_cachebench", "aoti_cross_compile_for_windows", "smoke_b200"}  # fmt: skip
-BENCH = re.compile(r"huggingface|timm|torchbench|dynamic_|_perf|benchmark|cachebench")
+# Configs of TD workflows whose .ci/pytorch/test.sh branch does not run run_test.py.
+NO_RUN_TEST = {"backwards_compat", "docs_test", "pr_time_benchmarks", "verify_cachebench", "aoti_cross_compile_for_windows"}  # fmt: skip
+# Inductor's model-benchmark configs, the ones outside its unit-test jobs; REPORT.md's inductor-share query uses BENCH and GPU_LABEL too.
+BENCH = re.compile(r"huggingface|timm|torchbench|_perf")
 CIFLOW_PR = re.compile(r"^ciflow/[^/]+/(\d+)$")
 GPU_LABEL = "gpu|nvidia|-a10g|-l4|-t4|h100|h200|b200|gb[0-9]00|a100|rocm|xpu"
+CONCURRENT_S = 600
 
 RUNS_SQL = """
 SELECT id, name, event, head_branch, head_sha, toUnixTimestamp(created_at) created, run_attempt, conclusion,
@@ -60,7 +62,7 @@ WHERE created_at >= toDateTime({end}) - INTERVAL 31 DAY AND created_at < toDateT
   AND repository.full_name = 'pytorch/pytorch' AND name IN ('pull','trunk','inductor','rocm-mi300')
 """
 
-# Per run: cancelled and failed job counts, last build and non-test job end; per test job: (end, Test step seconds, config, GPU, job seconds, queue seconds, labels).
+# Per run: cancelled job count, last build and non-test job end; per test job: (end, Test step seconds, config, GPU, job seconds, queue seconds, labels).
 JOBS_SQL = """
 WITH jobs AS (
   SELECT id, any(run_id) run_id, any(head_sha) head_sha, any(name) nm, any(conclusion) concl,
@@ -81,7 +83,7 @@ WITH jobs AS (
   FROM jobs
 )
 SELECT run_id, any(head_sha) sha,
-  countIf(concl = 'cancelled') ncancel, countIf(concl = 'failure') nfail,
+  countIf(concl = 'cancelled') ncancel,
   maxIf(toUnixTimestamp(je), kind='build' AND concl != 'skipped') last_build,
   maxIf(toUnixTimestamp(je), kind='other' AND concl != 'skipped') last_other,
   groupArrayIf((toUnixTimestamp(je), tsec, cfg, gpu, dateDiff('second', js, je), dateDiff('second', jc, js), lab), kind='test' AND concl != 'skipped') tests
@@ -114,10 +116,10 @@ WITH m AS (
 c AS (SELECT id, min(created_at) cc FROM default.issue_comment
   WHERE created_at >= toDateTime({end}) - INTERVAL 30 DAY AND created_at < toDateTime({end}) AND id IN (SELECT comment_id FROM m) GROUP BY id),
 mainrun AS (SELECT head_sha, min(created_at) mt FROM default.workflow_run
-  WHERE created_at >= toDateTime({end}) - INTERVAL 31 DAY AND name='pull' AND event='push' AND head_branch='main'
+  WHERE created_at >= toDateTime({end}) - INTERVAL 31 DAY AND created_at < toDateTime({end}) AND name='pull' AND event='push' AND head_branch='main'
     AND repository.full_name='pytorch/pytorch' GROUP BY head_sha),
 prrun AS (SELECT head_sha, min(created_at) pt FROM default.workflow_run
-  WHERE created_at >= toDateTime({end}) - INTERVAL 40 DAY AND name='pull' AND event='pull_request'
+  WHERE created_at >= toDateTime({end}) - INTERVAL 40 DAY AND created_at < toDateTime({end}) AND name='pull' AND event='pull_request'
     AND repository.full_name='pytorch/pytorch' GROUP BY head_sha)
 SELECT m.pr_num pr, m.f f, m.i i, toUnixTimestamp(c.cc) cc, toUnixTimestamp(mainrun.mt) mt, toUnixTimestamp(prrun.pt) pt, m.last_commit_sha sha
 FROM m JOIN c ON c.id = m.comment_id JOIN mainrun ON mainrun.head_sha = m.merge_commit_sha LEFT JOIN prrun ON prrun.head_sha = m.last_commit_sha
@@ -149,6 +151,12 @@ def ratios(dollars: dict) -> dict[str, float]:
     return {"cpu": round(f["cpu"] / t["cpu"], 3), "gpu": round(f["gpu"] / t["gpu"], 3), "ind_cpu": round(f["ind_cpu"], 3), "ind_gpu": round(f["ind_gpu"], 3)}  # fmt: skip
 
 
+def no_td_configs() -> set[str]:
+    """NO_RUN_TEST and the configs every pull and trunk test job of runs without TD (force-no-td, score.NO_TD_CONFIGS, macOS, xpu)."""
+    jobs = score.ci_jobs()
+    return NO_RUN_TEST | ({c for w, _, c in jobs[False] if w in ("pull", "trunk")} - {c for _, _, c in jobs[True]})  # fmt: skip
+
+
 def fork_runs(cache: Path, wfruns: list[dict]) -> set[int]:
     """Runs whose PR head repository is not pytorch/pytorch or is unknown: pull's pull_request runs by their own, ciflow/<label>/<PR> pushes by the PR's."""
     fk = json.loads((cache / "fork.json").read_text())
@@ -169,12 +177,13 @@ def replay(cache: Path, r: dict[str, float], keep: set[int]) -> dict[str, list[d
     """The included PR runs of each workflow, with their old and new TTS. Runs in `keep` are not shrunk."""
     end = json.loads((cache / "meta.json").read_text())["end"]
     wfr = {w["id"]: w for w in json.loads((cache / "wfruns.json").read_text())}
+    no_td = no_td_configs()
 
     def ratio(wf: str, cfg: str, gpu: bool, labels: str) -> float:
         if wf == "inductor":
             return 1.0 if BENCH.search(cfg) else r["ind_gpu" if gpu else "ind_cpu"]
-        no_td = cfg in TD_NO or any(fnmatch.fnmatchcase(cfg, n) for n in score.NO_TD_CONFIGS) or score.NO_TD_ENV.search(labels)  # fmt: skip
-        return 1.0 if no_td else r["gpu" if gpu else "cpu"]
+        off = cfg in no_td or any(fnmatch.fnmatchcase(cfg, n) for n in score.NO_TD_CONFIGS) or score.NO_TD_ENV.search(labels)  # fmt: skip
+        return 1.0 if off else r["gpu" if gpu else "cpu"]
 
     out = {}
     for wf in WORKFLOWS:
@@ -184,7 +193,6 @@ def replay(cache: Path, r: dict[str, float], keep: set[int]) -> dict[str, list[d
                 merged[x["run_id"]] = x
                 continue
             m["ncancel"] += x["ncancel"]
-            m["nfail"] += x["nfail"]
             m["last_build"] = max(m["last_build"], x["last_build"])
             m["last_other"] = max(m["last_other"], x["last_other"])
             m["tests"] += x["tests"]
@@ -220,6 +228,8 @@ def report(cache: Path, dollars: dict, all_prs: bool) -> list[str]:
     keep = set() if all_prs else fork_runs(cache, wfruns)
     runs = replay(cache, r, keep)
     lines = [f"r {r}, {len(keep)} fork runs kept", "", "| Workflow | Runs | Old p50 | New p50 | Old p90 | New p90 | Mean saved | Build-bound old | Build-bound new |", "|---|---|---|---|---|---|---|---|---|"]  # fmt: skip
+    if empty := [wf for wf, rs in runs.items() if not rs]:
+        raise SystemExit(f"no included {', '.join(empty)} runs in {cache}")
     for wf, rs in runs.items():
         o, n = [x["old"] for x in rs], [x["new"] for x in rs]
         bo, bn = (100 * sum(x[k] for x in rs) / len(rs) for k in ("build_bound_old", "build_bound_new"))  # fmt: skip
@@ -234,14 +244,21 @@ def report(cache: Path, dollars: dict, all_prs: bool) -> list[str]:
         for x in runs[wf]:
             if wf not in first[x["sha"]] or x["c"] < first[x["sha"]][wf]["c"]:
                 first[x["sha"]][wf] = x
-    conc = [(h["pull"], h["trunk"]) for h in first.values() if "pull" in h and "trunk" in h and abs(h["trunk"]["c"] - h["pull"]["c"]) <= 600]  # fmt: skip
-    ind = [(h["pull"], h["trunk"], h["inductor"]) for h in first.values() if "pull" in h and "trunk" in h and "inductor" in h]  # fmt: skip
+
+    def heads(wfs: tuple[str, ...]) -> list[tuple[dict, ...]]:
+        return [tuple(h[w] for w in wfs) for h in first.values() if all(w in h and abs(h[w]["c"] - h["pull"]["c"]) <= CONCURRENT_S for w in wfs)]  # fmt: skip
+
+    conc, ind = heads(("pull", "trunk")), heads(("pull", "trunk", "inductor"))
+    if not conc or not ind:
+        raise SystemExit(f"{len(conc)} pull and trunk heads, {len(ind)} with inductor: too few to report")  # fmt: skip
     lines += ["", "| Merge wait | Heads | Old p50 | Old p90 | Old mean | New p50 | New p90 | New mean |", "|---|---|---|---|---|---|---|---|"]  # fmt: skip
     for name, heads in (("pull and trunk", conc), ("pull, trunk and inductor", ind)):
         o, n = wait(heads, "end_old"), wait(heads, "end_new")
         lines.append(f"| {name} | {len(heads)} | {pct(o, 50):.0f} | {pct(o, 90):.0f} | {st.mean(o):.0f} | {pct(n, 50):.0f} | {pct(n, 90):.0f} | {st.mean(n):.0f} |")  # fmt: skip
     later = sum(t["end_old"] >= p["end_old"] for p, t in conc), sum(t["end_new"] >= p["end_new"] for p, t in conc)  # fmt: skip
     lines.append(f"Trunk ends last for {100 * later[0] / len(conc):.0f}% of the pull and trunk heads, {100 * later[1] / len(conc):.0f}% after.")  # fmt: skip
+    last = [sum(i[k] >= max(p[k], t[k]) for p, t, i in ind) for k in ("end_old", "end_new")]  # fmt: skip
+    lines.append(f"Inductor ends last for {100 * last[0] / len(ind):.0f}% of the pull, trunk and inductor heads, {100 * last[1] / len(ind):.0f}% after.")  # fmt: skip
 
     unforced = [m for m in json.loads((cache / "merges.json").read_text()) if not m["f"]]  # fmt: skip
     p2m = [(m["mt"] - m["pt"]) / 3600 for m in unforced if m["pt"] and m["mt"] >= m["pt"]]  # fmt: skip

@@ -175,8 +175,10 @@ def cold_call_usd(data: Path, tag: str, ids: list[str], samples: Path) -> tuple[
     rs = [r for r in every if r.get("attempts", 1) == 1 and r["usage"] is not None]
     u = np.array([[r["usage"].get(k, 0) for k in USAGE] for r in rs], float) / 1e6
     c = np.array([r["cost_usd"] for r in rs], float)
+    if len(rs) < 4 * len(USAGE):
+        raise SystemExit(f"{tag}: cannot fit {len(USAGE)} prices to {len(rs)} results")
     price, _, rank, _ = np.linalg.lstsq(u, c, rcond=None)
-    if rank < len(USAGE) or len(rs) < 4 * len(USAGE):
+    if rank < len(USAGE):
         raise SystemExit(f"{tag}: cannot fit {len(USAGE)} prices to {len(rs)} results of rank {rank}")  # fmt: skip
     rel = np.linalg.norm(u @ price - c) / np.linalg.norm(c)
     print(f"{tag}: price fit relative residual {rel:.2e} on {len(rs)} of {len(every)} results, cache-read share of their input tokens {u[:, 2].sum() / u[:, :3].sum():.2f}", file=sys.stderr)  # fmt: skip
