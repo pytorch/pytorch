@@ -35,7 +35,20 @@ TRANSIENT = {
     "reset while reading": "fatal: unable to access 'https://x/': OpenSSL SSL_read: Connection reset by peer, errno 104",
     "syscall while reading": "fatal: unable to access 'https://x/': OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 104",
     "case": "FATAL: EARLY eof",
+    # A curl error that is not retried on its own is retried when it breaks a
+    # pack that was already streaming, because git then also reports early EOF.
+    "framing error while streaming": (
+        "error: RPC failed; curl 16 Error in the HTTP2 framing layer\n"
+        "fetch-pack: unexpected disconnect while reading sideband packet\n"
+        "fatal: early EOF\n"
+        "fatal: fetch-pack: invalid index-pack output\n"
+    ),
+    "refused stream while streaming": (
+        "error: RPC failed; curl 92 HTTP/2 stream 5 was not closed cleanly: REFUSED_STREAM (err 7)\n"
+        "fatal: early EOF\n"
+    ),
 }
+# Single-line failures: these are the whole output because nothing was received.
 PERMANENT = {
     "missing tag": "fatal: Remote branch 5.0.1 not found in upstream origin",
     "get 404": "fatal: unable to access 'https://x/': The requested URL returned error: 404",
