@@ -489,13 +489,17 @@ void validate_scaled_mm_v2_inputs(
             scale_a[0].scalar_type() == ScalarType::Float8_e8m0fnu && scale_a[0].is_contiguous(),
         "For packed MNxK4 scaling scale_a should be a contiguous float8_e8m0fnu tensor with ",
         expected_a_elems, " elements, got ",
-        scale_a.empty() ? c10::SymInt(0) : scale_a[0].sym_numel());
+        scale_a.empty() ? c10::SymInt(0) : scale_a[0].sym_numel(), " elements, dtype ",
+        scale_a.empty() ? "None" : c10::toString(scale_a[0].scalar_type()),
+        ", contiguous=", !scale_a.empty() && scale_a[0].is_contiguous() ? "true" : "false");
     TORCH_CHECK_VALUE(
         scale_b.size() == 1 && scale_b[0].sym_numel() == expected_b_elems &&
             scale_b[0].scalar_type() == ScalarType::Float8_e8m0fnu && scale_b[0].is_contiguous(),
         "For packed MNxK4 scaling scale_b should be a contiguous float8_e8m0fnu tensor with ",
         expected_b_elems, " elements, got ",
-        scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel());
+        scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel(), " elements, dtype ",
+        scale_b.empty() ? "None" : c10::toString(scale_b[0].scalar_type()),
+        ", contiguous=", !scale_b.empty() && scale_b[0].is_contiguous() ? "true" : "false");
   } else if (is_rw) {
     // Match the kernel's per-tensor RowWise wording exactly. We don't check
     // dim()/contiguity here -- the kernel has specific, more actionable
