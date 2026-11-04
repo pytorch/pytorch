@@ -87,6 +87,8 @@ const char* get_last_error() {
 
 void set_last_error(const char* msg) {
   torch::csrc::shim::details::set_torch_exception_what(msg ? msg : "");
+  torch::csrc::shim::details::set_torch_exception_what_without_backtrace(
+      msg ? msg : "");
 }
 } // namespace torch::aot_inductor
 

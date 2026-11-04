@@ -30,6 +30,9 @@
 // The general guidelines for the C API:
 //
 //  - No exceptions, return an explicit error code to be checked at call site
+//  - Before returning AOTI_TORCH_FAILURE, record the error's message, e.g.
+//    with AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE; generated code reports
+//    it as the cause of the failed call
 //  - Only pointers (AtenTensorHandle counts), integers and floats in headers
 //
 // If you want to make changes to this header, you MUST MAINTAIN ABI
