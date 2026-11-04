@@ -10293,7 +10293,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         # worker_thread.
         torch._C._stash_obj_in_tls(torch.compiler._IS_COMPILING, True)
         try:
-            self.assertTrue(torch.compiler.is_compiling())
+            # With no session running the readers never reach TLS, so this bare
+            # copy is invisible until some session runs; the key itself stays.
+            self.assertFalse(torch.compiler.is_compiling())
+            self.assertTrue(torch._C._is_key_in_tls(torch.compiler._IS_COMPILING))
             with torch.compiler._compile_session_context():
                 self.assertTrue(torch.compiler.is_compiling())
             self.assertTrue(torch._C._is_key_in_tls(torch.compiler._IS_COMPILING))
@@ -10309,15 +10312,14 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertFalse(torch.compiler.is_exporting())
 
     def test_tracing_flags_scriptable(self):
+        # Only is_compiling() is scriptable: its is_scripting() check predates
+        # the per-thread flags and lets the JIT dead-code the TLS read. The
+        # other readers were never scriptable.
         @torch.jit.script
         def scripted_flags():
-            return (
-                torch.compiler.is_compiling(),
-                torch.compiler.is_exporting(),
-                torch.compiler._is_non_strict_tracing(),
-            )
+            return torch.compiler.is_compiling()
 
-        self.assertEqual(scripted_flags(), (False, False, False))
+        self.assertEqual(scripted_flags(), False)
 
     def test_tracing_flags_in_session_reads(self):
         torch._dynamo.reset()
@@ -10379,29 +10381,26 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertFalse(torch.compiler.is_compiling())
 
     def test_tracing_flags_session_gate(self):
-        self.assertEqual(torch.compiler._SESSIONS_ACTIVE, 0)
         with _compiling_state_context():
-            self.assertEqual(
-                torch.compiler._export_session_active(), torch.compiler.is_exporting()
-            )
+            self.assertEqual(torch.compiler._SESSIONS_ACTIVE, 1)
             with torch.compiler._compile_session_context():
                 self.assertEqual(torch.compiler._SESSIONS_ACTIVE, 2)
-        self.assertEqual(torch.compiler._SESSIONS_ACTIVE, 0)
-        self.assertFalse(torch.compiler._export_session_active())
-
         with self.assertRaisesRegex(RuntimeError, "gate boom"):
             with _compiling_state_context():
                 raise RuntimeError("gate boom")
         self.assertEqual(torch.compiler._SESSIONS_ACTIVE, 0)
 
-        # A key stashed outside any session is visible to the exact reader only;
-        # the hot-path gate deliberately short-circuits once no session is live.
+        # The count gates the TLS probe, so a flag set without entering a
+        # session is invisible to the public readers until some session runs.
         torch._C._stash_obj_in_tls(torch.compiler._IS_EXPORTING, True)
         try:
-            self.assertTrue(torch.compiler.is_exporting())
-            self.assertFalse(torch.compiler._export_session_active())
+            self.assertFalse(torch.compiler.is_exporting())
+            with torch.compiler._compile_session_context():
+                self.assertTrue(torch.compiler.is_exporting())
         finally:
             torch._C._remove_obj_from_tls(torch.compiler._IS_EXPORTING)
+        self.assertFalse(torch.compiler.is_exporting())
+        self.assertEqual(torch.compiler._SESSIONS_ACTIVE, 0)
 
     @unittest.skipIf(not TEST_CUDA, "cuda needed")
     def test_tracing_flags_autograd_worker_thread(self):
