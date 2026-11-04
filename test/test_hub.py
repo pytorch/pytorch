@@ -15,6 +15,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 import filelock
 
@@ -629,6 +630,28 @@ class TestHubCache(TestCase):
         self.assertFalse(os.path.exists(os.path.join(hub.get_dir(), "owner_repo_main")))
         self._assert_no_leftovers()
 
+    def test_get_cache_or_reload_ambiguous_ref(self):
+        url = self._make_hub_archive("repo")
+        real_download = hub.download_url_to_file
+        calls = []
+
+        def download(link, dst, progress):
+            calls.append(link)
+            if len(calls) == 1:
+                raise HTTPError(link, 300, "Multiple Choices", None, None)
+            return real_download(link, dst, progress=progress)
+
+        with (
+            patch.object(hub, "_git_archive_link", return_value=url) as mock_link,
+            patch.object(hub, "download_url_to_file", side_effect=download),
+            self.assertWarnsRegex(UserWarning, "ref main is ambiguous"),
+        ):
+            repo_dir = self._load_repo("repo")
+        self.assertEqual(len(calls), 2)
+        mock_link.assert_called_with("owner", "repo", ref="refs/heads/main")
+        self.assertEqual(os.listdir(repo_dir), ["hubconf.py"])
+        self._assert_no_leftovers()
+
     @skipIfOldFilelock
     def test_load_state_dict_from_url_failed_download_releases_lock(self):
         url, model_dir = self._save_weights()
@@ -988,6 +1011,23 @@ class TestHubCache(TestCase):
         os.symlink(target, lock_path)
         self.assertEqual(hub._lock_unavailable(lock_path, 0o644).errno, errno.ELOOP)
         self.assertFalse(os.path.exists(target))
+
+    @unittest.skipIf(IS_WINDOWS, "flock probe is Unix only")
+    def test_lock_unavailable_opens_existing_file_without_o_creat(self):
+        # With fs.protected_regular, an O_CREAT open of another user's lock file
+        # in a sticky directory fails, which would report a held lock as unusable.
+        lock_path = os.path.join(self.tmpdir.name, "entry.lock")
+        real_open = os.open
+        flags = []
+
+        def record_open(path, flag, *args):
+            flags.append(flag)
+            return real_open(path, flag, *args)
+
+        with patch("os.open", side_effect=record_open):
+            self.assertIsNone(hub._lock_unavailable(lock_path, 0o644))
+            self.assertIsNone(hub._lock_unavailable(lock_path, 0o644))
+        self.assertEqual([bool(f & os.O_CREAT) for f in flags], [True, False])
 
     @unittest.skipIf(not IS_WINDOWS, "Windows probe")
     def test_lock_unavailable_reports_unwritable_dir(self):

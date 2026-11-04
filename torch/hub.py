@@ -296,8 +296,13 @@ def _lock_unavailable(lock_path, mode):
 
     import fcntl
 
+    flags = os.O_RDWR | os.O_NOFOLLOW
+    # Like filelock, add O_CREAT only for a missing file: with fs.protected_regular,
+    # Linux refuses an O_CREAT open of another user's file in a sticky directory.
+    if not os.path.lexists(lock_path):
+        flags |= os.O_CREAT
     try:
-        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, mode)
+        fd = os.open(lock_path, flags, mode)
     except OSError as e:
         return e
     try:
@@ -451,9 +456,10 @@ def _get_cache_or_reload(
                 continue
             if time.time() - max(mtimes) > _STALE_WORK_DIR_S:
                 shutil.rmtree(stale, ignore_errors=True)
-        work_dir = tempfile.mkdtemp(prefix=work_prefix, dir=hub_dir)
-        cached_file = os.path.join(work_dir, "archive.zip")
-        try:
+        with tempfile.TemporaryDirectory(
+            prefix=work_prefix, dir=hub_dir, ignore_cleanup_errors=True
+        ) as work_dir:
+            cached_file = os.path.join(work_dir, "archive.zip")
             try:
                 url = _git_archive_link(repo_owner, repo_name, ref)
                 sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
@@ -493,8 +499,6 @@ def _get_cache_or_reload(
                 # Another process published it first, which can happen without the lock.
                 if not os.path.isdir(repo_dir):
                     raise
-        finally:
-            shutil.rmtree(work_dir, ignore_errors=True)
 
     return repo_dir
 
@@ -1002,10 +1006,11 @@ def load_state_dict_from_url(
     example DDP ranks) don't download the same file at the same time: one of
     them downloads it while the others wait, for up to an hour, and then load
     the cached copy. The lock is a ``.lock`` file next to the downloaded file in
-    ``model_dir``. If it can't be taken, or is held for more than an hour, the
-    file is downloaded without it and a warning is raised. With an older
-    filelock, every process downloads the file. Checkpoints in the legacy zip
-    format are still extracted on every load, without the lock.
+    ``model_dir``, which stays there on Linux and macOS. If it can't be taken,
+    or is held for more than an hour, the file is downloaded without it and a
+    warning is raised. With an older filelock, every process downloads the
+    file. Checkpoints in the legacy zip format are still extracted on every
+    load, without the lock.
 
     Args:
         url (str): URL of the object to download
