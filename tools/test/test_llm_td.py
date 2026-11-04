@@ -48,10 +48,12 @@ class TestSelection(unittest.TestCase):
             normalize_test_name("dynamo.test_misc", CANDIDATES), "dynamo/test_misc"
         )
         self.assertIsNone(normalize_test_name("test_nonexistent", CANDIDATES))
-        self.assertIsNone(normalize_test_name("jit/test_freezing", CANDIDATES))
-        candidates = CANDIDATES | {"test_jit"}
-        for name in ("jit/test_freezing", "test/jit/test_freezing.py", "jit.test_freezing"):  # fmt: skip
-            self.assertEqual(normalize_test_name(name, candidates), "test_jit")
+        # A file a driver runs, or a misspelling a driver's regex matches, names no candidate.
+        candidates = CANDIDATES | {"test_jit", "test_cpp_extensions_aot_ninja"}
+        for name in ("jit/test_freezing", "test/jit/test_freezing.py", "cpp_extensions_jit"):  # fmt: skip
+            self.assertIsNone(normalize_test_name(name, candidates), name)
+            sel = Selection.from_model_output({"tests": [{"file": name}]}, candidates, [])  # fmt: skip
+            self.assertTrue(sel.run_all and sel.error, name)
 
     def test_from_model_output(self) -> None:
         out = {
@@ -80,6 +82,28 @@ class TestSelection(unittest.TestCase):
         failed = Selection.from_model_output(None, CANDIDATES, [])
         self.assertIsNotNone(failed.error)
         self.assertEqual(Selection.from_json(failed.to_json()), failed)
+
+    def test_always_covered_matches_test_sh(self) -> None:
+        sh = (REPO_ROOT / ".ci/pytorch/test.sh").read_text()
+        lines = sh.splitlines()
+        # The top-level if/elif chain whose *inductor* branch calls test_inductor_shard.
+        end = next(i for i, line in enumerate(lines) if line.startswith("  test_inductor_shard "))  # fmt: skip
+        start = max(i for i in range(end) if lines[i].startswith("if [["))
+        dispatch = re.compile(r'(?:el)?if \[\[ "?\$\{?TEST_CONFIG\}?"? ==? (\S+) \]\]; then$')  # fmt: skip
+        branches = [m.group(1) for line in lines[start:end] if (m := dispatch.match(line))]  # fmt: skip
+        globs = tuple(b.strip("*") for b in branches if b.startswith("*"))
+        self.assertEqual(globs, selection.TEST_SH_GLOBS)
+        self.assertFalse([b for b in branches if not b.startswith("*") and "inductor" in b])  # fmt: skip
+        funcs = {"test_inductor_shard": "inductor", "test_inductor_cpp_wrapper_shard": "inductor_cpp_wrapper"}  # fmt: skip
+        runs: dict[str, set[str]] = {}
+        for func, body in re.findall(r"^(\w+)\(\) \{\n(.*?)^\}", sh, re.MULTILINE | re.DOTALL):  # fmt: skip
+            for include in re.findall(r"run_test\.py --inductor \\\n\s+--include ([^\\\n]+)", body):  # fmt: skip
+                runs.setdefault(funcs.get(func, func), set()).update(include.split())
+        self.assertEqual(runs, selection.ALWAYS_COVERED)
+        sel = Selection.from_model_output({"tests": []}, CANDIDATES | {"test_torch"}, [])  # fmt: skip
+        for config, covered in [("inductor_amx", True), ("inductor_avx2", True), ("inductor_cpp_wrapper", True), ("inductor_core", False), ("inductor_huggingface", False), ("default", False)]:  # fmt: skip
+            self.assertEqual(sel.covers("test_torch", config), covered, config)
+        self.assertFalse(sel.covers("test_ops", "inductor_cpp_wrapper"))
 
     def test_files_the_model_never_saw_are_covered(self) -> None:
         sel = Selection.from_model_output({"tests": []}, CANDIDATES, [])
@@ -421,9 +445,6 @@ class TestSelection(unittest.TestCase):
         ]:  # fmt: skip
             sel = Selection.from_model_output({"tests": []}, candidates, [changed])
             self.assertEqual(sel.files, expected, changed)
-        out = {"tests": [{"file": "jit/test_freezing", "confidence": "high"}]}
-        sel = Selection.from_model_output(out, candidates, [])
-        self.assertEqual((sel.files, sel.run_all), ({"test_jit"}, False))
 
     def test_drivers_match_the_test_list(self) -> None:
         for test in DRIVER_MAPPINGS:
