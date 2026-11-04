@@ -1,6 +1,6 @@
 # LLM test selection for PyTorch CI: offline evaluation
 
-**TL;DR.** We backtested picking each PR's tests with one Opus 5.5 call (medium effort, plus a 20% TD hedge) instead of today's target determination (TD). The result is mixed. The LLM policy catches more of the breakages that landed, but it is **below TD on failing PR pushes**. It would cut the spend of the test jobs in the Spend table (pull, trunk, inductor's unit tests, periodic and slow) **12%, from $888k to $780k a month** ($108k saved, $86k of it in the workflows this stack covers). It would also cut the p50 wait for pull and trunk from **181 to 169 minutes**. Fork PRs never get a selection and are left out of both figures.
+**TL;DR.** We backtested picking each PR's tests with one Opus 5.5 call (medium effort, plus a 20% TD hedge) instead of today's target determination (TD). The result is mixed. The LLM policy catches more of the breakages that landed, but it is **below TD on failing PR pushes**. It would cut the spend of the test jobs in the Spend table (pull, trunk, inductor's unit tests, periodic and slow) **12%, from $857k to $752k a month** ($105k saved, $80k of it in the workflows this stack covers). It would also cut the p50 wait for pull and trunk from **181 to 169 minutes**. Fork PRs never get a selection and are left out of both figures.
 
 - **Reverted commits caught: 82.8% vs 68.7% for TD** (n=134). Each of these commits landed and was then reverted for breaking a test. "Caught" means its PR's CI would have gone red. The paired difference is +14.2 points, with a 95% bootstrap interval of +7.5 to +21.6 (22 caught only by new, 3 only by old; McNemar p<0.001).
 - **Failing PR pushes with every real failure selected: 91.5% vs 94.1% for TD** (n=236 pushes from 148 PRs). Flaky failures are excluded. **The proposed config is 2.5 points below TD here.** The gap is not significant (95% interval -5.9 to +0.8 points resampling PRs; 6 pushes caught only by new, 12 only by old; McNemar p=0.24), but the point estimate is below TD, not level with it.
@@ -12,7 +12,7 @@
 | Reverted commits caught (n=134) | 68.7% | **82.8%** |
 | Failing PR pushes with every real failure selected (n=236) | **94.1%** | 91.5% |
 | CPU / GPU test time run on a typical change | 49.4% / 45.9% | **30.0% / 33.6%** |
-| Test-job spend | $888k/mo | **$780k/mo** |
+| Test-job spend | $857k/mo | **$752k/mo** |
 | pull + trunk wait, p50 / p90 | 181 / 291 min | **169 / 262 min** |
 
 - **The idea.** For each PR push, one `claude -p` call sees the title, the description, the diff, and every candidate test file annotated with its CI minutes. It returns the files worth running.
@@ -34,8 +34,8 @@
 The hedge adds 16.1 points rather than 20. Files the model already picked are not charged to it, so on its own that would let it add the full 20. It adds less because the 19 run-all changes below already run everything and have nothing left to hedge, a file that does not fit the remaining budget is skipped, and only files with a positive TD score and a recorded time are hedged (`Selection.split` in selection.py).
 
 - **Run-all.** 19 of the 187 typical changes (10.2%) run everything, nearly all through the test-infrastructure rule (CI scripts, docker images, commit pins, test workflows). Those 19 are 10.2 of the 13.9 points the model's picks run (73%), and 34% of new's CPU time with the hedge.
-- **The model calls** cost about $0.5k a month at the recorded per-call cost. That figure leans on the prompt cache, and with a cold cache it is about $2.3k (see Dollar model). Either way it is small next to the saving.
-- **Where the saving is.** This stack makes $86k of the saving reachable, in pull and trunk, once enforcement is the default (Rollout step 3). Until then it applies only to PRs with the `ci-llm-td` label. The other $22k is in workflows where TD is off today: inductor's unit tests, periodic and slow. Those run every test on PRs, so the selection is not enforced there, and inductor also needs a target-determination job first. See Follow-ups under Spend.
+- **The model calls** cost about $0.5k a month at the recorded per-call cost. That figure leans on the prompt cache, and with a cold cache it is about $2.2k (see Dollar model). Either way it is small next to the saving.
+- **Where the saving is.** This stack makes $80k of the saving reachable, in pull and trunk, once enforcement is the default (Rollout step 3). Until then it applies only to PRs with the `ci-llm-td` label. The other $25k is in workflows where TD is off today: inductor's unit tests, periodic and slow. Those run every test on PRs, so the selection is not enforced there, and inductor also needs a target-determination job first. See Follow-ups under Spend.
 - **The stack.** The PRs below this one contain the selector, the harness, the run_test.py integration and a shadow-mode CI workflow. Enforcement is opt-in per PR through the `ci-llm-td` label. It applies only to same-repo PRs whose author is a member, owner or collaborator.
 
 The sections up to Time to land compare only old and new. Other models, effort levels and hedge budgets are in [Sweep](#sweep-other-models-efforts-and-hedges), which is how the config was chosen.
@@ -111,24 +111,24 @@ Reverts need no such filter: the autorevert bot already requires the failure to 
 
 ## Spend and savings
 
-30-day runner cost of test jobs, from `misc.runner_cost`. Builds, lint and other non-test jobs are not counted. Only the PR-triggered part of each workflow changes; main pushes and scheduled runs keep running everything.
+30-day runner cost of the test jobs the selection can shrink, from `misc.runner_cost`. Builds, lint and other non-test jobs are not counted. Neither are the test jobs that run every test under both policies, which the Time to land replay also keeps at r = 1 (`land_time.selectable`): the TD-off configs (docs_test, pr_time_benchmarks, dynamo_cpython and the like), macOS jobs and inductor's model benchmarks. Those are about $5k a month in pull, $45k in trunk (macOS $23k, pr_time_benchmarks $22k) and $28k in inductor. Only the PR part of each workflow changes, meaning `pull_request` runs and `ciflow/` pushes; main, `release/*` and `landchecks/*` pushes and scheduled runs keep running everything.
 
-**Fork PRs are excluded.** `llm-td.yml` and the selection step in the `target-determination` job (`resolve_selection.py`) skip fork PRs, so their test jobs keep TD. Fork PRs are 36% of pull's PR test hours, 46% of trunk's, 30% of inductor's, 37% of periodic's and 38% of slow's. Each workflow's PR spend is cut to its same-repo share before the selection is applied. PRs from the same repo whose author is not trusted (see Rollout) keep TD but are still counted. Pushing a branch to this repo needs write access, but anyone can open a PR from an existing branch (see `TRUSTED_AUTHORS` in resolve_selection.py), so how many such PRs there are was not measured.
+**Fork PRs are excluded.** `llm-td.yml` and the selection step in the `target-determination` job (`resolve_selection.py`) skip fork PRs, so their test jobs keep TD. Fork PRs are 36% of pull's PR test hours, 46% (CPU) and 47% (GPU) of trunk's, 30% and 34% of inductor's, and 37% of periodic's and of slow's. Each workflow's PR spend is cut to its same-repo share before the selection is applied. PRs from the same repo whose author is not trusted (see Rollout) keep TD but are still counted. Pushing a branch to this repo needs write access, but anyone can open a PR from an existing branch (see `TRUSTED_AUTHORS` in resolve_selection.py), so how many such PRs there are was not measured.
 
 | Workflow | Old $k/mo | New $k/mo |
 |---|---|---|
-| pull, CPU | 463.6 | 400.8 |
-| trunk, CPU | 157.0 | 143.0 |
-| trunk, GPU | 158.0 | 148.7 |
-| inductor unit tests, CPU (follow-up) | 65.6 | 51.2 |
-| inductor unit tests, GPU (follow-up) | 20.7 | 15.3 |
-| periodic, GPU (follow-up) | 17.0 | 15.2 |
-| slow, CPU (follow-up) | 6.3 | 6.1 |
-| **total** | **888** | **780** |
-| model calls | 0 | 0.5 (2.3 cold cache) |
+| pull, CPU | 458.1 | 396.8 |
+| trunk, CPU | 133.4 | 121.7 |
+| trunk, GPU | 136.5 | 129.0 |
+| inductor unit tests, CPU (follow-up) | 54.9 | 42.9 |
+| inductor unit tests, GPU (follow-up) | 50.7 | 38.4 |
+| periodic, GPU (follow-up) | 17.2 | 16.7 |
+| slow, CPU (follow-up) | 6.2 | 6.1 |
+| **total** | **857** | **752** |
+| model calls | 0 | 0.5 (2.2 cold cache) |
 
-- **Saved:** $108k a month, $91k CPU and $16k GPU. Dollar figures are rounded separately, so sums can be off by $1k. The first three rows, which this stack covers, are $86k, reachable once enforcement is the default (Rollout step 3).
-- **Follow-ups.** TD runs, and so the selection is enforced, only when `GITHUB_WORKFLOW` is pull, trunk, `rocm-*` or `periodic-rocm-*`. That check lives in `td_enabled_workflow` in `tools/testing/target_determination/heuristics/utils.py`, which `--enable-td`'s default reads, and `TD_ENABLED` in `target_determination.yml` matches it. So jobs of the inductor unit-test workflow (run on PRs by `ciflow/inductor`), periodic (CUDA) and slow run every test, under old and new alike. The follow-up rows above assume each follow-up is done and the shadow data shows the selection is safe there. Inductor is worth $20k; periodic and slow $2k.
+- **Saved:** $105k a month, $85k CPU and $20k GPU. Dollar figures are rounded separately, so sums can be off by $1k. The first three rows, which this stack covers, are $80k, reachable once enforcement is the default (Rollout step 3).
+- **Follow-ups.** TD runs, and so the selection is enforced, only when `GITHUB_WORKFLOW` is pull, trunk, `rocm-*` or `periodic-rocm-*`. That check lives in `td_enabled_workflow` in `tools/testing/target_determination/heuristics/utils.py`, which `--enable-td`'s default reads, and `TD_ENABLED` in `target_determination.yml` matches it. So jobs of the inductor unit-test workflow (run on PRs by `ciflow/inductor`), periodic (CUDA) and slow run every test, under old and new alike. The follow-up rows above assume each follow-up is done and the shadow data shows the selection is safe there. Inductor is worth $24k; periodic and slow $0.5k, since nearly all of their runs are scheduled or on release branches.
   - **Periodic and slow** already have a `target-determination` job, so their test jobs get TD's ranking and the selection. Each needs adding to `td_enabled_workflow` and to `TD_ENABLED`, which turns on TD's cut and the hedge with it.
   - **Inductor** has no `target-determination` job, in neither `inductor.yml` nor `inductor-unittest.yml`, so it gets no `td_results.json`.
     - Without that file, run_test.py turns TD off. Enforcement requires TD on, and the 20% hedge these rows assume needs TD's ranking.
@@ -138,7 +138,7 @@ Reverts need no such filter: the autorevert bot already requires the failure to 
   - Fork PRs are about two fifths of PR test hours and keep TD.
   - Main and scheduled runs keep running everything.
   - The 20% fixed job overhead is not saved (see Dollar model).
-- **Inductor.** Only the run_test.py unit-test configs are selectable, so the table counts only their share of inductor's test-job cost (83% on CPU, 38% on GPU, in `dollars.WORKFLOWS`). The model benchmarks (huggingface, timm, torchbench) are the rest, most of inductor's GPU spend, and are not in the $888k.
+- **Inductor.** Only the run_test.py unit-test configs are selectable, so the table counts only those jobs, 69% of inductor's CPU test-job cost and 93% of its GPU cost. The model benchmarks (huggingface, timm, torchbench) are the rest, $28k a month, mostly the CPU torchbench smoke test, and are not in the $857k.
 - **Not in the table.** rocm-mi300 and the other ROCm workflows also download the selection, but `misc.runner_cost` carries their runners at $0, so they show up only under Time to land and Capacity. The remaining callers (win, mac, s390x, tpu) cost under $1k a month together or are also carried at $0.
 
 ## Time to land
@@ -168,7 +168,7 @@ Time to signal (TTS) per workflow, in minutes:
 
 - **Merge wait.** 1,643 PR heads ran pull and `ciflow/trunk` together. On those, the p50 drops by 12 minutes and the p90 by 29. Trunk is the later signal for nearly all of them in both. 1,030 of them also ran `ciflow/inductor` within the same 10 minutes; inductor ends last on 15% of those (13% after), so trunk still bounds most of their wait.
 - **Trunk is where the latency is.** Its long test shards are the critical path, so the test shrinkage shows up as wall-clock time. Trunk's p50 moves less than its mean (14 min saved on average): 46% of its PR test hours are fork PRs', which keep TD, and its macOS jobs run every test under both policies.
-- **Pull leans toward build-bound.** Runs that wait on a build go from 12% to 22%. The floor is the xpu build (p50 40 / p90 49 min from creation to done) and the ROCm build (p50 23 / p90 53).
+- **Pull leans toward build-bound.** Runs whose last job to finish is a build or another non-test job go from 12% to 22%. The floor is the xpu build (p50 40 / p90 49 min from creation to done) and the ROCm build (p50 23 / p90 53).
 - **The model matches real merges.** When the merge comment started trunk (n=337), comment to merge took p50 185 / p90 269 min, against a simulated trunk TTS of 182 / 277. Taking each of those trunk runs' replayed saving off its merge gives the new 179 / 258. When trunk had already run before the comment (n=533), the merge took p50 3 min.
 - **Two delays are not modelled, so the merge rows and the trunk saving are optimistic.**
   - The selection artifact is kept 3 days (`retention-days: 3` in llm-td.yml), and resolve_selection.py treats an expired one as missing. A trunk run that a merge starts more than 3 days after the push gets no selection and keeps TD, and the p90 from first run to merge is 94.5 h.
@@ -176,14 +176,14 @@ Time to signal (TTS) per workflow, in minutes:
 - **CI is a minority of end-to-end time to land.** From the first pull run on the merged head to the merge is p50 15.8 h and p90 94.5 h, dominated by review. The saving matters most for authors iterating on red CI, since every push pays it again.
 
 **Capacity.**
-- PR test job-hours across pull, trunk, inductor and rocm-mi300 go from 675k to 545k a month. That includes inductor's unit tests, which need the inductor follow-up. `Test` is 70-95% of test-job time on every major runner type.
+- PR test job-hours across pull, trunk, inductor and rocm-mi300 go from 675k to 545k over the included runs (about 29 days, see Method; cancelled runs and runs over 24 h are left out). That includes inductor's unit tests, which need the inductor follow-up. `Test` is 70-95% of test-job time on every major runner type.
 - Median runner queues are already 1-3 minutes, but the tails are long: a10g p90 14 min, l4 p90 11, macos-m1 p90 59, mi300 p90 55, and the 4-GPU a10g pool p50 10 / p90 132. Freed capacity should cut those tails; this is a qualitative argument, not a model.
 
 **Method.**
 - **Replay.** For every PR workflow run in the 30 days to 2026-11-03, each same-repo test job's `Test` step is shrunk by the ratio r of new to old test time for that job.
   - Each job keeps its start time. Builds and non-test jobs are unchanged, shards are not rebalanced, and queueing effects are ignored.
   - A run is a fork PR's when its head repository is not pytorch/pytorch. For `ciflow/` pushes, the PR's head repository decides. Fork runs keep r = 1.
-  - Jobs that run_test.py runs without TD keep r = 1 too: the configs with TD off (docs_test, backwards_compat and the like, and test.sh's NO_TD dynamo_cpython) and the macOS and xpu runners.
+  - Jobs that run_test.py runs without TD keep r = 1 too: the configs with TD off (docs_test, backwards_compat, libtorch_agnostic_targetting and the like, and test.sh's NO_TD dynamo_cpython) and the macOS and xpu runners.
 - **The ratio r.**
   - In pull, trunk and rocm-mi300, r is 0.606 (CPU) and 0.732 (GPU), from the unrounded typical-change test-time shares.
   - In inductor, which has no TD, r is 0.498 / 0.403 for the unit-test configs (assuming the inductor follow-up) and 1 for the model benchmarks.
@@ -196,28 +196,28 @@ Time to signal (TTS) per workflow, in minutes:
 - **Relative cost.** A job's relative cost is `0.2 + 0.8 * f`, where f is the share of test time it runs. For old, f is the replayed TD share in TD workflows and 1 elsewhere. The same-repo PR share of each workflow's test spend is then rescaled by new over old.
 - **Test-time shares.**
   - pull and trunk use the typical-change shares from the Accuracy table: old 49.4% CPU / 45.9% GPU, new 30.0% / 33.6%.
-  - periodic and slow have TD off today, so old runs everything there (relative cost 1) and new uses the same new shares. Those shares are over the configs TD jobs run, so the periodic and slow rows are approximations ($2k together).
+  - periodic and slow have TD off today, so old runs everything there (relative cost 1) and new uses the same new shares. Those shares are over the configs TD jobs run, so the periodic and slow rows are approximations ($0.5k together).
   - The inductor rows use the configs of inductor-unittest.yml that no TD job runs, over only the 67 of 187 typical commits that match the `ciflow/inductor` labeler globs, since those are the PRs that run it. On those, new runs 49.8% of CPU and 40.3% of GPU unit-test time; old runs everything. trunk's own `inductor` config has TD and is priced with trunk.
 - **Model cost.**
-  - $0.041 per call is the mean recorded cost over the 425 eval samples the selector asks the model about (`dollars.mean_call_usd`). At 12.5k same-repo PR pushes a month that is $0.5k a month. Fork PRs make no call.
+  - $0.041 per call is the mean recorded cost over the 425 eval samples the selector asks the model about (`dollars.mean_call_usd`). At 12.2k same-repo PR pushes a month that is $0.5k a month. Fork PRs make no call.
   - **That figure depends on the prompt cache.** The Opus medium and high runs ran after Opus low on the same prompts and read 92-93% of their input from cache. Opus low, run first, read 12%.
   - Priced cold, with every cache read billed as a cache write at the fitted rates ($4 input, $5 cache write, $0.20 cache read, $20 output per Mtok), every Opus effort costs $0.17-0.19 per call, over the calls made in one attempt with their usage recorded (all 425 here). The second Opus medium run, which hit a cold cache, recorded $0.146-0.164 per call.
   - `dollars --cold` prints the cold $/call and the fitted rates (`dollars.cold_call_usd`, a least-squares fit of the recorded cost to the four token counts). The fitted rates per Mtok (input / cache write / cache read / output) are $4 / $5 / $0.20 / $20 for Opus, $2 / $2.50 / $0.20 / $10 for Sonnet and $1 / $1.25 / $0.10 / $5 for Haiku.
-  - A cold-cache bound is about $0.18 x 12.5k = $2.3k a month. In CI each PR push sends a different diff, but the long candidate list is a shared prefix, so the real figure is somewhere between the two.
+  - A cold-cache bound is about $0.18 x 12.2k = $2.2k a month. In CI each PR push sends a different diff, but the long candidate list is a shared prefix, so the real figure is somewhere between the two.
   - Timed-out calls record only their earlier attempts' cost, so they are left out of the mean.
 
 The overhead fraction dominates the uncertainty:
 
 | Overhead | CPU saved | GPU saved | Total saved | This stack |
 |---|---|---|---|---|
-| 0.1 | $111k | $20k | $130k/mo | $106k |
-| **0.2** | **$91k** | **$16k** | **$108k/mo** | **$86k** |
-| 0.35 | $67k | $12k | $80k/mo | $62k |
-| 0.5 | $47k | $9k | $56k/mo | $43k |
+| 0.1 | $103k | $24k | $127k/mo | $99k |
+| **0.2** | **$85k** | **$20k** | **$105k/mo** | **$80k** |
+| 0.35 | $62k | $16k | $78k/mo | $58k |
+| 0.5 | $44k | $12k | $56k/mo | $40k |
 
 **Where the GPU money is.**
-- The GPU number is modest because the biggest GPU line, the inductor model benchmarks, is not selectable test files.
-- The same approach could gate them: ask the model whether a change can affect compiled-model performance or accuracy at all. That is a yes/no question rather than a file list, and it is step 5 of the rollout.
+- The GPU number is smaller because GPU jobs are under a quarter of the selectable spend ($204k of $857k), and new keeps more of the GPU test time old runs (73%, against 61% on CPU).
+- The inductor model benchmarks ($28k a month) are not selectable test files, but the same approach could gate them: ask the model whether a change can affect compiled-model performance or accuracy at all. That is a yes/no question rather than a file list, and it is step 5 of the rollout.
 - Skipping shards whose selection is empty would also recover the job overhead the model treats as fixed.
 
 ## Method
@@ -238,7 +238,7 @@ The overhead fraction dominates the uncertainty:
   - the change touches anything that decides how tests run (`RUN_ALL_PATTERNS`): run_test.py, conftest, common_utils, common_device_type, tools/testing, the test shell scripts and actions, the CI docker images and commit pins;
   - an edited inductor failure list names an unknown test class;
   - more than `MAX_DATA_FILES` (50) edited non-test files under `test/` would need their readers found one by one;
-  - test modules import the change through more than `MAX_IMPORT_HOPS` (8) hops;
+  - test modules import the change through `MAX_IMPORT_HOPS` (8) or more hops;
   - nothing is found that reads an edited data file under `test/`.
 - **Selector failures.** A missing or malformed answer, or any other selector error, is marked not enforced, and CI keeps TD's own split. The harness's `final+tdN` policies score it the same way, as TD's top 25%; `model`, `final` and `final-hm` score it as run-all.
 - **Fallbacks in run_test.py.** `apply_selection` keeps TD's split when there are no test times, when the PR's previous failures were not recorded, or when the selection chose no files for the job.
@@ -320,7 +320,7 @@ How to read the chart:
 | high, 20% | 84.3% | 82.8% | 90.3% | 97.0% | 29.7% | 33.3% |
 | TD today (old), for reference | 68.7% | 66.4% | 94.1% | 98.7% | 49.4% | 45.9% |
 
-Saved per month at the 0.2 overhead, for Opus medium: $188k with no hedge, $165k at 5%, $147k at 10%, $128k at 15% and $108k at 20%.
+Saved per month at the 0.2 overhead, for Opus medium: $181k with no hedge, $160k at 5%, $142k at 10%, $124k at 15% and $105k at 20%.
 
 **Other models, 20% hedge.** $/call is the mean recorded cost over the 425 eval samples the model is asked about. Cold is the same calls with every cache read priced as a cache write (`dollars --cold`); for every model all 425 were single-attempt calls with their usage recorded, so both columns cover the same 425. p50 wall is the model call alone.
 
@@ -338,7 +338,7 @@ Saved per month at the 0.2 overhead, for Opus medium: $188k with no hedge, $165k
   - Without a hedge, every Opus effort is ahead of TD on reverts (70.1-74.6% vs 68.7%) at under a third of its test time. But it selects every real failure on only about 81% of failing pushes, against TD's 94.1%.
   - The hedge closes most of that gap, since TD's heuristics rank recently failing tests high and many PR failures are in those. At 20%, Opus medium is still 2.5 points under TD (95% interval -5.9 to +0.8), low 3.4 under (-6.9 to 0.0) and high 3.8 under (-7.4 to -0.4).
   - Part of this is the censoring above, but how much cannot be measured offline.
-  - Budgets above 20% were not swept. Each 5 points of hedge costs about $20k a month of the saving.
+  - Budgets above 20% were not swept. Each 5 points of hedge costs about $19k a month of the saving.
 - **Why medium effort.** At the 20% hedge, low, medium and high are within 3.7 points of each other on reverts and 1.3 on pushes. The push spread is well inside the bootstrap intervals; the revert spread is above the 1-2 points measured run to run (see below), so effort may matter on reverts. Only high is significantly below TD on pushes at the 95% level (-7.4 to -0.4); low's interval reaches 0.0 and medium's +0.8, so that does not separate low from medium. Medium was kept as the middle setting, ahead of low on both metrics (82.8% vs 80.6% on reverts, 91.5% vs 90.7% on pushes), though both gaps are within the noise. Its p50 is 5s slower than low's, which is negligible next to the test jobs.
 - **Model size matters more than effort.**
   - Opus at any effort beats Sonnet on reverts by 4-9 points at the 20% hedge. On pushes the two are level.
@@ -435,11 +435,11 @@ Saved per month at the 0.2 overhead, for Opus medium: $188k with no hedge, $165k
      - **TD's recall there.** The holdout sets `force-no-td`, so TD's include list is every file and `llm_td_failure`'s `in_td_include` is always true on its rows. TD's recall is instead recomputed from the same failures' `td_test_failure_stats_v2` rows, which run_test.py emits with TD's ranking even with TD off: a failure counts for TD if its `position` is below `len(all_scores) * 25 // 100 + 1`. That is the cut `get_top_per_tests(25)` makes in `split_tests` (`tools/testing/test_selections.py`, called from run_test.py with TD on): `position` and the include list both index `TestPrioritizations._traverse_scores()` (`heuristics/interface.py`), and `all_scores` has one entry per TestRun in it.
      - **Previous failures differ from enforcement.** With every file in TD's include list, the selection's previously-failed rule admits every file that already failed on the PR. Under enforcement it admits only those in TD's top 25%, and the rest compete for the hedge. So a holdout failure covered only by `previous_failure_added` counts for the selection only if the file is in TD's recomputed 25%. Without that correction the holdout's recall would be optimistic against enforcement. **Given the backtest's push result, this gate is the decision point, not a formality.**
 2. **Opt-in enforcement.** `ci-llm-td` enforces the selection, with the 20% hedge, on that PR.
-3. **Default enforcement.** Enforce on every same-repo PR from a trusted author, with `ci-no-td` as the opt-out. This unlocks about $86k a month and the merge-wait drop above. Track reverts of enforced PRs on main as the live check of revert recall. Only take this step if the holdout clears the gate in step 1; if it does not, raise the hedge or iterate the prompt first.
+3. **Default enforcement.** Enforce on every same-repo PR from a trusted author, with `ci-no-td` as the opt-out. This unlocks about $80k a month and the merge-wait drop above. Track reverts of enforced PRs on main as the live check of revert recall. Only take this step if the holdout clears the gate in step 1; if it does not, raise the hedge or iterate the prompt first.
 4. **Inductor, periodic and slow.**
    - Periodic (CUDA) and slow already have a `target-determination` job. Add them to `td_enabled_workflow` in `tools/testing/target_determination/heuristics/utils.py` and to `TD_ENABLED` in `target_determination.yml`, which turns TD on for them.
    - Inductor first needs a `target-determination` job in `inductor.yml`, then the same two changes. Without TD's ranking there is no TD to enforce over and no hedge.
-   - Inductor's unit tests are worth about $20k a month; periodic and slow about $2k.
+   - Inductor's unit tests are worth about $24k a month; periodic and slow about $0.5k.
 5. **Benchmarks and shards.** Gate the inductor model benchmarks on a yes/no model answer, and skip shards with nothing selected.
 
 **Future work: a persistent per-test summary.** Each call re-reads the candidate list with nothing but file names and CI minutes. A summary per test file could record what the file exercises and which source areas have broken it before. Generated once and refreshed as tests change, it would give the model the knowledge TD's heuristics encode, and could let the hedge shrink.
@@ -538,58 +538,14 @@ python -m tools.testing.llm_td.eval.intervals rows_eval.json rows_head_noprev.js
 - the fork share of those PR hours;
 - whether TD runs there.
 
-`PR_PUSHES_PER_MONTH_K` is the same-repo PR head count. All of them come from ClickHouse, over the 30 days to the query date:
+`PR_PUSHES_PER_MONTH_K` is the same-repo PR head count. `dollars --constants END` recomputes all of them from ClickHouse over the 30 days to the unix time END, here 2026-11-03 (`COST_SQL`, `HOURS_SQL` and `HEADS_SQL` in dollars.py):
+- the cost is `misc.runner_cost` of the `/ test (` jobs, over the 30 whole days before END's date;
+- a job counts only if `land_time.selectable` says the selection shrinks it, the same rule the Time to land replay uses;
+- PR hours are those of `pull_request` runs and `ciflow/` pushes, the runs that can get a selection;
+- a PR run is a fork PR's when its head repository is not pytorch/pytorch, and for `ciflow/` pushes the PR's head repository decides.
 
-```sql
--- Test-job cost ($k): misc.runner_cost
-SELECT workflow_name, gpu, round(sum(cost) / 1000, 1) k FROM misc.runner_cost
-WHERE group_repo ILIKE '%pytorch/pytorch%' AND date >= today() - 30 AND job_name ILIKE '%test%'
-  AND workflow_name IN ('pull', 'trunk', 'inductor', 'periodic', 'slow')
-GROUP BY workflow_name, gpu;
-
--- PR share of test hours: jobs not on main or trunk/ branches
-SELECT workflow_name, round(sumIf(h, pr) / sum(h), 2) pr_share FROM (
-  SELECT workflow_name, NOT (head_branch = 'main' OR startsWith(head_branch, 'trunk/')) pr,
-    dateDiff('second', started_at, completed_at) / 3600 h
-  FROM default.workflow_job FINAL
-  WHERE repository_full_name = 'pytorch/pytorch' AND started_at >= now() - INTERVAL 30 DAY
-    AND completed_at > started_at AND name LIKE '%/ test (%'
-    AND workflow_name IN ('pull', 'trunk', 'inductor', 'periodic', 'slow'))
-GROUP BY workflow_name;
-
--- Inductor's unit-test share (0.83 of CPU and 0.38 of GPU test hours): the rest are model benchmarks (land_time.GPU_LABEL and land_time.BENCH)
-SELECT arrayExists(l -> match(l, 'gpu|nvidia|-a10g|-l4|-t4|h100|h200|b200|gb[0-9]00|a100|rocm|xpu'), labels) gpu,
-  match(extract(name, '/ test \\(([^,]+),'), 'huggingface|timm|torchbench|_perf') bench,
-  round(sum(dateDiff('second', started_at, completed_at)) / 3600) h
-FROM default.workflow_job FINAL
-WHERE repository_full_name = 'pytorch/pytorch' AND started_at >= now() - INTERVAL 30 DAY
-  AND completed_at > started_at AND workflow_name = 'inductor' AND name LIKE '%/ test (%'
-GROUP BY gpu, bench;
-
--- Fork share of PR test hours: pull runs by their head repo, ciflow/<label>/<PR> pushes by that PR's
-WITH runs AS (
-  SELECT id, name wf, event, head_repository.full_name = 'pytorch/pytorch' run_same,
-    toInt64OrZero(extract(head_branch, '^ciflow/[^/]+/([0-9]+)$')) pr
-  FROM default.workflow_run FINAL
-  WHERE created_at >= now() - INTERVAL 31 DAY AND repository.full_name = 'pytorch/pytorch'
-    AND ((name = 'pull' AND event = 'pull_request')
-      OR (name IN ('trunk', 'inductor', 'periodic', 'slow') AND head_branch LIKE 'ciflow/%'))),
-prs AS (
-  SELECT number, any(head.repo.full_name) = 'pytorch/pytorch' same FROM default.pull_request FINAL
-  WHERE number IN (SELECT pr FROM runs WHERE pr > 0) GROUP BY number)
-SELECT r.wf, if(r.event = 'pull_request', r.run_same, p.same) same,
-  round(sum(dateDiff('second', j.started_at, j.completed_at)) / 3600) h
-FROM default.workflow_job j FINAL JOIN runs r ON j.run_id = r.id LEFT JOIN prs p ON p.number = r.pr
-WHERE j.repository_full_name = 'pytorch/pytorch' AND j.started_at >= now() - INTERVAL 30 DAY
-  AND j.completed_at > j.started_at AND j.name LIKE '%/ test (%'
-GROUP BY r.wf, same;
-
--- Same-repo PR heads with a pull run
-SELECT head_repository.full_name = 'pytorch/pytorch' same, uniqExact(head_sha) heads
-FROM default.workflow_run FINAL
-WHERE created_at >= now() - INTERVAL 30 DAY AND repository.full_name = 'pytorch/pytorch'
-  AND name = 'pull' AND event = 'pull_request'
-GROUP BY same;
+```
+python -m tools.testing.llm_td.eval.dollars --constants 1793672225
 ```
 
 **Time to land.** The replay in Time to land's Method was run from ClickHouse with five queries over the month to 2026-11-03. `eval/land_time.py` runs them and the simulation. The queries:

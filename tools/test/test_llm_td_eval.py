@@ -4,10 +4,12 @@ import argparse
 import collections
 import contextlib
 import datetime as dt
+import fnmatch
 import functools
 import importlib.util
 import io
 import json
+import math
 import os
 import random
 import re
@@ -1854,9 +1856,43 @@ class TestDollars(unittest.TestCase):
         self.assertEqual(old, [round(w[2], 1) for w in dollars.WORKFLOWS])  # fmt: skip
         self.assertIn(f"| **total** | **{sum(w[2] for w in dollars.WORKFLOWS):.0f}** |", report)  # fmt: skip
 
+    def test_constants(self) -> None:
+        cost = [
+            {"wf": "pull", "gpu": 0, "name": "pull / test (default, l)", "k": 10.0},
+            {"wf": "pull", "gpu": 0, "name": "pull / test (docs_test, l)", "k": 5.0},
+            {"wf": "inductor", "gpu": 1, "name": "inductor / test (inductor_core, g)", "k": 4.0},
+            {"wf": "inductor", "gpu": 1, "name": "inductor / test (inductor_huggingface, g)", "k": 9.0},
+        ]  # fmt: skip
+        hours = [
+            {"wf": "pull", "name": "pull / test (default, 1, 2, l)", "gpu": False, "pr": True, "same": True, "h": 6.0},
+            {"wf": "pull", "name": "pull / test (default, 2, 2, l)", "gpu": False, "pr": True, "same": False, "h": 2.0},
+            {"wf": "pull", "name": "pull / test (default, 1, 2, l)", "gpu": False, "pr": False, "same": True, "h": 2.0},
+            {"wf": "pull", "name": "pull / test (docs_test, 1, 1, l)", "gpu": False, "pr": False, "same": True, "h": 100.0},
+            {"wf": "inductor", "name": "inductor / test (inductor_core, 1, 1, g)", "gpu": True, "pr": True, "same": True, "h": 3.0},
+            {"wf": "inductor", "name": "inductor / test (inductor_core, 1, 1, g)", "gpu": True, "pr": False, "same": True, "h": 1.0},
+            {"wf": "inductor", "name": "inductor / test (inductor_huggingface, 1, 1, g)", "gpu": True, "pr": False, "same": True, "h": 50.0},
+        ]  # fmt: skip
+        sqls = []
+
+        def query(sql: str) -> list[dict]:
+            sqls.append(sql)
+            return cost if "runner_cost" in sql else hours if "workflow_job" in sql else [{"heads": 12345}]  # fmt: skip
+
+        workflows = [("pull", "cpu", 0.0, 0.0, 0.0, True), ("inductor (unit tests)", "ind_gpu", 0.0, 0.0, 0.0, False)]  # fmt: skip
+        with patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}), mock.patch.object(clickhouse, "query", side_effect=query):  # fmt: skip
+            with mock.patch.object(dollars, "WORKFLOWS", workflows):
+                got = dollars.constants(1000)
+            # docs_test runs no run_test.py and the benchmark is no unit test, so neither counts.
+            self.assertEqual(got, ([("pull", "cpu", 10.0, 0.8, 0.25, True), ("inductor (unit tests)", "ind_gpu", 4.0, 0.75, 0.0, False)], 12.3))  # fmt: skip
+            self.assertIn(f"match(l, '{land_time.GPU_LABEL}')", sqls[1])
+            self.assertIn("toDateTime(1000)", sqls[2])
+            with mock.patch.object(dollars, "WORKFLOWS", [("slow", "cpu", 0.0, 0.0, 0.0, False)]), self.assertRaisesRegex(SystemExit, "no PR test hours for"):  # fmt: skip
+                dollars.constants(1000)
+
 
 class TestLandTime(unittest.TestCase):
     def test_replay(self) -> None:
+        self.enterContext(patch_ci_jobs({True: {("pull", "linux", "default"), ("trunk", "linux", "default")}, False: {("trunk", "b200", "smoke_b200")}}))  # fmt: skip
         end = 100 * 86400
         c = end - 86400
         runs = [{"id": i, "name": "pull", "event": "pull_request", "head_branch": "b", "head_sha": f"s{i}", "created": c, "run_attempt": 1, "conclusion": "success"} for i in (1, 2, 3)]  # fmt: skip
@@ -1903,6 +1939,58 @@ class TestLandTime(unittest.TestCase):
         self.assertEqual([t[-1] for t in out["pull"][0]["tests"]], [0.5, 1.0])
         self.assertEqual([t[-1] for t in out["trunk"][0]["tests"]], [0.5, 1.0, 1.0])
         self.assertAlmostEqual(land_time.pct([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 90), 9.1)
+        self.assertEqual(land_time.pct([7], 90), 7)
+        self.assertTrue(math.isnan(land_time.pct([], 50)))
+
+    def test_selectable(self) -> None:
+        no_td = {"docs_test"}
+        for wf, cfg, env, want in [
+            ("pull", "default", "l", True),
+            ("pull", "docs_test", "l", False),
+            ("pull", "dynamo_cpython", "l", False),
+            ("trunk", "default", "macos-m1-14", False),
+            ("inductor", "inductor_core", "g", True),
+            ("inductor", "inductor_huggingface", "g", False),
+        ]:
+            self.assertEqual(land_time.selectable(wf, cfg, env, no_td), want, (wf, cfg, env))  # fmt: skip
+
+    def test_no_run_test_matches_test_sh(self) -> None:
+        # A pull or trunk TD config's test.sh branch: the first earlier branch it matches that exits, else the main dispatch's.
+        func_def = re.compile(r"(?:function\s+(\w+)|(\w+)\s*\(\s*\))")
+        cond = re.compile(r'(el)?if \[\[ "?\$\{?TEST_CONFIG\}?"? ==? ["\']?([^ "\']+)')  # fmt: skip
+        func, bodies, chains, body = None, {}, [], None
+        for line in (REPO_ROOT / ".ci/pytorch/test.sh").read_text().splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            if m := func_def.match(line):
+                func = m.group(1) or m.group(2)
+                bodies[func] = set()
+            elif line.startswith("}"):
+                func = None
+            elif func:
+                bodies[func].update(re.findall(r"[\w.]+", line))
+            elif m := cond.match(line):
+                if not m.group(1):
+                    chains.append([])
+                chains[-1].append((m.group(2), body := set()))
+            elif re.match(r"el(se|if)\b", line):
+                chains[-1].append(("*" if line.startswith("else") else None, body := set()))  # fmt: skip
+            elif line.startswith("fi"):
+                body = None
+            elif body is not None:
+                body.update(re.findall(r"[\w.]+", line))
+        main = max(chains, key=len)
+
+        def runs_run_test(words: set[str], seen: frozenset[str] = frozenset()) -> bool:
+            return "run_test.py" in words or any(runs_run_test(bodies[w], seen | {w}) for w in words - seen if w in bodies)  # fmt: skip
+
+        jobs = ci_jobs()
+        no_run_test = set()
+        for cfg in {c for w, _, c in jobs[True] if w in ("pull", "trunk")}:
+            branches = (ws for chain in chains for p, ws in chain if p and fnmatch.fnmatchcase(cfg, p) and (chain is main or "exit" in ws))  # fmt: skip
+            if not runs_run_test(next(branches)):
+                no_run_test.add(cfg)
+        self.assertEqual(no_run_test, land_time.NO_RUN_TEST)
 
     def test_rules_match_workflows(self) -> None:
         jobs = ci_jobs()
@@ -1913,18 +2001,16 @@ class TestLandTime(unittest.TestCase):
         self.assertTrue(inductor)
         for n, c in inductor:
             self.assertEqual(bool(land_time.BENCH.search(c)), not n.startswith("unit-test / "), (n, c))  # fmt: skip
-        report = (REPO_ROOT / "tools/testing/llm_td/REPORT.md").read_text()
-        self.assertIn(f"match(l, '{land_time.GPU_LABEL}')", report)
-        self.assertIn(f"'{land_time.BENCH.pattern}') bench", report)
 
     def test_ratios_and_wait(self) -> None:
-        dollars_json = {"fractions": {"cpu": 0.3, "gpu": 0.3, "ind_cpu": 0.5, "ind_gpu": 0.4}, "td_fractions": {"cpu": 0.6, "gpu": 0.4, "ind_cpu": 1.0, "ind_gpu": 1.0}}  # fmt: skip
+        dollars_json = {"fractions": {"cpu": 0.3, "gpu": 0.3, "ind_cpu": 0.5, "ind_gpu": 0.4}, "td_fractions": {"cpu": 0.6, "gpu": 0.4, "ind_cpu": 0.8, "ind_gpu": 0.9}}  # fmt: skip
         self.assertEqual(land_time.ratios(dollars_json), {"cpu": 0.5, "gpu": 0.75, "ind_cpu": 0.5, "ind_gpu": 0.4})  # fmt: skip
         head = [{"c": 60, "end_old": 600, "end_new": 300}, {"c": 0, "end_old": 1200, "end_new": 240}]  # fmt: skip
         self.assertEqual(land_time.wait([head], "end_old"), [20.0])
         self.assertEqual(land_time.wait([head], "end_new"), [5.0])
 
     def test_report(self) -> None:
+        self.enterContext(patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}))  # fmt: skip
         end = 100 * 86400
         c0 = end - 86400
         # id -> (workflow, sha, creation offset).
@@ -1967,7 +2053,7 @@ class TestLandTime(unittest.TestCase):
             ],
         }  # fmt: skip
         cache = write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), files)  # fmt: skip
-        r = {"fractions": {"cpu": 0.3, "gpu": 0.3, "ind_cpu": 0.5, "ind_gpu": 0.4}, "td_fractions": {"cpu": 0.6, "gpu": 0.4, "ind_cpu": 1.0, "ind_gpu": 1.0}}  # fmt: skip
+        r = {"fractions": {"cpu": 0.3, "gpu": 0.3, "ind_cpu": 0.5, "ind_gpu": 0.4}, "td_fractions": {"cpu": 0.6, "gpu": 0.4, "ind_cpu": 0.8, "ind_gpu": 0.9}}  # fmt: skip
         out = land_time.report(cache, r, all_prs=False)
         # fmt: off
         for line in [
@@ -2198,17 +2284,20 @@ class TestBuildDataset(unittest.TestCase):
         git.assert_not_called()
         load.assert_not_called()
         self.assertIn("rerun on or after", err.getvalue())
-        # Head samples extend pr_ samples, so a DIR without any is refused before loading CI history.
-        closed = [*argv[:6], "2026-10-02", *argv[7:]]
+        # Head samples extend pr_ samples, so a DIR without any builds none, without loading CI history, and goes on to the later kinds.
+        closed = [*argv[:6], "2026-10-02", *argv[7:], "revert"]
         with (
             tempfile.TemporaryDirectory() as tmp,
             mock.patch.object(sys, "argv", [*closed[:2], tmp, *closed[3:]]),
             mock.patch.object(bd, "git") as git,
             mock.patch.object(bd.History, "load") as load,
-            self.assertRaisesRegex(SystemExit, "no pr_ samples"),
+            mock.patch.object(bd, "revert_samples") as revert,
+            contextlib.redirect_stdout(io.StringIO()) as out,
         ):  # fmt: skip
             bd.main()
         load.assert_not_called()
+        revert.assert_called_once()
+        self.assertIn(f"no head samples: there are no pr_ samples in {tmp}/samples", out.getvalue())  # fmt: skip
         # The guard is for PR truth only.
         with (
             tempfile.TemporaryDirectory() as tmp,
@@ -2584,20 +2673,60 @@ class TestBuildDataset(unittest.TestCase):
             bd.git("mv", "moved.py", "new.py")
             bd.git("commit", "-q", "-m", "change")
             head = bd.git("rev-parse", "HEAD").strip()
-            # select_tests' own git runs in this checkout, so only bd's is exercised.
+            # deleted_files runs select_tests' git, which scratch_repo also points here.
             with (
                 tempfile.TemporaryDirectory() as d,
                 mock.patch.object(bd, "candidates_at", return_value=[]),
                 mock.patch.object(bd, "changed_files", return_value=[]),
                 mock.patch.object(bd, "diffstat_and_diff", return_value=("", "")),
             ):  # fmt: skip
-                bd.write_sample(Path(d), "s", "neutral", head, base, "t", "b", truth=[])
+                bd.write_sample(Path(d), "s", "neutral", head, base, "t", "b", window=(START, END), truth=[])  # fmt: skip
                 s = json.loads((Path(d) / "s.json").read_text())
                 # Written once: a rebuild keeps the sample.
-                bd.write_sample(Path(d), "s", "neutral", head, base, "t2", "b", truth=[])  # fmt: skip
+                bd.write_sample(Path(d), "s", "neutral", head, base, "t2", "b", window=(START, END), truth=[])  # fmt: skip
                 self.assertEqual(json.loads((Path(d) / "s.json").read_text()), s)
         self.assertEqual(s["deleted"], ["gone.py", "moved.py"])
-        self.assertEqual(s["title"], "t")
+        self.assertEqual((s["title"], s["builder"], s["window"]), ("t", bd.BUILDER, [str(START), str(END)]))  # fmt: skip
+
+    def test_main_refuses_another_build(self) -> None:
+        neutral = [str(END - dt.timedelta(days=25)), str(END)]
+        argv = ["build_dataset", "--data", "", "--start", str(START), "--end", str(END), "--kinds"]  # fmt: skip
+        # Every kind refuses samples of its own of another builder or window, or of none, before any work, including the kinds before it.
+        cases = [
+            ("rev_x", {"window": [str(START), str(END)]}, "revert", "rev_ samples in {}, e.g. rev_x, predate the builder field; build into a fresh --data"),
+            ("rev_x", {"builder": bd.BUILDER + 1, "window": [str(START), str(END)]}, "revert", f"rev_ samples in {{}}, e.g. rev_x, were written by builder {bd.BUILDER + 1}, not {bd.BUILDER}; build into a fresh --data"),
+            ("neu_x", {"builder": bd.BUILDER, "window": [neutral[0], "2026-10-27"]}, "neutral", f"neu_ samples in {{}}, e.g. neu_x, were drawn from {[neutral[0], '2026-10-27']}, not {neutral[0]}/{END}"),
+            ("head_1_x", {}, "head", "head_ samples in {}, e.g. head_1_x, predate the builder field; build into a fresh --data"),
+        ]  # fmt: skip
+        for sid, mark, kind, msg in cases:
+            with (
+                tempfile.TemporaryDirectory() as tmp,
+                mock.patch.object(sys, "argv", [*argv[:2], tmp, *argv[3:], "pr", kind]),
+                mock.patch.object(bd, "WINDOW", dt.timedelta(0)),
+                mock.patch.object(bd, "git") as git,
+                mock.patch.object(bd.History, "load") as load,
+                self.assertRaises(SystemExit) as e,
+            ):  # fmt: skip
+                (Path(tmp) / "samples").mkdir()
+                (Path(tmp) / "samples" / f"{sid}.json").write_text(json.dumps(mark))
+                bd.main()
+            self.assertEqual(e.exception.code, f"refusing {kind} samples: " + msg.format(Path(tmp) / "samples"))  # fmt: skip
+            git.assert_not_called()
+            load.assert_not_called()
+        # Samples of this builder and window are extended.
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(sys, "argv", [*argv[:2], tmp, *argv[3:], "revert", "neutral"]),
+            mock.patch.object(bd, "git"),
+            mock.patch.object(bd, "revert_samples") as revert,
+            mock.patch.object(bd, "neutral_samples") as neutral_samples,
+        ):  # fmt: skip
+            (Path(tmp) / "samples").mkdir()
+            (Path(tmp) / "samples" / "rev_x.json").write_text(json.dumps({"builder": bd.BUILDER, "window": [str(START), str(END)]}))  # fmt: skip
+            (Path(tmp) / "samples" / "neu_x.json").write_text(json.dumps({"builder": bd.BUILDER, "window": neutral}))  # fmt: skip
+            bd.main()
+        revert.assert_called_once_with(Path(tmp) / "samples", 8, START, END)
+        neutral_samples.assert_called_once_with(Path(tmp) / "samples", END - dt.timedelta(days=25), END, 200)  # fmt: skip
 
     def test_fetch_retries_a_failed_batch_per_sha(self) -> None:
         def run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess:
@@ -2682,13 +2811,15 @@ class TestBuildDataset(unittest.TestCase):
                 self.assertEqual(bd.pr_text(1), ("t", "b"))
             self.assertEqual(sleep.call_count, 2)
             with mock.patch.object(bd.subprocess, "run", return_value=bad) as run:
-                with self.assertRaises(subprocess.CalledProcessError):
+                with self.assertRaises(subprocess.CalledProcessError) as e:
                     bd.pr_text(1)
+            self.assertEqual(e.exception.stderr, "API rate limit exceeded")
             self.assertEqual(run.call_count, 4)
             gone = subprocess.CompletedProcess([], 1, "", "gh: Not Found (HTTP 404)")
             with mock.patch.object(bd.subprocess, "run", return_value=gone) as run:
-                with self.assertRaises(subprocess.CalledProcessError):
+                with self.assertRaises(subprocess.CalledProcessError) as e:
                     bd.pr_text(1)
+            self.assertEqual(e.exception.stderr, "gh: Not Found (HTTP 404)")
             self.assertEqual(run.call_count, 1)
             junk = subprocess.CompletedProcess([], 0, "null", "")
             with mock.patch.object(bd.subprocess, "run", return_value=junk) as run:
@@ -2833,7 +2964,8 @@ class TestBuildDataset(unittest.TestCase):
             bd.head_samples(h, out, 1)
         self.assertEqual(sorted(samples), ["head_1_h1", "head_1_h2", "pr_1"])
         pr, head = samples["pr_1"], samples["head_1_h1"]
-        self.assertEqual((pr["sha"], pr["truth"], pr["window"]), ("h1", ["test_a"], [str(START), str(END)]))  # fmt: skip
+        self.assertEqual((pr["sha"], pr["truth"]), ("h1", ["test_a"]))
+        self.assertEqual({(s["builder"], tuple(s["window"])) for s in samples.values()}, {(bd.BUILDER, (str(START), str(END)))})  # fmt: skip
         self.assertEqual((pr["truth"], pr["truth_jobs"]), (head["truth"], head["truth_jobs"]))  # fmt: skip
         dropped = (
             "{'disabled': 1, 'job_green': 1, 'main_near_base': 1, 'other_failure': 1}"
@@ -2901,15 +3033,19 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "write_sample") as write,
             contextlib.redirect_stdout(io.StringIO()),
         ):  # fmt: skip
-            pr_1 = {"pr": 1, "sha": "h1", "base": "pr_base", "title": "t", "body": "b", "window": [str(START), str(END)]}  # fmt: skip
-            # pr_ samples of another window, or of none, refuse both PR kinds before History.load.
+            pr_1 = {"pr": 1, "sha": "h1", "base": "pr_base", "title": "t", "body": "b", "builder": bd.BUILDER, "window": [str(START), str(END)]}  # fmt: skip
+            # pr_ samples of another builder or window, or of none, refuse both PR kinds before History.load.
             data = Path(out) / "data"
             (samples := data / "samples").mkdir(parents=True)
             argv = ["build_dataset", "--data", str(data), "--start", str(START), "--end", str(END), "--kinds"]  # fmt: skip
-            want = {"2026-10-27": f"pr_ samples in {samples}, e.g. pr_1, were built with another --start/--end than {START}/{END}", None: f"pr_ samples in {samples}, e.g. pr_1, predate the window field"}  # fmt: skip
-            for end, msg in want.items():
-                (samples / "pr_1.json").write_text(json.dumps({**pr_1, "window": end and [str(START), end]}))  # fmt: skip
-                self.assertIn(msg, bd.other_window(samples, START, END) or "")
+            want = [
+                ({"window": [str(START), "2026-10-27"]}, f"pr_ samples in {samples}, e.g. pr_1, were drawn from {[str(START), '2026-10-27']}, not {START}/{END}"),
+                ({"builder": bd.BUILDER - 1}, f"pr_ samples in {samples}, e.g. pr_1, were written by builder {bd.BUILDER - 1}, not {bd.BUILDER}"),
+                ({"builder": None, "window": None}, f"pr_ samples in {samples}, e.g. pr_1, predate the builder field"),
+            ]  # fmt: skip
+            for mark, msg in want:
+                (samples / "pr_1.json").write_text(json.dumps({**pr_1, **mark}))
+                self.assertIn(msg, bd.other_build(samples, "pr_", (START, END)) or "")
                 for kind in ("pr", "head"):
                     # A zero WINDOW lets the guard on --end + WINDOW pass.
                     with mock.patch.object(sys, "argv", [*argv, kind]), mock.patch.object(bd, "WINDOW", dt.timedelta(0)), mock.patch.object(bd.History, "load") as load, self.assertRaises(SystemExit) as e:  # fmt: skip
@@ -2919,7 +3055,7 @@ class TestBuildDataset(unittest.TestCase):
             fetch.assert_not_called()
             write.assert_not_called()
             (samples / "pr_1.json").write_text(json.dumps(pr_1))
-            self.assertIsNone(bd.other_window(samples, START, END))
+            self.assertIsNone(bd.other_build(samples, "pr_", (START, END)))
             (Path(out) / "pr_1.json").write_text(json.dumps(pr_1))
             bd.head_samples(h, Path(out), 1)
         ci_bases.assert_called_once_with({"h1": 1, "h2": 1, "h3": 1, "h4": 1})
@@ -2944,7 +3080,7 @@ class TestBuildDataset(unittest.TestCase):
             args, kw = got[sid]
             self.assertEqual(args, ("head", sha))
             bases = {"base": base, "merge_base": merge_base, "main_base": main_base, "base_source": source}  # fmt: skip
-            self.assertEqual(kw, {"title": "t", "body": "b", **bases, "pr": 1, "truth": sorted(truth_jobs), "truth_jobs": truth_jobs, "previous_failures": previous[sid]})  # fmt: skip
+            self.assertEqual(kw, {"title": "t", "body": "b", **bases, "pr": 1, "window": (START, END), "truth": sorted(truth_jobs), "truth_jobs": truth_jobs, "previous_failures": previous[sid]})  # fmt: skip
 
     def test_revert_truth_is_truth_jobs(self) -> None:
         rows = [{"reverted_at": t, "commit_sha": "c" * 40, "source_signal_keys": ["test_a.py::x", "test_b.py::TestB::y", "no_test_key"]} for t in ("1", "2")]  # fmt: skip
@@ -2962,7 +3098,7 @@ class TestBuildDataset(unittest.TestCase):
             bd.revert_samples(Path(out), 1, dt.date(2026, 10, 1), dt.date(2026, 10, 26))
         truth_jobs.assert_called_once_with({("test_a", "", "x"), ("test_b", "TestB", "y")}, "c" * 40, mock.ANY, "1")  # fmt: skip
         kw = write.call_args.kwargs
-        self.assertEqual((kw["truth"], kw["truth_jobs"]), (["test_a"], jobs))
+        self.assertEqual((kw["window"], kw["truth"], kw["truth_jobs"]), ((dt.date(2026, 10, 1), dt.date(2026, 10, 26)), ["test_a"], jobs))  # fmt: skip
         with (
             tempfile.TemporaryDirectory() as out,
             mock.patch.object(bd, "query", return_value=rows),
@@ -3012,6 +3148,7 @@ class TestBuildDataset(unittest.TestCase):
         ):
             bd.neutral_samples(Path(out), start, end, 10)
         self.assertEqual(sorted(c.args[1] for c in write.call_args_list), ["neu_" + "a" * 12, "neu_" + "d" * 12])  # fmt: skip
+        self.assertEqual({c.kwargs["window"] for c in write.call_args_list}, {(start, end)})  # fmt: skip
         log = next(c for c in calls if "--first-parent" in c)
         self.assertIn("--since=2026-10-01 00:00 +0000", log)
         self.assertIn("--until=2026-10-26 00:00 +0000", log)
@@ -3107,8 +3244,8 @@ class TestBuildDataset(unittest.TestCase):
             git("add", "-A")
             git("commit", "-qm", "add")
             with mock.patch.object(bd, "candidates_at", return_value=[]) as candidates:
-                bd.write_sample(Path(repo), "s", "pr", "HEAD~1", "HEAD~2", "t", "b")
-                bd.write_sample(Path(repo), "s2", "pr", "HEAD", "lower", "t", "b", merge_base="HEAD~1", main_base="HEAD~2")  # fmt: skip
+                bd.write_sample(Path(repo), "s", "pr", "HEAD~1", "HEAD~2", "t", "b", window=(START, END))  # fmt: skip
+                bd.write_sample(Path(repo), "s2", "pr", "HEAD", "lower", "t", "b", merge_base="HEAD~1", main_base="HEAD~2", window=(START, END))  # fmt: skip
             s, s2 = (
                 json.loads((Path(repo) / f"{n}.json").read_text()) for n in ("s", "s2")
             )

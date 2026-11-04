@@ -4,12 +4,8 @@
     python -m tools.testing.llm_td.eval.build_dataset --data DIR --start 2026-10-01 --end 2026-10-26 --kinds head
     python -m tools.testing.llm_td.eval.build_dataset --data DIR --start 2026-04-01 --end 2026-10-26 --kinds revert
 
-The checked-in ids under eval/ids were built this way on 2026-11-03, before
-the window guard below and the `window` field existed, so 6 days of the PR
-truth's forward window were missing, and before the stacked rule skipped the
-author's landed PRs and applied the job rules to the lower head, and before
-revert truth matched a file::class::test signal key's class. They are
-replaced by a rebuild once the window has closed, on or after 2026-11-09.
+eval/ids lists the samples the report scored; see the PR description for
+how they were built.
 
 Four kinds of sample, each a JSON file under DIR/samples:
 
@@ -67,10 +63,12 @@ TESTS from its main checkout when it runs, which this replaces with TESTS at
 the head's merge base with main (`main_base`), plus the test files the sample
 adds. PR samples carry the raw PR body.
 Samples are only written once, so rebuilding into an existing DIR keeps them.
-PR truth reads failures and disables up to --end + WINDOW, so pr and head
-refuse to run before that has passed; pr_ samples record their --start and
---end as `window`, and pr and head refuse to run on a DIR with pr_ samples
-of another window or of none.
+Every sample records the BUILDER that wrote it and the window it was drawn
+from (--start and --end; for neutral samples the 25 days before --end) as
+`builder` and `window`, and a kind refuses to run on a DIR whose samples of
+that kind (and, for head, its pr_ samples) have another builder or window,
+or none. PR truth reads failures and disables up to --end + WINDOW, so pr
+and head refuse to run before that has passed.
 PR and head samples carry the PR's title and body as of the build, which may
 have been edited after the failure; revert and neutral samples carry the
 landed commit message without what the merge bot added (see commit_text).
@@ -159,6 +157,8 @@ if TYPE_CHECKING:
 
 
 KINDS = ("pr", "head", "revert", "neutral")
+# Recorded on every sample; bump it when a change alters what a sample holds.
+BUILDER = 1
 WINDOW = dt.timedelta(days=14)
 # Failures this far before --start are loaded: heads are judged from
 # --start - WINDOW, against failures up to WINDOW earlier, and merge bases may be
@@ -214,6 +214,14 @@ def sql_str(s: str) -> str:
     return "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
+def query_in(sql: str, values: list[str], size: int) -> list[dict]:
+    """The rows of `sql` with its {} filled by each `size` of `values`, quoted and comma-joined."""
+    rows: list[dict] = []
+    for i in range(0, len(values), size):
+        rows += query(sql.format(",".join(sql_str(v) for v in values[i : i + size])))
+    return rows
+
+
 def is_main(branch: str) -> bool:
     """pull_failures prefixes a fork's branches with its repository, so a fork's main is not main."""
     return branch == "main" or branch.startswith("trunk/")
@@ -265,25 +273,14 @@ def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
 
 
 def pr_of_shas(shas: list[str]) -> dict[str, int]:
-    out = {}
-    for i in range(0, len(shas), 1000):
-        chunk = ",".join(f"'{s}'" for s in shas[i : i + 1000])
-        for r in query(
-            f"SELECT head_sha, any(number) pr FROM materialized_views.pr_by_sha WHERE head_sha IN ({chunk}) GROUP BY head_sha"
-        ):
-            out[r["head_sha"]] = int(r["pr"])
-    return out
+    sql = "SELECT head_sha, any(number) pr FROM materialized_views.pr_by_sha WHERE head_sha IN ({}) GROUP BY head_sha"  # fmt: skip
+    return {r["head_sha"]: int(r["pr"]) for r in query_in(sql, shas, 1000)}
 
 
 def pr_authors(prs: list[int]) -> dict[int, str]:
-    out = {}
-    for i in range(0, len(prs), 500):
-        keys = ",".join(f"'pytorch/pytorch/{p}'" for p in prs[i : i + 500])
-        for r in query(
-            f"SELECT number, any(user.login) author FROM default.pull_request FINAL WHERE dynamoKey IN ({keys}) GROUP BY number"
-        ):
-            out[int(r["number"])] = r["author"]
-    return out
+    sql = "SELECT number, any(user.login) author FROM default.pull_request FINAL WHERE dynamoKey IN ({}) GROUP BY number"  # fmt: skip
+    keys = [f"pytorch/pytorch/{p}" for p in prs]
+    return {int(r["number"]): r["author"] for r in query_in(sql, keys, 500)}
 
 
 def disabled_tests(lo: dt.date, hi: dt.date) -> Disabled:
@@ -485,13 +482,10 @@ class History:
 
 def green_jobs(shas: list[str]) -> set[tuple[str, str, str]]:
     """The (head sha, workflow, job) that succeeded on any attempt."""
-    out = set()
-    for i in range(0, len(shas), 200):
-        chunk = ",".join(f"'{s}'" for s in shas[i : i + 200])
-        out |= {(j["head_sha"], j["workflow_name"], j["name"]) for j in query(f"""
+    sql = """
             SELECT DISTINCT head_sha, workflow_name, name FROM default.workflow_job FINAL
-            WHERE head_sha IN ({chunk}) AND repository_full_name = 'pytorch/pytorch' AND conclusion = 'success'""")}  # fmt: skip
-    return out
+            WHERE head_sha IN ({}) AND repository_full_name = 'pytorch/pytorch' AND conclusion = 'success'"""
+    return {(j["head_sha"], j["workflow_name"], j["name"]) for j in query_in(sql, shas, 200)}  # fmt: skip
 
 
 def ci_bases(heads: dict[str, int]) -> dict[str, list[str]]:
@@ -502,19 +496,13 @@ def ci_bases(heads: dict[str, int]) -> dict[str, list[str]]:
     match a head. A run records the base as of its latest webhook, which can be
     a base pushed after the head; see pr_bases. Heads with no such run, such
     as a fork's, are left out."""
-    shas, out = sorted(heads), {}
-    for i in range(0, len(shas), 200):
-        chunk = ",".join(f"'{s}'" for s in shas[i : i + 200])
-        sql = f"""
+    sql = """
             SELECT head_sha, tupleElement(p, 1) pr, groupUniqArray(tupleElement(p, 2)) bases
             FROM default.workflow_run ARRAY JOIN arrayZip(pull_requests.number, pull_requests.base.sha) AS p
-            WHERE head_sha IN ({chunk}) AND event = 'pull_request'
+            WHERE head_sha IN ({}) AND event = 'pull_request'
               AND repository.full_name = 'pytorch/pytorch'
             GROUP BY head_sha, pr"""
-        for r in query(sql):
-            if int(r["pr"]) == heads[r["head_sha"]]:
-                out[r["head_sha"]] = sorted(r["bases"])
-    return out
+    return {r["head_sha"]: sorted(r["bases"]) for r in query_in(sql, sorted(heads), 200) if int(r["pr"]) == heads[r["head_sha"]]}  # fmt: skip
 
 
 def pr_bases(sha: str, bases: list[str]) -> dict[str, str] | None:
@@ -641,9 +629,11 @@ def write_sample(
     body: str,
     merge_base: str | None = None,
     main_base: str | None = None,
+    *,
+    window: tuple[dt.date, dt.date],
     **extra,
 ) -> bool:
-    """Write sample `sid` for `sha` diffed against `merge_base` (default `base`), with main at `main_base` (default `merge_base`), whose TESTS give the candidates; False if it already exists."""
+    """Write sample `sid` for `sha` diffed against `merge_base` (default `base`), with main at `main_base` (default `merge_base`), whose TESTS give the candidates, drawn from `window`; False if it already exists."""
     path = out / f"{sid}.json"
     if path.exists():
         return False
@@ -653,7 +643,7 @@ def write_sample(
     write_json(path, {
         "id": sid, "kind": kind, "sha": sha, "base": base, "merge_base": merge_base, "main_base": main_base, "title": title, "body": body,
         "diff": diff, "diffstat": diffstat, "changed_files": changed_files(merge_base, sha), "deleted": deleted_files(merge_base, sha),
-        "candidates": candidates_at(main_base, sha, merge_base),
+        "candidates": candidates_at(main_base, sha, merge_base), "builder": BUILDER, "window": [str(d) for d in window],
         **extra,
     })  # fmt: skip
     return True
@@ -692,13 +682,16 @@ def print_dropped(kind: str, dropped: list[collections.Counter]) -> None:
     )
 
 
-def other_window(out: Path, start: dt.date, end: dt.date) -> str | None:
-    """Why the pr_ samples in `out` cannot be extended with --start `start` and --end `end`, if they cannot."""
-    windows = {p.stem: json.loads(p.read_text()).get("window") for p in sorted(out.glob("pr_*.json"))}  # fmt: skip
-    if legacy := [k for k, w in windows.items() if w is None]:
-        return f"pr_ samples in {out}, e.g. {legacy[0]}, predate the window field; build pr and head samples into a fresh --data"  # fmt: skip
-    if other := [k for k, w in windows.items() if w != [str(start), str(end)]]:
-        return f"pr_ samples in {out}, e.g. {other[0]}, were built with another --start/--end than {start}/{end}"  # fmt: skip
+def other_build(out: Path, prefix: str, window: tuple[dt.date, dt.date]) -> str | None:
+    """Why the `prefix` samples in `out` cannot be extended by this BUILDER from `window`, if they cannot."""
+    marks = {p.stem: json.loads(p.read_text()) for p in sorted(out.glob(f"{prefix}*.json"))}  # fmt: skip
+    marks = {k: (m.get("builder"), m.get("window")) for k, m in marks.items()}
+    if legacy := [k for k, (b, _) in marks.items() if b is None]:
+        return f"{prefix} samples in {out}, e.g. {legacy[0]}, predate the builder field; build into a fresh --data"  # fmt: skip
+    if other := [k for k, (b, _) in marks.items() if b != BUILDER]:
+        return f"{prefix} samples in {out}, e.g. {other[0]}, were written by builder {marks[other[0]][0]}, not {BUILDER}; build into a fresh --data"  # fmt: skip
+    if other := [k for k, (_, w) in marks.items() if w != [str(d) for d in window]]:
+        return f"{prefix} samples in {out}, e.g. {other[0]}, were drawn from {marks[other[0]][1]}, not {window[0]}/{window[1]}"  # fmt: skip
     return None
 
 
@@ -743,7 +736,7 @@ def pr_samples(h: History, out: Path, jobs: int) -> None:
             try:
                 title, body = pr_text(pr)
                 if write_sample(out, f"pr_{pr}", "pr", sha, title=title, body=body, **bases, pr=pr, date=first[pr]["t"][:19], truth=sorted(truth_jobs),
-                                window=[str(h.start), str(h.end)], truth_strong=sorted(strong), truth_jobs=truth_jobs):  # fmt: skip
+                                window=(h.start, h.end), truth_strong=sorted(strong), truth_jobs=truth_jobs):  # fmt: skip
                     sources.append(bases["base_source"])
             except subprocess.CalledProcessError as e:
                 print(f"skipping PR {pr}: {e} {e.stderr or ''}", flush=True)
@@ -757,7 +750,10 @@ def pr_samples(h: History, out: Path, jobs: int) -> None:
 
 
 def landed_times(since: dt.date) -> dict[int, dt.datetime]:
-    """PR number -> when it first landed on main, from the merge bot's `Pull Request resolved:` line, the last one of a body that quotes others."""
+    """PR number -> when it first landed on main since `since`, from the merge bot's `Pull Request resolved:` line, the last one of a body that quotes others.
+
+    A PR that first landed before `since` gets the time of its first reland, or none.
+    """
     out: dict[int, dt.datetime] = {}
     for c in git("log", "origin/main", f"--since={since} 00:00 +0000", "--format=%ct %b%x00").split("\0"):
         if (m := re.match(r"\s*(\d+) ", c)) and (prs := re.findall(r"Pull Request resolved: \S+/pull/(\d+)", c)):
@@ -768,13 +764,10 @@ def landed_times(since: dt.date) -> dict[int, dt.datetime]:
 
 def head_created(shas: list[str]) -> dict[str, str]:
     """Each head's first workflow job creation time, roughly when CI's target-determination job reads the PR's previous failures."""
-    out = {}
-    for i in range(0, len(shas), 200):
-        chunk = ",".join(f"'{s}'" for s in shas[i : i + 200])
-        out |= {r["head_sha"]: r["t"] for r in query(f"""
+    sql = """
             SELECT head_sha, toString(min(created_at)) t FROM default.workflow_job FINAL
-            WHERE head_sha IN ({chunk}) AND repository_full_name = 'pytorch/pytorch' GROUP BY head_sha""")}
-    return out
+            WHERE head_sha IN ({}) AND repository_full_name = 'pytorch/pytorch' GROUP BY head_sha"""
+    return {r["head_sha"]: r["t"] for r in query_in(sql, shas, 200)}
 
 
 def head_samples(h: History, out: Path, jobs: int) -> None:
@@ -815,7 +808,7 @@ def head_samples(h: History, out: Path, jobs: int) -> None:
             previous = sorted({tf for t, other, tf in failed[pr] if other != sha and sha in created and t < created[sha]})
             try:
                 if write_sample(out, f"head_{pr}_{sha[:12]}", "head", sha, title=prs[pr]["title"], body=prs[pr]["body"], **bases, pr=pr,
-                                truth=sorted(truth_jobs), truth_jobs=truth_jobs, previous_failures=previous):
+                                window=(h.start, h.end), truth=sorted(truth_jobs), truth_jobs=truth_jobs, previous_failures=previous):
                     sources.append(bases["base_source"])
             except subprocess.CalledProcessError as e:
                 print(f"skipping head {sha}: {e} {e.stderr or ''}", flush=True)
@@ -897,10 +890,10 @@ def revert_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
         try:
             truth_jobs = revert_truth_jobs(signal, sha, commit_time(sha), r["reverted_at"])  # fmt: skip
             if not truth_jobs:
-                print(f"skipping revert {sha}: no main job that runs TD failed on its signal tests", flush=True)  # fmt: skip
+                print(f"skipping revert {sha}: no failure of its signal tests in a main job that runs TD survives the job, job_green and passed_in_job rules", flush=True)  # fmt: skip
                 return
             title, body = commit_text(sha)
-            write_sample(out, f"rev_{sha[:12]}", "revert", sha, sha + "^", title, body, date=r["reverted_at"],
+            write_sample(out, f"rev_{sha[:12]}", "revert", sha, sha + "^", title, body, window=(start, end), date=r["reverted_at"],
                          truth=sorted(truth_jobs), truth_jobs=truth_jobs)  # fmt: skip
         except subprocess.CalledProcessError as e:
             print(f"skipping revert {sha}: {e} {e.stderr or ''}", flush=True)
@@ -944,7 +937,7 @@ def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
         if sha in reverted or re.search(r"\b(revert|reland)\b", title, re.IGNORECASE):  # fmt: skip
             return
         try:
-            write_sample(out, f"neu_{sha[:12]}", "neutral", sha, sha + "^", title, body, truth=[])  # fmt: skip
+            write_sample(out, f"neu_{sha[:12]}", "neutral", sha, sha + "^", title, body, window=(start, end), truth=[])  # fmt: skip
         except subprocess.CalledProcessError as e:
             print(f"skipping neutral {sha}: {e} {e.stderr or ''}", flush=True)
 
@@ -966,10 +959,16 @@ def main() -> None:
         p.error(f"PR truth looks for other authors' failures and disables up to --end + {WINDOW.days} days; rerun on or after {closes}")  # fmt: skip
     out = args.data / "samples"
     out.mkdir(parents=True, exist_ok=True)
-    if {"pr", "head"} & set(args.kinds) and (why := other_window(out, args.start, args.end)):  # fmt: skip
-        raise SystemExit(f"refusing pr and head samples: {why}")
+    neutral = (args.end - dt.timedelta(days=25), args.end)
+    builds = {"pr": [("pr_", (args.start, args.end))], "head": [("pr_", (args.start, args.end)), ("head_", (args.start, args.end))],
+              "revert": [("rev_", (args.start, args.end))], "neutral": [("neu_", neutral)]}  # fmt: skip
+    for kind in args.kinds:
+        for prefix, window in builds[kind]:
+            if why := other_build(out, prefix, window):
+                raise SystemExit(f"refusing {kind} samples: {why}")
     if "head" in args.kinds and "pr" not in args.kinds and not any(out.glob("pr_*.json")):  # fmt: skip
-        raise SystemExit(f"refusing head samples: there are no pr_ samples in {out}; build them with --kinds pr first")  # fmt: skip
+        print(f"no head samples: there are no pr_ samples in {out}; build them with --kinds pr first", flush=True)  # fmt: skip
+        args.kinds = [k for k in args.kinds if k != "head"]
     git("fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main")
     if {"pr", "head"} & set(args.kinds):
         h = History.load(args.start, args.end)
@@ -980,7 +979,7 @@ def main() -> None:
     if "revert" in args.kinds:
         revert_samples(out, args.jobs, args.start, args.end)
     if "neutral" in args.kinds:
-        neutral_samples(out, args.end - dt.timedelta(days=25), args.end, args.neutral)
+        neutral_samples(out, *neutral, args.neutral)
 
 
 if __name__ == "__main__":

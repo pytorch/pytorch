@@ -13,13 +13,14 @@ build download) plus the rest scaling with the share of test time run.
 Inductor workflows count only the samples whose changes the ciflow/inductor
 labeler rule triggers them on, and only the inductor unit-test configs' time.
 The model-call cost is PR_PUSHES_PER_MONTH_K times the mean cost of a call on
-an asked eval sample. The constants and the queries behind them are in
-REPORT.md's Reproducing section.
+an asked eval sample. `--constants END` recomputes the constants from
+ClickHouse.
 """
 
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import re
 import statistics as st
@@ -29,26 +30,58 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from tools.testing.llm_td.eval import REPO, score
+from tools.testing.llm_td.eval import clickhouse, land_time, REPO, score
 from tools.testing.llm_td.eval.run_eval import TIMED_OUT
 from tools.testing.llm_td.select_tests import test_minutes
 
 
-# 30-day runner cost of test jobs ($k), the PR share of test hours, the fork-PR
-# share of those PR hours, and whether TD runs in that workflow today.
-# Inductor is the run_test part only. Only the TD workflows enforce the
-# selection in this stack; the rest are follow-ups.
+# 30-day runner cost ($k) of the test jobs the selection can shrink
+# (land_time.selectable), the PR share of their hours, the fork-PR share of
+# those PR hours, and whether TD runs in that workflow today, from
+# `--constants 1793672225`. Only the TD workflows enforce the selection in
+# this stack; the rest are follow-ups.
 WORKFLOWS = [
-    ("pull", "cpu", 463.6, 0.81, 0.36, True),
-    ("trunk", "cpu", 157.0, 0.63, 0.46, True),
-    ("trunk", "gpu", 158.0, 0.63, 0.46, True),
-    ("inductor (unit tests)", "ind_cpu", 79.0 * 0.83, 0.78, 0.30, False),
-    ("inductor (unit tests)", "ind_gpu", 54.5 * 0.38, 0.78, 0.30, False),
-    ("periodic", "gpu", 17.0, 0.31, 0.37, False),
-    ("slow", "cpu", 6.3, 0.07, 0.38, False),
+    ("pull", "cpu", 458.1, 0.80, 0.36, True),
+    ("trunk", "cpu", 133.4, 0.62, 0.46, True),
+    ("trunk", "gpu", 136.5, 0.60, 0.47, True),
+    ("inductor (unit tests)", "ind_cpu", 54.9, 0.78, 0.30, False),
+    ("inductor (unit tests)", "ind_gpu", 50.7, 0.77, 0.34, False),
+    ("periodic", "gpu", 17.2, 0.08, 0.37, False),
+    ("slow", "cpu", 6.2, 0.04, 0.37, False),
 ]
 # Same-repo PR heads with a pull run per month; fork PRs make no model call.
-PR_PUSHES_PER_MONTH_K = 12.5
+PR_PUSHES_PER_MONTH_K = 12.2
+COST_SQL = """
+SELECT workflow_name wf, gpu, job_name name, sum(cost) / 1000 k FROM misc.runner_cost
+WHERE group_repo = 'pytorch/pytorch' AND date >= toDate(toDateTime({end})) - 30 AND date < toDate(toDateTime({end}))
+  AND job_name LIKE '%/ test (%' AND workflow_name IN ('pull', 'trunk', 'inductor', 'periodic', 'slow')
+GROUP BY wf, gpu, name
+"""
+# PR jobs are those of pull_request runs and ciflow/<label>/<PR> pushes, the ones that can get a selection; same is whether the PR's head is in this repo.
+HOURS_SQL = """
+WITH runs AS (
+  SELECT id, event, head_branch, head_repository.full_name = 'pytorch/pytorch' run_same,
+    toInt64OrZero(extract(head_branch, '^ciflow/[^/]+/([0-9]+)$')) prnum
+  FROM default.workflow_run FINAL
+  WHERE created_at >= toDateTime({end}) - INTERVAL 31 DAY AND created_at < toDateTime({end})
+    AND repository.full_name = 'pytorch/pytorch' AND name IN ('pull', 'trunk', 'inductor', 'periodic', 'slow')),
+prs AS (
+  SELECT number, any(head.repo.full_name) = 'pytorch/pytorch' same FROM default.pull_request FINAL
+  WHERE number IN (SELECT prnum FROM runs WHERE prnum > 0) GROUP BY number)
+SELECT j.workflow_name wf, j.name name, arrayExists(l -> match(l, '{gpu}'), j.labels) gpu,
+  r.event = 'pull_request' OR startsWith(r.head_branch, 'ciflow/') pr, if(r.event = 'pull_request', r.run_same, ifNull(p.same, 0)) same,
+  sum(dateDiff('second', j.started_at, j.completed_at)) / 3600 h
+FROM default.workflow_job j FINAL JOIN runs r ON j.run_id = r.id LEFT JOIN prs p ON p.number = r.prnum
+WHERE j.repository_full_name = 'pytorch/pytorch' AND j.started_at >= toDateTime({end}) - INTERVAL 30 DAY AND j.started_at < toDateTime({end})
+  AND j.completed_at > j.started_at AND j.name LIKE '%/ test (%' AND j.workflow_name IN ('pull', 'trunk', 'inductor', 'periodic', 'slow')
+GROUP BY wf, name, gpu, pr, same
+"""
+HEADS_SQL = """
+SELECT uniqExact(head_sha) heads FROM default.workflow_run FINAL
+WHERE created_at >= toDateTime({end}) - INTERVAL 30 DAY AND created_at < toDateTime({end}) AND repository.full_name = 'pytorch/pytorch'
+  AND name = 'pull' AND event = 'pull_request' AND head_repository.full_name = 'pytorch/pytorch'
+"""
+CONFIG = re.compile(r"/ test \(([^,]+),")
 IDS = Path(__file__).parent / "ids"
 LABELER = REPO / ".github/labeler.yml"
 
@@ -185,6 +218,41 @@ def cold_call_usd(data: Path, tag: str, ids: list[str], samples: Path) -> tuple[
     return float((c + u[:, 2] * (price[1] - price[2])).mean()), [float(x) for x in price]  # fmt: skip
 
 
+def constants(end: int) -> tuple[list[tuple[str, str, float, float, float, bool]], float]:  # fmt: skip
+    """WORKFLOWS and PR_PUSHES_PER_MONTH_K over the 30 days to `end`.
+
+    A row counts only the test jobs the selection can shrink, as the Time to
+    land replay does (land_time.selectable): its cost, the PR share of their
+    hours and the fork share of those PR hours."""
+    no_td = land_time.no_td_configs()
+
+    def key(wf: str, name: str, gpu: bool) -> tuple[str, str] | None:
+        m = CONFIG.search(name)
+        if m is None or not land_time.selectable(wf, m.group(1), name, no_td):
+            return None
+        return wf, ("ind_" if wf == "inductor" else "") + ("gpu" if gpu else "cpu")
+
+    cost: collections.defaultdict[tuple[str, str], float] = collections.defaultdict(float)  # fmt: skip
+    for r in clickhouse.query(COST_SQL.format(end=end)):
+        if k := key(r["wf"], r["name"], r["gpu"]):
+            cost[k] += r["k"]
+    # (all, PR, fork-PR) hours.
+    hours: dict[tuple[str, str], list[float]] = collections.defaultdict(lambda: [0.0, 0.0, 0.0])  # fmt: skip
+    for r in clickhouse.query(HOURS_SQL.format(end=end, gpu=land_time.GPU_LABEL)):
+        if k := key(r["wf"], r["name"], r["gpu"]):
+            hours[k][0] += r["h"]
+            hours[k][1] += r["h"] if r["pr"] else 0.0
+            hours[k][2] += r["h"] if r["pr"] and not r["same"] else 0.0
+    out = []
+    for wf, k, *_, has_td in WORKFLOWS:
+        total, pr, fork = hours[w := ("inductor" if k.startswith("ind_") else wf, k)]
+        if not pr:
+            raise SystemExit(f"no PR test hours for {w}")
+        out.append((wf, k, round(cost[w], 1), round(pr / total, 2), round(fork / pr, 2), has_td))  # fmt: skip
+    heads = clickhouse.query(HEADS_SQL.format(end=end))[0]["heads"]
+    return out, round(heads / 1000, 1)
+
+
 def model(
     data: Path,
     tag: str,
@@ -223,7 +291,7 @@ def main() -> None:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--data", type=Path, required=True, help="run_eval.py's --data: test-times.json and results/")  # fmt: skip
+    p.add_argument("--data", type=Path, help="run_eval.py's --data: test-times.json and results/")  # fmt: skip
     p.add_argument("--ids", type=Path, help="samples the fractions come from; default: the report's neutral samples")  # fmt: skip
     p.add_argument("--cost-ids", type=Path, help="samples $/call is averaged over; default: the report's eval samples")  # fmt: skip
     p.add_argument("--td-dir", type=Path, help="td_replay.py output; default: DATA/td")
@@ -232,9 +300,16 @@ def main() -> None:
     p.add_argument("--overhead", type=float, default=0.2, help="share of a test job's time that does not scale with the tests run")  # fmt: skip
     p.add_argument("--cold", action="store_true", help="also print $/call with a cold prompt cache (see cold_call_usd)")  # fmt: skip
     p.add_argument("--json", type=Path, help="also write the whole result (fractions, per-workflow rows, totals) here")  # fmt: skip
-    p.add_argument("tag", help="results/TAG, or td for TD's own cut")
-    p.add_argument("policy", help="a score.py policy, td25 with tag td")
+    p.add_argument("--constants", type=int, metavar="END", help="only print WORKFLOWS and PR_PUSHES_PER_MONTH_K for the 30 days to unix time END, from ClickHouse")  # fmt: skip
+    p.add_argument("tag", nargs="?", help="results/TAG, or td for TD's own cut")
+    p.add_argument("policy", nargs="?", help="a score.py policy, td25 with tag td")
     args = p.parse_args()
+    if args.constants is not None:
+        workflows, heads = constants(args.constants)
+        print("WORKFLOWS = [\n" + "".join(f"    {w!r},\n" for w in workflows) + f"]\nPR_PUSHES_PER_MONTH_K = {heads}")  # fmt: skip
+        return
+    if args.data is None or args.policy is None:
+        p.error("--data, tag and policy are required without --constants")
     if not 0 <= args.overhead < 1:
         p.error(f"--overhead must be in [0, 1), not {args.overhead}")
     if missing := [a for a in score.STATS_ARTIFACTS if not (args.stats / a).exists()]:

@@ -47,8 +47,8 @@ if TYPE_CHECKING:
 
 WORKFLOWS = ("pull", "trunk", "inductor", "rocm-mi300")
 # Configs of TD workflows whose .ci/pytorch/test.sh branch does not run run_test.py.
-NO_RUN_TEST = {"backwards_compat", "docs_test", "pr_time_benchmarks", "verify_cachebench", "aoti_cross_compile_for_windows"}  # fmt: skip
-# Inductor's model-benchmark configs, the ones outside its unit-test jobs; REPORT.md's inductor-share query uses BENCH and GPU_LABEL too.
+NO_RUN_TEST = {"backwards_compat", "docs_test", "libtorch_agnostic_targetting", "pr_time_benchmarks", "verify_cachebench", "aoti_cross_compile_for_windows"}  # fmt: skip
+# Inductor's model-benchmark configs, the ones outside its unit-test jobs.
 BENCH = re.compile(r"huggingface|timm|torchbench|_perf")
 CIFLOW_PR = re.compile(r"^ciflow/[^/]+/(\d+)$")
 GPU_LABEL = "gpu|nvidia|-a10g|-l4|-t4|h100|h200|b200|gb[0-9]00|a100|rocm|xpu"
@@ -142,7 +142,9 @@ def fetch(cache: Path, end: int) -> None:
 
 
 def pct(a: list[float], p: int) -> float:
-    """numpy.percentile's default (linear) interpolation."""
+    """numpy.percentile's default (linear) interpolation, or nan with no points."""
+    if len(a) < 2:
+        return a[0] if a else float("nan")
     return st.median(a) if p == 50 else st.quantiles(a, n=100, method="inclusive")[p - 1]  # fmt: skip
 
 
@@ -155,6 +157,15 @@ def no_td_configs() -> set[str]:
     """NO_RUN_TEST and the configs every pull and trunk test job of runs without TD (force-no-td, score.NO_TD_CONFIGS, macOS, xpu)."""
     jobs = score.ci_jobs()
     return NO_RUN_TEST | ({c for w, _, c in jobs[False] if w in ("pull", "trunk")} - {c for _, _, c in jobs[True]})  # fmt: skip
+
+
+def selectable(wf: str, cfg: str, env: str, no_td: set[str]) -> bool:
+    """Whether the selection shrinks a `wf` test job of config `cfg`: inductor's unit tests, and elsewhere the jobs run_test.py runs with TD.
+
+    `no_td` is no_td_configs(), and `env` the job's name or runner labels, for score.NO_TD_ENV."""
+    if wf == "inductor":
+        return not BENCH.search(cfg)
+    return not (cfg in no_td or any(fnmatch.fnmatchcase(cfg, n) for n in score.NO_TD_CONFIGS) or score.NO_TD_ENV.search(env))  # fmt: skip
 
 
 def fork_runs(cache: Path, wfruns: list[dict]) -> set[int]:
@@ -180,10 +191,9 @@ def replay(cache: Path, r: dict[str, float], keep: set[int]) -> dict[str, list[d
     no_td = no_td_configs()
 
     def ratio(wf: str, cfg: str, gpu: bool, labels: str) -> float:
-        if wf == "inductor":
-            return 1.0 if BENCH.search(cfg) else r["ind_gpu" if gpu else "ind_cpu"]
-        off = cfg in no_td or any(fnmatch.fnmatchcase(cfg, n) for n in score.NO_TD_CONFIGS) or score.NO_TD_ENV.search(labels)  # fmt: skip
-        return 1.0 if off else r["gpu" if gpu else "cpu"]
+        if not selectable(wf, cfg, labels, no_td):
+            return 1.0
+        return r[("ind_" if wf == "inductor" else "") + ("gpu" if gpu else "cpu")]
 
     out = {}
     for wf in WORKFLOWS:
