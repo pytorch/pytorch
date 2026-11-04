@@ -45,7 +45,6 @@ from torch.distributed.tensor._redistribute import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _MaskPartial, _StridedShard
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -61,6 +60,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     map_local_tensor_for_rank,
     patched_distribute_tensor as _distribute_tensor,
     redistribute,
+    requires_accelerator_ranks,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._debug_mode import DebugMode
@@ -764,7 +764,7 @@ class RedistributeTest(DTensorContinuousTestBase):
                 dt_full_tensor = dt.full_tensor()
                 self.assertEqual(dt_full_tensor, input_tensor)
 
-    @skip_if_lt_x_gpu(4)
+    @requires_accelerator_ranks(4)
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_redistribute_shard_dim_change(self, dtype):
         # test 1d device mesh

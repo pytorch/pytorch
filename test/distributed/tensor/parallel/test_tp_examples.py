@@ -30,7 +30,6 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_device_type import skipXPUIf
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -43,6 +42,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     MLPModule,
     ModelArgs,
     NUM_DEVICES,
+    requires_accelerator_ranks,
     skip_unless_torch_gpu,
     Transformer,
     with_comms,
@@ -570,7 +570,7 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
                             )
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @requires_accelerator_ranks(4)
     def test_loss_parallel_multi_dim_mesh(self):
         """Test loss_parallel with multi-dimensional DeviceMesh (e.g. DP + TP)."""
         # Create a 2D mesh: (dp=2, tp=2) on 4 GPUs
@@ -678,7 +678,7 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
                 F.cross_entropy(dist_x, dist_target, reduction="mean")
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @requires_accelerator_ranks(4)
     def test_loss_parallel_replicate_non_tp_dim(self):
         """Non-TP mesh dim = Replicate (not Shard) must also work."""
         mesh_2d = DeviceMesh(
@@ -723,7 +723,7 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
             self.assertEqual(dist_x.grad.full_tensor(), x.grad)
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @requires_accelerator_ranks(4)
     def test_loss_parallel_tp_not_last_dim(self):
         """TP mesh dim need not be the last dim: (tp, dp) ordering must also work."""
         # Create a 2D mesh with TP as the FIRST dim: (tp=2, dp=2)
@@ -755,7 +755,7 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
             self.assertEqual(dist_x.grad.full_tensor(), x.grad)
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @requires_accelerator_ranks(4)
     def test_loss_parallel_3d_input_non_batch_shard(self):
         """3-D input (batch, class, seq) with the non-TP mesh dim sharding the
         seq dim (d=2 > channel_dim=1). This exercises the ``d > channel_dim``
@@ -817,7 +817,7 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
             self.assertEqual(grad_x_none.full_tensor(), x.grad)
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @requires_accelerator_ranks(4)
     def test_loss_parallel_invalid_non_tp_placement(self):
         """Non-TP mesh dim with a placement that is neither Shard nor Replicate is rejected."""
         mesh_2d = DeviceMesh(
@@ -846,7 +846,7 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
                     F.cross_entropy(dist_x, dist_target, reduction=reduction)
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @requires_accelerator_ranks(4)
     def test_loss_parallel_plain_tensor_target_rejected_on_multi_dim(self):
         """On multi-dim mesh with a batch-sharded non-TP dim, a plain torch.Tensor
         target is ambiguous (full global vs. local slice) and must be rejected.

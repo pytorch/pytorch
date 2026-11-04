@@ -26,7 +26,6 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -34,6 +33,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     LocalDTensorContinuousTestBase,
     map_local_for_rank,
     NUM_DEVICES,
+    requires_accelerator_ranks,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -1079,7 +1079,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
             self.assertEqual(dt_idx.full_tensor(), expected_idx)
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @requires_accelerator_ranks(4)
     def test_foreach_add_different_mesh(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
@@ -1589,7 +1589,7 @@ class DistMathOpsTest(DTensorContinuousTestBase):
             out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
         )
 
-    @skip_if_lt_x_gpu(4)
+    @requires_accelerator_ranks(4)
     @with_comms
     def test_std(self):
         mesh = DeviceMesh(self.device_type, torch.arange(4).reshape(2, 2))

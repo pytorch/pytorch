@@ -7,12 +7,12 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import Replicate
 from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.style import ColwiseParallel
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
     MLPModule,
+    requires_accelerator_ranks,
     with_comms,
 )
 
@@ -39,7 +39,7 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                 )
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @requires_accelerator_ranks(4)
     def test_model_init(self):
         dp_size = 2
         tp_size = self.world_size // dp_size

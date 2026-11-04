@@ -8,8 +8,6 @@ import functools
 import itertools
 import sys
 import threading
-import types
-import unittest
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from functools import partial, wraps
@@ -53,6 +51,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_distributed import (
     ACCELERATOR_DIST_BACKENDS,
+    at_least_x_gpu,
     MultiProcContinuousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
@@ -61,12 +60,12 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
-    set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
     TEST_PRIVATEUSE1,
     TEST_WITH_ROCM,
     TEST_XPU,
+    TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
@@ -620,23 +619,28 @@ class Transformer(nn.Module):
         return module
 
 
-def skip_unless_torch_gpu(method: T) -> T:
-    """
-    Test decorator which skips the test unless there's a GPU available to torch.
+def requires_accelerator_ranks(n):
+    """Require an accelerator-backed test world with at least n ranks."""
 
-    >>> # xdoctest: +SKIP
-    >>> @skip_unless_torch_gpu
-    >>> def test_some_method(self) -> None:
-    >>>   ...
-    """
-    # The builtin @skip_if_no_gpu relies on os.environ['WORLD_SIZE'] being set.
-    # Runtime skip stays skip_if_lt_x_gpu(NUM_DEVICES), which scales with the
-    # machine. Pytest collects the object this decorator returns, so stamp that
-    # object with 2. A capacity-scaled stamp would look like a 4-GPU requirement
-    # to --multigpu-min-gpus.
-    wrapped = skip_if_lt_x_gpu(NUM_DEVICES)(method)
-    wrapped._min_gpus_required = 2
-    return cast(T, wrapped)
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if self.device_type == "cpu" or self.world_size < n:
+                self.skipTest(
+                    f"Requires an accelerator-backed world with at least {n} ranks"
+                )
+            return func(self, *args, **kwargs)
+
+        decorated = skip_if_lt_x_gpu(1)(wrapper)
+        decorated._min_gpus_required = n
+        return decorated
+
+    return decorator
+
+
+def skip_unless_torch_gpu(method: T) -> T:
+    """Require an accelerator-backed distributed test world, real or simulated."""
+    return cast(T, requires_accelerator_ranks(2)(method))
 
 
 def _get_device_type(world_size: int) -> str:
@@ -700,11 +704,22 @@ class DTensorTestMixin:
             d_out = op_call(*d_args, **d_kwargs)
             self.assertEqual(d_out.full_tensor(), out)
 
+    def _check_accelerator_requirement(self) -> None:
+        """Honor declared GPU capacity before a real multiprocess harness starts."""
+        method = getattr(self, self._testMethodName, None)
+        required = getattr(method, "_min_gpus_required", 0)
+        if required and not at_least_x_gpu(required):
+            self.skipTest(TEST_SKIPS[f"multi-device-{required}"].message)
+
     def run_subtests(self, *args, **kwargs):
         return run_subtests(self, *args, **kwargs)
 
 
 class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
+    def setUp(self) -> None:
+        self._check_accelerator_requirement()
+        super().setUp()
+
     @classmethod
     def backend_str(cls) -> str:
         device_type = _get_device_type(cls.world_size)
@@ -722,74 +737,6 @@ class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
 
         # Call parent's _init_pg to do the actual process group initialization
         super()._init_pg(rank, world_size, rdvz_file)
-
-
-class LocalDTensorContinuousTestBase(DTensorContinuousTestBase):
-    @property
-    def is_local_tensor_enabled(self) -> bool:
-        return True
-
-    def _get_local_tensor_mode(self):
-        return LocalTensorMode(frozenset(range(self.world_size)))
-
-    @classmethod
-    def _ensure_processes_spawned(cls):
-        if cls._processes_spawned:
-            return
-        if cls.world_size == -2:
-            cls.world_size = NUM_DEVICES
-        store = FakeStore()
-        dist.init_process_group(
-            backend="fake",
-            world_size=cls.world_size,
-            rank=0,
-            store=store,
-        )
-        cls.processes = []
-        cls.task_queues = []
-        cls.completion_queues = []
-        cls._processes_spawned = True
-
-    @classmethod
-    def tearDownClass(cls):
-        if cls._processes_spawned:
-            dist.destroy_process_group()
-            cls._processes_spawned = False
-        unittest.TestCase.tearDownClass()
-
-    def setUp(self):
-        unittest.TestCase.setUp(self)
-        self.__class__._ensure_processes_spawned()
-        # Match MultiProcContinuousTest, which reseeds before every test.
-        set_rng_seed()
-        torch.autograd._enable_record_function(False)
-
-    def tearDown(self):
-        from torch.distributed.tensor import _random as random
-
-        random._rng_tracker = None
-        unittest.TestCase.tearDown(self)
-        torch.autograd._enable_record_function(True)
-
-    def __init__(self, method_name="runTest", methodName="runTest"):
-        if methodName != "runTest":
-            method_name = methodName
-        unittest.TestCase.__init__(self, method_name)
-
-    @property
-    def rank(self):
-        return torch.SymInt(LocalIntNode({r: r for r in range(self.world_size)}))
-
-    @rank.setter
-    def rank(self, rank):
-        pass
-
-    def build_device_mesh(self) -> DeviceMesh:
-        with maybe_disable_local_tensor_mode():
-            return super().build_device_mesh()
-
-    def init_manual_seed_for_rank(self) -> None:
-        torch.manual_seed(0)
 
 
 class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
@@ -876,6 +823,7 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
         dist.destroy_process_group()
 
     def setUp(self) -> None:
+        self._check_accelerator_requirement()
         super().setUp()
         self._spawn_processes()
 
@@ -1108,10 +1056,26 @@ class DTensorConverter:
             raise RuntimeError(f"Trying to convert to DTensor, but got {type(t)}")
 
 
-class LocalDTensorOpTestBase(DTensorOpTestBase):
+class LocalDTensorTestBase(DTensorTestMixin, TestCase):
+    """Run simulated DTensor ranks in one process, with a test-owned fake PG."""
+
+    _pg: dist.ProcessGroup | None = None
+
+    @property
+    def world_size(self) -> int:
+        return NUM_DEVICES
+
+    @property
+    def device_type(self) -> str:
+        return _get_device_type(1)
+
     @property
     def is_local_tensor_enabled(self) -> bool:
         return True
+
+    @property
+    def rank(self):
+        return torch.SymInt(LocalIntNode({r: r for r in range(self.world_size)}))
 
     def _get_local_tensor_mode(self):
         return LocalTensorMode(frozenset(range(self.world_size)))
@@ -1119,108 +1083,67 @@ class LocalDTensorOpTestBase(DTensorOpTestBase):
     def setUp(self) -> None:
         super().setUp()
         torch.autograd._enable_record_function(False)
+        self.addCleanup(self._cleanup_local_tensor)
 
-    def tearDown(self) -> None:
+    def _cleanup_local_tensor(self) -> None:
         from torch.distributed.tensor import _random as random
 
-        random._rng_tracker = None
-        super().tearDown()
-        torch.autograd._enable_record_function(True)
-
-    @property
-    def rank(self):
-        return torch.SymInt(LocalIntNode({r: r for r in range(self.world_size)}))
-
-    @rank.setter
-    def rank(self, rank):
-        pass
-
-    def join_or_run(self, fn):
-        @wraps(fn)
-        def wrapper(self):
-            fn()
-
-        return types.MethodType(wrapper, self)
+        try:
+            self.destroy_pg()
+        finally:
+            random._rng_tracker = None
+            torch.autograd._enable_record_function(True)
 
     def build_device_mesh(self) -> DeviceMesh:
         with maybe_disable_local_tensor_mode():
             return super().build_device_mesh()
 
     def init_pg(self, eager_init, backend: str | None = None) -> None:
-        dist.init_process_group("fake", rank=0, world_size=self.world_size)
+        if dist.is_initialized():
+            if self._pg is dist.distributed_c10d._get_default_group():
+                return
+            raise RuntimeError("LocalTensor test cannot reuse an unowned process group")
+        previous_hook = sys.excepthook
+
+        def restore_exception_hook():
+            sys.excepthook = previous_hook
+
+        self.addCleanup(restore_exception_hook)
+        dist.init_process_group(
+            "fake", rank=0, world_size=self.world_size, store=FakeStore()
+        )
         self._pg = dist.distributed_c10d._get_default_group()
 
     def destroy_pg(self, device_id: int | None = None) -> None:
-        dist.destroy_process_group(self._pg)
-        self._pg = None
+        from torch.distributed.tensor.debug import _clear_sharding_prop_cache
 
-    def _spawn_processes(self) -> None:
-        pass
-
-    def _spawn_threads(self) -> None:
-        pass
-
-    def run_test(self, test_name: str, parent_pipe) -> None:
-        getattr(self, test_name)()
+        pg, self._pg = self._pg, None
+        if pg is None:
+            return
+        initialized = dist.is_initialized()
+        if initialized and pg is not dist.distributed_c10d._get_default_group():
+            raise RuntimeError("LocalTensor test process group was replaced")
+        _clear_sharding_prop_cache()
+        if initialized:
+            dist.destroy_process_group(pg)
 
     def init_manual_seed_for_rank(self) -> None:
         torch.manual_seed(0)
 
 
-class LocalDTensorTestBase(DTensorTestBase):
-    @property
-    def is_local_tensor_enabled(self) -> bool:
-        return True
+class LocalDTensorOpTestBase(LocalDTensorTestBase):
+    def assertEqualOnRank(self, x, y, msg=None, *, rank=0):
+        self.assertEqual(x, y, msg)
 
-    def _get_local_tensor_mode(self):
-        return LocalTensorMode(frozenset(range(self.world_size)))
+
+class LocalDTensorContinuousTestBase(LocalDTensorTestBase):
+    """Initialize a fresh fake PG for each test, including tests without with_comms."""
 
     def setUp(self) -> None:
+        if dist.is_initialized():
+            raise RuntimeError("LocalTensor test cannot reuse an unowned process group")
         super().setUp()
-        torch.autograd._enable_record_function(False)
-
-    def tearDown(self) -> None:
-        from torch.distributed.tensor import _random as random
-
-        random._rng_tracker = None
-        super().tearDown()
-        torch.autograd._enable_record_function(True)
-
-    @property
-    def rank(self):
-        return torch.SymInt(LocalIntNode({r: r for r in range(self.world_size)}))
-
-    @rank.setter
-    def rank(self, rank):
-        pass
-
-    def join_or_run(self, fn):
-        @wraps(fn)
-        def wrapper(self):
-            fn()
-
-        return types.MethodType(wrapper, self)
-
-    def build_device_mesh(self) -> DeviceMesh:
-        with maybe_disable_local_tensor_mode():
-            return super().build_device_mesh()
-
-    def init_pg(self, eager_init, backend: str | None = None) -> None:
-        dist.init_process_group("fake", rank=0, world_size=self.world_size)
-        self._pg = dist.distributed_c10d._get_default_group()
-
-    def destroy_pg(self, device_id: int | None = None) -> None:
-        dist.destroy_process_group(self._pg)
-        self._pg = None
-
-    def _spawn_processes(self) -> None:
-        pass
-
-    def run_test(self, test_name: str, parent_pipe) -> None:
-        getattr(self, test_name)()
-
-    def init_manual_seed_for_rank(self) -> None:
-        torch.manual_seed(0)
+        self.init_pg(False)
 
 
 def make_wrapped(fn, ctxs):
@@ -1243,8 +1166,9 @@ def make_wrapped(fn, ctxs):
 
 
 def create_local_tensor_test_class(
-    orig_cls, skipped_tests=None, base_class=LocalDTensorTestBase
+    orig_cls, skipped_tests=None, base_class=LocalDTensorTestBase, *, world_size=None
 ):
+    """Copy test bodies onto a local harness, without the original launch machinery."""
     if skipped_tests is None:
         skipped_tests = []
 
@@ -1261,11 +1185,9 @@ def create_local_tensor_test_class(
             ]
             dct[name] = make_wrapped(fn, ctxs)
 
-    cls = type(
-        orig_cls.__name__ + "WithLocalTensor",
-        (base_class,) + orig_cls.__bases__,
-        dct,
-    )
+    if world_size is not None:
+        dct["world_size"] = world_size
+    cls = type(orig_cls.__name__ + "WithLocalTensor", (base_class,), dct)
     cls.__file__ = __file__
     return cls
 

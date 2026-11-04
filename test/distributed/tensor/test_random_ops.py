@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
-    skip_if_lt_x_gpu,
+    requires_accelerator_ranks,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -127,7 +127,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertEqual(result_last.placements, (Replicate(),))
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @requires_accelerator_ranks(4)
     def test_init_with_user_generator(self):
         device_mesh = self.build_device_mesh()
         torch.manual_seed(42)
@@ -156,7 +156,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertEqual(t1.full_tensor(), t2.full_tensor())
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @requires_accelerator_ranks(4)
     def test_meta_tensor_init(self):
         # test suite sets each rank's seed to the same value.
         # The DTensor random ops will use the same generator as the default one on the device.
@@ -272,7 +272,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         compute_rankwise_if_local_tensor(weight_local, weight_gather.wait(), self.rank)
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @requires_accelerator_ranks(4)
     def test_fsdp_tp_model_meta_init(self):
         # initialize the 2-d device mesh
         global_mesh = init_device_mesh(
@@ -333,7 +333,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         compute_rankwise_if_local_tensor(weight_local, weight_gather.wait(), self.rank)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @requires_accelerator_ranks(2)
     def test_dtensor_init_helper_tensor_meta_strides(self):
         """Test that DTensorSpec.tensor_meta has correct strides in _distribute_region."""
         import torch.distributed.tensor._random as random_module
@@ -616,7 +616,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
             check_chunks(local_tensor, True)
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @requires_accelerator_ranks(4)
     def test_deterministic_uniform_2d(self):
         mesh = torch.arange(self.world_size).reshape(2, 2)
         device_mesh = DeviceMesh(self.device_type, mesh)
@@ -1009,7 +1009,7 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
     def world_size(self):
         return 8
 
-    @skip_if_lt_x_gpu(8)
+    @requires_accelerator_ranks(8)
     @with_comms
     def test_hsdp_tp_model_meta_init(self):
         # initialize the 3-d device mesh

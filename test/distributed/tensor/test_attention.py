@@ -55,7 +55,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfRocm,
@@ -67,6 +66,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
     DTensorTestBase,
     map_local_tensor_for_rank,
+    NUM_DEVICES,
+    requires_accelerator_ranks,
     with_comms,
 )
 
@@ -113,7 +114,7 @@ class RingAttentionTest(DTensorTestBase):
     def destroy_pg_upon_exit(self) -> bool:
         return False
 
-    @skip_if_lt_x_gpu(2)
+    @requires_accelerator_ranks(2)
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Does not support flash nor efficient attention",
@@ -369,7 +370,7 @@ class RingAttentionTest(DTensorTestBase):
                     behavior,
                 )
 
-    @skip_if_lt_x_gpu(2)
+    @requires_accelerator_ranks(2)
     @skipIfRocm
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
@@ -622,7 +623,7 @@ class CPFlexAttentionTest(DTensorTestBase):
             )
         raise ValueError(f"load_balancer type {lb_type} is not supported!")
 
-    @skip_if_lt_x_gpu(2)
+    @requires_accelerator_ranks(2)
     @with_comms
     def test_cp_flex_attention_preserves_block_size(self) -> None:
         qkv_size = 256 * self.world_size
@@ -650,7 +651,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         expected_mask = block_mask.to_dense().chunk(self.world_size, dim=-2)[self.rank]
         self.assertEqual(cp_block_mask.to_dense(), expected_mask)
 
-    @skip_if_lt_x_gpu(2)
+    @requires_accelerator_ranks(2)
     @with_comms
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
@@ -726,7 +727,7 @@ class TestCPCustomOps(DTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(2)
+    @requires_accelerator_ranks(2)
     @with_comms
     def test_flex_cp_custom_op(self) -> None:
         mesh = init_device_mesh(
@@ -757,7 +758,7 @@ class TestSharding(DTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(2)
+    @requires_accelerator_ranks(2)
     @with_comms
     def test_context_parallel_shard(self) -> None:
         B = 4
@@ -791,7 +792,7 @@ class TestSharding(DTensorTestBase):
             ),
         )
 
-    @skip_if_lt_x_gpu(2)
+    @requires_accelerator_ranks(2)
     @with_comms
     def test_context_parallel_shard_per_document_balance(self) -> None:
         # End-to-end regression through the real _context_parallel_shard path:
@@ -830,7 +831,7 @@ class TestSharding(DTensorTestBase):
         local_load = int(cost[sharded.reshape(-1).long()].sum())
         self.assertEqual(local_load, int(cost.sum()) // self.world_size)
 
-    @skip_if_lt_x_gpu(2)
+    @requires_accelerator_ranks(2)
     @with_comms
     def test_context_parallel_shard_with_positions(self) -> None:
         """Test context parallel sharding with expanded batch dimensions.
@@ -879,7 +880,7 @@ class TestSharding(DTensorTestBase):
         )
         self.assertEqual(positions_shard, expected_positions)
 
-    @skip_if_lt_x_gpu(2)
+    @requires_accelerator_ranks(2)
     @with_comms
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
@@ -1210,6 +1211,7 @@ class TestContextParallelStyleSDPA(DTensorContinuousTestBase):
 
 RingAttentionTestWithLocalTensor = create_local_tensor_test_class(
     RingAttentionTest,
+    world_size=NUM_DEVICES,
     skipped_tests=[
         # Need to make attention implementation local tensor friendly, e.g.
         # rewrite "rank local" logic

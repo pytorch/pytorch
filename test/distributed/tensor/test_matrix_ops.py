@@ -33,7 +33,6 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
 )
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -45,6 +44,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
     LocalDTensorContinuousTestBase,
     NUM_DEVICES,
+    requires_accelerator_ranks,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -319,7 +319,7 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
         ]
         self.assertEqual(len(mm_all_partial), 0)
 
-    @skip_if_lt_x_gpu(4)
+    @requires_accelerator_ranks(4)
     @with_comms
     def test_mm_with_strided_input(self):
         # Case 1: 1D mesh with StridedShard
