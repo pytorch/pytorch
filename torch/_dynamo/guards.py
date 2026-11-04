@@ -71,6 +71,7 @@ from torch._C._dynamo.guards import (
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
+    ORDERED_DICT_ORDER_MATCH,
     profile_guard_manager,
     RelationalGuard,
     RootGuardManager,
@@ -208,10 +209,12 @@ from .utils import (
     constants_identical,
     dataclass_fields,
     dict_keys,
+    enumerate_items_with_dict_position,
     get_current_stream,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
     guard_failures,
+    InvalidOrderedDict,
     istype,
     key_is_id,
     key_to_id,
@@ -574,6 +577,16 @@ class GuardManagerWrapper:
                 for accessor, mgr in zip(accessors, child_mgrs)
             )
 
+        def ordered_dict_tag_safe(node: GuardManager) -> bool:
+            # Subclass type changes do not update dictionary version tags.
+            return (
+                node.get_type_of_guarded_value() is collections.OrderedDict
+                or not any(
+                    isinstance(guard, ORDERED_DICT_ORDER_MATCH)
+                    for guard in node.get_leaf_guards()
+                )
+            )
+
         def visit_dict_manager(
             node: DictGuardManager,
         ) -> tuple[list[GuardManager], bool]:
@@ -609,7 +622,7 @@ class GuardManagerWrapper:
             if has_unoptimized_relational_guard:
                 return tag_safe_roots, has_unoptimized_relational_guard
 
-            is_subtree_tag_safe = True
+            is_subtree_tag_safe = ordered_dict_tag_safe(node)
             for key_mgr, val_mgr in node.get_key_value_managers().values():
                 if key_mgr:
                     is_subtree_tag_safe &= key_mgr.is_tag_safe()
@@ -667,7 +680,7 @@ class GuardManagerWrapper:
                 is_subtree_tag_safe = all(
                     isinstance(accessor, DictGetItemGuardAccessor) and mgr.is_tag_safe()
                     for accessor, mgr in zip(accessors, child_mgrs)
-                )
+                ) and ordered_dict_tag_safe(node)
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
             elif issubclass(node.get_type_of_guarded_value(), torch.nn.Module):
@@ -961,6 +974,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___key_to_id": key_to_id,
             "___dict_version": dict_version,
             "___dict_contains": lambda a, b: dict.__contains__(b, a),
+            "___ordered_dict_order": _ordered_dict_order,
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_count_iter": normalize_count_iter,
             "___normalize_range_iter": normalize_range_iter,
@@ -1515,6 +1529,16 @@ def unsupported_guard_check_spec(fn):
     """Mark a guard method as unsupported for auto-cache dispatch."""
     fn.guard_check_spec = UnsupportedGuardCheckSpec(fn.__name__)
     return fn
+
+
+def _ordered_dict_order(value: object) -> tuple[int, ...] | None:
+    if not issubclass(type(value), collections.OrderedDict):
+        return None
+    try:
+        value = cast(collections.OrderedDict[Any, Any], value)
+        return tuple(index for index, _, _ in enumerate_items_with_dict_position(value))
+    except InvalidOrderedDict:
+        return None
 
 
 class GuardBuilder(GuardBuilderBase):
@@ -3770,6 +3794,22 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _ordered_dict_order(value),
+        eval_fn=lambda value, order: order is not None
+        and _ordered_dict_order(value) == order,
+    )
+    def ORDERED_DICT_ORDER_MATCH(self, guard: Guard) -> None:
+        order = _ordered_dict_order(self.get(guard))
+        if order is None:
+            raise AssertionError("Expected a valid OrderedDict snapshot")
+        ref = self.arg_ref(guard)
+        code = [f"___ordered_dict_order({ref}) == {order!r}"]
+        self.get_guard_manager(guard).add_ordered_dict_order_guard(
+            order, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+        self._set_guard_export_info(guard, code)
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: list(dict.keys(value)),
         eval_fn=lambda value, metadata: constants_identical(
             list(dict.keys(value)), metadata
@@ -4904,6 +4944,45 @@ class GuardsStatePickler(FunctionPicklerBase):
         return dict.fromkeys(elems).keys()
 
     @classmethod
+    def _restore_ordered_dict_state(
+        cls,
+        value: collections.OrderedDict[Any, Any],
+        state: tuple[Any, tuple[int, ...], bool],
+    ) -> None:
+        attrs, order, adopt_attrs = state
+        keys = list(dict.keys(value))
+        for index in order:
+            collections.OrderedDict.move_to_end(value, keys[index])
+        if attrs is None:
+            return
+        try:
+            setstate = cast(Any, value).__setstate__
+        except AttributeError:
+            slots = None
+            if isinstance(attrs, tuple) and tuple.__len__(attrs) == 2:
+                attrs, slots = tuple.__getitem__(attrs, 0), tuple.__getitem__(attrs, 1)
+            # Match CPython's Modules/_pickle.c:load_build, including bad states.
+            if attrs is not None:
+                if not isinstance(attrs, dict):
+                    raise pickle.UnpicklingError("state is not a dictionary") from None
+                if adopt_attrs:
+                    for name, item in dict.items(value.__dict__):
+                        dict.setdefault(attrs, name, item)
+                    object.__setattr__(value, "__dict__", attrs)
+                else:
+                    for name, item in dict.items(attrs):
+                        value.__dict__[name] = item
+            if slots is not None:
+                if not isinstance(slots, dict):
+                    raise pickle.UnpicklingError(
+                        "slot state is not a dictionary"
+                    ) from None
+                for name, item in dict.items(slots):
+                    setattr(value, name, item)
+        else:
+            setstate(attrs)
+
+    @classmethod
     def _unpickle_count_iter(cls, item: int, step: int) -> itertools.count[int]:
         return itertools.count(item, step)
 
@@ -5217,6 +5296,51 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         if id(obj) in self.missing_values:
             return _Missing, ("missing values",)
+
+        if (
+            issubclass(type(obj), collections.OrderedDict)
+            and type(obj) not in copyreg.dispatch_table
+            and inspect.getattr_static(obj, "__reduce__")
+            is collections.OrderedDict.__reduce__
+            and inspect.getattr_static(obj, "__reduce_ex__")
+            is collections.OrderedDict.__reduce_ex__
+        ):
+            if type(obj).__qualname__ != type(obj).__name__:
+                raise_local_type_error(type(obj))
+            # Native pickle normalizes storage to linked order, invalidating
+            # storage-position sources and ORDERED_DICT_ORDER_MATCH on load.
+            # Custom constructors/items/setitem must retain native callback order.
+            preserve_storage = type(type(obj)).__call__ is type.__call__ and all(
+                getattr(type(obj), name) is getattr(collections.OrderedDict, name)
+                for name in ("__new__", "__init__", "__setitem__", "items")
+            )
+            order = _ordered_dict_order(obj)
+            if order is None:
+                # Native pickle may accept raw dict writes on an unguarded value.
+                return NotImplemented
+            if not preserve_storage and order != tuple(range(dict.__len__(obj))):
+                if id(obj) not in self.guard_tree_values:
+                    return NotImplemented
+                raise torch._dynamo.exc.PackageError(
+                    "Cannot preserve OrderedDict storage order with custom "
+                    "construction or item methods"
+                )
+            reduced = obj.__reduce__()
+            state = vars(obj) if type(obj) is collections.OrderedDict else reduced[2]
+            actual_attrs = vars(obj)
+            adopt_attrs = state is actual_attrs or (
+                isinstance(state, tuple)
+                and len(state) == 2
+                and state[0] is actual_attrs
+            )
+            return (
+                reduced[0],
+                reduced[1],
+                (state, order if preserve_storage else (), adopt_attrs),
+                reduced[3],
+                iter(dict.items(obj)) if preserve_storage else reduced[4],
+                type(self)._restore_ordered_dict_state,
+            )
 
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
             from torch.utils._python_dispatch import is_traceable_wrapper_subclass
