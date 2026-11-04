@@ -22,16 +22,22 @@ def _read_file(path: Path) -> str:
 #   - gitlab.com's "unable to handle this request due to load" page;
 #   - HTTP 429 and 5xx, as `The requested URL returned error: 503` or
 #     `RPC failed; HTTP 503`;
-#   - `RPC failed; curl ...`, a transfer that broke part way;
+#   - `RPC failed; curl 18`, `curl 56` and `curl 92 ... CANCEL/INTERNAL_ERROR`, a
+#     transfer that broke part way (partial file, receive failure, HTTP/2 stream
+#     cancelled). Other curl errors, e.g. `curl 16` from a broken HTTP/2 framing
+#     layer, usually come back on every attempt and are not retried;
 #   - `early EOF`, `unexpected disconnect` and `GnuTLS recv error`, the same for a
 #     connection that dropped while git was reading;
 #   - `SSL_read: Connection reset` and `SSL_read: SSL_ERROR_SYSCALL`, a connection
 #     that was reset while data was being read.
 # Only these read-time signatures are matched. A reset while the connection is
-# being set up (`SSL_connect: Connection reset ... in connection to`, or curl's
-# `Recv failure: Connection reset by peer` from a proxy that refuses the CONNECT)
-# is not retried: it usually never goes away, and each attempt would stall for the
-# 10 to 60 s wait.
+# being set up (`SSL_connect: Connection reset ... in connection to`) is not
+# retried: it usually never goes away, and each attempt would stall for the 10 to
+# 60 s wait. The same goes for a bare `Recv failure: Connection reset by peer`:
+# curl prints it both for a proxy that refuses the CONNECT and, on current curl,
+# for a reset while a response is being read, and the message cannot tell the two
+# apart, so neither is retried. (In a POST, git adds `RPC failed; curl 56`, which
+# is retried.)
 # Everything else fails at once instead of stalling for minutes, e.g. in the
 # `cmake` configure step: a tag that does not exist, HTTP 4xx other than 429, no
 # DNS, an unwritable directory. Connect timeouts are not retried either: on a
@@ -40,7 +46,7 @@ def _read_file(path: Path) -> str:
 _TRANSIENT_CLONE_ERROR = re.compile(
     r"unable to handle this request due to load"
     r"|The requested URL returned error: (?:429|5\d\d)"
-    r"|RPC failed; (?:HTTP (?:429|5\d\d)|curl)"
+    r"|RPC failed; (?:HTTP (?:429|5\d\d)|curl (?:18|56)\b|curl 92\b[^\n]*(?:CANCEL|INTERNAL_ERROR))"
     r"|early EOF|unexpected disconnect|GnuTLS recv error"
     r"|SSL_read: (?:Connection reset|SSL_ERROR_SYSCALL)",
     re.IGNORECASE,
@@ -66,7 +72,9 @@ def _clone(
     #
     # stderr is captured so that it can be matched and kept on the exception. git
     # shows its progress meter only when stderr is a terminal, so an interactive
-    # run prints nothing until each attempt ends; CI output is not affected.
+    # run prints nothing until each attempt ends. In CI too (including under
+    # cmake's execute_process), git's output appears only when an attempt exits,
+    # and is lost if the attempt is killed, e.g. by a step or job timeout.
     if attempts < 1:
         raise ValueError(f"attempts must be at least 1, got {attempts}")
     for attempt in range(1, attempts + 1):

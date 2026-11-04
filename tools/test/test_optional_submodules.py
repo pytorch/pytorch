@@ -27,6 +27,7 @@ TRANSIENT = {
     "post 429": "error: RPC failed; HTTP 429",
     "transfer closed": "error: RPC failed; curl 18 transfer closed with outstanding read data remaining",
     "http2 cancel": "error: RPC failed; curl 92 HTTP/2 stream 5 was not closed cleanly: CANCEL (err 8)",
+    "http2 internal error": "error: RPC failed; curl 92 HTTP/2 stream 1 was not closed cleanly: INTERNAL_ERROR (err 2)",
     "reset mid-transfer": "error: RPC failed; curl 56 Recv failure: Connection reset by peer",
     "early eof": "fatal: early EOF",
     "unexpected disconnect": "fatal: unexpected disconnect while reading sideband packet",
@@ -40,6 +41,8 @@ PERMANENT = {
     "get 404": "fatal: unable to access 'https://x/': The requested URL returned error: 404",
     "get 403": "fatal: unable to access 'https://x/': The requested URL returned error: 403",
     "post 403": "error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403",
+    "http2 framing": "error: RPC failed; curl 16 Error in the HTTP2 framing layer",
+    "http2 other stream error": "error: RPC failed; curl 92 HTTP/2 stream 5 was not closed cleanly: REFUSED_STREAM (err 7)",
     "no dns": "fatal: unable to access 'https://gitlab.com/': Could not resolve host: gitlab.com",
     "connect timeout": "fatal: unable to access 'https://gitlab.com/': Failed to connect to gitlab.com port 443 after 130000 ms: Connection timed out",
     "proxy refuses connect": "fatal: unable to access 'https://x/': Recv failure: Connection reset by peer",
@@ -103,11 +106,13 @@ class TestClone(TestCase):
         )
 
     def test_raises_after_last_attempt(self):
+        last = "fatal: early EOF\n"
         with self.assertRaises(CalledProcessError) as raised:
-            self._clone([FAILURE] * 3, attempts=3)
+            self._clone([FAILURE, FAILURE, result(128, last)], attempts=3)
         self.assertEqual(raised.exception.returncode, 128)
         self.assertEqual(raised.exception.cmd, CLONE)
-        self.assertEqual(raised.exception.stderr, GITLAB_LOAD)
+        # The exception carries the final attempt's stderr, not an earlier one.
+        self.assertEqual(raised.exception.stderr, last)
         self.assertEqual(self.run_.call_count, 3)
         self.assertEqual(self.sleep.call_count, 2)
 
@@ -126,6 +131,14 @@ class TestClone(TestCase):
                 self.assertEqual(self.run_.call_count, 1)
                 self.sleep.assert_not_called()
 
+    def test_permanent_error_after_a_transient_one_stops_retrying(self):
+        permanent = PERMANENT["missing tag"]
+        with self.assertRaises(CalledProcessError) as raised:
+            self._clone([FAILURE, result(128, permanent), result()])
+        self.assertEqual(raised.exception.stderr, permanent)
+        self.assertEqual(self.run_.call_count, 2)
+        self.assertEqual(self.sleep.call_count, 1)
+
     def test_attempts_must_be_positive(self):
         for attempts in (0, -1):
             with self.subTest(attempts):
@@ -135,7 +148,8 @@ class TestClone(TestCase):
 
     def test_git_runs_with_captured_text_output_in_the_c_locale(self):
         with mock.patch.dict(
-            optional_submodules.os.environ, {"PATH": "/bin", "https_proxy": "p:1"}
+            optional_submodules.os.environ,
+            {"PATH": "/bin", "https_proxy": "p:1", "LC_ALL": "de_DE.UTF-8"},
         ):
             self._clone([result()], cwd=Path("/tmp/x"))
         self.run_.assert_called_once()
@@ -179,7 +193,16 @@ class TestCheckoutNcclEp(TestCase):
             ):
                 optional_submodules.checkout_nccl_ep()
         self.assertEqual(run.call_count, 2)
-        self.assertEqual(run.call_args.args[0][:3], ["git", "clone", "--no-checkout"])
+        self.assertEqual(
+            run.call_args.args[0],
+            [
+                "git",
+                "clone",
+                "--no-checkout",
+                "https://github.com/NVIDIA/nccl-extensions.git",
+                str(third_party / "nccl-extensions"),
+            ],
+        )
         check_call.assert_called_once_with(
             ["git", "checkout", "--detach", "abc123"],
             cwd=third_party / "nccl-extensions",
