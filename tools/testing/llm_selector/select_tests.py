@@ -225,23 +225,20 @@ def query_model(
     return result
 
 
-# Git options to list non-ASCII paths verbatim rather than quoted.
-UNQUOTED_PATHS = ("-c", "core.quotePath=false")
-
-
 def git(*args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=REPO_ROOT, text=True)
 
 
-def git_paths(*args: str) -> list[str]:
-    """The paths a git command lists one per line."""
-    return git(*UNQUOTED_PATHS, *args).splitlines()
+def git_paths(command: str, *args: str) -> list[str]:
+    """The paths a git command lists, verbatim: -z keeps git from C-quoting
+    a path with a quote, backslash, control or non-ASCII character."""
+    return git(command, "-z", *args).split("\0")[:-1]
 
 
 def git_grep(pattern: str, rev: str, timeout: float | None = None) -> list[str]:
     """The paths under test/ at `rev` with a line matching the extended regex `pattern`."""
     p = subprocess.run(
-        ["git", *UNQUOTED_PATHS, "grep", "-lE", pattern, rev, "--", "test/"],
+        ["git", "grep", "-lzE", pattern, rev, "--", "test/"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -249,7 +246,7 @@ def git_grep(pattern: str, rev: str, timeout: float | None = None) -> list[str]:
     )
     if p.returncode > 1:
         raise RuntimeError(f"git grep failed: {p.stderr.strip()[-500:]}")
-    return [line.split(":", 1)[1] for line in p.stdout.splitlines()]
+    return [line.split(":", 1)[1] for line in p.stdout.split("\0")[:-1]]
 
 
 def changed_files(merge_base: str, head: str) -> list[str]:
