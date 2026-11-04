@@ -228,7 +228,8 @@ class TestSelection(unittest.TestCase):
         self.assertEqual((sel.files, sel.run_all), ({"test_nn", "dynamo/test_misc"}, False))  # fmt: skip
         many = [f"test/data{i}.json" for i in range(selection.MAX_DATA_FILES + 1)]
         sel = self.select_in_tree(sources, candidates, many)
-        self.assertEqual((sel.run_all, sel.error), (True, None))
+        reason = f"more than {selection.MAX_DATA_FILES} edited files under test/ are not tests"
+        self.assertEqual((sel.run_all, sel.reason, sel.error), (True, reason, None))
 
     def test_endless_import_chain_runs_all(self) -> None:
         calls: list[str] = []
@@ -269,8 +270,11 @@ class TestSelection(unittest.TestCase):
         for changed in ("test/inductor_expected_failures/TestGone.test_x", "test/inductor_skips/TestGone.test_x", "test/inductor_skips/TestNN.test_x.y"):  # fmt: skip
             sel = self.select_in_tree(sources, CANDIDATES, [changed])
             self.assertEqual((sel.run_all, sel.error), (True, None), changed)
-        many = [f"test/dynamo_skips/TestNN{i}.test_x" for i in range(selection.MAX_FAILURE_LIST_CLASSES + 1)]  # fmt: skip
-        self.assertEqual(self.select_in_tree(sources, CANDIDATES, many).sweeps, {"dynamo_wrapped"})  # fmt: skip
+        n = selection.MAX_FAILURE_LIST_CLASSES + 1
+        many_sources = sources | {"test_nn.py": "".join(f"class TestNN{i}(TestCase):\n" for i in range(n))}  # fmt: skip
+        many = [f"test/dynamo_skips/TestNN{i}.test_x" for i in range(n)]
+        sel = self.select_in_tree(many_sources, CANDIDATES, many)
+        self.assertEqual((sel.run_all, sel.files, sel.sweeps), (False, set(), {"dynamo_wrapped"}))  # fmt: skip
         # Without a grep, the classes cannot be looked up.
         sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/dynamo_skips/TestNN.test_x"])  # fmt: skip
         self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
@@ -1019,12 +1023,14 @@ class TestDashboardExclusions(unittest.TestCase):
         b = [{"test_file": "b"}]
         artifacts = {
             "td_exclusions-1.json": {"included": [], "excluded": [{"test_file": "a"}]},
-            "td_exclusions-2.json": {"included": [], "excluded": b, "source": "td"},
+            "td_exclusions-2.json": {"included": [{"test_file": "c"}], "excluded": b, "source": "td"},
             "td_exclusions-3.json": llm_artifact,
             # An enforced call that excluded nothing.
             "td_exclusions-4.json": {**llm_artifact, "excluded": [], "td_excluded": []},
             "td_exclusions-5.json": {"included": [], "excluded": [], "source": "td"},
-        }
+            # A call that excluded nothing but ran a file another call excluded.
+            "td_exclusions-6.json": {"included": [{"test_file": "a"}], "excluded": [], "source": "td"},
+        }  # fmt: skip
         jobs = {
             "td_exclusions-4.json": "linux / test (slow, 1, 1, x)",
             "td_exclusions-5.json": "linux / test (crossref, 1, 1, x)",
@@ -1053,8 +1059,8 @@ class TestDashboardExclusions(unittest.TestCase):
             json.loads(json.dumps(exclusions)),
             {
                 "td": {"linux": {"default": ["a", "b", "d"]}},
-                # What every call of a config with an enforced call excluded.
-                "llm_selection": {"linux": {"default": ["a", "b", "c"], "slow": []}},
+                # What a config with an enforced call excluded and none of its calls ran.
+                "llm_selection": {"linux": {"default": ["b"], "slow": []}},
             },
         )
 
