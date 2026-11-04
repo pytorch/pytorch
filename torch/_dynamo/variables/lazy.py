@@ -7,7 +7,10 @@ import inspect
 import operator
 from typing import Any, TYPE_CHECKING
 
+from torch._guards import ChainedSource, Source
+
 from .. import config
+from ..source import ComputedLazyConstantSource, is_constant_source, LocalSource
 from ..utils import is_function_or_wrapper
 from .base import SourceLocation, VariableTracker, VariableTrackerMeta
 
@@ -583,6 +586,56 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
     _cache: ComputedLazyCache  # pyrefly: ignore[bad-override]
 
     @staticmethod
+    def _source_base(source: Source) -> Source:
+        while isinstance(source, ChainedSource):
+            source = source.base
+        return source
+
+    @classmethod
+    def _maybe_make_source(
+        cls,
+        op: Callable[..., Any],
+        args: list[VariableTracker],
+    ) -> ComputedLazyConstantSource | None:
+        sources: dict[int, Source] = {}
+        for index, arg in enumerate(args):
+            if arg.source is not None and not is_constant_source(arg.source):
+                sources[index] = arg.source
+        if not sources:
+            return None
+
+        bases = {cls._source_base(source) for source in sources.values()}
+        if len(bases) != 1:
+            return None
+        base = next(iter(bases))
+        if (
+            not isinstance(base, LocalSource)
+            or not base.is_input
+            or base.is_derefed_cell_contents
+        ):
+            return None
+
+        values: list[Source | object] = []
+        for index, arg in enumerate(args):
+            if index in sources:
+                source = sources[index]
+                if source != base and not isinstance(
+                    source, ComputedLazyConstantSource
+                ):
+                    return None
+                values.append(source)
+                continue
+
+            if arg.source is None or is_constant_source(arg.source):
+                if isinstance(
+                    arg, (ComputedLazyConstantVariable, LazyConstantVariable)
+                ):
+                    return None
+                values.append(arg.as_python_constant())
+
+        return ComputedLazyConstantSource(base=base, op=op, args=tuple(values))
+
+    @staticmethod
     def create(  # pyrefly: ignore[bad-param-name-override, bad-override]
         op: Callable[..., Any],
         args: list[VariableTracker],
@@ -634,8 +687,10 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
             return None
         if not lazy_vars:
             return ConstantVariable.create(value)
+        source = ComputedLazyConstantVariable._maybe_make_source(op, args)
         return ComputedLazyConstantVariable(
-            ComputedLazyCache(value, lazy_vars, list(args), op, num_nodes)
+            ComputedLazyCache(value, lazy_vars, list(args), op, num_nodes),
+            source=source,
         )
 
     def __init__(self, _cache: ComputedLazyCache, **kwargs: Any) -> None:
@@ -644,6 +699,16 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
                 f"_cache must be a ComputedLazyCache instance, got {type(_cache).__name__}"
             )
         super().__init__(_cache, **kwargs)
+
+    def realize(self) -> VariableTracker:
+        if not self.is_realized():
+            self._cache.realize()
+            realized = self._cache.vt
+            if realized is None:
+                raise AssertionError("ComputedLazyCache.realize() did not set vt")
+            if self.source is not None and realized.source is None:
+                realized.source = self.source
+        return super().realize()
 
     def _ensure_operand_type_guards(self) -> None:
         # Type queries on the result depend on the operand types
