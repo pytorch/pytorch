@@ -2,8 +2,8 @@
 # PartialColumns stage-two kernel and the ordered (inner-tree) column kernel.
 # TileReduce threads own vectorized kept-axis outputs without lane merging. Splitting the
 # reduced axis provides parallelism; unsplit (65536, 256) took 7830us versus ATen's 15.8us.
-# Ordered column threads each own one output and replay the row inner-tree DAG with loads
-# strided by C.
+# Ordered column lanes each serve one output, and a block's warps split its rows as the row
+# inner tree's warps do, loading rows strided by C; warp 0 merges their roots.
 
 from collections.abc import Sequence
 from typing import Any, NamedTuple
@@ -230,6 +230,10 @@ class _OrderedColReduce:
         # R * C needs one.
         self.wide = R * C >= _INT32_LIMIT
         self.nouts = nouts
+        # Exact plans tile the row without padded warps or leaves past R. Skipping their
+        # leaf masks, and the shared-memory merge for one-warp rows, ran B200 argmax at up
+        # to 1.4x and var_mean at up to 2.4x on exact views; sums were within noise.
+        self.exact = plan.tms[0].exact
 
     @property
     def cache_sig(self) -> tuple[Any, ...]:
@@ -255,6 +259,9 @@ class _OrderedColReduce:
     def _leaf(self, rows, warp_base, k, active, last):
         trait = self.trait
         red = warp_base + k
+        if const_expr(self.exact):
+            # Every leaf is in bounds, and inactive lanes never store their outputs.
+            return trait.leaf(rows[cutlass.min(Int32(k), last)], red)
         valid = active & (red < Int32(self.R))
         # Leaves past R read the view's last in-bounds row, row R - 1; the select below
         # discards them. The clamp also keeps each address independent of the last one.
@@ -287,15 +294,6 @@ class _OrderedColReduce:
         batch, col = safe // C, safe % C
         col_base = in_base + Int64(batch) * Int64(self.R) * Int64(C) + Int64(col)
         nf = const_expr(trait.nfields)
-        smem = cutlass.utils.SmemAllocator()
-        roots = [
-            smem.allocate_tensor(
-                trait.fdtypes[f],
-                cute.make_layout(const_expr(plan.wpr * WARP)),
-                byte_alignment=8,
-            )
-            for f in range(nf)
-        ]
         loads, warp_chunk = plan.batches[0][2:]
         warp_base = warp * Int32(warp_chunk)
         # A padded warp can start at R; its leaves all mask, so its view starts at R-1.
@@ -346,41 +344,54 @@ class _OrderedColReduce:
                     op,
                 )
             tile._streaming_push(load_tree, load_root, load, plan.depth, op)
-        slot = warp * Int32(WARP) + lane
-        for f in cutlass.range_constexpr(nf):
-            roots[f][slot] = load_tree[0][f]
-        cute.arch.barrier()
-        groups = const_expr(plan.wpr // plan.kchunk)
-        final = ident
-        if warp == Int32(0):
-            group_vals = [
-                tile._inner_tree_reduce(
-                    [
-                        tuple(
-                            roots[f][(g * plan.kchunk + i) * Int32(WARP) + lane]
+        # The indexed tree seeds its fold with the identity, so -0 sums become +0.
+        if const_expr(plan.wpr == 1):
+            # One warp replays the whole row, so its root needs no shared-memory merge.
+            final = op(ident, load_tree[0])
+        else:
+            smem = cutlass.utils.SmemAllocator()
+            roots = [
+                smem.allocate_tensor(
+                    trait.fdtypes[f],
+                    cute.make_layout(const_expr(plan.wpr * WARP)),
+                    byte_alignment=8,
+                )
+                for f in range(nf)
+            ]
+            slot = warp * Int32(WARP) + lane
+            for f in cutlass.range_constexpr(nf):
+                roots[f][slot] = load_tree[0][f]
+            cute.arch.barrier()
+            groups = const_expr(plan.wpr // plan.kchunk)
+            final = ident
+            if warp == Int32(0):
+                group_vals = [
+                    tile._inner_tree_reduce(
+                        [
+                            tuple(
+                                roots[f][(g * plan.kchunk + i) * Int32(WARP) + lane]
+                                for f in range(nf)
+                            )
+                            for i in range(plan.kchunk)
+                        ],
+                        op,
+                    )
+                    for g in range(groups)
+                ]
+                # Like TileReduce._fold_itree, only several groups merge across 32 lanes.
+                root = group_vals[0]
+                if const_expr(groups > 1):
+                    padding = ident
+                    # Constant identities fold Welford's 0 / 0 count ratio at trace time.
+                    if const_expr(nf > 1):
+                        dynamic_false = lane < Int32(0)
+                        padding = tuple(
+                            group_vals[0][f] if dynamic_false else ident[f]
                             for f in range(nf)
                         )
-                        for i in range(plan.kchunk)
-                    ],
-                    op,
-                )
-                for g in range(groups)
-            ]
-            # Like TileReduce._fold_itree, only several groups merge across 32 lanes.
-            root = group_vals[0]
-            if const_expr(groups > 1):
-                padding = ident
-                # Constant identities fold Welford's 0 / 0 count ratio at trace time.
-                if const_expr(nf > 1):
-                    dynamic_false = lane < Int32(0)
-                    padding = tuple(
-                        group_vals[0][f] if dynamic_false else ident[f]
-                        for f in range(nf)
-                    )
-                group_vals.extend([padding] * (WARP - groups))
-                root = tile._inner_tree_reduce(group_vals, op)
-            # The indexed tree seeds its fold with the identity, so -0 sums become +0.
-            final = op(ident, root)
+                    group_vals.extend([padding] * (WARP - groups))
+                    root = tile._inner_tree_reduce(group_vals, op)
+                final = op(ident, root)
 
         projected = trait.project(final, trait.acc(self.R))
         if (Int32(ty) == Int32(0)) & active:
