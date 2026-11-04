@@ -3,8 +3,8 @@
 
 Modeled on the Triton suite (test/inductor/test_triton_kernels.py) and the OSS
 CuTeDSL stack's test_cutedsl_kernels.py: direct HOP use, wrap_flydsl eager launches
-and tracing (make_fx, non-strict export), and the FlyDSL compile helpers. Needs a
-ROCm GPU and flydsl >= 0.4.
+and tracing (make_fx, non-strict export), the FlyDSL compile helpers, and Dynamo.
+Needs a ROCm GPU and flydsl >= 0.4.
 """
 
 import functools
@@ -22,6 +22,13 @@ from typing import Any
 from unittest import mock
 
 import torch
+import torch._dynamo.testing
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    CompileCounter,
+    CompileCounterWithBackend,
+    EagerAndRecordGraphs,
+)
 from torch._higher_order_ops.flydsl_kernel_wrap import (
     flydsl_kernel_side_table,
     flydsl_kernel_wrapper_functional,
@@ -2110,8 +2117,557 @@ class FlyDSLCompileHelperTests(TestCase):
         self.assertEqual(out2, x2)
 
 
+@requires_flydsl
+class FlyDSLDynamoTests(TestCase):
+    """torch.compile front end: the wrapper (global or created inline) becomes one
+    HOP node; raw @flyc.jit calls graph-break; recompiles follow the arg classes."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    def test_wrap_of_a_wrapper_graph_breaks(self):
+        # Eager refuses to wrap a wrapper (it is not a @flyc.jit function), so Dynamo
+        # must not silently replace its write set.
+        def f(x, y):
+            out = torch.empty_like(x)
+            wrap_flydsl(add_w, mutates_args=["Out"])(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        with self.assertRaises(RuntimeError):
+            f(x, y)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(f, backend="eager", fullgraph=True)(x, y)
+
+    def test_wrap_without_mutates_args_graph_breaks(self):
+        # wrap_flydsl requires mutates_args (FlyDSL write sets are not inferred).
+        untyped_wrap: Any = wrap_flydsl
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            untyped_wrap(add_kernel)(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "wrap_flydsl"):
+            torch.compile(f, backend="eager", fullgraph=True)(x, y)
+
+    def test_wrap_with_none_mutates_args_graph_breaks(self):
+        # None is an invalid write set (as in eager), not an unwrapped host function.
+        def f(x, y):
+            out = torch.empty_like(x)
+            # pyrefly: ignore [bad-argument-type]
+            wrap_flydsl(add_kernel, mutates_args=None)(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, r"mutates_args must be .*got None"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x, y)
+
+    def test_refused_constant_graph_breaks(self):
+        # A constant FlyDSL's side table refuses (an unhashable value that is no
+        # container, here a set in the Constexpr tuple) is a graph break naming the
+        # kernel, not an internal error; eager refuses it with the same TypeError.
+        w = wrap_flydsl(scale_by_first_kernel, mutates_args=["Out"])
+
+        def f(x):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), (2.0, {1}))
+            return out
+
+        x = _rand(1000)
+        msg = "a constant kernel argument of type set is unhashable"
+        with self.assertRaisesRegex(TypeError, msg):
+            f(x)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, rf"scale_by_first_kernel\(\): {msg}"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x)
+
+    @parametrize("backend", ("eager", "aot_eager"))
+    def test_constexpr_lambda_defaults_are_guarded(self, backend):
+        # A lambda passed in is guarded on its code and, when it has defaults (FlyDSL
+        # bakes them in), on their values: another default recompiles instead of
+        # reusing the first lambda.
+        w = wrap_flydsl(map_kernel, mutates_args=["Out"])
+
+        def f(t, op):
+            out = torch.zeros_like(t)
+            w(t, out, t.numel(), op)
+            return out
+
+        def scale_by(k):
+            return lambda v, k=k: v * k
+
+        cf = torch.compile(f, backend=backend, fullgraph=True)
+        a = _rand(1000)
+        self.assertEqual(cf(a, scale_by(5.0)), 5 * a)
+        self.assertEqual(cf(a, scale_by(6.0)), 6 * a)
+        self.assertEqual(cf(a, lambda v: v * 2.0), 2 * a)
+        self.assertEqual(cf(a, lambda v: v * 2.0), 2 * a)
+
+    @parametrize("backend", ("eager", "aot_eager"))
+    def test_constexpr_lambda_made_in_the_frame(self, backend):
+        # Dynamo names a function made in the frame by its qualified name; FlyDSL
+        # takes a Constexpr lambda only when it is named "<lambda>", as in eager.
+        w = wrap_flydsl(map_kernel, mutates_args=["Out"])
+
+        def f(t):
+            out = torch.zeros_like(t)
+            w(t, out, t.numel(), lambda v: v * 2.0)
+            return out
+
+        a = _rand(1000)
+        self.assertEqual(torch.compile(f, backend=backend, fullgraph=True)(a), 2 * a)
+
+    @parametrize("backend", ("eager", "aot_eager"))
+    @parametrize("in_tuple", (False, True))
+    def test_constexpr_lambda_defaults_guarded_by_value(self, backend, in_tuple):
+        # Passed in or inside a Constexpr tuple, a lambda with defaults is guarded on
+        # its code and the values of its defaults (their types included): another
+        # default recompiles instead of reusing the first lambda, and an equal lambda
+        # made per call reuses the graph.
+        kernel = map_first_kernel if in_tuple else map_kernel
+        w = wrap_flydsl(kernel, mutates_args=["Out"])
+
+        def f(t, op):
+            out = torch.zeros_like(t)
+            w(t, out, t.numel(), op)
+            return out
+
+        def scale_by(k):
+            op = lambda v, k=k: v * k  # noqa: E731
+            return (op,) if in_tuple else op
+
+        cnt = CompileCounterWithBackend(backend)
+        cf = torch.compile(f, backend=cnt, fullgraph=True)
+        a = _rand(1000)
+        for k in (5.0, 6.0, 6.0, 6):
+            self.assertEqual(cf(a, scale_by(k)), k * a)
+        self.assertEqual(cnt.frame_count, 3)
+
+    @parametrize("backend", ("eager", "aot_eager"))
+    def test_constexpr_lambda_in_tuple_made_in_the_frame(self, backend):
+        # The same for a lambda made in the frame inside a Constexpr tuple.
+        w = wrap_flydsl(map_first_kernel, mutates_args=["Out"])
+
+        def f(t):
+            out = torch.zeros_like(t)
+            w(t, out, t.numel(), (lambda v: v * 2.0,))
+            return out
+
+        a = _rand(1000)
+        self.assertEqual(torch.compile(f, backend=backend, fullgraph=True)(a), 2 * a)
+
+    @parametrize("backend", ("eager", "aot_eager"))
+    def test_constexpr_lambda_symbolic_default(self, backend):
+        # A lambda made in the frame takes frame values through its defaults (FlyDSL
+        # refuses closures). A symbolic one (a float or int input once it is
+        # dynamic) is specialized, as in a Constexpr argument.
+        w = wrap_flydsl(map_kernel, mutates_args=["Out"])
+        w_first = wrap_flydsl(map_first_kernel, mutates_args=["Out"])
+
+        def f(t, k):
+            out = torch.zeros_like(t)
+            w(t, out, t.numel(), lambda v, k=k: v * k)
+            return out
+
+        def g(t, k):
+            out = torch.zeros_like(t)
+            w_first(t, out, t.numel(), (lambda v, k=k: v * k,))
+            return out
+
+        a = _rand(1000)
+        cases = (
+            (f, (5.0, 6.0), None),
+            (f, (5, 6), None),
+            (f, (5.0,), True),
+            (f, (5,), True),
+            (g, (5.0,), True),
+        )
+        for fn, ks, dynamic in cases:
+            torch._dynamo.reset()
+            cf = torch.compile(fn, backend=backend, fullgraph=True, dynamic=dynamic)
+            for k in ks:
+                self.assertEqual(cf(a, k), k * a)
+
+    def test_inline_wrapper_live_across_graph_break(self):
+        # A wrapper made in the frame is rebuilt at the graph break, so both parts
+        # compile instead of the frame falling back to eager.
+        def f(x, y):
+            w = wrap_flydsl(add_kernel, mutates_args=["Out"])
+            out = torch.zeros_like(x)
+            torch._dynamo.graph_break()
+            w(x, y, out, x.numel())
+            return out
+
+        cnt = CompileCounter()
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(torch.compile(f, backend=cnt)(x, y), x + y)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_wrapper_type_inside_compile(self):
+        from torch._higher_order_ops.flydsl_kernel_wrap import (
+            TraceableFlyDSLKernelWrapper,
+        )
+
+        def f(x):
+            return x + int(isinstance(add_w, TraceableFlyDSLKernelWrapper))
+
+        x = _rand(4)
+        self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(x), x + 1)
+
+    def test_numeric_constant_fullgraph(self):
+        # A constant that is not a Python constant (a FlyDSL Numeric value) is passed
+        # as the object, guarded on its type and value, by which the side table keys
+        # and copies it: an equal Numeric reuses the graph, a changed value (also of
+        # the same object) or another type recompiles.
+        def f(x, alpha):
+            out = torch.empty_like(x)
+            add_scalar_w(x, out, x.numel(), alpha)
+            return out
+
+        x = _rand(1000)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cf = torch.compile(f, backend=cnt, fullgraph=True)
+        alpha = fx.Float32(2.0)
+        self.assertEqual(cf(x, alpha), x + 2)
+        self.assertEqual(cf(x, fx.Float32(2.0)), x + 2)
+        self.assertEqual(cnt.frame_count, 1)
+        alpha.value = 3.0
+        self.assertEqual(cf(x, alpha), x + 3)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cf(x, fx.Int32(3)), x + 3)
+        self.assertEqual(cnt.frame_count, 3)
+
+    def test_constant_modified_in_region_graph_breaks(self):
+        # Dynamo applies a write made earlier in the region only after the graph runs,
+        # so a constant written before the launch is a graph break (fullgraph raises),
+        # and the call then runs eagerly, seeing the write.
+        def f(x, alpha):
+            alpha.value = 3.0
+            out = torch.empty_like(x)
+            add_scalar_w(x, out, x.numel(), alpha)
+            return out
+
+        x = _rand(1000)
+        cf = torch.compile(f, backend="aot_eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            Exception,
+            r"add_scalar_kernel\(\): L\['alpha'\], reached through 'k', is modified",
+        ):
+            cf(x, fx.Float32(2.0))
+        out = torch.compile(f, backend="aot_eager")(x, fx.Float32(2.0))
+        self.assertEqual(out, x + 3)
+
+    def test_nested_symint_in_constexpr_tuple(self):
+        # Specialized like a bare SymInt: one graph per value.
+        w = wrap_flydsl(scale_by_first_kernel, mutates_args=["Out"])
+
+        def f(x):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), (x.shape[0] // 250,))
+            return out
+
+        cf = torch.compile(f, backend="aot_eager", dynamic=True, fullgraph=True)
+        for n in (1000, 2000):
+            x = _rand(n)
+            self.assertEqual(cf(x), (n // 250) * x)
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_global_wrapper_fullgraph(self, backend):
+        cnt = CompileCounterWithBackend(backend)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out.relu()
+
+        x, y = _rand(2048), _rand(2048)
+        self.assertEqual(f(x, y), (x + y).relu())
+        self.assertEqual(cnt.frame_count, 1)
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_inline_wrap_flydsl_fullgraph(self, backend):
+        def f(x, y):
+            out = torch.empty_like(x)
+            wrap_flydsl(add_kernel, mutates_args=["Out"])(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        compiled = torch.compile(f, backend=backend, fullgraph=True)
+        self.assertEqual(compiled(x, y), x + y)
+
+    def test_dynamo_graph_has_one_hop_node(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(f(x, y), x + y)
+        (gm,) = backend.graphs
+        (node,) = _hop_nodes(gm, flydsl_kernel_wrapper_mutation)
+        record = flydsl_kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+        self.assertIs(record.fn, add_kernel)
+        self.assertEqual(record.mutates_args, ("Out",))
+        self.assertNotIn("stream", node.kwargs["kwargs"])
+
+    def test_aot_eager_graph_is_functional(self):
+        backend = AotEagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(f(x, y), x + y)
+        (fw,) = backend.fw_graphs
+        self.assertEqual(_hop_nodes(fw, flydsl_kernel_wrapper_mutation), [])
+        (node,) = _hop_nodes(fw, flydsl_kernel_wrapper_functional)
+        self.assertEqual(node.kwargs["tensors_to_clone"], ["Out"])
+
+    @parametrize("view", ["offset", "gap"])
+    def test_aot_eager_mutated_view_gets_tensor_bases(self, view):
+        # The production functionalization path (AOTAutograd) hands the base of a
+        # mutated view to the functional HOP.
+        backend = AotEagerAndRecordGraphs()
+
+        def take_view(base):
+            return base[4:] if view == "offset" else base[::2]
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x):
+            base = x * 1
+            v = take_view(base)
+            scale_inplace_w(v, v.numel())
+            return base
+
+        x = torch.arange(1, 1001, device=DEVICE, dtype=torch.float32)
+        expected = x.clone()
+        take_view(expected).mul_(2)
+        self.assertEqual(f(x), expected)
+        (node,) = _hop_nodes(backend.fw_graphs[0], flydsl_kernel_wrapper_functional)
+        self.assertEqual(list(node.kwargs["tensor_bases"]), ["X"])
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("grad_fn", [torch.no_grad, torch.enable_grad])
+    def test_wrapper_with_grad_option(self, backend, grad_fn):
+        # Mirrors test_triton_kernel_with_grad_option.
+        def f(x):
+            with grad_fn():
+                out = torch.empty_like(x)
+                mul_const_w(x, out, x.numel(), 2.0)
+                return out
+
+        x = _rand(1000)
+        self.assertEqual(torch.compile(f, backend=backend, fullgraph=True)(x), 2 * x)
+
+    def test_runtime_scalar_stays_dynamic(self):
+        # n is annotated fx.Int32: a runtime arg, so a new size does not recompile
+        # under dynamic=True.
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out
+
+        for n in (1000, 3000, 77):
+            x, y = _rand(n), _rand(n)
+            self.assertEqual(f(x, y), x + y)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_constexpr_specializes_and_recompiles(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def f(x, alpha_from_shape):
+            out = torch.empty_like(x)
+            alpha = x.shape[0] if alpha_from_shape else 3
+            mul_const_w(x, out, x.numel(), alpha)
+            return out
+
+        # A constant Constexpr value: shape changes stay dynamic.
+        for n in (8, 16):
+            x = _rand(n)
+            self.assertEqual(f(x, False), 3 * x)
+        self.assertEqual(cnt.frame_count, 1)
+        # A symbolic value for a Constexpr param is guarded on: a new value
+        # recompiles, a seen value does not.
+        for n in (8, 16, 8):
+            x = _rand(n)
+            self.assertEqual(f(x, True), n * x)
+        self.assertEqual(cnt.frame_count, 3)
+
+    def test_unannotated_scalar_stays_dynamic(self):
+        # A Python int for an unannotated parameter is a runtime Int32 in FlyDSL: a
+        # symbolic value stays a graph input and new values do not recompile.
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def f(x):
+            out = torch.empty_like(x)
+            add_scalar_w(x, out, x.numel(), x.shape[0])
+            return out
+
+        for n in (8, 16, 8):
+            x = _rand(n)
+            self.assertEqual(f(x), x + n)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_float_scalar_default_and_explicit(self):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x, y):
+            s1, d1 = torch.empty_like(x), torch.empty_like(x)
+            add_sub_w(x, y, s1, d1, x.numel())
+            s2, d2 = torch.empty_like(x), torch.empty_like(x)
+            add_sub_w(x, y, s2, d2, x.numel(), scale=0.25)
+            return s1, d1, s2, d2
+
+        x, y = _rand(1000), _rand(1000)
+        s1, d1, s2, d2 = f(x, y)
+        self.assertEqual((s1, d1), (x + y, x - y))
+        self.assertEqual((s2, d2), ((x + y) * 0.25, (x - y) * 0.25))
+
+    def test_wrapper_guards_on_kernel_and_write_set(self):
+        # A wrapper passed in is guarded on its host function and write set, not on
+        # its identity: an equal wrapper reuses the graph, another one recompiles.
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f(w, x, y):
+            out = torch.zeros_like(x)
+            w(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(f(add_w, x, y), x + y)
+        self.assertEqual(f(wrap_flydsl(add_kernel, mutates_args=["Out"]), x, y), x + y)
+        self.assertEqual(cnt.frame_count, 1)
+        unknown_w = wrap_flydsl(add_kernel, mutates_args="unknown")
+        self.assertEqual(f(unknown_w, x, y), x + y)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(f(same_name_sub_w, x, y), x - y)
+        self.assertEqual(cnt.frame_count, 3)
+
+    def test_raw_flyc_jit_call_graph_breaks(self):
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_kernel(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(16), _rand(16)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "wrap_flydsl"):
+            torch.compile(f, backend="eager", fullgraph=True)(x, y)
+
+    def test_raw_flyc_jit_call_runs_eagerly_after_graph_break(self):
+        # Without fullgraph, a correct raw FlyDSL call (torch tensors and a raw
+        # stream) graph-breaks with the wrap_flydsl hint and then runs eagerly.
+        def f(x, a, b, out, n, stream):
+            y = x + 1
+            add_kernel(a, b, out, n, stream)
+            return y * 2
+
+        x, a, b = _rand(1000), _rand(1000), _rand(1000)
+        out = torch.zeros_like(a)
+        torch._dynamo.utils.counters.clear()
+        res = torch.compile(f, backend="eager")(x, a, b, out, 1000, _raw_stream())
+        self.assertEqual(res, (x + 1) * 2)
+        self.assertEqual(out, a + b)
+        reasons = list(torch._dynamo.utils.counters["graph_break"])
+        self.assertTrue(any("wrap_flydsl" in r for r in reasons), reasons)
+
+    def test_strict_export(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                add_w(x, y, out, x.numel())
+                return out
+
+        x, y = _rand(1000), _rand(1000)
+        ep = torch.export.export(M(), (x, y), strict=True)
+        self.assertIn(
+            "torch.ops.higher_order.flydsl_kernel_wrapper_", ep.graph_module.code
+        )
+        self.assertEqual(ep.module()(x, y), x + y)
+        self.assertEqual(ep.run_decompositions().module()(x, y), x + y)
+
+    @parametrize("strict", [False, True])
+    def test_later_strict_export_keeps_earlier_programs_valid(self, strict):
+        # Strict export runs Dynamo, which resets per-process tables (the Triton
+        # kernel side table is reset by torch._dynamo.reset()). A program exported
+        # earlier must keep launching its own kernel, not whatever now sits at its
+        # kernel_idx.
+        class Add(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                add_w(x, y, out, x.numel())
+                return out
+
+        class Scale(torch.nn.Module):
+            def forward(self, x):
+                y = x.clone()
+                scale_inplace_w(y, y.numel())
+                return y
+
+        x, y = _rand(1000), _rand(1000)
+        ep1 = torch.export.export(Add(), (x, y), strict=strict)
+        torch._dynamo.reset()
+        ep2 = torch.export.export(Scale(), (x,), strict=True)
+        self.assertEqual(ep1.module()(x, y), x + y)
+        self.assertEqual(ep1.run_decompositions().module()(x, y), x + y)
+        self.assertEqual(ep2.module()(x), 2 * x)
+
+    def test_global_wrapper_survives_dynamo_reset(self):
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        gm = make_fx(f)(x, y)
+        self.assertEqual(
+            torch.compile(f, backend="aot_eager", fullgraph=True)(x, y), x + y
+        )
+        torch._dynamo.reset()
+        # Another kernel takes the next side-table slot after the reset.
+        z = _rand(1000)
+        scale_inplace_w(z.clone(), 1000)
+        self.assertEqual(
+            torch.compile(f, backend="aot_eager", fullgraph=True)(x, y), x + y
+        )
+        self.assertEqual(gm(x, y), x + y)
+        self.assertEqual(make_fx(f)(x, y)(x, y), x + y)
+
+    def test_kernel_output_in_autograd_graph(self):
+        # The launch has no derivative: its output enters the autograd graph as a
+        # constant, exactly as in eager.
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x.detach(), y.detach(), out, x.numel())
+            return (out * x).sum()
+
+        x, y = _rand(1000, requires_grad=True), _rand(1000)
+        f(x, y).backward()
+        eager_grad = x.grad.clone()
+        x.grad = None
+        torch.compile(f, backend="aot_eager", fullgraph=True)(x, y).backward()
+        self.assertEqual(x.grad, eager_grad)
+        self.assertEqual(eager_grad, (x + y).detach())
+
+
 instantiate_parametrized_tests(FlyDSLHOPTests)
 instantiate_parametrized_tests(FlyDSLWrapTests)
+instantiate_parametrized_tests(FlyDSLDynamoTests)
 
 
 if __name__ == "__main__":
