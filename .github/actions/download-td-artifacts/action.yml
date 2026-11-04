@@ -10,7 +10,8 @@ inputs:
 runs:
   using: composite
   steps:
-    # Only this workflow run's selection counts, not one in an unzipped build artifact.
+    # Drop any selection an unzipped build artifact left; its only source is llm-td.yml
+    # (added in the PR above).
     - name: Remove any LLM test selection
       shell: bash
       run: rm -f .additional_ci_files/llm_td_selection.json

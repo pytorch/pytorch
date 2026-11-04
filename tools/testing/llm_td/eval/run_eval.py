@@ -169,11 +169,13 @@ def main() -> None:
                 return
             try:
                 sample = json.loads((args.data / "samples" / f"{sid}.json").read_text())
-                wt = (
-                    checkout(args.data / "worktrees" / args.tag, slot, sample["sha"])
-                    if args.agentic
-                    else None
-                )
+                wt = None
+                if args.agentic:
+                    try:
+                        wt = checkout(args.data / "worktrees" / args.tag, slot, sample["sha"])  # fmt: skip
+                    except subprocess.CalledProcessError as e:
+                        print(f"{sid}: cannot check out {sample['sha']}, skipped: {e.stderr.decode(errors='replace').strip()}", flush=True)  # fmt: skip
+                        continue
                 r = run_one(sample, minutes, args, wt, stop)
                 # A call Ctrl-C killed returns a crash; give the main thread a moment to set stop.
                 if stop.is_set() or (r["out"] is None and stop.wait(1)):
