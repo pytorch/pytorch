@@ -113,8 +113,8 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "10.0": ("rocm[libraries,device-all]==10.0.*"),
     "10.1": ("rocm[libraries,device-all]==10.1.*"),
     # The XPU runtime is on oneAPI 2026.1. The intel-openmp<2026.2.0 caps in
-    # requirements-ci.txt, build_pytorch.bat and .ci/wheel/windows/build_install_deps.py
-    # exist because of this pin (#201218); lift them when XPU moves to 2026.2.
+    # .ci/docker/requirements-ci.txt and .ci/wheel/windows/build_install_deps.py (XPU
+    # builds only) exist because of this pin (#201218); lift them when XPU moves to 2026.2.
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.2 | "
         "intel-cmplr-lib-ur==2026.1.2 | "

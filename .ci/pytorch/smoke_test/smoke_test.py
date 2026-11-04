@@ -961,8 +961,9 @@ def main() -> None:
     options = parse_args()
     print(f"torch: {torch.__version__}")
     if options.mkl_version_only:
-        # For wheel types whose tests skip the rest of this file (XPU, ROCm) or
-        # that run no GPU job (Windows CPU).
+        # For wheel types whose tests skip the rest of this file (Linux XPU and
+        # ROCm) and for every Windows wheel, run before the no-GPU early exit in
+        # smoke_test.bat.
         check_mkl_version()
         return
     print(torch.__config__.parallel_info())

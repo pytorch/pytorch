@@ -13095,8 +13095,7 @@ if not TEST_MKL:
             ),
         }
     )
-
-if TEST_MKL:
+else:
     # Eager and AOTDispatcher gradients of matmul differ by up to 5.1e-5 in float32
     # with MKL 2026.2 (measured on the AVX-512 CI runners; the default atol is 1e-5).
     # 1e-4 leaves about 2x headroom for the AVX2 and AMD runners, where MKL picks other
