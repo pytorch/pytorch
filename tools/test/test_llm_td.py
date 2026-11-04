@@ -329,7 +329,7 @@ class TestSelection(unittest.TestCase):
                 for text in ("{", "1", '[["x"]]', "[[1]]", "[" * 100_000):
                     (folder / name).write_text(text)
                     self.assertIsNone(get_all_previous_failures(), (name, text[:10]))
-                    with self.assertRaises(Exception):
+                    with self.assertRaisesRegex(RuntimeError, "could not read the previous failures"):  # fmt: skip
                         scored()
                 (folder / name).write_text("[]")
 
@@ -363,22 +363,24 @@ class TestSelection(unittest.TestCase):
             ],
             mock.DEFAULT,
         )
-        with (
-            tempfile.TemporaryDirectory() as d,
-            mock.patch.multiple(
-                do_target_determination_for_s3,
-                REPO_ROOT=Path(d),
-                get_test_prioritizations=mock.Mock(return_value=heuristics),
-                get_all_previous_failures=mock.Mock(return_value={"test_ops"}),
-                **fetches,
-            ),
-            mock.patch.dict(os.environ, {"CI": "false"}),
-            mock.patch("sys.stdout"),
-        ):
-            do_target_determination_for_s3.main()
-            td_results = Path(d) / "td_results.json"
-            with mock.patch("sys.stderr"):
-                self.assertEqual(load_previous_failures(td_results), {"test_ops"})
+        # Unknown previous failures must stay unknown so that enforcement falls back.
+        for failed in ({"test_ops"}, None):
+            with (
+                tempfile.TemporaryDirectory() as d,
+                mock.patch.multiple(
+                    do_target_determination_for_s3,
+                    REPO_ROOT=Path(d),
+                    get_test_prioritizations=mock.Mock(return_value=heuristics),
+                    get_all_previous_failures=mock.Mock(return_value=failed),
+                    **fetches,
+                ),
+                mock.patch.dict(os.environ, {"CI": "false"}),
+                mock.patch("sys.stdout"),
+            ):
+                do_target_determination_for_s3.main()
+                td_results = Path(d) / "td_results.json"
+                with mock.patch("sys.stderr"):
+                    self.assertEqual(load_previous_failures(td_results), failed)
 
     def test_load_previous_failures(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -557,9 +559,11 @@ class TestSplit(unittest.TestCase):
         # A targeted call such as `run_test.py --include test_cuda`: one file
         # is all of the call's time, so it never fits the 20% hedge.
         include, exclude, split = self.split(Selection(files={"a"}), {TestRun("test_cuda"): 1}, {"test_cuda": 100}, td={"test_cuda"})  # fmt: skip
-        self.assertEqual((include, exclude, split.kept_td), ([], ["test_cuda"], True))
+        self.assertEqual(
+            (include, exclude, split.chose_nothing), ([], ["test_cuda"], True)
+        )
         include, exclude, split = self.split(Selection(files={"test_cuda"}), {TestRun("test_cuda"): 1}, {"test_cuda": 100}, td={"test_cuda"})  # fmt: skip
-        self.assertEqual((include, split.kept_td), (["test_cuda"], False))
+        self.assertEqual((include, split.chose_nothing), (["test_cuda"], False))
 
     def test_partial_runs_of_a_file_are_charged_once(self) -> None:
         f_a, f_rest = TestRun("f", included=["A"]), TestRun("f", excluded=["A"])
@@ -595,12 +599,12 @@ class TestSplit(unittest.TestCase):
         self.assertEqual(exclude, ["q", "rest"])
         self.assertEqual((split.covered, split.previously_failed, split.hedged, split.budget), ({"a"}, {"p", "big", "untimed"}, {"s", "tiny"}, 200))  # fmt: skip
 
-    def test_only_a_previous_failure_chosen_is_not_kept_td(self) -> None:
+    def test_only_a_previous_failure_chosen_is_a_choice(self) -> None:
         # p is all of TD's include and over the budget, so only its previous
         # failure runs it.
         include, exclude, split = self.split(Selection(), {TestRun("p"): 1}, {"p": 500, "r": 500}, prev={"p"}, td={"p"})  # fmt: skip
         self.assertEqual((include, exclude), (["p"], ["r"]))
-        self.assertEqual((split.previously_failed, split.hedged, split.kept_td), ({"p"}, set(), False))  # fmt: skip
+        self.assertEqual((split.previously_failed, split.hedged, split.chose_nothing), ({"p"}, set(), False))  # fmt: skip
 
     def test_previous_failures_outside_td_are_hedged_like_other_files(self) -> None:
         scores = {TestRun("s"): 1, TestRun("big"): 0.8, TestRun("p"): 0.5}
@@ -619,8 +623,7 @@ class TestSplit(unittest.TestCase):
             self.assertEqual((include, exclude, split.hedged), (["a", "b"], [], set()))
 
 
-# sha256 of the call's sorted test files, "a big p rest s".
-CALL_ID = "6eab3c031b50"
+CALL_ID = "c0ffee"
 
 
 class TestApplySelection(unittest.TestCase):
@@ -644,7 +647,7 @@ class TestApplySelection(unittest.TestCase):
             mock.patch.object(selection, "get_pr_number", return_value=pr_number),
             mock.patch("sys.stderr", io.StringIO() if stderr is None else stderr),
         ):
-            return apply_selection(sel, include, exclude, tp.get_score, times, test_config="default", td_enabled=td_enabled, previously_failed=prev)  # fmt: skip
+            return apply_selection(sel, include, exclude, tp.get_score, times, test_config="default", td_enabled=td_enabled, previously_failed=prev, call_id=CALL_ID)  # fmt: skip
 
     def metric(self, enforced: bool) -> dict[str, object]:
         # p previously failed, and s is hedged within the 200s budget.
@@ -657,13 +660,13 @@ class TestApplySelection(unittest.TestCase):
             "num_covered": 1,
             "num_td_include": 2,
             "num_hedged": 1,
-            "num_previously_failed": 1,
+            "num_previous_failures_added": 1,
             "kept_td": False,
             "previous_failures_known": True,
             "time_total": 1000,
             "time_covered": 10,
             "time_hedged": 170,
-            "time_previously_failed": 20,
+            "time_previous_failures_added": 20,
         }
 
     def test_gate(self) -> None:
@@ -675,6 +678,7 @@ class TestApplySelection(unittest.TestCase):
                     expected = td_enabled and enforce and pr_number is not None
                     self.assertEqual(applied.enforced, expected, (td_enabled, enforce, pr_number))  # fmt: skip
                     self.assertEqual(applied.selection_metric["enforced"], expected)
+                    self.assertFalse(applied.selection_metric["kept_td"])
                     include = ["p", "s", "a"] if expected else ["p", "s"]
                     self.assertEqual([str(x) for x in applied.include], include)
                     self.assertEqual(len(applied.include + applied.exclude), 5)
@@ -694,8 +698,9 @@ class TestApplySelection(unittest.TestCase):
                 "td_enabled": True,
                 "in_td_include": True,
                 "hedged": True,
-                "previously_failed": False,
+                "previous_failure_added": False,
                 "kept_td": False,
+                "previous_failures_known": True,
             },
         )
 
@@ -719,20 +724,25 @@ class TestApplySelection(unittest.TestCase):
         applied = self.apply(Selection(files={"a"}, enforce=True), prev=None, stderr=stderr)  # fmt: skip
         self.assertFalse(applied.enforced)
         self.assertEqual([str(x) for x in applied.include], ["p", "s"])
-        self.assertEqual(stderr.getvalue(), "LLM selection: no previous failures in the TD results, using TD\n")  # fmt: skip
+        self.assertEqual(stderr.getvalue(), "LLM selection: previous failures not recorded in the TD results, using TD\n")  # fmt: skip
         # Without them p is hedged too, as the shadow metrics record.
-        unknown = {"num_previously_failed": 0, "time_previously_failed": 0, "num_hedged": 2, "time_hedged": 190, "previous_failures_known": False}  # fmt: skip
+        unknown = {"num_previous_failures_added": 0, "time_previous_failures_added": 0, "num_hedged": 2, "time_hedged": 190, "previous_failures_known": False, "kept_td": True}  # fmt: skip
         self.assertEqual(
             applied.selection_metric, self.metric(enforced=False) | unknown
         )
-        self.assertFalse(applied.failure_metric(TestRun("p"))["previously_failed"])
-        self.assertFalse(self.apply(Selection(files={"a"}), prev=None).enforced)
+        self.assertEqual({k: applied.failure_metric(TestRun("p"))[k] for k in ("previous_failure_added", "kept_td", "previous_failures_known")}, {"previous_failure_added": False, "kept_td": True, "previous_failures_known": False})  # fmt: skip
+        shadow = self.apply(Selection(files={"a"}), prev=None)
+        self.assertEqual(
+            (shadow.enforced, shadow.selection_metric["kept_td"]), (False, False)
+        )
 
     def test_no_test_times_falls_back_to_td(self) -> None:
-        applied = self.apply(Selection(files={"a"}, enforce=True), times={})
+        stderr = io.StringIO()
+        applied = self.apply(Selection(files={"a"}, enforce=True), times={}, stderr=stderr)  # fmt: skip
         self.assertFalse(applied.enforced)
         self.assertEqual([str(x) for x in applied.include], ["p", "s"])
-        self.assertEqual(applied.selection_metric["time_total"], 0)
+        self.assertEqual(stderr.getvalue(), "LLM selection: no test times, using TD\n")
+        self.assertEqual((applied.selection_metric["time_total"], applied.selection_metric["kept_td"]), (0, True))  # fmt: skip
 
     def test_nothing_chosen_is_reported_as_td(self) -> None:
         # Neither scored file fits the 200s hedge and the selection names none.
@@ -743,14 +753,8 @@ class TestApplySelection(unittest.TestCase):
         self.assertEqual(stderr.getvalue(), "LLM selection: chose no files, using TD\n")
         self.assertEqual((applied.selection_metric["enforced"], applied.selection_metric["kept_td"]), (False, True))  # fmt: skip
         self.assertEqual({k: applied.failure_metric(TestRun("p"))[k] for k in ("enforced", "kept_td")}, {"enforced": False, "kept_td": True})  # fmt: skip
-
-    def test_call_id_tells_apart_the_calls_of_a_job(self) -> None:
-        first, again = self.apply(Selection()), self.apply(Selection(), times={})
-        other = self.apply(Selection(), tests=["p", "s", "x"])
-        self.assertEqual(first.selection_metric["call_id"], CALL_ID)
-        self.assertEqual(again.selection_metric["call_id"], CALL_ID)
-        self.assertNotEqual(other.selection_metric["call_id"], CALL_ID)
-        self.assertEqual(other.failure_metric(TestRun("p"))["call_id"], other.selection_metric["call_id"])  # fmt: skip
+        shadow = self.apply(Selection(), times={"p": 500, "s": 500})
+        self.assertFalse(shadow.selection_metric["kept_td"])
 
     def test_failure_metric(self) -> None:
         # big failed before but TD does not run it and it does not fit the
@@ -774,8 +778,9 @@ class TestApplySelection(unittest.TestCase):
                     "td_enabled": True,
                     "in_td_include": in_td,
                     "hedged": hedged,
-                    "previously_failed": prev,
+                    "previous_failure_added": prev,
                     "kept_td": False,
+                    "previous_failures_known": True,
                 },
             )
 
@@ -791,8 +796,11 @@ def import_test_dashboard() -> Any:
 class TestSplitTests(unittest.TestCase):
     """run_test.py's wiring of the selection."""
 
-    def run_split(self, sel: Selection | None, emit: mock.Mock | None) -> tuple[selection.TestSplit, str]:  # fmt: skip
+    def run_split(self, sel: Selection | None, td_enabled: bool = True) -> tuple[selection.CallSplit, str]:  # fmt: skip
         tp = TestPrioritizations(["a", "p"], {TestRun("p"): 1})
+        return self.split_with(sel, tp, {"a": 1, "p": 1}, set(), td_enabled)
+
+    def split_with(self, sel: Selection | None, tp: TestPrioritizations, times: dict[str, float], prev: set[str], td_enabled: bool = True) -> tuple[selection.CallSplit, str]:  # fmt: skip
         include, exclude = tp.get_top_per_tests(25)
         stderr = io.StringIO()
         with (
@@ -803,49 +811,75 @@ class TestSplitTests(unittest.TestCase):
             selection_file, td_results = Path(tmp) / "sel.json", Path(tmp) / "td.json"
             if sel is not None:
                 selection_file.write_text(json.dumps(sel.to_json()))
-            td_results.write_text(json.dumps(td_results_json(tp, set())))
-            split = split_tests(include, exclude, tp.get_score, {"a": 1, "p": 1}, selection_file=selection_file, td_results=td_results, test_config="default", td_enabled=True, percent=25, emit=emit)  # fmt: skip
+            td_results.write_text(json.dumps(td_results_json(tp, prev)))
+            split = split_tests(include, exclude, tp.get_score, times, selection_file=selection_file, td_results=td_results, test_config="default", td_enabled=td_enabled, percent=25)  # fmt: skip
+        self.assertEqual([str(x) for x in split.td_exclude], [str(x) for x in exclude])
         return split, stderr.getvalue()
 
     def test_wiring(self) -> None:
         for sel, enforced in [(None, False), (Selection(files={"a"}, candidates={"a"}), False), (Selection(files={"a"}, enforce=True, candidates={"a"}), True)]:  # fmt: skip
-            emit = mock.Mock()
-            split, stderr = self.run_split(sel, emit)
+            split, stderr = self.run_split(sel)
             self.assertEqual(split.enforced, enforced)
             self.assertEqual([str(x) for x in split.include], ["p", "a"] if enforced else ["p"])  # fmt: skip
-            self.assertEqual(split.source, gen_artifact.LLM_SELECTION_SOURCE if enforced else "td")  # fmt: skip
+            self.assertEqual(split.source, gen_artifact.LLM_SELECTION_SOURCE if enforced else gen_artifact.TD_SOURCE)  # fmt: skip
             self.assertNotIn("::warning::", stderr)
             self.assertEqual("Running 25% of tests based on TD" in stderr, not enforced)
-            split.report_failure(TestRun("p"))
-            calls = []
             if split.llm is not None:
-                selected = mock.call("llm_td_shadow_selection", split.llm.selection_metric)  # fmt: skip
-                shadow = mock.call("llm_td_shadow_failure", split.llm.failure_metric(TestRun("p")))  # fmt: skip
-                calls = [selected, shadow]
-            self.assertEqual(emit.call_args_list, calls)
+                self.assertEqual(split.llm.selection_metric["call_id"], split.call_id)
+                self.assertEqual(split.llm.failure_metric(TestRun("p"))["call_id"], split.call_id)  # fmt: skip
 
-    def test_td_failure_metric_is_emitted_by_run_test_main(self) -> None:
+    def test_call_id_is_random_per_call(self) -> None:
+        # test.sh runs one file several times in a job with different -k filters.
+        ids = {self.run_split(Selection(candidates={"a"}))[0].call_id for _ in range(2)}
+        self.assertEqual(len(ids), 2)
+        self.assertTrue(all(re.fullmatch("[0-9a-f]{32}", x) for x in ids), ids)
+
+    def test_previous_failure_in_td_include_runs_when_enforced(self) -> None:
+        # TD ranks class A of f first and the rest of f last, and f is over
+        # the hedge budget, so only its previous failure runs it.
+        f_a = TestRun("f", included=["A"])
+        tp = TestPrioritizations(["a", "f", "r1", "r2", "r3"], {f_a: 1})
+        self.assertEqual([str(x) for x in tp.get_top_per_tests(25)[0]], ["f, A", "a"])
+        sel = Selection(files={"a"}, enforce=True, candidates={"a", "f", "r1", "r2", "r3"})  # fmt: skip
+        times: dict[str, float] = {"a": 1, "f": 300, "r1": 233, "r2": 233, "r3": 233}
+        for prev, runs in (({"f"}, ["f, A", "a", "f, not (A)"]), (set(), ["a"])):
+            split, _ = self.split_with(sel, tp, times, prev)
+            self.assertTrue(split.enforced)
+            self.assertEqual([str(x) for x in split.include], runs)
+
+    def test_td_disabled(self) -> None:
+        for sel in [None, Selection(files={"a"}, enforce=True, candidates={"a"})]:
+            split, stderr = self.run_split(sel, td_enabled=False)
+            self.assertFalse(split.enforced)
+            self.assertEqual(split.source, gen_artifact.TD_SOURCE)
+            self.assertIn("Running all tests", stderr)
+            self.assertNotIn("based on TD", stderr)
+
+    def test_run_test_main_wiring(self) -> None:
         # emit_metric records its caller's file, module and function, which
-        # queries of td_test_failure_stats_v2 filter on.
+        # queries of the metrics filter on, so they are emitted by main().
         tree = ast.parse((REPO_ROOT / "test" / "run_test.py").read_text())
-        callers = [
-            f.name
-            for f in ast.walk(tree)
-            if isinstance(f, ast.FunctionDef)
-            for c in ast.walk(f)
-            if isinstance(c, ast.Call)
-            and getattr(c.func, "id", None) == "emit_metric"
-            and isinstance(c.args[0], ast.Constant)
-            and c.args[0].value == "td_test_failure_stats_v2"
-        ]
-        self.assertEqual(callers, ["main"])
+        (main,) = [f for f in tree.body if isinstance(f, ast.FunctionDef) and f.name == "main"]  # fmt: skip
+        calls: list[tuple[bool, str]] = []
 
-    def test_no_metrics_outside_ci(self) -> None:
-        split, _ = self.run_split(
-            Selection(files={"a"}, enforce=True, candidates={"a"}), emit=None
-        )
-        self.assertTrue(split.enforced)
-        split.report_failure(TestRun("p"))
+        def visit(node: ast.AST, in_ci: bool) -> None:
+            for child in ast.iter_child_nodes(node):
+                ci = in_ci or (isinstance(node, ast.If) and child in node.body and ast.unparse(node.test) == "IS_CI")  # fmt: skip
+                if isinstance(child, ast.Call) and getattr(child.func, "id", None) in ("split_tests", "gen_ci_artifact", "emit_metric"):  # fmt: skip
+                    calls.append((ci, ast.unparse(child)))
+                visit(child, ci)
+
+        visit(main, False)
+        self.assertEqual(
+            calls,
+            [
+                (False, "split_tests(include, exclude, test_prioritizations.get_score, test_file_times_dict, selection_file=REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_TD_SELECTION_FILE, td_results=TD_RESULTS, test_config=TEST_CONFIG, td_enabled=options.enable_td, percent=percent_to_run)"),
+                (True, "gen_ci_artifact([x.to_json() for x in include], [x.to_json() for x in exclude], source=split.source, td_excluded=[x.to_json() for x in split.td_exclude])"),
+                (True, "emit_metric('llm_td_selection', split.llm.selection_metric)"),
+                (True, "emit_metric('td_test_failure_stats_v2', {'selected_tests': selected_tests, 'failure': str(test), 'llm_enforced': split.enforced, 'call_id': split.call_id, **test_stats})"),
+                (True, "emit_metric('llm_td_failure', split.llm.failure_metric(test))"),
+            ],
+        )  # fmt: skip
 
 
 class TestDashboardExclusions(unittest.TestCase):
@@ -855,7 +889,7 @@ class TestDashboardExclusions(unittest.TestCase):
             reports = Path(d) / "test" / "test-reports"
             reports.mkdir(parents=True)
             with mock.patch.object(gen_artifact, "REPO_ROOT", Path(d)):
-                gen_artifact.gen_ci_artifact([], [{"test_file": "c"}], gen_artifact.LLM_SELECTION_SOURCE)  # fmt: skip
+                gen_artifact.gen_ci_artifact([], [{"test_file": "c"}], source=gen_artifact.LLM_SELECTION_SOURCE, td_excluded=[{"test_file": "d"}])  # fmt: skip
             (written,) = reports.glob("td_exclusions-*.json")
             llm_artifact = json.loads(written.read_text())
 
@@ -893,7 +927,7 @@ class TestDashboardExclusions(unittest.TestCase):
         self.assertEqual(
             json.loads(json.dumps(exclusions)),
             {
-                "all": {"linux": {"default": ["a", "b", "c"]}},
+                "td": {"linux": {"default": ["a", "b", "d"]}},
                 "llm_selection": {"linux": {"default": ["c"]}},
             },  # fmt: skip
         )
@@ -903,9 +937,9 @@ class TestDashboardExclusions(unittest.TestCase):
         td, llm = {"linux": {"default": ["a"]}}, {"linux": {"default": ["c"]}}
         for exclusions, expected in (
             ({}, [mock.call(1, 2, "additional_info/td_exclusions", [{}])]),
-            ({"all": td}, [mock.call(1, 2, "additional_info/td_exclusions", [td])]),
+            ({"td": td}, [mock.call(1, 2, "additional_info/td_exclusions", [td])]),
             (
-                {"all": td, "llm_selection": llm},
+                {"td": td, "llm_selection": llm},
                 [
                     mock.call(1, 2, "additional_info/td_exclusions", [td]),
                     mock.call(1, 2, "additional_info/llm_td_exclusions", [llm]),
