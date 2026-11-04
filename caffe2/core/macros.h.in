@@ -50,6 +50,7 @@
   {"USE_GFLAGS", "${USE_GFLAGS}"}, \
   {"USE_GLOG", "${USE_GLOG}"}, \
   {"USE_GLOO", "${USE_GLOO}"}, \
+  {"USE_NNPACK", "${USE_NNPACK}"}, \
   {"USE_OPENMP", "${USE_OPENMP}"}, \
   {"FORCE_FALLBACK_CUDA_MPI", "${CAFFE2_FORCE_FALLBACK_CUDA_MPI}"}, \
   {"HAS_MKL_DNN", "${CAFFE2_HAS_MKL_DNN}"}, \
