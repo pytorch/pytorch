@@ -429,6 +429,7 @@ class TestReductionsDevice(TestCase):
         t = make_tensor((32, 2 ** 16), dtype=dtype, device=device, low=-1, high=1, exclude_zero=True)
         self._test_ref(op, t, dim=1)
 
+    @serialTest()
     @largeTensorTest("8gb")
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=[torch.float64])
