@@ -981,10 +981,9 @@ def _extract_stack_with_positions() -> StackSummary:
     frame = sys._getframe(1)
     while frame is not None:
         code = frame.f_code
-        # colno/end_colno kwargs were added to FrameSummary in 3.11
         kwargs: dict[str, Any] = {}
         lineno = frame.f_lineno
-        if sys.version_info >= (3, 11) and frame.f_lasti >= 0:
+        if frame.f_lasti >= 0:
             positions = list(code.co_positions())
             idx = frame.f_lasti // 2
             if idx < len(positions):

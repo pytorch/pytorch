@@ -424,7 +424,7 @@ TEST(TensorIndexingTest, TestEmptyNdimIndexBool) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(
       x.index({torch::empty(
-          {0, 2}, torch::TensorOptions(torch::kUInt8).device(device))}),
+          {0, 2}, torch::TensorOptions(torch::kBool).device(device))}),
       c10::Error);
 }
 
@@ -434,7 +434,7 @@ TEST(TensorIndexingTest, TestEmptyNdimIndexBool_CUDA) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(
       x.index({torch::empty(
-          {0, 2}, torch::TensorOptions(torch::kUInt8).device(device))}),
+          {0, 2}, torch::TensorOptions(torch::kBool).device(device))}),
       c10::Error);
 }
 
@@ -461,8 +461,8 @@ TEST(TensorIndexingTest, TestEmptySlice_CUDA) {
 }
 
 TEST(TensorIndexingTest, TestIndexGetitemCopyBoolsSlices) {
-  auto true_tensor = torch::tensor(1, torch::kUInt8);
-  auto false_tensor = torch::tensor(0, torch::kUInt8);
+  auto true_tensor = torch::tensor(true, torch::kBool);
+  auto false_tensor = torch::tensor(false, torch::kBool);
 
   std::vector<torch::Tensor> tensors = {torch::randn({2, 3}), torch::tensor(3)};
 
@@ -485,8 +485,8 @@ TEST(TensorIndexingTest, TestIndexGetitemCopyBoolsSlices) {
 }
 
 TEST(TensorIndexingTest, TestIndexSetitemBoolsSlices) {
-  auto true_tensor = torch::tensor(1, torch::kUInt8);
-  auto false_tensor = torch::tensor(0, torch::kUInt8);
+  auto true_tensor = torch::tensor(true, torch::kBool);
+  auto false_tensor = torch::tensor(false, torch::kBool);
 
   std::vector<torch::Tensor> tensors = {torch::randn({2, 3}), torch::tensor(3)};
 
@@ -830,19 +830,9 @@ TEST(NumpyTests, TestBooleanShapeMismatch) {
   index = torch::tensor({false, false, false, false, false, false});
   ASSERT_THROWS_WITH(arr.index({index}), "mask");
 
-  {
-    WarningCapture warnings;
-
-    index = torch::empty({4, 4}, torch::kByte).zero_();
-    ASSERT_THROWS_WITH(arr.index({index}), "mask");
-    ASSERT_THROWS_WITH(arr.index({Slice(), index}), "mask");
-
-    ASSERT_EQ(
-        count_substr_occurrences(
-            warnings.str(),
-            "indexing with dtype torch.uint8 is now deprecated"),
-        2);
-  }
+  index = torch::zeros({4, 4}, torch::kBool);
+  ASSERT_THROWS_WITH(arr.index({index}), "mask");
+  ASSERT_THROWS_WITH(arr.index({Slice(), index}), "mask");
 }
 
 TEST(NumpyTests, TestBooleanIndexingOnedim) {
