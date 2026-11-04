@@ -148,7 +148,8 @@ std::string generate_reduction_code(
     bool contiguous,
     bool vectorized,
     int vec_size,
-    int max_threads_codegen);
+    int max_threads_codegen,
+    int global_reduce_prefetch);
 
 std::string generate_reduction_code(
     const KernelDescriptor &desc,
@@ -156,7 +157,8 @@ std::string generate_reduction_code(
     bool contiguous,
     bool vectorized,
     int vec_size,
-    int max_threads_codegen);
+    int max_threads_codegen,
+    int global_reduce_prefetch);
 
 NvrtcFunction jit_pwise_function(
     const std::string& code,
