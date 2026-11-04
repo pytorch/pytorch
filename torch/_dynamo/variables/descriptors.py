@@ -47,7 +47,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .functions import BaseUserFunctionVariable, UserMethodVariable
-from .object_protocol import object_richcompare, python_constant_repr_impl, type_init
+from .object_protocol import object_richcompare, python_constant_repr_impl
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -105,6 +105,24 @@ def descr_repr(
     return VariableTracker.build(
         tx, f"<{kind} '{name}' of '{get_type_tp_name(objclass)}' objects>"
     )
+
+
+def _vt_cls_modeling(vt: VariableTracker, py_type: type) -> type | None:
+    # Each class's own python_type, called on vt: the first one returning
+    # py_type is the VT class whose slot impls model py_type. VariableTracker's
+    # python_type is type(vt.as_python_constant()), which models no type.
+    for cls in type(vt).__mro__:
+        if cls is VariableTracker:
+            break
+        python_type = cls.__dict__.get("python_type")
+        if python_type is None:
+            continue
+        try:
+            if python_type(vt) is py_type:
+                return cls
+        except NotImplementedError:
+            continue
+    return None
 
 
 class DescriptorVariable(VariableTracker):
@@ -218,28 +236,16 @@ class WrapperDescriptorVariable(DescriptorVariable):
         # and find Python overrides on subclasses. Routing through the class
         # mirrors CPython's wrapperdescr_call which invokes the C slot directly.
         obj = obj.realize()
-        if objclass is object:
-            # object's own slot (object_init, object_richcompare, ...), not the
-            # override on type(obj).
-            sd = _compute_slotdefs(object).get(name)
-            if sd is not None:
-                # TODO: use VariableTracker's once https://github.com/pytorch/pytorch/pull/199999 is merged
-                impl = (
-                    object_richcompare
-                    if sd.impl == "tp_richcompare_impl"
-                    else getattr(VariableTracker, sd.impl)
-                )
-                return sd.wrapper(obj, tx, impl, rest, kwargs)
-        elif objclass is type and name == "__init__":
-            return type_init(tx, rest, kwargs)
-        elif objclass is type and name == "__repr__":
-            return VariableTracker.build(tx, type.__repr__(obj.as_python_constant()))
-        elif isinstance(obj, UserDefinedObjectVariable):
-            return obj.call_base_method(tx, name, rest, kwargs)
-        sd = obj.lookup_slotdefs(name)
-        if sd is None:
-            return self.owner.call_method(tx, name, [obj, *rest], kwargs)
-        return sd(obj, tx, rest, kwargs)
+        # The VT class modeling objclass, e.g. ConstDictVariable for
+        # dict.__eq__ on an OrderedDict: its impl, not the subclass VT's.
+        vt_cls = _vt_cls_modeling(obj, objclass)
+        sd = _compute_slotdefs(objclass).get(name)
+        if sd is not None:
+            impl = getattr(vt_cls, sd.impl)
+            return sd.wrapper(obj, tx, impl, rest, kwargs)
+        return self.owner.call_method(
+            tx, self.descriptor.__name__, [obj, *rest], kwargs
+        )
 
     def tp_descr_get_impl(
         self,
@@ -265,7 +271,6 @@ class WrapperDescriptorVariable(DescriptorVariable):
         # PyWrapperDescr_Type leaves tp_richcompare NULL and inherits
         # object_richcompare from object.
         # TODO(guilhermeleobas): delete this once #199999 is merged
-        from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
 
@@ -485,7 +490,6 @@ class MethodDescriptorVariable(DescriptorVariable):
     ) -> VariableTracker:
         # PyMethodDescr_Type leaves tp_richcompare NULL and inherits
         # object_richcompare from object.
-        from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
 

@@ -3,7 +3,6 @@ import inspect
 import os
 from functools import cached_property
 from typing import Any
-from typing_extensions import Unpack
 
 from torch.utils._triton import get_triton_version
 
@@ -463,7 +462,7 @@ class StaticallyLaunchedTritonKernel:
         grid_y: int,
         grid_z: int,
         stream: int,
-        *args: Unpack[tuple[object, ...]],
+        *args: *tuple[object, ...],
     ) -> None:
         """Actually run the kernel at runtime. This function is the hot codepath."""
 
