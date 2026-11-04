@@ -751,6 +751,10 @@ jobs:
           BYTES=$(stat -c%s /tmp/pr-diff.txt)
           tr '\0' '\n' < /tmp/pr-files.z > /tmp/pr-files.txt
           echo "changed files: ${FILES}, diff bytes: ${BYTES}"
+          # The commit's tree, not the worktree's: the symlink scrub above
+          # edited only the latter. A replay checks its rebuild against this.
+          TREE=$(git rev-parse 'HEAD^{tree}')
+          echo "head_tree_sha=${TREE}" >> "$GITHUB_OUTPUT"
 
           if [ "$FILES" -gt "${MAX_CHANGED_FILES}" ] || [ "$BYTES" -gt "${MAX_DIFF_BYTES}" ]; then
             echo "::notice::PR exceeds the review size gate (${FILES} files, ${BYTES}B)"
@@ -760,13 +764,15 @@ jobs:
           fi
 
       - name: Configure AWS credentials via OIDC
+        id: aws
         if: steps.diff.outputs.too_large == 'false'
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ env.REVIEW_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
           # The role's ceiling. The review step's 55-minute timeout leaves room
-          # for the steps between here and it. The credential stays Bedrock-only.
+          # for the steps between here and it. The role grants Bedrock and S3
+          # writes under pr_review_traces/, nothing else.
           role-duration-seconds: 3600
 
       # Fetched by `prepare` from the API. No continue-on-error: a review
@@ -782,6 +788,52 @@ jobs:
             exit 1
           fi
           printf '%s' "$PR_COMMENTS" > /tmp/pr-comments.json
+
+      # The inputs the model is handed, so a run can be replayed or turned into
+      # an eval case without rebuilding them from GitHub, where comments get
+      # edited or deleted and force-pushed heads are not guaranteed to survive.
+      # The checkout itself is not kept, so a replay needs head_sha or
+      # merge_base_sha still fetchable. The merge base plus pr-diff.txt rebuilds
+      # the reviewed tree (not the commit) only if the result hashes to
+      # head_tree_sha; a binary or `-diff`-attributed change cannot, since the
+      # diff is plain text. The model read that tree minus the symlinks the
+      # scrub above removed, so after that check a replay re-runs the scrub
+      # before the review reads the tree.
+      # Before the model: everything it uploads is final by now, and this way
+      # it does not depend on the credential outlasting both stages. Under
+      # pr_review_traces/ because that is the one prefix this job's role may
+      # write. Best-effort like the trace upload: any failure is a warning.
+      - name: Upload the review inputs to S3
+        if: steps.aws.outcome == 'success'
+        env:
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
+          HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+          MERGE_BASE_SHA: ${{ needs.prepare.outputs.merge_base_sha }}
+          HEAD_TREE_SHA: ${{ steps.diff.outputs.head_tree_sha }}
+        run: |
+          set -euo pipefail
+          DEST="s3://${S3_BUCKET}/pr_review_traces/${{ github.repository }}/${{ github.run_id }}_${{ github.run_attempt }}_input/"
+          # One `&&` chain inside `if`, so a failure at any stage, staging
+          # included, reaches the warning instead of failing the job. The
+          # timeouts keep a slow S3 from eating the model's credential time.
+          # manifest.json goes up last and alone: a set without it is partial.
+          if mkdir -p /tmp/pr-review-input \
+             && cp -- /tmp/pr-diff.txt /tmp/pr-files.txt /tmp/pr-comments.json /tmp/pr-review-input/ \
+             && jq -n --arg repo "$REPO" --arg pr_number "$PR_NUMBER" \
+                      --arg head_sha "$HEAD_SHA" --arg base_sha "$BASE_SHA" \
+                      --arg merge_base_sha "$MERGE_BASE_SHA" --arg head_tree_sha "$HEAD_TREE_SHA" \
+                      '{repo: $repo, pr_number: ($pr_number | tonumber), head_sha: $head_sha,
+                        base_sha: $base_sha, merge_base_sha: $merge_base_sha,
+                        head_tree_sha: $head_tree_sha}' \
+                      > /tmp/pr-review-manifest.json \
+             && timeout 120 aws s3 cp --recursive /tmp/pr-review-input "$DEST" \
+             && timeout 30 aws s3 cp /tmp/pr-review-manifest.json "${DEST}manifest.json"; then
+            echo "uploaded the inputs, then the manifest, to ${DEST}"
+          else
+            echo "::warning::review input upload failed (best-effort)"
+          fi
 
       - name: Check the findings path resolved
         if: steps.diff.outputs.too_large == 'false'
