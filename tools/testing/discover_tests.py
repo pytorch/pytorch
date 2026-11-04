@@ -69,17 +69,19 @@ def discover_tests(
     return sorted(rc)
 
 
+# str.startswith prefixes of test/-relative test names without .py, whose files
+# run_test.py does not run on their own.
 BLOCKLISTED_PATTERNS = [
-    "ao",
-    "custom_backend",
-    "fx",  # executed by test_fx.py
-    "jit",  # executed by test_jit.py
-    "mobile",
-    "onnx_caffe2",
-    "package",  # executed by test_package.py
-    "quantization",  # executed by test_quantization.py
-    "autograd",  # executed by test_autograd.py
-    "cpp_extensions/open_registration_extension/torch_openreg/tests",  # executed by test_openreg.py
+    "ao",  # partly run by test_ao_sparsity.py
+    "custom_backend",  # run directly by the CI scripts, not by run_test.py
+    "fx",  # partly run by test_fx.py
+    "jit",  # partly run by test_jit.py
+    "mobile",  # not run
+    "package",  # partly run by test_package.py
+    "quantization",  # partly run by test_quantization.py
+    "autograd",  # partly run by test_autograd.py
+    # run by run_test.py's test_openreg handler, only with --openreg
+    "cpp_extensions/open_registration_extension/torch_openreg/tests",
 ]
 
 TESTS = discover_tests(
