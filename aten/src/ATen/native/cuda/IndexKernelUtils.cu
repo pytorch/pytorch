@@ -13,7 +13,7 @@
 #include <type_traits>
 
 namespace at::native {
-template <int Alignment, typename index_t>
+template <int Alignment, typename index_t, bool loop_over_rows>
 __global__ void vectorized_gather_kernel(char * out, char * inp, index_t * idx, int num_ind, int64_t slice_size, int64_t ind_dim_size, int64_t inp_stride, int64_t out_stride, bool allow_neg_indices) {
     for (auto entry = blockIdx.x * blockDim.y + threadIdx.y; entry < static_cast<unsigned int>(num_ind); entry += gridDim.x * blockDim.y) {
       int64_t ind = idx[entry];
@@ -26,6 +26,9 @@ __global__ void vectorized_gather_kernel(char * out, char * inp, index_t * idx, 
         auto vec = at::native::memory::ld_vec<Alignment>(inp + ind * inp_stride + off);
         at::native::memory::st_vec<Alignment>(out + entry * (int32_t)out_stride + off, vec);  // out offset is guaranteed to be within int32 limits
       }
+      if constexpr (!loop_over_rows) {
+        break;
+      }
     }
 }
 
@@ -36,19 +39,32 @@ void vectorized_gather_kernel_launch(char * out, char * inp, index_t * idx, int 
                                      int64_t slice_size_in_bytes, int64_t ind_dim_size, int64_t inp_stride_bytes, int64_t out_stride_bytes, bool allow_neg_indices){
 
   constexpr int64_t max_num_threads=256;
+  // Packing wider rows regressed Hopper; leave them one row per block.
   constexpr int64_t max_packed_num_threads=32;
   constexpr int64_t max_block_waves=32;
   auto num_vectors = at::ceil_div(slice_size_in_bytes, Alignment);
   const bool is_packed = num_vectors <= max_packed_num_threads;
+  // x copies vectors within a row; y packs rows without rounding each to a warp.
   auto num_threads = is_packed ? num_vectors : std::min(max_num_threads, at::round_up(num_vectors, static_cast<int64_t>(at::cuda::warp_size())));
   auto entries_per_block = is_packed ? max_num_threads / num_vectors : 1;
   const auto* properties = at::cuda::getCurrentDeviceProperties();
-  const int64_t max_blocks = properties->multiProcessorCount * (properties->maxThreadsPerMultiProcessor / (num_threads * entries_per_block)) * max_block_waves;
+  const int64_t resident_blocks = properties->multiProcessorCount * (properties->maxThreadsPerMultiProcessor / (num_threads * entries_per_block));
+  // Cap rows to 32 thread-limited waves; scattered reads need more concurrency
+  // than ScatterCopyOp's random writes.
+  const int64_t max_blocks = resident_blocks * max_block_waves;
+  const auto row_blocks = at::ceil_div(static_cast<int64_t>(num_ind), entries_per_block);
+  const auto grid_x = std::min(row_blocks, max_blocks);
   uint32_t grid_y = properties->maxGridSize[1];
   grid_y = std::min(static_cast<uint32_t>(at::ceil_div(slice_size_in_bytes, max_num_threads * Alignment)), grid_y);
-  dim3 grid = {static_cast<uint32_t>(std::min(at::ceil_div(static_cast<int64_t>(num_ind), entries_per_block), max_blocks)), grid_y, 1};
+  // Split columns only to fill a wave; row CTAs already supply parallelism otherwise.
+  // This also keeps grid_x * grid_y within max_blocks, unlike an x-only cap.
+  grid_y = std::min(static_cast<int64_t>(grid_y), std::max(int64_t{1}, resident_blocks / grid_x));
+  dim3 grid = {static_cast<uint32_t>(grid_x), grid_y, 1};
   dim3 block = {static_cast<uint32_t>(num_threads), static_cast<uint32_t>(entries_per_block), 1};
-  vectorized_gather_kernel<Alignment, index_t><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(out, inp, idx, num_ind, slice_size_in_bytes,
+  auto kernel = row_blocks > grid_x
+      ? vectorized_gather_kernel<Alignment, index_t, true>
+      : vectorized_gather_kernel<Alignment, index_t, false>;
+  kernel<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(out, inp, idx, num_ind, slice_size_in_bytes,
   ind_dim_size, inp_stride_bytes, out_stride_bytes, allow_neg_indices);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }

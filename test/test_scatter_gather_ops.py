@@ -1,5 +1,6 @@
 # Owner(s): ["module: scatter & gather ops"]
 
+import itertools
 import random
 import unittest
 from typing import NamedTuple
@@ -210,11 +211,16 @@ class TestScatterGatherDevice(TestCase):
     @serialTest()
     @dtypes(torch.int8, torch.bfloat16)
     def test_gather_large(self, device, dtype):
-        # test larger shapes to check vectorized implementation
+        many_rows = 1031
+        if device.startswith("cuda"):
+            properties = torch.cuda.get_device_properties(device)
+            many_rows = properties.multi_processor_count * (properties.max_threads_per_multi_processor // 256) * 32 + 1
         for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192),
                           (4096, 3072, 16), (4096, 3072, 32), (4096, 1024, 8),
-                          (4096, 1031, 48), (4096, 1031, 160), (4096, 1031, 512),
-                          (64, 131072, 4096), (64, 4194304, 64)):
+                          # Non-power-of-two packing, partial row blocks, and the 32/33-vector boundary.
+                          (4096, 1031, 48), (4096, 1031, 160), (4096, 1031, 512), (4096, 1031, 528),
+                          # Force row-loop iterations on this GPU without multi-GB outputs.
+                          (64, many_rows, 4096), (64, many_rows * 64, 64)):
             if torch.accelerator.is_available():
                 torch.accelerator.empty_cache()
             src = make_tensor((m, k), device=device, dtype=dtype)
@@ -225,10 +231,11 @@ class TestScatterGatherDevice(TestCase):
             alloc2 = torch.empty(m, k + 4, device=device, dtype=dtype)
             misaligned1 = alloc2[:, :-4].copy_(src)
             num_ind = n
-            for dim in (0, 1):
+            index_dtypes = (torch.int64, torch.int32) if k == 48 else (torch.int64,)
+            for dim, index_dtype in itertools.product((0, 1), index_dtypes):
                 max_ind = src.shape[dim]
-                ind0 = torch.randint(max_ind, (num_ind,), device=device)
-                ind_discontig0 = torch.empty(num_ind * 2, device=device, dtype=torch.int64)[::2].copy_(ind0)
+                ind0 = torch.randint(max_ind, (num_ind,), device=device, dtype=index_dtype)
+                ind_discontig0 = torch.empty(num_ind * 2, device=device, dtype=index_dtype)[::2].copy_(ind0)
                 shape_ind = [1] * src.ndim
                 shape_ind[dim] = ind0.shape[0]
                 shape_out = list(src.shape)
