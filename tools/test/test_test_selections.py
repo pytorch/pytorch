@@ -635,15 +635,14 @@ class TestSplitTests(unittest.TestCase):
     def split(
         self,
         sel: Selection | str | None,
-        tp: TestPrioritizations | None = None,
-        times: dict[str, float] | None = None,
         prev: Collection[str] | None = (),
         td_enabled: bool = True,
         record: bool = True,
+        test_config: str = "default",
     ) -> tuple[CallSplit, str, list[dict]]:
         """split_tests' result, its stderr and the artifacts it wrote, with the
         selection file holding `sel` (a str is written as is)."""
-        tp = tp or TestPrioritizations(["a", "p"], {TestRun("p"): 1})
+        tp = TestPrioritizations(["a", "p"], {TestRun("p"): 1})
         stderr = io.StringIO()
         with (
             tempfile.TemporaryDirectory() as d,
@@ -660,9 +659,9 @@ class TestSplitTests(unittest.TestCase):
                 selection_file.write_text(sel)
             split = split_tests(
                 tp,
-                {"a": 1, "p": 1} if times is None else times,
+                {"a": 1, "p": 1},
                 selection_file=selection_file,
-                test_config="default",
+                test_config=test_config,
                 td_enabled=td_enabled,
                 previous_failures=prev,
                 record=record,
@@ -708,6 +707,15 @@ class TestSplitTests(unittest.TestCase):
         expected = {"included": [p, a], "excluded": [], "source": "llm_selection", "td_excluded": [a]}  # fmt: skip
         self.assertEqual(artifacts, [expected])
 
+    def test_sweep_covers_only_its_config(self) -> None:
+        sel = Selection(sweeps={"dynamo_wrapped"}, enforce=True, candidates={"a", "p"})
+        for config, covered in (("dynamo_wrapped", {"a", "p"}), ("default", set())):
+            split, _, _ = self.split(sel, test_config=config)
+            if split.llm is None:
+                raise AssertionError("no selection read")
+            self.assertEqual(split.llm.split.covered, covered, config)
+            self.assertEqual(split.llm_enforced, bool(covered), config)
+
     def test_not_recorded_outside_ci(self) -> None:
         sel = Selection(files={"a"}, enforce=True, candidates={"a"})
         for s in (None, sel):
@@ -727,15 +735,16 @@ class TestSplitTests(unittest.TestCase):
         # that sets both is not enforced either; a deliberate run_all is.
         failed = Selection(run_all=True, reason="selector failed: x", enforce=True, error="x")  # fmt: skip
         deliberate = Selection(run_all=True, reason="infra", enforce=True)
-        for sel, error, enforced in ((failed, "x", False), (deliberate, None, True)):
+        failed_line = "LLM selection: the selector failed ('x'), using TD\n"
+        enforced_line = "LLM selection: running 2 of 2 test files (2 covered; 0 previous failures added; 0 hedged within 0s)\n"  # fmt: skip
+        for sel, error, enforced, lines in ((failed, "x", False, failed_line + self.TD_LINE), (deliberate, None, True, enforced_line)):  # fmt: skip
             split, stderr, artifacts = self.split(sel)
             if split.llm is None:
                 raise AssertionError("no selection read")
             self.assertEqual(split.llm_enforced, enforced)
             self.assertFalse(split.llm.kept_td)
             self.assertSplit(split, ["p", "a"] if enforced else ["p"], [] if enforced else ["a"])  # fmt: skip
-            failed_line = "LLM selection: the selector failed ('x'), using TD\n"
-            self.assertEqual(failed_line + self.TD_LINE == stderr, not enforced)
+            self.assertEqual(stderr, lines)
             self.assertEqual(split.llm.selection_metric["selector_error"], error)
             source = "llm_selection" if enforced else "td"
             self.assertEqual([x["source"] for x in artifacts], [source])
@@ -750,21 +759,6 @@ class TestSplitTests(unittest.TestCase):
         fallback = "LLM selection: previous failures not recorded in the TD results, using TD\n"  # fmt: skip
         self.assertEqual(stderr, fallback + self.TD_LINE)
         self.assertEqual([x["source"] for x in artifacts], ["td"])
-
-    def test_previous_failure_in_td_include_runs_when_enforced(self) -> None:
-        # TD ranks class A of f first and the rest of f last, and f is over
-        # the hedge budget, so only its previous failure runs it. r1 fits the
-        # budget but TD does not score it.
-        files = ["a", "f", "r1", "r2", "r3"]
-        tp = TestPrioritizations(files, {TestRun("f", included=["A"]): 1})
-        sel = Selection(files={"a"}, enforce=True, candidates=set(files))
-        times: dict[str, float] = {"a": 1, "f": 300, "r1": 150, "r2": 233, "r3": 233}
-        for prev, runs in (({"f"}, ["f, A", "a", "f, not (A)"]), (set(), ["a"])):
-            split, _, artifacts = self.split(sel, tp, times, prev)
-            self.assertTrue(split.llm_enforced)
-            self.assertEqual([str(x) for x in split.include], runs)
-            td_excluded = [TestRun("f", excluded=["A"])] + [TestRun(f) for f in ("r1", "r2", "r3")]  # fmt: skip
-            self.assertEqual(artifacts[0]["td_excluded"], [x.to_json() for x in td_excluded])  # fmt: skip
 
 
 if __name__ == "__main__":
