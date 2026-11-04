@@ -716,6 +716,9 @@ class TestSerialFileXdistWorkers(TestCase):
             unittest.mock.patch.object(
                 run_test_module, "read_lastfailed", lambda: lastfailed
             ),
+            unittest.mock.patch.object(
+                run_test_module, "drop_lastfailed", lambda prefix: None
+            ),
             unittest.mock.patch.dict(os.environ, {"NUM_PARALLEL_PROCS": "3"}),
         ):
             ret_code = run_test_module.run_test(test, "test", options)
@@ -735,7 +738,8 @@ class TestSerialFileXdistWorkers(TestCase):
             nodeids,
             ["test/inductor/test_flex_attention.py::TestFlexAttentionCUDA::test_a"],
         )
-        self.assertFalse(continue_through_error)
+        # Keep-going still classifies every failure.
+        self.assertTrue(continue_through_error)
         self.assertNotIn("NUM_PARALLEL_PROCS", env)
 
     def test_xdist_timeout_crash_or_unrecorded_failure_is_not_rerun(self) -> None:
