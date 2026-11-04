@@ -2920,10 +2920,11 @@ class TestBuildDataset(unittest.TestCase):
             self.assertFalse(bd.is_ancestor("0" * 40, b))
 
     def test_landed_times_takes_the_last_trailer(self) -> None:
-        log = "\n100 Reland\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/1\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/2\n\0\n200 x\n\0"  # fmt: skip
+        # PR 2 also landed earlier, as the older commit at 50 the log lists after it.
+        log = "\n100 Reland\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/1\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/2\n\0\n200 x\n\0\n50 Land\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/2\n\0"  # fmt: skip
         with mock.patch.object(bd, "git", return_value=log):
             got = bd.landed_times(dt.date(2026, 10, 1))
-        self.assertEqual(got, {2: dt.datetime.fromtimestamp(100, tz=dt.timezone.utc)})
+        self.assertEqual(got, {2: dt.datetime.fromtimestamp(50, tz=dt.timezone.utc)})
 
     def test_revert_truth_jobs_commits(self) -> None:
         def run(*args: str, cwd: str, date: str = "2026-10-05T00:00:00+00:00") -> str:
@@ -3052,7 +3053,13 @@ class TestBuildDataset(unittest.TestCase):
 
     def test_pr_samples(self) -> None:
         t = "2026-10-05 00:00:00"
+        dynamo = "dynamo-unittest / dynamo-test (3.1{}) / test (default, 1, 1)"
         rows = [
+            # The later head's rows come first, the earlier head is still the sample's.
+            fail("test_x", "2026-10-06 00:00:00", "s1", tf="test_c"),
+            # The date is the earliest failure from --start on, not the first row's or one from before --start.
+            fail("test_w", "2026-10-07 00:00:00", "s", tf="test_d"),
+            fail("test_v", "2026-09-30 00:00:00", "s", tf="test_d"),
             fail("test_x", t, "s", tf="test_a"),
             fail("test_x", t, "s", tf="test_b"),
             fail("test_x", t, "s", tf="test_b", job="win / test (default, 1, 1)"),
@@ -3064,16 +3071,18 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_y", "2026-09-05 00:00:00", "m", br="main", tf="test_c"),
             # The earliest failing head before --start is not the sample's.
             fail("test_x", "2026-09-30 00:00:00", "s0", tf="test_a"),
-            # A later head reproduces test_c, and a head before --start test_e.
-            fail("test_x", "2026-10-06 00:00:00", "s1", tf="test_c"),
+            # The later head above reproduces test_c, and a head before --start test_e.
             fail("test_x", t, "s", tf="test_e"),
             fail("test_x", "2026-09-28 00:00:00", "s0", tf="test_e"),
+            # Two Python versions of one reusable workflow's job are two environments.
+            fail("test_x", t, "s", tf="test_f", job=dynamo.format(1)),
+            fail("test_x", t, "s", tf="test_f", job=dynamo.format(2)),
         ]
         h = history(rows, {"s": 1, "s0": 1, "s1": 1}, {1: "me"})
         merge_bases = {("origin/main", "s"): "main_mb", ("lower", "s"): "lower", ("origin/main", "s0"): "main_mb0", ("origin/main", "s1"): "main_mb1"}  # fmt: skip
         with (
             tempfile.TemporaryDirectory() as out,
-            patch_ci_jobs({True: {("pull", "pull", "default"), ("pull", "win", "default")}, False: set()}),
+            patch_ci_jobs({True: {("pull", "pull", "default"), ("pull", "win", "default"), *(("pull", dynamo.format(v).rsplit(" / ", 1)[0], "default") for v in (1, 2))}, False: set()}),
             mock.patch.object(bd, "green_jobs", return_value=set()),
             mock.patch.object(bd, "fetch") as fetch,
             mock.patch.object(bd, "has_commit", return_value=True),
@@ -3093,7 +3102,8 @@ class TestBuildDataset(unittest.TestCase):
         self.assertEqual(sorted(c.args[0] for c in commit_time.call_args_list), ["main_mb", "main_mb0", "main_mb1"])  # fmt: skip
         kw = write.call_args.kwargs
         win = ("pull", "win / test (default, 1, 1)")
-        self.assertEqual((kw["truth"], kw["truth_strong"], kw["truth_jobs"]), (["test_b", "test_c", "test_d", "test_e"], ["test_b", "test_c", "test_e"], {"test_b": [("pull", JOB), win], "test_c": [("pull", JOB)], "test_d": [("pull", JOB)], "test_e": [("pull", JOB)]}))  # fmt: skip
+        self.assertEqual((write.call_args.args[3], kw["date"]), ("s", t))
+        self.assertEqual((kw["truth"], kw["truth_strong"], kw["truth_jobs"]), (["test_b", "test_c", "test_d", "test_e", "test_f"], ["test_b", "test_c", "test_e", "test_f"], {"test_b": [("pull", JOB), win], "test_c": [("pull", JOB)], "test_d": [("pull", JOB)], "test_e": [("pull", JOB)], "test_f": [("pull", dynamo.format(v)) for v in (1, 2)]}))  # fmt: skip
         self.assertEqual({k: kw[k] for k in ("base", "merge_base", "main_base", "base_source")}, {"base": "lower", "merge_base": "lower", "main_base": "main_mb", "base_source": "ci"})  # fmt: skip
         self.assertIn("pr truth: dropped by rule over 1 heads: {'main_near_base': 1}", stdout.getvalue())  # fmt: skip
 
@@ -3474,10 +3484,11 @@ class TestBuildDataset(unittest.TestCase):
         self.assertEqual([c.args[3] for c in write.call_args_list], random.Random(0).sample(plain, 10))  # fmt: skip
 
     def test_checked_in_ids(self) -> None:
-        ids = {n: set((REPO_ROOT / "tools/testing/llm_selector/eval/ids" / f"{n}.txt").read_text().split()) for n in ("eval", "dev", "agentic", "neutral", "head")}  # fmt: skip
+        ids = {n: set((REPO_ROOT / "tools/testing/llm_selector/eval/ids" / f"{n}.txt").read_text().split()) for n in ("eval", "dev", "agentic", "neutral", "head", "pilot")}  # fmt: skip
         self.assertLessEqual(ids["neutral"], ids["eval"])
         self.assertLessEqual(ids["agentic"], ids["eval"])
         self.assertEqual(ids["dev"] & ids["eval"], set())
+        self.assertEqual(ids["pilot"] & ids["eval"], set())
         every = set().union(*ids.values())
         shas = {k: {i.removeprefix(f"{k}_") for i in every if i.startswith(f"{k}_")} for k in ("neu", "rev")}  # fmt: skip
         self.assertEqual(shas["neu"] & shas["rev"], set())
