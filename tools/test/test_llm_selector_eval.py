@@ -2946,7 +2946,7 @@ class TestBuildDataset(unittest.TestCase):
             failed = [{"tf": "test_a", "classname": "TestA", "test": "test_x", "sha": commits["change"], "wf": wf, "job": j} for wf, j in (td, other, unstable, rerun)]  # fmt: skip
             failed += [{"tf": "test_b", "classname": "TestB", "test": "test_q'r", "sha": commits["change"], "wf": other[0], "job": other[1]}]  # fmt: skip
             # A key with a class matches only that class's test.
-            failed += [{"tf": "test_c", "classname": "TestOther", "test": "test_y", "sha": commits["change"], "wf": td[0], "job": td[1]}]  # fmt: skip
+            failed += [{"tf": "test_c", "classname": c, "test": "test_y", "sha": commits["change"], "wf": td[0], "job": td[1]} for c in ("TestOther", "TestC")]  # fmt: skip
             signal = {("test_a", "", "test_x"), ("test_b", "", "test_q'r"), ("test_c", "TestC", "test_y")}  # fmt: skip
             with (
                 patch_ci_jobs({True: {(*td, "default")}, False: {(*other, "default")}}),
@@ -2959,10 +2959,10 @@ class TestBuildDataset(unittest.TestCase):
                 bd.revert_truth_jobs({("test_a", "", "test_x")}, commits["change"], landed, "2026-10-05 00:30:00")  # fmt: skip
                 # Decided after the revert landed: the range still ends before the revert, so "late" is not counted.
                 bd.revert_truth_jobs({("test_a", "", "test_x")}, commits["change"], landed, "2026-10-05 06:00:00")  # fmt: skip
-                failed = failed[1:]
-                # Without the TD job's row, only periodic, unstable and rerun-green rows remain, so revert_samples skips it.
+                failed = failed[1:-1]
+                # Without the TD job's rows, only periodic, unstable and rerun-green rows remain, so revert_samples skips it.
                 none = bd.revert_truth_jobs(signal, commits["change"], landed, "2026-10-05 04:00:00")  # fmt: skip
-        self.assertEqual(got, {"test_a": [td]})
+        self.assertEqual(got, {"test_a": [td], "test_c": [td]})
         self.assertEqual(none, {})
         # The change and the commit after it, not the revert or what landed after the decision.
         self.assertIn(f"head_sha IN ('{commits['after']}','{commits['change']}')", queries[0])  # fmt: skip

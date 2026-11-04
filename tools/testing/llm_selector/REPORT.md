@@ -5,7 +5,7 @@
 - **Reverted commits caught: 82.8% vs 68.7% for TD** (n=134). Each of these commits landed and was then reverted for breaking a test. "Caught" means its PR's CI would have gone red. The paired difference is +14.2 points, with a 95% bootstrap interval of +7.5 to +21.6 (22 caught only by new, 3 only by old; McNemar p<0.001).
 - **Failing PR pushes with every real failure selected: 91.5% vs 94.1% for TD** (n=236 pushes from 148 PRs). Flaky failures are excluded. **The proposed config is 2.5 points below TD here.** The gap is not significant (95% interval -5.9 to +0.8 points resampling PRs; 6 pushes caught only by new, 12 only by old; McNemar p=0.24), but the point estimate is below TD, not level with it.
 - **This truth favors TD by construction.** These PRs ran under TD, so the only failures we can see are in files TD chose to run (see What the backtest measures). Revert truth comes from main, where everything runs, so it is not censored this way.
-- **Recommendation: keep the config, ship shadow mode and per-PR opt-in only.** Do not make enforcement the default (Rollout step 3) until the TD-off holdout shows live push recall at TD's level. The backtest cannot separate a real push-recall gap from the censoring bias, and only the holdout can.
+- **Recommendation: keep the config and ship shadow mode only.** This stack ships `selection.ENFORCEMENT_ENABLED = False`, so even per-PR opt-in enforces nothing until it is flipped (Rollout step 2). Do not make enforcement the default (Rollout step 3) until the TD-off holdout shows live push recall at TD's level. The backtest cannot separate a real push-recall gap from the censoring bias, and only the holdout can.
 
 | | Old: TD | New: Opus 5.5 medium + 20% hedge |
 |---|---|---|
@@ -17,7 +17,7 @@
 
 - **The idea.** For each PR push, one `claude -p` call sees the title, the description, the diff, and every candidate test file annotated with its CI minutes. It returns the files worth running.
 - **Old and new.**
-  - "Old" is TD as it runs on PRs today: its top 25% of test files per config, in the workflows that have TD.
+  - "Old" is TD as it runs on PRs today: its top 25% of TestRuns per config, in the workflows that have TD.
   - "New" is the proposed production config: Opus 5.5 at medium effort, plus TD's top files up to 20% of each config's test time.
   - Main always runs everything in both.
 - **The 25% and the 20% are in different units.**
@@ -27,7 +27,7 @@
 
 | CPU test time run on a typical change | Share of a full pass |
 |---|---|
-| Old: TD's top 25% of files | 49.4% |
+| Old: TD's top 25% of TestRuns | 49.4% |
 | New, model's picks alone (including the run-all rules) | 13.9% |
 | New, model's picks plus the 20% hedge | 30.0% |
 
@@ -35,8 +35,8 @@ The hedge adds 16.1 points rather than 20. Files the model already picked are no
 
 - **Run-all.** 19 of the 187 typical changes (10.2%) run everything, nearly all through the test-infrastructure rule (CI scripts, docker images, commit pins, test workflows). Those 19 are 10.2 of the 13.9 points the model's picks run (73%), and 34% of new's CPU time with the hedge.
 - **The model calls** cost about $0.5k a month at the recorded per-call cost. That figure leans on the prompt cache, and with a cold cache it is about $2.2k (see Dollar model). Either way it is small next to the saving.
-- **Where the saving is.** This stack makes $80k of the saving reachable, in pull and trunk, once enforcement is the default (Rollout step 3). Until then it applies only to PRs with the `ci-llm-selector` label. The other $25k is in workflows where TD is off today: inductor's unit tests, periodic and slow. Those run every test on PRs, so the selection is not enforced there, and inductor also needs a target-determination job first. See Follow-ups under Spend.
-- **The stack.** The PRs below this one contain the selector, the harness, the run_test.py integration and a shadow-mode CI workflow. Enforcement is opt-in per PR through the `ci-llm-selector` label. It applies only to same-repo PRs whose author is a member, owner or collaborator.
+- **Where the saving is.** This stack makes $80k of the saving reachable, in pull and trunk, once enforcement is the default (Rollout step 3). This stack ships shadow mode only: `selection.ENFORCEMENT_ENABLED` is False, so even PRs with the `ci-llm-selector` label save nothing until it is flipped (Rollout step 2). The other $25k is in workflows where TD is off today: inductor's unit tests, periodic and slow. Those run every test on PRs, so the selection is not enforced there, and inductor also needs a target-determination job first. See Follow-ups under Spend.
+- **The stack.** The PRs below this one contain the selector, the harness, the run_test.py integration and a shadow-mode CI workflow. It ships shadow mode only: with `ENFORCEMENT_ENABLED` False every selection runs as shadow. Once that is flipped, enforcement is opt-in per PR through the `ci-llm-selector` label, and it applies only to same-repo PRs whose author is a member, owner or collaborator.
 
 The sections up to Time to land compare only old and new. Other models, effort levels and hedge budgets are in [Sweep](#sweep-other-models-efforts-and-hedges), which is how the config was chosen.
 
@@ -169,7 +169,7 @@ Time to signal (TTS) per workflow, in minutes:
 - **Merge wait.** 1,643 PR heads ran pull and `ciflow/trunk` together. On those, the p50 drops by 12 minutes and the p90 by 29. Trunk is the later signal for nearly all of them in both. 1,030 of them also ran `ciflow/inductor` within the same 10 minutes; inductor ends last on 15% of those (17% after), so trunk still bounds most of their wait.
 - **Trunk is where the latency is.** Its long test shards are the critical path, so the test shrinkage shows up as wall-clock time. Trunk's p50 moves less than its mean (14 min saved on average): 46% of its PR test hours are fork PRs', which keep TD, and its macOS jobs run every test under both policies.
 - **Pull leans toward build-bound.** Runs whose last job to finish is a build or another non-test job go from 12% to 22%. The floor is the xpu build (p50 40 / p90 49 min from creation to done) and the ROCm build (p50 23 / p90 53).
-- **The model matches real merges.** When the merge comment started trunk (n=326), comment to merge took p50 186 / p90 269 min, against a simulated trunk TTS of 182 / 277. Taking each of those trunk runs' replayed saving off its merge gives the new 179 / 259. 11 more such merges are left out of both, since the replay left out their trunk run (cancelled, or created in the last 12 hours). When trunk had already run before the comment (n=533), the merge took p50 3 min.
+- **The model matches real merges.** When the merge comment started trunk (n=326), comment to merge took p50 186 / p90 269 min, against a simulated trunk TTS of 182 / 277. Taking each of those trunk runs' replayed saving off its merge gives the new 179 / 259. 11 more such merges are left out of both, since the replay left out their trunk run by the TTS rules in Method (a conclusion other than success or failure, a cancelled job, no test job, a TTS outside (0, 24 h], or created outside the window, such as in the last 12 hours). When trunk had already run before the comment (n=533), the merge took p50 3 min.
 - **Two delays are not modelled, so the merge rows and the trunk saving are optimistic.**
   - The selection artifact is kept 3 days (`retention-days: 3` in llm-selector.yml), and resolve_selection.py treats an expired one as missing. A trunk run that a merge starts more than 3 days after the push gets no selection and keeps TD, and the p90 from first run to merge is 94.5 h.
   - Under enforcement the target-determination job waits up to `WAIT_SECONDS` (600 s) for a selector run that is still pending. The replay assumes the selection is ready.
@@ -183,7 +183,7 @@ Time to signal (TTS) per workflow, in minutes:
 - **Replay.** For every PR workflow run in the 30 days to 2026-11-03, each same-repo test job's `Test` step is shrunk by the ratio r of new to old test time for that job.
   - Each job keeps its start time. Builds and non-test jobs are unchanged, shards are not rebalanced, and queueing effects are ignored.
   - A run is a fork PR's when its head repository is not pytorch/pytorch. For `ciflow/` pushes, the PR's head repository decides. Fork runs keep r = 1.
-  - Jobs that run_test.py runs without TD keep r = 1 too, classified by job name with `score.job_runs_td`, the rule the truth uses: the configs with TD off (docs_test, backwards_compat, libtorch_agnostic_targetting and the like, and test.sh's NO_TD dynamo_cpython) and the macOS and xpu jobs.
+  - Jobs that run every test under both policies keep r = 1 too (`land_time.selectable`). Configs whose test.sh branch never runs run_test.py (`land_time.NO_RUN_TEST`: docs_test, backwards_compat, libtorch_agnostic_targetting and the like) are dropped first. The rest are classified by job name with `score.job_runs_td`, the rule the truth uses, which keeps r = 1 for test.sh's NO_TD dynamo_cpython configs and the macOS and xpu jobs.
 - **The ratio r.**
   - In pull, trunk and rocm-mi300, r is 0.606 (CPU) and 0.732 (GPU), from the unrounded typical-change test-time shares.
   - In inductor, which has no TD, r is 0.498 / 0.403 for the unit-test configs (assuming the inductor follow-up) and 1 for the model benchmarks and the other configs `land_time.inductor_unit_configs` leaves out, such as the moved `inductor` config (see Spend).
@@ -345,7 +345,7 @@ Saved per month at the 0.2 overhead, for Opus medium: $181k with no hedge, $160k
   - Haiku 4.5 does not support the effort setting, so its `low` label is nominal (select_tests.py always passes `--effort`, here `low`). It is well behind on both metrics.
   - Sonnet sometimes fails to produce schema-valid output after retries: 25 of 237 pushes at medium effort and 12 at high. Those are selector failures, which keep TD's split.
 - **Spend goes on run-all and the hedge.**
-  - The run-all rules fire on 19 of the 187 typical changes. 17 of those are test-infrastructure changes (`.ci/pytorch/test.sh` and `common.sh`, the docker images and commit pins, the test workflows, common_utils), which `select_tests` runs in full without asking the model. They account for 10.2 of the 13.9 points of CPU time the no-hedge policy runs. The hedge adds the rest.
+  - The run-all rules fire on 19 of the 187 typical changes. 17 of those are test-infrastructure changes (`.ci/pytorch/test.sh` and `common.sh`, the docker images and commit pins, the test workflows, common_utils), which `select_tests` runs in full without asking the model. The 19 run-all changes account for 10.2 of the 13.9 points of CPU time the no-hedge policy runs. The hedge adds the rest.
   - Narrowing those rules, in particular the commit-pin bumps, is the cheapest remaining lever. They were kept broad because several reverts are docker image changes.
 - **The LLM and TD miss different things.** On reverts, Opus medium with no hedge catches 23 that TD misses, and TD catches 15 that Opus misses. Their union catches 115 of 134 (86%). This is why the hedge works.
 - **Run-to-run variance is about 1-2 points on reverts.**
@@ -404,7 +404,7 @@ Saved per month at the 0.2 overhead, for Opus medium: $181k with no hedge, $160k
 - **Prompt injection.**
   - A PR's description or diff can try to talk the model into selecting nothing.
   - **Mitigations.**
-    - Enforcement is opt-in per PR through the `ci-llm-selector` label, which is read live when the workflow run resolves the selection.
+    - Enforcement is off in this stack (`ENFORCEMENT_ENABLED` False). Once it is flipped, it is opt-in per PR through the `ci-llm-selector` label, which is read live when the workflow run resolves the selection.
     - The selector workflow runs only for same-repo PRs. It runs from the default branch's copy of the workflow and code: since GitHub's 2025-12-08 change, `pull_request_target` always uses the default branch, whatever the PR's base.
     - The selector reads the diff through git, and the title and description from the event payload (`GITHUB_EVENT_PATH`). It never runs PR code.
     - Main always runs everything.
@@ -418,6 +418,7 @@ Saved per month at the 0.2 overhead, for Opus medium: $181k with no hedge, $160k
    - **The selector.** `llm-selector.yml`, a `pull_request_target` workflow that runs on `opened`, `synchronize` and `reopened`, writes a selection for every same-repo PR push. The selection is the artifact `llm_selection_<PR number>_<head sha>`, kept for 3 days.
    - **Resolving it.** The workflow run's `target-determination` job resolves the selection once (`resolve_selection.py`) and uploads it as `llm_selection.json`. The test jobs' download-td-artifacts step only downloads that file from their own workflow run.
    - **Provenance.** `selector_runs` in `resolve_selection.py` only filters runs: it takes the artifact named for this PR and head only from an `llm-selector.yml` `pull_request_target` run for that head whose head branch is in this repository. `main()` decides enforcement. It requires all of these:
+     - `ENFORCEMENT_ENABLED` in selection.py, False in this stack;
      - TD on in the workflow (`TD_ENABLED`);
      - an author whose `author_association` is OWNER, MEMBER or COLLABORATOR;
      - the PR's live labels: `ci-llm-selector` present and `ci-no-td` absent.
@@ -520,7 +521,7 @@ for t in v3_opus55_medium v3_opus55_low v3_opus55_high v3_sonnet5_medium v3_sonn
 - Reverts are resampled per commit. Failing pushes are resampled per PR (the PR number is the second `_`-separated field of a head id) and, for reference, per push.
 - The p-values are an exact two-sided McNemar test on the discordant counts. On pushes it treats the 236 pushes as independent, ignoring that pushes of one PR are correlated, so those p-values are anti-conservative; the PR-resampled intervals are the ones to read.
 - The "without PR history" row reruns `td_replay` and `score` on a copy of `$DATA` whose head samples have `previous_failures` removed.
-- `dollars --json` writes the fractions, the per-workflow rows and the totals that the Spend table is built from.
+- `dollars --json` writes the fractions, the per-workflow rows (same-repo PR spend `pr_k`, relative costs, saving), the saving totals and the call cost. It has no total workflow cost, so the Old $k/mo column comes from `dollars.WORKFLOWS`, not from the JSON.
 
 The "without PR history" row. `intervals` compares head rows with the revert rows passed alongside, so the variant's head rows go in with `rows_eval.json`:
 
@@ -538,11 +539,12 @@ python -m tools.testing.llm_selector.eval.intervals rows_eval.json rows_head_nop
 - the fork share of those PR hours;
 - whether TD runs there.
 
-`PR_PUSHES_PER_MONTH_K` is the same-repo PR head count. `dollars --constants END` recomputes all of them from ClickHouse over the 30 days to the unix time END, here 2026-11-03 (`COST_SQL`, `HOURS_SQL` and `HEADS_SQL` in dollars.py):
+`PR_PUSHES_PER_MONTH_K` is the same-repo PR head count. `dollars --constants END` recomputes the cost, the PR share, the fork share and the head count from ClickHouse over the 30 days to the unix time END, here 2026-11-03 (`COST_SQL`, `HOURS_SQL` and `HEADS_SQL` in dollars.py):
 - the cost is `misc.runner_cost` of the `/ test (` jobs, over the 30 whole days before END's date;
 - a job counts only if `land_time.selectable` says the selection shrinks it, the same rule the Time to land replay uses;
 - PR hours are those of `pull_request` runs and `ciflow/` pushes, the runs that can get a selection;
-- a PR run is a fork PR's when its head repository is not pytorch/pytorch, and for `ciflow/` pushes the PR's head repository decides.
+- a PR run is a fork PR's when its head repository is not pytorch/pytorch, and for `ciflow/` pushes the PR's head repository decides;
+- whether TD runs there is not queried; it is copied from the existing `WORKFLOWS` rows.
 
 ```
 python -m tools.testing.llm_selector.eval.dollars --constants 1793672225
