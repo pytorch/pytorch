@@ -81,6 +81,21 @@ class DenseSparseParams(nn.Module):
         return self.dense_weight.sum(), self.sparse_weight.sum()
 
 
+class TwoInputs(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # Unused in forward, but FSDP only hooks modules that own parameters.
+        self.weight = nn.Parameter(torch.randn(16, 16))
+        self.input_types = None
+
+    def forward(self, residual, shared_kv):
+        self.input_types = (
+            dict(spmd.get_local_type(residual)),
+            dict(spmd.get_local_type(shared_kv)),
+        )
+        return residual, shared_kv
+
+
 @unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
 class TestFullyShardSpmdTypes(TestCase):
     @classmethod
@@ -583,6 +598,56 @@ class TestFullyShardSpmdTypes(TestCase):
             "requires DP parameters to be R since it handles the DP gradient "
             "reduction.",
         )
+
+    def test_forward_inputs_keep_per_input_types(self):
+        """FSDP's pre-forward hook must not mix the types of separate inputs.
+
+        A sequence-sharded input must not turn a CP/TP-replicated input into V.
+        """
+        model = TwoInputs()
+        spmd.assert_type(
+            model.weight,
+            {self.dp_axis: spmd.R, self.cp_axis: spmd.R, self.tp_axis: spmd.R},
+        )
+        fully_shard(
+            model,
+            mesh=self.dense_storage_mesh,
+            dp_mesh_dims=DataParallelMeshDims(
+                shard=("dp_shard", "cp"),
+                replicate="dp_replicate",
+            ),
+        )
+
+        residual = torch.randn(4, 8, 16, requires_grad=True)
+        shared_kv = torch.randn(4, 8, 16, requires_grad=True)
+        residual_type = {
+            self.dp_axis: spmd.V,
+            self.cp_axis: spmd.V,
+            self.tp_axis: spmd.V,
+        }
+        shared_kv_type = {
+            self.dp_axis: spmd.V,
+            self.cp_axis: spmd.R,
+            self.tp_axis: spmd.R,
+        }
+        with (
+            spmd.set_current_mesh(self.dense_type_mesh),
+            typecheck(strict_mode="strict", local=False),
+        ):
+            spmd.assert_type(
+                residual,
+                residual_type,
+                partition_spec=spmd.PartitionSpec(
+                    self.dp_axis, (self.cp_axis, self.tp_axis), None
+                ),
+            )
+            spmd.assert_type(
+                shared_kv,
+                shared_kv_type,
+                partition_spec=spmd.PartitionSpec(self.dp_axis, None, None),
+            )
+            model(residual, shared_kv)
+        self.assertEqual(model.input_types, (residual_type, shared_kv_type))
 
 
 @unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")

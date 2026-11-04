@@ -1417,8 +1417,14 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
         # queues final post-backward after all primal/tangent paths finish.
         return grad_inputs
 
+    @staticmethod
+    def spmd_typecheck(
+        outputs: tuple[torch.Tensor, ...], *, inputs: tuple[torch.Tensor, ...]
+    ) -> None:
+        # Each output is its input, so keep each input's SPMD type. spmd_types'
+        # local autograd rule would instead merge all input types onto every
+        # output (e.g. an S(0) input would turn an R input into V).
+        from spmd_types import rules
 
-if dist._is_spmd_types_available():
-    import spmd_types
-
-    spmd_types.register_local_autograd_function(RegisterPostBackwardFunction)
+        for out, inp in zip(outputs, inputs):
+            rules.einsum("...->...", inp, linear_in=(0,), out=out)
