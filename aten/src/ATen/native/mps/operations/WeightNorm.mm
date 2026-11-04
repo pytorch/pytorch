@@ -9,9 +9,7 @@
 #else
 #include <ATen/ops/_weight_norm_interface_backward_native.h>
 #include <ATen/ops/_weight_norm_interface_native.h>
-#include <ATen/ops/empty_like.h>
 #include <ATen/ops/norm_except_dim.h>
-#include <ATen/ops/zeros_like.h>
 #endif
 
 namespace at::native {
@@ -44,9 +42,12 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
                               "weight_norm backward is not implemented for '",
                               toString(saved_v.scalar_type()),
                               "' on MPS");
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       grad_w.is_contiguous() && saved_v.is_contiguous() && saved_g.is_contiguous() && saved_norms.is_contiguous(),
       "weight_norm backward expects contiguous tensors");
+  TORCH_CHECK_VALUE(grad_w.sizes() == saved_v.sizes() && saved_g.numel() == saved_v.size(dim) &&
+                        saved_norms.numel() == saved_v.size(dim),
+                    "weight_norm backward expects grad_w shaped like v, and one g and one norm per slice");
   // MPS saves norms in v's dtype, unlike CPU and CUDA which keep float for half/bfloat16.
   TORCH_CHECK_TYPE(grad_w.scalar_type() == saved_v.scalar_type() && saved_g.scalar_type() == saved_v.scalar_type() &&
                        saved_norms.scalar_type() == saved_v.scalar_type(),
@@ -69,11 +70,16 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
   const auto len = numel / slices;
   const auto dtype = scalarToMetalTypeString(saved_v);
   constexpr auto simd = c10::metal::simdgroup_size;
+  const auto col_groups = at::ceil_div(slices, simd);
+  const auto splits = std::clamp<uint32_t>(occupancy_threadgroups() / col_groups, 1, at::ceil_div(len, simd));
+  const auto partial = dim == 0
+      ? Tensor()
+      : at::empty({splits, slices}, saved_v.options().dtype(at::toOpMathType(saved_v.scalar_type())));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      auto run = [&](const std::string& kernel, MTLSize grid, MTLSize threads, auto... args) {
+      auto run = [&](const std::string& kernel, MTLSize grid, MTLSize threads, const auto&... args) {
         auto pso = lib.getPipelineStateForFunc(kernel);
         getMPSProfiler().beginProfileKernel(pso, kernel, {grad_w, saved_v, saved_g, saved_norms}, stream);
         [encoder setComputePipelineState:pso];
@@ -96,9 +102,6 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
             len,
             grad_g);
       } else {
-        const auto col_groups = at::ceil_div(slices, simd);
-        const auto splits = std::clamp<uint32_t>(occupancy_threadgroups() / col_groups, 1, at::ceil_div(len, simd));
-        auto partial = at::empty({splits, slices}, saved_v.options().dtype(at::toOpMathType(saved_v.scalar_type())));
         const auto tile = MTLSizeMake(simd, simd, 1);
         const std::array<uint32_t, 2> rows_cols = {len, slices};
         run(fmt::format("weight_norm_backward_cols_dot_{}", dtype),
@@ -114,7 +117,7 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
             partial,
             std::array<uint32_t, 2>{splits, slices});
         // Every thread of a tile writes simd rows of one contiguous block, so reads and writes stay close in memory.
-        const uint32_t rows_per_tile = simd * simd;
+        constexpr auto rows_per_tile = simd * simd;
         run(fmt::format("weight_norm_backward_cols_{}", dtype),
             MTLSizeMake(slices, at::ceil_div(len, rows_per_tile) * simd, 1),
             tile,
