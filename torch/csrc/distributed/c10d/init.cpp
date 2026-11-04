@@ -3387,10 +3387,6 @@ Args:
               &::c10d::ProcessGroup::unregisterAbortHook,
               py::arg("hook_id"),
               "Remove the abort hook registered with ``hook_id``.")
-          .def_property_readonly(
-              "supports_completion_hooks",
-              &::c10d::ProcessGroup::supportsCompletionHooks,
-              "Whether the default backend reports operation completion to completion hooks, which can only be registered from C++.")
           .def(
               "register_pre_hook",
               &::c10d::ProcessGroup::registerPreHook,
@@ -3624,10 +3620,6 @@ Args:
               &::c10d::Backend::unregisterAbortHook,
               py::arg("hook_id"),
               "Remove the abort hook registered with ``hook_id``.")
-          .def_property_readonly(
-              "supports_completion_hooks",
-              &::c10d::Backend::supportsCompletionHooks,
-              "Whether the backend reports operation completion to completion hooks, which can only be registered from C++.")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,

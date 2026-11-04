@@ -1738,6 +1738,37 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_timeout_publishes_results(self) -> None:
+        # finalize() resolves a work queued behind a timed-out one, which
+        # inherits the timeout, so its result future does not hang. Shutdown
+        # stops the watchdog first, so finalize()'s drain finds the timeout
+        # once the group's 5s elapses. Futures are only waited on:
+        # getFutureResult() and Work.wait() poll the work and could resolve it
+        # themselves.
+        env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "0"}
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup(timeout=timedelta(seconds=5))
+        backend = pg._get_backend(self.device)
+        self._check_all_reduce(pg)
+
+        if self.rank == 0:
+            t = torch.ones(1024, device=self.device)
+            hung = dist.all_reduce(t, group=pg, async_op=True).get_future_result()
+            # Long enough that only finalize() can end it.
+            dist.set_timeout(timedelta(hours=1), group=pg)
+            queued = dist.all_reduce(t, group=pg, async_op=True).get_future_result()
+            backend.shutdown()
+            self.assertTrue(hung.done())
+            self.assertTrue(queued.done())
+            self.assertEqual(WorkResult(hung.wait()), WorkResult.TIMEOUT)
+            self.assertEqual(WorkResult(queued.wait()), WorkResult.TIMEOUT)
+
+        self._wait_for_rank_zero(pg)
+        self._abort_timed_out_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_timeout_with_communicator_cleanup(self) -> None:
         env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "2"}
         with mock.patch.dict(os.environ, env):
@@ -1842,14 +1873,14 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
                 self.assertEqual(hung[0]["timeout_ms"], 5000)
                 # ... and it has to read as unfinished. The watchdog marked this
                 # work TIMEDOUT, which Work::isCompleted() also answers true to,
-                # so a completion report on a failed work would retire the entry
-                # and hide the culprit. Only successful completion is pushed.
+                # so retiring on any result would hide the culprit. Only a
+                # SUCCESS result retires an entry.
                 self.assertFalse(hung[0]["retired"], msg=str(hung[0]))
                 self.assertNotEqual(hung[0]["state"], "completed", msg=str(hung[0]))
                 # Unset reads None here; the JSON dump spells the same thing 0.
                 self.assertIsNone(hung[0]["time_discovered_completed_ns"])
-                # The healthy collectives on the same group did get their
-                # completion pushed, so the dump distinguishes them.
+                # The healthy collectives on the same group did succeed, so the
+                # dump distinguishes them.
                 healthy = [e for e in dump["entries"] if e["input_sizes"] == [[4]]]
                 self.assertTrue(healthy)
                 for e in healthy:

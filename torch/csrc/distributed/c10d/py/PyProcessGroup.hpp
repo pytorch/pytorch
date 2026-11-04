@@ -159,10 +159,6 @@ class PyProcessGroup : public ProcessGroup {
       return work_->getTimeout();
     }
 
-    uint64_t getCompletionKey() const override {
-      return work_->getCompletionKey();
-    }
-
    private:
     c10::intrusive_ptr<Work> work_;
     py::object pyWork_;

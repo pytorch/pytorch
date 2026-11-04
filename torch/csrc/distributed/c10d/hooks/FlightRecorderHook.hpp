@@ -7,26 +7,27 @@
 // The pre-hook records an entry into the serving backend's own
 // FlightRecorder<c10::Event> instance (getFlightRecorder, keyed by backend
 // name). The post-hook does not retire it: it fires when the collective is
-// *issued*, not when it finishes. The entry is retired from the backend's
-// completion hook (Hooks.hpp), which fires where the backend establishes that
-// the op really finished and carries the backend's own duration measurement.
-// That is stock ProcessGroupNCCL's model -- its watchdog retires on real
-// completion -- and it is what lets a dump tell a finished collective from a
-// hung one: a collective that never completes is never retired and reads
-// "scheduled", one that finished reads "completed". A hang needs no observer,
-// since work that never completes is simply never reported.
+// *issued*, not when it finishes. The entry is retired from a callback on the
+// Work's result future (Work::getFutureResult), which the backend completes
+// where it establishes that the op really finished; the duration is the
+// Work's own measurement. That is stock ProcessGroupNCCL's model -- its
+// watchdog retires on real completion -- and it is what lets a dump tell a
+// finished collective from a hung one: a collective that never completes is
+// never retired and reads "scheduled", one that finished reads "completed". A
+// hang needs no observer, since work that never completes is simply never
+// reported.
 //
 // The post-hook is the only place a Work and its op_id are seen together, so
-// it is where the completion hook's key is registered -- and a fast collective
-// can be finished before it runs. So the post-hook also asks the Work whether
-// it has already finished: a completion earlier than the registration is
-// caught there, a later one finds the mapping, and none falls between.
+// it is where the callback is added. A future that already completed runs it
+// at once, so a fast collective that finished before the post-hook is retired
+// too.
 //
-// Backends with no completion hook fall back to retiring in the post-hook, i.e.
-// at issue. Such an entry carries no duration and never reads "completed", only
-// "scheduled" and retired -- degraded, but honest, because without a push there
-// is genuinely no moment at which this hook learns the op finished. Leaving
-// those entries un-retired instead would make every healthy op look hung.
+// Backends whose Work has no result future fall back to retiring in the
+// post-hook, i.e. at issue. Such an entry carries no duration and never reads
+// "completed", only "scheduled" and retired -- degraded, but honest, because
+// there is genuinely no moment at which this hook learns the op finished.
+// Leaving those entries un-retired instead would make every healthy op look
+// hung.
 //
 // The hook owns no device events. One it recorded itself could only say whether
 // the *caller's* stream reached the op, which for an async_op collective is not
@@ -50,11 +51,10 @@
 // can be attached to a group of any composition without duplicating what a
 // native backend already recorded.
 //
-// attach() registers a completion hook on backends that support one, and an
-// abort hook on backends that support one. The abort hook writes the trace to
-// disk when the backend detects a timeout or an error, and is the single
-// trigger for a dump-on-failure: backends do not dump themselves, they only run
-// their abort hooks.
+// attach() registers an abort hook on backends that support one. The abort hook
+// writes the trace to disk when the backend detects a timeout or an error, and
+// is the single trigger for a dump-on-failure: backends do not dump themselves,
+// they only run their abort hooks.
 
 #pragma once
 
@@ -64,7 +64,9 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#include <unordered_map>
+#include <typeindex>
+#include <typeinfo>
+#include <unordered_set>
 #include <vector>
 
 #include <c10/core/Event.h>
@@ -112,15 +114,18 @@ class TORCH_API FlightRecorderHook
     std::chrono::milliseconds timeout{kBackendDefaultTimeout};
   };
 
-  // A recorded op whose collective the hook is still waiting on. workKey is
-  // empty between the pre-hook and the post-hook, and stays empty if the
-  // backend threw in between -- such an entry is never retired, which is the
-  // honest report: it was issued and never seen to finish.
+  // A recorded op whose collective the hook is still waiting on. work is null
+  // between the pre-hook and the post-hook, and stays null if the backend
+  // threw in between -- such an entry is never retired, which is the honest
+  // report: it was issued and never seen to finish. Until the first Work
+  // refuses getDuration() it is held until the op's result is published, so
+  // the duration can be read after the caller drops the handle, and is then
+  // parked in released_works_.
   struct InflightOp {
     FlightRecorder<c10::Event>::TraceIdentifier trace_id;
     FlightRecorder<c10::Event>* recorder = nullptr;
     HookOpName name = HookOpName::UNKNOWN;
-    std::optional<uint64_t> workKey;
+    c10::intrusive_ptr<Work> work;
   };
 
   FlightRecorderHook(
@@ -137,11 +142,12 @@ class TORCH_API FlightRecorderHook
   std::optional<bool> captureActive(std::optional<c10::Device> device) const;
   void onPre(const PreHookArgs& args);
   void onPost(const PostHookArgs& args);
-  // Retires the entry of an op whose Work completed successfully, unless it is
-  // already retired: the entry is claimed out of inflight_ under mutex_, so
-  // the backend's completion hook and the post-hook's own check retire it
-  // exactly once between them however they race.
-  void retireCompleted(uint64_t completion_key, std::optional<float> duration);
+  // Called from the result future of the op's Work. Retires the entry if the
+  // op succeeded; a failed op stays un-retired.
+  void onResult(int64_t op_id, bool success);
+  // Claims the entry of an op out of inflight_, so exactly one caller retires
+  // it. The caller drops the Work it holds, outside mutex_.
+  std::optional<InflightOp> takeInflightLocked(int64_t op_id);
   // The backend's own measurement, or nullopt if it cannot time collectives.
   std::optional<float> workDuration(const Work& work);
   // Dumps the trace to disk, at most once per process. Deliberately takes no
@@ -155,14 +161,6 @@ class TORCH_API FlightRecorderHook
   // Whether attach() got an abort hook registered; false for backends that
   // have none (gloo), whose unregister call would throw just as loudly.
   bool abort_hook_registered_{false};
-  // Whether the backend pushes completion. When false the post-hook retires the
-  // entry at issue, since nothing else ever will. Asked of the default backend,
-  // the one ProcessGroup routes hook registration to, so a mixed group whose
-  // default backend has no completion hooks falls back for all of its ops.
-  bool push_completion_{false};
-  // Whether Work::getDuration() is worth asking: it throws when the backend
-  // does not time its collectives, so the first refusal is remembered.
-  std::atomic<bool> work_can_time_{true};
   size_t pg_id_;
   // Cap on inflight_, see onPre.
   size_t max_inflight_{0};
@@ -179,18 +177,32 @@ class TORCH_API FlightRecorderHook
   // drops the handle -- and blocks on this mutex, so a collective thread that
   // held it while waiting for the GIL would deadlock the process with no
   // timeout. That is why onPre() calls the recorder, which gathers a traceback
-  // under the GIL, outside the lock. It also outranks the backend's own hook
-  // lock: remove() takes it and then unregisters, so a backend must never
-  // invoke a hook while holding the lock that guards its hook table.
+  // under the GIL, outside the lock, and why no Work is released under it: a
+  // Work's destructor may take the GIL (PyWorkHolder). It also outranks the
+  // backend's own hook lock: remove() takes it and then unregisters, so a
+  // backend must never invoke a hook while holding the lock that guards its
+  // hook table.
   std::mutex mutex_;
   size_t collective_seq_{0};
   size_t p2p_seq_{0};
   // Ordered by op_id, which is monotonic per process group, so the front is the
   // oldest op still awaited and eviction is in issue order.
   std::map<int64_t, InflightOp> inflight_;
-  // The reverse index a completion needs. Numeric keys do not extend Work
-  // lifetimes and are never reused by a backend.
-  std::unordered_map<uint64_t, int64_t> work_ids_;
+  // Work types whose getFutureResult() threw. The refusal is a property of the
+  // type, not of the op, and throwing is costly, so each type is asked once.
+  // Keyed by type rather than backend: a backend can return a sentinel Work
+  // (nccl2 does inside a coalescing window) next to Works that do report. A
+  // type forwarding to Works of mixed kinds (PyWorkHolder) falls back to
+  // retiring at issue for all its ops after the first refusal.
+  std::unordered_set<std::type_index> no_result_future_types_;
+  // Cleared the first time a Work refuses getDuration(): timing is a property
+  // of the backend, so later ops neither ask nor keep their Work for it.
+  // Collectives timing enabled after that is not picked up.
+  std::atomic<bool> work_can_time_{true};
+  // Works of ops whose result was published, released by the next onPost or
+  // remove() so the last reference is never dropped on a backend thread; see
+  // onResult.
+  std::vector<c10::intrusive_ptr<Work>> released_works_;
 };
 
 } // namespace c10d

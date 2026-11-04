@@ -125,16 +125,17 @@ class AbstractFlightRecorderHookTest:
         return self.backend_name != "fake"
 
     @property
-    def _push_completion(self):
-        # Two tiers. A backend with completion hooks pushes real completion, so
-        # an entry is retired when its collective actually finished and reads
-        # "completed" with the backend's own duration. A backend without them
-        # ("fake") is retired by the post-hook, at issue: honest but degraded,
-        # since nothing will ever tell the hook the op finished.
+    def _has_result_future(self):
+        # Two tiers. A backend whose Work has a result future reports real
+        # completion, so an entry is retired when its collective actually
+        # finished and reads "completed" with the backend's own duration. A
+        # backend without one ("fake") is retired by the post-hook, at issue:
+        # honest but degraded, since nothing will ever tell the hook the op
+        # finished.
         return self.backend_name == "nccl2"
 
     def _completed_state(self):
-        return "completed" if self._push_completion else "scheduled"
+        return "completed" if self._has_result_future else "scheduled"
 
     def _await_retired(self, count=0, timeout=60.0):
         # Completion arrives when the backend establishes it: on its watchdog,
@@ -179,20 +180,20 @@ class AbstractFlightRecorderHookTest:
         self.assertIn(self._name("all_reduce"), names)
         self.assertIn(self._name("broadcast"), names)
         self.assertIn(self._name("barrier"), names)
-        # Every entry is retired, on both tiers. Only a backend that pushes
-        # completion can also say the collective finished.
+        # Every entry is retired, on both tiers. Only a backend with a result
+        # future can also say the collective finished.
         for e in entries:
             self.assertTrue(e["retired"], msg=str(e))
             self.assertEqual(e["state"], self._completed_state(), msg=str(e))
         hook.remove()
 
-    def test_entry_state_from_pushed_completion(self):
-        # Tier one: the backend pushes completion from where its watchdog
-        # establishes it, so "completed" is reachable without the hook polling
-        # anything. See test_retires_at_issue_without_completion_hooks for the
-        # other tier.
-        if not self._push_completion:
-            self.skipTest("backend pushes no completion")
+    def test_entry_state_from_result_future(self):
+        # Tier one: the backend completes the Work's result future where its
+        # watchdog establishes completion, so "completed" is reachable without
+        # the hook polling anything. See
+        # test_retires_at_issue_without_result_future for the other tier.
+        if not self._has_result_future:
+            self.skipTest("backend has no result future")
         self._init_pg()
         sub_pg = dist.new_group(list(range(self.world_size)))
         hook = self._fr_hook(sub_pg)
@@ -214,16 +215,15 @@ class AbstractFlightRecorderHookTest:
             self.assertGreater(e["time_discovered_started_ns"], 0, msg=str(e))
         hook.remove()
 
-    def test_retires_at_issue_without_completion_hooks(self):
-        # Tier two: a backend with no completion hook. The post-hook has to
+    def test_retires_at_issue_without_result_future(self):
+        # Tier two: a backend with no result future. The post-hook has to
         # retire the entry itself, at issue, because nothing else ever will and
         # an entry nothing retires is indistinguishable from a hang. What it must
         # not do is claim a completion nobody observed, so the entry reads
         # "scheduled" and carries no duration.
-        if self._push_completion:
-            self.skipTest("backend pushes completion")
+        if self._has_result_future:
+            self.skipTest("backend has a result future")
         pg = self._init_pg()
-        self.assertFalse(pg.supports_completion_hooks)
         hook = self._fr_hook(pg)
         before = len(self._hook_entries())
 
@@ -243,8 +243,8 @@ class AbstractFlightRecorderHookTest:
     def test_duration_ms_absent_without_backend_timing(self):
         # duration_ms comes from the backend, which reports none unless it was
         # asked to time collectives. There is deliberately no host clock stand-in:
-        # the report arrives on a watchdog tick, so a wall clock would measure how
-        # late the push was, not the collective.
+        # the result is published on a watchdog tick, so a wall clock would
+        # measure how late it was published, not the collective.
         pg = self._init_pg()
         hook = self._fr_hook(pg)
         before = len(self._hook_entries())
@@ -287,6 +287,41 @@ class AbstractFlightRecorderHookTest:
             self.assertLess(e["duration_ms"], 60000.0, msg=str(e))
         hook.remove()
 
+    def test_timed_work_released_after_result(self):
+        # With timing on, the hook holds a Work until its result is published,
+        # to read its duration. It must not keep the outputs alive after that.
+        pg = self._init_pg()
+        if self.backend_name != "nccl2":
+            self.skipTest("backend cannot time collectives")
+        pg._enable_collectives_timing()
+        hook = self._fr_hook(pg)
+        t = torch.ones(1024, device=self.device)
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
+        base = torch.cuda.memory_allocated(self.device)
+
+        big = torch.ones(4 * 1024 * 1024, device=self.device)
+        nbytes = big.numel() * big.element_size()
+        before = len(self._hook_entries())
+        work = dist.all_reduce(big, async_op=True)
+        # Callbacks run in the order they were added, so this one runs after
+        # the hook's.
+        done = work.get_future_result().then(lambda fut: fut.value())
+        for _ in range(3):
+            dist.all_reduce(t)
+        done.wait()
+        # The hook did hold the Work: it read the duration.
+        e = self._hook_entries()[before]
+        self.assertIn("duration_ms", e, msg=str(e))
+        # wait() drops the backend's own stash of the input.
+        work.wait()
+        del work, big, done
+        # The next collective releases what the hook held.
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
+        self.assertLess(torch.cuda.memory_allocated(self.device), base + nbytes)
+        hook.remove()
+
     def test_hung_collective_reads_not_completed(self):
         # The property the whole design exists for: a dump taken while a
         # collective is stuck must show that collective as not completed, and
@@ -323,7 +358,7 @@ class AbstractFlightRecorderHookTest:
             dist.all_reduce(t)
 
         torch.cuda.synchronize()
-        # Once it finishes, the backend pushes that too.
+        # Once it finishes, its result future reports that too.
         self.assertEqual(self._await_retired()[-1]["state"], "completed")
         hook.remove()
 
@@ -515,6 +550,37 @@ class AbstractFlightRecorderHookTest:
         self.assertEqual(allreduce[0]["input_sizes"], [[4, 8]])
         self.assertEqual(allreduce[0]["input_dtypes"], ["Float"])
         hook.remove()
+
+    def test_mixed_result_future_types(self):
+        # nccl2 returns a futureless sentinel for each op in a coalesced p2p
+        # batch. Those retire at issue; WorkNCCL ops on the same hook still
+        # retire from their result.
+        if self.backend_name != "nccl2":
+            self.skipTest("nccl2 coalesced p2p sentinel")
+        pg = self._init_pg()
+        self._fr_hook(pg)
+        before = len(self._hook_entries())
+
+        peer = 1 - self.rank
+        send_t = torch.ones(4, device=self.device)
+        recv_t = torch.empty(4, device=self.device)
+        ops = [
+            dist.P2POp(dist.isend, send_t, peer),
+            dist.P2POp(dist.irecv, recv_t, peer),
+        ]
+        for work in dist.batch_isend_irecv(ops):
+            work.wait()
+        dist.all_reduce(torch.ones(4, device=self.device))
+        torch.cuda.synchronize()
+
+        entries = self._await_retired()[before:]
+        p2p = [e for e in entries if e["is_p2p"]]
+        coll = [e for e in entries if e["profiling_name"] == self._name("all_reduce")]
+        self.assertEqual(len(p2p), 2, msg=str(entries))
+        for e in p2p:
+            self.assertEqual(e["state"], "scheduled", msg=str(e))
+        self.assertEqual(len(coll), 1, msg=str(entries))
+        self.assertEqual(coll[0]["state"], "completed", msg=str(coll[0]))
 
     def test_p2p_and_collective_seq_ids(self):
         pg = self._init_pg()
@@ -866,30 +932,6 @@ class AbstractFlightRecorderHookTest:
         # registered one.
         hook.remove()
 
-    def test_attach_without_completion_hook_support(self):
-        # Completion hooks are optional in the same way abort hooks are, and
-        # Backend's default registerCompletionHook throws rather than no-opping,
-        # so attach() must ask first. A backend without them still records; it
-        # only loses the ability to say a collective finished.
-        pg = self._init_pg()
-        backend = pg._get_backend(self.device)
-        self.assertEqual(pg.supports_completion_hooks, self._push_completion)
-        self.assertEqual(backend.supports_completion_hooks, self._push_completion)
-
-        before = len(self._hook_entries())
-        hook = self._fr_hook(pg)
-        t = torch.ones(4, device=self.device)
-        dist.all_reduce(t)
-        if self.device_type == "cuda":
-            torch.cuda.synchronize()
-        entries = self._await_retired(before + 1)[before:]
-        self.assertEqual(len(entries), 1)
-        self.assertTrue(entries[0]["retired"], msg=str(entries[0]))
-        # remove() must not throw either: unregisterCompletionHook throws on a
-        # backend that has none, so it may only be called if attach() registered
-        # one.
-        hook.remove()
-
     def test_profiling_name_carries_backend_name(self):
         # The comm_lib field must be the backend's own name, not a placeholder
         # and not ProcessGroup::getBackendName(), which answers "custom" for
@@ -948,23 +990,22 @@ class AbstractFlightRecorderHookTest:
         self.assertEqual(e["time_discovered_completed_ns"], 0, msg=str(e))
         hook.remove()
 
-    def test_completion_arriving_before_registration_still_retires(self):
+    def test_completion_before_post_hook_still_retires(self):
         # A Work and its op_id are only ever seen together in the post-hook, so
-        # a backend that establishes completion before that runs has nothing to
-        # hand the callback to. Dropping it retires nothing and the collective
-        # reads "scheduled" for ever -- the false hang this feature exists to
-        # rule out -- so the post-hook asks the Work whether it has already
-        # finished instead of waiting for a push that is not coming.
+        # that is where the callback is added, and a fast collective can finish
+        # before it runs. Its future is then already complete and the callback
+        # must run at once; otherwise the collective reads "scheduled" for ever
+        # -- the false hang this feature exists to rule out.
         #
         # Constructed, not raced. Post-hooks fire in hook_id order and the
         # flight recorder hook's ids start far above any hand-picked one, so
         # the hook below runs first and holds the window open. It waits on a
-        # sentinel collective issued behind the target on the same stream: the
-        # backend retires that queue in order, so once the sentinel's entry is
-        # retired the target's completion has already been pushed -- into a
+        # sentinel collective issued behind the target on the same stream, so
+        # once the sentinel's entry is retired the target has finished on the
+        # device too, and is_completed() publishes its result -- before a
         # post-hook that has not run yet, because it is waiting on this one.
-        if not self._push_completion:
-            self.skipTest("backend pushes no completion")
+        if not self._has_result_future:
+            self.skipTest("backend has no result future")
         pg = self._init_pg()
         pg._enable_collectives_timing()
         hook = self._fr_hook(pg)
@@ -986,6 +1027,7 @@ class AbstractFlightRecorderHookTest:
                     if len(entries) > before + 1 and entries[before + 1]["retired"]:
                         break
                     time.sleep(0.05)
+                observed["target_done"] = args.work.is_completed()
                 entries = self._hook_entries()
                 observed["target"] = entries[before]
                 observed["sentinel"] = entries[before + 1]
@@ -999,11 +1041,12 @@ class AbstractFlightRecorderHookTest:
         finally:
             pg.unregister_post_hook(1)
 
-        # The completion really did arrive with no op_id to match it to: had the
-        # hook registered the Work first, the same push would have retired the
+        # The target really did finish before the hook saw its Work: had the
+        # callback been added first, the same completion would have retired the
         # entry before this snapshot was taken.
         sentinel = observed["sentinel"]
         self.assertTrue(sentinel["retired"], msg=str(sentinel))
+        self.assertTrue(observed["target_done"])
         target = observed["target"]
         self.assertFalse(target["retired"], msg=str(target))
         self.assertNotEqual(target["state"], "completed", msg=str(target))

@@ -7,7 +7,7 @@
 namespace c10d::nccl2 {
 
 WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked(
-    std::vector<std::shared_ptr<WorkNCCL::State>>& completed) {
+    std::vector<std::shared_ptr<WorkNCCL::State>>& finished) {
   WorkNCCL::WorkStatus last_status = WorkNCCL::WorkStatus::COMPLETED;
 
   // Keep popping completed elements until we hit an in-progress element
@@ -24,7 +24,7 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked(
       WorkNCCL::WorkStatus status = work.state->checkStatus();
 
       if (status == WorkNCCL::WorkStatus::COMPLETED) {
-        completed.push_back(work.state);
+        finished.push_back(work.state);
         completedInputTensors_.push(std::move(work.inputTensors));
         work_queue.pop();
         // Continue to the next element in the queue
@@ -32,6 +32,7 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked(
           status == WorkNCCL::WorkStatus::TIMEDOUT ||
           status == WorkNCCL::WorkStatus::ERROR) {
         // Return the error status immediately
+        finished.push_back(work.state);
         return status;
       } else {
         // NOT_STARTED or INPROGRESS - stop processing this queue
@@ -56,19 +57,18 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked(
 // work_queues_mutex_ ensures proper synchronization - both garbageCollect() and
 // enqueueWork() acquire the mutex before accessing stream_work_queues_.
 WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollect() {
-  std::vector<std::shared_ptr<WorkNCCL::State>> completed;
+  std::vector<std::shared_ptr<WorkNCCL::State>> finished;
   WorkNCCL::WorkStatus status = WorkNCCL::WorkStatus::COMPLETED;
   {
     std::lock_guard<std::mutex> lock(work_queues_mutex_);
-    status = garbageCollectLocked(completed);
+    status = garbageCollectLocked(finished);
   }
-  // Reported with no queue lock held on purpose: a completion hook may take a
-  // lock of its own (c10d::FlightRecorderHook takes the recorder's, which a
-  // concurrent dump can hold while it waits on the GIL), and holding
+  // Published with no queue lock held on purpose: a future callback may take a
+  // lock of its own (the GIL, or c10d::FlightRecorderHook's), and holding
   // work_queues_mutex_ across it would put enqueueWork -- every collective on
   // this backend -- behind that wait.
-  for (const auto& state : completed) {
-    state->notifyCompletion();
+  for (const auto& state : finished) {
+    state->publishResult();
   }
   return status;
 }
@@ -83,14 +83,29 @@ WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
 
   // Initialize the status to COMPLETED to cover the case where the queue is
   // empty
-  std::vector<std::shared_ptr<WorkNCCL::State>> completed;
+  std::vector<std::shared_ptr<WorkNCCL::State>> finished;
   WorkNCCL::WorkStatus status = WorkNCCL::WorkStatus::COMPLETED;
   while (!stream_work_queues_.empty()) {
-    status = garbageCollectLocked(completed);
+    status = garbageCollectLocked(finished);
     if (status == WorkNCCL::WorkStatus::ERROR ||
         status == WorkNCCL::WorkStatus::TIMEDOUT ||
         status == WorkNCCL::WorkStatus::COMPLETED) {
       break;
+    }
+  }
+
+  // Works still queued on any stream will never finish once the communicator
+  // is torn down; fail those not already terminal so their result futures
+  // complete, as TIMEDOUT if the drain stopped on a timed-out work.
+  const auto forced = status == WorkNCCL::WorkStatus::TIMEDOUT
+      ? WorkNCCL::WorkStatus::TIMEDOUT
+      : WorkNCCL::WorkStatus::ERROR;
+  for (auto& [_, work_queue] : stream_work_queues_) {
+    for (; !work_queue.empty(); work_queue.pop()) {
+      auto& state = work_queue.front().state;
+      state->checkStatus();
+      state->setTerminalStatus(forced);
+      finished.push_back(state);
     }
   }
 
@@ -103,8 +118,8 @@ WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
   completedInputTensors.swap(completedInputTensors_);
   lock.unlock();
 
-  for (const auto& state : completed) {
-    state->notifyCompletion();
+  for (const auto& state : finished) {
+    state->publishResult();
   }
   while (!completedInputTensors.empty()) {
     completedInputTensors.front()->clear();
