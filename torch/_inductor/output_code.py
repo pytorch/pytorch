@@ -539,9 +539,6 @@ class CompiledFxGraph(OutputCode):
     frozen_param_names: dict[str, str]
     torchbind_constants: dict[str, torch._C.ScriptObject | FakeScriptObject]
     opaque_value_type_classes: dict[str, type]
-    # User CuTeDSL kernels that keep this graph from being serialized (see
-    # prepare_for_serialization).
-    process_local_kernels: list[str]
     output_strides: list[tuple[_StrideExprStr, ...] | None] | None
     disabled_cudagraphs_reason: str | None
     metrics_deltas: metrics.CachedMetricsDeltas
@@ -564,6 +561,10 @@ class CompiledFxGraph(OutputCode):
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
 
+    # User CuTeDSL kernels that keep this graph from being serialized (see
+    # prepare_for_serialization). A class attribute, unlike a default_factory, is
+    # also read by an instance made without __init__.
+    process_local_kernels: Sequence[str] = ()
     _boxed_call: bool | None = None
     _triton_bundle: TritonBundle | None = None
     _wrap_compiled_regions: bool = False

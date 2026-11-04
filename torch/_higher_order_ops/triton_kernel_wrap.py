@@ -35,6 +35,7 @@ from torch._higher_order_ops.user_kernel_hop import (
     trace_user_kernel_wrapper,
     UserKernelHOPifier,
     UserKernelHOPInfo,
+    UserKernelLayoutConstraint,
     UserKernelWrapperHOP,
 )
 from torch._higher_order_ops.utils import register_fake
@@ -2028,10 +2029,16 @@ def get_triton_kernel_name(hop_kwargs: Mapping[str, Any]) -> str:
         raise AssertionError("Unknown triton kernel type")
 
 
-def get_triton_layout_constraint() -> str:
+def get_triton_layout_constraint() -> UserKernelLayoutConstraint:
     from torch._inductor import config
 
-    return config.triton_kernel_default_layout_constraint
+    # The config module does not check values against their Literal type.
+    constraint = config.triton_kernel_default_layout_constraint
+    if constraint not in typing.get_args(UserKernelLayoutConstraint):
+        raise RuntimeError(
+            f"Unknown triton_kernel_default_layout_constraint: {constraint}"
+        )
+    return constraint
 
 
 ###############################################################################

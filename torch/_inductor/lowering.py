@@ -9385,27 +9385,13 @@ def cutedsl_kernel_wrap_(
     constant_args_idx,
     kwargs,
 ):
-    from torch._higher_order_ops.cutedsl_kernel_wrap import (
-        cutedsl_kernel_side_table,
-        get_cutedsl_mutated_tensors,
-    )
+    from torch._higher_order_ops.cutedsl_kernel_wrap import cutedsl_kernel_side_table
 
-    # The write set is decided on the FX node's (fake) values, as when the node was
-    # functionalized.
-    fx_kwargs = V.graph.current_node.kwargs["kwargs"]
-    mutated = get_cutedsl_mutated_tensors(
-        kernel_idx,
-        constant_args_idx,
-        {
-            k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
-            for k, v in fx_kwargs.items()  # type: ignore[union-attr]
-        },
-    )
     constant_args = cutedsl_kernel_side_table.get_constant_args(constant_args_idx)
     ir.UserDefinedCuteDSLKernel(
         kernel_idx=kernel_idx,
+        constant_args_idx=constant_args_idx,
         kernel_args={**kwargs, **constant_args},
-        mutated_arg_names=mutated,
     )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
