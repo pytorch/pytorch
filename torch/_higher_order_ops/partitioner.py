@@ -333,9 +333,9 @@ def create_hop_joint_graph(
         )
     example_grads = tuple(torch.zeros_like(val) for val in fw_gm_output_vals)
 
-    # Both re-traces below call a graph module. Run it through an Interpreter
-    # so each new node keeps its source node's meta (e.g. a "recompute" tag or
-    # an fx.traceback.annotate region), which the partitioner reads.
+    # Interpret graph modules so re-traced nodes keep their meta (e.g. recompute
+    # tags). A plain fw_fn sets its meta again when re-run. fw_gm can't replace
+    # fw_fn: it dropped the body's no_grad regions.
     joint_fn = create_bw_fn(
         _maybe_run_with_interpreter(fw_fn), fw_args, return_fw_outputs=True
     )
