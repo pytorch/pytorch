@@ -832,9 +832,9 @@ class TestScore(unittest.TestCase):
         self.assertEqual(pick("final+td5", r, cut).per_config["slow"], set())
         # A 20% share: 50s of default fits test_d (40s) and test_c, not test_b after them.
         ranked = {"scored": ["test_d", "test_c", "test_b"], "top25": [], "top25_cfg": {}}  # fmt: skip
-        with mock.patch.object(score, "LLM_SELECTOR_HEDGE", 0.2):
+        with mock.patch.object(score, "HEDGE_SHARE", 0.2):
             self.assertEqual(pick("final+td", NOTHING, ranked).per_config, {"default": {"test_d", "test_c"}, "slow": set()})  # fmt: skip
-        with mock.patch.object(score, "LLM_SELECTOR_HEDGE", 0.45):
+        with mock.patch.object(score, "HEDGE_SHARE", 0.45):
             self.assertEqual(pick("final+td", NOTHING, td).per_config, pick("final+td45", NOTHING, td).per_config)  # fmt: skip
         self.assertEqual(pick("final+td5", NOTHING, ranked).per_config["default"], {"test_c"})  # fmt: skip
         # 45% of 250s: test_a fits, test_b then does not, test_c after it still does.
