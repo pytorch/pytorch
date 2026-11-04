@@ -345,8 +345,9 @@ class Selection:
     # The test files the model chose from. Any other file, such as a custom
     # run_test.py handler or a C++ test, is always covered. None covers no extra file.
     candidates: set[str] | None = None
-    # Why from_model_output got no usable model answer; not serialized.
-    error: str | None = field(default=None, compare=False, repr=False)
+    # Why the selector got no usable answer (git, the model call or its output,
+    # or the test times); None for a deliberate run_all.
+    error: str | None = None
 
     @classmethod
     def from_model_output(
@@ -461,6 +462,7 @@ class Selection:
             "reason": self.reason,
             "enforce": self.enforce,
             "candidates": None if self.candidates is None else sorted(self.candidates),
+            "error": self.error,
         }
 
     @classmethod
@@ -471,7 +473,7 @@ class Selection:
         if not isinstance(d, dict) or type(d.get("version")) is not int or d["version"] != SELECTION_VERSION:  # fmt: skip
             raise ValueError(f"not a selection file of version {SELECTION_VERSION}")
         files, sweeps, candidates = d["files"], d["sweeps"], d["candidates"]
-        run_all, enforce, reason = d["run_all"], d["enforce"], d["reason"]
+        run_all, enforce, reason, error = d["run_all"], d["enforce"], d["reason"], d["error"]  # fmt: skip
         if not all(
             isinstance(v, list) and all(isinstance(x, str) for x in v)
             for v in (files, sweeps) + (() if candidates is None else (candidates,))
@@ -479,8 +481,8 @@ class Selection:
             raise TypeError("files, sweeps and candidates must be lists of strings")
         if not isinstance(run_all, bool) or not isinstance(enforce, bool):
             raise TypeError("run_all and enforce must be booleans")
-        if not isinstance(reason, str):
-            raise TypeError("reason must be a string")
+        if not isinstance(reason, str) or not isinstance(error, (str, type(None))):
+            raise TypeError("reason must be a string and error a string or null")
         if candidates is None and not run_all:
             raise ValueError("a selection without candidates must be run_all")
         return cls(
@@ -490,6 +492,7 @@ class Selection:
             reason,
             enforce,
             None if candidates is None else set(candidates),
+            error,
         )
 
     @classmethod
@@ -544,7 +547,9 @@ class AppliedSelection:
     def selection_metric(self) -> dict[str, object]:
         """The llm_td_selection metric. Every shard of a config emits the same
         one, so count one per (workflow run, run attempt, build_environment,
-        config, list_id): list_id hashes only the call's test file names."""
+        config, list_id): list_id hashes only the call's test file names.
+        selector_error tells a failed selector, which is never enforced, from
+        a deliberate run_all."""
         split, times = self.split, self.file_time
         files = "\n".join(sorted(times)).encode()
         return {
@@ -552,6 +557,7 @@ class AppliedSelection:
             "enforced": self.enforced,
             "td_enabled": self.td_enabled,
             "run_all": self.selection.run_all,
+            "selector_error": self.selection.error,
             "num_tests": len(times),
             "num_covered": len(split.covered),
             "num_td_include": len(self.td_include),
@@ -579,6 +585,7 @@ class AppliedSelection:
             "previous_failure_added": f in self.split.previously_failed,
             "kept_td": self.kept_td,
             "previous_failures_known": self.previous_failures_known,
+            "selector_error": self.selection.error,
         }
 
 
