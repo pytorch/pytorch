@@ -18203,6 +18203,10 @@ instantiate_device_type_tests(TestNNCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestNN)
 
+# pytest-xdist workers import this file instead of running it as __main__.
+if "PYTEST_XDIST_WORKER" in os.environ:
+    TestCase._default_dtype_check_enabled = True
+
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
     run_tests()
