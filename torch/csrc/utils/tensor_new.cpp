@@ -2083,9 +2083,8 @@ Tensor asarray(
     }
   } else {
     // Undefined tensor means it does not implement neither DLPack nor
-    // the buffer protocol. Last cases are a sequence, in which case we must
-    // copy (copy can't be false), and a __cuda_array_interface__ object, which
-    // copy_numpy copies.
+    // the buffer protocol. Last case is a sequence, in which case we must
+    // copy (copy can't be false).
     TORCH_CHECK_VALUE(
         !force_alias, "can't alias arbitrary sequence into a tensor.");
 
@@ -2099,7 +2098,7 @@ Tensor asarray(
         device,
         obj,
         /* copy_variables = */ false,
-        /* copy_numpy = */ force_copy,
+        /* copy_numpy = */ false,
         /* type_inference = */ !dtype.has_value());
     tensor.set_requires_grad(return_requires_grad);
   }
