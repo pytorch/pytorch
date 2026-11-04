@@ -5874,43 +5874,41 @@ class TestDeviceCodeCacheRegistry(TestCase):
         from torch._inductor.codegen.common import init_backend_registration
 
         init_backend_registration()
-        self.assertIs(get_device_codecache("cuda"), CUDACodeCache)
+        # On a HIP build the "cuda" device is served by the ROCm code cache
+        # (wired at module level in codecache.py).
+        expected_cuda = ROCmCodeCache if torch.version.hip else CUDACodeCache
+        self.assertIs(get_device_codecache("cuda"), expected_cuda)
         self.assertIs(get_device_codecache("xpu"), XPUCodeCache)
 
     def test_hip_build_registers_rocm_for_cuda(self):
-        # On a HIP build the "cuda" device is served by the ROCm code cache;
-        # "rocm" is not a registry key, so an out-of-tree override for "cuda"
-        # is the single point of customization.
+        # The built-in "cuda" entry is registered at module level in
+        # codecache.py as ``ROCmCodeCache if torch.version.hip else
+        # CUDACodeCache``, so it is resolved at import time from the real
+        # build flavor and never overwritten by init_backend_registration.
+        # Verify the module-level registration semantics:
         from torch._inductor.codecache import (
             _lookup_device_codecache,
             CUDACodeCache,
             ROCmCodeCache,
-            XPUCodeCache,
         )
 
+        # Mocking torch.version.hip after import must NOT change the
+        # registration: the class was chosen at import time, and the builtin
+        # registration (run unconditionally by setUp) does not touch the
+        # codecache registry.
+        import_time_hip = torch.version.hip
+        expected = ROCmCodeCache if import_time_hip else CUDACodeCache
         with mock.patch("torch.version.hip", "5.7"):
-            self.assertIs(_lookup_device_codecache("cuda"), CUDACodeCache)
             from torch._inductor.codegen.common import (
                 _init_builtin_backend_registration,
             )
 
-            # re-run the builtin registration under the mocked HIP build;
-            # device_codegens must be cleared too, otherwise the
-            # get_scheduling_for_device("cuda") is None guard skips the cuda
-            # branch (setUp already ran the registration once).
-            with mock.patch.dict(
-                "torch._inductor.codecache._DEVICE_CODECACHE_REGISTRY",
-                {"xpu": XPUCodeCache},
-            ), mock.patch.dict(
-                "torch._inductor.codegen.common.device_codegens",
-                clear=True,
-            ):
-                _init_builtin_backend_registration.cache_clear()
-                _init_builtin_backend_registration()
-                self.assertIs(_lookup_device_codecache("cuda"), ROCmCodeCache)
             _init_builtin_backend_registration.cache_clear()
-        # non-HIP lookups are unaffected
-        self.assertIs(_lookup_device_codecache("cuda"), CUDACodeCache)
+            _init_builtin_backend_registration()
+            self.assertIs(_lookup_device_codecache("cuda"), expected)
+            _init_builtin_backend_registration.cache_clear()
+        # and the real (unmocked) build flavor resolves the same way
+        self.assertIs(_lookup_device_codecache("cuda"), expected)
 
     def test_registered_class_satisfies_protocol(self):
         from torch._inductor.codecache import (

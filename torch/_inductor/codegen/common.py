@@ -689,18 +689,9 @@ def _init_builtin_backend_registration() -> None:
             CppWrapperGpu,
             WrapperFxCodegen,
         )
-        # "rocm" is a build flavor, not a device type: on a HIP build the cuda
-        # device is served by the ROCm code cache. Registration is unconditional
-        # (not @functools.cache-guarded like the scheduling above) so an
-        # out-of-tree override registered before the first compile sticks.
-        if torch.version.hip is not None:
-            from ..codecache import ROCmCodeCache, register_device_codecache
-
-            register_device_codecache("cuda", ROCmCodeCache)
-        else:
-            from ..codecache import CUDACodeCache, register_device_codecache
-
-            register_device_codecache("cuda", CUDACodeCache)
+        # NOTE: the built-in "cuda" code cache (ROCmCodeCache on a HIP build,
+        # CUDACodeCache otherwise) is registered at module level in
+        # codecache.py, not here - see the comment there for why.
 
     if get_scheduling_for_device("tpu") is None:
         register_backend_for_device(
@@ -712,8 +703,6 @@ def _init_builtin_backend_registration() -> None:
         )
 
     if get_scheduling_for_device("xpu") is None:
-        from ..codecache import XPUCodeCache, register_device_codecache
-
         register_backend_for_device(
             "xpu",
             XPUCombinedScheduling,
@@ -721,7 +710,8 @@ def _init_builtin_backend_registration() -> None:
             CppWrapperGpu,
             WrapperFxCodegen,
         )
-        register_device_codecache("xpu", XPUCodeCache)
+        # NOTE: the built-in "xpu" code cache is registered at module level in
+        # codecache.py, not here - see the comment there for why.
 
     if get_scheduling_for_device("tpu") is None:
         tpu_backends = {

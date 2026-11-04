@@ -273,16 +273,17 @@ def toolkit_version(device_type: str) -> str:
 
 def get_device_cutlass_config(device_type: str):
     """
-    Get device-specific CUTLASS config (``config.xpu``/``config.cuda`` override
-    the general ``config.cutlass``).
+    Get device-specific CUTLASS config.
 
-    Devices without a dedicated config namespace (currently everything except
-    xpu and cuda) fall back to the general ``config.cutlass``.
+    xpu has a dedicated config namespace (``config.xpu``, which copies the
+    ``config.cutlass`` defaults at class-creation time). Everything else -
+    including cuda - reads the general ``config.cutlass`` so that user
+    overrides like ``config.patch("cutlass.cutlass_max_profiling_configs",
+    ...)`` keep applying (``config.cuda`` is an independent copy and would
+    silently ignore them).
     """
     if device_type == "xpu":
         return config.xpu
-    if device_type == "cuda":
-        return config.cuda
     from ...config import cutlass as inductor_cutlass_config
 
     return inductor_cutlass_config

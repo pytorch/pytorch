@@ -5904,8 +5904,9 @@ class ROCmCodeCache:
 
 # Registry of the CodeCache class used to compile kernels for a given device type.
 # Out-of-tree backends should call register_device_codecache() from their backend
-# registration hook (see codegen.common.init_backend_registration, which wires the
-# built-in cuda/xpu entries).
+# registration hook; the built-in cuda/xpu entries are wired at module level at
+# the bottom of this file (next to the class definitions, after all classes
+# exist).
 #
 # The protocol below is the contract a registered class must satisfy; see
 # CUDACodeCache / XPUCodeCache / ROCmCodeCache for concrete implementations.
@@ -5986,7 +5987,17 @@ def get_device_codecache(device_type: str) -> type[DeviceCodeCacheProtocol]:
     return codecache_cls
 
 
-register_device_codecache("cuda", CUDACodeCache)
+# Wire the built-in device code caches at import time. "rocm" is a build
+# flavor, not a device type: on a HIP build the "cuda" device is served by
+# ROCmCodeCache. Doing this at module level (rather than inside
+# codegen.common._init_builtin_backend_registration) means an out-of-tree
+# backend calling register_device_codecache() from its own registration hook
+# is never overwritten by the built-in entries ("first registration wins"
+# for the built-ins is not needed because out-of-tree hooks run after this
+# import and simply replace these entries).
+register_device_codecache(
+    "cuda", ROCmCodeCache if torch.version.hip is not None else CUDACodeCache
+)
 register_device_codecache("xpu", XPUCodeCache)
 
 
