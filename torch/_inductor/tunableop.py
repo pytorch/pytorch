@@ -187,24 +187,19 @@ class BenchmarkJob:
         """
         try:
             measured = self.bmreq.benchmark()
-            warm_ok = True
-        except Exception:  # a failed warm must still yield a timing
-            log.warning(
-                "TunableOp warm-up failed; measuring the untuned kernel instead",
-                exc_info=True,
-            )
-            measured = None
-            warm_ok = False
+        except Exception:
+            # Nothing was tuned or validated, so there is no time worth
+            # reporting: measuring anyway hands the caller a timing for a
+            # kernel that was never validated, and it would be filed as "ok".
+            # Re-raised instead -- the exception crosses the pipe, submit()
+            # files an error outcome and the caller times the candidate
+            # inline, and the worker restarts in case the failure left a
+            # sticky fault (e.g. an illegal address) behind.
+            log.warning("TunableOp warm-up failed", exc_info=True)
+            raise
         if not self.measure:
             # Tune-only job (the ladder discards times): the warm already
             # performed the tuning side effect; skip the second benchmark.
-            # A failed warm re-raises instead of reporting inf: the exception
-            # crosses the pipe and submit() restarts the worker, since a warm
-            # failure may leave a sticky fault (e.g. an illegal address)
-            # behind. Reporting inf would skip that restart and leave the
-            # poisoned worker serving every later bucket.
-            if measured is None:
-                raise RuntimeError("TunableOp tune-only warm-up failed")
             return measured
         # Neither flag reaches the measured call: tuning would re-run FindFastest
         # and nearest match the donor search, both compile-time-only costs this
