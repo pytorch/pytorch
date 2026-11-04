@@ -33,12 +33,18 @@ def _find_pkg_dir(name: str) -> str | None:
 
 
 def _prepare_nccl_extensions() -> None:
-    # Locate the native library and JIT headers without importing EP's bindings.
+    # Dynamic (USE_SYSTEM_NCCL=ON / wheel) build only: the extension NEEDED-links
+    # libnccl_ep.so, which the nccl-extensions wheel provides at runtime. Point
+    # nccl-ep's JIT at its EP headers (NCCL_EP_HOME) and the nvidia.nccl wheel's
+    # NCCL headers (NCCL_HOME), and make libnccl_ep resolvable before importing
+    # the extension (its libnccl dependency is already loaded by torch). The
+    # static build bakes all of this in and never reaches here.
+    # Locate nccl without importing its initializer or EP's Python bindings.
     nccl_pkg = _find_pkg_dir("nccl")
-    if nccl_pkg is None:
+    if nccl_pkg is None or not os.path.isdir(os.path.join(nccl_pkg, "ep")):
         raise ImportError(
             "This TokenSwitchNCCL build requires the nccl-extensions package. "
-            "Install it with `pip install nccl-extensions==0.1.0`."
+            "Install it with `pip install nccl-extensions`."
         )
     ep_dir = os.path.join(nccl_pkg, "ep")
     cuda_version = torch.version.cuda
@@ -49,7 +55,7 @@ def _prepare_nccl_extensions() -> None:
     if not os.path.isfile(lib):
         raise ImportError(
             f"nccl-extensions is missing the CUDA {cuda_major} library at {lib}. "
-            "Install it with `pip install nccl-extensions==0.1.0`."
+            "Install it with `pip install nccl-extensions`."
         )
     if "NCCL_EP_HOME" not in os.environ:
         ep_headers = os.path.join(ep_dir, "include", "nccl_ep")
@@ -60,12 +66,20 @@ def _prepare_nccl_extensions() -> None:
             )
         os.environ["NCCL_EP_HOME"] = ep_dir
 
-    # Shared-NCCL builds already load libnccl; only its JIT headers are needed.
-    nvidia_nccl = _find_pkg_dir("nvidia.nccl")
-    if nvidia_nccl is not None and os.path.isdir(os.path.join(nvidia_nccl, "include")):
-        os.environ.setdefault("NCCL_HOME", nvidia_nccl)
+    # Point the JIT at NCCL headers. libnccl.so itself needs no preload here: a
+    # USE_SYSTEM_NCCL=ON torch (the only build that reaches this path) already
+    # dynamically loaded the system libnccl, so libnccl_ep.so's NEEDED
+    # libnccl.so.2 resolves to that already-loaded copy.
+    if "NCCL_HOME" not in os.environ:
+        nvidia_nccl = _find_pkg_dir("nvidia.nccl")
+        if nvidia_nccl is not None and os.path.isdir(
+            os.path.join(nvidia_nccl, "include")
+        ):
+            os.environ.setdefault("NCCL_HOME", nvidia_nccl)
 
-    # Register the versioned SONAME before importing torch._nccl_ep.
+    # nccl-extensions ships libnccl_ep unversioned (libnccl_ep.so) while the
+    # extension's NEEDED entry is its SONAME libnccl_ep.so.0; load it by path to
+    # register that SONAME for the import below.
     _NCCL_EP_KEEPALIVE.append(ctypes.CDLL(lib, mode=ctypes.RTLD_LOCAL))
 
 
@@ -73,8 +87,9 @@ def _import_nccl_ep() -> Any:
     # The EP bindings live in the optional torch._nccl_ep extension (USE_NCCL_EP).
     # A USE_SYSTEM_NCCL=OFF build links libnccl_ep statically and bakes its JIT
     # header paths, so the extension imports directly -- self-contained, no
-    # nccl-extensions. A USE_SYSTEM_NCCL=ON build NEEDED-links libnccl_ep from
-    # the nccl-extensions wheel; fall back to preparing that package and retry.
+    # nccl-extensions. A USE_SYSTEM_NCCL=ON build NEEDED-links libnccl_ep from the
+    # nccl-extensions wheel, so the first import fails until it is set up; fall
+    # back to that and retry.
     try:
         # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
         import torch._nccl_ep as _ep

@@ -60,7 +60,7 @@ if(NOT __NCCL_EP_INCLUDED)
   #    link it -- self-contained, no nccl-extensions, no runtime libnccl_ep.so.
   #  - USE_SYSTEM_NCCL=ON (wheel/CI): torch dynamically links the system NCCL, so
   #    build libnccl_ep.so against that same NCCL; the extension NEEDED-links it
-  #    and resolves it and its JIT headers from the nccl-extensions wheel.
+  #    and resolves it (and its JIT headers) from the nccl-extensions wheel at runtime.
   if(USE_SYSTEM_NCCL)
     if(DEFINED ENV{NCCL_INCLUDE_DIR})
       get_filename_component(__NCCL_EP_NCCL_HOME "$ENV{NCCL_INCLUDE_DIR}" DIRECTORY)
