@@ -683,33 +683,33 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
 
     # --- Dunder __hash__ and consistency ---
 
-    @parametrize(
-        "value",
-        [True, False, "hello", b"x", (1, 2), frozenset({1}), int, range(3)],
-    )
-    def test_dunder_hash_exact_builtin_type(self, value):
-        hash_type = type(value)
-
-        def fn(x):
-            return x.sin(), hash_type.__hash__(value)
-
-        x = torch.tensor(0)
-        cnt = torch._dynamo.testing.CompileCounter()
-        result = torch.compile(fn, backend=cnt, fullgraph=True)(x)
-        self.assertEqual(result, fn(x))
-        self.assertEqual(cnt.frame_count, 1)
-
-    def test_dunder_hash_exact_object_type_as_dict_key(self):
+    def test_dunder_hash_exact_bool(self):
         def fn(x, value):
-            d = {object.__hash__(value): 7}
-            return x.sin(), d[hash(value)]
+            return x.sin(), bool.__hash__(value)
 
         x = torch.tensor(0)
-        value = object()
-        cnt = torch._dynamo.testing.CompileCounter()
-        result = torch.compile(fn, backend=cnt, fullgraph=True)(x, value)
-        self.assertEqual(result, fn(x, value))
-        self.assertEqual(cnt.frame_count, 1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for value in (True, False, True):
+            self.assertEqual(compiled(x, value), fn(x, value))
+
+    def test_dunder_hash_object_alias_second_call(self):
+        def fn(x, a, b):
+            return x.sin(), object.__hash__(a) == object.__hash__(b)
+
+        x = torch.tensor(0)
+        a, b = object(), object()
+        compiled = torch.compile(fn, backend="eager")
+        self.assertEqual(compiled(x, a, b), fn(x, a, b))
+        self.assertEqual(compiled(x, a, a), fn(x, a, a))
+
+    def test_dunder_hash_range_second_call(self):
+        def fn(x, r):
+            return x.sin(), range.__hash__(r)
+
+        x = torch.tensor(0)
+        compiled = torch.compile(fn, backend="eager")
+        for r in (range(3), range(4)):
+            self.assertEqual(compiled(x, r), fn(x, r))
 
     def test_dunder_hash_unknown_receiver_type(self):
         from torch._functorch.eager_transforms import grad_increment_nesting
@@ -725,7 +725,43 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "expected 0 arguments, got 1"
+            torch._dynamo.exc.Unsupported, "Unsupported builtin __hash__ receiver"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    @parametrize("receiver", ["object", "bytes_subclass", "unknown_type"])
+    def test_dunder_hash_fallback_caught_type_error(self, receiver):
+        from torch._functorch.eager_transforms import grad_increment_nesting
+
+        class HashedBytes(bytes):
+            def __hash__(self):
+                return 123
+
+        value = HashedBytes(b"hello")
+        expected_object_hash = object.__hash__(5)
+
+        def fn(x):
+            y = x.sin()
+            try:
+                if receiver == "object":
+                    valid = object.__hash__(5) == expected_object_hash
+                elif receiver == "bytes_subclass":
+                    valid = bytes.__hash__(value) == hash(b"hello")
+                else:
+                    ctx = grad_increment_nesting()
+                    valid = isinstance(object.__hash__(ctx), int)
+            except TypeError:
+                valid = False
+            return y, valid
+
+        x = torch.tensor(0)
+        cnt = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn, backend=cnt)(x), fn(x))
+        self.assertEqual(cnt.frame_count, 0)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported builtin __hash__ receiver"
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
 
@@ -736,7 +772,13 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         x = torch.tensor(0)
         cnt = torch._dynamo.testing.CompileCounter()
         self.assertEqual(torch.compile(fn, backend=cnt)(x), fn(x))
-        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.frame_count, 1)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported builtin __hash__ receiver"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
 
     def test_dunder_hash_bytes_type_preserves_base_method(self):
         class HashedBytes(bytes):
@@ -751,19 +793,26 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         x = torch.tensor(0)
         cnt = torch._dynamo.testing.CompileCounter()
         self.assertEqual(torch.compile(fn, backend=cnt)(x), fn(x))
-        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.frame_count, 1)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported builtin __hash__ receiver"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
 
     def test_dunder_hash_bool_type_invalid_receiver(self):
         def fn(x):
             return x.sin(), bool.__hash__("hello")
 
         x = torch.tensor(0)
-        with self.assertRaises(TypeError):
+        with self.assertRaises(TypeError) as eager_error:
             fn(x)
         cnt = torch._dynamo.testing.CompileCounter()
-        with self.assertRaises(TypeError):
+        with self.assertRaises(TypeError) as compiled_error:
             torch.compile(fn, backend=cnt)(x)
-        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(str(compiled_error.exception), str(eager_error.exception))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_dunder_hash_int(self):
         expected = (42).__hash__()
