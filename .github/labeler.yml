@@ -223,12 +223,10 @@
 - .lintrunner.toml
 
 "ciflow/binaries":
-# Pins of the dependencies bundled into or required by the binary wheels
+# Not .ci/docker/**: those paths also get ciflow/docker, and the binary workflows
+# wait for only the CPU builder image, so the CUDA wheel jobs would pull a CUDA
+# image that is still being built.
 - .github/scripts/generate_binary_build_matrix.py
-- .ci/docker/common/install_cuda.sh
-- .ci/docker/common/install_cusparselt.sh
-- .ci/docker/common/install_mkl.sh
-- .ci/docker/common/install_nccl.sh
 - .ci/pytorch/windows/internal/cuda_install.bat
 
 "ciflow/torchtitan":
