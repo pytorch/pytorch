@@ -117,9 +117,9 @@ constexpr bool is_arm_neoverse() {
 }
 #endif
 
-// Without ACL, aarch64 CPUs that lack SVE (e.g. Apple Silicon) run oneDNN's NEON-only JIT
-// eltwise, softmax and binary kernels, which give wrong results or fail to build
-constexpr bool mkldnn_use_aten_for_eltwise() {
+// Without ACL, oneDNN has no optimized kernels for aarch64 CPUs that lack SVE (e.g. Apple Silicon):
+// convolutions run via gemm and the NEON-only JIT binary kernel fails to build
+constexpr bool mkldnn_lacks_aarch64_kernels() {
 #if defined(__aarch64__) && !AT_MKLDNN_ACL_ENABLED()
   return true;
 #else

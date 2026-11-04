@@ -134,7 +134,8 @@ Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, Tensor& result) 
   } else {
     TORCH_CHECK(self.sizes() == other.sizes(),
                "mkldnn_mul_out: currently mkldnn not support broadcasting");
-    if (mkldnn_use_aten_for_eltwise()) {
+    // oneDNN's NEON-only JIT binary kernel fails to build
+    if (mkldnn_lacks_aarch64_kernels()) {
       return result.copy_(self.to_dense().mul(other.to_dense()).to_mkldnn());
     }
     ideep::tensor y = itensor_from_mkldnn(other);

@@ -36,14 +36,10 @@ Tensor& mkldnn_tanh_(Tensor& self) {
 #else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
-#include <ATen/native/mkldnn/Utils.h>
 
 namespace at::native {
 
 Tensor mkldnn_sigmoid(const Tensor& self) {
-  if (mkldnn_use_aten_for_eltwise()) {
-    return self.to_dense().sigmoid().to_mkldnn();
-  }
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor y;
   ideep::eltwise_forward::compute(
@@ -53,9 +49,6 @@ Tensor mkldnn_sigmoid(const Tensor& self) {
 }
 
 Tensor& mkldnn_sigmoid_(Tensor& self) {
-  if (mkldnn_use_aten_for_eltwise()) {
-    return self.copy_(self.to_dense().sigmoid().to_mkldnn());
-  }
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::eltwise_forward::compute(
       x, x, ideep::algorithm::eltwise_logistic, ideep::prop_kind::forward);
@@ -63,9 +56,6 @@ Tensor& mkldnn_sigmoid_(Tensor& self) {
 }
 
 Tensor mkldnn_tanh(const Tensor& self) {
-  if (mkldnn_use_aten_for_eltwise()) {
-    return self.to_dense().tanh().to_mkldnn();
-  }
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor y;
   ideep::eltwise_forward::compute(
@@ -75,9 +65,6 @@ Tensor mkldnn_tanh(const Tensor& self) {
 }
 
 Tensor& mkldnn_tanh_(Tensor& self) {
-  if (mkldnn_use_aten_for_eltwise()) {
-    return self.copy_(self.to_dense().tanh().to_mkldnn());
-  }
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::eltwise_forward::compute(
       x, x, ideep::algorithm::eltwise_tanh, ideep::prop_kind::forward);
