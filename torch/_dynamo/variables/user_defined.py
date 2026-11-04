@@ -62,7 +62,12 @@ from ..exc import (
     unimplemented,
 )
 from ..graph_bytecode_inputs import get_external_object_by_index
-from ..guards import GuardBuilder, install_guard, install_not_in_instance_dict_guard
+from ..guards import (
+    GuardBuilder,
+    install_guard,
+    install_not_in_instance_dict_guard,
+    is_portable_function_guard,
+)
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
@@ -91,6 +96,7 @@ from ..utils import (
     is_pybind11_enum_member,
     is_torch_class,
     istype,
+    iter_mro_static_dicts,
     list_methods,
     namedtuple_fields,
     no_keywords,
@@ -106,7 +112,6 @@ from ..utils import (
     unpatched_nn_module_getattr,
 )
 from .base import (
-    _compute_slotdefs,
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
     GetSet,
@@ -127,6 +132,7 @@ from .lists import DequeVariable, ListVariable, TupleVariable
 from .object_protocol import (
     _resolve_descriptor_get,
     generic_is_true,
+    guard_mro_absent,
     is_nb_not_implemented,
     mro_attr_source,
     mro_lookup,
@@ -343,6 +349,10 @@ KNOWN_DATA_DESCRIPTOR_TYPES: frozenset[type] = frozenset(
         types.GetSetDescriptorType,
     }
 )
+
+# A metaclass whose MRO resolves __getattribute__ to anything else replaces
+# type_getattro, including one that only inherits the override.
+_type_getattribute = type.__getattribute__
 
 
 def is_data_descriptor(obj: object) -> bool:
@@ -612,6 +622,50 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
 
+    def pending_setattr_owner(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        """The class in this class's MRO whose pending setattr of *name* a lookup
+        sees, or None.
+
+        In eager the store would already be in that class's ``__dict__``, so it
+        wins unless a class earlier in the MRO defines *name*. The classes walked
+        past and the owner's place in the MRO are guarded to keep it that way, as
+        ``__bases__`` can be reassigned between calls.
+        """
+        side_effects = tx.output.side_effects
+        for idx, (klass, namespace) in enumerate(iter_mro_static_dicts(self.value)):
+            if klass is self.value:
+                klass_vt = self
+            elif klass in side_effects:
+                klass_vt = side_effects[klass]
+            else:
+                klass_vt = None
+            if klass_vt is not None and side_effects.has_pending_mutation_of_attr(
+                klass_vt, name
+            ):
+                if self.source is not None:
+                    guard_mro_absent(tx, self.value, self.source, name, idx)
+                    if klass_vt is not self:
+                        mro_entry = GetItemSource(TypeMROSource(self.source), idx)
+                        install_guard(mro_entry.make_guard(GuardBuilder.CLASS_MATCH))
+                return klass_vt
+            if name in namespace:
+                return None
+        return None
+
+    def getattr_needs_tracing(self, tx: "InstructionTranslatorBase", name: str) -> bool:
+        """Whether a real ``getattr`` cannot stand in for tracing the lookup.
+
+        It would run a user-defined ``__get__`` at trace time and bake its result
+        into the graph, or miss a setattr still pending in this frame.
+        """
+        cls_attr = self.lookup_cls_mro_attr(name)
+        descr_get = inspect.getattr_static(type(cls_attr), "__get__", None)
+        if isinstance(descr_get, types.FunctionType):
+            return True
+        return self.pending_setattr_owner(tx, name) is not None
+
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
@@ -624,7 +678,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # EnumType, etc.) that don't override __getattribute__ use
         # type.__getattribute__ which is the algorithm we implement below.
         metacls = type(self.value)
-        if metacls is not type and "__getattribute__" in metacls.__dict__:
+        if self.lookup_metaclass_attr("__getattribute__") is not _type_getattribute:
             unimplemented(
                 gb_type="Custom metaclass with __getattribute__",
                 context=f"type({self.value}) = {metacls}",
@@ -650,9 +704,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if meta_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(meta_attr):
             return self.resolve_meta_data_descriptor(tx, name, meta_attr, source)
 
-        # Check for pending mutations from setattr on the class during tracing.
-        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
-            return tx.output.side_effects.load_attr(self, name)
+        # Check for pending mutations from setattr on the class or a base
+        # during tracing.
+        owner = self.pending_setattr_owner(tx, name)
+        if owner is not None:
+            value = tx.output.side_effects.load_attr(owner, name)
+            # The store sits in owner.__dict__, so a descriptor is bound to this
+            # class, as in step 4 below.
+            if isinstance(
+                value, (variables.StaticMethodVariable, variables.ClassMethodVariable)
+            ):
+                return value.tp_descr_get_impl(tx, self, self)
+            if isinstance(value, UserDefinedVariable) and (
+                mro_lookup(value.python_type(), "__get__") is not NO_SUCH_SUBOBJ
+            ):
+                none = variables.ConstantVariable.create(None)
+                return value.call_method(tx, "__get__", [none, self], {})
+            return value
 
         # Step 3-5: Class MRO lookup.
         cls_attr = self.lookup_cls_mro_attr(name)
@@ -1270,6 +1338,27 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
+        elif (
+            name == "mro"
+            and len(args) == 0
+            and not kwargs
+            and type(self.value) is type
+            and self.lookup_cls_mro_attr("mro") is NO_SUCH_SUBOBJ
+        ):
+            # type.mro() returns a new list. With metaclass type, CPython
+            # recomputes __mro__ with the same C3 whenever a base changes, so
+            # the two always match. A custom metaclass can leave __mro__ stale.
+            # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L2935-L2945
+            # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L3001-L3014
+            if self.source is not None:
+                # cls.mro is type.mro while no class in the MRO defines mro.
+                guard_mro_absent(
+                    tx, self.value, self.source, "mro", len(self.value.__mro__)
+                )
+            mro_source = self.source and TypeMROSource(self.source)
+            mro = VariableTracker.build(tx, self.value.__mro__, mro_source)
+            items = mro.unpack_var_sequence(tx)
+            return variables.ListVariable(items, mutation_type=ValueMutationNew())
         elif name == "fromkeys" and issubclass(self.value, dict):
             if not issubclass(self.value, collections.OrderedDict):
                 no_keywords(tx, f"{self.value.__name__}.fromkeys", kwargs)
@@ -2036,6 +2125,37 @@ class UserDefinedClassVariable(UserDefinedVariable):
             new_fn = new_fn.__func__
         return new_fn is object.__new__
 
+    def _hasattr_check_side_effects(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "ConstantVariable | None":
+        # A metaclass data descriptor wins over the MRO, as in tp_getattro_impl.
+        meta_attr = self.lookup_metaclass_attr(name)
+        if meta_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(meta_attr):
+            return super()._hasattr_check_side_effects(tx, name)
+        owner = self.pending_setattr_owner(tx, name)
+        if owner is None:
+            return None
+        value = tx.output.side_effects.load_attr(owner, name, deleted_ok=True)
+        # The lookup would run a metaclass __getattribute__ or the stored value's
+        # __get__, and either may raise AttributeError. Tracing that here would
+        # run it twice for getattr(cls, name, default), which looks the attribute
+        # up again after hasattr.
+        if self.lookup_metaclass_attr("__getattribute__") is not _type_getattribute or (
+            isinstance(value, UserDefinedVariable)
+            and mro_lookup(value.python_type(), "__get__") is not NO_SUCH_SUBOBJ
+        ):
+            unimplemented(
+                gb_type="hasattr on a class attribute set earlier in the frame",
+                context=f"hasattr({self.value}, {name!r}), value {value}",
+                explanation="Dynamo cannot tell whether the lookup raises "
+                "AttributeError without running the stored value's __get__ "
+                "or the metaclass __getattribute__.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return variables.ConstantVariable.create(
+            not isinstance(value, variables.DeletedVariable)
+        )
+
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
@@ -2136,6 +2256,16 @@ def call_random_fn(
     # (currently hypothetical), but I'm not going to poke my hand in
     # this nest for now
     return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
+
+
+def can_guard_class_function_code(tx: "InstructionTranslatorBase", fn: object) -> bool:
+    """Whether a function reached through an instance's class can get its
+    CLOSURE_MATCH. A package must serialize every guard it keeps, and a function
+    whose globals no importable module owns (one exec'd into a plain dict) has
+    no portable form of that guard: under strict_precompile it would fail the
+    compile. Under a package such a function stays unguarded, as it was before
+    this guard existed."""
+    return tx.output.package is None or is_portable_function_guard("CLOSURE_MATCH", fn)
 
 
 class UserDefinedObjectVariable(UserDefinedVariable):
@@ -2295,25 +2425,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__rmod__" and isinstance(self.value, str) and len(args) == 1:
-            # str.__rmod__ is unicode_mod(other, self): `other` is the format
-            # string, and its %s runs a subclass __str__ on self, so keep self.
-            if not issubclass(args[0].python_type(), str):
-                return ConstantVariable.create(NotImplemented)
-            return args[0].call_method(tx, "__mod__", [self], kwargs)
-        for base, to_plain in _to_plain_constant.items():
-            if isinstance(self.value, base):
-                # The base type's method ignores subclass overrides, so run it
-                # on the plain builtin value.
-                plain = ConstantVariable.create(to_plain(self.value))
-                return plain.call_method(tx, name, args, kwargs)
-        # The subclass's own slots (e.g. slot_nb_add for a Python __add__) must
-        # not hide the builtin base's, which is what the unbound call runs.
-        builtin_base = next(
-            t for t in type(self.value).__mro__ if not t.__flags__ & Py_TPFLAGS_HEAPTYPE
-        )
-        base_slotdefs = _compute_slotdefs(builtin_base)
-        slotdef = base_slotdefs.get(name) or self.lookup_slotdefs(name)
+        slotdef = self.lookup_slotdefs(name)
         if slotdef is None:
             return super(UserDefinedObjectVariable, self).call_method(  # noqa: UP008
                 tx, name, args, kwargs
@@ -4192,16 +4304,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # the method's closure sourcelessly and SourcelessBuilder fails on
             # a captured tensor (test_modes.py,
             # test_nested_torch_function_mode).
-            fn_source = var_source or (
-                self.source and AttrSource(TypeSource(self.source), name)
-            )
-            return variables.UserMethodVariable(
-                VariableBuilder.create_internal_user_function(
-                    type_attr, source=fn_source
-                ),
-                self,
-                source=source,
-            )
+            # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
+            # off TypeSource is not tag-safe.
+            if var_source is not None and can_guard_class_function_code(tx, type_attr):
+                im_func = variables.UserFunctionVariable.create_with_source(
+                    type_attr, var_source
+                )
+            else:
+                im_func = VariableBuilder.create_internal_user_function(
+                    type_attr,
+                    source=var_source
+                    or (self.source and AttrSource(TypeSource(self.source), name)),
+                )
+            return variables.UserMethodVariable(im_func, self, source=source)
         # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
@@ -5055,15 +5170,6 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
 
 _CONSTANT_BASE_TYPES = (int, float, str)
 
-Py_TPFLAGS_HEAPTYPE = 1 << 9
-
-# The conversions skip subclass overrides of __int__ / __float__ / __str__
-_to_plain_constant: dict[type, Callable[[Any], Any]] = {
-    int: int.__int__,
-    float: float.__float__,
-    str: str.__str__,
-}
-
 _constant_base_methods: dict[type, set[Any]] = {
     t: {m for m in t.__dict__.values() if callable(m)} for t in _CONSTANT_BASE_TYPES
 }
@@ -5293,6 +5399,9 @@ class DefaultDictVariable(ConstDictVariable):
 
             default_factory = ConstantVariable.create(None)
         self.default_factory = default_factory
+
+    def python_type(self) -> type:
+        return collections.defaultdict
 
     @staticmethod
     def is_supported_factory(arg: VariableTracker) -> bool:
