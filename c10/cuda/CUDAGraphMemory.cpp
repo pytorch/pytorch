@@ -1,18 +1,11 @@
 #include <c10/cuda/impl/CUDAGraphMemory.h>
 
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Exception.h>
 
 namespace c10::cuda::CUDAGraphMemory {
 
-void markCaptureBegin(
-    c10::DeviceIndex device,
-    const CaptureRegistration& registration) {
-  CUDACachingAllocator::get()->markCaptureBegin(device, registration);
-}
-
-size_t markCaptureEnd(c10::DeviceIndex device, CaptureId_t capture_id) {
-  return CUDACachingAllocator::get()->markCaptureEnd(device, capture_id);
+void CaptureTracker::captureBegin() {
+  ++active_captures_;
 }
 
 void CaptureTracker::captureBegin(const CaptureRegistration& registration) {
@@ -34,12 +27,18 @@ void CaptureTracker::captureBegin(const CaptureRegistration& registration) {
           registration.parent_capture_id,
           root_capture_id,
           registration.primary_stream});
-  ++active_captures_;
+  captureBegin();
   if (registration.parent_capture_id.has_value()) {
     reuse_stream_aliases_.emplace(
         registration.primary_stream,
         reuseStream(registration.parent_dependency_stream));
   }
+}
+
+void CaptureTracker::captureEnd() {
+  TORCH_INTERNAL_ASSERT(
+      active_captures_ > 0, "captureEnd called with no active capture");
+  --active_captures_;
 }
 
 size_t CaptureTracker::captureEnd(CaptureId_t capture_id) {
@@ -64,9 +63,7 @@ size_t CaptureTracker::captureEnd(CaptureId_t capture_id) {
         ended_capture.invalid_capture_free_count;
     reuse_stream_aliases_.erase(ended_capture.primary_stream);
     capture_tree_.erase(capture_it);
-    TORCH_INTERNAL_ASSERT(
-        active_captures_ > 0, "captureEnd called with no active capture");
-    --active_captures_;
+    captureEnd();
   } else {
     const int erased_active_captures =
         eraseCaptureTree(ended_capture.root_capture_id);

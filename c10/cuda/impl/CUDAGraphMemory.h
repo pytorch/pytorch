@@ -16,7 +16,9 @@ struct AllocationContext {
 // allocation. Surviving allocations move to the parent when a child ends.
 class CaptureTracker {
  public:
+  void captureBegin();
   void captureBegin(const CaptureRegistration& registration);
+  void captureEnd();
   size_t captureEnd(CaptureId_t capture_id);
   bool hasActiveCaptures() const {
     return active_captures_ != 0;

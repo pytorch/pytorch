@@ -7084,6 +7084,12 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
         allocation_stream = torch.cuda.Stream()
         free_stream = torch.cuda.Stream()
 
+        # Warm per-stream HIP BLAS handles before the captures overlap.
+        if TEST_WITH_ROCM:
+            for stream in (allocation_stream, free_stream):
+                with torch.cuda.graph(torch.cuda.CUDAGraph(), stream=stream):
+                    torch.ones(1, device="cuda")
+
         torch.cuda.synchronize()
         with torch.cuda.stream(allocation_stream):
             allocation_graph.capture_begin(capture_error_mode="relaxed")
