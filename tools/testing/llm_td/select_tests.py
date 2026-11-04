@@ -31,7 +31,6 @@ from tools.testing.discover_tests import BLOCKLISTED_PATTERNS, TESTS
 from tools.testing.llm_td.selection import (
     LLM_TD_SELECTION_FILE,
     needs_run_all,
-    parse_model_output,
     Selection,
     SWEEPS,
 )
@@ -245,7 +244,6 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     record["head"] = git("rev-parse", args.head).strip()
     changed = changed_files(merge_base, args.head)
     if not changed and not args.print_prompt:
-        record["error"] = "no changed files"
         return Selection(run_all=True, reason="no changed files")
     if needs_run_all(changed) and not args.print_prompt:
         return Selection(run_all=True, reason="change touches test infrastructure")
@@ -285,20 +283,18 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     out = None if result.get("is_error") else result.get("structured_output")
     record["cost_usd"] = result.get("total_cost_usd")
     record["model_output"] = out
-    if out is None:
-        record["error"] = str(result.get("result") or "no structured output")[:2000]
-    else:
-        try:
-            parse_model_output(out, set(candidates))
-        except ValueError as e:
-            record["error"] = f"malformed model output: {e}"[:2000]
     # A deleted file, or the old path of a moved one, needs no reader.
     deleted = git(
         "diff", "--name-only", "--no-renames", "--diff-filter=D", merge_base, args.head
     ).splitlines()
-    return Selection.from_model_output(
+    selection = Selection.from_model_output(
         out, set(candidates), changed, lambda p: git_grep(p, args.head), set(deleted)
     )
+    if selection.error is not None:
+        # Without an answer, the CLI's own output says why.
+        cli = str(result.get("result") or "") if out is None else ""
+        record["error"] = (cli or selection.error)[:2000]
+    return selection
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -335,6 +331,9 @@ def main(argv: list[str] | None = None) -> None:
         "merge_base": None,
         "head": None,
         "cost_usd": None,
+        # Set exactly when the selector failed to produce a usable answer (git,
+        # the model call or its output, or the test times); never for a
+        # deliberate run_all.
         "error": None,
         "model_output": None,
     }
@@ -352,10 +351,10 @@ def main(argv: list[str] | None = None) -> None:
         selection = Selection(run_all=True, reason=f"selector failed: {error[:500]}")
     if selection is None:
         return
-    # A deliberate run_all (test infrastructure, too many changed files, an
-    # inductor failure list naming an unknown class, too many import hops, an
-    # edited file under test/ that nothing reads, or the model) is enforced; a
-    # broken selector leaves TD's split in place.
+    # A deliberate run_all (no changed files, test infrastructure, too many
+    # changed files, an inductor failure list naming an unknown class, too many
+    # import hops, an edited file under test/ that nothing reads, or the model)
+    # is enforced; a broken selector leaves TD's split in place.
     selection.enforce = args.enforce and record["error"] is None
     args.output.write_text(
         json.dumps({**selection.to_json(), "diagnostics": record}, indent=1)
