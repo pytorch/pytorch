@@ -24,10 +24,15 @@ def _read_file(path: Path) -> str:
 #     `RPC failed; HTTP 503`;
 #   - `RPC failed; curl 18`, `curl 56` and `curl 92 ... CANCEL/INTERNAL_ERROR`, a
 #     transfer that broke part way (partial file, receive failure, HTTP/2 stream
-#     cancelled). Other curl errors, e.g. `curl 16` from a broken HTTP/2 framing
-#     layer, usually come back on every attempt and are not retried;
+#     cancelled). The curl code is only checked when the clone fails before any
+#     pack data has arrived. Other curl errors, e.g. `curl 16` from a broken
+#     HTTP/2 framing layer, usually come back on every attempt and are not
+#     retried then;
 #   - `early EOF`, `unexpected disconnect` and `GnuTLS recv error`, the same for a
-#     connection that dropped while git was reading;
+#     connection that dropped while git was reading. These are matched anywhere in
+#     stderr, whatever curl error came before them: a failure while the pack is
+#     streaming is normally followed by `unexpected disconnect` and `early EOF`, so
+#     it is retried even for a curl code listed above as not retried;
 #   - `SSL_read: Connection reset` and `SSL_read: SSL_ERROR_SYSCALL`, a connection
 #     that was reset while data was being read.
 # Only these read-time signatures are matched. A reset while the connection is
