@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import logging
-import threading
 from unittest.mock import patch
 
 import torch
@@ -12,6 +11,7 @@ from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor.debug import _clear_sharding_prop_cache
 from torch.testing._internal.common_utils import (
     requires_accelerator,
+    run_concurrently,
     run_tests,
     TestCase,
 )
@@ -138,46 +138,33 @@ sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[
         handler.emit = lambda record: log_records.append(record)
         dispatch_logger.addHandler(handler)
         self.addCleanup(dispatch_logger.removeHandler, handler)
+        self.addCleanup(dispatch_logger.setLevel, dispatch_logger.level)
 
         x_dt = DTensor.from_local(torch.randn(2, 4), mesh, [Shard(0)], run_check=False)
 
-        def run_worker():
-            worker_exc: BaseException | None = None
-            cache_stats: tuple[int, int] | None = None
-
-            def worker():
-                nonlocal worker_exc, cache_stats
-                try:
-                    x_dt + x_dt  # miss (populates thread-local C++ cache)
-                    (
-                        x_dt + x_dt
-                    )  # hit (invokes log_sharding_prop_cache_hit on worker thread)
-                    cache_stats = (
-                        torch._C._get_DTensor_sharding_propagator_cache_stats()
-                    )
-                except BaseException as exc:
-                    worker_exc = exc
-
-            thread = threading.Thread(target=worker)
-            thread.start()
-            thread.join()
-            if worker_exc is not None:
-                raise worker_exc
-            self.assertIsNotNone(cache_stats)
-            hits, _ = cache_stats
-            self.assertGreaterEqual(hits, 1)
+        def worker():
+            x_dt + x_dt  # miss (populates thread-local C++ cache)
+            x_dt + x_dt  # hit (invokes log_sharding_prop_cache_hit on worker thread)
+            return torch._C._get_DTensor_sharding_propagator_cache_stats()
 
         for level, expected_records in ((logging.WARNING, 0), (logging.DEBUG, 2)):
             log_records.clear()
             dispatch_logger.setLevel(level)
-            run_worker()
+            hits, _ = run_concurrently(worker, num_threads=1)[0]
+            self.assertGreaterEqual(hits, 1)
             self.assertEqual(len(log_records), expected_records)
+        self.assertIn("MISS", log_records[0].getMessage())
+        self.assertIn("HIT", log_records[1].getMessage())
 
         # Also test when the logger returned to C++ has no other Python references,
         # so any dangling thread_local py::object deallocates it during thread exit
         # after PyThreadState_DeleteCurrent() has released the GIL (even under -DNDEBUG).
-        with patch.object(logging, "getLogger", side_effect=logging.Logger):
-            run_worker()
+        with patch.object(
+            logging, "getLogger", side_effect=logging.Logger
+        ) as mock_get_logger:
+            hits, _ = run_concurrently(worker, num_threads=1)[0]
+            self.assertGreaterEqual(hits, 1)
+            mock_get_logger.assert_any_call("torch.distributed.tensor._dispatch")
 
 
 if __name__ == "__main__":

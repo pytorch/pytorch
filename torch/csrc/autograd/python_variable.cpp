@@ -920,6 +920,14 @@ DEFINE_CACHING_PYTHON_IMPORT_GETTER(
         .attr("_op_schema")
         .attr("TupleStrategy"))
 
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_logging_module,
+    py::module_::import("logging"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_logging_debug,
+    get_logging_module().attr("DEBUG"))
+
 static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   const auto dtensor_spec_class = get_dtensor_spec_class();
   const auto op_strategy_class = get_op_strategy_class();
@@ -1184,18 +1192,12 @@ struct hash<NativeOpSchema> {
 
 // Helper to check if dtensor debug logging is enabled and log cache hits.
 // We cache the debug-enabled check per thread to avoid repeated Python calls,
-// and fetch the logger on each logged hit. Only plain bools may be kept in
-// thread_local storage here, because a thread_local py::object is destroyed at
-// thread exit after PyThreadState_DeleteCurrent() has released the GIL.
+// and fetch the logger on each logged hit. A thread_local py::object is
+// otherwise destroyed at thread exit after PyThreadState_DeleteCurrent() has
+// released the GIL, so it would require explicit cleanup before thread-state
+// teardown (as get_thread_local_native_sharding_propagator_cache does); this
+// helper avoids that by keeping only bools thread-local.
 namespace {
-DEFINE_CACHING_PYTHON_IMPORT_GETTER(
-    get_logging_module,
-    py::module_::import("logging"))
-
-DEFINE_CACHING_PYTHON_IMPORT_GETTER(
-    get_logging_debug,
-    get_logging_module().attr("DEBUG"))
-
 thread_local bool dtensor_dispatch_logger_initialized = false;
 thread_local bool dtensor_debug_logging_enabled = false;
 
