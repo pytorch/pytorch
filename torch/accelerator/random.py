@@ -62,7 +62,7 @@ def set_rng_state(new_state: Tensor, device: Device = None, /) -> None:
     r"""Set the RNG state of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>` on the given device.
 
     Args:
-        new_state (:class:`torch.Tensor`): The desired RNG state, a tensor of dtype `torch.uint8`.
+        new_state (:class:`torch.Tensor`): The desired RNG state. Must be a contiguous CPU tensor of dtype `torch.uint8`.
         device (:class:`torch.device`, str, int, optional): The device to set the RNG state for.
             If not given, uses :func:`torch.accelerator.current_device_index` by default.
 
