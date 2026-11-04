@@ -17,6 +17,7 @@ import torch
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
+from ...utils.device import check_current
 from . import tile
 from .kernel_general import (
     _combine_itree_partials,
@@ -693,7 +694,7 @@ def reduce_ordered_col(
             ),
         )
     device = x.get_device()
-    _L.check_current(device)
+    check_current(device)
     outs = [
         torch.empty(out_shape, device=x.device, dtype=dtype)
         for dtype in out_dtypes[:nouts]
@@ -816,7 +817,7 @@ def _reduce_col_tile(
     if x.dim() not in (2, 3) or not x.is_cuda or not x.is_contiguous():
         raise AssertionError(f"want contiguous 2D/3D CUDA, got {tuple(x.shape)}")
     device = x.get_device()
-    _L.check_current(device)
+    check_current(device)
     if len(out_dtypes) < nouts:
         raise AssertionError(f"want {nouts} output dtypes, got {len(out_dtypes)}")
     if x.dim() == 2:
