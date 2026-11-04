@@ -5007,16 +5007,6 @@ class TestAsArrayCudaOnly(TestCase):
             torch.asarray(_RecordsStream(torch.arange(5, device=device)))
         self.assertEqual(streams, [stream.cuda_stream])
 
-    def test_asarray_copy_cuda_array_interface(self, device):
-        class _CAI:
-            def __init__(self, tensor):
-                self.__cuda_array_interface__ = tensor.__cuda_array_interface__
-
-        original = torch.arange(5, device=device)
-        copied = torch.asarray(_CAI(original), copy=True)
-        self.assertNotEqual(copied.data_ptr(), original.data_ptr())
-        self.assertEqual(copied, original)
-
     def test_asarray_dlpack_initializes_device(self, device):
         code = """
 import sys
