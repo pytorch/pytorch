@@ -233,8 +233,9 @@ def data_file_readers(
     reading a file that needs no further reader and, by file, those reading a
     file only they can read. A file needs no further reader when it is deleted,
     when NO_READER_RE matches it, when a driver runs its directory (see
-    edited_tests), or when a C++ test reads it. None for more than
-    MAX_DATA_FILES files only their readers can read. A file is read by the paths naming it outside a # comment line, as test_run.py
+    edited_tests), or when a C++ test names it outside a // comment line.
+    None for more than MAX_DATA_FILES files only their readers can read. A file
+    is read by the paths naming it outside a # comment line, as test_run.py
     runs bin/test_script.py; a .py file also by its importers; and an expect
     file (see EXPECT_RE) also by the paths defining a class whose name starts
     with its test class, as test_tensorboard.py builds the path of
@@ -245,9 +246,10 @@ def data_file_readers(
     if len(data) > MAX_DATA_FILES:
         return None
 
-    def name_pattern(files: list[str]) -> str:
+    def name_pattern(files: list[str], cpp: bool = False) -> str:
         names = alts(f.rsplit("/", 1)[-1] for f in files)
-        return rf"^[[:space:]]*([^#[:space:][:alnum:]_.-]|[^#[:space:]].*[^[:alnum:]_.-])?({names})([^[:alnum:]_.-]|$)"
+        first = "([^#/[:space:]]|/[^/])" if cpp else "[^#[:space:]]"
+        return rf"^[[:space:]]*([^#[:space:][:alnum:]_.-]|{first}.*[^[:alnum:]_.-])?({names})([^[:alnum:]_.-]|$)"
 
     # A deleted expect file breaks the tests that still assert against it.
     classes = [m[1] for f in exempt if (m := EXPECT_RE.match(f))]
@@ -261,7 +263,8 @@ def data_file_readers(
         if f.endswith(".py"):
             patterns.append(import_pattern([f]))
         found = [r for r in grep("|".join(f"({p})" for p in patterns)) if r != f]
-        if any(r.startswith("test/cpp/") for r in found):
+        cpp = {r for r in found if r.startswith("test/cpp/") and not r.endswith((".md", ".rst"))}  # fmt: skip
+        if cpp and cpp & set(grep(name_pattern([f], cpp=True))):
             readers += found
         else:
             read_by[f] = found
