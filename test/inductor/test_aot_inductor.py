@@ -11472,6 +11472,25 @@ class AOTInductorTestsTemplate:
                 ).stdout
                 self.assertNotIn("torch_exception_get_what", undefined)
 
+    @unittest.skipUnless(IS_LINUX, "nm -D reads ELF dynamic symbols")
+    def test_libtorch_linked_so_uses_shim_message_getter(self):
+        # With libtorch providing the shims, a failed shim call reports the
+        # message libtorch recorded.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        so_path = AOTIRunnerUtil.legacy_compile(
+            Model(), (torch.randn(4, device=self.device),)
+        )
+        undefined = subprocess.run(
+            ["nm", "-D", "--undefined-only", so_path],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        self.assertIn("torch_exception_get_what_without_backtrace", undefined)
+
     @unittest.skipUnless(IS_LINUX, "the flag it checks is passed to ELF linkers")
     def test_libtorch_free_so_has_no_unused_openmp_dependency(self):
         # _get_openmp_args adds OpenMP to every Linux link. A model that calls no
