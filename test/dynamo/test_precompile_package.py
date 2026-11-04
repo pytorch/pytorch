@@ -124,6 +124,10 @@ def _stack(*filenames):
     return traceback.StackSummary.from_list([(f, 1, "forward", "") for f in filenames])
 
 
+class MethodKeyDict(dict):
+    pass
+
+
 def _aot_compile(fn, *args, guard_filter_fn=None, seen=None):
     """aot_compile fn on args through guard_filter_fn (the default filter when
     None), appending every (entry, verdict) pair to seen."""
@@ -278,6 +282,43 @@ _RISKY_DROP_CASES = {
 
 
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
+    @torch._dynamo.config.patch(caching_precompile=False)
+    @parametrize("alias_pair", [False, True])
+    def test_builtin_method_keys_all_guards(self, alias_pair):
+        def fn(x, left, right):
+            keys = {left.get, right.get} if alias_pair else {left.get}
+            return x + len(keys)
+
+        x = torch.ones(1)
+        compiled = _aot_compile(
+            fn,
+            x,
+            MethodKeyDict(),
+            MethodKeyDict(),
+            guard_filter_fn=lambda guards: [True] * len(guards),
+        )
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+        left, right = MethodKeyDict(), MethodKeyDict()
+        self.assertEqual(loaded(x, left, right), fn(x, left, right))
+        self.assertTrue(loaded.guard_check(x, left, right))
+        if alias_pair:
+            self.assertFalse(loaded.guard_check(x, left, left))
+
+    @parametrize("caching_precompile", (False, True))
+    def test_module_attribute_guard_survives_serialization(self, caching_precompile):
+        def fn(x, module):
+            return x + module.weight
+
+        module = torch.nn.Linear(3, 3)
+        x = torch.ones(3)
+        with torch._dynamo.config.patch(caching_precompile=caching_precompile):
+            compiled = _aot_compile(fn, x, module)
+            data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+        self.assertTrue(loaded.guard_check(x, module))
+        self.assertEqual(loaded(x, module), fn(x, module))
+
     @parametrize("caching_precompile", (False, True))
     @parametrize("descriptor_kind", ("method", "classmethod"))
     def test_raw_descriptor_guard_survives_serialization(
@@ -521,7 +562,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         control_state, _ = _kept_types(control)
         # The kept keys-match is all that tells the two artifacts' guards apart
         # beyond the identity guards on objects a load resolves by reference
-        # (G['pytree'], two of its classes and torch), which the pre-check's type
+        # (G['pytree'], its referenced classes and torch), which the pre-check's type
         # tests drop. Counted per type, because a set of type names hides a
         # second divergence in a type that keeps another instance.
         self.assertIn("DICT_KEYS_MATCH", kept)
@@ -535,7 +576,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # from Python 3.11 on; before that it is a _SpecialForm, guarded by an
         # ID_MATCH that is kept because it pickles as the global typing.Any.
         any_is_class = isinstance(pytree.Any, type)
-        class_matches, id_matches = (2, 2) if any_is_class else (1, 3)
+        # Constructed lookup keys now retain their class guard as well.
+        class_matches, id_matches = (3, 2) if any_is_class else (2, 3)
         self.assertEqual(
             counts - control_counts,
             {
@@ -2034,6 +2076,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(verdicts["G['_user_op']"], False, verdicts)
             self.assertEqual(len(risky), 1, verdicts)
             self.assertTrue(risky[0].startswith(root), verdicts)
+
+    def test_receiver_alias_guard_policy(self):
+        from torch._dynamo.precompile_package import (
+            _INVARIANT_DROPPABLE_GUARD_TYPES,
+            _SHAPE_BEARING_GUARD_TYPES,
+        )
+
+        self.assertIn("BUILTIN_METHOD_RECEIVER_ALIAS", _SHAPE_BEARING_GUARD_TYPES)
+        self.assertNotIn(
+            "BUILTIN_METHOD_RECEIVER_ALIAS", _INVARIANT_DROPPABLE_GUARD_TYPES
+        )
 
     def test_guard_policy_classification_is_total(self):
         # A guard type in no set is KEPT, so a drop policy can only ever

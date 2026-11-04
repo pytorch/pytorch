@@ -1510,14 +1510,15 @@ def is_function_or_wrapper(
 def is_function(
     value: object,
 ) -> TypeIs[_FuncTypes]:
-    return isinstance(
-        value,
-        (
+    # These types cannot be subclassed. Identity avoids spoofed __class__ and metaclass equality.
+    return any(
+        type(value) is function_type
+        for function_type in (
             types.FunctionType,
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
-        ),
+        )
     )
 
 
@@ -3047,6 +3048,13 @@ if has_triton_package():
 """
 
 
+def is_identity_singleton(value: object) -> bool:
+    """Constants whose process-wide identity does not depend on their source."""
+    return any(
+        value is item for item in (None, True, False, Ellipsis, NotImplemented)
+    ) or istype(value, (torch.dtype, torch.layout, torch.memory_format))
+
+
 def is_safe_constant(v: object) -> bool:
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
@@ -3268,10 +3276,14 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         # GC time) on that same dict mid-iteration, which a live view would turn
         # into "dictionary changed size during iteration".
         return list(obj.items())
-    elif isinstance(obj, OrderedDict):
+    elif issubclass(type(obj), OrderedDict):
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
     else:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
+
+
+class InvalidOrderedDict(ValueError):
+    """An OrderedDict's storage and linked keys cannot form one snapshot."""
 
 
 def enumerate_items_with_dict_position(
@@ -3285,10 +3297,19 @@ def enumerate_items_with_dict_position(
     dict.keys() position so that ConstDictKeySource indices stay consistent
     with PyDict_Next / C++ DictGuardManager.
     """
+    if issubclass(cast(type[dict[K, V]], type(obj)), OrderedDict):
+        items = list(dict.items(obj))
+        keys = torch._C._dynamo.guards.ordered_dict_keys(obj)
+        positions = {id(key): (i, key, value) for i, (key, value) in enumerate(items)}
+        if (
+            keys is None
+            or len(positions) != len(items)
+            or len(keys) != len(items)
+            or {id(key) for key in keys} != positions.keys()
+        ):
+            raise InvalidOrderedDict("OrderedDict storage differs from linked keys")
+        return (positions[id(key)] for key in keys)
     items = get_items_from_dict(obj)
-    if isinstance(obj, OrderedDict):
-        key_to_pos = {k: i for i, k in enumerate(dict.keys(obj))}
-        return ((key_to_pos[k], k, v) for k, v in items)
     return ((i, k, v) for i, (k, v) in enumerate(items))
 
 
@@ -3365,14 +3386,6 @@ def to_subclass(t: Any, cls: type) -> Any:
 
 
 dict_getitem = dict.__getitem__
-
-
-@torch.fx.wrap
-def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
-    # Use dict.keys() to match the iteration order of PyDict_Next used by
-    # the C++ DictGuardManager and by ConstDictKeySource._name_template.
-    # pyrefly: ignore [bad-argument-type]
-    return next(itertools.islice(dict.keys(d), n, n + 1))
 
 
 def set_base_iter(s: Iterable[T]) -> Iterator[T]:
@@ -5639,6 +5652,18 @@ def is_tensor_getset_descriptor(name: str) -> bool:
         return type(attr) is types.GetSetDescriptorType
     except AttributeError:
         return False
+
+
+def find_type_attribute_name(obj_type: type, value: object, /) -> str | None:
+    """Find a directly declared class attribute by value identity."""
+    return next(
+        (
+            name
+            for name, item in get_type_dict_no_user_code(obj_type).items()
+            if item is value
+        ),
+        None,
+    )
 
 
 def get_type_dict_no_user_code(cls: type) -> Mapping[str, object]:

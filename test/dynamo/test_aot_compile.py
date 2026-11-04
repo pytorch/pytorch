@@ -804,7 +804,7 @@ class RejectsOnceThenRaises(NeverReChecked):
 # over it pins the junction of the two, which a caveat-only golden would not. The
 # placeholders are the plural of `raise` and the trees it names, each as
 # `[i] <Kind: reason>`, joined with `; `.
-CAVEAT_AFTER_A_RAISE = "which need not be the one that loaded them. Fix the raise{} out of {} first: every rejection this advice rests on followed a raise from its own tree, and a C++ throw out of a tree can leave that tree's relational guard state stale, so its next check can reject a call it fits or accept one it does not."
+CAVEAT_AFTER_A_RAISE = "which need not be the one that loaded them. Fix the raise{} out of {} first: every rejection this advice rests on followed a raise from its own tree, and guard checks can execute user code that changes the guarded state, so a later rejection need not describe the original call."
 
 
 # Not the identity: an identity weight makes "read the serialized weight" and
@@ -4973,18 +4973,8 @@ from user code:
                         self.assertIsNone(ref())
 
     def test_no_match_message_quotes_a_tree_that_raised_then_answered(self):
-        # A raise still withholds the opted-out last resort: dispatch cannot tell
-        # this flavour, which returns with an exception merely set and leaves
-        # nothing stale, from a C++ throw that skips the
-        # _reset_relational_guard_state() call on check_nopybind_template's normal
-        # exits -- RelationalGuard::reset_state has no Python binding, so nothing
-        # here can clear that residue -- and lets a later rejection from the same
-        # tree stand on the residue rather than on this call, so it holds the
-        # opt-out back on any raise. But the raise is no longer all the report can
-        # say about that entry -- the tree did reject this call on the second
-        # pass, and that rejection is a real answer, so the report quotes the
-        # guard it rejected on and the advice that rejection earns, and names the
-        # raise as what withheld the opt-out and what to fix.
+        # A raise still withholds the opted-out last resort. A retry can execute
+        # user code against changed state, so report both its answer and the raise.
         x = torch.ones(3, 3)
         model = torch.compile(DictBranchModule(), fullgraph=True, backend="eager")
         model._aot_compile(
@@ -5040,8 +5030,8 @@ from user code:
         # message: [0] raised, [1]'s guards passed on this call, and the parent
         # propagated [0]'s raise and served nothing. A raise is not a rejection
         # and says nothing about [1], so [1]'s graph is what dispatch owes the
-        # caller; refusing would not undo the relational residue a C++ throw
-        # leaves either, so the raise is served over and warned about.
+        # caller. Native relational state is reset even when an earlier tree
+        # throws, so the later match can be served and the raise warned about.
         self._hide_leaked_dynamo_globals()
         mod = GlobalConfigModule()
         model = torch.compile(
@@ -5076,7 +5066,7 @@ from user code:
         self.assertEqual(
             logs.output,
             [
-                "WARNING:torch._dynamo.aot_compile:AOT compiled input [0]'s guard check raised RuntimeError: guard tree is unhappy; dispatch served [1] rather than propagating it. Fix or drop input [0]: its next check can reject a call it fits or accept one it does not."
+                "WARNING:torch._dynamo.aot_compile:AOT compiled input [0]'s guard check raised RuntimeError: guard tree is unhappy; dispatch served [1] rather than propagating it. Fix or drop input [0]: its guard check raised."
             ],
         )
 
@@ -5113,10 +5103,10 @@ from user code:
         self.assertIn(raised, logs.output[0])
         self.assertIn(f"dispatch served [{served_index}]", logs.output[0])
         if opted_out:
-            self.assertIn("opted out of guard checks, but", logs.output[0])
+            self.assertIn("opted out of guard checks;", logs.output[0])
             # The raiser is the last of the two results here, so the stale accept
-            # has no later match to displace and the advice states the remedy alone.
-            remedy = "accept a call it does not fit; fix or drop it."
+            # The warning identifies the opted-out artifact and its remedy.
+            remedy = "fix or drop its failing guard artifact."
             self.assertIn(remedy, logs.output[0])
             self.assertNotIn("ahead of a later match", logs.output[0])
 
@@ -5297,20 +5287,9 @@ from user code:
         self.assertTrue(advice.endswith(caveat), advice)
         self.assertNotIn("Every guard tree raised", message)
 
-    def test_no_match_message_qualifies_a_rejection_that_followed_a_cpp_throw(self):
-        # The stub above raises from Python; this is the raise the caveat's clause
-        # is about, out of a real tree. TENSOR_MATCH on a strided nested tensor
-        # fires a TORCH_CHECK, and that throw skips the reset on
-        # check_nopybind_template's exits, so NO_TENSOR_ALIASING still holds
-        # L['x'] from the scan when the second pass visits x's manager -- before
-        # y's, whose leaf threw -- and rejects the call there. That stale
-        # rejection is the one the advice rests on; the report's re-check runs on
-        # the state that rejection reset and quotes y's mismatch instead. Two
-        # orderings besides the reset carry this: root accessors stay in
-        # Guard.sort_key order (L['x'] before L['y']; the throw leaves before the
-        # fail-count bump and sort in check_accessors_nopybind), and
-        # TensorCheck::check_verbose compares dispatch key sets before it reads
-        # strides, so the re-check names L['y'] rather than throwing again.
+    def test_no_match_message_resets_relational_guards_after_a_cpp_throw(self):
+        # TENSOR_MATCH on a strided nested tensor throws after checking x.
+        # Both dispatch passes must report y, without stale tensor-alias state.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(PairModule(), fullgraph=True, backend="eager")
         model._aot_compile(
@@ -5334,27 +5313,21 @@ from user code:
         self.assertIsNone(cause.__cause__)
         self.assertEqual(sum(ln.startswith("  [") for ln in lines), 1, message)
         entry = next(ln for ln in lines if ln.startswith("  ["))
-        self.assertNotIn("<guard check raised", entry)
-        self.assertIn("L['y']", entry)
-        self.assertIn("[0]'s guard check raised while checking this call", message)
-        advice = next(ln for ln in lines if ln.startswith("Add a ModelInput"))
-        # Collapsed as _raise_text collapses it: under TORCH_SHOW_CPP_STACKTRACES=1,
-        # which run_test.py sets on a retry, str(cause) carries the multi-line C++
-        # backtrace, and the report is one line per paragraph.
-        collapsed = " ".join(str(cause).splitlines())
-        caveat = CAVEAT_AFTER_A_RAISE.format("", f"[0] <RuntimeError: {collapsed}>")
-        self.assertTrue(advice.endswith(caveat), advice)
-        self.assertNotIn("Every guard tree raised", message)
-        # The residue itself, probed after the dispatch under test so that
-        # dispatch ran on a tree nothing here had touched: the evaluation right
-        # after the throw fails on x as a duplicate.
+        self.assertIn("<guard check raised RuntimeError:", entry)
+        self.assertIn("doesn't support strides", entry)
+        self.assertIn("guard check raised while checking this call", message)
+        self.assertNotIn("Add a ModelInput", message)
+        self.assertNotIn("stale", message)
         result = model.forward.compiled_results[0]
         tree = result._live_guard_manager()
         f_locals = result.prepare_f_locals(model.forward.model, x, nested)
         with self.assertRaisesRegex(RuntimeError, "doesn't support strides"):
             tree.check(f_locals)
-        stale = tree.check_verbose(f_locals).verbose_code_parts
-        self.assertEqual(stale, ["Duplicate tensor found where not expected!"])
+        diagnostic = tree.check_verbose(f_locals).verbose_code_parts
+        self.assertIn("L['y']", " ".join(diagnostic))
+        valid = result.prepare_f_locals(model.forward.model, x, torch.randn(3, 3))
+        self.assertTrue(tree.check(valid))
+        self.assertTrue(tree.check(valid))
 
     def test_no_match_message_trusts_one_rejection_taken_before_a_raise(self):
         # One trusted rejection is enough to leave the advice unqualified: [0]
@@ -5663,7 +5636,7 @@ from user code:
         raised = "[0]'s guard check raised RuntimeError: the scan is unhappy"
         self.assertIn(raised, warned)
         self.assertIn("dispatch served [0]", warned)
-        self.assertIn("reject a call it fits or accept one it does not", warned)
+        self.assertIn("Fix or drop input [0]: its guard check raised", warned)
         # The same tree's next answer is acted on with no raise on record at all,
         # which is why a per-call veto is not what keeps a stale tree honest.
         with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
@@ -5687,7 +5660,7 @@ from user code:
         self.assertEqual(
             logs.output,
             [
-                "WARNING:torch._dynamo.aot_compile:AOT compiled input [0]'s guard check raised RuntimeError: the scan is unhappy; dispatch served [0] rather than propagating it. Input [0] opted out of guard checks, but its next check can accept a call it does not fit; fix or drop it."
+                "WARNING:torch._dynamo.aot_compile:AOT compiled input [0]'s guard check raised RuntimeError: the scan is unhappy; dispatch served [0] rather than propagating it. Input [0] opted out of guard checks; fix or drop its failing guard artifact."
             ],
         )
 
@@ -5706,7 +5679,7 @@ from user code:
         self.assertEqual(len(logs.output), 1, "\n".join(logs.output))
         self.assertIn("dispatch served [1]", logs.output[0])
         self.assertIn("Fix or drop input [0]", logs.output[0])
-        self.assertNotIn("opted out of guard checks, but", logs.output[0])
+        self.assertNotIn("opted out of guard checks;", logs.output[0])
 
     def test_aot_compile_module_second_pass_warning_names_the_index_served(self):
         # [0] raises in both passes and [1] raises in the scan, then accepts on
@@ -5765,8 +5738,8 @@ from user code:
         # opted-out result itself is what the last resort serves.
         self.assertIn("dispatch served [0]", logs.output[0])
         # The helper's result opted out, so the advice is the opted-out tree's.
-        self.assertIn("opted out of guard checks, but", logs.output[0])
-        self.assertIn("does not fit; fix or drop it.", logs.output[0])
+        self.assertIn("opted out of guard checks;", logs.output[0])
+        self.assertIn("fix or drop its failing guard artifact.", logs.output[0])
         self.assertNotIn("Fix or drop input", logs.output[0])
 
     def test_aot_compile_module_warns_once_per_exception_type_at_one_index(self):
@@ -5890,9 +5863,9 @@ from user code:
             self.assertEqual(model(x), x * 2)
         self.assertEqual(len(logs.output), 1, "\n".join(logs.output))
         self.assertIn("dispatch served [1]", logs.output[0])
-        self.assertIn("Input [0] opted out of guard checks, but", logs.output[0])
+        self.assertIn("Input [0] opted out of guard checks;", logs.output[0])
         # A later result exists here, so the stale accept's cost names it.
-        self.assertIn("does not fit ahead of a later match", logs.output[0])
+        self.assertIn("fix or drop its failing guard artifact", logs.output[0])
         with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
             self.assertEqual(model(x), x * 2)
 
@@ -7871,13 +7844,89 @@ from user code:
         (result,) = compiled.compiled_results
         self.assertFalse(result._has_global_guards)
 
-    def test_aot_compile_module_key_order_only_global_is_not_read_live(self):
-        # A global certified by nothing but a guard_on_key_order entry. Iterating
-        # a module-level dict roots its TYPE_MATCH and its key-order check at the
-        # same GlobalSource, the default filter drops the guard for being global,
-        # and guard_filter_fn never prunes the key-order set -- so no kept guard
-        # checks these tensors and the pick must leave the name alone. Reading it
-        # live would serve values nothing ever compared against.
+    @parametrize("retain", [False, True])
+    def test_aot_compile_dictionary_order_metadata_follows_filter(self, retain):
+        class Module(torch.nn.Module):
+            def forward(self, x, mapping):
+                return x + next(iter(mapping.values()))
+
+        def guard_filter(entries):
+            return [retain or "mapping" not in entry.name for entry in entries]
+
+        x, mapping = torch.ones(1), {"a": 2, "b": 3}
+        model = torch.compile(
+            Module(),
+            backend="eager",
+            fullgraph=True,
+            options={"guard_filter_fn": guard_filter},
+        )
+        model._aot_compile([ModelInput(args=(x, mapping), kwargs={}, contexts=[])])
+        (captured,) = model.forward.compiled_results
+        state = load_guards_state(captured._artifacts.guards_state).output_graph
+        self.assertEqual(
+            {source.name for source in state.guard_on_key_order},
+            {"L['mapping']"} if retain else set(),
+        )
+        self.assertEqual(model(x, mapping), x + 2)
+        data = model._save_aot_compiled_module()
+        loaded = torch.compile(Module(), backend="eager", fullgraph=True)
+        loaded._load_aot_compiled_module(data)
+        self.assertEqual(loaded(x, mapping), x + 2)
+        reordered = {"b": 3, "a": 2}
+        if retain:
+            with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
+                loaded(x, reordered)
+        else:
+            self.assertEqual(loaded(x, reordered), x + 2)
+
+    @parametrize("member", ["mapping", "weight"])
+    def test_aot_compile_implicit_module_dictionary_order_alias(self, member):
+        global AOT_IMPLICIT_ORDER_ROOT
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mapping = {"a": 1, "b": 2}
+                self.weight = torch.nn.Parameter(torch.ones(1))
+                self.bias = torch.nn.Parameter(torch.zeros(1))
+
+            def forward(self, x):
+                return x + len(tuple(AOT_IMPLICIT_ORDER_ROOT)) + hasattr(self, member)
+
+        module = Module()
+        AOT_IMPLICIT_ORDER_ROOT = (
+            module.mapping if member == "mapping" else module._parameters
+        )
+        self.addCleanup(globals().pop, "AOT_IMPLICIT_ORDER_ROOT", None)
+
+        def guard_filter(entries):
+            return [
+                entry.guard_type == "HASATTR" or entry.guard_type == "TENSOR_MATCH"
+                for entry in entries
+            ]
+
+        x = torch.ones(1)
+        model = torch.compile(
+            module,
+            backend="eager",
+            fullgraph=True,
+            options={"guard_filter_fn": guard_filter},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        (captured,) = model.forward.compiled_results
+        state = load_guards_state(captured._artifacts.guards_state).output_graph
+        self.assertEqual(
+            {source.name for source in state.guard_on_key_order},
+            {"G['AOT_IMPLICIT_ORDER_ROOT']"},
+        )
+        self.assertIn("AOT_IMPLICIT_ORDER_ROOT", state.global_scope)
+        data = model._save_aot_compiled_module()
+        loaded = torch.compile(Module(), backend="eager", fullgraph=True)
+        loaded._load_aot_compiled_module(data)
+        self.assertEqual(loaded(x), x + 3)
+
+    def test_aot_compile_module_captured_global_is_not_read_live(self):
+        # Dropping global guards and order metadata must preserve captured values.
         from torch._dynamo.source import get_global_source_name
 
         global AOT_KEY_ORDER_GLOBAL
@@ -7903,11 +7952,9 @@ from user code:
         ko_sources = output_graph.guard_on_key_order
         key_order = {get_global_source_name(source) for source in ko_sources}
         self.assertNotIn("AOT_KEY_ORDER_GLOBAL", own)
-        self.assertIn("AOT_KEY_ORDER_GLOBAL", key_order)
-        # Armed and not vacuous: the name is in the serialized global_scope that
-        # arms the pick, and the graph carries the value the narrowing keeps
-        # serving instead.
-        self.assertIn("AOT_KEY_ORDER_GLOBAL", output_graph.global_scope)
+        self.assertNotIn("AOT_KEY_ORDER_GLOBAL", key_order)
+        # Captured tensor inputs survive even when no guard reads this global.
+        self.assertNotIn("AOT_KEY_ORDER_GLOBAL", output_graph.global_scope)
         used_globals = captured._artifacts.runtime_env.used_globals
         self.assertIn("AOT_KEY_ORDER_GLOBAL", used_globals)
 
@@ -7922,7 +7969,7 @@ from user code:
         reloaded._load_aot_compiled_module(data)
         (result,) = reloaded.forward.compiled_results
         self.assertIs(result._guard_scope, _GuardScope.SUPPLIED)
-        self.assertTrue(result._has_global_guards)
+        self.assertFalse(result._has_global_guards)
         actual = reloaded(x)
         self.assertEqual(actual, expected)
         live = x + AOT_KEY_ORDER_GLOBAL["a"] + AOT_KEY_ORDER_GLOBAL["b"]

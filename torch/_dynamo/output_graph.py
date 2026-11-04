@@ -184,6 +184,7 @@ from .variables.builder import (
 )
 from .variables.ctx_manager import ContextWrappingVariable
 from .variables.functions import ClosureConversionError, VariableTracker
+from .variables.hashable import BuiltinMethodKeyTracker
 from .variables.misc import NullVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -769,6 +770,7 @@ class OutputGraph(OutputGraphCommon):
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: dict[Source, VariableTracker] = {}
+        self.builtin_method_keys = BuiltinMethodKeyTracker()
         # List of TensorVariables that are leaf tensors created in-graph
         # (e.g., nn.Parameter via tracable_create_parameter). These need to be
         # tracked separately from input_source_to_var for backward() auto-detection.
@@ -1484,6 +1486,9 @@ class OutputGraph(OutputGraphCommon):
             )
             self.tracers.append(tracer)
             yield tracer
+            # Successful ordinary HOP traces contribute to enclosing reuse conditions.
+            if tracer.parent is not None:
+                tracer.parent.traced_sources.update(tracer.traced_sources)
         finally:
             new_scope_ctx.__exit__(None, None, None)
             self.tracers.pop()
@@ -2535,6 +2540,7 @@ class OutputGraph(OutputGraphCommon):
                         f"Here are the list of potential sources you can double check: {side_effect_refs}"
                     )
 
+        self.builtin_method_keys.install_alias_guard()
         return all_stack_locals_metas
 
     def codegen_cells(self, tx: "InstructionTranslatorBase", cg: PyCodegen) -> None:
@@ -3704,6 +3710,7 @@ class OutputGraph(OutputGraphCommon):
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
         self.input_source_to_var.clear()
+        self.builtin_method_keys.clear()
         self.leaf_var_creation_order.clear()
         self.unspec_variable_map.clear()
         self.backward_state.clear()
@@ -4037,6 +4044,7 @@ class SubgraphTracer(fx.Tracer):
         # this subtracer's trace. Used by invoke_subgraph reuse to collect
         # guards and detect mutations on captured variables.
         self.traced_sources: OrderedSet[Source] = OrderedSet()
+        self.has_builtin_method_keys = False
 
         # True if this tracer is currently tracing (reconstructing) into a Python generator
         self.is_reconstructing_generator = False
