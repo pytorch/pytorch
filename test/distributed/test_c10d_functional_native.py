@@ -1043,6 +1043,33 @@ class CompileTestCPU(TestCase):
             self.assertIn(f"torch.ops._c10d_functional.{op}.default", code)
         self.assertEqual([o.shape for o in out], [(4, 4), (8, 4), (2, 4)])
 
+    @fresh_cache()
+    def test_inductor_batch_p2p_cpu(self):
+        class Receive(torch.nn.Module):
+            def forward(self, x):
+                received = funcol.batch_p2p_ops_inplace(
+                    ["irecv", "irecv"], [1, 1], [0, 1], [x * 2, x + 3], "0"
+                )
+                return funcol.wait_tensor(received[0]) + funcol.wait_tensor(received[1])
+
+        class Send(torch.nn.Module):
+            def forward(self, x):
+                funcol.batch_p2p_ops_inplace(["isend"], [1], [0], [x * 2], "0")
+                return x + 1
+
+        arg = torch.rand(4, 4)
+        next_arg = torch.rand(4, 4)
+        for model in (Receive(), Send()):
+            torch._dynamo.reset()
+            with torch._inductor.config.patch({"cpp_wrapper": True}):
+                compiled = torch.compile(model, fullgraph=True)
+                self.assertEqual(compiled(arg), model(arg))
+                self.assertEqual(compiled(next_arg), model(next_arg))
+
+        torch._dynamo.reset()
+        receive = Receive()
+        self.assertEqual(AOTIRunnerUtil.run(receive, (arg,)), receive(arg))
+
 
 class CompileTest(TestCase):
     def setUp(self):
