@@ -37,7 +37,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM53OrLater, SM80OrLater, SM90OrLater, SM100OrLater, with_tf32_off, TEST_CUDNN,
+    SM53OrLater, SM80OrLater, SM90OrLater, PLATFORM_SUPPORTS_MXFP8_CAST, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version,
 )
 from torch.testing._internal.common_quantized import (
@@ -23044,7 +23044,7 @@ if "cutedsl" in dsl_ops_by_dsl:
                 DecorateInfo(onlyCUDA),
                 DecorateInfo(skipIfNoCuteDSL),
                 DecorateInfo(skipIfRocm),
-                DecorateInfo(skipCUDAIf(not SM100OrLater, "requires NVIDIA SM100+")),
+                DecorateInfo(skipCUDAIf(not PLATFORM_SUPPORTS_MXFP8_CAST, "requires MXFP8 cast support")),
             ],
             skips=(
                 DecorateInfo(unittest.skip("export is deferred"), "TestExportOpInfo"),
@@ -23069,7 +23069,7 @@ if "cutedsl" in dsl_ops_by_dsl:
                 DecorateInfo(onlyCUDA),
                 DecorateInfo(skipIfNoCuteDSL),
                 DecorateInfo(skipIfRocm),
-                DecorateInfo(skipCUDAIf(not SM100OrLater, "requires NVIDIA SM100+")),
+                DecorateInfo(skipCUDAIf(not PLATFORM_SUPPORTS_MXFP8_CAST, "requires MXFP8 cast support")),
             ],
             skips=(
                 DecorateInfo(unittest.skip("export is deferred"), "TestExportOpInfo"),
