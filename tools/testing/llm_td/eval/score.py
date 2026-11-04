@@ -381,7 +381,9 @@ def policy(
     grep: Callable[[str], list[str]] | None = None,
     fallback: dict[str, dict[str, float]] | None = None,
 ) -> Choice | None:
-    """The files `name` runs on sample `s`, or None when its inputs are missing.
+    """The files `name` runs on sample `s`, or None for td25 and final+tdN when
+    `td` is None. A missing model result `r` counts as a failed call: run-all,
+    or TD's cut under final+tdN.
 
     `grep` finds the importers of edited test files (see selection.importers),
     and `fallback` is fallback_seconds."""

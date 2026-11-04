@@ -9,8 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tools.stats.import_test_stats import get_disabled_tests
-from tools.testing.llm_td.selection import apply_selection, Selection
+from tools.stats.import_test_stats import ADDITIONAL_CI_FILES_FOLDER, get_disabled_tests
+from tools.testing.llm_td.selection import (
+    apply_selection,
+    LLM_TD_SELECTION_FILE,
+    Selection,
+)
 from tools.testing.target_determination.gen_artifact import (
     gen_ci_artifact,
     LLM_SELECTION_SOURCE,
@@ -384,3 +388,27 @@ def split_tests(
             td_excluded=[x.to_json() for x in exclude],
         )
     return split
+
+
+def run_test_split(
+    test_prioritizations: TestPrioritizations,
+    test_times: dict[str, float],
+    *,
+    previous_failures: Collection[str] | None,
+    test_config: str,
+    td_enabled: bool,
+    is_ci: bool,
+    repo_root: Path = REPO_ROOT,
+) -> CallSplit:
+    """split_tests as run_test.py calls it: the selection CI downloaded, and
+    the split recorded only in CI. `previous_failures` is import_results'
+    value, None when unknown, which keeps TD's split."""
+    return split_tests(
+        test_prioritizations,
+        test_times,
+        selection_file=repo_root / ADDITIONAL_CI_FILES_FOLDER / LLM_TD_SELECTION_FILE,
+        test_config=test_config,
+        td_enabled=td_enabled,
+        previous_failures=previous_failures,
+        record=is_ci,
+    )

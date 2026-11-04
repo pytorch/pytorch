@@ -640,10 +640,17 @@ class TestScore(unittest.TestCase):
         )
         self.assertTrue(choice.covers("test_a", "default"))
         self.assertFalse(choice.covers("test_a", "slow"))
+        # A timed file that is not a candidate adds nothing to the budget.
+        extra = {**SECONDS, "default": {**SECONDS["default"], "test_x": [250.0, 0.0]}}
+        choice = policy("final+td45", SAMPLE, NOTHING, td, extra)
+        if choice is None:
+            raise AssertionError("final+td45 chose nothing")
+        self.assertEqual(choice.per_config["default"], {"test_a", "test_c"})
         # With no fallback job times, unknown configs hedge nothing and keep TD's cut.
         self.assertEqual(pick("final+td45", NOTHING, {**td, "top25": ["test_b"]}).other, {"test_b"})  # fmt: skip
-        # As in run_test.py, an unknown config is hedged over the candidates in default/<config>, else default/default.
-        fallback = {"default": {"test_a": 30.0, "test_b": 40.0, "test_d": 30.0, "test_x": 1.0}, "rare": {"test_b": 1.0, "test_c": 9.0}}  # fmt: skip
+        # As in run_test.py, an unknown config is hedged over the candidates in default/<config>, else default/default;
+        # counting the non-candidate test_x would let test_b fit too.
+        fallback = {"default": {"test_a": 30.0, "test_b": 40.0, "test_d": 30.0, "test_x": 100.0}, "rare": {"test_b": 1.0, "test_c": 9.0}}  # fmt: skip
         choice = policy("final+td45", SAMPLE, NOTHING, td, SECONDS, None, fallback)
         if choice is None:
             raise AssertionError("final+td45 chose nothing")
@@ -1036,11 +1043,15 @@ class TestScore(unittest.TestCase):
 
         def prioritize(cands: list[str], file: io.StringIO) -> mock.Mock:
             # What td_replay patched into the heuristics modules for this sample.
-            mod = {m: sys.modules[td_replay.H + m] for m in ("historical_class_failure_correlation", "previously_failed_in_pr", "mentioned_in_pr", *td_replay.CHANGED_FILES_READERS)}  # fmt: skip
+            mod = {m: sys.modules[td_replay.H + m] for m in ("historical_class_failure_correlation", "previously_failed_in_pr", "mentioned_in_pr", "llm", *td_replay.CHANGED_FILES_READERS)}  # fmt: skip
             roots = {mod[m].REPO_ROOT for m in ("utils", "historical_class_failure_correlation")}  # fmt: skip
             changed = [mod[m].query_changed_files() for m in td_replay.CHANGED_FILES_READERS]  # fmt: skip
-            prev = mod["previously_failed_in_pr"].get_previous_failures()
-            seen.append((roots, prev, mod["mentioned_in_pr"].get_git_commit_info(), changed))  # fmt: skip
+            failed = mod["previously_failed_in_pr"]
+            prev = failed.get_previous_failures(), failed.read_additional_test_failures_file()  # fmt: skip
+            mentioned, info = mod["mentioned_in_pr"], mod["mentioned_in_pr"].get_git_commit_info()  # fmt: skip
+            # As MentionedInPR does: the PR's body and those of the issues the commit text links.
+            bodies = [mentioned.get_pr_number(), *(mentioned.get_issue_or_pr_body(int(n)) for n in re.findall(r"#(\d+)", info))]  # fmt: skip
+            seen.append((roots, prev, info, bodies, mod["llm"].LLM().get_mappings(), changed))  # fmt: skip
             # A heuristic that raised has no results; get_aggregated_priorities leaves a trial_mode one out anyway.
             ran = [h.name for h in heuristics.HEURISTICS if not h.trial_mode]
             if "test_e" not in cands:
@@ -1054,7 +1065,7 @@ class TestScore(unittest.TestCase):
             for a in score.STATS_ARTIFACTS:
                 (stats / a).write_text("{}")
             a = {**SAMPLE, "previous_failures": ["test_c"]}
-            broken = {**SAMPLE, "candidates": ["test_a", "test_b"], "changed_files": ["torch/bar.py", "docs/b.md"], "title": "u", "body": "v"}  # fmt: skip
+            broken = {**SAMPLE, "candidates": ["test_a", "test_b"], "changed_files": ["torch/bar.py", "docs/b.md"], "title": "u", "body": "v #12"}  # fmt: skip
             data = write_data(d, {"test-times.json": {"linux": {"default": {"test_a": 100.0, "test_c": 10.0}}}, "samples/a.json": a, "samples/b.json": broken, "td/b.json": {}})  # fmt: skip
 
             def replay(*argv: str) -> None:
@@ -1063,13 +1074,18 @@ class TestScore(unittest.TestCase):
                     mock.patch("tools.testing.target_determination.determinator.get_test_prioritizations", prioritize),
                     mock.patch.object(heuristics, "HEURISTICS", [*heuristics.HEURISTICS, Trial()]),
                     mock.patch("sys.stdout", io.StringIO()),
+                    # What the PR-local inputs would give without td_replay's patches.
+                    mock.patch(td_replay.H + "previously_failed_in_pr.read_additional_test_failures_file", lambda: {"test_leak"}),
+                    mock.patch(td_replay.H + "llm.LLM.get_mappings", lambda self: {"test_leak": 1.0}),
+                    mock.patch(td_replay.H + "mentioned_in_pr.get_pr_number", lambda: 1),
+                    mock.patch(td_replay.H + "mentioned_in_pr.get_issue_or_pr_body", lambda n: "test_leak"),
                 ):  # fmt: skip
                     td_replay.main()
 
             with self.assertRaisesRegex(SystemExit, r"a heuristic raised on 1 samples, left for a rerun: \['b'\]"):  # fmt: skip
                 replay()
             n, root = len(td_replay.CHANGED_FILES_READERS), stats.absolute().parent
-            expected = [({root}, {"test_c"}, "t\n", [["torch/foo.py"]] * n), ({root}, set(), "u\nv", [["torch/bar.py", "docs/b.md"]] * n)]  # fmt: skip
+            expected = [({root}, ({"test_c"}, set()), "t\n", [None], {}, [["torch/foo.py"]] * n), ({root}, (set(), set()), "u\nv #12", [None, ""], {}, [["torch/bar.py", "docs/b.md"]] * n)]  # fmt: skip
             self.assertEqual(seen, expected)
             self.assertFalse((data / "td/b.json").exists())
             td = json.loads((data / "td/a.json").read_text())
