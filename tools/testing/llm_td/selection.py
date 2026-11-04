@@ -17,7 +17,7 @@ import json
 import re
 import sys
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import Any, Protocol, TYPE_CHECKING
 
 from tools.testing.target_determination.gen_artifact import (
     LLM_SELECTION_SOURCE,
@@ -40,9 +40,22 @@ if TYPE_CHECKING:
 
 
 SWEEPS = ("dynamo_wrapped", "crossref")
-# The files test.sh's test_inductor_shard runs with run_test.py --inductor,
-# which compiles every test, so like a sweep any change can break them.
-ALWAYS_COVERED = {"inductor": frozenset({"test_modules", "test_ops", "test_ops_gradients", "test_torch"})}  # fmt: skip
+# The TEST_CONFIG globs (*glob*) of .ci/pytorch/test.sh's top-level dispatch,
+# which runs the first branch a config matches, up to its *inductor* branch.
+TEST_SH_GLOBS = (
+    "numpy_2", "backward", "libtorch_agnostic_targetting", "torchtitan", "executorch",
+    "operator_benchmark", "operator_microbenchmark", "attention_microbenchmark",
+    "inductor_distributed", "inductor-halide", "inductor-flydsl", "inductor-pallas",
+    "inductor-triton-cpu", "inductor-micro-benchmark", "inductor_better_benchmark",
+    "aoti_cross_compile_for_windows", "huggingface", "timm", "torchbench",
+    "inductor_cpp_wrapper", "inductor_aoti_fallback", "inductor_core", "inductor",
+)  # fmt: skip
+# The files the branches of those globs run with run_test.py --inductor, which
+# compiles every test, so like a sweep any change can break them.
+ALWAYS_COVERED = {
+    "inductor_cpp_wrapper": frozenset({"test_torch"}),
+    "inductor": frozenset({"test_modules", "test_ops", "test_ops_gradients", "test_torch"}),
+}  # fmt: skip
 LLM_TD_SELECTION_FILE = "llm_td_selection.json"
 # The selector runs from the default branch and run_test.py from the PR, so
 # bump this whenever an older reader would misread the selection file.
@@ -137,17 +150,13 @@ RUN_ALL_PATTERNS = [
 
 def normalize_test_name(name: str, candidates: set[str]) -> str | None:
     """Map a model-written name such as 'test/dynamo/test_misc.py [3m]' onto a
-    candidate, and a file that a driver runs, such as jit/test_freezing, onto the driver."""
+    candidate; None if it names none (edited_tests maps files onto their drivers)."""
     n = re.sub(r"\s*\[[^\]]*\]$", "", name.strip())
     n = n.split("::")[0].removeprefix("./").removeprefix("test/").removesuffix(".py")
     if n in candidates:
         return n
     n = n.replace(".", "/")
-    if n in candidates:
-        return n
-    path = f"test/{n}.py"
-    drivers = (t for t, regexes in DRIVER_MAPPINGS.items() if t in candidates and any(re.search(r, path) for r in regexes))  # fmt: skip
-    return next(drivers, None)
+    return n if n in candidates else None
 
 
 def edited_tests(changed_files: list[str], candidates: set[str]) -> set[str]:
@@ -408,8 +417,9 @@ class Selection:
     def covers(self, test_file: str, test_config: str) -> bool:
         if self.candidates is not None and test_file not in self.candidates:
             return True
+        glob = next((g for g in TEST_SH_GLOBS if g in test_config), "")
         whole = self.run_all or test_config in self.sweeps
-        always = ALWAYS_COVERED.get(test_config, ())
+        always = ALWAYS_COVERED.get(glob, ())
         return whole or test_file in self.files or test_file in always
 
     def split(
@@ -690,6 +700,19 @@ class CallSplit:
         return LLM_SELECTION_SOURCE if self.enforced else TD_SOURCE
 
 
+class GenArtifact(Protocol):
+    """gen_ci_artifact's signature."""
+
+    def __call__(
+        self,
+        included: list[Any],
+        excluded: list[Any],
+        *,
+        source: str,
+        td_excluded: list[Any],
+    ) -> None: ...
+
+
 def split_tests(
     *,
     test_prioritizations: TestPrioritizations,
@@ -698,7 +721,7 @@ def split_tests(
     test_config: str,
     td_enabled: bool,
     previously_failed: Collection[str] | None,
-    gen_artifact: Callable[..., None] | None,
+    gen_artifact: GenArtifact | None,
 ) -> CallSplit:
     """run_test.py's split of one call's tests: TD's split, 25% with TD enabled
     and everything otherwise, with the selection in `selection_file`, if any,

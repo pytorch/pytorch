@@ -63,6 +63,8 @@ if TYPE_CHECKING:
 
 
 H = "tools.testing.target_determination.heuristics."
+# The heuristics modules that call query_changed_files, which reads this clone's git.
+CHANGED_FILES_READERS = ("utils", "edited_by_pr", "filepath", "historical_class_failure_correlation", "public_bindings")  # fmt: skip
 
 
 def top25_per_config(
@@ -123,13 +125,7 @@ def main() -> None:
         "mentioned_in_pr.get_pr_number": lambda: None,
         "mentioned_in_pr.get_issue_or_pr_body": lambda n: "",
     }
-    for m in [
-        "utils",
-        "edited_by_pr",
-        "filepath",
-        "historical_class_failure_correlation",
-        "public_bindings",
-    ]:
+    for m in CHANGED_FILES_READERS:
         patches[f"{m}.query_changed_files"] = lambda: current["changed_files"]
 
     out = args.out or args.data / "td"
