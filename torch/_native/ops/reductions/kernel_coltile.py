@@ -120,8 +120,8 @@ def select_ordered_col_config(
     narrow = cc == (10, 0) and fields == 1 and out_dtypes == (dtype,)
     if field_bits != (32,) * fields or out_dtypes != (output,) * nouts and not narrow:
         return None
-    # Only routed split views (one field, B = 1, C >= 128) reach these rows.
-    if cc == (10, 0) and full_tiles and rows is not None:
+    # Measured on routed split views only (one field, B = 1, C >= 128).
+    if cc == (10, 0) and full_tiles and rows is not None and fields == 1:
         if rows == 65536 and columns == 1024:
             cfg = cfg._replace(tile_columns=16, full_tiles=True)
         elif 32768 <= rows <= 131072 and 128 <= columns <= 257:
@@ -714,6 +714,8 @@ def reduce_ordered_col(
         out_shape = (B, C)
     else:
         return None
+    if len(out_dtypes) < nouts:
+        raise AssertionError(f"want {nouts} output dtypes, got {len(out_dtypes)}")
     # The last block's Int32 output index must not wrap past the outputs.
     last = B * C + WARP
     if C < WARP or last >= _INT32_LIMIT:

@@ -6,7 +6,7 @@
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import Boolean, const_expr, Float32, Int32, Int64
+from cutlass import Boolean, const_expr, Float32, Float64, Int32, Int64
 from cutlass._mlir.dialects import llvm
 from cutlass.cutlass_dsl import dsl_user_op, T as _T
 
@@ -83,16 +83,17 @@ class SumOps:
 
 @dsl_user_op
 def _square_rn(a, *, loc=None, ip=None):
-    """Float32 a * a rounded on its own: ptxas never contracts mul.rn into an add."""
-    if type(a) is not Float32:
-        raise TypeError(f"_square_rn takes Float32, got {type(a).__name__}")
+    """a * a rounded on its own: ptxas never contracts mul.rn into an add."""
+    if type(a) not in (Float32, Float64):
+        raise TypeError(f"_square_rn takes Float32 or Float64, got {type(a).__name__}")
+    wide = type(a) is Float64
     x = a.ir_value(loc=loc, ip=ip)
-    return Float32(
+    return type(a)(
         llvm.inline_asm(
-            _T.f32(),
+            _T.f64() if wide else _T.f32(),
             [x, x],
-            "mul.rn.f32 $0, $1, $2;",
-            "=f,f,f",
+            "mul.rn.f64 $0, $1, $2;" if wide else "mul.rn.f32 $0, $1, $2;",
+            "=d,d,d" if wide else "=f,f,f",
             has_side_effects=False,
             is_align_stack=False,
             asm_dialect=llvm.AsmDialect.AD_ATT,
@@ -112,14 +113,15 @@ class NormOps:
         self.fdtypes = (acc,)
 
     @cute.jit
-    def _absp(self, val):
+    def _absp(self, val, rounded: cutlass.Constexpr = False):
         a = self.acc(cute.math.absf(val))
         if const_expr(self.p == 1.0):
             return a
         elif const_expr(self.p == 2.0):
-            # Kernels fold leaves in different shapes; a contractible square would let
-            # the compiler fuse it into some adds and not others.
-            return _square_rn(a)
+            # Tree folds would contract a leaf square into whichever add follows, which
+            # differs by kernel, so leaves round it on their own and stay bitwise equal
+            # across kernels. Serial updates keep the fused a * a.
+            return _square_rn(a) if const_expr(rounded) else a * a
         else:
             # |x|**p via exp(p*log|x|); log(0)=-inf so 0**p -> exp(-inf)=0 for p>0.
             return cute.math.exp(self.acc(self.p) * cute.math.log(a))
@@ -129,7 +131,7 @@ class NormOps:
 
     @cute.jit
     def leaf(self, val, idx):
-        return (self._absp(val),)
+        return (self._absp(val, rounded=True),)
 
     @cute.jit
     def reduce(self, acc, val, idx, valid):
@@ -412,7 +414,8 @@ class NanSumOps:
 
 
 class AllOps:
-    # acc is the product of 0/1 truth flags; NaN is truthy, matching torch.all.
+    # acc is the min of 0/1 truth flags; NaN is truthy, matching torch.all. Ordered
+    # columns ran a product fold at 0.22-0.59x of the indexed tree on B200.
     nfields = 1
 
     def __init__(self, acc=Float32):
@@ -430,11 +433,11 @@ class AllOps:
     def reduce(self, acc, val, idx, valid):
         flag = self.acc(1.0) if (val != self.acc(0.0)) else self.acc(0.0)
         keep = flag if valid else self.acc(1.0)
-        return (acc[0] * keep,)
+        return (min(keep, acc[0]),)
 
     @cute.jit
     def combine(self, a, b):
-        return (a[0] * b[0],)
+        return (min(b[0], a[0]),)
 
     @cute.jit
     def shfl_down(self, acc, offset):

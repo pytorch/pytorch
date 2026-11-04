@@ -244,6 +244,17 @@ class TestKernelGeneral(TestCase):
         )
         self.assertEqual(out, 1)
 
+    def test_float64_norm2_tree_leaves(self):
+        """Square float64 norm2 tree leaves with the float64 rounded multiply."""
+        x = torch.randn(64, 2000, device="cuda", dtype=torch.float64)
+        trait = T.NormOps(2, acc=cutlass.Float64)
+        # Contiguous rows take the row tree; strided rows take the indexed tree.
+        for view in (x, x[:, ::2]):
+            got = kg.reduce_dim(
+                trait, "norm2_f64", view, [1], torch.float64, order="inner_tree"
+            )
+            self.assertEqual(got, torch.linalg.vector_norm(view, dim=1))
+
     def test_empty_inner_tree_reduce_all(self):
         """Use the reduction identity when an empty input has no tree order."""
         x = torch.empty(0, device="cuda")
