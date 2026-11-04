@@ -2925,6 +2925,14 @@ Call this whenever a new thread is created in order to propagate values from
       [](const at::Tensor& fake,
          const py::object& memo,
          std::optional<uint64_t> epoch) {
+        TORCH_CHECK(fake.defined(), "Expected a defined tensor");
+        TORCH_CHECK(fake.is_fake(), "Expected a fake tensor");
+        // As SymNumberMemoDescriptor holds; anything else could hold a
+        // reference back to the tensor, a cycle the GC cannot see
+        TORCH_CHECK_TYPE(
+            THPUtils_checkScalar(memo.ptr()),
+            "Expected a number or SymNumber memo, got ",
+            Py_TYPE(memo.ptr())->tp_name);
         fake.unsafeGetTensorImpl()->set_fake_item_memo(
             std::make_shared<c10::SafePyObject>(
                 memo.inc_ref().ptr(), getPyInterpreter()),
@@ -3057,17 +3065,13 @@ Call this whenever a new thread is created in order to propagate values from
             "tensor's device must be 'meta', got ",
             meta.device().type());
         auto* impl = meta.unsafeGetTensorImpl();
-        // A fake reads as meta on the meta device or inside a kernel, and
-        // Python accepts it then too. Unlike Python, a fake of another mode is
-        // rejected.
+        // A fake also reads as meta on the meta device or inside a kernel
         TORCH_CHECK_VALUE(
-            !impl->is_fake() || impl->fake_tensor_mode() == mode,
-            "Expected a fake of the given mode, got a fake of another or no mode");
+            !impl->is_fake(), "Expected a meta tensor that is not fake");
         // Like Python's FakeTensor(mode, meta, device), which goes through
         // _make_subclass: a new detached fake sharing meta's storage, made
-        // without dispatching. meta keeps its own device, autograd state and
-        // real tensor; as in Python, the storage it shares is marked as a
-        // fake's.
+        // without dispatching. meta keeps its own device and autograd state;
+        // as in Python, the storage it shares is marked as a fake's.
         c10::intrusive_ptr<c10::TensorImpl> out_impl;
         {
           // Otherwise an active dispatch mode would run the detach
@@ -3076,9 +3080,6 @@ Call this whenever a new thread is created in order to propagate values from
           out_impl = impl->shallow_copy_and_detach(
               impl->version_counter(), /*allow_tensor_metadata_change=*/true);
         }
-        // Python's new FakeTensor has no real tensor or recorded dispatch keys
-        out_impl->set_real_tensor(nullptr);
-        out_impl->set_fake_dispatch_keys(std::nullopt);
         // Before marking the shared storage, as this can throw
         out_impl->set_requires_grad(meta.requires_grad());
         at::init_cpp_fake(out_impl.get(), device, mode);
