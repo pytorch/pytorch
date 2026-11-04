@@ -1895,6 +1895,31 @@ class TestTorchDeviceType(TestCase):
             'grid_sampler_2d_backward_cuda',
             torch.device(device).type == 'cuda')
 
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    def test_nondeterministic_alert_grid_sample_2d_rocm_channel_lane(self, device):
+        # The ROCm channel-parallel 2D backward kernel, forced on, raises the
+        # same alert. This channels-last 32-channel call requests both
+        # gradients, so it is eligible, and copies the kernel's channels-last
+        # scratch into the result only when that kernel runs.
+        input = torch.randn(1, 32, 2, 2, device=device).contiguous(memory_format=torch.channels_last)
+        grid = torch.zeros(1, 1, 1, 2, device=device)
+        grad_output = torch.ones(1, 32, 1, 1, device=device)
+
+        def backward():
+            return torch.ops.aten.grid_sampler_2d_backward.default(
+                grad_output, input, grid, 0, 0, False, [True, True])
+
+        for value, runs in (("1", True), ("0", False)):
+            with unittest.mock.patch.dict("os.environ", {"PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE": value}):
+                # Default activities: on ROCm a CPU-only session leaves later
+                # sessions in this process without GPU events.
+                with torch.profiler.profile() as prof:
+                    backward()
+                self.assertEqual("aten::copy_" in {e.name for e in prof.events()}, runs)
+                self.check_nondeterministic_alert(backward, 'grid_sampler_2d_backward_cuda')
+
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_grid_sample_3d(self, device):

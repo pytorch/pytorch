@@ -37,10 +37,14 @@ run_if_exists() {
 run_if_exists tensor_interop_test
 run_if_exists cudnn_test
 run_if_exists cuda_generator_test
-# ROCm builds name this executable cuda_apply_test or hip_apply_test,
-# depending on the PyTorch revision.
-run_if_exists cuda_apply_test
-run_if_exists hip_apply_test
+# ROCm builds rename the hip_* test targets to cuda_* (caffe2/CMakeLists.txt),
+# so the ROCm build of apply_test is cuda_apply_test. Other builds keep the
+# original selection. Import torch outside the source tree, as .ci/pytorch does.
+if [[ "$(cd "${CPP_TESTS_DIR}" && python -c 'import torch; print(torch.version.hip is not None)' | tail -n 1)" == "True" ]]; then
+  run_if_exists cuda_apply_test
+else
+  run_if_exists apply_test
+fi
 run_if_exists stream_test
 run_if_exists cuda_half_test
 run_if_exists cuda_vectorized_test

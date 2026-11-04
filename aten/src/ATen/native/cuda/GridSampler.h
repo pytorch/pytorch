@@ -4,6 +4,8 @@
 #ifdef USE_ROCM
 #include <ATen/core/TensorBase.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
+#include <c10/util/llvmMathExtras.h>
+#include <algorithm>
 #include <limits>
 #endif
 
@@ -21,40 +23,39 @@ void launch_grid_sampler_3d_forward_kernel(
     const TensorBase &output, const TensorBase &input, const TensorBase &grid,
     int64_t interpolation_mode, int64_t padding_mode, bool align_corners);
 
+#ifdef USE_ROCM
+struct RocmGridSampler2dBackwardDispatch;
+#endif
 void launch_grid_sampler_2d_backward_kernel(
     const TensorBase &grad_input, const TensorBase &grad_grid,
     const TensorBase &grad_output, const TensorBase &input,
     const TensorBase &grid, int64_t interpolation_mode, int64_t padding_mode,
-    bool align_corners, std::array<bool, 2> output_mask);
+    bool align_corners, std::array<bool, 2> output_mask
+#ifdef USE_ROCM
+    , const RocmGridSampler2dBackwardDispatch &dispatch
+#endif
+    );
 
 #ifdef USE_ROCM
 // Kernel selection for the 2D backward, made once per call. The caller
-// allocates grad_input from `scratch` (a channels-last buffer copied into the
-// contiguous result) and passes the same decision to
-// launch_grid_sampler_2d_backward_kernel_rocm, which selects the kernel from
-// `channel_lane`.
+// allocates grad_input from `scratch` (a channels-last buffer that the caller
+// copies into the contiguous result after the launch) and passes the same
+// decision to launch_grid_sampler_2d_backward_kernel, which runs the
+// channel-parallel kernel when `channel_lane` is set.
 struct RocmGridSampler2dBackwardDispatch {
   bool channel_lane = false;
   bool scratch = false;
 };
 RocmGridSampler2dBackwardDispatch rocm_grid_sampler_2d_backward_dispatch(
-    const TensorBase &input, const TensorBase &grid, bool input_requires_grad);
-
-void launch_grid_sampler_2d_backward_kernel_rocm(
-    const TensorBase &grad_input, const TensorBase &grad_grid,
-    const TensorBase &grad_output, const TensorBase &input,
-    const TensorBase &grid, int64_t interpolation_mode, int64_t padding_mode,
-    bool align_corners, std::array<bool, 2> output_mask,
-    const RocmGridSampler2dBackwardDispatch &dispatch);
+    const TensorBase &input, const TensorBase &grid,
+    int64_t interpolation_mode, bool input_requires_grad);
 
 // Lanes per block of the channel-parallel kernel: a power of two, which its
 // tree reduction requires, capped at its 256-thread launch bound.
 inline int64_t rocm_grid_sampler_2d_backward_lanes(int64_t num_channels) {
-  int64_t lanes = 1;
-  while (lanes < num_channels && lanes < 256) {
-    lanes <<= 1;
-  }
-  return lanes;
+  // Clamp first: PowerOf2Ceil(0) is 0, and C = 0 still needs one lane.
+  return static_cast<int64_t>(c10::llvm::PowerOf2Ceil(
+      static_cast<uint64_t>(std::clamp<int64_t>(num_channels, 1, 256))));
 }
 
 // Whether the channel-parallel kernel can index in 32 bits. Besides the

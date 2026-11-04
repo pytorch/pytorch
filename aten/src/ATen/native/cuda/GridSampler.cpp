@@ -50,7 +50,8 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
 #ifdef USE_ROCM
   // Decide the kernel once, so the allocation and the launch agree.
   const auto dispatch =
-      rocm_grid_sampler_2d_backward_dispatch(input, grid, input_requires_grad);
+      rocm_grid_sampler_2d_backward_dispatch(
+          input, grid, interpolation_mode, input_requires_grad);
   // The channel-parallel kernel coalesces its atomics only into a
   // channels-last gradient. The returned gradient stays contiguous on every
   // architecture, because Meta/FakeTensor strides cannot depend on the GPU
@@ -74,23 +75,20 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
     }
   })();
   auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  launch_grid_sampler_2d_backward_kernel(
+#ifdef USE_ROCM
+      grad_input_scratch.defined() ? grad_input_scratch :
+#endif
+      grad_input, grad_grid, grad_output, input,
+      grid, interpolation_mode, padding_mode, align_corners, output_mask
+#ifdef USE_ROCM
+      , dispatch
+#endif
+      );
 #ifdef USE_ROCM
   if (grad_input_scratch.defined()) {
-    launch_grid_sampler_2d_backward_kernel_rocm(
-        grad_input_scratch, grad_grid, grad_output, input,
-        grid, interpolation_mode, padding_mode, align_corners, output_mask,
-        dispatch);
     grad_input.copy_(grad_input_scratch);
-    return std::make_tuple(std::move(grad_input), std::move(grad_grid));
   }
-  launch_grid_sampler_2d_backward_kernel_rocm(
-      grad_input, grad_grid, grad_output, input,
-      grid, interpolation_mode, padding_mode, align_corners, output_mask,
-      dispatch);
-#else
-  launch_grid_sampler_2d_backward_kernel(
-      grad_input, grad_grid, grad_output, input,
-      grid, interpolation_mode, padding_mode, align_corners, output_mask);
 #endif
   return std::make_tuple(std::move(grad_input), std::move(grad_grid));
 }

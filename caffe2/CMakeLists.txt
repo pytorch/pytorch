@@ -1038,8 +1038,16 @@ if(USE_ROCM)
   # sampler without packed BF16 instructions. The flag covers every BF16 kernel
   # in this file, including the 3D backward, which then use v_fma_mix and f32
   # instructions; other dtypes, and architectures without the feature, compile
-  # unchanged. If the probe cannot run, the flag is applied.
-  if(PYTORCH_ROCM_ARCH MATCHES "gfx1250")
+  # unchanged. If the probe cannot run, the flag is applied. The host pass of
+  # this HIP compile ignores the feature with a "not a recognized feature"
+  # warning; -Xarch_device cannot carry the -Xclang pairs to the device only.
+  # Match the base architecture so target IDs such as gfx1250:sramecc+ count.
+  set(_gs_base_archs "")
+  foreach(_gs_arch IN LISTS PYTORCH_ROCM_ARCH)
+    string(REGEX REPLACE ":.*$" "" _gs_base "${_gs_arch}")
+    list(APPEND _gs_base_archs "${_gs_base}")
+  endforeach()
+  if("gfx1250" IN_LIST _gs_base_archs)
     set(_gs_probe "${CMAKE_CURRENT_BINARY_DIR}/gfx1250_bf16_inline_constant.ll")
     file(WRITE "${_gs_probe}"
       "target triple = \"amdgcn-amd-amdhsa\"\n"
@@ -1063,8 +1071,8 @@ if(USE_ROCM)
                      "without packed BF16 instructions")
       set_property(SOURCE
           "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/hip/GridSampler.hip"
-          APPEND_STRING PROPERTY COMPILE_FLAGS
-          " -Xclang -target-feature -Xclang -bf16-pk-insts")
+          APPEND PROPERTY COMPILE_OPTIONS
+          "-Xclang" "-target-feature" "-Xclang" "-bf16-pk-insts")
     endif()
   endif()
 endif()

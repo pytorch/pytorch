@@ -430,8 +430,10 @@ namespace {
   // ignored with a warning issued once per process, rather than on every call.
   // The value is read each time a call passes the channel-count, layout/mask
   // and launch-size checks, so tests can change it within a process; it cannot
-  // select the channel kernel for calls those checks reject (C < 3, or
-  // grid-gradient-only calls on non-channels-last input).
+  // select the channel kernel for calls those checks reject: C < 3, other
+  // layouts below C = 32, grid-gradient-only calls below C = 32, on
+  // non-channels-last input or in nearest mode, and launches beyond HIP
+  // limits.
   std::optional<bool> rocm_grid_sampler_2d_backward_channel_lane_override() {
     const auto value =
         c10::utils::get_env("PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE");
@@ -955,10 +957,10 @@ namespace {
             const bool in_ne = within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W);
             const bool in_sw = within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W);
             const bool in_se = within_bounds_2d(iy_se, ix_se, inp_H, inp_W);
-            const index_t off_nw = C > 0 && in_nw ? iy_nw * inp_sH + ix_nw * inp_sW : 0;
-            const index_t off_ne = C > 0 && in_ne ? iy_ne * inp_sH + ix_ne * inp_sW : 0;
-            const index_t off_sw = C > 0 && in_sw ? iy_sw * inp_sH + ix_sw * inp_sW : 0;
-            const index_t off_se = C > 0 && in_se ? iy_se * inp_sH + ix_se * inp_sW : 0;
+            const index_t off_nw = in_nw ? iy_nw * inp_sH + ix_nw * inp_sW : 0;
+            const index_t off_ne = in_ne ? iy_ne * inp_sH + ix_ne * inp_sW : 0;
+            const index_t off_sw = in_sw ? iy_sw * inp_sH + ix_sw * inp_sW : 0;
+            const index_t off_se = in_se ? iy_se * inp_sH + ix_se * inp_sW : 0;
             const scalar_t r_nw = inp_ptr_NC[off_nw], r_ne = inp_ptr_NC[off_ne];
             const scalar_t r_sw = inp_ptr_NC[off_sw], r_se = inp_ptr_NC[off_se];
             const auto nw_x = r_nw * (iy_se - iy) * gOut;
@@ -1537,11 +1539,26 @@ void launch_grid_sampler_3d_forward_kernel(
   }
 }
 
+#ifdef USE_ROCM
+// Defined after rocm_grid_sampler_2d_backward_dispatch, below: instantiating
+// the channel-parallel kernels after the generic ones keeps the generic
+// kernels' placement in the code object, which affects their timing.
+static void launch_grid_sampler_2d_backward_channel_lane(
+    const TensorBase &grad_input, const TensorBase &grad_grid,
+    const TensorBase &grad_output, const TensorBase &input,
+    const TensorBase &grid, int64_t interpolation_mode, int64_t padding_mode,
+    bool align_corners, bool input_requires_grad, int64_t nblocks_nhw);
+#endif  // USE_ROCM
+
 void launch_grid_sampler_2d_backward_kernel(
     const TensorBase &grad_input, const TensorBase &grad_grid,
     const TensorBase &grad_output, const TensorBase &input,
     const TensorBase &grid, int64_t interpolation_mode, int64_t padding_mode,
-    bool align_corners, std::array<bool,2> output_mask) {
+    bool align_corners, std::array<bool,2> output_mask
+#ifdef USE_ROCM
+    , const RocmGridSampler2dBackwardDispatch &dispatch
+#endif
+    ) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
   check_grid_sampler_2d_backward(input, grid, grad_output);
@@ -1559,6 +1576,19 @@ void launch_grid_sampler_2d_backward_kernel(
   auto input_requires_grad = output_mask[0];
 
   int64_t count = N * H * W;
+#ifdef USE_ROCM
+  // rocm_grid_sampler_2d_backward_dispatch selects the channel-parallel
+  // kernel only for nonempty launches within HIP's limits.
+  if (dispatch.channel_lane) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        !dispatch.scratch ||
+        grad_input.is_contiguous(at::MemoryFormat::ChannelsLast));
+    launch_grid_sampler_2d_backward_channel_lane(
+        grad_input, grad_grid, grad_output, input, grid, interpolation_mode,
+        padding_mode, align_corners, input_requires_grad, count);
+    return;
+  }
+#endif
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
@@ -1601,10 +1631,21 @@ void launch_grid_sampler_2d_backward_kernel(
 #ifdef USE_ROCM
 
 RocmGridSampler2dBackwardDispatch rocm_grid_sampler_2d_backward_dispatch(
-    const TensorBase &input, const TensorBase &grid, bool input_requires_grad) {
+    const TensorBase &input, const TensorBase &grid,
+    int64_t interpolation_mode, bool input_requires_grad) {
   // The allocation in GridSampler.cpp calls this before the launcher validates
-  // shapes; leave malformed inputs to the launcher's checks.
-  if (input.dim() != 4 || grid.dim() != 4) {
+  // shapes; leave malformed inputs to the launcher's checks, which report
+  // them. Checking the batch and the grid's last dimension first also keeps
+  // the block count below from overflowing on malformed zero-size inputs.
+  if (input.dim() != 4 || grid.dim() != 4 ||
+      input.size(0) != grid.size(0) || grid.size(3) != 2) {
+    return {};
+  }
+  // Nearest grid-gradient-only calls compute no gradient: grad_grid is all
+  // zeros, which the generic kernel writes without reading the input.
+  if (!input_requires_grad &&
+      static_cast<GridSamplerInterpolation>(interpolation_mode) ==
+          GridSamplerInterpolation::Nearest) {
     return {};
   }
   // Reject small channel counts before inspecting layouts or device properties.
@@ -1626,7 +1667,8 @@ RocmGridSampler2dBackwardDispatch rocm_grid_sampler_2d_backward_dispatch(
   const bool channels_last = input_channels_last &&
       (!input_requires_grad || wants_scratch ||
        (input.size(2) == 1 && input.size(3) == 1));
-  const int64_t nblocks_nhw = input.size(0) * grid.size(1) * grid.size(2);
+  // N * out_H * out_W, with the batch sizes already known to match.
+  const int64_t nblocks_nhw = grid.numel() / 2;
   RocmGridSampler2dBackwardDispatch dispatch;
   // Grid-gradient-only calls on other layouts always use the generic kernel.
   // The choice depends on layout, sizes, the output mask and the
@@ -1643,31 +1685,16 @@ RocmGridSampler2dBackwardDispatch rocm_grid_sampler_2d_backward_dispatch(
   return dispatch;
 }
 
-void launch_grid_sampler_2d_backward_kernel_rocm(
+// Launches the ROCm channel-parallel kernel. Only
+// launch_grid_sampler_2d_backward_kernel calls this, after its checks, when
+// rocm_grid_sampler_2d_backward_dispatch selected the kernel.
+static void launch_grid_sampler_2d_backward_channel_lane(
     const TensorBase &grad_input, const TensorBase &grad_grid,
     const TensorBase &grad_output, const TensorBase &input,
     const TensorBase &grid, int64_t interpolation_mode, int64_t padding_mode,
-    bool align_corners, std::array<bool,2> output_mask,
-    const RocmGridSampler2dBackwardDispatch &dispatch) {
-  if (!dispatch.channel_lane) {
-    launch_grid_sampler_2d_backward_kernel(
-        grad_input, grad_grid, grad_output, input, grid, interpolation_mode,
-        padding_mode, align_corners, output_mask);
-    return;
-  }
-  // The same checks as launch_grid_sampler_2d_backward_kernel.
-  check_grid_sampler_2d_backward(input, grid, grad_output);
-  globalContext().alertNotDeterministic("grid_sampler_2d_backward_cuda");
-  const auto input_requires_grad = output_mask[0];
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      !dispatch.scratch ||
-      grad_input.is_contiguous(at::MemoryFormat::ChannelsLast));
-
-  const int64_t C = input.size(1);
-  const int64_t nblocks_nhw = input.size(0) * grid.size(1) * grid.size(2);
+    bool align_corners, bool input_requires_grad, int64_t nblocks_nhw) {
   const int lanes =
-      static_cast<int>(rocm_grid_sampler_2d_backward_lanes(C));
+      static_cast<int>(rocm_grid_sampler_2d_backward_lanes(input.size(1)));
   const auto blocks = static_cast<unsigned int>(nblocks_nhw);
   AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,

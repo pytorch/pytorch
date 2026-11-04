@@ -160,7 +160,15 @@ TEST(ApplyTest, GridSampler2dBackwardChannelLaneIndexWidth) {
   const auto meta = at::TensorOptions().device(at::kMeta).dtype(at::kBFloat16);
   const auto grid = at::empty({1, 1, 1, 2}, meta);
   const int64_t int32_max = std::numeric_limits<int32_t>::max();
-  ASSERT_EQ(at::native::rocm_grid_sampler_2d_backward_lanes(int32_max), 256);
+  // Lanes: the next power of two, at least 1 and at most 256.
+  const std::pair<int64_t, int64_t> lane_cases[] = {
+      {0, 1}, {1, 1}, {2, 2}, {3, 4}, {64, 64}, {65, 128}, {256, 256},
+      {257, 256}, {int32_max, 256}, {std::numeric_limits<int64_t>::max(), 256},
+  };
+  for (const auto& [C, lanes] : lane_cases) {
+    EXPECT_EQ(at::native::rocm_grid_sampler_2d_backward_lanes(C), lanes)
+        << "C=" << C;
+  }
   // (C, expected selection); the large C use scalar-expanded tensors.
   const std::pair<int64_t, bool> cases[] = {
       {257, true},
