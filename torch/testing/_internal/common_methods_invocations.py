@@ -3801,11 +3801,11 @@ class _TestParamsMaxPoolBase:
             'return_indices': [True, False]
         }
 
-        # Python-level arg forms (int vs tuple) that don't need to be crossed with self.kwargs
+        # Uncrossed samples: the other arg form, and non-overlapping windows for the max_unpool*d grads
         self.extra_kwargs = []
 
         self.shapes = [
-            [1, None],  # batch
+            [2, None],  # batch
             [2],  # channels
             [3, 6]  # signal
         ]
@@ -3835,7 +3835,7 @@ class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
     def __init__(self) -> None:
         super().__init__()
         self.extra_kwargs.append(
-            dict(kernel_size=(3,), stride=(2,), ceil_mode=False, padding=(1,), dilation=(1,), return_indices=True))
+            dict(kernel_size=(3,), stride=(2,), ceil_mode=False, padding=(1,), dilation=1, return_indices=True))
 
 class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
 
@@ -10518,7 +10518,9 @@ def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwarg
         # i.e. the index tensor has to be comprised of only unique
         # indices.
         # Here we go with the solution 2, the easiest of all.
-        if indices.unique().numel() == indices.numel():
+        # Indices are per (N, C) plane, so only duplicates within a plane matter.
+        sorted_indices = indices.flatten(2).sort(dim=-1).values
+        if (sorted_indices[..., 1:] != sorted_indices[..., :-1]).all():
             yield sample
 
 def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_grad, **kwargs):
