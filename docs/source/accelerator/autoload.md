@@ -129,6 +129,45 @@ register_backend_for_device(
 torch.compile(model, options={"my_device.my_config_key": 1})
 ```
 
+### Registering a Device Code Cache
+
+Inductor compiles device kernels through a per-device-type CodeCache class.
+Out-of-tree backends that want to *override* the code cache used for an existing
+device type call `register_device_codecache` from their backend initialization
+hook (the `_inductor_backend_init` method described above, or the eager
+attribute-based registration path):
+
+```python
+from torch._inductor.codecache import register_device_codecache
+
+register_device_codecache("cuda", MyCodeCache)  # replaces CUDACodeCache
+```
+
+The registered class must satisfy `DeviceCodeCacheProtocol` (see its docstring
+in `torch/_inductor/codecache.py`): class-level `write`, `compile`, and `load`
+methods plus an `aot_kernels_o` list used by the AOTInductor link step.
+Re-registration replaces the previous entry (last registration wins), and
+re-running the built-in backend registration never overwrites an out-of-tree
+entry.
+
+Note the scope of this extension point: it overrides the code cache *for the
+"cuda"/"xpu" device types*. It does not by itself make Inductor compile kernels
+for a new device type -- codegen emits `async_compile.<device_type>(...)` calls
+and only the cuda/xpu/rocm entry points exist. A full new-device integration
+uses `register_backend_for_device` (see above) with its own codegen classes.
+
+For the attribute-based registration path (a device module exposing
+`Scheduling` / `PythonWrapperCodegen` / `CppWrapperCodegen` directly), an
+optional `CodeCache` attribute on the device module is registered the same way:
+
+```python
+class MyDeviceModule:
+    Scheduling = MyScheduling
+    PythonWrapperCodegen = MyWrapperCodegen
+    CppWrapperCodegen = MyCppWrapperCodegen
+    CodeCache = MyCodeCache  # optional, registered via register_device_codecache
+```
+
 ## Result
 
 After setting up the entry point and backend, build and install your backend. Now, we can use the new accelerator without explicitly importing it.

@@ -791,6 +791,16 @@ def init_backend_registration() -> None:
                     cpp_wrapper_codegen,
                     fx_wrapper_codegen,
                 )
+                # Optionally register the device's code cache class, if the
+                # device module exposes one under the CodeCache attribute
+                # (see autoload.md). Not required: devices without such an
+                # attribute keep whatever register_device_codecache calls
+                # their integration code already made, or none at all.
+                device_codecache = getattr(device_mod, "CodeCache", None)
+                if device_codecache is not None:
+                    from ..codecache import register_device_codecache
+
+                    register_device_codecache(private_backend, device_codecache)
 
 
 def index_prevent_reordering(

@@ -3237,6 +3237,13 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     if torch.version.hip:
         return False
 
+    # CUTLASS codegen only implements the cuda/xpu arch & toolkit probes
+    # (cutlass_arch / toolkit_version raise NotImplementedError for anything
+    # else). Other GPU-class devices (e.g. a PrivateUse1 GPU) must skip the
+    # CUTLASS backend cleanly instead of crashing lowering.
+    if layout.device.type not in ("cuda", "xpu"):
+        return False
+
     # output dtype
     # FP32 not supported: https://github.com/pytorch/pytorch/issues/145952
     layout_dtypes = [torch.float16, torch.bfloat16, torch.int32]

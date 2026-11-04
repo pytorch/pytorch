@@ -37,6 +37,7 @@ from torch._inductor.codecache import (
     get_device_codecache,
     HalideCodeCache,
     LambdaFuture,
+    ROCmCodeCache,
     StaticAutotunerFuture,
     torch_key,
 )
@@ -765,14 +766,12 @@ class AsyncCompile:
         aot_compile=False,
     ):
         kernel_code_log.info("ROCm Kernel:\n%s", source_code)
-        # On a HIP build "cuda" is registered to ROCmCodeCache, so the
-        # registry lookup below resolves to it; keep the direct class for a
-        # hypothetical non-HIP caller of this entry point.
-        rocm_codecache = get_device_codecache("cuda") if torch.version.hip else None
-        if rocm_codecache is None:
-            from torch._inductor.codecache import ROCmCodeCache
-
-            rocm_codecache = ROCmCodeCache
+        # Deliberately NOT routed through get_device_codecache("cuda"): other
+        # ROCm sites (rocm_benchmark_request, rocm_cpp_scheduling) also use
+        # ROCmCodeCache directly, so an out-of-tree "cuda" override must not
+        # reach this entry point either. On a HIP build codegen emits
+        # async_compile.cuda(...), which does use the registry.
+        rocm_codecache = ROCmCodeCache
 
         def task():
             if aot_compile:

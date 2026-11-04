@@ -192,7 +192,11 @@ def _normalize_xpu_arch(arch: str | None) -> str:
     if arch is None:
         raise RuntimeError(
             "Unable to determine the XPU architecture to generate CUTLASS kernels "
-            "for: the device codename is not recognized."
+            "for: the device codename is not recognized. Run on an XPU device "
+            "(the codename is read from torch.xpu.get_device_capability), or set "
+            "torch._inductor.config.xpu.arch to a numeric arch in [12, 50] and "
+            "clear cutlass_arch's cache via "
+            "torch._inductor.codegen.cutlass.utils.cutlass_arch.cache_clear()."
         )
     if arch.startswith("Xe"):
         return arch[2:]
@@ -206,7 +210,10 @@ def _normalize_cuda_arch(arch: str | None) -> str:
     if arch is None:
         raise RuntimeError(
             "Unable to determine the CUDA architecture to generate CUTLASS kernels "
-            "for. Set torch._inductor.config.cuda.arch or run on a CUDA device."
+            "for. Set torch._inductor.config.cuda.arch or run on a CUDA device. "
+            "Note that cutlass_arch caches its result (and a failed probe): after "
+            "setting the knob, clear it via "
+            "torch._inductor.codegen.cutlass.utils.cutlass_arch.cache_clear()."
         )
     arch_num = arch
     if isinstance(arch, str):
@@ -264,9 +271,10 @@ def toolkit_version(device_type: str) -> str:
     if not version:
         raise RuntimeError(
             f"Unable to determine the {device_type} toolkit version to generate "
-            "CUTLASS kernels for. Set "
-            f"torch._inductor.config.{device_type}.version or run on a "
-            f"{device_type} device."
+            "CUTLASS kernels for. Run on a "
+            f"{device_type} device, or set torch._inductor.config.{device_type}.version "
+            "and clear this function's cache (it caches failed probes too) via "
+            "torch._inductor.codegen.cutlass.utils.toolkit_version.cache_clear()."
         )
     return version
 
@@ -613,9 +621,9 @@ class CUTLASSCompileSourceCapturingContext:
             self.sources.append(source_code)
             return _compile_method_orig(source_code, dst_file_ext)
 
-        # pyrefly: ignore [bad-assignment]
         # Patch the class object itself (not its module path) so custom
         # CodeCache classes registered by out-of-tree backends work too.
+        # pyrefly: ignore [bad-assignment]
         self._compile_patch = mock.patch.object(codecache_cls, "compile", my_compile)
         self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
         return self
@@ -644,7 +652,7 @@ def cutlass_standalone_runner_compile_command(
             f"CUTLASS standalone runner is not implemented for device type "
             f"{device_type!r}"
         )
-    if device_type != "xpu":
+    if device_type == "cuda":
         extra_args.append("-DCUTLASS_DEBUG_TRACE_LEVEL=1")
     compile_command = cutlass_compile_command(
         [str(srcpath)], str(exepath), "exe", extra_args=extra_args
