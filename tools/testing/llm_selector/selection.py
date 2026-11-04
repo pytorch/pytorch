@@ -294,14 +294,15 @@ def failure_list_sources(
     """The paths under test/ that define the classes named by the edited
     failure-list entries (see FAILURE_LIST_RE), and the lists ("dynamo",
     "inductor" or "compiled_autograd") naming a class that `grep` (see
-    importers) does not find or holding an entry without exactly one ".", which
-    dynamo_test_failures.py rejects at import for the dynamo and inductor lists."""
+    importers) does not find, holding an entry in a subdirectory, or holding an
+    entry without exactly one ".", which dynamo_test_failures.py rejects at
+    import for the dynamo and inductor lists."""
     classes: dict[str, set[str]] = {}
     unparsed: set[str] = set()
     for f in changed_files:
         if not (d := FAILURE_LIST_DIR_RE.match(f)):
             continue
-        if d[1] != "compiled_autograd" and f.rsplit("/", 1)[-1].count(".") != 1:
+        if "/" in f[d.end() :] or (d[1] != "compiled_autograd" and f.rsplit("/", 1)[-1].count(".") != 1):  # fmt: skip
             unparsed.add(d[1])
         elif m := FAILURE_LIST_RE.match(f):
             classes.setdefault(m[2], set()).add(m[1])
