@@ -2299,7 +2299,7 @@ class BenchmarkRunner:
                     fp64_outputs,
                 )
             except Exception as e:
-                if isinstance(e, torch.cuda.OutOfMemoryError):
+                if isinstance(e, torch._C.OutOfMemoryError):
                     log.exception("fp64 reference generation failed for %s", name)
                     return record_status("OOM", dynamo_start_stats=start_stats)
                 log.warning(
