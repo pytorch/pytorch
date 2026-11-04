@@ -186,7 +186,6 @@ class TestInnerTreeOrder(TestCase):
     @parametrize("name", ["float16_sum", "var_mean", "negzero_sum"])
     def test_staged_split_preserves_reduction_trees(self, name):
         """Ensure split staging keeps the same tree as the corresponding direct fold."""
-        # B200 is the only profile that stages split batches; force it on every SM90+ device.
         with mock.patch.object(rt, "_itree_arch", return_value=rt._ITREE_ARCH[(10, 0)]):
             m, n = 3, 1 << 18
             x = torch.randn(m, n, device="cuda")
