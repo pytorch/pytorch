@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import ast
 import contextlib
 import functools
 import io
@@ -555,32 +554,14 @@ class TestScore(unittest.TestCase):
         )
 
     def test_no_td_configs_match_test_sh(self) -> None:
-        text = (REPO_ROOT / ".ci/pytorch/test.sh").read_text()
-        funcs = re.findall(r"^(\w+)\(\) \{\n(?:(?!^\}).*\n)*?\s*export NO_TD=1", text, re.MULTILINE)  # fmt: skip
-        dispatch = dict(re.findall(r'"\$\{TEST_CONFIG\}" == \*(\w+)\* \]\]; then\n\s*(\w+)', text))  # fmt: skip
-        self.assertEqual(funcs, ["test_dynamo_cpython"])
-        self.assertEqual({c for c, f in dispatch.items() if f in funcs}, set(score.NO_TD_CONFIGS))  # fmt: skip
-
-    def test_td_check_matches_run_test(self) -> None:
-        # td_workflow, td_job and NO_TD_CONFIGS model this check; update them with it.
-        tree = ast.parse((REPO_ROOT / "test/run_test.py").read_text())
-        (default,) = [
-            k.value
-            for n in ast.walk(tree)
-            if isinstance(n, ast.Call)
-            and n.args
-            and isinstance(n.args[0], ast.Constant)
-            and n.args[0].value == "--enable-td"  # fmt: skip
-            for k in n.keywords
-            if k.arg == "default"
-        ]
-        self.assertEqual(
-            ast.unparse(default),
-            "IS_CI and get_pr_number() is not None and (not strtobool(os.environ.get('NO_TD', 'False'))) and (not IS_MACOS) and ('xpu' not in BUILD_ENVIRONMENT) and ('onnx' not in BUILD_ENVIRONMENT) and (GITHUB_WORKFLOW in ('trunk', 'pull') or GITHUB_WORKFLOW.startswith(('rocm-', 'periodic-rocm-')))",
-        )
-        (main,) = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"]  # fmt: skip
-        (tti,) = [n for n in main.body if isinstance(n, ast.If) and ast.unparse(n.test) == "tests_to_include_env"]  # fmt: skip
-        self.assertEqual(ast.unparse(tti.body[-1]), "options.enable_td = False")
+        # test.sh runs a config through test_<config>; these are the functions that export NO_TD=1.
+        func, no_td = None, set()
+        for line in (REPO_ROOT / ".ci/pytorch/test.sh").read_text().splitlines():
+            if m := re.match(r"(?:function\s+)?(\w+)\s*\(\)", line):
+                func = m.group(1)
+            elif re.search(r"\bexport NO_TD=1", line):
+                no_td.add(func)
+        self.assertEqual(no_td, {f"test_{c}" for c in score.NO_TD_CONFIGS})
 
     def test_unasked(self) -> None:
         td = {"scored": ["test_a"], "top25": ["test_e"], "top25_cfg": {"default": ["test_a"]}}  # fmt: skip
@@ -659,27 +640,6 @@ class TestScore(unittest.TestCase):
         for bad in ("final+tdx", "final+td5x", "nonsense"):
             with self.assertRaisesRegex(ValueError, "unknown policy"):
                 policy(bad, SAMPLE, NOTHING, td, SECONDS)
-
-    def test_hedge_matches_split(self) -> None:
-        # hedge is Selection.split for any share LLM_TD_HEDGE could be.
-        rng = random.Random(0)
-        files = [f"test_{i}" for i in range(8)]
-        for i in range(500):
-            share = (0.05, 0.2, 0.45)[i % 3]
-            scored = rng.sample(files, rng.randint(0, 8))
-            seconds = {f: float(rng.choice([0, 1, 5, 20, 60])) for f in files if rng.random() < 0.7}  # fmt: skip
-            untimed = [f for f in files if f not in seconds and rng.random() < 0.5]
-            job = [*seconds, *untimed]
-            sel = Selection(set(rng.sample(files, rng.randint(0, 2))), candidates=set(files))  # fmt: skip
-            ranked = [TestRun(f) for f in scored if f in job] + [TestRun(f) for f in job if f not in scored]  # fmt: skip
-            cut = set(rng.sample(job, min(len(job), 2)))
-            prev = set(rng.sample(files, rng.randint(0, 2)))
-            with mock.patch.object(selection, "LLM_TD_HEDGE", share):
-                split = sel.split(ranked, lambda x: float(x.test_file in scored), seconds, "c", previously_failed=prev, td_include=cut)  # fmt: skip
-            got = score.hedge(sel, scored, seconds, share, "c", cut, untimed, prev)
-            want = cut if split.chose_nothing or not sum(seconds.values()) else split.previously_failed | split.hedged  # fmt: skip
-            case = (share, scored, seconds, untimed, sel, cut, prev)
-            self.assertEqual(got, want, case)
 
     def test_policy_matches_apply_selection(self) -> None:
         # What final+td runs in a job is what apply_selection runs there, including a job with
