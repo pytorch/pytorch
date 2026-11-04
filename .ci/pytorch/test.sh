@@ -261,7 +261,8 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Used so that only cuda/rocm specific versions of tests are generated
   # mainly used so that we're not spending extra cycles testing cpu
-  # devices on expensive gpu machines
+  # devices on expensive gpu machines. The nogpu_NO_AVX2 job brings back
+  # inductor's RUN_CPU classes with PYTORCH_TEST_INDUCTOR_RUN_CPU (below).
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
@@ -402,6 +403,11 @@ fi
 
 if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
+  # A CUDA build sets ONLY_FOR=cuda, which turns off inductor's RUN_CPU test
+  # classes; bring them back here, the only CI config that runs them without a
+  # vector ISA. nogpu_AVX512 deliberately leaves them off to save test time:
+  # pull.yml's CPU build already runs them on the same AVX-512 runners.
+  export PYTORCH_TEST_INDUCTOR_RUN_CPU=1
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx512
   # valgrind cannot decode AVX-512 instructions
