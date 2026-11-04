@@ -2002,7 +2002,7 @@ class _InProcessFxCompile(FxCompile):
                     if (
                         cudagraphs
                         and config.triton.cudagraph_skip_dynamic_graphs
-                        and not V.graph.partition_handles_cudagraph_unsafe_ops
+                        and not V.graph.cudagraphs_per_partition
                         and not V.graph.disable_cudagraphs_reason
                         and torch._inductor.utils.any_is_symbolic(*example_inputs)
                     ):
@@ -2031,7 +2031,7 @@ class _InProcessFxCompile(FxCompile):
                     if (
                         cudagraphs
                         # pyrefly: ignore [unbound-name]
-                        and not V.graph.partition_handles_cudagraph_unsafe_ops
+                        and not V.graph.cudagraphs_per_partition
                         # pyrefly: ignore [unbound-name]
                         and not V.graph.disable_cudagraphs_reason
                     ):
@@ -2073,7 +2073,7 @@ class _InProcessFxCompile(FxCompile):
                                 V.graph.device_node_mapping,
                                 cpu_nodes_partitioned_out=(
                                     # pyrefly: ignore [unbound-name]
-                                    V.graph.partition_handles_cudagraph_unsafe_ops
+                                    V.graph.cudagraphs_per_partition
                                 ),
                             )
                         )
@@ -2601,7 +2601,10 @@ def fw_compiler_freezing(
         if tracing_context.fw_metadata:
             static_input_idxs = tracing_context.fw_metadata.static_input_indices
 
-    with allow_non_fake_inputs_temporarily(fake_mode):
+    with (
+        allow_non_fake_inputs_temporarily(fake_mode),
+        cudagraph_annotation_context(compiler_config_extra.cudagraphs),
+    ):
         optimized_function = inner_compile(
             opt_model,
             aot_example_inputs,
