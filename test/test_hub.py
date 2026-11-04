@@ -1,6 +1,7 @@
 # Owner(s): ["module: hub"]
 
 import contextlib
+import errno
 import io
 import os
 import tempfile
@@ -17,6 +18,7 @@ import torch
 import torch.hub as hub
 from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
+    IS_WINDOWS,
     retry,
     run_tests,
     skipIfTorchDynamo,
@@ -438,8 +440,13 @@ class TestHub(TestCase):
         # timeout, a lock that is never released makes the workers fall back
         # within seconds, which _assert_lock_used catches, instead of hanging.
         real_download = hub.download_url_to_file
+        count_lock = threading.Lock()
+        num_downloads = 0
 
         def slow_download(*args, **kwargs):
+            nonlocal num_downloads
+            with count_lock:
+                num_downloads += 1
             time.sleep(0.5)
             return real_download(*args, **kwargs)
 
@@ -452,13 +459,11 @@ class TestHub(TestCase):
         with (
             self._assert_lock_used(),
             patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 5),
-            patch.object(
-                hub, "download_url_to_file", side_effect=slow_download
-            ) as mock_download,
+            patch.object(hub, "download_url_to_file", side_effect=slow_download),
             ThreadPoolExecutor(len(fns)) as pool,
         ):
             results = list(pool.map(worker, fns))
-        return results, mock_download.call_count
+        return results, num_downloads
 
     @contextlib.contextmanager
     def _assert_lock_used(self):
@@ -473,26 +478,27 @@ class TestHub(TestCase):
         torch.save({"w": torch.arange(10)}, src)
         return Path(src).as_uri(), os.path.join(self.tmpdir.name, "checkpoints")
 
-    def _make_hub_archive(self, repo, entries=None):
+    def _make_hub_archive(self, repo, entries=None, top_dir=None):
         archive_dir = os.path.join(self.tmpdir.name, "archives")
         os.makedirs(archive_dir, exist_ok=True)
         archive = os.path.join(archive_dir, repo + ".zip")
         # Mimic a GitHub archive: a single top-level directory.
+        top_dir = top_dir or f"{repo}-main"
         if entries is None:
-            entries = {f"{repo}-main/hubconf.py": f"name = {repo!r}\n"}
+            entries = {f"{top_dir}/hubconf.py": f"name = {repo!r}\n"}
         with zipfile.ZipFile(archive, "w") as zf:
-            zf.writestr(f"{repo}-main/", "")
+            zf.writestr(f"{top_dir}/", "")
             for name, content in entries.items():
                 zf.writestr(name, content)
         return Path(archive).as_uri()
 
-    def _load_repo(self, repo, force_reload=False):
+    def _load_repo(self, repo, force_reload=False, skip_validation=True):
         return hub._get_cache_or_reload(
             f"owner/{repo}:main",
             force_reload=force_reload,
             trust_repo=True,
             verbose=False,
-            skip_validation=True,
+            skip_validation=skip_validation,
         )
 
     def _assert_no_leftovers(self):
@@ -500,7 +506,7 @@ class TestHub(TestCase):
         leftovers = [
             n
             for n in names
-            if not n.endswith(".lock") and (n.endswith(".zip") or "_main." in n)
+            if not n.endswith(".lock") and (n.endswith(".zip") or "~" in n)
         ]
         self.assertEqual(leftovers, [])
 
@@ -628,6 +634,148 @@ class TestHub(TestCase):
                 url, model_dir=model_dir, progress=False
             )
         self.assertEqual(state_dict["w"], torch.arange(10))
+
+    def test_get_cache_or_reload_concurrent_validates_once(self):
+        url = self._make_hub_archive("repo")
+        with (
+            patch.object(hub, "_git_archive_link", return_value=url),
+            patch.object(hub, "_validate_not_a_forked_repo") as mock_validate,
+        ):
+            _, num_downloads = self._run_concurrently(
+                [lambda: self._load_repo("repo", skip_validation=False)] * 4
+            )
+        # Validation runs under the lock, so workers that find the repo already
+        # extracted skip its GitHub API calls.
+        self.assertEqual(num_downloads, 1)
+        self.assertEqual(mock_validate.call_count, 1)
+
+    def test_get_cache_or_reload_two_refs_same_commit(self):
+        # Two refs at the same commit unpack to the same top-level directory.
+        urls = {
+            ref: self._make_hub_archive(
+                f"repo_{ref}",
+                {"repo-abc123/hubconf.py": f"ref = {ref!r}\n"},
+                "repo-abc123",
+            )
+            for ref in ("main", "v1")
+        }
+
+        def load(ref):
+            return hub._get_cache_or_reload(
+                f"owner/repo:{ref}",
+                force_reload=False,
+                trust_repo=True,
+                verbose=False,
+                skip_validation=True,
+            )
+
+        with patch.object(
+            hub, "_git_archive_link", side_effect=lambda owner, name, ref: urls[ref]
+        ):
+            results, num_downloads = self._run_concurrently(
+                [lambda: load("main"), lambda: load("v1")]
+            )
+        self.assertEqual(num_downloads, 2)
+        for ref, repo_dir in zip(("main", "v1"), results):
+            with open(os.path.join(repo_dir, "hubconf.py")) as f:
+                self.assertEqual(f.read(), f"ref = {ref!r}\n")
+        self.assertFalse(os.path.exists(os.path.join(hub.get_dir(), "repo-abc123")))
+
+    def test_get_cache_or_reload_unlocked_keeps_published_repo(self):
+        url = self._make_hub_archive("repo")
+        repo_dir = os.path.join(hub.get_dir(), "owner_repo_main")
+        real_download = hub.download_url_to_file
+
+        def download_while_another_process_publishes(*args, **kwargs):
+            os.makedirs(repo_dir)
+            with open(os.path.join(repo_dir, "hubconf.py"), "w") as f:
+                f.write("name = 'other'\n")
+            return real_download(*args, **kwargs)
+
+        error = OSError(errno.ENOLCK, "No locks available")
+        with (
+            patch.object(hub, "_git_archive_link", return_value=url),
+            patch.object(hub, "_lock_unavailable", return_value=error),
+            patch.object(
+                hub,
+                "download_url_to_file",
+                side_effect=download_while_another_process_publishes,
+            ),
+            self.assertWarnsRegex(UserWarning, "No locks available"),
+        ):
+            self.assertEqual(self._load_repo("repo"), repo_dir)
+        # The other process's copy is neither replaced nor nested into.
+        self.assertEqual(os.listdir(repo_dir), ["hubconf.py"])
+        with open(os.path.join(repo_dir, "hubconf.py")) as f:
+            self.assertEqual(f.read(), "name = 'other'\n")
+        self._assert_no_leftovers()
+
+    def test_get_cache_or_reload_removes_stale_work_dir(self):
+        stale = os.path.join(hub.get_dir(), "owner_repo_main~killed01")
+        os.makedirs(os.path.join(stale, "repo-main"))
+        # The cached repo of ref "main.1", which the cleanup must leave alone.
+        other_ref = os.path.join(hub.get_dir(), "owner_repo_main.1")
+        os.makedirs(other_ref)
+        url = self._make_hub_archive("repo")
+        with patch.object(hub, "_git_archive_link", return_value=url):
+            self._load_repo("repo")
+        self.assertFalse(os.path.exists(stale))
+        self.assertTrue(os.path.isdir(other_ref))
+
+    def test_load_state_dict_from_url_lock_timeout(self):
+        from torch.utils._filelock import FileLock
+
+        url, model_dir = self._save_weights()
+        os.makedirs(model_dir)
+        stderr = io.StringIO()
+        with (
+            FileLock(os.path.join(model_dir, "weights.pt") + ".lock"),
+            patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 0.2),
+            patch("sys.stderr", new=stderr),
+            self.assertWarnsRegex(UserWarning, "Could not lock"),
+            ThreadPoolExecutor(1) as pool,
+        ):
+            # Another thread, so that the held lock looks like another process's.
+            state_dict = pool.submit(
+                hub.load_state_dict_from_url, url, model_dir=model_dir, progress=False
+            ).result(timeout=60)
+        self.assertIn("Waiting for another process", stderr.getvalue())
+        self.assertEqual(state_dict["w"], torch.arange(10))
+
+    def test_load_state_dict_from_url_unlockable_falls_back_at_once(self):
+        from torch.utils._filelock import FileLock
+
+        url, model_dir = self._save_weights()
+        error = OSError(errno.ENOLCK, "No locks available")
+        with (
+            patch.object(hub, "_lock_unavailable", return_value=error),
+            patch.object(FileLock, "__enter__", side_effect=AssertionError),
+            self.assertWarnsRegex(UserWarning, "No locks available"),
+        ):
+            state_dict = hub.load_state_dict_from_url(
+                url, model_dir=model_dir, progress=False
+            )
+        self.assertEqual(state_dict["w"], torch.arange(10))
+
+    @unittest.skipIf(IS_WINDOWS, "flock probe is Unix only")
+    def test_lock_unavailable_tells_unlockable_from_busy(self):
+        lock_path = os.path.join(self.tmpdir.name, "entry.lock")
+        enolck = OSError(errno.ENOLCK, "No locks available")
+        with patch("fcntl.flock", side_effect=enolck):
+            self.assertIs(hub._lock_unavailable(lock_path), enolck)
+        with patch("fcntl.flock", side_effect=BlockingIOError(errno.EWOULDBLOCK, "")):
+            self.assertIsNone(hub._lock_unavailable(lock_path))
+        self.assertIsNone(hub._lock_unavailable(lock_path))
+
+    def test_warm_cache_does_not_lock(self):
+        url, model_dir = self._save_weights()
+        repo_url = self._make_hub_archive("repo")
+        with patch.object(hub, "_git_archive_link", return_value=repo_url):
+            hub.load_state_dict_from_url(url, model_dir=model_dir, progress=False)
+            repo_dir = self._load_repo("repo")
+            with patch.object(hub, "_cache_lock", side_effect=AssertionError):
+                hub.load_state_dict_from_url(url, model_dir=model_dir, progress=False)
+                self.assertEqual(self._load_repo("repo"), repo_dir)
 
 
 if __name__ == "__main__":
