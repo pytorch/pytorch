@@ -502,8 +502,8 @@ inline int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n) {
   auto mn = std::min(m, n);
   auto mx = std::max(m, n);
   if (jobz == 'N') {
-#ifdef __APPLE__
-    // According to `vecLib.framework/Headers/clapack.h` Accelerate.framework is based on LAPACK 3.2.1
+#if defined(__APPLE__) && !defined(ACCELERATE_NEW_LAPACK)
+    // Accelerate.framework's legacy interface is based on LAPACK 3.2.1, see `vecLib.framework/Headers/clapack.h`
     return 7 * mn;
 #else
     // These setting is valid for on LAPACK 3.6+

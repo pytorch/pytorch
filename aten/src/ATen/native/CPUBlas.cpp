@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/LapackAlias.h>
 #include <ATen/native/mkl/LinearAlgebra.h>
 #include <ATen/native/mkldnn/Matmul.h>
 
@@ -15,10 +16,10 @@
 #if C10_IOS
 #include <Accelerate/Accelerate.h>
 #elif !defined(_ARMPL_H)
-extern "C" void dgemm_(char *transa, char *transb, int *m, int *n, int *k, double *alpha, const double *a, int *lda, const double *b, int *ldb, double *beta, double *c, int *ldc);
-extern "C" void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float *alpha, const float *a, int *lda, const float *b, int *ldb, float *beta, float *c, int *ldc);
-extern "C" void cgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
-extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
+extern "C" void dgemm_(char *transa, char *transb, int *m, int *n, int *k, double *alpha, const double *a, int *lda, const double *b, int *ldb, double *beta, double *c, int *ldc) AT_LAPACK_ALIAS(dgemm);
+extern "C" void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float *alpha, const float *a, int *lda, const float *b, int *ldb, float *beta, float *c, int *ldc) AT_LAPACK_ALIAS(sgemm);
+extern "C" void cgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc) AT_LAPACK_ALIAS(cgemm);
+extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc) AT_LAPACK_ALIAS(zgemm);
 #ifdef BLAS_HAS_SBGEMM
 extern "C" void sbgemm_(char *transa, char *transb, int *m, int *n, int *k,
                 float *alpha,
@@ -35,15 +36,15 @@ extern "C" void shgemm_(char *transa, char *transb, int *m, int *n, int *k,
                 float *beta,
                 float *c, int *ldc);
 #endif  // BLAS_HAS_SHGEMM
-extern "C" void cswap_(int *n, const void *x, int *incx, void *y, int *incy);
-extern "C" void dcopy_(int *n, const double *x, int *incx, double *y, int *incy);
-extern "C" void scopy_(int *n, const float *x, int *incx, float *y, int *incy);
-extern "C" void zcopy_(int *n, const void *x, int *incx, void *y, int *incy);
-extern "C" void ccopy_(int *n, const void *x, int *incx, void *y, int *incy);
-extern "C" void daxpy_(int *n, double *a, const double *x, int *incx, double *y, int *incy);
-extern "C" void saxpy_(int *n, float *a, const float *x, int *incx, float *y, int *incy);
-extern "C" void caxpy_(int *n, void *a, const void *x, int *incx, void *y, int *incy);
-extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *incy);
+extern "C" void cswap_(int *n, const void *x, int *incx, void *y, int *incy) AT_LAPACK_ALIAS(cswap);
+extern "C" void dcopy_(int *n, const double *x, int *incx, double *y, int *incy) AT_LAPACK_ALIAS(dcopy);
+extern "C" void scopy_(int *n, const float *x, int *incx, float *y, int *incy) AT_LAPACK_ALIAS(scopy);
+extern "C" void zcopy_(int *n, const void *x, int *incx, void *y, int *incy) AT_LAPACK_ALIAS(zcopy);
+extern "C" void ccopy_(int *n, const void *x, int *incx, void *y, int *incy) AT_LAPACK_ALIAS(ccopy);
+extern "C" void daxpy_(int *n, double *a, const double *x, int *incx, double *y, int *incy) AT_LAPACK_ALIAS(daxpy);
+extern "C" void saxpy_(int *n, float *a, const float *x, int *incx, float *y, int *incy) AT_LAPACK_ALIAS(saxpy);
+extern "C" void caxpy_(int *n, void *a, const void *x, int *incx, void *y, int *incy) AT_LAPACK_ALIAS(caxpy);
+extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *incy) AT_LAPACK_ALIAS(zaxpy);
 #endif  // C10_IOS
 #endif  // AT_BUILD_WITH_BLAS
 
