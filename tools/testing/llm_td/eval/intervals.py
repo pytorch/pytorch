@@ -9,7 +9,8 @@ bootstrap, since pushes of one PR are correlated) and, for reference, per
 push. A revert counts as caught when any failure is selected, a push only
 when every one is, as in chart.caught. Also prints the discordant counts and
 an exact two-sided McNemar p-value. --latency prints the p50 and p90 of
-run_eval's wall_s (the last attempt's latency) over TAG's results on IDS.
+run_eval's wall_s (the last attempt's latency) over TAG's results on IDS,
+timed-out calls included.
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ import math
 import random
 import statistics as st
 from pathlib import Path
+
+from tools.testing.llm_td.eval.chart import PRODUCTION
 
 
 def outcomes(rows: list[dict], tag: str, pol: str, kind: str) -> dict[str, bool]:
@@ -83,7 +86,9 @@ def compare(rows: list[dict], new: list[str], old: list[str], b: int, seed: int)
 
 
 def latency(data: Path, tag: str, ids: list[str]) -> str:
-    """p50 and p90 of `tag`'s wall_s on `ids`: the last attempt's latency, without earlier attempts or their backoff."""
+    """p50 and p90 of `tag`'s wall_s on `ids`: the last attempt's latency, without earlier attempts or their backoff.
+
+    Timed-out calls count, at the time they were cut off."""
     walls = sorted(json.loads(p.read_text())["wall_s"] for i in ids if (p := data / "results" / tag / f"{i}.json").exists())  # fmt: skip
     if len(walls) < 2:
         raise SystemExit(f"fewer than 2 {tag} results on the ids")
@@ -96,7 +101,7 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument("rows", nargs="*", type=Path, help="score.py --json rows")
-    p.add_argument("--new", default="v3_opus55_medium:final+td20", help="TAG:POLICY")
+    p.add_argument("--new", default=":".join(PRODUCTION), help="TAG:POLICY")
     p.add_argument("--old", default="td:td25", help="TAG:POLICY")
     p.add_argument("--b", type=int, default=10000, help="bootstrap resamples")
     p.add_argument("--seed", type=int, default=0)

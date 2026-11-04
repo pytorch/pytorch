@@ -20,11 +20,12 @@ CLICKHOUSE_UID = "ceczcsck1b20wb"
 TIMEOUT = 600
 ATTEMPTS = 3
 # Server-side "Timeout exceeded" is deterministic, so it is not here; code 202 is "Too many simultaneous queries".
-TRANSIENT = re.compile(r"timed out|throttl|rate.?limit|connection (reset|refused|closed)|temporar|too many simultaneous queries|\b(429|500|502|503|504)\b", re.IGNORECASE)  # fmt: skip
+# HTTP codes need an HTTP/status prefix or their reason phrase, so "elapsed 500 seconds" is not transient.
+TRANSIENT = re.compile(r"timed out|throttl|rate.?limit|connection (reset|refused|closed)|temporar(il)?y unavailable|too many simultaneous queries|(HTTP|status)\D{0,12}\b(429|500|502|503|504)\b|\b(429 Too Many|500 Internal Server|502 Bad Gateway|503 Service Unavailable|504 Gateway Time)", re.IGNORECASE)  # fmt: skip
 
 
 def query(sql: str) -> list[dict]:
-    """The rows of `sql`. A failure whose stderr is transient is retried up to ATTEMPTS times; a local timeout, malformed output or any other failure raises at once."""
+    """The rows of `sql`. A failure whose stderr is transient is retried, for ATTEMPTS attempts in all; a local timeout, malformed output or any other failure raises at once."""
     for attempt in range(ATTEMPTS):
         if attempt:
             time.sleep(30 * attempt)

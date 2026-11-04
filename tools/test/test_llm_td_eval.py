@@ -1295,8 +1295,17 @@ class TestChart(unittest.TestCase):
         self.assertEqual(chart.caught(s, "revert"), (100.0, 2))
         self.assertEqual(chart.caught(s, "head"), (50.0, 2))
         (empty,) = score.summarize(rows[2:])
-        with self.assertRaises(SystemExit):
+        with self.assertRaisesRegex(SystemExit, "^no failing head rows for t$"):
             chart.caught(empty, "head")
+
+    def test_committed_svg(self) -> None:
+        # chart.main needs matplotlib, which CI's tools tests lack (TestChartMain), so check its committed output here.
+        svg = (REPO_ROOT / "tools/testing/llm_td/report_tradeoff.svg").read_text()
+        report = (REPO_ROOT / "tools/testing/llm_td/REPORT.md").read_text()
+        for title in ("Reverted commits caught (n=134)", "Failing PR pushes with every real failure selected (n=236)"):  # fmt: skip
+            self.assertIn(f">{title}<", svg)
+            self.assertIn(f"| {title} |", report)
+        self.assertNotIn("Matplotlib v", svg)
 
     def test_panels(self) -> None:
         base = {"files": 1, "run_all": False, "gpu": 0.0, "cost_usd": 0.1, "error": False}  # fmt: skip
@@ -1421,17 +1430,11 @@ class TestDollars(unittest.TestCase):
             "results/m/d.json": result, "results/m/e.json": result,
             "results/m/t.json": {"out": None, "error": TIMED_OUT, "cost_usd": 0.0},
         })  # fmt: skip
-        # d's replay is of another sample, and git grep fails at e's head.
+        # d's replay is of another sample, and e's head is not in this clone.
         (data / "td/d.json").write_text(json.dumps({**td, "inputs": "stale"}))
         self.enterContext(patch_ci_jobs(DOLLAR_JOBS))
-        self.enterContext(mock.patch.object(score, "grep_at", self.grep_at))
+        self.enterContext(mock.patch.object(score, "grep_at", return_value=[]))
         return data
-
-    @staticmethod
-    def grep_at(pattern: str, sha: str) -> list[str]:
-        if sha == "gone":
-            raise RuntimeError(sha)
-        return []
 
     def model(self, data: Path, tag: str, pol: str, ids: str, workflows: list[tuple[str, str, float, float, float, bool]] = dollars.WORKFLOWS) -> tuple[dict, str]:  # fmt: skip
         err = io.StringIO()
@@ -1524,8 +1527,35 @@ class TestDollars(unittest.TestCase):
             contextlib.redirect_stdout(out),
         ):  # fmt: skip
             dollars.main()
-        self.assertRegex(out.getvalue(), r"^m final overhead=0.2 n=3 n_ind=1 run cpu=0.467 gpu=0.800 .* \$/call=0.300 llm=\$3.8k/month\n$")  # fmt: skip
+        llm = re.escape(f"{0.3 * dollars.PR_PUSHES_PER_MONTH_K:.1f}")
+        self.assertRegex(out.getvalue(), rf"^m final overhead=0.2 n=3 n_ind=1 run cpu=0.467 gpu=0.800 .* \$/call=0.300 llm=\${llm}k/month\n$")  # fmt: skip
         self.assertEqual(json.loads((data / "d.json").read_text())["fractions"]["n"], 3)
+        for bad in ("1", "-0.1"):
+            with mock.patch.object(sys, "argv", [*argv, "--overhead", bad, "m", "final"]), contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):  # fmt: skip
+                dollars.main()
+            self.assertIn("--overhead must be in [0, 1)", err.getvalue())
+
+    def test_cold_call_usd(self) -> None:
+        price = [4.0, 5.0, 0.2, 20.0]
+        usage = {"a": [1000, 0, 9000, 100], "b": [500, 9000, 0, 200], "d": [2000, 1000, 5000, 50], "e": [100, 0, 0, 10]}  # fmt: skip
+        files: dict[str, object] = {f"results/m/{i}.json": {"cost_usd": sum(p * n for p, n in zip(price, u)) / 1e6, "error": None, "usage": dict(zip(dollars.USAGE, u))} for i, u in usage.items()}  # fmt: skip
+        files["results/m/t.json"] = {"cost_usd": 9.0, "error": TIMED_OUT, "usage": None}
+        sample = {"title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a"], "changed_files": ["torch/foo.py"]}  # fmt: skip
+        data = self.write({**files, **{f"samples/{i}.json": sample for i in "abdet"}, "samples/u.json": {**sample, "changed_files": ["test/run_test.py"]}})  # fmt: skip
+        with contextlib.redirect_stderr(io.StringIO()):
+            cold, fitted = dollars.cold_call_usd(data, "m", list("abdetu"), data / "samples")  # fmt: skip
+        for got, want in zip(fitted, price):
+            self.assertAlmostEqual(got, want)
+        # Every cache-read token re-priced at the cache-write rate.
+        recorded = sum(sum(p * n for p, n in zip(price, u)) / 1e6 for u in usage.values()) / 4  # fmt: skip
+        self.assertAlmostEqual(cold, recorded + (9000 + 5000) * (5.0 - 0.2) / 1e6 / 4)
+
+    def test_report_spend_matches_workflows(self) -> None:
+        report = (REPO_ROOT / "tools/testing/llm_td/REPORT.md").read_text()
+        table = report[report.index("| Workflow | Old $k/mo | New $k/mo |") :].split("\n| **total**")[0]  # fmt: skip
+        old = [float(line.split("|")[2]) for line in table.splitlines()[2:]]
+        self.assertEqual(old, [round(w[2], 1) for w in dollars.WORKFLOWS])  # fmt: skip
+        self.assertIn(f"| **total** | **{sum(w[2] for w in dollars.WORKFLOWS):.0f}** |", report)  # fmt: skip
 
 
 @unittest.skipUnless(importlib.util.find_spec("matplotlib"), "needs matplotlib")
@@ -1573,11 +1603,40 @@ class TestIntervals(unittest.TestCase):
         self.assertEqual(intervals.outcomes(rows, "new", "p", "revert"), {"r1": True, "r2": True})  # fmt: skip
         revert, head = intervals.compare(rows, ["new", "p"], ["old", "p"], 200, 0)
         self.assertTrue(revert.startswith("reverts caught: n=2 new=100.0% old=50.0% new-old=+50.0 pts discordant new-only=1 old-only=0 McNemar p=1.000"), revert)  # fmt: skip
+        # Resampling the two commits gives 0, 50 or 100 points.
+        self.assertRegex(revert, r"\| 95% CI per commit \[\+0\.0, \+100\.0\]$")
         # head_2_c has no old row, so it is not paired; both pushes are of PR 1.
         self.assertTrue(head.startswith("failing pushes, every failure: n=2 new=0.0% old=100.0% new-old=-100.0 pts"), head)  # fmt: skip
         self.assertTrue(head.endswith("| per PR (1 PRs) [-100.0, -100.0]"), head)
         with self.assertRaisesRegex(SystemExit, "no paired failing revert rows of x:p and old:p"):  # fmt: skip
             intervals.compare(rows, ["x", "p"], ["old", "p"], 10, 0)
+
+    def test_bootstrap_percentiles(self) -> None:
+        # Clusters 0 and 1 are misses, 2 and 3 hits; the resamples score 0, 25, 75, 100 and then 36 times 50.
+        draws = iter([0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 2, 2, 2, 2, 2, 2] + [0, 1, 2, 3] * 36)  # fmt: skip
+        rng = mock.Mock(randrange=lambda n: next(draws))
+        self.assertEqual(intervals.bootstrap({"a": [0], "b": [0], "c": [1], "d": [1]}, 40, rng), (25.0, 75.0))  # fmt: skip
+
+    def test_main(self) -> None:
+        rows = [{"tag": t, "policy": p, "kind": k, "id": i, "pairs": 1, "hit": int(t != "td")} for t, p in (intervals.PRODUCTION, ("td", "td25")) for k, i in (("revert", "r1"), ("head", "head_1_a"))]  # fmt: skip
+        # Revert and head rows come in separate files, as score.py writes them.
+        d = write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), {"a.json": rows[::2], "b.json": rows[1::2], "results/m/x.json": {"wall_s": 1}, "results/m/y.json": {"wall_s": 3}, "ids": "x y"})  # fmt: skip
+
+        def run(*argv: str) -> tuple[str, str]:
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.object(sys, "argv", ["intervals", *argv]), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):  # fmt: skip
+                try:
+                    intervals.main()
+                except SystemExit:
+                    pass
+            return out.getvalue(), err.getvalue()
+
+        out, _ = run(str(d / "a.json"), str(d / "b.json"), "--b", "40")
+        self.assertEqual([x.split(":")[0] for x in out.splitlines()], ["reverts caught", "failing pushes, every failure"])  # fmt: skip
+        self.assertEqual(run("--data", str(d), "--latency", "m", "--ids", str(d / "ids"))[0], "m latency: n=2 p50=2s p90=3s\n")  # fmt: skip
+        self.assertIn("--latency needs --data", run("--latency", "m")[1])
+        self.assertIn("no rows", run()[1])
+        self.assertIn("are TAG:POLICY, got 'td'", run(str(d / "a.json"), "--old", "td")[1])  # fmt: skip
 
     def test_mcnemar(self) -> None:
         self.assertEqual(intervals.mcnemar(0, 0), 1.0)
@@ -1623,7 +1682,8 @@ class TestClickhouse(unittest.TestCase):
         ok = subprocess.CompletedProcess([], 0, 'log\n{"columns": [{"name": "a"}], "rows": [[1]]}', "")  # fmt: skip
         busy = subprocess.CompletedProcess([], 1, "", "HTTP 503 Service Unavailable")
         crowded = subprocess.CompletedProcess([], 1, "", "Code: 202. DB::Exception: Too many simultaneous queries")  # fmt: skip
-        slow = subprocess.CompletedProcess([], 1, "", "Code: 159. DB::Exception: Timeout exceeded: elapsed 300 seconds")  # fmt: skip
+        slow = subprocess.CompletedProcess([], 1, "", "Code: 159. DB::Exception: Timeout exceeded: elapsed 500 seconds")  # fmt: skip
+        gateway = subprocess.CompletedProcess([], 1, "", "502 Bad Gateway")
         bad = subprocess.CompletedProcess([], 2, "", "Code: 62. Syntax error")
         # A result that is not one, whose rows would look transient if searched.
         null = subprocess.CompletedProcess([], 0, '{"columns": null, "rows": [["connection timed out"]]}', "")  # fmt: skip
@@ -1633,7 +1693,8 @@ class TestClickhouse(unittest.TestCase):
             ([ok], 1, [{"a": 1}]),
             ([busy, crowded, ok], 3, [{"a": 1}]),
             ([bad, ok], 1, "attempt 1 of 3 exited with code 2: Code: 62. Syntax error"),
-            ([slow, ok], 1, "attempt 1 of 3 exited with code 1: Code: 159. DB::Exception: Timeout exceeded: elapsed 300 seconds"),
+            ([slow, ok], 1, "attempt 1 of 3 exited with code 1: Code: 159. DB::Exception: Timeout exceeded: elapsed 500 seconds"),
+            ([gateway, ok], 2, [{"a": 1}]),
             ([busy, hung, ok], 2, "attempt 2 of 3 timed out after 600s"),
             ([null, ok], 1, 'attempt 1 of 3 returned no result: {"columns": null, "rows": [["connection timed out"]]}'),
             ([busy, busy, busy], 3, "attempt 3 of 3 exited with code 1: HTTP 503 Service Unavailable"),
@@ -1649,6 +1710,7 @@ class TestClickhouse(unittest.TestCase):
                     self.assertEqual(str(e.exception), f"ClickHouse query failed, {want}\nSQL: SELECT 1")  # fmt: skip
                 self.assertEqual(run.call_count, calls)
                 self.assertEqual(run.call_args.kwargs["timeout"], clickhouse.TIMEOUT)
+                self.assertEqual(run.call_args.args[0][1:], ["datasources", "clickhouse", "query", "-d", clickhouse.CLICKHOUSE_UID, "--limit", "0", "-o", "json", "SELECT 1"])  # fmt: skip
 
 
 class TestBuildDataset(unittest.TestCase):
@@ -1667,6 +1729,15 @@ class TestBuildDataset(unittest.TestCase):
             bd.main()
         git.assert_not_called()
         self.assertIn("rerun on or after", err.getvalue())
+        # The guard is for PR truth only.
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(sys, "argv", [*argv[:2], tmp, *argv[3:-1], "revert"]),
+            mock.patch.object(bd, "git"),
+            mock.patch.object(bd, "revert_samples") as revert,
+        ):  # fmt: skip
+            bd.main()
+        revert.assert_called_once()
 
     def test_commit_text(self) -> None:
         # As trymerge.py's gen_commit_message lands a ghstack PR and native_stack.py a GitHub-native one.
@@ -1682,7 +1753,7 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_x", "2026-10-05 00:00:00", "a"),
             fail("test_x", "2026-10-05 00:00:00", "m", br="main", flaky=True),
             fail("test_x", "2026-10-05 00:00:00", "t", br="trunk/t"),
-            # A fork's main is a PR branch, here of no known PR.
+            # A fork's main is a PR branch, not main; here PR 2's, whose author is unknown.
             fail("test_x", "2026-10-05 00:00:00", "g", br="f/pytorch:main"),
             fail("test_x", "2026-10-05 00:00:00", "u"),
         ]
@@ -1832,7 +1903,8 @@ class TestBuildDataset(unittest.TestCase):
 
     def test_stacked_down_the_stack(self) -> None:
         # A ghstack stack L0 (pr 1) < L (pr 2) < U (pr 3): U's base has L's tree, and L's change edits a
-        # line two away from L0's, so L0's change still reverse-applies to U's base.
+        # line two away from L0's, so L0's change reverse-applies to U's base with one line of context
+        # but not with two.
         lines = [str(i) for i in range(1, 10)]
 
         def a(**edits: str) -> str:
@@ -1841,7 +1913,7 @@ class TestBuildDataset(unittest.TestCase):
         with scratch_repo():
             m = commit_files({"a": a(), "b": "b\n"})
             bd.git("update-ref", "refs/remotes/origin/main", m)
-            main, k0_files, k1_files = ({"a": a(**e), "b": "b\n"} for e in ({}, {"l2": "x"}, {"l2": "x", "l5": "y"}))  # fmt: skip
+            main, k0_files, k1_files = ({"a": a(**e), "b": "b\n"} for e in ({}, {"l2": "x"}, {"l2": "x", "l4": "y"}))  # fmt: skip
             k0 = commit_files(k0_files, commit_files(main, m))
             k1 = commit_files(k1_files, commit_files(k0_files, m))
             k2_base = commit_files(k1_files, m)
@@ -1867,13 +1939,15 @@ class TestBuildDataset(unittest.TestCase):
         # S (pr 3, mine) and F (pr 4, mine). O and S broke their tests 20 days before U's failure,
         # outside WINDOW; F's failure passed again in its job. D (pr 5, mine) deletes a line whose
         # context is two blank lines, which B has elsewhere, so D's change reverse-applies to B
-        # with one line of context though B does not have it.
-        main = {"a": "a\n\nX\n\nb\n\n\nc\n", "o": "o\n", "s": "s\n", "f": "f\n"}
+        # with one line of context though B does not have it. P (pr 6) and Q (pr 7), another author's,
+        # failed within WINDOW but after U landed, which other_failure leaves out; B has P's change only.
+        main = {"a": "a\n\nX\n\nb\n\n\nc\n", "o": "o\n", "s": "s\n", "f": "f\n", "p": "p\n", "q": "q\n"}  # fmt: skip
         with scratch_repo():
             m = commit_files(main)
             bd.git("update-ref", "refs/remotes/origin/main", m)
-            changed = dict.fromkeys("osf", "changed\n")
-            o, s, f = (commit_files({**main, k: v}, m) for k, v in changed.items())
+            changed = dict.fromkeys("osfp", "changed\n")
+            o, s, f, p = (commit_files({**main, k: v}, m) for k, v in changed.items())
+            q = commit_files({**main, "q": "changed\n"}, m)
             d = commit_files({**main, "a": "a\n\n\nb\n\n\nc\n"}, m)
             b = commit_files({**main, **changed}, m)
             u = commit_files({**main, **changed, "u": "u\n"}, b)
@@ -1882,8 +1956,11 @@ class TestBuildDataset(unittest.TestCase):
                 fail("test_s", "2026-09-17 00:00:00", s),
                 fail("test_f", "2026-10-06 00:00:00", f, flaky=True),
                 fail("test_d", "2026-10-06 00:00:00", d),
-            ] + [fail(t, "2026-10-07 00:00:00", u) for t in ("test_o", "test_s", "test_f", "test_d")]  # fmt: skip
-            h = history(rows, {u: 1, o: 2, s: 3, f: 4, d: 5}, {1: "me", 2: "x", 3: "me", 4: "me", 5: "me"}, {2: day(18, 9)})  # fmt: skip
+                fail("test_p", "2026-10-09 00:00:00", p),
+                fail("test_q", "2026-10-09 00:00:00", q),
+            ] + [fail(t, "2026-10-07 00:00:00", u) for t in ("test_o", "test_s", "test_f", "test_d", "test_p", "test_q")]  # fmt: skip
+            authors = {1: "me", 2: "x", 3: "me", 4: "me", 5: "me", 6: "y", 7: "y"}
+            h = history(rows, {u: 1, o: 2, s: 3, f: 4, d: 5, p: 6, q: 7}, authors, {2: day(18, 9), 1: day(8)})  # fmt: skip
             dropped: collections.Counter = collections.Counter()
             with (
                 patch_ci_jobs(TD_JOBS),
@@ -1892,11 +1969,11 @@ class TestBuildDataset(unittest.TestCase):
             ):  # fmt: skip
                 h.load_green({u})
                 kept = h.truth(u, {"base": b, "merge_base": b, "main_base": m, "base_source": "ci"}, dropped)  # fmt: skip
-            self.assertTrue(all(bd.below(x, b) for x in (o, s, f)))
-            self.assertFalse(bd.below(d, b))
+            self.assertTrue(all(bd.below(x, b) for x in (o, s, f, p)))
+            self.assertFalse(any(bd.below(x, b) for x in (d, q)))
             self.assertEqual(len(bd.deletion_hunks(bd.own_change(d))), 1)
-        self.assertEqual(sorted(r["test"] for r in kept or []), ["test_d", "test_f", "test_o"])  # fmt: skip
-        self.assertEqual(dropped, {"stacked": 1})
+        self.assertEqual(sorted(r["test"] for r in kept or []), ["test_d", "test_f", "test_o", "test_q"])  # fmt: skip
+        self.assertEqual(dropped, {"stacked": 2})
 
     def test_truth_skips_a_main_base_before_the_loaded_failures(self) -> None:
         h = history([fail("test_x", "2026-10-05 00:00:00", "s")], {"s": 1}, {1: "me"})
@@ -2006,7 +2083,7 @@ class TestBuildDataset(unittest.TestCase):
                 bd.revert_truth_jobs({("test_a", "test_x")}, commits["change"], landed, "2026-10-05 00:30:00")  # fmt: skip
                 self.assertEqual(green.call_args.args[0], [commits["change"]])
                 failed = failed[1:]
-                # Failing only in jobs that do not run TD, so revert_samples skips it.
+                # Without the TD job's row, only periodic, unstable and rerun-green rows remain, so revert_samples skips it.
                 none = bd.revert_truth_jobs({("test_a", "test_x"), ("test_b", "test_q'r")}, commits["change"], landed, "2026-10-05 04:00:00")  # fmt: skip
         self.assertEqual(got, {"test_a": [td]})
         self.assertEqual(none, {})

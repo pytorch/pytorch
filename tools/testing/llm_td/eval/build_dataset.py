@@ -1,6 +1,12 @@
 """Build the labelled eval set from CI history.
 
-    python -m tools.testing.llm_td.eval.build_dataset --data DIR --start 2026-09-20 --end 2026-10-26
+    python -m tools.testing.llm_td.eval.build_dataset --data DIR --start 2026-10-01 --end 2026-10-26 --kinds pr neutral
+    python -m tools.testing.llm_td.eval.build_dataset --data DIR --start 2026-10-01 --end 2026-10-26 --kinds head
+    python -m tools.testing.llm_td.eval.build_dataset --data DIR --start 2026-04-01 --end 2026-10-26 --kinds revert
+
+The checked-in ids under eval/ids were built this way on 2026-11-03, with
+these rules but before the window guard below and the `window` field
+existed, so 6 days of the PR truth's forward window were missing.
 
 Four kinds of sample, each a JSON file under DIR/samples:
 
@@ -17,7 +23,9 @@ Four kinds of sample, each a JSON file under DIR/samples:
   head_<N>_<sha12>
               every head of a pr_ sample's PR with a failure that is the PR's
               own; the truth is those failures, so the pr_ sample's head gets
-              the same truth here.
+              the same `truth` here. Only pr_ samples carry `truth_strong`,
+              which score.py uses by default for pr_ samples alone, so pr_ and
+              head_ metrics are comparable only under --all-truth.
               `previous_failures` are the test files with a test that failed,
               and did not pass again in the same job, in a job that runs TD on
               another head of the PR before this head's first job was created,
@@ -78,8 +86,13 @@ not the PR's own, and is dropped, if
     out and the failure is the breakage of a PR below it in a stack (or of
     one that landed before it). The author's own PRs count at any time, since
     a stack's lower PRs can sit for weeks; another author's count only within
-    WINDOW, as for other_failure, so a long-landed PR that once broke the
-    test does not drop the failure.
+    WINDOW, so a long-landed PR that once broke the test does not drop the
+    failure. Within WINDOW and before the PR landed, other_failure already
+    drops it, so for another author this rule only adds lower heads that
+    failed after the PR landed, which other_failure leaves out because there
+    it cannot tell this PR's breakage from theirs. The lower head's failure
+    is only required not to have passed again in its job; the job, job_green
+    and other rules are not applied to it.
     In a GitHub-native stack that head is an ancestor of `merge_base`.
     ghstack bases each PR on a synthetic gh/USER/N/base commit with the tree
     of the PR below, so no lower head is an ancestor; there the lower head's
@@ -872,11 +885,11 @@ def main() -> None:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--data", type=Path, required=True)
-    p.add_argument("--start", type=dt.date.fromisoformat, required=True)
-    p.add_argument("--end", type=dt.date.fromisoformat, required=True)
-    p.add_argument("--neutral", type=int, default=200)
-    p.add_argument("--jobs", type=int, default=8)
+    p.add_argument("--data", type=Path, required=True, help="samples are written to DATA/samples")  # fmt: skip
+    p.add_argument("--start", type=dt.date.fromisoformat, required=True, help="first day (UTC); neutral ignores it")  # fmt: skip
+    p.add_argument("--end", type=dt.date.fromisoformat, required=True, help="day after the last (UTC); neutral samples the 25 days before it")  # fmt: skip
+    p.add_argument("--neutral", type=int, default=200, help="neutral commits to sample")
+    p.add_argument("--jobs", type=int, default=8, help="worker threads; neutral always uses 1")  # fmt: skip
     p.add_argument("--kinds", nargs="+", choices=KINDS, default=KINDS)
     args = p.parse_args()
     if {"pr", "head"} & set(args.kinds) and (closes := args.end + WINDOW) > dt.datetime.now(dt.timezone.utc).date():  # fmt: skip

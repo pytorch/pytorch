@@ -26,6 +26,7 @@ import statistics as st
 import sys
 from pathlib import Path
 
+import numpy as np
 import yaml
 
 from tools.testing.llm_td.eval import REPO, score
@@ -120,19 +121,40 @@ def fractions(
     return out[tag], out["td"]
 
 
-def mean_call_usd(data: Path, tag: str, ids: list[str], samples: Path) -> float:
-    """Mean recorded cost of `tag`'s calls on the `ids` select_tests asks the model about.
+def call_results(data: Path, tag: str, ids: list[str], samples: Path) -> list[dict]:
+    """`tag`'s results on the `ids` select_tests asks the model about, without the timed-out calls.
 
     A call run_eval timed out records only its earlier attempts' cost, so
     timed-out calls are left out."""
     asked = [i for i in ids if not score.unasked(json.loads((samples / f"{i}.json").read_text()))]  # fmt: skip
     results = [json.loads(p.read_text()) for i in asked if (p := data / "results" / tag / f"{i}.json").exists()]  # fmt: skip
-    costs = [r["cost_usd"] for r in results if r["error"] != TIMED_OUT]
-    if not costs:
+    kept = [r for r in results if r["error"] != TIMED_OUT]
+    if not kept:
         raise SystemExit(f"no {tag} results that did not time out for the cost ids")
-    if n := len(results) - len(costs):
+    if n := len(results) - len(kept):
         print(f"left out {n} of {len(results)} {tag} calls that timed out", file=sys.stderr)  # fmt: skip
-    return st.mean(costs)
+    return kept
+
+
+def mean_call_usd(data: Path, tag: str, ids: list[str], samples: Path) -> float:
+    """Mean recorded cost of `tag`'s calls on the `ids` select_tests asks the model about (see call_results)."""
+    return st.mean(r["cost_usd"] for r in call_results(data, tag, ids, samples))
+
+
+USAGE = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")  # fmt: skip
+
+
+def cold_call_usd(data: Path, tag: str, ids: list[str], samples: Path) -> tuple[float, list[float]]:  # fmt: skip
+    """Mean cost of `tag`'s calls on `ids` with a cold prompt cache, and the per-Mtok prices of USAGE fitted to the recorded costs.
+
+    The eval ran its calls back to back, so most read the cached prompt;
+    production calls are spread out and may not. Cold prices every
+    cache-read token as a cache write."""
+    rs = call_results(data, tag, ids, samples)
+    u = np.array([[(r["usage"] or {}).get(k, 0) for k in USAGE] for r in rs], float) / 1e6  # fmt: skip
+    c = np.array([r["cost_usd"] for r in rs], float)
+    price = np.linalg.lstsq(u, c, rcond=None)[0]
+    return float((c + u[:, 2] * (price[1] - price[2])).mean()), [float(x) for x in price]  # fmt: skip
 
 
 def model(
@@ -180,10 +202,13 @@ def main() -> None:
     p.add_argument("--stats", type=Path, default=REPO / score.ADDITIONAL_CI_FILES_FOLDER, help="td_replay.py's --stats")  # fmt: skip
     p.add_argument("--labeler", type=Path, default=LABELER, help="the labeler config with the ciflow/inductor globs")  # fmt: skip
     p.add_argument("--overhead", type=float, default=0.2, help="share of a test job's time that does not scale with the tests run")  # fmt: skip
+    p.add_argument("--cold", action="store_true", help="also print $/call with a cold prompt cache (see cold_call_usd)")  # fmt: skip
     p.add_argument("--json", type=Path, help="also write the whole result (fractions, per-workflow rows, totals) here")  # fmt: skip
     p.add_argument("tag", help="results/TAG, or td for TD's own cut")
     p.add_argument("policy", help="a score.py policy, td25 with tag td")
     args = p.parse_args()
+    if not 0 <= args.overhead < 1:
+        p.error(f"--overhead must be in [0, 1), not {args.overhead}")
     if missing := [a for a in score.STATS_ARTIFACTS if not (args.stats / a).exists()]:
         p.error(f"{args.stats} lacks {missing}, which td_replay.py read")
     ids = (args.ids or IDS / "neutral.txt").read_text().split()
@@ -198,6 +223,11 @@ def main() -> None:
         f"save cpu=${t['cpu']:.0f}k gpu=${t['gpu']:.0f}k (this stack ${d['stack_k_per_month']:.0f}k) "
         f"$/call={d['usd_per_call']:.3f} llm=${d['llm_k_per_month']:.1f}k/month"
     )
+    if args.cold and d["tag"] != "td":
+        cold, price = cold_call_usd(args.data, d["tag"], cost_ids, args.data / "samples")  # fmt: skip
+        prices = ", ".join(f"{k}=${x:.2f}" for k, x in zip(USAGE, price))
+        print(f"cold cache $/call={cold:.3f} llm=${PR_PUSHES_PER_MONTH_K * cold:.1f}k/month; fitted per-Mtok {prices}")  # fmt: skip
+        d["cold_usd_per_call"], d["fitted_usd_per_mtok"] = cold, dict(zip(USAGE, price))
     if args.json:
         args.json.write_text(json.dumps(d, indent=1))
 
