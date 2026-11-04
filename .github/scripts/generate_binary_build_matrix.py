@@ -24,17 +24,12 @@ SCRIPT_DIR = Path(__file__).absolute().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
 
-CUDA_ARCHES = ["13.0", "13.2", "13.4"]
+CUDA_ARCHES = ["13.2", "13.4"]
 CUDA_STABLE = "13.2"
-# CUDA versions built for Linux only. 13.0 is held on nightly for vLLM's cu130
-# lane (pytorch/test-infra#8989); nothing consumes a Windows cu130 nightly.
-CUDA_ARCHES_NO_WINDOWS = ["13.0"]
 # Only consumed by generate_docker_release_matrix.py, whose Dockerfile installs
 # an already-published torch nightly. A CUDA version belongs here only once its
 # wheels are on the download.pytorch.org index.
 CUDA_ARCHES_FULL_VERSION = {
-    "12.6": "12.6.3",
-    "13.0": "13.0.3",
     "13.2": "13.2.2",
     "13.4": "13.4.1",
 }
@@ -43,8 +38,6 @@ CUDA_ARCHES_FULL_VERSION = {
 # Drop an entry once its toolkit ships in the apt repo.
 CUDA_ARCHES_RUNTIME_IMAGE_ONLY = []
 CUDA_ARCHES_CUDNN_VERSION = {
-    "12.6": "9",
-    "13.0": "9",
     "13.2": "9",
     "13.4": "9",
 }
@@ -58,22 +51,11 @@ CPU_AARCH64_ARCH = ["cpu-aarch64"]
 CPU_S390X_ARCH = ["cpu-s390x"]
 
 CUDA_AARCH64_ARCHES = [
-    "13.0-aarch64",
     "13.2-aarch64",
     "13.4-aarch64",
 ]
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
-    "13.0": {
-        "linux": (
-            "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | "
-            "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
-            "nvidia-cudnn-cu13==9.27.0.42; platform_system == 'Linux' | "
-            "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Linux' | "
-            "nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | "
-            "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
-        ),
-    },
     "13.2": {
         "linux": (
             "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.2; platform_system == 'Linux' | "
@@ -428,9 +410,7 @@ def generate_wheels_matrix(
         if os == "linux":
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
-            arches += [
-                c for c in CUDA_ARCHES if c not in CUDA_ARCHES_NO_WINDOWS
-            ] + XPU_ARCHES
+            arches += CUDA_ARCHES + XPU_ARCHES
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
@@ -473,7 +453,7 @@ def generate_wheels_matrix(
             # to install CUDA runtime libraries from PyPI.
 
             if (
-                arch_version in ["13.4", "13.2", "13.0"]
+                arch_version in ["13.4", "13.2"]
                 and os in ("linux", "windows")
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
