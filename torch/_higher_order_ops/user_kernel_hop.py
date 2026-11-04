@@ -1,12 +1,12 @@
 """DSL-agnostic pieces of the user-kernel HOPs.
 
-A user-defined kernel (e.g. a ``@triton.jit`` kernel) is captured as a pair of HOPs:
-a mutation HOP that launches the kernel and writes its arguments in place, and a
-functional HOP that functionalization rewrites it into (clones of the written
-arguments, then the launch on the clones). Everything here is shared by every DSL's
-pair; each DSL's module (e.g. triton_kernel_wrap.py) adds the parts that depend on
-the kernel object: how to launch it, how to find its write set, and how to capture a
-call to it (the HOPifier).
+A user-defined kernel (a ``@triton.jit`` kernel, a ``@flyc.jit`` host function) is
+captured as a pair of HOPs: a mutation HOP that launches the kernel and writes its
+arguments in place, and a functional HOP that functionalization rewrites it into
+(clones of the written arguments, then the launch on the clones). Everything here is
+shared by every DSL's pair; each DSL's module (triton_kernel_wrap.py,
+flydsl_kernel_wrap.py) adds the parts that depend on the kernel object: how to launch
+it, how to find its write set, and how to capture a call to it (the HOPifier).
 """
 
 import copy
@@ -70,7 +70,7 @@ def _has_slot_state(cls: type) -> bool:
 class ConstantRules:
     """What a DSL tells constant_key and _snapshot about its own values. The
     defaults treat every value as a plain Python one; a DSL whose side table dedupes
-    its constant args supplies its own."""
+    its constant args supplies its own (flydsl_kernel_wrap.FLYDSL_CONSTANT_RULES)."""
 
     def is_dsl_value(self, value: object) -> bool:
         """Whether ``value`` is of one of the DSL's own types, which is never keyed or
@@ -800,7 +800,7 @@ class UserKernelHOPInfo:
     serializable: bool
     # register_user_kernel_hop_impls sets the last two; a DSL that builds its entry
     # itself and captures calls with code of its own may leave them out.
-    # The DSL's name in messages (e.g. "Triton"); dsl if empty.
+    # The DSL's name in messages ("Triton", "FlyDSL"); dsl if empty.
     display_name: str = ""
     # The table the pair's kernel_idx and constant_args_idx index into, which the
     # shared capture code reads (get_side_table).
@@ -909,7 +909,8 @@ def register_user_kernel_hop_impls(
     to the name of the kernel's side-table record. With ``refuse_aliased_writes``,
     the mutation HOP's functionalization refuses two written arguments that may
     overlap in memory (check_written_args_disjoint, which names the DSL, the kernel
-    and the ``mutates_args`` of its side-table record); Triton does not set it.
+    and the ``mutates_args`` of its side-table record); FlyDSL sets it, Triton does
+    not.
 
     Every impl takes the HOP arguments by keyword and forwards them unchanged, so a
     node keeps the arguments, in the order, that the HOP's ``__call__`` produced.
@@ -1044,8 +1045,8 @@ def register_user_kernel_hop_impls(
 
 
 class UserKernelHOPifier:
-    """Base of each DSL's HOPifier (e.g. TritonHOPifier), which turns a call to a user
-    kernel into a call to the DSL's mutation HOP.
+    """Base of each DSL's HOPifier (TritonHOPifier, FlyDSLHOPifier), which turns a call
+    to a user kernel into a call to the DSL's mutation HOP.
 
     Each DSL has one subclass per capture environment: Dynamo, which works on
     VariableTrackers and reports unsupported features as graph breaks, and tracing

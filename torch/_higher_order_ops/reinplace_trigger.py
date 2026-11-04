@@ -12,3 +12,4 @@ class ReInplaceTrigger(enum.Enum):
     TRITON_OPS = 3
     # A user-kernel DSL without a member of its own.
     USER_KERNEL_OPS = 4
+    FLYDSL_OPS = 6
