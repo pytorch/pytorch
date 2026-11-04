@@ -28,7 +28,9 @@ from torch._functorch._aot_autograd.descriptors import (
     SavedForBackwardsNoVcCheckAOTOutput,
 )
 from torch._higher_order_ops.associative_scan import associative_scan_op
+from torch._higher_order_ops.flydsl_kernel_wrap import flydsl_kernel_wrapper_mutation
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._higher_order_ops.user_kernel_hop import is_user_kernel_functional_hop
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
 from torch._library.utils import get_layout_constraint_tag
@@ -2974,8 +2976,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     if node.target in (
         torch.ops.higher_order.auto_functionalized,
         torch.ops.higher_order.auto_functionalized_v2,
-        torch.ops.higher_order.triton_kernel_wrapper_functional,
-    ):
+    ) or is_user_kernel_functional_hop(node.target):
         return False
 
     # Custom fallback lowering
@@ -9366,15 +9367,36 @@ def triton_kernel_wrap_(
 ):
     from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
-    constant_args = kernel_side_table.get_constant_args(constant_args_idx)
-    ir.UserDefinedTritonKernel(
+    return ir.UserDefinedTritonKernel.lower_mutation_hop(
+        kernel_side_table,
+        constant_args_idx,
+        kwargs,
         kernel_idx=kernel_idx,
         grid=grid,
         tma_descriptor_metadata=tma_descriptor_metadata,
-        kernel_args={**kwargs, **constant_args},
         launch_kwargs=() if launch_kwargs is None else launch_kwargs,
     )
-    return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
+
+
+@register_lowering(flydsl_kernel_wrapper_mutation)
+def flydsl_kernel_wrap_(
+    *,
+    kernel_idx,
+    constant_args_idx,
+    kwargs,
+):
+    from torch._higher_order_ops.flydsl_kernel_wrap import flydsl_kernel_hop_info
+
+    # The write set is decided on the FX node's (fake) values, as when the node was
+    # functionalized.
+    mutated = flydsl_kernel_hop_info.get_node_mutated_tensors(V.graph.current_node)
+    return ir.UserDefinedFlyDSLKernel.lower_mutation_hop(
+        flydsl_kernel_hop_info.get_side_table(),
+        constant_args_idx,
+        kwargs,
+        kernel_idx=kernel_idx,
+        mutated_arg_names=mutated,
+    )
 
 
 @register_lowering(torch.ops.higher_order.cond, type_promotion_kind=None)

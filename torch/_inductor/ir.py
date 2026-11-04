@@ -9,7 +9,7 @@ import logging
 import operator
 import textwrap
 import traceback
-from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import partial
@@ -143,6 +143,7 @@ from .virtualized import ops, OpsValue, V
 
 
 if TYPE_CHECKING:
+    from torch._higher_order_ops.user_kernel_hop import KernelSideTable
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
     from torch.types import IntLikeType
@@ -8799,7 +8800,114 @@ class SubgraphBuffer(ExternKernel):
         )
 
 
-class UserDefinedTritonKernel(ExternKernel):
+class UserDefinedKernel(ExternKernel):
+    """
+    Base of the IR nodes for user-defined kernels (UserDefinedTritonKernel,
+    UserDefinedFlyDSLKernel): an opaque launch that returns nothing (NoneLayout) and
+    writes some of its tensor arguments in place. Each written argument gets a
+    MutationOutput, which orders later readers after the launch and keeps it alive.
+    """
+
+    def __init__(
+        self,
+        kernel_args: dict[str, Any],
+        wrap_tensor_arg: Callable[[str, IRNode], IRNode] | None = None,
+        *,
+        kernel_idx: int | None = None,
+    ) -> None:
+        inputs: list[IRNode] = []
+        kwargs: dict[str, IRNode] = {}
+        constant_args: list[IRNode] = []
+
+        for k, v in kernel_args.items():
+            if isinstance(v, TensorBox):
+                t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
+                if wrap_tensor_arg is not None:
+                    t = wrap_tensor_arg(k, t)
+                inputs.append(t)
+                kwargs[k] = t
+            else:
+                constant_args.append(v)
+                kwargs[k] = v
+
+        if len(inputs) == 0:
+            raise AssertionError("Expected len(inputs) != 0")
+        self.device = inputs[0].get_device()
+
+        if not isinstance(inputs, Sequence):
+            raise AssertionError(type(inputs))
+        super().__init__(
+            None,
+            NoneLayout(device=self.device),
+            inputs,
+            tuple(constant_args),
+            kwargs,
+        )
+        # The kernel's index in its DSL's side table (the HOP node's kernel_idx). A
+        # subclass that does not pass it sets it itself.
+        if kernel_idx is not None:
+            self.kernel_idx = kernel_idx
+
+    @classmethod
+    def lower_mutation_hop(
+        cls,
+        side_table: KernelSideTable[Any],
+        constant_args_idx: int,
+        kwargs: dict[str, Any],
+        **node_kwargs: Any,
+    ) -> dict[str, Any]:
+        """Lowering of a node of a user-kernel mutation HOP: creates the IR node from
+        the node's graph kwargs joined with its side-table constant args (the other
+        node arguments go to the constructor as they are) and returns the tensor
+        kwargs, the node's value in the lowered graph."""
+        cls(
+            kernel_args=side_table.kernel_kwargs(constant_args_idx, kwargs),
+            **node_kwargs,
+        )
+        return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
+
+    def set_kernel_param_order(
+        self, param_names: Iterable[str], kernel_args: Mapping[str, Any]
+    ) -> None:
+        """Order the kwargs the C++ wrapper passes by the kernel's parameters
+        (``param_names``), keeping the ones the call passed."""
+        self.ordered_kwargs_for_cpp_kernel = [
+            name for name in param_names if name in kernel_args
+        ]
+
+    def register_written_args(
+        self, kernel_args: Mapping[str, Any], names: Iterable[str]
+    ) -> None:
+        """register_mutations for the tensor arguments among ``names``, the kernel
+        arguments the launch writes."""
+        self.register_mutations(
+            [
+                kernel_args[name]
+                for name in names
+                if isinstance(kernel_args.get(name), TensorBox)
+            ]
+        )
+
+    def register_mutations(self, mutable_args: list[Any]) -> None:
+        """Record the written arguments, then register the node with the graph."""
+        self.mutable_args = mutable_args
+        self.mutation_outputs = [
+            MutationOutput(NoneLayout(device=self.device), buf, self)
+            for buf in self.mutable_args
+        ]
+        V.graph.register_operation(self)
+
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
+
+    def get_outputs(self) -> list[Buffer]:
+        return list(self.mutation_outputs)
+
+    def get_device(self) -> torch.device | None:
+        return self.device
+
+
+class UserDefinedTritonKernel(UserDefinedKernel):
     """
     A user-defined triton kernel (e.g. via @triton.jit).
     """
@@ -9015,9 +9123,6 @@ class UserDefinedTritonKernel(ExternKernel):
             self.grid, unbacked_only
         )
 
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
-
     def __init__(
         self,
         *,
@@ -9027,35 +9132,12 @@ class UserDefinedTritonKernel(ExternKernel):
         kernel_args: dict[str, Any],
         launch_kwargs: tuple[str, ...],
     ) -> None:
-        inputs: list[IRNode] = []
-        kwargs: dict[str, IRNode] = {}
-        constant_args: list[IRNode] = []
+        def wrap_tensor_arg(k: str, t: IRNode) -> IRNode:
+            if k in tma_descriptor_metadata:
+                return TMADescriptor.create(t, tma_descriptor_metadata[k])
+            return t
 
-        for k, v in kernel_args.items():
-            if isinstance(v, TensorBox):
-                t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
-                if k in tma_descriptor_metadata:
-                    t = TMADescriptor.create(t, tma_descriptor_metadata[k])
-                inputs.append(t)
-                kwargs[k] = t
-            else:
-                constant_args.append(v)
-                kwargs[k] = v
-
-        if len(inputs) == 0:
-            raise AssertionError("Expected len(inputs) != 0")
-        self.device = inputs[0].get_device()
-
-        if not isinstance(inputs, Sequence):
-            raise AssertionError(type(inputs))
-        super().__init__(
-            None,
-            NoneLayout(device=self.device),
-            inputs,
-            tuple(constant_args),
-            kwargs,
-        )
-        self.kernel_idx = kernel_idx
+        super().__init__(kernel_args, wrap_tensor_arg, kernel_idx=kernel_idx)
         self.grid = grid
         self.launch_kwargs = launch_kwargs
 
@@ -9064,9 +9146,7 @@ class UserDefinedTritonKernel(ExternKernel):
         # If we are autotuning, not all arguments will be passed
         if not hasattr(kernel, "arg_names"):
             raise AssertionError('Expected hasattr(kernel, "arg_names")')
-        self.ordered_kwargs_for_cpp_kernel = [
-            arg for arg in kernel.arg_names if arg in kernel_args
-        ]
+        self.set_kernel_param_order(kernel.arg_names, kernel_args)
 
         from torch._higher_order_ops.triton_kernel_wrap import (
             identify_accessed_tensors,
@@ -9089,25 +9169,83 @@ class UserDefinedTritonKernel(ExternKernel):
             tma_descriptor_metadata,
         )
 
-        # Filter to only tensor args: with Triton 3.7+, ordered_arg_names
+        # Only tensor args are registered: with Triton 3.7+, ordered_arg_names
         # includes scalars, so writes may reference non-tensor args like SymInts.
-        self.mutable_args = [
-            kernel_args[key.name]
-            for key in self.arg_accesses.read_writes.writes
-            if isinstance(kernel_args.get(key.name), TensorBox)
-        ]
+        self.register_written_args(
+            kernel_args, [key.name for key in self.arg_accesses.read_writes.writes]
+        )
 
-        self.mutation_outputs = [
-            MutationOutput(NoneLayout(device=self.device), buf, self)
-            for buf in self.mutable_args
-        ]
-        V.graph.register_operation(self)
 
-    def get_outputs(self) -> list[Buffer]:
-        return list(self.mutation_outputs)
+class UserDefinedFlyDSLKernel(UserDefinedKernel):
+    """
+    A user-defined FlyDSL kernel: a @flyc.jit host function captured through
+    torch._library.flydsl.wrap_flydsl.
 
-    def get_device(self) -> torch.device | None:
-        return self.device
+    Unlike a user Triton kernel, Inductor does not compile or fuse into it: the
+    generated code launches the host function (Python wrapper) on the wrapper's
+    stream.
+    """
+
+    def __init__(
+        self,
+        *,
+        kernel_idx: int,
+        kernel_args: dict[str, Any],
+        mutated_arg_names: Sequence[str],
+    ) -> None:
+        from torch._higher_order_ops.flydsl_kernel_wrap import (
+            flydsl_kernel_side_table,
+            get_host_fn_info,
+        )
+
+        super().__init__(kernel_args, kernel_idx=kernel_idx)
+        self.kernel = flydsl_kernel_side_table.get_kernel(kernel_idx)
+        self.host_fn_info = get_host_fn_info(self.kernel.fn)
+        self.set_kernel_param_order(self.host_fn_info.params, kernel_args)
+        self.mutated_arg_names = list(mutated_arg_names)
+        self.register_written_args(kernel_args, mutated_arg_names)
+
+    def split_args(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Kernel arguments passed at launch (tensors and runtime scalars, in
+        signature order) and the constants the generated code binds once (Constexpr
+        arguments, None, objects). Parameters the call left out take their defaults
+        here."""
+        from torch._higher_order_ops.flydsl_kernel_wrap import python_scalar
+
+        info = self.host_fn_info
+        runtime_args: dict[str, Any] = {}
+        constant_args: dict[str, Any] = {}
+        for name in info.params:
+            if name == info.stream_param:
+                continue
+            if name in self.ordered_kwargs_for_cpp_kernel:
+                value = self.get_kwargs_value(name)
+            else:
+                value = info.defaults[name]
+            if isinstance(value, IRNode):
+                runtime_args[name] = value
+            elif info.is_runtime_scalar(name, value):
+                # A FlyDSL Numeric value or an int/float subclass, as a plain Python
+                # value the generated code can print (symbolic values stay as they are).
+                runtime_args[name] = python_scalar(value)
+            else:
+                constant_args[name] = value
+        return runtime_args, constant_args
+
+    @override
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        runtime_args, constant_args = self.split_args()
+        name = wrapper.define_user_defined_flydsl_kernel(
+            self.kernel,
+            tuple(runtime_args),
+            constant_args,
+            runtime_args,
+            self.get_device(),
+        )
+        self.codegen_comment(wrapper, name)
+        wrapper.generate_user_defined_flydsl_kernel_call(
+            name, self.kernel, runtime_args, constant_args, self.get_device_or_error()
+        )
 
 
 class InplaceBernoulliFallback(ExternKernel):
