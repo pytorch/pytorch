@@ -56,7 +56,14 @@ class TestHeuristicsUtils(unittest.TestCase):
     def test_td_enabled(self) -> None:
         for workflow in ("pull", "trunk", "rocm-mi300", "periodic-rocm-mi200"):
             self.assertTrue(utils.td_enabled_workflow(workflow), workflow)
-        for workflow in ("periodic", "inductor", "slow", "pull-rocm"):
+        for workflow in (
+            "periodic",
+            "inductor",
+            "slow",
+            "pull-rocm",
+            "trunk-rocm-sandbox",
+            "rocm",
+        ):
             self.assertFalse(utils.td_enabled_workflow(workflow), workflow)
 
         def job(env: str, macos: bool = False, no_td: bool = False) -> bool:
@@ -64,6 +71,7 @@ class TestHeuristicsUtils(unittest.TestCase):
 
         self.assertTrue(job("linux-jammy-py3.10"))
         self.assertFalse(job("linux-xpu"))
+        self.assertFalse(job("linux-noble-xpu-n-py3.11"))
         self.assertFalse(job("linux-onnx"))
         self.assertFalse(job("linux", macos=True))
         self.assertFalse(job("linux", no_td=True))
