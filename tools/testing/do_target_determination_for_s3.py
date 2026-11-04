@@ -53,7 +53,10 @@ def import_results(
     with open(path) as f:
         td_results = json.load(f)
     tp = TestPrioritizations.from_json(td_results)
-    failed = td_results.get(PREVIOUS_FAILURES_KEY)
+    if PREVIOUS_FAILURES_KEY not in td_results:
+        print(f"Previous failures not recorded in {path}", file=sys.stderr)
+        return tp, None
+    failed = td_results[PREVIOUS_FAILURES_KEY]
     if not isinstance(failed, list) or not all(isinstance(x, str) for x in failed):
         print(
             f"Ignoring the previous failures in {path}: {failed!r:.200}",
