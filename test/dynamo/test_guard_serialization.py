@@ -33,6 +33,7 @@ import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.bytecode_transformation import transform_code_object
+from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import (
     _Missing,
@@ -1559,6 +1560,9 @@ _RAW_DESCRIPTORS = [
     list.count,
     dict.__dict__["fromkeys"],
 ]
+_generic_class_getitem = typing.Generic.__dict__["__class_getitem__"]
+if isinstance(_generic_class_getitem, types.ClassMethodDescriptorType):
+    _RAW_DESCRIPTORS.append(_generic_class_getitem)
 
 
 class _ODictSubclass(collections.OrderedDict):
@@ -1582,6 +1586,16 @@ class _ODictGetState(collections.OrderedDict):
 
     def __getstate__(self):
         return {"saved": self.saved} if self.saved is not None else None
+
+
+class _ODictTupleState(tuple):
+    __slots__ = ()
+
+    def __len__(self):
+        raise AssertionError("State inspection must bypass tuple overrides")
+
+    def __getitem__(self, index):
+        raise AssertionError("State inspection must bypass tuple overrides")
 
 
 class _ODictCustomState(_ODictGetState):
@@ -1630,11 +1644,6 @@ class _ODictSlotsState(_ODictSubclass):
         return {"saved": self.saved}, {"slot": self.slot}
 
 
-_generic_class_getitem = typing.Generic.__dict__["__class_getitem__"]
-if isinstance(_generic_class_getitem, types.ClassMethodDescriptorType):
-    _RAW_DESCRIPTORS.append(_generic_class_getitem)
-
-
 @instantiate_parametrized_tests
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -1649,7 +1658,18 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         return load_guards_state(buf.getvalue())
 
     @parametrize(
-        "state", [None, 0, "", (), {}, {"saved": 3}, ({}, {}), ({"saved": 3}, {})]
+        "state",
+        [
+            None,
+            0,
+            "",
+            (),
+            {},
+            {"saved": 3},
+            ({}, {}),
+            ({"saved": 3}, {}),
+            _ODictTupleState(({"saved": 3}, {})),
+        ],
     )
     def test_ordered_dict_custom_state_matches_pickle(self, state):
         mapping = _ODictCustomState()
@@ -1662,7 +1682,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             return
         loaded, saved = self._roundtrip_ordered_dict((mapping, state), mapping, state)
         self.assertEqual(vars(loaded), vars(expected))
-        self.assertEqual(saved, state)
+        self.assertEqual(tuple(saved), tuple(state)) if isinstance(
+            state, _ODictTupleState
+        ) else self.assertEqual(saved, state)
         if type(state) is dict:
             self.assertIsNot(vars(loaded), saved)
 
@@ -1680,10 +1702,6 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         dict.__setitem__(mapping, "unlinked", 2)
         expected = pickle.loads(pickle.dumps(mapping))
         self.assertEqual(self._roundtrip_ordered_dict(mapping), expected)
-
-    # Pickler-level: these drive GuardsStatePickler, or the loader it feeds,
-    # directly rather than through a capture, so none of
-    # TestGuardSerialization's setup applies.
 
     @parametrize("local", [False, True])
     def test_ordered_dict_requires_global_class(self, local):
@@ -1786,6 +1804,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             loaded = self._roundtrip_ordered_dict(mapping, mapping)
         self.assertIs(type(loaded), dict)
         self.assertEqual(loaded, {})
+
+    # Pickler-level: these drive GuardsStatePickler, or the loader it feeds,
+    # directly rather than through a capture, so none of
+    # TestGuardSerialization's setup applies.
 
     @parametrize("descriptor", _RAW_DESCRIPTORS)
     def test_raw_descriptors_require_an_immutable_owner(self, descriptor):
@@ -3211,6 +3233,113 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
 class TestGuardSerialization(TestGuardSerializationBase):
+    @parametrize("skip_dependency", [False, True])
+    def test_native_receiver_alias_dependencies(self, skip_dependency):
+        def install_alias_guard(ctx):
+            from torch._dynamo.guards import GuardBuilder, install_guard
+            from torch._dynamo.source import SkipGuardSource
+
+            sources = tuple(
+                ctx.get_local(name)
+                ._i_will_not_complain_if_bc_breaks_VariableTracker()
+                .source
+                for name in ("left", "right")
+            )
+            if skip_dependency:
+                sources = (sources[0], SkipGuardSource(sources[1]))
+            install_guard(
+                sources[0].make_guard(
+                    functools.partial(
+                        GuardBuilder.BUILTIN_METHOD_RECEIVER_ALIAS,
+                        sources=sources,
+                        aliases=(0, 1),
+                    )
+                )
+            )
+
+        def fn(x, left, right):
+            comptime(install_alias_guard)
+            return x + 1 if left is left and right is right else x
+
+        x, left, right = torch.ones(1), [], []
+        ref, loaded = self._test_serialization(
+            "BUILTIN_METHOD_RECEIVER_ALIAS", fn, x, left, right
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "left": left, "right": right}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "left": left, "right": left}, False)
+        self._test_check_fn(ref, loaded, {"x": x, "left": [], "right": []}, True)
+
+    @parametrize("hooks_name", ["_forward_hooks", "_forward_pre_hooks"])
+    @parametrize("global_flags", [False, True])
+    def test_native_hook_membership_dependencies(self, hooks_name, global_flags):
+        def install_membership_guard(ctx):
+            from torch._dynamo.guards import GuardBuilder, install_guard
+            from torch._dynamo.source import GlobalSource
+
+            module_source = (
+                ctx.get_local("module")
+                ._i_will_not_complain_if_bc_breaks_VariableTracker()
+                .source
+            )
+            flags_source = (
+                GlobalSource("HOOK_FLAGS_FOR_SERIALIZATION")
+                if global_flags
+                else ctx.get_local("flags")
+                ._i_will_not_complain_if_bc_breaks_VariableTracker()
+                .source
+            )
+            install_guard(
+                module_source.make_guard(
+                    functools.partial(
+                        GuardBuilder.NN_MODULE_HOOKS_DICT_CONTAINS,
+                        hooks_name=hooks_name,
+                        flags_source=flags_source,
+                    )
+                )
+            )
+
+        def fn(x, module, flags):
+            comptime(install_membership_guard)
+            return x + 1 if module is module and flags is flags else x
+
+        x, module, flags = torch.ones(1), torch.nn.Identity(), {2: True}
+        getattr(module, hooks_name).update({1: None, 2: None})
+        with mock.patch.dict(globals(), {"HOOK_FLAGS_FOR_SERIALIZATION": flags}):
+            ref, loaded = self._test_serialization(
+                "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, module, flags
+            )
+            inputs = {"x": x, "module": module, "flags": flags}
+            self._test_check_fn(ref, loaded, inputs, True)
+            flags[1] = flags.pop(2)
+            self._test_check_fn(ref, loaded, inputs, False)
+            flags[2] = flags.pop(1)
+            self._test_check_fn(ref, loaded, inputs, True)
+
+    @parametrize("reordered", [False, True])
+    def test_native_ordered_dict_order(self, reordered):
+        def install_order_guard(ctx):
+            from torch._dynamo.guards import GuardBuilder, install_guard
+
+            mapping = ctx.get_local(
+                "mapping"
+            )._i_will_not_complain_if_bc_breaks_VariableTracker()
+            install_guard(mapping.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
+
+        def fn(x, mapping):
+            comptime(install_order_guard)
+            return x + len(mapping)
+
+        mapping = collections.OrderedDict(a=1, b=2)
+        if reordered:
+            mapping.move_to_end("a")
+        x = torch.ones(1)
+        ref, loaded = self._test_serialization(
+            "ORDERED_DICT_ORDER_MATCH", fn, x, mapping
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, True)
+        mapping.move_to_end("b" if reordered else "a")
+        self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, False)
+
     hw_classification = HardwareClassification.GENERIC
 
     def test_function_locals(self):
@@ -5086,6 +5215,67 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": {"a": torch.randn(3, 2)}}, False)
 
+    def test_nn_module_hook_order_serialization(self):
+        def fn(x, module):
+            for hook in module._forward_hooks.values():
+                x = hook(x)
+            return x
+
+        module = torch.nn.Identity()
+        module._forward_hooks.update({1: torch.sin, 2: torch.cos})
+        x = torch.ones(2)
+        ref, loaded = self._test_serialization(
+            "ORDERED_DICT_ORDER_MATCH", fn, x, module
+        )
+        fresh = torch.nn.Identity()
+        fresh._forward_hooks.update({3: torch.sin, 4: torch.cos})
+        inputs = {"x": x, "module": fresh}
+        self._test_check_fn(ref, loaded, inputs, True)
+        fresh._forward_hooks.move_to_end(3)
+        self._test_check_fn(ref, loaded, inputs, False)
+
+    @parametrize("reordered", [False, True])
+    @parametrize("mapping_type", [collections.OrderedDict, _ODictSubclass])
+    def test_ordered_dict_iteration_order(self, reordered, mapping_type):
+        def fn(x, mapping):
+            return x + sum(mapping.values())
+
+        x = torch.ones(2)
+        mapping = mapping_type(a=1, b=2)
+        if reordered:
+            mapping.move_to_end("a")
+        ref, loaded = self._test_serialization(
+            "ORDERED_DICT_ORDER_MATCH", fn, x, mapping
+        )
+        order = (1, 0) if reordered else (0, 1)
+        self.assertIn(f"== {order!r}", str(ref))
+        self.assertIn(f"== {order!r}", str(loaded))
+        self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, True)
+        mapping.move_to_end("b" if reordered else "a")
+        self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, False)
+
+    @parametrize("with_kwargs", [False, True])
+    def test_forward_pre_hook_membership(self, with_kwargs):
+        def hook(module, args, *rest):
+            return ((args[0] + 1,), rest[0]) if rest else (args[0] + 1,)
+
+        def make_module(flag):
+            module = torch.nn.Identity()
+            module.register_forward_pre_hook(hook, with_kwargs=flag)
+            return module
+
+        def fn(x, module):
+            return module(x)
+
+        x = torch.ones(2)
+        ref, loaded = self._test_serialization(
+            "NN_MODULE_HOOKS_DICT_CONTAINS", fn, x, make_module(with_kwargs)
+        )
+        for flag in (with_kwargs, not with_kwargs):
+            self._test_check_fn(
+                ref, loaded, {"x": x, "module": make_module(flag)}, flag == with_kwargs
+            )
+
     @parametrize("flag_name", ["with_kwargs", "always_call"])
     def test_nn_module_hook_membership(self, flag_name):
         def hook(module, args, *rest):
@@ -5147,25 +5337,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             {"x": x, "module": module},
             True,
         )
-
-    def test_nn_module_hook_order_serialization(self):
-        def fn(x, module):
-            for hook in module._forward_hooks.values():
-                x = hook(x)
-            return x
-
-        module = torch.nn.Identity()
-        module._forward_hooks.update({1: torch.sin, 2: torch.cos})
-        x = torch.ones(2)
-        ref, loaded = self._test_serialization(
-            "ORDERED_DICT_ORDER_MATCH", fn, x, module
-        )
-        fresh = torch.nn.Identity()
-        fresh._forward_hooks.update({3: torch.sin, 4: torch.cos})
-        inputs = {"x": x, "module": fresh}
-        self._test_check_fn(ref, loaded, inputs, True)
-        fresh._forward_hooks.move_to_end(3)
-        self._test_check_fn(ref, loaded, inputs, False)
 
     def test_nested_region_hook_secondary_source(self):
         @torch.compiler.nested_compile_region
@@ -5287,26 +5458,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 local_handle.id
             )
             self._test_check_fn(ref, loaded, inputs, False)
-
-    @parametrize("reordered", [False, True])
-    @parametrize("mapping_type", [collections.OrderedDict, _ODictSubclass])
-    def test_ordered_dict_iteration_order(self, reordered, mapping_type):
-        def fn(x, mapping):
-            return x + sum(mapping.values())
-
-        x = torch.ones(2)
-        mapping = mapping_type(a=1, b=2)
-        if reordered:
-            mapping.move_to_end("a")
-        ref, loaded = self._test_serialization(
-            "ORDERED_DICT_ORDER_MATCH", fn, x, mapping
-        )
-        order = (1, 0) if reordered else (0, 1)
-        self.assertIn(f"== {order!r}", str(ref))
-        self.assertIn(f"== {order!r}", str(loaded))
-        self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, True)
-        mapping.move_to_end("b" if reordered else "a")
-        self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, False)
 
     @torch._dynamo.config.patch("skip_nnmodule_hook_guards", False)
     def test_empty_nn_module_hooks_dict(self):

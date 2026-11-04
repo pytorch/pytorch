@@ -147,7 +147,8 @@ def forward(self, x, y):
         self.assertEqual(result, 5)
 
     @common_utils.parametrize("value", [2, 2.5, "mode", True, None])
-    def test_sourced_constant_outputs(self, value):
+    def test_sourced_constant_outputs_smoke(self, value):
+        # Smoke coverage for export's deliberate source-independent reconstruction.
         def fn(x, value):
             return x + 1, value, ((value,),)
 
@@ -1199,8 +1200,7 @@ def forward(self, x, y):
             ]
             self.assertEqual(len(sin_nodes), 5)
             self.assertEqual(len(cos_nodes), 2)
-            if sys.version_info >= (3, 11):
-                self.assertNotEqual(sin_nodes[0].stack_trace, cos_nodes[0].stack_trace)
+            self.assertNotEqual(sin_nodes[0].stack_trace, cos_nodes[0].stack_trace)
             self.assertNotEqual(sin_nodes[0].stack_trace, sin_nodes[1].stack_trace)
             self.assertIs(sin_nodes[2].stack_trace, sin_nodes[3].stack_trace)
             self.assertIs(sin_nodes[3].stack_trace, sin_nodes[4].stack_trace)
