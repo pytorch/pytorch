@@ -192,7 +192,7 @@ class TestSelection(unittest.TestCase):
         # another edited data file that nothing reads.
         for changed in ("test/expect/TestGone.test_x.expect", "test/distributed/launcher/bin/unused.py", "test/notes.txt", "test/run_only.json"):  # fmt: skip
             sel = self.select_in_tree(sources, candidates, ["test/allowlist_for_publicAPI.json", changed])  # fmt: skip
-            self.assertEqual((sel.run_all, sel.reason), (True, f"nothing found that reads {changed}"))  # fmt: skip
+            self.assertEqual((sel.run_all, sel.reason, sel.error), (True, f"nothing found that reads {changed}", None))  # fmt: skip
         sel = self.select_in_tree(sources | {"allowlist_for_publicAPI.json": "b.json\n"}, candidates, ["test/allowlist_for_publicAPI.json", "test/b.json"])  # fmt: skip
         self.assertEqual((sel.run_all, sel.reason), (True, "nothing found that reads test/b.json"))  # fmt: skip
         sel = self.select_in_tree(sources, CANDIDATES, ["test/cpp_extensions/ext.cpp"])
@@ -206,7 +206,8 @@ class TestSelection(unittest.TestCase):
         sel = self.select_in_tree(sources, candidates, gone, deleted=tuple(gone))
         self.assertEqual((sel.files, sel.run_all), ({"test_nn", "dynamo/test_misc"}, False))  # fmt: skip
         many = [f"test/data{i}.json" for i in range(selection.MAX_DATA_FILES + 1)]
-        self.assertTrue(self.select_in_tree(sources, candidates, many).run_all)
+        sel = self.select_in_tree(sources, candidates, many)
+        self.assertEqual((sel.run_all, sel.error), (True, None))
 
     def test_endless_import_chain_runs_all(self) -> None:
         calls: list[str] = []
@@ -216,7 +217,7 @@ class TestSelection(unittest.TestCase):
             return [f"test/m{len(calls)}.py"]
 
         sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/test_nn.py"], grep)  # fmt: skip
-        self.assertTrue(sel.run_all)
+        self.assertEqual((sel.run_all, sel.error), (True, None))
         self.assertEqual(len(calls), selection.MAX_IMPORT_HOPS)
 
     def test_failure_list_edits_select_their_tests(self) -> None:
@@ -245,7 +246,8 @@ class TestSelection(unittest.TestCase):
             self.assertFalse(sel.run_all, changed)
             self.assertEqual((sel.files, sel.sweeps), (files, sweeps), changed)
         for changed in ("test/inductor_expected_failures/TestGone.test_x", "test/inductor_skips/TestGone.test_x", "test/inductor_skips/TestNN.test_x.y"):  # fmt: skip
-            self.assertTrue(self.select_in_tree(sources, CANDIDATES, [changed]).run_all)
+            sel = self.select_in_tree(sources, CANDIDATES, [changed])
+            self.assertEqual((sel.run_all, sel.error), (True, None), changed)
         many = [f"test/dynamo_skips/TestNN{i}.test_x" for i in range(selection.MAX_FAILURE_LIST_CLASSES + 1)]  # fmt: skip
         self.assertEqual(self.select_in_tree(sources, CANDIDATES, many).sweeps, {"dynamo_wrapped"})  # fmt: skip
         # Without a grep, the classes cannot be looked up.
