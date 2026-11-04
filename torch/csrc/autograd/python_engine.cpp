@@ -23,6 +23,7 @@
 #include <pthread.h>
 #endif
 
+#include <limits>
 #include <memory> // for unique_ptr
 #include <utility>
 
@@ -453,7 +454,14 @@ static PyObject* THPEngine_allow_implicit_grad_accumulation(
   if (!PyArg_ParseTuple(args, "Op", &edge, &all_outputs)) {
     return nullptr;
   }
+  // Check before parseGradientEdge narrows the index to uint32_t.
+  auto output_nr = THPUtils_unpackLong(PyTuple_GetItem(edge, 1));
   auto gradient_edge = parseGradientEdge(edge, 0);
+  TORCH_CHECK(
+      output_nr >= 0 && output_nr <= std::numeric_limits<uint32_t>::max(),
+      gradient_edge.function->name(),
+      " has no output ",
+      output_nr);
   gradient_edge.function->allow_implicit_grad_accumulation(
       all_outputs ? std::nullopt
                   : std::optional<uint32_t>(gradient_edge.input_nr));

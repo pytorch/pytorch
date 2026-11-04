@@ -19342,6 +19342,10 @@ class TestDisallowImplicitGradAccumulation(TestCase):
         edge = torch.autograd.graph.GradientEdge(x.grad_fn, 1)
         with self.assertRaisesRegex(RuntimeError, "has no output 1"):
             allow(edge)
+        for output_nr in (2**32, -1):
+            edge = torch.autograd.graph.GradientEdge(x.grad_fn, output_nr)
+            with self.assertRaisesRegex(RuntimeError, f"has no output {output_nr}"):
+                allow(edge)
         # Allowing a tensor allows its current node; an in-place op makes a new one.
         x = a.sin()
         allow(x)
