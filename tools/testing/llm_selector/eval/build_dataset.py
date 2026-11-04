@@ -8,7 +8,9 @@ eval/ids lists the samples the report scored, as sorted ids (file names under
 DIR/samples without .json), split by each sample's `date` (a PR sample's
 failure, a revert's revert time):
   eval.txt    the pr_, rev_ and neu_ samples of the three builds above, less
-              the 10 neutral pilot samples read while writing the prompt
+              pilot.txt
+  pilot.txt   the 10 neu_ samples of the pilot run made while writing the
+              prompt; its pr_ and rev_ samples are not in eval.txt either
   neutral.txt the neu_ ids of eval.txt
   head.txt    the head_ samples of the head build above, all of eval.txt's PRs
   dev.txt     the pr_ samples of a build with --start 2026-09-20 --end
@@ -21,8 +23,10 @@ failure, a revert's revert time):
               test_checked_in_ids checks that no id is in both
   agentic.txt the eval.txt samples the agentic rerun was made on, a subset
               recorded with that run rather than derived from a build
-The checked-in lists were cut this way from builds by an earlier builder (the
-PR description says which), so a rebuild gives similar, not identical, lists.
+The checked-in pr_ and rev_ ids were built by the builder at tag
+llmtd-r17-pre-r39, which rebuilt only the PRs and reverts already in eval.txt;
+the neu_ and dev.txt samples are carried over from earlier builds. So a rebuild
+gives similar, not identical, lists.
 
 Four kinds of sample, each a JSON file under DIR/samples:
 
@@ -140,8 +144,8 @@ WINDOW is 14 days, Dr.CI's flaky window: truth is a lower bound anyway, so a
 shorter window would buy a few more truths at the price of counting more
 flakes and parallel breakages as the PR's. The builder prints how many
 failures each rule dropped. PR truths that reproduced (same test failing in
-two build environments, or on two heads of the PR, also heads from before
---start that the window rule keeps, each failure the PR's own under all the
+two build environments, the job names less their last ` / ` part, or on
+two heads of the PR, also heads from before --start that the window rule keeps, each failure the PR's own under all the
 rules with its own head's bases) are kept in `truth_strong`. A one-off is not necessarily a flake: often only one
 environment runs the test, or the author fixed it in the next push.
 """
@@ -769,7 +773,7 @@ def pr_samples(h: History, out: Path, jobs: int) -> None:
     envs, heads = collections.defaultdict(set), collections.defaultdict(set)
     for _, kept, _ in truths.values():
         for r in kept:
-            envs[k := (r["pr"], *key(r))].add(r["job"].split(" / ")[0])
+            envs[k := (r["pr"], *key(r))].add(r["job"].rsplit(" / ", 1)[0])
             heads[k].add(r["sha"])
     reproduced = {k for k in envs if len(envs[k]) >= 2 or len(heads[k]) >= 2}
     sources: list[str] = []
