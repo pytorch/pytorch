@@ -452,6 +452,10 @@ def reduce_ordered_col(
     allow_split: bool = False,
 ) -> tuple[torch.Tensor, ...] | None:
     """Reduce axis -2 of a contiguous (R, C) or (B, R, C) view, or return None."""
+    if not x.is_cuda:
+        raise AssertionError(f"want a CUDA input, got {x.device}")
+    device = x.get_device()
+    check_current(device)
     if x.dim() == 2 and x.is_contiguous():
         B, (R, C) = 1, x.shape
         out_shape = (C,)
@@ -491,8 +495,6 @@ def reduce_ordered_col(
     ):
         return None
     op = _OrderedColReduce(trait, plan, R, C, trait.nfields if split else nouts)
-    device = x.get_device()
-    check_current(device)
     outs = [
         torch.empty(out_shape, device=x.device, dtype=dtype)
         for dtype in out_dtypes[:nouts]
