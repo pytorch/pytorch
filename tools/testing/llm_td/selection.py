@@ -127,15 +127,20 @@ RUN_ALL_PATTERNS = [
 ]
 
 
-def normalize_test_name(name: str, candidates: set[str]) -> str | None:
-    """Map a model-written name such as 'test/dynamo/test_misc.py [3m]' onto a
-    candidate; None if it names none (edited_tests maps files onto their drivers)."""
+def normalize_test_name(
+    name: str, candidates: set[str], paths: Collection[str] = ()
+) -> set[str]:
+    """The candidates a model-written name such as 'test/dynamo/test_misc.py [3m]'
+    names: the candidate, or the drivers of a file in `paths` (the files under
+    test/) such as jit/test_freezing; empty if it names neither."""
     n = re.sub(r"\s*\[[^\]]*\]$", "", name.strip())
     n = n.split("::")[0].removeprefix("./").removeprefix("test/").removesuffix(".py")
-    if n in candidates:
-        return n
-    n = n.replace(".", "/")
-    return n if n in candidates else None
+    for m in (n, n.replace(".", "/")):
+        if m in candidates:
+            return {m}
+        if f"test/{m}.py" in paths:
+            return edited_tests([f"test/{m}.py"], candidates)
+    return set()
 
 
 def edited_tests(changed_files: list[str], candidates: set[str]) -> set[str]:
@@ -143,7 +148,8 @@ def edited_tests(changed_files: list[str], candidates: set[str]) -> set[str]:
     edited = {
         n
         for f in changed_files
-        if f.startswith("test/") and (n := normalize_test_name(f, candidates))
+        if f.startswith("test/")
+        for n in normalize_test_name(f, candidates)
     }
     for test, regexes in DRIVER_MAPPINGS.items():
         if test in candidates and any(re.search(r, f) for r in regexes for f in changed_files):  # fmt: skip
@@ -178,7 +184,8 @@ def importers(
 
 def import_pattern(modules: Iterable[str]) -> str:
     """A `git grep -E` pattern for importing one of `modules`, .py paths under test/."""
-    # A module is imported by any dotted suffix of its path, a package by its
+    # A module is imported by any dotted suffix of its path, optionally under
+    # the test. package, also through importlib.import_module, a package by its
     # directory, and load_test_module (a SourceFileLoader) takes the path.
     # A parenthesized `from <package> import (` may span lines, so it counts
     # as importing every module of that package.
@@ -190,14 +197,13 @@ def import_pattern(modules: Iterable[str]) -> str:
     paths = alts(n for m in mods for n in (m, m.replace("/", ".")))
     end = "([^[:alnum:]_]|$)"
     forms = [
-        rf"(from|import)[[:space:]]+\.*({names}){end}",
+        rf"(from|import)[[:space:]]+\.*(test\.)?({names}){end}",
         rf"from[[:space:]]+\.+[[:space:]]+import[[:space:]]+(.*[^[:alnum:]_.])?({bases}){end}",
     ]
     if parents:
-        forms.append(rf"from[[:space:]]+\.*({parents})[[:space:]]+import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})")  # fmt: skip
-    return (
-        rf"""^[[:space:]]*({"|".join(forms)})|load_test_module\(["']({paths})["']\)"""
-    )
+        forms.append(rf"from[[:space:]]+\.*(test\.)?({parents})[[:space:]]+import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})")  # fmt: skip
+    quoted = rf"""load_test_module\(["']({paths})["']\)|import_module\(["'](test\.)?({names})["']\)"""
+    return rf"^[[:space:]]*({'|'.join(forms)})|{quoted}"
 
 
 def alts(names: Iterable[str]) -> str:
@@ -293,12 +299,16 @@ def needs_run_all(changed_files: list[str]) -> bool:
     return any(re.search(p, f) for p in RUN_ALL_PATTERNS for f in changed_files)
 
 
-def parse_model_output(out: object, candidates: set[str]) -> tuple[set[str], set[str]]:
+def parse_model_output(
+    out: object, candidates: set[str], grep: Callable[[str], list[str]] | None = None
+) -> tuple[set[str], set[str]]:
     """The files and sweeps a model answer names; ValueError if it is malformed.
 
     A `dirs` entry is a directory prefix such as "dynamo"; one that matches no
     candidate is malformed, and so is a `tests` name that matches no
-    candidate: the model was told to copy the names from the candidate list."""
+    candidate: the model was told to copy the names from the candidate list.
+    With `grep` (see importers), a name of a file that a driver runs, such as
+    jit/test_freezing, names the driver instead."""
     if not isinstance(out, dict):
         raise ValueError("not an object")
     tests, dirs, sweeps = out.get("tests"), out.get("dirs", []), out.get("sweeps", [])
@@ -312,9 +322,13 @@ def parse_model_output(out: object, candidates: set[str]) -> tuple[set[str], set
     if not isinstance(out.get("run_all", False), bool):
         raise ValueError("run_all is not a boolean")
     names = {t["file"]: normalize_test_name(t["file"], candidates) for t in tests}
-    if unmatched := sorted(t for t, n in names.items() if n is None):
+    if grep is not None and not all(names.values()):
+        # Every file under test/ at the head.
+        paths = set(grep("^"))
+        names = {t: n or normalize_test_name(t, candidates, paths) for t, n in names.items()}  # fmt: skip
+    if unmatched := sorted(t for t, n in names.items() if not n):
         raise ValueError(f"tests entries match no test file: {unmatched[:10]}")
-    files = {n for n in names.values() if n}
+    files = {f for n in names.values() for f in n}
     for d in dirs:
         prefix = re.sub(r"(/\*\*?)?/*$", "", d.strip()).removeprefix("./").removeprefix("test/")  # fmt: skip
         in_dir = {c for c in candidates if c.startswith(prefix + "/")}
@@ -365,7 +379,7 @@ class Selection:
         if needs_run_all(changed_files):
             return cls(run_all=True, reason="change touches test infrastructure")
         try:
-            files, sweeps = parse_model_output(out, candidates)
+            files, sweeps = parse_model_output(out, candidates, grep)
         except ValueError as e:
             return cls(run_all=True, reason=f"malformed model output ({e}); running everything", error=f"malformed model output: {e}")  # fmt: skip
         if not isinstance(out, dict):
