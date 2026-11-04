@@ -49,6 +49,7 @@ SECONDS = {
 }  # fmt: skip
 SAMPLE = {
     "kind": "pr",
+    "sha": "h",
     "title": "t",
     "body": None,
     "diffstat": "",
@@ -195,6 +196,46 @@ class TestRunEval(unittest.TestCase):
         self.assertEqual(
             (r["error"], r["transient"], r["agentic"]), ("529", True, True)
         )
+        # The checkout preamble and the tools are sent too.
+        prompt = run_eval.sample_prompt(sample, {})
+        self.assertEqual(r["prompt_sha"], run_eval.prompt_sha(prompt, True))
+        self.assertNotEqual(r["prompt_sha"], run_eval.prompt_sha(prompt))
+
+    def test_main_survives_a_failed_write(self) -> None:
+        from tools.testing.llm_td.eval import run_eval
+
+        r = {"type": "result", "structured_output": {"tests": []}}
+        writes = [OSError("full"), None]
+        with tempfile.TemporaryDirectory() as d:
+            samples = {f"samples/{i}.json": {**SAMPLE, "id": i} for i in "ab"}
+            data = write_data(d, samples)
+            (data / "test-times.json").write_text("{}")
+            (data / "ids.txt").write_text("a b a b")
+            ids = str(data / "ids.txt")
+            argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", ids]
+            with (
+                mock.patch.object(sys, "argv", [*argv, "--jobs", "1"]),
+                mock.patch("sys.stdout", io.StringIO()) as out,
+                mock.patch.object(run_eval, "query_model", return_value=r) as query,
+                mock.patch.object(run_eval, "write_json", side_effect=writes) as write,
+            ):
+                run_eval.main()
+        # Each id is paid once, and a's failed write leaves the slot running b.
+        self.assertEqual((query.call_count, write.call_count), (2, 2))
+        self.assertEqual(write.call_args.args[0].name, "b.json")
+        self.assertIn("a failed, left for a rerun", out.getvalue())
+
+    def test_main_refuses_tag_td(self) -> None:
+        from tools.testing.llm_td.eval import run_eval
+
+        argv = ["run_eval", "--data", "x", "--tag", "td", "--model", "m", "--ids", "x"]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch("sys.stderr", io.StringIO()) as err,
+            self.assertRaises(SystemExit),
+        ):
+            run_eval.main()
+        self.assertIn("the tag td holds the TD replay", err.getvalue())
 
     def test_main_refuses_other_settings(self) -> None:
         from tools.testing.llm_td.eval import run_eval
@@ -245,6 +286,9 @@ class TestRunEval(unittest.TestCase):
 
 
 class TestScore(unittest.TestCase):
+    def setUp(self) -> None:
+        self.enterContext(mock.patch.object(score, "has_head", return_value=True))
+
     def test_config_of(self) -> None:
         self.assertEqual(
             config_of(
@@ -718,6 +762,8 @@ class TestScore(unittest.TestCase):
             "td/a.json": td, "td/b.json": td,
             "results/m1/a.json": result, "results/m1/b.json": result, "results/m1/c.json": result,
             "results/m2/a.json": failed, "results/m2/c.json": failed,
+            # Not a model's: td is scored only on its replay.
+            "results/td/a.json": {**failed, "cost_usd": 5.0},
         }  # fmt: skip
         with (
             tempfile.TemporaryDirectory() as d,
@@ -726,8 +772,13 @@ class TestScore(unittest.TestCase):
             data = write_data(d, files)
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
-                rows = score.score(data, ["a", "b", "c"], ["m1", "m2", "td"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
-        self.assertEqual({(x["tag"], x["policy"], x["id"]) for x in rows}, {("m1", "model", "a"), ("m2", "model", "a"), ("td", "td25", "a")})  # fmt: skip
+                dirs = data / "samples", data / "td"
+                rows = score.score(data, ["a", "b", "c", "a"], ["m1", "m2", "td"], ["model"], True, *dirs, "")  # fmt: skip
+            b = data / "results/m1/b.json"
+            b.write_text(json.dumps({**json.loads(b.read_text()), "effort": "high"}))
+            with self.assertRaisesRegex(ValueError, r"\['m1'\] mix"):
+                score.score(data, ["a", "b"], ["m1"], ["model"], True, *dirs, "")
+        self.assertEqual(sorted((x["tag"], x["policy"], x["id"]) for x in rows), [("m1", "model", "a"), ("m2", "model", "a"), ("td", "td25", "a")])  # fmt: skip
         self.assertEqual(err.getvalue(), "dropped 1 of 3 ids with no m2 result\ndropped 1 of 3 ids with no td replay\n")  # fmt: skip
         fields = ("pairs", "hit", "missed", "cpu", "gpu", "run_all", "files", "error")
         by_tag = {x["tag"]: tuple(x[k] for k in fields) for x in rows}
@@ -779,6 +830,20 @@ class TestScore(unittest.TestCase):
             self.assertEqual([x["files"] for x in rows], n_files)
             self.assertEqual(err.getvalue(), msg)
             self.assertEqual(grep.call_args.args[1], "abc")
+        # A head missing from the clone drops the sample also under policies that never grep.
+        msg = "dropped 1 of 1 ids with no working git grep at their head (not in this clone?)\n"
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
+            mock.patch.object(score, "has_head", return_value=False) as has_head,
+        ):
+            data = write_data(d, files)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                dirs = data / "samples", data / "td"
+                rows = score.score(data, ["a"], ["m", "td"], ["model"], True, *dirs, "")
+        self.assertEqual((rows, err.getvalue()), ([], msg))
+        has_head.assert_called_once_with("abc")
 
     def test_grep_head_copies(self) -> None:
         cached = functools.cache(lambda pattern, sha: ["test/test_a.py"])
