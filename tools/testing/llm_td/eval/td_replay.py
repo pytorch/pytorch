@@ -73,7 +73,7 @@ def top25_per_config(
     """The files of CI's top-25% cut in each config, cutting the scores to that config's job test list `jobs[c]` (see score.job_files)."""
     out = {}
     for c, files in jobs.items():
-        job = copy.deepcopy(tp)
+        job = copy.copy(tp)
         job.amend_tests(sorted(files))
         out[c] = sorted({t.test_file for t in job.get_top_per_tests(25)[0]})
     return out

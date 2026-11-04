@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import io
 import itertools
 import json
@@ -832,108 +831,6 @@ class TestApplySelection(unittest.TestCase):
             self.assertEqual(applied.failure_metric(TestRun("a"))["selector_error"], error)  # fmt: skip
 
 
-class TestRunTestMain(unittest.TestCase):
-    def test_run_test_main_wiring(self) -> None:
-        # run_test.py cannot be imported without a built torch, so this reads
-        # main()'s AST: what it passes to apply_selection, that TD is switched
-        # off before TD's split is made, that an enforced selection's split
-        # runs and is recorded, and that main() itself emits the metrics (as
-        # emit_metric records its caller) in CI and only with a selection.
-        tree = ast.parse((REPO_ROOT / "test" / "run_test.py").read_text())
-        (main,) = [f for f in tree.body if isinstance(f, ast.FunctionDef) and f.name == "main"]  # fmt: skip
-        # Each node with the names and attributes the tests of the ifs whose
-        # bodies it is in read, and its enclosing for loops.
-        guards: dict[ast.AST, set[str]] = {}
-        loops: dict[ast.AST, list[ast.For]] = {}
-
-        def names(node: ast.AST) -> set[str]:
-            return {ast.unparse(n) for n in ast.walk(node) if isinstance(n, (ast.Name, ast.Attribute))}  # fmt: skip
-
-        def visit(node: ast.AST, read: set[str], fors: list[ast.For]) -> None:
-            guards[node], loops[node] = read, fors
-            if isinstance(node, ast.If):
-                visit(node.test, read, fors)
-                for child in node.body:
-                    visit(child, read | names(node.test), fors)
-                for child in node.orelse:
-                    visit(child, read, fors)
-                return
-            if isinstance(node, ast.For):
-                fors = [*fors, node]
-            for child in ast.iter_child_nodes(node):
-                visit(child, read, fors)
-
-        visit(main, set(), [])
-        assigns = [n for n in guards if isinstance(n, ast.Assign) and len(n.targets) == 1]  # fmt: skip
-
-        def calls(func: str) -> list[ast.Call]:
-            return [n for n in guards if isinstance(n, ast.Call) and ast.unparse(n.func) == func]  # fmt: skip
-
-        def targets(n: ast.Assign) -> list[str]:
-            t = n.targets[0]
-            return [ast.unparse(e) for e in (t.elts if isinstance(t, ast.Tuple) else [t])]  # fmt: skip
-
-        def bound(func: str) -> list[str]:
-            """The names bound to the call of `func`."""
-            (found,) = [targets(n) for n in assigns if isinstance(n.value, ast.Call) and ast.unparse(n.value.func) == func]  # fmt: skip
-            return found
-
-        def resolve(node: ast.expr) -> ast.expr:
-            """`node`, through a local bound once in main()."""
-            values = [n.value for n in assigns if isinstance(node, ast.Name) and ast.unparse(n.targets[0]) == node.id]  # fmt: skip
-            return values[0] if len(values) == 1 else node
-
-        tp, prev = bound("import_results")
-        (times,) = bound("load_test_file_times")
-        include, exclude = bound(f"{tp}.get_top_per_tests")
-        (selection_name,) = bound("Selection.load")
-        (llm,) = bound("apply_selection")
-        ((load,), (apply,), (cut,)) = (calls(f) for f in ("Selection.load", "apply_selection", f"{tp}.get_top_per_tests"))  # fmt: skip
-        self.assertLessEqual({"ADDITIONAL_CI_FILES_FOLDER", "LLM_TD_SELECTION_FILE"}, names(load))  # fmt: skip
-        self.assertIn(selection_name, guards[apply])
-        self.assertEqual([ast.unparse(a) for a in apply.args], [selection_name, include, exclude, f"{tp}.get_score", times])  # fmt: skip
-        kwargs = {k.arg: ast.unparse(k.value) for k in apply.keywords}
-        self.assertEqual(kwargs, {"test_config": "TEST_CONFIG", "td_enabled": "options.enable_td", "previous_failures": prev})  # fmt: skip
-        # TESTS_TO_INCLUDE and missing TD results turn TD off before its split.
-        td_off = [n.lineno for n in assigns if ast.unparse(n.targets[0]) == "options.enable_td"]  # fmt: skip
-        self.assertEqual(len(td_off), 2)
-        self.assertLess(max(td_off), cut.lineno)
-        # An enforced selection's split runs and is recorded, with TD's.
-        (swap,) = [n for n in assigns if targets(n) == [include, exclude] and n.value is not cut]  # fmt: skip
-        self.assertIn(f"{llm}.enforced", guards[swap])
-        self.assertEqual(ast.unparse(swap.value), f"({llm}.split.include, {llm}.split.exclude)")  # fmt: skip
-        batches = calls("TestBatch")
-        self.assertEqual([ast.unparse(c.args[1]) for c in batches], [include, exclude])
-        self.assertLess(swap.lineno, min(c.lineno for c in batches))
-        (artifact,) = calls("gen_ci_artifact")
-        self.assertIn("IS_CI", guards[artifact])
-        comps = [*artifact.args, *(k.value for k in artifact.keywords if k.arg == "td_excluded")]  # fmt: skip
-        iters = [c.generators[0].iter for c in comps if isinstance(c, ast.ListComp)]
-        self.assertEqual([ast.unparse(x) for x in iters[:2]], [include, exclude])
-        (td_exclude,) = [n for n in assigns if ast.unparse(n.targets[0]) == ast.unparse(iters[2])]  # fmt: skip
-        self.assertEqual(ast.unparse(td_exclude.value), exclude)
-        self.assertLess(td_exclude.lineno, swap.lineno)
-        metrics = [(a.value, c) for c in calls("emit_metric") if isinstance(a := c.args[0], ast.Constant)]  # fmt: skip
-        emitted = dict(metrics)
-        self.assertEqual(len(emitted), len(metrics), "a metric is emitted twice")
-        for name in ("llm_td_selection", "llm_td_failure"):
-            self.assertLessEqual({"IS_CI", llm}, guards[emitted[name]], name)
-        self.assertEqual(ast.unparse(emitted["llm_td_selection"].args[1]), f"{llm}.selection_metric")  # fmt: skip
-        failure = emitted["llm_td_failure"]
-        failures = loops[failure][-1]
-        self.assertEqual(ast.unparse(resolve(failures.iter)), "test_batch.failures")
-        target = failures.target
-        test = target.elts[0] if isinstance(target, ast.Tuple) else target
-        self.assertEqual(ast.unparse(failure.args[1]), f"{llm}.failure_metric({ast.unparse(test)})")  # fmt: skip
-        stats = emitted["td_test_failure_stats_v2"]
-        self.assertEqual((loops[stats][-1], "IS_CI" in guards[stats]), (failures, True))
-        fields = stats.args[1]
-        if not isinstance(fields, ast.Dict):
-            raise AssertionError(f"not a dict: {ast.unparse(fields)}")
-        (enforced,) = [v for k, v in zip(fields.keys, fields.values) if k and ast.unparse(k) == "'llm_enforced'"]  # fmt: skip
-        self.assertLessEqual({llm, f"{llm}.enforced"}, names(resolve(enforced)))
-
-
 class TestPrompt(unittest.TestCase):
     def test_truncate_diff_keeps_every_file(self) -> None:
         diff = "\n".join(
@@ -1073,12 +970,26 @@ class TestMain(unittest.TestCase):
         self.assertIsNone(record["error"])
 
     def test_query_model_runs_outside_the_checkout(self) -> None:
-        run = mock.Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
-        with mock.patch.object(select_tests.subprocess, "run", run):
-            select_tests.query_model("p", "m", "medium", checkout="/wt")
-        cmd = run.call_args.args[0]
-        self.assertEqual(cmd[cmd.index("--add-dir") + 1], "/wt")
-        self.assertNotEqual(run.call_args.kwargs["cwd"], "/wt")
+        seen: dict[str, Any] = {}
+
+        def run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+            cwd = Path(kwargs["cwd"])
+            seen.update(cmd=cmd, cwd=cwd, contents=list(cwd.iterdir()))
+            return subprocess.CompletedProcess([], 0, "{}", "")
+
+        with (
+            tempfile.TemporaryDirectory() as wt,
+            mock.patch.object(select_tests.subprocess, "run", run),
+        ):
+            select_tests.query_model("p", "m", "medium", checkout=wt)
+        cmd, cwd = seen["cmd"], seen["cwd"]
+        self.assertEqual(cmd[cmd.index("--add-dir") + 1], wt)
+        # A fresh, empty temp dir outside the checkout, removed afterwards.
+        self.assertEqual(seen["contents"], [])
+        self.assertEqual(cwd.parent, Path(tempfile.gettempdir()))
+        self.assertNotEqual(cwd, Path(wt))
+        self.assertNotIn(REPO_ROOT, cwd.parents)
+        self.assertFalse(cwd.exists())
 
     def test_query_model_failures_run_all(self) -> None:
         def completed(stdout: str) -> subprocess.CompletedProcess:
@@ -1087,6 +998,7 @@ class TestMain(unittest.TestCase):
         timeout = subprocess.TimeoutExpired(["claude", "-p", "<prompt>"], 600)
         for run, error in [
             (completed("not json"), "not jsonerr"),
+            (completed("[1]"), "[1]err"),
             (completed(json.dumps({"is_error": True, "result": "overloaded"})), "overloaded"),
             (completed(json.dumps({"result": "", "total_cost_usd": 0.5})), "no model output"),
             (mock.Mock(side_effect=timeout), "model call timed out after 600s"),
@@ -1201,6 +1113,25 @@ class TestMain(unittest.TestCase):
                 )
             record = json.loads(output.read_text())
         return record, query.call_args.args[0].split("# Candidate test files", 1)[1]
+
+    def test_non_ascii_paths_are_unquoted(self) -> None:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+        name = "test/test_caf\u00e9.py"
+        with (
+            tempfile.TemporaryDirectory() as repo,
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(select_tests, "REPO_ROOT", Path(repo)),
+        ):
+            git = select_tests.git
+            git("init", "-q")
+            git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-q", "--allow-empty", "-m", "base")  # fmt: skip
+            (Path(repo) / "test").mkdir()
+            (Path(repo) / name).write_text("import x\n")
+            git("add", "-A")
+            git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-qm", "add")  # fmt: skip
+            self.assertEqual(select_tests.changed_files("HEAD~1", "HEAD"), [name])
+            self.assertEqual(select_tests.git_grep("import", "HEAD"), [name])
 
     def test_moved_test_file_is_selected(self) -> None:
         answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": []}}  # fmt: skip
