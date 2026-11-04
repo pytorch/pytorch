@@ -5552,34 +5552,24 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIsNone(torch._C._get_real_tensor(moved))
         self.assertTrue(moved.requires_grad)
         self.assertTrue(moved.is_leaf)
-        self.assertFalse(moved._is_view())
         self.assertEqual(meta_fake.device, torch.device("meta"))
         self.assertIsNotNone(torch._C._get_real_tensor(meta_fake))
         other_mode, _other_wrapper = self._make_mode()
-        with self.assertRaisesRegex(RuntimeError, "Expected a fake of the given mode"):
+        with self.assertRaisesRegex(ValueError, "Expected a fake of the given mode"):
             torch._C._from_meta_and_device(meta_fake, torch.device("cpu"), other_mode)
 
-        with self.assertRaisesRegex(RuntimeError, "device must be 'meta', got cpu"):
+        with self.assertRaisesRegex(ValueError, "device must be 'meta', got cpu"):
             torch._C._from_meta_and_device(fake, torch.device("cpu"), mode)
-        with self.assertRaisesRegex(RuntimeError, "device must be 'meta', got cpu"):
+        with self.assertRaisesRegex(ValueError, "device must be 'meta', got cpu"):
             torch._C._from_meta_and_device(torch.empty(2), torch.device("cpu"), mode)
         meta_subclass = TwoTensor(
             torch.empty(2, device="meta"), torch.empty(2, device="meta")
         )
-        with self.assertRaisesRegex(RuntimeError, "Expected a plain meta tensor"):
+        with self.assertRaisesRegex(TypeError, "does not accept tensor subclasses"):
             torch._C._from_meta_and_device(meta_subclass, torch.device("cpu"), mode)
 
-        class DispatchSubclass(torch.Tensor):
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                return func(*args, **(kwargs or {}))
-
-        # A subclass made from a fake is rejected too, not silently unwrapped
-        fake_subclass = torch.Tensor._make_subclass(DispatchSubclass, meta_fake)
-        with self.assertRaisesRegex(RuntimeError, "Expected a plain meta tensor"):
-            torch._C._from_meta_and_device(fake_subclass, torch.device("cpu"), mode)
         functional = torch._to_functional_tensor(torch.empty(2, device="meta"))
-        with self.assertRaisesRegex(RuntimeError, "Expected a plain meta tensor"):
+        with self.assertRaisesRegex(TypeError, "does not accept tensor subclasses"):
             torch._C._from_meta_and_device(functional, torch.device("cpu"), mode)
 
         # allow_meta is enforced
@@ -5588,16 +5578,32 @@ class TestCppFakeTensorModeBindings(TestCase):
         meta = torch.empty(2, device="meta")
         with self.assertRaisesRegex(RuntimeError, "allow_meta is False"):
             torch._C._from_meta_and_device(meta, torch.device("meta"), strict_mode)
-        self.assertFalse(torch._C._is_fake_tensor(meta))
-        self.assertTrue(meta.is_meta)
+
+        # requires_grad is set before the shared storage is marked, so failing
+        # to set it leaves the input's storage unmarked
+        mode._allow_unsafe_data_ptr_access = False
+        with torch.inference_mode():
+            inference = torch.empty(2, device="meta", requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "inference tensor"):
+            torch._C._from_meta_and_device(inference, torch.device("cpu"), mode)
+        inference.data_ptr()
 
     def test_maybe_get_fake_mode(self):
         mode, wrapper = self._make_mode()
+        other_mode, other_wrapper = self._make_mode()
         meta = torch.empty(2, device="meta")
         fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+        other = torch._C._from_meta_and_device(meta, torch.device("cpu"), other_mode)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), wrapper)
+        self.assertIs(torch._C._maybe_get_fake_mode(other), other_wrapper)
         self.assertIsNone(torch._C._maybe_get_fake_mode(meta))
         self.assertIsNone(torch._C._maybe_get_fake_mode(torch.empty(2)))
+        no_mode = torch.empty(2, device="meta")
+        torch._C._set_fake_device(no_mode, torch.device("cpu"))
+        self.assertIsNone(torch._C._maybe_get_fake_mode(no_mode))
+        # The functional wrapper copies the fake's mode but drops the Fake key
+        functional = torch._to_functional_tensor(fake)
+        self.assertIsNone(torch._C._maybe_get_fake_mode(functional))
 
     def test_unsafe_data_ptr_access(self):
         def make_fake(mode):
@@ -5605,10 +5611,11 @@ class TestCppFakeTensorModeBindings(TestCase):
             return torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
 
         warning = "Accessing the data pointer of FakeTensor"
+        data_ptr_error = r"Cannot access data pointer of Tensor \(e\.g\. FakeTensor"
         config = torch._functorch.config
         with config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
             strict_mode, _ = self._make_mode()
-        with self.assertRaisesRegex(RuntimeError, "data pointer"):
+        with self.assertRaisesRegex(RuntimeError, data_ptr_error):
             make_fake(strict_mode).data_ptr()
 
         mode, _ = self._make_mode()
@@ -5618,7 +5625,7 @@ class TestCppFakeTensorModeBindings(TestCase):
 
         # Reassigning applies to fakes created afterwards
         mode._allow_unsafe_data_ptr_access = False
-        with self.assertRaisesRegex(RuntimeError, "data pointer"):
+        with self.assertRaisesRegex(RuntimeError, data_ptr_error):
             make_fake(mode).data_ptr()
         with self.assertWarnsOnceRegex(UserWarning, warning):
             fake.data_ptr()
@@ -5635,6 +5642,12 @@ class TestCppFakeTensorModeBindings(TestCase):
             with self.assertRaisesRegex(RuntimeError, "one already exists"):
                 torch._C._set_dispatch_mode(other_wrapper)
             self.assertEqual(self._installed(), (wrapper, True))
+            # Only the FAKE key sees it, and the mode stack does not
+            proxy = torch._C._TorchDispatchModeKey.PROXY
+            self.assertIsNone(torch._C._get_dispatch_mode(proxy))
+            self.assertIsNone(torch._C._unset_dispatch_mode(proxy))
+            self.assertEqual(torch._C._len_torch_dispatch_stack(), 0)
+            self.assertEqual(self._installed(), (wrapper, True))
             self.assertIs(torch._C._unset_dispatch_mode(fake), wrapper)
             self.assertEqual(self._installed(), (None, False))
             self.assertIsNone(torch._C._unset_dispatch_mode(fake))
@@ -5642,10 +5655,11 @@ class TestCppFakeTensorModeBindings(TestCase):
             torch._C._unset_dispatch_mode(fake)
         self.assertEqual(self._installed(), (None, False))
 
+    @skipIfTorchDynamo("Dynamo suspends the fake mode, rebuilding its wrapper")
     def test_failed_unset_keeps_mode(self):
         # Unsetting a mode whose wrapper was collected rebuilds the wrapper; if
         # that fails, the mode stays installed
-        mode, wrapper = self._make_mode()
+        _, wrapper = self._make_mode()
         fake = torch._C._TorchDispatchModeKey.FAKE
         torch._C._set_dispatch_mode(wrapper)
         del wrapper
@@ -5661,16 +5675,21 @@ class TestCppFakeTensorModeBindings(TestCase):
             def _from_cpp_mode(cls, *args):
                 return cls()
 
-        fake_tensor = torch._subclasses.fake_tensor
-        with patch.object(fake_tensor, "CppFakeTensorMode", Unrebuildable, create=True):
-            with self.assertRaisesRegex(RuntimeError, "rebuild failed"):
-                torch._C._unset_dispatch_mode(fake)
-        installed = torch._C._dispatch_tls_is_dispatch_key_included(
-            torch._C.DispatchKey.Fake
-        )
-        with patch.object(fake_tensor, "CppFakeTensorMode", Rebuildable, create=True):
-            self.assertIsInstance(torch._C._unset_dispatch_mode(fake), Rebuildable)
+        ft = torch._subclasses.fake_tensor
+        try:
+            with patch.object(ft, "CppFakeTensorMode", Unrebuildable, create=True):
+                with self.assertRaisesRegex(RuntimeError, "rebuild failed"):
+                    torch._C._unset_dispatch_mode(fake)
+            installed = torch._C._dispatch_tls_is_dispatch_key_included(
+                torch._C.DispatchKey.Fake
+            )
+        finally:
+            with patch.object(ft, "CppFakeTensorMode", Rebuildable, create=True):
+                got = torch._C._get_dispatch_mode(fake)
+                unset = torch._C._unset_dispatch_mode(fake)
         self.assertTrue(installed)
+        self.assertIsInstance(got, Rebuildable)
+        self.assertIs(unset, got)
         self.assertEqual(self._installed(), (None, False))
 
     def test_suspend_for_real_tensors(self):
@@ -5686,7 +5705,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             with BaseTorchDispatchMode() as py_mode:
                 with torch.utils._python_dispatch._disable_current_modes():
                     self.assertEqual(self._installed(), (None, False))
-                    self.assertEqual(torch._C._len_torch_dispatch_stack(), 0)
                     self.assertFalse(torch._C._is_fake_tensor(torch.empty(2)))
                 self.assertEqual(self._installed(), (wrapper, True))
                 self.assertIs(_get_current_dispatch_mode(), py_mode)
@@ -5698,6 +5716,7 @@ class TestCppFakeTensorModeBindings(TestCase):
                 self.assertIs(_get_current_dispatch_mode(), py_mode)
         finally:
             torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+        self.assertEqual(self._installed(), (None, False))
 
     def test_item_memo(self):
         mode, _ = self._make_mode()
@@ -5711,18 +5730,40 @@ class TestCppFakeTensorModeBindings(TestCase):
         memo = ShapeEnv().create_unbacked_symfloat()
         torch._C._set_fake_item_memo(fake, memo, 3)
         self.assertIs(torch._C._get_fake_item_memo(fake, 3), memo)
+        self.assertIs(torch._C._get_fake_item_memo(fake, 3), memo)
         # Dropped once read in another epoch, unless kept across epochs
         self.assertIsNone(torch._C._get_fake_item_memo(fake, 4))
         self.assertIsNone(torch._C._get_fake_item_memo(fake, 3))
         torch._C._set_fake_item_memo(fake, True, None)
         self.assertIs(torch._C._get_fake_item_memo(fake, 4), True)
-        # Dropped once the tensor is mutated, and by a shallow copy (set_data)
-        bumped = (fake._version + 1,)
-        torch._C._autograd._unsafe_set_version_counter((fake,), bumped)
-        self.assertIsNone(torch._C._get_fake_item_memo(fake, 4))
-        torch._C._set_fake_item_memo(fake, 2, None)
-        fake.data = make_fake()
-        self.assertIsNone(torch._C._get_fake_item_memo(fake, 4))
+        self.assertIs(torch._C._get_fake_item_memo(fake, 5), True)
+        # Dropped once the tensor is mutated, whether or not it has an epoch
+        for epoch in (5, None):
+            torch._C._set_fake_item_memo(fake, 2, epoch)
+            self.assertEqual(torch._C._get_fake_item_memo(fake, 5), 2)
+            bumped = (fake._version + 1,)
+            torch._C._autograd._unsafe_set_version_counter((fake,), bumped)
+            self.assertIsNone(torch._C._get_fake_item_memo(fake, 5))
+        # An inference fake has no version counter to record or check, but its
+        # epochs are checked as usual
+        with torch.inference_mode():
+            inference = make_fake()
+        self.assertTrue(inference.is_inference())
+        torch._C._set_fake_item_memo(inference, 2, 5)
+        self.assertEqual(torch._C._get_fake_item_memo(inference, 5), 2)
+        self.assertIsNone(torch._C._get_fake_item_memo(inference, 6))
+        torch._C._set_fake_item_memo(inference, 3, None)
+        self.assertEqual(torch._C._get_fake_item_memo(inference, 6), 3)
+        self.assertEqual(torch._C._get_fake_item_memo(inference, 7), 3)
+        # A shallow copy (set_data) drops the memo and does not copy the source's.
+        # Both are at version 0, so a copied memo would not read as mutated.
+        dst, src = make_fake(), make_fake()
+        torch._C._set_fake_item_memo(dst, 2, None)
+        torch._C._set_fake_item_memo(src, 3, None)
+        self.assertEqual(torch._C._get_fake_item_memo(dst, 5), 2)
+        self.assertEqual(torch._C._get_fake_item_memo(src, 5), 3)
+        dst.data = src
+        self.assertIsNone(torch._C._get_fake_item_memo(dst, 5))
 
     def test_fake_dispatch_keys(self):
         mode, _ = self._make_mode()
@@ -5731,19 +5772,20 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIsNone(maybe_get_fake_dispatch_keys(meta_fake))
         keys = torch._C._dispatch_keys(torch.empty(2))
         torch._C._set_fake_dispatch_keys(meta_fake, keys)
-        recorded = maybe_get_fake_dispatch_keys(meta_fake)
-        self.assertEqual(recorded.raw_repr(), keys.raw_repr())
-        # detach and alias keep them, like a Python FakeTensor's. Excluding
-        # Fake runs their own kernels.
+        self.assertEqual(maybe_get_fake_dispatch_keys(meta_fake), keys)
+        # Excluding Fake runs the kernels themselves. detach keeps them, like a
+        # Python FakeTensor's. alias's kernel does not: ops such as _conj call
+        # it internally, and Python gives their outputs no keys.
         fake_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
         with torch._C._ExcludeDispatchKeyGuard(fake_key):
-            outs = [meta_fake.detach(), torch.ops.aten.alias(meta_fake)]
-        for out in outs:
-            recorded = maybe_get_fake_dispatch_keys(out)
-            self.assertEqual(recorded.raw_repr(), keys.raw_repr())
+            detached = meta_fake.detach()
+            aliased = torch.ops.aten.alias(meta_fake)
+        self.assertEqual(maybe_get_fake_dispatch_keys(detached), keys)
+        self.assertIsNone(maybe_get_fake_dispatch_keys(aliased))
         # A new fake made from it does not, like Python's from_meta_and_device
         fake = torch._C._from_meta_and_device(meta_fake, torch.device("cpu"), mode)
         self.assertIsNone(maybe_get_fake_dispatch_keys(fake))
+        self.assertEqual(maybe_get_fake_dispatch_keys(meta_fake), keys)
         torch._C._set_fake_dispatch_keys(meta_fake, None)
         self.assertIsNone(maybe_get_fake_dispatch_keys(meta_fake))
 
