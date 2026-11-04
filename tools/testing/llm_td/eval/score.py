@@ -94,10 +94,12 @@ from tools.stats.import_test_stats import (
 )
 from tools.testing.llm_td.eval import REPO
 from tools.testing.llm_td.select_tests import (
+    added_test_files,
     AGENTIC_TOOLS,
     build_prompt,
     CHECKOUT_PREAMBLE,
     git_grep,
+    git_paths,
     run_all_reason,
     SCHEMA,
     SYSTEM_PROMPT,
@@ -445,12 +447,15 @@ def unasked(s: dict) -> bool:
 
 
 def sample_prompt(sample: dict, minutes: dict) -> str:
-    """The prompt select_tests.select builds for `sample`, which lists apart
-    the candidate test files that its diff adds, as a new file or the new path
-    of a moved one (the diff detects renames, while select diffs with --no-renames)."""
+    """The prompt select_tests.select builds for `sample`. Its added test
+    files are the candidates the diff adds, as a new file or the new path of a
+    moved one (the diff detects renames, while select diffs with --no-renames),
+    except those already in the tree at main_base (default base), whose TESTS
+    gave the candidates."""
     found = re.findall(r"^diff --git a/\S+ b/(\S+)\nnew file mode |^rename to (\S+)$", sample["diff"], re.MULTILINE)  # fmt: skip
-    added = {a or b for a, b in found}
-    new = {c for c in sample["candidates"] if f"test/{c}.py" in added and re.match(r"test/([\w/]+/)?test_\w+\.py$", f"test/{c}.py")}  # fmt: skip
+    added = sorted({a or b for a, b in found} & {f"test/{c}.py" for c in sample["candidates"]})  # fmt: skip
+    listed = git_paths("ls-tree", "--name-only", sample.get("main_base") or sample["base"], "--", *added) if added else []  # fmt: skip
+    new = added_test_files(added, [p.removeprefix("test/").removesuffix(".py") for p in listed])  # fmt: skip
     return build_prompt(sample["title"], sample["body"] or "", sample["diffstat"], sample["diff"], sample["candidates"], minutes, new)  # fmt: skip
 
 
@@ -520,7 +525,7 @@ def score(
     td_dir: Path,
     stats: str,
 ) -> list[dict]:
-    """Rows of every tag and policy, all on the distinct ids that have a TD replay of the current inputs under `stats` (see replay_stats), git grep at their head and, unless `unasked`, a result for every tag but `td` of the prompt the sample gives now (see prompt_sha). Raises ValueError if a tag's results mix --model, --effort or --agentic."""
+    """Rows of every tag and policy, all on the distinct ids that have a sample, a TD replay of the current inputs under `stats` (see replay_stats), git grep at their head and, unless `unasked`, a result for every tag but `td` of the prompt the sample gives now (see prompt_sha). Raises ValueError if a tag's results mix --model, --effort or --agentic."""
     ids = list(dict.fromkeys(ids))
     no_grep = "working git grep at their head (not in this clone?)"
     settings: collections.defaultdict[str, set[tuple]] = collections.defaultdict(set)
@@ -534,6 +539,9 @@ def score(
     no_workflow: set[str] = set()
     throttled: collections.Counter[str] = collections.Counter()
     for sid in ids:
+        if not (samples / f"{sid}.json").exists():
+            dropped["sample"] += 1
+            continue
         loaded = {tag: load(data, tag, sid, samples, td_dir) for tag in tags}
         s, _, td = next(iter(loaded.values()))
         for tag, (_, r, _) in loaded.items():
