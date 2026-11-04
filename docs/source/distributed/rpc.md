@@ -8,7 +8,7 @@ higher-level API to automatically differentiate models split across several
 machines.
 
 ```{warning}
-`torch.distributed.rpc` is deprecated since 2.16 and will be removed in 2.18.
+`torch.distributed.rpc` is deprecated since 2.16 and will be removed in a future version.
 For new code, consider one of these alternatives:
 
 - [Monarch](https://meta-pytorch.org/monarch/stable/generated/examples/getting_started.html)
@@ -16,7 +16,7 @@ For new code, consider one of these alternatives:
 - [gRPC](https://grpc.io/docs/languages/python/quickstart/)
 
 There is no drop-in replacement for distributed autograd, `DistributedOptimizer`
-or RRef. Existing users should pin `torch<2.18`.
+or RRef. Existing users should pin a PyTorch release that still includes it.
 ```
 
 ```{note}

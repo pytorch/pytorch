@@ -606,7 +606,7 @@ class RemoteModule(_RemoteModule):
         A RemoteModule instance can only be created after RPC initialization.
 
         .. deprecated:: 2.16
-            ``torch.distributed.rpc`` is deprecated and will be removed in 2.18.
+            ``torch.distributed.rpc`` is deprecated and will be removed in a future version.
             See :ref:`distributed-rpc-framework` for alternatives.
 
         It creates a user-specified module on a specified remote node.

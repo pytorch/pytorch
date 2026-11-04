@@ -105,7 +105,7 @@ if is_available():
 
         .. deprecated:: 2.16
             ``torch.distributed.rpc`` is deprecated and will be removed in
-            2.18. See :ref:`distributed-rpc-framework` for alternatives.
+            a future version. See :ref:`distributed-rpc-framework` for alternatives.
 
         Args:
             name (str): a globally unique name of this node. (e.g.,
@@ -134,9 +134,8 @@ if is_available():
         global _deprecation_warned
         if not _deprecation_warned or torch.is_warn_always_enabled():
             warnings.warn(
-                "torch.distributed.rpc is deprecated since 2.16 and will be removed in 2.18. "
-                "Use Monarch, Ray or gRPC instead. See "
-                "https://docs.pytorch.org/docs/main/distributed/rpc.html",
+                "torch.distributed.rpc is deprecated since 2.16 and will be removed in a future version. "
+                "See https://docs.pytorch.org/docs/main/distributed/rpc.html for alternatives.",
                 FutureWarning,
                 stacklevel=2,
             )

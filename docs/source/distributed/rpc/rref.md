@@ -7,8 +7,8 @@ orphan: true
 # Remote Reference Protocol
 
 ```{warning}
-`torch.distributed.rpc` is deprecated since 2.16 and will be removed in 2.18.
-See {ref}`distributed-rpc-framework` for alternatives.
+`torch.distributed.rpc` is deprecated since 2.16 and will be removed in a future
+version. See {ref}`distributed-rpc-framework` for alternatives.
 ```
 
 This note describes the design details of Remote Reference protocol and walks
