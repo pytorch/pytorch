@@ -266,14 +266,32 @@ void ActivityTraceWrapper::save(const std::string& path) {
 #endif // USE_KINETO
 }
 
-bool isDevicePresent() {
+ActivitySet supportedDeviceActivities() {
+  using torch::autograd::profiler::ActivityType;
+  ActivitySet activities;
+#ifdef USE_KINETO
+#if defined(HAS_CUPTI) || defined(HAS_ROCTRACER)
+  if (at::getNumGPUs() > 0) {
+    activities.insert(ActivityType::CUDA);
+  }
+#endif // defined(HAS_CUPTI) || defined(HAS_ROCTRACER)
+  if (at::hasXPU()) {
+    activities.insert(ActivityType::XPU);
+  }
   // Asking for hooks that are not registered yet caches stub hooks for the
   // whole process, so an out-of-tree backend that loads later would never be
   // seen. Check the registry first.
-  const bool hasMTIA = at::detail::isMTIAHooksBuilt() && at::hasMTIA();
-  const bool hasHPU = at::HPUHooksRegistry()->Has("HPUHooks") && at::hasHPU();
-  return at::hasCUDA() || at::hasXPU() || hasMTIA || hasHPU ||
-      c10::is_privateuse1_backend_registered();
+  if (at::detail::isMTIAHooksBuilt() && at::hasMTIA()) {
+    activities.insert(ActivityType::MTIA);
+  }
+  if (at::detail::isHPUHooksBuilt() && at::hasHPU()) {
+    activities.insert(ActivityType::HPU);
+  }
+  if (c10::is_privateuse1_backend_registered()) {
+    activities.insert(ActivityType::PrivateUse1);
+  }
+#endif // USE_KINETO
+  return activities;
 }
 
 bool collectivesProfilerExists() {
@@ -318,7 +336,8 @@ void prepareTrace(
 #ifdef USE_KINETO
   libkineto::api().resetKinetoTLS();
   if (!libkineto::api().isProfilerRegistered()) {
-    libkineto_init(/*cpuOnly=*/!isDevicePresent(), /*logOnError=*/true);
+    libkineto_init(
+        /*cpuOnly=*/supportedDeviceActivities().empty(), /*logOnError=*/true);
     libkineto::api().suppressLogMessages();
   }
 

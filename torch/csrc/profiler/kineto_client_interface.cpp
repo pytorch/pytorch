@@ -91,9 +91,9 @@ class LibKinetoClient : public libkineto::ClientInterface {
 void global_kineto_init() {
   if constexpr (kEnableGlobalObserver) {
     if (c10::utils::get_env("KINETO_USE_DAEMON").has_value()) {
-      libkineto_init(
-          /*cpuOnly=*/!profiler::impl::kineto::isDevicePresent(),
-          /*logOnError=*/true);
+      const bool cpuOnly =
+          profiler::impl::kineto::supportedDeviceActivities().empty();
+      libkineto_init(cpuOnly, /*logOnError=*/true);
       libkineto::api().suppressLogMessages();
     }
   }
