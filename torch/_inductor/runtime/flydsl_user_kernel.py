@@ -1,6 +1,10 @@
 """Compile and launch user-defined FlyDSL kernels (``@flyc.jit`` host functions).
 
-Used by the eager impl of ``flydsl_kernel_wrapper_mutation`` (launch_flydsl_kernel).
+Used by the eager impl of ``flydsl_kernel_wrapper_mutation`` (launch_flydsl_kernel)
+and by Inductor's Python wrapper, where each kernel becomes a FlyDSLKernelLauncher:
+the counterpart of the CachingAutotuner a user Triton kernel becomes in generated
+code.
+
 A compiled FlyDSL kernel (a CompiledFunction) is specialized to the argument layouts
 it was compiled for and checks nothing at launch, so compiles are cached per
 argument signature: dtype, shape, stride and alignment of every tensor, the type of
@@ -38,6 +42,7 @@ from torch.utils._ordered_set import OrderedSet
 
 __all__ = [
     "FLYDSL_COMPILE_LOCK",
+    "FlyDSLKernelLauncher",
     "compile_host_fn",
     "device_arch",
     "flydsl_env",
@@ -549,3 +554,35 @@ def launch_flydsl_kernel(
                     compiled = compile_host_fn(fn, placeholders, arch)
                     per_fn[tuple(key)] = compiled
         compiled(*call_args)
+
+
+class FlyDSLKernelLauncher:
+    """One user FlyDSL kernel in Inductor's generated Python wrapper.
+
+    ``run(*args, stream=...)`` takes the kernel arguments (``arg_names``: tensors and
+    runtime scalars, in host-function signature order) positionally; the constants
+    were bound when the wrapper was generated. It launches through
+    launch_flydsl_kernel, which compiles each argument signature once.
+    """
+
+    def __init__(
+        self,
+        fn: Callable[..., Any],
+        arg_names: Sequence[str],
+        constant_args: Mapping[str, Any],
+    ) -> None:
+        self.fn = fn
+        self.arg_names = tuple(arg_names)
+        self.constant_args = dict(constant_args)
+
+    def run(self, *args: Any, stream: int) -> None:
+        if len(args) != len(self.arg_names):
+            raise AssertionError(
+                f"expected {len(self.arg_names)} arguments ({self.arg_names}), "
+                f"got {len(args)}"
+            )
+        launch_flydsl_kernel(
+            self.fn,
+            {**dict(zip(self.arg_names, args)), **self.constant_args},
+            stream,
+        )

@@ -3,8 +3,8 @@
 
 Modeled on the Triton suite (test/inductor/test_triton_kernels.py) and the OSS
 CuTeDSL stack's test_cutedsl_kernels.py: direct HOP use, wrap_flydsl eager launches
-and tracing (make_fx, non-strict export), the FlyDSL compile helpers, and Dynamo.
-Needs a ROCm GPU and flydsl >= 0.4.
+and tracing (make_fx, non-strict export), the FlyDSL compile helpers, Dynamo, and
+Inductor (Python wrapper). Needs a ROCm GPU and flydsl >= 0.4.
 """
 
 import functools
@@ -29,6 +29,7 @@ from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
 )
+from torch._dynamo.utils import ReinplaceCounters
 from torch._higher_order_ops.flydsl_kernel_wrap import (
     flydsl_kernel_side_table,
     flydsl_kernel_wrapper_functional,
@@ -37,12 +38,14 @@ from torch._higher_order_ops.flydsl_kernel_wrap import (
     get_flydsl_mutated_tensors,
     get_host_fn_info,
 )
+from torch._inductor import config as inductor_config
 from torch._inductor.runtime import flydsl_user_kernel
 from torch._inductor.runtime.flydsl_user_kernel import (
     FLYDSL_COMPILE_LOCK,
     flydsl_version_ok,
 )
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import run_and_get_code
 from torch._library.flydsl import wrap_flydsl
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -251,6 +254,23 @@ if HAS_FLYDSL:
             grid=((n + 1023) // 1024, 1, 1), block=(1024, 1, 1), stream=stream
         )
 
+    # An unannotated flag, which FlyDSL makes a runtime Boolean: out = x * 3 if flag
+    # else x * 5.
+    @flyc.kernel
+    def _select_k(X, Out, n: fx.Int32, flag: fx.Boolean):
+        i = fx.block_idx.x * 1024 + fx.thread_idx.x
+        if i < n:
+            if flag:
+                Out[i] = X[i] * 3.0
+            else:
+                Out[i] = X[i] * 5.0
+
+    @flyc.jit
+    def select_kernel(X, Out, n: fx.Int32, flag, stream: fx.Stream):
+        _select_k(X, Out, n, flag).launch(
+            grid=((n + 1023) // 1024, 1, 1), block=(1024, 1, 1), stream=stream
+        )
+
     # Only for test_wrap_flydsl_globals_drift_does_not_trigger (it rebinds the module
     # global x, which this kernel "uses" through fx.thread_idx.x).
     @flyc.jit
@@ -407,6 +427,21 @@ def _normalize_indices(code):
     """Side-table indices depend on what ran before; blank them for expected code."""
     code = re.sub(r"\bkernel_idx = \d+", "kernel_idx = K", code)
     return re.sub(r"\bconstant_args_idx = \d+", "constant_args_idx = C", code)
+
+
+def _strip_comments(code):
+    """Inductor output code carries `Original ATen:` / source comments that would
+    make positive substring checks pass vacuously."""
+    lines = (ln for ln in code.splitlines() if not ln.lstrip().startswith(("#", "//")))
+    return "\n".join(lines)
+
+
+def _flydsl_launches(code, host_name):
+    """`<launcher>.run(...)` calls of the user kernel ``host_name`` in Python wrapper
+    code, as (launcher name, args) pairs. The launcher is named after the host
+    function (`flydsl_add_kernel_0.run(...)`)."""
+    pattern = rf"\b(flydsl_{re.escape(host_name)}_\d+)\.run\(([^\n]*)\)"
+    return re.findall(pattern, _strip_comments(code))
 
 
 def _pointer_alignment(t):
@@ -2648,7 +2683,8 @@ class FlyDSLDynamoTests(TestCase):
         self.assertEqual(gm(x, y), x + y)
         self.assertEqual(make_fx(f)(x, y)(x, y), x + y)
 
-    def test_kernel_output_in_autograd_graph(self):
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_kernel_output_in_autograd_graph(self, backend):
         # The launch has no derivative: its output enters the autograd graph as a
         # constant, exactly as in eager.
         def f(x, y):
@@ -2660,14 +2696,727 @@ class FlyDSLDynamoTests(TestCase):
         f(x, y).backward()
         eager_grad = x.grad.clone()
         x.grad = None
-        torch.compile(f, backend="aot_eager", fullgraph=True)(x, y).backward()
+        torch.compile(f, backend=backend, fullgraph=True)(x, y).backward()
         self.assertEqual(x.grad, eager_grad)
         self.assertEqual(eager_grad, (x + y).detach())
+
+
+@requires_flydsl
+class FlyDSLInductorTests(TestCase):
+    """Inductor: the HOP lowers to ir.UserDefinedFlyDSLKernel, launched from the
+    Python wrapper as `<launcher>.run(<args>, stream=raw_streamN)`."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    def test_global_rebind_reaches_compiled_graphs(self):
+        # The launcher keys its compiles on the module globals the kernel reads, so
+        # a compiled graph (and a recompile after torch._dynamo.reset()) uses a
+        # rebound global's new value.
+        module = sys.modules[__name__]
+        self.addCleanup(setattr, module, "_GLOBAL_SCALE", _GLOBAL_SCALE)
+        w = wrap_flydsl(scale_global_kernel, mutates_args=["Out"])
+
+        def f(t):
+            out = torch.zeros_like(t)
+            w(t, out, t.numel())
+            return out + 1
+
+        a = _rand(1000)
+        cf = torch.compile(f, backend="inductor", fullgraph=True)
+        self.assertEqual(cf(a), 2 * a + 1)
+        module._GLOBAL_SCALE = 3.0
+        self.assertEqual(cf(a), 3 * a + 1)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(f, backend="inductor")(a), 3 * a + 1)
+
+    def test_constexpr_lambdas(self):
+        # Constexpr lambdas through the Python wrapper: one made in the frame (named
+        # "<lambda>" for FlyDSL) and ones passed in with other defaults (guarded).
+        w = wrap_flydsl(map_kernel, mutates_args=["Out"])
+
+        def inline(t):
+            out = torch.zeros_like(t)
+            w(t, out, t.numel(), lambda v: v * 2.0)
+            return out
+
+        def passed(t, op):
+            out = torch.zeros_like(t)
+            w(t, out, t.numel(), op)
+            return out
+
+        def scale_by(k):
+            return lambda v, k=k: v * k
+
+        a = _rand(1000)
+        self.assertEqual(torch.compile(inline, fullgraph=True)(a), 2 * a)
+        cf = torch.compile(passed, fullgraph=True)
+        self.assertEqual(cf(a, scale_by(5.0)), 5 * a)
+        self.assertEqual(cf(a, scale_by(6.0)), 6 * a)
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_keyword_only_params(self, backend):
+        a, b = _rand(1000), _rand(1000)
+        kwonly_n_w = wrap_flydsl(kwonly_n_kernel, mutates_args=["Out"])
+        kwonly_out_w = wrap_flydsl(kwonly_out_kernel, mutates_args=["Out"])
+        kwonly_alpha_w = wrap_flydsl(kwonly_alpha_kernel, mutates_args=["Out"])
+
+        def f(t, u):
+            o1, o2, o3 = (torch.zeros_like(t) for _ in range(3))
+            kwonly_n_w(t, u, o1, n=t.numel())
+            kwonly_out_w(t, u, t.numel(), Out=o2)
+            kwonly_alpha_w(t, o3, t.numel(), alpha=3.0)
+            return o1, o2, o3
+
+        res = torch.compile(f, backend=backend, fullgraph=True)(a, b)
+        self.assertEqual(res, (a + b, a + b, 3 * a))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_unannotated_numeric_defaults(self, backend):
+        # A Numeric default of an unannotated parameter is a constant of FlyDSL's
+        # own type: an Int64 that does not fit an Int32, a Float64 that is not a
+        # Float32.
+        xi = torch.arange(1000, device=DEVICE, dtype=torch.int64)
+        xd = _rand(1000, dtype=torch.float64)
+        for host_fn, t, expected in (
+            (int64_default_kernel, xi, xi + 10**10),
+            (big_int64_default_kernel, xi, xi + 3_000_000_000**2),
+            (float64_default_kernel, xd, xd + 0.1),
+        ):
+            w = wrap_flydsl(host_fn, mutates_args=["Out"])
+
+            def f(t):
+                out = torch.zeros_like(t)
+                w(t, out, t.numel())
+                return out
+
+            with self.subTest(host_fn=host_fn.func.__name__):
+                torch._dynamo.reset()
+                res = torch.compile(f, backend=backend, fullgraph=True)(t)
+                self.assertEqual(res, expected, atol=0, rtol=0)
+
+    def test_flydsl_kernel_inductor_basic(self):
+        from torch._inductor import ir
+
+        codegen_calls = []
+        orig_codegen = ir.UserDefinedFlyDSLKernel.codegen
+
+        def spy_codegen(self, wrapper):
+            codegen_calls.append(self)
+            return orig_codegen(self, wrapper)
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out.relu()
+
+        x, y = _rand(1000), _rand(1000)
+        with mock.patch.object(ir.UserDefinedFlyDSLKernel, "codegen", spy_codegen):
+            res, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        self.assertEqual(res, (x + y).relu())
+        self.assertEqual(len(codegen_calls), 1)
+        self.assertIs(codegen_calls[0].kernel.fn, add_kernel)
+        launches = _flydsl_launches(code, "add_kernel")
+        self.assertEqual(launches, [("flydsl_add_kernel_0", mock.ANY)], code)
+        # Launched on the stream Inductor fetched for the device (named
+        # `raw_stream0` or `stream0` depending on the version), never a constant.
+        self.assertRegex(launches[0][1], r"stream=(raw_)?stream\d+$")
+        # The header comment names the user's function (JitFunction.func).
+        FileCheck().check(
+            "# flydsl_add_kernel_0: FlyDSL host function "
+            f"{add_kernel.func.__module__}.add_kernel"
+        ).run(code)
+
+    def test_flydsl_kernel_symbolic_bool_scalar(self):
+        # A symbolic bool for an unannotated param is a runtime scalar (a FlyDSL
+        # Boolean), evaluated at each launch like a symbolic int.
+        w = wrap_flydsl(select_kernel, mutates_args=["Out"])
+
+        def f(x):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), x.shape[0] > 1500)
+            return out
+
+        cf = torch.compile(f, dynamic=True, fullgraph=True)
+        for n in (1000, 2000):
+            x = _rand(n)
+            self.assertEqual(cf(x), (3 if n > 1500 else 5) * x)
+
+    def test_flydsl_kernel_numeric_scalar_values(self):
+        # A FlyDSL Numeric default, and a Numeric value passed for a Numeric param,
+        # reach the generated code as Python floats.
+        w = wrap_flydsl(add_c_kernel, mutates_args=["Out"])
+        c = fx.Float32(0.75)
+
+        def f(x):
+            a, b = torch.empty_like(x), torch.empty_like(x)
+            w(x, a, x.numel())
+            w(x, b, x.numel(), c=c)
+            return a, b
+
+        x = _rand(1000)
+        (a, b), (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(a, x + 0.25)
+        self.assertEqual(b, x + 0.75)
+        args = [a for _, a in _flydsl_launches(code, "add_c_kernel")]
+        self.assertEqual(len(args), 2, code)
+        self.assertTrue(any(", 0.25, stream=" in a for a in args), args)
+        self.assertTrue(any(", 0.75, stream=" in a for a in args), args)
+
+    def test_flydsl_kernel_graph_not_serializable(self):
+        # The generated module binds launchers of this process's host functions, so
+        # serializing the compiled graph (aot_compile) fails loudly.
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out * 2
+
+        x, y = _rand(1000), _rand(1000)
+        with self.assertRaisesRegex(Exception, "cannot be serialized"):
+            torch.compile(f, fullgraph=True).aot_compile(((x, y), {}))
+
+    @parametrize("grad", [False, True])
+    @parametrize("dynamic", [False, True])
+    @inductor_config.patch("implicit_fallbacks", False)
+    def test_flydsl_kernel_no_clones(self, grad, dynamic):
+        # Mirrors test_triton_kernel_no_clones: with the right mutates_args the
+        # kernel writes the graph input in place, no clone or copy-back.
+        def call_flydsl(x, y, output):
+            n_elements = output.numel()
+            tmp = torch.add(x, 1)
+            add_w(x, y, output, n_elements)
+            return output, tmp
+
+        t1 = _rand(5, requires_grad=grad)
+        t2 = _rand(5, requires_grad=grad)
+        o1 = torch.zeros_like(t1, requires_grad=grad)
+        torch_add = call_flydsl(t1, t2, o1)
+        o2 = torch.zeros_like(t1, requires_grad=grad)
+        test, (code,) = run_and_get_code(
+            torch.compile(call_flydsl, dynamic=dynamic), t1, t2, o2
+        )
+        self.assertEqual(torch_add, test)
+        # Like the Triton test, these rely on `Original ATen:` comments, so a clone
+        # fused into some kernel is caught too.
+        self.assertNotIn("aten.copy", code)
+        self.assertNotIn("aten.clone", code)
+        self.assertEqual(len(_flydsl_launches(code, "add_kernel")), 1, code)
+        if not grad:
+            self.assertIn("return (buf0, )", code)
+
+    def test_flydsl_kernel_reinplaces_intermediate(self):
+        def f(x, y):
+            out = torch.zeros_like(x)
+            add_w(x, y, out, x.numel())
+            s, d = torch.empty_like(x), torch.empty_like(x)
+            add_sub_w(out, y, s, d, x.numel(), scale=0.5)
+            return s + d
+
+        x, y = _rand(1000), _rand(1000)
+        ReinplaceCounters.clear()
+        res, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        self.assertEqual(res, (x + y) * 0.5 * 2)
+        self.assertEqual(ReinplaceCounters.get_total_missed(), 0)
+        self.assertNotIn("aten.clone", code)
+        self.assertNotIn("aten.copy", code)
+
+    def test_flydsl_kernel_mutates_graph_input(self):
+        def f(x):
+            scale_inplace_w(x, x.numel())
+            return x.sum()
+
+        x = _rand(1000)
+        x_ref = x.clone()
+        res, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(x, 2 * x_ref)
+        self.assertEqual(res, (2 * x_ref).sum())
+        self.assertNotIn("aten.clone", code)
+        self.assertNotIn("aten.copy", code)
+
+    @parametrize("view", ["offset", "gap"])
+    def test_flydsl_kernel_mutates_graph_input_view(self, view):
+        def take_view(t):
+            return t[4:] if view == "offset" else t[::2]
+
+        def f(x):
+            v = take_view(x)
+            scale_inplace_w(v, v.numel())
+            return x + 1
+
+        x = torch.arange(1, 1001, device=DEVICE, dtype=torch.float32)
+        expected = x.clone()
+        take_view(expected).mul_(2)
+        res = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual(x, expected)
+        self.assertEqual(res, expected + 1)
+
+    @parametrize("dynamic", [False, True])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_flydsl_kernel_with_views(self, dynamic, backend):
+        # Mirrors test_triton_kernel_with_views.
+        def call_take_view(x):
+            output = torch.zeros_like(x)
+            mul_const_w(x, output, output.numel(), 2.0)
+            return output
+
+        def call_return_view(x):
+            output = torch.zeros_like(x)
+            mul_const_w(x.view(-1), output.view(-1), output.numel(), 2.0)
+            return output.view(4, 4)
+
+        t = _rand(4, 4)
+        t_view = t.view(16)
+        compiled = torch.compile(
+            call_take_view, backend=backend, fullgraph=True, dynamic=dynamic
+        )
+        self.assertEqual(2 * t_view, compiled(t_view))
+        self.assertEqual(2 * t, compiled(t_view).view(4, 4))
+        compiled = torch.compile(
+            call_return_view, backend=backend, fullgraph=True, dynamic=dynamic
+        )
+        self.assertEqual(2 * t_view, compiled(t).view(16))
+        self.assertEqual(2 * t, compiled(t))
+
+    @parametrize("which", ["left", "right", "slice_view", "transposed"])
+    def test_flydsl_kernel_strided_input(self, which):
+        # Mirrors test_triton_kernel_strided_input{,_nonzero_offset} and
+        # test_triton_kernel_slice_and_view_input with a layout-indexing kernel.
+        def f(inp):
+            if which in ("left", "right"):
+                left, right = torch.split(inp, [128, 128], dim=1)
+                src = left if which == "left" else right  # strides (256, 1)
+            elif which == "slice_view":
+                src = inp[:, :128].reshape(64, 128)[:, ::2]
+            else:
+                src = inp.t()
+            out = torch.empty(src.shape, device=src.device)
+            add_one_2d_w(src, out)
+            return out + src
+
+        inp = _rand(64, 256)
+        self.assertEqual(torch.compile(f, fullgraph=True)(inp), f(inp))
+
+    @parametrize("gap", [1, 2])
+    def test_flydsl_kernel_mutated_offset_view_not_miscompiled(self, gap):
+        # Mirrors test_triton_kernel_mutated_offset_view_not_miscompiled: the kernel
+        # writes a (possibly gapped) row view of an intermediate at a non-zero
+        # storage offset; elements it does not write must keep their values.
+        n_cols, n_rows, skipped_row = 64, 8, 7
+        width = n_cols * gap
+
+        def make_base():
+            return torch.arange(
+                1, n_rows * width + 1, dtype=torch.float32, device=DEVICE
+            ).reshape(n_rows, width)
+
+        def f(src):
+            base = make_base()
+            for i in range(n_rows):
+                if i != skipped_row:
+                    add_one_2d_w(src, base[i : i + 1, ::gap])
+            return base
+
+        src = _rand(1, n_cols)
+        expected = make_base()
+        for i in range(n_rows):
+            if i != skipped_row:
+                expected[i : i + 1, ::gap] = src + 1
+        self.assertEqual(f(src), expected)
+        self.assertEqual(torch.compile(f, fullgraph=True)(src), expected)
+
+    @parametrize("dynamic", [False, True])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_flydsl_kernel_multiple_outputs(self, dynamic, backend):
+        # Mirrors test_triton_kernel_multiple_outputs (incl. a training graph).
+        @torch.compile(fullgraph=True, backend=backend, dynamic=dynamic)
+        def f(x, y, z):
+            s, d = torch.empty_like(x), torch.empty_like(x)
+            add_sub_w(x, y, s, d, x.numel())
+            return s, d, z**2
+
+        x, y, z = (_rand(300, requires_grad=True) for _ in range(3))
+        s, d, z2 = f(x, y, z)
+        self.assertEqual(s, x + y)
+        self.assertEqual(d, x - y)
+        self.assertEqual(z2, z**2)
+        z2.sum().backward()
+        self.assertEqual(z.grad, 2 * z)
+
+    def test_flydsl_kernel_dependencies(self):
+        # Mirrors test_triton_kernel_dependancies: kernel -> kernel -> aten op.
+        def f(x, y):
+            out = torch.zeros_like(x)
+            add_w(x, y, out, x.numel())
+            out2 = torch.zeros_like(out)
+            add_w(out, y, out2, out.numel())
+            return torch.add(out2, 1)
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x, y), f(x, y))
+
+    def test_flydsl_kernel_reinplace_inplaceable_pass(self):
+        # Mirrors test_triton_kernel_reinplace_inplaceable_pass: the second launch
+        # reads and writes the same buffer through two parameters (X is Out).
+        def f(x, y):
+            out = torch.zeros_like(x)
+            add_w(x, y, out, x.numel())
+            add_w(out, x, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x, y), 2 * x + y)
+
+    def test_flydsl_kernel_caching(self):
+        # Mirrors test_triton_kernel_caching: one kernel launched in a loop is
+        # defined once and launched four times.
+        def f(x, y):
+            for _ in range(4):
+                out = torch.zeros_like(x)
+                add_w(x, y, out, x.numel())
+                x = out
+            return x
+
+        x, y = torch.ones(1000, device=DEVICE), torch.ones(1000, device=DEVICE)
+        res, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        self.assertEqual(res, 5 * torch.ones(1000, device=DEVICE))
+        launches = _flydsl_launches(code, "add_kernel")
+        self.assertEqual(len(launches), 4, code)
+        self.assertEqual(len({name for name, _ in launches}), 1, launches)
+
+    def test_flydsl_kernel_same_name_kernels(self):
+        # Mirrors test_triton_kernel_caching_duplicate: two different host
+        # functions with one name get two launchers.
+        def f(x, y):
+            o1, o2 = torch.empty_like(x), torch.empty_like(x)
+            same_name_add_w(x, y, o1, x.numel())
+            same_name_sub_w(x, y, o2, x.numel())
+            return o1, o2
+
+        x, y = _rand(1000), _rand(1000)
+        (o1, o2), (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        self.assertEqual(o1, x + y)
+        self.assertEqual(o2, x - y)
+        launches = _flydsl_launches(code, "binary_kernel")
+        self.assertEqual(len({name for name, _ in launches}), 2, launches)
+
+    @parametrize("case", ["triton_first", "flydsl_first", "triton_in_cond"])
+    def test_flydsl_kernel_launcher_name_taken_by_a_triton_kernel(self, case):
+        # User Triton kernels and launchers are numbered apart, so a Triton kernel
+        # named flydsl_add_kernel would be flydsl_add_kernel_0 too, as add_kernel's
+        # launcher is, and loading the module would bind the launcher over it. With
+        # one set of names, the kernel defined second takes the next free index, also
+        # when a torch.cond branch defines it.
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def flydsl_add_kernel(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr):
+            i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+            x = tl.load(x_ptr + i, mask=i < n)
+            y = tl.load(y_ptr + i, mask=i < n)
+            tl.store(out_ptr + i, x - y, mask=i < n)
+
+        def triton_sub(x, y):
+            out, n = torch.empty_like(x), x.numel()
+            flydsl_add_kernel[(triton.cdiv(n, 128),)](x, y, out, n, BLOCK=128)
+            return out
+
+        def flydsl_add(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out
+
+        def f(x, y):
+            # The second kernel reads what the first wrote: they run in this order.
+            if case == "triton_first":
+                first = triton_sub(x, y)
+                return first, flydsl_add(first, y)
+            first = flydsl_add(x, y)
+            if case == "flydsl_first":
+                return first, triton_sub(first, y)
+            sub = torch.cond(x.sum() > 0, triton_sub, lambda a, b: a - b, (first, y))
+            return first, sub
+
+        x, y = _rand(1000).abs(), _rand(1000)
+        cf = torch.compile(f, fullgraph=True)
+        (first, second), (code,) = run_and_get_code(cf, x, y)
+        self.assertEqual(first, x - y if case == "triton_first" else x + y)
+        self.assertEqual(second, x)
+        (launcher,) = re.findall(r"(?m)^# (\w+): FlyDSL host function ", code)
+        self.assertEqual(launcher, f"flydsl_add_kernel_{int(case == 'triton_first')}")
+        run = r"\b(flydsl_add_kernel_\d+)\.run\("
+        launched = set(re.findall(run, _strip_comments(code)))
+        self.assertEqual(launched, {"flydsl_add_kernel_0", "flydsl_add_kernel_1"})
+
+    def test_flydsl_kernel_module_attributes_bound_once(self):
+        # Loading the generated module binds its launchers, constants and the classes
+        # of opaque values as globals, by name: a launcher named as one of those
+        # classes is refused instead of replacing it.
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+        from torch._inductor.virtualized import V
+
+        define = PythonWrapperCodegen.define_user_defined_flydsl_kernel
+
+        def define_as_a_class(self, *args, **kwargs):
+            name = define(self, *args, **kwargs)
+            V.graph.opaque_value_type_classes[name] = type(name, (), {})
+            return name
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        name = "define_user_defined_flydsl_kernel"
+        with (
+            mock.patch.object(PythonWrapperCodegen, name, define_as_a_class),
+            self.assertRaisesRegex(
+                Exception,
+                r"module attributes bound twice: \['flydsl_add_kernel_\d+'\]",
+            ),
+        ):
+            torch.compile(f, fullgraph=True)(x, y)
+
+    def test_flydsl_kernel_in_cond_branches(self):
+        # The branches become subgraph functions of the root module. Their launches
+        # resolve to launchers the root module binds, one per kernel and constants,
+        # shared with the root graph's launches and each defined once.
+        def true_fn(x):
+            out = torch.empty_like(x)
+            mul_const_w(x, out, x.numel(), 2)
+            return out
+
+        def false_fn(x):
+            out = torch.empty_like(x)
+            mul_const_w(x, out, x.numel(), 5)
+            return out
+
+        def f(x):
+            a = torch.empty_like(x)
+            mul_const_w(x, a, x.numel(), 2)
+            return a, torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+
+        cf = torch.compile(f, fullgraph=True)
+        x = _rand(1000).abs()
+        (a, b), (code,) = run_and_get_code(cf, x)
+        self.assertEqual((a, b), (2 * x, 2 * x))
+        self.assertEqual(cf(-x), (-2 * x, -5 * x))
+        launches = _flydsl_launches(code, "mul_const_kernel")
+        self.assertEqual(len(launches), 3, code)
+        fns = re.findall(r"(?m)^def (?!call\()\w+\(args\):\n(?:[ \t].*\n|\n)*", code)
+        in_fns = _flydsl_launches("".join(fns), "mul_const_kernel")
+        self.assertEqual(len(in_fns), 2, code)
+        names = {name for name, _ in launches}
+        self.assertEqual(len(names), 2, code)
+        for name in names:
+            self.assertEqual(len(re.findall(rf"(?m)^# {name}: ", code)), 1, code)
+
+    @parametrize("triton_layout", ["needs_fixed_stride_order", "flexible_layout"])
+    def test_flydsl_kernel_layout_constraint_is_its_own(self, triton_layout):
+        # FlyDSL's mutation HOP keeps the strides its tensors were traced with
+        # (needs_fixed_stride_order, FlyDSL's own constraint) whatever Triton's
+        # triton_kernel_default_layout_constraint says: when the HOP is lowered, x is
+        # already fixed to its traced strides (1, 8), where a flexible layout would
+        # still show Inductor's default, contiguous (4, 1).
+        from torch._inductor import ir
+        from torch._inductor.lowering import lowerings
+
+        strides = []
+        lowering = lowerings[flydsl_kernel_wrapper_mutation]
+
+        def lower(**hop_kwargs):
+            x = ir.ExternKernel.realize_input(hop_kwargs["kwargs"]["X"])
+            strides.append(tuple(x.get_stride()))
+            return lowering(**hop_kwargs)
+
+        def f(inp):
+            x = inp.permute(1, 0) * 2
+            out = torch.empty_like(x)
+            add_one_2d_w(x, out)
+            return out
+
+        inp = _rand(4, 8)
+        with (
+            mock.patch.dict(lowerings, {flydsl_kernel_wrapper_mutation: lower}),
+            inductor_config.patch(
+                force_disable_caches=True,
+                triton_kernel_default_layout_constraint=triton_layout,
+            ),
+        ):
+            out = torch.compile(f, fullgraph=True)(inp)
+        self.assertEqual(strides, [(1, 8)])
+        self.assertEqual(out, inp.T * 2 + 1)
+
+    def test_flydsl_kernel_constants(self):
+        # Constexpr values are baked in per launch site; an unannotated int is a
+        # runtime Int32 argument of the launch.
+        def f(x):
+            o1, o2, o3 = torch.empty_like(x), torch.empty_like(x), torch.empty_like(x)
+            mul_const_w(x, o1, x.numel(), 3)
+            mul_const_w(x, o2, x.numel(), 2.5)
+            add_scalar_w(x, o3, x.numel(), 5)
+            return o1, o2, o3
+
+        x = _rand(1000)
+        (o1, o2, o3), (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual((o1, o2, o3), (3 * x, 2.5 * x, x + 5))
+        self.assertEqual(
+            len({n for n, _ in _flydsl_launches(code, "mul_const_kernel")}), 2
+        )
+        ((_, args),) = _flydsl_launches(code, "add_scalar_kernel")
+        self.assertRegex(args, r", 1000, 5, stream=")
+
+    def test_flydsl_kernel_dynamic_shapes(self):
+        # One dynamic graph serves every size: the launcher compiles each new layout
+        # (FlyDSL kernels are compiled for static layouts).
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def f(x, y, m):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            out2 = torch.empty_like(m)
+            add_one_2d_w(m, out2)
+            return out, out2
+
+        for n, shape in ((1000, (4, 8)), (3000, (16, 32)), (77, (3, 300))):
+            x, y, m = _rand(n), _rand(n), _rand(*shape)
+            out, out2 = f(x, y, m)
+            self.assertEqual(out, x + y)
+            self.assertEqual(out2, m + 1)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_flydsl_kernel_dynamic_shapes_layout_change(self):
+        # A transposed input must not reuse the row-major kernel.
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(m):
+            out = torch.empty(m.shape, device=m.device)
+            add_one_2d_w(m, out)
+            return out
+
+        for m in (_rand(4, 8), _rand(16, 32), _rand(8, 4).t(), _rand(32, 16).t()):
+            self.assertEqual(f(m), m + 1)
+
+    def test_flydsl_kernel_unaligned_view(self):
+        def f(base, v):
+            x = base[:, 1:]  # data_ptr 4 bytes past a 16-byte boundary
+            out = torch.empty(x.shape, device=x.device)
+            add_one_2d_w(x, out)
+            out1 = torch.empty_like(v)
+            add_w(v, v, out1, v.numel())
+            return out, out1
+
+        base, v = _rand(4, 9), _rand(1001)[1:]
+        out, out1 = torch.compile(f, fullgraph=True)(base, v)
+        self.assertEqual(out, base[:, 1:] + 1)
+        self.assertEqual(out1, 2 * v)
+
+    def test_flydsl_kernel_epilogue_and_prologue(self):
+        # Inductor ops around the user kernel (it is an extern launch: correctness
+        # only, no fusion expected).
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x.sin(), y * 2, out, x.numel())
+            return out.relu() + 1
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x, y), f(x, y))
+
+    def test_flydsl_kernel_reduce_overhead(self):
+        # CUDA graphs (cudagraph trees, HIP graphs here) capture the launch on the
+        # capture stream.
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out * 2
+
+        compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+        counters = torch._dynamo.utils.counters
+        counters.clear()
+        for _ in range(3):
+            x, y = _rand(1000), _rand(1000)
+            self.assertEqual(compiled(x, y), (x + y) * 2)
+        # The graph was captured, not skipped.
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+    def test_flydsl_kernel_inference_mode(self):
+        # inference_mode disables view tracking (cf. MutationTests'
+        # test_triton_kernel_inference_mode and the inference-mode offset-view test).
+        def f(x):
+            base = x * 1
+            v = base[4:]
+            scale_inplace_w(v, v.numel())
+            return base
+
+        x = _rand(1000)
+        expected = x.clone()
+        expected[4:] *= 2
+        with torch.inference_mode():
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), expected)
+
+    def test_flydsl_kernel_specialized_constants_dynamic(self):
+        # A Constexpr value computed from a dynamic size is specialized (guarded):
+        # the generated code must bake each value in. An unannotated int computed
+        # from it stays a runtime scalar.
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(x):
+            o1, o2 = torch.empty_like(x), torch.empty_like(x)
+            mul_const_w(x, o1, x.numel(), x.shape[0] // 8)
+            add_scalar_w(x, o2, x.numel(), x.shape[0])
+            return o1, o2
+
+        for n in (8, 16, 8):
+            x = _rand(n)
+            o1, o2 = f(x)
+            self.assertEqual(o1, (n // 8) * x)
+            self.assertEqual(o2, x + n)
+
+    @inductor_config.patch(fx_graph_cache=True, fx_graph_remote_cache=False)
+    def test_flydsl_kernel_bypasses_fx_graph_cache(self):
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import fresh_cache
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out.relu()
+
+        x, y = _rand(1000), _rand(1000)
+        with fresh_cache():
+            counters.clear()
+            self.assertEqual(torch.compile(f)(x, y), (x + y).relu())
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(f)(x, y), (x + y).relu())
+        # The generated module binds the launcher in-process: never cached.
+        self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+    def test_flydsl_kernel_launcher_caches_compiled_functions(self):
+        # The Python wrapper's launcher compiles each specialization once (a fresh
+        # private JitFunction per compile) and then calls the CompiledFunction.
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out
+
+        compiled = torch.compile(f, fullgraph=True)
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(compiled(x, y), x + y)
+        with mock.patch.object(
+            flydsl_user_kernel,
+            "compile_host_fn",
+            wraps=flydsl_user_kernel.compile_host_fn,
+        ) as compile_host_fn:
+            for _ in range(3):
+                x, y = _rand(1000), _rand(1000)
+                self.assertEqual(compiled(x, y), x + y)
+        self.assertEqual(compile_host_fn.call_count, 0)
 
 
 instantiate_parametrized_tests(FlyDSLHOPTests)
 instantiate_parametrized_tests(FlyDSLWrapTests)
 instantiate_parametrized_tests(FlyDSLDynamoTests)
+instantiate_parametrized_tests(FlyDSLInductorTests)
 
 
 if __name__ == "__main__":
