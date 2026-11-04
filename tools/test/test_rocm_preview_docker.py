@@ -311,6 +311,8 @@ class TestRocmPreviewWheels(unittest.TestCase):
         self.assertIn("ciflow/docker/*", workflow[True]["push"]["tags"])
         job = workflow["jobs"]["rocm-preview-mirror-check"]
         self.assertEqual(job["permissions"], {"contents": "read"})
+        for release_ref in ("refs/heads/release/", "refs/tags/v"):
+            self.assertIn(f"!startsWith(github.ref, '{release_ref}')", job["if"])
 
 
 if __name__ == "__main__":

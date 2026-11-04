@@ -74,7 +74,8 @@ jobs:
   # Pin-bump PRs get ciflow/docker but skip preview tests, so catch an
   # unmirrored rocm-preview pin here before the next nightly fails to install it.
   rocm-preview-mirror-check:
-    if: github.repository_owner == 'pytorch'
+    # Releases never run preview lanes, and their pin ages off the nightly index.
+    if: github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/heads/release/') && !startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
       contents: read
