@@ -32,8 +32,8 @@ from typing import TYPE_CHECKING
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
-from tools.stats.import_test_stats import get_test_times
-from tools.testing.discover_tests import BLOCKLISTED_PATTERNS, TESTS
+from tools.stats.import_test_stats import ADDITIONAL_CI_FILES_FOLDER, get_test_times
+from tools.testing.discover_tests import BLOCKLISTED_PATTERNS, CPP_TEST_PREFIX, TESTS
 from tools.testing.llm_selector.selection import (
     LLM_SELECTION_FILE,
     needs_run_all,
@@ -317,7 +317,8 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
         "diff", "--name-only", "--no-renames", "--diff-filter=A", merge_base, args.head
     )
     new = added_test_files(added, TESTS)
-    candidates = sorted(set(TESTS) | new)
+    # The C++ tests, which TESTS lists when the build has them, always run.
+    candidates = sorted(t for t in set(TESTS) | new if not t.startswith(f"{CPP_TEST_PREFIX}/"))  # fmt: skip
     title, body = pr_text(args)
     minutes = test_minutes(test_times)
     prompt = build_prompt(title, body, diffstat, diff, candidates, minutes, new)
@@ -349,6 +350,12 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
         # Without an answer, the CLI's own output says why.
         cli = str(result.get("result") or "") if out is None else ""
         selection.error = (cli or selection.error)[:2000]
+    # No deterministic rule follows a change outside test/, so an answer
+    # naming nothing for one leaves only ALWAYS_COVERED: never enforce that.
+    keys = ("tests", "dirs", "sweeps")
+    picked = selection.run_all or out is None or any(out[k] for k in keys)
+    if not picked and any(not f.startswith("test/") for f in changed):
+        record["not_enforced"] = "the model chose no tests for a change outside test/"
     return selection
 
 
@@ -366,7 +373,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--model", default=os.environ.get("LLM_SELECTOR_MODEL") or DEFAULT_MODEL, help=f"the claude model (default: LLM_SELECTOR_MODEL or {DEFAULT_MODEL})")  # fmt: skip
     efforts = ["low", "medium", "high", "xhigh", "max"]
     parser.add_argument("--effort", default=os.environ.get("LLM_SELECTOR_EFFORT") or "medium", choices=efforts, help="the model's effort (default: LLM_SELECTOR_EFFORT or medium)")  # fmt: skip
-    parser.add_argument("--output", type=Path, default=REPO_ROOT / LLM_SELECTION_FILE, help="where to write the selection file")  # fmt: skip
+    parser.add_argument("--output", type=Path, default=REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_SELECTION_FILE, help="where to write the selection file (default: where run_test.py reads it)")  # fmt: skip
     parser.add_argument(
         "--enforce",
         action="store_true",
@@ -387,7 +394,9 @@ def main(argv: list[str] | None = None) -> None:
         "head": None,
         "cost_usd": None,
         "model_output": None,
+        "not_enforced": None,
     }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     try:
         selection = select(args, record)
     except Exception as e:
@@ -399,6 +408,8 @@ def main(argv: list[str] | None = None) -> None:
         else:
             error = f"{type(e).__name__}: {e}"
         selection = Selection(run_all=True, reason=f"selector failed: {error[:500]}", error=error[:2000])  # fmt: skip
+    if record["not_enforced"] is not None:
+        args.enforce = False
     if selection is None:
         return
     selection.enforce = args.enforce
