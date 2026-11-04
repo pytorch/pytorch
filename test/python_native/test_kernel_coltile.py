@@ -514,49 +514,71 @@ _ROUTED_TRAITS = {
 }
 
 
+def _flags(x):
+    return x != 0
+
+
+# Torch references over dim 1, independent of the traits' leaf, combine and project code.
+_TORCH_REFS = {
+    "sum": lambda x: (x.double().sum(1),),
+    "mean": lambda x: (x.double().mean(1),),
+    "prod": lambda x: (x.double().prod(1),),
+    "nansum": lambda x: (x.double().nansum(1),),
+    "norm1": lambda x: (torch.linalg.vector_norm(x.double(), 1, dim=1),),
+    "norm2": lambda x: (torch.linalg.vector_norm(x.double(), 2, dim=1),),
+    "norm3": lambda x: (torch.linalg.vector_norm(x.double(), 3, dim=1),),
+    "amax": lambda x: (x.amax(1),),
+    "amin": lambda x: (x.amin(1),),
+    "absmax": lambda x: (x.abs().amax(1),),
+    "absmin": lambda x: (x.abs().amin(1),),
+    "all": lambda x: (_flags(x).all(1),),
+    "any": lambda x: (_flags(x).any(1),),
+    "count_nonzero": lambda x: (_flags(x).sum(1),),
+    "argmax": lambda x: (x.argmax(1),),
+    "argmin": lambda x: (x.argmin(1),),
+    "max_dim": lambda x: (x.amax(1), x.argmax(1)),
+    "min_dim": lambda x: (x.amin(1), x.argmin(1)),
+    "aminmax": lambda x: (x.amin(1), x.amax(1)),
+    "var": lambda x: (x.double().var(1),),
+    "std": lambda x: (x.double().std(1),),
+    "var_mean": lambda x: (x.double().var(1), x.double().mean(1)),
+}
+
+
 class TestOrderedColRoute(TestCase):
     @parametrize(
-        "nfields,shape,cc,routed",
+        "nfields,shape,routed",
         [
-            (1, (16, 128, 128), (10, 0), True),
-            (1, (16, 128, 127), (10, 0), False),
-            (1, (16, 127, 128), (10, 0), False),
-            (2, (128, 128, 128), (10, 0), True),
-            (2, (127, 128, 128), (10, 0), False),
-            (3, (256, 128, 128), (10, 0), True),
-            (3, (255, 128, 128), (10, 0), False),
-            (4, (256, 128, 128), (10, 0), True),
-            (1, (16, 128, 128), (9, 0), False),
-            (1, (16, 8192, 128), (10, 0), True),
-            (1, (16, 8193, 128), (10, 0), False),
-            (1, (128, 2048), (10, 0), True),
-            (1, (127, 2048), (10, 0), False),
-            (1, (128, 2047), (10, 0), False),
-            (1, (128, 128, 31), (10, 0), False),
-            (1, (128, 128, 32), (10, 0), True),
+            (1, (16, 128, 128), True),
+            (1, (16, 128, 127), False),
+            (1, (16, 127, 128), False),
+            (2, (128, 128, 128), True),
+            (2, (127, 128, 128), False),
+            (3, (256, 128, 128), True),
+            (3, (255, 128, 128), False),
+            (4, (256, 128, 128), True),
+            (1, (16, 8192, 128), True),
+            (1, (16, 8193, 128), False),
+            (1, (128, 2048), True),
+            (1, (127, 2048), False),
+            (1, (128, 2047), False),
+            (1, (128, 128, 31), False),
+            (1, (128, 128, 32), True),
         ],
-        name_fn=lambda nfields, shape, cc, routed: "_".join(
-            [f"{nfields}f", "x".join(map(str, shape)), f"sm{cc[0]}{cc[1]}"]
-        ),
+        name_fn=lambda n, shape, routed: f"{n}f_" + "x".join(map(str, shape)),
     )
-    def test_gate_boundaries(self, nfields, shape, cc, routed):
+    def test_gate_boundaries(self, nfields, shape, routed):
         view = torch.empty(shape, device="meta")
-        self.assertEqual(kg._ordered_col_route_ok(view, nfields, cc), routed)
+        self.assertEqual(kg._ordered_col_route_ok(view, nfields), routed)
 
     @parametrize("outputs", [8192, 16384])
     def test_general_norms_need_more_outputs(self, outputs):
         view = torch.empty((outputs // 128, 128, 128), device="meta")
-        self.assertTrue(kg._ordered_col_route_ok(view, 1, (10, 0)))
-        routed = kg._ordered_col_route_ok(view, 1, (10, 0), general_norm=True)
+        self.assertTrue(kg._ordered_col_route_ok(view, 1))
+        routed = kg._ordered_col_route_ok(view, 1, general_norm=True)
         self.assertEqual(routed, outputs >= 16384)
         self.assertTrue(kg._general_norm(T.NormOps(3)))
         self.assertFalse(kg._general_norm(T.NormOps(2)))
-
-    @parametrize("dtype", [*_DTYPES, torch.float64, torch.int8])
-    def test_gate_admits_measured_dtypes(self, dtype):
-        view = torch.empty((16, 128, 128), device="meta", dtype=dtype)
-        routed = kg._ordered_col_route_ok(view, 1, (10, 0))
-        self.assertEqual(routed, dtype in _DTYPES)
 
     @parametrize(
         "field,error",
@@ -789,6 +811,8 @@ class TestOrderedColDevice(TestCase):
             1,
         )
         self.assertEqual(got[0].view(torch.uint8), reference[0].view(torch.uint8))
+        if pattern == "ties":
+            self.assertEqual(got[0], torch.zeros_like(got[0]))
 
     @parametrize("op", ["sum", "argmax"])
     @parametrize("rows,served", [(8192, True), (8193, False), (16384, False)])
@@ -869,6 +893,9 @@ class TestOrderedColDevice(TestCase):
         if name in ("all", "any"):
             self.assertEqual(want[0].unique().numel(), 2, "uniform flags test nothing")
         self._assert_bitwise(got, want)
+        for g, ref in zip(got, _TORCH_REFS[name](x), strict=True):
+            tol = _TOL.get(g.dtype, {"atol": 0, "rtol": 0})
+            self.assertEqual(g, ref.to(g.dtype), **tol)
 
     @parametrize("dtype", _DTYPES)
     @parametrize("name", list(_ROUTED_TRAITS))
@@ -901,12 +928,31 @@ class TestOrderedColDevice(TestCase):
         # The kernel tiles 32 columns, so the gate and the kernel both decline 16.
         x = torch.randn(256, 128, 16, device=device)
         trait = T.SumOps(acc=cutlass.Float32)
-        self.assertFalse(kg._ordered_col_route_ok(x, 1, (10, 0)))
+        self.assertFalse(kg._ordered_col_route_ok(x, 1))
         f32 = [torch.float32]
         self.assertIsNone(ct.reduce_ordered_col(trait, "narrow", x, f32, 1))
         (got,), served = self._reduce(device, trait, "narrow", x, 1, f32, route=True)
         self.assertFalse(served)
         self.assertEqual(got, x.sum(dim=1), atol=1e-4, rtol=1e-4)
+
+    def test_unmeasured_dtypes_stay_on_the_indexed_tree(self, device):
+        x = torch.randn(16, 128, 128, device=device, dtype=torch.float64)
+        key, trait, f64 = "fp64_route", T.SumOps(acc=cutlass.Float64), [torch.float64]
+        (got,), served = self._reduce(device, trait, key, x, 1, f64, route=True)
+        self.assertFalse(served)
+        self.assertEqual(got, x.sum(dim=1))
+
+    def test_declined_views_fall_back_to_the_indexed_tree(self, device):
+        """Serve a view the gate admits but the kernel declines through the indexed tree."""
+        x = torch.randn(16, 128, 128, device=device)
+        trait, f32 = T.SumOps(acc=cutlass.Float32), [torch.float32]
+        self.assertTrue(kg._ordered_col_route_ok(x, 1))
+        # The kernel declines once its last output index, B * C + WARP, reaches the limit.
+        with mock.patch.object(ct, "_INT32_LIMIT", 16 * 128 + 32):
+            got, served = self._reduce(device, trait, "declined", x, 1, f32, route=True)
+        self.assertFalse(served)
+        want, _ = self._reduce(device, trait, "declined_ref", x, 1, f32, route=False)
+        self._assert_bitwise(got, want)
 
     def test_unservable_views_decline(self, device):
         """Decline strided, rank-4, multirow and Int32-overflowing views."""
