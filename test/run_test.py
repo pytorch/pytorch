@@ -65,11 +65,11 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results
-from tools.testing.target_determination.gen_artifact import gen_ci_artifact
+from tools.testing.target_determination.gen_artifact import gen_ci_artifact, TD_SOURCE
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
 )
-from tools.testing.target_determination.heuristics.utils import get_pr_number
+from tools.testing.target_determination.heuristics.utils import td_enabled_default
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
     calculate_shards,
@@ -1789,20 +1789,16 @@ def parse_args():
         help="Set a timeout based on the test times json file.  Only works if there are test times available",
         default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
     )
-    GITHUB_WORKFLOW = os.environ.get("GITHUB_WORKFLOW", "slow")
     parser.add_argument(
         "--enable-td",
         action="store_true",
         help="Enables removing tests based on TD",
-        default=IS_CI
-        and get_pr_number() is not None
-        and not strtobool(os.environ.get("NO_TD", "False"))
-        and not IS_MACOS
-        and "xpu" not in BUILD_ENVIRONMENT
-        and "onnx" not in BUILD_ENVIRONMENT
-        and (
-            GITHUB_WORKFLOW in ("trunk", "pull")
-            or GITHUB_WORKFLOW.startswith(("rocm-", "periodic-rocm-"))
+        default=td_enabled_default(
+            build_environment=BUILD_ENVIRONMENT,
+            workflow=os.environ.get("GITHUB_WORKFLOW", "slow"),
+            is_ci=IS_CI,
+            macos=IS_MACOS,
+            no_td=strtobool(os.environ.get("NO_TD", "False")),
         ),
     )
     parser.add_argument(
@@ -2497,7 +2493,7 @@ def main():
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
 
-    test_prioritizations = import_results()
+    test_prioritizations, previous_failures = import_results()
     if len(test_prioritizations.get_all_tests()) == 0:
         options.enable_td = False
     test_prioritizations.amend_tests(selected_tests)
@@ -2555,7 +2551,9 @@ def main():
     test_batch = TestBatch("tests to run", include, False)
     test_batch_exclude = TestBatch("excluded", exclude, True)
     if IS_CI:
-        gen_ci_artifact([x.to_json() for x in include], [x.to_json() for x in exclude])
+        included = [x.to_json() for x in include]
+        excluded = [x.to_json() for x in exclude]
+        gen_ci_artifact(included, excluded, source=TD_SOURCE, td_excluded=excluded)
 
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
