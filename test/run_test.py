@@ -1795,8 +1795,8 @@ def parse_args():
         action="store_true",
         help="Enables removing tests based on TD",
         default=td_enabled_default(
-            BUILD_ENVIRONMENT,
-            os.environ.get("GITHUB_WORKFLOW", "slow"),
+            build_environment=BUILD_ENVIRONMENT,
+            workflow=os.environ.get("GITHUB_WORKFLOW", "slow"),
             is_ci=IS_CI,
             macos=IS_MACOS,
             no_td=strtobool(os.environ.get("NO_TD", "False")),
