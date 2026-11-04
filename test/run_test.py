@@ -738,13 +738,10 @@ def run_test(
         else THRESHOLD * 3
         if is_cpp_test
         # The per-file xdist pass (see run_tests) skips the stepcurrent retries
-        # below, so bound a hang by its whole estimated wall time, with room
-        # for estimates that run low.
-        else max(THRESHOLD * 6, 3 * test_module.time)
-        if options.pytest_xdist_workers is not None
-        and test_file in XDIST_SERIAL_FILES
-        and isinstance(test_module, ShardedTest)
-        and test_module.time is not None
+        # below, which bound each process. Its pieces are estimated at no more
+        # than THRESHOLD, but estimates can run several times low.
+        else THRESHOLD * 6
+        if options.pytest_xdist_workers is not None and test_file in XDIST_SERIAL_FILES
         else None
     )
     print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
@@ -769,6 +766,13 @@ def run_test(
             )
         else:
             command.extend([f"--sc={stepcurrent_key}", "--print-items"])
+            if (
+                options.pytest_xdist_workers is not None
+                and test_file in XDIST_SERIAL_FILES
+            ):
+                # Leave only this pass's failures in lastfailed for the rerun
+                # below.
+                drop_lastfailed(f"test/{test_file}.py::")
             ret_code, was_rerun = retry_shell(
                 command,
                 test_directory,
@@ -815,42 +819,54 @@ def run_test(
         # The xdist pass skips the fresh-process retries that classify failures
         # as flaky or consistent. Exit code 1 means it ran every test (no -x)
         # and some failed, rather than timing out or crashing, so rerun just
-        # those through the retries, stopping at the first consistent failure.
-        # The failures are fixed up front: pytest's lastfailed cache changes as
+        # those through the retries. The failures are fixed up front: pytest's lastfailed cache changes as
         # the retries run, and selecting from it would rerun the rest of the
         # file once a flaky failure passes.
         print_to_stderr(
             f"{test_label} failed under xdist; rerunning its {len(failed)} failures"
             " without xdist"
         )
-        nodeid_fd, nodeid_path = tempfile.mkstemp(suffix="_failed_nodeids.txt")
-        with os.fdopen(nodeid_fd, "w") as f:
-            f.write("\n".join(failed))
         rerun_options = copy.deepcopy(options)
         rerun_options.pytest_xdist_workers = None
-        rerun_options.continue_through_error = False
-        rerun_options.additional_args.append(f"--nodeid-file={nodeid_path}")
         # Run alone, without the xdist workers' memory cap.
         rerun_env = {k: v for k, v in env.items() if k != "NUM_PARALLEL_PROCS"}
-        return run_test(
-            test_module,
-            test_directory,
-            rerun_options,
-            launcher_cmd,
-            extra_unittest_args,
-            rerun_env,
-            print_log,
-        )
+        with tempfile.NamedTemporaryFile("w", suffix="_failed_nodeids.txt") as f:
+            f.write("\n".join(failed))
+            f.flush()
+            rerun_options.additional_args.append(f"--nodeid-file={f.name}")
+            return run_test(
+                test_module,
+                test_directory,
+                rerun_options,
+                launcher_cmd,
+                extra_unittest_args,
+                rerun_env,
+                print_log,
+            )
     return ret_code
+
+
+LASTFAILED_PATH = REPO_ROOT / ".pytest_cache/v/cache/lastfailed"
 
 
 def read_lastfailed() -> list[str]:
     """Node ids in pytest's lastfailed cache, which xdist runs write too."""
     try:
-        with open(REPO_ROOT / ".pytest_cache/v/cache/lastfailed") as f:
+        with open(LASTFAILED_PATH) as f:
             return list(json.load(f))
     except FileNotFoundError:
         return []
+
+
+def drop_lastfailed(prefix: str) -> None:
+    """Removes the node ids starting with prefix from pytest's lastfailed cache."""
+    try:
+        with open(LASTFAILED_PATH) as f:
+            lastfailed = json.load(f)
+    except FileNotFoundError:
+        return
+    with open(LASTFAILED_PATH, "w") as f:
+        json.dump({k: v for k, v in lastfailed.items() if not k.startswith(prefix)}, f)
 
 
 def install_cpp_extensions(extensions_dir, env=os.environ):
@@ -2003,14 +2019,14 @@ def must_serial(file: str | ShardedTest) -> bool:
         or file in CUSTOM_HANDLERS
         or file in RUN_PARALLEL_BLOCKLIST
         or file in CI_SERIAL_LIST
-        or file in XDIST_SERIAL_LIST
+        or file in XDIST_SERIAL_FILES
         or file in JIT_EXECUTOR_TESTS
         or file in ONNX_SERIAL_LIST
         or NUM_PROCS == 1
     )
 
 
-# Smallest per-worker GPU memory cap for XDIST_SERIAL_FILES; flex's
+# Smallest per-worker GPU memory cap for XDIST_SERIAL_LIST files; flex's
 # largeTensorTest("2GB") guards skip below 2 GiB of free memory per worker.
 MIN_XDIST_WORKER_GPU_GIB = 4
 
@@ -2021,8 +2037,8 @@ def serial_file_xdist_workers(
     """Number of pytest-xdist workers that run the non-@serial tests of an
     XDIST_SERIAL_FILES file in its serial slot, or 1 to run it without xdist.
 
-    The global --pytest-xdist-workers mode already schedules every file under
-    xdist, so this returns 1 in that mode."""
+    Returns 1 in the global --pytest-xdist-workers mode, which runs serial
+    files without xdist."""
     if isinstance(file, ShardedTest):
         file = file.name
     if (

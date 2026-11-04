@@ -30,6 +30,7 @@ change. This file contains two types of randomized tests:
 
 import math
 import numbers
+import os
 import unittest
 from collections import namedtuple
 from itertools import product
@@ -7462,6 +7463,10 @@ instantiate_device_type_tests(
         "xpu",
     ),
 )
+
+# pytest-xdist workers import this file instead of running it as __main__.
+if "PYTEST_XDIST_WORKER" in os.environ and torch._C.has_lapack:
+    TestCase._default_dtype_check_enabled = True
 
 if __name__ == "__main__" and torch._C.has_lapack:
     TestCase._default_dtype_check_enabled = True
