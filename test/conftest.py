@@ -119,7 +119,31 @@ def pytest_addoption(parser: Parser) -> None:
         "without it are unaffected. Layered on top of `-m multigpu` so a "
         "larger-runner config can run just the >2-GPU distributed tests.",
     )
+    parser.addoption(
+        "--nodeid-file",
+        action="store",
+        default=None,
+        dest="nodeid_file",
+        metavar="path",
+        help="run only the tests whose node ids are listed, one per line, in this file",
+    )
     shard_addoptions(parser)
+
+
+class NodeidFilePlugin:
+    """Selects a fixed set of tests by node id (see --nodeid-file). run_test.py
+    uses it to rerun the failures of an xdist pass through its retries."""
+
+    def __init__(self, path: str) -> None:
+        with open(path) as f:
+            self.nodeids = {line.strip() for line in f if line.strip()}
+
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        selected = [item for item in items if item.nodeid in self.nodeids]
+        config.hook.pytest_deselected(
+            items=[item for item in items if item.nodeid not in self.nodeids]
+        )
+        items[:] = selected
 
 
 class HardwareClassificationPytestPlugin:
@@ -176,6 +200,10 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(StepcurrentPlugin(config), "stepcurrentplugin")
     if config.getoption("num_shards"):
         config.pluginmanager.register(PytestShardPlugin(config), "pytestshardplugin")
+    if config.getoption("nodeid_file"):
+        config.pluginmanager.register(
+            NodeidFilePlugin(config.getoption("nodeid_file")), "nodeid_file_plugin"
+        )
     if config.getoption("hw_classification"):
         config.pluginmanager.register(
             HardwareClassificationPytestPlugin(config.getoption("hw_classification")),
