@@ -677,6 +677,7 @@ class TestScore(unittest.TestCase):
             self.assertFalse(choice.sel.run_all)
             self.assertEqual(choice.per_config, {"default": {"test_a"}, "slow": set()})
             self.assertEqual(choice.other, {"test_e"})
+            self.assertFalse(choice.covers("test_torch", "inductor"))
         # A deliberate run-all still runs everything.
         self.assertTrue(pick("final+td45", {"out": {"tests": [], "run_all": True}}, td).sel.run_all)  # fmt: skip
         infra = {**SAMPLE, "changed_files": ["test/run_test.py"]}
@@ -867,6 +868,9 @@ class TestScore(unittest.TestCase):
         self.assertFalse(choice.covers("test_c", "slow"))
         self.assertTrue(choice.covers("test_e", "not_in_test_times"))
         self.assertEqual(choice.files(), {"test_a", "test_e"})
+        # TD runs only its cut, even of the files a selection always covers.
+        ind = pick("td25", None, {"top25": [], "top25_cfg": {"inductor": ["test_a"]}})
+        self.assertEqual([ind.covers("test_a", "inductor"), ind.covers("test_torch", "inductor")], [True, False])  # fmt: skip
 
     def test_cost_fraction(self) -> None:
         cands = {"test_a", "test_b", "test_c"}
@@ -1324,6 +1328,29 @@ class TestBuildDataset(unittest.TestCase):
                 self.assertEqual(truth(l2, l_base), (["test_q", "test_x"], {}))
             self.assertEqual(h.other_heads({u1}), {l1, l2, w, n})
 
+    def test_write_sample(self) -> None:
+        with scratch_repo():
+            bd.git("commit", "-q", "--allow-empty", "-m", "base")
+            for f in ("gone.py", "moved.py"):
+                (bd.REPO / f).write_text(f)
+            bd.git("add", ".")
+            bd.git("commit", "-q", "-m", "files")
+            base = bd.git("rev-parse", "HEAD").strip()
+            bd.git("rm", "-q", "gone.py")
+            bd.git("mv", "moved.py", "new.py")
+            bd.git("commit", "-q", "-m", "change")
+            head = bd.git("rev-parse", "HEAD").strip()
+            # select_tests' own git runs in this checkout, so only bd's is exercised.
+            with (
+                tempfile.TemporaryDirectory() as d,
+                mock.patch.object(bd, "candidates_at", return_value=[]),
+                mock.patch.object(bd, "changed_files", return_value=[]),
+                mock.patch.object(bd, "diffstat_and_diff", return_value=("", "")),
+            ):  # fmt: skip
+                bd.write_sample(Path(d), "s", "neutral", head, base, "t", "b", truth=[])
+                s = json.loads((Path(d) / "s.json").read_text())
+        self.assertEqual(s["deleted"], ["gone.py", "moved.py"])
+
     def test_is_ancestor(self) -> None:
         with scratch_repo():
             for msg in ("a", "b"):
@@ -1493,6 +1520,7 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "pr_text", return_value=("t", "b")),
             mock.patch.object(bd, "diffstat_and_diff", return_value=("", "")),
             mock.patch.object(bd, "changed_files", return_value=[]),
+            mock.patch.object(bd, "deleted_files", return_value=[]),
             mock.patch.object(bd, "candidates_at", return_value=[]),
             mock.patch.object(bd, "head_created", return_value={}),
             contextlib.redirect_stdout(io.StringIO()) as stdout,
