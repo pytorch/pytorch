@@ -25,7 +25,8 @@ As in select_tests.select, a sample with no changed files, a change to test
 infrastructure or more than MAX_CHANGED_FILES (select_tests.run_all_reason) runs everything
 under every model policy, at no model cost; `final+tdN` keeps TD's cut in a
 config with no test time there too, as it does for any run-all. A malformed answer counts as an
-error, as select_tests records it.
+error, as select_tests records it, and errors still throttled after run_eval's
+retries are counted on stderr.
 The tag `td` scores the replayed in-repo TD (see td_replay.py) under the
 single policy `td25`, its CI cut of the top 25% per config, and ignores
 --policies.
@@ -336,7 +337,7 @@ def hedge(
     if not sum(seconds.values()):
         return set(td_cut)
     positive = set(scored)
-    job = [*seconds, *untimed]
+    job = dict.fromkeys([*seconds, *untimed])
     ranked = [TestRun(f) for f in scored if f in job] + [TestRun(f) for f in job if f not in positive]  # fmt: skip
     split = sel.split(ranked, lambda x: float(x.test_file in positive), seconds, config, previously_failed=previous, td_include=td_cut, share=share)  # fmt: skip
     if split.chose_nothing:
@@ -414,9 +415,9 @@ def policy(
         for c in fb.keys() - times.keys() - {"default"}:
             per_config[c] = hedge(sel, td["scored"], fb[c], share, c, td["top25"], cands - set(fb[c]), prev)  # fmt: skip
             times[c] = fb[c]
-        fs = fb.get("default", {})
-        other = hedge(sel, td["scored"], fs, share, "", td["top25"], cands - set(fs), prev)  # fmt: skip
-        unenforced = {c for c, fs in [*times.items(), ("", fs)] if not sum(fs.values())}  # fmt: skip
+        default = fb.get("default", {})
+        other = hedge(sel, td["scored"], default, share, "", td["top25"], cands - set(default), prev)  # fmt: skip
+        unenforced = {c for c, fs in [*times.items(), ("", default)] if not sum(fs.values())}  # fmt: skip
         return Choice(sel, per_config, other, unenforced)
     if unasked(s):
         return Choice(Selection(run_all=True))
@@ -522,6 +523,7 @@ def score(
     dropped: collections.Counter[str] = collections.Counter()
     ungrepped: set[str] = set()
     no_workflow: set[str] = set()
+    throttled: collections.Counter[str] = collections.Counter()
     for sid in ids:
         loaded = {tag: load(data, tag, sid, samples, td_dir) for tag in tags}
         s, _, td = next(iter(loaded.values()))
@@ -545,10 +547,12 @@ def score(
         if missing:
             continue
         pairs, cands = truth_pairs(s, strong), set(s["candidates"])
-        sample_rows = []
+        sample_rows, sample_throttled = [], []
         for tag, (_, r, td) in loaded.items():
             skipped = tag != "td" and unasked(s)
             error = not skipped and bool(r) and (bool(r["error"]) or Selection.from_model_output(r["out"], cands, []).error is not None)  # fmt: skip
+            if error and (r or {}).get("transient"):
+                sample_throttled.append(tag)
             for pol in ["td25"] if tag == "td" else policies:
                 choice = policy(
                     pol, s, r, td, seconds, grep_head(s, sid, ungrepped), fallback
@@ -568,12 +572,15 @@ def score(
             dropped[no_grep] += 1
             continue
         rows += sample_rows
+        throttled.update(sample_throttled)
         if any(wf is None for f in truth_files(s, strong) for wf, _ in truth_jobs(s, f)):  # fmt: skip
             no_workflow.add(sid)
     if mixed := sorted(t for t, v in settings.items() if len(v) > 1):
         raise ValueError(f"the results of {mixed} mix --model, --effort or --agentic")
     for why, n in sorted(dropped.items()):
         print(f"dropped {n} of {len(ids)} ids with no {why}", file=sys.stderr)
+    for tag, n in sorted(throttled.items()):
+        print(f"scored {n} {tag} results as errors that were still throttled after run_eval's retries, which CI does not provoke", file=sys.stderr)  # fmt: skip
     if no_workflow:
         print(f"scored {len(no_workflow)} of {len(ids)} ids with truth jobs that record no workflow: a job name TD and non-TD workflows share counts as TD", file=sys.stderr)  # fmt: skip
     return rows
