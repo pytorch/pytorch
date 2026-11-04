@@ -10,8 +10,6 @@ import unittest
 import warnings
 import weakref
 
-from test import support
-
 from torch.testing._internal.common_utils import HardwareClassification, TestCase
 from torch.utils._ordered_set import OrderedSet
 
@@ -23,6 +21,24 @@ class PassThru(Exception):
 def check_pass_thru():
     raise PassThru
     yield 1
+
+
+# From CPython's test.support, which is not always available.
+def check_free_after_iterating(test, make_iter, cls):
+    class A(cls):
+        def __del__(self):
+            nonlocal done
+            done = True
+            try:
+                next(it)
+            except StopIteration:
+                pass
+
+    done = False
+    it = make_iter(A())
+    test.assertRaises(StopIteration, next, it)
+    gc.collect()
+    test.assertTrue(done)
 
 
 class BadCmp:
@@ -428,7 +444,7 @@ class TestJointOps(TestCase):
         self.assertTrue(ref() is None, "Cycle was not collected")
 
     def test_free_after_iterating(self):
-        support.check_free_after_iterating(self, iter, self.thetype)
+        check_free_after_iterating(self, iter, self.thetype)
 
 
 class TestSet(TestJointOps, TestCase):
@@ -691,7 +707,7 @@ class TestSet(TestJointOps, TestCase):
         p = weakref.proxy(s)
         self.assertEqual(str(p), str(s))
         s = None
-        support.gc_collect()  # For PyPy or other GCs.
+        gc.collect()  # For PyPy or other GCs.
         self.assertRaises(ReferenceError, str, p)
 
     def test_rich_compare(self):

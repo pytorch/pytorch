@@ -195,12 +195,26 @@ class TestDecompSharding(TestCase):
         out = aten.index_add.default(input, 0, index, source)
         self.assertEqual(out.placements, (Shard(1),))
 
-        # polar: force replicate
+        # polar: decomposes to cos/sin, which replicate the angle, and a mul and
+        # complex that are linear in the magnitude, so Partial survives.
         check_no_strategy(aten.polar.default)
         x = d_empty(16, device_mesh=mesh, placements=[Partial()])
         y = d_empty(16, device_mesh=mesh, placements=[Partial()])
         out = aten.polar.default(x, y)
-        self.assertEqual(out.placements, (Replicate(),))
+        self.assertEqual(out.placements, (Partial(),))
+
+    def test_assert_async(self):
+        """assert ops have no output to propagate but must not raise either:
+        they turn up inside other ops' decompositions, which we trace to derive
+        a sharding strategy for the enclosing op."""
+        aten = torch.ops.aten
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        x = distribute_tensor(torch.full((16,), 0.5), mesh, [Shard(0)])
+
+        msg = "x must be non-negative"
+        aten._assert_async.msg(torch.all(x >= 0), msg)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            aten._assert_async.msg(torch.all(x < 0), msg)
 
     def test_roll_flip_strategies(self):
         """roll and flip unshard on active dims, keep sharding on others."""
