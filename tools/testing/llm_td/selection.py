@@ -201,6 +201,8 @@ def import_pattern(modules: Iterable[str]) -> str:
     # A module is imported by any dotted suffix of its path, optionally prefixed
     # with `test.`, or by importlib.import_module of one; a package by its
     # directory; and load_test_module (a SourceFileLoader) takes the path.
+    # The CPython tests under test/cpython redirect test.<name> to <name>, so
+    # `from test import <name>` imports their sibling module <name>.
     # A parenthesized `from <package> import (` may span lines, so it counts
     # as importing every module of that package.
     mods = sorted(f[5:-3].removesuffix("/__init__") for f in modules)
@@ -212,7 +214,7 @@ def import_pattern(modules: Iterable[str]) -> str:
     end = "([^[:alnum:]_]|$)"
     forms = [
         rf"(from|import)[[:space:]]+\.*(test\.)?({names}){end}",
-        rf"from[[:space:]]+\.+[[:space:]]+import[[:space:]]+(.*[^[:alnum:]_.])?({bases}){end}",
+        rf"from[[:space:]]+(\.+|test)[[:space:]]+import[[:space:]]+(.*[^[:alnum:]_.])?({bases}){end}",
     ]
     if parents:
         forms.append(rf"from[[:space:]]+\.*(test\.)?({parents})[[:space:]]+import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})")  # fmt: skip
@@ -246,7 +248,7 @@ def data_file_readers(
     file only they can read. A file needs no further reader when it is deleted,
     when NO_READER_RE matches it, when a driver runs its directory (see
     edited_tests), or when a C++ test reads it. None for more than
-    MAX_DATA_FILES files only their readers can read. A file is read by the paths naming it, as test_run.py
+    MAX_DATA_FILES files only their readers can read. A file is read by the paths naming it outside a # comment line, as test_run.py
     runs bin/test_script.py; a .py file also by its importers; and an expect
     file (see EXPECT_RE) also by the paths defining a class whose name starts
     with its test class, as test_tensorboard.py builds the path of
@@ -259,7 +261,7 @@ def data_file_readers(
 
     def name_pattern(files: list[str]) -> str:
         names = alts(f.rsplit("/", 1)[-1] for f in files)
-        return rf"(^|[^[:alnum:]_.-])({names})([^[:alnum:]_.-]|$)"
+        return rf"^[[:space:]]*([^#[:space:][:alnum:]_.-]|[^#[:space:]].*[^[:alnum:]_.-])?({names})([^[:alnum:]_.-]|$)"
 
     # A deleted expect file breaks the tests that still assert against it.
     classes = [m[1] for f in exempt if (m := EXPECT_RE.match(f))]
