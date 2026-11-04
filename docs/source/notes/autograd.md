@@ -434,6 +434,13 @@ Autograd returns each input that ``forward`` returns as a new view of it, so
 into either, and ``Split.backward`` combines their gradients. Because they are views
 of ``x``, do not modify them in place.
 
+A custom Function can also accumulate in place:
+{attr}`ctx.input_grad_buffers <torch.autograd.function.FunctionCtx.input_grad_buffers>`
+gives it the gradient that other uses of an input have already produced, if any.
+Adding its own gradient into that buffer and returning ``None`` for the input is an
+explicit accumulation, so it does not raise. When the entry is ``None``, the gradient
+the Function returns is checked as usual.
+
 A backward started while another one runs, such as the recomputation done by
 {func}`torch.utils.checkpoint.checkpoint` with ``use_reentrant=True``, inherits the
 setting. Derivative formulas can use their inputs more than once, so a graph built
