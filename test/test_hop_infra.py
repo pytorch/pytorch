@@ -12,6 +12,7 @@ from unittest import mock
 import torch
 from torch._higher_order_ops.cutedsl_kernel_wrap import (
     _may_overlap,
+    _rows_disjoint,
     CUTEDSL_CONSTANT_RULES,
     cutedsl_kernel_side_table,
     cutedsl_kernel_wrapper_mutation,
@@ -228,8 +229,9 @@ class TestHOPInfra(TestCase):
 class TestCuteDSLHOPHelpers(TestCase):
     """The parts of the CuTeDSL user-kernel HOPs that need neither CUDA nor
     nvidia-cutlass-dsl: how the side table keys and stores constants, how a call is
-    split, and the overlap checks of functionalization. The tests that compile and
-    launch host functions are in test/inductor/test_cutedsl_kernels.py."""
+    split, the overlap checks of functionalization, and who owns their reinplacing
+    trigger. The tests that compile and launch host functions are in
+    test/inductor/test_cutedsl_kernels.py."""
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -315,6 +317,44 @@ class TestCuteDSLHOPHelpers(TestCase):
             add({1, 2})
         with self.assertRaisesRegex(TypeError, msg.format("EqSlotCfg", "it has state")):
             add(EqSlotCfg(1.0))
+
+    def test_numpy_and_complex_constants_are_keyed_by_their_bits(self):
+        # A numpy floating scalar that is not a Python float (np.float32, ...) and a
+        # complex value, Python or numpy, are keyed as a float is, by type and the
+        # hex() of each float component: signed zeros apart, equal values of other
+        # types apart, and every NaN of one type the same constant, in the side
+        # table too. Where long double is wider than double (unlike on Windows or
+        # macOS arm64), a long double that no float holds is keyed by its exact value.
+        import numpy as np
+
+        def distinct_keys(*values):
+            return len({constant_key(v, CUTEDSL_CONSTANT_RULES) for v in values})
+
+        for a, b in (
+            (np.float32(-0.0), np.float32(0.0)),
+            (np.float16(-0.0), np.float16(0.0)),
+            (np.longdouble(-0.0), np.longdouble(0.0)),
+            (complex(-0.0, 0.0), complex(0.0, 0.0)),
+            (complex(0.0, -0.0), complex(0.0, 0.0)),
+            (np.complex64(complex(-0.0, 0.0)), np.complex64(0.0)),
+            (np.float32(1.0), np.float16(1.0)),
+            (np.float32(1.0), 1.0),
+            (np.complex64(1.0), np.complex128(1.0)),
+            (np.complex128(1.0), complex(1.0)),
+        ):
+            self.assertEqual(distinct_keys(a, b), 2, f"{a!r} and {b!r}")
+        if np.finfo(np.longdouble).nmant > np.finfo(np.float64).nmant:
+            # The long double nearest 0.1, and the float nearest 0.1 as a long double.
+            a, b = np.longdouble("0.1"), np.longdouble(0.1)
+            self.assertEqual(distinct_keys(a, b), 2, f"{a!r} and {b!r}")
+        nan = float("nan")
+        for make in (np.float32, np.float16, np.longdouble, complex, np.complex64):
+            self.assertEqual(distinct_keys(make(nan), make(nan)), 1, make.__name__)
+        self.assertEqual(distinct_keys(-np.float32(nan), np.float32(nan)), 1)
+        table = KernelSideTable(constant_rules=CUTEDSL_CONSTANT_RULES)
+        values = (np.float32(-0.0), np.float32(0.0), np.float32(nan), np.float32(nan))
+        indices = [table.add_constant_args({"alpha": v}) for v in values]
+        self.assertEqual(indices, [0, 1, 2, 2])
 
     def test_side_table_reset_clears_the_dedupe_index(self):
         # Without the index, a reset table would hand out the index of an entry that
@@ -532,6 +572,22 @@ class TestCuteDSLHOPHelpers(TestCase):
             with self.assertRaisesRegex(TypeError, msg.format(where)):
                 table.add_constant_args({"cfg": value})
 
+    def test_dict_subclasses_are_rebuilt_with_their_items(self):
+        # _snapshot rebuilds a dict, of a subclass too, with each item assigned: a
+        # Counter's update() would count the (key, value) pairs
+        # (Counter({('a', 3): 1})), and dict.update() would leave an OrderedDict
+        # empty to iterate.
+        rules = CUTEDSL_CONSTANT_RULES
+        for value in (
+            collections.Counter({"a": 3}),
+            collections.OrderedDict([("b", 1), ("a", 2)]),
+        ):
+            with self.subTest(type=type(value).__name__):
+                snapshot = _snapshot(value, rules)
+                self.assertIsNot(snapshot, value)
+                self.assertIs(type(snapshot), type(value))
+                self.assertEqual(list(snapshot.items()), list(value.items()))
+
     def test_host_fn_info_checks_and_splits_a_call(self):
         # check_call and split_args need only a parsed signature, written out here: a
         # tensor x, a cutlass Numeric n (int stands for its type), the stream, an
@@ -605,9 +661,11 @@ class TestCuteDSLHOPHelpers(TestCase):
         # which decides by the size hints and guards on the decision: x[:n] and x[m:]
         # (n = 10, m = 20) are disjoint while n <= m. Views of different element sizes
         # are compared by their byte ranges, without guards: x[:n] ends where the
-        # float16 view from element 2n starts, and may overlap the one from 2m. An
-        # unbacked size, which cannot be guarded on, counts as an overlap, even in
-        # x[:u] and x[u:].
+        # float16 view from element 2n starts, and may overlap the one from 2m, while
+        # empty views from element n, inside the bytes of x[:n], overlap nothing,
+        # whatever their strides. An unbacked size, which cannot be guarded on,
+        # counts as an overlap, even in x[:u] and x[u:], and so does a tensor whose
+        # emptiness depends on one.
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -618,16 +676,17 @@ class TestCuteDSLHOPHelpers(TestCase):
             halves = x.view(torch.float16)
             head, tail = x[:n], x[m:]
             halves_n, halves_m = halves[2 * n :], halves[2 * m :]
+            empty = (halves[n:n], halves.as_strided((5, 0), (n, 1), n))
             shape_env = n.node.shape_env
             guards = len(shape_env.guards)
-            results.extend(_may_overlap(head, h) for h in (halves_n, halves_m))
+            results.extend(_may_overlap(head, h) for h in (halves_n, halves_m, *empty))
             self.assertEqual(len(shape_env.guards), guards)
             results.append(_may_overlap(head, tail))
             return x
 
         sizes = (100, 10, 20)
         gm = make_fx(f, tracing_mode="symbolic")(*map(torch.randn, sizes))
-        self.assertEqual(results, [False, True, False])
+        self.assertEqual(results, [False, True, False, False, False])
         inputs = [node.meta["val"] for node in gm.graph.find_nodes(op="placeholder")]
         holds = gm.shape_env.evaluate_guards_for_args
         self.assertTrue(holds(inputs, list(map(torch.randn, sizes))))
@@ -638,6 +697,7 @@ class TestCuteDSLHOPHelpers(TestCase):
             u = shape_env.create_unbacked_symint()
             x = torch.empty(100)
             self.assertTrue(_may_overlap(x[:u], x[u:]))
+            self.assertTrue(_may_overlap(x[:u], x.view(torch.uint8)[:4]))
 
     def test_overlap_check_rechecks_2d_rows(self):
         # TODO(zoranzhao): remove with _rows_disjoint once
@@ -683,20 +743,30 @@ class TestCuteDSLHOPHelpers(TestCase):
         ) as overlapping:
             f(torch.randn(10, 25))
             make_fx(f, tracing_mode="symbolic")(torch.randn(10, 25))
-        self.assertEqual(overlapping.call_count, len(results))
+        # Every pair but the empty one, which _may_overlap answers before it asks,
+        # goes to the mock, once with real and once with symbolic sizes.
+        self.assertEqual(overlapping.call_count, len(results) - 2)
         self.assertEqual(len(results), 26)
         for name, overlaps, expected in results:
             self.assertEqual(overlaps, expected, name)
+        # An empty view can still reach _rows_disjoint through _may_overlap when its
+        # emptiness is not statically known (a size that is 0 only by its hint), so
+        # _rows_disjoint's own emptiness condition is checked directly here.
+        base = torch.randn(10, 25)
+        self.assertTrue(_rows_disjoint(base[:4, :3], base[1:3, 0:0]))
 
     @parametrize("api", ["python", "cpp", "cpp_view_copies"])
     def test_functionalization_refuses_writes_that_may_overlap(self, api):
         # Each written argument is cloned and written back on its own, so two written
         # arguments that may overlap would lose a write: functionalization refuses the
-        # same tensor twice, and views that overlap whatever their shapes, offsets and
+        # same tensor twice and views that overlap whatever their shapes, offsets and
         # dtypes. Views of one base that do not overlap are accepted, unless
-        # functionalization copies views (remove="mutations_and_views"): the copies
-        # do not show where the views sit, so any two views are refused, with a
-        # message of their own. With mutates_args="unknown" the record needs no
+        # functionalization copies views (remove="mutations_and_views"): the copies do
+        # not show where the views sit, so any two views are refused, with a message
+        # of their own, unless one of them is empty. An empty tensor overlaps nothing,
+        # not even itself, and the copy of an empty view is empty too, so in every mode
+        # an empty view is accepted next to its base, in either order, next to another
+        # empty view, and twice. With mutates_args="unknown" the record needs no
         # signature, and with fake tensors the kernel never runs, so a plain function
         # stands for a host function. test/inductor/test_cutedsl_kernels.py runs the
         # accepted calls and the refusals under an explicit mutates_args.
@@ -760,7 +830,17 @@ class TestCuteDSLHOPHelpers(TestCase):
             return qkv
 
         def empty(x, y):
-            launch(x, y, x[500:500])  # an empty view overlaps nothing
+            launch(x, y, x[500:500])  # an empty view overlaps nothing,
+            launch(x[500:500], y, x)  # in either order,
+            return x
+
+        def empty_views(x, y):
+            launch(x[100:100], y, x[500:500])  # nor another empty view,
+            return x
+
+        def empty_twice(x, y):
+            view = x[500:500]
+            launch(view, y, view)  # nor even itself
             return x
 
         written = (
@@ -797,7 +877,29 @@ class TestCuteDSLHOPHelpers(TestCase):
         else:
             trace(views, base, y)
             trace(columns, qkv)
-            trace(empty, x, y)
+        for f in (empty, empty_views, empty_twice):
+            trace(f, x, y)
+
+    def test_cutedsl_trigger_refused_to_other_dsls(self):
+        # ReInplaceTrigger.CUTEDSL_OPS belongs to the cutedsl DSL (TRIGGER_DSLS)
+        # whether or not CuTeDSL has registered yet (it registers when
+        # cutedsl_kernel_wrap is first imported), so another DSL registering first
+        # cannot take it and make CuTeDSL's own registration fail.
+        from torch._higher_order_ops.user_kernel_hop import (
+            _user_kernel_hops,
+            get_user_kernel_hop_info,
+            register_user_kernel_hop,
+        )
+
+        info = get_user_kernel_hop_info(cutedsl_kernel_wrapper_mutation)
+        msg = (
+            "^ReInplaceTrigger.CUTEDSL_OPS belongs to the cutedsl DSL; register the "
+            "toy DSL with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own$"
+        )
+        with mock.patch.dict(_user_kernel_hops, clear=True):
+            with self.assertRaisesRegex(ValueError, msg):
+                register_user_kernel_hop(dataclasses.replace(info, dsl="toy"))
+            self.assertEqual(_user_kernel_hops, {})
 
 
 instantiate_parametrized_tests(TestCuteDSLHOPHelpers)

@@ -505,6 +505,34 @@ class CuteDSLHOPTests(TestCase):
             )
             self.assertEqual(torch.signbit(out), torch.signbit(x * alpha))
 
+    def test_numpy_float_constants_are_keyed_by_their_bits(self):
+        # A numpy floating constant that is not a Python float, such as np.float32,
+        # is keyed by its type and the hex() of its value, as a float is
+        # (test/test_hop_infra.py has constant_key's part): -0.0 and 0.0 get their
+        # own side-table entries and compiles, and two NaNs share one.
+        x = torch.rand(1000, device=DEVICE) + 1
+        kidx = _add_kernel_to_table(mul_const_kernel, ["mOut"])
+
+        def launch(alpha):
+            out = torch.empty_like(x)
+            cidx = cutedsl_kernel_side_table.add_constant_args({"alpha": alpha})
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=kidx,
+                constant_args_idx=cidx,
+                kwargs={"mX": x, "mOut": out, "n": 1000},
+            )
+            self.assertEqual(out, x * alpha)  # NaN equals NaN here, and -0.0 equals 0.0
+            if alpha == 0:  # x > 0, so x * alpha has the sign of alpha
+                self.assertEqual(torch.signbit(out), torch.signbit(x * alpha))
+            return cidx
+
+        with _counting_compiles() as compile_spy:
+            self.assertNotEqual(launch(np.float32(-0.0)), launch(np.float32(0.0)))
+            self.assertEqual(compile_spy.call_count, 2)
+            nan = float("nan")
+            self.assertEqual(launch(np.float32(nan)), launch(np.float32(nan)))
+            self.assertEqual(compile_spy.call_count, 3)
+
     def test_cyclic_constants_are_refused(self):
         # The eager launch refuses a constant that refers to itself, as constant_key
         # does (test/test_hop_infra.py), naming the kernel and the parameter.
@@ -652,6 +680,13 @@ class CuteDSLHOPTests(TestCase):
             add_one_2d(_rand(8, 4))
             add_one_2d(_rand(4, 8).t())
             self.assertEqual(compile_spy.call_count, 5)
+            # The shape alone: the kernel reads its extent from mX's shape, so the
+            # compile for 2 rows would leave rows 2 and 3 of a 4-row output unwritten.
+            short, tall = _rand(2, 8), _rand(4, 8)
+            self.assertEqual(short.stride(), tall.stride())
+            add_one_2d(short)
+            add_one_2d(tall)
+            self.assertEqual(compile_spy.call_count, 7)
 
     def test_launch_on_the_given_stream(self):
         # stream= is the raw stream to launch on: queued behind a sleep on a side
@@ -673,6 +708,26 @@ class CuteDSLHOPTests(TestCase):
         torch.cuda.current_stream().wait_stream(side)
         self.assertEqual(before, torch.zeros_like(x))
         self.assertEqual(out, x + y)
+
+    def test_launch_on_the_current_stream(self):
+        # Without stream=, the launch is on the current stream: under
+        # torch.cuda.stream(side), queued behind a sleep and a write of its input on
+        # side, the kernel reads the new input.
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
+        from torch.testing._internal.common_utils import get_cycles_per_ms
+
+        x, y, new_x = _rand(1000), _rand(1000), _rand(1000)
+        out = torch.zeros_like(x)
+        args = _add_kwargs(x, y, out)
+        launch_cutedsl_kernel(add_kernel, args)  # compiles outside the timed part
+        side = torch.cuda.Stream()
+        side.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(int(200 * get_cycles_per_ms()))
+            x.copy_(new_x)
+            launch_cutedsl_kernel(add_kernel, args)
+        torch.cuda.synchronize()
+        self.assertEqual(out, new_x + y)
 
     def test_cutedsl_hop_object_and_none_constants_for_unannotated_params(self):
         # The launch passes the constants of parameters that are not Constexpr (an
@@ -1422,6 +1477,52 @@ def forward(self, x_1, y_1):
             self.assertEqual(gm(qkv.clone()), torch.cat([q, k, q + k], dim=1))
             # Traced with fake tensors: CUDA refuses a launch of zero blocks (n = 0).
             trace(empty, x.clone(), y, tracing_mode="fake")
+
+    @parametrize("api", ["python", "cpp"])
+    def test_cutedsl_hop_functionalize_accepts_empty_views_of_another_dtype(self, api):
+        # Written arguments of different element sizes are compared by their byte
+        # ranges (test/test_hop_infra.py), and an empty one overlaps nothing: empty
+        # uint8 views inside the output's bytes, passed for the parameter the kernel
+        # leaves alone, are accepted under mutates_args="unknown", and the output is
+        # written back.
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensorMode,
+            PythonFunctionalizeAPI,
+        )
+
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        kidx = _add_kernel_to_table(mul_cfg_kernel, "unknown")
+        cidx = cutedsl_kernel_side_table.add_constant_args({"cfg": Cfg(2.0)})
+
+        def trace(f, *args):
+            if api == "python":
+                with FunctionalTensorMode():
+                    return make_fx(PythonFunctionalizeAPI().functionalize(f))(*args)
+            return make_fx(torch.func.functionalize(f))(*args)
+
+        def launch(x, out, unused):
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=kidx,
+                constant_args_idx=cidx,
+                kwargs={"mX": x, "mOut": out, "n": 1000, "unused": unused},
+            )
+
+        def flat(x, out):
+            launch(x, out, out.view(torch.uint8)[4:4])
+            return out
+
+        def rows(x, out):
+            # Shape (5, 0), strides (100, 1): 400 bytes from byte 100, as a range.
+            launch(x, out, out.view(torch.uint8).view(40, 100)[1:6, :0])
+            return out
+
+        x = _rand(1000)
+        for f in (flat, rows):
+            gm = trace(f, x, torch.zeros_like(x))
+            self.assertEqual(gm(x, torch.zeros_like(x)), x * 2.0)
 
     @parametrize("api", ["python", "cpp"])
     def test_cutedsl_hop_functionalize_columns_symbolic(self, api):
