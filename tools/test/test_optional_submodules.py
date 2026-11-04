@@ -10,21 +10,23 @@ from tools import optional_submodules
 
 
 EIGEN_URL = "https://gitlab.com/libeigen/eigen"
-CLONE = ["git", "clone", "--depth", "1", "--branch", "5.0.1", EIGEN_URL]
+LOW_SPEED = ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=60"]
+CLONE = ["git", *LOW_SPEED, "clone", "--depth", "1", "--branch", "5.0.1", EIGEN_URL]
 GITLAB_LOAD = (
     "remote: GitLab is currently unable to handle this request due to load\n"
     "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': "
     "The requested URL returned error: 503\n"
 )
 
-# One realistic git message per alternative of the retry pattern, each matched
-# only by that alternative, plus the case-insensitive match.
+# One realistic git message per alternative of the retry pattern, plus the
+# case-insensitive match. The POST samples are matched by the `returned error`
+# alternative; the `RPC failed; curl` ones by their own.
 TRANSIENT = {
     "gitlab load page": "remote: GitLab is currently unable to handle this request due to load",
     "get 503": "fatal: unable to access 'https://x/': The requested URL returned error: 503",
     "get 429": "fatal: unable to access 'https://x/': The requested URL returned error: 429",
-    "post 502": "error: RPC failed; HTTP 502",
-    "post 429": "error: RPC failed; HTTP 429",
+    "post 502": "error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502",
+    "post 429": "error: RPC failed; HTTP 429 curl 22 The requested URL returned error: 429",
     "transfer closed": "error: RPC failed; curl 18 transfer closed with outstanding read data remaining",
     "http2 cancel": "error: RPC failed; curl 92 HTTP/2 stream 5 was not closed cleanly: CANCEL (err 8)",
     "http2 internal error": "error: RPC failed; curl 92 HTTP/2 stream 1 was not closed cleanly: INTERNAL_ERROR (err 2)",
@@ -34,6 +36,7 @@ TRANSIENT = {
     "gnutls": "fatal: unable to access 'https://x/': GnuTLS recv error (-54): Error in the pull function.",
     "reset while reading": "fatal: unable to access 'https://x/': OpenSSL SSL_read: Connection reset by peer, errno 104",
     "syscall while reading": "fatal: unable to access 'https://x/': OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 104",
+    "stalled transfer": "fatal: unable to access 'https://x/': Operation too slow. Less than 1000 bytes/sec transferred the last 60 seconds",
     "case": "FATAL: EARLY eof",
     # A curl error that is not retried on its own is retried when it breaks a
     # pack that was already streaming, because git then also reports early EOF.
@@ -48,7 +51,9 @@ TRANSIENT = {
         "fatal: early EOF\n"
     ),
 }
-# Single-line failures: these are the whole output because nothing was received.
+# Failures that must fail at once. Each entry is the line git prints for the
+# failure itself; a real run also prints `Cloning into '...'...` before it, and
+# the "empty" entry is no output at all.
 PERMANENT = {
     "missing tag": "fatal: Remote branch 5.0.1 not found in upstream origin",
     "get 404": "fatal: unable to access 'https://x/': The requested URL returned error: 404",
@@ -93,16 +98,24 @@ class TestClone(TestCase):
             ) as run,
             mock.patch.object(optional_submodules.time, "sleep") as sleep,
             mock.patch("sys.stderr", new_callable=io.StringIO) as stderr,
+            mock.patch("sys.stdout", new_callable=io.StringIO) as stdout,
         ):
             try:
                 optional_submodules._clone(cmd, **kwargs)
             finally:
-                self.run_, self.sleep, self.stderr = run, sleep, stderr.getvalue()
+                self.run_, self.sleep = run, sleep
+                self.stderr, self.stdout = stderr.getvalue(), stdout.getvalue()
 
     def test_retries_until_clone_succeeds(self):
         self._clone([FAILURE, FAILURE, result()])
         self.assertEqual(self.run_.call_count, 3)
         self.assertEqual([c.args[0] for c in self.sleep.call_args_list], [10, 20])
+        # The retry notice is the only sign in a log that the job is waiting.
+        self.assertEqual(
+            self.stdout,
+            "-- Clone failed (attempt 1/8), retry in 10s\n"
+            "-- Clone failed (attempt 2/8), retry in 20s\n",
+        )
 
     def test_survives_seven_failures_with_the_default_attempts(self):
         self._clone([FAILURE] * 7 + [result()])
@@ -128,6 +141,8 @@ class TestClone(TestCase):
         self.assertEqual(raised.exception.stderr, last)
         self.assertEqual(self.run_.call_count, 3)
         self.assertEqual(self.sleep.call_count, 2)
+        # git's output for every attempt, including the one that raised, is echoed.
+        self.assertEqual(self.stderr, GITLAB_LOAD * 2 + last)
 
     def test_no_retry_on_success(self):
         self._clone([result()])
@@ -141,6 +156,7 @@ class TestClone(TestCase):
                     self._clone([result(128, stderr)])
                 self.assertEqual(raised.exception.returncode, 128)
                 self.assertEqual(raised.exception.stderr, stderr)
+                self.assertEqual(self.stderr, stderr)
                 self.assertEqual(self.run_.call_count, 1)
                 self.sleep.assert_not_called()
 
@@ -165,13 +181,17 @@ class TestClone(TestCase):
             {"PATH": "/bin", "https_proxy": "p:1", "LC_ALL": "de_DE.UTF-8"},
         ):
             self._clone([result()], cwd=Path("/tmp/x"))
-        self.run_.assert_called_once()
-        self.assertEqual(self.run_.call_args.args, (CLONE,))
+        # Exactly these arguments: an extra check=True or stdout=PIPE would change
+        # what run raises or captures.
+        self.run_.assert_called_once_with(
+            CLONE,
+            cwd=Path("/tmp/x"),
+            stderr=PIPE,
+            text=True,
+            errors="replace",
+            env=mock.ANY,
+        )
         kwargs = self.run_.call_args.kwargs
-        self.assertEqual(kwargs["cwd"], Path("/tmp/x"))
-        self.assertEqual(kwargs["stderr"], PIPE)
-        self.assertIs(kwargs["text"], True)
-        self.assertEqual(kwargs["errors"], "replace")
         # The rest of the environment (PATH, proxy settings) is kept.
         self.assertEqual(kwargs["env"]["LC_ALL"], "C")
         self.assertEqual(kwargs["env"]["PATH"], "/bin")
@@ -210,6 +230,7 @@ class TestCheckoutNcclEp(TestCase):
             run.call_args.args[0],
             [
                 "git",
+                *LOW_SPEED,
                 "clone",
                 "--no-checkout",
                 "https://github.com/NVIDIA/nccl-extensions.git",
