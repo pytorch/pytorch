@@ -9366,15 +9366,15 @@ def triton_kernel_wrap_(
 ):
     from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
-    constant_args = kernel_side_table.get_constant_args(constant_args_idx)
-    ir.UserDefinedTritonKernel(
+    return ir.UserDefinedTritonKernel.lower_mutation_hop(
+        kernel_side_table,
+        constant_args_idx,
+        kwargs,
         kernel_idx=kernel_idx,
         grid=grid,
         tma_descriptor_metadata=tma_descriptor_metadata,
-        kernel_args={**kwargs, **constant_args},
         launch_kwargs=() if launch_kwargs is None else launch_kwargs,
     )
-    return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
 
 @register_lowering(torch.ops.higher_order.cond, type_promotion_kind=None)
