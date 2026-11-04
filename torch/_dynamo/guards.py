@@ -66,6 +66,7 @@ from torch._C._dynamo.guards import (
     GuardAccessor,
     GuardDebugInfo,
     GuardManager,
+    install_nn_module_hook_membership_guard,
     install_no_tensor_aliasing_guard,
     install_object_alias_pattern_guard,
     install_object_aliasing_guard,
@@ -1499,6 +1500,21 @@ def _constant_subclass_base_value(value: object) -> Any:
         if isinstance(value, t):
             return t(value)  # pyrefly: ignore[bad-argument-type]
     raise TypeError(f"Not a constant subclass: {type(value)}")
+
+
+def _nn_module_hook_membership(
+    values: tuple[Any, Any], hooks_name: str
+) -> tuple[bool, ...] | None:
+    module, flags = values
+    hooks = getattr(module, hooks_name, None)
+    if not issubclass(type(hooks), dict) or not issubclass(type(flags), dict):
+        return None
+    hooks = cast(dict[Any, Any], hooks)
+    if any(
+        type(key) is not int for mapping in (hooks, flags) for key in dict.keys(mapping)
+    ):
+        return None
+    return tuple(dict.__contains__(flags, key) for key in dict.keys(hooks))
 
 
 def _guard_create_fn_keyword(guard: Guard, name: str) -> Any:
@@ -3868,6 +3884,69 @@ class GuardBuilder(GuardBuilderBase):
             order, get_verbose_code_parts(code, guard), guard.user_stack
         )
         self._set_guard_export_info(guard, code)
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            _guard_create_fn_keyword(guard, "hooks_name"),
+            _nn_module_hook_membership(
+                value, _guard_create_fn_keyword(guard, "hooks_name")
+            ),
+        ),
+        eval_fn=lambda value, metadata: metadata[1] is not None
+        and _nn_module_hook_membership(value, metadata[0]) == metadata[1],
+        get_extra_sources_fn=lambda guard: (
+            _guard_create_fn_keyword(guard, "flags_source"),
+        ),
+    )
+    def NN_MODULE_HOOKS_DICT_CONTAINS(
+        self,
+        guard: Guard,
+        hooks_name: str,
+        flags_source: Source,
+    ) -> None:
+        hooks_source = AttrSource(guard.originating_source, hooks_name)
+        flags = self.get(flags_source)
+        if self.save_guards:
+            if name := get_local_source_name(flags_source):
+                self.check_fn_manager.additional_used_local_vars.add(name)
+            if name := get_global_source_name(flags_source):
+                self.check_fn_manager.additional_used_global_vars.add(name)
+        flags_ref = self.arg_ref(flags_source.name)
+        hooks_ref = self.arg_ref(hooks_source.name)
+        if dict.__len__(flags) == 0:
+            # Empty flags make every membership false, independent of hook IDs.
+            # Keep the logical relation for nested reuse, but use a tag-safe leaf.
+            code = f"dict.__len__({flags_ref}) == 0"
+            if code in self.already_added_code_parts:
+                return
+            self.already_added_code_parts.add(code)
+            self.get_guard_manager_from_source(
+                flags_source
+            ).add_dict_length_check_guard(
+                0, get_verbose_code_parts([code], guard), guard.user_stack
+            )
+            self._set_guard_export_info(guard, [code])
+            return
+        membership = tuple(
+            dict.__contains__(flags, key) for key in dict.keys(self.get(hooks_source))
+        )
+        code = (
+            f"tuple(dict.__contains__({flags_ref}, key) for key in "
+            f"dict.keys({hooks_ref})) == {membership!r}"
+        )
+        if code in self.already_added_code_parts:
+            return
+        # Attach both leaves to their dictionaries so version-tag shortcuts
+        # cannot skip changes to either side of this membership relation.
+        install_nn_module_hook_membership_guard(
+            self.get_guard_manager_from_source(hooks_source),
+            self.get_guard_manager_from_source(flags_source),
+            membership,
+            get_verbose_code_parts([code], guard),
+            guard.user_stack,
+        )
+        self._set_guard_export_info(guard, [code])
+        self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: list(dict.keys(value)),
