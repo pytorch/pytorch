@@ -225,6 +225,23 @@ def is_floating(x):
     return promote_to_tensor(x).dtype.is_floating()
 
 
+# libdevice.ceil, libdevice.floor, and libdevice.trunc accept only floating-point
+# inputs. Conservatively canonicalized symbolic expressions can still be integer
+# at Triton compile time, so bypass libdevice for those inputs.
+@triton.jit
+def rounding_to_int(x, index_dtype: tl.constexpr, rounding: tl.constexpr):
+    x = promote_to_tensor(x)
+    if x.dtype.is_int():
+        return x.to(index_dtype)
+    else:
+        if rounding == "ceil":
+            return libdevice.ceil(x).to(index_dtype)
+        elif rounding == "floor":
+            return libdevice.floor(x).to(index_dtype)
+        else:
+            return libdevice.trunc(x).to(index_dtype)
+
+
 @triton.jit
 def _prod_accumulate(a, b):
     return a * b
