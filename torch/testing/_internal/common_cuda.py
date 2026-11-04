@@ -187,6 +187,15 @@ def blas_library_context(backend):
     finally:
         torch.backends.cuda.preferred_blas_library(prev_backend)
 
+@contextlib.contextmanager
+def prefer_cublaslt_grouped_gemm(use_cublaslt):
+    old = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
+    try:
+        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = use_cublaslt
+        yield
+    finally:
+        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = old
+
 def evaluate_gfx_arch_within(arch_list):
     if not torch.cuda.is_available():
         return False
