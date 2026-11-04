@@ -15,6 +15,7 @@ import sys
 import tempfile
 import textwrap
 import threading
+import types
 import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -137,6 +138,16 @@ def history(rows: list[dict], sha2pr: dict[str, int], authors: dict[int, str], l
         return bd.History.load(START, END)
 
 
+class NoWaitEvent(threading.Event):
+    def wait(self, timeout: float | None = None) -> bool:
+        return self.is_set()
+
+
+def no_waits() -> contextlib.AbstractContextManager:
+    """main()'s stop event, whose waits are the retry backoff and the Ctrl-C grace, returns at once."""
+    return mock.patch("tools.testing.llm_td.eval.run_eval.threading", types.SimpleNamespace(Event=NoWaitEvent))  # fmt: skip
+
+
 class TestRunEval(unittest.TestCase):
     def run_one(self, replies: list[object]) -> tuple[dict, mock.Mock, mock.Mock]:
         sample = {"id": "x", "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a"]}  # fmt: skip
@@ -232,7 +243,7 @@ class TestRunEval(unittest.TestCase):
                 mock.patch.dict(os.environ, {"LLM_TD_AGENTIC_SANDBOX": "1"}),
                 mock.patch.object(run_eval, "checkout", return_value="wt") as co,
                 mock.patch.object(run_eval, "query_model", return_value={"type": "result", "is_error": True, "result": "529"}) as query,
-                mock.patch.object(run_eval.time, "sleep"),
+                no_waits(),
                 mock.patch("sys.stdout", io.StringIO()),
             ):  # fmt: skip
                 run_eval.main()
@@ -374,6 +385,7 @@ class TestRunEval(unittest.TestCase):
                     mock.patch("sys.stderr", io.StringIO()) as err,
                     mock.patch("sys.stdout", io.StringIO()),
                     mock.patch.object(run_eval, "query_model", return_value=r) as query,
+                    no_waits(),
                 ):
                     try:
                         run_eval.main()
@@ -416,6 +428,22 @@ class TestRunEval(unittest.TestCase):
         lines = out.getvalue().splitlines()
         self.assertEqual((len(lines), query.call_count), (2, 0))
         self.assertTrue(lines[1].startswith("a: git cannot build its prompt in this clone, skipped"))  # fmt: skip
+        # An agentic checkout git cannot make is named as such, with git's own error.
+        with tempfile.TemporaryDirectory() as d:
+            data = write_data(d, {"samples/a.json": sample, "test-times.json": {}})
+            (data / "ids.txt").write_text("a")
+            err = b"fatal: invalid reference\n"
+            failed = subprocess.CalledProcessError(128, ["git"], stderr=err)
+            with (
+                mock.patch.object(sys, "argv", ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt"), "--agentic"]),
+                mock.patch.dict(os.environ, {"LLM_TD_AGENTIC_SANDBOX": "1"}),
+                mock.patch("sys.stdout", io.StringIO()) as out,
+                mock.patch.object(run_eval, "checkout", side_effect=failed),
+                mock.patch.object(run_eval, "query_model") as query,
+            ):  # fmt: skip
+                run_eval.main()
+        self.assertEqual(out.getvalue().splitlines()[1], f"a: cannot check out {'f' * 40}, skipped: fatal: invalid reference")  # fmt: skip
+        query.assert_not_called()
 
     def test_main_tops_up_agentic_results(self) -> None:
         from tools.testing.llm_td.eval import run_eval
@@ -437,6 +465,7 @@ class TestRunEval(unittest.TestCase):
                     mock.patch("sys.stdout", io.StringIO()),
                     mock.patch.object(run_eval, "checkout", return_value="wt"),
                     mock.patch.object(run_eval, "query_model", return_value=r) as query,
+                    no_waits(),
                 ):
                     try:
                         run_eval.main()
