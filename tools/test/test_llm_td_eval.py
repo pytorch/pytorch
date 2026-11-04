@@ -200,6 +200,9 @@ class TestRunEval(unittest.TestCase):
         prompt = run_eval.sample_prompt(sample, {})
         self.assertEqual(r["prompt_sha"], run_eval.prompt_sha(prompt, True))
         self.assertNotEqual(r["prompt_sha"], run_eval.prompt_sha(prompt))
+        for name in ("AGENTIC_TOOLS", "CHECKOUT_PREAMBLE"):
+            with mock.patch.object(score, name, "x"):
+                self.assertNotEqual(r["prompt_sha"], run_eval.prompt_sha(prompt, True))
 
     def test_main_survives_a_failed_write(self) -> None:
         from tools.testing.llm_td.eval import run_eval
@@ -283,6 +286,24 @@ class TestRunEval(unittest.TestCase):
                         self.assertFalse(refused)
                 # Only the unfinished b is run, and only when a's result is accepted.
                 self.assertEqual(query.call_count, 0 if refused else 1)
+
+
+class TestEvalHelpers(unittest.TestCase):
+    def test_has_head(self) -> None:
+        self.assertTrue(score.has_head(select_tests.git("rev-parse", "HEAD").strip()))
+        self.assertFalse(score.has_head("0" * 40))
+
+    def test_write_json(self) -> None:
+        from tools.testing.llm_td.eval import write_json
+
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "r.json"
+            write_json(path, {"a": 1})
+            self.assertEqual((json.loads(path.read_text()), path.stat().st_mode & 0o777), ({"a": 1}, 0o644))  # fmt: skip
+            # A failed write keeps the old file and leaves no temporary one.
+            with self.assertRaises(TypeError):
+                write_json(path, {"a": object()})
+            self.assertEqual((json.loads(path.read_text()), list(Path(d).iterdir())), ({"a": 1}, [path]))  # fmt: skip
 
 
 class TestScore(unittest.TestCase):
