@@ -66,7 +66,6 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results
-from tools.testing.llm_td.selection import LLM_TD_SELECTION_FILE
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
 )
@@ -77,8 +76,8 @@ from tools.testing.test_selections import (
     get_job_base_name,
     get_test_case_configs,
     NUM_PROCS,
+    run_test_split,
     ShardedTest,
-    split_tests,
     THRESHOLD,
 )
 
@@ -2545,14 +2544,13 @@ def main():
             return s.strip()
 
     # TD's split, or the LLM test selection's if CI downloaded one; see tools/testing/llm_td.
-    split = split_tests(
+    split = run_test_split(
         test_prioritizations,
         test_file_times_dict,
-        selection_file=REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_TD_SELECTION_FILE,
+        previous_failures=previous_failures,
         test_config=TEST_CONFIG,
         td_enabled=options.enable_td,
-        previous_failures=previous_failures,
-        record=IS_CI,
+        is_ci=IS_CI,
     )
     test_batch = TestBatch("tests to run", split.include, False)
     test_batch_exclude = TestBatch("excluded", split.exclude, True)
