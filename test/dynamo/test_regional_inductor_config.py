@@ -237,22 +237,34 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         self.assertEqual(result, expected)
         self.assertEqual(pass_calls, [])
 
-    def test_check_multiple_devices_or_any_cpu_nodes(self):
-        """A device-less mapping has no GPU work, so capture is refused.
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch({"graph_partition": True, "triton.cudagraphs": True})
+    def test_dynamo_cudagraphs_backend_ignores_inductor_graph_partition(self):
+        """The cudagraphs backend never partitions, so a CPU op still skips capture."""
+        if GPU_TYPE != "cuda":
+            self.skipTest("the cudagraphs backend is CUDA-only")
 
-        This helper is shared with whole-graph compiles and the dynamo cudagraphs
-        backend, so the empty case has to be right for them too: a CPU-only graph
-        under partitioning lands here once the cpu entry is popped, and reporting
-        no reason would claim an all-CPU graph is capturable.
-        """
+        def fn(x, y):
+            return x + 1, y + 2
+
+        compiled = torch.compile(fn, backend="cudagraphs")
+        for i in range(3):
+            x = torch.full((4,), float(i), device=GPU_TYPE)
+            y = torch.full((4,), float(10 * i))
+            self.assertEqual(compiled(x, y), fn(x, y))
+        skips = torch._dynamo.utils.counters["inductor"]["cudagraph_skips"]
+        self.assertEqual(skips, 1)
+
+    def test_check_multiple_devices_or_any_cpu_nodes(self):
+        """Nothing left to capture once cpu/meta are popped is refused as "no GPU ops"."""
         from torch._inductor.cudagraph_utils import (
             check_multiple_devices_or_any_cpu_nodes,
         )
 
         graph = torch.fx.Graph()
         meta = torch.device("meta")
-        cuda0 = torch.device(GPU_TYPE, 0)
-        cuda1 = torch.device(GPU_TYPE, 1)
+        cuda0 = torch.device("cuda", 0)
+        cuda1 = torch.device("cuda", 1)
         cpu = torch.device("cpu")
 
         for mapping, partition, expected in (
@@ -281,7 +293,7 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         ):
             with self.subTest(devices=sorted(map(str, mapping)), partition=partition):
                 reason = check_multiple_devices_or_any_cpu_nodes(
-                    dict(mapping), use_cudagraph_partition=partition
+                    dict(mapping), cudagraphs_per_partition=partition
                 )
                 if expected is None:
                     self.assertIsNone(reason)

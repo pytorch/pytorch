@@ -423,8 +423,8 @@ class GraphLowering(torch.fx.Interpreter):
         inputs_to_check: Sequence[int] | None = None,
         fx_wrapper: bool = False,
         get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
-        graph_partition: bool | None = None,
-        use_cudagraph_partition: bool | None = None,
+        split_into_partitions: bool | None = None,
+        cudagraphs_per_partition: bool | None = None,
     ) -> None:
         super().__init__(gm)
         self.get_decomp_fn = get_decomp_fn
@@ -608,15 +608,17 @@ class GraphLowering(torch.fx.Interpreter):
         # Whether codegen splits this graph into partition functions.
         # Everything that reasons about partitioning must read this rather than
         # the ambient config, which stays at what the user asked for.
-        self.graph_partition = (
-            config.graph_partition if graph_partition is None else graph_partition
+        self.split_into_partitions = (
+            config.graph_partition
+            if split_into_partitions is None
+            else split_into_partitions
         )
         # Whether the partitions are for CUDA Graphs (or a customized partition
         # wrapper).
-        self.use_cudagraph_partition = (
+        self.cudagraphs_per_partition = (
             is_using_cudagraph_partition()
-            if use_cudagraph_partition is None
-            else use_cudagraph_partition
+            if cudagraphs_per_partition is None
+            else cudagraphs_per_partition
         )
 
         # only keeping one node per device for stack trace purposes
@@ -1025,8 +1027,8 @@ class GraphLowering(torch.fx.Interpreter):
             is_inference=self.is_inference,
             is_backward=self.is_backward,
             name=self.qualify_name(subgraph_name),
-            graph_partition=False,
-            use_cudagraph_partition=False,
+            split_into_partitions=False,
+            cudagraphs_per_partition=False,
         )
 
     @property
@@ -1036,13 +1038,13 @@ class GraphLowering(torch.fx.Interpreter):
         partition rather than disabling capture for the whole graph.
 
         Only consult this from a site that is already gated on cudagraphs being
-        requested. It folds in use_cudagraph_partition, which is False whenever
+        requested. It folds in cudagraphs_per_partition, which is False whenever
         capture was not asked for, so from an ungated site it reads as "no
         partitioning" for a graph that is in fact partitioned. Every current
         caller either sits under `if cudagraphs:` or only writes
         disable_cudagraphs_reason, which nothing reads unless capture is on.
         """
-        return self.use_cudagraph_partition
+        return self.cudagraphs_per_partition
 
     def find_nodes_prefer_channels_last(self) -> OrderedSet[Node]:
         """
