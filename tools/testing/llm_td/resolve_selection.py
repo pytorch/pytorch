@@ -132,6 +132,7 @@ def main(output: Path = Path(LLM_TD_SELECTION_FILE)) -> None:
     if selection is not None:
         # select_tests clears enforce when its model call failed.
         selection.enforce = enforce and selection.enforce
+        selection.enforce_requested = enforce and selection.enforce_requested
         output.write_text(json.dumps(selection.to_json()))
         print(f"Resolved the LLM test selection, enforce={selection.enforce}")
 
