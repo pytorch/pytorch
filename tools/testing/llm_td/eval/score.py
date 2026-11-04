@@ -5,7 +5,7 @@
 A failure is a (test file, CI config) pair. It counts as caught when the
 selection runs that file in that config. Cost is the share of one full CI
 pass's CPU and GPU test-seconds (from test-times.json) that the selection
-would run.
+would run, counting only the jobs and environments that run TD (see below).
 
 Policies: `model` is the raw model output, `final` adds what CI adds (edited
 test files, the run-all rules), `final-hm` keeps only high/medium-confidence
@@ -110,7 +110,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Collection
 
 
-GPU_ENV = re.compile(r"cuda|rocm|sm\d+|xpu|h100|b200|a100|gpu", re.IGNORECASE)
+GPU_ENV = re.compile(r"cuda|rocm|sm\d+|h100|b200|a100|gpu", re.IGNORECASE)
 HEDGE = re.compile(r"final\+td(\d+(?:\.\d+)?)?")
 MATRIX_CONFIG = re.compile(r'config: "([^"]+)"')
 VERSION = re.compile(r"\d+(\.\d+)*")
