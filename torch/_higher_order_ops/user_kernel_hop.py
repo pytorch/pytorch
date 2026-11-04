@@ -11,8 +11,7 @@ call to it (the HOPifier).
 
 import threading
 from collections.abc import Callable
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
-from typing_extensions import Never
+from typing import Any, Generic, Never, TYPE_CHECKING, TypeVar
 
 import torch.fx as fx
 import torch.utils._pytree as pytree
