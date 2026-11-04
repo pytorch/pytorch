@@ -3,6 +3,8 @@
 #include <c10/core/Device.h>
 #include <c10/macros/Export.h>
 
+#include <memory>
+
 namespace c10 {
 struct FakeTensorMode;
 struct TensorImpl;
@@ -14,12 +16,16 @@ TORCH_API void set_and_normalize_fake_device(
     c10::TensorImpl* impl,
     c10::Device device);
 
-// Marks the storage of a newly created C++ fake of mode, as Python's
-// FakeTensor.__new__ does: a fake has no real data, so reading its mutable
-// data pointer warns, or throws if mode disallows unsafe data pointer access.
-// Views share their base's storage, so only call this where a fake is created.
-TORCH_API void mark_fake_storage(
+// Makes impl a fake of mode on device, as Python's FakeTensor.__new__ does for
+// every fake it makes, views included. It also marks impl's storage so that
+// reading its mutable data pointer warns, or throws if the mode disallows
+// unsafe data pointer access; a later, stricter setting thus also makes a
+// storage shared with earlier fakes throw once a new fake of it is made. Views
+// made inside kernels, which Python never wraps, are not marked: they only get
+// set_and_normalize_fake_device and set_fake_tensor_mode.
+TORCH_API void init_cpp_fake(
     c10::TensorImpl* impl,
-    const c10::FakeTensorMode& mode);
+    c10::Device device,
+    const std::shared_ptr<c10::FakeTensorMode>& mode);
 
 } // namespace at
