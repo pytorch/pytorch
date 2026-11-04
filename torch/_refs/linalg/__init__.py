@@ -106,24 +106,25 @@ def _check_vector_norm_args(
     if not (ord < 0.0 or ord == float("inf")):
         return
 
-    torch._check(
-        sym_or(
-            x.numel() != 0,
-            not isinstance(dim, IntLike) and dim is not None and len(dim) != 0,
-        ),
-        lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
-        "because the operation does not have an identity",
-    )
+    nonempty = x.numel() != 0
+    if not statically_known_true(nonempty):
+        torch._check(
+            sym_or(
+                nonempty,
+                not isinstance(dim, IntLike) and dim is not None and len(dim) != 0,
+            ),
+            lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
+            "because the operation does not have an identity",
+        )
 
-    shape = x.shape
-    if not statically_known_true(x.numel() != 0):
+        shape = x.shape
         if dim is not None and not isinstance(dim, IntLike):
             for d in dim:
                 d_wrapped = utils.canonicalize_dim(x.ndim, d)
                 torch._check(
                     sym_or(
-                        x.numel() != 0,
-                        x.ndim > 0 and shape[d_wrapped] != 0,
+                        nonempty,
+                        shape[d_wrapped] != 0,
                     ),
                     lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
                     f"dimension {d} because this dimension is empty and the "

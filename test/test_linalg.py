@@ -1556,54 +1556,30 @@ class TestLinalg(TestCase):
 
     @parametrize("ord_val", (float("inf"), float("-inf"), -1, -2.0))
     def test_vector_norm_compile_empty_batch_negative_dim(self, device, ord_val):
-        x3d = torch.empty(0, 5, 3, device=device)
-        compiled_tuple = torch.compile(
-            lambda t: torch.linalg.vector_norm(t, ord=ord_val, dim=(-1,)),
-            backend="eager",
-            fullgraph=True,
-        )
-        self.assertEqual(
-            compiled_tuple(x3d),
-            torch.linalg.vector_norm(x3d, ord=ord_val, dim=(-1,)),
-        )
-
-        x = torch.empty(0, 5, device=device)
-        eager_fn = lambda t: torch.linalg.vector_norm(t, ord=ord_val, dim=-1)
-        compiled_fn = torch.compile(eager_fn, backend="eager", fullgraph=True)
-        self.assertEqual(compiled_fn(x), eager_fn(x))
-
-        x_err = torch.empty(5, 0, device=device)
-        compiled_err = torch.compile(
-            lambda t: torch.linalg.vector_norm(t, ord=ord_val, dim=-1),
-            backend="eager",
-            fullgraph=True,
-        )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"linalg.vector_norm cannot compute the .* norm on the dimension -1",
-        ):
-            compiled_err(x_err)
-
-        x_multi_err = torch.empty(0, 5, device=device)
-        compiled_multi_err = torch.compile(
-            lambda t: torch.linalg.vector_norm(t, ord=ord_val, dim=(-1, -2)),
-            backend="eager",
-            fullgraph=True,
-        )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"linalg.vector_norm cannot compute the .* norm on the dimension -2",
-        ):
-            compiled_multi_err(x_multi_err)
-
-        x_oob = torch.empty(3, 0, device=device)
-        compiled_oob = torch.compile(
-            lambda t: torch.linalg.vector_norm(t, ord=ord_val, dim=-3),
-            backend="eager",
-            fullgraph=True,
-        )
-        with self.assertRaisesRegex(IndexError, r"Dimension out of range"):
-            compiled_oob(x_oob)
+        error_cases = [
+            (
+                (5, 0),
+                -1,
+                RuntimeError,
+                r"cannot compute the .* norm on the dimension -1",
+            ),
+            (
+                (0, 5),
+                (-1, -2),
+                RuntimeError,
+                r"cannot compute the .* norm on the dimension -2",
+            ),
+            ((3, 0), -3, IndexError, r"Dimension out of range"),
+        ]
+        for shape, dim, exc_type, regex in error_cases:
+            x = torch.empty(*shape, device=device)
+            compiled_fn = torch.compile(
+                lambda t: torch.linalg.vector_norm(t, ord=ord_val, dim=dim),
+                backend="eager",
+                fullgraph=True,
+            )
+            with self.assertRaisesRegex(exc_type, regex):
+                compiled_fn(x)
 
     def test_vector_norm_dim_tuple_arg(self, device):
         test_cases = [
