@@ -8,6 +8,7 @@
 
 #include "XpuptiScopeProfilerApi.h"
 #include "Config.h"
+#include "ScopeExit.h"
 #include "ThrowUtil.h"
 #include "XpuptiProfilerMacros.h"
 #include "XpuptiScopeProfilerConfig.h"
@@ -68,9 +69,16 @@ XpuptiScopeProfilerApi::safe_pti_scope_collection_handle_t::
 }
 
 void XpuptiScopeProfilerApi::enableScopeProfiler(const Config& cfg) {
-  // Since PTI 1.2, creating the handle enables metrics, needed by
-  // ptiMetricsGetDevices.
-  scopeHandleOpt_.emplace(exceptFromScopeHandleDestructor_);
+#if PTI_VERSION_AT_LEAST(1, 2)
+  XPUPTI_CALL(ptiMetricsEnable(nullptr));
+  const auto metricsGuard = makeScopeExit([this]() {
+    try {
+      XPUPTI_CALL(ptiMetricsDisable(nullptr));
+    } catch (...) {
+      exceptFromScopeHandleDestructor_ = std::current_exception();
+    }
+  });
+#endif
 
   uint32_t deviceCount = 0;
   XPUPTI_CALL(ptiMetricsGetDevices(nullptr, &deviceCount));
@@ -107,6 +115,8 @@ void XpuptiScopeProfilerApi::enableScopeProfiler(const Config& cfg) {
         std::runtime_error,
         "XPUPTI_PROFILER_ENABLE_PER_KERNEL has to be set to 1. Other variants are currently not supported.");
   }
+
+  scopeHandleOpt_.emplace(exceptFromScopeHandleDestructor_);
 
   const auto& requestedDevices = spcfg.xpuptiProfilerDevices();
 
