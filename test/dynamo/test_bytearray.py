@@ -20,12 +20,6 @@ from torch.testing._internal.common_utils import (
 )
 
 
-# CPython's test_translate builds this table with item assignment, so build
-# it once at import time instead.
-_rosetta = bytearray(range(256))
-_rosetta[ord("o")] = ord("e")
-
-
 class Indexable:
     def __init__(self, value=0):
         self.value = value
@@ -864,18 +858,20 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
     @make_dynamo_test
     def test_translate(self):
         b = self.type2test(b"hello")
-        self.assertEqual(b.translate(_rosetta), b"helle")
-        self.assertEqual(b.translate(_rosetta, b"l"), b"hee")
-        self.assertEqual(b.translate(_rosetta, delete=b"l"), b"hee")
+        rosetta = bytearray(range(256))
+        rosetta[ord("o")] = ord("e")
+        self.assertEqual(b.translate(rosetta), b"helle")
+        self.assertEqual(b.translate(rosetta, b"l"), b"hee")
+        self.assertEqual(b.translate(rosetta, delete=b"l"), b"hee")
         self.assertEqual(b.translate(None, b"e"), b"hllo")
         self.assertEqual(b, b"hello")
-        self.assertIsInstance(b.translate(_rosetta), self.type2test)
+        self.assertIsInstance(b.translate(rosetta), self.type2test)
         with self.assertRaisesRegex(
             ValueError, "translation table must be 256 characters long"
         ):
             b.translate(bytes(range(255)))
         with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
-            b.translate(_rosetta, 1)
+            b.translate(rosetta, 1)
         with self.assertRaisesRegex(
             TypeError, r"translate\(\) takes at least 1 positional argument \(0 given\)"
         ):
@@ -909,7 +905,7 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         def translate(ba, arg):
             return ba.translate(arg)
 
-        for fn, arg in ((replace, b"a"), (translate, _rosetta)):
+        for fn, arg in ((replace, b"a"), (translate, bytes(range(256)))):
             name = fn.__name__
             with self.subTest(method=name):
                 args = bytearray(b"ab"), BytesSubclass(arg)

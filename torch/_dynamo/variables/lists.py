@@ -2195,6 +2195,9 @@ class ByteArrayVariable(VariableTracker):
         if not isinstance(data, bytearray):
             raise AssertionError(f"data must be a bytearray, got {type(data).__name__}")
         self.data = data
+        # SourcelessBuilder cannot tell a captured existing bytearray from a new
+        # one, so a bytearray the traced operation allocates must be wrapped with
+        # create(), not VariableTracker.build().
         self.is_from_sourceless_builder = is_from_sourceless_builder
 
     def python_type(self) -> type[bytearray]:  # type: ignore[type-arg]
@@ -2202,11 +2205,7 @@ class ByteArrayVariable(VariableTracker):
 
     @staticmethod
     def create(data: bytearray) -> "ByteArrayVariable":
-        """Wrap a freshly allocated bytearray.
-
-        New bytearrays must use this factory, not VariableTracker.build, which
-        sends raw bytearrays through SourcelessBuilder with unknown provenance.
-        """
+        """Wrap a bytearray allocated by the traced operation as a new, writable value."""
         return ByteArrayVariable(data, mutation_type=ValueMutationNew())
 
     def as_python_constant(self) -> bytearray:
@@ -2267,7 +2266,7 @@ class ByteArrayVariable(VariableTracker):
                 f"{type(self).__name__}; every construction site should set "
                 "mutation_type."
             )
-        self._decline_store_to_existing(tx)
+        self._decline_store_to_existing()
         # value=None signals delete (CPython NULL sentinel).
         if pyindex_check(maybe_get_python_type(key)):
             index = pynumber_as_ssize_t(tx, key)
@@ -2344,7 +2343,7 @@ class ByteArrayVariable(VariableTracker):
                 f"{type(self).__name__}; every construction site should set "
                 "mutation_type."
             )
-        self._decline_store_to_existing(tx)
+        self._decline_store_to_existing()
         # value=None signals delete (CPython NULL sentinel).
         index = key.nb_index_impl(tx).as_python_constant()
         byte = None
@@ -2366,7 +2365,7 @@ class ByteArrayVariable(VariableTracker):
         self.data = new_data
         return ConstantVariable.create(None)
 
-    def _decline_store_to_existing(self, tx: "InstructionTranslatorBase") -> None:
+    def _decline_store_to_existing(self) -> None:
         # Stores run on a copy that side-effect replay writes back after the
         # frame. A bytearray that existed before the frame may share its buffer
         # with a memoryview, tensor or ndarray, which would read stale bytes,
@@ -2378,16 +2377,10 @@ class ByteArrayVariable(VariableTracker):
             isinstance(self.mutation_type, ValueMutationExisting)
             or self.is_from_sourceless_builder
         ):
-            from ..resume_execution import ContinueExecutionCache
-
             context = (
                 self.source.name
                 if self.source is not None
                 else "captured without a source"
-            )
-            is_resume = (
-                tx.output.root_tx.f_code
-                in ContinueExecutionCache.generated_code_metadata
             )
             unimplemented(
                 gb_type="bytearray store to an existing bytearray",
@@ -2403,11 +2396,6 @@ class ByteArrayVariable(VariableTracker):
                 "a graph break is treated as existing in the resume function.",
                 hints=[
                     "Return a new bytearray from the compiled function instead of storing into an existing one.",
-                    *(
-                        graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK
-                        if is_resume
-                        else []
-                    ),
                 ],
             )
 
