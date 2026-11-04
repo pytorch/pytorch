@@ -17,6 +17,7 @@
 #include <ATen/ops/stack.h>
 #endif
 
+#include <c10/util/irange.h>
 #include <vector>
 
 namespace {
@@ -43,11 +44,11 @@ Tensor _triu_mask(c10::SymInt n, int64_t dims, bool diagonal, TensorOptions opt)
   std::vector<Tensor> index_grids = at::meshgrid(std::vector<Tensor>(dims, range), "ij");
   Tensor mask = at::full_symint(index_grids[0].sym_sizes(), true, opt.dtype(kBool));
   if(diagonal) {
-    for(int64_t i = 0; i < dims - 1; i++) {
+    for(const auto i : c10::irange(dims - 1)) {
       mask *= index_grids[i] <= index_grids[i+1];
     }
   } else {
-    for(int64_t i = 0; i < dims - 1; i++) {
+    for(const auto i : c10::irange(dims - 1)) {
       mask *= index_grids[i] < index_grids[i+1];
     }
   }
