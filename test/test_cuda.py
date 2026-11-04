@@ -3023,9 +3023,21 @@ raise RuntimeError("device assert did not fire")
                 b = torch.randn(n, device="cuda")
                 out = torch.empty(n, device="cuda", dtype=dtype)
                 torch.add(a, b, out=out)
-                self.assertEqual(
-                    out, (a.cpu().float() + b.cpu()).to(dtype), atol=0, rtol=0
-                )
+                out, a, b = out.cpu(), a.cpu(), b.cpu()
+                expected = (a.float() + b).to(dtype)
+                if TEST_WITH_ROCM:
+                    # RDNA fuses the add and the conversion (v_fma_mix*), rounding the
+                    # exact sum once instead of through float. Accept that more accurate
+                    # result too. Rounding the double sum to float with round-to-odd
+                    # makes the final .to(dtype) a correct single rounding; a plain
+                    # double .to(dtype) would round through float again.
+                    s = a.double() + b.double()
+                    f = s.float()
+                    trunc = f.view(torch.int32) - (f.double().abs() > s.abs()).int()
+                    odd = torch.where(f.double() == s, f.view(torch.int32), trunc | 1)
+                    once = odd.view(torch.float32).to(dtype)
+                    expected = torch.where(out == once, once, expected)
+                self.assertEqual(out, expected, atol=0, rtol=0)
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     @gcIfJetson
