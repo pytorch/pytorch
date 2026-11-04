@@ -2208,9 +2208,22 @@ class TestLandTime(unittest.TestCase):
             "Inductor ends last for 50% of the pull, trunk and inductor heads, 50% after.",
             "Merges without -f (n=7): comment to merge p50 10 / p90 134 min; first PR pull run to merge p50 0.5 / p90 2.3 h.",
             "Merge comment started trunk (n=2, 1 more whose trunk run was not replayed left out): comment to merge p50 135 / p90 139 min, new p50 118 / p90 120 min. Trunk ran before the comment (n=2): p50 6 / p90 9 min.",
+            "Test job-hours: 21 -> 15",
+            "Trunk ends last for 100% of the pull and trunk heads, 100% after.",
+            "| Runner labels | Jobs | Queue p50 (min) | Queue p90 (min) | Job-hours | Test-step share |",
+            "| g | 6 | 1.0 | 1.0 | 11 | 92% |",
+            "| l | 11 | 1.0 | 1.0 | 10 | 85% |",
         ]:
             self.assertIn(line, out)
         # fmt: on
+        self.assertEqual(out[0], "r {'cpu': 0.5, 'gpu': 0.75, 'ind_cpu': 0.5, 'ind_gpu': 0.4}, 0 fork runs kept")  # fmt: skip
+        # With run 14 a fork PR's, it keeps r = 1 unless all_prs shrinks it too.
+        files["fork.json"]["run_head_repo"]["14"] = "someone/pytorch"
+        forked = write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), files)  # fmt: skip
+        kept = land_time.report(forked, r, all_prs=False)
+        self.assertTrue(kept[0].endswith(", 1 fork runs kept"), kept[0])
+        self.assertIn("| pull | 5 | 60 | 35 | 60 | 50 | 20 | 0.0% | 0.0% |", kept)
+        self.assertEqual(land_time.report(forked, r, all_prs=True), out)
         files["runs_inductor.json"] = []
         cache = write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), files)  # fmt: skip
         with self.assertRaisesRegex(SystemExit, "^no included inductor runs in "):

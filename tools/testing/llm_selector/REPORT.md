@@ -182,7 +182,7 @@ Time to signal (TTS) per workflow, in minutes:
 **Method.**
 - **Replay.** For every PR workflow run in the 30 days to 2026-11-03, each same-repo test job's `Test` step is shrunk by the ratio r of new to old test time for that job.
   - Each job keeps its start time. Builds and non-test jobs are unchanged, shards are not rebalanced, and queueing effects are ignored.
-  - A run is a fork PR's when its head repository is not pytorch/pytorch. For `ciflow/` pushes, the PR's head repository decides. Fork runs keep r = 1.
+  - A run is a fork PR's when its head repository is not pytorch/pytorch or is unknown (conservative: the run keeps today's time). For `ciflow/` pushes, the PR's head repository decides. Fork runs keep r = 1. This month's cache has a head repository for every PR run, so none is unknown.
   - Jobs that run every test under both policies keep r = 1 too (`land_time.selectable`). Configs whose test.sh branch never runs run_test.py (`land_time.NO_RUN_TEST`: docs_test, backwards_compat, libtorch_agnostic_targetting and the like) are dropped first. The rest are classified by job name with `score.job_runs_td`, the rule the truth uses, which keeps r = 1 for test.sh's NO_TD dynamo_cpython configs and the macOS and xpu jobs.
 - **The ratio r.**
   - In pull, trunk and rocm-mi300, r is 0.606 (CPU) and 0.732 (GPU), from the unrounded typical-change test-time shares.
@@ -543,7 +543,7 @@ python -m tools.testing.llm_selector.eval.intervals rows_eval.json rows_head_nop
 - the cost is `misc.runner_cost` of the `/ test (` jobs, over the 30 whole days before END's date;
 - a job counts only if `land_time.selectable` says the selection shrinks it, the same rule the Time to land replay uses;
 - PR hours are those of `pull_request` runs and `ciflow/` pushes, the runs that can get a selection;
-- a PR run is a fork PR's when its head repository is not pytorch/pytorch, and for `ciflow/` pushes the PR's head repository decides;
+- a PR run is a fork PR's when its head repository is not pytorch/pytorch or is unknown (conservative: its hours keep today's cost in both columns), and for `ciflow/` pushes the PR's head repository decides;
 - whether TD runs there is not queried; it is copied from the existing `WORKFLOWS` rows.
 
 ```
@@ -551,9 +551,9 @@ python -m tools.testing.llm_selector.eval.dollars --constants 1793672225
 ```
 
 **Time to land.** The replay in Time to land's Method was run from ClickHouse with five queries over the month to 2026-11-03. `eval/land_time.py` runs them and the simulation. The queries:
-- `default.workflow_run` for pull, trunk, inductor and rocm-mi300: event, head branch and sha, head repository, creation time, attempt, conclusion and PR number. PR runs are pull's `pull_request` runs and the others' `ciflow/` pushes.
-- `default.workflow_job`, first attempts only. Per run: the cancelled job count, and the last build and non-test job completion. Per test job: its completion time, `Test` step duration, job name and whether its runner is a GPU one.
-- `default.workflow_run` again for each PR run's head repository, and `default.pull_request` for the head repository of each PR a `ciflow/<label>/<PR>` push names: the fork-PR test.
+- `default.workflow_run` for pull, trunk, inductor and rocm-mi300: event, head branch and sha, creation time, attempt, conclusion and PR number. PR runs are pull's `pull_request` runs and the others' `ciflow/` pushes.
+- `default.workflow_job`, first attempts only. Per run: the cancelled job count, and the last build and non-test job completion. Per test job: its completion time, `Test` step duration, job name, whether its runner is a GPU one, job and queue seconds, and runner labels.
+- `default.workflow_run` again for each `pull_request` run's head repository, and `default.pull_request` for the head repository of each PR a `ciflow/<label>/<PR>` push names: the fork-PR test.
 - `default.merges` joined with `default.issue_comment` and the main `pull` run of the merge commit: comment, merge and first PR run times, for the merge rows.
 
 The simulation works as follows:
