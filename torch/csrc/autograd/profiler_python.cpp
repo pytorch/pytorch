@@ -1431,8 +1431,17 @@ class PostProcess {
       const auto python_tid =
           std::get<ExtraFields<E>>((*it)->extra_fields_).python_tid_;
       if ((*it)->start_tid_ == NoTID && SOFT_ASSERT(E == EventType::PyCall)) {
+        // A thread that was parked for the whole profile has no observed event
+        // to take a system TID from. `build_tree` keys its per-thread stacks on
+        // `start_tid_`, so each such thread needs a placeholder of its own:
+        // sharing one would splice the second parked thread's start frames into
+        // the first thread's stack as children. `python_tid == 0` still yields
+        // `NoTID`, keeping the single-parked-thread case unchanged.
         const auto& tid_info =
-            tid_map.insert({python_tid, {NoTID, kineto::DeviceAndResource()}})
+            tid_map
+                .insert(
+                    {python_tid,
+                     {NoTID - python_tid, kineto::DeviceAndResource()}})
                 .first->second;
         (*it)->start_tid_ = tid_info.first;
         (*it)->kineto_info_ = tid_info.second;
