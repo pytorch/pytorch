@@ -250,8 +250,9 @@ def data_file_readers(
     reading a file that needs no further reader and, by file, those reading a
     file only they can read. A file needs no further reader when it is deleted,
     when NO_READER_RE matches it, when a driver runs its directory (see
-    edited_tests), or when a C++ test reads it. None for more than
-    MAX_DATA_FILES files only their readers can read. A file is read by the paths naming it outside a # comment line, as test_run.py
+    edited_tests), or when a C++ test names it outside a // comment line.
+    None for more than MAX_DATA_FILES files only their readers can read. A file
+    is read by the paths naming it outside a # comment line, as test_run.py
     runs bin/test_script.py; a .py file also by its importers; and an expect
     file (see EXPECT_RE) also by the paths defining a class whose name starts
     with its test class, as test_tensorboard.py builds the path of
@@ -262,9 +263,10 @@ def data_file_readers(
     if len(data) > MAX_DATA_FILES:
         return None
 
-    def name_pattern(files: list[str]) -> str:
+    def name_pattern(files: list[str], cpp: bool = False) -> str:
         names = alts(f.rsplit("/", 1)[-1] for f in files)
-        return rf"^[[:space:]]*([^#[:space:][:alnum:]_.-]|[^#[:space:]].*[^[:alnum:]_.-])?({names})([^[:alnum:]_.-]|$)"
+        first = "([^#/[:space:]]|/[^/])" if cpp else "[^#[:space:]]"
+        return rf"^[[:space:]]*([^#[:space:][:alnum:]_.-]|{first}.*[^[:alnum:]_.-])?({names})([^[:alnum:]_.-]|$)"
 
     # A deleted expect file breaks the tests that still assert against it.
     classes = [m[1] for f in exempt if (m := EXPECT_RE.match(f))]
@@ -278,7 +280,8 @@ def data_file_readers(
         if f.endswith(".py"):
             patterns.append(import_pattern([f]))
         found = [r for r in grep("|".join(f"({p})" for p in patterns)) if r != f]
-        if any(r.startswith("test/cpp/") for r in found):
+        cpp = {r for r in found if r.startswith("test/cpp/") and not r.endswith((".md", ".rst"))}  # fmt: skip
+        if cpp and cpp & set(grep(name_pattern([f], cpp=True))):
             readers += found
         else:
             read_by[f] = found
@@ -587,6 +590,7 @@ class AppliedSelection:
     selection: Selection
     split: Split
     td_enabled: bool
+    enforcement_enabled: bool
     enforced: bool
     kept_td: bool
     previous_failures_known: bool
@@ -602,14 +606,15 @@ class AppliedSelection:
         selector_error tells a failed selector, which is never enforced, from
         a deliberate run_all. enforce_requested is the selection's, also true
         when enforced and whether or not TD is on: the requested enforcements
-        that fell back to TD are the rows with enforce_requested and
-        td_enabled but not enforced, on PR jobs."""
+        that fell back to TD are the rows with enforcement_enabled,
+        enforce_requested and td_enabled but not enforced, on PR jobs."""
         split, times = self.split, self.file_time
         files = "\n".join(sorted(times)).encode()
         return {
             "list_id": hashlib.sha256(files).hexdigest()[:12],
             "enforced": self.enforced,
             "enforce_requested": self.selection.enforce_requested,
+            "enforcement_enabled": self.enforcement_enabled,
             "td_enabled": self.td_enabled,
             "run_all": self.selection.run_all,
             "selector_error": self.selection.error,
@@ -635,6 +640,7 @@ class AppliedSelection:
             "covered": f in self.split.covered,
             "enforced": self.enforced,
             "enforce_requested": self.selection.enforce_requested,
+            "enforcement_enabled": self.enforcement_enabled,
             "td_enabled": self.td_enabled,
             "in_td_include": test in self.td_include_runs,
             "hedged": f in self.split.hedged,
@@ -680,7 +686,7 @@ def apply_selection(
     td_on_pr = td_enabled and get_pr_number() is not None
     wanted = ENFORCEMENT_ENABLED and td_on_pr and selection.enforce and selection.error is None  # fmt: skip
     # select_tests clears enforce when the selector fails, but keeps the request.
-    requested = td_on_pr and selection.enforce_requested
+    requested = ENFORCEMENT_ENABLED and td_on_pr and selection.enforce_requested
     if not sum(file_time.values()):
         fallback = "no test times"
     elif previous_failures is None:
@@ -707,6 +713,7 @@ def apply_selection(
         selection=selection,
         split=split,
         td_enabled=td_enabled,
+        enforcement_enabled=ENFORCEMENT_ENABLED,
         enforced=enforced,
         kept_td=wanted and not enforced,
         previous_failures_known=previous_failures is not None,
