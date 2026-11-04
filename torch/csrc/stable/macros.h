@@ -2,11 +2,11 @@
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Exception.h>
+#include <torch/headeronly/util/shim_utils.h>
 
 #include <ctime>
 #include <iomanip>
 #include <iostream>
-#include <sstream>
 #include <stdexcept>
 
 #if defined(_WIN32)
@@ -169,17 +169,8 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
     const char* call,
     const char* file,
     int64_t line) {
-  std::stringstream ss;
   const auto& error_msg_without = TORCH_DYNAMIC_VERSION_CALL_2_13_0(
       torch_exception_get_what_without_backtrace, torch_shim_bc_const_char_ptr);
-  if (error_msg_without) {
-    ss << error_msg_without;
-    ss << " (originally from " << call << " API call failed at " << file
-       << ", line " << line << ")";
-  } else {
-    ss << call << " API call failed at " << file << ", line " << line;
-  }
-
   const auto& error_msg = TORCH_DYNAMIC_VERSION_CALL_2_13_0(
       torch_exception_get_what, torch_shim_bc_const_char_ptr);
   if (error_msg) {
@@ -190,10 +181,8 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
               << "] Exception across libtorch C API boundary: " << error_msg;
   }
 
-  // STD_TORCH_CHECK would stamp this helper's file and line over the
-  // caller's, which the message above already carries.
-  // @allow-raw-throw: keeps the caller's location in the message
-  throw std::runtime_error(ss.str());
+  torch::headeronly::detail::throw_exception(
+      error_msg_without, call, file, line);
 }
 HIDDEN_NAMESPACE_END(torch, stable, detail)
 
