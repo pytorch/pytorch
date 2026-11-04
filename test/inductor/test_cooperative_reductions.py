@@ -17,6 +17,7 @@ from torch.testing import assert_close
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -26,9 +27,9 @@ class TestVarianceReductionHeuristic(TestCase):
         super().setUp()
         torch._dynamo.reset()
 
-    def _skip_if_not_cuda(self):
-        if GPU_TYPE != "cuda":
-            self.skipTest("CUDA-specific variance heuristic")
+    def _skip_if_not_gpu(self):
+        if GPU_TYPE not in ["cuda", "xpu"]:
+            self.skipTest("CUDA/XPU-specific variance heuristic")
 
     def _dtypes(self):
         dtypes = [torch.float16]
@@ -36,8 +37,9 @@ class TestVarianceReductionHeuristic(TestCase):
             dtypes.append(torch.bfloat16)
         return dtypes
 
+    @skipIfXpu(msg="intel/torch-xpu-ops/issues/5221")
     def test_var_mean_uses_two_step_for_non_split_reductions(self):
-        self._skip_if_not_cuda()
+        self._skip_if_not_gpu()
 
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
@@ -54,7 +56,7 @@ class TestVarianceReductionHeuristic(TestCase):
             self.assertNotIn("welford_reduce", source_code)
 
     def test_var_mean_keeps_welford_for_float32_reductions(self):
-        self._skip_if_not_cuda()
+        self._skip_if_not_gpu()
 
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
@@ -68,7 +70,7 @@ class TestVarianceReductionHeuristic(TestCase):
 
     @config.patch("triton.force_cooperative_reductions", True)
     def test_var_mean_keeps_welford_for_small_reductions(self):
-        self._skip_if_not_cuda()
+        self._skip_if_not_gpu()
 
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
@@ -91,7 +93,7 @@ class TestVarianceReductionHeuristic(TestCase):
         }
     )
     def test_var_mean_keeps_welford_for_split_reductions(self):
-        self._skip_if_not_cuda()
+        self._skip_if_not_gpu()
 
         def fn(x):
             return torch.var_mean(x, dim=-1, correction=0)
