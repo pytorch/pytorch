@@ -4,6 +4,7 @@
 # numerical coverage.
 
 import collections
+import itertools
 import pathlib
 import re
 import sys
@@ -264,19 +265,23 @@ class TestKernelGeneral(TestCase):
     def test_norm2_tree_leaves_match_across_trees(self):
         """Round norm2 tree leaves alike in the row and indexed trees, whose row bits
         test_inner_tree_order pins."""
-        for dtype, acc, bits in (
+        dtypes = (
             (torch.float32, cutlass.Float32, torch.int32),
             (torch.float64, cutlass.Float64, torch.int64),
-        ):
-            with self.subTest(dtype=dtype):
-                x = torch.randn(64, 4000, device="cuda", dtype=dtype)[:, ::2]
+        )
+        # N = 2000 plans one looped stage and N = 100003 a two-stage split.
+        shapes = ((64, 2000, ("",)), (8, 100003, ("1", "2")))
+        for (dtype, acc, bits), (m, n, stages) in itertools.product(dtypes, shapes):
+            with self.subTest(dtype=dtype, n=n):
+                x = torch.randn(m, 2 * n, device="cuda", dtype=dtype)[:, ::2]
                 trait, kw = T.NormOps(2, acc=acc), {"order": "inner_tree"}
-                row_key, idx_key = f"norm2_rows_{dtype}", f"norm2_indexed_{dtype}"
+                key = f"norm2_{dtype}_{n}"
+                row_key, idx_key = f"{key}_rows", f"{key}_indexed"
                 rows = kg.reduce_dim(trait, row_key, x.contiguous(), [1], dtype, **kw)
                 indexed = kg.reduce_dim(trait, idx_key, x, [1], dtype, **kw)
-                row_tags = {k[0][:8] for k in rt._CACHE if k[1] == row_key}
-                self.assertIn("rowitree", row_tags)
-                self.assertIn("genitree", {t[:8] for t in _plan_tags(idx_key)})
+                row_tags = {k[0] for k in rt._CACHE if k[1] == row_key}
+                self.assertEqual(row_tags, {f"rowitree{s}" for s in stages})
+                self.assertEqual(_plan_tags(idx_key), {f"genitree{s}" for s in stages})
                 self.assertEqual(rows.view(bits), indexed.view(bits))
                 self.assertEqual(rows, torch.linalg.vector_norm(x, dim=1))
 
