@@ -336,10 +336,8 @@ class NCCLComm {
 
   ncclResult_t checkForNcclError();
 
-  // Thread-safe wrapper for ncclCommGetAsyncError that acquires the mutex
-  // before calling the NCCL API. This is needed because NCCL does not provide
-  // thread-safety guarantees for ncclCommGetAsyncError, and both the main
-  // thread and watchdog thread may call it concurrently.
+  // Thread-safe wrapper for ncclCommGetAsyncError. See Note [Serialize
+  // ncclCommGetAsyncError] in torch/csrc/cuda/nccl.h.
   ncclResult_t getAsyncError(ncclResult_t* asyncError);
 
   ncclResult_t registerSegment(

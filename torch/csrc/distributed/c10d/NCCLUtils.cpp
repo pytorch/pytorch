@@ -180,8 +180,6 @@ void NCCLComm::waitReady(bool longInterval) {
   if (aborted_)
     return;
   // If timeout is reached, throw an exception.
-  // (RohitRathore1) Note: We already hold the mutex_ lock here, so the direct
-  // call to ncclCommGetAsyncError is safe from concurrent access.
   ncclResult_t result = ncclInProgress;
   auto startTimepoint = std::chrono::steady_clock::now();
   auto timeout = nccl_nonblocking_timeout();
@@ -201,7 +199,7 @@ void NCCLComm::waitReady(bool longInterval) {
     } else {
       sched_yield();
     }
-    ncclCommGetAsyncError(ncclComm_, &result);
+    getAsyncError(&result);
   }
   if (result != ncclSuccess) {
     std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +
@@ -418,8 +416,6 @@ void NCCLComm::abort(std::optional<std::string> commFailureReason) {
   LOG(INFO) << "Aborting ncclComm_ " << ncclComm_ << " with reason: "
             << (commFailureReason ? *commFailureReason
                                   : "No abort reason provided.");
-  // Note: We already hold the mutex_ lock here, so the direct call to
-  // ncclCommGetAsyncError is safe from concurrent access.
   ncclResult_t result = ::ncclCommAbort(ncclComm_);
   auto startTimepoint = std::chrono::steady_clock::now();
   auto timeout = nccl_nonblocking_timeout();
@@ -434,7 +430,7 @@ void NCCLComm::abort(std::optional<std::string> commFailureReason) {
       TORCH_CHECK_WITH(DistBackendError, false, err);
     }
     sched_yield();
-    ncclCommGetAsyncError(ncclComm_, &result);
+    getAsyncError(&result);
   }
   if (result != ncclSuccess) {
     std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +
@@ -470,13 +466,15 @@ ncclResult_t NCCLComm::checkForNcclError() {
   if (ncclAsyncErr_ != ncclSuccess) {
     return ncclAsyncErr_;
   }
-  C10D_NCCL_CHECK(
-      ncclCommGetAsyncError(ncclComm_, &ncclAsyncErr_), commFailureReason_);
+  C10D_NCCL_CHECK(getAsyncError(&ncclAsyncErr_), commFailureReason_);
   return ncclAsyncErr_;
 }
 
 ncclResult_t NCCLComm::getAsyncError(ncclResult_t* asyncError) {
   LockType lock(mutex_);
+  // See Note [Serialize ncclCommGetAsyncError] in torch/csrc/cuda/nccl.h
+  std::lock_guard<std::mutex> async_error_lock(
+      torch::cuda::nccl::get_async_error_mutex());
   return ncclCommGetAsyncError(ncclComm_, asyncError);
 }
 
