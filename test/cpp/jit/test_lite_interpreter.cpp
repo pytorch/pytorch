@@ -1,6 +1,7 @@
 #include <test/cpp/jit/test_utils.h>
 
 #include <c10/core/TensorOptions.h>
+#include <caffe2/serialize/inline_container.h>
 #include <gtest/gtest.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
@@ -17,6 +18,7 @@
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
@@ -2073,7 +2075,94 @@ TEST(LiteInterpreterUpgraderTest, DivScalarInplaceIntV2) {
   ASSERT_TRUE(actual_output.equal(expect_output));
 }
 
+TEST(LiteInterpreterUpgraderTest, DivTensorV2OperatorIndexOutOfRange) {
+  // Same model as DivTensorV2 (operator version 2, so upgraders run), with
+  // every OP instruction pointing past its 3-entry operator table.
+  caffe2::serialize::PyTorchStreamReader reader(resolveTestDataFile(
+      __FILE__, "upgrader_models/test_versioned_div_tensor_v2.ptl"));
+  std::function<IValue(const IValue&)> corrupt = [&](const IValue& v) {
+    if (!v.isTuple()) {
+      return v;
+    }
+    const auto& elements = v.toTupleRef().elements();
+    if (elements.size() == 3 && elements[0].isString() &&
+        elements[0].toStringRef() == "OP") {
+      return IValue(c10::ivalue::Tuple::create(elements[0], 1000, elements[2]));
+    }
+    std::vector<IValue> corrupted;
+    for (const auto& e : elements) {
+      corrupted.push_back(corrupt(e));
+    }
+    return IValue(c10::ivalue::Tuple::create(std::move(corrupted)));
+  };
+
+  std::stringstream ss;
+  caffe2::serialize::PyTorchStreamWriter writer([&](const void* buf, size_t n) {
+    ss.write(static_cast<const char*>(buf), n);
+    return n;
+  });
+  for (const auto& name : reader.getAllRecords()) {
+    auto [data, size] = reader.getRecord(name);
+    if (name == "bytecode.pkl") {
+      auto bytecode = unpickle(static_cast<const char*>(data.get()), size);
+      auto pickled = pickle(corrupt(bytecode));
+      writer.writeRecord(name, pickled.data(), pickled.size());
+    } else {
+      writer.writeRecord(name, data.get(), size);
+    }
+  }
+  writer.writeEndOfFile();
+
+  ASSERT_THROWS_WITH_MESSAGE(
+      _load_for_mobile(ss), "applyUpgrader: operator index 1000 out of range");
+}
+
 #endif // !defined(FB_XPLAT_BUILD)
+
+namespace {
+std::unique_ptr<mobile::Function> makeUpgraderTestFunction(
+    size_t num_operators,
+    int64_t op_index) {
+  auto function =
+      std::make_unique<mobile::Function>(c10::QualifiedName("test"));
+  for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    function->append_function(byteCodeFunctionWithOperator.function);
+  }
+  for (size_t i = 0; i < num_operators; i++) {
+    function->append_operator("aten::div", "Tensor", std::nullopt);
+  }
+  function->append_instruction(OpCode::OP, op_index, 0);
+  return function;
+}
+} // namespace
+
+TEST(LiteInterpreterUpgraderTest, ApplyUpgraderRejectsOutOfRangeOperatorIndex) {
+  const std::vector<std::pair<size_t, int64_t>> cases = {
+      {3, -1}, {3, 3}, {3, std::numeric_limits<int32_t>::max()}, {0, 0}};
+  for (const auto& [num_operators, op_index] : cases) {
+    auto function = makeUpgraderTestFunction(num_operators, op_index);
+    EXPECT_THROW(applyUpgrader(function.get(), 2), c10::Error)
+        << "operator index " << op_index << " with " << num_operators
+        << " operators";
+  }
+}
+
+TEST(LiteInterpreterUpgraderTest, ApplyUpgraderLastOperatorIndex) {
+  auto upgraded = makeUpgraderTestFunction(3, 2);
+  applyUpgrader(upgraded.get(), 2);
+  const auto& upgraded_inst = upgraded->get_code().instructions_[0];
+  EXPECT_EQ(upgraded_inst.op, OpCode::CALL);
+  EXPECT_EQ(
+      upgraded_inst.X,
+      getOperatorVersionMapForMobile().at("aten::div.Tensor")[0].index);
+
+  // No upgrader covers operator version 4, so the instruction is untouched.
+  auto unchanged = makeUpgraderTestFunction(3, 2);
+  applyUpgrader(unchanged.get(), 4);
+  const auto& unchanged_inst = unchanged->get_code().instructions_[0];
+  EXPECT_EQ(unchanged_inst.op, OpCode::OP);
+  EXPECT_EQ(unchanged_inst.X, 2);
+}
 
 TEST(LiteInterpreterUpgraderTest, Upgrader) {
   std::vector<mobile::Function> upgrader_functions;
