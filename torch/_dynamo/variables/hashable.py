@@ -9,7 +9,6 @@ during symbolic execution. Used by both ConstDictVariable and SetVariable.
 import functools
 import inspect
 import types
-from collections import OrderedDict
 from collections.abc import Iterable, Iterator
 from typing import cast, TYPE_CHECKING
 
@@ -33,6 +32,25 @@ from .base import VariableTracker
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+
+_KeyStorage = dict["HashableTracker", VariableTracker]
+
+# Identity comparisons avoid callbacks from key metaclasses. Heap classes are
+# classified per key, since their equality implementation can be reassigned.
+_SAFE_KEY_TYPES = (object, type, int, float, complex, str, bytes, bool, type(None)) + (
+    tuple,
+    frozenset,
+    types.FunctionType,
+    types.MethodType,
+    types.BuiltinMethodType,
+)
+_SAFE_KEY_EQUALITIES = (
+    *(inspect.getattr_static(kind, "__eq__", None) for kind in _SAFE_KEY_TYPES),
+    torch.Tensor.__eq__,
+    torch.device.__eq__,
+    torch.Size.__eq__,  # THPSize uses PyTuple_Type.tp_richcompare.
+)
 
 
 def raise_unhashable(
@@ -88,51 +106,62 @@ def is_hashable(x: VariableTracker) -> bool:
 
 
 class BuiltinMethodKeyTracker:
-    """Guard receiver aliasing without pinning every internal method-key hash."""
+    """Keep collision metadata and receiver relations local to participating containers."""
 
     def __init__(self) -> None:
         self.receivers: dict[Source, object] = {}
-        self.input_methods: set[Source] = set()
+        self.parents: dict[Source, Source] = {}
+        self.summaries: dict[int, tuple[_KeyStorage, KeySummary]] = {}
         self.has_method_keys = False
-        self.has_custom_keys = False
 
     def clear(self) -> None:
         self.receivers.clear()
-        self.input_methods.clear()
+        self.parents.clear()
+        self.summaries.clear()
         self.has_method_keys = False
-        self.has_custom_keys = False
+
+    def representative(self, source: Source) -> Source:
+        path = []
+        parent = self.parents.setdefault(source, source)
+        while parent != source:
+            path.append(source)
+            source, parent = parent, self.parents[parent]
+        for item in path:
+            self.parents[item] = source
+        return source
+
+    def connect(self, first: Source, second: Source) -> None:
+        self.parents[self.representative(second)] = self.representative(first)
 
     def install_alias_guard(self) -> None:
-        if len(self.receivers) < 2:
-            return
         from ..guards import _receiver_alias_pattern
 
-        sources = tuple(self.receivers)
-        install_guard(
-            sources[0].make_guard(
-                functools.partial(
-                    GuardBuilder.BUILTIN_METHOD_RECEIVER_ALIAS,
-                    sources=sources,
-                    aliases=_receiver_alias_pattern(tuple(self.receivers.values())),
+        groups: dict[Source, list[Source]] = {}
+        for source in self.parents:
+            groups.setdefault(self.representative(source), []).append(source)
+        for group in groups.values():
+            if len(group) < 2:
+                continue
+            source = next(
+                (item for item in group if not is_from_skip_guard_source(item)), None
+            )
+            if source is None:
+                continue
+            sources = tuple(group)
+            install_guard(
+                source.make_guard(
+                    functools.partial(
+                        GuardBuilder.BUILTIN_METHOD_RECEIVER_ALIAS,
+                        sources=sources,
+                        aliases=_receiver_alias_pattern(
+                            tuple(self.receivers[item] for item in sources)
+                        ),
+                    )
                 )
             )
-        )
-
-    def add_custom_key(self) -> None:
-        self.has_custom_keys = True
-
-    def add_input_method(self, tx: "InstructionTranslatorBase", source: Source) -> None:
-        self.input_methods.add(source)
-        if self.has_method_keys:
-            # The receiver relation alone cannot detect a different C function.
-            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            self.add_receiver(tx, AttrSource(source, "__self__"))
 
     def activate(self, tx: "InstructionTranslatorBase") -> None:
-        if not self.has_method_keys:
-            self.has_method_keys = True
-            for input_source in self.input_methods:
-                self.add_input_method(tx, input_source)
+        self.has_method_keys = True
         tracer = tx.output.current_tracer
         while tracer is not None:
             tracer.has_builtin_method_keys = True
@@ -144,64 +173,154 @@ class BuiltinMethodKeyTracker:
         self.activate(tx)
         if source is None:
             return None
-        if is_from_skip_guard_source(source):
-            return tx.output.resolve_source_value(source)
-        receiver = tx.output.resolve_source_value(source)
-        self.receivers.setdefault(source, receiver)
-        return receiver
+        if source not in self.receivers:
+            self.receivers[source] = tx.output.resolve_source_value(source)
+        return self.receivers[source]
+
+    def summary(self, keys: Iterable["HashableTracker"]) -> "KeySummary":
+        if isinstance(keys, dict):
+            cached = self.summaries.get(id(keys))
+            if cached is not None and cached[1].size == len(keys):
+                return cached[1]
+            summary = KeySummary(
+                self,
+                (
+                    key
+                    for key, value in keys.items()
+                    if type(value) is not variables.DeletedVariable
+                ),
+            )
+            summary.size = len(keys)
+            self.summaries[id(keys)] = (keys, summary)
+            return summary
+        return KeySummary(self, keys)
 
 
-def guard_key_collisions(*collections: Iterable["HashableTracker"]) -> None:
-    """Guard only keys that can meet in this dictionary or set operation."""
+class KeySummary:
+    def __init__(
+        self, tracker: BuiltinMethodKeyTracker, keys: Iterable["HashableTracker"]
+    ) -> None:
+        self.tracker = tracker
+        self.receivers: dict[Source | None, None] = {}
+        self.input_methods: set[Source] = set()
+        self.has_methods = False
+        self.custom = False
+        self.metaclass = False
+        self.connected = False
+        self.pinned = False
+        self.size = 0
+        self.first: Source | None = None
+        for key in keys:
+            self.add(key)
+
+    def add(
+        self, key: "HashableTracker", tx: "InstructionTranslatorBase | None" = None
+    ) -> None:
+        self.receivers.update(dict.fromkeys(key.method_receivers))
+        self.input_methods.update(key.input_methods)
+        self.has_methods |= key.has_builtin_method and not key.method_keys_guarded
+        self.custom |= key.has_custom_equality
+        self.metaclass |= key.has_custom_metaclass_equality
+        if self.connected and tx is not None:
+            self.connect(tx, key.method_receivers)
+            if self.pinned:
+                for source in key.method_receivers:
+                    if source is not None:
+                        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+
+    def connect(
+        self,
+        tx: "InstructionTranslatorBase",
+        sources: Iterable[Source | None] | None = None,
+    ) -> None:
+        self.connected = True
+        for method in self.input_methods:
+            install_guard(method.make_guard(GuardBuilder.ID_MATCH))
+        self.input_methods.clear()
+        for source in self.receivers if sources is None else sources:
+            if source is None:
+                continue
+            self.tracker.add_receiver(tx, source)
+            if self.first is None:
+                self.first = source
+            self.tracker.connect(self.first, source)
+
+
+def guard_key_collisions(
+    *collections: Iterable["HashableTracker"],
+) -> KeySummary | None:
+    """Guard comparisons at the containers that can actually meet."""
     from ..symbolic_convert import InstructionTranslator
 
     try:
         tx = InstructionTranslator.current_tx()
     except AttributeError:
-        return
-    if tx is None:
-        return
+        return None
+    if tx is None or not tx.output.builtin_method_keys.has_method_keys:
+        return None
     tracker = tx.output.builtin_method_keys
-    # Most operations contain neither methods nor custom equality. These frame
-    # flags avoid scanning their keys; they never install a guard themselves.
-    if (
-        not (tracker.has_method_keys or tracker.input_methods)
-        or not tracker.has_custom_keys
-    ):
-        return
-    receivers = set()
-    custom = metaclass = False
-    for collection in collections:
-        keys = (
-            dict.__iter__(collection)
-            if isinstance(collection, OrderedDict)
-            else collection
-        )
-        for key in keys:
-            receivers.update(key.method_receivers)
-            custom |= key.has_custom_equality
-            metaclass |= key.has_custom_metaclass_equality
-    if not receivers or not custom:
-        return
-    tracker.activate(tx)
-    if metaclass:
-        unimplemented(
-            gb_type="Builtin method keys with custom metaclass equality",
-            context="builtin method key hashing",
-            explanation="Dynamo cannot trace custom metaclass equality against builtin method keys.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
-    if None in receivers:
-        unimplemented(
-            gb_type="Builtin method keys with custom equality and local receivers",
-            context="builtin method key hashing",
-            explanation="Custom key equality can observe runtime method hash collisions, "
-            "but a locally created receiver has no guardable identity.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
-    for source in receivers:
-        if source is not None:
-            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+    summaries = [tracker.summary(keys) for keys in collections]
+    methods = [summary for summary in summaries if summary.has_methods]
+    participants = [summary for summary in summaries if summary.receivers]
+    custom = any(summary.custom for summary in summaries)
+    if methods and custom:
+        if any(summary.metaclass for summary in summaries):
+            unimplemented(
+                gb_type="Builtin method keys with custom metaclass equality",
+                context="builtin method key hashing",
+                explanation="Dynamo cannot trace custom metaclass equality against builtin method keys.",
+                hints=[
+                    "Avoid mixing class keys with custom equality and builtin method keys.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        if any(None in summary.receivers for summary in methods):
+            unimplemented(
+                gb_type="Builtin method keys with custom equality and local receivers",
+                context="builtin method key hashing",
+                explanation="Custom key equality can observe hash collisions with builtin methods, "
+                "but a locally created receiver cannot be identity-guarded.",
+                hints=[
+                    "Avoid mixing keys with custom equality and methods of locally created containers.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+    # A literal-only operand cannot equal a method. Do not activate unrelated input keys.
+    if methods and (custom or len(collections) == 1 or len(participants) > 1):
+        first = None
+        for summary in participants:
+            if not summary.connected:
+                summary.connect(tx)
+            if summary.first is not None:
+                if first is None:
+                    first = summary.first
+                tracker.connect(first, summary.first)
+            if custom and not summary.pinned:
+                for source in summary.receivers:
+                    if source is not None:
+                        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+                summary.pinned = True
+    return summaries[0] if collections and isinstance(collections[0], dict) else None
+
+
+def store_item(
+    items: _KeyStorage, key: "HashableTracker", value: VariableTracker
+) -> None:
+    summary = guard_key_collisions(items, (key,))
+    size = len(items)
+    items[key] = value
+    if summary is not None and len(items) != size:
+        from ..symbolic_convert import InstructionTranslator
+
+        summary.add(key, InstructionTranslator.current_tx())
+        summary.size = len(items)
+
+
+def invalidate_key_summary(items: _KeyStorage) -> None:
+    from ..symbolic_convert import InstructionTranslator
+
+    tx = InstructionTranslator.current_tx()
+    tx.output.builtin_method_keys.summaries.pop(id(items), None)
 
 
 class RawHash:
@@ -221,22 +340,48 @@ class RawHash:
         return self.h
 
 
-def _builtin_method_sources(value: object, source: Source) -> Iterator[Source]:
+def _key_metadata(
+    value: object, source: Source
+) -> tuple[tuple[Source, ...], tuple[type | None, ...]]:
     from .builder import bound_builtin_method_descriptor
 
-    if type(value) is tuple:
-        for index, item in enumerate(value):
-            yield from _builtin_method_sources(item, GetItemSource(source, index))
-    elif type(value) is frozenset:
-        for index, item in enumerate(value):
-            yield from _builtin_method_sources(
-                item, NonSerializableSetGetItemSource(source, index)
+    methods = []
+    key_types: list[type | None] = []
+    pending = [(value, source)]
+    while pending:
+        value, source = pending.pop()
+        kind = type(value)
+        if issubclass(kind, tuple) and kind is not torch.Size:
+            key_types.append(kind)
+            if inspect.getattr_static(kind, "__getitem__") is not tuple.__getitem__:
+                key_types.append(None)  # The source would invoke an overridden indexer.
+            else:
+                pending.extend(
+                    (item, GetItemSource(source, index))
+                    for index, item in enumerate(
+                        tuple.__iter__(cast(tuple[object, ...], value))
+                    )
+                )
+        elif kind is frozenset:
+            pending.extend(
+                (item, NonSerializableSetGetItemSource(source, index))
+                for index, item in enumerate(cast(frozenset[object], value))
             )
-    elif (
-        type(value) is types.BuiltinMethodType
-        and bound_builtin_method_descriptor(value) is not None
-    ):
-        yield source
+        elif issubclass(kind, frozenset):
+            # Subclass iteration can change the source's meaning.
+            key_types += [kind, None]
+        else:
+            key_types.append(kind)
+            if (
+                kind is types.BuiltinMethodType
+                and bound_builtin_method_descriptor(value) is not None
+            ):
+                methods.append(source)
+    return tuple(methods), tuple(key_types)
+
+
+def _builtin_method_sources(value: object, source: Source) -> Iterator[Source]:
+    yield from _key_metadata(value, source)[0]
 
 
 class HashableTracker:
@@ -247,29 +392,51 @@ class HashableTracker:
     """
 
     vt: VariableTracker
+    input_methods: tuple[Source, ...] = ()
     has_builtin_method: bool = False
+    method_keys_guarded: bool = False
     method_receivers: tuple[Source | None, ...] = ()
     has_custom_equality: bool = False
     has_custom_metaclass_equality: bool = False
 
     _MISSING = object()
 
-    def __init__(self, vt: VariableTracker) -> None:
+    def __init__(self, vt: VariableTracker, *, known_hash: int | None = None) -> None:
+        if known_hash is not None:
+            # Only exact-int hook IDs use a hash from the source dictionary.
+            # Keep them lazy until user code observes the key or its hash.
+            self.vt = vt
+            self._hash, self._hash_is_identity = known_hash, False
+            return
         # We specialize SymNodes
         vt = specialize_symnode(vt)
+        if type(vt) is variables.ConstantVariable and (
+            type(vt.value) is int or type(vt.value) is str
+        ):
+            self.vt = vt
+            self._hash, self._hash_is_identity = hash(vt.value), False
+            return
 
         from .descriptors import BoundBuiltinMethodVariable
 
         input_methods = ()
+        lazy_key_types = None
         if isinstance(vt, variables.LazyVariableTracker):
             if vt.is_realized() or vt.source is None:
                 vt = vt.realize()
             else:
-                input_methods = tuple(
-                    _builtin_method_sources(vt.original_value(), vt.source)
+                input_methods, lazy_key_types = _key_metadata(
+                    vt.original_value(), vt.source
                 )
                 if not isinstance(vt.source, ConstDictKeySource):
-                    vt = vt.realize()
+                    if (
+                        type(vt.original_value()) is types.BuiltinMethodType
+                        and input_methods
+                    ):
+                        install_guard(vt.source.make_guard(GuardBuilder.ID_MATCH))
+                        self.method_keys_guarded = True
+                    else:
+                        vt = vt.realize()
         from ..symbolic_convert import InstructionTranslator
 
         if not isinstance(vt, variables.LazyVariableTracker) and isinstance(
@@ -278,61 +445,59 @@ class HashableTracker:
             tx = InstructionTranslator.current_tx()
             self._hash, self._hash_is_identity = vt.key_hash_impl(tx)
             self.has_builtin_method = True
+            self.method_keys_guarded = vt.value is not None
             self.method_receivers = (vt.obj.source,)
-            if vt.obj.source is None and not any(
-                vt.obj.python_type() is builtin for builtin in (list, dict, set)
-            ):
+            if vt.obj.source is None and not vt.has_fresh_container_receiver():
                 self.method_receivers = ()
                 self.has_custom_equality = True
             self.vt = vt
             return
-        # Only exact builtin equality is known not to equate a different type
-        # with a builtin method. User-defined keys can observe hash collisions.
+        # Builtin equality implementations reject a different method type.
+        # User-defined overrides can observe hash collisions.
         key_types: list[type | None]
         try:
-            if isinstance(vt, variables.LazyVariableTracker) and not vt.is_realized():
-                # Exact tuples can hide custom equality behind the lazy-key path.
-                # Inspect actual types without realizing unused keys or their guards.
-                values = [vt.original_value()]
-                key_types = []
-                while values:
-                    value = values.pop()
-                    if type(value) is tuple or type(value) is frozenset:
-                        values.extend(value)
-                    else:
-                        key_types.append(type(value))
-            else:
-                key_types = [vt.python_type()]
+            key_types = (
+                list(lazy_key_types)
+                if lazy_key_types is not None
+                else [vt.python_type()]
+            )
         except NotImplementedError:
             # Let generic hashing preserve its normal unsupported-type fallback.
             key_types = [None]
+        if lazy_key_types is None and any(
+            kind is not None
+            and issubclass(kind, (tuple, frozenset))
+            and not any(kind is builtin for builtin in (tuple, frozenset, torch.Size))
+            for kind in key_types
+        ):
+            key_types.append(None)
+        if input_methods:
+            try:
+                current_tx = InstructionTranslator.current_tx()
+            except AttributeError:
+                current_tx = None
+            if current_tx is not None:
+                if self.method_keys_guarded:
+                    current_tx.output.builtin_method_keys.activate(current_tx)
+                else:
+                    current_tx.output.builtin_method_keys.has_method_keys = True
+        self.input_methods = () if self.method_keys_guarded else input_methods
+        self.has_builtin_method = bool(input_methods)
+        self.method_receivers = tuple(
+            AttrSource(source, "__self__") for source in input_methods
+        )
         for key_type in key_types:
-            if not any(
-                key_type is safe_type
-                for safe_type in (
-                    object,
-                    type,
-                    int,
-                    float,
-                    complex,
-                    str,
-                    bytes,
-                    tuple,
-                    frozenset,
-                    type(None),
-                    bool,
-                    types.FunctionType,
-                    types.MethodType,
-                    types.BuiltinMethodType,
-                )
-            ):
+            if not any(key_type is safe_type for safe_type in _SAFE_KEY_TYPES):
                 is_metaclass = key_type is not None and issubclass(key_type, type)
-                if (
-                    key_type is not None
-                    and inspect.getattr_static(key_type, "__eq__", None)
-                    is object.__eq__
+                equality = (
+                    None
+                    if key_type is None
+                    else inspect.getattr_static(key_type, "__eq__", None)
+                )
+                if equality is not None and any(
+                    equality is safe for safe in _SAFE_KEY_EQUALITIES
                 ):
-                    # Identity-only equality cannot match a builtin method.
+                    # Inherited builtin equality rejects a different builtin-method type.
                     continue
                 self.has_custom_equality = True
                 self.has_custom_metaclass_equality |= is_metaclass
@@ -347,28 +512,12 @@ class HashableTracker:
         ):
             # Preserve unused input-key laziness, including methods inside tuples.
             # Activate guards when a constructed method key can compare with them.
-            if input_methods or self.has_custom_equality:
-                try:
-                    tx = InstructionTranslator.current_tx()
-                except AttributeError:
-                    tx = None
-                if tx is not None and self.has_custom_equality:
-                    tx.output.builtin_method_keys.add_custom_key()
-                if tx is not None:
-                    for source in input_methods:
-                        tx.output.builtin_method_keys.add_input_method(tx, source)
-            self.has_builtin_method = bool(input_methods)
-            self.method_receivers = tuple(
-                AttrSource(source, "__self__") for source in input_methods
-            )
             self._hash = hash(vt.original_value())
             self._hash_is_identity = False
             self.vt = vt
             return
 
         tx = InstructionTranslator.current_tx()
-        if self.has_custom_equality:
-            tx.output.builtin_method_keys.add_custom_key()
         vt = vt.realize()
         if type(vt) is variables.TupleVariable or (
             isinstance(vt, variables.FrozensetVariable)
@@ -383,7 +532,14 @@ class HashableTracker:
                 items = list(cast(variables.FrozensetVariable, vt).items)
                 self._hash = hash(frozenset(RawHash(item._hash) for item in items))
             self._hash_is_identity = any(item._hash_is_identity for item in items)
+            self.input_methods = tuple(
+                source for item in items for source in item.input_methods
+            )
             self.has_builtin_method = any(item.has_builtin_method for item in items)
+            self.method_keys_guarded = all(
+                item.method_keys_guarded or not item.has_builtin_method
+                for item in items
+            )
             self.method_receivers = tuple(
                 source for item in items for source in item.method_receivers
             )
@@ -402,16 +558,6 @@ class HashableTracker:
         # have no python-constant value, so their key equality is identity.
         self._hash, self._hash_is_identity = generic_hash_impl(tx, vt)
         self.vt = vt
-
-    @classmethod
-    def from_known_hash(cls, vt: VariableTracker, hash_value: int) -> "HashableTracker":
-        # Only for an exact-int key already hashed by its source dictionary.
-        # Keep the key lazy; hashing it in user code must still specialize it.
-        result = cls.__new__(cls)
-        result.vt = vt
-        result._hash = hash_value
-        result._hash_is_identity = False
-        return result
 
     @classmethod
     def _maybe_constant_torch_size(cls, vt: VariableTracker) -> object:
@@ -501,7 +647,15 @@ class HashableTracker:
 
         tx = InstructionTranslator.current_tx()
 
-        result = generic_richcompare_bool(tx, self.vt, other.vt, op="__eq__")
+        from .descriptors import BoundBuiltinMethodVariable
+
+        if isinstance(self.vt, BoundBuiltinMethodVariable) and isinstance(
+            other.vt, BoundBuiltinMethodVariable
+        ):
+            # Method equality handles receiver identity without materializing it.
+            result = self.vt.tp_richcompare_impl(tx, other.vt, "__eq__")
+        else:
+            result = generic_richcompare_bool(tx, self.vt, other.vt, op="__eq__")
         if result.is_python_constant():
             return bool(result.as_python_constant())
 
