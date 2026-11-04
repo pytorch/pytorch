@@ -3295,10 +3295,33 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             init: VariableTracker,
             xs: VariableTracker,
             additional_inputs: VariableTracker,
-        ) -> tuple[VariableTracker, VariableTracker, VariableTracker, VariableTracker]:
-            return combine_fn, init, xs, additional_inputs
+            reverse: VariableTracker | None = None,
+        ) -> tuple[
+            VariableTracker,
+            VariableTracker,
+            VariableTracker,
+            VariableTracker,
+            VariableTracker | None,
+        ]:
+            return combine_fn, init, xs, additional_inputs, reverse
 
-        combine_fn, init, xs, additional_inputs = arg_extractor(*args, **kwargs)
+        combine_fn, init, xs, additional_inputs, reverse_var = arg_extractor(
+            *args, **kwargs
+        )
+        reverse = False
+        if reverse_var is not None:
+            if not reverse_var.is_python_constant() or not isinstance(
+                reverse_var.as_python_constant(), bool
+            ):
+                unimplemented(
+                    gb_type="torch.scan: improper reverse",
+                    context=str(reverse_var),
+                    explanation="Expected reverse to be a constant bool.",
+                    hints=[
+                        *graph_break_hints.DYNAMO_BUG,
+                    ],
+                )
+            reverse = reverse_var.as_python_constant()
         init_vars = unpack_iterable(tx, init)
         xs_vars = unpack_iterable(tx, xs)
         additional_inputs_vars = unpack_iterable(tx, additional_inputs)
@@ -3527,9 +3550,11 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             xs_proxy,
             additional_inputs_proxy,
         )
-        hop_kwargs = (
+        hop_kwargs: dict[str, Any] = (
             {"mutated_arg_indices": mutated_arg_indices} if mutated_arg_indices else {}
         )
+        if reverse:
+            hop_kwargs["reverse"] = True
 
         return _call_function_and_unflatten_output(
             tx,
