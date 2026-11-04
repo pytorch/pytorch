@@ -17,7 +17,6 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.dynamic_spec import (
     DictSpec,
     IntermediateSpec,
-    IntVar,
     LeafSpec,
     ObjectSpec,
     SeqSpec,
@@ -151,7 +150,7 @@ def _walk_spec(
                 f"{where}: spec is TensorSpec but the actual arg is "
                 f"{type(arg_value).__name__}, not a Tensor."
             )
-    elif isinstance(user_spec, (IntVar, int)):
+    elif isinstance(user_spec, (torch.SymInt, int)):
         if not isinstance(arg_value, int):
             raise ValueError(
                 f"{where}: spec is {type(user_spec).__name__} "

@@ -237,6 +237,27 @@ class <lambda>(torch.nn.Module):
         self.assertTrue(free_unbacked_symbols(sym))
         self.assertEqual(str(sym.node.expr), "u0")
 
+    def test_int_input_with_derived_spec(self):
+        """An int input declared via a derived expression (``A * 4 + 16``)
+        is bound like a derived tensor dim: the relation to ``A`` holds at
+        trace time."""
+        A = IntVar("a")
+
+        def f(n, m):
+            if m == n * 4 + 16:
+                return torch.ones(m)
+            return torch.zeros(n)
+
+        gm = make_fx(
+            f,
+            tracing_mode="fake",
+            dynamic_shapes={"n": A, "m": A * 4 + 16},
+        )(14, 72)
+
+        targets = {str(node.target) for node in gm.graph.nodes}
+        self.assertIn("aten.ones.default", targets)
+        self.assertNotIn("aten.zeros.default", targets)
+
     def test_dict_shorthand_accepted(self):
         """A bare ``dict`` is accepted as shorthand for
         ``ShapesSpec(PARAMS(dict))``."""
