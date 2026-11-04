@@ -2,7 +2,7 @@
 # Stage 1 reshapes (M, N) to (M*C, N/C) and emits raw accumulators; stage 2 combines C
 # partials and projects with true N, preserving mean/variance. C depends only on N, so plans
 # reuse across M. Reshaping obscures global indices, so index traits use the general kernel's
-# ragged split. Measured 1.13-1.66x of ATen.
+# ragged split. Measured 1.13-1.66x of ATen. Inputs must be on the current device.
 
 import math
 from collections.abc import Sequence
