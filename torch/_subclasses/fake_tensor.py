@@ -398,7 +398,7 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         fake_mode = torch._C._maybe_get_fake_mode(x)
         if fake_mode is not None:
-            # A SymNode's hint never changes, so this can be decided now
+            # A SymFloat's hint is never filled in later, so this can be decided now
             backed = isinstance(memo, SymFloat) and memo.node.hint is not None
             epoch = None if backed else fake_mode.epoch
             torch._C._set_fake_item_memo(x, memo, epoch)

@@ -246,7 +246,8 @@ struct C10_API FakeTensorMode {
   // Owns a Python weakref to this mode's Python wrapper (CppFakeTensorMode),
   // not the wrapper itself. See
   // Note [C++ FakeTensorMode Python wrapper lifetime] in
-  // torch/csrc/FakeTensorMode.cpp.
+  // torch/csrc/FakeTensorMode.cpp. Set when the mode is created; after that
+  // only getCppFakeTensorModePyObj accesses it, under a lock.
   std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
 
   // when false, disallow a fake tensor from having a 'meta' device
@@ -258,9 +259,9 @@ struct C10_API FakeTensorMode {
   // so read this through PyInterpreterVTable::allow_non_fake_inputs().
   bool allow_non_fake_inputs_ = false;
 
-  // Whether reading a fake's mutable data pointer only warns (true) or throws
-  // (false); Python's _allow_unsafe_data_ptr_access, exposed under that name.
-  // See at::init_cpp_fake.
+  // Whether reading the mutable data pointer of a fake made afterwards only
+  // warns (true) or throws (false); a storage's marking is never relaxed.
+  // Python's _allow_unsafe_data_ptr_access, exposed under that name.
   bool allow_unsafe_data_ptr_access_ = true;
 
   // Same as Python's FakeTensorMode.epoch. Kept here rather than on the Python
@@ -312,10 +313,13 @@ struct C10_API ExtraMeta {
   // The real tensor this fake shadows, when propagate_real_tensors is on.
   c10::intrusive_ptr<c10::TensorImpl> real_tensor_ = nullptr;
   // The dispatch keys of the real tensor this fake stands for, when recorded
-  // (Python FakeTensor.dispatch_keys); guards are built from these. Copied by
-  // the copy constructor, so a shallow copy such as detach keeps them, as
-  // Python FakeTensor's detach does. Unlike Python, fake.data = other gives
-  // the fake other's keys, as set_data replaces the whole ExtraMeta.
+  // (Python FakeTensor.dispatch_keys); guards are built from these. Python
+  // keeps them only on the output of a dispatched aten.alias or aten.detach.
+  // Here the copy constructor copies them, so every shallow copy, such as
+  // detach, keeps them, while views, including a top-level alias, drop them;
+  // matching Python is left to the C++ fake dispatch path, which knows the
+  // dispatched op. Unlike Python, fake.data = other gives the fake other's
+  // keys, as set_data replaces the whole ExtraMeta.
   std::optional<c10::DispatchKeySet> fake_dispatch_keys_ = std::nullopt;
   // The real constant this fake was created from (via
   // FakeTensorMode::set_constant), or null.
@@ -331,9 +335,9 @@ struct C10_API ExtraMeta {
   };
   std::unordered_map<std::string, FakeSymMemo> fake_sym_memos_;
   // The item memo of a C++ fake (Python FakeTensor.item_memo); see
-  // TensorImpl::set_fake_item_memo. Held as a Python object, since item() can
-  // return a SymFloat or SymBool as well as a SymInt. Like fake_sym_memos_, the
-  // copy constructor does not copy it.
+  // TensorImpl::set_fake_item_memo. Held as the Python object that was set, so
+  // that every read returns that same object, as SymNumberMemoDescriptor does.
+  // Like fake_sym_memos_, the copy constructor does not copy it.
   struct FakeItemMemo {
     std::shared_ptr<c10::SafePyObject> value;
     std::optional<uint32_t> version;
@@ -1624,15 +1628,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       uint64_t epoch);
 
   // Records memo as this fake's item memo, set in fake mode epoch `epoch`, or
-  // kept across epochs if `epoch` is nullopt (a backed SymFloat, see
-  // SymNumberMemoDescriptor). Like set_fake_sym_memo, safe to call
-  // concurrently.
+  // kept across epochs if `epoch` is nullopt. The caller decides which memos
+  // are kept (a backed SymFloat, see SymNumberMemoDescriptor); this does not
+  // check. Like set_fake_sym_memo, safe to call concurrently.
   void set_fake_item_memo(
       std::shared_ptr<c10::SafePyObject> memo,
       std::optional<uint64_t> epoch);
 
-  // The item memo, or nullptr if there is none or it is stale, like
-  // fake_sym_memo. A stale memo is dropped.
+  // The item memo, or nullptr if there is none or it is stale: the tensor was
+  // mutated since, or it was set in an epoch other than `epoch` (a memo kept
+  // across epochs is only dropped on mutation). A stale memo is dropped.
   std::shared_ptr<c10::SafePyObject> fake_item_memo(uint64_t epoch);
 
   // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.
