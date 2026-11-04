@@ -2401,7 +2401,9 @@ class MetaConverter(Generic[_TensorT]):
             trace = False
 
         # Describe the tensor.  NB: do NOT disable ambient modes, we may need
-        # to query them when figuring out what to put in here
+        # to query them when figuring out what to put in here. describe_tensor
+        # only takes a C++ fake mode's Fake key out of the TLS include set, so
+        # that a real tensor's queries do not reach the fake fallback.
         t_desc = self.describer.describe_tensor(t, trace=trace)
 
         if trace:
