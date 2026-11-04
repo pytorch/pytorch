@@ -362,6 +362,8 @@ g () {
             ".ci/docker/build.sh",
             ".ci/docker/ci_commit_pins/triton.txt",
             ".ci/docker/ubuntu/Dockerfile",
+            ".ci/docker/ubuntu-rocm/Dockerfile",
+            ".ci/docker/ubuntu-xpu/Dockerfile",
             ".ci/pytorch/test.sh",
             ".ci/pytorch/multigpu-test.sh",
             ".ci/pytorch/win-test.sh",
@@ -381,6 +383,8 @@ g () {
             ".ci/pytorch/win-test-helpers/setup_pytorch_env.bat",
             ".ci/pytorch/win-test-helpers/test_python_shard.bat",
             ".ci/pytorch/win-test-helpers/installation-helpers/activate_miniconda3.bat",
+            ".ci/pytorch/win-test-helpers/installation-helpers/install_magma.bat",
+            ".ci/pytorch/win-test-helpers/installation-helpers/install_sccache.bat",
             ".github/workflows/_linux-test.yml",
             ".github/workflows/_win-test.yml",
             ".github/workflows/_mac-test.yml",
@@ -398,6 +402,7 @@ g () {
             ".github/actions/setup-xpu/action.yml",
             ".github/actions/filter-test-configs/action.yml",
             ".github/actions/download-td-artifacts/action.yml",
+            ".github/actions/download-build-artifacts/action.yml",
             ".github/scripts/filter_test_configs.py",
             ".github/ci_commit_pins/vision.txt",
             ".github/ci_commit_pins/audio.txt",
@@ -447,6 +452,8 @@ g () {
             ".github/workflows/_binary-build-linux.yml",
             ".github/workflows/docs-build.yml",
             ".github/actions/setup-linux/action.yml",
+            # A cross-build image; no test job runs in it.
+            ".ci/docker/ubuntu-cross-riscv/Dockerfile",
             ".github/ci_commit_pins/vllm.txt",
         ]:
             self.assertFalse(needs_run_all([f]), f)
@@ -551,6 +558,23 @@ g () {
                 re.search(r, path) for rs in DRIVER_MAPPINGS.values() for r in rs
             )
             self.assertEqual(driven, pattern not in undriven, pattern)
+        # Blocklisted test files that candidates import or run as subprocesses.
+        spawn = {f"distributed/test_c10d_spawn_{b}" for b in ("gloo", "nccl", "ucc")}
+        launcher_bin = "distributed/launcher/bin/test_script"
+        for f, drivers in [
+            ("test_jit_fuser", {"test_jit_fuser_legacy"}),
+            ("distributed/test_c10d_spawn", spawn),
+            ("onnx/test_models", {"onnx/test_models_onnxruntime"}),
+            ("distributed/bin/test_script", {"distributed/test_launcher"}),
+            *(
+                (f"{launcher_bin}{s}", {"distributed/launcher/test_run"})
+                for s in ("", "_init_method", "_is_torchelastic_launched")
+            ),
+        ]:
+            path = f"test/{f}.py"
+            self.assertTrue((REPO_ROOT / path).exists(), path)
+            self.assertNotIn(f, TESTS)
+            self.assertEqual(selection.edited_tests([path], set(TESTS)), drivers, f)
 
 
 class TestPrompt(unittest.TestCase):
@@ -562,6 +586,7 @@ class TestPrompt(unittest.TestCase):
             "test/helper.py",
             "torch/test_d.py",
             "test/fx/test_e.py",
+            "test/test_f.py\n",
         ]
         self.assertEqual(
             select_tests.added_test_files(added, ["test_c"]), {"test_a", "nn/test_b"}
@@ -729,6 +754,12 @@ class TestMain(unittest.TestCase):
         reason = f"more than {cap} changed files"
         self.assertEqual(select_tests.run_all_reason(files), reason)
 
+    def test_run_all_reason_on_control_characters(self) -> None:
+        reason = "a changed path contains a control character"
+        for path in ["test/a\nb/conftest.py", "test/test_x.py\n", "test/a\rb.py"]:
+            changed = ["torch/a.py", path]
+            self.assertEqual(select_tests.run_all_reason(changed), reason, msg=path)
+
     def test_git_readers_on_a_rename(self) -> None:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
@@ -807,18 +838,21 @@ class TestMain(unittest.TestCase):
                 "-m",
                 "base",
             )
-            for name in (conftest, reader, "test/x\ny.py"):
+            # A \r survives only without universal newlines, \xff only without strict UTF-8.
+            names = [conftest, reader, "test/x\ny.py", "test/x\ry.py"]
+            names.append(os.fsdecode(b"test/x\xffy.py"))
+            for name in names:
                 (Path(repo) / name).parent.mkdir(parents=True, exist_ok=True)
                 (Path(repo) / name).write_text("import x\n")
             git("add", "-A")
             git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-qm", "add")
             changed = select_tests.changed_files("HEAD~1", "HEAD")
-            self.assertEqual(changed, [conftest, reader, "test/x\ny.py"])
+            self.assertEqual(changed, names)
             self.assertEqual(
                 select_tests.run_all_reason(changed),
                 "change touches test infrastructure",
             )
-            self.assertIsNone(select_tests.run_all_reason(changed[1:]))
+            self.assertIsNone(select_tests.run_all_reason([reader, names[-1]]))
             self.assertEqual(select_tests.git_grep("import", "HEAD"), changed)
             self.assertEqual(
                 select_tests.git_paths("ls-tree", "-r", "--name-only", "HEAD"), changed
