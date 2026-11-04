@@ -64,6 +64,9 @@ MAX_FAILURE_LIST_CLASSES = 50
 # together; for a targeted --include call, only those files): TD and the model
 # miss largely different failures.
 LLM_SELECTOR_HEDGE = 0.20
+# Flip only after the HUD and test-infra consumers of the TD exclusions and
+# recall stats handle llm_selection_exclusions and llm_enforced.
+ENFORCEMENT_ENABLED = False
 
 
 # Tests that run the files a change matches although they do not import them:
@@ -655,9 +658,10 @@ def apply_selection(
 ) -> AppliedSelection:
     """Apply the selection to TD's (include, exclude) split.
 
-    The selection is enforced, replacing TD's split, only on a PR with TD
-    enabled, the selection's enforce set and no selector error, only if some
-    of the files have a test time, only if `previous_failures` (the PR's
+    The selection is enforced, replacing TD's split, only with
+    ENFORCEMENT_ENABLED, on a PR with TD enabled, the selection's enforce set
+    and no selector error, only if some of the files have a test time, only
+    if `previous_failures` (the PR's
     previous failures stored with TD's ranking, see import_results) is not
     None, and only if the split chooses some file.
     run_test.py falls back to the default job's times for a config without its
@@ -674,7 +678,7 @@ def apply_selection(
         ranked, score, file_time, test_config, previous_failures=prev, td_include=td
     )
     td_on_pr = td_enabled and get_pr_number() is not None
-    wanted = td_on_pr and selection.enforce and selection.error is None
+    wanted = ENFORCEMENT_ENABLED and td_on_pr and selection.enforce and selection.error is None  # fmt: skip
     # select_tests clears enforce when the selector fails, but keeps the request.
     requested = td_on_pr and selection.enforce_requested
     if not sum(file_time.values()):

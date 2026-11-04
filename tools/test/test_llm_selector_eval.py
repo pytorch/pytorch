@@ -908,6 +908,7 @@ class TestScore(unittest.TestCase):
             applied, ran = {}, {}
             for c in (config, ""):
                 with (
+                    mock.patch.object(selection, "ENFORCEMENT_ENABLED", True),
                     mock.patch.object(selection, "get_pr_number", return_value=1),
                     mock.patch("sys.stderr", io.StringIO()),
                 ):
