@@ -63,9 +63,11 @@ MAX_BODY = 4000
 MAX_REVIEW_BODY = 40_000
 # Of the description once JSON-escaped; leaves most of MAX_TOTAL_BYTES to comments.
 MAX_PR_BODY_BYTES = 40_000
-# Labels the review is shown, and the JSON-escaped size of each name, so the
-# labels add at most MAX_LABELS * MAX_LABEL_BYTES to the file. Real label names are
-# short; the caps only bound what a PR with hundreds of labels can add.
+# Labels the review is shown, and the JSON-escaped size of each name. A cut name
+# keeps at most MAX_LABEL_BYTES and gains the " [truncated]" marker (12 bytes), so
+# the labels add about MAX_LABELS * (MAX_LABEL_BYTES + 12) bytes plus separators to
+# the file. Real label names are short; the caps only bound what a PR with hundreds
+# of labels can add.
 MAX_LABELS = 50
 MAX_LABEL_BYTES = 120
 MAX_HUNK = 1500

@@ -343,23 +343,33 @@ class TestCollect(unittest.TestCase):
     def test_each_label_name_is_capped_by_its_encoded_size(self):
         suffix = " [truncated]"
         e = "\U0001f600"  # 12 bytes once escaped
-        issue = [comment("maint", body="y" * fpc.MAX_BODY)] * 80
-        api = FakeApi(issue=issue, maintainers={"maint"})
-        names = ["l" * 500, e * 500]
+        api = FakeApi()
         api.pull = {
             **api.pull,
-            "labels": [{"name": n} for n in names] * (fpc.MAX_LABELS // 2),
-            "body": e * 60000,
+            "labels": [{"name": n} for n in ("l" * 500, e * 500, "short")],
         }
         out = fpc.collect(api, REPO, PR)
+        # cap_encoded cuts by tenths until the name fits in MAX_LABEL_BYTES (120):
+        # 110 ASCII characters (112 bytes) or 9 emoji (110 bytes).
+        self.assertEqual(out["labels"], ["l" * 110 + suffix, e * 9 + suffix, "short"])
+
+    def test_worst_case_labels_cost_only_a_few_comments(self):
+        e = "\U0001f600"
+        issue = [comment("maint", body="y" * fpc.MAX_BODY)] * 80
+
+        def collect(labels):
+            api = FakeApi(issue=issue, maintainers={"maint"})
+            api.pull = {**api.pull, "labels": labels, "body": e * 60000}
+            return fpc.collect(api, REPO, PR)
+
+        worst = [{"name": n} for n in ("l" * 500, e * 500)]
+        out = collect((worst * fpc.MAX_LABELS)[: fpc.MAX_LABELS])
         self.assertEqual(len(out["labels"]), fpc.MAX_LABELS)
-        for name in out["labels"]:
-            self.assertTrue(name.endswith(suffix))
-            self.assertLessEqual(
-                len(fpc.dumps(name[: -len(suffix)])), fpc.MAX_LABEL_BYTES
-            )
         self.assertLessEqual(len(fpc.dumps(out)), fpc.MAX_TOTAL_BYTES)
-        # Even worst-case labels leave room for comments.
+        without = collect([])
+        # About 7 KB of labels is two 4 KB comments at most; a cap several times
+        # looser would cost more.
+        self.assertLessEqual(len(without["items"]) - len(out["items"]), 2)
         self.assertGreaterEqual(len(out["items"]), 5)
 
     def test_the_description_is_capped_and_counted(self):

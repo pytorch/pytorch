@@ -51,6 +51,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+# The collector whose output keys stage A's system prompt must name.
+import fetch_pr_comments  # noqa: E402
+
 # Collected as a test of THIS module, so the suite notices if this file is the
 # one deleted. See _suite_manifest for why the guard is shared, not copied.
 from _suite_manifest import (  # noqa: E402,F401
@@ -6726,8 +6729,6 @@ class TestStageAShowsTheLabels(unittest.TestCase):
     prompt and the file's keys must stay in step, or it asks for labels already set."""
 
     def test_the_prompt_names_the_label_keys_that_collect_emits(self):
-        import fetch_pr_comments
-
         def api(endpoint, body=None):
             if endpoint.endswith("/pulls/1"):
                 return {"user": {"login": "author"}, "labels": []}
