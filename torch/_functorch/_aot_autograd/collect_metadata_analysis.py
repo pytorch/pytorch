@@ -893,27 +893,86 @@ from a multi-output view call"
             traced_tangents, count_symints=False, with_memory_format=True
         )
 
+        # Record which user inputs/outputs share a storage in eager, so Inductor can
+        # tell aliasing it introduced (e.g. by removing `x + 0`) from aliasing the
+        # program already had.
+        #
+        # We never run the program eagerly (TODO: extract from eager behavior).
+        # Instead the user code runs on FunctionalTensors, which record a
+        # functionalized program: each FunctionalTensor in the user code stands for a
+        # tensor in the functionalized program. Storages in both programs can show
+        # eager aliasing, but each misses cases the other catches, so two tensors
+        # alias if either matches:
+        #
+        # - FunctionalTensor storages catch mutated inputs. For
+        #
+        #     x.index_put_((idx,), src)
+        #     return x.expand(2, 4)  # aliases x in eager
+        #
+        #   the two programs are
+        #
+        #     user code (FunctionalTensors)    functionalized program
+        #     x.index_put_((idx,), src)        x2 = index_put(x, (idx,), src)
+        #     out = x.expand(2, 4)             out = x2.expand(2, 4)
+        #
+        #   In the user code, out is a view of x, so they share a FunctionalTensor
+        #   storage, as in eager. In the functionalized program, out is a view of x2,
+        #   a new tensor, so it doesn't share x's storage.
+        #
+        # - Functionalized-program storages catch ops that functionalization doesn't
+        #   treat as views. For
+        #
+        #     y = x.sin()
+        #     t1 = y.new_empty(0)
+        #     t1.set_(y)
+        #     return t1, y  # t1 and y share a storage in eager
+        #
+        #   the two programs are
+        #
+        #     user code (FunctionalTensors)    functionalized program
+        #     y = x.sin()                      y = x.sin()
+        #     t1 = y.new_empty(0)              t1 = y.new_empty(0)
+        #     t1.set_(y)                       t1 = y
+        #     return t1, y                     return y, y
+        #
+        #   In the user code, t1 keeps the FunctionalTensor storage it got from
+        #   new_empty, so it doesn't share y's. In the functionalized program, t1 is
+        #   y, so they share a storage, as in eager.
+        #
+        # In the code below, flat_f_args/flat_f_outs are the user code's
+        # FunctionalTensors and flat_args/flat_outs are the matching tensors of the
+        # functionalized program, so storages(f_t, t) takes one tensor from each.
+        def storages(f_t: Tensor, t: Tensor) -> set[StorageWeakRef]:
+            return {
+                StorageWeakRef(f_t.untyped_storage()),
+                StorageWeakRef(t.untyped_storage()),
+            }
+
+        # fw_graph_outs is the functionalized program's mutated inputs, then its
+        # outputs, then intermediate bases.
+        num_mutated = len(f_mutated_inputs)
+        flat_outs = fw_graph_outs[num_mutated : num_mutated + len(flat_f_outs)]
         inp_storages = {
-            i: StorageWeakRef(a.untyped_storage())
-            for i, a in enumerate(flat_f_args)
-            if isinstance(a, Tensor)
+            i: storages(f_a, a)
+            for i, (f_a, a) in enumerate(zip(flat_f_args, flat_args))
+            if isinstance(f_a, Tensor)
         }
         out_storages = {
-            i: StorageWeakRef(o.untyped_storage())
-            for i, o in enumerate(flat_f_outs)
-            if isinstance(o, Tensor)
+            i: storages(f_o, o)
+            for i, (f_o, o) in enumerate(zip(flat_f_outs, flat_outs))
+            if isinstance(f_o, Tensor)
         }
         aliased_input_output_pairs = [
             (i, j)
             for j, out_storage in out_storages.items()
             for i, inp_storage in inp_storages.items()
-            if inp_storage == out_storage
+            if inp_storage & out_storage
         ]
         aliased_output_pairs = [
             (i, j)
             for j, out_storage in out_storages.items()
             for i, other_storage in out_storages.items()
-            if i < j and other_storage == out_storage
+            if i < j and other_storage & out_storage
         ]
 
         metadata = ViewAndMutationMeta(

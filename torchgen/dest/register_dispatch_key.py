@@ -3,8 +3,7 @@ from __future__ import annotations
 import itertools
 import textwrap
 from dataclasses import dataclass, field
-from typing import Literal, TYPE_CHECKING
-from typing_extensions import assert_never
+from typing import assert_never, Literal, TYPE_CHECKING
 
 import torchgen.api.cpp as cpp
 import torchgen.api.meta as meta
@@ -407,6 +406,17 @@ class RegisterDispatchKey:
             g,
             native_aot_manifests=self.native_aot_manifests,
         )
+        # A functional or inplace variant may override its generated Meta kernel
+        # (e.g. a SymInt-aware one); the other variants stay structured.
+        if self.backend_index.dispatch_key == DispatchKey.Meta:
+            return list(
+                mapMaybe(
+                    lambda f: self.gen_unstructured(f, g)
+                    if self.backend_index.has_kernel(f)
+                    else structured_gen.gen_one(f),
+                    g.functions(),
+                )
+            )
         return list(mapMaybe(structured_gen.gen_one, g.functions()))
 
     def gen_unstructured(
@@ -568,6 +578,16 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                         if device_of is not None:
                             device_guard = f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
 
+                aot_consultation = ""
+                aot_manifest = self.native_aot_manifests.get(str(f.func.name))
+                if aot_manifest is not None and not aot_manifest.structured:
+                    from torchgen.native_aot import gen_stub_consultation
+
+                    aot_consultation = gen_stub_consultation(
+                        aot_manifest,
+                        ", ".join(a.name for a in sig.arguments()),
+                        returns_type=returns_type,
+                    )
                 return f"""\
 namespace {{
 
@@ -575,6 +595,7 @@ namespace {{
   {device_check}
 
   {device_guard}
+  {aot_consultation}
   return {impl_name}({args_exprs_str});
 }}
 
@@ -982,14 +1003,14 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                         context, structured.impl_arguments(self.g), method=False
                     )
                 )
-                # Exact overload name wins over base name: "gt.Tensor" hooks only
-                # that overload, "topk" the unique structured group.
+                # An exact overload name wins over a base name, which represents
+                # the unique structured group.
                 aot_manifest = self.native_aot_manifests.get(
                     str(self.g.functional.func.name)
                 ) or self.native_aot_manifests.get(
                     self.g.functional.func.name.name.base
                 )
-                if aot_manifest is not None:
+                if aot_manifest is not None and aot_manifest.matches_group(self.g):
                     from torchgen.native_aot import gen_stub_consultation
 
                     sig_body.append(gen_stub_consultation(aot_manifest, impl_exprs))
