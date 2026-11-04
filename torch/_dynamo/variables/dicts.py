@@ -27,6 +27,7 @@ from collections.abc import Callable, Iterator
 from typing import Any, cast, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
 
+from torch._guards import GuardSource
 from torch.utils._pytree import MappingKey
 
 from .. import graph_break_hints, polyfills, variables
@@ -47,6 +48,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard, is_safe_dict_key
 from ..source import (
     AttrSource,
+    ComputedLazyConstantSource,
     DictGetItemSource,
     is_constant_source,
     is_from_local_source,
@@ -624,7 +626,13 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             self.source is None
             or item.source is None
             or not isinstance(self.source, LocalSource)
-            or not isinstance(item.source, LocalSource)
+            or not (
+                isinstance(item.source, LocalSource)
+                or (
+                    isinstance(item.source, ComputedLazyConstantSource)
+                    and item.source.guard_source is GuardSource.LOCAL
+                )
+            )
             or tx.output.side_effects.is_modified(self)
             or not isinstance(item, variables.LazyVariableTracker)
             or item.is_realized()
