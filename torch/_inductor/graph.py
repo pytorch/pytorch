@@ -423,8 +423,8 @@ class GraphLowering(torch.fx.Interpreter):
         inputs_to_check: Sequence[int] | None = None,
         fx_wrapper: bool = False,
         get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
-        graph_partition: bool | None = None,
-        use_cudagraph_partition: bool | None = None,
+        split_into_partitions: bool | None = None,
+        cudagraphs_per_partition: bool | None = None,
         cudagraphs_top_level: bool | None = None,
         cudagraph_region_forced_partition: bool = False,
     ) -> None:
@@ -611,15 +611,17 @@ class GraphLowering(torch.fx.Interpreter):
         # region asking for its own CUDA Graph forces this on for one compile,
         # so it can differ from config.graph_partition, which stays at what the
         # user asked for.
-        self.graph_partition = (
-            config.graph_partition if graph_partition is None else graph_partition
+        self.split_into_partitions = (
+            config.graph_partition
+            if split_into_partitions is None
+            else split_into_partitions
         )
         # Whether the partitions are for CUDA Graphs (or a customized partition
         # wrapper).
-        self.use_cudagraph_partition = (
+        self.cudagraphs_per_partition = (
             is_using_cudagraph_partition()
-            if use_cudagraph_partition is None
-            else use_cudagraph_partition
+            if cudagraphs_per_partition is None
+            else cudagraphs_per_partition
         )
         # Effective cudagraph setting outside of any nested region.
         self.cudagraphs_top_level = (
@@ -1035,8 +1037,8 @@ class GraphLowering(torch.fx.Interpreter):
             is_inference=self.is_inference,
             is_backward=self.is_backward,
             name=self.qualify_name(subgraph_name),
-            graph_partition=False,
-            use_cudagraph_partition=False,
+            split_into_partitions=False,
+            cudagraphs_per_partition=False,
         )
 
     @property
@@ -1047,8 +1049,12 @@ class GraphLowering(torch.fx.Interpreter):
         partitioning was forced on only to isolate a nested region while the
         enclosing code is still captured: the enclosing capture keeps following
         the user's graph_partition=False rules.
+
+        Only consult this from a site that is already gated on cudagraphs being
+        requested: it folds in cudagraphs_per_partition, which is False whenever
+        capture was not asked for.
         """
-        return self.use_cudagraph_partition and not (
+        return self.cudagraphs_per_partition and not (
             self.cudagraph_region_forced_partition and self.cudagraphs_top_level
         )
 
