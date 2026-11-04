@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.utils._traceback import report_compile_source_on_error
-from torch.utils._triton import has_triton
+from torch.utils._triton import has_triton, has_triton_package
 
 
 def strip_trailing_whitespace(r):
@@ -543,14 +543,14 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
                 repro,
             )
 
-    def import_triton_extra_import_kernel(self):
+    def import_test_module(self, name):
         test_dynamo_dir = os.path.abspath(os.path.dirname(__file__))
         with patch.object(sys, "path", [test_dynamo_dir, *sys.path]):
-            return importlib.import_module("_triton_extra_import_kernel")
+            return importlib.import_module(name)
 
     @unittest.skipIf(not has_triton(), "requires Triton")
     def test_save_graph_repro_emits_extra_triton_imports(self):
-        extra_import_kernel = self.import_triton_extra_import_kernel()
+        extra_import_kernel = self.import_test_module("_triton_extra_import_kernel")
 
         with (
             patch.object(kernel_side_table, "id_to_kernel", {}),
@@ -575,6 +575,67 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
             repro = buf.getvalue()
 
             self.assertIn("import triton.language.extra.libdevice as libdevice", repro)
+
+    def save_graph_repro_with_kernels(self, kernels):
+        with (
+            patch.object(kernel_side_table, "id_to_kernel", {}),
+            patch.object(kernel_side_table, "kernel_to_id", {}),
+            patch.object(kernel_side_table, "constant_args", {}),
+        ):
+            for kernel in kernels:
+                kernel_side_table.add_kernel(kernel)
+
+            args = [torch.randn(4)]
+
+            def f(x):
+                return (x + 1,)
+
+            gm = make_fx(f)(*args)
+            buf = io.StringIO()
+            save_graph_repro(buf, gm, args, "inductor")
+            repro = buf.getvalue()
+
+            # Running the repro re-registers its kernels in the side table.
+            namespace = {"__compile_source__": repro}
+            with report_compile_source_on_error():
+                exec(repro, namespace)
+            return repro, namespace, dict(kernel_side_table.id_to_kernel)
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    def test_save_graph_repro_emits_constexpr_globals(self):
+        kernels = self.import_test_module("_triton_repro_kernels")
+        _, namespace, _ = self.save_graph_repro_with_kernels(
+            [kernels.kernel_with_constexpr_globals]
+        )
+
+        # The kernel reads these globals, so the repro must define them even
+        # when they are falsy or not plain literals.
+        self.assertIs(namespace["IS_ENABLED"].value, False)
+        self.assertEqual(namespace["OFFSET"].value, 0)
+        self.assertEqual(namespace["MODE"].value, 1)
+        self.assertEqual(namespace["SHAPE"].value, (0, 1))
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    def test_save_graph_repro_emits_autotune_args(self):
+        kernels = self.import_test_module("_triton_repro_kernels")
+        repro, _, id_to_kernel = self.save_graph_repro_with_kernels(
+            [kernels.autotuned_kernel]
+        )
+
+        (autotuner,) = id_to_kernel.values()
+        self.assertEqual(autotuner.keys, ["n_elements"])
+        self.assertEqual(autotuner.reset_to_zero, ["out_ptr"])
+        self.assertEqual(autotuner.restore_value, ["x_ptr"])
+        self.assertEqual(
+            [
+                (c.kwargs, c.num_warps, c.num_stages, c.num_ctas, c.maxnreg)
+                for c in autotuner.configs
+            ],
+            [({"BLOCK": 64}, 4, 2, 1, 128), ({"BLOCK": 128}, 8, 3, 2, None)],
+        )
+        self.assertIn(
+            "# triton.autotune arguments not reproduced: prune_configs_by", repro
+        )
 
     def test_repro_run_accuracy_does_not_reuse_compiled_graph(self):
         class Repro(torch.nn.Module):
@@ -845,7 +906,9 @@ class TestAfterAotAccelerator(torch._dynamo.test_case.TestCase):
     @onlyAccelerator
     @unittest.skipIf(not has_triton(), "requires Triton")
     def test_after_aot_minifier_emits_extra_triton_imports_integration(self, device):
-        extra_import_kernel = TestAfterAot.import_triton_extra_import_kernel(self)
+        extra_import_kernel = TestAfterAot.import_test_module(
+            self, "_triton_extra_import_kernel"
+        )
         from torch._dynamo.debug_utils import minifier_dir
         from torch._inductor.codegen.simd import SIMDScheduling
 
