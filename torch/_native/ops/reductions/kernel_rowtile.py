@@ -786,7 +786,7 @@ def reduce_row_itree(
 ) -> bool:
     """Write 2-D `x` rows to 1-D `out`; return False only when no inner-tree plan exists.
 
-    x's device must be current.
+    x's device must be current, and `out` must be on x's device.
     """
     if not x.is_cuda:
         raise AssertionError(f"want a CUDA input, got {x.device}")
