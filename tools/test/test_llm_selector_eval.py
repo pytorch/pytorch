@@ -1595,9 +1595,9 @@ class TestScore(unittest.TestCase):
 
     def test_cost_fraction(self) -> None:
         cands = {"test_a", "test_b", "test_c"}
-        choice = Choice(Selection({"test_b"}), {"slow": {"test_a"}})
+        choice = Choice(Selection({"test_b"}, candidates=cands), {"slow": {"test_a"}})
         self.assertEqual(cost_fraction(choice, cands, SECONDS), (50 / 160, 250 / 250))
-        only_b = Choice(Selection({"test_b"}))
+        only_b = Choice(Selection({"test_b"}, candidates=cands))
         self.assertEqual(cost_fraction(only_b, cands, SECONDS), (50 / 160, 50 / 250))
         self.assertEqual(
             cost_fraction(only_b, cands, SECONDS, lambda c: c == "default"),
