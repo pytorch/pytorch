@@ -1611,6 +1611,7 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 return t.sum(), view[0], str(e), x + 1
             return t.sum(), view[0], None, x + 1
 
+        @torch._dynamo.disable(recursive=False)
         def run(fn):
             ba = bytearray(b"\x01\x02")
             t = torch.frombuffer(ba, dtype=torch.uint8)
