@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from tools.testing.llm_td.eval import REPO
+from tools.testing.llm_selector.eval import REPO
 
 
 # The ci-metrics skill's wrapper and the grafana-clickhouse-datasource UID its SKILL.md gives; update both if the skill moves or the UID rotates.

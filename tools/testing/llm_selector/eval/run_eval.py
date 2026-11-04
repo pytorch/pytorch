@@ -1,7 +1,7 @@
 """Run the selector over eval samples, caching one result per sample.
 
-    python -m tools.testing.llm_td.eval.run_eval --data DIR --tag sonnet5_medium \\
-        --model us.anthropic.claude-sonnet-5 --effort medium --ids tools/testing/llm_td/eval/ids/eval.txt
+    python -m tools.testing.llm_selector.eval.run_eval --data DIR --tag sonnet5_medium \\
+        --model us.anthropic.claude-sonnet-5 --effort medium --ids tools/testing/llm_selector/eval/ids/eval.txt
 
 Results go to DIR/results/<tag>/<id>.json and are never recomputed; rerun the
 same command to fill in samples on which run_eval itself raised (such as a
@@ -17,7 +17,7 @@ select_tests answers without the model (see score.unasked) are skipped. With
 --agentic, each worker checks the sample's head out into its own worktree
 under DIR/worktrees/<tag> and lets the model Read/Grep/Glob it; query_model
 limits those tools to the checkout. The prompt holds untrusted PR text, so
---agentic runs only with LLM_TD_AGENTIC_SANDBOX=1, in a sandbox whose only
+--agentic runs only with LLM_SELECTOR_AGENTIC_SANDBOX=1, in a sandbox whose only
 secret is the model credential. Ctrl-C stops the workers after their calls in flight, whose
 results are dropped, as the claude children die with the run.
 """
@@ -36,9 +36,13 @@ import time
 import traceback
 from pathlib import Path
 
-from tools.testing.llm_td.eval import REPO, write_json
-from tools.testing.llm_td.eval.score import prompt_sha, sample_prompt, unasked
-from tools.testing.llm_td.select_tests import query_model, QUERY_TIMEOUT, test_minutes
+from tools.testing.llm_selector.eval import REPO, write_json
+from tools.testing.llm_selector.eval.score import prompt_sha, sample_prompt, unasked
+from tools.testing.llm_selector.select_tests import (
+    query_model,
+    QUERY_TIMEOUT,
+    test_minutes,
+)
 
 
 TIMED_OUT = f"model call timed out after {QUERY_TIMEOUT}s"
@@ -129,12 +133,12 @@ def main() -> None:
     p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])  # fmt: skip
     p.add_argument("--ids", type=Path, required=True)
     p.add_argument("--jobs", type=int, default=8)
-    p.add_argument("--agentic", action="store_true", help="give the model Read, Grep and Glob over a checkout of the change, on untrusted PR text; needs LLM_TD_AGENTIC_SANDBOX=1")  # fmt: skip
+    p.add_argument("--agentic", action="store_true", help="give the model Read, Grep and Glob over a checkout of the change, on untrusted PR text; needs LLM_SELECTOR_AGENTIC_SANDBOX=1")  # fmt: skip
     args = p.parse_args()
     if args.tag == "td":
         p.error("the tag td holds the TD replay, which score.py scores as td25")
-    if args.agentic and os.environ.get("LLM_TD_AGENTIC_SANDBOX") != "1":
-        p.error("--agentic gives the model Read, Grep and Glob on untrusted PR text; query_model limits them to the checkout, but run it only in a sandbox whose only secret is the model credential, with LLM_TD_AGENTIC_SANDBOX=1")  # fmt: skip
+    if args.agentic and os.environ.get("LLM_SELECTOR_AGENTIC_SANDBOX") != "1":
+        p.error("--agentic gives the model Read, Grep and Glob on untrusted PR text; query_model limits them to the checkout, but run it only in a sandbox whose only secret is the model credential, with LLM_SELECTOR_AGENTIC_SANDBOX=1")  # fmt: skip
     # Agentic checkouts are handed to a CLI that runs in a temp dir.
     args.data = args.data.resolve()
 

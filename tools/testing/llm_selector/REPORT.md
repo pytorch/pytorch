@@ -35,8 +35,8 @@ The hedge adds 16.1 points rather than 20. Files the model already picked are no
 
 - **Run-all.** 19 of the 187 typical changes (10.2%) run everything, nearly all through the test-infrastructure rule (CI scripts, docker images, commit pins, test workflows). Those 19 are 10.2 of the 13.9 points the model's picks run (73%), and 34% of new's CPU time with the hedge.
 - **The model calls** cost about $0.5k a month at the recorded per-call cost. That figure leans on the prompt cache, and with a cold cache it is about $2.2k (see Dollar model). Either way it is small next to the saving.
-- **Where the saving is.** This stack makes $80k of the saving reachable, in pull and trunk, once enforcement is the default (Rollout step 3). Until then it applies only to PRs with the `ci-llm-td` label. The other $25k is in workflows where TD is off today: inductor's unit tests, periodic and slow. Those run every test on PRs, so the selection is not enforced there, and inductor also needs a target-determination job first. See Follow-ups under Spend.
-- **The stack.** The PRs below this one contain the selector, the harness, the run_test.py integration and a shadow-mode CI workflow. Enforcement is opt-in per PR through the `ci-llm-td` label. It applies only to same-repo PRs whose author is a member, owner or collaborator.
+- **Where the saving is.** This stack makes $80k of the saving reachable, in pull and trunk, once enforcement is the default (Rollout step 3). Until then it applies only to PRs with the `ci-llm-selector` label. The other $25k is in workflows where TD is off today: inductor's unit tests, periodic and slow. Those run every test on PRs, so the selection is not enforced there, and inductor also needs a target-determination job first. See Follow-ups under Spend.
+- **The stack.** The PRs below this one contain the selector, the harness, the run_test.py integration and a shadow-mode CI workflow. Enforcement is opt-in per PR through the `ci-llm-selector` label. It applies only to same-repo PRs whose author is a member, owner or collaborator.
 
 The sections up to Time to land compare only old and new. Other models, effort levels and hedge budgets are in [Sweep](#sweep-other-models-efforts-and-hedges), which is how the config was chosen.
 
@@ -113,7 +113,7 @@ Reverts need no such filter: the autorevert bot already requires the failure to 
 
 30-day runner cost of the test jobs the selection can shrink, from `misc.runner_cost`. Builds, lint and other non-test jobs are not counted. Neither are the test jobs that run every test under both policies, which the Time to land replay also keeps at r = 1 (`land_time.selectable`): the TD-off configs (docs_test, pr_time_benchmarks, dynamo_cpython and the like), macOS jobs and inductor's model benchmarks. Those are about $5k a month in pull, $45k in trunk (macOS $23k, pr_time_benchmarks $22k) and $28k in inductor. Only the PR part of each workflow changes, meaning `pull_request` runs and `ciflow/` pushes; main, `release/*` and `landchecks/*` pushes and scheduled runs keep running everything.
 
-**Fork PRs keep TD.** `llm-td.yml` and the selection step in the `target-determination` job (`resolve_selection.py`) skip fork PRs, so their test jobs keep TD. Fork PRs are 36% of pull's PR test hours, 46% (CPU) and 47% (GPU) of trunk's, 30% and 34% of inductor's, and 37% of periodic's and of slow's. Each workflow's PR spend is cut to its same-repo share before the selection is applied, so fork-PR spend stays in both columns unchanged. PRs from the same repo whose author is not trusted (see Rollout) keep TD but are still counted. Pushing a branch to this repo needs write access, but anyone can open a PR from an existing branch (see `TRUSTED_AUTHORS` in resolve_selection.py), so how many such PRs there are was not measured.
+**Fork PRs keep TD.** `llm-selector.yml` and the selection step in the `target-determination` job (`resolve_selection.py`) skip fork PRs, so their test jobs keep TD. Fork PRs are 36% of pull's PR test hours, 46% (CPU) and 47% (GPU) of trunk's, 30% and 34% of inductor's, and 37% of periodic's and of slow's. Each workflow's PR spend is cut to its same-repo share before the selection is applied, so fork-PR spend stays in both columns unchanged. PRs from the same repo whose author is not trusted (see Rollout) keep TD but are still counted. Pushing a branch to this repo needs write access, but anyone can open a PR from an existing branch (see `TRUSTED_AUTHORS` in resolve_selection.py), so how many such PRs there are was not measured.
 
 | Workflow | Old $k/mo | New $k/mo |
 |---|---|---|
@@ -171,7 +171,7 @@ Time to signal (TTS) per workflow, in minutes:
 - **Pull leans toward build-bound.** Runs whose last job to finish is a build or another non-test job go from 12% to 22%. The floor is the xpu build (p50 40 / p90 49 min from creation to done) and the ROCm build (p50 23 / p90 53).
 - **The model matches real merges.** When the merge comment started trunk (n=326), comment to merge took p50 186 / p90 269 min, against a simulated trunk TTS of 182 / 277. Taking each of those trunk runs' replayed saving off its merge gives the new 179 / 259. 11 more such merges are left out of both, since the replay left out their trunk run (cancelled, or created in the last 12 hours). When trunk had already run before the comment (n=533), the merge took p50 3 min.
 - **Two delays are not modelled, so the merge rows and the trunk saving are optimistic.**
-  - The selection artifact is kept 3 days (`retention-days: 3` in llm-td.yml), and resolve_selection.py treats an expired one as missing. A trunk run that a merge starts more than 3 days after the push gets no selection and keeps TD, and the p90 from first run to merge is 94.5 h.
+  - The selection artifact is kept 3 days (`retention-days: 3` in llm-selector.yml), and resolve_selection.py treats an expired one as missing. A trunk run that a merge starts more than 3 days after the push gets no selection and keeps TD, and the p90 from first run to merge is 94.5 h.
   - Under enforcement the target-determination job waits up to `WAIT_SECONDS` (600 s) for a selector run that is still pending. The replay assumes the selection is ready.
 - **CI is a minority of end-to-end time to land.** From the first pull run on the merged head to the merge is p50 15.8 h and p90 94.5 h, dominated by review. The saving matters most for authors iterating on red CI, since every push pays it again.
 
@@ -404,7 +404,7 @@ Saved per month at the 0.2 overhead, for Opus medium: $181k with no hedge, $160k
 - **Prompt injection.**
   - A PR's description or diff can try to talk the model into selecting nothing.
   - **Mitigations.**
-    - Enforcement is opt-in per PR through the `ci-llm-td` label, which is read live when the workflow run resolves the selection.
+    - Enforcement is opt-in per PR through the `ci-llm-selector` label, which is read live when the workflow run resolves the selection.
     - The selector workflow runs only for same-repo PRs. It runs from the default branch's copy of the workflow and code: since GitHub's 2025-12-08 change, `pull_request_target` always uses the default branch, whatever the PR's base.
     - The selector reads the diff through git, and the title and description from the event payload (`GITHUB_EVENT_PATH`). It never runs PR code.
     - Main always runs everything.
@@ -415,26 +415,26 @@ Saved per month at the 0.2 overhead, for Opus medium: $181k with no hedge, $160k
 ## Rollout
 
 1. **Shadow (this stack).**
-   - **The selector.** `llm-td.yml`, a `pull_request_target` workflow that runs on `opened`, `synchronize` and `reopened`, writes a selection for every same-repo PR push. The selection is the artifact `llm_td_selection_<PR number>_<head sha>`, kept for 3 days.
-   - **Resolving it.** The workflow run's `target-determination` job resolves the selection once (`resolve_selection.py`) and uploads it as `llm_td_selection.json`. The test jobs' download-td-artifacts step only downloads that file from their own workflow run.
-   - **Provenance.** `selector_runs` in `resolve_selection.py` only filters runs: it takes the artifact named for this PR and head only from an `llm-td.yml` `pull_request_target` run for that head whose head branch is in this repository. `main()` decides enforcement. It requires all of these:
+   - **The selector.** `llm-selector.yml`, a `pull_request_target` workflow that runs on `opened`, `synchronize` and `reopened`, writes a selection for every same-repo PR push. The selection is the artifact `llm_selection_<PR number>_<head sha>`, kept for 3 days.
+   - **Resolving it.** The workflow run's `target-determination` job resolves the selection once (`resolve_selection.py`) and uploads it as `llm_selection.json`. The test jobs' download-td-artifacts step only downloads that file from their own workflow run.
+   - **Provenance.** `selector_runs` in `resolve_selection.py` only filters runs: it takes the artifact named for this PR and head only from an `llm-selector.yml` `pull_request_target` run for that head whose head branch is in this repository. `main()` decides enforcement. It requires all of these:
      - TD on in the workflow (`TD_ENABLED`);
      - an author whose `author_association` is OWNER, MEMBER or COLLABORATOR;
-     - the PR's live labels: `ci-llm-td` present and `ci-no-td` absent.
+     - the PR's live labels: `ci-llm-selector` present and `ci-no-td` absent.
    - **Waiting.** When enforcing, `resolve_selection.py` waits up to `WAIT_SECONDS` (600 s) for a pending selector run of the head. Otherwise it uses the newest successful run's selection, in shadow.
    - **Failures.** The artifact's own `enforce` flag can only turn enforcement off, so a planted or stale artifact cannot enforce a selection on a PR without the label. A selector failure, or a missing or malformed artifact, keeps TD's split.
    - **Logging.** run_test.py logs:
-     - `llm_td_selection`: what the selection would run, and its time;
-     - `llm_td_failure`: each failing test, with whether the model's picks covered it, whether the hedge or the previously-failed rule did, and whether it was in TD's include list.
+     - `llm_selection`: what the selection would run, and its time;
+     - `llm_selector_failure`: each failing test, with whether the model's picks covered it, whether the hedge or the previously-failed rule did, and whether it was in TD's include list.
    - **What the shadow failure metric does not measure.** With TD on, only TD's include list runs, so the shadow metric only sees failures in files TD picked. It compares the selection with TD, not with the truth. Under enforcement only the selected, hedged and previously failed files run, so every observed failure is covered by construction.
    - **Where live recall comes from.**
      - The `td-holdout-unstable` workflow runs with TD off. It covers the `default` and `distributed` configs of the linux-jammy-py3.11-gcc11 build and the `dynamo_wrapped` config of the clang21 build, all CPU, without `inductor/test_torchinductor_opinfo` (`tests-to-exclude`). Its rows, with `td_enabled` false, see every failure in those configs.
      - It runs only when a PR is `opened`, and a shadow resolve only uses a selector run that has already succeeded. So a holdout row often has no selection yet, and the rows that have one lean toward PRs whose selector finished before the holdout's target-determination job.
      - Enforced PRs that later break main are the other source, since main runs everything.
    - **Gate for step 3.** Wait for a few weeks of the holdout's recall, for the PRs that do have a selection, to be at least TD's on the same configs. Also wait for the selection's run time to match the typical-change shares.
-     - **TD's recall there.** The holdout sets `force-no-td`, so TD's include list is every file and `llm_td_failure`'s `in_td_include` is always true on its rows. TD's recall is instead recomputed from the same failures' `td_test_failure_stats_v2` rows, which run_test.py emits with TD's ranking even with TD off: a failure counts for TD if its `position` is below `len(all_scores) * 25 // 100 + 1`. That is the cut `get_top_per_tests(25)` makes in `split_tests` (`tools/testing/test_selections.py`, called from run_test.py with TD on): `position` and the include list both index `TestPrioritizations._traverse_scores()` (`heuristics/interface.py`), and `all_scores` has one entry per TestRun in it.
+     - **TD's recall there.** The holdout sets `force-no-td`, so TD's include list is every file and `llm_selector_failure`'s `in_td_include` is always true on its rows. TD's recall is instead recomputed from the same failures' `td_test_failure_stats_v2` rows, which run_test.py emits with TD's ranking even with TD off: a failure counts for TD if its `position` is below `len(all_scores) * 25 // 100 + 1`. That is the cut `get_top_per_tests(25)` makes in `split_tests` (`tools/testing/test_selections.py`, called from run_test.py with TD on): `position` and the include list both index `TestPrioritizations._traverse_scores()` (`heuristics/interface.py`), and `all_scores` has one entry per TestRun in it.
      - **Previous failures differ from enforcement.** With every file in TD's include list, the selection's previously-failed rule admits every file that already failed on the PR. Under enforcement it admits only those in TD's top 25%, and the rest compete for the hedge. So a holdout failure covered only by `previous_failure_added` counts for the selection only if the file is in TD's recomputed 25%. Without that correction the holdout's recall would be optimistic against enforcement. **Given the backtest's push result, this gate is the decision point, not a formality.**
-2. **Opt-in enforcement.** `ci-llm-td` enforces the selection, with the 20% hedge, on that PR.
+2. **Opt-in enforcement.** `ci-llm-selector` enforces the selection, with the 20% hedge, on that PR.
 3. **Default enforcement.** Enforce on every same-repo PR from a trusted author, with `ci-no-td` as the opt-out. This unlocks about $80k a month and the merge-wait drop above. Track reverts of enforced PRs on main as the live check of revert recall. Only take this step if the holdout clears the gate in step 1; if it does not, raise the hedge or iterate the prompt first.
 4. **Inductor, periodic and slow.**
    - Periodic (CUDA) and slow already have a `target-determination` job. Add them to `td_enabled_workflow` in `tools/testing/target_determination/heuristics/utils.py` and to `TD_ENABLED` in `target_determination.yml`, which turns TD on for them.
@@ -457,28 +457,28 @@ The reported PR and neutral samples come from 2026-10-01 to 2026-10-25, and the 
 - Both are what CI downloads from test-infra's `generated-stats` branch. The report's snapshot is not checked in, so a fresh download has today's stats.
 
 ```
-python -m tools.testing.llm_td.eval.build_dataset --data $DATA --start 2026-10-01 --end 2026-10-26 --kinds pr neutral
-python -m tools.testing.llm_td.eval.build_dataset --data $DATA --start 2026-10-01 --end 2026-10-26 --kinds head
-python -m tools.testing.llm_td.eval.build_dataset --data $DATA --start 2026-04-01 --end 2026-10-26 --kinds revert
+python -m tools.testing.llm_selector.eval.build_dataset --data $DATA --start 2026-10-01 --end 2026-10-26 --kinds pr neutral
+python -m tools.testing.llm_selector.eval.build_dataset --data $DATA --start 2026-10-01 --end 2026-10-26 --kinds head
+python -m tools.testing.llm_selector.eval.build_dataset --data $DATA --start 2026-04-01 --end 2026-10-26 --kinds revert
 python -c "from tools.stats import import_test_stats as s; [f() for f in (s.get_test_times, s.get_test_class_times, s.get_test_file_ratings, s.get_test_class_ratings, s.get_td_heuristic_historial_edited_files_json, s.get_td_heuristic_profiling_json)]"
 cp .additional_ci_files/test-times.json $DATA/
-python -m tools.testing.llm_td.eval.td_replay --data $DATA
+python -m tools.testing.llm_selector.eval.td_replay --data $DATA
 ```
 
 **Model runs**, one tag per Sweep row. Results are cached per sample, so a rerun only runs the ids without a result file; errors and timeouts are kept unless their files are deleted. Each result records its prompt's hash: run_eval refuses a tag whose results came from another prompt or sample, and score leaves such samples out:
 
 ```
-IDS=tools/testing/llm_td/eval/ids
+IDS=tools/testing/llm_selector/eval/ids
 cat $IDS/eval.txt $IDS/head.txt > all.txt
 OPUS=us.anthropic.claude-opus-5-5 SONNET=us.anthropic.claude-sonnet-5 HAIKU=us.anthropic.claude-haiku-4-5-20251001-v1:0
-run() { python -m tools.testing.llm_td.eval.run_eval --data $DATA --tag $1 --model $2 --effort $3 --ids ${4:-all.txt} $5; }
+run() { python -m tools.testing.llm_selector.eval.run_eval --data $DATA --tag $1 --model $2 --effort $3 --ids ${4:-all.txt} $5; }
 run v3_opus55_low $OPUS low; run v3_opus55_medium $OPUS medium; run v3_opus55_high $OPUS high
 run v3_sonnet5_medium $SONNET medium; run v3_sonnet5_high $SONNET high; run v3_haiku45_low $HAIKU low
 run v3_opus55_medium_r2 $OPUS medium $IDS/eval.txt; run v3_opus55_low_r2 $OPUS low $IDS/eval.txt
-LLM_TD_AGENTIC_SANDBOX=1 run v3_sonnet5_medium_agentic $SONNET medium $IDS/agentic.txt --agentic
+LLM_SELECTOR_AGENTIC_SANDBOX=1 run v3_sonnet5_medium_agentic $SONNET medium $IDS/agentic.txt --agentic
 ```
 
-`--agentic` gives the model Read, Grep and Glob over the checkout on untrusted PR text, so run_eval refuses it without `LLM_TD_AGENTIC_SANDBOX=1`: set that only in a sandbox whose only secret is the model credential.
+`--agentic` gives the model Read, Grep and Glob over the checkout on untrusted PR text, so run_eval refuses it without `LLM_SELECTOR_AGENTIC_SANDBOX=1`: set that only in a sandbox whose only secret is the model credential.
 
 The order matters for the recorded $/call: runs that share a prompt prefix with an earlier run read it from cache (see Dollar model).
 
@@ -490,7 +490,7 @@ The order matters for the recorded $/call: runs that share a prompt prefix with 
 - The chart was rendered with matplotlib 3.11.1.
 
 ```
-S="python -m tools.testing.llm_td.eval.score --data $DATA"
+S="python -m tools.testing.llm_selector.eval.score --data $DATA"
 TAGS="v3_haiku45_low v3_sonnet5_medium v3_sonnet5_high v3_opus55_low v3_opus55_medium v3_opus55_high td"
 H=final,final+td5,final+td10,final+td15,final+td20
 $S --ids $IDS/eval.txt --policies model,$H --json rows_eval.json $TAGS
@@ -499,15 +499,15 @@ $S --ids $IDS/eval.txt --policies final,final+td20 v3_opus55_medium_r2 v3_opus55
 $S --ids $IDS/eval.txt --all-truth --policies final+td20 v3_opus55_medium td
 $S --ids $IDS/agentic.txt --policies model,final v3_sonnet5_medium v3_sonnet5_medium_agentic v3_opus55_low
 jq -s add rows_eval.json rows_head.json > rows_chart.json
-python -m tools.testing.llm_td.eval.chart rows_chart.json tools/testing/llm_td/report_tradeoff.svg
-python -m tools.testing.llm_td.eval.intervals rows_eval.json rows_head.json
-python -m tools.testing.llm_td.eval.intervals rows_eval.json rows_head.json --new v3_opus55_low:final+td20
-python -m tools.testing.llm_td.eval.intervals rows_eval.json rows_head.json --new v3_opus55_high:final+td20
-python -m tools.testing.llm_td.eval.intervals --data $DATA --latency v3_opus55_medium --ids $IDS/eval.txt
-for t in v3_opus55_low v3_opus55_high v3_sonnet5_medium v3_sonnet5_high v3_haiku45_low; do python -m tools.testing.llm_td.eval.intervals --data $DATA --latency $t --ids $IDS/eval.txt; done
-for t in v3_sonnet5_medium v3_sonnet5_medium_agentic; do python -m tools.testing.llm_td.eval.intervals --data $DATA --latency $t --ids $IDS/agentic.txt; done
+python -m tools.testing.llm_selector.eval.chart rows_chart.json tools/testing/llm_selector/report_tradeoff.svg
+python -m tools.testing.llm_selector.eval.intervals rows_eval.json rows_head.json
+python -m tools.testing.llm_selector.eval.intervals rows_eval.json rows_head.json --new v3_opus55_low:final+td20
+python -m tools.testing.llm_selector.eval.intervals rows_eval.json rows_head.json --new v3_opus55_high:final+td20
+python -m tools.testing.llm_selector.eval.intervals --data $DATA --latency v3_opus55_medium --ids $IDS/eval.txt
+for t in v3_opus55_low v3_opus55_high v3_sonnet5_medium v3_sonnet5_high v3_haiku45_low; do python -m tools.testing.llm_selector.eval.intervals --data $DATA --latency $t --ids $IDS/eval.txt; done
+for t in v3_sonnet5_medium v3_sonnet5_medium_agentic; do python -m tools.testing.llm_selector.eval.intervals --data $DATA --latency $t --ids $IDS/agentic.txt; done
 # The overhead table, then the saving at each hedge budget (Sweep), then the other models.
-D="python -m tools.testing.llm_td.eval.dollars --data $DATA"
+D="python -m tools.testing.llm_selector.eval.dollars --data $DATA"
 for o in 0.1 0.2 0.35 0.5; do $D --overhead $o --json dollars_o$o.json v3_opus55_medium final+td20; done
 for p in final final+td5 final+td10 final+td15; do $D v3_opus55_medium $p; done
 for t in v3_opus55_low v3_opus55_high v3_sonnet5_medium v3_sonnet5_high v3_haiku45_low; do $D $t final+td20; done
@@ -527,9 +527,9 @@ The "without PR history" row. `intervals` compares head rows with the revert row
 ```
 cp -r $DATA $DATA_NP && rm -rf $DATA_NP/td
 python -c "import json, pathlib, sys; [p.write_text(json.dumps({**json.loads(p.read_text()), 'previous_failures': []})) for p in pathlib.Path(sys.argv[1]).glob('samples/head_*.json')]" $DATA_NP
-python -m tools.testing.llm_td.eval.td_replay --data $DATA_NP
-python -m tools.testing.llm_td.eval.score --data $DATA_NP --ids $IDS/head.txt --policies $H --json rows_head_noprev.json $TAGS
-python -m tools.testing.llm_td.eval.intervals rows_eval.json rows_head_noprev.json
+python -m tools.testing.llm_selector.eval.td_replay --data $DATA_NP
+python -m tools.testing.llm_selector.eval.score --data $DATA_NP --ids $IDS/head.txt --policies $H --json rows_head_noprev.json $TAGS
+python -m tools.testing.llm_selector.eval.intervals rows_eval.json rows_head_noprev.json
 ```
 
 **Dollar constants.** `dollars.WORKFLOWS` holds, per workflow and runner kind:
@@ -545,7 +545,7 @@ python -m tools.testing.llm_td.eval.intervals rows_eval.json rows_head_noprev.js
 - a PR run is a fork PR's when its head repository is not pytorch/pytorch, and for `ciflow/` pushes the PR's head repository decides.
 
 ```
-python -m tools.testing.llm_td.eval.dollars --constants 1793672225
+python -m tools.testing.llm_selector.eval.dollars --constants 1793672225
 ```
 
 **Time to land.** The replay in Time to land's Method was run from ClickHouse with five queries over the month to 2026-11-03. `eval/land_time.py` runs them and the simulation. The queries:
@@ -563,7 +563,7 @@ The simulation works as follows:
 - With `--all-prs`, fork-PR runs are shrunk too, for the "fork PRs were selected too" line.
 
 ```
-python -m tools.testing.llm_td.eval.land_time fetch --cache $TTL --end 1793672225
-python -m tools.testing.llm_td.eval.land_time report --cache $TTL --dollars dollars_o0.2.json
-python -m tools.testing.llm_td.eval.land_time report --cache $TTL --dollars dollars_o0.2.json --all-prs
+python -m tools.testing.llm_selector.eval.land_time fetch --cache $TTL --end 1793672225
+python -m tools.testing.llm_selector.eval.land_time report --cache $TTL --dollars dollars_o0.2.json
+python -m tools.testing.llm_selector.eval.land_time report --cache $TTL --dollars dollars_o0.2.json --all-prs
 ```

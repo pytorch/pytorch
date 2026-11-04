@@ -238,7 +238,7 @@ class TestDashboardExclusions(unittest.TestCase):
                 {"td": td, "llm_selection": llm},
                 [
                     mock.call(1, 2, "additional_info/td_exclusions", [td]),
-                    mock.call(1, 2, "additional_info/llm_td_exclusions", [llm]),
+                    mock.call(1, 2, "additional_info/llm_selector_exclusions", [llm]),
                 ],
             ),
         ):

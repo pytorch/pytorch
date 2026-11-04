@@ -115,7 +115,7 @@ jobs:
 
       # One selection per workflow run, so every shard of a test job applies the same one.
       - name: Resolve the LLM test selection
-        id: llm-td
+        id: llm-selector
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
         timeout-minutes: 12
@@ -127,13 +127,13 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           # The workflows where run_test.py enables TD, and so can enforce the selection.
           TD_ENABLED: ${{ contains(fromJSON('["pull", "trunk"]'), github.workflow) || startsWith(github.workflow, 'rocm-') || startsWith(github.workflow, 'periodic-rocm-') }}
-        run: uv run --no-project --python 3.12 tools/testing/llm_td/resolve_selection.py
+        run: uv run --no-project --python 3.12 tools/testing/llm_selector/resolve_selection.py
 
       - name: Store the LLM test selection on GHA
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: steps.llm-td.outcome == 'success'
+        if: steps.llm-selector.outcome == 'success'
         with:
-          name: llm_td_selection.json
+          name: llm_selection.json
           retention-days: 1
           if-no-files-found: ignore
-          path: llm_td_selection.json
+          path: llm_selection.json

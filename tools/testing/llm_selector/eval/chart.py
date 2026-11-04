@@ -1,6 +1,6 @@
 """Plot changes caught vs test time run on a typical change, from score.py --json rows.
 
-    python -m tools.testing.llm_td.eval.chart rows.json out.svg
+    python -m tools.testing.llm_selector.eval.chart rows.json out.svg
 
 Needs matplotlib, which no requirements file installs; the SVG's path data
 depends on its version.
@@ -18,7 +18,7 @@ import io
 import json
 from pathlib import Path
 
-from tools.testing.llm_td.eval.score import summarize
+from tools.testing.llm_selector.eval.score import summarize
 
 
 MODELS = {"v3_opus55": "Opus 5.5", "v3_sonnet5": "Sonnet 5", "v3_haiku45": "Haiku 4.5"}

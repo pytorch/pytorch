@@ -1,7 +1,7 @@
 """Replay of PR CI time to signal and merge wait with the selection's test time, for REPORT.md's Time to land.
 
-    python -m tools.testing.llm_td.eval.land_time fetch --cache DIR [--end UNIX_TIME]
-    python -m tools.testing.llm_td.eval.land_time report --cache DIR --dollars DOLLARS_JSON [--all-prs]
+    python -m tools.testing.llm_selector.eval.land_time fetch --cache DIR [--end UNIX_TIME]
+    python -m tools.testing.llm_selector.eval.land_time report --cache DIR --dollars DOLLARS_JSON [--all-prs]
 
 fetch caches, from ClickHouse, 31 days of pull, trunk, inductor and rocm-mi300
 runs (wfruns.json), each run's first-attempt job aggregates (runs_WF.json),
@@ -39,7 +39,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tools.testing.llm_td.eval import clickhouse, score, write_json
+from tools.testing.llm_selector.eval import clickhouse, score, write_json
 
 
 if TYPE_CHECKING:

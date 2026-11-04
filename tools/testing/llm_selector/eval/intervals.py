@@ -1,7 +1,7 @@
 """Paired 95% intervals and McNemar p-values for new minus old on the headline metrics, and model-call latency.
 
-    python -m tools.testing.llm_td.eval.intervals rows_eval.json rows_head.json [--new TAG:POLICY] [--old TAG:POLICY]
-    python -m tools.testing.llm_td.eval.intervals --data DIR --latency TAG [--ids IDS]
+    python -m tools.testing.llm_selector.eval.intervals rows_eval.json rows_head.json [--new TAG:POLICY] [--old TAG:POLICY]
+    python -m tools.testing.llm_selector.eval.intervals --data DIR --latency TAG [--ids IDS]
 
 ROWS are score.py --json outputs (the revert rows and the head rows). Reverts
 are resampled per commit; failing PR pushes are resampled per PR (a cluster
@@ -23,8 +23,8 @@ import random
 import statistics as st
 from pathlib import Path
 
-from tools.testing.llm_td.eval.chart import PRODUCTION
-from tools.testing.llm_td.eval.dollars import current_results
+from tools.testing.llm_selector.eval.chart import PRODUCTION
+from tools.testing.llm_selector.eval.dollars import current_results
 
 
 def outcomes(rows: list[dict], tag: str, pol: str, kind: str) -> dict[str, bool]:

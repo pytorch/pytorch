@@ -1,6 +1,6 @@
 """Monthly runner-dollar model of replacing TD with an LLM selection policy.
 
-    python -m tools.testing.llm_td.eval.dollars --data DIR v3_opus55_medium final+td20 [--overhead 0.2]
+    python -m tools.testing.llm_selector.eval.dollars --data DIR v3_opus55_medium final+td20 [--overhead 0.2]
 
 The selection fractions are score.score's rows on the neutral samples (random
 landed main commits), the closest thing to a typical PR push, for the policy
@@ -31,9 +31,9 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from tools.testing.llm_td.eval import clickhouse, land_time, REPO, score
-from tools.testing.llm_td.eval.run_eval import TIMED_OUT
-from tools.testing.llm_td.select_tests import test_minutes
+from tools.testing.llm_selector.eval import clickhouse, land_time, REPO, score
+from tools.testing.llm_selector.eval.run_eval import TIMED_OUT
+from tools.testing.llm_selector.select_tests import test_minutes
 
 
 # 30-day runner cost ($k) of the test jobs the selection can shrink
