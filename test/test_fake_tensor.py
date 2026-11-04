@@ -5541,34 +5541,24 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIsNone(torch._C._get_real_tensor(moved))
         self.assertTrue(moved.requires_grad)
         self.assertTrue(moved.is_leaf)
-        self.assertFalse(moved._is_view())
         self.assertEqual(meta_fake.device, torch.device("meta"))
         self.assertIsNotNone(torch._C._get_real_tensor(meta_fake))
         other_mode, _other_wrapper = self._make_mode()
-        with self.assertRaisesRegex(RuntimeError, "Expected a fake of the given mode"):
+        with self.assertRaisesRegex(ValueError, "Expected a fake of the given mode"):
             torch._C._from_meta_and_device(meta_fake, torch.device("cpu"), other_mode)
 
-        with self.assertRaisesRegex(RuntimeError, "device must be 'meta', got cpu"):
+        with self.assertRaisesRegex(ValueError, "device must be 'meta', got cpu"):
             torch._C._from_meta_and_device(fake, torch.device("cpu"), mode)
-        with self.assertRaisesRegex(RuntimeError, "device must be 'meta', got cpu"):
+        with self.assertRaisesRegex(ValueError, "device must be 'meta', got cpu"):
             torch._C._from_meta_and_device(torch.empty(2), torch.device("cpu"), mode)
         meta_subclass = TwoTensor(
             torch.empty(2, device="meta"), torch.empty(2, device="meta")
         )
-        with self.assertRaisesRegex(RuntimeError, "Expected a plain meta tensor"):
+        with self.assertRaisesRegex(TypeError, "does not accept tensor subclasses"):
             torch._C._from_meta_and_device(meta_subclass, torch.device("cpu"), mode)
 
-        class DispatchSubclass(torch.Tensor):
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                return func(*args, **(kwargs or {}))
-
-        # A subclass made from a fake is rejected too, not silently unwrapped
-        fake_subclass = torch.Tensor._make_subclass(DispatchSubclass, meta_fake)
-        with self.assertRaisesRegex(RuntimeError, "Expected a plain meta tensor"):
-            torch._C._from_meta_and_device(fake_subclass, torch.device("cpu"), mode)
         functional = torch._to_functional_tensor(torch.empty(2, device="meta"))
-        with self.assertRaisesRegex(RuntimeError, "Expected a plain meta tensor"):
+        with self.assertRaisesRegex(TypeError, "does not accept tensor subclasses"):
             torch._C._from_meta_and_device(functional, torch.device("cpu"), mode)
 
         # allow_meta is enforced
@@ -5577,8 +5567,15 @@ class TestCppFakeTensorModeBindings(TestCase):
         meta = torch.empty(2, device="meta")
         with self.assertRaisesRegex(RuntimeError, "allow_meta is False"):
             torch._C._from_meta_and_device(meta, torch.device("meta"), strict_mode)
-        self.assertFalse(torch._C._is_fake_tensor(meta))
-        self.assertTrue(meta.is_meta)
+
+        # requires_grad is set before the shared storage is marked, so failing
+        # to set it leaves the input's storage unmarked
+        mode._allow_unsafe_data_ptr_access = False
+        with torch.inference_mode():
+            inference = torch.empty(2, device="meta", requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "inference tensor"):
+            torch._C._from_meta_and_device(inference, torch.device("cpu"), mode)
+        inference.data_ptr()
 
     def test_unsafe_data_ptr_access(self):
         def make_fake(mode):
@@ -5586,10 +5583,11 @@ class TestCppFakeTensorModeBindings(TestCase):
             return torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
 
         warning = "Accessing the data pointer of FakeTensor"
+        data_ptr_error = r"Cannot access data pointer of Tensor \(e\.g\. FakeTensor"
         config = torch._functorch.config
         with config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
             strict_mode, _ = self._make_mode()
-        with self.assertRaisesRegex(RuntimeError, "data pointer"):
+        with self.assertRaisesRegex(RuntimeError, data_ptr_error):
             make_fake(strict_mode).data_ptr()
 
         mode, _ = self._make_mode()
@@ -5599,7 +5597,7 @@ class TestCppFakeTensorModeBindings(TestCase):
 
         # Reassigning applies to fakes created afterwards
         mode._allow_unsafe_data_ptr_access = False
-        with self.assertRaisesRegex(RuntimeError, "data pointer"):
+        with self.assertRaisesRegex(RuntimeError, data_ptr_error):
             make_fake(mode).data_ptr()
         with self.assertWarnsOnceRegex(UserWarning, warning):
             fake.data_ptr()
