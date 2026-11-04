@@ -35,9 +35,6 @@
 namespace at::native {
 namespace {
 
-// One thread per output pixel, looping over all N*C planes, so the source
-// coordinates are computed once per pixel. Only fast when OH*OW alone fills
-// the device.
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_bilinear2d_out_frame(
@@ -88,14 +85,10 @@ __global__ void upsample_bilinear2d_out_frame(
 }
 
 #ifdef USE_ROCM
-// On ROCm, below this many output pixels per CU, upsample_bilinear2d_out_frame
-// leaves the device idle and the one-thread-per-element kernels are faster.
-// One value is used on every ROCm architecture except where a sweep put the
-// tie elsewhere. gfx942: the new kernels win 1.4-2.2x at 216 pixels/CU, tie at
-// 431, and lose from 1010 up. gfx950: they win up to 1.9x at 384 pixels/CU;
-// at 512 they trail by up to 14% with N*C <= 32 and win 1.2-1.4x with 256
-// planes; from 768 up they mostly tie or lose. CUDA always uses
-// upsample_bilinear2d_out_frame.
+// upsample_bilinear2d_out_frame runs one thread per output pixel and loops
+// over all N*C planes. Below this many output pixels per CU it leaves the
+// device idle, and the one-thread-per-element kernels below are faster.
+// The cut is tuned per architecture from perf sweeps.
 int64_t plane_kernel_min_pixels_per_sm(const cudaDeviceProp* props) {
   if (c10::basic_string_view<char>(props->gcnArchName).starts_with("gfx950")) {
     return 512;
