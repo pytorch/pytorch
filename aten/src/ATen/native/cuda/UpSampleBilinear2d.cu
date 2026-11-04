@@ -14,8 +14,8 @@
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/LaunchUtils.h>
 #ifdef USE_ROCM
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
-#include <c10/util/string_view.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -89,18 +89,19 @@ __global__ void upsample_bilinear2d_out_frame(
 // over all N*C planes. Below this many output pixels per CU it leaves the
 // device idle, and the one-thread-per-element kernels below are faster. More
 // planes lengthen the plane loop's serial work, which moves the crossover to
-// larger planes. The cut is tuned per architecture from perf sweeps.
-int64_t plane_kernel_min_pixels_per_sm(
-    const cudaDeviceProp* props,
-    int64_t planes) {
-  const c10::basic_string_view<char> arch(props->gcnArchName);
-  if (arch.starts_with("gfx950")) {
+// larger planes. Architectures without a perf sweep keep the plane kernel.
+int64_t plane_kernel_min_pixels_per_sm(int64_t planes) {
+  const auto& hooks = at::detail::getCUDAHooks();
+  if (hooks.isGPUArch({"gfx950"})) {
     return planes >= 256 ? 640 : 512;
   }
-  if (arch.starts_with("gfx1250")) {
+  if (hooks.isGPUArch({"gfx942"})) {
+    return 256;
+  }
+  if (hooks.isGPUArch({"gfx1250"})) {
     return 768;
   }
-  return 256;
+  return 0;
 }
 
 // One thread per output element, w2 fastest so neighbouring lanes store
@@ -213,8 +214,7 @@ bool use_per_element_kernels(const Tensor& output) {
   const int64_t plane_numel = output.size(2) * output.size(3);
   return output.numel() > 0 &&
       plane_numel < static_cast<int64_t>(props->multiProcessorCount) *
-          plane_kernel_min_pixels_per_sm(
-              props, output.size(0) * output.size(1));
+          plane_kernel_min_pixels_per_sm(output.size(0) * output.size(1));
 }
 
 template <typename scalar_t>
