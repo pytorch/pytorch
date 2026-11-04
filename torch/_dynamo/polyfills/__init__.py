@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib
 import sys as py_sys
 import types
-from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
 from operator import eq, ge, gt, le, lt, ne
@@ -368,9 +367,6 @@ def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
     # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
     if (dict.__len__(d) != dict.__len__(other)) or (dict.keys(d) != dict.keys(other)):
         return False
-
-    if all(isinstance(a, OrderedDict) for a in (d, other)):
-        return list(dict.items(d)) == list(dict.items(other))
 
     # CPython's dict_equal uses PyObject_RichCompareBool for value
     # comparison, which has an identity shortcut (if v is w, eq is True).
