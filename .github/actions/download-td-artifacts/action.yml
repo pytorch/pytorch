@@ -10,7 +10,7 @@ inputs:
 runs:
   using: composite
   steps:
-    # Defense in depth against a stale or planted selection an unzipped build artifact left, not
+    # Clear any selection already in the checkout so only the one downloaded below is used. Not
     # the trust boundary: resolve_selection.py decides which .github/workflows/llm-selector.yml
     # selection, if any, the test jobs get.
     - name: Remove any LLM test selection
