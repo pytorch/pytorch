@@ -41,7 +41,8 @@ class TestTDResults(unittest.TestCase):
                 self.assertEqual(scores, [("test_nn", 1), ("test_ops", 0)])
 
     def test_td_job_writes_the_previous_failures(self) -> None:
-        tp = TestPrioritizations(["test_nn", "test_ops"], {TestRun("test_nn"): 1})
+        scores = {TestRun("test_nn"): 0.5, TestRun("test_ops"): 1}
+        tp = TestPrioritizations(["test_ops", "test_nn", "test_fx"], scores)
         heuristics = mock.Mock(**{"get_aggregated_priorities.return_value": tp})
         fetches: dict[str, Any] = dict.fromkeys(
             [
@@ -93,8 +94,9 @@ class TestTDResults(unittest.TestCase):
                     if outcome is None:
                         os.environ.pop("PYTEST_CACHE_DOWNLOAD_OUTCOME", None)
                     do_target_determination_for_s3.main()
-                    _, loaded = import_results(Path(d) / "td_results.json")
+                    ranking, loaded = import_results(Path(d) / "td_results.json")
                 self.assertEqual(loaded, failed, (outcome, cache))
+                self.assertEqual(ranking.to_json(), tp.to_json(), (outcome, cache))
 
     def test_import_results(self) -> None:
         with tempfile.TemporaryDirectory() as d, mock.patch("sys.stdout"):
