@@ -346,13 +346,13 @@ def _get_use_stack_trace(node: torch.fx.Node) -> str | None:
 def check_multiple_devices_or_any_cpu_nodes(
     device_node_mapping: dict[torch.device, torch.fx.Node],
     *,
-    cudagraphs_per_partition: bool,
+    cpu_nodes_partitioned_out: bool,
 ) -> str | None:
     # meta tensors are supported since there is no compute
     device_node_mapping.pop(torch.device("meta"), None)
 
-    if cudagraphs_per_partition:
-        # graph partition supports splitting on cpu op. So we can ignore cpu nodes.
+    if cpu_nodes_partitioned_out:
+        # Graph partitioning splits cpu ops out of the captured partitions.
         device_node_mapping.pop(torch.device("cpu"), None)
 
     if cpu_node := device_node_mapping.get(torch.device("cpu")):
@@ -401,13 +401,12 @@ def check_caching_allocator_for_cudagraphs() -> str | None:
 def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node],
     *,
-    cudagraphs_per_partition: bool,
+    cpu_nodes_partitioned_out: bool,
 ) -> str | None:
     return (
         check_caching_allocator_for_cudagraphs()
         or check_multiple_devices_or_any_cpu_nodes(
-            device_node_mapping,
-            cudagraphs_per_partition=cudagraphs_per_partition,
+            device_node_mapping, cpu_nodes_partitioned_out=cpu_nodes_partitioned_out
         )
     )
 
