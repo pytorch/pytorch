@@ -11,6 +11,7 @@ import torch
 from ...cutedsl import launch as _L
 from ...cutedsl.dtypes import torch2cute
 from ...cutedsl.plan_cache import cached_plan
+from ...utils.device import check_current
 from . import tile
 from .kernel_general import _launch, _PART_TORCH, ReduceBlock
 
@@ -53,7 +54,7 @@ def reduce_col_tile(
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
     device = x.get_device()
-    _L.check_current(device)
+    check_current(device)
     if threads_per_block is None:
         threads_per_block = (
             _WIDE_ACC_THREADS_PER_BLOCK if trait.nfields >= 3 else _THREADS_PER_BLOCK
