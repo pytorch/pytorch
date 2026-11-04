@@ -42,8 +42,8 @@ out under every policy and counted on stderr too, as in CI the grep works.
 run_test.py applies TD, and so the selection, only in the pull, trunk and
 ROCm workflows, and not on macOS, in xpu or onnx builds, under NO_TD (from
 force-no-td or .ci/pytorch/test.sh, see NO_TD_CONFIGS) or with
-TESTS_TO_INCLUDE (test/run_test.py's --enable-td default, which calls
-td_enabled_workflow and td_enabled_job, and its main(); see td_job). Other jobs (inductor's unit tests, periodic, slow, ...) run
+TESTS_TO_INCLUDE (test/run_test.py's --enable-td default, td_enabled_default,
+and its main(); see td_job). Other jobs (inductor's unit tests, periodic, slow, ...) run
 every test under every policy, so their failures are left out
 of the truth, and configs no TD job runs are left out of the cost share
 (the report's dollar model prices the inductor ones separately). Jobs are
@@ -71,6 +71,7 @@ from __future__ import annotations
 import argparse
 import collections
 import contextlib
+import fnmatch
 import functools
 import hashlib
 import inspect
@@ -124,8 +125,8 @@ VERSION = re.compile(r"\d+(\.\d+)*")
 MATRIX_SUFFIX = re.compile(r" \([^()]*\)")
 # run_test.py never runs TD on macOS or in NO_TD_BUILD_ENVS builds.
 NO_TD_ENV = re.compile("|".join(("macos", *NO_TD_BUILD_ENVS)))
-# .ci/pytorch/test.sh runs a TEST_CONFIG containing one of these through a function that exports NO_TD=1.
-NO_TD_CONFIGS = ("dynamo_cpython",)
+# The patterns of .ci/pytorch/test.sh's TEST_CONFIG branches that export NO_TD=1.
+NO_TD_CONFIGS = ("*dynamo_cpython*",)
 # The historical-stats artifacts td_replay reads, and the TD code it runs.
 STATS_ARTIFACTS = [TEST_FILE_RATINGS_FILE, TD_HEURISTIC_HISTORICAL_EDITED_FILES, TD_HEURISTIC_PROFILING_FILE]  # fmt: skip
 TD_CODE = REPO / "tools/testing/target_determination"
@@ -235,7 +236,7 @@ def ci_jobs(
             elif "test" in uses:
                 w = job.get("with") or {}
                 ok = td_job(uses, arg(key, "build-environment"), w.get("force-no-td"), str(w.get("tests-to-include", "")))  # fmt: skip
-                out |= {(name, c, ok and not any(n in c for n in NO_TD_CONFIGS)) for c in MATRIX_CONFIG.findall(arg(key, "test-matrix"))}  # fmt: skip
+                out |= {(name, c, ok and not any(fnmatch.fnmatchcase(c, n) for n in NO_TD_CONFIGS)) for c in MATRIX_CONFIG.findall(arg(key, "test-matrix"))}  # fmt: skip
         return out
 
     out: dict[bool, set[tuple[str, str, str]]] = {True: set(), False: set()}
@@ -625,9 +626,12 @@ def main() -> None:
     p.add_argument("--json", type=Path, help="also write per-sample rows here")
     p.add_argument("tags", nargs="+")
     args = p.parse_args()
-    policies = args.policies.split(",")
+    policies = list(dict.fromkeys(args.policies.split(",")))
     if unknown := [x for x in policies if x not in POLICIES and not HEDGE.fullmatch(x)]:
         p.error(f"unknown --policies {unknown}; the tag td is always scored as td25")
+    shares = [float(m.group(1)) / 100 if m.group(1) else LLM_TD_HEDGE for x in policies if (m := HEDGE.fullmatch(x))]  # fmt: skip
+    if len(shares) != len(set(shares)):
+        p.error(f"--policies {policies} has two hedge policies of the same share")
     if missing := [a for a in STATS_ARTIFACTS if not (args.stats / a).exists()]:
         p.error(f"{args.stats} lacks {missing}, which td_replay.py read")
     ids = args.ids.read_text().split()
