@@ -2,6 +2,7 @@
 # PartialColumns stage-two kernel.
 # Threads own vectorized kept-axis outputs without lane merging. Splitting the reduced
 # axis provides parallelism; unsplit (65536, 256) took 7830us versus ATen's 15.8us.
+# Inputs must be on the current device.
 
 from collections.abc import Sequence
 from typing import Any, NamedTuple
