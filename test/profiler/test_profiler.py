@@ -2524,6 +2524,19 @@ with open(sys.argv[1], "w") as f:
                 False, {collected}
             )
 
+    def test_toggle_cpu_when_not_running_raises(self):
+        # A scheduled profiler is created in warmup but runs only while recording.
+        cpu = [ProfilerActivity.CPU]
+        warmup_then_record = torch.profiler.schedule(wait=0, warmup=1, active=1)
+        with profile(activities=cpu, schedule=warmup_then_record) as p:
+            with self.assertRaisesRegex(RuntimeError, "profiler is not running"):
+                p.toggle_collection_dynamic(False, cpu)
+            p.step()
+            p.toggle_collection_dynamic(False, cpu)
+            p.toggle_collection_dynamic(True, cpu)
+        with self.assertRaisesRegex(RuntimeError, "profiler is not running"):
+            p.toggle_collection_dynamic(False, cpu)
+
     def test_init_for_cuda_graphs_traces_cuda(self):
         from torch.profiler._utils import _init_for_cuda_graphs
 
