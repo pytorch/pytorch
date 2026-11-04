@@ -20,7 +20,6 @@ from weakref import ReferenceType
 
 import torch
 import torch._library.utils as library_utils
-import torch.utils._python_dispatch as python_dispatch
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._custom_class_base import CustomClassBase
@@ -42,6 +41,7 @@ from torch.overrides import TorchFunctionMode
 from torch.types import IntLikeType, py_sym_types
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
+    _set_in_torch_dispatch_mode,
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
     TraceableWrapperSubclass,
@@ -399,7 +399,7 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         fake_mode = torch._C._maybe_get_fake_mode(x)
         if fake_mode is not None:
-            # A SymNode's hint never changes, so this can be decided now
+            # A SymFloat's hint is never filled in later, so this can be decided now
             backed = isinstance(memo, SymFloat) and memo.node.hint is not None
             epoch = None if backed else fake_mode.epoch
             torch._C._set_fake_item_memo(x, memo, epoch)
@@ -710,7 +710,7 @@ def _avoid_device_init() -> bool:
 # CppFakeTensorMode. install() puts mode in the FAKE dispatch mode slot, which
 # is empty at that point, and uninstall() takes it out.
 def _enter_fake_mode(
-    mode: FakeTensorMode | CppFakeTensorMode, install: Callable[[], object]
+    mode: FakeTensorMode | CppFakeTensorMode, install: Callable[[], object], /
 ) -> None:
     import torch.nested._internal.nested_tensor
 
@@ -740,13 +740,16 @@ def _enter_fake_mode(
 
 
 def _exit_fake_mode(
-    mode: FakeTensorMode | CppFakeTensorMode, uninstall: Callable[[], object]
+    mode: FakeTensorMode | CppFakeTensorMode,
+    uninstall: Callable[..., object],
+    /,
+    *args: object,
 ) -> None:
     (live, maybe_prev_fake_mode, maybe_prev_only_lift_cpu_tensors) = (
         mode.enter_stack.pop()
     )
     if live:
-        uninstall()
+        uninstall(*args)
 
         # Re-enable the previous fake mode, if there was one.
         if maybe_prev_fake_mode is not None:
@@ -765,8 +768,10 @@ class CppFakeTensorMode:
     # The Python wrapper of a C++ FakeTensorMode (torch._C._CppFakeTensorMode),
     # which the Python parts of fake dispatch run against. The mode's state
     # lives on the C++ mode, so a wrapper rebuilt by _from_cpp_mode is
-    # equivalent. See Note [C++ FakeTensorMode Python wrapper lifetime] in
-    # torch/csrc/FakeTensorMode.cpp.
+    # equivalent, except for the enter state (enter_stack,
+    # old_dispatch_mode_flags), which is why an entered wrapper is kept in
+    # _entered_cpp_fake_modes. See Note [C++ FakeTensorMode Python wrapper
+    # lifetime] in torch/csrc/FakeTensorMode.cpp.
     __slots__ = ("_cpp_mode", "enter_stack", "old_dispatch_mode_flags", "__weakref__")
 
     def __init__(
@@ -832,14 +837,16 @@ class CppFakeTensorMode:
     # torch/csrc/autograd/init.cpp)
     def _install(self) -> None:
         _entered_cpp_fake_modes.append(self)
-        self.old_dispatch_mode_flags.append(python_dispatch._is_in_torch_dispatch_mode)
-        python_dispatch._is_in_torch_dispatch_mode = True
+        self.old_dispatch_mode_flags.append(_set_in_torch_dispatch_mode(True))
         torch._C._set_dispatch_mode(self)
 
     def _uninstall(self) -> None:
-        torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
-        python_dispatch._is_in_torch_dispatch_mode = self.old_dispatch_mode_flags.pop()
+        _set_in_torch_dispatch_mode(self.old_dispatch_mode_flags.pop())
         _entered_cpp_fake_modes.remove(self)
+        if torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is None:
+            raise RuntimeError(
+                "Attempted to unset FakeTensorMode, but there wasn't one active."
+            )
 
 
 @functools.cache
@@ -2249,9 +2256,7 @@ class FakeTensorMode(TorchDispatchMode):
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        _exit_fake_mode(
-            self, functools.partial(super().__exit__, exc_type, exc_val, exc_tb)
-        )
+        _exit_fake_mode(self, super().__exit__, exc_type, exc_val, exc_tb)
 
     @classmethod
     def is_infra_mode(cls) -> bool:
