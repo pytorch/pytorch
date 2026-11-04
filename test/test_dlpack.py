@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
+    onlyMPS,
     onlyNativeDeviceTypes,
     onlyOn,
     skipCUDAIf,
@@ -456,19 +457,28 @@ class TestTorchDlPack(TestCase):
         new_tensor = torch.tensor(wrap)
         self.assertEqual(tensor, new_tensor)
 
-    @skipMeta
     @skipIfTorchDynamo("__dlpack__ doesn't work with dynamo")
-    @onlyNativeDeviceTypes
-    def test_asarray_prefers_dlpack_over_buffer(self, device):
+    @onlyMPS
+    def test_asarray_dlpack_buffer_on_mps(self, device):
+        # Like an MLX array on Apple silicon: a buffer whose __dlpack__ exports
+        # MPS memory. The empty buffer would raise, so results come from DLPack.
         class DLPackBuffer(TensorDLPackWrapper, bytearray):
             pass
 
-        # The empty buffer would raise; the result must be the producer's tensor.
         tensor = make_tensor((2, 3), dtype=torch.float32, device=device)
-        result = torch.asarray(DLPackBuffer(tensor))
-        self.assertEqual(result, tensor)
-        self.assertEqual(result.device, tensor.device)
-        self.assertEqual(result.data_ptr(), tensor.data_ptr())
+        aliased = torch.asarray(DLPackBuffer(tensor), device="mps:0", copy=False)
+        self.assertEqual(aliased, tensor)
+        self.assertEqual(aliased.data_ptr(), tensor.data_ptr())
+
+        copied = torch.asarray(DLPackBuffer(tensor), copy=True)
+        self.assertEqual(copied, tensor)
+        self.assertNotEqual(copied.data_ptr(), tensor.data_ptr())
+
+        on_cpu = torch.asarray(DLPackBuffer(tensor), device="cpu")
+        self.assertEqual(on_cpu.device, torch.device("cpu"))
+        self.assertEqual(on_cpu, tensor.cpu())
+        with self.assertRaisesRegex(ValueError, "from device 'mps:0' to 'cpu'"):
+            torch.asarray(DLPackBuffer(tensor), device="cpu", copy=False)
 
     @skipMeta
     @skipIfTorchDynamo("__dlpack__ doesn't work with dynamo")
