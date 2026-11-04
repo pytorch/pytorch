@@ -1,5 +1,6 @@
 # Owner(s): ["module: hub"]
 
+import io
 import os
 import tempfile
 import threading
@@ -430,79 +431,107 @@ class TestHub(TestCase):
 
                 self.assertIn("directory traversal", str(cm.exception))
 
-    def _run_concurrently(self, fn, num_workers=4):
+    def _run_concurrently(self, fns):
         # Slow down the download so that, without locking, every worker would
-        # see an empty cache and start its own download.
+        # see an empty cache and start its own download. The short lock timeout
+        # turns a lock that is never released into extra downloads, so the test
+        # fails instead of hanging.
         real_download = hub.download_url_to_file
 
         def slow_download(*args, **kwargs):
             time.sleep(0.5)
             return real_download(*args, **kwargs)
 
-        barrier = threading.Barrier(num_workers)
+        barrier = threading.Barrier(len(fns))
 
-        def worker():
+        def worker(fn):
             barrier.wait()
             return fn()
 
-        with patch.object(
-            hub, "download_url_to_file", side_effect=slow_download
-        ) as mock_download:
-            with ThreadPoolExecutor(num_workers) as pool:
-                futures = [pool.submit(worker) for _ in range(num_workers)]
-                results = [f.result(timeout=120) for f in futures]
+        with (
+            patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 30),
+            patch.object(
+                hub, "download_url_to_file", side_effect=slow_download
+            ) as mock_download,
+            ThreadPoolExecutor(len(fns)) as pool,
+        ):
+            results = list(pool.map(worker, fns))
         return results, mock_download.call_count
 
-    def test_load_state_dict_from_url_concurrent(self):
+    def _save_weights(self):
         src = os.path.join(self.tmpdir.name, "weights.pt")
         torch.save({"w": torch.arange(10)}, src)
-        model_dir = os.path.join(self.tmpdir.name, "checkpoints")
+        return Path(src).as_uri(), os.path.join(self.tmpdir.name, "checkpoints")
 
-        results, num_downloads = self._run_concurrently(
-            lambda: hub.load_state_dict_from_url(
-                Path(src).as_uri(), model_dir=model_dir, progress=False
-            )
+    def _make_hub_archive(self, repo, entries=None):
+        archive_dir = os.path.join(self.tmpdir.name, "archives")
+        os.makedirs(archive_dir, exist_ok=True)
+        archive = os.path.join(archive_dir, repo + ".zip")
+        # Mimic a GitHub archive: a single top-level directory.
+        if entries is None:
+            entries = {f"{repo}-main/hubconf.py": f"name = {repo!r}\n"}
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr(f"{repo}-main/", "")
+            for name, content in entries.items():
+                zf.writestr(name, content)
+        return Path(archive).as_uri()
+
+    def _load_repo(self, repo, force_reload=False):
+        return hub._get_cache_or_reload(
+            f"owner/{repo}:main",
+            force_reload=force_reload,
+            trust_repo=True,
+            verbose=False,
+            skip_validation=True,
         )
+
+    def _assert_no_leftovers(self):
+        names = os.listdir(hub.get_dir())
+        leftovers = [
+            n
+            for n in names
+            if not n.endswith(".lock") and (n.endswith(".zip") or "_main." in n)
+        ]
+        self.assertEqual(leftovers, [])
+
+    def test_load_state_dict_from_url_concurrent(self):
+        url, model_dir = self._save_weights()
+
+        def load():
+            return hub.load_state_dict_from_url(
+                url, model_dir=model_dir, progress=False
+            )
+
+        results, num_downloads = self._run_concurrently([load] * 4)
         self.assertEqual(num_downloads, 1)
         for state_dict in results:
             self.assertEqual(state_dict["w"], torch.arange(10))
 
     def test_get_cache_or_reload_concurrent(self):
-        url = self._make_hub_archive()
-        with patch.object(hub, "_git_archive_link", return_value=url):
-            results, num_downloads = self._run_concurrently(
-                lambda: hub._get_cache_or_reload(
-                    "owner/repo:main",
-                    force_reload=False,
-                    trust_repo=True,
-                    verbose=False,
-                    skip_validation=True,
-                )
-            )
-        self.assertEqual(num_downloads, 1)
-        repo_dir = os.path.join(hub.get_dir(), "owner_repo_main")
-        self.assertEqual(results, [repo_dir] * len(results))
-        self.assertEqual(os.listdir(repo_dir), ["hubconf.py"])
+        repos = ["repo", "other"]
+        urls = {repo: self._make_hub_archive(repo) for repo in repos}
+        loads = [lambda r=repo: self._load_repo(r) for repo in repos for _ in range(3)]
+        with patch.object(
+            hub, "_git_archive_link", side_effect=lambda owner, name, ref: urls[name]
+        ):
+            results, num_downloads = self._run_concurrently(loads)
 
-    def _make_hub_archive(self):
-        archive = os.path.join(self.tmpdir.name, "archive.zip")
-        # Mimic a GitHub archive: a single top-level directory.
-        with zipfile.ZipFile(archive, "w") as zf:
-            zf.writestr("repo-main/", "")
-            zf.writestr("repo-main/hubconf.py", "dependencies = []\n")
-        return Path(archive).as_uri()
+        # One download per repo, although both repos are on the same branch.
+        self.assertEqual(num_downloads, len(repos))
+        hub_dir = hub.get_dir()
+        expected = [
+            os.path.join(hub_dir, f"owner_{r}_main") for r in repos for _ in range(3)
+        ]
+        self.assertEqual(results, expected)
+        for repo in repos:
+            repo_dir = os.path.join(hub_dir, f"owner_{repo}_main")
+            self.assertEqual(os.listdir(repo_dir), ["hubconf.py"])
+            with open(os.path.join(repo_dir, "hubconf.py")) as f:
+                self.assertEqual(f.read(), f"name = {repo!r}\n")
+        self._assert_no_leftovers()
 
     def test_get_cache_or_reload_force_reload(self):
-        def load(force_reload):
-            return hub._get_cache_or_reload(
-                "owner/repo:main",
-                force_reload=force_reload,
-                trust_repo=True,
-                verbose=False,
-                skip_validation=True,
-            )
-
-        url = self._make_hub_archive()
+        url = self._make_hub_archive("repo")
         real_download = hub.download_url_to_file
         with (
             patch.object(hub, "_git_archive_link", return_value=url),
@@ -510,42 +539,62 @@ class TestHub(TestCase):
                 hub, "download_url_to_file", side_effect=real_download
             ) as mock_download,
         ):
-            repo_dir = load(force_reload=False)
-            load(force_reload=False)
+            repo_dir = self._load_repo("repo")
+            self._load_repo("repo")
             self.assertEqual(mock_download.call_count, 1)
-            self.assertEqual(load(force_reload=True), repo_dir)
+            self.assertEqual(self._load_repo("repo", force_reload=True), repo_dir)
             self.assertEqual(mock_download.call_count, 2)
         self.assertEqual(os.listdir(repo_dir), ["hubconf.py"])
+        self._assert_no_leftovers()
+
+    def test_get_cache_or_reload_failed_extraction_cleans_up(self):
+        url = self._make_hub_archive(
+            "repo", {"repo-main/hubconf.py": "", "../../../evil.py": ""}
+        )
+        with (
+            patch.object(hub, "_git_archive_link", return_value=url),
+            self.assertRaisesRegex(ValueError, "directory traversal"),
+        ):
+            self._load_repo("repo")
+        self.assertFalse(os.path.exists(os.path.join(hub.get_dir(), "owner_repo_main")))
+        self._assert_no_leftovers()
 
     def test_load_state_dict_from_url_failed_download_releases_lock(self):
-        src = os.path.join(self.tmpdir.name, "weights.pt")
-        torch.save({"w": torch.arange(10)}, src)
-        model_dir = os.path.join(self.tmpdir.name, "checkpoints")
+        url, model_dir = self._save_weights()
         real_download = hub.download_url_to_file
+        waiting = threading.Event()
         calls = []
+
+        class StderrRecorder(io.StringIO):
+            def write(self, s):
+                if "Waiting for another process" in s:
+                    waiting.set()
+                return super().write(s)
 
         def flaky_download(*args, **kwargs):
             calls.append(None)
-            time.sleep(0.5)
-            if len(calls) == 1:
-                raise RuntimeError("download failed")
-            return real_download(*args, **kwargs)
+            if len(calls) > 1:
+                return real_download(*args, **kwargs)
+            # Fail only once the other worker is blocked on the lock.
+            if not waiting.wait(timeout=60):
+                raise AssertionError("the other worker never waited for the lock")
+            raise RuntimeError("download failed")
 
-        barrier = threading.Barrier(2)
-
-        def worker():
-            barrier.wait()
+        def load(_):
             try:
                 return hub.load_state_dict_from_url(
-                    Path(src).as_uri(), model_dir=model_dir, progress=False
+                    url, model_dir=model_dir, progress=False
                 )
             except RuntimeError as e:
                 return e
 
-        with patch.object(hub, "download_url_to_file", side_effect=flaky_download):
-            with ThreadPoolExecutor(2) as pool:
-                futures = [pool.submit(worker) for _ in range(2)]
-                outcomes = [f.result(timeout=120) for f in futures]
+        with (
+            patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 30),
+            patch("sys.stderr", new=StderrRecorder()),
+            patch.object(hub, "download_url_to_file", side_effect=flaky_download),
+            ThreadPoolExecutor(2) as pool,
+        ):
+            outcomes = list(pool.map(load, range(2)))
 
         # The worker whose download failed releases the lock, and the one that
         # was waiting for it downloads the file itself.
@@ -555,6 +604,19 @@ class TestHub(TestCase):
         self.assertEqual(len(errors), 1)
         self.assertEqual(len(state_dicts), 1)
         self.assertEqual(state_dicts[0]["w"], torch.arange(10))
+
+    def test_load_state_dict_from_url_without_lock(self):
+        from torch.utils._filelock import FileLock
+
+        url, model_dir = self._save_weights()
+        with (
+            patch.object(FileLock, "acquire", side_effect=NotImplementedError),
+            self.assertWarnsRegex(UserWarning, "Could not lock"),
+        ):
+            state_dict = hub.load_state_dict_from_url(
+                url, model_dir=model_dir, progress=False
+            )
+        self.assertEqual(state_dict["w"], torch.arange(10))
 
 
 if __name__ == "__main__":
