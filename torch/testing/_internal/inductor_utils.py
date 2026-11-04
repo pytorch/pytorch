@@ -136,8 +136,9 @@ RUN_CPU = LazyVal(
 HAS_TPU = LazyVal(has_tpu_pallas)
 # TPU is a privateuse1 backend that isn't in _desired_test_bases (it requires
 # runtime initialization before the test base is registered). Check the env var
-# directly, matching the same semantics as RUN_GPU: when the env var is
-# unset, run if the hardware is available; when set, only run if "tpu" is listed.
+# directly, matching RUN_GPU's ONLY_FOR semantics: when the env var is unset, run
+# if the hardware is available; when set, only run if "tpu" is listed. Unlike
+# RUN_GPU, it ignores PYTORCH_TESTING_DEVICE_EXCEPT_FOR.
 RUN_TPU = LazyVal(
     lambda: HAS_TPU
     and (
