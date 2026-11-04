@@ -12244,7 +12244,8 @@ class Scheduler:
 
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings
-        # benefit to cudagraph
+        # benefit to cudagraph. Read the top-level setting: a region opting in
+        # asks for that region alone to be captured.
         if (
             not V.graph.cudagraphs_top_level
             and _unstable_customized_partition_wrapper.wrapper is None
