@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.testing.discover_tests import BLOCKLISTED_PATTERNS
-from tools.testing.llm_selector.selection import SWEEPS
+from tools.testing.llm_selector.selection import needs_run_all, SWEEPS
 
 
 sys.path.remove(str(REPO_ROOT))
@@ -38,6 +38,8 @@ DEFAULT_MODEL = (
 SYSTEM_PROMPT = (Path(__file__).parent / "prompt.md").read_text()
 DIFF_BUDGET = 120_000
 BODY_BUDGET = 4_000
+# A larger change runs everything rather than paying for an oversized prompt.
+MAX_CHANGED_FILES = 1000
 # Seconds the model call may take.
 QUERY_TIMEOUT = 600
 # Room for the note that replaces a truncated file's tail.
@@ -215,6 +217,48 @@ def query_model(
     if not isinstance(result, dict):
         return {"is_error": True, "result": (p.stdout + p.stderr)[-2000:]}
     return result
+
+
+def git(*args: str) -> str:
+    return subprocess.check_output(["git", *args], cwd=REPO_ROOT, text=True)
+
+
+def git_paths(command: str, *args: str) -> list[str]:
+    """The paths a git command lists, verbatim: -z keeps git from C-quoting
+    a path with a quote, backslash, control or non-ASCII character."""
+    return git(command, "-z", *args).split("\0")[:-1]
+
+
+def git_grep(pattern: str, rev: str, timeout: float | None = None) -> list[str]:
+    """The paths under test/ at `rev` with a line matching the extended regex `pattern`."""
+    p = subprocess.run(
+        ["git", "grep", "-lzE", pattern, rev, "--", "test/"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    # 1 is no match; a signal kill is negative.
+    if p.returncode not in (0, 1):
+        raise RuntimeError(f"git grep failed: {p.stderr.strip()[-500:]}")
+    return [line.split(":", 1)[1] for line in p.stdout.split("\0")[:-1]]
+
+
+def changed_files(merge_base: str, head: str) -> list[str]:
+    # Without renames a moved file is listed at both paths, and its new path is
+    # an added file.
+    return git_paths("diff", "--name-only", "--no-renames", merge_base, head)
+
+
+def run_all_reason(changed: list[str]) -> str | None:
+    """Why select runs everything on these changed files without asking the model, if it does."""
+    if not changed:
+        return "no changed files"
+    if needs_run_all(changed):
+        return "change touches test infrastructure"
+    if len(changed) > MAX_CHANGED_FILES:
+        return f"more than {MAX_CHANGED_FILES} changed files"
+    return None
 
 
 def added_test_files(added: Iterable[str], listed: Collection[str]) -> set[str]:

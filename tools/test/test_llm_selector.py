@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -606,6 +607,93 @@ class TestMain(unittest.TestCase):
         self.assertNotEqual(cwd, Path(wt))
         self.assertNotIn(REPO_ROOT, cwd.parents)
         self.assertFalse(cwd.exists())
+
+    def test_git_grep_failures_raise(self) -> None:
+        for code, raises in [
+            (0, False),
+            (1, False),
+            (2, True),
+            (128, True),
+            (-9, True),
+        ]:
+            done = subprocess.CompletedProcess([], code, "", "killed")
+            with mock.patch.object(select_tests.subprocess, "run", return_value=done):
+                if raises:
+                    with self.assertRaisesRegex(
+                        RuntimeError, "git grep failed: killed", msg=code
+                    ):
+                        select_tests.git_grep("x", "HEAD")
+                else:
+                    self.assertEqual(select_tests.git_grep("x", "HEAD"), [])
+
+    def test_non_ascii_paths_are_unquoted(self) -> None:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+        name = "test/test_caf\u00e9.py"
+        with (
+            tempfile.TemporaryDirectory() as repo,
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(select_tests, "REPO_ROOT", Path(repo)),
+        ):
+            git = select_tests.git
+            git("init", "-q")
+            git(
+                "-c",
+                "user.name=a",
+                "-c",
+                "user.email=a@b.c",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "base",
+            )
+            (Path(repo) / "test").mkdir()
+            (Path(repo) / name).write_text("import x\n")
+            git("add", "-A")
+            git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-qm", "add")
+            self.assertEqual(select_tests.changed_files("HEAD~1", "HEAD"), [name])
+            self.assertEqual(select_tests.git_grep("import", "HEAD"), [name])
+
+    def test_c_quoted_paths_are_read_verbatim(self) -> None:
+        # git C-quotes a path with a quote, backslash, tab or newline even when core.quotePath is false.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+        conftest, reader = "test/a\tb/conftest.py", 'test/test_"q\\".py'
+        with (
+            tempfile.TemporaryDirectory() as repo,
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(select_tests, "REPO_ROOT", Path(repo)),
+        ):
+            git = select_tests.git
+            git("init", "-q")
+            git(
+                "-c",
+                "user.name=a",
+                "-c",
+                "user.email=a@b.c",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "base",
+            )
+            for name in (conftest, reader, "test/x\ny.py"):
+                (Path(repo) / name).parent.mkdir(parents=True, exist_ok=True)
+                (Path(repo) / name).write_text("import x\n")
+            git("add", "-A")
+            git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-qm", "add")
+            changed = select_tests.changed_files("HEAD~1", "HEAD")
+            self.assertEqual(changed, [conftest, reader, "test/x\ny.py"])
+            self.assertEqual(
+                select_tests.run_all_reason(changed),
+                "change touches test infrastructure",
+            )
+            self.assertIsNone(select_tests.run_all_reason(changed[1:]))
+            self.assertEqual(select_tests.git_grep("import", "HEAD"), changed)
+            self.assertEqual(
+                select_tests.git_paths("ls-tree", "-r", "--name-only", "HEAD"), changed
+            )
 
 
 if __name__ == "__main__":
