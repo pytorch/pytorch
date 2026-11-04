@@ -370,9 +370,10 @@ class TestSelection(unittest.TestCase):
             self.assertTrue(td_enabled_workflow(workflow), workflow)
         for workflow in ("periodic", "inductor", "slow", "pull-rocm"):
             self.assertFalse(td_enabled_workflow(workflow), workflow)
-        self.assertTrue(td_enabled_job("linux-jammy-py3.10", macos=False, no_td=False))
-        for env, macos, no_td in (("linux-xpu", False, False), ("linux-onnx", False, False), ("linux", True, False), ("linux", False, True)):  # fmt: skip
-            self.assertFalse(td_enabled_job(env, macos=macos, no_td=no_td), env)
+        on = {"macos": False, "no_td": False, "tests_to_include": " "}
+        self.assertTrue(td_enabled_job("linux-jammy-py3.10", **on))
+        for env, kw in (("linux-xpu", {}), ("linux-onnx", {}), ("linux", {"macos": True}), ("linux", {"no_td": True}), ("linux", {"tests_to_include": "test_nn"})):  # fmt: skip
+            self.assertFalse(td_enabled_job(env, **{**on, **kw}), (env, kw))
 
     def test_td_results_round_trip(self) -> None:
         tp = TestPrioritizations(["test_nn", "test_ops"], {TestRun("test_nn"): 1})

@@ -1803,7 +1803,12 @@ def parse_args():
         help="Enables removing tests based on TD",
         default=IS_CI
         and get_pr_number() is not None
-        and td_enabled_job(BUILD_ENVIRONMENT, macos=IS_MACOS, no_td=no_td)
+        and td_enabled_job(
+            BUILD_ENVIRONMENT,
+            macos=IS_MACOS,
+            no_td=no_td,
+            tests_to_include=os.environ.get("TESTS_TO_INCLUDE", ""),
+        )
         and td_enabled_workflow(GITHUB_WORKFLOW),
     )
     parser.add_argument(
@@ -2487,8 +2492,6 @@ def main():
         else:
             # No explicit --include, use env var tests
             options.include = list(env_tests)
-
-        options.enable_td = False
 
     # Include sharding info in all metrics
     which_shard, num_shards = get_sharding_opts(options)
