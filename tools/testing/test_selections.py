@@ -100,9 +100,11 @@ def get_with_pytest_shard(
     allow_pytest_sharding: bool = True,
     xdist_workers: Callable[[str], int] | None = None,
 ) -> list[ShardedTest]:
-    """xdist_workers maps a test file to the number of pytest-xdist workers
-    that run its tests concurrently; its estimated wall time is divided by that
-    count."""
+    """Split tests whose estimated wall time exceeds THRESHOLD into pytest shards.
+
+    xdist_workers maps a test file to the number of pytest-xdist workers that
+    run its tests concurrently; the file's estimated wall time is its recorded
+    time divided by that count."""
     sharded_tests: list[ShardedTest] = []
 
     for test in tests:
@@ -228,6 +230,8 @@ def calculate_shards(
     allow_pytest_sharding: bool = True,
     xdist_workers: Callable[[str], int] | None = None,
 ) -> list[tuple[float, list[ShardedTest]]]:
+    """Assign tests to num_shards shards; see get_with_pytest_shard for
+    xdist_workers."""
     must_serial = must_serial or (lambda x: True)
     test_class_times = test_class_times or {}
 

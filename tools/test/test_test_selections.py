@@ -474,6 +474,26 @@ class TestCalculateShards(unittest.TestCase):
         )
         self.assertEqual(sorted(time for time, _ in shards), [THRESHOLD * 2] * 2)
 
+    def test_xdist_workers_split_divided_time_in_test_order(self) -> None:
+        # run_test.py shards its main batch with sort_by_time=False, and splits a
+        # serial xdist file by its divided time.
+        test_times = {"xdist_test": THRESHOLD * 7}
+        shards = calculate_shards(
+            3,
+            [TestRun("xdist_test")],
+            test_times,
+            gen_class_times(test_times),
+            must_serial=lambda _: True,
+            sort_by_time=False,
+            xdist_workers=lambda _: 3,
+        )
+
+        piece_time = THRESHOLD * 7 / 3 / 3
+        self.assertEqual(
+            [shard for _, shard in shards],
+            [[ShardedTest("xdist_test", i, 3, piece_time)] for i in (1, 2, 3)],
+        )
+
     def test_zero_tests(self) -> None:
         self.assertListEqual([(0.0, []), (0.0, [])], calculate_shards(2, [], {}, None))
 
