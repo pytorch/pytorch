@@ -727,6 +727,14 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         self._ensure_operand_type_guards()
         return False
 
+    def is_hashable_lazy(self) -> bool:
+        if self.is_realized():
+            raise AssertionError(
+                "is_hashable_lazy() called on an already realized variable"
+            )
+        self._ensure_operand_type_guards()
+        return type(self._cache.value) in LazyConstantVariable.supported_types
+
     def _might_realize_symbolic(self) -> bool:
         # Mirrors LazyConstantVariable._maybe_realize_for_type
         from .tensor import SymNodeVariable
