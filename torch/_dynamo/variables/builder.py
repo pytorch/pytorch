@@ -927,7 +927,7 @@ def lookup_tracked_variable(
 ) -> VariableTracker | None:
     """The VT side effects already track for `value`, if any. Every build of
     the same object must return it, or its pending mutations are missed."""
-    if value not in tx.output.side_effects:
+    if tx is None or value not in tx.output.side_effects:
         return None
     return tx.output.side_effects[value]
 
