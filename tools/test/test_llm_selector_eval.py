@@ -26,10 +26,10 @@ if TYPE_CHECKING:
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
-from tools.testing.llm_td import select_tests, selection
-from tools.testing.llm_td.eval import score, td_replay
-from tools.testing.llm_td.eval.run_eval import run_one
-from tools.testing.llm_td.eval.score import (
+from tools.testing.llm_selector import select_tests, selection
+from tools.testing.llm_selector.eval import score, td_replay
+from tools.testing.llm_selector.eval.run_eval import run_one
+from tools.testing.llm_selector.eval.score import (
     Choice,
     ci_jobs,
     config_of,
@@ -37,8 +37,8 @@ from tools.testing.llm_td.eval.score import (
     policy,
     truth_pairs,
 )
-from tools.testing.llm_td.eval.td_replay import top25_per_config
-from tools.testing.llm_td.selection import apply_selection, Selection
+from tools.testing.llm_selector.eval.td_replay import top25_per_config
+from tools.testing.llm_selector.selection import apply_selection, Selection
 from tools.testing.target_determination.heuristics.interface import TestPrioritizations
 from tools.testing.test_run import TestRun
 
@@ -63,7 +63,14 @@ SAMPLE = {
     "truth_strong": ["test_a"],
     "truth_jobs": {"test_a": [["pull", "linux / test (slow, 1, 2, linux.2xlarge)"]]},
 }
-NOTHING = {"out": {"tests": []}}
+
+
+def answer(**kw: object) -> dict:
+    """A well-formed model answer selecting nothing, with `kw` replacing its keys."""
+    return {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": [], **kw}
+
+
+NOTHING = {"out": answer()}
 
 
 def pick(name: str, r: dict | None, td: dict | None, s: dict = SAMPLE, grep: Callable[[str], list[str]] | None = None) -> Choice:  # fmt: skip
@@ -114,7 +121,7 @@ class NoWaitEvent(threading.Event):
 
 def no_waits() -> contextlib.AbstractContextManager:
     """main()'s stop event, whose waits are the retry backoff and the Ctrl-C grace, returns at once."""
-    return mock.patch("tools.testing.llm_td.eval.run_eval.threading", types.SimpleNamespace(Event=NoWaitEvent))  # fmt: skip
+    return mock.patch("tools.testing.llm_selector.eval.run_eval.threading", types.SimpleNamespace(Event=NoWaitEvent))  # fmt: skip
 
 
 class TestRunEval(unittest.TestCase):
@@ -122,13 +129,13 @@ class TestRunEval(unittest.TestCase):
         sample = {"id": "x", "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a"]}  # fmt: skip
         args = argparse.Namespace(model="m", effort="medium")
         with (
-            mock.patch("tools.testing.llm_td.eval.run_eval.query_model", side_effect=replies) as query,
-            mock.patch("tools.testing.llm_td.eval.run_eval.time.sleep") as sleep,
+            mock.patch("tools.testing.llm_selector.eval.run_eval.query_model", side_effect=replies) as query,
+            mock.patch("tools.testing.llm_selector.eval.run_eval.time.sleep") as sleep,
         ):  # fmt: skip
             return run_one(sample, {}, args, None), query, sleep
 
     def test_retry_then_success(self) -> None:
-        out = {"tests": []}
+        out = answer()
         r, _, sleep = self.run_one([
             {"type": "result", "is_error": True, "result": "API Error: 502 Bad Gateway", "total_cost_usd": 0.1},
             {"type": "result", "structured_output": out, "total_cost_usd": 0.2},
@@ -151,7 +158,7 @@ class TestRunEval(unittest.TestCase):
                 "type": "result",
                 "is_error": True,
                 "result": "bad schema",
-                "structured_output": {"tests": []},
+                "structured_output": answer(),
             },
             # query_model's fallback for output that is not JSON: a crash, whatever its trace says.
             {"is_error": True, "result": "TypeError at cli.js:503:12"},
@@ -165,7 +172,7 @@ class TestRunEval(unittest.TestCase):
     def test_timeout_is_final(self) -> None:
         from subprocess import TimeoutExpired
 
-        from tools.testing.llm_td.eval.run_eval import TIMED_OUT
+        from tools.testing.llm_selector.eval.run_eval import TIMED_OUT
 
         r, query, _ = self.run_one([TimeoutExpired("claude", 1)])
         self.assertEqual((r["out"], r["error"], r["transient"], query.call_count), (None, TIMED_OUT, False, 1))  # fmt: skip
@@ -175,7 +182,7 @@ class TestRunEval(unittest.TestCase):
 
     def test_transient(self) -> None:
         for text in ("API Error: 429 Too Many Requests", '{"type":"rate_limit_error"}', "ThrottlingException", "503"):  # fmt: skip
-            r, query, _ = self.run_one([{"type": "result", "is_error": True, "result": text}, {"type": "result", "structured_output": {"tests": []}}])  # fmt: skip
+            r, query, _ = self.run_one([{"type": "result", "is_error": True, "result": text}, {"type": "result", "structured_output": answer()}])  # fmt: skip
             self.assertEqual((r["error"], r["attempts"]), (None, 2), text)
 
     def test_gives_up(self) -> None:
@@ -190,7 +197,7 @@ class TestRunEval(unittest.TestCase):
         stop = threading.Event()
         reply = {"type": "result", "is_error": True, "result": "529 overloaded"}
         with (
-            mock.patch("tools.testing.llm_td.eval.run_eval.query_model", return_value=reply) as query,
+            mock.patch("tools.testing.llm_selector.eval.run_eval.query_model", return_value=reply) as query,
             mock.patch.object(stop, "wait", return_value=True) as wait,
         ):  # fmt: skip
             r = run_one(sample, {}, argparse.Namespace(model="m", effort="medium"), None, stop)  # fmt: skip
@@ -199,7 +206,7 @@ class TestRunEval(unittest.TestCase):
         wait.assert_called_once_with(30)
 
     def test_main_writes_exhausted_and_resolves_data(self) -> None:
-        from tools.testing.llm_td.eval import run_eval
+        from tools.testing.llm_selector.eval import run_eval
 
         sample = {"id": "a", "sha": "f" * 40, "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a"], "changed_files": ["torch/foo.py"]}  # fmt: skip
         with tempfile.TemporaryDirectory() as d:
@@ -209,7 +216,7 @@ class TestRunEval(unittest.TestCase):
             with (
                 contextlib.chdir(data.parent),  # --data is relative to this cwd.
                 mock.patch.object(sys, "argv", argv),
-                mock.patch.dict(os.environ, {"LLM_TD_AGENTIC_SANDBOX": "1"}),
+                mock.patch.dict(os.environ, {"LLM_SELECTOR_AGENTIC_SANDBOX": "1"}),
                 mock.patch.object(run_eval, "checkout", return_value="wt") as co,
                 mock.patch.object(run_eval, "query_model", return_value={"type": "result", "is_error": True, "result": "529"}) as query,
                 no_waits(),
@@ -231,9 +238,9 @@ class TestRunEval(unittest.TestCase):
                 self.assertNotEqual(r["prompt_sha"], run_eval.prompt_sha(prompt, True))
 
     def test_main_survives_a_failed_write(self) -> None:
-        from tools.testing.llm_td.eval import run_eval
+        from tools.testing.llm_selector.eval import run_eval
 
-        r = {"type": "result", "structured_output": {"tests": []}}
+        r = {"type": "result", "structured_output": answer()}
         writes = [OSError("full"), None]
         with tempfile.TemporaryDirectory() as d:
             samples = {f"samples/{i}.json": {**SAMPLE, "id": i} for i in "ab"}
@@ -261,7 +268,7 @@ class TestRunEval(unittest.TestCase):
     def test_main_stops_on_ctrl_c(self) -> None:
         import signal
 
-        from tools.testing.llm_td.eval import run_eval
+        from tools.testing.llm_selector.eval import run_eval
 
         def killed(*args: object, **kwargs: object) -> dict:
             # Ctrl-C reaches the main thread, and the claude child dies with output that is not JSON.
@@ -290,11 +297,11 @@ class TestRunEval(unittest.TestCase):
         self.assertIn("interrupted", out.getvalue())
 
     def test_main_refuses_agentic_outside_a_sandbox(self) -> None:
-        from tools.testing.llm_td.eval import run_eval
+        from tools.testing.llm_selector.eval import run_eval
 
         argv = ["run_eval", "--data", "x", "--tag", "t", "--model", "m", "--ids", "x", "--agentic"]  # fmt: skip
-        for env in ({}, {"LLM_TD_AGENTIC_SANDBOX": "0"}):
-            env = {k: v for k, v in os.environ.items() if k != "LLM_TD_AGENTIC_SANDBOX"} | env  # fmt: skip
+        for env in ({}, {"LLM_SELECTOR_AGENTIC_SANDBOX": "0"}):
+            env = {k: v for k, v in os.environ.items() if k != "LLM_SELECTOR_AGENTIC_SANDBOX"} | env  # fmt: skip
             with (
                 mock.patch.object(sys, "argv", argv),
                 mock.patch.dict(os.environ, env, clear=True),
@@ -303,11 +310,11 @@ class TestRunEval(unittest.TestCase):
                 self.assertRaises(SystemExit),
             ):
                 run_eval.main()
-            self.assertIn("LLM_TD_AGENTIC_SANDBOX=1", err.getvalue())
+            self.assertIn("LLM_SELECTOR_AGENTIC_SANDBOX=1", err.getvalue())
             query.assert_not_called()
 
     def test_main_refuses_tag_td(self) -> None:
-        from tools.testing.llm_td.eval import run_eval
+        from tools.testing.llm_selector.eval import run_eval
 
         argv = ["run_eval", "--data", "x", "--tag", "td", "--model", "m", "--ids", "x"]
         with (
@@ -319,7 +326,7 @@ class TestRunEval(unittest.TestCase):
         self.assertIn("the tag td holds the TD replay", err.getvalue())
 
     def test_main_refuses_other_settings(self) -> None:
-        from tools.testing.llm_td.eval import run_eval
+        from tools.testing.llm_selector.eval import run_eval
 
         with tempfile.TemporaryDirectory() as d:
             data = Path(d)
@@ -337,7 +344,7 @@ class TestRunEval(unittest.TestCase):
         self.assertIn("1 results in", err.getvalue())
 
     def test_main_refuses_another_prompt(self) -> None:
-        from tools.testing.llm_td.eval import run_eval
+        from tools.testing.llm_selector.eval import run_eval
 
         sample = {"id": "a", "sha": "f" * 40, "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a"], "changed_files": ["torch/foo.py"]}  # fmt: skip
         sent = run_eval.prompt_sha(run_eval.sample_prompt(sample, {}))
@@ -367,7 +374,7 @@ class TestRunEval(unittest.TestCase):
                 self.assertEqual(query.call_count, 0 if refused else 1)
 
     def test_main_skips_a_prompt_git_cannot_build(self) -> None:
-        from tools.testing.llm_td.eval import run_eval
+        from tools.testing.llm_selector.eval import run_eval
 
         # The diff adds a candidate, which sample_prompt looks up at a main_base this clone lacks.
         sample = {"id": "a", "sha": "f" * 40, "title": "t", "body": None, "diffstat": "", "diff": "diff --git a/test/test_new.py b/test/test_new.py\nnew file mode 100644\n", "candidates": ["test_new"], "changed_files": ["test/test_new.py"], "main_base": "0" * 40}  # fmt: skip
@@ -405,7 +412,7 @@ class TestRunEval(unittest.TestCase):
             failed = subprocess.CalledProcessError(128, ["git"], stderr=err)
             with (
                 mock.patch.object(sys, "argv", ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt"), "--agentic"]),
-                mock.patch.dict(os.environ, {"LLM_TD_AGENTIC_SANDBOX": "1"}),
+                mock.patch.dict(os.environ, {"LLM_SELECTOR_AGENTIC_SANDBOX": "1"}),
                 mock.patch("sys.stdout", io.StringIO()) as out,
                 mock.patch.object(run_eval, "checkout", side_effect=failed),
                 mock.patch.object(run_eval, "query_model") as query,
@@ -415,7 +422,7 @@ class TestRunEval(unittest.TestCase):
         query.assert_not_called()
 
     def test_main_tops_up_agentic_results(self) -> None:
-        from tools.testing.llm_td.eval import run_eval
+        from tools.testing.llm_selector.eval import run_eval
 
         sample = {"id": "a", "sha": "f" * 40, "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a"], "changed_files": ["torch/foo.py"]}  # fmt: skip
         prompt = run_eval.sample_prompt(sample, {})
@@ -429,7 +436,7 @@ class TestRunEval(unittest.TestCase):
                 argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt"), "--agentic"]  # fmt: skip
                 with (
                     mock.patch.object(sys, "argv", argv),
-                    mock.patch.dict(os.environ, {"LLM_TD_AGENTIC_SANDBOX": "1"}),
+                    mock.patch.dict(os.environ, {"LLM_SELECTOR_AGENTIC_SANDBOX": "1"}),
                     mock.patch("sys.stderr", io.StringIO()) as err,
                     mock.patch("sys.stdout", io.StringIO()),
                     mock.patch.object(run_eval, "checkout", return_value="wt"),
@@ -450,7 +457,7 @@ class TestRunEval(unittest.TestCase):
     def test_checkout(self) -> None:
         import subprocess
 
-        from tools.testing.llm_td.eval import run_eval
+        from tools.testing.llm_selector.eval import run_eval
 
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="a", GIT_AUTHOR_EMAIL="a@a", GIT_COMMITTER_NAME="a", GIT_COMMITTER_EMAIL="a@a")  # fmt: skip
@@ -488,7 +495,7 @@ class TestEvalHelpers(unittest.TestCase):
         self.assertFalse(score.has_head("0" * 40))
 
     def test_write_json(self) -> None:
-        from tools.testing.llm_td.eval import write_json
+        from tools.testing.llm_selector.eval import write_json
 
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "r.json"
@@ -781,7 +788,7 @@ class TestScore(unittest.TestCase):
 
     def test_unasked(self) -> None:
         td = {"scored": ["test_a"], "top25": ["test_e"], "top25_cfg": {"default": ["test_a"]}}  # fmt: skip
-        r = {"out": {"tests": [{"file": "test_b"}]}}
+        r = {"out": answer(tests=[{"file": "test_b"}])}
         huge = {**SAMPLE, "changed_files": [f"torch/f{i}.py" for i in range(select_tests.MAX_CHANGED_FILES + 1)]}  # fmt: skip
         empty = {**SAMPLE, "changed_files": []}
         infra = {**SAMPLE, "changed_files": ["test/run_test.py"]}
@@ -791,7 +798,7 @@ class TestScore(unittest.TestCase):
         # As apply_selection does not enforce a job with no test times, even a run-all keeps TD's cut there.
         zero = {**SECONDS, "zero": {"test_a": [0.0, 0.0]}}
         cut = {**td, "top25_cfg": {"zero": ["test_b"]}}
-        for s, out in ((empty, None), (SAMPLE, {"tests": [], "run_all": True})):
+        for s, out in ((empty, None), (SAMPLE, answer(run_all=True))):
             choice = policy("final+td45", s, {"out": out}, cut, zero)
             if choice is None:
                 raise AssertionError("final+td45 chose nothing")
@@ -818,16 +825,16 @@ class TestScore(unittest.TestCase):
         # A config in which nothing runs keeps TD's cut, as Selection.split does.
         cut = {**td, "top25_cfg": {"slow": ["test_a"]}}
         self.assertEqual(pick("final+td5", NOTHING, cut).per_config["slow"], {"test_a"})
-        r = {"out": {"tests": [{"file": "test_c"}]}}
+        r = {"out": answer(tests=[{"file": "test_c"}])}
         self.assertEqual(pick("final+td5", r, cut).per_config["slow"], set())
         # So does an untimed file, which is in every job's test list.
-        r = {"out": {"tests": [{"file": "test_e"}]}}
+        r = {"out": answer(tests=[{"file": "test_e"}])}
         self.assertEqual(pick("final+td5", r, cut).per_config["slow"], set())
         # A 20% share: 50s of default fits test_d (40s) and test_c, not test_b after them.
         ranked = {"scored": ["test_d", "test_c", "test_b"], "top25": [], "top25_cfg": {}}  # fmt: skip
-        with mock.patch.object(score, "LLM_TD_HEDGE", 0.2):
+        with mock.patch.object(score, "LLM_SELECTOR_HEDGE", 0.2):
             self.assertEqual(pick("final+td", NOTHING, ranked).per_config, {"default": {"test_d", "test_c"}, "slow": set()})  # fmt: skip
-        with mock.patch.object(score, "LLM_TD_HEDGE", 0.45):
+        with mock.patch.object(score, "LLM_SELECTOR_HEDGE", 0.45):
             self.assertEqual(pick("final+td", NOTHING, td).per_config, pick("final+td45", NOTHING, td).per_config)  # fmt: skip
         self.assertEqual(pick("final+td5", NOTHING, ranked).per_config["default"], {"test_c"})  # fmt: skip
         # 45% of 250s: test_a fits, test_b then does not, test_c after it still does.
@@ -855,7 +862,7 @@ class TestScore(unittest.TestCase):
         self.assertEqual(choice.per_config["default"], {"test_a", "test_c"})
         self.assertTrue(choice.covers("test_a", "unknown"))
         # Files the selection already covers cost no budget.
-        r = {"out": {"tests": [{"file": "test_a"}]}}
+        r = {"out": answer(tests=[{"file": "test_a"}])}
         self.assertEqual(
             pick("final+td45", r, td).per_config["default"],
             {"test_b", "test_c"},
@@ -884,8 +891,8 @@ class TestScore(unittest.TestCase):
             changed = rng.choice([["torch/foo.py"]] * 3 + [[]])
             s = {**SAMPLE, "candidates": job, "truth": [], "previous_failures": prev, "changed_files": changed}  # fmt: skip
             sweeps = rng.sample(["dynamo_wrapped", "crossref"], rng.randint(0, 1))
-            answer = {"tests": [{"file": f} for f in picked], "sweeps": sweeps, "dirs": rng.choice([[], [], ["dynamo"]])}  # fmt: skip
-            out = rng.choice([answer] * 3 + [{"tests": [], "run_all": True}, {"tests": "test_0"}, None])  # fmt: skip
+            chosen = answer(tests=[{"file": f} for f in picked], sweeps=sweeps, dirs=rng.choice([[], [], ["dynamo"]]))  # fmt: skip
+            out = rng.choice([chosen] * 3 + [answer(run_all=True), {"tests": "test_0"}, None])  # fmt: skip
             # The job's times are its own, the fallback job's for its config, or default/default's.
             config = rng.choice(["c", "inductor", "dynamo_wrapped", "crossref"])
             how = rng.choice(["own", "fallback", "default"])
@@ -940,7 +947,7 @@ class TestScore(unittest.TestCase):
             self.assertEqual(choice.other, {"test_e"})
             self.assertFalse(choice.covers("test_torch", "inductor"))
         # A deliberate run-all still runs everything.
-        self.assertTrue(pick("final+td45", {"out": {"tests": [], "run_all": True}}, td).sel.run_all)  # fmt: skip
+        self.assertTrue(pick("final+td45", {"out": answer(run_all=True)}, td).sel.run_all)  # fmt: skip
         infra = {**SAMPLE, "changed_files": ["test/run_test.py"]}
         self.assertTrue(pick("final+td45", {"out": None}, td, infra).sel.run_all)
 
@@ -948,7 +955,7 @@ class TestScore(unittest.TestCase):
         # A deleted data file under test/ needs no reader, as select_tests passes it.
         s = {**SAMPLE, "changed_files": ["test/data/gone.json"], "deleted": ["test/data/gone.json"]}  # fmt: skip
         td = {"scored": [], "top25": [], "top25_cfg": {"default": [], "slow": []}}
-        out = {"out": {"tests": [{"file": "test_a", "confidence": "low"}]}}
+        out = {"out": answer(tests=[{"file": "test_a", "confidence": "low"}])}
         for name in ("final", "final-hm", "final+td45"):
             self.assertFalse(pick(name, out, td, s, lambda p: []).sel.run_all, name)
             self.assertTrue(pick(name, out, td, {**s, "deleted": []}, lambda p: []).sel.run_all, name)  # fmt: skip
@@ -961,15 +968,15 @@ class TestScore(unittest.TestCase):
             self.assertTrue(pick("final", {"out": out}, None).sel.run_all)
         tests = [{"file": "test_c", "confidence": "low"}, {"file": "test_b", "confidence": "high"}, {"file": "test_a", "confidence": ["high"]}]  # fmt: skip
         self.assertEqual(
-            pick("final-hm", {"out": {"tests": tests}}, None).sel.files, {"test_b"}
+            pick("final-hm", {"out": answer(tests=tests)}, None).sel.files, {"test_b"}
         )
         # An unmatched name makes the answer malformed under both.
         tests = [{"file": "test_a", "confidence": "low"}, {"file": "bogus", "confidence": "high"}]  # fmt: skip
         for name in ("final", "final-hm"):
-            self.assertTrue(pick(name, {"out": {"tests": tests}}, None).sel.run_all)
+            self.assertTrue(pick(name, {"out": answer(tests=tests)}, None).sel.run_all)
         # With grep, a file a driver runs names the driver under every policy.
         jit = {**SAMPLE, "candidates": [*SAMPLE["candidates"], "test_jit"]}
-        out = {"tests": [{"file": "jit/test_freezing", "confidence": "high"}]}
+        out = answer(tests=[{"file": "jit/test_freezing", "confidence": "high"}])
         for name in ("model", "final", "final-hm"):
             choice = policy(name, jit, {"out": out}, None, SECONDS, lambda p: ["test/jit/test_freezing.py"] if p == "^" else [])  # fmt: skip
             if choice is None:
@@ -977,17 +984,17 @@ class TestScore(unittest.TestCase):
             self.assertEqual((choice.sel.files, choice.sel.run_all), ({"test_jit"}, False), name)  # fmt: skip
         # Filtering out every name leaves a well-formed empty answer.
         tests = [{"file": "test_a", "confidence": "low"}]
-        self.assertEqual(pick("final", {"out": {"tests": tests}}, None).sel.files, {"test_a"})  # fmt: skip
-        empty = pick("final-hm", {"out": {"tests": tests}}, None).sel
+        self.assertEqual(pick("final", {"out": answer(tests=tests)}, None).sel.files, {"test_a"})  # fmt: skip
+        empty = pick("final-hm", {"out": answer(tests=tests)}, None).sel
         self.assertEqual((empty.run_all, empty.files), (False, set()))
-        hm = pick("final-hm", {"out": {"tests": tests, "dirs": ["sub"]}}, None, {**SAMPLE, "candidates": [*SAMPLE["candidates"], "sub/test_x"]})  # fmt: skip
+        hm = pick("final-hm", {"out": answer(tests=tests, dirs=["sub"])}, None, {**SAMPLE, "candidates": [*SAMPLE["candidates"], "sub/test_x"]})  # fmt: skip
         self.assertEqual((hm.sel.run_all, hm.sel.files), (False, {"sub/test_x"}))
 
     def test_score_same_ids(self) -> None:
         sample = {**SAMPLE, "truth_jobs": {"test_a": [["pull", "linux / test (default, 1, 2, linux.2xlarge)"]]}}  # fmt: skip
         td = {"scored": [], "top25": ["test_a"], "top25_cfg": {"default": ["test_a"]}}
         result = {
-            "out": {"tests": [{"file": "test_a"}]},
+            "out": answer(tests=[{"file": "test_a"}]),
             "error": None,
             "cost_usd": 0.1,
         }
@@ -1054,7 +1061,7 @@ class TestScore(unittest.TestCase):
             "test-times.json": {"linux": {"default": {"test_a": 10.0}}},
             "samples/a.json": sample,
             "td/a.json": {"scored": [], "top25": [], "top25_cfg": {}},
-            "results/m/a.json": {"out": {"tests": []}, "error": None, "cost_usd": 0.1},
+            "results/m/a.json": {"out": answer(), "error": None, "cost_usd": 0.1},
         }  # fmt: skip
         for grep, n_files, msg in (
             (mock.Mock(return_value=["test/test_a.py"]), [2, 2], ""),
@@ -1092,7 +1099,7 @@ class TestScore(unittest.TestCase):
         diff = "diff --git a/test/test_e.py b/test/test_e.py\nnew file mode 100644\n"
         sample = {**SAMPLE, "diff": diff, "changed_files": ["test/test_e.py"], "main_base": "0" * 40}  # fmt: skip
         td = {"scored": [], "top25": [], "top25_cfg": {}}
-        result = {"out": {"tests": []}, "error": None, "cost_usd": 0.1, "prompt_sha": "x"}  # fmt: skip
+        result = {"out": answer(), "error": None, "cost_usd": 0.1, "prompt_sha": "x"}  # fmt: skip
         files = {
             "test-times.json": {}, "samples/a.json": SAMPLE, "samples/b.json": sample,
             "td/a.json": td, "td/b.json": td, "results/m/a.json": {**result, "prompt_sha": score.prompt_sha(score.sample_prompt(SAMPLE, {}))}, "results/m/b.json": result,
@@ -1122,8 +1129,8 @@ class TestScore(unittest.TestCase):
             "samples/a.json": SAMPLE, "samples/b.json": SAMPLE, "samples/c.json": SAMPLE,
             "td/a.json": td, "td/b.json": td, "td/c.json": td,
             "results/m/a.json": {"out": None, "error": "429 rate limited", "cost_usd": 0.1, "transient": True},
-            "results/m/b.json": {"out": {"tests": []}, "error": None, "cost_usd": 0.1},
-            "results/m/c.json": {"out": {"tests": [{"file": "bogus"}]}, "error": None, "cost_usd": 0.1},
+            "results/m/b.json": {"out": answer(), "error": None, "cost_usd": 0.1},
+            "results/m/c.json": {"out": answer(tests=[{"file": "bogus"}]), "error": None, "cost_usd": 0.1},
         }  # fmt: skip
         with (
             tempfile.TemporaryDirectory() as d,
@@ -1166,7 +1173,7 @@ class TestScore(unittest.TestCase):
 
     def test_score_stale_results(self) -> None:
         td = {"scored": [], "top25": [], "top25_cfg": {}}
-        result = {"out": {"tests": []}, "error": None, "cost_usd": 0.1}
+        result = {"out": answer(), "error": None, "cost_usd": 0.1}
         files = {
             "test-times.json": {"linux": {"default": {"test_a": 10.0}}},
             "samples/a.json": SAMPLE, "samples/b.json": SAMPLE, "samples/c.json": SAMPLE,
@@ -1192,7 +1199,7 @@ class TestScore(unittest.TestCase):
         sent = score.prompt_sha(score.sample_prompt(SAMPLE, select_tests.test_minutes(times)))  # fmt: skip
         untimed = score.prompt_sha(score.sample_prompt(SAMPLE, {}))
         td = {"scored": [], "top25": [], "top25_cfg": {}}
-        result = {"out": {"tests": []}, "error": None, "cost_usd": 0.1}
+        result = {"out": answer(), "error": None, "cost_usd": 0.1}
         files = {
             "test-times.json": times,
             "samples/a.json": SAMPLE, "samples/b.json": {**SAMPLE, "diff": "+x"}, "samples/c.json": SAMPLE,
@@ -1212,7 +1219,7 @@ class TestScore(unittest.TestCase):
         # An agentic result is current only with the agentic prompt's hash.
         prompt = score.sample_prompt(SAMPLE, {})
         td = {"scored": [], "top25": [], "top25_cfg": {}}
-        result = {"out": {"tests": []}, "error": None, "cost_usd": 0.1, "agentic": True}
+        result = {"out": answer(), "error": None, "cost_usd": 0.1, "agentic": True}
         files = {
             "test-times.json": {},
             "samples/a.json": SAMPLE, "samples/b.json": SAMPLE, "td/a.json": td, "td/b.json": td,
@@ -1420,7 +1427,7 @@ class TestScore(unittest.TestCase):
             "test-times.json": {"linux": {"default": {"test_a": 10.0}}},
             "samples/a.json": sample,
             "td/a.json": {"scored": [], "top25": [], "top25_cfg": {}},
-            "results/m/a.json": {"out": {"tests": []}, "error": None, "cost_usd": 0.1},
+            "results/m/a.json": {"out": answer(), "error": None, "cost_usd": 0.1},
         }
         with (
             tempfile.TemporaryDirectory() as d,
@@ -1446,7 +1453,7 @@ class TestScore(unittest.TestCase):
             "test-times.json": times,
             "samples/a.json": sample,
             "td/a.json": {"scored": ["test_d", "test_b"], "top25": [], "top25_cfg": {"default": ["test_b"]}},
-            "results/m/a.json": {"out": {"tests": [{"file": "test_a"}]}, "error": None, "cost_usd": 0.1},
+            "results/m/a.json": {"out": answer(tests=[{"file": "test_a"}]), "error": None, "cost_usd": 0.1},
         }  # fmt: skip
         # slow runs no TD, so its seconds are not priced.
         ci = {True: {("pull", "linux", "default"), ("pull", "linux", "rare")}, False: {("pull", "linux", "slow")}}  # fmt: skip

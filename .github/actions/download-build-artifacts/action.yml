@@ -30,13 +30,13 @@ runs:
       with:
         name: ${{ inputs.name }}
 
-    # A build artifact never supplies the LLM test selection; it comes from llm-td.yml
+    # A build artifact never supplies the LLM test selection; it comes from llm-selector.yml
     # (added in the PR above) through download-td-artifacts.
     - name: Unzip artifacts
       shell: bash
       run: |
         unzip -o artifacts.zip
-        rm -f .additional_ci_files/llm_td_selection.json
+        rm -f .additional_ci_files/llm_selection.json
 
     - name: Remove artifacts.zip
       shell: bash
