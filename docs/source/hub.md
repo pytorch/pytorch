@@ -157,6 +157,12 @@ without the lock.
 `force_reload=True` isn't coordinated this way: every caller that passes it downloads the
 entry again (one at a time, when the lock can be taken) and replaces the copy other processes
 may be using, so avoid passing it from several processes at once.
+Repos are downloaded and extracted in a temporary work directory in the hub directory
+(`.<owner_repo_ref>~` plus 8 characters), so extracted paths are that much longer: on Windows
+without long paths enabled, a repo whose deepest file is close to `MAX_PATH` can fail to
+extract. Work directories that a killed process leaves behind are removed by a later download
+of the same entry once they have been untouched for a day, but only by the user who created
+them, because they are private to that user.
 
 ### Known limitations:
 
