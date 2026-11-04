@@ -3731,7 +3731,6 @@ class TestSparseCompressedTritonKernelsDevice(TestCase):
         bsr = input.to_sparse_bsr(1)
         self.assertEqual(input.softmax(-1), bsr_softmax(bsr))
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5989")
     @onlyAccelerator
     @parametrize("block_size", [16, 32, 64])
     @parametrize("index_dtype", [torch.int32, torch.int64])
@@ -3747,11 +3746,21 @@ class TestSparseCompressedTritonKernelsDevice(TestCase):
             return bsr_dense_mm(*args, skip_checks=True, **kwargs)
 
         device_type = torch.device(device).type
+        dispatch_key = f"SparseCsr{torch._C._dispatch_key_for_device(device_type)}"
+
+        # The kernel must already be registered by the backend (lazily, so check here and not
+        # in a decorator). Only CUDA does so today, via torch.cuda._register_triton_kernels;
+        # other backends additionally need the DispatchKey check in
+        # aten/src/ATen/native/sparse/SparseBlasImpl.cpp to accept their key.
+        # XPU support is tracked in https://github.com/intel/torch-xpu-ops/issues/5989
+        if ("_triton_bsr_dense_mm_out", dispatch_key) not in torch._TritonLibrary.ops_table:
+            self.skipTest(f"triton::_triton_bsr_dense_mm_out is not registered for {dispatch_key}")
+
         kernel = torch._TritonLibrary.registerOp(
             "_triton_bsr_dense_mm_out",
             "_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)",
             kernel_impl,
-            f"SparseCsr{torch._C._dispatch_key_for_device(device_type)}"
+            dispatch_key
         )
 
         # kernel != kernel_impl means dispatch was already registered.
@@ -3802,7 +3811,7 @@ class TestSparseCompressedTritonKernelsDevice(TestCase):
 
             res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
             # check whether bsr_dense_mm handles different grid sizes
-            # None means max possible grid size which is device-dependent.
+            # None means the maximum grid size (currently CUDA's limits, hardcoded in launch_kernel).
             grid_size = (None, 2, 4)
             grid_gen = itertools.product(grid_size, repeat=3)
             for grid in grid_gen:
