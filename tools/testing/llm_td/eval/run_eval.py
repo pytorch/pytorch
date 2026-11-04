@@ -133,7 +133,7 @@ def main() -> None:
     if stale := sorted(i for i, h in sent.items() if done[i].get("prompt_sha") != h):
         p.error(f"{len(stale)} results in {out}, e.g. {stale[0]}, were made from another prompt, schema or sample; use another --tag")  # fmt: skip
     ids = [i for i in dict.fromkeys(args.ids.read_text().split()) if i not in done]
-    print(f"{args.tag}: {len(ids)} to run", flush=True)
+    print(f"{args.tag}: {len(ids)} without a result", flush=True)
 
     def worker(slot: int) -> None:
         # Each worker owns one worktree slot, so the ids are dealt out round-robin.

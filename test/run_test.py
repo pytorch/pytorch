@@ -2493,6 +2493,8 @@ def main():
             # No explicit --include, use env var tests
             options.include = list(env_tests)
 
+        options.enable_td = False
+
     # Include sharding info in all metrics
     which_shard, num_shards = get_sharding_opts(options)
     add_global_metric("shard", which_shard)
