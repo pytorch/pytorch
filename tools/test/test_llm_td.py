@@ -213,7 +213,7 @@ class TestSelection(unittest.TestCase):
         # another edited data file that nothing reads.
         for changed in ("test/expect/TestGone.test_x.expect", "test/distributed/launcher/bin/unused.py", "test/notes.txt", "test/run_only.json"):  # fmt: skip
             sel = self.select_in_tree(sources, candidates, ["test/allowlist_for_publicAPI.json", changed])  # fmt: skip
-            self.assertEqual((sel.run_all, sel.reason), (True, f"nothing found that reads {changed}"))  # fmt: skip
+            self.assertEqual((sel.run_all, sel.reason, sel.error), (True, f"nothing found that reads {changed}", None))  # fmt: skip
         sel = self.select_in_tree(sources | {"allowlist_for_publicAPI.json": "b.json\n"}, candidates, ["test/allowlist_for_publicAPI.json", "test/b.json"])  # fmt: skip
         self.assertEqual((sel.run_all, sel.reason), (True, "nothing found that reads test/b.json"))  # fmt: skip
         sel = self.select_in_tree(sources, CANDIDATES, ["test/cpp_extensions/ext.cpp"])
@@ -227,7 +227,8 @@ class TestSelection(unittest.TestCase):
         sel = self.select_in_tree(sources, candidates, gone, deleted=tuple(gone))
         self.assertEqual((sel.files, sel.run_all), ({"test_nn", "dynamo/test_misc"}, False))  # fmt: skip
         many = [f"test/data{i}.json" for i in range(selection.MAX_DATA_FILES + 1)]
-        self.assertTrue(self.select_in_tree(sources, candidates, many).run_all)
+        sel = self.select_in_tree(sources, candidates, many)
+        self.assertEqual((sel.run_all, sel.error), (True, None))
 
     def test_endless_import_chain_runs_all(self) -> None:
         calls: list[str] = []
@@ -237,7 +238,7 @@ class TestSelection(unittest.TestCase):
             return [f"test/m{len(calls)}.py"]
 
         sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/test_nn.py"], grep)  # fmt: skip
-        self.assertTrue(sel.run_all)
+        self.assertEqual((sel.run_all, sel.error), (True, None))
         self.assertEqual(len(calls), selection.MAX_IMPORT_HOPS)
 
     def test_failure_list_edits_select_their_tests(self) -> None:
@@ -266,7 +267,8 @@ class TestSelection(unittest.TestCase):
             self.assertFalse(sel.run_all, changed)
             self.assertEqual((sel.files, sel.sweeps), (files, sweeps), changed)
         for changed in ("test/inductor_expected_failures/TestGone.test_x", "test/inductor_skips/TestGone.test_x", "test/inductor_skips/TestNN.test_x.y"):  # fmt: skip
-            self.assertTrue(self.select_in_tree(sources, CANDIDATES, [changed]).run_all)
+            sel = self.select_in_tree(sources, CANDIDATES, [changed])
+            self.assertEqual((sel.run_all, sel.error), (True, None), changed)
         many = [f"test/dynamo_skips/TestNN{i}.test_x" for i in range(selection.MAX_FAILURE_LIST_CLASSES + 1)]  # fmt: skip
         self.assertEqual(self.select_in_tree(sources, CANDIDATES, many).sweeps, {"dynamo_wrapped"})  # fmt: skip
         # Without a grep, the classes cannot be looked up.
@@ -812,6 +814,9 @@ class TestApplySelection(unittest.TestCase):
         self.assertEqual(stderr.getvalue(), "LLM selection: no test times, using TD\n")
         self.assertEqual(applied.selection_metric["time_total"], 0)
         self.assertTrue(applied.kept_td)
+        # test-times.json is there but has none of the call's files.
+        applied = self.apply(sel, times={"elsewhere": 100.0})
+        self.assertEqual((applied.enforced, applied.kept_td), (False, True))
 
     def test_nothing_chosen_is_reported_as_td(self) -> None:
         # Neither scored file fits the 200s hedge and the selection names none.
@@ -869,7 +874,7 @@ class TestSplitTests(unittest.TestCase):
         sel: Selection | None,
         tp: TestPrioritizations | None = None,
         times: dict[str, float] | None = None,
-        prev: set[str] | None = None,
+        prev: Collection[str] | None = (),
         td_enabled: bool = True,
     ) -> tuple[selection.CallSplit, str]:
         """split_tests' result and its stderr."""
@@ -892,7 +897,7 @@ class TestSplitTests(unittest.TestCase):
                 selection_file=selection_file,
                 test_config="default",
                 td_enabled=td_enabled,
-                previously_failed=set() if prev is None else prev,
+                previously_failed=prev,
             )
         self.assertEqual((split.td_include, split.td_exclude), (include, exclude))
         return split, stderr.getvalue()
@@ -910,10 +915,12 @@ class TestSplitTests(unittest.TestCase):
             self.assertNotIn("::warning::", stderr)
             self.assertEqual(split.source, "llm_selection" if enforced else "td")
 
-    def test_list_id_is_the_same_on_every_shard(self) -> None:
-        splits = [self.split_with(Selection(candidates={"a"}))[0] for _ in range(2)]
-        list_ids = {x.llm.selection_metric["list_id"] for x in splits if x.llm}
-        self.assertEqual(len(list_ids), 1)
+    def test_unknown_previous_failures_keep_td(self) -> None:
+        sel = Selection(files={"a"}, enforce=True, candidates={"a"})
+        split, stderr = self.split_with(sel, prev=None)
+        self.assertFalse(split.enforced)
+        self.assertEqual([str(x) for x in split.include], ["p"])
+        self.assertIn("previous failures not recorded", stderr)
 
     def test_previous_failure_in_td_include_runs_when_enforced(self) -> None:
         # TD ranks class A of f first and the rest of f last, and f is over
@@ -1046,7 +1053,8 @@ class TestDashboardExclusions(unittest.TestCase):
             json.loads(json.dumps(exclusions)),
             {
                 "td": {"linux": {"default": ["a", "b", "d"]}},
-                "llm_selection": {"linux": {"default": ["c"], "slow": []}},
+                # What every call of a config with an enforced call excluded.
+                "llm_selection": {"linux": {"default": ["a", "b", "c"], "slow": []}},
             },
         )
 

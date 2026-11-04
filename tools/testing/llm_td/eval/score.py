@@ -35,8 +35,8 @@ of the current test-times.json, sample, STATS artifacts and replay code
 (see replay_inputs and replay_stats) and a result for every model tag made
 from the prompt the sample gives now (see prompt_sha); the rest are counted on stderr. The test files that
 import an edited test file are found with git grep at the sample's head; a
-sample on which that fails (its head is not in this clone?) is left out and
-counted on stderr too, as in CI the grep works.
+sample whose head is not in this clone, or on which that grep fails, is left
+out under every policy and counted on stderr too, as in CI the grep works.
 
 run_test.py applies TD, and so the selection, only in the pull, trunk and
 ROCm workflows, and not on macOS, in xpu or onnx builds, under NO_TD (from
@@ -76,6 +76,7 @@ import inspect
 import json
 import re
 import statistics as st
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -94,6 +95,7 @@ from tools.testing.llm_td.select_tests import (
     build_prompt,
     git_grep,
     MAX_CHANGED_FILES,
+    query_model,
     SCHEMA,
     SYSTEM_PROMPT,
     test_minutes,
@@ -359,6 +361,14 @@ def hedge(
 grep_at = functools.cache(git_grep)
 
 
+@functools.cache
+def has_head(sha: str) -> bool:
+    """Whether this clone has the commit `sha`, at which grep_at greps."""
+    commit = f"{sha}^{{commit}}"
+    p = subprocess.run(["git", "cat-file", "-e", commit], cwd=REPO, capture_output=True)
+    return p.returncode == 0
+
+
 def grep_head(s: dict, sid: str, failed: set[str]) -> Callable[[str], list[str]]:
     """grep_at at `s`'s head, finding nothing and adding `sid` to `failed` once git grep fails there."""
 
@@ -449,9 +459,12 @@ def sample_prompt(sample: dict, minutes: dict) -> str:
     return build_prompt(sample["title"], sample["body"] or "", sample["diffstat"], sample["diff"], sample["candidates"], minutes)  # fmt: skip
 
 
-def prompt_sha(prompt: str) -> str:
-    """A hash of everything the model is sent: the system prompt, SCHEMA and `prompt`."""
-    return hashlib.sha256(json.dumps([SYSTEM_PROMPT, SCHEMA, prompt]).encode()).hexdigest()  # fmt: skip
+def prompt_sha(prompt: str, agentic: bool = False) -> str:
+    """A hash of everything the model is sent: the system prompt, SCHEMA and `prompt` and, when `agentic`, the source of query_model, which holds the checkout preamble and the tool list."""
+    sent = [SYSTEM_PROMPT, SCHEMA, prompt]
+    if agentic:
+        sent.append(inspect.getsource(query_model))
+    return hashlib.sha256(json.dumps(sent).encode()).hexdigest()
 
 
 def replay_inputs(stats: str, times: bytes, sample: bytes) -> str:
@@ -464,6 +477,8 @@ def replay_stats(stats_dir: Path) -> str:
     """A hash of the STATS_ARTIFACTS in `stats_dir` and of the code a replay runs: TD_CODE, REPLAY_CODE and this module's functions td_replay calls, with the module constants they read."""
     paths = [stats_dir / a for a in STATS_ARTIFACTS] + sorted(TD_CODE.rglob("*.py")) + REPLAY_CODE  # fmt: skip
     parts = [f"{p.name} {hashlib.sha256(p.read_bytes()).hexdigest()}" for p in paths]
+    # getclosurevars sees only the globals a function reads itself: a constant
+    # read through a helper that is not in this tuple is missed.
     for f in (test_seconds, job_files, truth_files, truth_jobs, config_of):
         read = inspect.getclosurevars(inspect.unwrap(f)).globals
         consts = [f"{k} {v!r}" for k, v in sorted(read.items()) if k.isupper()]
@@ -494,7 +509,8 @@ def load(
 ) -> tuple[dict, dict | None, dict | None]:
     s = json.loads((samples / f"{sid}.json").read_text())
     rp, tp = data / "results" / tag / f"{sid}.json", td_dir / f"{sid}.json"
-    r = json.loads(rp.read_text()) if rp.exists() else None
+    # The tag td is scored only as td25, on its replay.
+    r = json.loads(rp.read_text()) if tag != "td" and rp.exists() else None
     td = json.loads(tp.read_text()) if tp.exists() else None
     return s, r, td
 
@@ -509,7 +525,10 @@ def score(
     td_dir: Path,
     stats: str,
 ) -> list[dict]:
-    """Rows of every tag and policy, all on the ids that have a TD replay of the current inputs under `stats` (see replay_stats), git grep at their head and, unless `unasked`, a result for every tag but `td` of the prompt the sample gives now (see prompt_sha)."""
+    """Rows of every tag and policy, all on the distinct ids that have a TD replay of the current inputs under `stats` (see replay_stats), git grep at their head and, unless `unasked`, a result for every tag but `td` of the prompt the sample gives now (see prompt_sha). Raises ValueError if a tag's results mix --model, --effort or --agentic."""
+    ids = list(dict.fromkeys(ids))
+    no_grep = "working git grep at their head (not in this clone?)"
+    settings: collections.defaultdict[str, set[tuple]] = collections.defaultdict(set)
     seconds = test_seconds(data / "test-times.json")
     fallback = fallback_seconds(data / "test-times.json")
     times = (data / "test-times.json").read_bytes()
@@ -521,6 +540,9 @@ def score(
     for sid in ids:
         loaded = {tag: load(data, tag, sid, samples, td_dir) for tag in tags}
         s, _, td = next(iter(loaded.values()))
+        for tag, (_, r, _) in loaded.items():
+            if r is not None:
+                settings[tag].add((r.get("model"), r.get("effort"), r.get("agentic")))
         missing = [] if td else ["td replay"]
         if td and td.get("inputs") != replay_inputs(stats, times, (samples / f"{sid}.json").read_bytes()):  # fmt: skip
             missing = [
@@ -529,8 +551,11 @@ def score(
         if not unasked(s):
             results = {tag: r for tag, (_, r, _) in loaded.items() if tag != "td"}
             missing += [f"{tag} result" for tag, r in results.items() if r is None]
-            sent = prompt_sha(sample_prompt(s, minutes))
-            missing += [f"{tag} result of the current sample, test-times.json, prompt and schema" for tag, r in results.items() if r is not None and r.get("prompt_sha") != sent]  # fmt: skip
+            prompt = sample_prompt(s, minutes)
+            missing += [f"{tag} result of the current sample, test-times.json, prompt and schema" for tag, r in results.items() if r is not None and r.get("prompt_sha") != prompt_sha(prompt, bool(r.get("agentic")))]  # fmt: skip
+        # Probed for every policy: grep_head fails only where a policy greps.
+        if not has_head(s["sha"]):
+            missing.append(no_grep)
         dropped.update(missing)
         if missing:
             continue
@@ -555,11 +580,13 @@ def score(
                     "missed": [p for p, h in zip(pairs, hit) if not h],
                 })  # fmt: skip
         if sid in ungrepped:
-            dropped["working git grep at their head (not in this clone?)"] += 1
+            dropped[no_grep] += 1
             continue
         rows += sample_rows
         if any(wf is None for f in truth_files(s, strong) for wf, _ in truth_jobs(s, f)):  # fmt: skip
             no_workflow.add(sid)
+    if mixed := sorted(t for t, v in settings.items() if len(v) > 1):
+        raise ValueError(f"the results of {mixed} mix --model, --effort or --agentic")
     for why, n in sorted(dropped.items()):
         print(f"dropped {n} of {len(ids)} ids with no {why}", file=sys.stderr)
     if no_workflow:
