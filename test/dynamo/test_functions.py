@@ -49,6 +49,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
+    requires_accelerator,
     xfailIfNoAcceleratorTriton,
 )
 
@@ -6398,6 +6399,9 @@ class GraphModule(torch.nn.Module):
             print(torch.get_device_module())
             self.assertEqual(f5(), getattr(torch, new_device))
 
+    # synchronize needs a usable accelerator.
+    @requires_accelerator
+    def test_torch_get_device_module_synchronize(self):
         # synchronize causes a graph break, so no fullgraph=True
         @torch.compile(backend="eager")
         def f6():

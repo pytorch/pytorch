@@ -11273,7 +11273,10 @@ class StorageBox(MutableBox):
                     return True
             if self.has_large_inner_fn():
                 return True
-            return graph_reuse and self.num_reads() > config.realize_reads_threshold
+            broadcast_reuse = users >= config.realize_broadcast_reuse_threshold
+            return (graph_reuse or broadcast_reuse) and (
+                self.num_reads() > config.realize_reads_threshold
+            )
         return False
 
     def mark_reuse(self, users: int, *, graph_reuse: bool = True) -> None:
