@@ -369,6 +369,8 @@ class Selection:
     # Why the selector got no usable answer (git, the model call or its output,
     # or the test times); None for a deliberate run_all.
     error: str | None = None
+    # Whether enforcement was asked for, even if a failed selector cleared enforce.
+    enforce_requested: bool = False
 
     @classmethod
     def from_model_output(
@@ -449,7 +451,8 @@ class Selection:
         failures run whatever their size, as under TD, and are not charged to
         the hedge: their pool spans the PR's SHAs, build environments and
         configs, so one large earlier failure would otherwise use up the hedge
-        of every config, while TD's include bounds what they cost. The hedge
+        of every config. A previous failure with any TestRun in TD's include
+        runs its whole file. The hedge
         is `share` (by default LLM_TD_HEDGE, 20%) of the test time of
         `ranked`, spent greedily in rank order on the other files with a
         positively scored TestRun, including the other previous failures. One positive class-level run
@@ -486,6 +489,7 @@ class Selection:
             "enforce": self.enforce,
             "candidates": None if self.candidates is None else sorted(self.candidates),
             "error": self.error,
+            "enforce_requested": self.enforce_requested,
         }
 
     @classmethod
@@ -497,13 +501,14 @@ class Selection:
             raise ValueError(f"not a selection file of version {SELECTION_VERSION}")
         files, sweeps, candidates = d["files"], d["sweeps"], d["candidates"]
         run_all, enforce, reason, error = d["run_all"], d["enforce"], d["reason"], d["error"]  # fmt: skip
+        enforce_requested = d["enforce_requested"]
         if not all(
             isinstance(v, list) and all(isinstance(x, str) for x in v)
             for v in (files, sweeps) + (() if candidates is None else (candidates,))
         ):
             raise TypeError("files, sweeps and candidates must be lists of strings")
-        if not isinstance(run_all, bool) or not isinstance(enforce, bool):
-            raise TypeError("run_all and enforce must be booleans")
+        if not all(isinstance(v, bool) for v in (run_all, enforce, enforce_requested)):  # fmt: skip
+            raise TypeError("run_all, enforce and enforce_requested must be booleans")
         if not isinstance(reason, str) or not isinstance(error, (str, type(None))):
             raise TypeError("reason must be a string and error a string or null")
         if candidates is None and not run_all:
@@ -516,6 +521,7 @@ class Selection:
             enforce,
             None if candidates is None else set(candidates),
             error,
+            enforce_requested,
         )
 
     @classmethod
@@ -564,6 +570,7 @@ class AppliedSelection:
     kept_td: bool
     previous_failures_known: bool
     td_include: set[str]
+    td_include_runs: set[TestRun]
     file_time: dict[str, float]
 
     @property
@@ -572,12 +579,14 @@ class AppliedSelection:
         one, so count one per (workflow run, run attempt, build_environment,
         config, list_id): list_id hashes only the call's test file names.
         selector_error tells a failed selector, which is never enforced, from
-        a deliberate run_all."""
+        a deliberate run_all, and enforce_requested counts the requested
+        enforcements that fell back to TD."""
         split, times = self.split, self.file_time
         files = "\n".join(sorted(times)).encode()
         return {
             "list_id": hashlib.sha256(files).hexdigest()[:12],
             "enforced": self.enforced,
+            "enforce_requested": self.selection.enforce_requested,
             "td_enabled": self.td_enabled,
             "run_all": self.selection.run_all,
             "selector_error": self.selection.error,
@@ -602,8 +611,9 @@ class AppliedSelection:
             "failure": str(test),
             "covered": f in self.split.covered,
             "enforced": self.enforced,
+            "enforce_requested": self.selection.enforce_requested,
             "td_enabled": self.td_enabled,
-            "in_td_include": f in self.td_include,
+            "in_td_include": test in self.td_include_runs,
             "hedged": f in self.split.hedged,
             "previous_failure_added": f in self.split.previous_failures_added,
             "kept_td": self.kept_td,
@@ -679,5 +689,6 @@ def apply_selection(
         kept_td=wanted and not enforced,
         previous_failures_known=previous_failures is not None,
         td_include=td,
+        td_include_runs=set(include),
         file_time=file_time,
     )
