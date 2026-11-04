@@ -195,10 +195,14 @@ def query_model(
     checkout: str | None = None,
     timeout: int = QUERY_TIMEOUT,
 ) -> dict:
-    """Run `claude -p` and return its JSON result.
+    """Run `claude -p` and return the CLI's JSON envelope (`is_error`, `subtype`,
+    the answer under `structured_output`), or on any failure of the call
+    `{"is_error": True, "result": <why>}`.
 
-    With `checkout`, the model may Read/Grep/Glob that tree and nothing else (the
-    `Read` permission rule also scopes Grep and Glob); otherwise it has no tools."""
+    With `checkout`, the model may Read/Grep/Glob that tree but not its .git/ and
+    nothing else (the `Read` permission rules also scope Grep and Glob);
+    otherwise it has no tools. Callers must check the tree out with
+    `persist-credentials: false`, so that no file in it holds a token."""
     tools = AGENTIC_TOOLS if checkout else ""
     cmd = [
         "claude",
@@ -220,20 +224,33 @@ def query_model(
     ]
     if checkout:
         checkout = os.path.abspath(checkout)
-        allowed = f"Read(/{checkout}/**)"
-        cmd += ["--allowed-tools", allowed, "--add-dir", checkout]
+        allowed, denied = f"Read(/{checkout}/**)", f"Read(/{checkout}/.git/**)"
+        cmd += ["--allowed-tools", allowed, "--disallowed-tools", denied]
+        cmd += ["--add-dir", checkout]
         prompt = CHECKOUT_PREAMBLE.format(checkout=checkout) + prompt
     # An empty working directory keeps the CLI from picking up any project
     # settings, also those of a checkout, which it reads only through --add-dir.
     with tempfile.TemporaryDirectory() as tmp:
-        p = subprocess.run(
-            cmd, input=prompt, capture_output=True, text=True, cwd=tmp, timeout=timeout
-        )
+        try:
+            p = subprocess.run(
+                cmd,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                cwd=tmp,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as e:
+            # Its message is mostly the claude argv, prompt included.
+            why = f"model call timed out after {e.timeout}s"
+            return {"is_error": True, "result": why}
+        except FileNotFoundError as e:
+            return {"is_error": True, "result": f"{type(e).__name__}: {e}"}
     try:
         result = json.loads(p.stdout)
     except json.JSONDecodeError:
         result = None
-    if not isinstance(result, dict):
+    if p.returncode != 0 or not isinstance(result, dict):
         return {"is_error": True, "result": (p.stdout + p.stderr)[-2000:]}
     return result
 
@@ -251,7 +268,7 @@ def git_paths(command: str, *args: str) -> list[str]:
 def git_grep(pattern: str, rev: str, timeout: float | None = None) -> list[str]:
     """The paths under test/ at `rev` with a line matching the extended regex `pattern`."""
     p = subprocess.run(
-        ["git", "grep", "-lzE", pattern, rev, "--", "test/"],
+        ["git", "grep", "-lzE", "-e", pattern, rev, "--", "test/"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -380,8 +397,9 @@ def select(args: argparse.Namespace, record: dict) -> tuple[Selection | None, bo
         cli = str(result.get("result") or "") if out is None else ""
         selection.error = (cli or selection.error)[:2000]
     # Only the doctest rule follows a change outside test/, so an answer naming
-    # nothing for one leaves at most doctests and ALWAYS_COVERED: never enforce.
-    keys = ("tests", "dirs", "sweeps")
+    # no tests or dirs for one leaves at most doctests and ALWAYS_COVERED outside
+    # its sweeps' configs: never enforce.
+    keys = ("tests", "dirs")
     picked = selection.run_all or out is None or any(out[k] for k in keys)
     enforceable = picked or all(f.startswith("test/") for f in changed)
     if not enforceable:
