@@ -719,6 +719,40 @@ def _validate_sample_input_sparse_elementwise_binary_operation(
     return sample
 
 
+def sample_inputs_sparse_add_blocked(
+    op_info, device, dtype, requires_grad, layout, **kwargs
+):
+    if torch.device(device).type not in {"cpu", "cuda"} or dtype not in {
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+        torch.complex64,
+        torch.complex128,
+    }:
+        return
+
+    lhs = torch.tensor(
+        [[1, 0, 0, 0], [0, 2, 0, 0], [0, 0, 3, 0], [0, 0, 0, 0]],
+        dtype=dtype,
+        device=device,
+    )
+    rhs = torch.tensor(
+        [[0, 0, 4, 0], [0, 5, 0, 0], [0, 0, 0, 0], [0, 0, 0, 6]],
+        dtype=dtype,
+        device=device,
+    )
+    for blocksize in ((1, 1), (2, 2)):
+        left = lhs.to_sparse(layout=layout, blocksize=blocksize).requires_grad_(
+            requires_grad
+        )
+        right = rhs.to_sparse(layout=layout, blocksize=blocksize).requires_grad_(
+            requires_grad
+        )
+        yield SampleInput(left, args=(right,), kwargs={"alpha": -0.5})
+        yield SampleInput(left, args=(left.clone(),))
+
+
 def sample_inputs_sparse_mul(op_info, device, dtype, requires_grad, layout, **kwargs):
     """Sample inputs for mul operation on sparse tensors."""
     yield from _sample_inputs_sparse(
