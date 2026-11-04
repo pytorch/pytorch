@@ -2973,9 +2973,10 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
     TMA-specific mixin that uses persistent configs and adds TMA options.
     This inherits from MMTemplateConfigMixin and overrides config generation.
 
-    ``ROCmPersistentTDMTemplateConfigHeuristic`` feeds the same Jinja template
-    with deliberately different probes (unit-stride row-majorness, stable
-    descriptor API, no workspace). Keep both in sync when adding a variable.
+    ``ROCmPersistentTDMTemplateConfigHeuristic`` and
+    ``XPUDescriptorMMTemplateConfigMixin`` feed the same Jinja template with
+    deliberately different probes (unit-stride row-majorness, stable descriptor
+    API, no workspace). Keep all three in sync when adding a variable.
     """
 
     def _get_template_configs_impl(
@@ -4107,7 +4108,8 @@ class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
     # (also used by baddbmm via XPUAddmmTemplateConfigHeuristic).
     ascending_k = True
 
-    # The only mm_configs that still win on Xe2 once the XPU mm templates run.
+    # Used instead of mm_configs when the XPU mm templates take the mm: the
+    # only triton_mm configs that still win next to them on BMG (Xe2).
     xpu_template_companion_configs = [
         GemmConfig(64, 32, 32, 5, 8),
         GemmConfig(64, 64, 16, 2, 4),
@@ -4130,49 +4132,14 @@ class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
         op_name: str,
         **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
-        keep = None
         if (
             op_name == "mm"
-            and isinstance(kernel_inputs, MMKernelInputs)
             and config.max_autotune_gemm_search_space != "EXHAUSTIVE"
             and _xpu_descriptor_row_major(kernel_inputs) is not None
         ):
-            m, n, k = kernel_inputs.mnk_symbolic()
-            keep = OrderedSet(
-                [
-                    (
-                        c.kwargs["BLOCK_M"],
-                        c.kwargs["BLOCK_N"],
-                        c.kwargs["BLOCK_K"],
-                        c.num_stages,
-                        c.num_warps,
-                    )
-                    for c in self.preprocess_mm_configs(
-                        m,
-                        n,
-                        k,
-                        configs=self.xpu_template_companion_configs,
-                        dtype_size=kernel_inputs.dtype().itemsize,
-                        op_name=op_name,
-                        **kwargs,
-                    )
-                ]
-            )
-        for template_kwargs in super()._get_template_configs_impl(
-            kernel_inputs, op_name, **kwargs
-        ):
-            if (
-                keep is None
-                or (
-                    template_kwargs["BLOCK_M"],
-                    template_kwargs["BLOCK_N"],
-                    template_kwargs["BLOCK_K"],
-                    template_kwargs["num_stages"],
-                    template_kwargs["num_warps"],
-                )
-                in keep
-            ):
-                yield template_kwargs
+            # A call-time keyword overrides the partial's configs=self.mm_configs.
+            kwargs["configs"] = self.xpu_template_companion_configs
+        yield from super()._get_template_configs_impl(kernel_inputs, op_name, **kwargs)
 
 
 @register_template_heuristic(mm_template.uid, "xpu", op_name="addmm")
