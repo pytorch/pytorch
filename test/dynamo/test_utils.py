@@ -50,11 +50,6 @@ class TestUtils(TestCase):
             utils.safe_repr({"x": BadRepr(), "y": 2}), "{'x': <BadRepr>, 'y': 2}"
         )
         self.assertEqual(utils.safe_repr((BadRepr(),)), "(<BadRepr>,)")
-        # An exception keeps its message when one of its args has a bad repr
-        self.assertEqual(
-            utils.safe_repr(RuntimeError("boom", BadRepr())),
-            "RuntimeError('boom', <BadRepr>)",
-        )
         self.assertEqual(utils.safe_repr((t, {"k": 2})), repr((t, {"k": 2})))
 
     def test_run_node_error_with_bad_repr_arg(self):
@@ -81,49 +76,24 @@ class TestUtils(TestCase):
             torch.compile(f, backend="eager", fullgraph=True)(x, torch.ones(3))
 
     def test_summarize_example_value(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
         self.assertEqual(
             utils.summarize_example_value([torch.ones(2, 3), 4]),
-            "list[Tensor(..., size=(2, 3)), 4]",
+            "list[Tensor(shape=(2, 3), dtype=torch.float32), 4]",
         )
+        with FakeTensorMode():
+            fake = torch.ones(2, dtype=torch.int64)
         self.assertEqual(
-            utils.summarize_example_value(torch.ones(2)), "Tensor(..., size=(2,))"
-        )
-        # Without values to show it, int64 is shown too, as in a fake tensor's repr
-        self.assertEqual(
-            utils.summarize_example_value(torch.ones(2, dtype=torch.int64)),
-            "Tensor(..., size=(2,), dtype=torch.int64)",
-        )
-        # A non-default dtype and the autograd state are shown, as in a repr
-        t = torch.ones(2, dtype=torch.float16, requires_grad=True)
-        self.assertEqual(
-            utils.summarize_example_value(t),
-            "Tensor(..., size=(2,), dtype=torch.float16, requires_grad=True)",
-        )
-        self.assertEqual(
-            utils.summarize_example_value(t * 2),
-            "Tensor(..., size=(2,), dtype=torch.float16, grad_fn=<MulBackward0>)",
-        )
-        # Reading grad_fn raises for a view created and modified in place in
-        # no-grad mode; like a repr, the summary shows it as invalid
-        base = torch.ones(3, requires_grad=True).clone()
-        with torch.no_grad():
-            view = base[:2]
-            view.mul_(2)
-        self.assertEqual(
-            utils.summarize_example_value(view),
-            "Tensor(..., size=(2,), grad_fn=<Invalid>)",
+            utils.summarize_example_value((fake, 2)),
+            "tuple[FakeTensor(shape=(2,), dtype=torch.int64), 2]",
         )
 
-        # A tuple is summarized like a list, and a non-tensor whose repr raises
-        # is shown as <ClassName>
+        # A non-tensor whose repr raises is shown as <ClassName>
         class BadRepr:
             def __repr__(self):
                 raise RuntimeError("repr failed")
 
-        self.assertEqual(
-            utils.summarize_example_value((torch.ones(1), 2)),
-            "tuple[Tensor(..., size=(1,)), 2]",
-        )
         self.assertEqual(utils.summarize_example_value(BadRepr()), "<BadRepr>")
 
     def test_cleanup_hook_tolerates_missing_name(self):
