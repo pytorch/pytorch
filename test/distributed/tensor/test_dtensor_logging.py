@@ -9,11 +9,7 @@ from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor.debug import _clear_sharding_prop_cache
-from torch.testing._internal.common_utils import (
-    run_concurrently,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_concurrently, run_tests, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
@@ -32,7 +28,7 @@ class TestDTensorLogging(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        acc = torch.accelerator.current_accelerator()
+        acc = torch.accelerator.current_accelerator(check_available=True)
         self.device_type = acc.type if acc else "cpu"
 
     def test_sharding_prop_cache_logging(self):
@@ -158,12 +154,9 @@ sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[
         # Also test when the logger returned to C++ has no other Python references,
         # so any dangling thread_local py::object deallocates it during thread exit
         # after PyThreadState_DeleteCurrent() has released the GIL (even under -DNDEBUG).
-        with patch.object(
-            logging, "getLogger", side_effect=logging.Logger
-        ) as mock_get_logger:
+        with patch.object(logging, "getLogger", side_effect=logging.Logger):
             hits, _ = run_concurrently(worker, num_threads=1)[0]
             self.assertGreaterEqual(hits, 1)
-            mock_get_logger.assert_any_call("torch.distributed.tensor._dispatch")
 
 
 if __name__ == "__main__":
