@@ -1494,7 +1494,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/MaxUnpooling.cpp",
     "aten/src/ATen/native/Memory.cpp",
     "aten/src/ATen/native/MetaTensor.cpp",
-    "aten/src/ATen/native/NNPACK.cpp",
     "aten/src/ATen/native/NaiveConvolutionTranspose2d.cpp",
     "aten/src/ATen/native/NaiveConvolutionTranspose3d.cpp",
     "aten/src/ATen/native/NaiveDilatedConvolution.cpp",

@@ -15,10 +15,6 @@ requires = [
     # scikit-build-core, but list it explicitly as a direct build-time
     # dep. Keep the lower bound in sync with the wheel runtime requirement.
     "typing-extensions>=4.15.0",
-    # Dependency chain: NNPACK -> PeachPy -> six. PeachPy emits NNPACK's hot
-    # assembly loops at build time and does `import six`. NNPACK is on by
-    # default (USE_NNPACK=ON); isolated PEP 517 builds need six available.
-    "six",
 ]
 build-backend = "scikit_build_core.build"
 

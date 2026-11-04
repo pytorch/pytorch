@@ -396,6 +396,12 @@ These backends include:
 ```
 
 ```{eval-rst}
+.. deprecated:: 2.16
+    NNPACK has been removed from PyTorch. ``torch.backends.nnpack`` is a no-op kept for
+    backward compatibility and will be removed in 2.18.
+```
+
+```{eval-rst}
 .. autofunction::  torch.backends.nnpack.is_available
 ```
 

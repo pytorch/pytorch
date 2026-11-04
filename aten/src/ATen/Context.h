@@ -267,8 +267,6 @@ class TORCH_API Context {
   void setDeterministicCuDNN(bool /*b*/);
   bool deterministicMkldnn() const;
   void setDeterministicMkldnn(bool /*b*/);
-  bool userEnabledNNPACK() const;
-  void setUserEnabledNNPACK(bool e);
 
   CuDNNDepthwiseKernel cudnnDepthwiseKernel() const;
   void setCuDNNDepthwiseKernel(CuDNNDepthwiseKernel k);
@@ -537,7 +535,6 @@ class TORCH_API Context {
   std::optional<int32_t> sm_carveout = std::nullopt;
   bool enabled_mkldnn = true;
   bool allow_tf32_onednn = false;
-  bool enabled_nnpack = true;
   CuDNNDepthwiseKernel depthwise_kernel_cudnn = CuDNNDepthwiseKernel::AUTO;
   at::LinalgBackend linalg_preferred_backend =
       (c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true ||

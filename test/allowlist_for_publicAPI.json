@@ -1250,8 +1250,6 @@
     "_neg_view_copy",
     "_nested_from_padded",
     "_nested_from_padded_and_nested_example",
-    "_nnpack_available",
-    "_nnpack_spatial_convolution",
     "_pack_padded_sequence",
     "_pad_packed_sequence",
     "_pin_memory",
