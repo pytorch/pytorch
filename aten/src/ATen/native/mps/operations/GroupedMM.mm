@@ -6,6 +6,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/GroupedMM.h>
 #include <ATen/ops/bmm.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -44,9 +45,9 @@ template <typename idx_t>
 GroupedMMParams<idx_t> grouped_mm_params(const Tensor& mat_a, const Tensor& mat_b, const Tensor& out, uint32_t groups) {
   const auto& batched = mat_a.dim() == 3 ? mat_a : mat_b.dim() == 3 ? mat_b : out;
   return {
-      .m = c10::checked_convert<uint32_t>(mat_a.size(-2), "mat_a.size(-2)"),
-      .n = c10::checked_convert<uint32_t>(mat_b.size(-1), "mat_b.size(-1)"),
-      .k = c10::checked_convert<uint32_t>(std::min(mat_a.size(-1), mat_b.size(-2)), "contraction dimension"),
+      .m = c10::safe_conv<uint32_t>(mat_a.size(-2), "mat_a.size(-2)"),
+      .n = c10::safe_conv<uint32_t>(mat_b.size(-1), "mat_b.size(-1)"),
+      .k = c10::safe_conv<uint32_t>(std::min(mat_a.size(-1), mat_b.size(-2)), "contraction dimension"),
       .groups = groups,
       .a_stride_m = static_cast<idx_t>(mat_a.stride(-2)),
       .a_stride_k = static_cast<idx_t>(mat_a.stride(-1)),
@@ -124,7 +125,7 @@ GroupedMMKernel grouped_mm_pick_kernel(const GroupedMMParams<uint64_t>& params,
 // The operand ranks pick the jagged mode: 2d x 3d splits the rows of mat_a,
 // 3d x 2d the columns of mat_b, 2d x 2d the shared contraction dim.
 void grouped_mm_out_mps(const Tensor& mat_a, const Tensor& mat_b, const Tensor& offsets, const Tensor& out) {
-  const auto groups = c10::checked_convert<uint32_t>(offsets.numel(), "number of groups");
+  const auto groups = c10::safe_conv<uint32_t>(offsets.numel(), "number of groups");
   if (groups == 0 || out.numel() == 0) {
     return;
   }
