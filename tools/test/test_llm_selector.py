@@ -332,6 +332,17 @@ g () {
         reason = f"more than {selection.MAX_DATA_FILES} edited files under test/ are not tests"
         self.assertEqual((sel.run_all, sel.reason, sel.error), (True, reason, None))
 
+    def test_cpp_docs_and_comments_do_not_read_data_files(self) -> None:
+        sources = {
+            "cpp/jit/README.md": "doc_only.json\n",
+            "cpp/jit/test_save_load.cpp": '// Reads comment_only.json\n  //comment_only.json\nload("real.json");\n',
+        }  # fmt: skip
+        sel = self.select_in_tree(sources, CANDIDATES, ["test/real.json"])
+        self.assertEqual((sel.files, sel.run_all), (set(), False))
+        for changed in ("test/doc_only.json", "test/comment_only.json"):
+            sel = self.select_in_tree(sources, CANDIDATES, [changed])
+            self.assertEqual((sel.run_all, sel.reason), (True, f"nothing found that reads {changed}"))  # fmt: skip
+
     def test_endless_import_chain_runs_all(self) -> None:
         calls: list[str] = []
 
@@ -723,6 +734,7 @@ class TestApplySelection(unittest.TestCase):
             "list_id": "7916c4091b31",  # sha256 of the sorted test list
             "enforced": enforced,
             "enforce_requested": requested,
+            "enforcement_enabled": True,
             "td_enabled": True,
             "run_all": False,
             "selector_error": None,
@@ -765,6 +777,7 @@ class TestApplySelection(unittest.TestCase):
                 "covered": False,
                 "enforced": False,
                 "enforce_requested": False,
+                "enforcement_enabled": True,
                 "td_enabled": True,
                 "in_td_include": True,
                 "hedged": True,
@@ -872,6 +885,7 @@ class TestApplySelection(unittest.TestCase):
                     "covered": covered,
                     "enforced": True,
                     "enforce_requested": True,
+                    "enforcement_enabled": True,
                     "td_enabled": True,
                     "in_td_include": in_td,
                     "hedged": hedged,
@@ -1024,16 +1038,29 @@ class TestMain(unittest.TestCase):
 
     def test_greps_are_memoized_and_bounded(self) -> None:
         answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": []}}  # fmt: skip
-        with mock.patch.object(select_tests, "git_grep", wraps=select_tests.git_grep) as grep:  # fmt: skip
+        clock, git_grep = iter(range(10**6)), select_tests.git_grep
+        with (
+            mock.patch.object(select_tests, "git_grep", wraps=git_grep) as grep,
+            mock.patch.object(select_tests.time, "monotonic", lambda: next(clock)),
+        ):
             record, _ = self.run_in_repo(answer)
         patterns = [c.args[0] for c in grep.call_args_list]
-        self.assertTrue(patterns)
+        self.assertGreater(len(patterns), 1)
         self.assertEqual(len(patterns), len(set(patterns)))
-        self.assertTrue(all(0 < c.args[2] <= select_tests.GREP_BUDGET for c in grep.call_args_list))  # fmt: skip
+        # Every grep gets what is left of one shared budget.
+        timeouts = [c.args[2] for c in grep.call_args_list]
+        self.assertEqual(timeouts, sorted(set(timeouts), reverse=True))
+        self.assertTrue(0 < timeouts[-1] < timeouts[0] < select_tests.GREP_BUDGET)
         self.assertIsNone(record["error"])
-        timeout = subprocess.TimeoutExpired(["git", "grep"], 1)
-        with mock.patch.object(select_tests, "git_grep", side_effect=timeout):
+        # A grep that starts past the deadline gets no time and fails the selection.
+        clock = iter(range(0, 10**6, select_tests.GREP_BUDGET))
+        timeout = subprocess.TimeoutExpired(["git", "grep"], 0.001)
+        with (
+            mock.patch.object(select_tests, "git_grep", side_effect=timeout) as grep,
+            mock.patch.object(select_tests.time, "monotonic", lambda: next(clock)),
+        ):
             record, _ = self.run_in_repo(answer)
+        self.assertEqual([c.args[2] for c in grep.call_args_list], [0.001])
         self.assertTrue(record["run_all"])
         self.assertEqual(record["error"], f"RuntimeError: git grep ran past the {select_tests.GREP_BUDGET}s budget after the model call")  # fmt: skip
         self.assertIsNotNone(record["diagnostics"]["model_output"])

@@ -370,7 +370,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--enforce",
         action="store_true",
-        help="let run_test.py replace TD's split with the selection (see selection.apply_selection); ignored when the selector fails",
+        help="request that run_test.py replace TD's split with the selection (see selection.apply_selection); a no-op until selection.ENFORCEMENT_ENABLED is flipped, and ignored when the selector fails",
     )
     parser.add_argument("--print-prompt", action="store_true", help="print the prompt instead of calling the model; writes no file")  # fmt: skip
     args = parser.parse_args(argv)
@@ -404,8 +404,8 @@ def main(argv: list[str] | None = None) -> None:
     # A deliberate run_all (no changed files, test infrastructure, too many
     # changed files, an inductor failure list naming an unknown class, too many
     # edited files under test/ that are not tests, too many import hops, an
-    # edited file under test/ that nothing reads, or the model) is enforced; a
-    # broken selector leaves TD's split in place.
+    # edited file under test/ that nothing reads, or the model) is enforced once
+    # selection.ENFORCEMENT_ENABLED is flipped; a broken selector never is.
     selection.enforce = args.enforce and selection.error is None
     selection.enforce_requested = args.enforce
     args.output.write_text(
