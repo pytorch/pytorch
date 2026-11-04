@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.import_test_stats import (
+    ADDITIONAL_CI_FILES_FOLDER,
     copy_additional_previous_failures,
     copy_pytest_cache,
     get_td_heuristic_historial_edited_files_json,
@@ -30,32 +31,43 @@ from tools.testing.target_determination.heuristics.interface import (
 )
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     get_all_previous_failures,
-    PREVIOUS_FAILURES_KEY,
 )
 
 
 sys.path.remove(str(REPO_ROOT))
 
-TD_RESULTS = REPO_ROOT / ".additional_ci_files/td_results.json"
+TD_RESULTS = REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / "td_results.json"
+# main() stores get_all_previous_failures() with TD's ranking, so that every
+# shard sees the same ones; TestPrioritizations.from_json ignores the key.
+PREVIOUS_FAILURES_KEY = "previous_failures"
 
 
-def import_results() -> TestPrioritizations:
-    if not TD_RESULTS.exists():
+def import_results(
+    path: Path = TD_RESULTS,
+) -> tuple[TestPrioritizations, set[str] | None]:
+    """TD's ranking and the previous failures stored with it, or None for
+    those if they are missing (no TD results, or an older writer) or malformed."""
+    if not path.exists():
         print("No TD results found")
-        return TestPrioritizations([], {})
-    with open(TD_RESULTS) as f:
+        return TestPrioritizations([], {}), None
+    with open(path) as f:
         td_results = json.load(f)
-        tp = TestPrioritizations.from_json(td_results)
-
-    return tp
+    tp = TestPrioritizations.from_json(td_results)
+    failed = td_results.get(PREVIOUS_FAILURES_KEY)
+    if not isinstance(failed, list) or not all(isinstance(x, str) for x in failed):
+        print(
+            f"Ignoring the previous failures in {path}: {failed!r:.200}",
+            file=sys.stderr,
+        )
+        return tp, None
+    return tp, set(failed)
 
 
 def td_results_json(
     test_prioritizations: TestPrioritizations, previous_failures: set[str] | None
 ) -> dict[str, Any]:
-    """TD's ranking and the previous failures, unless they are unknown, stored
-    with it so that every shard sees the same ones; TestPrioritizations.from_json
-    ignores the extra key."""
+    """The td_results.json that import_results reads: TD's ranking and the
+    previous failures, unless they are unknown."""
     td_results = test_prioritizations.to_json()
     if previous_failures is not None:
         td_results[PREVIOUS_FAILURES_KEY] = sorted(previous_failures)

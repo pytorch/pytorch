@@ -22,25 +22,6 @@ from tools.testing.test_run import TestRun
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-# The key of td_results.json under which do_target_determination_for_s3.py
-# stores get_all_previous_failures(), so that they arrive with TD's ranking.
-PREVIOUS_FAILURES_KEY = "previous_failures"
-
-
-class PreviouslyFailedInPR(HeuristicInterface):
-    def __init__(self, **kwargs: dict[str, Any]) -> None:
-        super().__init__(**kwargs)
-
-    def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
-        try:
-            critical_tests = read_all_previous_failures()
-        except PREVIOUS_FAILURES_ERRORS as e:
-            raise RuntimeError("could not read the previous failures") from e
-        return TestPrioritizations(
-            tests, {TestRun(test): 1 for test in critical_tests if test in tests}
-        )
-
-
 PREVIOUS_FAILURES_ERRORS = (
     OSError,
     ValueError,
@@ -48,6 +29,17 @@ PREVIOUS_FAILURES_ERRORS = (
     AttributeError,
     RecursionError,
 )
+
+
+class PreviouslyFailedInPR(HeuristicInterface):
+    def __init__(self, **kwargs: dict[str, Any]) -> None:
+        super().__init__(**kwargs)
+
+    def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
+        critical_tests = read_all_previous_failures()
+        return TestPrioritizations(
+            tests, {TestRun(test): 1 for test in critical_tests if test in tests}
+        )
 
 
 def read_all_previous_failures() -> set[str]:

@@ -16,6 +16,7 @@ import sys
 import sysconfig
 import tempfile
 import time
+import uuid
 from collections import defaultdict
 from collections.abc import Sequence
 from contextlib import ExitStack
@@ -64,9 +65,8 @@ from tools.testing.discover_tests import (
     parse_test_module,
     TESTS,
 )
-from tools.testing.do_target_determination_for_s3 import import_results, TD_RESULTS
+from tools.testing.do_target_determination_for_s3 import import_results
 from tools.testing.llm_td.selection import LLM_TD_SELECTION_FILE, split_tests
-from tools.testing.target_determination.gen_artifact import gen_ci_artifact
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
 )
@@ -2494,11 +2494,13 @@ def main():
     which_shard, num_shards = get_sharding_opts(options)
     add_global_metric("shard", which_shard)
     add_global_metric("num_shards", num_shards)
+    # Joins one call's metrics: test.sh runs some files several times per job.
+    add_global_metric("call_id", uuid.uuid4().hex)
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
 
-    test_prioritizations = import_results()
+    test_prioritizations, previous_failures = import_results()
     if len(test_prioritizations.get_all_tests()) == 0:
         options.enable_td = False
     test_prioritizations.amend_tests(selected_tests)
@@ -2548,31 +2550,30 @@ def main():
     percent_to_run = 25 if options.enable_td else 100
     include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
 
-    # Written by the llm-test-selection workflow; see tools/testing/llm_td.
+    # The LLM test selection, if CI downloaded one; see tools/testing/llm_td.
+    selection_file = REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_TD_SELECTION_FILE
     split = split_tests(
         include,
         exclude,
         test_prioritizations.get_score,
         test_file_times_dict,
-        selection_file=REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_TD_SELECTION_FILE,
-        td_results=TD_RESULTS,
+        selection_file=selection_file,
         test_config=TEST_CONFIG,
         td_enabled=options.enable_td,
-        percent=percent_to_run,
+        previously_failed=previous_failures,
+        in_ci=IS_CI,
     )
-    include, exclude = split.include, split.exclude
-
-    test_batch = TestBatch("tests to run", include, False)
-    test_batch_exclude = TestBatch("excluded", exclude, True)
-    if IS_CI:
-        gen_ci_artifact(
-            [x.to_json() for x in include],
-            [x.to_json() for x in exclude],
-            source=split.source,
-            td_excluded=[x.to_json() for x in split.td_exclude],
+    if not split.enforced:
+        print_to_stderr(
+            f"Running {percent_to_run}% of tests based on TD"
+            if options.enable_td
+            else "Running all tests"
         )
-        if split.llm is not None:
-            emit_metric("llm_td_selection", split.llm.selection_metric)
+
+    test_batch = TestBatch("tests to run", split.include, False)
+    test_batch_exclude = TestBatch("excluded", split.exclude, True)
+    if IS_CI and split.llm is not None:
+        emit_metric("llm_td_selection", split.llm.selection_metric)
 
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
@@ -2627,7 +2628,6 @@ def main():
                         "selected_tests": selected_tests,
                         "failure": str(test),
                         "llm_enforced": split.enforced,
-                        "call_id": split.call_id,
                         **test_stats,
                     },
                 )
