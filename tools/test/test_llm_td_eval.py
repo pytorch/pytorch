@@ -126,8 +126,8 @@ TD_JOBS = {
 }
 
 
-def fail(test: str, t: str, sha: str, br: str = "gh/x", wf: str = "pull", job: str = JOB, tf: str = "test_a") -> dict:  # fmt: skip
-    return {"tf": tf, "classname": "TestA", "test": test, "t": t, "sha": sha, "br": br, "wf": wf, "job": job}  # fmt: skip
+def fail(test: str, t: str, sha: str, br: str = "gh/x", wf: str = "pull", job: str = JOB, tf: str = "test_a", flaky: bool = False) -> dict:  # fmt: skip
+    return {"tf": tf, "classname": "TestA", "test": test, "t": t, "sha": sha, "br": br, "wf": wf, "job": job, "flaky": flaky}  # fmt: skip
 
 
 def day(d: int, month: int = 10) -> dt.datetime:
@@ -241,6 +241,9 @@ class TestRunEval(unittest.TestCase):
         prompt = run_eval.sample_prompt(sample, {})
         self.assertEqual(r["prompt_sha"], run_eval.prompt_sha(prompt, True))
         self.assertNotEqual(r["prompt_sha"], run_eval.prompt_sha(prompt))
+        for name in ("AGENTIC_TOOLS", "CHECKOUT_PREAMBLE"):
+            with mock.patch.object(score, name, "x"):
+                self.assertNotEqual(r["prompt_sha"], run_eval.prompt_sha(prompt, True))
 
     def test_main_survives_a_failed_write(self) -> None:
         from tools.testing.llm_td.eval import run_eval
@@ -324,6 +327,24 @@ class TestRunEval(unittest.TestCase):
                         self.assertFalse(refused)
                 # Only the unfinished b is run, and only when a's result is accepted.
                 self.assertEqual(query.call_count, 0 if refused else 1)
+
+
+class TestEvalHelpers(unittest.TestCase):
+    def test_has_head(self) -> None:
+        self.assertTrue(score.has_head(select_tests.git("rev-parse", "HEAD").strip()))
+        self.assertFalse(score.has_head("0" * 40))
+
+    def test_write_json(self) -> None:
+        from tools.testing.llm_td.eval import write_json
+
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "r.json"
+            write_json(path, {"a": 1})
+            self.assertEqual((json.loads(path.read_text()), path.stat().st_mode & 0o777), ({"a": 1}, 0o644))  # fmt: skip
+            # A failed write keeps the old file and leaves no temporary one.
+            with self.assertRaises(TypeError):
+                write_json(path, {"a": object()})
+            self.assertEqual((json.loads(path.read_text()), list(Path(d).iterdir())), ({"a": 1}, [path]))  # fmt: skip
 
 
 class TestScore(unittest.TestCase):
@@ -1367,7 +1388,24 @@ def scratch_repo() -> Iterator[None]:
     env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="a", GIT_AUTHOR_EMAIL="a@a", GIT_COMMITTER_NAME="a", GIT_COMMITTER_EMAIL="a@a")  # fmt: skip
     with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, env, clear=True), mock.patch.object(bd, "REPO", Path(d)):  # fmt: skip
         bd.git("init", "-q")
-        yield
+        caches = (bd.is_ancestor, bd.own_change, bd.below)
+        for c in caches:
+            c.cache_clear()
+        try:
+            yield
+        finally:
+            for c in caches:
+                c.cache_clear()
+
+
+def commit_files(files: dict[str, str], *parents: str) -> str:
+    """In a scratch_repo, a commit of a tree holding `files`, so commits of equal files have equal trees."""
+
+    def piped(args: list[str], stdin: str) -> str:
+        return subprocess.run(["git", *args], cwd=bd.REPO, input=stdin, capture_output=True, text=True, check=True).stdout.strip()  # fmt: skip
+
+    entries = "".join(f"100644 blob {piped(['hash-object', '-w', '--stdin'], v)}\t{k}\n" for k, v in sorted(files.items()))  # fmt: skip
+    return bd.git("commit-tree", piped(["mktree"], entries), *(a for p in parents for a in ("-p", p)), "-m", "c").strip()  # fmt: skip
 
 
 class TestClickhouse(unittest.TestCase):
@@ -1411,7 +1449,7 @@ class TestBuildDataset(unittest.TestCase):
     def test_history_load(self) -> None:
         rows = [
             fail("test_x", "2026-10-05 00:00:00", "a"),
-            fail("test_x", "2026-10-05 00:00:00", "m", br="main"),
+            fail("test_x", "2026-10-05 00:00:00", "m", br="main", flaky=True),
             fail("test_x", "2026-10-05 00:00:00", "t", br="trunk/t"),
             # A fork's main is a PR branch, here of no known PR.
             fail("test_x", "2026-10-05 00:00:00", "g", br="f/pytorch:main"),
@@ -1439,7 +1477,8 @@ class TestBuildDataset(unittest.TestCase):
     def test_why_dropped(self) -> None:
         t = "2026-10-05 00:00:00"
         mine = ["test_real", "test_main", "test_main_after", "test_other_in", "test_other_out", "test_unmapped", "test_fork_main",
-                "test_same_author", "test_own_head", "test_disabled", "test_disabled_out", "test_base_in", "test_base_out"]  # fmt: skip
+                "test_same_author", "test_own_head", "test_disabled", "test_disabled_out", "test_base_in", "test_base_out",
+                "test_main_flaky", "test_other_flaky", "test_base_flaky"]  # fmt: skip
         rows = [fail(name, t, "s") for name in mine] + [
             fail("test_green", t, "s", job="pull / test (default, 2, 2)"),
             fail("test_unstable", t, "s", job="pull / test (default, 1, 1, unstable)"),
@@ -1450,6 +1489,13 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_early", "2026-09-16 23:59:59", "s"),
             fail("test_early_in", "2026-09-17 00:00:00", "s"),
             fail("test_after_landing", "2026-10-08 00:00:00", "s"),
+            # Passed again in its job; it still counts against the other PRs.
+            fail("test_own_flaky", t, "s", flaky=True),
+            fail("test_own_flaky", "2026-10-06 00:00:00", "o"),
+            # Main's and another PR's failures count even when they passed again in their job.
+            fail("test_main_flaky", "2026-10-06 00:00:00", "m", br="main", flaky=True),
+            fail("test_other_flaky", "2026-10-06 00:00:00", "o", flaky=True),
+            fail("test_base_flaky", "2026-09-05 00:00:00", "m", br="main", flaky=True),
             fail("test_main", "2026-10-07 00:00:00", "m", br="main"),
             # PR 1 lands 10-07 12:00; its own breakage on main afterwards is not held against it.
             fail("test_main_after", "2026-10-08 00:00:00", "m", br="main"),
@@ -1477,7 +1523,8 @@ class TestBuildDataset(unittest.TestCase):
             h.load_green({"s"})
             got = {r["test"]: h.why_dropped(r) for r in h.heads["s"]}
             # The merge base with main at 09-15: main broke test_base_in 10 days before it.
-            near_base = {r["test"]: h.why_dropped(r, base_t=day(15, 9)) for r in h.heads["s"] if r["test"].startswith("test_base")}  # fmt: skip
+            near_base = {r["test"]: h.why_dropped(r, base_t=day(15, 9)) for r in h.heads["s"] if r["test"] in ("test_base_in", "test_base_out", "test_base_flaky")}  # fmt: skip
+            other = {r["test"]: h.why_dropped(r) for r in h.heads["o"]}
             # Main breaks test_main_after near this merge base, but only after PR 1 landed.
             after = h.why_dropped(next(r for r in h.heads["s"] if r["test"] == "test_main_after"), base_t=day(4))  # fmt: skip
         # Each head is queried once.
@@ -1487,11 +1534,11 @@ class TestBuildDataset(unittest.TestCase):
             "test_unmapped": "other_failure", "test_fork_main": "other_failure", "test_same_author": None, "test_own_head": None,
             "test_disabled": "disabled", "test_disabled_out": None, "test_base_in": None, "test_base_out": None, "test_green": "job_green",
             "test_unstable": "job", "test_holdout": "job", "test_periodic": "job", "test_rx": "job", "test_late": "window",
-            "test_early": "window", "test_early_in": None, "test_after_landing": "after_landing",
+            "test_early": "window", "test_early_in": None, "test_after_landing": "after_landing", "test_own_flaky": "passed_in_job",
+            "test_main_flaky": "other_failure", "test_other_flaky": "other_failure", "test_base_flaky": None,
         })  # fmt: skip
-        self.assertEqual(
-            near_base, {"test_base_in": "main_near_base", "test_base_out": None}
-        )
+        self.assertEqual(near_base, {"test_base_in": "main_near_base", "test_base_out": None, "test_base_flaky": "main_near_base"})  # fmt: skip
+        self.assertEqual(other["test_own_flaky"], "other_failure")
         self.assertIsNone(after)
 
     def test_stacked(self) -> None:
@@ -1501,16 +1548,11 @@ class TestBuildDataset(unittest.TestCase):
         # N (pr 4) is a GitHub-native PR on top of L's second head, W (pr 3) another PR of the author's.
         with scratch_repo():
 
-            def piped(args: list[str], stdin: str) -> str:
-                return subprocess.run(["git", *args], cwd=bd.REPO, input=stdin, capture_output=True, text=True, check=True).stdout.strip()  # fmt: skip
-
             def commit(content: str, *parents: str) -> str:
-                """A commit of a tree holding `content`, so commits of equal content have equal trees."""
-                blob = piped(["hash-object", "-w", "--stdin"], content)
-                tree = piped(["mktree"], f"100644 blob {blob}\tf\n")
-                return bd.git("commit-tree", tree, *(a for p in parents for a in ("-p", p)), "-m", content).strip()  # fmt: skip
+                return commit_files({"f": content}, *parents)
 
             m = commit("main")
+            bd.git("update-ref", "refs/remotes/origin/main", m)
             l_base = commit("main", m)
             l1 = commit("L1", l_base)
             l2 = commit("L2", l1, l_base)
@@ -1545,12 +1587,67 @@ class TestBuildDataset(unittest.TestCase):
                 # Each U head drops what the L version below it broke; its own failures, W's and main's stay.
                 self.assertEqual(truth(u1, u_base1), (["test_q", "test_v", "test_y", "test_z"], {"stacked": 1}))  # fmt: skip
                 self.assertEqual(truth(u2, u_base2), (["test_v", "test_y", "test_z"], {"stacked": 2}))  # fmt: skip
+                # CI recorded only U's later base: diffed against the merge base, the first L version is below.
+                self.assertEqual(truth(u1, u_base2), (["test_q", "test_v", "test_y", "test_z"], {"stacked": 1}))  # fmt: skip
                 # Diffed against L's head, the native PR finds L below it by ancestry; diffed against
                 # main, its diff contains L's change, so L's failures are its own too.
                 self.assertEqual(truth(n, l2), (["test_v", "test_y", "test_z"], {"stacked": 2}))  # fmt: skip
                 self.assertEqual(truth(n, m), (["test_q", "test_v", "test_x", "test_y", "test_z"], {}))  # fmt: skip
                 self.assertEqual(truth(l2, l_base), (["test_q", "test_x"], {}))
             self.assertEqual(h.other_heads({u1}), {l1, l2, w, n})
+
+    def test_stacked_down_the_stack(self) -> None:
+        # A ghstack stack L0 (pr 1) < L (pr 2) < U (pr 3): U's base has L's tree, and L's change edits a
+        # line two away from L0's, so L0's change still reverse-applies to U's base.
+        lines = [str(i) for i in range(1, 10)]
+
+        def a(**edits: str) -> str:
+            return "".join(edits.get(f"l{i}", x) + "\n" for i, x in enumerate(lines, 1))  # fmt: skip
+
+        with scratch_repo():
+            m = commit_files({"a": a(), "b": "b\n"})
+            bd.git("update-ref", "refs/remotes/origin/main", m)
+            main, k0_files, k1_files = ({"a": a(**e), "b": "b\n"} for e in ({}, {"l2": "x"}, {"l2": "x", "l5": "y"}))  # fmt: skip
+            k0 = commit_files(k0_files, commit_files(main, m))
+            k1 = commit_files(k1_files, commit_files(k0_files, m))
+            k2_base = commit_files(k1_files, m)
+            k2 = commit_files({**k1_files, "b": "u\n"}, k2_base)
+            # P (pr 4) changes L0's line differently, so its change is not in U's base.
+            p = commit_files({"a": a(l2="p"), "b": "b\n"}, m)
+            rows = [fail("test_x", "2026-10-05 00:00:00", k0), fail("test_w", "2026-10-05 00:00:00", k1), fail("test_y", "2026-10-05 00:00:00", p)]  # fmt: skip
+            rows += [fail(t, "2026-10-07 00:00:00", k2) for t in ("test_x", "test_w", "test_y", "test_z")]  # fmt: skip
+            h = history(rows, {k0: 1, k1: 2, k2: 3, p: 4}, {1: "me", 2: "me", 3: "me", 4: "me"})  # fmt: skip
+            dropped: collections.Counter = collections.Counter()
+            with (
+                patch_ci_jobs(TD_JOBS),
+                mock.patch.object(bd, "green_jobs", return_value=set()),
+                mock.patch.object(bd, "commit_time", return_value=day(20)),
+            ):  # fmt: skip
+                h.load_green({k2})
+                kept = h.truth(k2, {"base": k2_base, "merge_base": k2_base, "main_base": m, "base_source": "ci"}, dropped)  # fmt: skip
+        self.assertEqual(sorted(r["test"] for r in kept or []), ["test_y", "test_z"])
+        self.assertEqual(dropped, {"stacked": 2})
+
+    def test_truth_skips_a_main_base_before_the_loaded_failures(self) -> None:
+        h = history([fail("test_x", "2026-10-05 00:00:00", "s")], {"s": 1}, {1: "me"})
+        h.green["s"] = set()
+        bases = {"base": "b", "merge_base": "b", "main_base": "b", "base_source": "ci"}
+        # START - LOOKBACK + WINDOW is 2026-09-15.
+        with patch_ci_jobs(TD_JOBS), contextlib.redirect_stdout(io.StringIO()) as out:
+            for t, want in ((day(14, 9), None), (day(15, 9), ["test_x"])):
+                with mock.patch.object(bd, "commit_time", return_value=t):
+                    kept = h.truth("s", bases, collections.Counter())
+                self.assertEqual(want, kept and [r["test"] for r in kept])
+        self.assertEqual(out.getvalue(), "skipping s: merge base before the loaded failures\n")  # fmt: skip
+
+    def test_pull_failures_marks_flaky_rows(self) -> None:
+        rows = [{"job": JOB, "flaky": 1}, {"job": JOB, "flaky": 0}, {"job": "pull / test (default, 1, 1, mem_leak_check)", "flaky": 0}]  # fmt: skip
+        with mock.patch.object(bd, "query", return_value=rows) as query, contextlib.redirect_stdout(io.StringIO()):  # fmt: skip
+            got = bd.pull_failures(dt.date(2026, 10, 1), dt.date(2026, 10, 2))
+        self.assertEqual(got, rows[:2])
+        sql = query.call_args.args[0]
+        self.assertIn("(f.job_id, f.tf, f.classname, f.name) IN (SELECT * FROM passed) flaky", sql)  # fmt: skip
+        self.assertNotIn("NOT IN", sql)
 
     def test_write_sample(self) -> None:
         with scratch_repo():
@@ -1573,7 +1670,11 @@ class TestBuildDataset(unittest.TestCase):
             ):  # fmt: skip
                 bd.write_sample(Path(d), "s", "neutral", head, base, "t", "b", truth=[])
                 s = json.loads((Path(d) / "s.json").read_text())
+                # Written once: a rebuild keeps the sample.
+                bd.write_sample(Path(d), "s", "neutral", head, base, "t2", "b", truth=[])  # fmt: skip
+                self.assertEqual(json.loads((Path(d) / "s.json").read_text()), s)
         self.assertEqual(s["deleted"], ["gone.py", "moved.py"])
+        self.assertEqual(s["title"], "t")
 
     def test_fetch_retries_a_failed_batch_per_sha(self) -> None:
         def run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess:
@@ -1620,15 +1721,20 @@ class TestBuildDataset(unittest.TestCase):
             queries: list[str] = []
             landed = dt.datetime(2026, 10, 5, 1, tzinfo=dt.timezone.utc)
             td, other = ("trunk", "linux / test (default, 1, 1)"), ("periodic", "linux / test (default, 1, 1)")  # fmt: skip
-            failed = [{"tf": "test_a", "wf": wf, "job": j} for wf, j in (td, other)] + [{"tf": "test_b", "wf": other[0], "job": other[1]}]  # fmt: skip
+            # As for PR truth, an unstable job and one that passed on another attempt on the commit are not truth.
+            unstable, rerun = ("trunk", "linux / test (default, 1, 1, unstable)"), ("trunk", "linux / test (default, 1, 2)")  # fmt: skip
+            failed = [{"tf": "test_a", "sha": commits["change"], "wf": wf, "job": j} for wf, j in (td, other, unstable, rerun)]  # fmt: skip
+            failed += [{"tf": "test_b", "sha": commits["change"], "wf": other[0], "job": other[1]}]  # fmt: skip
             with (
                 patch_ci_jobs({True: {(*td, "default")}, False: {(*other, "default")}}),
                 mock.patch.object(bd, "git", lambda *a, check=True: run(*a, cwd=d)),
                 mock.patch.object(bd, "query", lambda sql: queries.append(sql) or failed),
+                mock.patch.object(bd, "green_jobs", return_value={(commits["change"], *rerun), (commits["after"], *td)}) as green,
             ):  # fmt: skip
                 got = bd.revert_truth_jobs({"test_a", "test_b"}, commits["change"], landed, "2026-10-05 04:00:00")  # fmt: skip
                 # Decided before the change landed: no commit qualifies, so only the change itself.
                 bd.revert_truth_jobs({"test_a"}, commits["change"], landed, "2026-10-05 00:30:00")  # fmt: skip
+                self.assertEqual(green.call_args.args[0], [commits["change"]])
                 failed = failed[1:]
                 # Failing only in jobs that do not run TD, so revert_samples skips it.
                 none = bd.revert_truth_jobs({"test_a", "test_b"}, commits["change"], landed, "2026-10-05 04:00:00")  # fmt: skip
@@ -1637,6 +1743,8 @@ class TestBuildDataset(unittest.TestCase):
         # The change and the commit after it, not the revert or what landed after the decision.
         self.assertIn(f"head_sha IN ('{commits['after']}','{commits['change']}')", queries[0])  # fmt: skip
         self.assertIn(f"head_sha IN ('{commits['change']}')", queries[1])
+        # A test that also passed in its job is not a failure there.
+        self.assertIn("HAVING countIf(failure_count > 0 OR error_count > 0) > 0 AND countIf(failure_count = 0 AND error_count = 0 AND skipped_count = 0) = 0", queries[0])  # fmt: skip
 
     def test_pr_text_retries_then_raises(self) -> None:
         ok = subprocess.CompletedProcess([], 0, '{"title": "t", "body": "b"}', "")
@@ -1676,11 +1784,14 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "ci_bases", return_value={}),
             mock.patch.object(bd, "pr_text", side_effect=error) as pr_text,
             mock.patch.object(bd, "write_sample") as write,
-            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stdout(io.StringIO()) as stdout,
         ):  # fmt: skip
             bd.pr_samples(h, Path(out), 1)
         pr_text.assert_called_once_with(1)
         write.assert_not_called()
+        # Skipped by pr_samples' own handler, not counted by run_each as raising.
+        self.assertIn(f"skipping PR 1: {error}", stdout.getvalue())
+        self.assertNotIn("raised", stdout.getvalue())
 
     def test_unexpected_error_skips_only_its_sample(self) -> None:
         h = history([fail("test_x", "2026-10-05 00:00:00", "s"), fail("test_x", "2026-10-05 00:00:00", "t", tf="test_b")], {"s": 1, "t": 2}, {1: "me", 2: "you"})  # fmt: skip
@@ -1823,6 +1934,9 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_x", t, "h1", job=job_b, tf="test_c"),
             fail("test_x", t, "h2", job=job_a, tf="test_b"),
             fail("test_x", t, "h3", job=job_a, tf="test_d"),
+            # Passed again in its job, so it left the pytest cache; and a job that does not run TD.
+            fail("test_y", t, "h3", job=job_a, tf="test_h", flaky=True),
+            fail("test_x", t, "h3", wf="periodic", job=job_a, tf="test_i"),
             fail("test_x", t, "h4", job=job_a, tf="test_e"),
             # Every failure of h5 is in a job that passed, and h6 is another PR's.
             fail("test_x", t, "h5", job=job_a, tf="test_f"),
@@ -1850,7 +1964,7 @@ class TestBuildDataset(unittest.TestCase):
         ci_bases.assert_called_once_with({"h1": 1, "h2": 1, "h3": 1, "h4": 1})
         got = {c.args[1]: (c.args[2:], c.kwargs) for c in write.call_args_list}
         self.assertEqual(sorted(got), ["head_1_h1", "head_1_h2", "head_1_h4"])
-        # h2's previous failures are the other heads' (flaky or not, also of h3 and h5, which have no sample).
+        # h2's previous failures are the other heads' (also of h3 and h5, which have no sample) but h3's test_h and test_i.
         previous = {"head_1_h1": [], "head_1_h2": ["test_a", "test_c", "test_d", "test_e", "test_f"], "head_1_h4": []}  # fmt: skip
         want = {
             "head_1_h1": ("h1", "b1", "b1", "m1", "ci", {"test_c": [("pull", job_b)]}),
@@ -1904,8 +2018,8 @@ class TestBuildDataset(unittest.TestCase):
     def test_neutral_samples(self) -> None:
         start, end = dt.date(2026, 10, 1), dt.date(2026, 10, 26)
         titles: dict[str, str] = {"a" * 40: "Fix foo", "b" * 40: "[ghstack] Revert bar", "c" * 40: "Reland: baz", "d" * 40: "Add RevertibleOp"}  # fmt: skip
-        # Reverted by a message, by the autorevert bot, and with a rev_ sample.
-        titles |= {"e" * 40: "Add e", "f" * 40: "Add f", "0" * 40: "Add 0"}
+        # Reverted by a message and by the autorevert bot.
+        titles |= {"e" * 40: "Add e", "f" * 40: "Add f"}
         calls = []
 
         def git(*args: str) -> str:
@@ -1922,7 +2036,6 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "query", return_value=[{"commit_sha": "f" * 40}]),
             mock.patch.object(bd, "write_sample") as write,
         ):
-            (Path(out) / f"rev_{'0' * 12}.json").write_text("{}")
             bd.neutral_samples(Path(out), start, end, 10)
         self.assertEqual(sorted(c.args[1] for c in write.call_args_list), ["neu_" + "a" * 12, "neu_" + "d" * 12])  # fmt: skip
         log = next(c for c in calls if "--first-parent" in c)

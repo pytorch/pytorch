@@ -8,18 +8,22 @@ Four kinds of sample, each a JSON file under DIR/samples:
               earliest head with a failure between --start and --end that the
               rules below, short of the two on the head's bases, leave as the
               PR's own. The ground truth is every (test file, CI config) of
-              that head's own failures. These runs are censored: pull/trunk
-              jobs already skip 75% of files through TD, so truth is a lower
-              bound.
+              that head's own failures. When the rules on the head's bases
+              drop every one of them, or its main_base is older than the
+              loaded failures, the PR has no pr_ sample and so no head
+              samples; no later head stands in. These runs are censored:
+              pull/trunk jobs already skip 75% of files through TD, so truth
+              is a lower bound.
   head_<N>_<sha12>
               every head of a pr_ sample's PR with a failure that is the PR's
               own; the truth is those failures, so the pr_ sample's head gets
               the same truth here.
-              `previous_failures` are the test files that failed, flaky or
-              not, in a job that runs TD on another head of the PR before this
-              head's first job was created: what TD's PreviouslyFailedInPR
-              reads from the PR's pytest cache. It overstates that set, as a
-              test that passed again in the same job leaves the cache.
+              `previous_failures` are the test files with a test that failed,
+              and did not pass again in the same job, in a job that runs TD on
+              another head of the PR before this head's first job was created,
+              whatever the other rules below say: what TD's
+              PreviouslyFailedInPR reads from the PR's pytest cache, which a
+              test that passes again leaves.
   rev_<sha12> a commit the autorevert bot reverted between --start and --end
               because it broke a test on main, where every test runs. The
               truth is the test files of the reverting signal that failed on
@@ -31,8 +35,8 @@ Four kinds of sample, each a JSON file under DIR/samples:
               selector runs on typical traffic. --neutral commits are drawn
               from those whose title does not start with Revert or Reland, and
               then the draw drops reverted commits (by a revert's message or
-              the autorevert bot), those with a rev_ sample and titles naming
-              a revert or reland anywhere, so fewer than --neutral come out.
+              the autorevert bot) and titles naming a revert or reland
+              anywhere, so fewer than --neutral come out.
 
 <sha12> is the first 12 hex digits of the sample's commit.
 
@@ -58,20 +62,25 @@ not the PR's own, and is dropped, if
     when its own breakage on main and on PRs based on it can no longer be told
     apart from someone else's;
   - its job does not run TD, is unstable, or passed on any attempt on the head;
+  - the test passed again in the same job, as when run_test.py reruns it in
+    a new process;
   - the test was disabled within WINDOW of the failure;
   - the same test failed on main, on a branch with no known PR, or on another
     author's PR within WINDOW of the failure, before the PR landed;
   - the same test failed on main within WINDOW of the head's `main_base`,
     before the PR landed;
-  - the same test failed on another PR's head that is below this head in a
-    stack and whose change the head's diff leaves out, so the failure is the
-    breakage of a PR below. In a GitHub-native stack that head is an ancestor
-    of `merge_base` (the CI base or older). ghstack bases each PR on a
-    synthetic gh/USER/N/base commit with the tree of the PR below, and the
-    lower head is not an ancestor, so there it is a head with the CI base's
-    tree. A lower head the diff contains, as for a PR that targets main but
+  - the same test failed on another PR's head whose change `merge_base`
+    already has, so the head's diff leaves it out and the failure is the
+    breakage of a PR below it in a stack (or of one that landed before it).
+    In a GitHub-native stack that head is an ancestor of `merge_base`.
+    ghstack bases each PR on a synthetic gh/USER/N/base commit with the tree
+    of the PR below, so no lower head is an ancestor; there the lower head's
+    diff against its merge base with main reverse-applies to `merge_base`
+    with one line of context, for every PR down the stack. A lower PR whose
+    changes a PR between them rewrote is missed, and keeps its failures. So
+    does a lower head the diff contains, as for a PR that targets main but
     branches off another PR, or one diffed against main for want of a CI
-    base, keeps its failures.
+    base.
 WINDOW is 14 days, Dr.CI's flaky window: truth is a lower bound anyway, so a
 shorter window would buy a few more truths at the price of counting more
 flakes and parallel breakages as the PR's. The builder prints how many
@@ -89,10 +98,13 @@ import collections
 import concurrent.futures as cf
 import dataclasses
 import datetime as dt
+import functools
 import json
+import os
 import random
 import re
 import subprocess
+import tempfile
 import time
 import traceback
 from pathlib import Path
@@ -170,8 +182,8 @@ def is_main(branch: str) -> bool:
 def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
     """Every failing (job, test) in pytorch/pytorch CI, two days per query to stay under ClickHouse limits.
 
-    A test that also passed in the same job, as when run_test.py's rerun of it
-    in a new process passes and it counts as flaky, is not a failure."""
+    `flaky` marks a test that also passed in the same job, as when
+    run_test.py's rerun of it in a new process passes."""
     rows: list[dict] = []
     d = start
     while d < end:
@@ -191,13 +203,12 @@ def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
               WHERE id IN (SELECT job_id FROM f) AND repository_full_name = 'pytorch/pytorch')
             SELECT f.job_id job_id, tf, classname, f.name test, toString(t) t, j.head_sha sha,
                    if(r.hr IN ('', 'pytorch/pytorch'), j.head_branch, concat(r.hr, ':', j.head_branch)) br,
-                   j.workflow_name wf, j.name job
+                   j.workflow_name wf, j.name job, (f.job_id, f.tf, f.classname, f.name) IN (SELECT * FROM passed) flaky
             FROM f JOIN j ON j.id = f.job_id
             LEFT JOIN (
               SELECT id, any(head_repository.full_name) hr FROM default.workflow_run
               WHERE id IN (SELECT run_id FROM j) GROUP BY id) r
-            ON r.id = j.run_id
-            WHERE (f.job_id, f.tf, f.classname, f.name) NOT IN (SELECT * FROM passed)""")
+            ON r.id = j.run_id""")
         print(d, len(rows), flush=True)
         d = n
     return [r for r in rows if not any(s in r["job"] for s in SKIP_JOBS)]
@@ -243,22 +254,37 @@ def was_disabled(disabled: Disabled, r: dict) -> bool:
     return any(abs(d - t) < WINDOW for d in days)
 
 
+@functools.cache
 def is_ancestor(a: str, b: str) -> bool:
     """False also when `a` is not fetched, which an ancestor of a fetched `b` always is."""
     return not subprocess.run(["git", "merge-base", "--is-ancestor", a, b], cwd=REPO, capture_output=True).returncode  # fmt: skip
 
 
-def tree_of(sha: str) -> str:
-    """'' when `sha` is not fetched."""
-    return git("rev-parse", "-q", "--verify", f"{sha}^{{tree}}", check=False).strip()
+@functools.cache
+def own_change(sha: str) -> bytes:
+    """PR head `sha`'s diff against its merge base with main, as bytes since files need not be UTF-8; empty when `sha` is not fetched."""
+    if not (main_base := git("merge-base", "origin/main", sha, check=False).strip()):
+        return b""
+    return subprocess.run(["git", "diff", "--binary", "--full-index", "--no-renames", main_base, sha], cwd=REPO, capture_output=True).stdout  # fmt: skip
 
 
-def below(other: str, base: str, merge_base: str) -> bool:
-    """Whether PR head `other` is below a head in a stack and left out of its diff against `merge_base`, its merge base with the CI base `base` (see the module docstring)."""
+@functools.cache
+def below(other: str, merge_base: str) -> bool:
+    """Whether `merge_base` already has PR head `other`'s change, so a diff against it leaves that change out (see the module docstring).
+
+    That is when `other` is an ancestor or its change reverse-applies to
+    `merge_base` with one line of context, so edits two lines away still match."""
     if is_ancestor(other, merge_base):
         return True
-    tree = tree_of(base)
-    return bool(tree) and tree_of(other) == tree
+    if not (patch := own_change(other)):
+        return False
+    with tempfile.TemporaryDirectory() as d:
+        env = {**os.environ, "GIT_INDEX_FILE": os.path.join(d, "index")}
+
+        def fails(*args: str, stdin: bytes | None = None) -> int:
+            return subprocess.run(["git", *args], cwd=REPO, env=env, input=stdin, capture_output=True).returncode  # fmt: skip
+
+        return not fails("read-tree", merge_base) and not fails("apply", "--cached", "--check", "-R", "-C1", stdin=patch)  # fmt: skip
 
 
 def key(r: dict) -> Key:
@@ -325,13 +351,15 @@ class History:
             return "job"
         if (r["wf"], r["job"]) in self.green.get(r["sha"], ()):
             return "job_green"
+        if r["flaky"]:
+            return "passed_in_job"
         if was_disabled(self.disabled, r):
             return "disabled"
         if any(who != me and abs(wt - t) < WINDOW and wt < cutoff for wt, who, _, _ in self.seen.get(k, [])):  # fmt: skip
             return "other_failure"
         if base_t is not None and any(abs(base_t - m) < WINDOW and m < cutoff for m in self.main.get(k, [])):  # fmt: skip
             return "main_near_base"
-        if bases is not None and any(pr not in (None, r["pr"]) and below(sha, bases["base"], bases["merge_base"]) for _, _, sha, pr in self.seen.get(k, [])):  # fmt: skip
+        if bases is not None and any(pr not in (None, r["pr"]) and below(sha, bases["merge_base"]) for _, _, sha, pr in self.seen.get(k, [])):  # fmt: skip
             return "stacked"
         return None
 
@@ -639,7 +667,7 @@ def head_samples(h: History, out: Path, jobs: int) -> None:
     failed = collections.defaultdict(list)
     for other, rows in h.heads.items():
         for r in rows:
-            if r["pr"] in prs and job_runs_td(r["job"], r["wf"]):
+            if r["pr"] in prs and not r["flaky"] and job_runs_td(r["job"], r["wf"]):
                 failed[r["pr"]].append((ts(r["t"]), other, r["tf"]))
     sources: list[str] = []
     dropped: list[collections.Counter] = []
@@ -670,6 +698,9 @@ def revert_truth_jobs(
 ) -> dict[str, list[tuple[str, str]]]:
     """The main-branch (workflow, job)s that run TD each signal test file failed in between landing and the revert, on the main commits from `sha` up to the revert.
 
+    A failure is dropped as PR truth drops it when its job is unstable or
+    passed on any attempt on the commit, or the test passed again in the job.
+
     `reverted` is when autorevert decided to revert, so the main commits that
     landed between that and the revert commit are left out: truth is only
     lost, never added."""
@@ -680,7 +711,7 @@ def revert_truth_jobs(
     shas = ",".join(f"'{c}'" for c in with_change or [sha])
     failed = query(f"""
         WITH j AS (
-          SELECT id, workflow_name, name FROM default.workflow_job
+          SELECT id, head_sha, workflow_name, name FROM default.workflow_job
           WHERE created_at >= toDateTime('{t0}') - INTERVAL 1 HOUR
             AND created_at <= parseDateTimeBestEffort('{reverted}') + INTERVAL 1 HOUR
             AND repository_full_name = 'pytorch/pytorch' AND (head_branch = 'main' OR head_branch LIKE 'trunk/%')
@@ -688,17 +719,19 @@ def revert_truth_jobs(
             AND run_id IN (SELECT id FROM default.workflow_run WHERE head_repository.full_name = 'pytorch/pytorch'
                            AND created_at >= toDateTime('{t0}') - INTERVAL 1 HOUR)
             AND {" AND ".join(f"name NOT LIKE '%{s}%'" for s in SKIP_JOBS)})
-        SELECT DISTINCT tf, wf, job FROM (
-          SELECT t.job_id, replaceRegexpOne(file, '\\.py$', '') tf, classname, t.name, j.workflow_name wf, j.name job
+        SELECT DISTINCT tf, sha, wf, job FROM (
+          SELECT t.job_id, replaceRegexpOne(file, '\\.py$', '') tf, classname, t.name, j.head_sha sha, j.workflow_name wf, j.name job
           FROM tests.all_test_runs t JOIN j ON j.id = t.job_id
           WHERE t.job_id IN (SELECT id FROM j) AND file IN ({files})
             AND time_inserted >= toDateTime('{t0}') AND time_inserted <= parseDateTimeBestEffort('{reverted}') + INTERVAL 2 HOUR
-          GROUP BY t.job_id, tf, classname, t.name, wf, job
+          GROUP BY t.job_id, tf, classname, t.name, sha, wf, job
           -- A test that also passed in the job, as run_test.py's rerun of it in a new process does, is flaky there.
           HAVING countIf(failure_count > 0 OR error_count > 0) > 0 AND countIf(failure_count = 0 AND error_count = 0 AND skipped_count = 0) = 0)""")
+    # As History.why_dropped's job and job_green rules.
+    green = green_jobs(sorted({f["sha"] for f in failed}))
     truth_jobs: dict[str, set] = collections.defaultdict(set)
     for f in failed:
-        if job_runs_td(f["job"], f["wf"]):
+        if job_runs_td(f["job"], f["wf"]) and "unstable" not in f["job"] and (f["sha"], f["wf"], f["job"]) not in green:  # fmt: skip
             truth_jobs[f["tf"]].add((f["wf"], f["job"]))
     return {k: sorted(v) for k, v in truth_jobs.items()}
 
@@ -752,10 +785,10 @@ def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
         for sha, _, title in (line.partition(" ") for line in log)
         if not re.match(r"(Revert|Reland)", title)
     ]
-    # Reverts (by message, by the autorevert bot's record, or with a rev_
-    # sample) and titles naming a revert or reland anywhere filter the sample
-    # rather than the population, so a later revert only drops its id from the
-    # draw instead of reshuffling it.
+    # Reverts (by message or by the autorevert bot's record, which has every
+    # commit a rev_ sample can be of) and titles naming a revert or reland
+    # anywhere filter the sample rather than the population, so a later revert
+    # only drops its id from the draw instead of reshuffling it.
     reverted = set(
         re.findall(
             r"This reverts commit ([0-9a-f]{40})",
@@ -768,11 +801,10 @@ def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
             SELECT DISTINCT commit_sha FROM misc.autorevert_events_v2
             WHERE repo = 'pytorch/pytorch' AND action = 'revert' AND dry_run = 0 AND ts >= toDateTime('{start}')""")
     }
-    reverted_ids = {p.stem.removeprefix("rev_") for p in out.glob("rev_*.json")}
 
     def go(sha: str) -> None:
         title, _, body = git("log", "-1", "--format=%B", sha).partition("\n")
-        if sha in reverted or sha[:12] in reverted_ids or re.search(r"\b(revert|reland)\b", title, re.IGNORECASE):  # fmt: skip
+        if sha in reverted or re.search(r"\b(revert|reland)\b", title, re.IGNORECASE):  # fmt: skip
             return
         try:
             write_sample(out, f"neu_{sha[:12]}", "neutral", sha, sha + "^", title, strip_trailers(body), truth=[])  # fmt: skip

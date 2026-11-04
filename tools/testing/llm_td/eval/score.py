@@ -92,10 +92,11 @@ from tools.stats.import_test_stats import (
 )
 from tools.testing.llm_td.eval import REPO
 from tools.testing.llm_td.select_tests import (
+    AGENTIC_TOOLS,
     build_prompt,
+    CHECKOUT_PREAMBLE,
     git_grep,
     MAX_CHANGED_FILES,
-    query_model,
     SCHEMA,
     SYSTEM_PROMPT,
     test_minutes,
@@ -460,10 +461,10 @@ def sample_prompt(sample: dict, minutes: dict) -> str:
 
 
 def prompt_sha(prompt: str, agentic: bool = False) -> str:
-    """A hash of everything the model is sent: the system prompt, SCHEMA and `prompt` and, when `agentic`, the source of query_model, which holds the checkout preamble and the tool list."""
+    """A hash of everything the model is sent: the system prompt, SCHEMA and `prompt` and, when `agentic`, AGENTIC_TOOLS and CHECKOUT_PREAMBLE."""
     sent = [SYSTEM_PROMPT, SCHEMA, prompt]
     if agentic:
-        sent.append(inspect.getsource(query_model))
+        sent += [AGENTIC_TOOLS, CHECKOUT_PREAMBLE]
     return hashlib.sha256(json.dumps(sent).encode()).hexdigest()
 
 
