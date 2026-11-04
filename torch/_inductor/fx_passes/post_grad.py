@@ -16,6 +16,11 @@ from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters, detect_fake_mode
 from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
+from torch._higher_order_ops.user_kernel_hop import (
+    is_user_kernel_functional_hop,
+    user_kernel_hop_infos,
+    UserKernelHOPInfo,
+)
 from torch._inductor.custom_graph_pass import (
     CustomInferenceAwareGraphPass,
     get_custom_graph_passes,
@@ -1540,21 +1545,17 @@ def _depends_on_storage_offset(node: torch.fx.Node) -> bool:
     ops and extern fallback kernels, are intentionally not included. Views are
     followed through single- and multi-output view ops.
     """
-    from torch._higher_order_ops.user_kernel_hop import user_kernel_hop_infos
-
     storage = get_node_storage(node)
     if storage is None:
         return False
-    placement_dependent = (
-        aten.as_strided.default,
-        *(info.functional for info in user_kernel_hop_infos()),
-    )
     pending = [node]
     seen = OrderedSet([node])
     while pending:
         current = pending.pop()
         for user in current.users:
-            if user.target in placement_dependent:
+            if user.target is aten.as_strided.default:
+                return True
+            if is_user_kernel_functional_hop(user.target):
                 return True
             if user.op != "call_function" or user in seen:
                 continue
@@ -1957,22 +1958,21 @@ def decompose_user_kernel_wrapper_functional(graph):
     tells us (via rewriting the arguments or .meta to those nodes) which
     Tensors we should clone and which Tensors are safe to reinplace.
     """
-    from torch._higher_order_ops.user_kernel_hop import user_kernel_hop_infos
-
     # First, recursively process any subgraphs
     apply_pass_to_subgraphs(decompose_user_kernel_wrapper_functional, graph)
 
     graph_pass = PatternMatcherPass()
     user_kernel_hops = user_kernel_hop_infos()
 
-    for user_kernel_hop in user_kernel_hops:
-
+    def register_pattern(user_kernel_hop: UserKernelHOPInfo) -> None:
+        # A HOP kwarg of any name reaches the handler as a keyword argument, so the
+        # handler closes over the info and takes match as a positional-only argument.
         @register_graph_pattern(
             CallFunctionVarArgs(user_kernel_hop.functional),
             # pyrefly: ignore [bad-argument-type]
             pass_dict=graph_pass,
         )
-        def _(match: Match, *args, user_kernel_hop=user_kernel_hop, **kwargs):
+        def _(match: Match, /, *args, **kwargs):
             hop_node = match.nodes[0]
             flat_args, spec = pytree.tree_flatten((args, kwargs))
             # The impl that eager runs: clones plus the mutation HOP.
@@ -1994,6 +1994,8 @@ def decompose_user_kernel_wrapper_functional(graph):
                 replacement_nodes, hop_node, user_kernel_hop.mutation
             )
 
+    for user_kernel_hop in user_kernel_hops:
+        register_pattern(user_kernel_hop)
     graph_pass.apply(graph)
 
     for user_kernel_hop in user_kernel_hops:
@@ -2001,9 +2003,6 @@ def decompose_user_kernel_wrapper_functional(graph):
             op="call_function", target=user_kernel_hop.functional
         ):
             raise AssertionError(f"{user_kernel_hop.functional} was not removed")
-
-
-decompose_triton_kernel_wrapper_functional = decompose_user_kernel_wrapper_functional
 
 
 def fix_auto_functionalized_dtype_views(graph: torch.fx.Graph) -> None:
