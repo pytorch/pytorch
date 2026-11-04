@@ -220,9 +220,8 @@ class TestRunEval(unittest.TestCase):
             data = write_data(d, {"samples/a.json": sample, "test-times.json": {}})
             (data / "ids.txt").write_text("a")
             argv = ["run_eval", "--data", data.name, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt"), "--jobs", "1", "--agentic"]  # fmt: skip
-            # --data is relative to this cwd.
             with (
-                mock.patch("os.getcwd", return_value=str(data.parent)),
+                contextlib.chdir(data.parent),  # --data is relative to this cwd.
                 mock.patch.object(sys, "argv", argv),
                 mock.patch.object(run_eval, "checkout", return_value="wt") as co,
                 mock.patch.object(run_eval, "query_model", return_value={"type": "result", "is_error": True, "result": "529"}),
@@ -251,9 +250,11 @@ class TestRunEval(unittest.TestCase):
         writes = [OSError("full"), None]
         with tempfile.TemporaryDirectory() as d:
             samples = {f"samples/{i}.json": {**SAMPLE, "id": i} for i in "ab"}
+            # select_tests runs everything on c without asking the model.
+            samples["samples/c.json"] = dict(SAMPLE, id="c", changed_files=[])
             data = write_data(d, samples)
             (data / "test-times.json").write_text("{}")
-            (data / "ids.txt").write_text("a b a b")
+            (data / "ids.txt").write_text("a b c a b")
             ids = str(data / "ids.txt")
             argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", ids]
             with (
@@ -263,7 +264,7 @@ class TestRunEval(unittest.TestCase):
                 mock.patch.object(run_eval, "write_json", side_effect=writes) as write,
             ):
                 run_eval.main()
-        # Each id is paid once, and a's failed write leaves the slot running b.
+        # Each id is paid once, c never, and a's failed write leaves the slot running b.
         self.assertEqual((query.call_count, write.call_count), (2, 2))
         self.assertEqual(write.call_args.args[0].name, "b.json")
         self.assertIn("a failed, left for a rerun", out.getvalue())
@@ -988,10 +989,12 @@ class TestScore(unittest.TestCase):
         self.assertIn(Path(score.__file__).with_name("td_replay.py"), score.REPLAY_CODE)
 
     def test_td_replay_main(self) -> None:
-        from tools.testing.target_determination.heuristics import HEURISTICS
+        from tools.testing.target_determination import heuristics
 
-        seen = []
-        trial = next(h.__class__.__name__ for h in HEURISTICS if h.trial_mode)
+        class Trial:
+            trial_mode = True
+
+        seen, trial = [], "Trial"
 
         def prioritize(cands: list[str], file: io.StringIO) -> mock.Mock:
             from tools.testing.target_determination.heuristics import utils
@@ -1016,6 +1019,7 @@ class TestScore(unittest.TestCase):
                 with (
                     mock.patch.object(sys, "argv", ["td_replay", "--data", d, "--stats", str(stats), *argv]),
                     mock.patch("tools.testing.target_determination.determinator.get_test_prioritizations", prioritize),
+                    mock.patch.object(heuristics, "HEURISTICS", [*heuristics.HEURISTICS, Trial()]),
                     mock.patch("sys.stdout", io.StringIO()),
                 ):  # fmt: skip
                     td_replay.main()
@@ -1042,6 +1046,71 @@ class TestScore(unittest.TestCase):
             empty.mkdir(parents=True)
             with self.assertRaisesRegex(SystemExit, "lacks"):
                 replay("--stats", str(empty))
+
+    def test_td_replay_patches_every_changed_files_reader(self) -> None:
+        heuristics = REPO_ROOT / "tools/testing/target_determination/heuristics"
+        readers = {p.stem for p in heuristics.glob("*.py") if "query_changed_files" in p.read_text()}  # fmt: skip
+        self.assertEqual(readers, set(td_replay.CHANGED_FILES_READERS))
+
+    def test_score_no_workflow_truth(self) -> None:
+        sample = {**SAMPLE, "truth_jobs": {"test_a": ["linux / test (default, 1, 2, linux.2xlarge)"]}}  # fmt: skip
+        files = {
+            "test-times.json": {"linux": {"default": {"test_a": 10.0}}},
+            "samples/a.json": sample,
+            "td/a.json": {"scored": [], "top25": [], "top25_cfg": {}},
+            "results/m/a.json": {"out": {"tests": []}, "error": None, "cost_usd": 0.1},
+        }
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
+        ):
+            data = write_data(d, files)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rows = score.score(data, ["a"], ["m"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
+        self.assertEqual([(x["id"], x["pairs"]) for x in rows], [("a", 1)])
+        self.assertIn("scored 1 of 1 ids with truth jobs that record no workflow", err.getvalue())  # fmt: skip
+
+    def test_score_main(self) -> None:
+        row = {"tag": "m", "policy": "final+td", "kind": "pr", "pairs": 1, "hit": 1, "cpu": 0.5, "gpu": 0.0, "run_all": False, "files": 3, "cost_usd": 0.1, "error": False}  # fmt: skip
+        with tempfile.TemporaryDirectory() as d:
+            data, stats = Path(d), Path(d) / "stats"
+            stats.mkdir()
+            (data / "ids.txt").write_text("a b")
+
+            def main(*argv: str) -> tuple[mock.Mock, str]:
+                with (
+                    mock.patch.object(sys, "argv", ["score", "--data", d, "--ids", str(data / "ids.txt"), "--stats", str(stats), *argv]),
+                    mock.patch.object(score, "score", return_value=[row]) as scored,
+                    mock.patch.object(score, "replay_stats", return_value="s"),
+                    mock.patch("sys.stdout", io.StringIO()) as out,
+                    mock.patch("sys.stderr", io.StringIO()) as err,
+                ):  # fmt: skip
+                    try:
+                        score.main()
+                    except SystemExit:
+                        return scored, err.getvalue()
+                return scored, out.getvalue()
+
+            self.assertRegex(main("m")[1], "lacks")
+            for a in score.STATS_ARTIFACTS:
+                (stats / a).write_text("{}")
+            for bad in ("td25", "final+tdx"):
+                scored, err = main("--policies", f"model,{bad}", "m")
+                self.assertIn(f"unknown --policies ['{bad}']", err)
+                scored.assert_not_called()
+            scored, out = main("m", "td")
+            self.assertEqual(scored.call_args.args, (data, ["a", "b"], ["m", "td"], ["model", "final", "final-hm", "final+td"], True, data / "samples", data / "td", "s"))  # fmt: skip
+            self.assertRegex(out, r"^m +final\+td +pr +n=  1 fail=  1 caught=100.0%")
+            scored, _ = main("--all-truth", "--td-dir", d, "--policies", "final+td5", "--json", str(data / "rows.json"), "m")  # fmt: skip
+            self.assertEqual(scored.call_args.args[3:7], (["final+td5"], False, data / "samples", data))  # fmt: skip
+            self.assertEqual(json.loads((data / "rows.json").read_text()), [row])
+
+    def test_ci_jobs_of_the_real_workflows(self) -> None:
+        score.runs_td.cache_clear()
+        self.assertTrue(score.runs_td("default"))
+        self.assertIn("pull", {w for w, _, c in ci_jobs()[True] if c == "default"})
+        self.assertEqual(score.MATRIX_CONFIG.findall("""{ config: "a" }, { config: 'b' }, { config: c }"""), ["a", "b", "c"])  # fmt: skip
 
     def test_td25_per_config(self) -> None:
         cands = ["test_a", "test_b", "test_c", "test_d", "test_e"]

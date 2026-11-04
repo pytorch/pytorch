@@ -103,6 +103,7 @@ from tools.testing.llm_td.select_tests import (
 )
 from tools.testing.llm_td.selection import LLM_TD_HEDGE, parse_model_output, Selection
 from tools.testing.target_determination.heuristics.utils import (
+    NO_TD_BUILD_ENVS,
     td_enabled_job,
     td_enabled_workflow,
 )
@@ -115,11 +116,13 @@ if TYPE_CHECKING:
 
 GPU_ENV = re.compile(r"cuda|rocm|sm\d+|h100|b200|a100|gpu", re.IGNORECASE)
 HEDGE = re.compile(r"final\+td(\d+(?:\.\d+)?)?")
-MATRIX_CONFIG = re.compile(r'config: "([^"]+)"')
+# The policies of a model tag besides the final+tdN ones.
+POLICIES = ("model", "final", "final-hm")
+MATRIX_CONFIG = re.compile(r"""config: ['"]?([\w.-]+)""")
 VERSION = re.compile(r"\d+(\.\d+)*")
 MATRIX_SUFFIX = re.compile(r" \([^()]*\)")
-# run_test.py never runs TD on macOS or in xpu or onnx builds.
-NO_TD_ENV = re.compile("macos|xpu|onnx")
+# run_test.py never runs TD on macOS or in NO_TD_BUILD_ENVS builds.
+NO_TD_ENV = re.compile("|".join(("macos", *NO_TD_BUILD_ENVS)))
 # .ci/pytorch/test.sh runs a TEST_CONFIG containing one of these through a function that exports NO_TD=1.
 NO_TD_CONFIGS = ("dynamo_cpython",)
 # The historical-stats artifacts td_replay reads, and the TD code it runs.
@@ -387,7 +390,7 @@ def policy(
         cut = {c: set(fs) for c, fs in td["top25_cfg"].items()}
         # TD runs only its cut, not even the files a selection always covers.
         return Choice(Selection(), cut, set(td["top25"]), {*cut, ""})
-    if name not in ("model", "final", "final-hm") and not HEDGE.fullmatch(name):
+    if name not in POLICIES and not HEDGE.fullmatch(name):
         raise ValueError(f"unknown policy {name!r}")
     out = (r or {}).get("out")
     if m := HEDGE.fullmatch(name):
@@ -606,7 +609,7 @@ def main() -> None:
     p.add_argument("--ids", type=Path, required=True)
     p.add_argument("--td-dir", type=Path, help="td_replay.py output; default: DATA/td")
     p.add_argument("--stats", type=Path, default=REPO / ADDITIONAL_CI_FILES_FOLDER, help="td_replay.py's --stats")  # fmt: skip
-    p.add_argument("--policies", default="model,final,final-hm,final+td20")
+    p.add_argument("--policies", default="model,final,final-hm,final+td")
     p.add_argument(
         "--all-truth",
         action="store_true",
@@ -615,11 +618,14 @@ def main() -> None:
     p.add_argument("--json", type=Path, help="also write per-sample rows here")
     p.add_argument("tags", nargs="+")
     args = p.parse_args()
+    policies = args.policies.split(",")
+    if unknown := [x for x in policies if x not in POLICIES and not HEDGE.fullmatch(x)]:
+        p.error(f"unknown --policies {unknown}; the tag td is always scored as td25")
     if missing := [a for a in STATS_ARTIFACTS if not (args.stats / a).exists()]:
         p.error(f"{args.stats} lacks {missing}, which td_replay.py read")
     ids = args.ids.read_text().split()
     samples, td_dir = args.data / "samples", args.td_dir or args.data / "td"
-    rows = score(args.data, ids, args.tags, args.policies.split(","), not args.all_truth, samples, td_dir, replay_stats(args.stats))  # fmt: skip
+    rows = score(args.data, ids, args.tags, policies, not args.all_truth, samples, td_dir, replay_stats(args.stats))  # fmt: skip
     for x in summarize(rows):
         print(
             f"{x['tag']:24s} {x['policy']:10s} {x['kind']:7s} n={x['n']:3d} fail={x['n_failing']:3d} caught={x['caught_any']:6.1%} "
