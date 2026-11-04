@@ -827,6 +827,7 @@ class GetItemSource(ChainedSource):
 
 @dataclass_with_cached_hash(frozen=True)
 class DictKeysSource(ChainedSource):
+    # Codegen-only snapshot; this source must never be used for guards.
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen.load_import_from("builtins", "list"))
 
