@@ -21,11 +21,12 @@ __global__ void vectorized_gather_kernel(char * out, char * inp, index_t * idx, 
           ind = (ind < 0) ? ind + ind_dim_size : ind;
       }
       CUDA_KERNEL_ASSERT_VERBOSE(ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds", "Expected 0 <= index < ind_dim_size(%ld), but got index = %ld", ind_dim_size, ind);
-      // off is guaranteed to be within int32 limits
-      for (int32_t off = (blockDim.x * blockIdx.y + threadIdx.x) * Alignment; off < slice_size; off += blockDim.x * gridDim.y * Alignment) {
+      // Keep the final byte-offset increment unsigned, as in vectorized scatter.
+      for (uint32_t off = (blockDim.x * blockIdx.y + threadIdx.x) * Alignment; off < slice_size; off += blockDim.x * gridDim.y * Alignment) {
         auto vec = at::native::memory::ld_vec<Alignment>(inp + ind * inp_stride + off);
         at::native::memory::st_vec<Alignment>(out + entry * (int32_t)out_stride + off, vec);  // out offset is guaranteed to be within int32 limits
       }
+      // Avoid loop-control overhead on uncapped launches; the tail guard still applies.
       if constexpr (!loop_over_rows) {
         break;
       }
@@ -48,7 +49,9 @@ void vectorized_gather_kernel_launch(char * out, char * inp, index_t * idx, int 
   auto num_threads = is_packed ? num_vectors : std::min(max_num_threads, at::round_up(num_vectors, static_cast<int64_t>(at::cuda::warp_size())));
   auto entries_per_block = is_packed ? max_num_threads / num_vectors : 1;
   const auto* properties = at::cuda::getCurrentDeviceProperties();
-  const int64_t resident_blocks = properties->multiProcessorCount * (properties->maxThreadsPerMultiProcessor / (num_threads * entries_per_block));
+  // A partially filled warp still consumes all of its thread slots.
+  const auto warp_threads_per_block = at::round_up(num_threads * entries_per_block, static_cast<int64_t>(at::cuda::warp_size()));
+  const int64_t resident_blocks = properties->multiProcessorCount * (properties->maxThreadsPerMultiProcessor / warp_threads_per_block);
   // Cap rows to 32 thread-limited waves; scattered reads need more concurrency
   // than ScatterCopyOp's random writes.
   const int64_t max_blocks = resident_blocks * max_block_waves;
@@ -56,9 +59,8 @@ void vectorized_gather_kernel_launch(char * out, char * inp, index_t * idx, int 
   const auto grid_x = std::min(row_blocks, max_blocks);
   uint32_t grid_y = properties->maxGridSize[1];
   grid_y = std::min(static_cast<uint32_t>(at::ceil_div(slice_size_in_bytes, max_num_threads * Alignment)), grid_y);
-  // Split columns only to fill a wave; row CTAs already supply parallelism otherwise.
-  // This also keeps grid_x * grid_y within max_blocks, unlike an x-only cap.
-  grid_y = std::min(static_cast<int64_t>(grid_y), std::max(int64_t{1}, resident_blocks / grid_x));
+  // Budget the full grid; few very wide rows still need column parallelism.
+  grid_y = std::min(static_cast<int64_t>(grid_y), max_blocks / grid_x);
   dim3 grid = {static_cast<uint32_t>(grid_x), grid_y, 1};
   dim3 block = {static_cast<uint32_t>(num_threads), static_cast<uint32_t>(entries_per_block), 1};
   auto kernel = row_blocks > grid_x

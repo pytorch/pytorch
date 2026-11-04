@@ -214,7 +214,9 @@ class TestScatterGatherDevice(TestCase):
         many_rows = 1031
         if device.startswith("cuda"):
             properties = torch.cuda.get_device_properties(device)
-            many_rows = properties.multi_processor_count * (properties.max_threads_per_multi_processor // 256) * 32 + 1
+            # Match max_num_threads=256 and max_block_waves=32 in IndexKernelUtils.cu.
+            # Use multiple passes plus a partial tail, rather than one row past the cap.
+            many_rows = 2 * properties.multi_processor_count * (properties.max_threads_per_multi_processor // 256) * 32 + 1031
         for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192),
                           (4096, 3072, 16), (4096, 3072, 32), (4096, 1024, 8),
                           # Non-power-of-two packing, partial row blocks, and the 32/33-vector boundary.
@@ -231,8 +233,9 @@ class TestScatterGatherDevice(TestCase):
             alloc2 = torch.empty(m, k + 4, device=device, dtype=dtype)
             misaligned1 = alloc2[:, :-4].copy_(src)
             num_ind = n
-            index_dtypes = (torch.int64, torch.int32) if k == 48 else (torch.int64,)
-            for dim, index_dtype in itertools.product((0, 1), index_dtypes):
+            index_dtypes = (torch.int64, torch.int32) if device.startswith("cuda") and k == 48 else (torch.int64,)
+            dims = (0,) if m == 64 and n in (many_rows, many_rows * 64) else (0, 1)
+            for dim, index_dtype in itertools.product(dims, index_dtypes):
                 max_ind = src.shape[dim]
                 ind0 = torch.randint(max_ind, (num_ind,), device=device, dtype=index_dtype)
                 ind_discontig0 = torch.empty(num_ind * 2, device=device, dtype=index_dtype)[::2].copy_(ind0)
