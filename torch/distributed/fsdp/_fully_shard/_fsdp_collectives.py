@@ -38,7 +38,8 @@ lib.define(
         Tensor all_gather_output,
         SymInt[] inp_split_sizes,
         SymInt all_gather_input_numel,
-        SymInt rank
+        SymInt rank,
+        *, SymInt[]? input_outer_sizes=None
     ) -> (Tensor, Tensor)
     """
 )
@@ -243,6 +244,22 @@ class SymmMemReduceScatter(SymmMemAllocMixin, ReduceScatter):
 # all_gather_copy_in fills its output by mutating views of it, so it uses the
 # NonFunctional variant, which leaves out functional backends (XLA, Lazy). Its
 # Meta impl, which skips the copy, takes precedence on meta tensors.
+def _validate_all_gather_input_layouts(
+    inputs: list[torch.Tensor],
+    splits: list[int],
+    outer_sizes: list[int],
+) -> None:
+    if len(inputs) != len(splits) or len(inputs) != len(outer_sizes):
+        raise ValueError("Expected one split and outer size per all-gather input")
+    for tensor, split, outer in zip(inputs, splits, outer_sizes):
+        torch._check(outer > 0, lambda: "Expected a positive outer size")
+        torch._check(
+            split % outer == 0, lambda: "Split must be divisible by outer size"
+        )
+        torch._check(tensor.numel() % outer == 0)
+        torch._check(tensor.numel() <= split, lambda: "Input exceeds its padded split")
+
+
 @torch.library.impl(lib, "all_gather_copy_in", "Meta")
 def all_gather_copy_in_meta(
     all_gather_inputs: list[torch.Tensor],
@@ -250,7 +267,13 @@ def all_gather_copy_in_meta(
     inp_split_sizes: list[int],
     all_gather_input_numel: int,
     rank: int,
+    *,
+    input_outer_sizes: list[int] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    if input_outer_sizes is not None:
+        _validate_all_gather_input_layouts(
+            all_gather_inputs, inp_split_sizes, input_outer_sizes
+        )
     all_gather_input = all_gather_output.narrow(
         0, all_gather_input_numel * rank, all_gather_input_numel
     )
@@ -264,13 +287,36 @@ def all_gather_copy_in_default(
     inp_split_sizes: list[int],
     all_gather_input_numel: int,
     rank: int,
+    *,
+    input_outer_sizes: list[int] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    if input_outer_sizes is not None:
+        _validate_all_gather_input_layouts(
+            all_gather_inputs, inp_split_sizes, input_outer_sizes
+        )
     all_gather_input = all_gather_output.narrow(
         0, all_gather_input_numel * rank, all_gather_input_numel
     )
     foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
     with torch.no_grad():
-        torch._foreach_copy_(foreach_copy_dsts, all_gather_inputs)
+        if input_outer_sizes is None:
+            torch._foreach_copy_(foreach_copy_dsts, all_gather_inputs)
+        else:
+            full_dsts: list[torch.Tensor] = []
+            full_srcs: list[torch.Tensor] = []
+            for dst, src, outer in zip(
+                foreach_copy_dsts, all_gather_inputs, input_outer_sizes
+            ):
+                if dst.numel() == src.numel():
+                    full_dsts.append(dst)
+                    full_srcs.append(src)
+                    continue
+                src_width = src.numel() // outer
+                dst_rows = dst.view(outer, dst.numel() // outer)
+                dst_rows[:, :src_width].copy_(src.view(outer, src_width))
+                dst_rows[:, src_width:].zero_()
+            if full_dsts:
+                torch._foreach_copy_(full_dsts, full_srcs)
     return all_gather_input, all_gather_output
 
 

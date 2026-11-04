@@ -17,7 +17,8 @@ namespace {
 
 // The device code and pack_vecs are copied verbatim from
 // aten/src/ATen/native/cuda/TensorShape.cu, where they are not exported, apart
-// from namespace qualification.
+// from namespace qualification and the optional per-split valid sizes of
+// split_with_sizes_copy_out_contiguous_no_cast_kernel.
 static constexpr int64_t BLOCK_SIZE = 128;
 static constexpr int64_t BYTES_PER_THREAD = 16;
 static constexpr int64_t BYTES_PER_BLOCK = BYTES_PER_THREAD * BLOCK_SIZE;
@@ -131,12 +132,16 @@ static __device__ __inline__ void copy_chunk(
   }
 }
 
+// split_valid_sizes, if not null, holds the bytes of each split's destination
+// that receive data: chunk i copies only its part of the first
+// split_valid_sizes[split_idx] bytes, and chunks past them copy nothing.
 static __global__ void split_with_sizes_copy_out_contiguous_no_cast_kernel(
     char** dst_base_addrs,
     char** src_base_addrs,
     int64_t* split_chunk_sizes,
     int64_t* block_idx_to_split_idx,
     int64_t* blocks_cumsums,
+    const int64_t* split_valid_sizes,
     int64_t src_stride,
     int64_t num_chunks) {
   const int64_t split_idx = block_idx_to_split_idx[blockIdx.x];
@@ -146,15 +151,23 @@ static __global__ void split_with_sizes_copy_out_contiguous_no_cast_kernel(
   const int64_t split_thread_idx =
       (blockIdx.x - blocks_cumsums[split_idx]) * blockDim.x + threadIdx.x;
   const int64_t split_chunk_size = split_chunk_sizes[split_idx];
+  const int64_t split_valid_size = split_valid_sizes == nullptr
+      ? num_chunks * split_chunk_size
+      : split_valid_sizes[split_idx];
 
   char* dst_base_addr = dst_base_addrs[split_idx];
   char* src_base_addr = src_base_addrs[split_idx];
 
   for (int64_t i = blockIdx.y; i < num_chunks; i += gridDim.y) {
+    const int64_t copy_size =
+        std::min(split_chunk_size, split_valid_size - i * split_chunk_size);
+    if (copy_size <= 0) {
+      break; // later chunks start further past the valid bytes
+    }
     copy_chunk(
         dst_base_addr + i * split_chunk_size,
         src_base_addr + i * src_stride,
-        split_chunk_size,
+        copy_size,
         split_thread_idx,
         split_threads);
   }
@@ -483,32 +496,46 @@ void all_gather_copy_out_cuda(
     const at::Tensor& input,
     c10::SymIntArrayRef split_sizes,
     c10::SymIntArrayRef outer_sizes,
-    int64_t num_chunks) {
+    int64_t num_chunks,
+    at::OptionalSymIntArrayRef output_inner_sizes) {
   if (use_composite(out, input)) {
-    all_gather_copy_out(out, input, split_sizes, outer_sizes, num_chunks);
+    all_gather_copy_out(
+        out, input, split_sizes, outer_sizes, num_chunks, output_inner_sizes);
     return;
   }
   check_all_gather_copy_out_inputs(
-      out, input, split_sizes, outer_sizes, num_chunks);
+      out, input, split_sizes, outer_sizes, num_chunks, output_inner_sizes);
   c10::cuda::CUDAGuard device_guard(input.device());
+  const bool clip = output_inner_sizes.has_value();
   std::vector<int64_t> srcs;
   std::vector<int64_t> dsts;
   std::vector<int64_t> chunk_sizes;
+  // Bytes of each destination row that receive data; only uploaded with
+  // output_inner_sizes, as without it every row receives all chunks
+  std::vector<int64_t> valid_sizes;
   auto src = reinterpret_cast<int64_t>(input.const_data_ptr());
   const auto elem_size = input.element_size();
   for (const auto i : c10::irange(out.size())) {
     const auto split_size = split_sizes[i].expect_int();
-    if (split_size == 0) {
-      continue;
-    }
     const auto outer_size = outer_sizes[i].expect_int();
     const int64_t chunk_size = split_size / outer_size * elem_size;
-    const auto dst = reinterpret_cast<int64_t>(out[i].mutable_data_ptr());
-    for (const auto outer_idx : c10::irange(outer_size)) {
-      srcs.push_back(src + outer_idx * chunk_size);
-      dsts.push_back(dst + outer_idx * num_chunks * chunk_size);
-      chunk_sizes.push_back(chunk_size);
+    // Destination rows are contiguous and hold the received chunks back to
+    // back, so the row size is also the destination row stride.
+    const int64_t row_size = clip
+        ? (*output_inner_sizes)[i].expect_int() * elem_size
+        : num_chunks * chunk_size;
+    if (chunk_size > 0 && row_size > 0) {
+      const auto dst = reinterpret_cast<int64_t>(out[i].mutable_data_ptr());
+      for (const auto outer_idx : c10::irange(outer_size)) {
+        srcs.push_back(src + outer_idx * chunk_size);
+        dsts.push_back(dst + outer_idx * row_size);
+        chunk_sizes.push_back(chunk_size);
+        if (clip) {
+          valid_sizes.push_back(row_size);
+        }
+      }
     }
+    // Full-group offsets: skipped outputs still occupy their splits
     src += split_size * elem_size;
   }
   if (srcs.empty()) {
@@ -537,9 +564,12 @@ void all_gather_copy_out_cuda(
     blocks_cumsums.push_back(blocks_cumsums.back() + blocks);
   }
   // `packed` keeps the device metadata alive until the kernel is enqueued.
-  auto [packed, ptrs] = pack_vecs(
-      {&dsts, &srcs, &chunk_sizes, &block_idx_to_split_idx, &blocks_cumsums},
-      input.device());
+  std::vector<const std::vector<int64_t>*> vecs{
+      &dsts, &srcs, &chunk_sizes, &block_idx_to_split_idx, &blocks_cumsums};
+  if (clip) {
+    vecs.push_back(&valid_sizes);
+  }
+  auto [packed, ptrs] = pack_vecs(vecs, input.device());
   split_with_sizes_copy_out_contiguous_no_cast_kernel<<<
       dim3(blocks_cumsums.back(), num_chunks / chunks_per_block, 1),
       dim3(BLOCK_SIZE, 1, 1),
@@ -550,6 +580,7 @@ void all_gather_copy_out_cuda(
       ptrs[2],
       ptrs[3],
       ptrs[4],
+      /*split_valid_sizes=*/clip ? ptrs[5] : nullptr,
       /*src_stride=*/input.numel() / num_chunks * elem_size,
       num_chunks);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -606,6 +637,9 @@ void chunk_cat_mixed_dtype_cuda(
   }
   check_chunk_cat_leading_dims_inputs(
       tensors, *num_leading_dims, num_chunks, out);
+  // A chunked dim that num_chunks does not divide needs no special case:
+  // fused_chunk_cat sizes each chunk with div_up, and chunk_cat_cuda_kernel
+  // clamps each rank's copy and zero-fills the rest of its chunk.
   auto chunks = out.view({num_chunks, -1});
   fused_chunk_cat(
       tensors, *num_leading_dims, num_chunks, fused_cast_dtype, chunks);
