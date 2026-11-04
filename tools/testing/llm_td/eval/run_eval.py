@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures as cf
+import contextlib
 import json
 import re
 import subprocess
@@ -130,7 +131,12 @@ def main() -> None:
     done = {x.stem: json.loads(x.read_text()) for x in out.glob("*.json")}
     if other := sorted(i for i, r in done.items() if {k: r.get(k) for k in want} != want):  # fmt: skip
         p.error(f"{len(other)} results in {out}, e.g. {other[0]}, were made with other settings than {want}; use another --tag")  # fmt: skip
-    sent = {i: prompt_sha(sample_prompt(json.loads(x.read_text()), minutes), args.agentic) for i in done if (x := args.data / "samples" / f"{i}.json").exists()}  # fmt: skip
+    sent = {}
+    for i in done:
+        # score.py drops a sample whose prompt git cannot build in this clone.
+        if (x := args.data / "samples" / f"{i}.json").exists():
+            with contextlib.suppress(subprocess.CalledProcessError):
+                sent[i] = prompt_sha(sample_prompt(json.loads(x.read_text()), minutes), args.agentic)  # fmt: skip
     if stale := sorted(i for i, h in sent.items() if done[i].get("prompt_sha") != h):
         p.error(f"{len(stale)} results in {out}, e.g. {stale[0]}, were made from another prompt, schema, sample or test-times.json; use another --tag")  # fmt: skip
     ids = [i for i in dict.fromkeys(args.ids.read_text().split()) if i not in done]

@@ -18,7 +18,7 @@ from unittest import mock
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Callable, Iterator, Mapping
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -63,8 +63,8 @@ SAMPLE = {
 NOTHING = {"out": {"tests": []}}
 
 
-def pick(name: str, r: dict | None, td: dict | None, s: dict = SAMPLE) -> Choice:
-    choice = policy(name, s, r, td, SECONDS)
+def pick(name: str, r: dict | None, td: dict | None, s: dict = SAMPLE, grep: Callable[[str], list[str]] | None = None) -> Choice:  # fmt: skip
+    choice = policy(name, s, r, td, SECONDS, grep)
     if choice is None:
         raise AssertionError(f"{name} chose nothing")
     return choice
@@ -287,6 +287,24 @@ class TestRunEval(unittest.TestCase):
                         self.assertFalse(refused)
                 # Only the unfinished b is run, and only when a's result is accepted.
                 self.assertEqual(query.call_count, 0 if refused else 1)
+
+    def test_main_skips_a_prompt_git_cannot_build(self) -> None:
+        from tools.testing.llm_td.eval import run_eval
+
+        # The diff adds a candidate, which sample_prompt looks up at a main_base this clone lacks.
+        sample = {"id": "a", "sha": "f" * 40, "title": "t", "body": None, "diffstat": "", "diff": "diff --git a/test/test_new.py b/test/test_new.py\nnew file mode 100644\n", "candidates": ["test_new"], "changed_files": ["test/test_new.py"], "main_base": "0" * 40}  # fmt: skip
+        result = {"model": "m", "effort": "medium", "agentic": False, "prompt_sha": "x"}
+        with tempfile.TemporaryDirectory() as d:
+            data = write_data(d, {"samples/a.json": sample, "test-times.json": {}, "results/t/a.json": result})  # fmt: skip
+            (data / "ids.txt").write_text("a")
+            argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt")]  # fmt: skip
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch("sys.stdout", io.StringIO()) as out,
+                mock.patch.object(run_eval, "query_model") as query,
+            ):
+                run_eval.main()
+        self.assertEqual((out.getvalue(), query.call_count), ("t: 0 without a result\n", 0))  # fmt: skip
 
     def test_main_tops_up_agentic_results(self) -> None:
         from tools.testing.llm_td.eval import run_eval
@@ -812,6 +830,15 @@ class TestScore(unittest.TestCase):
         infra = {**SAMPLE, "changed_files": ["test/run_test.py"]}
         self.assertTrue(pick("final+td45", {"out": None}, td, infra).sel.run_all)
 
+    def test_policy_passes_deleted(self) -> None:
+        # A deleted data file under test/ needs no reader, as select_tests passes it.
+        s = {**SAMPLE, "changed_files": ["test/data/gone.json"], "deleted": ["test/data/gone.json"]}  # fmt: skip
+        td = {"scored": [], "top25": [], "top25_cfg": {"default": [], "slow": []}}
+        out = {"out": {"tests": [{"file": "test_a", "confidence": "low"}]}}
+        for name in ("final", "final-hm", "final+td45"):
+            self.assertFalse(pick(name, out, td, s, lambda p: []).sel.run_all, name)
+            self.assertTrue(pick(name, out, td, {**s, "deleted": []}, lambda p: []).sel.run_all, name)  # fmt: skip
+
     def test_final_hm_malformed(self) -> None:
         # Malformed answers run everything, as under final.
         tests = ["test_a", {"file": "test_c", "confidence": "low"}, {"file": "test_b", "confidence": "high"}]  # fmt: skip
@@ -945,6 +972,27 @@ class TestScore(unittest.TestCase):
                 rows = score.score(data, ["a"], ["m", "td"], ["model"], True, *dirs, "")
         self.assertEqual((rows, err.getvalue()), ([], msg))
         has_head.assert_called_once_with("abc")
+
+    def test_score_drops_a_sample_without_main_base(self) -> None:
+        # The diff adds a candidate, which sample_prompt looks up at main_base.
+        diff = "diff --git a/test/test_e.py b/test/test_e.py\nnew file mode 100644\n"
+        sample = {**SAMPLE, "diff": diff, "changed_files": ["test/test_e.py"], "main_base": "0" * 40}  # fmt: skip
+        td = {"scored": [], "top25": [], "top25_cfg": {}}
+        result = {"out": {"tests": []}, "error": None, "cost_usd": 0.1, "prompt_sha": "x"}  # fmt: skip
+        files = {
+            "test-times.json": {}, "samples/a.json": SAMPLE, "samples/b.json": sample,
+            "td/a.json": td, "td/b.json": td, "results/m/a.json": {**result, "prompt_sha": score.prompt_sha(score.sample_prompt(SAMPLE, {}))}, "results/m/b.json": result,
+        }  # fmt: skip
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
+        ):
+            data = write_data(d, files)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rows = score.score(data, ["a", "b"], ["m", "td"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
+        self.assertEqual({x["id"] for x in rows}, {"a"})
+        self.assertEqual(err.getvalue(), "dropped 1 of 2 ids with no main_base (default base) in this clone\n")  # fmt: skip
 
     def test_grep_head_copies(self) -> None:
         cached = functools.cache(lambda pattern, sha: ["test/test_a.py"])
@@ -1150,6 +1198,26 @@ class TestScore(unittest.TestCase):
         self.assertEqual(len(set(digests)), 5)
         self.assertEqual(digests[2], digests[3])
         self.assertIn(Path(score.__file__).with_name("td_replay.py"), score.REPLAY_CODE)
+
+    def test_td_replay_cuts_as_ci(self) -> None:
+        # td_replay hard-codes split_tests' cut with TD on; replay_stats hashes td_replay but not test_selections.
+        from tools.testing import test_selections
+
+        class Scores:
+            def amend_tests(self, files: list[str]) -> None:
+                pass
+
+            def get_top_per_tests(self, percent: int) -> tuple[list, list]:
+                cuts.append(percent)
+                return [], []
+
+        cuts: list[int] = []
+        top25_per_config(Scores(), {"default": set()})  # type: ignore[arg-type]
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stderr(io.StringIO()):  # fmt: skip
+            test_selections.split_tests(Scores(), {}, selection_file=Path(d) / "none.json", test_config="default", td_enabled=True, previous_failures=None, record=False)  # type: ignore[arg-type]  # fmt: skip
+        self.assertEqual(cuts, [25, 25])
+        replay = Path(td_replay.__file__).read_text()
+        self.assertEqual(replay.count("get_top_per_tests(25)"), 2)
 
     def test_td_replay_main(self) -> None:
         from tools.testing.target_determination import heuristics

@@ -37,7 +37,9 @@ of the current test-times.json, sample, STATS artifacts and replay code
 from the prompt the sample gives now (see prompt_sha); the rest are counted on stderr. The test files that
 import an edited test file are found with git grep at the sample's head; a
 sample whose head is not in this clone, or on which that grep fails, is left
-out under every policy and counted on stderr too, as in CI the grep works.
+out under every policy and counted on stderr too, as in CI the grep works; so
+is one whose diff adds a candidate test file and whose main_base (default
+base) is not in this clone.
 
 run_test.py applies TD, and so the selection, only in the pull, trunk and
 ROCm workflows, and not on macOS, in xpu or onnx builds, under NO_TD (from
@@ -528,6 +530,7 @@ def score(
     """Rows of every tag and policy, all on the distinct ids that have a sample, a TD replay of the current inputs under `stats` (see replay_stats), git grep at their head and, unless `unasked`, a result for every tag but `td` of the prompt the sample gives now (see prompt_sha). Raises ValueError if a tag's results mix --model, --effort or --agentic."""
     ids = list(dict.fromkeys(ids))
     no_grep = "working git grep at their head (not in this clone?)"
+    no_base = "main_base (default base) in this clone"
     settings: collections.defaultdict[str, set[tuple]] = collections.defaultdict(set)
     seconds = test_seconds(data / "test-times.json")
     fallback = fallback_seconds(data / "test-times.json")
@@ -555,8 +558,12 @@ def score(
         if not unasked(s):
             results = {tag: r for tag, (_, r, _) in loaded.items() if tag != "td"}
             missing += [f"{tag} result" for tag, r in results.items() if r is None]
-            prompt = sample_prompt(s, minutes)
-            missing += [f"{tag} result of the current sample, test-times.json, prompt and schema" for tag, r in results.items() if r is not None and r.get("prompt_sha") != prompt_sha(prompt, bool(r.get("agentic")))]  # fmt: skip
+            try:
+                prompt = sample_prompt(s, minutes)
+            except subprocess.CalledProcessError:
+                missing.append(no_base)
+            else:
+                missing += [f"{tag} result of the current sample, test-times.json, prompt and schema" for tag, r in results.items() if r is not None and r.get("prompt_sha") != prompt_sha(prompt, bool(r.get("agentic")))]  # fmt: skip
         # Probed for every policy: grep_head fails only where a policy greps.
         if not has_head(s["sha"]):
             missing.append(no_grep)
