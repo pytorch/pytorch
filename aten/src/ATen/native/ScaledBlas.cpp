@@ -247,7 +247,7 @@ TORCH_META_FUNC(_scaled_grouped_mm_v2)(
     at::IntArrayRef contraction_dim,
     bool use_fast_accum) {
   scaled_blas::validate_scaled_grouped_mm_v2_inputs(
-      self, mat2, recipe_a, recipe_b, offs, bias, contraction_dim, out_dtype);
+      self, mat2, recipe_a, swizzle_a, recipe_b, swizzle_b, offs, bias, contraction_dim, out_dtype);
 
   const auto out_dtype_ = out_dtype.value_or(kBFloat16);
   std::optional<Tensor> offs_opt =
@@ -618,9 +618,11 @@ TORCH_IMPL_FUNC(_scaled_mm_cpu_v2_out)(
       mat_a.scalar_type(),
       scale_recipe_a_enum,
       scale_a_ref,
+      swizzle_a_enum,
       mat_b.scalar_type(),
       scale_recipe_b_enum,
-      scale_b_ref);
+      scale_b_ref,
+      swizzle_b_enum);
 
   if (gemm_impl == ScaledGemmImplementation::NONE) {
     const std::optional<at::Tensor> scale_a_opt = scale_a.empty() ? std::optional<at::Tensor>{std::nullopt} : std::optional<at::Tensor>{scale_a[0]};

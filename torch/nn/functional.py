@@ -7292,6 +7292,21 @@ def scaled_mm(
     Applies a scaled matrix-multiply, mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
     scale_recipe_a and scale_recipe_b respectively.
 
+    Packed MNxK4 scaling uses matching ``BlockWise1x32`` or ``BlockWise1x128`` recipes
+    with ``SWIZZLE_MN_K4`` on both inputs. Inputs must be ``float8_e4m3fn`` or
+    ``float8_e5m2``, with at least one ``float8_e4m3fn`` input.
+    It requires cuBLASLt 13.8.1 or later
+    (bundled with CUDA 13.4) on SM10.x/SM11.x, and supports bfloat16, float16, and
+    float32 outputs. Bias requires bfloat16 or float16 output with matching dtype.
+    ``use_fast_accum`` is forwarded to cuBLASLt for MNxK4.
+    MNxK4 requires row-major ``mat_a`` and column-major ``mat_b``.
+    Scales are contiguous ``float8_e8m0fnu`` tensors with 16-byte-aligned data pointers.
+    For block size ``B`` (32 or 128) and outer extent ``O`` (M for A, N for B),
+    the physical row-major byte order is ``[ceil(K / (4 * B)), round_up(O, 4), 4]``:
+    four consecutive K-block scales are packed together for each outer position.
+    Each scale buffer has ``16 * ceil(O / 4) * ceil(K / (4 * B))`` elements.
+    M need not be a multiple of four; K and N must be divisible by 16. Padding entries are ignored.
+
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
         scale_recipe_a: Enum describing how mat_a has been scaled
@@ -7303,7 +7318,9 @@ def scaled_mm(
         output_dtype: dtype used for the output tensor
         contraction_dim: Must be empty or ``(1, 0)`` (equivalent negative
             dimensions are also accepted).
-        use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
+        use_fast_accum: Request tensor-core fast accumulation for supported recipes.
+            Hopper ``BlockWise1x128``/``BlockWise128x128`` require ``False``;
+            MNxK4 forwards the flag to cuBLASLt.
     """
 
     scale_a = _expand_single_value(scale_a)
@@ -7485,7 +7502,8 @@ def scaled_grouped_mm(
     or one value per group in a contiguous 1D tensor. Each input may use either scale layout.
     Both inputs must be ``float8_e4m3fn`` or ``float8_e5m2``, with at least one ``float8_e4m3fn`` input.
     At most 1024 groups are supported.
-    TensorWise scaling requires CUDA 13.4 or later on SM9.x-SM11.x; swizzle metadata is ignored.
+    TensorWise scaling requires CUDA 13.4 or later on SM9.x-SM11.x; swizzle metadata is ignored
+    except ``SWIZZLE_MN_K4``, which is rejected.
     It supports bfloat16, float16, and float32 outputs.
 
     Hopper block scaling requires CUDA 13.4 or later on SM9.x and supports recipe pairs
@@ -7500,7 +7518,20 @@ def scaled_grouped_mm(
     of 4. These recipes support bfloat16, float16, and float32 outputs and require
     ``use_fast_accum=False``. Swizzle metadata must be omitted or ``NO_SWIZZLE``.
 
-    Other scaling recipes require bfloat16 output.
+    Packed MNxK4 scaling uses the recipes, byte order, element count, and alignment
+    described in :func:`scaled_mm`, independently for each group. A 3D operand uses
+    scale shape ``(groups, elements_per_group)``; a 2D operand concatenates each
+    group's flattened scale buffer in offset order. Each group starts at a 16-byte
+    boundary. Per-group M need not be a multiple of four. K and the total N
+    dimension must be divisible by 16, including when ``offs`` splits N. Group output
+    starts must be 16-byte aligned: starting N offsets must be multiples of 8
+    for bfloat16/float16 output or 4 for float32 output. Invalid group output
+    alignment triggers a device assertion. It requires
+    cuBLASLt 13.8.1 or later (bundled with CUDA 13.4) on SM10.x/SM11.x and accepts
+    bfloat16, float16, and float32 outputs. ``use_fast_accum`` is forwarded to cuBLASLt
+    for MNxK4.
+
+    Other recipes require bfloat16 output.
 
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
@@ -7511,11 +7542,13 @@ def scaled_grouped_mm(
         swizzle_b: Enum describing the swizzling pattern (if any) of scale_b
         bias: optional bias term to be added to the output
         offs: optional offsets into the source tensors denoting group start indices
-        output_dtype: output dtype; single-recipe TensorWise on both inputs and Hopper block
-          scaling accept bfloat16, float16, or float32; other recipes require bfloat16
+        output_dtype: output dtype; the cuBLASLt recipes described above (including ``TensorWise``
+          alone on both inputs) accept bfloat16, float16, or float32; other recipes require bfloat16
         contraction_dim: describe which dimensions are :math:`K` in the matmul.
-        use_fast_accum: enable/disable tensor-core fast accumulation for cuBLASLt
-            recipes and CUDA RowWise scaling. MSLK recipes and ROCm ignore this flag.
+        use_fast_accum: Request tensor-core fast accumulation for cuBLASLt recipes
+            (including MNxK4) and CUDA RowWise scaling. Hopper
+            ``BlockWise1x128``/``BlockWise128x128`` require ``False``.
+            MSLK recipes and ROCm ignore this flag.
     """
 
     scale_a = _expand_single_value(scale_a)
