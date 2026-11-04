@@ -5375,7 +5375,8 @@ for dtype in (torch.int32, torch.int64):
         with self.assertRaisesRegex(RuntimeError, msg):
             fn(t1, t2)
         if config.cpp_wrapper:
-            msg = "aoti_torch_.* API call failed at .*"
+            # The generated code's error keeps ATen's message and the call.
+            msg += r" \(originally from aoti_torch_.* API call failed at .*, line \d+\)"
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t1, t2)
 
@@ -5397,7 +5398,8 @@ for dtype in (torch.int32, torch.int64):
         with self.assertRaisesRegex(RuntimeError, msg):
             fn(t)
         if config.cpp_wrapper:
-            msg = "aoti_torch_.* API call failed at .*"
+            # The generated code's error keeps ATen's message and the call.
+            msg += r" \(originally from aoti_torch_.* API call failed at .*, line \d+\)"
         with self.assertRaisesRegex(RuntimeError, msg):
             with torch.no_grad():
                 torch.compile(fn)(t)
