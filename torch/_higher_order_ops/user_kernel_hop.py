@@ -11,6 +11,7 @@ it, how to find its write set, and how to capture a call to it (the HOPifier).
 
 import copy
 import dataclasses
+import sys
 import threading
 import types
 from collections.abc import Callable, Iterable, Mapping
@@ -21,7 +22,7 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import _dispatch_keys, DispatchKey
-from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger, TRIGGER_DSLS
 from torch._higher_order_ops.utils import redirect_to_mode
 from torch._ops import HigherOrderOperator
 from torch._prims_common import (
@@ -64,6 +65,30 @@ def _has_slot_state(value: object) -> bool:
         if any(s not in ("__dict__", "__weakref__", *fields) for s in slots):
             return True
     return False
+
+
+def _float_component_keys(value: Any) -> tuple[object, ...] | None:
+    """For a complex value (Python or numpy) or a numpy floating scalar that is not a
+    Python float (np.float32, np.longdouble, ...), the key of each float component
+    (the real and imaginary parts, or the value itself), as constant_key keys a
+    float: its float.hex(), so -0.0 is not 0.0 and every NaN is the same, or the
+    exact ratio of a long double that no float holds. None for any other value.
+    numpy is not imported: without it, no value is one of its scalars."""
+    np = sys.modules.get("numpy")
+    if isinstance(value, complex) or (np and isinstance(value, np.complexfloating)):
+        components = (value.real, value.imag)
+    elif np and isinstance(value, np.floating) and not isinstance(value, float):
+        components = (value,)
+    else:
+        return None
+    keys: list[object] = []
+    for c in components:
+        as_float = float(c)
+        if as_float == c or as_float != as_float:  # exactly a float, or a NaN
+            keys.append(as_float.hex())
+        else:  # a long double that no float holds
+            keys.append(c.as_integer_ratio())
+    return tuple(keys)
 
 
 class ConstantRules:
@@ -124,10 +149,11 @@ def constant_key(value: object, rules: ConstantRules) -> object:
     """A hashable key for a constant kernel argument, equal for two values only when
     they are interchangeable: lists, tuples, dicts and objects (see _object_state)
     by type and content, floats by hex() (-0.0 is not 0.0, and every NaN is the
-    same), a DSL scalar by its type and Python value (see ConstantRules), other
-    values by their own equality. Any other unhashable value, and a tensor, as the
-    value or anywhere inside it, are refused with a TypeError, and a value that
-    contains itself with a ValueError."""
+    same), numpy floats and complex values by type and the hex() of each float
+    component (see _float_component_keys), a DSL scalar by its type and Python value
+    (see ConstantRules), other values by their own equality. Any other unhashable
+    value, and a tensor, as the value or anywhere inside it, are refused with a
+    TypeError, and a value that contains itself with a ValueError."""
     return _ContentWalk(rules).key(value)
 
 
@@ -191,6 +217,9 @@ class _ContentWalk:
         scalar = self.rules.scalar_value(value)
         if scalar is not None:
             return (type(value), self.key(scalar))
+        float_keys = _float_component_keys(value)
+        if float_keys is not None:
+            return (type(value), float_keys)
         if isinstance(value, float):
             return (type(value), value.hex())
         state = _object_state(value, self.rules)
@@ -235,7 +264,11 @@ class _ContentWalk:
             items = self.visit(value, value.items(), "[{!r}]", self.snapshot)
             new_dict = copy.copy(value)
             new_dict.clear()
-            new_dict.update(zip(keys, items))
+            # Each item assigned, as pickle rebuilds a dict subclass: a Counter's
+            # update() counts the pairs, and dict.update() would bypass the order an
+            # OrderedDict keeps.
+            for key, item in zip(keys, items):
+                new_dict[key] = item
             return new_dict
         state = _object_state(value, self.rules)
         if state is None:
@@ -632,10 +665,12 @@ class UserKernelHOPInfo:
     # "flexible_layout" (Inductor picks them). Inductor calls it each time it lowers
     # one of this DSL's mutation HOP nodes.
     get_layout_constraint: Callable[[], UserKernelLayoutConstraint]
-    # Only keys this DSL's reinplacing counters: ReInplaceTrigger.USER_KERNEL_OPS, or
-    # a member of the DSL's own. auto_functionalize's AUTO_FUNC_V1 and AUTO_FUNC_V2
-    # are refused; the reinplacing pass also reads AUTO_FUNC_V2 as a switch that
-    # stops it from rewriting getitem users.
+    # Only keys this DSL's reinplacing counters: ReInplaceTrigger.USER_KERNEL_OPS,
+    # which DSLs share, or a member of the DSL's own, the one TRIGGER_DSLS names for
+    # it, which register_user_kernel_hop refuses to a DSL of another name.
+    # auto_functionalize's AUTO_FUNC_V1 and AUTO_FUNC_V2 are refused too; the
+    # reinplacing pass also reads AUTO_FUNC_V2 as a switch that stops it from
+    # rewriting getitem users.
     reinplace_trigger: ReInplaceTrigger
     # torch.export's serializer can write this DSL's nodes.
     serializable: bool
@@ -655,7 +690,10 @@ def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
       example), if either HOP is not a UserKernelWrapperHOP, or if the functional HOP
       has no CompositeExplicitAutograd py_impl for the decomposition to trace.
     - ValueError if the trigger is auto_functionalize's AUTO_FUNC_V1 or AUTO_FUNC_V2,
-      or if the mutation and functional HOPs are the same HOP.
+      or a member other than USER_KERNEL_OPS that TRIGGER_DSLS does not name for this
+      DSL (another DSL's member, whether or not that DSL has registered yet, or a
+      member without an entry), or if the mutation and functional HOPs are the same
+      HOP.
     - RuntimeError if either HOP is registered already, with another info. Infos
       compare by identity: registering the same object again is accepted and changes
       nothing, but an equal copy of it is refused.
@@ -666,6 +704,17 @@ def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
     if trigger in (ReInplaceTrigger.AUTO_FUNC_V1, ReInplaceTrigger.AUTO_FUNC_V2):
         raise ValueError(
             f"{trigger} belongs to auto_functionalize; register the {info.dsl} DSL "
+            "with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
+        )
+    trigger_dsl = TRIGGER_DSLS.get(trigger)
+    if trigger is not ReInplaceTrigger.USER_KERNEL_OPS and trigger_dsl != info.dsl:
+        if trigger_dsl is None:
+            raise ValueError(
+                f"{trigger} has no entry in TRIGGER_DSLS; add one naming the DSL it "
+                "belongs to"
+            )
+        raise ValueError(
+            f"{trigger} belongs to the {trigger_dsl} DSL; register the {info.dsl} DSL "
             "with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
         )
     if info.mutation is info.functional:

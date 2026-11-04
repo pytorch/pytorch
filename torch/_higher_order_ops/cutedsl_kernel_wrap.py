@@ -506,23 +506,29 @@ def _rows_disjoint(a: Tensor, b: Tensor) -> bool:
 
 
 def _may_overlap(a: Tensor, b: Tensor) -> bool:
-    """Whether two tensors may share memory: the same tensor, or two on one storage
-    that compute_overlapping_tensors, which reinplacing uses too, does not find
-    disjoint (with _rows_disjoint agreeing for 2-D views with contiguous rows of one
-    stride). It guards on the symbolic sizes it compares, and a size it cannot guard
-    on (an unbacked one) counts as an overlap. It counts offsets and strides in
+    """Whether two tensors may share memory. A tensor known to be empty
+    (statically_known_true, which neither guards nor raises) shares memory with no
+    tensor, not even itself. Otherwise the same tensor does, and so do two on one
+    storage that compute_overlapping_tensors, which reinplacing uses too, does not
+    find disjoint (with _rows_disjoint agreeing for 2-D views with contiguous rows of
+    one stride). It guards on the symbolic sizes it compares, and a size it cannot
+    guard on (an unbacked one) counts as an overlap. It counts offsets and strides in
     elements, so views of one storage with different element sizes are compared by
     their byte ranges instead, without guards (statically_known_true)."""
-    if a is b:
-        return True
-    if not _same_storage(a, b):
-        return False
     from torch._C._dynamo.guards import compute_overlapping_tensors
     from torch.fx.experimental.symbolic_shapes import (
         GuardOnDataDependentSymNode,
         statically_known_true,
     )
 
+    # An empty tensor overlaps nothing, not even itself, though its byte range below
+    # need not be empty: a (5, 0) view with row stride s spans 4 * s elements.
+    if statically_known_true(a.numel() == 0) or statically_known_true(b.numel() == 0):
+        return False
+    if a is b:
+        return True
+    if not _same_storage(a, b):
+        return False
     if a.element_size() == b.element_size():
         try:
             if compute_overlapping_tensors([a, b]):
@@ -539,7 +545,8 @@ def _may_overlap(a: Tensor, b: Tensor) -> bool:
             return True
 
     def byte_range(t: Tensor) -> tuple[Any, Any]:
-        # Exact unless t is empty, and an empty tensor overlaps nothing.
+        # Exact unless t is empty, which it can be here only if that is not
+        # statically known: its range then errs toward an overlap.
         start = t.storage_offset() * t.element_size()
         last = sum((n - 1) * s for n, s in zip(t.shape, t.stride()))
         return start, start + (last + 1) * t.element_size()
@@ -565,7 +572,11 @@ def check_written_args_disjoint(
     ``wrapped``. Functional tensors that alias share a storage; where their
     unwrapped values do not, functionalization copied the views
     (torch.func.functionalize with remove="mutations_and_views"), and the copies do
-    not show where the views sit, so they count as overlapping."""
+    not show where the views sit, so they count as overlapping, unless one of them
+    is known to be empty: a tensor known to be empty overlaps nothing (_may_overlap),
+    and the copy of an empty view is empty too."""
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
     for i, later in enumerate(written):
         for earlier in written[:i]:
             a, b = kwargs[earlier], kwargs[later]
@@ -573,7 +584,11 @@ def check_written_args_disjoint(
             if _may_overlap(a, b):
                 problem = "are the same tensor or views that may overlap"
                 fix = "Pass tensors that do not overlap."
-            elif aliases and not _same_storage(a, b):
+            elif (
+                aliases
+                and not _same_storage(a, b)
+                and not any(statically_known_true(t.numel() == 0) for t in (a, b))
+            ):
                 problem = (
                     "are views of one tensor, which functionalization with "
                     'remove="mutations_and_views" copied, so PT2 cannot tell whether '
