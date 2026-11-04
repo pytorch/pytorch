@@ -83,6 +83,21 @@ class TestKernelColTile(TestCase):
         )
         self.assertEqual(out, x.sum(dim=0), atol=1e-2, rtol=1e-2)
 
+    def test_plans_key_and_require_the_current_device(self):
+        trait = T.SumOps(acc=cutlass.Float32)
+        x = torch.randn(4097, 256, device="cuda")
+        before = set(ct._CACHE)
+        # One GPU has no other device, so pretend another one is current.
+        other = x.get_device() + 1
+        with mock.patch.object(torch.cuda, "current_device", return_value=other):
+            with self.assertRaisesRegex(AssertionError, "is current"):
+                ct.reduce_col_tile(trait, "bydevice", x, torch.float32)
+        self.assertEqual(set(ct._CACHE), before)
+        ct.reduce_col_tile(trait, "bydevice", x, torch.float32)
+        # The index follows the alignment; without it, the slot holds the "col" axis.
+        keys = [k for k in ct._CACHE if k[1] == "bydevice"]
+        self.assertEqual({k[5] for k in keys}, {x.get_device()})
+
     def test_reduce_col_tile_split_reduced_axis(self):
         # Exercise a ragged reduced-axis split and stage-2 partial combination.
         x = torch.randn(4097, 256, device="cuda")
@@ -641,6 +656,21 @@ class TestOrderedColHost(TestCase):
 
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "requires Hopper or later")
 class TestOrderedColDevice(TestCase):
+    def test_plans_key_and_require_the_current_device(self):
+        trait, x = T.SumOps(), torch.randn(2, 4096, 32, device="cuda")
+        before = set(ct._CACHE)
+        # One GPU has no other device, so pretend another one is current.
+        other = x.get_device() + 1
+        with mock.patch.object(torch.cuda, "current_device", return_value=other):
+            with self.assertRaisesRegex(AssertionError, "is current"):
+                ct.reduce_ordered_col(trait, "bydevice", x, [torch.float32], 1)
+        self.assertEqual(set(ct._CACHE), before)
+        self.assertIsNotNone(
+            ct.reduce_ordered_col(trait, "bydevice", x, [torch.float32], 1)
+        )
+        keys = [k for k in ct._CACHE if k[:2] == ("ordered_col", "bydevice")]
+        self.assertEqual({k[4] for k in keys}, {x.get_device()})
+
     @parametrize(
         "op,dtype,shape,split",
         [
