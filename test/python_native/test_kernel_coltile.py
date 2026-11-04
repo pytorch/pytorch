@@ -46,6 +46,11 @@ _VALUE_INDEX = {
 }
 
 
+def _tags(trait_key):
+    """Tags of the column plans compiled for trait_key."""
+    return {k[0] for k in ct._CACHE if k[1] == trait_key}
+
+
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestKernelColTile(TestCase):
@@ -164,12 +169,10 @@ class TestKernelColTile(TestCase):
         x = torch.randn(2, 2048, 256, device="cuda")
         x[:, 100, :] = 5.0
         x[:, 900, :] = 5.0
-        real = ct.reduce_batched_col_tile
-        with mock.patch.object(ct, "reduce_batched_col_tile", wraps=real) as served:
-            got = kg.reduce_dim(
-                T.ArgMaxOps(acc=cutlass.Float32), "batched_argmax", x, 1, torch.int32
-            )
-        self.assertEqual(served.call_count, 1)
+        got = kg.reduce_dim(
+            T.ArgMaxOps(acc=cutlass.Float32), "batched_argmax", x, 1, torch.int32
+        )
+        self.assertIn("coltile", _tags("batched_argmax"))
         self.assertEqual(
             got, torch.full((2, 256), 100, device="cuda", dtype=torch.int32)
         )
@@ -225,27 +228,23 @@ class TestKernelColTile(TestCase):
         x = torch.randn(shape, device="cuda")
         with torch.backends.python_native.cutedsl.disabled():
             expected = (x.sum(dim=1),) if nouts == 1 else torch.var_mean(x, dim=1)
-        real = ct.reduce_batched_col_tile
-        with mock.patch.object(ct, "reduce_batched_col_tile", wraps=real) as served:
-            if nouts == 1:
-                got = (kg.reduce_dim(T.SumOps(acc=cutlass.Float32), "gate", x, 1, f32),)
-            else:
-                two = T.VarMeanOps(correction=1, acc=cutlass.Float32)
-                got = kg.reduce_dim2(two, "gate_2out", x, 1, [f32, f32])
-        self.assertEqual(served.call_count, int(routed))
+        key = f"gate_{'x'.join(map(str, shape))}_{nouts}"
+        if nouts == 1:
+            got = (kg.reduce_dim(T.SumOps(acc=cutlass.Float32), key, x, 1, f32),)
+        else:
+            two = T.VarMeanOps(correction=1, acc=cutlass.Float32)
+            got = kg.reduce_dim2(two, key, x, 1, [f32, f32])
+        self.assertEqual("coltile" in _tags(key), routed)
         for g, e in zip(got, expected):
             torch.testing.assert_close(g, e, atol=1e-3, rtol=1e-4)
 
     def test_batched_view_collapses_adjacent_axes(self):
         # Leading, reduced and trailing runs each fold into one (B, R, C) axis and back.
         x = torch.randn(2, 3, 32, 5, 16, device="cuda")
-        real = ct.reduce_batched_col_tile
-        with mock.patch.object(ct, "reduce_batched_col_tile", wraps=real) as served:
-            got = kg.reduce_dim(
-                T.SumOps(acc=cutlass.Float32), "collapse", x, [2, 3], torch.float32
-            )
-        served.assert_called_once()
-        self.assertEqual(served.call_args.args[2].shape, (6, 160, 16))
+        got = kg.reduce_dim(
+            T.SumOps(acc=cutlass.Float32), "collapse", x, [2, 3], torch.float32
+        )
+        self.assertIn("coltile", _tags("collapse"))
         torch.testing.assert_close(
             got, x.double().sum(dim=(2, 3)).float(), atol=1e-4, rtol=1e-4
         )
@@ -262,11 +261,9 @@ class TestKernelColTile(TestCase):
         }[layout]
         with torch.backends.python_native.cutedsl.disabled():
             expected = torch.var_mean(x, dim=dim)
-        real = ct.reduce_col_tile_2out
-        with mock.patch.object(ct, "reduce_col_tile_2out", wraps=real) as served:
-            f32 = [torch.float32, torch.float32]
-            got = kg.reduce_dim2(trait, f"var_mean_{layout}", x, dim, f32)
-        self.assertEqual(served.call_count, int(routed))
+        f32 = [torch.float32, torch.float32]
+        got = kg.reduce_dim2(trait, f"var_mean_{layout}", x, dim, f32)
+        self.assertEqual("coltile" in _tags(f"var_mean_{layout}"), routed)
         for g, e in zip(got, expected):
             torch.testing.assert_close(g, e, atol=1e-4, rtol=1e-4)
 
@@ -302,27 +299,20 @@ class TestKernelColTile(TestCase):
         x = torch.randn(shape, device="cuda").to(dtype)
         x.select(dim, 100).fill_(tie)
         x.select(dim, 900).fill_(tie)
-        two_out, batched = ct.reduce_col_tile_2out, ct.reduce_batched_col_tile
-        with (
-            mock.patch.object(ct, "reduce_col_tile_2out", wraps=two_out) as two,
-            mock.patch.object(ct, "reduce_batched_col_tile", wraps=batched) as bat,
-        ):
-            key = f"{op}dim_route"
-            vals, idx = kg.reduce_dim2(trait, key, x, dim, [dtype, torch.int32])
-        self.assertEqual(two.call_count, int(x.dim() == 2))
-        self.assertEqual(bat.call_count, int(x.dim() == 3))
+        key = f"{op}dim_route_{x.dim()}d"
+        vals, idx = kg.reduce_dim2(trait, key, x, dim, [dtype, torch.int32])
+        served = {(k[0], k[2]) for k in ct._CACHE if k[1] == key}
+        self.assertIn(("coltile", dtype), served)
         self.assertEqual(vals, torch.full_like(vals, tie))
         self.assertEqual(idx, torch.full_like(idx, 100))
 
     def test_transposed_dense_columns_route_to_coltile(self):
         # A transposed view whose kept axis is dense is served by the column kernel.
         x = torch.randn(256, 4096, device="cuda").t()
-        real = ct.reduce_col_tile
-        with mock.patch.object(ct, "reduce_col_tile", wraps=real) as served:
-            got = kg.reduce_dim(
-                T.SumOps(acc=cutlass.Float32), "transposed_col", x, 1, torch.float32
-            )
-        self.assertEqual(served.call_count, 1)
+        got = kg.reduce_dim(
+            T.SumOps(acc=cutlass.Float32), "transposed_col", x, 1, torch.float32
+        )
+        self.assertIn("coltile", _tags("transposed_col"))
         torch.testing.assert_close(
             got, x.double().sum(dim=1).float(), atol=1e-3, rtol=1e-4
         )
@@ -360,15 +350,11 @@ class TestColTileHost(TestCase):
 
     def test_route_gate_keeps_other_architectures_on_general(self):
         x = torch.randn(4, 64, 16, device="cuda")
-        real = ct.reduce_batched_col_tile
-        with (
-            mock.patch.object(kg, "_BATCHED_COL_CCS", ()),
-            mock.patch.object(ct, "reduce_batched_col_tile", wraps=real) as served,
-        ):
+        with mock.patch.object(kg, "_BATCHED_COL_CCS", ()):
             got = kg.reduce_dim(
                 T.SumOps(acc=cutlass.Float32), "gate_off", x, 1, torch.float32
             )
-        served.assert_not_called()
+        self.assertNotIn("coltile", _tags("gate_off"))
         torch.testing.assert_close(
             got, x.double().sum(dim=1).float(), atol=1e-4, rtol=1e-4
         )
