@@ -12168,8 +12168,9 @@ class TestLinalgCudaOnly(TestCase):
     @onlyCUDA
     @dtypes(torch.float)
     def test_nearest_match_off_by_default_tunableop(self, device, dtype):
-        # Execution must never borrow, since a borrowed solution is unmeasured for
-        # the shape it is applied to. Off unless a compile-time pass turns it on.
+        # Borrowing is off unless a compile-time pass turns it on: a runtime
+        # process has no reason to pay a nearest-match scan and a validation
+        # benchmark on every miss.
         with self._tunableop_ctx():
             self.assertFalse(torch.cuda.tunable._nearest_match_is_enabled())
             self.assertFalse(torch.cuda.tunable._record_borrowed_is_enabled())
@@ -12275,10 +12276,11 @@ class TestLinalgCudaOnly(TestCase):
     @onlyCUDA
     @dtypes(torch.float)
     def test_nearest_match_precedes_wildcard_fallback_tunableop(self, device, dtype):
-        # Both mechanisms answer a concrete miss. A borrow is benchmarked and
-        # persisted here; a wildcard hit is an unvalidated reuse of a kernel tuned
-        # for a different shape and records nothing. So with both enabled the
-        # borrow takes the branch, which the new entry is evidence of.
+        # Both mechanisms answer a concrete miss. With nearest match on, a
+        # nearest donor is preferred over the wildcard and whichever is used is
+        # benchmarked and persisted; with it off, a wildcard hit is served
+        # unvalidated and records nothing. So with both enabled the borrow
+        # takes the branch, which the new entry is evidence of.
         with self._tunableop_ctx():
             torch.cuda.tunable.set_max_tuning_iterations(1)
 
@@ -12373,8 +12375,9 @@ class TestLinalgCudaOnly(TestCase):
             self.assertEqual(len(torch.cuda.tunable.get_results()), before)
 
     def _results_file_rows(self):
-        # What was actually persisted. get_results() is the in-memory map,
-        # which a borrow may legitimately populate without writing.
+        # What was actually persisted, as opposed to get_results(), which is
+        # the in-memory map. Asserting on the file is what proves a borrow
+        # reached disk rather than only memory.
         import csv
         import os
         filename = torch.cuda.tunable.get_filename()

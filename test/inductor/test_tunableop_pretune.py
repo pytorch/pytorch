@@ -923,9 +923,8 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
     hipBLASLt accepts and that each reaches the file runtime reads.
 
     InductorTestCase enters fresh_cache(), which isolates the cache directory
-    per test and clears _pretuned_gemms with it. That also means the compile
-    always starts cold, so this does not exercise the tune-mode cache bypass;
-    test_enabled_modes_bypass_the_fx_graph_cache covers that directly.
+    per test and clears _pretuned_gemms with it, so the compile always starts
+    cold.
     """
 
     hw_classification = HardwareClassification.CUDA

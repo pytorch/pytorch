@@ -65,9 +65,10 @@ namespace {
 // memory as well as in the results file -- and, since a borrow that records
 // nothing leaves runtime on Default while the pass measured the donor, it
 // disables borrowing too. Both are kept out of the user-facing
-// table in README.md: the mechanism they govern has no public entry point yet,
-// and documenting them there would promise a contract before there is a feature
-// to attach it to. Add them when it goes public.
+// table in README.md: they are kill switches for the compile-time reuse pass
+// rather than knobs a TunableOp user sets, and the reuse section there
+// describes the mechanism instead. Add them if the pass gains a runtime
+// contract of its own.
 bool NearestMatchDisabledByEnv() {
   static const bool disabled =
       !c10::utils::check_env("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED")

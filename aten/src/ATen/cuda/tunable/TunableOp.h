@@ -188,10 +188,10 @@ class TunableOp {
       return GetOp(donor.GetKey()) != nullptr;
     }
 
-    // Reuse pass, shape with no exact entry. Borrowing is a guess, so check it
-    // rather than trust it: the same comparison tuning makes, restricted to the
-    // donor. Default is candidate 0 for every GEMM, so the borrow only wins on
-    // merit.
+    // Every miss with tuning off, which for a reuse pass is every shape it has
+    // no exact entry for. Borrowing is a guess, so check it rather than trust
+    // it: the same comparison tuning makes, restricted to the donor. Default is
+    // candidate 0 for every GEMM, so the borrow only wins on merit.
     ResultEntry ResolveWithoutExactHit(
         TuningResultsManager& mgr,
         const ParamsT* params,
@@ -259,6 +259,17 @@ class TunableOp {
           // it properly means tuning from a file without these entries.
           mgr.RecordBorrowed(op_sig, concrete_sig, result);
           return result;
+        }
+        catch (const c10::AcceleratorError&) {
+          // Not a failed validation but an unusable device: tunableop.py
+          // relies on this reaching Python so the worker is torn down.
+          throw;
+        }
+        catch (const c10::OutOfMemoryError&) {
+          // FindFastestAmong frees its copies only on the normal path, so
+          // swallowing a repeatable OOM leaks again on every later dispatch
+          // of this signature. Fail the job; the caller then times inline.
+          throw;
         }
         catch (const c10::Error& e) {
           // FindFastestAmong TORCH_CHECKs the calls it makes and allocates
