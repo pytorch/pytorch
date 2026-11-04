@@ -9193,12 +9193,16 @@ class UserDefinedCuteDSLKernel(UserDefinedKernel):
         print (see python_scalar; a symbolic one stays as it is). A parameter the call
         left out takes a copy of its default, as the side table copies passed
         constants; unlike those, defaults are not guarded by Dynamo: changing one
-        later does not recompile."""
+        later does not recompile. If a default cannot be copied (such as one that
+        refers to itself), the call is refused with the error the eager launch gives
+        it, as that launch keys the constants before it copies them (see
+        key_constants)."""
         from torch._higher_order_ops.cutedsl_kernel_wrap import (
             CUTEDSL_CONSTANT_RULES,
             python_scalar,
         )
         from torch._higher_order_ops.user_kernel_hop import _snapshot
+        from torch._native.cutedsl.user_kernel import key_constants
 
         passed = {
             name: self.get_kwargs_value(name)
@@ -9211,10 +9215,21 @@ class UserDefinedCuteDSLKernel(UserDefinedKernel):
             k: passed[k] if isinstance(passed.get(k), IRNode) else python_scalar(v)
             for k, v in runtime.items()
         }
-        constant_args = {
-            k: v if k in passed else _snapshot(v, CUTEDSL_CONSTANT_RULES)
-            for k, v in constants.items()
-        }
+        try:
+            constant_args = {
+                k: v if k in passed else _snapshot(v, CUTEDSL_CONSTANT_RULES)
+                for k, v in constants.items()
+            }
+        except Exception:
+            # The eager launch's error, whatever the copy raised: that launch keys
+            # the constants, in signature order, before it copies them, so
+            # key_constants raises for the first default that constant_key refuses
+            # (it refuses every one that refers to itself), and if it refuses none,
+            # the copy's own error stands, as there. Keying the defaults on success
+            # would walk them twice: the launcher's definition keys every constant.
+            defaults = {k: v for k, v in constants.items() if k not in passed}
+            key_constants(self.kernel.name, defaults)
+            raise
         return runtime_args, constant_args
 
     @override
