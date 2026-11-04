@@ -987,6 +987,13 @@ registers a hook that runs when the backend detects a timeout or error, before i
 aborts; it does not run on a user-requested abort or shutdown. Check
 {attr}`~torch.distributed.ProcessGroup.supports_abort_hooks` first.
 
+{meth}`ProcessGroup.register_completion_hook <torch.distributed.ProcessGroup.register_completion_hook>`
+registers a hook that runs on a backend or calling thread after each operation
+on the default backend completes successfully. Correlate
+{attr}`~torch.distributed.distributed_c10d.CompletionHookArgs.completion_key`
+with {attr}`~torch.distributed.Work.completion_key` from a post-hook. Check
+{attr}`~torch.distributed.ProcessGroup.supports_completion_hooks` first.
+
 PyTorch attaches these built-in hooks to new process groups:
 
 - {class}`~torch.distributed.distributed_c10d.FlightRecorderHook` records
@@ -1005,10 +1012,15 @@ PyTorch attaches these built-in hooks to new process groups:
 .. autoattribute:: torch.distributed.ProcessGroup.supports_abort_hooks
 .. automethod:: torch.distributed.ProcessGroup.register_abort_hook
 .. automethod:: torch.distributed.ProcessGroup.unregister_abort_hook
+.. autoattribute:: torch.distributed.ProcessGroup.supports_completion_hooks
+.. automethod:: torch.distributed.ProcessGroup.register_completion_hook
+.. automethod:: torch.distributed.ProcessGroup.unregister_completion_hook
 
 .. autoclass:: torch.distributed.distributed_c10d.PreHookArgs
    :members:
 .. autoclass:: torch.distributed.distributed_c10d.PostHookArgs
+   :members:
+.. autoclass:: torch.distributed.distributed_c10d.CompletionHookArgs
    :members:
 .. autoclass:: torch.distributed.distributed_c10d.HookOpName
    :members:

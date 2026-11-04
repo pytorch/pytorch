@@ -157,6 +157,54 @@ class IntrusivePtrNoGilDestructor {
   }
 };
 
+// Takes the GIL to release fn, since the backend may drop its last copy of a
+// completion hook on any thread. Leaks fn once the interpreter is finalizing,
+// when threads must not take the GIL.
+std::shared_ptr<py::object> pythonCompletionHookFn(py::object fn) {
+  return std::shared_ptr<py::object>(
+      new py::object(std::move(fn)), [](py::object* fn) {
+        if (Py_IsInitialized() && !Py_IsFinalizing()) {
+          py::gil_scoped_acquire gil;
+          delete fn;
+          return;
+        }
+        fn->release();
+        delete fn;
+      });
+}
+
+void registerPythonCompletionHook(
+    const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+    int64_t hookId,
+    py::object hook) {
+  TORCH_CHECK_TYPE(
+      PyCallable_Check(hook.ptr()),
+      "register_completion_hook: hook must be callable");
+  TORCH_CHECK(
+      pg->supportsCompletionHooks(),
+      "register_completion_hook: backend ",
+      pg->getBackendName(),
+      " does not support completion hooks");
+  auto fn = pythonCompletionHookFn(std::move(hook));
+  // Don't hold the GIL while taking backend locks.
+  py::gil_scoped_release noGil;
+  pg->registerCompletionHook(
+      hookId, [fn](const ::c10d::CompletionHookArgs& args) {
+        if (!Py_IsInitialized() || Py_IsFinalizing()) {
+          return;
+        }
+        py::gil_scoped_acquire gil;
+        try {
+          (*fn)(args);
+        } catch (py::error_already_set& e) {
+          e.discard_as_unraisable(*fn);
+        } catch (const std::exception& e) {
+          PyErr_SetString(PyExc_RuntimeError, e.what());
+          PyErr_WriteUnraisable(fn->ptr());
+        }
+      });
+}
+
 } // anonymous namespace
 
 PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true)
@@ -1656,6 +1704,20 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
           "op_id",
           &::c10d::PostHookArgs::op_id,
           "Same ``op_id`` as the matching pre-hook call.");
+
+  py::class_<::c10d::CompletionHookArgs>(
+      module,
+      "CompletionHookArgs",
+      "Arguments passed to a completion hook, see ``ProcessGroup.register_completion_hook``.")
+      .def(py::init<>())
+      .def_readwrite(
+          "completion_key",
+          &::c10d::CompletionHookArgs::completionKey,
+          "``Work.completion_key`` of the completed operation.")
+      .def_readwrite(
+          "duration_ms",
+          &::c10d::CompletionHookArgs::duration_ms,
+          "The backend's measurement of the operation in milliseconds, or ``None`` if it does not time operations. nccl2 times operations only with ``TORCH_NCCL_ENABLE_TIMING=1`` or after ``_enable_collectives_timing()``; operations issued before that report ``None``.");
 
   py::class_<::c10d::DistributedBackendOptions>(
       module, "_DistributedBackendOptions")
@@ -3390,7 +3452,7 @@ Args:
           .def_property_readonly(
               "supports_completion_hooks",
               &::c10d::ProcessGroup::supportsCompletionHooks,
-              "Whether the default backend reports operation completion to completion hooks, which can only be registered from C++.")
+              "Whether the default backend supports ``register_completion_hook``.")
           .def(
               "register_pre_hook",
               &::c10d::ProcessGroup::registerPreHook,
@@ -3435,6 +3497,49 @@ Args:
               &::c10d::ProcessGroup::unregisterPostHook,
               py::arg("hook_id"),
               "Remove the post-hook registered with ``hook_id``.")
+          .def(
+              "register_completion_hook",
+              &registerPythonCompletionHook,
+              py::arg("hook_id"),
+              py::arg("hook"),
+              R"(
+Register ``hook`` to be called with a ``CompletionHookArgs`` once for each
+operation that the default backend reports as completed successfully after
+the hook is registered. Failed, timed-out and aborted operations are not reported.
+Correlate ``CompletionHookArgs.completion_key`` with ``Work.completion_key``
+from a post-hook, which may run after the completion hook. Keys need not map
+one-to-one to post-hook ``Work`` objects: a key may have no matching post-hook,
+e.g. for operations issued before the post-hook was registered or inside a
+coalescing window, and a post-hook ``Work`` may never be reported.
+
+``hook`` runs with the GIL held on a backend thread such as the watchdog, or on
+a thread issuing, waiting for or shutting down operations on the group, and the
+backend waits for it to return. Calls may run concurrently on several threads
+and out of order. ``hook`` must be fast and thread-safe, and must not block or
+issue operations on process groups. Exceptions are reported as unraisable.
+Hooks are not called once the interpreter is finalizing; destroy the group
+before the interpreter exits. A hook that references its group
+keeps the group alive until unregistered. Raises if the default backend does
+not support completion hooks, see ``supports_completion_hooks``.
+
+Must not be called concurrently with other methods of the group.
+
+Args:
+    hook_id (int): Identifier for ``unregister_completion_hook``. Registering
+        an existing id keeps the existing hook; unregister it first to replace
+        it.
+    hook (Callable[[CompletionHookArgs], None]): The hook.
+)")
+          .def(
+              "unregister_completion_hook",
+              &::c10d::ProcessGroup::unregisterCompletionHook,
+              py::arg("hook_id"),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Remove the completion hook registered with ``hook_id``. A call already running
+or about to start may still run after this returns. Does nothing if
+``hook_id`` is not registered on a backend that supports completion hooks. Must
+not be called concurrently with other methods of the group.)")
           .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
                 return torch::jit::toPyObject(c10::IValue(std::move(self)));
           })
@@ -3627,7 +3732,7 @@ Args:
           .def_property_readonly(
               "supports_completion_hooks",
               &::c10d::Backend::supportsCompletionHooks,
-              "Whether the backend reports operation completion to completion hooks, which can only be registered from C++.")
+              "Whether the backend reports operation completion to completion hooks, see ``ProcessGroup.register_completion_hook``.")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -5160,6 +5265,10 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                   corresponding collective communication.
             )")
           .def_property_readonly("timeout", &::c10d::Work::getTimeout)
+          .def_property_readonly(
+              "completion_key",
+              &::c10d::Work::getCompletionKey,
+              "Identifies this operation in ``CompletionHookArgs.completion_key``. Unique among operations on the backend whose completion may still be reported; a backend may reuse the key only after that.")
           .def(
               "boxed",
               [](c10::intrusive_ptr<::c10d::Work> self) {
