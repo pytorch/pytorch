@@ -22,7 +22,7 @@ samples only, see build_dataset) that are in TD's cut of the config, outside
 the hedge budget; td_replay ranks them first, as TD's PreviouslyFailedInPR
 does.
 As in select_tests.select, a sample with no changed files, a change to test
-infrastructure (needs_run_all) or more than MAX_CHANGED_FILES runs everything
+infrastructure or more than MAX_CHANGED_FILES (select_tests.run_all_reason) runs everything
 under every model policy, at no model cost; `final+tdN` keeps TD's cut in a
 config with no test time there too, as it does for any run-all. A malformed answer counts as an
 error, as select_tests records it.
@@ -41,8 +41,8 @@ out under every policy and counted on stderr too, as in CI the grep works.
 run_test.py applies TD, and so the selection, only in the pull, trunk and
 ROCm workflows, and not on macOS, in xpu or onnx builds, under NO_TD (from
 force-no-td or .ci/pytorch/test.sh, see NO_TD_CONFIGS) or with
-TESTS_TO_INCLUDE (test/run_test.py's --enable-td default and main(); see
-td_job). Other jobs (inductor's unit tests, periodic, slow, ...) run
+TESTS_TO_INCLUDE (test/run_test.py's --enable-td default, which calls
+td_enabled_workflow and td_enabled_job, and main(); see td_job). Other jobs (inductor's unit tests, periodic, slow, ...) run
 every test under every policy, so their failures are left out
 of the truth, and configs no TD job runs are left out of the cost share
 (the report's dollar model prices the inductor ones separately). Jobs are
@@ -96,17 +96,17 @@ from tools.testing.llm_td.select_tests import (
     build_prompt,
     CHECKOUT_PREAMBLE,
     git_grep,
-    MAX_CHANGED_FILES,
+    run_all_reason,
     SCHEMA,
     SYSTEM_PROMPT,
     test_minutes,
 )
-from tools.testing.llm_td.selection import (
-    LLM_TD_HEDGE,
-    needs_run_all,
-    parse_model_output,
-    Selection,
+from tools.testing.llm_td.selection import LLM_TD_HEDGE, parse_model_output, Selection
+from tools.testing.target_determination.heuristics.utils import (
+    td_enabled_job,
+    td_enabled_workflow,
 )
+from tools.testing.test_run import TestRun
 
 
 if TYPE_CHECKING:
@@ -185,15 +185,10 @@ def fallback_seconds(path: Path) -> dict[str, dict[str, float]]:
     return json.loads(path.read_text()).get("default", {})
 
 
-def td_workflow(name: str) -> bool:
-    """Whether run_test.py enables TD under GITHUB_WORKFLOW `name` (see test/run_test.py --enable-td)."""
-    return name in ("trunk", "pull") or name.startswith(("rocm-", "periodic-rocm-"))
-
-
 def td_job(
     uses: str, build_environment: str, force_no_td: object, tests_to_include: str
 ) -> bool:
-    """The job-level rest of run_test.py's TD check: not IS_MACOS, no xpu/onnx BUILD_ENVIRONMENT, no NO_TD from force-no-td, no TESTS_TO_INCLUDE.
+    """The job-level rest of run_test.py's TD check: td_enabled_job, with NO_TD from force-no-td, and no TESTS_TO_INCLUDE.
 
     A tests-to-include expression (pull's and trunk's workflow_dispatch input)
     is empty on PRs. ci_jobs also applies test.sh's NO_TD, which depends on
@@ -202,11 +197,9 @@ def td_job(
     sample is scored as a PR push), and TD switching off when it has no
     prioritizations."""
     include = tests_to_include.strip()
-    return (
-        uses != "_mac-test.yml"
-        and not re.search("xpu|onnx", build_environment)
-        and force_no_td not in (True, "true")
-        and (not include or include.startswith("${{"))
+    macos, no_td = uses == "_mac-test.yml", force_no_td in (True, "true")
+    return td_enabled_job(build_environment, macos=macos, no_td=no_td) and (
+        not include or include.startswith("${{")
     )
 
 
@@ -249,7 +242,7 @@ def ci_jobs(
         if set([on] if isinstance(on, str) else on or []) - {"workflow_call"}:
             workflow = wf.get("name", "")
             for name, c, ok in test_jobs(file):
-                out[td_workflow(workflow) and ok].add((workflow, name, c))
+                out[td_enabled_workflow(workflow) and ok].add((workflow, name, c))
     return out
 
 
@@ -269,7 +262,7 @@ def job_runs_td(job: str, workflow: str | None = None) -> bool:
     (samples built before it was recorded) every workflow is searched, and a
     job that matches both TD and non-TD jobs, such as a trunk job periodic
     reuses the name of, counts as TD."""
-    if workflow is not None and not td_workflow(workflow):
+    if workflow is not None and not td_enabled_workflow(workflow):
         return False
     name, c = job.rsplit(" / ", 1)[0], config_of(job)
     jobs = ci_jobs()
@@ -333,30 +326,21 @@ def hedge(
     untimed: Collection[str],
     previous: Collection[str] = (),
 ) -> set[str]:
-    """The `previous` failures in TD's cut `td_cut`, and TD's positive-score files that fit in `share` of `seconds`' total, filled greedily in TD's order.
+    """What Selection.split adds to `sel` in a job whose test list is `seconds` and `untimed`, ranked by TD with `scored` positive, given a `share` hedge.
 
-    This is selection.Selection.split for any share and with a job's test
-    list taken to be `seconds` and `untimed` (test_hedge_matches_split pins
-    the two together). As in split, the previous failures are not charged to
-    the budget, files the selection already covers cost nothing, and a file
-    that does not fit is skipped while smaller ones after it may still fit.
-    Files with no recorded time are skipped rather than added for free. If
-    the selection covers none of `seconds`' files and the `untimed` ones and
-    that adds nothing, it is TD's cut `td_cut`. Unlike split it takes any
-    share. If `seconds` sums to 0 it is `td_cut` too: apply_selection does
-    not enforce a job with no test times."""
+    That is the `previous` failures in TD's cut `td_cut` and TD's positive-score
+    files that fit in `share` of `seconds`' total. It is `td_cut` where
+    apply_selection keeps TD's split: when the split chooses nothing, or
+    `seconds` sums to 0."""
     if not sum(seconds.values()):
         return set(td_cut)
-    budget = share * sum(seconds.values())
-    out = {f for f in previous if f in td_cut and not sel.covers(f, config)}
-    for f in scored:
-        t = seconds.get(f, 0.0)
-        if f not in out and t > 0 and t <= budget and not sel.covers(f, config):
-            budget -= t
-            out.add(f)
-    if not out and not any(sel.covers(f, config) for f in [*seconds, *untimed]):
+    positive = set(scored)
+    job = [*seconds, *untimed]
+    ranked = [TestRun(f) for f in scored if f in job] + [TestRun(f) for f in job if f not in positive]  # fmt: skip
+    split = sel.split(ranked, lambda x: float(x.test_file in positive), seconds, config, previously_failed=previous, td_include=td_cut, share=share)  # fmt: skip
+    if split.chose_nothing:
         return set(td_cut)
-    return out
+    return split.previously_failed | split.hedged
 
 
 grep_at = functools.cache(git_grep)
@@ -452,8 +436,7 @@ def policy(
 
 def unasked(s: dict) -> bool:
     """Whether select_tests.select runs everything on `s` without asking the model."""
-    changed = s["changed_files"]
-    return not changed or needs_run_all(changed) or len(changed) > MAX_CHANGED_FILES
+    return run_all_reason(s["changed_files"]) is not None
 
 
 def sample_prompt(sample: dict, minutes: dict) -> str:
