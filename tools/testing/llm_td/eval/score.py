@@ -443,7 +443,13 @@ def unasked(s: dict) -> bool:
 
 
 def sample_prompt(sample: dict, minutes: dict) -> str:
-    return build_prompt(sample["title"], sample["body"] or "", sample["diffstat"], sample["diff"], sample["candidates"], minutes)  # fmt: skip
+    """The prompt select_tests.select builds for `sample`, which lists apart
+    the candidate test files that its diff adds, as a new file or the new path
+    of a moved one (the diff detects renames, while select diffs with --no-renames)."""
+    found = re.findall(r"^diff --git a/\S+ b/(\S+)\nnew file mode |^rename to (\S+)$", sample["diff"], re.MULTILINE)  # fmt: skip
+    added = {a or b for a, b in found}
+    new = {c for c in sample["candidates"] if f"test/{c}.py" in added and re.match(r"test/([\w/]+/)?test_\w+\.py$", f"test/{c}.py")}  # fmt: skip
+    return build_prompt(sample["title"], sample["body"] or "", sample["diffstat"], sample["diff"], sample["candidates"], minutes, new)  # fmt: skip
 
 
 def prompt_sha(prompt: str, agentic: bool = False) -> str:
