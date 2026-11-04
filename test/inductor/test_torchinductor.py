@@ -2296,6 +2296,11 @@ class CommonTemplate:
 
     @unittest.skipIf(TEST_WITH_ASAN, "inf to int cast is UB under sanitizers")
     def test_index_propagation_to_dtype_inf(self):
+        if is_cpp_backend(self.device) and not cpu_vec_isa.pick_vec_isa():
+            raise unittest.SkipTest(
+                "inf to int cast is UB; scalar C++ results depend on the compiler"
+            )
+
         def fn():
             x = torch.full((2,), 0.0, device=self.device)
             y = torch.log(x)
