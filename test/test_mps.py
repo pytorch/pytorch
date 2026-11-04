@@ -15565,6 +15565,40 @@ class TestCommon(TestCase):
     exact_dtype = True
 
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("shape,dim", [((2, 3), -1), ((3, 8192), -1), ((3, 33), 0), ((4100, 7), 0)])
+    @parametrize("margin", [8.0, 18.0, 40.0])
+    @parametrize("scale", [-1.0, 0.25])
+    def test_log_softmax_backward_collapse(self, device, dtype, shape, dim, margin, scale):
+        x = torch.full(shape, -math.inf, dtype=dtype)
+        target = shape[dim] // 2
+        x.select(dim, target).fill_(0)
+        x.select(dim, 0).fill_(-margin)
+        x.select(dim, shape[dim] - 1).fill_(-margin)
+        grad = torch.zeros_like(x)
+        grad.select(dim, target).fill_(scale)
+        # Form the dominant gradient from the tail, avoiding cancellation even in float64.
+        tail_prob = math.exp(-margin) / (1 + 2 * math.exp(-margin))
+        expected = torch.zeros_like(x)
+        expected.select(dim, target).fill_(2 * scale * tail_prob)
+        expected.select(dim, 0).fill_(-scale * tail_prob)
+        expected.select(dim, shape[dim] - 1).fill_(-scale * tail_prob)
+        x = x.to(device).requires_grad_()
+        actual = torch.autograd.grad(x.log_softmax(dim), x, grad.to(device))[0]
+        rtol = {torch.float32: 2e-5, torch.float16: 2e-3, torch.bfloat16: 2e-2}[dtype]
+        self.assertEqual(actual.cpu(), expected, atol=0, rtol=rtol)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("margin", [0.0, 0.5, 0.7, 2.0, 20.0, math.inf, math.nan])
+    @parametrize("grad_values", [(1, 0, 0), (1, 1, 1), (1, -2, 3), (math.inf, 0, 0), (math.nan, 1, 0)])
+    def test_log_softmax_backward_expm1(self, device, dtype, margin, grad_values):
+        output = torch.tensor([0, -margin, -margin], dtype=torch.float64).log_softmax(0).to(dtype)
+        grad = torch.tensor(grad_values, dtype=dtype)
+        expected = torch.ops.aten._log_softmax_backward_data(grad.double(), output.double(), 0, torch.float64)
+        actual = torch.ops.aten._log_softmax_backward_data(grad.to(device), output.to(device), 0, dtype)
+        rtol = {torch.float32: 2e-5, torch.float16: 2e-3, torch.bfloat16: 2e-2}[dtype]
+        self.assertEqual(actual.cpu(), expected.to(dtype), atol=1e-7, rtol=rtol)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize("shape,dim", [((3, 33), 0), ((256, 33), 0), ((257, 4096), 1)])
     @parametrize("values", [
         (0, -17, -math.inf), (-17, 0, -math.inf), (-20, -math.inf, 0),

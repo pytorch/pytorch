@@ -1,4 +1,5 @@
 #include <ATen/native/mps/kernels/SoftMax.h>
+#include <c10/metal/expm1f.h>
 #include <c10/metal/reduction_utils.h>
 #include <metal_stdlib>
 using namespace metal;
@@ -59,8 +60,13 @@ struct LogSoftmaxBackwardOp {
 
   template <typename T, typename idx_t>
   T operator()(device const T* grad, device const T* output, idx_t i) const {
-    return static_cast<T>(
-        float(grad[i]) - precise::exp(float(output[i])) * sum);
+    const float log_p = float(output[i]);
+    if (log_p > -0.6931471805599453f && log_p <= 0 && isfinite(sum)) {
+      // Preserve 1 - p when exp(log_p) would round to one.
+      return static_cast<T>(
+          (float(grad[i]) - sum) - c10::metal::expm1f(log_p) * sum);
+    }
+    return static_cast<T>(float(grad[i]) - precise::exp(log_p) * sum);
   }
 };
 
