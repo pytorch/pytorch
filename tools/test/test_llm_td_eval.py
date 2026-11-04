@@ -35,7 +35,7 @@ from tools.testing.llm_td.eval.score import (
     truth_pairs,
 )
 from tools.testing.llm_td.eval.td_replay import top25_per_config
-from tools.testing.llm_td.selection import apply_selection, Selection
+from tools.testing.llm_td.selection import apply_selection, CallSplit, Selection
 from tools.testing.target_determination.heuristics.interface import TestPrioritizations
 from tools.testing.test_run import TestRun
 
@@ -646,8 +646,8 @@ class TestScore(unittest.TestCase):
                 mock.patch.object(selection, "get_pr_number", return_value=1),
                 mock.patch("sys.stderr", io.StringIO()),
             ):
-                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config=config, td_enabled=True, previously_failed=prev, call_id="c")  # fmt: skip
-            ran = {x.test_file for x in applied.include}
+                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config=config, td_enabled=True, previously_failed=prev)  # fmt: skip
+            ran = {x.test_file for x in CallSplit(include, exclude, applied).include}
             self.assertEqual({f for f in job if choice.covers(f, config)}, ran, (seconds, job, n, scored, out, prev, changed, how))  # fmt: skip
 
     def test_hedge_previous_failures(self) -> None:
