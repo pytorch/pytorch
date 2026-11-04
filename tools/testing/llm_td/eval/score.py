@@ -462,7 +462,7 @@ def sample_prompt(sample: dict, minutes: dict) -> str:
 
 
 def prompt_sha(prompt: str, agentic: bool = False) -> str:
-    """A hash of everything the model is sent: the system prompt, SCHEMA and `prompt` and, when `agentic`, AGENTIC_TOOLS and CHECKOUT_PREAMBLE."""
+    """A hash of the text the model is sent: the system prompt, SCHEMA and `prompt` and, when `agentic`, AGENTIC_TOOLS and CHECKOUT_PREAMBLE. query_model's other CLI flags (permissions, --add-dir, --bare) are not hashed."""
     sent = [SYSTEM_PROMPT, SCHEMA, prompt]
     if agentic:
         sent += [AGENTIC_TOOLS, CHECKOUT_PREAMBLE]
