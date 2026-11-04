@@ -802,29 +802,30 @@ class TestHubCache(TestCase):
 
     def test_get_cache_or_reload_removes_stale_work_dir(self):
         hub_dir = hub.get_dir()
-        stale = os.path.join(hub_dir, "owner_repo_main~killed01")
+        stale = os.path.join(hub_dir, ".owner_repo_main~killed01")
         os.makedirs(os.path.join(stale, "repo-main"))
         old = time.time() - 2 * hub._STALE_WORK_DIR_S
         for path in (stale, os.path.join(stale, "repo-main")):
             os.utime(path, (old, old))
         # A download in progress, possibly without the lock: its directory is
         # old, but the file being downloaded into it was just written.
-        live = os.path.join(hub_dir, "owner_repo_main~running")
+        live = os.path.join(hub_dir, ".owner_repo_main~running")
         os.makedirs(live)
         open(os.path.join(live, "archive.zip.partial"), "w").close()
         os.utime(live, (old, old))
         # A download that has received nothing for longer than the lock timeout,
         # whose waiters gave up and download on their own.
-        stalled = os.path.join(hub_dir, "owner_repo_main~stalled")
+        stalled = os.path.join(hub_dir, ".owner_repo_main~stalled")
         os.makedirs(stalled)
         partial = os.path.join(stalled, "archive.zip.partial")
         open(partial, "w").close()
         waited = time.time() - 2 * hub._CACHE_LOCK_TIMEOUT_S
         for path in (stalled, partial):
             os.utime(path, (waited, waited))
-        # The cached repo of ref "main.1".
-        other_ref = os.path.join(hub_dir, "owner_repo_main.1")
+        # The cached repo of ref "main~1", which GitHub resolves to a commit.
+        other_ref = os.path.join(hub_dir, "owner_repo_main~1")
         os.makedirs(other_ref)
+        os.utime(other_ref, (old, old))
         url = self._make_hub_archive("repo")
         with patch.object(hub, "_git_archive_link", return_value=url):
             self._load_repo("repo")
@@ -906,6 +907,23 @@ class TestHubCache(TestCase):
             patch.object(hub, "_lock_unavailable", return_value=error),
             patch.object(FileLock, "__enter__", side_effect=[busy, AssertionError]),
             self.assertWarnsRegex(UserWarning, "No locks available"),
+        ):
+            state_dict = hub.load_state_dict_from_url(
+                url, model_dir=model_dir, progress=False
+            )
+        self.assertEqual(state_dict["w"], torch.arange(10))
+
+    @skipIfOldFilelock
+    @unittest.skipIf(IS_WINDOWS, "flock is Unix only")
+    def test_load_state_dict_from_url_flock_unsupported(self):
+        url, model_dir = self._save_weights()
+        # NFS without lockd. filelock 3.x reports it as a held lock, so only the
+        # probe avoids waiting, which would end in the timeout warning instead.
+        enolck = OSError(errno.ENOLCK, "No locks available")
+        with (
+            patch("fcntl.flock", side_effect=enolck),
+            patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 5),
+            self.assertWarnsRegex(UserWarning, "Could not lock.*No locks available"),
         ):
             state_dict = hub.load_state_dict_from_url(
                 url, model_dir=model_dir, progress=False

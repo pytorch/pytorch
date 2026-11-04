@@ -147,15 +147,16 @@ downloads it while the others wait and then use the cached copy. This needs file
 later; with an older filelock, every process downloads the entry, as in earlier releases.
 On Linux and macOS the lock files (`<entry>.lock`) stay next to the entries; they are
 group-writable if the directory is, so that users who share the cache through a group can take
-each other's locks.
+each other's locks. On Linux this also needs the setgid bit on the directory (`chmod g+s`), so
+that new lock files get the shared group instead of their creator's primary group.
 If the lock can't be taken (for example on a filesystem without `flock` support, or a lock file
 another user created without giving this user write access) or another process holds it for
 more than an hour, the entry is downloaded without it, as in earlier releases, and a
 `UserWarning` is raised. Checkpoints in the legacy zip format are extracted on every load,
 without the lock.
 `force_reload=True` isn't coordinated this way: every caller that passes it downloads the
-entry again, one at a time, and replaces the copy other processes may be using, so avoid
-passing it from several processes at once.
+entry again (one at a time, when the lock can be taken) and replaces the copy other processes
+may be using, so avoid passing it from several processes at once.
 
 ### Known limitations:
 

@@ -336,7 +336,8 @@ def _cache_lock(path, stacklevel, verbose):
     lock_path = path + ".lock"
     # filelock gives the lock files it creates this mode, whatever the umask.
     # They are group-writable only in a group-writable directory (a cache shared
-    # by a group), so that every member of the group can take the lock.
+    # by a group), so that every member of the group can take the lock. On Linux,
+    # that also needs a setgid directory, so that the files get the shared group.
     lock_dir_mode = os.stat(os.path.dirname(lock_path)).st_mode
     mode = 0o664 if lock_dir_mode & stat.S_IWGRP else 0o644
 
@@ -358,9 +359,10 @@ def _cache_lock(path, stacklevel, verbose):
     except filelock.Timeout:
         message = (
             f"Another process has held {lock_path} for more than "
-            f"{_CACHE_LOCK_TIMEOUT_S} s, so this process downloads the entry as "
-            "well. If downloading it takes longer than that, populate the cache "
-            "from one process before the others load it."
+            f"{_CACHE_LOCK_TIMEOUT_S} s, so this process stops waiting and "
+            "downloads the entry if it isn't cached by then. If downloading it "
+            "takes longer than that, populate the cache from one process before "
+            "the others load it."
         )
     except (NotImplementedError, OSError) as e:
         message = (
@@ -415,8 +417,8 @@ def _get_cache_or_reload(
         return repo_dir
 
     # force_reload is not coordinated between processes: each caller that passes
-    # it downloads the repo again, one at a time, and replaces the directory that
-    # other processes may be using.
+    # it downloads the repo again (one at a time, while the lock can be taken) and
+    # replaces the directory that other processes may be using.
     with _cache_lock(repo_dir, stacklevel=5, verbose=verbose):
         # Another process may have populated the cache while we waited.
         if not force_reload and os.path.exists(repo_dir):
@@ -430,9 +432,10 @@ def _get_cache_or_reload(
 
         # Download and extract in a private directory: different repos on the same
         # branch, and refs of a repo at the same commit, would otherwise share the
-        # archive or the extracted top-level directory. "~" can't appear in a git
-        # ref, so no other ref's directory has this prefix.
-        work_prefix = owner_name_branch + "~"
+        # archive or the extracted top-level directory. Cached repos never start
+        # with "." (GitHub owner names can't), so the cleanup below can't match
+        # one, even for a ref like "main~1".
+        work_prefix = "." + owner_name_branch + "~"
         # Remove work directories of processes killed mid-download. A running
         # download keeps writing to a file in its work directory, so only those
         # untouched for longer than _STALE_WORK_DIR_S are removed.
