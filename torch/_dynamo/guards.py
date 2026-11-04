@@ -87,6 +87,7 @@ from torch._dynamo.package import (
     SerializedCode,
 )
 from torch._dynamo.source import (
+    ComputedLazyConstantSource,
     get_global_source_name,
     get_local_source_name,
     IndexedSource,
@@ -951,6 +952,23 @@ def uninteresting_files() -> set[str]:
 _CLOSURE_VARS: dict[str, object] | None = None
 
 
+def is_safe_dict_key(value: object) -> bool:
+    value_type = type(value)
+    if value_type in common_constant_types:
+        return True
+    if value_type in (tuple, frozenset, torch.Size):
+        return all(is_safe_dict_key(item) for item in cast(Any, value))
+    return False
+
+
+def relational_dict_contains(key: object, mapping: object) -> bool | None:
+    if type(mapping) is not dict or not is_safe_dict_key(key):
+        return None
+    if not all(is_safe_dict_key(dict_key) for dict_key in mapping):
+        return None
+    return dict.__contains__(mapping, key)
+
+
 def _get_closure_vars() -> dict[str, object]:
     global _CLOSURE_VARS
     if _CLOSURE_VARS is None:
@@ -961,6 +979,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___key_to_id": key_to_id,
             "___dict_version": dict_version,
             "___dict_contains": lambda a, b: dict.__contains__(b, a),
+            "___relational_dict_contains": relational_dict_contains,
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_count_iter": normalize_count_iter,
             "___normalize_range_iter": normalize_range_iter,
@@ -2407,6 +2426,15 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, ComputedLazyConstantSource):
+            if not base_guard_manager:
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x, src=source: src.eval_with_base(x),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         else:
             raise AssertionError(
                 f"missing guard manager builder {source} - {source.name}"
@@ -2742,6 +2770,32 @@ class GuardBuilder(GuardBuilderBase):
             key,
             get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
+        )
+        self.already_added_code_parts.add(code)
+
+    @skip_guard_check_spec
+    def RELATIONAL_DICT_CONTAINS(
+        self,
+        guard: Guard,
+        *,
+        dict_source: Source,
+        expected: bool,
+    ) -> None:
+        key_ref = self.arg_ref(guard)
+        dict_ref = self.source_ref(dict_source)
+        code = f"___relational_dict_contains({key_ref}, {dict_ref}) is {expected}"
+        if code in self.already_added_code_parts:
+            return
+
+        self._set_guard_export_info(guard, [code])
+        relation = "contain" if expected else "not contain"
+        reason = (
+            f"{dict_ref} must {relation} {key_ref}; Dynamo specialized the compiled "
+            "code on this membership result."
+        )
+        self.add_python_lambda_leaf_guard_to_root(
+            [code],
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
         )
         self.already_added_code_parts.add(code)
 

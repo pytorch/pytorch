@@ -27,6 +27,7 @@ from collections.abc import Callable, Iterator
 from typing import Any, cast, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
 
+from torch._guards import GuardSource
 from torch.utils._pytree import MappingKey
 
 from .. import graph_break_hints, polyfills, variables
@@ -44,12 +45,14 @@ from ..exc import (
     unimplemented,
     Unsupported,
 )
-from ..guards import GuardBuilder, install_guard
+from ..guards import GuardBuilder, install_guard, is_safe_dict_key
 from ..source import (
     AttrSource,
+    ComputedLazyConstantSource,
     DictGetItemSource,
     is_constant_source,
     is_from_local_source,
+    LocalSource,
     TypeDictSource,
 )
 from ..utils import (
@@ -161,6 +164,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         self,
         items: dict[VariableTracker, VariableTracker]
         | dict[HashableTracker, VariableTracker],
+        mutation_log: dict[HashableTracker, None] | tuple[()] | None = (),
         **kwargs: Any,
     ) -> None:
         # .clone() pass these arguments in kwargs but they're recreated a few
@@ -203,10 +207,36 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             not is_from_local_source(self.source) if self.source else True
         )
         self.original_items = {key.vt: value for key, value in self.items.items()}
+        self.mutation_log: dict[HashableTracker, None] | None = (
+            dict(mutation_log)
+            if mutation_log is not None and not self.should_reconstruct_all
+            else None
+        )
         # Re-entrancy guard for is_python_constant against self-referential
         # dicts. Both forms re-enter this same instance's is_python_constant, so
         # a per-instance flag suffices.
         self._checking_python_constant = False
+
+    def _record_mutation(self, key: HashableTracker) -> None:
+        if (
+            type(self) is not ConstDictVariable
+            or self.should_reconstruct_all
+            or self.mutation_log is None
+        ):
+            return
+        if not is_safe_dict_key(_get_literal_key(key.vt)) or (
+            not self.mutation_log
+            and any(
+                not is_safe_dict_key(_get_literal_key(stored_key.vt))
+                for stored_key in self.items
+            )
+        ):
+            # Keep callback keys on the existing guarded replay path.
+            self.install_dict_keys_match_guard()
+            self.mutation_log = None
+        else:
+            # Keep the first incoming key operand and write position.
+            self.mutation_log.setdefault(key, None)
 
     def as_proxy(self) -> dict[Any, Any]:
         return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
@@ -440,6 +470,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         value = self.items.get(key)
         # The deletion marker is explicit; `isinstance` would realize lazy values.
         if value is None or type(value) is variables.DeletedVariable:
+            self.install_dict_contains_guard(tx, key, key_present=False)
             raise_observed_exception(KeyError, tx, args=[arg])
         return value
 
@@ -493,7 +524,8 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         key_present: bool | None = None,
     ) -> None:
         # Key guarding - These are the cases to consider
-        # 1) The dict has been mutated. In this case, we would have already
+        # 1) The dict has been mutated in such a way that it needs a full
+        # reconstruction. In this case, we would have already
         # inserted a DICT_KEYS_MATCH guard, so we can skip.
         #
         # 2) The key is a literal or a sourceless constant. Guard membership.
@@ -508,7 +540,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if not self.source:
             return
 
-        if tx.output.side_effects.is_modified(self):
+        if tx.output.side_effects.is_modified(self) and self.should_reconstruct_all:
             return
 
         # Reuse a previous lookup result to avoid repeating key comparisons.
@@ -575,10 +607,57 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         item: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4657-L4668
+        relational_result = self._maybe_relational_dict_contains(tx, item)
+        if relational_result is not None:
+            return relational_result
+
         key = self._lookup_key(tx, item)
         value = self.items.get(key)
         contains = value is not None and type(value) is not variables.DeletedVariable
         self.install_dict_contains_guard(tx, key, key_present=contains)
+        return VariableTracker.build(tx, contains)
+
+    def _maybe_relational_dict_contains(
+        self,
+        tx: "InstructionTranslatorBase",
+        item: VariableTracker,
+    ) -> VariableTracker | None:
+        if (
+            self.source is None
+            or item.source is None
+            or not isinstance(self.source, LocalSource)
+            or not (
+                isinstance(item.source, LocalSource)
+                or (
+                    isinstance(item.source, ComputedLazyConstantSource)
+                    and item.source.guard_source is GuardSource.LOCAL
+                )
+            )
+            or tx.output.side_effects.is_modified(self)
+            or not isinstance(item, variables.LazyVariableTracker)
+            or item.is_realized()
+        ):
+            return None
+
+        real_dict = tx.output.resolve_source_value(self.source)
+        real_key = item.original_value()
+        if (
+            type(real_dict) is not dict
+            or not is_safe_dict_key(real_key)
+            or not all(is_safe_dict_key(key) for key in real_dict)
+        ):
+            return None
+
+        contains = dict.__contains__(real_dict, real_key)
+        install_guard(
+            item.source.make_guard(
+                functools.partial(
+                    GuardBuilder.RELATIONAL_DICT_CONTAINS,
+                    dict_source=self.source,
+                    expected=contains,
+                )
+            )
+        )
         return VariableTracker.build(tx, contains)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -595,6 +674,14 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if type(self) is ConstDictVariable:
+            check_positional(tx, "dict", len(args), 0, 1)
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.mutable_mapping_update),
+                [self, *args],
+                kwargs,
+            )
+
         from . import DictBuiltinVariable
 
         temp_dict_vt = DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
@@ -786,7 +873,23 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 # NB - Guard on all the keys of the other dict to ensure
                 # correctness.
                 other.install_dict_keys_match_guard()
+                log_mutations = (
+                    type(self) is ConstDictVariable
+                    and not self.should_reconstruct_all
+                    and self.mutation_log is not None
+                )
+                mappings = (other,) if self.mutation_log else (self, other)
+                if log_mutations and any(
+                    not is_safe_dict_key(_get_literal_key(key.vt))
+                    for mapping in mappings
+                    for key in mapping.items
+                ):
+                    self.mutation_log = None
+                    log_mutations = False
                 self.items.update(other.items)
+                if log_mutations:
+                    for key in other.items:
+                        self._record_mutation(key)
             elif (
                 isinstance(
                     other,
@@ -796,7 +899,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             ):
                 keys = other.call_method(tx, "keys", [], {})
                 for key in unpack_iterable(tx, keys):
-                    self.items[HashableTracker(key)] = generic_getitem(tx, other, key)
+                    hkey = HashableTracker(key)
+                    self.items[hkey] = generic_getitem(tx, other, key)
+                    self._record_mutation(hkey)
             else:
                 for idx, item in enumerate(unpack_iterable(tx, other)):
                     pair = unpack_iterable(tx, item)
@@ -809,9 +914,13 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                                 f"#{idx} has length {len(pair)}; 2 is required"
                             ],
                         )
-                    self.items[HashableTracker(pair[0])] = pair[1]
+                    key = HashableTracker(pair[0])
+                    self.items[key] = pair[1]
+                    self._record_mutation(key)
         for k, v in kwargs.items():
-            self.items[HashableTracker(VariableTracker.build(tx, k))] = v
+            key = HashableTracker(VariableTracker.build(tx, k))
+            self.items[key] = v
+            self._record_mutation(key)
         return ConstantVariable.create(None)
 
     def dict_setdefault(
@@ -849,6 +958,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 # OrderedDict.setdefault looks up, then hashes again to insert.
                 key = HashableTracker(args[0])
             self.items[key] = x
+            self._record_mutation(key)
             return x
 
     def dict_reversed(
@@ -930,8 +1040,16 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if not self.is_mutable():
             return super().mp_ass_subscript_impl(tx, key, value)
 
-        # value=None signals delete (CPython NULL sentinel).
-        self.install_dict_keys_match_guard()
+        # A setitem on a local dict does not need to guard the full key set;
+        # the side-effect replay only updates the changed item. Deletion and
+        # non-local mutations still need the conservative guard because their
+        # replay may clear and rebuild the whole dict.
+        if (
+            value is None
+            or self.source is None
+            or not is_from_local_source(self.source)
+        ):
+            self.install_dict_keys_match_guard()
         if isinstance(self, OrderedDictVariable):
             _guard_nan_key(key)
             hkey = HashableTracker(key)
@@ -948,6 +1066,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             self.should_reconstruct_all = True
         else:
             self.items[hkey] = value
+            self._record_mutation(hkey)
         return ConstantVariable.create(None)
 
     def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
