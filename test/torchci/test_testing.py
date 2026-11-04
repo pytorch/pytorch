@@ -602,8 +602,9 @@ class TestReportEnablement(TestCase):
 
 @skipIfTorchDynamo("tests run_test.py's scheduling, not the tests it runs")
 class TestSerialFileXdistWorkers(TestCase):
-    """run_test.py runs the non-@serial tests of XDIST_SERIAL_LIST files under
-    xdist only where each worker keeps the per-process isolation it needs."""
+    """run_test.py runs the non-@serial tests of XDIST_SERIAL_FILES under xdist
+    only where each worker keeps the per-process isolation it needs, and
+    XDIST_SERIAL_CPU_LIST files only on CPU-only jobs."""
 
     def workers(
         self,
@@ -643,6 +644,10 @@ class TestSerialFileXdistWorkers(TestCase):
         self.assertEqual(self.workers(cuda=False), 3)
 
     def test_unlisted_file(self) -> None:
+        self.assertEqual(self.workers("test_ops"), 1)
+
+    def test_cpu_only_file(self) -> None:
+        self.assertEqual(self.workers("test_nn", cuda=False), 3)
         self.assertEqual(self.workers("test_nn"), 1)
 
     def test_backends_without_per_worker_isolation(self) -> None:
