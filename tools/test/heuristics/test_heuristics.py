@@ -5,6 +5,7 @@ import io
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.append(str(REPO_ROOT))
 
 from tools.test.heuristics.test_interface import TestTD
+from tools.testing.target_determination.heuristics import previously_failed_in_pr
 from tools.testing.target_determination.heuristics.edited_by_pr import (
     _get_modified_tests,
 )
@@ -28,6 +30,7 @@ from tools.testing.target_determination.heuristics.historical_class_failure_corr
 from tools.testing.target_determination.heuristics.interface import TestPrioritizations
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     get_previous_failures,
+    previous_failures_or_none,
 )
 from tools.testing.target_determination.heuristics.utils import (
     _get_pr_merge_base,
@@ -246,6 +249,54 @@ class TestParsePrevTests(TestTD):
         found_tests = get_previous_failures()
 
         self.assertSetEqual(expected_failing_test_files, found_tests)
+
+    def test_previous_failures_skip_bad_entries_like_td(self) -> None:
+        def scored() -> set[str]:
+            heuristic = previously_failed_in_pr.PreviouslyFailedInPR()
+            tp = heuristic.get_prediction_confidence(["test_nn", "test_ops"])
+            return {str(x) for x in tp.get_all_tests() if tp.get_score(x) > 0}
+
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.object(previously_failed_in_pr, "REPO_ROOT", Path(d)),
+            mock.patch("sys.stdout"),
+            mock.patch("sys.stderr"),
+        ):
+            folder = Path(d) / ".additional_ci_files"
+            folder.mkdir()
+            self.assertEqual(previous_failures_or_none(), set())
+            (folder / "previous_failures.json").write_text(
+                '{"test/test_nn.py::TestNN::test_a": true}'
+            )
+            (folder / "previous_failures_additional.json").write_text('[1, "test_ops"]')
+            self.assertEqual(previous_failures_or_none(), {"test_nn", "test_ops"})
+            self.assertEqual(scored(), {"test_nn", "test_ops"})
+            # The additional file is a list, so a nested list is unhashable.
+            nested: list[tuple[str, type[Exception], str]] = [
+                ("previous_failures.json", AttributeError, "no attribute 'split'"),
+                ("previous_failures_additional.json", TypeError, "unhashable type"),
+            ]
+            for name, nested_error, nested_regex in nested:
+                cases: list[tuple[str, type[Exception], str]] = [
+                    ("{", json.JSONDecodeError, "Expecting property name"),
+                    ("1", TypeError, "not iterable"),
+                    ('[["x"]]', nested_error, nested_regex),
+                    ("[[1]]", nested_error, nested_regex),
+                    ("[" * 100_000, RecursionError, ""),
+                ]
+                for text, error, regex in cases:
+                    (folder / name).write_text(text)
+                    self.assertIsNone(previous_failures_or_none(), (name, text[:10]))
+                    # TD's determinator logs the error and skips the heuristic.
+                    with self.assertRaisesRegex(error, regex):
+                        scored()
+                (folder / name).unlink()
+                (folder / name).mkdir()
+                self.assertIsNone(previous_failures_or_none(), (name, "a directory"))
+                with self.assertRaisesRegex(IsADirectoryError, "Is a directory"):
+                    scored()
+                (folder / name).rmdir()
+                (folder / name).write_text("[]")
 
 
 class TestFilePath(TestTD):
