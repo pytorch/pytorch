@@ -288,6 +288,71 @@ class TestRunEval(unittest.TestCase):
                 # Only the unfinished b is run, and only when a's result is accepted.
                 self.assertEqual(query.call_count, 0 if refused else 1)
 
+    def test_main_tops_up_agentic_results(self) -> None:
+        from tools.testing.llm_td.eval import run_eval
+
+        sample = {"id": "a", "sha": "f" * 40, "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a"], "changed_files": ["torch/foo.py"]}  # fmt: skip
+        prompt = run_eval.sample_prompt(sample, {})
+        result = {"model": "m", "effort": "medium", "agentic": True}
+        r = {"type": "result", "is_error": True, "result": "x"}
+        # An agentic result is accepted only with the agentic prompt's hash.
+        for agentic_sha, refused in ((True, False), (False, True)):
+            with tempfile.TemporaryDirectory() as d:
+                data = write_data(d, {"samples/a.json": sample, "samples/b.json": sample, "test-times.json": {}, "results/t/a.json": {**result, "prompt_sha": run_eval.prompt_sha(prompt, agentic_sha)}})  # fmt: skip
+                (data / "ids.txt").write_text("a b")
+                argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt"), "--agentic"]  # fmt: skip
+                with (
+                    mock.patch.object(sys, "argv", argv),
+                    mock.patch("sys.stderr", io.StringIO()) as err,
+                    mock.patch("sys.stdout", io.StringIO()),
+                    mock.patch.object(run_eval, "checkout", return_value="wt"),
+                    mock.patch.object(run_eval, "query_model", return_value=r) as query,
+                ):
+                    try:
+                        run_eval.main()
+                    except SystemExit:
+                        self.assertTrue(refused)
+                        self.assertIn("another prompt", err.getvalue())
+                    else:
+                        self.assertFalse(refused)
+                        b = json.loads((data / "results/t/b.json").read_text())
+                        self.assertEqual(b["prompt_sha"], run_eval.prompt_sha(prompt, True))  # fmt: skip
+                self.assertEqual(query.call_count, 0 if refused else 1)
+
+    def test_checkout(self) -> None:
+        import subprocess
+
+        from tools.testing.llm_td.eval import run_eval
+
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="a", GIT_AUTHOR_EMAIL="a@a", GIT_COMMITTER_NAME="a", GIT_COMMITTER_EMAIL="a@a")  # fmt: skip
+        with (
+            tempfile.TemporaryDirectory() as repo,
+            tempfile.TemporaryDirectory() as root,
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(run_eval, "REPO", Path(repo)),
+        ):
+
+            def git(*args: str, cwd: str = repo) -> str:
+                return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()  # fmt: skip
+
+            git("init", "-q")
+            shas = []
+            for text in ("1", "2"):
+                (Path(repo) / "f").write_text(text)
+                git("add", "-A")
+                git("commit", "-qm", text)
+                shas.append(git("rev-parse", "HEAD"))
+            wt = run_eval.checkout(Path(root), 3, shas[0])
+            self.assertEqual(wt, str(Path(root) / "slot3"))
+            self.assertEqual(git("rev-parse", "HEAD", cwd=wt), shas[0])
+            # The slot is reused, and a file the model's tools left behind is overwritten.
+            (Path(wt) / "f").write_text("dirty")
+            self.assertEqual(run_eval.checkout(Path(root), 3, shas[1]), wt)
+            self.assertEqual(git("rev-parse", "HEAD", cwd=wt), shas[1])
+            self.assertEqual((Path(wt) / "f").read_text(), "2")
+            self.assertEqual(len(git("worktree", "list").splitlines()), 2)
+
 
 class TestEvalHelpers(unittest.TestCase):
     def test_has_head(self) -> None:
@@ -670,10 +735,12 @@ class TestScore(unittest.TestCase):
 
     def test_policy_matches_apply_selection(self) -> None:
         # What final+td runs in a job is what apply_selection runs there, including a job with
-        # no test times, a run-all, a failed or malformed answer, and a job timed by a fallback job.
+        # no test times, a run-all, a failed or malformed answer, a job timed by a fallback job,
+        # sweeps, dirs, and an inductor config whose glob always covers some files.
         rng = random.Random(0)
-        files = [f"test_{i}" for i in range(8)]
-        for _ in range(600):
+        files = [f"test_{i}" for i in range(5)] + ["dynamo/test_a", "dynamo/test_b", "test_torch", "test_ops"]  # fmt: skip
+        diverged = 0
+        for _ in range(2000):
             seconds = {f: float(rng.choice([0, 0, 5, 20, 60])) for f in files if rng.random() < 0.6}  # fmt: skip
             job = [*seconds, *(f for f in files if f not in seconds and rng.random() < 0.5)]  # fmt: skip
             rng.shuffle(job)
@@ -684,26 +751,43 @@ class TestScore(unittest.TestCase):
             prev = rng.sample(files, rng.randint(0, 2))
             changed = rng.choice([["torch/foo.py"]] * 3 + [[]])
             s = {**SAMPLE, "candidates": job, "truth": [], "previous_failures": prev, "changed_files": changed}  # fmt: skip
-            out = rng.choice([{"tests": [{"file": f} for f in picked]}] * 3 + [{"tests": [], "run_all": True}, {"tests": "test_0"}, None])  # fmt: skip
+            sweeps = rng.sample(["dynamo_wrapped", "crossref"], rng.randint(0, 1))
+            answer = {"tests": [{"file": f} for f in picked], "sweeps": sweeps, "dirs": rng.choice([[], [], ["dynamo"]])}  # fmt: skip
+            out = rng.choice([answer] * 3 + [{"tests": [], "run_all": True}, {"tests": "test_0"}, None])  # fmt: skip
             # The job's times are its own, the fallback job's for its config, or default/default's.
-            config, how = rng.choice([("c", "own"), ("c", "fallback"), ("unknown", "default")])  # fmt: skip
-            own = {"c": {f: [t, 0.0] for f, t in seconds.items()}} if how == "own" else {}  # fmt: skip
-            fallback = {} if how == "own" else {"c" if how == "fallback" else "default": seconds}  # fmt: skip
-            td = {"scored": scored, "top25": job[:n], "top25_cfg": {"c": job[:n]} if how == "own" else {}}  # fmt: skip
+            config = rng.choice(["c", "inductor", "dynamo_wrapped", "crossref"])
+            how = rng.choice(["own", "fallback", "default"])
+            own = {config: {f: [t, 0.0] for f, t in seconds.items()}} if how == "own" else {}  # fmt: skip
+            fallback = {} if how == "own" else {config if how == "fallback" else "default": seconds}  # fmt: skip
+            td = {"scored": scored, "top25": job[:n], "top25_cfg": {config: job[:n]} if how == "own" else {}}  # fmt: skip
             choice = policy("final+td", s, {"out": out}, td, own, None, fallback)
             if choice is None:
                 raise AssertionError("final+td chose nothing")
             # What select_tests writes: no model call without changed files, and an error is never enforced.
             sel = Selection(run_all=True) if not changed else Selection.from_model_output(out, set(job), changed)  # fmt: skip
             sel.enforce = sel.error is None
-            with (
-                mock.patch.object(selection, "get_pr_number", return_value=1),
-                mock.patch("sys.stderr", io.StringIO()),
-            ):
-                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config=config, td_enabled=True, previous_failures=prev)  # fmt: skip
-            runs = applied.split.include if applied.enforced else include
-            ran = {x.test_file for x in runs}
-            self.assertEqual({f for f in job if choice.covers(f, config)}, ran, (seconds, job, n, scored, out, prev, changed, how))  # fmt: skip
+            applied, ran = {}, {}
+            for c in (config, ""):
+                with (
+                    mock.patch.object(selection, "get_pr_number", return_value=1),
+                    mock.patch("sys.stderr", io.StringIO()),
+                ):
+                    applied[c] = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config=c, td_enabled=True, previous_failures=prev)  # fmt: skip
+                ran[c] = {x.test_file for x in (applied[c].split.include if applied[c].enforced else include)}  # fmt: skip
+            case = (config, how, seconds, job, n, scored, out, prev, changed)
+            predicted = {f for f in job if choice.covers(f, config)}
+            if how == "default":
+                # Known divergence: a config that no job records is hedged as config "",
+                # whose coverage lacks the config's sweep and ALWAYS_COVERED files.
+                blank = applied[""]
+                kept = blank.enforced or (blank.kept_td and sum(blank.file_time.values()) > 0)  # fmt: skip
+                self.assertEqual(predicted, ran[""] | ({f for f in job if sel.covers(f, config)} if kept else set()), case)  # fmt: skip
+                if predicted != ran[config]:
+                    diverged += 1
+                    self.assertTrue(any(sel.covers(f, config) != sel.covers(f, "") for f in job), case)  # fmt: skip
+                continue
+            self.assertEqual(predicted, ran[config], case)
+        self.assertGreater(diverged, 0)
 
     def test_hedge_previous_failures(self) -> None:
         # Previous failures in TD's cut run outside the budget; test_b is not in the cut.
@@ -961,6 +1045,27 @@ class TestScore(unittest.TestCase):
             with contextlib.redirect_stderr(io.StringIO()):
                 rows = score.score(data, ["a", "b", "c"], ["m"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
         self.assertEqual({x["id"] for x in rows}, {"a"})
+
+    def test_score_agentic_results(self) -> None:
+        # An agentic result is current only with the agentic prompt's hash.
+        prompt = score.sample_prompt(SAMPLE, {})
+        td = {"scored": [], "top25": [], "top25_cfg": {}}
+        result = {"out": {"tests": []}, "error": None, "cost_usd": 0.1, "agentic": True}
+        files = {
+            "test-times.json": {},
+            "samples/a.json": SAMPLE, "samples/b.json": SAMPLE, "td/a.json": td, "td/b.json": td,
+            "results/m/a.json": {**result, "prompt_sha": score.prompt_sha(prompt, True)}, "results/m/b.json": {**result, "prompt_sha": score.prompt_sha(prompt)},
+        }  # fmt: skip
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
+        ):
+            data = write_data(d, files)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rows = score.score(data, ["a", "b"], ["m"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
+        self.assertEqual({x["id"] for x in rows}, {"a"})
+        self.assertIn("dropped 1 of 2 ids with no m result of the current sample", err.getvalue())  # fmt: skip
 
     def test_sample_prompt_is_the_ci_prompt(self) -> None:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
