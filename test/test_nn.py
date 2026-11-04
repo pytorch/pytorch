@@ -10736,9 +10736,8 @@ class TestNNDeviceType(NNTestCase):
             msg="View must use 64-bit indexing")
         for mode, padding_mode, align_corners in itertools.product(
                 ('nearest', 'bilinear', 'bicubic'), ('zeros', 'border', 'reflection'), (True, False)):
-            # Neither MPS nor XPU has a 5-D bicubic sampler. XPU does not run this class
-            # (allow_xpu=False); its kernel lives in torch-xpu-ops.
-            if mode == 'bicubic' and torch.device(device).type in ('mps', 'xpu'):
+            # MPS has no 5-D bicubic sampler.
+            if mode == 'bicubic' and torch.device(device).type == 'mps':
                 continue
             a = F.grid_sample(
                 small_image, coords, mode=mode,
@@ -11499,7 +11498,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out_3d.squeeze(2), out_2d, **tolerance)
 
     @parametrize_test("dual_inputs", ["grid", "input_and_grid"])
-    @expectedFailureMPS  # 5-D bicubic is CPU and CUDA only
+    @expectedFailureMPS  # MPS has no 5-D bicubic sampler
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
     def test_grid_sample_3d_bicubic_forward_ad(self, device, dtype, dual_inputs):
@@ -11616,7 +11615,7 @@ class TestNNDeviceType(NNTestCase):
         grad_3d = torch.autograd.grad(out_3d.sum(), grid_3d)[0]
         self.assertEqual(grad_3d.squeeze(1)[..., :2], grad_2d)
 
-    @expectedFailureMPS  # 5-D bicubic is CPU and CUDA only
+    @expectedFailureMPS  # MPS has no 5-D bicubic sampler
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16)
     def test_grid_sample_3d_bicubic_double_backward_low_precision(self, device, dtype):
@@ -11639,7 +11638,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(got.double(), want, rtol=1e-2, atol=0)
 
     @parametrize_test("size", [2 ** 24 + 1, 2 ** 53 + 1])
-    @expectedFailureMPS  # 5-D bicubic is CPU and CUDA only
+    @expectedFailureMPS  # MPS has no 5-D bicubic sampler
     @onlyNativeDeviceTypes
     def test_grid_sample_3d_bicubic_last_voxel_of_a_wide_axis(self, device, size):
         # Neither extent is exact in float32, and the second is not exact in double.
