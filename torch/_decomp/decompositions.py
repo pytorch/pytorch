@@ -3461,6 +3461,7 @@ def _index_add(
     inplace: bool,
     alpha: NumberType = 1,
 ):
+    utils.check_packed_shell_float_arithmetic("index_add", x.dtype)
     dim = utils.canonicalize_dims(x.ndim, dim)
     torch._check(
         x.device == index.device and x.device == tensor.device,

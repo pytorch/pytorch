@@ -142,6 +142,10 @@ Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   if (dims.size() != 1 || shifts.size() != 1) {
     return roll_common(self, shifts, dims);
   }
+  if (isPackedShellFloatType(self.scalar_type())) {
+    // No typed kernel; roll as narrow + cat, which copies whole elements.
+    return at::native::roll(self, shifts, dims);
+  }
 
   auto in_tensor = self;
   if(!self.is_contiguous()) {

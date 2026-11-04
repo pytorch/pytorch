@@ -141,10 +141,21 @@ inline bool isShellType(ScalarType t) {
 
 // Dtypes whose element size is not a power of two (Float6_e2m3fn_x4 is 3
 // bytes). Typed kernels cannot be instantiated for them (vectorized loads need
-// power-of-two alignment), so byte-level ops such as copy_, zero_ and cat run
-// on a uint8 view with a trailing dim of the element size instead.
+// power-of-two alignment), so ops that Float4_e2m1fn_x2 runs through existing
+// typed or opaque kernels (copy_, zero_, CUDA cat, where, eq/ne) run on a uint8
+// view with a trailing dim of the element size for these dtypes only. (eq/ne
+// also take that view for Float4_e2m1fn_x2 when one operand is a CPU scalar.)
 inline bool hasNonPowerOfTwoElementSize(ScalarType t) {
   return t == ScalarType::Float6_e2m3fn_x4;
+}
+
+// Float shell dtypes whose element packs several values. Ops that have no
+// kernel for any of them (indexing, gather/scatter, index_select, flip, CPU cat
+// and so roll) run on a uint8 view of their bytes, see
+// ATen/native/ElementBytes.h; ops that need arithmetic raise. Mirrored by
+// torch._prims_common._packed_shell_float_dtypes.
+inline bool isPackedShellFloatType(ScalarType t) {
+  return t == ScalarType::Float4_e2m1fn_x2 || t == ScalarType::Float6_e2m3fn_x4;
 }
 
 constexpr bool isBarebonesUnsignedType(ScalarType t) {

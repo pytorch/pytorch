@@ -82,6 +82,14 @@ TORCH_API Tensor& index_out(
     const Tensor& self,
     const c10::List<std::optional<at::Tensor>>& indices);
 
+// index_select for packed float shell dtypes (c10::isPackedShellFloatType),
+// which runs on as_element_bytes views.
+TORCH_API Tensor& index_select_out_as_bytes(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    Tensor& result);
+
 TORCH_API void index_copy_out_impl(
     const Tensor& self,
     int64_t dim,
