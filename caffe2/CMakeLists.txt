@@ -931,6 +931,13 @@ if(USE_MPS)
   endif()
 endif()
 
+# Use Accelerate's LAPACK 3.9.1 interfaces, available since macOS 13.3, see ATen/native/LapackAlias.h
+if(APPLE AND NOT IOS AND BLAS_INFO MATCHES "^(accelerate|veclib)$" AND LAPACK_INFO MATCHES "^(accelerate|veclib)$")
+  if(NOT CMAKE_OSX_DEPLOYMENT_TARGET OR CMAKE_OSX_DEPLOYMENT_TARGET VERSION_GREATER_EQUAL 13.3)
+    target_compile_definitions(torch_cpu PRIVATE ACCELERATE_NEW_LAPACK)
+  endif()
+endif()
+
 option(TORCH_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
 if(TORCH_USE_IWYU)
   find_program(iwyu NAMES include-what-you-use)

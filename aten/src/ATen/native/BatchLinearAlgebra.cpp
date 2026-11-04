@@ -8,6 +8,7 @@
 
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/LapackAlias.h>
 #include <ATen/native/Resize.h>
 
 #include <c10/util/accumulate.h>
@@ -126,10 +127,10 @@
 
 #ifndef _ARMPL_H  // ArmPL's `cblas.h` pulls in these prototypes.
 // getrf
-extern "C" void zgetrf_(int *m, int *n, std::complex<double> *a, int *lda, int *ipiv, int *info);
-extern "C" void cgetrf_(int *m, int *n, std::complex<float> *a, int *lda, int *ipiv, int *info);
-extern "C" void dgetrf_(int *m, int *n, double *a, int *lda, int *ipiv, int *info);
-extern "C" void sgetrf_(int *m, int *n, float *a, int *lda, int *ipiv, int *info);
+extern "C" void zgetrf_(int *m, int *n, std::complex<double> *a, int *lda, int *ipiv, int *info) AT_LAPACK_ALIAS(zgetrf);
+extern "C" void cgetrf_(int *m, int *n, std::complex<float> *a, int *lda, int *ipiv, int *info) AT_LAPACK_ALIAS(cgetrf);
+extern "C" void dgetrf_(int *m, int *n, double *a, int *lda, int *ipiv, int *info) AT_LAPACK_ALIAS(dgetrf);
+extern "C" void sgetrf_(int *m, int *n, float *a, int *lda, int *ipiv, int *info) AT_LAPACK_ALIAS(sgetrf);
 #endif
 
 // potrs
@@ -167,26 +168,26 @@ static inline void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, fl
 #else
 
 #ifndef _ARMPL_H  // ArmPL's `cblas.h` pulls in these prototypes.
-extern "C" void zpotrs_(char *uplo, int *n, int *nrhs, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb, int *info);
-extern "C" void cpotrs_(char *uplo, int *n, int *nrhs, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb, int *info);
-extern "C" void dpotrs_(char *uplo, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
-extern "C" void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info);
+extern "C" void zpotrs_(char *uplo, int *n, int *nrhs, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb, int *info) AT_LAPACK_ALIAS(zpotrs);
+extern "C" void cpotrs_(char *uplo, int *n, int *nrhs, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb, int *info) AT_LAPACK_ALIAS(cpotrs);
+extern "C" void dpotrs_(char *uplo, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info) AT_LAPACK_ALIAS(dpotrs);
+extern "C" void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info) AT_LAPACK_ALIAS(spotrs);
 #endif
 
 #endif
 
 #ifndef _ARMPL_H  // ArmPL's `cblas.h` pulls in these prototypes.
 // potrf
-extern "C" void zpotrf_(char *uplo, int *n, std::complex<double> *a, int *lda, int *info);
-extern "C" void cpotrf_(char *uplo, int *n, std::complex<float> *a, int *lda, int *info);
-extern "C" void dpotrf_(char *uplo, int *n, double *a, int *lda, int *info);
-extern "C" void spotrf_(char *uplo, int *n, float *a, int *lda, int *info);
+extern "C" void zpotrf_(char *uplo, int *n, std::complex<double> *a, int *lda, int *info) AT_LAPACK_ALIAS(zpotrf);
+extern "C" void cpotrf_(char *uplo, int *n, std::complex<float> *a, int *lda, int *info) AT_LAPACK_ALIAS(cpotrf);
+extern "C" void dpotrf_(char *uplo, int *n, double *a, int *lda, int *info) AT_LAPACK_ALIAS(dpotrf);
+extern "C" void spotrf_(char *uplo, int *n, float *a, int *lda, int *info) AT_LAPACK_ALIAS(spotrf);
 
 // potri
-extern "C" void zpotri_(char *uplo, int *n, std::complex<double> *a, int *lda, int *info);
-extern "C" void cpotri_(char *uplo, int *n, std::complex<float> *a, int *lda, int *info);
-extern "C" void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
-extern "C" void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
+extern "C" void zpotri_(char *uplo, int *n, std::complex<double> *a, int *lda, int *info) AT_LAPACK_ALIAS(zpotri);
+extern "C" void cpotri_(char *uplo, int *n, std::complex<float> *a, int *lda, int *info) AT_LAPACK_ALIAS(cpotri);
+extern "C" void dpotri_(char *uplo, int *n, double *a, int *lda, int *info) AT_LAPACK_ALIAS(dpotri);
+extern "C" void spotri_(char *uplo, int *n, float *a, int *lda, int *info) AT_LAPACK_ALIAS(spotri);
 
 // sytrf
 extern "C" void dsytrf_(
@@ -197,7 +198,7 @@ extern "C" void dsytrf_(
     int* ipiv,
     double* work,
     int* lwork,
-    int* info);
+    int* info) AT_LAPACK_ALIAS(dsytrf);
 extern "C" void ssytrf_(
     char* uplo,
     int* n,
@@ -206,7 +207,7 @@ extern "C" void ssytrf_(
     int* ipiv,
     float* work,
     int* lwork,
-    int* info);
+    int* info) AT_LAPACK_ALIAS(ssytrf);
 extern "C" void zsytrf_(
     char* uplo,
     int* n,
@@ -215,7 +216,7 @@ extern "C" void zsytrf_(
     int* ipiv,
     std::complex<double>* work,
     int* lwork,
-    int* info);
+    int* info) AT_LAPACK_ALIAS(zsytrf);
 extern "C" void csytrf_(
     char* uplo,
     int* n,
@@ -224,7 +225,7 @@ extern "C" void csytrf_(
     int* ipiv,
     std::complex<float>* work,
     int* lwork,
-    int* info);
+    int* info) AT_LAPACK_ALIAS(csytrf);
 
 // hetrf
 extern "C" void zhetrf_(
@@ -235,7 +236,7 @@ extern "C" void zhetrf_(
     int* ipiv,
     std::complex<double>* work,
     int* lwork,
-    int* info);
+    int* info) AT_LAPACK_ALIAS(zhetrf);
 extern "C" void chetrf_(
     char* uplo,
     int* n,
@@ -244,7 +245,7 @@ extern "C" void chetrf_(
     int* ipiv,
     std::complex<float>* work,
     int* lwork,
-    int* info);
+    int* info) AT_LAPACK_ALIAS(chetrf);
 
 // sytrs
 extern "C" void dsytrs_(
@@ -256,7 +257,7 @@ extern "C" void dsytrs_(
     int* ipiv,
     double* b,
     int* ldb,
-    int* info);
+    int* info) AT_LAPACK_ALIAS(dsytrs);
 extern "C" void ssytrs_(
     char* uplo,
     int* n,
@@ -266,7 +267,7 @@ extern "C" void ssytrs_(
     int* ipiv,
     float* b,
     int* ldb,
-    int* info);
+    int* info) AT_LAPACK_ALIAS(ssytrs);
 extern "C" void zsytrs_(
     char* uplo,
     int* n,
@@ -276,7 +277,7 @@ extern "C" void zsytrs_(
     int* ipiv,
     std::complex<double>* b,
     int* ldb,
-    int* info);
+    int* info) AT_LAPACK_ALIAS(zsytrs);
 extern "C" void csytrs_(
     char* uplo,
     int* n,
@@ -286,7 +287,7 @@ extern "C" void csytrs_(
     int* ipiv,
     std::complex<float>* b,
     int* ldb,
-    int* info);
+    int* info) AT_LAPACK_ALIAS(csytrs);
 
 // hetrs
 extern "C" void zhetrs_(
@@ -298,7 +299,7 @@ extern "C" void zhetrs_(
     int* ipiv,
     std::complex<double>* b,
     int* ldb,
-    int* info);
+    int* info) AT_LAPACK_ALIAS(zhetrs);
 extern "C" void chetrs_(
     char* uplo,
     int* n,
@@ -308,19 +309,19 @@ extern "C" void chetrs_(
     int* ipiv,
     std::complex<float>* b,
     int* ldb,
-    int* info);
+    int* info) AT_LAPACK_ALIAS(chetrs);
 
 // geqrf
-extern "C" void zgeqrf_(int *m, int *n, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *work, int *lwork, int *info);
-extern "C" void cgeqrf_(int *m, int *n, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *work, int *lwork, int *info);
-extern "C" void dgeqrf_(int *m, int *n, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
-extern "C" void sgeqrf_(int *m, int *n, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
+extern "C" void zgeqrf_(int *m, int *n, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *work, int *lwork, int *info) AT_LAPACK_ALIAS(zgeqrf);
+extern "C" void cgeqrf_(int *m, int *n, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *work, int *lwork, int *info) AT_LAPACK_ALIAS(cgeqrf);
+extern "C" void dgeqrf_(int *m, int *n, double *a, int *lda, double *tau, double *work, int *lwork, int *info) AT_LAPACK_ALIAS(dgeqrf);
+extern "C" void sgeqrf_(int *m, int *n, float *a, int *lda, float *tau, float *work, int *lwork, int *info) AT_LAPACK_ALIAS(sgeqrf);
 
 // orgqr
-extern "C" void zungqr_(int *m, int *n, int *k, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *work, int *lwork, int *info);
-extern "C" void cungqr_(int *m, int *n, int *k, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *work, int *lwork, int *info);
-extern "C" void dorgqr_(int *m, int *n, int *k, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
-extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
+extern "C" void zungqr_(int *m, int *n, int *k, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *work, int *lwork, int *info) AT_LAPACK_ALIAS(zungqr);
+extern "C" void cungqr_(int *m, int *n, int *k, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *work, int *lwork, int *info) AT_LAPACK_ALIAS(cungqr);
+extern "C" void dorgqr_(int *m, int *n, int *k, double *a, int *lda, double *tau, double *work, int *lwork, int *info) AT_LAPACK_ALIAS(dorgqr);
+extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info) AT_LAPACK_ALIAS(sorgqr);
 #endif
 
 // ormqr
@@ -353,22 +354,22 @@ static inline void sormqr_(char *side, char *trans, int *m, int *n, int *k, floa
 }
 #else
 #ifndef _ARMPL_H  // ArmPL's `cblas.h` pulls in these prototypes.
-extern "C" void zunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *c, int *ldc, std::complex<double> *work, int *lwork, int *info);
-extern "C" void cunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *c, int *ldc, std::complex<float> *work, int *lwork, int *info);
-extern "C" void dormqr_(char *side, char *trans, int *m, int *n, int *k, double *a, int *lda, double *tau, double *c, int *ldc, double *work, int *lwork, int *info);
-extern "C" void sormqr_(char *side, char *trans, int *m, int *n, int *k, float *a, int *lda, float *tau, float *c, int *ldc, float *work, int *lwork, int *info);
+extern "C" void zunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *c, int *ldc, std::complex<double> *work, int *lwork, int *info) AT_LAPACK_ALIAS(zunmqr);
+extern "C" void cunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *c, int *ldc, std::complex<float> *work, int *lwork, int *info) AT_LAPACK_ALIAS(cunmqr);
+extern "C" void dormqr_(char *side, char *trans, int *m, int *n, int *k, double *a, int *lda, double *tau, double *c, int *ldc, double *work, int *lwork, int *info) AT_LAPACK_ALIAS(dormqr);
+extern "C" void sormqr_(char *side, char *trans, int *m, int *n, int *k, float *a, int *lda, float *tau, float *c, int *ldc, float *work, int *lwork, int *info) AT_LAPACK_ALIAS(sormqr);
 #endif
 #endif
 #ifndef _ARMPL_H  // ArmPL's `cblas.h` pulls in these prototypes.
 // syevd
-extern "C" void zheevd_(char *jobz, char *uplo, int *n, std::complex<double> *a, int *lda, double *w, std::complex<double> *work, int *lwork, double *rwork, int *lrwork, int *iwork, int *liwork, int *info);
-extern "C" void cheevd_(char *jobz, char *uplo, int *n, std::complex<float> *a, int *lda, float *w, std::complex<float> *work, int *lwork, float *rwork, int *lrwork, int *iwork, int *liwork, int *info);
-extern "C" void dsyevd_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *iwork, int *liwork, int *info);
-extern "C" void ssyevd_(char *jobz, char *uplo, int *n, float *a, int *lda, float *w, float *work, int *lwork, int *iwork, int *liwork, int *info);
+extern "C" void zheevd_(char *jobz, char *uplo, int *n, std::complex<double> *a, int *lda, double *w, std::complex<double> *work, int *lwork, double *rwork, int *lrwork, int *iwork, int *liwork, int *info) AT_LAPACK_ALIAS(zheevd);
+extern "C" void cheevd_(char *jobz, char *uplo, int *n, std::complex<float> *a, int *lda, float *w, std::complex<float> *work, int *lwork, float *rwork, int *lrwork, int *iwork, int *liwork, int *info) AT_LAPACK_ALIAS(cheevd);
+extern "C" void dsyevd_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *iwork, int *liwork, int *info) AT_LAPACK_ALIAS(dsyevd);
+extern "C" void ssyevd_(char *jobz, char *uplo, int *n, float *a, int *lda, float *w, float *work, int *lwork, int *iwork, int *liwork, int *info) AT_LAPACK_ALIAS(ssyevd);
 
 // geev
-extern "C" void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double* vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
-extern "C" void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float* vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info);
+extern "C" void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double* vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info) AT_LAPACK_ALIAS(dgeev);
+extern "C" void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float* vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info) AT_LAPACK_ALIAS(sgeev);
 extern "C" void cgeev_(char *jobvl, char *jobvr, int *n,
              std::complex<float> *a, int *lda,
              std::complex<float> *w,
@@ -376,7 +377,7 @@ extern "C" void cgeev_(char *jobvl, char *jobvr, int *n,
              std::complex<float> *vr, int *ldvr,
              std::complex<float> *work, int *lwork,
              float *rwork,
-             int *info);
+             int *info) AT_LAPACK_ALIAS(cgeev);
 extern "C" void zgeev_(char *jobvl, char *jobvr, int *n,
              std::complex<double> *a, int *lda,
              std::complex<double> *w,
@@ -384,105 +385,105 @@ extern "C" void zgeev_(char *jobvl, char *jobvr, int *n,
              std::complex<double> *vr, int *ldvr,
              std::complex<double> *work, int *lwork,
              double *rwork,
-             int *info);
+             int *info) AT_LAPACK_ALIAS(zgeev);
 
 // gesdd
 extern "C" void zgesdd_(char *jobz, int *m, int *n, std::complex<double> *a, int *lda,
-                        double *s, std::complex<double> *u, int *ldu, std::complex<double> *vt, int *ldvt, std::complex<double> *work, int *lwork, double *rwork, int *iwork, int *info);
+                        double *s, std::complex<double> *u, int *ldu, std::complex<double> *vt, int *ldvt, std::complex<double> *work, int *lwork, double *rwork, int *iwork, int *info) AT_LAPACK_ALIAS(zgesdd);
 extern "C" void cgesdd_(char *jobz, int *m, int *n, std::complex<float> *a, int *lda,
-                        float *s, std::complex<float> *u, int *ldu, std::complex<float> *vt, int *ldvt, std::complex<float> *work, int *lwork, float *rwork, int *iwork, int *info);
+                        float *s, std::complex<float> *u, int *ldu, std::complex<float> *vt, int *ldvt, std::complex<float> *work, int *lwork, float *rwork, int *iwork, int *info) AT_LAPACK_ALIAS(cgesdd);
 extern "C" void dgesdd_(char *jobz, int *m, int *n, double *a, int *lda,
-                        double *s, double *u, int *ldu, double *vt, int *ldvt, double *work, int *lwork, int *iwork, int *info);
+                        double *s, double *u, int *ldu, double *vt, int *ldvt, double *work, int *lwork, int *iwork, int *info) AT_LAPACK_ALIAS(dgesdd);
 extern "C" void sgesdd_(char *jobz, int *m, int *n, float *a, int *lda,
-                        float *s, float *u, int *ldu, float *vt, int *ldvt, float *work, int *lwork, int *iwork, int *info);
+                        float *s, float *u, int *ldu, float *vt, int *ldvt, float *work, int *lwork, int *iwork, int *info) AT_LAPACK_ALIAS(sgesdd);
 
 // getrs
-extern "C" void zgetrs_(char *trans, int *n, int *nrhs, std::complex<double> *a, int *lda, int *ipiv, std::complex<double> *b, int *ldb, int *info);
-extern "C" void cgetrs_(char *trans, int *n, int *nrhs, std::complex<float> *a, int *lda, int *ipiv, std::complex<float> *b, int *ldb, int *info);
-extern "C" void dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
-extern "C" void sgetrs_(char *trans, int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
+extern "C" void zgetrs_(char *trans, int *n, int *nrhs, std::complex<double> *a, int *lda, int *ipiv, std::complex<double> *b, int *ldb, int *info) AT_LAPACK_ALIAS(zgetrs);
+extern "C" void cgetrs_(char *trans, int *n, int *nrhs, std::complex<float> *a, int *lda, int *ipiv, std::complex<float> *b, int *ldb, int *info) AT_LAPACK_ALIAS(cgetrs);
+extern "C" void dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info) AT_LAPACK_ALIAS(dgetrs);
+extern "C" void sgetrs_(char *trans, int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info) AT_LAPACK_ALIAS(sgetrs);
 
 // gels
 extern "C" void zgels_(char *trans, int *m, int *n, int *nrhs,
     std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb,
-    std::complex<double> *work, int *lwork, int *info);
+    std::complex<double> *work, int *lwork, int *info) AT_LAPACK_ALIAS(zgels);
 extern "C" void cgels_(char *trans, int *m, int *n, int *nrhs,
     std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb,
-    std::complex<float> *work, int *lwork, int *info);
+    std::complex<float> *work, int *lwork, int *info) AT_LAPACK_ALIAS(cgels);
 extern "C" void dgels_(char *trans, int *m, int *n, int *nrhs,
     double *a, int *lda, double *b, int *ldb,
-    double *work, int *lwork, int *info);
+    double *work, int *lwork, int *info) AT_LAPACK_ALIAS(dgels);
 extern "C" void sgels_(char *trans, int *m, int *n, int *nrhs,
     float *a, int *lda, float *b, int *ldb,
-    float *work, int *lwork, int *info);
+    float *work, int *lwork, int *info) AT_LAPACK_ALIAS(sgels);
 
 // gelsd
 extern "C" void zgelsd_(int *m, int *n, int *nrhs,
     std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb,
     double *s, double *rcond, int *rank,
-    std::complex<double> *work, int *lwork, double *rwork, int *iwork, int *info);
+    std::complex<double> *work, int *lwork, double *rwork, int *iwork, int *info) AT_LAPACK_ALIAS(zgelsd);
 extern "C" void cgelsd_(int *m, int *n, int *nrhs,
     std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb,
     float *s, float *rcond, int *rank,
-    std::complex<float> *work, int *lwork, float *rwork, int *iwork, int *info);
+    std::complex<float> *work, int *lwork, float *rwork, int *iwork, int *info) AT_LAPACK_ALIAS(cgelsd);
 extern "C" void dgelsd_(int *m, int *n, int *nrhs,
     double *a, int *lda, double *b, int *ldb,
     double *s, double *rcond, int *rank,
-    double *work, int *lwork, int *iwork, int *info);
+    double *work, int *lwork, int *iwork, int *info) AT_LAPACK_ALIAS(dgelsd);
 extern "C" void sgelsd_(int *m, int *n, int *nrhs,
     float *a, int *lda, float *b, int *ldb,
     float *s, float *rcond, int *rank,
-    float *work, int *lwork, int *iwork, int *info);
+    float *work, int *lwork, int *iwork, int *info) AT_LAPACK_ALIAS(sgelsd);
 
 // gelsy
 extern "C" void zgelsy_(int *m, int *n, int *nrhs,
     std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb,
     int *jpvt, double *rcond, int *rank,
     std::complex<double> *work, int *lwork,
-    double *rwork, int *info);
+    double *rwork, int *info) AT_LAPACK_ALIAS(zgelsy);
 extern "C" void cgelsy_(int *m, int *n, int *nrhs,
     std::complex<float> * a, int *lda, std::complex<float> *b, int *ldb,
     int *jpvt, float *rcond, int *rank,
     std::complex<float> *work, int *lwork,
-    float *rwork, int *info);
+    float *rwork, int *info) AT_LAPACK_ALIAS(cgelsy);
 extern "C" void dgelsy_(int *m, int *n, int *nrhs,
     double *a, int *lda, double *b, int *ldb,
     int *jpvt, double *rcond, int *rank,
-    double *work, int *lwork, int *info);
+    double *work, int *lwork, int *info) AT_LAPACK_ALIAS(dgelsy);
 extern "C" void sgelsy_(int *m, int *n, int *nrhs,
     float *a, int *lda, float *b, int *ldb,
     int *jpvt, float *rcond, int *rank,
-    float *work, int *lwork, int *info);
+    float *work, int *lwork, int *info) AT_LAPACK_ALIAS(sgelsy);
 
 // gelss
 extern "C" void zgelss_(int *m, int *n, int *nrhs,
     std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb,
     double *s, double *rcond, int *rank,
     std::complex<double> *work, int *lwork,
-    double *rwork, int *info);
+    double *rwork, int *info) AT_LAPACK_ALIAS(zgelss);
 extern "C" void cgelss_(int *m, int *n, int *nrhs,
     std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb,
     float *s, float *rcond, int *rank,
     std::complex<float> *work, int *lwork,
-    float *rwork, int *info);
+    float *rwork, int *info) AT_LAPACK_ALIAS(cgelss);
 extern "C" void dgelss_(int *m, int *n, int *nrhs,
     double *a, int *lda, double *b, int *ldb,
     double *s, double *rcond, int *rank,
-    double *work, int *lwork, int *info);
+    double *work, int *lwork, int *info) AT_LAPACK_ALIAS(dgelss);
 extern "C" void sgelss_(int *m, int *n, int *nrhs,
     float *a, int *lda, float *b, int *ldb,
     float *s, float *rcond, int *rank,
-    float *work, int *lwork, int *info);
+    float *work, int *lwork, int *info) AT_LAPACK_ALIAS(sgelss);
 #endif
 #endif
 
 #if AT_BUILD_WITH_BLAS()
 // trsm
 #ifndef _ARMPL_H  // ArmPL's `cblas.h` pulls in these prototypes.
-extern "C" void ztrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<double> *alpha, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb);
-extern "C" void ctrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<float> *alpha, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb);
-extern "C" void dtrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, double *alpha, double *a, int *lda, double *b, int *ldb);
-extern "C" void strsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, float *alpha, float *a, int *lda, float *b, int *ldb);
+extern "C" void ztrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<double> *alpha, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb) AT_LAPACK_ALIAS(ztrsm);
+extern "C" void ctrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<float> *alpha, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb) AT_LAPACK_ALIAS(ctrsm);
+extern "C" void dtrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, double *alpha, double *a, int *lda, double *b, int *ldb) AT_LAPACK_ALIAS(dtrsm);
+extern "C" void strsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, float *alpha, float *a, int *lda, float *b, int *ldb) AT_LAPACK_ALIAS(strsm);
 #endif
 #endif
 
