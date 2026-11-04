@@ -302,7 +302,8 @@ TEST(TestNative, MarkFakeStorage) {
       ADD_FAILURE() << "expected mutable_data_ptr() to throw";
     } catch (const c10::Error& e) {
       EXPECT_NE(
-          std::string(e.what()).find("Cannot access data pointer of Tensor"),
+          std::string(e.what()).find(
+              "Cannot access data pointer of Tensor (e.g. FakeTensor"),
           std::string::npos);
     }
   };
