@@ -14,6 +14,7 @@ import torch
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
+from ...utils.device import check_current
 from . import tile
 from .traits import WARP, welford_nouts
 
@@ -809,6 +810,7 @@ def _launch_itree(
     operands: tuple[Sequence[Any], Sequence[Any]],
     N: int,
     tag: str,
+    *,
     device: int,
     nouts: int = 1,
     dsts: Sequence[torch.dtype] = (),
@@ -921,12 +923,12 @@ def _run_itree(
             ([_L.read_only(x)], list(outs)),
             N,
             "rowitree",
-            device,
-            nouts,
-            tuple(o.dtype for o in outs),
-            align,
-            compact,
-            strided_outs,
+            device=device,
+            nouts=nouts,
+            dsts=tuple(o.dtype for o in outs),
+            align=align,
+            compact=compact,
+            strided_outs=strided_outs,
         )
         return tuple(outs)
     # Split writes one field-typed partial per (row, batch), then folds them linearly.
@@ -944,11 +946,11 @@ def _run_itree(
         ([_L.read_only(x)], list(parts)),
         N,
         "rowitree1",
-        device,
-        nouts,
-        tuple(p.dtype for p in parts),
-        align,
-        compact,
+        device=device,
+        nouts=nouts,
+        dsts=tuple(p.dtype for p in parts),
+        align=align,
+        compact=compact,
     )
     outs = results()
     # DECLARE the partials' alignment or stage 2 reads them one element at a time: autovec_copy
@@ -975,10 +977,10 @@ def _run_itree(
         ([_L.read_only(p) for p in parts], list(outs)),
         N,
         "rowitree2",
-        device,
-        nouts,
-        tuple(o.dtype for o in outs),
-        palign,
+        device=device,
+        nouts=nouts,
+        dsts=tuple(o.dtype for o in outs),
+        align=palign,
         strided_outs=strided_outs,
     )
     return tuple(outs)
@@ -996,7 +998,7 @@ def reduce_row_itree(
     """
     if not x.is_cuda:
         raise AssertionError(f"want a CUDA input, got {x.device}")
-    _L.check_current(x.get_device())
+    check_current(x.get_device())
     M, N = x.shape
     itree = trait_itree_plan(trait, N, M, x.element_size(), device=x.device)
     if itree is None:
@@ -1029,7 +1031,7 @@ def reduce_row_tile(
     if M >= _INT32_LIMIT or N >= _INT32_LIMIT:
         raise AssertionError(f"row reduction needs M and N < 2^31, got M={M}, N={N}")
     device = x.get_device()
-    _L.check_current(device)
+    check_current(device)
     # Dispatchers resolve PYTORCH_NATIVE_INNER_TREE (reduction_order), so only an explicit
     # order="inner_tree" selects the tree here, and it raises rather than use another DAG.
     if order not in (None, "linear", "inner_tree"):

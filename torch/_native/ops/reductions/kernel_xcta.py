@@ -19,6 +19,7 @@ import torch
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
+from ...utils.device import check_current
 from . import (  # safe: kernel_general imports us only lazily
     kernel_general as _RB,
     kernel_rowtile as _rt,
@@ -188,7 +189,7 @@ def _reduce_row_xcta(
             f"need a contiguous CUDA input, got {x.device} {x.stride()}"
         )
     device = x.get_device()
-    _L.check_current(device)
+    check_current(device)
     if x.dim() == 1:
         x = x.view(1, -1)
     M, N = x.shape
