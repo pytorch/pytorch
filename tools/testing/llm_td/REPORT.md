@@ -1,6 +1,6 @@
 # LLM test selection for PyTorch CI: offline evaluation
 
-**TL;DR.** We backtested picking each PR's tests with one Opus 5.5 call (medium effort, plus a 20% TD hedge) instead of today's target determination (TD). The result is mixed. The LLM policy catches more of the breakages that landed, but it is **below TD on failing PR pushes**. It would cut the spend of the test jobs in the Spend table (pull, trunk, inductor's unit tests, periodic and slow) **12%, from $888k to $780k a month** ($108k saved, $86k of it in the workflows this stack covers). It would also cut the p50 wait for pull and trunk from **181 to 161 minutes**. Fork PRs never get a selection and are left out of both figures.
+**TL;DR.** We backtested picking each PR's tests with one Opus 5.5 call (medium effort, plus a 20% TD hedge) instead of today's target determination (TD). The result is mixed. The LLM policy catches more of the breakages that landed, but it is **below TD on failing PR pushes**. It would cut the spend of the test jobs in the Spend table (pull, trunk, inductor's unit tests, periodic and slow) **12%, from $888k to $780k a month** ($108k saved, $86k of it in the workflows this stack covers). It would also cut the p50 wait for pull and trunk from **181 to 169 minutes**. Fork PRs never get a selection and are left out of both figures.
 
 - **Reverted commits caught: 82.8% vs 68.7% for TD** (n=134). Each of these commits landed and was then reverted for breaking a test. "Caught" means its PR's CI would have gone red. The paired difference is +14.2 points, with a 95% bootstrap interval of +7.5 to +21.6 (22 caught only by new, 3 only by old; McNemar p<0.001).
 - **Failing PR pushes with every real failure selected: 91.5% vs 94.1% for TD** (n=236 pushes from 148 PRs). Flaky failures are excluded. **The proposed config is 2.5 points below TD here.** The gap is not significant (95% interval -5.9 to +0.8 points resampling PRs; 6 pushes caught only by new, 12 only by old; McNemar p=0.24), but the point estimate is below TD, not level with it.
@@ -13,7 +13,7 @@
 | Failing PR pushes with every real failure selected (n=236) | **94.1%** | 91.5% |
 | CPU / GPU test time run on a typical change | 49.4% / 45.9% | **30.0% / 33.6%** |
 | Test-job spend | $888k/mo | **$780k/mo** |
-| pull + trunk wait, p50 / p90 | 181 / 291 min | **161 / 247 min** |
+| pull + trunk wait, p50 / p90 | 181 / 291 min | **169 / 262 min** |
 
 - **The idea.** For each PR push, one `claude -p` call sees the title, the description, the diff, and every candidate test file annotated with its CI minutes. It returns the files worth running.
 - **Old and new.**
@@ -21,7 +21,7 @@
   - "New" is the proposed production config: Opus 5.5 at medium effort, plus TD's top files up to 20% of each config's test time.
   - Main always runs everything in both.
 - **The 25% and the 20% are in different units.**
-  - TD's 25% counts files: run_test.py keeps the top quarter of TD's ranked files (`get_top_per_tests(percent_to_run)` in tools/testing/test_selections.py, with 25 when TD is on), whatever their size. TD ranks large, often-failing files high, so that quarter of the files is 49.4% of the CPU test time on a typical change.
+  - TD's 25% counts TestRuns: run_test.py keeps the first `n * len // 100 + 1` of TD's ranked TestRuns, n = 25 when TD is on (`get_top_per_tests(percent_to_run)` in tools/testing/test_selections.py), whatever their size. A TestRun is a test file or a class-level part of one. TD ranks large, often-failing files high, so that quarter is 49.4% of the CPU test time on a typical change.
   - The hedge's 20% counts seconds: TD's ranked files are added in order until they fill 20% of the config's test time.
   - The model does not filter TD's list. New runs the union of the model's picks and the hedge:
 
@@ -147,47 +147,48 @@ Fork-PR runs keep TD, so their jobs are left unshrunk. The inductor rows assume 
 
 | Wait for a PR push | Old (min) | New (min) |
 |---|---|---|
-| pull and trunk, p50 | 181 | 161 |
-| pull and trunk, p90 | 291 | 247 |
-| pull and trunk, mean | 205 | 175 |
-| pull, trunk and inductor, p50 | 191 | 167 |
-| pull, trunk and inductor, p90 | 440 | 410 |
-| `@pytorchbot merge` that starts trunk, comment to merge, p50 | 185 | ~170 |
-| `@pytorchbot merge` that starts trunk, comment to merge, p90 | 269 | ~255 |
+| pull and trunk, p50 | 181 | 169 |
+| pull and trunk, p90 | 291 | 262 |
+| pull and trunk, mean | 205 | 183 |
+| pull, trunk and inductor, p50 | 191 | 172 |
+| pull, trunk and inductor, p90 | 440 | 425 |
+| `@pytorchbot merge` that starts trunk, comment to merge, p50 | 185 | 179 |
+| `@pytorchbot merge` that starts trunk, comment to merge, p90 | 269 | 258 |
 
-If fork PRs were selected too, the pull and trunk wait would be 142 / 228 min (p50 / p90).
+If fork PRs were selected too, the pull and trunk wait would be 158 / 252 min (p50 / p90).
 
 Time to signal (TTS) per workflow, in minutes:
 
 | Workflow | Old p50 | New p50 | Old p90 | New p90 |
 |---|---|---|---|---|
 | pull | 70 | 53 | 95 | 88 |
-| trunk | 182 | 170 | 277 | 255 |
+| trunk | 182 | 174 | 277 | 263 |
 | inductor (follow-up) | 136 | 120 | 223 | 205 |
 | rocm-mi300 | 208 | 191 | 313 | 299 |
 
-- **Merge wait.** 1,643 PR heads ran pull and `ciflow/trunk` together. On those, the p50 drops by 20 minutes and the p90 by 44. Trunk is the later signal for nearly all of them in both. With `ciflow/inductor` as well (1,186 heads), the inductor benchmarks bound the wait.
-- **Trunk is where the latency is.** Its long test shards are the critical path, so the test shrinkage shows up as wall-clock time. Trunk's p50 moves less than its mean (20 min saved on average): 46% of its PR test hours are fork PRs', which keep TD.
+- **Merge wait.** 1,643 PR heads ran pull and `ciflow/trunk` together. On those, the p50 drops by 12 minutes and the p90 by 29. Trunk is the later signal for nearly all of them in both. With `ciflow/inductor` as well (1,186 heads), the inductor benchmarks bound the wait.
+- **Trunk is where the latency is.** Its long test shards are the critical path, so the test shrinkage shows up as wall-clock time. Trunk's p50 moves less than its mean (14 min saved on average): 46% of its PR test hours are fork PRs', which keep TD, and its macOS jobs run every test under both policies.
 - **Pull leans toward build-bound.** Runs that wait on a build go from 12% to 22%. The floor is the xpu build (p50 40 / p90 49 min from creation to done) and the ROCm build (p50 23 / p90 53).
-- **The model matches real merges.** When the merge comment started trunk (n=337), comment to merge took p50 185 / p90 269 min, against a simulated trunk TTS of 182 / 277. When trunk had already run before the comment (n=533), the merge took p50 3 min.
+- **The model matches real merges.** When the merge comment started trunk (n=337), comment to merge took p50 185 / p90 269 min, against a simulated trunk TTS of 182 / 277. Taking each of those trunk runs' replayed saving off its merge gives the new 179 / 258. When trunk had already run before the comment (n=533), the merge took p50 3 min.
 - **Two delays are not modelled, so the merge rows and the trunk saving are optimistic.**
   - The selection artifact is kept 3 days (`retention-days: 3` in llm-td.yml), and resolve_selection.py treats an expired one as missing. A trunk run that a merge starts more than 3 days after the push gets no selection and keeps TD, and the p90 from first run to merge is 94.5 h.
   - Under enforcement the target-determination job waits up to `WAIT_SECONDS` (600 s) for a selector run that is still pending. The replay assumes the selection is ready.
 - **CI is a minority of end-to-end time to land.** From the first pull run on the merged head to the merge is p50 15.8 h and p90 94.5 h, dominated by review. The saving matters most for authors iterating on red CI, since every push pays it again.
 
 **Capacity.**
-- PR test job-hours across pull, trunk, inductor and rocm-mi300 go from 675k to 541k a month. That includes inductor's unit tests, which need the inductor follow-up. `Test` is 70-95% of test-job time on every major runner type.
+- PR test job-hours across pull, trunk, inductor and rocm-mi300 go from 675k to 545k a month. That includes inductor's unit tests, which need the inductor follow-up. `Test` is 70-95% of test-job time on every major runner type.
 - Median runner queues are already 1-3 minutes, but the tails are long: a10g p90 14 min, l4 p90 11, macos-m1 p90 59, mi300 p90 55, and the 4-GPU a10g pool p50 10 / p90 132. Freed capacity should cut those tails; this is a qualitative argument, not a model.
 
 **Method.**
 - **Replay.** For every PR workflow run in the 30 days to 2026-11-03, each same-repo test job's `Test` step is shrunk by the ratio r of new to old test time for that job.
   - Each job keeps its start time. Builds and non-test jobs are unchanged, shards are not rebalanced, and queueing effects are ignored.
   - A run is a fork PR's when its head repository is not pytorch/pytorch. For `ciflow/` pushes, the PR's head repository decides. Fork runs keep r = 1.
+  - Jobs that run_test.py runs without TD keep r = 1 too: the configs with TD off (docs_test, backwards_compat and the like, and test.sh's NO_TD dynamo_cpython) and the macOS and xpu runners.
 - **The ratio r.**
   - In pull, trunk and rocm-mi300, r is 0.606 (CPU) and 0.732 (GPU), from the unrounded typical-change test-time shares.
   - In inductor, which has no TD, r is 0.498 / 0.403 for the unit-test configs (assuming the inductor follow-up) and 1 for the model benchmarks.
   - r is one ratio per workflow and runner kind, applied to every shard. An unbalanced selection, where one shard keeps most of the selected tests, would make the real latency win smaller.
-- **TTS** is the last job's completion minus the run's creation. Only first attempts are used. Cancelled runs, runs with a cancelled job, and runs that failed before any build are excluded.
+- **TTS** is the last job's completion minus the run's creation. Only first attempts are used, from runs created between 29.5 days and 12 hours before the end. Runs whose conclusion is not success or failure, runs with a cancelled job, runs with no test job and runs whose TTS is not in (0, 24 h] are excluded.
 
 ## Dollar model
 
@@ -200,7 +201,7 @@ Time to signal (TTS) per workflow, in minutes:
 - **Model cost.**
   - $0.041 per call is the mean recorded cost over the 425 eval samples the selector asks the model about (`dollars.mean_call_usd`). At 12.5k same-repo PR pushes a month that is $0.5k a month. Fork PRs make no call.
   - **That figure depends on the prompt cache.** The Opus medium and high runs ran after Opus low on the same prompts and read 92-93% of their input from cache. Opus low, run first, read 12%.
-  - Priced cold, with every cache read billed as a cache write at the fitted rates ($4 input, $5 cache write, $0.20 cache read, $20 output per Mtok), every Opus effort costs $0.17-0.19 per call. The second Opus medium run, which hit a cold cache, recorded $0.146-0.164 per call.
+  - Priced cold, with every cache read billed as a cache write at the fitted rates ($4 input, $5 cache write, $0.20 cache read, $20 output per Mtok), every Opus effort costs $0.17-0.19 per call, over the calls made in one attempt with their usage recorded (all 425 here). The second Opus medium run, which hit a cold cache, recorded $0.146-0.164 per call.
   - `dollars --cold` prints the cold $/call and the fitted rates (`dollars.cold_call_usd`, a least-squares fit of the recorded cost to the four token counts). The fitted rates per Mtok (input / cache write / cache read / output) are $4 / $5 / $0.20 / $20 for Opus, $2 / $2.50 / $0.20 / $10 for Sonnet and $1 / $1.25 / $0.10 / $5 for Haiku.
   - A cold-cache bound is about $0.18 x 12.5k = $2.3k a month. In CI each PR push sends a different diff, but the long candidate list is a shared prefix, so the real figure is somewhere between the two.
   - Timed-out calls record only their earlier attempts' cost, so they are left out of the mean.
@@ -292,7 +293,7 @@ This section is how the production config was chosen. Rows use the same samples 
 ![reverts caught and failing pushes fully selected vs CPU test time](report_tradeoff.svg)
 
 How to read the chart:
-- Each line is one model and effort level, through hedge budgets of 0, 5, 10, 15 and 20% (labeled on the Opus medium line).
+- Each line is one model and effort level, through hedge budgets of 0, 5, 10, 15 and 20% (labeled on the Opus medium line of the failing-pushes panel).
 - The red X is today's TD, and the dotted red line marks its level.
 - The gold star is the proposed config.
 - The dashed gray line is the Pareto frontier: no point beats a frontier point on both axes.
@@ -589,15 +590,17 @@ WHERE created_at >= now() - INTERVAL 30 DAY AND repository.full_name = 'pytorch/
 GROUP BY same;
 ```
 
-**Time to land.** The replay in Time to land's Method was run from ClickHouse with three queries over the 30 days to 2026-11-03. `eval/land_time.py` runs them and the simulation. The queries:
+**Time to land.** The replay in Time to land's Method was run from ClickHouse with five queries over the month to 2026-11-03. `eval/land_time.py` runs them and the simulation. The queries:
 - `default.workflow_run` for pull, trunk, inductor and rocm-mi300: event, head branch and sha, head repository, creation time, attempt, conclusion and PR number. PR runs are pull's `pull_request` runs and the others' `ciflow/` pushes.
 - `default.workflow_job`, first attempts only. Per run: the cancelled and failed job counts, and the last build and non-test job completion. Per test job: its completion time, `Test` step duration, config and whether its runner is a GPU one.
+- `default.workflow_run` again for each PR run's head repository, and `default.pull_request` for the head repository of each PR a `ciflow/<label>/<PR>` push names: the fork-PR test.
 - `default.merges` joined with `default.issue_comment` and the main `pull` run of the merge commit: comment, merge and first PR run times, for the merge rows.
 
 The simulation works as follows:
 - It shrinks each same-repo test job's `Test` step by r and keeps its start time.
 - It recomputes each run's TTS as its last job's completion minus its creation.
-- It takes a PR head's wait as the latest TTS of its pull and trunk runs, plus inductor's for those rows.
+- It takes a PR head's wait as the latest end of its first pull and trunk runs, plus inductor's for those rows, minus the earliest of their creations. The pull and trunk rows count only heads whose trunk run was created within 600 s of pull.
+- For the merges whose comment started trunk (a `ciflow/trunk` run created within 300 s of the comment), it takes that trunk run's replayed saving off the comment to merge time.
 - r is new over old test time on a typical change, from the unrounded shares: 29.96/49.41 = 0.606 CPU and 33.55/45.86 = 0.732 GPU where TD runs. For inductor's unit-test configs it is the new shares (0.498 / 0.403), against 1 today.
 - With `--all-prs`, fork-PR runs are shrunk too, for the "fork PRs were selected too" line.
 

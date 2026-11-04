@@ -24,6 +24,7 @@ import statistics as st
 from pathlib import Path
 
 from tools.testing.llm_td.eval.chart import PRODUCTION
+from tools.testing.llm_td.eval.dollars import current_results
 
 
 def outcomes(rows: list[dict], tag: str, pol: str, kind: str) -> dict[str, bool]:
@@ -86,10 +87,10 @@ def compare(rows: list[dict], new: list[str], old: list[str], b: int, seed: int)
 
 
 def latency(data: Path, tag: str, ids: list[str]) -> str:
-    """p50 and p90 of `tag`'s wall_s on `ids`: the last attempt's latency, without earlier attempts or their backoff.
+    """p50 and p90 of `tag`'s wall_s on its current results on `ids` (see dollars.current_results): the last attempt's latency, without earlier attempts or their backoff.
 
     Timed-out calls count, at the time they were cut off."""
-    walls = sorted(json.loads(p.read_text())["wall_s"] for i in ids if (p := data / "results" / tag / f"{i}.json").exists())  # fmt: skip
+    walls = sorted(r["wall_s"] for r in current_results(data, tag, ids, data / "samples"))  # fmt: skip
     if len(walls) < 2:
         raise SystemExit(f"fewer than 2 {tag} results on the ids")
     q = st.quantiles(walls, n=10, method="inclusive")

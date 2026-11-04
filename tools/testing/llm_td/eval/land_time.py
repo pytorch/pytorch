@@ -12,20 +12,25 @@ report replays the runs created between 29.5 days and 12 hours before the
 end. Each same-repo test job's `Test` step is shrunk by r, new over old test
 time on a typical change, from a dollars.py --json output: fractions over
 td_fractions where TD runs, and the inductor unit-test fractions (old = 1)
-in inductor, whose model benchmarks keep r = 1. Fork-PR runs keep TD, so
-r = 1 for them unless --all-prs. Each job keeps its start time; a run's time
-to signal (TTS) is its last job's completion minus its creation. Only first
-attempts count, and runs that were cancelled, have a cancelled job, ran no
-test job or took over 24 hours are left out. A PR head's merge wait is the
-latest end of its first pull and trunk runs (and inductor's) minus the
-earliest creation, over heads whose trunk run was created within 10 minutes
-of pull.
+in inductor, whose model benchmarks keep r = 1. Jobs run_test.py runs
+without TD (TD_NO and score.NO_TD_CONFIGS configs, score.NO_TD_ENV runner
+labels such as macOS) keep r = 1, and so do fork-PR runs, which keep TD,
+unless --all-prs. Each job keeps its start time; a run's time to signal
+(TTS) is its last job's completion minus its creation. Only first attempts
+count, and runs that did not conclude success or failure, have a cancelled
+job, ran no test job or have a TTS outside (0, 24 h] are left out. A PR
+head's merge wait is the latest end of its first pull and trunk runs (and
+inductor's) minus the earliest creation; the pull and trunk rows take only
+heads whose trunk run was created within 10 minutes of pull. The merges
+whose comment started trunk are replayed by taking that trunk run's saving
+off their comment to merge time.
 """
 
 from __future__ import annotations
 
 import argparse
 import collections
+import fnmatch
 import json
 import re
 import statistics as st
@@ -33,7 +38,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tools.testing.llm_td.eval import clickhouse
+from tools.testing.llm_td.eval import clickhouse, score, write_json
 
 
 if TYPE_CHECKING:
@@ -120,16 +125,18 @@ FROM m JOIN c ON c.id = m.comment_id JOIN mainrun ON mainrun.head_sha = m.merge_
 
 
 def fetch(cache: Path, end: int) -> None:
+    """meta.json is written last, so a fetch that fails partway leaves a cache report refuses."""
     cache.mkdir(parents=True, exist_ok=True)
-    (cache / "meta.json").write_text(json.dumps({"end": end}))
-    (cache / "wfruns.json").write_text(json.dumps(clickhouse.query(RUNS_SQL.format(end=end))))  # fmt: skip
+    (cache / "meta.json").unlink(missing_ok=True)
+    write_json(cache / "wfruns.json", clickhouse.query(RUNS_SQL.format(end=end)))
     for wf in WORKFLOWS:
         branch = "head_branch NOT LIKE 'release/%'" if wf == "pull" else "head_branch LIKE 'ciflow/%'"  # fmt: skip
         rows = [r for lo in range(0, 30, 3) for r in clickhouse.query(JOBS_SQL.format(end=end, lo=lo, hi=lo + 3, wf=wf, branch=branch, gpu=GPU_LABEL))]  # fmt: skip
-        (cache / f"runs_{wf}.json").write_text(json.dumps(rows))
+        write_json(cache / f"runs_{wf}.json", rows)
     fork = {name: {r["k"]: r["repo"] for r in clickhouse.query(sql.format(end=end))} for name, sql in (("run_head_repo", FORK_SQL), ("pr_head_repo", PR_REPO_SQL))}  # fmt: skip
-    (cache / "fork.json").write_text(json.dumps(fork))
-    (cache / "merges.json").write_text(json.dumps(clickhouse.query(MERGES_SQL.format(end=end))))  # fmt: skip
+    write_json(cache / "fork.json", fork)
+    write_json(cache / "merges.json", clickhouse.query(MERGES_SQL.format(end=end)))
+    write_json(cache / "meta.json", {"end": end})
 
 
 def pct(a: list[float], p: int) -> float:
@@ -163,10 +170,11 @@ def replay(cache: Path, r: dict[str, float], keep: set[int]) -> dict[str, list[d
     end = json.loads((cache / "meta.json").read_text())["end"]
     wfr = {w["id"]: w for w in json.loads((cache / "wfruns.json").read_text())}
 
-    def ratio(wf: str, cfg: str, gpu: bool) -> float:
+    def ratio(wf: str, cfg: str, gpu: bool, labels: str) -> float:
         if wf == "inductor":
             return 1.0 if BENCH.search(cfg) else r["ind_gpu" if gpu else "ind_cpu"]
-        return 1.0 if cfg in TD_NO else r["gpu" if gpu else "cpu"]
+        no_td = cfg in TD_NO or any(fnmatch.fnmatchcase(cfg, n) for n in score.NO_TD_CONFIGS) or score.NO_TD_ENV.search(labels)  # fmt: skip
+        return 1.0 if no_td else r["gpu" if gpu else "cpu"]
 
     out = {}
     for wf in WORKFLOWS:
@@ -190,7 +198,7 @@ def replay(cache: Path, r: dict[str, float], keep: set[int]) -> dict[str, list[d
                 continue
             last_build, last_other = x["last_build"] or c, x["last_other"] or c
             for t in x["tests"]:
-                t.append(1.0 if rid in keep else ratio(wf, t[2], t[3]))
+                t.append(1.0 if rid in keep else ratio(wf, t[2], t[3], t[6]))
             t_old = max(t[0] for t in x["tests"])
             t_new = max(t[0] - t[1] * (1 - t[-1]) for t in x["tests"])
             old = max(last_build, last_other, t_old) - c
@@ -243,18 +251,20 @@ def report(cache: Path, dollars: dict, all_prs: bool) -> list[str]:
     for w in wfruns:
         if w["name"] == "trunk" and w["head_branch"].startswith("ciflow/"):
             trunk[w["head_sha"]].append(w["created"])
-    started, before = [], []
+    saved = {(x["sha"], x["c"]): x["old"] - x["new"] for x in runs["trunk"]}
+    started, started_new, before = [], [], []
     for m in merges:
         if m["i"] or not (ts := trunk.get(m["sha"])):
             continue
         if min(ts) < m["cc"] - 300:
             before.append((m["mt"] - m["cc"]) / 60)
-        elif min(abs(t - m["cc"]) for t in ts) <= 300:
+        elif abs((t := min(ts, key=lambda t: abs(t - m["cc"]))) - m["cc"]) <= 300:
             started.append((m["mt"] - m["cc"]) / 60)
+            started_new.append(started[-1] - saved.get((m["sha"], t), 0.0))
     lines += [
         "",
         f"Merges without -f (n={len(c2m)}): comment to merge p50 {pct(c2m, 50):.0f} / p90 {pct(c2m, 90):.0f} min; first PR pull run to merge p50 {pct(p2m, 50):.1f} / p90 {pct(p2m, 90):.1f} h.",
-        f"Merge comment started trunk (n={len(started)}): comment to merge p50 {pct(started, 50):.0f} / p90 {pct(started, 90):.0f} min. Trunk ran before the comment (n={len(before)}): p50 {pct(before, 50):.0f} / p90 {pct(before, 90):.0f} min.",
+        f"Merge comment started trunk (n={len(started)}): comment to merge p50 {pct(started, 50):.0f} / p90 {pct(started, 90):.0f} min, new p50 {pct(started_new, 50):.0f} / p90 {pct(started_new, 90):.0f} min. Trunk ran before the comment (n={len(before)}): p50 {pct(before, 50):.0f} / p90 {pct(before, 90):.0f} min.",
     ]
 
     queues: dict[str, list] = collections.defaultdict(lambda: [[], 0.0, 0.0])
