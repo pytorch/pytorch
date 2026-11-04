@@ -665,6 +665,11 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
   at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
     return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
   });
+  // beginAllocateToPool takes a reference on the pool, but this only re-routes
+  // allocations of a pool the graph already holds (from capture_begin, released
+  // in reset()). Drop the extra reference so reset() can free the pool.
+  c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+  at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
 
   AT_CUDA_CHECK(cudaStreamBeginCaptureToGraph(
       child_stream,
@@ -739,6 +744,10 @@ void CUDAGraph::end_capture_to_conditional_node() {
       return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
     });
   }
+  // Same as in begin_capture_to_conditional_node: this re-routes allocations
+  // of a pool the graph already holds, so drop the reference taken above.
+  c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+  at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
   constexpr const char* rng_with_conditional_nodes_error =
       "RNG within data-dependent conditional nodes is not supported yet.";
   TORCH_CHECK(!rng_or_generators_changed, rng_with_conditional_nodes_error);
