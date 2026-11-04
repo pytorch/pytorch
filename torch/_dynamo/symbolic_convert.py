@@ -4347,6 +4347,18 @@ class InstructionTranslatorBase(
 
     def _format_value(self, fmt_spec: VariableTracker, flags: int) -> None:
         value = self.pop()
+        from .variables.lazy import ComputedLazyConstantVariable
+
+        if (
+            isinstance(value, ComputedLazyConstantVariable)
+            and not value.is_realized()
+            and (flags & 0x03) == 0
+            and fmt_spec.is_python_constant()
+            and fmt_spec.as_python_constant() == ""
+        ):
+            self.push(VariableTracker.build(self, str).call_function(self, [value], {}))
+            return
+
         if isinstance(value, SymNodeVariable):
             from torch._dynamo.variables.lazy import (
                 LazySymNodeFormatString,
