@@ -200,6 +200,80 @@ __global__ void upsample_bilinear2d_out_frame_vec4(
     *reinterpret_cast<vec_t*>(odata + static_cast<int64_t>(index4) * 4) = out;
   }
 }
+
+bool use_per_element_kernels(const Tensor& output) {
+  const auto* props = at::cuda::getCurrentDeviceProperties();
+  const int64_t plane_numel = output.size(2) * output.size(3);
+  return output.numel() > 0 &&
+      plane_numel < static_cast<int64_t>(props->multiProcessorCount) *
+          plane_kernel_min_pixels_per_sm(props);
+}
+
+template <typename scalar_t>
+void upsample_bilinear2d_out_per_element_launch(
+    const Tensor& output,
+    const Tensor& input,
+    bool align_corners,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
+  using accscalar_t = at::acc_type<scalar_t, true>;
+  const int channels = input.size(1);
+  const int input_height = input.size(2);
+  const int input_width = input.size(3);
+  const int output_height = output.size(2);
+  const int output_width = output.size(3);
+  const int64_t numel = output.numel();
+  const int64_t plane_numel =
+      static_cast<int64_t>(output_height) * output_width;
+
+  constexpr int64_t elem_threads = 256;
+  const int64_t max_blocks =
+      at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  auto idata = input.packed_accessor64<const scalar_t, 4>();
+  auto odata = output.packed_accessor64<scalar_t, 4>();
+
+  const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
+      input_height, output_height, align_corners, scales_h);
+  const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
+      input_width, output_width, align_corners, scales_w);
+
+  const bool use_32bit_indexing =
+      canUse32BitIndexMath(input) && canUse32BitIndexMath(output);
+  // vec4 helps only when upsampling: when downsampling, the input read
+  // dominates and the scalar kernel is faster.
+  const bool use_vec4 = use_32bit_indexing && output.is_contiguous() &&
+      output_width % 4 == 0 &&
+      reinterpret_cast<uintptr_t>(output.const_data_ptr()) %
+              (4 * sizeof(scalar_t)) == 0 &&
+      static_cast<int64_t>(input_height) * input_width <= plane_numel;
+
+  if (use_vec4) {
+    const int64_t numel4 = numel / 4;
+    const int64_t num_blocks =
+        std::min(ceil_div(numel4, elem_threads), max_blocks);
+    upsample_bilinear2d_out_frame_vec4<scalar_t, accscalar_t>
+        <<<num_blocks, elem_threads, 0, stream>>>(
+            static_cast<int32_t>(numel4), rheight, rwidth, align_corners,
+            idata, output.mutable_data_ptr<scalar_t>(), channels,
+            output_height, output_width);
+  } else {
+    const int64_t num_blocks =
+        std::min(ceil_div(numel, elem_threads), max_blocks);
+    if (use_32bit_indexing) {
+      upsample_bilinear2d_out_frame_per_element<scalar_t, accscalar_t, int32_t>
+          <<<num_blocks, elem_threads, 0, stream>>>(
+              static_cast<int32_t>(numel), rheight, rwidth, align_corners,
+              idata, odata);
+    } else {
+      upsample_bilinear2d_out_frame_per_element<scalar_t, accscalar_t, int64_t>
+          <<<num_blocks, elem_threads, 0, stream>>>(
+              numel, rheight, rwidth, align_corners, idata, odata);
+    }
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
 #endif
 
 template <typename scalar_t, typename accscalar_t, typename index_t>
@@ -496,6 +570,24 @@ static void upsample_bilinear2d_out_cuda_template(
     return;
   }
 
+#ifdef USE_ROCM
+  // Output planes too small to fill the device get one thread per output
+  // element instead of the plane loop in upsample_bilinear2d_out_frame. The
+  // condition must match the channels_last heuristic below.
+  const bool channels_last_path =
+      memory_format == at::MemoryFormat::ChannelsLast && channels >= 16 &&
+      output.is_contiguous(memory_format);
+  if (!channels_last_path && use_per_element_kernels(output)) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half, at::ScalarType::BFloat16,
+        input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
+          upsample_bilinear2d_out_per_element_launch<scalar_t>(
+              output, input, align_corners, scales_h, scales_w);
+        });
+    return;
+  }
+#endif
+
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
@@ -570,56 +662,6 @@ static void upsample_bilinear2d_out_cuda_template(
           input_height, output_height, align_corners, scales_h);
       const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
           input_width, output_width, align_corners, scales_w);
-
-#ifdef USE_ROCM
-      // Output planes too small to fill the device get one thread per output
-      // element instead of the plane loop below.
-      const auto* props = at::cuda::getCurrentDeviceProperties();
-      const int64_t numel = output.numel();
-      const int64_t plane_numel =
-          static_cast<int64_t>(output_height) * output_width;
-      if (numel > 0 &&
-          plane_numel < static_cast<int64_t>(props->multiProcessorCount) *
-                  plane_kernel_min_pixels_per_sm(props)) {
-        constexpr int64_t elem_threads = 256;
-        const int64_t max_blocks = props->maxGridSize[0];
-        const bool use_32bit_indexing =
-            canUse32BitIndexMath(input) && canUse32BitIndexMath(output);
-        // vec4 helps only when upsampling: when downsampling, the input read
-        // dominates and the scalar kernel is faster.
-        const bool use_vec4 = use_32bit_indexing && output.is_contiguous() &&
-            output_width % 4 == 0 &&
-            reinterpret_cast<uintptr_t>(output.const_data_ptr()) %
-                    (4 * sizeof(scalar_t)) == 0 &&
-            static_cast<int64_t>(input_height) * input_width <= plane_numel;
-
-        if (use_vec4) {
-          const int64_t numel4 = numel / 4;
-          const int64_t num_blocks =
-              std::min(ceil_div(numel4, elem_threads), max_blocks);
-          upsample_bilinear2d_out_frame_vec4<scalar_t, accscalar_t>
-              <<<num_blocks, elem_threads, 0, stream>>>(
-                  static_cast<int32_t>(numel4), rheight, rwidth, align_corners,
-                  idata, output.mutable_data_ptr<scalar_t>(), channels,
-                  output_height, output_width);
-        } else {
-          const int64_t num_blocks =
-              std::min(ceil_div(numel, elem_threads), max_blocks);
-          if (use_32bit_indexing) {
-            upsample_bilinear2d_out_frame_per_element<scalar_t, accscalar_t, int32_t>
-                <<<num_blocks, elem_threads, 0, stream>>>(
-                    static_cast<int32_t>(numel), rheight, rwidth,
-                    align_corners, idata, odata);
-          } else {
-            upsample_bilinear2d_out_frame_per_element<scalar_t, accscalar_t, int64_t>
-                <<<num_blocks, elem_threads, 0, stream>>>(
-                    numel, rheight, rwidth, align_corners, idata, odata);
-          }
-        }
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-        return;
-      }
-#endif
 
       upsample_bilinear2d_out_frame<scalar_t, accscalar_t>
           <<<ceil_div(num_kernels, num_threads),
