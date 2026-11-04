@@ -762,19 +762,37 @@ class TestScatterGatherDevice(TestCase):
         ],
     )
     def test_atomic_add_preserves_neighbours(self, device, dtype, op):
-        # Half-precision atomic adds may be packed with the other half of the
-        # 4-byte word holding the target, inside or outside self. The packed
-        # lane must leave that slot unchanged; -0.0 would flip under +0.0.
+        # Half-precision atomic adds can be packed with a neighbouring slot.
+        # Check that only the targeted elements change: slots of self start at
+        # -0.0, which an add of +0.0 would flip, and slots outside self hold a
+        # signaling NaN, which any add would quiet.
         # See https://github.com/pytorch/pytorch/issues/202905
+        signaling_nan = 0x7C01 if dtype == torch.float16 else 0x7F81
+
         def view_5x5(b):
             return b[:25].view(5, 5)
+
+        def column_slice(b):
+            return b[:30].view(5, 6)[:, :5]
 
         cases = [
             (view_5x5, 1, 4),
             (view_5x5, 0, 4),
             (lambda b: view_5x5(b).t(), 1, 4),
             (lambda b: b[1:26].view(5, 5), 1, 0),
-            (lambda b: b[:30].view(5, 6)[:, :5], 1, 4),
+            (lambda b: b[:25], 0, 24),
+            (lambda b: b[1:26], 0, 0),
+            # Padded rows: interior columns may pair within their row only.
+            (column_slice, 1, 4),
+            (column_slice, 1, 2),
+            (column_slice, 0, 2),
+            (lambda b: column_slice(b).t(), 1, 2),
+            (lambda b: b[:30].view(5, 6)[:, 1:], 1, 0),
+            (lambda b: b[1:31].view(5, 6)[:, :5], 1, 3),
+            (lambda b: b[:35].view(5, 7)[:, :5], 1, 3),
+            (lambda b: b[:48].view(2, 4, 6)[:, :, :5], 2, 4),
+            (lambda b: b[:48].view(2, 4, 6)[:, :, :5], 1, 3),
+            # No element has an owned neighbour.
             (lambda b: b[:10:2], 0, 1),
             (lambda b: b[1:11:2], 0, 1),
         ]
@@ -807,17 +825,22 @@ class TestScatterGatherDevice(TestCase):
             else:
                 raise AssertionError(f"unknown op {op}")
 
+        def make_base():
+            base = torch.full((64,), signaling_nan, device=device, dtype=torch.int16)
+            return base.view(dtype)
+
         for make_self, dim, i in cases:
-            base = torch.full((32,), -0.0, device=device, dtype=dtype)
+            base = make_base()
             x = make_self(base)
+            x.fill_(-0.0)
             shape = list(x.shape)
             shape[dim] = 1
             idx = torch.full(shape, i, device=device)
             src = torch.ones(shape, device=device, dtype=dtype)
             apply(x, dim, i, idx, src)
 
-            expected = torch.full((32,), -0.0, device=device, dtype=dtype)
-            make_self(expected).select(dim, i).fill_(1)
+            expected = make_base()
+            make_self(expected).fill_(-0.0).select(dim, i).fill_(1)
             self.assertEqual(
                 base.view(torch.int16),
                 expected.view(torch.int16),

@@ -108,17 +108,18 @@ HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 // speedup, see https://github.com/pytorch/pytorch/pull/21879).
 // We can convert a __half atomic into a __half2 atomic by simply
 // pairing the __half with a -0.0 entry on the left/right depending
-// on alignment. numel bounds how far that pairing may look: the partner
-// tensor[index +/- 1] is used only if it is inside [0, numel); otherwise
-// a plain __half atomic is used.
+// on alignment... but only if this wouldn't cause an out of bounds
+// access!  Thus, you must specify tensor and numel so we can check
+// if you would be out-of-bounds and use a plain __half atomic if
+// you would be.
 //
-// The partner is always the other half of the 4-byte-aligned word holding
-// tensor[index], so it never leaves that word and cannot fault. Unless numel
-// is exact for the elements at tensor, it may touch memory outside the tensor
-// (e.g. the gap of a strided view) or just past the requested allocation. It
-// is padded with -0.0, which leaves every
-// non-NaN value, including -0.0, bit-for-bit unchanged under
-// round-to-nearest; a NaN partner may be quieted.
+// tensor[0, numel) must be elements that the caller owns, and index must be
+// measured from tensor in the same units: the partner tensor[index +/- 1] is
+// used only if it lies in that range. A strided tensor's memory span contains
+// slots that are not its elements, so pass a tensor and numel covering only
+// owned elements (e.g. one contiguous row), or numel = 0 to disable pairing.
+// The partner receives -0.0, which leaves every non-NaN value (including
+// -0.0) unchanged.
 template <
     typename scalar_t,
     typename index_t,
@@ -139,13 +140,13 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
   bool low_byte =
       (reinterpret_cast<std::uintptr_t>(target_addr) % sizeof(__half2) == 0);
 
-  if (low_byte && index < (numel - 1)) {
+  if (low_byte && index + 1 < numel) {
     __half2 value2;
     value2.x = static_cast<__half>(value);
     value2.y = NATIVE_NEG_ZERO_HALF;
     ATOMICADD(reinterpret_cast<__half2*>(target_addr), value2);
 
-  } else if (!low_byte && index > 0) {
+  } else if (!low_byte && index > 0 && index < numel) {
     __half2 value2;
     value2.x = NATIVE_NEG_ZERO_HALF;
     value2.y = static_cast<__half>(value);
@@ -186,13 +187,13 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
       (reinterpret_cast<std::uintptr_t>(target_addr) % sizeof(__nv_bfloat162) ==
        0);
 
-  if (low_byte && index < (numel - 1)) {
+  if (low_byte && index + 1 < numel) {
     __nv_bfloat162 value2;
     value2.x = *reinterpret_cast<__nv_bfloat16*>(&value);
     value2.y = NATIVE_NEG_ZERO_BF16;
     ATOMICADD(reinterpret_cast<__nv_bfloat162*>(target_addr), value2);
 
-  } else if (!low_byte && index > 0) {
+  } else if (!low_byte && index > 0 && index < numel) {
     __nv_bfloat162 value2;
     value2.x = NATIVE_NEG_ZERO_BF16;
     value2.y = *reinterpret_cast<__nv_bfloat16*>(&value);
@@ -242,7 +243,7 @@ __device__ __forceinline__ void fastAtomicAdd(
 
 HIDDEN_NAMESPACE_END(torch, headeronly)
 
-// ATOMICADD/NATIVE_NEG_ZERO_* are only expanded above; don't leak them.
+// These macros are only expanded above; don't leak them.
 #undef ATOMICADD
 #undef NATIVE_NEG_ZERO_BF16
 #undef NATIVE_NEG_ZERO_HALF
