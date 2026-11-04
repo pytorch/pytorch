@@ -81,8 +81,8 @@ def main() -> None:
 
     # fmt: off
     tags = sorted({t for t, _, _ in g if t != "td" and not t.endswith(("_r2", "_agentic"))})
-    if unknown := [t for t in tags if t not in COLOR or t.rsplit("_", 1)[0] not in MODELS]:
-        raise SystemExit(f"no name or color for {unknown}; add them to MODELS and COLOR")
+    if unknown := [t for t in tags if t not in COLOR or t.rsplit("_", 1)[0] not in MODELS or t.rsplit("_", 1)[1] not in MARKER]:
+        raise SystemExit(f"no name, color or marker for {unknown}; add them to MODELS, COLOR and MARKER")
     titles = {"revert": "Reverted commits caught", "head": "Failing PR pushes with every real failure selected"}
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.8))
     for ax, kind in zip(axes, ["revert", "head"]):
@@ -108,7 +108,7 @@ def main() -> None:
         ax.plot(fx, fy, color="gray", linestyle="--", linewidth=1, zorder=0, label="Pareto frontier")
         ax.set_title(f"{titles[kind]} (n={n})", fontsize=10)
         ax.set_xlabel("CPU test time run on a typical change (% of a full pass, in seconds)")
-        ax.set_xlim(0, 55)
+        ax.set_xlim(0, max(55, 5 + max(px for px, _ in points)))
         ax.grid(alpha=0.3)
     # fmt: on
     axes[0].set_ylabel("%")

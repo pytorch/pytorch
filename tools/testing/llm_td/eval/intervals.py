@@ -54,14 +54,14 @@ def bootstrap(
 
 
 def compare(rows: list[dict], new: list[str], old: list[str], b: int, seed: int) -> list[str]:  # fmt: skip
+    """One line per headline metric comparing (tag, policy) `new` with `old` on the ids both scored, with `b` resamples."""
     rng = random.Random(seed)
     lines = []
     for kind, label in (("revert", "reverts caught"), ("head", "failing pushes, every failure")):  # fmt: skip
         n, o = (outcomes(rows, t, p, kind) for t, p in (new, old))
         ids = sorted(n.keys() & o.keys())
         if not ids:
-            lines.append(f"{label}: no paired rows")
-            continue
+            raise SystemExit(f"no paired failing {kind} rows of {':'.join(new)} and {':'.join(old)}")  # fmt: skip
         d = {i: int(n[i]) - int(o[i]) for i in ids}
         nb, nc = sum(v == 1 for v in d.values()), sum(v == -1 for v in d.values())
         line = (
@@ -83,6 +83,7 @@ def compare(rows: list[dict], new: list[str], old: list[str], b: int, seed: int)
 
 
 def latency(data: Path, tag: str, ids: list[str]) -> str:
+    """p50 and p90 of `tag`'s wall_s on `ids`: the last attempt's latency, without earlier attempts or their backoff."""
     walls = sorted(json.loads(p.read_text())["wall_s"] for i in ids if (p := data / "results" / tag / f"{i}.json").exists())  # fmt: skip
     if len(walls) < 2:
         raise SystemExit(f"fewer than 2 {tag} results on the ids")
@@ -110,6 +111,8 @@ def main() -> None:
         return
     if not args.rows:
         p.error("no rows")
+    if bad := [x for x in (args.new, args.old) if x.count(":") != 1]:
+        p.error(f"--new and --old are TAG:POLICY, got {bad[0]!r}")
     rows = [r for f in args.rows for r in json.loads(f.read_text())]
     for line in compare(rows, args.new.split(":"), args.old.split(":"), args.b, args.seed):  # fmt: skip
         print(line)

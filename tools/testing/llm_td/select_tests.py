@@ -321,7 +321,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--enforce",
         action="store_true",
-        help="tell run_test.py, on PRs with TD on, to run the covered files, the files that already failed on the PR and that TD runs, and a hedge of TD's top files instead of TD's split; ignored when the selector fails, and run_test.py keeps TD's split when none of the call's files has a test time (for example without test-times.json), when td_results.json has no previous failures, or when none of those files would run",
+        help="tell run_test.py, on PRs with TD on, to run the covered files, the files that already failed on the PR and that TD runs, and a hedge of TD's top files instead of TD's split; ignored when the selector fails, and run_test.py keeps TD's split when none of the call's files has a test time (for example without test-times.json), when the previous failures are not recorded in the TD results, or when none of those files would run",
     )
     parser.add_argument("--print-prompt", action="store_true")
     args = parser.parse_args(argv)

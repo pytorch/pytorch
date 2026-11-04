@@ -75,6 +75,7 @@ def fractions(
     data: Path,
     tag: str,
     pol: str,
+    *,
     ids: list[str],
     samples: Path,
     td_dir: Path,
@@ -86,11 +87,11 @@ def fractions(
     The inductor shares ("ind_cpu", "ind_gpu") are over the rows whose change
     the ciflow/inductor labeler rule matches, of the time of inductor.yml's
     unit-test configs (inductor-unittest.yml) that TD never runs."""
-    rows = score.score(data, ids, list(dict.fromkeys([tag, "td"])), [pol], True, samples, td_dir, stats)  # fmt: skip
+    rows = score.score(data, ids, list(dict.fromkeys([tag, "td"])), [pol], strong=True, samples=samples, td_dir=td_dir, stats=stats)  # fmt: skip
     seconds = score.test_seconds(data / "test-times.json")
     fallback = score.fallback_seconds(data / "test-times.json")
     globs = inductor_globs(labeler)
-    unit = {c for _, n, c in score.ci_jobs()[False] if n.startswith("unit-test / ")}
+    unit = {c for w, n, c in score.ci_jobs()[False] if w == "inductor" and n.startswith("unit-test / ")}  # fmt: skip
     inductor = {c for c in unit if not score.runs_td(c)}
     if not inductor:
         raise SystemExit("no inductor unit-test configs without TD in workflows")
@@ -148,7 +149,7 @@ def model(
     workflows: list[tuple[str, str, float, float, float, bool]] = WORKFLOWS,
 ) -> dict:
     """Per-workflow monthly savings ($k) of `pol` of `tag` over TD, with the fractions on `ids` and the model-call cost averaged over `cost_ids`."""
-    f, ftd = fractions(data, tag, pol, ids, samples, td_dir, stats, labeler)
+    f, ftd = fractions(data, tag, pol, ids=ids, samples=samples, td_dir=td_dir, stats=stats, labeler=labeler)  # fmt: skip
     total = {"cpu": 0.0, "gpu": 0.0}
     stack = 0.0
     rows = []
