@@ -36,7 +36,6 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
 )
 from torch.testing._internal.common_dtype import (
-    all_types,
     all_types_and,
     all_types_and_complex_and,
     complex_types,
@@ -1289,7 +1288,6 @@ class TestBinaryUfuncsDevice(TestCase):
             self.assertEqual(actual, expect, exact_dtype=exact_dtype)
 
     @dtypes(*all_types_and(torch.half))
-    @dtypesIfXPU(*all_types())
     def test_div_rounding_numpy(self, device, dtype):
         info = torch.finfo(dtype) if dtype.is_floating_point else torch.iinfo(dtype)
         low, high = info.min, info.max
