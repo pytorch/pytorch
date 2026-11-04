@@ -1803,12 +1803,7 @@ def parse_args():
         help="Enables removing tests based on TD",
         default=IS_CI
         and get_pr_number() is not None
-        and td_enabled_job(
-            BUILD_ENVIRONMENT,
-            macos=IS_MACOS,
-            no_td=no_td,
-            tests_to_include=os.environ.get("TESTS_TO_INCLUDE", ""),
-        )
+        and td_enabled_job(BUILD_ENVIRONMENT, macos=IS_MACOS, no_td=no_td)
         and td_enabled_workflow(GITHUB_WORKFLOW),
     )
     parser.add_argument(
@@ -2559,7 +2554,7 @@ def main():
         selection_file=REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / LLM_TD_SELECTION_FILE,
         test_config=TEST_CONFIG,
         td_enabled=options.enable_td,
-        previously_failed=previous_failures,
+        previous_failures=previous_failures,
         gen_artifact=gen_ci_artifact if IS_CI else None,
     )
     test_batch = TestBatch("tests to run", split.include, False)

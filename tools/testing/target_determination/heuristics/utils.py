@@ -119,18 +119,15 @@ def td_enabled_workflow(workflow: str) -> bool:
     )
 
 
-# run_test.py never runs TD in builds whose BUILD_ENVIRONMENT contains one of these.
 NO_TD_BUILD_ENVS = ("xpu", "onnx")
 
 
-def td_enabled_job(
-    build_environment: str, *, macos: bool, no_td: bool, tests_to_include: str
-) -> bool:
+def td_enabled_job(build_environment: str, *, macos: bool, no_td: bool) -> bool:
     """The job-level rest of run_test.py's --enable-td default: TD is off on
-    macOS, in NO_TD_BUILD_ENVS builds, under NO_TD, and when TESTS_TO_INCLUDE
-    names tests."""
+    macOS, in NO_TD_BUILD_ENVS builds and under NO_TD. main() also turns it
+    off when TESTS_TO_INCLUDE names tests."""
     no_td_env = any(e in build_environment for e in NO_TD_BUILD_ENVS)
-    return not (no_td or macos or no_td_env or tests_to_include.strip())
+    return not (no_td or macos or no_td_env)
 
 
 @cache
