@@ -6,7 +6,6 @@
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
-#include <c10/util/SmallVector.h>
 #define PY_SSIZE_T_CLEAN
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/EmptyTensor.h>
@@ -14,6 +13,7 @@
 #include <c10/util/Synchronized.h>
 #include <c10/util/flat_hash_map.h>
 #include <fmt/format.h>
+#include <pybind11/critical_section.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -21,6 +21,7 @@
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -2046,9 +2047,7 @@ class LAMBDA_GUARD : public LeafGuard {
 // https://github.com/python/cpython/blob/v3.11.0/Objects/odictobject.c
 // The public OrderedDict iterator hashes each key. Walking the nodes directly
 // avoids invoking user hash/equality callbacks.
-#if IS_PYTHON_3_16_PLUS
-#error "Please ensure the OrderedDict layouts below still match CPython 3.16"
-#endif
+#if !IS_PYTHON_3_16_PLUS
 struct OrderedDictNodePrefix {
   PyObject* key;
   Py_hash_t hash;
@@ -2084,6 +2083,13 @@ static std::optional<std::vector<py::object>> ordered_dict_keys(
   return result;
 }
 
+#else
+static std::optional<std::vector<py::object>> ordered_dict_keys(
+    py::handle value) {
+  TORCH_CHECK(false, "Python 3.16+ OrderedDict snapshots are not supported");
+}
+#endif
+
 // Order records dense storage indices in linked order, independent of key IDs.
 // Replay this leaf on tag-cache hits: move_to_end does not change dict tags.
 class ORDERED_DICT_ORDER_MATCH : public LeafGuard {
@@ -2111,6 +2117,10 @@ class ORDERED_DICT_ORDER_MATCH : public LeafGuard {
   }
 
   bool check_nopybind(PyObject* value) override {
+#if IS_PYTHON_3_16_PLUS
+    TORCH_CHECK(
+        false, "Python 3.16+ OrderedDict order guards are not supported");
+#else
     if (!PyODict_Check(value)) {
       return false;
     }
@@ -2129,9 +2139,11 @@ class ORDERED_DICT_ORDER_MATCH : public LeafGuard {
     result = check_order(value, keys.data());
     Py_END_CRITICAL_SECTION();
     return result;
+#endif
   }
 
  private:
+#if !IS_PYTHON_3_16_PLUS
   bool check_order(PyObject* value, PyObject** keys) const {
     if (PyDict_GET_SIZE(value) != static_cast<Py_ssize_t>(_order.size())) {
       return false;
@@ -2160,6 +2172,8 @@ class ORDERED_DICT_ORDER_MATCH : public LeafGuard {
     }
     return node == nullptr;
   }
+
+#endif
 
   std::vector<Py_ssize_t> _order;
   bool _storage_order = true;
@@ -2922,6 +2936,16 @@ class RelationalGuard : public LeafGuard {
   // reset the relational guard state on guard failure. This is called by the
   // guard manager.
   virtual void reset_state() = 0;
+
+  // Stateful guards can opt into clone-local state without changing explicit
+  // filters.
+  virtual std::shared_ptr<RelationalGuard> clone(RootGuardManager* root) {
+    return nullptr;
+  }
+
+  virtual const void* group_identity() const {
+    return this;
+  }
 };
 
 // Shared state for one ordered receiver-alias pattern.
@@ -2955,7 +2979,7 @@ struct ObjectAliasPatternState {
   }
 
   std::vector<py::object> representatives;
-  std::unordered_map<PyObject*, size_t> classes;
+  ska::flat_hash_map<PyObject*, size_t> classes;
   bool dirty = false;
 };
 
@@ -2982,32 +3006,65 @@ class OBJECT_ALIAS_PATTERN : public RelationalGuard {
     _state->reset();
   }
 
-  std::shared_ptr<OBJECT_ALIAS_PATTERN> clone(RootGuardManager* root);
+  std::shared_ptr<RelationalGuard> clone(RootGuardManager* root) override;
+
+  const void* group_identity() const override {
+    return _state.get();
+  }
 
  private:
   std::shared_ptr<ObjectAliasPatternState> _state;
   size_t _alias;
 };
 
+// Root checks serialize this cache; callers hold both dictionary critical
+// sections.
+struct NNModuleHookFlagsValidation {
+  // Borrowed identity; unique version IDs protect against address reuse.
+  PyObject* dictionary{nullptr};
+  uint64_t version{0};
+  Py_ssize_t size{-1};
+  bool valid{false};
+
+  bool check(PyObject* flags) {
+    const auto current_version = get_dict_version_unchecked(flags);
+    const auto current_size = PyDict_GET_SIZE(flags);
+    if (current_version != 0 && dictionary == flags &&
+        version == current_version && size == current_size) {
+      return valid;
+    }
+    // A clone into an empty watched dict need not change its tag, but changes
+    // size.
+    dictionary = flags;
+    version = current_version;
+    size = current_size;
+    valid = true;
+    PyObject *key = nullptr, *value = nullptr;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(flags, &pos, &key, &value)) {
+      if (!PyLong_CheckExact(key)) {
+        valid = false;
+        break;
+      }
+    }
+    return valid;
+  }
+};
+
 struct NNModuleHookMembership {
   py::object hooks;
   py::object flags;
   std::vector<bool> expected;
+  std::shared_ptr<NNModuleHookFlagsValidation> flags_validation;
 
   bool check() const {
     if (PyDict_GET_SIZE(hooks.ptr()) !=
-        static_cast<Py_ssize_t>(expected.size())) {
+            static_cast<Py_ssize_t>(expected.size()) ||
+        !flags_validation->check(flags.ptr())) {
       return false;
     }
     PyObject *key = nullptr, *value = nullptr;
     Py_ssize_t pos = 0;
-    // Restrict both sides to integer hook IDs, so lookup cannot run callbacks.
-    while (PyDict_Next(flags.ptr(), &pos, &key, &value)) {
-      if (!PyLong_CheckExact(key)) {
-        return false;
-      }
-    }
-    pos = 0;
     size_t index = 0;
     while (PyDict_Next(hooks.ptr(), &pos, &key, &value)) {
       if (!PyLong_CheckExact(key)) {
@@ -3026,8 +3083,7 @@ struct NNModuleHookMembership {
   }
 };
 
-// Compare membership by hook storage position without specializing module IDs.
-// Two role-tagged leaves permit either guard manager to run first.
+// Compare membership by storage position, independently of the actual hook IDs.
 class NN_MODULE_HOOK_MEMBERSHIP : public RelationalGuard {
  public:
   NN_MODULE_HOOK_MEMBERSHIP(
@@ -3052,27 +3108,25 @@ class NN_MODULE_HOOK_MEMBERSHIP : public RelationalGuard {
     if (!_state->hooks || !_state->flags) {
       return true;
     }
-    bool result;
-    Py_BEGIN_CRITICAL_SECTION2(_state->hooks.ptr(), _state->flags.ptr());
-    result = _state->check();
-    Py_END_CRITICAL_SECTION2();
-    return result;
+    py::scoped_critical_section critical_section(_state->hooks, _state->flags);
+    return _state->check();
   }
 
   void reset_state() final {
     (_is_hooks ? _state->hooks : _state->flags) = py::object();
   }
 
-  std::shared_ptr<NN_MODULE_HOOK_MEMBERSHIP> clone(RootGuardManager* root);
+  std::shared_ptr<RelationalGuard> clone(RootGuardManager* root) override;
+
+  const void* group_identity() const override {
+    return _state.get();
+  }
 
  private:
   std::shared_ptr<NNModuleHookMembership> _state;
   bool _is_hooks;
 };
 
-/**
- * Checks that object x is object y.
- */
 class OBJECT_ALIASING : public RelationalGuard {
  public:
   OBJECT_ALIASING(
@@ -3182,6 +3236,10 @@ class STORAGE_OVERLAPPING : public RelationalGuard {
 
   void reset_state() final {
     _checker->reset(_overlapping);
+  }
+
+  const void* group_identity() const override {
+    return _checker.get();
   }
 
  private:
@@ -4015,26 +4073,25 @@ class GuardManager {
       RootGuardManager* cloned_root,
       GuardManager* cloned_mgr,
       const py::function& clone_filter_fn) {
-    for (auto guard : _leaf_guards) {
-      if (auto pattern =
-              std::dynamic_pointer_cast<OBJECT_ALIAS_PATTERN>(guard)) {
-        guard = pattern->clone(cloned_root);
+    for (const auto& guard : _leaf_guards) {
+      auto cloned_guard = guard;
+      if (auto relational = std::dynamic_pointer_cast<RelationalGuard>(guard)) {
+        if (auto copy = relational->clone(cloned_root)) {
+          cloned_guard = std::move(copy);
+        }
       }
-      if (auto membership =
-              std::dynamic_pointer_cast<NN_MODULE_HOOK_MEMBERSHIP>(guard)) {
-        guard = membership->clone(cloned_root);
-      }
-      cloned_mgr->_leaf_guards.emplace_back(guard);
-      if (std::dynamic_pointer_cast<ORDERED_DICT_ORDER_MATCH>(guard)) {
-        cloned_mgr->add_dict_tag_replay_guard(guard);
+      cloned_mgr->_leaf_guards.emplace_back(cloned_guard);
+      if (std::dynamic_pointer_cast<ORDERED_DICT_ORDER_MATCH>(cloned_guard)) {
+        cloned_mgr->add_dict_tag_replay_guard(cloned_guard);
       }
       if (std::shared_ptr<RelationalGuard> relational_guard =
-              std::dynamic_pointer_cast<RelationalGuard>(guard)) {
-        // Hook replay uses the role leaf directly, including in cloned trees.
-        // Clones do not own the dedicated NO_TENSOR_ALIASING replay guard.
-        if (auto membership =
-                std::dynamic_pointer_cast<NN_MODULE_HOOK_MEMBERSHIP>(guard)) {
-          cloned_mgr->add_dict_tag_replay_guard(membership);
+              std::dynamic_pointer_cast<RelationalGuard>(cloned_guard)) {
+        // Cloned roots do not own the dedicated NO_TENSOR_ALIASING replay
+        // guard. Preserve only the classification needed to prevent ordinary
+        // dict-tag skips from omitting an unoptimized relational guard.
+        if (std::dynamic_pointer_cast<NN_MODULE_HOOK_MEMBERSHIP>(
+                relational_guard)) {
+          cloned_mgr->add_dict_tag_replay_guard(relational_guard);
         } else if (
             std::dynamic_pointer_cast<NO_TENSOR_ALIASING>(relational_guard) ==
             nullptr) {
@@ -4303,8 +4360,8 @@ class GuardManager {
         } else if (_has_no_tensor_aliasing_guard) {
           record_tensor_pointer(_root, value);
         }
-        // Dict tags do not capture linked order or cross-subtree relations.
-        // Replay these leaves even when their ownership paths are unchanged.
+        // Dict tags do not capture linked order. Replay these leaves on tag
+        // hits.
         for (const auto& guard : _dict_tag_replay_guards) {
           record_dict_tag_guard(_root, guard, value);
         }
@@ -4699,9 +4756,9 @@ class GuardManager {
         nullptr) {
       _has_object_aliasing_guard = true;
     }
-    if (auto membership = std::dynamic_pointer_cast<NN_MODULE_HOOK_MEMBERSHIP>(
+    if (std::dynamic_pointer_cast<NN_MODULE_HOOK_MEMBERSHIP>(
             relational_guard)) {
-      add_dict_tag_replay_guard(membership);
+      add_dict_tag_replay_guard(relational_guard);
     } else if (
         std::dynamic_pointer_cast<NO_TENSOR_ALIASING>(relational_guard) !=
         nullptr) {
@@ -4767,8 +4824,8 @@ class GuardManager {
       _tensor_metadata_pointers;
   std::vector<WeakEntry> _tag_safe_entries;
   std::vector<std::shared_ptr<LeafGuard>> _dict_tag_replay_guards;
-  // Borrowed dictionary pointers remain valid through the recorded ownership
-  // paths and their dict tags/watchers, just like _dict_pointers.
+  // Ownership paths and watched dictionary tags protect these borrowed
+  // pointers.
   std::unordered_map<PyObject*, std::vector<RecordedDictTagGuard>>
       _dict_tag_guards;
 
@@ -4806,11 +4863,10 @@ GuardAccessor::GuardAccessor(GuardManager* guard_manager, GuardAccessor* from)
  As the ownership goes, the model is exactly same as before. We have unique_ptr
  for GuardAccessor and GuardManagers. So, any state required for the accessors
  and managers is copied over using constructors and clone_visitor functions.
- The main thing to notice is leaf guards. The leaf guards are represented using
- shared_ptr, and they are shared (not cloned) with the cloned managers.
-
- So for leaf guard state to be released, both the original and cloned managers
- have to be destructed.
+ Leaf guards normally share ownership with cloned managers. A relational guard
+ may override clone() to keep its mutable state local to the cloned root; all
+ participants of that guard share the same new state. The root's temporary
+ construction map is cleared before the clone is returned.
 */
 
 /**
@@ -4821,8 +4877,6 @@ GuardAccessor::GuardAccessor(GuardManager* guard_manager, GuardAccessor* from)
  */
 
 class RootGuardManager : public GuardManager {
-  friend class NN_MODULE_HOOK_MEMBERSHIP;
-
  public:
   // This is the root node, set its _root member to nullptr
   RootGuardManager() : GuardManager(this, "L") {}
@@ -4846,15 +4900,24 @@ class RootGuardManager : public GuardManager {
     return _no_tensor_aliasing_guard;
   }
 
-  std::shared_ptr<ObjectAliasPatternState> clone_alias_pattern_state(
-      const std::shared_ptr<ObjectAliasPatternState>& state) {
-    auto [it, inserted] =
-        _alias_pattern_clones.try_emplace(state.get(), nullptr);
+  template <typename State, typename Factory>
+  std::shared_ptr<State> clone_relational_state(
+      const std::shared_ptr<State>& state,
+      Factory factory) {
+    auto [it, inserted] = _relational_state_clones.try_emplace(state.get());
     if (inserted) {
-      it->second = std::make_shared<ObjectAliasPatternState>(
-          state->representatives.size());
+      it->second = factory();
     }
-    return it->second;
+    return std::static_pointer_cast<State>(it->second);
+  }
+
+  std::shared_ptr<NNModuleHookFlagsValidation> hook_flags_validation(
+      GuardManager* manager) {
+    auto& validation = _hook_flags_validations[manager];
+    if (!validation) {
+      validation = std::make_shared<NNModuleHookFlagsValidation>();
+    }
+    return validation;
   }
 
   // Adds the relational guard resetter
@@ -5027,8 +5090,11 @@ class RootGuardManager : public GuardManager {
     cloned_root->_local_state = _local_state;
     cloned_root->_init_local_state = _init_local_state;
     cloned_root->_compile_on_one_rank = _compile_on_one_rank;
+    auto clear_clone_states =
+        c10::make_scope_exit([cloned = cloned_root.get()] {
+          cloned->_relational_state_clones.clear();
+        });
     clone_common(cloned_root.get(), cloned_root.get(), clone_filter_fn);
-    cloned_root->_cloned_hook_memberships.clear();
     for (const auto& guard : _epilogue_lambda_guards) {
       cloned_root->_epilogue_lambda_guards.emplace_back(guard);
     }
@@ -5135,12 +5201,6 @@ class RootGuardManager : public GuardManager {
   LocalState _local_state;
 
  private:
-  // Share role state only while constructing one cloned tree.
-  std::unordered_map<
-      const NNModuleHookMembership*,
-      std::shared_ptr<NNModuleHookMembership>>
-      _cloned_hook_memberships;
-
   // See set_compile_on_one_rank.
   bool _compile_on_one_rank = false;
 
@@ -5148,10 +5208,9 @@ class RootGuardManager : public GuardManager {
   // when the guard evaluates to False. This ensures that guard state is reset
   // on guard failure so that next invocation is clean.
   std::vector<std::shared_ptr<RelationalGuard>> _relational_guard_resetters;
-  std::unordered_map<
-      const ObjectAliasPatternState*,
-      std::shared_ptr<ObjectAliasPatternState>>
-      _alias_pattern_clones;
+  // Used only while constructing one clone, never during guard evaluation.
+  std::unordered_map<const void*, std::shared_ptr<void>>
+      _relational_state_clones;
 
   // These guards are lambda guards, i.e., the guards that lack C++
   // implementation. For simplicity, we add these guards at the root. They
@@ -5194,6 +5253,10 @@ class RootGuardManager : public GuardManager {
   // Pointer to the no tensor relational guard
   std::shared_ptr<RelationalGuard> _no_tensor_aliasing_guard;
 
+  std::
+      unordered_map<GuardManager*, std::shared_ptr<NNModuleHookFlagsValidation>>
+          _hook_flags_validations;
+
   // tag safe optimization related members
   bool _is_recording_dict_pointers{false};
   GuardManager* _current_tag_safe_root{nullptr};
@@ -5202,17 +5265,6 @@ class RootGuardManager : public GuardManager {
   std::vector<RecordedDictTagGuard> _recorded_dict_tag_guards;
   std::vector<RecordedTensorMetadata> _recorded_tensor_metadata;
 };
-
-std::shared_ptr<NN_MODULE_HOOK_MEMBERSHIP> NN_MODULE_HOOK_MEMBERSHIP::clone(
-    RootGuardManager* root) {
-  auto& state = root->_cloned_hook_memberships[_state.get()];
-  if (!state) {
-    state = std::make_shared<NNModuleHookMembership>();
-    state->expected = _state->expected;
-  }
-  return std::make_shared<NN_MODULE_HOOK_MEMBERSHIP>(
-      root, state, _is_hooks, verbose_code_parts(), get_user_stack());
-}
 
 /*
  * Dicts are common in python code. Therefore, we handle guards for dicts
@@ -5554,14 +5606,36 @@ GuardManager* clone_guard_manager(
   return from->clone(cloned_root, clone_filter_fn);
 }
 
-std::shared_ptr<OBJECT_ALIAS_PATTERN> OBJECT_ALIAS_PATTERN::clone(
+std::shared_ptr<RelationalGuard> OBJECT_ALIAS_PATTERN::clone(
     RootGuardManager* root) {
   return std::make_shared<OBJECT_ALIAS_PATTERN>(
       root,
-      root->clone_alias_pattern_state(_state),
+      root->clone_relational_state(
+          _state,
+          [&] {
+            return std::make_shared<ObjectAliasPatternState>(
+                _state->representatives.size());
+          }),
       _alias,
       verbose_code_parts(),
       get_user_stack());
+}
+
+std::shared_ptr<RelationalGuard> NN_MODULE_HOOK_MEMBERSHIP::clone(
+    RootGuardManager* root) {
+  // Clone dependencies before the factory: nested insertion can invalidate its
+  // iterator.
+  auto validation = root->clone_relational_state(_state->flags_validation, [] {
+    return std::make_shared<NNModuleHookFlagsValidation>();
+  });
+  auto state = root->clone_relational_state(_state, [&] {
+    auto copy = std::make_shared<NNModuleHookMembership>();
+    copy->expected = _state->expected;
+    copy->flags_validation = validation;
+    return copy;
+  });
+  return std::make_shared<NN_MODULE_HOOK_MEMBERSHIP>(
+      root, state, _is_hooks, verbose_code_parts(), get_user_stack());
 }
 
 void add_relational_guard_resetter_to_cloned_root(
@@ -7929,6 +8003,7 @@ void install_nn_module_hook_membership_guard(
   TORCH_CHECK(hooks->get_root() == flags->get_root());
   auto state = std::make_shared<NNModuleHookMembership>();
   state->expected = std::move(expected);
+  state->flags_validation = hooks->get_root()->hook_flags_validation(flags);
   for (bool is_hooks : {true, false}) {
     auto* manager = is_hooks ? hooks : flags;
     auto guard = std::make_shared<NN_MODULE_HOOK_MEMBERSHIP>(
@@ -8529,7 +8604,10 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("__call__", &TENSOR_MATCH::check);
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<RelationalGuard, LeafGuard, std::shared_ptr<RelationalGuard>>(
-      py_m, "RelationalGuard");
+      py_m, "RelationalGuard")
+      .def("get_group_id", [](const RelationalGuard& guard) {
+        return reinterpret_cast<uintptr_t>(guard.group_identity());
+      });
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       NN_MODULE_HOOK_MEMBERSHIP,

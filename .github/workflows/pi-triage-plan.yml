@@ -66,6 +66,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TRIAGE_REPO: ${{ inputs.repo }}
+      TRIAGE_SOURCE_ISSUE: ${{ matrix.issue }}
       TRIAGE_REPLAY_ISSUE: ${{ inputs.replay && matrix.issue || '' }}
     steps:
       # MUST be the first step. The allowlist is pinned by
