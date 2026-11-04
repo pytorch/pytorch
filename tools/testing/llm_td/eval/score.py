@@ -42,7 +42,7 @@ run_test.py applies TD, and so the selection, only in the pull, trunk and
 ROCm workflows, and not on macOS, in xpu or onnx builds, under NO_TD (from
 force-no-td or .ci/pytorch/test.sh, see NO_TD_CONFIGS) or with
 TESTS_TO_INCLUDE (test/run_test.py's --enable-td default, which calls
-td_enabled_workflow and td_enabled_job, and main(); see td_job). Other jobs (inductor's unit tests, periodic, slow, ...) run
+td_enabled_workflow and td_enabled_job; see td_job). Other jobs (inductor's unit tests, periodic, slow, ...) run
 every test under every policy, so their failures are left out
 of the truth, and configs no TD job runs are left out of the cost share
 (the report's dollar model prices the inductor ones separately). Jobs are
@@ -188,7 +188,7 @@ def fallback_seconds(path: Path) -> dict[str, dict[str, float]]:
 def td_job(
     uses: str, build_environment: str, force_no_td: object, tests_to_include: str
 ) -> bool:
-    """The job-level rest of run_test.py's TD check: td_enabled_job, with NO_TD from force-no-td, and no TESTS_TO_INCLUDE.
+    """The job-level rest of run_test.py's TD check: td_enabled_job, with NO_TD from force-no-td and TESTS_TO_INCLUDE from tests-to-include.
 
     A tests-to-include expression (pull's and trunk's workflow_dispatch input)
     is empty on PRs. ci_jobs also applies test.sh's NO_TD, which depends on
@@ -196,11 +196,9 @@ def td_job(
     them: NO_TD from the PR's ci-no-td label, the PR-number check (every
     sample is scored as a PR push), and TD switching off when it has no
     prioritizations."""
-    include = tests_to_include.strip()
+    include = "" if tests_to_include.strip().startswith("${{") else tests_to_include
     macos, no_td = uses == "_mac-test.yml", force_no_td in (True, "true")
-    return td_enabled_job(build_environment, macos=macos, no_td=no_td) and (
-        not include or include.startswith("${{")
-    )
+    return td_enabled_job(build_environment, macos=macos, no_td=no_td, tests_to_include=include)  # fmt: skip
 
 
 @functools.cache

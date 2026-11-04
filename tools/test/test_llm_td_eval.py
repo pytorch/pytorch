@@ -595,14 +595,23 @@ class TestScore(unittest.TestCase):
         )
 
     def test_no_td_configs_match_test_sh(self) -> None:
-        # test.sh runs a config through test_<config>; these are the functions that export NO_TD=1.
-        func, no_td = None, set()
+        # The TEST_CONFIG patterns of test.sh's top-level dispatch whose branch calls a function that exports NO_TD=1.
+        func, no_td, branch, calls = None, set(), None, {}
+        dispatch = re.compile(r'(?:el)?if \[\[ "?\$\{?TEST_CONFIG\}?"? ==? "?([^ "]+)')
         for line in (REPO_ROOT / ".ci/pytorch/test.sh").read_text().splitlines():
             if m := re.match(r"(?:function\s+)?(\w+)\s*\(\)", line):
                 func = m.group(1)
             elif re.search(r"\bexport NO_TD=1", line):
                 no_td.add(func)
-        self.assertEqual(no_td, {f"test_{c}" for c in score.NO_TD_CONFIGS})
+            if m := dispatch.match(line):
+                branch = m.group(1)
+            elif re.match(r"\S", line):
+                branch = None
+            elif branch and (m := re.match(r"\s+(\w+)", line)):
+                calls.setdefault(branch, set()).add(m.group(1))
+        self.assertIn("test_dynamo_cpython", calls["*dynamo_cpython*"])
+        dispatched = {p for p, fns in calls.items() if fns & no_td}
+        self.assertEqual(dispatched, {f"*{c}*" for c in score.NO_TD_CONFIGS})
 
     def test_unasked(self) -> None:
         td = {"scored": ["test_a"], "top25": ["test_e"], "top25_cfg": {"default": ["test_a"]}}  # fmt: skip
