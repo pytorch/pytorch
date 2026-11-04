@@ -6,7 +6,7 @@ Every self-hosted runner label that a PR adds or changes is checked against the 
 
 ## Which Labels This Covers
 
-The rule covers every self-hosted label: OSDC ARC labels, legacy EC2 labels (`linux.*`, `windows.*`), partner fleets (ROCm, XPU, TPU, DGX, s390x), and the self-hosted macOS fleets (`macos-m1-stable`, `macos-m1-15`, `macos-m2-26`, `macos-m2-27`).
+The rule covers every self-hosted label: OSDC ARC labels, legacy EC2 labels (`linux.*`, `windows.*`), partner fleets (ROCm, XPU, TPU, DGX, s390x), and the self-hosted macOS fleets (`macos-m*`), which use their own form (see Self-Hosted macOS Labels).
 
 GitHub-hosted runners are exempt. These label families are GitHub-hosted:
 
@@ -81,9 +81,20 @@ The full form, as a regex. It does not encode length; apply the length rule sepa
 ^(c-)?(mt|lf|am|in|nv|ib)-(rel-)?[lwm]-b?(x86(i|a)(avx2|avx512|amx)|arm64g[234])-[1-9][0-9]*-[1-9][0-9]*(-(t4|a10g|l4|a100|h100|b200)(-([2-9]|[1-9][0-9]+))?)?$
 ```
 
+### Self-Hosted macOS Labels
+
+The self-hosted macOS fleets (EC2 Mac pet instances) are not OSDC runners and use their own label convention. It is what the runner install playbook in pytorch-gha-infra derives on each Mac, `macos-<chip>-<macOS major>`, plus a `-stable` alias per chip:
+
+```
+^macos-m[1-9][0-9]*-([1-9][0-9]|stable)$
+```
+
+- chip: the Apple Silicon generation, lowercase (`m1`, `m2`, `m3`, `m4`, ...). Pro and Max variants share the base chip's label: `macos-m2-*` runs on M2 Pro.
+- macOS major: the first two digits of the macOS version (`15`, `26`, `27`, ...), or `stable`.
+
 ### Hardware the Standard Cannot Express
 
-Non-NVIDIA GPUs (ROCm, XPU), TPUs, NVIDIA Grace or other non-Graviton ARM hosts, Apple Silicon, arm64 CPU features, and the multi-node fabric `-fab` variant. A runner that needs one of these cannot conform.
+Non-NVIDIA GPUs (ROCm, XPU), TPUs, NVIDIA Grace or other non-Graviton ARM hosts, Apple Silicon in OSDC form (self-hosted `macos-m*` labels use the macOS form instead), arm64 CPU features, and the multi-node fabric `-fab` variant. A runner that needs one of these cannot conform.
 
 ## How Labels Are Written in This Repo
 
@@ -113,7 +124,7 @@ Prefix sources:
 
 1. **Resolve the effective labels.** Check every label that new CI runs on (a new workflow, job, matrix or matrix entry such as a test-matrix row or strategy-matrix entry, or a generated or templated job), and every runner label or prefix the PR changes on existing CI. A label counts only if the PR raises the number of places that request it. A place is a job, a job's test-matrix `config:` value, or a strategy-matrix entry; compare the places before and after the PR, with effective labels resolved on both sides, counting only runner values in the forms above (lines in `.github/actionlint.yaml`, `.github/arc.yaml`, docs or test fixtures never count). Deleting a runner input (`runner:`, `runs_on:`), a `runner_prefix:` or a matrix key from existing CI moves that place to the label it now falls back to. Skip a label the PR only re-touches, such as rows whose shard count changed, new shard rows of a config that already runs on that label, or a job moved to another file; a new config, job or matrix, and a prefix flip (the effective label changes), still count. New CI's labels include the ones it gets without writing them: the input defaults of a reusable workflow for runner inputs it omits (a new `_linux-build.yml` caller without `runner_prefix:` and `runner:` runs on `""` plus the `runner` default, a bare label), the fallback a runner value uses when a new matrix entry omits its key (as in `${{ matrix.runner_label || '<label>' }}`), and the `default:` and `options:` values of a `workflow_dispatch` input whose value a runner value uses as its label, through `github.event.inputs.<name>` or `inputs.<name>`. For each value, compose the prefix written before it: a literal, a determinator expression, or a `runner_prefix:` value. Every ternary branch, every default, and every value a prefix expression can produce (see Prefix sources) is a separate label. A change to only the prefix creates a new effective label: adding `runner_prefix: "mt-"` in front of `linux.s390x` requests `mt-linux.s390x`. A PR that changes a prefix value itself (a `runner_prefix:` literal or input default, or the prefixes the determinator emits) must leave a valid `[c-]{provider}-` part, or the empty prefix that legacy labels use; check every label it is prepended to.
 2. **Skip GitHub-hosted labels.**
-3. **Validate.** Check each label against the length rule and:
+3. **Validate.** A label starting with `macos-m`: check the whole label against the macOS form in Self-Hosted macOS Labels only. Every other label: check it against the length rule and:
    - literal, or with a literal prefix: the whole label against the full form;
    - prefixed by a prefix expression: each value the expression yields (see Prefix sources), as a literal prefix, plus the rest against the full form; if the PR changes what the determinator emits (`.github/scripts/runner_determinator.py` or `.github/workflows/_runner-determinator.yml`), use the values the PR leaves there;
    - anything else (legacy dot labels, partner labels, unknown prefix schemes) does not conform.
@@ -139,5 +150,5 @@ Prefix sources:
 
 Anchor a finding on the label line, or on the changed prefix line or determinator line when only the prefix changed, or, for a label new CI gets from an input or matrix key it omits, on the new job's `uses:` line or the new matrix entry; if the label repeats, on its first added occurrence. For a label existing CI falls back to after the PR deletes an input, prefix or matrix key, anchor on the new-side line right after the deletion, inside the hunk that removed it. In /pr-review, file findings under Infrastructure. When one line yields labels in both tiers, such as a determinator prefix whose `mt-` label other CI uses while its `lf-` label is new, report only the blocker for that line and leave its already-used label out of the heads-up.
 
-- **Blocker: no other CI in this repo uses the label.** One finding per distinct label; the labels one line yields through a prefix expression, such as `mt-X` and `lf-X`, are one finding. Always Request Changes. Name the label and the field or fields that break the standard, and suggest a conforming name: describe its shape from the intended hardware, or name a conforming label already used in this repo with the same resources. The runner must be defined under that name in pytorch/ci-infra. For hardware the standard cannot express, say the canonical doc must be extended first. State the consequence, so the finding is not mistaken for a naming preference: every runner introduced in this repo must follow the standard, and maintainers send back PRs that do not. Tooling keys off the structure: the `rel-` marker and the length limit above, and the `l-` segment, which HUD queue-time queries and queue alerts use to treat a job as ARC.
+- **Blocker: no other CI in this repo uses the label.** One finding per distinct label; the labels one line yields through a prefix expression, such as `mt-X` and `lf-X`, are one finding. Always Request Changes. Name the label and the field or fields that break the standard, and suggest a conforming name: describe its shape from the intended hardware, or name a conforming label already used in this repo with the same resources. The runner must be defined under that name in pytorch/ci-infra. For hardware the standard cannot express, say the canonical doc must be extended first. For a `macos-m*` label, instead suggest a name in the macOS form; these runners are set up by pytorch-gha-infra, not ci-infra. State the consequence, so the finding is not mistaken for a naming preference: every runner introduced in this repo must follow the standard, and maintainers send back PRs that do not. Tooling keys off the structure: the `rel-` marker and the length limit above, and the `l-` segment, which HUD queue-time queries and queue alerts use to treat a job as ARC.
 - **Heads-up: other CI in this repo already uses the label.** One short finding for the whole PR that lists every such label and the field or fields each breaks, anchored on the first one's line. It does not block approval; it is a deliberate exception to pr-review's "Everything is a must-fix".

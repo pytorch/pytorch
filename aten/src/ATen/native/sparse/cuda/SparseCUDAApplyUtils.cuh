@@ -186,8 +186,8 @@ __global__ void indexSparseUnionKernel(
 template <typename Dtype, typename Acctype>
 C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void coalesceValuesKernel(
-  int64_t *segment_offsets, int64_t *value_indices,
-  Dtype *values, Dtype *newValues,
+  const int64_t *segment_offsets, const int64_t *value_indices,
+  const Dtype *values, Dtype *newValues,
   int64_t nnz, int64_t newNnz, int64_t stride) {
 
 #ifdef USE_ROCM
@@ -244,8 +244,8 @@ __global__ void coalesceValuesKernel(
 template<typename Dtype>
 C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE_UPPER_BOUND*4)
 __global__ void coalesceValuesKernel(
-  int64_t *segment_offsets, int64_t *value_indices,
-  bool *values, bool *newValues,
+  const int64_t *segment_offsets, const int64_t *value_indices,
+  const bool *values, bool *newValues,
   int64_t nnz, int64_t newNnz, int64_t stride) {
 
 #ifdef USE_ROCM

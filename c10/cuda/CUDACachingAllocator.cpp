@@ -34,6 +34,7 @@
 #endif
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <cuda_runtime_api.h>
 #include <algorithm>
 #include <array>
@@ -319,6 +320,17 @@ struct SegmentRange {
   SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
 };
 
+// Expandable segments have no ROCm fabric handle path, so ROCm keeps POSIX fds
+// even on devices where get_fabric_access() is true for symmetric memory.
+bool use_fabric_handles(c10::DeviceIndex device) {
+#ifdef USE_ROCM
+  (void)device;
+  return false;
+#else
+  return cuda::get_fabric_access(device);
+#endif
+}
+
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || \
     defined(USE_ROCM)
 
@@ -590,7 +602,7 @@ struct ExpandableSegment {
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       if (ipcEnabled()) {
-        if (cuda::get_fabric_access(device_)) {
+        if (use_fabric_handles(device_)) {
 #ifndef USE_ROCM
           prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
 #endif
@@ -696,7 +708,7 @@ struct ExpandableSegment {
     header.pid = get_self_pid();
     header.segment_size = segment_size_;
     header.num_handles = end - begin;
-    header.handle_type = cuda::get_fabric_access(device_)
+    header.handle_type = use_fabric_handles(device_)
         ? Expandable_Segments_Handle_Type::FABRIC_HANDLE
         : Expandable_Segments_Handle_Type::POSIX_FD;
 
@@ -752,7 +764,7 @@ struct ExpandableSegment {
         header.handle_type == Expandable_Segments_Handle_Type::POSIX_FD ||
             (header.handle_type ==
                  Expandable_Segments_Handle_Type::FABRIC_HANDLE &&
-             cuda::get_fabric_access(device)),
+             use_fabric_handles(device)),
         "Unsupported expandable_segments IPC handle type ",
         static_cast<int>(header.handle_type),
         " on device ",
@@ -888,7 +900,7 @@ struct ExpandableSegment {
     if (!ipcEnabled()) {
       return Expandable_Segments_Handle_Type::UNSPECIFIED;
     }
-    return cuda::get_fabric_access(device_)
+    return use_fabric_handles(device_)
         ? Expandable_Segments_Handle_Type::FABRIC_HANDLE
         : Expandable_Segments_Handle_Type::POSIX_FD;
   }
@@ -2428,7 +2440,7 @@ class DeviceCachingAllocator {
           "All streams in the same capture should agree on the graph");
 
       // Use current terminals as the free markers for the stream
-      for (size_t i = 0; i < info.num_terminals; ++i) {
+      for (const auto i : c10::irange(info.num_terminals)) {
         auto terminal = info.terminals[i];
         markers.insert(terminal);
       }
@@ -2497,7 +2509,7 @@ class DeviceCachingAllocator {
     // is a predecessor). A free marker is reusable if it is a predecessor of
     // all terminal nodes.
     std::deque<cudaGraphNode_t> dfs;
-    for (size_t i = 0; i < info.num_terminals; ++i) {
+    for (const auto i : c10::irange(info.num_terminals)) {
       dfs.push_back(info.terminals[i]);
     }
 
@@ -2937,7 +2949,7 @@ class DeviceCachingAllocator {
     };
 
     // allocate all blocks in the segment
-    for (size_t i = 0; i < segment_len; ++i) {
+    for (const auto i : c10::irange(segment_len)) {
       // Note [Last block when restoring checkpoint state]
       // The last block in expandable segment is one of the following cases:
       // - case 1: a unmapped tail containing the remaining amount of available
@@ -3593,7 +3605,7 @@ class DeviceCachingAllocator {
     }
     if (handle_type == Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
       TORCH_CHECK(
-          cuda::get_fabric_access(device_id),
+          use_fabric_handles(device_id),
           "the expandable segment at ",
           address,
           " was saved with fabric handles, but device ",

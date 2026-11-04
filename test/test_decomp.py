@@ -20,12 +20,12 @@ from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
 from torch._subclasses import FakeTensorMode
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import SM70OrLater, tf32_off
+from torch.testing._internal.common_cuda import SM70OrLater, TEST_CUDA, tf32_off
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
-    onlyCUDA,
     onlyNativeDeviceTypes,
     ops,
     skip,
@@ -1348,7 +1348,7 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions._log_softmax(x, -1, False)
         self.assertEqual(ref.stride(), res.stride())
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_exponential_non_inf(self, device):
         inp = torch.empty((4, 400, 256), device=device)
 
@@ -1361,9 +1361,8 @@ class DecompOneOffTests(TestCase):
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
-    @onlyCUDA
-    def test_amp_batch_norm_backward(self):
-        device = "cuda"
+    @onlyAccelerator
+    def test_amp_batch_norm_backward(self, device):
         grad_out = torch.randn((1, 2, 16, 16), dtype=torch.float16, device=device)
         x = torch.randn((1, 2, 16, 16), dtype=torch.float16, device=device)
         weight = torch.randn((2,), dtype=torch.float32, device=device)
@@ -1462,7 +1461,7 @@ class DecompOneOffTests(TestCase):
                 rtol=1e-2,
             )
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfCrossRef
     def test_fused_dropout_decomposition_extreme_p(self, device):
         input_tensor = torch.randn(10, 10, dtype=torch.float32, device=device)
@@ -1493,7 +1492,7 @@ class DecompOneOffTests(TestCase):
         self.assertEqual(decomp_out, ref_out)
         self.assertEqual(decomp_mask, ref_mask)
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfCrossRef
     def test_fused_dropout_compile_extreme_p(self, device):
         def fn(input_tensor, p, generator):
@@ -1585,8 +1584,8 @@ class DecompOneOffTests(TestCase):
         for o_ref, o in zip(out_ref, out):
             self.assertEqual(o_ref.dtype, o.dtype)
 
-    @onlyCUDA
-    @unittest.skipIf(not SM70OrLater, "triton")
+    @onlyAccelerator
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton requires CUDA with SM>=7.0")
     def test_rms_norm_decomp_cuda(self, device):
         @torch.compile
         def rms_norm_sinh(a, b, c):
@@ -1611,7 +1610,7 @@ class DecompOneOffTests(TestCase):
             in generated_codes[1]
         )
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfCrossRef
     def test_addmm_out_dtype_decomp(self, device):
         cases = [
@@ -1722,7 +1721,7 @@ class DecompOneOffTests(TestCase):
             )
 
 
-instantiate_device_type_tests(DecompOneOffTests, globals())
+instantiate_device_type_tests(DecompOneOffTests, globals(), allow_xpu=True)
 
 
 class HasDecompTest(TestCase):
