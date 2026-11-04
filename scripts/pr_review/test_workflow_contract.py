@@ -5550,6 +5550,13 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         self.assertIn("summary and its Recommendation", prompt)
         self.assertIn("under Approve or Needs Discussion, say so in words", prompt)
 
+    def test_the_exceptions_name_principle_5_by_its_title(self):
+        # Two documented exceptions to principle 5 cite it by its title.
+        self.assertIn("5. **Blockers should block**", PR_REVIEW_SKILL.read_text())
+        for name in ("review-checklist.md", "ci-runner-naming.md"):
+            text = (PR_REVIEW_SKILL.parent / name).read_text()
+            self.assertIn('"Blockers should block"', text)
+
     def test_the_prompt_names_every_file_kind_that_cannot_anchor(self):
         # parse_diff's KNOWN LIMITS: findings on these files are discarded,
         # and a change request left with none is refused.
