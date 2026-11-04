@@ -360,6 +360,8 @@ g () {
             ".ci/docker/build.sh",
             ".ci/docker/ci_commit_pins/triton.txt",
             ".ci/docker/ubuntu/Dockerfile",
+            ".ci/docker/ubuntu-rocm/Dockerfile",
+            ".ci/docker/ubuntu-xpu/Dockerfile",
             ".ci/pytorch/test.sh",
             ".ci/pytorch/multigpu-test.sh",
             ".ci/pytorch/win-test.sh",
@@ -379,6 +381,8 @@ g () {
             ".ci/pytorch/win-test-helpers/setup_pytorch_env.bat",
             ".ci/pytorch/win-test-helpers/test_python_shard.bat",
             ".ci/pytorch/win-test-helpers/installation-helpers/activate_miniconda3.bat",
+            ".ci/pytorch/win-test-helpers/installation-helpers/install_magma.bat",
+            ".ci/pytorch/win-test-helpers/installation-helpers/install_sccache.bat",
             ".github/workflows/_linux-test.yml",
             ".github/workflows/_win-test.yml",
             ".github/workflows/_mac-test.yml",
@@ -396,6 +400,7 @@ g () {
             ".github/actions/setup-xpu/action.yml",
             ".github/actions/filter-test-configs/action.yml",
             ".github/actions/download-td-artifacts/action.yml",
+            ".github/actions/download-build-artifacts/action.yml",
             ".github/scripts/filter_test_configs.py",
             ".github/ci_commit_pins/vision.txt",
             ".github/ci_commit_pins/audio.txt",
@@ -445,6 +450,8 @@ g () {
             ".github/workflows/_binary-build-linux.yml",
             ".github/workflows/docs-build.yml",
             ".github/actions/setup-linux/action.yml",
+            # A cross-build image; no test job runs in it.
+            ".ci/docker/ubuntu-cross-riscv/Dockerfile",
             ".github/ci_commit_pins/vllm.txt",
         ]:
             self.assertFalse(needs_run_all([f]), f)
@@ -516,6 +523,23 @@ g () {
                 re.search(r, path) for rs in DRIVER_MAPPINGS.values() for r in rs
             )
             self.assertEqual(driven, pattern not in undriven, pattern)
+        # Blocklisted test files that candidates import or run as subprocesses.
+        spawn = {f"distributed/test_c10d_spawn_{b}" for b in ("gloo", "nccl", "ucc")}
+        launcher_bin = "distributed/launcher/bin/test_script"
+        for f, drivers in [
+            ("test_jit_fuser", {"test_jit_fuser_legacy"}),
+            ("distributed/test_c10d_spawn", spawn),
+            ("onnx/test_models", {"onnx/test_models_onnxruntime"}),
+            ("distributed/bin/test_script", {"distributed/test_launcher"}),
+            *(
+                (f"{launcher_bin}{s}", {"distributed/launcher/test_run"})
+                for s in ("", "_init_method", "_is_torchelastic_launched")
+            ),
+        ]:
+            path = f"test/{f}.py"
+            self.assertTrue((REPO_ROOT / path).exists(), path)
+            self.assertNotIn(f, TESTS)
+            self.assertEqual(selection.edited_tests([path], set(TESTS)), drivers, f)
 
 
 if __name__ == "__main__":
