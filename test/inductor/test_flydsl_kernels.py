@@ -3,23 +3,39 @@
 
 Modeled on the Triton suite (test/inductor/test_triton_kernels.py) and the OSS
 CuTeDSL stack's test_cutedsl_kernels.py: direct HOP use, wrap_flydsl eager launches
-and tracing (make_fx, non-strict export), the FlyDSL compile helpers, Dynamo, and
-Inductor (Python wrapper). Needs a ROCm GPU and flydsl >= 0.4.
+and tracing (make_fx, non-strict export), the FlyDSL compile helpers, Dynamo,
+Inductor (Python wrapper) and AOTInductor (export_to_c objects linked into the model
+.so). Needs a ROCm GPU and flydsl >= 0.4, except FlyDSLAOTUnitTests (CPU, no flydsl:
+codegen/flydsl/user_kernel_aot.py against synthetic exports and a fake compile).
 """
 
+import contextlib
+import ctypes
+import dataclasses
 import functools
 import inspect
 import io
+import json
 import math
 import os
 import re
+import shlex
+import shutil
+import struct
+import subprocess
 import sys
+import tempfile
 import threading
+import types
 import unittest
 import weakref
+import zipfile
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from unittest import mock
+
+import sympy
 
 import torch
 import torch._dynamo.testing
@@ -39,13 +55,14 @@ from torch._higher_order_ops.flydsl_kernel_wrap import (
     get_host_fn_info,
 )
 from torch._inductor import config as inductor_config
+from torch._inductor.codegen.flydsl import user_kernel_aot as fuka
 from torch._inductor.runtime import flydsl_user_kernel
 from torch._inductor.runtime.flydsl_user_kernel import (
     FLYDSL_COMPILE_LOCK,
     flydsl_version_ok,
 )
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import IndentedBuffer, run_and_get_code, run_and_get_cpp_code
 from torch._library.flydsl import wrap_flydsl
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -270,6 +287,36 @@ if HAS_FLYDSL:
         _select_k(X, Out, n, flag).launch(
             grid=((n + 1023) // 1024, 1, 1), block=(1024, 1, 1), stream=stream
         )
+
+    # The same with an annotated flag (a Boolean in the exported C ABI).
+    @flyc.jit
+    def select_bool_kernel(X, Out, n: fx.Int32, flag: fx.Boolean, stream: fx.Stream):
+        _select_k(X, Out, n, flag).launch(
+            grid=((n + 1023) // 1024, 1, 1), block=(1024, 1, 1), stream=stream
+        )
+
+    # A runtime Float16 scalar, which export_to_c passes as raw bits.
+    @flyc.jit
+    def add_half_kernel(X, Out, n: fx.Int32, h: fx.Float16, stream: fx.Stream):
+        _add_c_k(X, Out, n, fx.Float32(h)).launch(
+            grid=((n + 1023) // 1024, 1, 1), block=(1024, 1, 1), stream=stream
+        )
+
+    # Host functions that differ only in a captured list: out = x * c[0] + c[1].
+    def make_affine_kernel(c):
+        @flyc.kernel
+        def _affine_k(X, Out, n: fx.Int32):
+            i = fx.block_idx.x * 1024 + fx.thread_idx.x
+            if i < n:
+                Out[i] = X[i] * c[0] + c[1]
+
+        @flyc.jit
+        def affine_kernel(X, Out, n: fx.Int32, stream: fx.Stream):
+            _affine_k(X, Out, n).launch(
+                grid=((n + 1023) // 1024, 1, 1), block=(1024, 1, 1), stream=stream
+            )
+
+        return affine_kernel
 
     # Only for test_wrap_flydsl_globals_drift_does_not_trigger (it rebinds the module
     # global x, which this kernel "uses" through fx.thread_idx.x).
@@ -2794,6 +2841,39 @@ class FlyDSLInductorTests(TestCase):
                 res = torch.compile(f, backend=backend, fullgraph=True)(t)
                 self.assertEqual(res, expected, atol=0, rtol=0)
 
+    def test_aoti_keyword_only_and_unannotated_numeric_default(self):
+        # AOTInductor: keyword-only parameters export as the others do. A Numeric
+        # default of an unannotated parameter is a constant to PT2 but a run-time
+        # argument of FlyDSL's C ABI: refused, with a hint (as for a Numeric value
+        # passed to one).
+        def package(model, args):
+            ep = torch.export.export(model, args, strict=False)
+            return torch._inductor.aoti_compile_and_package(ep)
+
+        kwonly_w = wrap_flydsl(kwonly_n_kernel, mutates_args=["Out"])
+        default_w = wrap_flydsl(int64_default_kernel, mutates_args=["Out"])
+
+        class KwOnly(torch.nn.Module):
+            def forward(self, t, u):
+                out = torch.empty_like(t)
+                kwonly_w(t, u, out, n=t.numel())
+                return out
+
+        class Default(torch.nn.Module):
+            def forward(self, t):
+                out = torch.empty_like(t)
+                default_w(t, out, t.numel())
+                return out
+
+        a, b = _rand(1000), _rand(1000)
+        runner = torch._inductor.aoti_load_package(package(KwOnly(), (a, b)))
+        self.assertEqual(runner(a, b), a + b)
+        xi = torch.arange(1000, device=DEVICE, dtype=torch.int64)
+        with self.assertRaisesRegex(
+            Exception, r"FlyDSL passes \['k'\] at run time: annotate them"
+        ):
+            package(Default(), (xi,))
+
     def test_flydsl_kernel_inductor_basic(self):
         from torch._inductor import ir
 
@@ -3413,10 +3493,2079 @@ class FlyDSLInductorTests(TestCase):
         self.assertEqual(compile_host_fn.call_count, 0)
 
 
+class _AddModule(torch.nn.Module):
+    def forward(self, x, y):
+        out = torch.empty_like(x)
+        add_w(x, y, out, x.numel())
+        return out
+
+
+class _ScaleModule(torch.nn.Module):
+    def forward(self, x):
+        y = x.clone()
+        scale_inplace_w(y, y.numel())
+        return y
+
+
+@contextlib.contextmanager
+def _captured_stderr_fd():
+    """What is written to file descriptor 2 inside the block (C++ std::cerr
+    included), as the only element of the yielded list once the block exits."""
+    captured = []
+    sys.stderr.flush()
+    saved = os.dup(2)
+    with tempfile.TemporaryFile() as tmp:
+        os.dup2(tmp.fileno(), 2)
+        try:
+            yield captured
+        finally:
+            sys.stderr.flush()
+            os.dup2(saved, 2)
+            os.close(saved)
+            tmp.seek(0)
+            captured.append(tmp.read().decode(errors="replace"))
+
+
+def _package_so(pkg, out_dir):
+    """The model .so inside AOTInductor package ``pkg``, extracted to ``out_dir``."""
+    with zipfile.ZipFile(pkg) as z:
+        (name,) = [n for n in z.namelist() if n.endswith(".so")]
+        return z.extract(name, out_dir)
+
+
+# A module global _bias_k reads (test_aoti_reexport_after_global_rebind rebinds it).
+_AOTI_BIAS = 2.0
+
+# Module globals outside the kernel prefix, which test_aoti_reexport_after_rebind_
+# outside_prefix rebinds: a tuple _tuple_scale_k reads, and a float read by the plain
+# helper _helper_scale_k calls.
+_AOTI_SCALE = (2.0,)
+_AOTI_FACTOR = 2.0
+
+
+def _aoti_scaled(v):
+    return v * _AOTI_FACTOR
+
+
+if HAS_FLYDSL:
+    # --- BEGIN AOTI CASE KERNELS ---
+    # out = x + _AOTI_BIAS: the global's value is baked into the compiled kernel.
+    @flyc.kernel
+    def _bias_k(X, Out, n: fx.Int32):
+        i = fx.block_idx.x * 1024 + fx.thread_idx.x
+        if i < n:
+            Out[i] = X[i] + _AOTI_BIAS
+
+    @flyc.jit
+    def bias_kernel(X, Out, n: fx.Int32, stream: fx.Stream):
+        _bias_k(X, Out, n).launch(
+            grid=((n + 1023) // 1024, 1, 1), block=(1024, 1, 1), stream=stream
+        )
+
+    # out = x * _AOTI_SCALE[0] and out = _aoti_scaled(x) = x * _AOTI_FACTOR.
+    @flyc.kernel
+    def _tuple_scale_k(X, Out, n: fx.Int32):
+        i = fx.block_idx.x * 1024 + fx.thread_idx.x
+        if i < n:
+            Out[i] = X[i] * _AOTI_SCALE[0]
+
+    @flyc.jit
+    def tuple_scale_kernel(X, Out, n: fx.Int32, stream: fx.Stream):
+        _tuple_scale_k(X, Out, n).launch(
+            grid=((n + 1023) // 1024, 1, 1), block=(1024, 1, 1), stream=stream
+        )
+
+    @flyc.kernel
+    def _helper_scale_k(X, Out, n: fx.Int32):
+        i = fx.block_idx.x * 1024 + fx.thread_idx.x
+        if i < n:
+            Out[i] = _aoti_scaled(X[i])
+
+    @flyc.jit
+    def helper_scale_kernel(X, Out, n: fx.Int32, stream: fx.Stream):
+        _helper_scale_k(X, Out, n).launch(
+            grid=((n + 1023) // 1024, 1, 1), block=(1024, 1, 1), stream=stream
+        )
+
+    # out = x + k for an Int64 scalar k.
+    @flyc.kernel
+    def _add_i64_k(X, Out, n: fx.Int32, k: fx.Int64):
+        i = fx.block_idx.x * 1024 + fx.thread_idx.x
+        if i < n:
+            Out[i] = X[i] + k
+
+    @flyc.jit
+    def add_i64_kernel(X, Out, n: fx.Int32, k: fx.Int64, stream: fx.Stream):
+        _add_i64_k(X, Out, n, k).launch(
+            grid=((n + 1023) // 1024, 1, 1), block=(1024, 1, 1), stream=stream
+        )
+
+    # out[0] = the high 32 bits of a Uint64 scalar.
+    @flyc.kernel
+    def _u64_hi_k(Out, s: fx.Uint64):
+        if fx.thread_idx.x < 1:
+            Out[0] = fx.Int32(s >> 32)
+
+    @flyc.jit
+    def u64_hi_kernel(Out, s: fx.Uint64, stream: fx.Stream):
+        _u64_hi_k(Out, s).launch(grid=(1, 1, 1), block=(64, 1, 1), stream=stream)
+
+    # Parameters named like C++ keywords (new, default), a C macro (errno) and the
+    # generated launcher's stream parameter: errno = old + new * default,
+    # stream = old - new.
+    @flyc.kernel
+    def _kw_blend_k(old, new, errno, stream, n: fx.Int32, default: fx.Float32):
+        i = fx.block_idx.x * 1024 + fx.thread_idx.x
+        if i < n:
+            errno[i] = old[i] + new[i] * default
+            stream[i] = old[i] - new[i]
+
+    @flyc.jit
+    def kw_blend_kernel(
+        old, new, errno, stream, n: fx.Int32, default: fx.Float32, s: fx.Stream
+    ):
+        _kw_blend_k(old, new, errno, stream, n, default).launch(
+            grid=((n + 1023) // 1024, 1, 1), block=(1024, 1, 1), stream=s
+        )
+
+    # add_one_2d_kernel with an exact block size, and with a user maximum flat
+    # work-group size of 256 threads.
+    @flyc.kernel(known_block_size=[64, 1, 1])
+    def _add_one_2d_kbs_k(X, Out):
+        i = fx.block_idx.x
+        j = fx.thread_idx.x
+        Out[i, j] = X[i, j] + 1.0
+
+    @flyc.jit
+    def add_one_2d_kbs_kernel(X, Out, stream: fx.Stream):
+        m, n = X.shape.unpack()
+        _add_one_2d_kbs_k(X, Out).launch(grid=(m, 1, 1), block=(n, 1, 1), stream=stream)
+
+    @flyc.jit
+    def add_one_2d_fwg256_kernel(X, Out, stream: fx.Stream):
+        m, n = X.shape.unpack()
+        _add_one_2d_k(
+            X, Out, value_attrs={"rocdl.flat_work_group_size": "1,256"}
+        ).launch(grid=(m, 1, 1), block=(n, 1, 1), stream=stream)
+
+    # out = x + 1 through side-effecting inline asm on a loaded value: the write-set
+    # analysis cannot tell what the asm writes, so "infer" gives every tensor.
+    from flydsl._mlir import ir as _mlir_ir
+    from flydsl._mlir.dialects import llvm as _mlir_llvm
+
+    @flyc.kernel
+    def _asm_add_one_k(X, Out, n: fx.Int32):
+        i = fx.block_idx.x * 1024 + fx.thread_idx.x
+        if i < n:
+            v = _mlir_llvm.inline_asm(
+                _mlir_ir.F32Type.get(),
+                [X[i].ir_value()],
+                "v_mov_b32 $0, $1",
+                "=v,v",
+                has_side_effects=True,
+            )
+            Out[i] = fx.Float32(v) + 1.0
+
+    @flyc.jit
+    def asm_add_one_kernel(X, Out, n: fx.Int32, stream: fx.Stream):
+        _asm_add_one_k(X, Out, n).launch(
+            grid=((n + 1023) // 1024, 1, 1), block=(1024, 1, 1), stream=stream
+        )
+
+    # --- END AOTI CASE KERNELS ---
+
+
+@requires_flydsl
+class FlyDSLAOTITests(TestCase):
+    """AOTInductor: the kernel is compiled ahead of time (export_to_c), its object is
+    linked into the model .so, and the generated C++ launches it through the
+    header's <prefix>_call after <prefix>__module_load(-1)."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    def _package(self, model, args, dynamic_shapes=None, strict=False):
+        ep = torch.export.export(
+            model, args, dynamic_shapes=dynamic_shapes, strict=strict
+        )
+        return torch._inductor.aoti_compile_and_package(ep)
+
+    def _package_and_code(self, model, args, **kwargs):
+        # run_and_get_cpp_code starts with torch._dynamo.reset(), so the export has
+        # to happen inside it (see test_aoti_program_exported_before_reset).
+        return run_and_get_cpp_code(self._package, model, args, **kwargs)
+
+    def test_aoti_add(self):
+        x, y = _rand(1000), _rand(1000)
+        pkg, code = self._package_and_code(_AddModule(), (x, y))
+        code = _strip_comments(code)
+        # One launcher per export, which loads the module on the current device and
+        # calls the typed entry point of the spliced header.
+        FileCheck().check("static inline void call_flydsl_add_kernel_gfx").check(
+            "__module_load(-1)"
+        ).check("_call(").run(code)
+        self.assertRegex(code, r"call_flydsl_add_kernel_gfx\w+\(\w+\.data_ptr\(\)")
+        runner = torch._inductor.aoti_load_package(pkg)
+        self.assertEqual(runner(x, y), x + y)
+        x2, y2 = _rand(1000), _rand(1000)
+        self.assertEqual(runner(x2, y2), x2 + y2)
+
+    def test_aoti_flydsl_symbols_stay_local(self):
+        # The version script keeps the five symbols of each export out of the model
+        # .so's dynamic symbol table (two model .so files could otherwise bind each
+        # other's kernels).
+        x, y = _rand(1000), _rand(1000)
+        pkg, code = self._package_and_code(_AddModule(), (x, y))
+        prefix = re.findall(r"\bcall_(flydsl_add_kernel_gfx\w+)\(", code)[0]
+        with tempfile.TemporaryDirectory() as d:
+            lib = ctypes.CDLL(_package_so(pkg, d))
+            self.assertTrue(hasattr(lib, "AOTInductorModelContainerCreateWithDevice"))
+            for suffix in ("", "__module_init", "__module_load", "__metadata"):
+                self.assertFalse(hasattr(lib, prefix + suffix), prefix + suffix)
+        self.assertEqual(torch._inductor.aoti_load_package(pkg)(x, y), x + y)
+
+    @parametrize("strict", [False, True])
+    def test_aoti_dynamic_shapes(self, strict):
+        dim = torch.export.Dim("n", min=2, max=8192)
+        pkg = self._package(
+            _AddModule(),
+            (_rand(1000), _rand(1000)),
+            dynamic_shapes={"x": {0: dim}, "y": {0: dim}},
+            strict=strict,
+        )
+        runner = torch._inductor.aoti_load_package(pkg)
+        for n in (1000, 77, 8192):
+            x, y = _rand(n), _rand(n)
+            self.assertEqual(runner(x, y), x + y)
+
+    def test_aoti_2d_view_dynamic(self):
+        # Dynamic sizes and strides of a transposed view: the packed layout structs
+        # carry int32 sizes and int64 strides.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                xt = x.t()  # strides (1, x.shape[1]): a non-contiguous view
+                out = torch.empty(xt.shape, device=x.device)
+                add_one_2d_w(xt, out)
+                return out
+
+        a, b = (
+            torch.export.Dim("a", min=2, max=512),
+            torch.export.Dim("b", min=2, max=512),
+        )
+        pkg, code = self._package_and_code(
+            M(), (_rand(8, 4),), dynamic_shapes={"x": {0: a, 1: b}}
+        )
+        # x.t() has strides (1, b): int32 sizes and one int64 stride.
+        self.assertIn(
+            "{static_cast<int32_t>(flydsl_arg0_size0), "
+            "static_cast<int32_t>(flydsl_arg0_size1)}, "
+            "{static_cast<int64_t>(a0_stride0)}}",
+            code,
+        )
+        runner = torch._inductor.aoti_load_package(pkg)
+        for shape in ((8, 4), (33, 17), (4, 300)):
+            x = _rand(*shape)
+            self.assertEqual(runner(x), x.t() + 1)
+
+    def test_aoti_constexpr(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                o1, o2 = torch.empty_like(x), torch.empty_like(x)
+                mul_const_w(x, o1, x.numel(), 3)
+                mul_const_w(x, o2, x.numel(), 2.5)
+                return o1, o2
+
+        x = _rand(1000)
+        pkg, code = self._package_and_code(M(), (x,))
+        # One export per Constexpr value.
+        self.assertEqual(code.count("#define FLYDSL_DECLARED_"), 2)
+        o1, o2 = torch._inductor.aoti_load_package(pkg)(x)
+        self.assertEqual((o1, o2), (3 * x, 2.5 * x))
+
+    def test_aoti_boolean_and_float_scalars(self):
+        # A Boolean takes the truthiness of its value (x.shape[0] % 3 can be 2), as
+        # in eager; a defaulted Float32 is passed as a float.
+        w = wrap_flydsl(select_bool_kernel, mutates_args=["Out"])
+        add_c_w = wrap_flydsl(add_c_kernel, mutates_args=["Out"])
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a, b = torch.empty_like(x), torch.empty_like(x)
+                w(x, a, x.numel(), x.shape[0] % 3)
+                add_c_w(x, b, x.numel())
+                return a, b
+
+        n = torch.export.Dim("n", min=2, max=4096)
+        pkg = self._package(M(), (_rand(1000),), dynamic_shapes={"x": {0: n}})
+        run = torch._inductor.aoti_load_package(pkg)
+        for size in (1000, 1001, 1002):  # size % 3 = 1, 2, 0
+            x = _rand(size)
+            a, b = run(x)
+            self.assertEqual(a, (3 if size % 3 else 5) * x)
+            self.assertEqual(b, x + 0.25)
+
+    def test_aoti_unannotated_scalar(self):
+        # FlyDSL types an unannotated scalar from each launch's Python value; the
+        # exported C ABI needs its type fixed, so AOTInductor asks for an annotation.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                out = torch.empty_like(x)
+                add_scalar_w(x, out, x.numel(), 5)
+                return out
+
+        x = _rand(1000)
+        # The Python wrapper launches it fine ...
+        self.assertEqual(torch.compile(M(), fullgraph=True)(x), x + 5)
+        # ... AOTInductor cannot export it.
+        with self.assertRaisesRegex(Exception, "annotated with a FlyDSL Numeric"):
+            self._package(M(), (x,))
+
+    def test_aoti_half_scalar_refused(self):
+        # export_to_c passes Float16 / BFloat16 scalars as raw bits, which the C++
+        # launcher does not compute.
+        w = wrap_flydsl(add_half_kernel, mutates_args=["Out"])
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                out = torch.empty_like(x)
+                w(x, out, x.numel(), 0.5)
+                return out
+
+        with self.assertRaisesRegex(Exception, "Float16/BFloat16 scalars as raw bits"):
+            self._package(M(), (_rand(1000),))
+
+    def test_aoti_int32_scalar_range_checked(self):
+        # The exported ABI takes n as an int32_t: the launcher refuses a value that
+        # does not fit instead of letting it wrap (as FlyDSL would).
+        class M(torch.nn.Module):
+            def forward(self, x, y, m):
+                out = torch.zeros_like(x)
+                add_w(x, y, out, m.shape[0] * 256)
+                return out
+
+        x, y = _rand(1000), _rand(1000)
+        dim = torch.export.Dim("m", min=2, max=2**23)
+        pkg = self._package(
+            M(), (x, y, _rand(2)), dynamic_shapes={"x": None, "y": None, "m": {0: dim}}
+        )
+        runner = torch._inductor.aoti_load_package(pkg)
+        out = runner(x, y, _rand(2))  # n = 512
+        self.assertEqual(out[:512], (x + y)[:512])
+        self.assertEqual(out[512:], torch.zeros_like(x[512:]))
+        with self.assertRaisesRegex(RuntimeError, "scalar n does not fit in int32_t"):
+            runner(x, y, torch.empty(2**23, device=DEVICE))  # n = 2**31
+
+    def test_aoti_numeric_constant_for_unannotated_param(self):
+        # A FlyDSL Numeric value for an unannotated parameter is a constant to PT2
+        # (guarded on, baked into the generated code) but a runtime argument of the
+        # exported C ABI: refused, with a hint.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                out = torch.empty_like(x)
+                add_scalar_w(x, out, x.numel(), fx.Float32(2.0))
+                return out
+
+        with self.assertRaisesRegex(
+            Exception, r"FlyDSL passes \['k'\] at run time: annotate them"
+        ):
+            self._package(M(), (_rand(1000),))
+
+    def test_export_tools_missing(self):
+        # export_to_c shells out to a linker and objcopy; say which one is missing
+        # instead of FlyDSL's bare FileNotFoundError.
+        from torch._inductor.codegen.flydsl import user_kernel_aot
+
+        with mock.patch.object(user_kernel_aot.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(
+                RuntimeError, r"needs a relocatable linker \(ld.lld or ld\)"
+            ):
+                user_kernel_aot._check_export_tools()
+
+    def test_aoti_misaligned_input_guard(self):
+        # Exported with aligned inputs, the kernel assumes 16-byte alignment and
+        # the launch checks it.
+        base, base2 = _rand(1001), _rand(1001)
+        pkg = self._package(_AddModule(), (base[:1000], base2[:1000]))
+        runner = torch._inductor.aoti_load_package(pkg)
+        x, y = base[1:], base2[1:]
+        if inductor_config.is_fbcode():
+            # fbcode AOTI does not copy misaligned inputs, so the guard fires.
+            with _captured_stderr_fd() as err, self.assertRaises(RuntimeError) as cm:
+                runner(x, y)
+            # The C++ exception is in the error (or only on stderr, for runners that
+            # do not forward it).
+            self.assertIn(
+                "argument X is not 16-byte aligned", str(cm.exception) + err[0]
+            )
+        else:
+            self.assertEqual(runner(x, y), x + y)
+
+    def test_aoti_unaligned_view(self):
+        # A view the export cannot prove 16-byte aligned is compiled for its
+        # element alignment instead (no check).
+        class M(torch.nn.Module):
+            def forward(self, base):
+                x = base[:, 1:]  # data_ptr 4 bytes past a 16-byte boundary
+                out = torch.empty(x.shape, device=x.device)
+                add_one_2d_w(x, out)
+                return out
+
+        base = _rand(4, 9)
+        runner = torch._inductor.aoti_load_package(self._package(M(), (base,)))
+        self.assertEqual(runner(base), base[:, 1:] + 1)
+
+    def test_aoti_two_outputs_and_default_scale(self):
+        # The host function takes `scale: fx.Float32 = 1.0` after the stream: a
+        # defaulted runtime scalar must still be passed.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                s1, d1 = torch.empty_like(x), torch.empty_like(x)
+                add_sub_w(x, y, s1, d1, x.numel())
+                s2, d2 = torch.empty_like(x), torch.empty_like(x)
+                add_sub_w(x, y, s2, d2, x.numel(), scale=0.25)
+                return s1, d1, s2, d2
+
+        x, y = _rand(1000), _rand(1000)
+        runner = torch._inductor.aoti_load_package(self._package(M(), (x, y)))
+        s1, d1, s2, d2 = runner(x, y)
+        self.assertEqual((s1, d1), (x + y, x - y))
+        self.assertEqual((s2, d2), ((x + y) * 0.25, (x - y) * 0.25))
+
+    def test_aoti_inplace_kernel_and_view(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = x * 1
+                scale_inplace_w(y, y.numel())
+                v = y[4:]
+                scale_inplace_w(v, v.numel())
+                return y
+
+        x = _rand(1000)
+        expected = 2 * x
+        expected[4:] *= 2
+        runner = torch._inductor.aoti_load_package(self._package(M(), (x,)))
+        self.assertEqual(runner(x), expected)
+
+    def test_aoti_same_name_kernels(self):
+        # Two host functions named binary_kernel: their exported symbols must not
+        # collide in the model .so.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                o1, o2 = torch.empty_like(x), torch.empty_like(x)
+                same_name_add_w(x, y, o1, x.numel())
+                same_name_sub_w(x, y, o2, x.numel())
+                return o1, o2
+
+        x, y = _rand(1000), _rand(1000)
+        runner = torch._inductor.aoti_load_package(self._package(M(), (x, y)))
+        o1, o2 = runner(x, y)
+        self.assertEqual(o1, x + y)
+        self.assertEqual(o2, x - y)
+
+    def test_aoti_kernels_differing_in_closure_values(self):
+        # Two host functions from one factory get the same prefix (it cannot see a
+        # captured list); each still gets its own export, under a unique symbol.
+        ka = wrap_flydsl(make_affine_kernel([2.0, 0.0]), mutates_args=["Out"])
+        kb = wrap_flydsl(make_affine_kernel([5.0, 1.0]), mutates_args=["Out"])
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a, b = torch.empty_like(x), torch.empty_like(x)
+                ka(x, a, x.numel())
+                kb(x, b, x.numel())
+                return a, b
+
+        x = torch.arange(1000, device=DEVICE, dtype=torch.float32)
+        a, b = torch._inductor.aoti_load_package(self._package(M(), (x,)))(x)
+        self.assertEqual(a, 2 * x)
+        self.assertEqual(b, 5 * x + 1)
+
+    @parametrize("strict", [False, True])
+    def test_aoti_program_exported_before_reset(self, strict):
+        # A program exported before torch._dynamo.reset() and another strict export
+        # must still compile its own kernel (the Triton side table is reset there).
+        x, y = _rand(1000), _rand(1000)
+        ep = torch.export.export(_AddModule(), (x, y), strict=strict)
+        torch._dynamo.reset()
+        torch.export.export(_ScaleModule(), (x,), strict=True)
+        runner = torch._inductor.aoti_load_package(
+            torch._inductor.aoti_compile_and_package(ep)
+        )
+        self.assertEqual(runner(x, y), x + y)
+
+    def test_aoti_call_sites_share_one_export(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a, b = torch.empty_like(x), torch.empty_like(x)
+                add_w(x, y, a, x.numel())
+                add_w(a, y, b, x.numel())
+                return b
+
+        x, y = _rand(1000), _rand(1000)
+        pkg, code = self._package_and_code(M(), (x, y))
+        self.assertEqual(code.count("#define FLYDSL_DECLARED_"), 1)
+        calls = re.findall(r"\bcall_flydsl_add_kernel_\w+\(", _strip_comments(code))
+        self.assertEqual(len(calls), 3, calls)  # the definition and two launches
+        self.assertEqual(torch._inductor.aoti_load_package(pkg)(x, y), x + 2 * y)
+
+    def test_aoti_user_stream_region_uses_region_stream(self):
+        # In a user stream region every launch uses the region's stream, which its
+        # aten fallbacks run on (as in torch.compile's wrapper), so the kernel stays
+        # ordered with the aten mm and the Triton kernels around it. Outside the
+        # region, the model's stream.
+        class M(torch.nn.Module):
+            def forward(self, x, w):
+                s = torch.cuda.Stream()
+                e = torch.cuda.Event()
+                with torch.cuda.stream(s):
+                    a = torch.mm(x, w)
+                    b = torch.empty_like(a)
+                    add_one_2d_w(a, b)
+                    c = torch.empty_like(a)
+                    add_one_2d_w(b * 3, c)
+                    z = c * 2
+                    e.record()
+                torch.cuda.current_stream().wait_event(e)
+                out = torch.empty_like(z)
+                add_one_2d_w(z, out)
+                return out
+
+        # add_one_2d_kernel runs one block per row, with a thread per column.
+        x, w = _rand(4096, 1024), _rand(1024, 1024)
+        pkg, code = self._package_and_code(M(), (x, w), strict=True)
+        code = _strip_comments(code)
+        # The region's stream, named as the region's entry names it (not by a local
+        # variable, which a later block could not see).
+        (aux,) = set(
+            re.findall(
+                r"_aoti_current_stream_guard = std::make_unique<[\w:]+>\((.*), "
+                r"this->device_idx_\);",
+                code,
+            )
+        )
+        calls = re.findall(r"\bcall_flydsl_add_one_2d_kernel\w*\((.*)\);", code)
+        streams = [
+            "aux" if call.endswith(f", {aux}") else call.rsplit(", ", 1)[-1]
+            for call in calls
+        ]
+        self.assertEqual(streams, ["aux", "aux", "stream"])
+        # A Triton launch ends with the device index, stream, kernels and cubin dir.
+        calls = re.findall(r"\bcall_triton_\w+\((.*)\);", code)
+        self.assertGreaterEqual(len(calls), 2)
+        tail = f", this->device_idx_, {aux}, kernels, this->cubin_dir_"
+        self.assertTrue(all(call.endswith(tail) for call in calls), calls)
+        run = torch._inductor.aoti_load_package(pkg)
+        expected = ((x @ w + 1) * 3 + 1) * 2 + 1
+        self.assertEqual(run(x, w), expected, atol=1e-2, rtol=1e-3)
+
+    def test_aoti_exports_not_reused_from_disk(self):
+        # With the in-process export cache empty (as in a new process) the kernel is
+        # exported again, into a fresh directory: nothing on disk is reused.
+        from torch._inductor.codegen.flydsl import user_kernel_aot
+
+        x, y = _rand(1000), _rand(1000)
+        with mock.patch.object(
+            user_kernel_aot,
+            "export_flydsl_kernel",
+            wraps=user_kernel_aot.export_flydsl_kernel,
+        ) as export:
+            for _ in range(2):
+                user_kernel_aot._exports.clear()
+                self._package(_AddModule(), (x, y))
+        dirs = [c.kwargs["out_dir"] for c in export.call_args_list]
+        self.assertEqual(len(dirs), 2)
+        self.assertNotEqual(dirs[0], dirs[1])
+
+    @unittest.skipUnless(torch.cuda.device_count() >= 2, "requires two GPUs")
+    def test_aoti_two_devices(self):
+        # The exported module is loaded per device (__module_load(-1) under
+        # AOTInductor's device guard), so one package runs on either GPU, in one
+        # process, in any order.
+        x, y = _rand(1000), _rand(1000)
+        pkg = self._package(_AddModule(), (x, y))
+        run1 = torch._inductor.aoti_load_package(pkg, device_index=1)
+        run0 = torch._inductor.aoti_load_package(pkg, device_index=0)
+        x1, y1 = x.to("cuda:1"), y.to("cuda:1")
+        self.assertEqual(run1(x1, y1), x1 + y1)
+        self.assertEqual(run0(x, y), x + y)
+        self.assertEqual(run1(2 * x1, y1), 2 * x1 + y1)
+
+    def test_flydsl_kernel_jit_cpp_wrapper(self):
+        # torch.compile with the C++ wrapper links the exported objects into the JIT
+        # module the same way.
+        x, y = _rand(1000), _rand(1000)
+        with inductor_config.patch(cpp_wrapper=True):
+            res, (code,) = run_and_get_code(
+                torch.compile(_AddModule(), fullgraph=True), x, y
+            )
+        self.assertEqual(res, x + y)
+        FileCheck().check("call_flydsl_add_kernel_").run(code)
+
+    def test_aoti_export_for_another_arch_refused(self):
+        # The export checks the target recorded in the object's metadata: FlyDSL
+        # takes it from the environment, which must not leak in.
+        real_compile = flydsl_user_kernel.compile_host_fn
+
+        def compile_for_gfx942(fn, args, arch):
+            return real_compile(fn, args, "gfx942")
+
+        with mock.patch.object(
+            flydsl_user_kernel, "compile_host_fn", compile_for_gfx942
+        ):
+            with self.assertRaisesRegex(
+                Exception,
+                "FlyDSLExportError: .* compiled for 'gfx942', not the target 'gfx9",
+            ):
+                self._package(_AddModule(), (_rand(1000), _rand(1000)))
+
+    def test_aoti_module_for_another_arch_fails_cleanly(self):
+        # A package exported for another GPU fails at its first launch with an error
+        # naming the kernel and the HIP error, and leaves no HIP error pending.
+        from torch._inductor.codegen.flydsl import user_kernel_aot
+
+        x, y = _rand(1000), _rand(1000)
+        with mock.patch.object(user_kernel_aot, "target_arch", return_value="gfx942"):
+            pkg = self._package(_AddModule(), (x, y))
+        runner = torch._inductor.aoti_load_package(pkg)
+        with _captured_stderr_fd() as err, self.assertRaises(RuntimeError) as cm:
+            runner(x, y)
+        self.assertRegex(
+            str(cm.exception) + err[0],
+            r"FlyDSL kernel flydsl_add_kernel_gfx942_\w+: \w+__module_load on the "
+            r"current device failed: status 209 \(hipErrorNoBinaryForGpu",
+        )
+        # The next HIP call is not hit by the failed load.
+        self.assertEqual(x + y, torch.add(x, y))
+        torch.cuda.synchronize()
+
+    def test_aoti_reexport_after_global_rebind(self):
+        # A plain-constant module global the kernel reads is part of its prefix:
+        # once it is rebound, a new package exports the kernel again (under another
+        # prefix) instead of linking the stale export, and the first package keeps
+        # its own kernel. Other globals: test_aoti_reexport_after_rebind_outside_
+        # prefix.
+        bias_w = wrap_flydsl(bias_kernel, mutates_args=["Out"])
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                out = torch.empty_like(x)
+                bias_w(x, out, x.numel())
+                return out
+
+        x = _rand(1000)
+        pkg1, code1 = self._package_and_code(M(), (x,))
+        run1 = torch._inductor.aoti_load_package(pkg1)
+        self.assertEqual(run1(x), x + 2.0)
+        with mock.patch.dict(globals(), {"_AOTI_BIAS": 5.0}):
+            torch._dynamo.reset()
+            pkg2, code2 = self._package_and_code(M(), (x,))
+        run2 = torch._inductor.aoti_load_package(pkg2)
+        self.assertEqual(run2(x), x + 5.0)
+        self.assertEqual(run1(x), x + 2.0)
+        prefixes = [
+            re.findall(r"\bcall_(flydsl_bias_kernel_gfx\w+)\(", c)[0]
+            for c in (code1, code2)
+        ]
+        self.assertNotEqual(prefixes[0], prefixes[1])
+
+    @parametrize("case", ["tuple", "helper_global"])
+    def test_aoti_reexport_after_rebind_outside_prefix(self, case):
+        # The prefix records only the plain constants a kernel reads itself, not a
+        # tuple global or the globals of a Python helper it calls. The export cache
+        # holds the values of all of them, as the eager launch key does: after a
+        # rebind, a new package and the JIT C++ wrapper export the kernel again
+        # (under the same prefix) and agree with eager; the first package keeps its
+        # own kernel.
+        kernel, name, value = {
+            "tuple": (tuple_scale_kernel, "_AOTI_SCALE", (3.0,)),
+            "helper_global": (helper_scale_kernel, "_AOTI_FACTOR", 3.0),
+        }[case]
+        w = wrap_flydsl(kernel, mutates_args=["Out"])
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                out = torch.empty_like(x)
+                w(x, out, x.numel())
+                return out
+
+        x = _rand(1000)
+        run1 = torch._inductor.aoti_load_package(self._package(M(), (x,)))
+        self.assertEqual(run1(x), x * 2.0)
+        with mock.patch.dict(globals(), {name: value}):
+            self.assertEqual(M()(x), x * 3.0)
+            torch._dynamo.reset()
+            run2 = torch._inductor.aoti_load_package(self._package(M(), (x,)))
+            self.assertEqual(run2(x), x * 3.0)
+            with inductor_config.patch(cpp_wrapper=True):
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(M())(x), x * 3.0)
+        self.assertEqual(run1(x), x * 2.0)
+
+    def test_aoti_int_constant_out_of_range_refused(self):
+        # A Python int constant for an integer scalar is checked against the
+        # scalar's C type when the C++ is generated, as eager refuses a value FlyDSL
+        # would wrap: Int64 values outside int64, and an Int32 value beyond 64 bits
+        # (which no C++ literal holds). The int64 extremes reach the kernel.
+        i64_w = wrap_flydsl(add_i64_kernel, mutates_args=["Out"])
+
+        def i64_model(*ks):
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    outs = []
+                    for k in ks:
+                        out = torch.empty_like(x)
+                        i64_w(x, out, x.numel(), k)
+                        outs.append(out)
+                    return torch.stack(outs)
+
+            return M()
+
+        class Int32Model(torch.nn.Module):
+            def forward(self, x):
+                out = torch.empty_like(x)
+                add_w(x, x, out, 2**64 + 5)
+                return out
+
+        x = torch.zeros(16, dtype=torch.int64, device=DEVICE)
+        for model, arg, message in (
+            (i64_model(2**63 + 5), x, "k=9223372036854775813 does not fit"),
+            (i64_model(-(2**63) - 1), x, "k=-9223372036854775809 does not fit"),
+            (Int32Model(), _rand(16), "n=18446744073709551621 does not fit"),
+        ):
+            with self.subTest(message):
+                with self.assertRaisesRegex(ValueError, message):
+                    model(arg)
+                with self.assertRaisesRegex(Exception, message):
+                    self._package(model, (arg,))
+                torch._dynamo.reset()
+                with (
+                    inductor_config.patch(cpp_wrapper=True),
+                    self.assertRaisesRegex(Exception, message),
+                ):
+                    torch.compile(model)(arg)
+        ks = (2**63 - 1, -(2**63))
+        runner = torch._inductor.aoti_load_package(self._package(i64_model(*ks), (x,)))
+        expected = torch.tensor(ks, device=DEVICE)[:, None].expand(2, 16)
+        self.assertEqual(runner(x), expected)
+
+    def test_aoti_uint64_scalar_above_int64_max(self):
+        # A Uint64 scalar reaches the kernel as a uint64_t: values from 2**63 up
+        # pass, constants checked when the code is generated (as ULL literals), a
+        # symbolic value when the launch runs.
+        u64_hi_w = wrap_flydsl(u64_hi_kernel, mutates_args=["Out"])
+        ks = (2**63, 0x9E3779B97F4A7C15, 2**64 - 1)
+
+        def model(*constants):
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    outs = []
+                    for k in (*constants, x.shape[0] * 2**33):
+                        out = torch.zeros(1, dtype=torch.int32, device=x.device)
+                        u64_hi_w(out, k)
+                        outs.append(out)
+                    return torch.cat(outs)
+
+            return M()
+
+        def high_bits(*values):  # as the kernel's Int32
+            return torch.tensor(
+                [((k >> 32) + 2**31) % 2**32 - 2**31 for k in values],
+                dtype=torch.int32,
+                device=DEVICE,
+            )
+
+        x = _rand(3)
+        expected = high_bits(*ks, 3 * 2**33)
+        self.assertEqual(model(*ks)(x), expected)  # eager
+        dim = torch.export.Dim("n", min=2, max=64)
+        pkg, code = self._package_and_code(
+            model(*ks), (x,), dynamic_shapes={"x": {0: dim}}
+        )
+        runner = torch._inductor.aoti_load_package(pkg)
+        self.assertEqual(runner(x), expected)
+        self.assertEqual(runner(_rand(5)), high_bits(*ks, 5 * 2**33))
+        self.assertIn("(buf0.data_ptr(), 9223372036854775808ULL, stream)", code)
+        self.assertRegex(
+            code,
+            r"AOTI_RUNTIME_CHECK\(\(.+\) >= 0, \"FlyDSL kernel flydsl_u64_hi_kernel_"
+            r"\w+: scalar s does not fit in uint64_t\"\);",
+        )
+        with inductor_config.patch(cpp_wrapper=True):
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(model(*ks))(x), expected)
+        # Out of range: refused when the code is generated.
+        for k in (-1, 2**64):
+            with self.assertRaisesRegex(
+                Exception, rf"scalar s={k} does not fit in uint64_t"
+            ):
+                self._package(model(k), (x,))
+
+    def test_aoti_cpp_keyword_param_names(self):
+        # The generated launcher names its parameters a0, a1, ...: host-function
+        # parameters named like C++ keywords (new, default), a C macro (errno) or
+        # the launcher's stream parameter compile; comments keep the names.
+        blend_w = wrap_flydsl(kw_blend_kernel, mutates_args=["errno", "stream"])
+
+        class M(torch.nn.Module):
+            def forward(self, old, new):
+                errno, stream = torch.empty_like(old), torch.empty_like(old)
+                blend_w(old, new, errno, stream, old.numel(), 0.5)
+                return errno, stream
+
+        old, new = _rand(1000), _rand(1000)
+        expected = (old + new * 0.5, old - new)
+        self.assertEqual(M()(old, new), expected)
+        pkg, code = self._package_and_code(M(), (old, new))
+        self.assertIn("void* flydsl_arg1_data = a1;  // new", code)
+        self.assertIn("const float flydsl_arg5 = static_cast<float>(a5);", code)
+        self.assertEqual(torch._inductor.aoti_load_package(pkg)(old, new), expected)
+        with inductor_config.patch(cpp_wrapper=True):
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(M())(old, new), expected)
+
+    def test_aoti_dual_wrapper_refused(self):
+        # AOTInductor without compile-time autotuning generates dual-wrapper code,
+        # which FlyDSL kernels do not support: the refusal says how to get out.
+        with inductor_config.patch({"triton.autotune_at_compile_time": False}):
+            with self.assertRaisesRegex(
+                Exception,
+                r"User-defined FlyDSL kernels are not supported in dual wrapper mode "
+                r"\(AOTInductor with torch\._inductor\.config\.triton\."
+                r"autotune_at_compile_time=False\); set torch\._inductor\.config\."
+                r"triton\.autotune_at_compile_time=True, or unset "
+                r"TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME",
+            ):
+                self._package(_AddModule(), (_rand(1000), _rand(1000)))
+
+    def test_aoti_2d_view_dynamic_large_blocks(self):
+        # test_aoti_2d_view_dynamic's model at shapes inside its declared range
+        # whose transposed view launches blocks of 300 and 512 threads: the block
+        # derives from a dynamic size, which the export compiles for up to 1024.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                xt = x.t()
+                out = torch.empty(xt.shape, device=x.device)
+                add_one_2d_w(xt, out)
+                return out
+
+        a, b = (
+            torch.export.Dim("a", min=2, max=512),
+            torch.export.Dim("b", min=2, max=512),
+        )
+        runner = torch._inductor.aoti_load_package(
+            self._package(M(), (_rand(8, 4),), dynamic_shapes={"x": {0: a, 1: b}})
+        )
+        for shape in ((300, 4), (512, 3), (8, 4)):
+            x = _rand(*shape)
+            self.assertEqual(runner(x), x.t() + 1)
+
+    def test_aoti_dynamic_block_over_256(self):
+        # Without a known block size the ROCDL lowering would cap the kernel at 256
+        # threads per block; the export gives it HIP's default, 1024.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                out = torch.empty_like(x)
+                add_one_2d_w(x, out)
+                return out
+
+        dim = torch.export.Dim("n", min=2, max=1024)
+        runner = torch._inductor.aoti_load_package(
+            self._package(M(), (_rand(32, 64),), dynamic_shapes={"x": {1: dim}})
+        )
+        for n in (64, 256, 257, 1024):
+            x = _rand(32, n)
+            self.assertEqual(runner(x), x + 1)
+
+    def test_flydsl_kernel_jit_cpp_wrapper_dynamic_block(self):
+        # The same for the JIT C++ wrapper with dynamic shapes: one dynamic kernel
+        # serves blocks of 64 to 1024 threads.
+        def fn(x):
+            out = torch.empty_like(x)
+            add_one_2d_w(x, out)
+            return out
+
+        counter = CompileCounterWithBackend("inductor")
+        with inductor_config.patch(cpp_wrapper=True):
+            compiled = torch.compile(fn, dynamic=True, backend=counter)
+            for shape in ((32, 64), (8, 300), (4, 1024)):
+                x = _rand(*shape)
+                self.assertEqual(compiled(x), x + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_aoti_flat_work_group_size_only_where_unset(self):
+        # Only exports with dynamic layouts set a maximum flat work-group size, and
+        # only on kernels without a known block size or one of their own.
+        import flydsl.compiler.backends.rocm as rocm
+
+        from torch._inductor.codegen.flydsl import user_kernel_aot as fly_aot
+        from torch._inductor.codegen.flydsl.user_kernel_aot import (
+            StreamParamSpec,
+            TensorParamSpec,
+        )
+
+        def specs(dynamic):
+            n = None if dynamic else 64
+            return (
+                *(
+                    TensorParamSpec(t, torch.float32, (8, n), (n, 1), 16)
+                    for t in ("X", "Out")
+                ),
+                StreamParamSpec("stream"),
+            )
+
+        changed = []
+        real = fly_aot._set_default_flat_work_group_size
+
+        def spy(module, max_size):
+            changed.append(real(module, max_size))
+            return changed[-1]
+
+        hook = rocm.RocmBackend.__dict__["lower_compile_hints"]
+        arch = flydsl_user_kernel.device_arch()
+        cases = (
+            (add_one_2d_kernel, False),
+            (add_one_2d_kernel, True),
+            (add_one_2d_kbs_kernel, True),
+            (add_one_2d_fwg256_kernel, True),
+        )
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch.object(fly_aot, "_set_default_flat_work_group_size", spy):
+                for i, (fn, dynamic) in enumerate(cases):
+                    prefix = f"flydsl_fwg{i}"
+                    fly_aot.export_flydsl_kernel(
+                        fn, specs(dynamic), out_dir=d, prefix=prefix, arch=arch
+                    )
+        self.assertEqual(len(changed), 3)  # not called for the static layouts
+        self.assertEqual(len(changed[0]), 1)
+        self.assertTrue(changed[0][0].startswith("_add_one_2d_k"), changed)
+        self.assertEqual(changed[1:], [[], []])
+        self.assertIs(rocm.RocmBackend.__dict__["lower_compile_hints"], hook)
+
+    def test_aoti_dynamic_block_over_kernel_limit_fails_with_hint(self):
+        # A kernel's own maximum flat work-group size stays: a larger launch block
+        # fails, with a hint naming the arguments whose layout is dynamic. The
+        # failure is not sticky.
+        w = wrap_flydsl(add_one_2d_fwg256_kernel, mutates_args=["Out"])
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                out = torch.empty_like(x)
+                w(x, out)
+                return out
+
+        dim = torch.export.Dim("n", min=2, max=1024)
+        runner = torch._inductor.aoti_load_package(
+            self._package(M(), (_rand(32, 64),), dynamic_shapes={"x": {1: dim}})
+        )
+        x = _rand(32, 256)
+        self.assertEqual(runner(x), x + 1)
+        hint = (
+            r"launch failed: status 719 \(hipErrorLaunchFailure: .*\); this export has "
+            r"dynamic sizes or strides for X, Out: a launch block derived from them "
+            r"must fit the kernel's maximum flat work-group size"
+        )
+        with _captured_stderr_fd(), self.assertRaisesRegex(RuntimeError, hint):
+            runner(_rand(32, 300))
+        x = _rand(32, 128)
+        self.assertEqual(runner(x), x + 1)
+
+
+###############################################################################
+# Helpers of FlyDSLAOTUnitTests (CPU: no flydsl needed)
+
+
+def _elf_object(symbols, data=b""):
+    """A minimal ELF64 little-endian relocatable object, as an export_to_c object
+    without code: section 1 is a .data section holding ``data``; ``symbols`` are
+    (name, binding, section, value, size) symbol table entries (binding 0 local,
+    1 global, 2 weak; section 0 undefined)."""
+    strtab = b"\0"
+    entries = [bytes(24)]
+    for name, binding, section, value, size in symbols:
+        info = binding << 4 | 1  # STT_OBJECT
+        entries.append(
+            struct.pack("<IBBHQQ", len(strtab), info, 0, section, value, size)
+        )
+        strtab += name.encode() + b"\0"
+    shstrtab = b"\0.data\0.symtab\0.strtab\0.shstrtab\0"
+    parts = [data, b"".join(entries), strtab, shstrtab]
+    offsets, pos = [], 64
+    for part in parts:
+        offsets.append(pos)
+        pos += len(part)
+    shoff = (pos + 7) // 8 * 8
+    sections = [
+        bytes(64),
+        struct.pack("<IIQQQQIIQQ", 1, 1, 3, 0, offsets[0], len(data), 0, 0, 1, 0),
+        struct.pack("<IIQQQQIIQQ", 7, 2, 0, 0, offsets[1], len(parts[1]), 3, 1, 8, 24),
+        struct.pack("<IIQQQQIIQQ", 15, 3, 0, 0, offsets[2], len(strtab), 0, 0, 1, 0),
+        struct.pack("<IIQQQQIIQQ", 23, 3, 0, 0, offsets[3], len(shstrtab), 0, 0, 1, 0),
+    ]
+    header = struct.pack(
+        "<16sHHIQQQIHHHHHH",
+        b"\x7fELF\x02\x01\x01",
+        1,  # ET_REL
+        62,  # EM_X86_64
+        1,
+        0,
+        0,
+        shoff,
+        0,
+        64,
+        0,
+        0,
+        64,
+        len(sections),
+        4,
+    )
+    body = header + b"".join(parts)
+    return body + bytes(shoff - len(body)) + b"".join(sections)
+
+
+def _fake_flydsl_type(name):
+    # What fuka reads of a FlyDSL Numeric annotation: its class name and module.
+    return type(name, (), {"__module__": "flydsl.expr.numeric"})
+
+
+FakeInt8, FakeInt32, FakeInt64, FakeUint64, FakeBoolean, FakeFloat32, FakeFloat16 = (
+    _fake_flydsl_type(n)
+    for n in ("Int8", "Int32", "Int64", "Uint64", "Boolean", "Float32", "Float16")
+)
+
+
+class _FakeJitFunction:
+    """Stands in for a @flyc.jit JitFunction (fuka recognizes one by its class name
+    and module and reads the user's function from _original_func; the export key
+    reads its compile hints)."""
+
+    def __init__(self, func):
+        self.func = func
+        self._original_func = func
+        self.compile_hints = {}
+
+    def __call__(self, *args, **kwargs):
+        return self.func(*args, **kwargs)
+
+    def _effective_compile_hints(self):
+        return dict(self.compile_hints)
+
+
+_FakeJitFunction.__name__ = _FakeJitFunction.__qualname__ = "JitFunction"
+_FakeJitFunction.__module__ = "flydsl.compiler.jit_function"
+
+
+@_FakeJitFunction
+def _aot_add_kernel(X, Y, Out, n, stream):
+    Out.copy_(X + Y)
+
+
+@_FakeJitFunction
+def _aot_scale_kernel(X, Out, scale, stream, alpha=1.0, bias=None):
+    Out.copy_(X * scale * alpha)
+
+
+AOT_BLOCK = 128
+
+
+@_FakeJitFunction
+def _aot_inner_kernel(X, Out):
+    Out.copy_(X)
+
+
+@_FakeJitFunction
+def _aot_outer_kernel(X, Out, stream):
+    _aot_inner_kernel(X, Out)
+    Out.mul_(AOT_BLOCK)
+
+
+AOT_SIGN = 1.0
+
+
+@_FakeJitFunction
+def _aot_signed_kernel(X, Out, stream):
+    Out.copy_(X * AOT_SIGN)
+
+
+# A tuple global: not part of the kernel prefix, which records plain constants only.
+AOT_TILE = (2.0,)
+
+
+@_FakeJitFunction
+def _aot_tile_kernel(X, Out, stream):
+    Out.copy_(X * AOT_TILE[0])
+
+
+@dataclasses.dataclass(frozen=True)
+class _AotConfig:
+    block: int
+
+
+def _synthetic_export(specs, prefix, arch, *, bits=32):
+    """The metadata JSON and header export_to_c writes for ``specs`` (flydsl 0.4,
+    schema 2): a slot per tensor data pointer, per tensor layout with dynamic dims
+    (``bits``-bit sizes and strides), per runtime scalar and for the stream, and the
+    typed ``<prefix>_call`` taking them in order."""
+    abi, params = [], []
+    for s in specs:
+        if isinstance(s, fuka.TensorParamSpec):
+            abi.append({"kind": "tensor_data", "arg_name": s.name, "ctype": "pointer"})
+            params.append(f"void *{s.name}_data")
+            shape = [i for i, v in enumerate(s.sizes) if v is None]
+            stride = [i for i, v in enumerate(s.strides) if v is None]
+            if shape or stride:
+                slot = {
+                    "kind": "tensor_layout",
+                    "arg_name": s.name,
+                    "ctype": "bytes",
+                    "shape_dims": shape,
+                    "stride_dims": stride,
+                    "shape_bits": bits,
+                }
+                if stride:
+                    slot["stride_bits"] = bits
+                abi.append(slot)
+                params.append(f"const {prefix}_{s.name}_layout_t *{s.name}_layout")
+        elif isinstance(s, fuka.ScalarParamSpec):
+            ctype = fuka.scalar_ctype(s.annotation).removesuffix("_t")
+            abi.append({"kind": "scalar", "arg_name": s.name, "ctype": ctype})
+            params.append(f"{fuka._slot_ctype(ctype)} {s.name}")
+        elif isinstance(s, fuka.StreamParamSpec):
+            abi.append({"kind": "stream", "arg_name": s.name, "ctype": "pointer"})
+            params.append(f"void *{s.name}")
+    metadata = {
+        "schema_version": 2,
+        "symbol": prefix,
+        "metadata_symbol": f"{prefix}__metadata",
+        **{
+            f"module_{n}_symbol": f"{prefix}__module_{n}"
+            for n in ("init", "load", "unload")
+        },
+        "arch": arch,
+        "return_abi": {"ctype": "int32", "kind": "status", "success": 0},
+        "abi": abi,
+        "linker_flags": ["-lamdhip64", "-pthread", "-ldl"],
+        "flydsl_version": "0.4.0",
+    }
+    header = (
+        "#pragma once\n"
+        f"int32_t {prefix}(void **args);\n"
+        f"static inline int32_t {prefix}_call({', '.join(params)}) {{\n"
+        "  return 0;\n"
+        "}\n"
+    )
+    return metadata, header
+
+
+def _write_export(out_dir, prefix, metadata, header, extra_symbols=()):
+    # The object defines the five export symbols plus ``extra_symbols``; a local and
+    # an undefined symbol show which ones the symbol check leaves alone.
+    meta = json.dumps(metadata).encode() + b"\0"
+    symbols = [
+        (prefix, 1, 1, 0, 0),
+        (f"{prefix}__metadata", 1, 1, 0, len(meta)),
+        *((f"{prefix}__module_{n}", 1, 1, 0, 0) for n in ("init", "load", "unload")),
+        ("flydsl_aot_runtime_state", 0, 1, 0, 0),
+        ("hipModuleLaunchKernel", 1, 0, 0, 0),
+        *((name, 1, 1, 0, 0) for name in extra_symbols),
+    ]
+    Path(out_dir, f"{prefix}.o").write_bytes(_elf_object(symbols, meta))
+    Path(out_dir, f"{prefix}.h").write_text(header)
+
+
+class _FakeExports:
+    """What _fake_flydsl_export records and lets a test change between exports."""
+
+    def __init__(self) -> None:
+        self.prefixes: list[str] = []  # what export_to_c ran for
+        self.arch_override: str | None = None  # compile for this arch instead
+        self.extra_symbols: list[str] = []  # stray globals of the next objects
+        self.env: tuple[object, ...] = ()  # the FlyDSL environment variables' values
+
+
+@contextlib.contextmanager
+def _fake_flydsl_export():
+    """Exports without flydsl: _compile_args passes the specs through (by name), a
+    fake flydsl_user_kernel.compile_host_fn returns an object whose export_to_c
+    writes the synthetic export of those specs, and the export tools check and the
+    FlyDSL version are faked; fuka's export cache starts empty. The export key reads
+    the globals the kernel itself loads (flydsl_user_kernel._global_refs, which also
+    follows its callees, needs flydsl), the environment from ``fake.env`` and no
+    compile hints of the thread."""
+    fake = _FakeExports()
+
+    def global_refs(fn):
+        func = fn._original_func
+        names = dict.fromkeys(flydsl_user_kernel._loaded_globals(func.__code__))
+        return tuple((name, func.__globals__) for name in names)
+
+    def compile_host_fn(fn, args, arch):
+        specs = tuple(args.values())
+
+        class Compiled:
+            def export_to_c(self, out_dir, prefix, *, function_prefix):
+                if function_prefix != prefix:
+                    raise AssertionError((function_prefix, prefix))
+                fake.prefixes.append(prefix)
+                metadata, header = _synthetic_export(
+                    specs, prefix, fake.arch_override or arch
+                )
+                _write_export(out_dir, prefix, metadata, header, fake.extra_symbols)
+
+        return Compiled()
+
+    with contextlib.ExitStack() as stack:
+        for target, name, value in (
+            (fuka, "_compile_args", lambda specs: {s.name: s for s in specs}),
+            (fuka, "_check_export_tools", lambda: None),
+            (fuka, "version_tag", lambda: "flydsl=0.4.0"),
+            (fuka, "_exports", weakref.WeakKeyDictionary()),
+            (flydsl_user_kernel, "compile_host_fn", compile_host_fn),
+            (flydsl_user_kernel, "_global_refs", global_refs),
+            (flydsl_user_kernel, "_globals_snapshots", weakref.WeakKeyDictionary()),
+            (flydsl_user_kernel, "_key_readers", lambda: (lambda: fake.env, dict)),
+        ):
+            stack.enter_context(mock.patch.object(target, name, value))
+        yield fake
+
+
+@contextlib.contextmanager
+def _flydsl_hidden():
+    """Inside the block flydsl is not installed, as far as imports go: importing any
+    of its modules raises ModuleNotFoundError, also those imported already (they are
+    put back on exit). flydsl_user_kernel's cached readers are dropped, before and
+    after."""
+
+    def is_flydsl(name):
+        return name == "flydsl" or name.startswith("flydsl.")
+
+    loaded = {name: m for name, m in sys.modules.items() if is_flydsl(name)}
+    flydsl_user_kernel._key_readers.cache_clear()
+    hidden: Any = dict.fromkeys(["flydsl", *loaded])  # None stops an import
+    sys.modules.update(hidden)
+    try:
+        yield
+    finally:
+        for name in [name for name in sys.modules if is_flydsl(name)]:
+            del sys.modules[name]
+        sys.modules.update(loaded)
+        flydsl_user_kernel._key_readers.cache_clear()
+
+
+class FlyDSLAOTUnitTests(TestCase):
+    """codegen/flydsl/user_kernel_aot.py without a GPU or flydsl: ELF reading, symbol
+    checks, the exported ABI, kernel prefixes, the version script and link flags,
+    exports (through a fake compile) and their cache, and the generated C++."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def _tmp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        return d.name
+
+    def _add_specs(self, n=None, n_type=FakeInt32, hint=1000):
+        return (
+            *(fuka.TensorParamSpec(t, torch.float32, (n,), (1,), 16) for t in "XY"),
+            fuka.TensorParamSpec("Out", torch.float32, (n,), (1,), 16),
+            fuka.ScalarParamSpec("n", n_type, hint),
+            fuka.StreamParamSpec("stream"),
+        )
+
+    def test_runs_without_flydsl(self):
+        # This class has no skip decorator, so it also runs where flydsl is not
+        # installed (the caffe2/test/inductor target, OSS CI): every other test of
+        # it passes with flydsl hidden, checked on hosts that have flydsl too.
+        names = unittest.defaultTestLoader.getTestCaseNames(type(self))
+        result = unittest.TestResult()
+        with _flydsl_hidden():
+            for name in names:
+                if name != self._testMethodName:
+                    type(self)(name).run(result)
+        self.assertEqual(result.testsRun, len(names) - 1)
+        failed = [
+            f"{test.id().rsplit('.', 1)[-1]}: {trace.strip().splitlines()[-1]}"
+            for test, trace in result.errors + result.failures
+        ]
+        self.assertFalse(failed, "\n".join(failed))
+
+    def test_elf_reader(self):
+        meta = b'{"abi": []}\0'
+        path = os.path.join(self._tmp(), "k.o")
+        symbols = [
+            ("k", 1, 1, 0, 0),
+            ("k__metadata", 1, 1, 0, len(meta)),
+            ("k_local", 0, 1, 0, 0),
+            ("hipLaunchKernel", 1, 0, 0, 0),
+            ("k_weak", 2, 1, 0, 0),
+        ]
+        Path(path).write_bytes(_elf_object(symbols, meta))
+        self.assertEqual(
+            [(s.name, s.binding, s.section) for s in fuka.elf_symbols(path)],
+            [("", 0, 0), *((n, b, s) for n, b, s, _, _ in symbols)],
+        )
+        self.assertEqual(fuka.elf_global_symbols(path), ["k", "k__metadata", "k_weak"])
+        self.assertEqual(fuka.elf_symbol_data(path, "k__metadata"), meta)
+        for name in ("hipLaunchKernel", "missing"):
+            with self.assertRaisesRegex(
+                fuka.FlyDSLExportError, f"does not define one data symbol {name}"
+            ):
+                fuka.elf_symbol_data(path, name)
+        bad = os.path.join(self._tmp(), "bad.o")
+        Path(bad).write_bytes(b"!<arch>\n" + bytes(64))
+        with self.assertRaisesRegex(
+            fuka.FlyDSLExportError, "is not an ELF64 little-endian object"
+        ):
+            fuka.elf_global_symbols(bad)
+
+    @unittest.skipUnless(
+        sys.platform == "linux" and shutil.which("cc"),
+        "needs a C compiler that writes ELF objects",
+    )
+    def test_elf_reader_compiled_object(self):
+        d = self._tmp()
+        src = os.path.join(d, "k.c")
+        Path(src).write_text(
+            "static int k_local;\n"
+            "int k(void) { return k_local; }\n"
+            'const char k__metadata[] = "{\\"arch\\": \\"gfx950\\"}";\n'
+        )
+        subprocess.check_call(["cc", "-c", "-fPIC", "-o", f"{d}/k.o", src])
+        self.assertEqual(
+            sorted(fuka.elf_global_symbols(f"{d}/k.o")), ["k", "k__metadata"]
+        )
+        self.assertEqual(fuka._read_metadata(f"{d}/k.o", "k"), {"arch": "gfx950"})
+
+    def test_check_object_symbols(self):
+        # An export defines exactly its five symbols (export_to_c localizes the rest,
+        # its embedded runtime included); local and undefined symbols do not count.
+        d = self._tmp()
+        _write_export(d, "k", {}, "")
+        fuka._check_object_symbols(f"{d}/k.o", "k")
+        _write_export(d, "k", {}, "", extra_symbols=["k_weak"])
+        with self.assertRaisesRegex(
+            fuka.FlyDSLExportError,
+            r"defines global symbols outside k k__metadata k__module_init "
+            r"k__module_load k__module_unload: \['k_weak'\]",
+        ):
+            fuka._check_object_symbols(f"{d}/k.o", "k")
+        Path(f"{d}/k.o").write_bytes(
+            _elf_object([("k", 1, 1, 0, 0), ("k__metadata", 1, 1, 0, 0)])
+        )
+        with self.assertRaisesRegex(
+            fuka.FlyDSLExportError,
+            r"k.o does not define \['k__module_init', 'k__module_load', "
+            r"'k__module_unload'\]",
+        ):
+            fuka._check_object_symbols(f"{d}/k.o", "k")
+
+    def test_scalar_ctype(self):
+        self.assertEqual(fuka.scalar_ctype(FakeInt32), "int32_t")
+        self.assertEqual(fuka.scalar_ctype(FakeBoolean), "bool")
+        self.assertEqual(fuka.scalar_ctype(FakeFloat32), "float")
+        # Float16/BFloat16 scalars are exported as raw bits; other types as nothing.
+        with self.assertRaisesRegex(
+            fuka.FlyDSLExportError, "Float16 is not supported by AOTInductor"
+        ):
+            fuka.scalar_ctype(FakeFloat16)
+        for annotation in (int, type("Int32", (), {"__module__": "cutlass"})):
+            with self.assertRaisesRegex(
+                fuka.FlyDSLExportError, "is not supported by FlyDSL export_to_c"
+            ):
+                fuka.scalar_ctype(annotation)
+
+    def test_parse_exported_abi(self):
+        # The metadata and header of an export, checked against the specs and target.
+        specs = (
+            fuka.TensorParamSpec("X", torch.float32, (None, 4), (None, 1), 16),
+            fuka.TensorParamSpec("Out", torch.float32, (8,), (1,), 16),
+            fuka.ScalarParamSpec("n", FakeInt32, 7),
+            fuka.ConstantParamSpec("block", 256),
+            fuka.StreamParamSpec("stream"),
+        )
+        metadata, header = _synthetic_export(specs, "k", "gfx950")
+        abi = fuka.parse_exported_abi(
+            metadata, header, specs, prefix="k", arch="gfx950"
+        )
+        self.assertEqual(
+            [(s.kind, s.name, s.cpp_type) for s in abi.slots],
+            [
+                ("tensor_data", "X", "void *"),
+                ("tensor_layout", "X", "const k_X_layout_t *"),
+                ("tensor_data", "Out", "void *"),
+                ("scalar", "n", "int32_t"),
+                ("stream", "stream", "void *"),
+            ],
+        )
+        layout = abi.layout("X")
+        if layout is None:
+            self.fail("the ABI has no layout for X")
+        self.assertEqual((layout.shape_dims, layout.stride_dims), ((0,), (0,)))
+        self.assertEqual((layout.shape_bits, layout.stride_bits), (32, 32))
+        self.assertIsNone(abi.layout("Out"))
+        self.assertEqual(abi.linker_flags, ("-lamdhip64", "-pthread", "-ldl"))
+        exported = fuka.FlyDSLExportedKernel("k", "k.h", "k.o", header, abi, specs)
+        self.assertEqual(
+            [(p.kind, p.name, p.launcher_ctype) for p in fuka.launch_params(exported)],
+            [
+                ("tensor", "X", "int64_t"),
+                ("tensor", "Out", "int64_t"),
+                ("scalar", "n", "int64_t"),
+                ("stream", "stream", "int64_t"),
+            ],
+        )
+
+        def parse(metadata=metadata, header=header, arch="gfx950"):
+            return fuka.parse_exported_abi(
+                metadata, header, specs, prefix="k", arch=arch
+            )
+
+        for change, message in (
+            ({"schema_version": 1}, "metadata schema 1, expected 2"),
+            ({"arch": "gfx942"}, "compiled for 'gfx942', not the target 'gfx950'"),
+            ({"module_load_symbol": "x"}, "unexpected lifecycle symbol names"),
+            ({"return_abi": {}}, "unexpected return ABI"),
+            ({"linker_flags": "-ldl"}, "unexpected linker_flags"),
+        ):
+            with self.assertRaisesRegex(fuka.FlyDSLExportError, message):
+                parse({**metadata, **change})
+        # A FlyDSL Numeric constant for an unannotated parameter is a runtime
+        # argument to FlyDSL: the mismatch names it.
+        runtime_block = {
+            **metadata,
+            "abi": [
+                *metadata["abi"][:-1],
+                {"kind": "scalar", "arg_name": "block", "ctype": "int32"},
+                metadata["abi"][-1],
+            ],
+        }
+        with self.assertRaisesRegex(
+            fuka.FlyDSLExportError,
+            r"FlyDSL passes \['block'\] at run time: annotate them with fx.Constexpr",
+        ):
+            parse(runtime_block)
+        with self.assertRaisesRegex(
+            fuka.FlyDSLExportError, "k_call takes 'n' as 'int64_t', not int32"
+        ):
+            parse(header=header.replace("int32_t n", "int64_t n"))
+        with self.assertRaisesRegex(fuka.FlyDSLExportError, "header lacks k_call"):
+            parse(header="int32_t k(void **args);\n")
+
+    def test_target_arch(self):
+        with mock.patch.object(
+            flydsl_user_kernel, "device_arch", return_value="gfx942"
+        ) as device_arch:
+            self.assertEqual(fuka.target_arch(torch.device("cuda", 1)), "gfx942")
+        device_arch.assert_called_once_with(torch.device("cuda", 1))
+
+    def test_prefix(self):
+        def prefix(specs, fn=_aot_add_kernel, arch="gfx950"):
+            return fuka.flydsl_kernel_prefix(fn, specs, arch)
+
+        version = mock.patch.object(fuka, "version_tag", return_value="flydsl=0.4.0")
+        version.start()
+        self.addCleanup(version.stop)
+        specs = self._add_specs()
+        p = prefix(specs)
+        self.assertRegex(p, r"^flydsl_aot_add_kernel_gfx950_[0-9a-f]{16}$")
+        self.assertEqual(prefix(specs), p)
+        # The scalar hint is not baked into the kernel; everything else is.
+        self.assertEqual(prefix(self._add_specs(hint=7)), p)
+        x16 = fuka.TensorParamSpec("X", torch.float16, (None,), (1,), 16)
+        x4 = fuka.TensorParamSpec("X", torch.float32, (None,), (1,), 4)
+        for other in (
+            self._add_specs(2048),
+            self._add_specs(n_type=FakeInt8),
+            (x16, *specs[1:]),
+            (x4, *specs[1:]),
+        ):
+            self.assertNotEqual(prefix(other), p)
+        self.assertNotEqual(prefix(specs, arch="gfx942"), p)
+        with mock.patch.object(fuka, "version_tag", return_value="flydsl=0.4.1"):
+            self.assertNotEqual(prefix(specs), p)
+        with mock.patch.object(fuka, "_FORMAT_VERSION", 2):
+            self.assertNotEqual(prefix(specs), p)
+        with self.assertRaisesRegex(ValueError, "arch must look like 'gfx950'"):
+            prefix(specs, arch="sm_90a")
+
+        # Constants count by value (no object addresses).
+        def scale_specs(scale):
+            return (
+                fuka.TensorParamSpec("X", torch.float32, (8,), (1,), 16),
+                fuka.TensorParamSpec("Out", torch.float32, (8,), (1,), 16),
+                fuka.ConstantParamSpec("scale", scale),
+                fuka.StreamParamSpec("stream"),
+                fuka.ConstantParamSpec("alpha", 1.0),
+                fuka.ConstantParamSpec("bias", None),
+            )
+
+        for a, b, c in (
+            ([2, 5], [2, 5], [2, 6]),
+            (_AotConfig(2), _AotConfig(2), _AotConfig(3)),
+        ):
+            self.assertEqual(
+                prefix(scale_specs(a), _aot_scale_kernel),
+                prefix(scale_specs(b), _aot_scale_kernel),
+            )
+            self.assertNotEqual(
+                prefix(scale_specs(a), _aot_scale_kernel),
+                prefix(scale_specs(c), _aot_scale_kernel),
+            )
+        self.assertNotIn("0x", fuka._stable_repr(_AotConfig(2)))
+
+    def test_prefix_closure(self):
+        # The host function's source, the FlyDSL functions it calls and the simple
+        # constants they read, transitively.
+        parts = fuka._dsl_function_closure(_aot_outer_kernel)
+        self.assertEqual(
+            [part.split("\n")[0] for part in parts],
+            [
+                f"{__name__}._aot_outer_kernel",
+                "AOT_BLOCK=128",
+                f"{__name__}._aot_inner_kernel",
+            ],
+        )
+        self.assertIn("Out.mul_(AOT_BLOCK)", parts[0])
+        # FlyDSL's own functions are covered by its version.
+        with mock.patch.object(fuka, "_DSL_PACKAGE", __name__):
+            parts = fuka._dsl_function_closure(_aot_outer_kernel)
+        self.assertEqual(len(parts), 2)
+
+    def test_link_inputs_and_flags(self):
+        d = os.path.join(self._tmp(), "out dir")
+        abi = fuka.FlyDSLExportedABI((), "gfx950", "0.4.0", ("-lamdhip64", "-ldl"))
+        abi2 = dataclasses.replace(abi, linker_flags=("-ldl", "-pthread"))
+        k1, k2 = (
+            fuka.FlyDSLExportedKernel(f"flydsl_{n}", f"/x/{n}.h", f"/x/{n}.o", "", a)
+            for n, a in (("b", abi), ("a", abi2))
+        )
+        # Every object once, in order (each embeds FlyDSL's AOT runtime).
+        self.assertEqual(fuka.flydsl_link_inputs([k1, k2, k1]), ["/x/b.o", "/x/a.o"])
+        flags = fuka.flydsl_link_flags(d, [k1, k2, k1])
+        # The version script (its path a token of its own), then the metadata's
+        # link flags once each.
+        self.assertEqual(flags[1:], ["-lamdhip64", "-ldl", "-pthread"])
+        tokens = shlex.split(flags[0])
+        self.assertEqual(tokens[:3], ["-Xlinker", "--version-script", "-Xlinker"])
+        path = tokens[3]
+        self.assertEqual(os.path.dirname(path), d)
+        self.assertRegex(os.path.basename(path), r"^flydsl_[0-9a-f]{16}\.ver$")
+        self.assertEqual(
+            Path(path).read_text(),
+            "/* FlyDSL user kernels: export_to_c symbols stay in this library. */\n"
+            "{\n  local:\n    flydsl_a;\n    flydsl_a__*;\n"
+            "    flydsl_b;\n    flydsl_b__*;\n};\n",
+        )
+        # Written once per content (the prefixes are sorted; the metadata flags keep
+        # the order of first appearance).
+        mtime = os.stat(path).st_mtime_ns
+        self.assertEqual(
+            fuka.flydsl_link_flags(d, [k2, k1]),
+            [flags[0], "-ldl", "-pthread", "-lamdhip64"],
+        )
+        self.assertEqual(os.stat(path).st_mtime_ns, mtime)
+        self.assertNotEqual(fuka.flydsl_link_flags(d, [k1])[0], flags[0])
+        self.assertEqual(len(os.listdir(d)), 2)
+        self.assertEqual(fuka.flydsl_link_flags(d, []), [])
+        bad = dataclasses.replace(k1, prefix="a-b")
+        with self.assertRaisesRegex(ValueError, "'a-b' is not a C identifier"):
+            fuka.flydsl_link_flags(d, [k1, bad])
+
+    def _cpp_kernel(self, *specs):
+        # The export of ``specs``, by default every launcher parameter kind: a tensor
+        # with a 32-bit dynamic layout, int8, uint64, Boolean and Float32 scalars, the
+        # stream (not last), a static tensor and a constant (no slot).
+        specs = specs or (
+            fuka.TensorParamSpec("X", torch.float32, (None, 4), (None, 1), 16),
+            fuka.ScalarParamSpec("i8", FakeInt8, -3),
+            fuka.ScalarParamSpec("u64", FakeUint64, 7),
+            fuka.ScalarParamSpec("flag", FakeBoolean, True),
+            fuka.ScalarParamSpec("f", FakeFloat32, 0.5),
+            fuka.StreamParamSpec("stream"),
+            fuka.TensorParamSpec("Out", torch.float32, (8,), (1,), 16),
+            fuka.ConstantParamSpec("alpha", 2),
+        )
+        metadata, header = _synthetic_export(specs, "flydsl_k", "gfx950")
+        abi = fuka.parse_exported_abi(
+            metadata, header, specs, prefix="flydsl_k", arch="gfx950"
+        )
+        return fuka.FlyDSLExportedKernel(
+            "flydsl_k", "/x/flydsl_k.h", "/x/flydsl_k.o", header, abi, specs
+        )
+
+    def _launch(self, exported, **overrides):
+        kwargs: dict[str, Any] = {
+            "tensor_args": {
+                "X": ("x_ptr", ["x_size0"], ["x_stride0"]),
+                "Out": ("out_ptr", [], []),
+            },
+            "scalar_args": {n: f"{n}_value" for n in ("i8", "u64", "flag", "f")},
+            "stream_expr": "s",
+            "check_align": {"X": 16},
+            **overrides,
+        }
+        return fuka.emit_cpp_launch(exported, **kwargs)
+
+    def test_emit_cpp(self):
+        exported = self._cpp_kernel()
+        decls = fuka.emit_cpp_declarations(exported)
+        prelude = [
+            *fuka._CPP_PRELUDE.splitlines(),
+            *fuka._STATUS_HELPERS.splitlines(),
+        ]
+        self.assertEqual(decls[: len(prelude)], prelude)
+        call = exported.header_text.splitlines()[2]
+        self.assertTrue(call.startswith("static inline int32_t flydsl_k_call("), call)
+        self.assertEqual(
+            decls[len(prelude) :],
+            [
+                "// FlyDSL user kernel flydsl_k: export_to_c header flydsl_k.h",
+                "#ifndef FLYDSL_DECLARED_flydsl_k",
+                "#define FLYDSL_DECLARED_flydsl_k",
+                "int32_t flydsl_k(void **args);",
+                call,
+                "  return 0;",
+                "}",
+                "static std::once_flag flydsl_k_init_once;",
+                "static inline void flydsl_k_init_module_once() {",
+                "  std::call_once(flydsl_k_init_once, [] {",
+                "    const int32_t status = flydsl_k__module_init();",
+                '    flydsl_user_kernel_check(status, "FlyDSL kernel flydsl_k: '
+                'flydsl_k__module_init failed");',
+                "  });",
+                "}",
+                "#endif  // FLYDSL_DECLARED_flydsl_k",
+            ],
+        )
+        self.assertEqual(
+            "\n".join(self._launch(exported)),
+            """\
+{
+  // FlyDSL user kernel flydsl_k
+  flydsl_k_init_module_once();
+  flydsl_user_kernel_check(flydsl_k__module_load(-1), "FlyDSL kernel flydsl_k: flydsl_k__module_load on the current device failed");
+  void* flydsl_arg0_data = x_ptr;  // X
+  AOTI_RUNTIME_CHECK(reinterpret_cast<std::uintptr_t>(flydsl_arg0_data) % 16 == 0, "FlyDSL kernel flydsl_k: argument X is not 16-byte aligned");
+  const int64_t flydsl_arg0_size0 = static_cast<int64_t>(x_size0);
+  AOTI_RUNTIME_CHECK(flydsl_arg0_size0 >= 0 && flydsl_arg0_size0 <= 2147483647LL, "FlyDSL kernel flydsl_k: dynamic size 0 of argument X does not fit in int32");
+  const int64_t flydsl_arg0_stride0 = static_cast<int64_t>(x_stride0);
+  AOTI_RUNTIME_CHECK(flydsl_arg0_stride0 >= -2147483648LL && flydsl_arg0_stride0 <= 2147483647LL, "FlyDSL kernel flydsl_k: dynamic stride 0 of argument X does not fit in int32");
+  const flydsl_k_X_layout_t flydsl_arg0_layout{{static_cast<int32_t>(flydsl_arg0_size0)}, {static_cast<int32_t>(flydsl_arg0_stride0)}};
+  const int64_t flydsl_arg1_value = static_cast<int64_t>(i8_value);  // i8
+  AOTI_RUNTIME_CHECK(flydsl_arg1_value >= -128LL && flydsl_arg1_value <= 127LL, "FlyDSL kernel flydsl_k: scalar i8 does not fit in int8_t");
+  const int8_t flydsl_arg1 = static_cast<int8_t>(flydsl_arg1_value);
+  const uint64_t flydsl_arg2 = static_cast<uint64_t>(u64_value);  // u64
+  const bool flydsl_arg3 = static_cast<bool>((flag_value) != 0);  // flag
+  const float flydsl_arg4 = static_cast<float>(f_value);  // f
+  void* flydsl_arg6_data = out_ptr;  // Out
+  flydsl_user_kernel_check(flydsl_k_call(flydsl_arg0_data, &flydsl_arg0_layout, flydsl_arg1, flydsl_arg2, flydsl_arg3, flydsl_arg4, static_cast<void*>(s), flydsl_arg6_data), "FlyDSL kernel flydsl_k: launch failed", "; this export has dynamic sizes or strides for X: a launch block derived from them must fit the kernel's maximum flat work-group size (1024 threads unless the kernel sets known_block_size or value_attrs={'rocdl.flat_work_group_size': '<min>,<max>'})");
+}""",
+        )
+
+    def test_emit_cpp_errors(self):
+        exported = self._cpp_kernel()
+        for overrides, message in (
+            ({"tensor_args": {"X": ("p", ["s"], ["t"])}}, r"tensor_args \['X'\] != "),
+            (
+                {"scalar_args": {}},
+                r"scalar_args \[\] != scalars \['f', 'flag', 'i8', 'u64'\]",
+            ),
+            (
+                {"check_align": {"i8": 16}},
+                r"check_align names \['i8'\] are not tensors",
+            ),
+            ({"check_align": {"X": 12}}, r"check_align\[X\]=12 is not a power of two"),
+            (
+                {"tensor_args": {"X": ("p", [], ["t"]), "Out": ("q", [], [])}},
+                "X needs 1 dynamic sizes and 1 dynamic strides, got 0 and 1",
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, message):
+                self._launch(exported, **overrides)
+        # A scalar C type the launcher cannot convert to (parse_exported_abi refuses
+        # such an ABI; a hand-made one reaches the C++ emitter).
+        slots = tuple(
+            dataclasses.replace(s, ctype="int128") if s.name == "i8" else s
+            for s in exported.abi.slots
+        )
+        odd = dataclasses.replace(
+            exported, abi=dataclasses.replace(exported.abi, slots=slots)
+        )
+        with self.assertRaisesRegex(
+            fuka.FlyDSLExportError,
+            "flydsl_k: unsupported scalar C type int128_t for i8",
+        ):
+            self._launch(odd)
+        # A uint64 launcher parameter for a scalar the export takes as int32_t.
+        with self.assertRaisesRegex(
+            fuka.FlyDSLExportError,
+            "flydsl_k: u64 is passed as a uint64_t, not as int32_t",
+        ):
+            fuka._cpp_scalar(
+                exported,
+                fuka.ExportedParam("scalar", "u64", "int32_t", uint64=True),
+                "v",
+                "e",
+            )
+
+    def test_call_wrapper(self):
+        # The launcher's parameters are named a<i> (a FlyDSL parameter may be named
+        # like a C++ keyword or macro, or like the stream) and a uint64_t scalar is
+        # taken as a uint64_t (values above INT64_MAX); messages keep the host
+        # function's parameter names.
+        wrapper: Any = types.SimpleNamespace(prefix=IndentedBuffer())
+        exported = self._cpp_kernel()
+        fuka.FlyDSLCallWrapper("call_flydsl_k", exported, {"X": 16}).generate(wrapper)
+        lines = wrapper.prefix.getvalue().splitlines()
+        self.assertEqual(
+            lines[0],
+            "static inline void call_flydsl_k(void* a0, int64_t a0_size0, "
+            "int64_t a0_stride0, int64_t a1, uint64_t a2, int64_t a3, double a4, "
+            "void* a6, hipStream_t stream)",
+        )
+        launch = self._launch(
+            exported,
+            tensor_args={
+                "X": ("a0", ["a0_size0"], ["a0_stride0"]),
+                "Out": ("a6", [], []),
+            },
+            scalar_args={"i8": "a1", "u64": "a2", "flag": "a3", "f": "a4"},
+            stream_expr="stream",
+        )
+        self.assertEqual(lines[1:], launch)
+        text = "\n".join(launch)
+        # Any value of the launcher's uint64_t fits: no check in the launcher.
+        self.assertIn(
+            "  const uint64_t flydsl_arg2 = static_cast<uint64_t>(a2);  // u64", launch
+        )
+        self.assertNotIn("scalar u64 does not fit", text)
+        self.assertIn("argument X is not 16-byte aligned", text)
+        self.assertIn("scalar i8 does not fit in int8_t", text)
+
+    def test_cpp_uint64_arg(self):
+        # A call site passing a uint64_t launcher parameter: Python ints are checked
+        # when the code is generated, values computed at run time when it runs.
+        exported = self._cpp_kernel()
+        for value, literal in (
+            (0, "0ULL"),
+            (2**63, "9223372036854775808ULL"),
+            (2**64 - 1, "18446744073709551615ULL"),
+        ):
+            self.assertEqual(
+                fuka.cpp_uint64_arg(exported, "u64", value, str(value)), ([], literal)
+            )
+        for value in (-1, 2**64):
+            with self.assertRaisesRegex(
+                ValueError,
+                rf"FlyDSL kernel flydsl_k: scalar u64={value} does not fit in uint64_t",
+            ):
+                fuka.cpp_uint64_arg(exported, "u64", value, str(value))
+        self.assertEqual(
+            fuka.cpp_uint64_arg(exported, "u64", object(), "s0 * 4"),
+            (
+                [
+                    'AOTI_RUNTIME_CHECK((s0 * 4) >= 0, "FlyDSL kernel flydsl_k: '
+                    'scalar u64 does not fit in uint64_t");'
+                ],
+                "s0 * 4",
+            ),
+        )
+
+    def test_call_args_scalars(self):
+        # generate_user_defined_flydsl_kernel_call's arguments for runtime scalars:
+        # Python values as literals, symbolic ones through the wrapper; a scalar the
+        # launcher takes as a uint64_t is checked now (a Python int) or at run time.
+        exported = self._cpp_kernel()
+        lines: list[str] = []
+        wrapper: Any = types.SimpleNamespace(
+            _flydsl_call_wrappers={
+                "call_flydsl_k": fuka.FlyDSLCallWrapper("call_flydsl_k", exported, {})
+            },
+            writeline=lines.append,
+            codegen_cpp_sizevar=lambda e: f"cpp({e})",
+            generate_float_value=lambda v: f"{v}f",
+        )
+
+        def call_args(**runtime_args):
+            return fuka.flydsl_call_args(wrapper, "call_flydsl_k", runtime_args)
+
+        self.assertEqual(
+            call_args(i8=-3, u64=2**63, flag=True, f=0.5),
+            ["-3", "9223372036854775808ULL", "true", "0.5f"],
+        )
+        self.assertEqual(lines, [])
+        s0 = sympy.Symbol("s0", integer=True)
+        self.assertEqual(
+            call_args(i8=s0, u64=4 * s0, flag=False, f=0.5),
+            ["cpp(s0)", "cpp(4*s0)", "false", "0.5f"],
+        )
+        self.assertEqual(
+            lines,
+            [
+                'AOTI_RUNTIME_CHECK((cpp(4*s0)) >= 0, "FlyDSL kernel flydsl_k: '
+                'scalar u64 does not fit in uint64_t");'
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, "scalar u64=-1 does not fit"):
+            call_args(i8=0, u64=-1)
+
+    def test_call_args_int_constants_checked(self):
+        # A Python int for an integer scalar is checked against the scalar's C type
+        # when the code is generated, as eager refuses a value FlyDSL would wrap: an
+        # int64_t too (the launcher takes it as it is), and beyond 64 bits (no C++
+        # literal holds it). The smallest int64 is spelled so that C++ reads it as
+        # one. A Boolean or Float32 scalar takes any int.
+        exported = self._cpp_kernel(
+            fuka.ScalarParamSpec("i8", FakeInt8, 1),
+            fuka.ScalarParamSpec("k", FakeInt64, 1),
+            fuka.ScalarParamSpec("flag", FakeBoolean, True),
+            fuka.ScalarParamSpec("f", FakeFloat32, 0.5),
+            fuka.StreamParamSpec("stream"),
+        )
+        wrapper: Any = types.SimpleNamespace(
+            _flydsl_call_wrappers={
+                "call_flydsl_k": fuka.FlyDSLCallWrapper("call_flydsl_k", exported, {})
+            }
+        )
+
+        def call_args(i8=0, k=0):
+            return fuka.flydsl_call_args(
+                wrapper, "call_flydsl_k", {"i8": i8, "k": k, "flag": 3, "f": 2}
+            )
+
+        self.assertEqual(
+            call_args(-128, 2**63 - 1), ["-128", "9223372036854775807", "3", "2"]
+        )
+        self.assertEqual(
+            call_args(127, -(2**63)), ["127", "(-9223372036854775807LL - 1)", "3", "2"]
+        )
+        i64 = "int64_t [-9223372036854775808, 9223372036854775807]"
+        for name, value, bounds in (
+            ("i8", 128, "int8_t [-128, 127]"),
+            ("i8", -129, "int8_t [-128, 127]"),
+            ("k", 2**63 + 5, i64),
+            ("k", -(2**63) - 1, i64),
+            ("k", 2**64 + 5, i64),
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                re.escape(
+                    f"FlyDSL kernel flydsl_k: scalar {name}={value} does not fit in "
+                    f"{bounds}, and FlyDSL would wrap it"
+                ),
+            ):
+                call_args(**{name: value})
+
+    def test_define_flydsl_launcher(self):
+        # CppWrapperGpu.define_user_defined_flydsl_kernel's body: the export of the
+        # call's specs for the device's arch; once per prefix, its declarations go
+        # into the wrapper's header and its launcher into _flydsl_call_wrappers.
+        exported = self._cpp_kernel()
+        specs = list(exported.specs)
+        wrapper: Any = types.SimpleNamespace(
+            flydsl_exported_kernels={},
+            _flydsl_call_wrappers={},
+            header=IndentedBuffer(),
+        )
+        kernel = FlyDSLKernel(_aot_add_kernel, ("Out",))
+        device = torch.device("cuda", 0)
+        with contextlib.ExitStack() as stack:
+            param_specs, target_arch, export_for_link = (
+                stack.enter_context(mock.patch.object(fuka, name, return_value=value))
+                for name, value in (
+                    ("flydsl_param_specs", (specs, {"X": 16})),
+                    ("target_arch", "gfx950"),
+                    ("export_for_link", exported),
+                )
+            )
+            for _ in range(2):
+                self.assertEqual(
+                    fuka.define_flydsl_launcher(
+                        wrapper, kernel, {"alpha": 2}, {"X": "x"}, device
+                    ),
+                    "call_flydsl_k",
+                )
+        param_specs.assert_called_with(kernel, {"X": "x"}, {"alpha": 2})
+        target_arch.assert_called_with(device)
+        args, kwargs = export_for_link.call_args
+        self.assertEqual(args, (_aot_add_kernel, specs, "gfx950"))
+        self.assertIs(kwargs["linked"], wrapper.flydsl_exported_kernels)
+        self.assertEqual(os.path.basename(kwargs["out_root"]), "flydsl_user_kernels")
+        self.assertEqual(wrapper.flydsl_exported_kernels, {"flydsl_k": exported})
+        launcher = wrapper._flydsl_call_wrappers["call_flydsl_k"]
+        self.assertEqual(
+            (launcher.exported, launcher.check_align), (exported, {"X": 16})
+        )
+        self.assertEqual(
+            wrapper.header.getvalue().count("#define FLYDSL_DECLARED_flydsl_k"), 1
+        )
+
+    def test_export_for_link(self):
+        root = self._tmp()
+        # Static sizes, as in every export test here: an export with dynamic ones
+        # hooks FlyDSL's compiler (_default_flat_work_group_size), which needs flydsl.
+        specs = self._add_specs(1000)
+
+        def export(linked):
+            return fuka.export_for_link(
+                _aot_add_kernel, specs, "gfx950", linked=linked, out_root=root
+            )
+
+        with _fake_flydsl_export() as fake:
+            e1 = export({})
+            self.assertRegex(e1.prefix, r"^flydsl_aot_add_kernel_gfx950_[0-9a-f]{16}$")
+            self.assertEqual(
+                e1.prefix, fuka.flydsl_kernel_prefix(_aot_add_kernel, specs, "gfx950")
+            )
+            self.assertEqual(e1.specs, specs)
+            self.assertEqual(
+                [(s.kind, s.name) for s in e1.abi.slots],
+                [
+                    ("tensor_data", "X"),
+                    ("tensor_data", "Y"),
+                    ("tensor_data", "Out"),
+                    ("scalar", "n"),
+                    ("stream", "stream"),
+                ],
+            )
+            out_dir = os.path.dirname(e1.object_path)
+            self.assertEqual(os.path.dirname(out_dir), root)
+            self.assertEqual(
+                sorted(os.listdir(out_dir)), [f"{e1.prefix}.h", f"{e1.prefix}.o"]
+            )
+            self.assertEqual(e1.header_path, os.path.join(out_dir, f"{e1.prefix}.h"))
+            self.assertEqual(Path(e1.header_path).read_text(), e1.header_text)
+            # Reused within the process, also when the library links it already.
+            self.assertIs(export({}), e1)
+            self.assertIs(export({e1.prefix: e1}), e1)
+            self.assertEqual(fake.prefixes, [e1.prefix])
+            self.assertEqual(len(fuka._exports[_aot_add_kernel]), 1)
+            # An export whose directory is gone is exported again; nothing is read
+            # back from disk.
+            shutil.rmtree(out_dir)
+            e2 = export({})
+            self.assertEqual(e2.prefix, e1.prefix)
+            self.assertNotEqual(e2.object_path, e1.object_path)
+            # Another kernel of the library has the prefix: a new one.
+            other = dataclasses.replace(e2, header_path="other.h")
+            e3 = export({e2.prefix: other})
+            self.assertEqual(e3.prefix, f"{e1.prefix}_1")
+            self.assertEqual(fake.prefixes, [e1.prefix, e1.prefix, e3.prefix])
+
+    def test_export_errors(self):
+        out_dir = self._tmp()
+        specs = self._add_specs(1000)
+
+        def export(specs=specs, prefix="flydsl_k", arch="gfx950"):
+            return fuka.export_flydsl_kernel(
+                _aot_add_kernel, specs, out_dir=out_dir, prefix=prefix, arch=arch
+            )
+
+        with _fake_flydsl_export() as fake:
+            for kwargs, error, message in (
+                (
+                    {"specs": specs[:4]},
+                    ValueError,
+                    r"must name every parameter of _aot_add_kernel",
+                ),
+                ({"prefix": "a-b"}, ValueError, "prefix 'a-b' is not a C identifier"),
+                ({"arch": "sm_90a"}, ValueError, "arch must look like 'gfx950'"),
+                (
+                    {"specs": self._add_specs(1000, n_type=FakeFloat16)},
+                    fuka.FlyDSLExportError,
+                    "Float16 is not supported by AOTInductor",
+                ),
+            ):
+                with self.assertRaisesRegex(error, message):
+                    export(**kwargs)
+            self.assertEqual(fake.prefixes, [])
+            # The target recorded in the metadata must be the one asked for (FlyDSL
+            # takes it from the environment); nothing reaches out_dir.
+            fake.arch_override = "gfx942"
+            with self.assertRaisesRegex(
+                fuka.FlyDSLExportError,
+                "FlyDSL export flydsl_k: compiled for 'gfx942', not the target "
+                "'gfx950'",
+            ):
+                export()
+            self.assertEqual(os.listdir(out_dir), [])
+            fake.arch_override = None
+            # A stray global symbol: validated before anything reaches out_dir.
+            fake.extra_symbols = ["flydsl_rt_helper"]
+            with self.assertRaisesRegex(
+                fuka.FlyDSLExportError,
+                r"defines global symbols outside flydsl_k flydsl_k__metadata "
+                r".*: \['flydsl_rt_helper'\]",
+            ):
+                export()
+            self.assertEqual(os.listdir(out_dir), [])
+            fake.extra_symbols = []
+            exported = export()
+        self.assertEqual(exported.object_path, os.path.join(out_dir, "flydsl_k.o"))
+        self.assertEqual(sorted(os.listdir(out_dir)), ["flydsl_k.h", "flydsl_k.o"])
+
+    def test_export_cache_keyed_like_a_launch(self):
+        # Besides the specs, target and prefix, an export is keyed with what the
+        # eager launch key adds: the values of the module globals the kernel reads (a
+        # tuple is not part of the prefix, which records plain constants only), the
+        # FlyDSL environment variables and the compile hints. Each change exports
+        # again, under the same prefix; once undone, the first export is reused.
+        root = self._tmp()
+        specs = (
+            fuka.TensorParamSpec("X", torch.float32, (8,), (1,), 16),
+            fuka.TensorParamSpec("Out", torch.float32, (8,), (1,), 16),
+            fuka.StreamParamSpec("stream"),
+        )
+
+        def export():
+            return fuka.export_for_link(
+                _aot_tile_kernel, specs, "gfx950", linked={}, out_root=root
+            )
+
+        with _fake_flydsl_export() as fake:
+            e1 = export()
+            changed = []
+            with mock.patch.dict(globals(), {"AOT_TILE": (3.0,)}):
+                changed.append(export())
+            fake.env = ("3",)
+            changed.append(export())
+            fake.env = ()
+            hints = {"fast_fp_math": True}
+            with mock.patch.dict(_aot_tile_kernel.compile_hints, hints):
+                changed.append(export())
+            self.assertIs(export(), e1)
+        self.assertEqual(len({id(e) for e in (e1, *changed)}), 4)
+        self.assertEqual(fake.prefixes, [e1.prefix] * 4)
+
+    def test_export_cache_follows_rebound_globals(self):
+        # A rebound plain-constant global the kernel reads changes its prefix: the
+        # export misses, so the kernel is exported again; with the global back, the
+        # first export is reused (D-aoti-1: the cache key includes the prefix).
+        root = self._tmp()
+        specs = (
+            fuka.TensorParamSpec("X", torch.float32, (8,), (1,), 16),
+            fuka.TensorParamSpec("Out", torch.float32, (8,), (1,), 16),
+            fuka.StreamParamSpec("stream"),
+        )
+
+        def export():
+            return fuka.export_for_link(
+                _aot_signed_kernel, specs, "gfx950", linked={}, out_root=root
+            )
+
+        with _fake_flydsl_export() as fake:
+            e1 = export()
+            with mock.patch.dict(globals(), {"AOT_SIGN": -1.0}):
+                e2 = export()
+                self.assertNotEqual(e2.prefix, e1.prefix)
+                self.assertIs(export(), e2)
+            self.assertIs(export(), e1)
+            self.assertEqual(fake.prefixes, [e1.prefix, e2.prefix])
+
+
 instantiate_parametrized_tests(FlyDSLHOPTests)
 instantiate_parametrized_tests(FlyDSLWrapTests)
 instantiate_parametrized_tests(FlyDSLDynamoTests)
 instantiate_parametrized_tests(FlyDSLInductorTests)
+instantiate_parametrized_tests(FlyDSLAOTITests)
 
 
 if __name__ == "__main__":

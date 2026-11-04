@@ -1292,6 +1292,11 @@ class CppWrapperGpu(CppWrapperCpu):
         self.grid_id = count()
         self._kernel_name_to_body: dict[str, str] = {}
         self._triton_call_wrappers: dict[str, DeferredTritonCallWrapper] = {}
+        # User FlyDSL kernels exported for this wrapper (prefix -> header + object,
+        # linked into the model .so) and their launchers (FlyDSLCallWrapper of
+        # codegen/flydsl/user_kernel_aot.py).
+        self.flydsl_exported_kernels: dict[str, Any] = {}
+        self._flydsl_call_wrappers: dict[str, Any] = {}
         self.autotune_input_prefix = "_REAL_AUTOTUNE_INPUT"
         self._lazy_kernel_names: list[str] = []
         self._declared_aux_stream_slots: OrderedSet[int] = OrderedSet()
@@ -1720,6 +1725,9 @@ class CppWrapperGpu(CppWrapperCpu):
             for kernel in self._triton_call_wrappers.values():
                 self.prefix.writeline("\n")
                 kernel.generate(self)
+            for flydsl_kernel in self._flydsl_call_wrappers.values():
+                self.prefix.writeline("\n")
+                flydsl_kernel.generate(self)
 
             # Generate parallel kernel compilation initialization function.
             # JIT-only since AOTI has no Python dependency.
@@ -2134,6 +2142,69 @@ static inline void ensure_triton_kernel_compiles_started() {{
             self.writeline(f"{kernel_prefix}{kernel_name}({call_args_str}, {stream});")
             if enable_kernel_profile:
                 self.writeline(ExitKernelProfileScopeLine(self))
+
+    def define_user_defined_flydsl_kernel(
+        self,
+        kernel: Any,
+        arg_names: tuple[str, ...],
+        constant_args: dict[str, Any],
+        runtime_args: dict[str, Any],
+        device: torch.device | None,
+    ) -> str:
+        """Export a user FlyDSL kernel for the layouts Inductor froze and the gfx
+        architecture of ``device`` and define its C++ launcher; returns the
+        launcher's name. The counterpart of the DeferredTritonCallWrapper a user
+        Triton kernel gets: export_to_c compiles the host function ahead of time into
+        a header (spliced into the wrapper) and an object (linked into the model .so
+        by AotCodeCompiler); see define_flydsl_launcher in
+        codegen/flydsl/user_kernel_aot.py."""
+        from .flydsl.user_kernel_aot import define_flydsl_launcher
+
+        if V.graph.is_dual_wrapper_mode:
+            raise NotImplementedError(
+                "User-defined FlyDSL kernels are not supported in dual wrapper mode "
+                "(AOTInductor with "
+                "torch._inductor.config.triton.autotune_at_compile_time=False); set "
+                "torch._inductor.config.triton.autotune_at_compile_time=True, or "
+                "unset TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME"
+            )
+        return define_flydsl_launcher(self, kernel, constant_args, runtime_args, device)
+
+    def flydsl_jit_link_args(self) -> list[str]:
+        # AOTI links them in AotCodeCompiler (codecache.flydsl_user_kernel_link_args).
+        if V.graph.aot_mode or not self.flydsl_exported_kernels:
+            return []
+        from .flydsl.user_kernel_aot import flydsl_link_flags, flydsl_link_inputs
+
+        kernels = list(self.flydsl_exported_kernels.values())
+        out_dir = os.path.dirname(kernels[0].object_path)
+        return [*flydsl_link_inputs(kernels), *flydsl_link_flags(out_dir, kernels)]
+
+    def generate_user_defined_flydsl_kernel_call(
+        self,
+        kernel_name: str,
+        kernel: Any,
+        runtime_args: dict[str, Any],
+        constant_args: dict[str, Any],
+        device: torch.device,
+    ) -> None:
+        from .flydsl.user_kernel_aot import flydsl_call_args
+
+        call_args = flydsl_call_args(self, kernel_name, runtime_args)
+        # The stream a user Triton kernel launches on, so the kernel stays ordered with
+        # the kernels and aten fallbacks around it.
+        current_stream_idx = V.graph.scheduler.current_stream_idx
+        if (
+            V.graph.aot_mode
+            and current_stream_idx is not None
+            and current_stream_idx != 0
+        ):
+            # Inside a user stream region: the region's stream, which its aten
+            # fallbacks and kernels run on (see _generate_kernel_call_helper).
+            stream = self._stream_expr_for_idx(current_stream_idx)
+        else:
+            stream = self.write_get_raw_stream(device.index, V.graph.name)
+        self.writeline(f"{kernel_name}({', '.join([*call_args, stream])});")
 
     def prepare_triton_wrapper_args(
         self, call_args: list[Any], arg_types: list[Any]

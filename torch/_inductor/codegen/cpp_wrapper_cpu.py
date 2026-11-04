@@ -517,8 +517,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device: torch.device | None,
     ) -> str:
         raise NotImplementedError(
-            "User-defined FlyDSL kernels are not supported by the C++ wrapper yet"
+            "User-defined FlyDSL kernels need a ROCm device (CppWrapperGpu)"
         )
+
+    def flydsl_jit_link_args(self) -> list[str]:
+        """Extra link arguments for user FlyDSL kernels in JIT cpp_wrapper mode."""
+        return []
 
     def _generate_kernel_call_helper(
         self,
@@ -1863,7 +1867,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # their absolute paths positionally to the linker encodes them as
         # absolute DT_NEEDED entries that resolve at module load (same
         # mechanism HalideCodeCache uses for its standalone runtime).
-        extra_flags_repr = repr(tuple(self.external_kernel_libs))
+        extra_flags_repr = repr(
+            (*self.external_kernel_libs, *self.flydsl_jit_link_args())
+        )
         # Cpp entry function for JIT with cpp wrapper
         result.splice(f"""
             inductor_entry = CppWrapperCodeCache.load_pybinding(
