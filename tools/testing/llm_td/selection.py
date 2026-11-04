@@ -381,23 +381,24 @@ class Selection:
     ) -> Selection:
         """Turn the model's structured output into a Selection.
 
-        A missing or malformed output, a change to test infrastructure, an
-        edited inductor failure list naming an unknown class, too many import
-        hops, and with `grep` an edited file under test/ that no test reads
-        (see data_file_readers) all fall back to running everything; only a
-        missing or malformed output sets error. Test files the change edits
-        and their drivers are always selected, and with `grep` so are the
-        test files that import them (see importers), those defining the tests
-        that an edited failure list names (see failure_list_sources), and those
-        reading an edited data file (see data_file_readers), with their importers."""
+        A change to test infrastructure, an edited inductor failure list
+        naming an unknown class, too many import hops, and with `grep` an
+        edited file under test/ that no test reads (see data_file_readers) all
+        fall back to running everything. A missing or malformed output sets
+        error instead, so run_test.py keeps TD's split (see apply_selection).
+        Test files the change edits and their drivers are always selected, and
+        with `grep` so are the test files that import them (see importers),
+        those defining the tests that an edited failure list names (see
+        failure_list_sources), and those reading an edited data file (see
+        data_file_readers), with their importers."""
         if out is None:
-            return cls(run_all=True, reason="no model output; running everything", error="no model output")  # fmt: skip
+            return cls(run_all=True, reason="no model output; TD's split runs", error="no model output")  # fmt: skip
         if needs_run_all(changed_files):
             return cls(run_all=True, reason="change touches test infrastructure")
         try:
             files, sweeps = parse_model_output(out, candidates, grep)
         except ValueError as e:
-            return cls(run_all=True, reason=f"malformed model output ({e}); running everything", error=f"malformed model output: {e}")  # fmt: skip
+            return cls(run_all=True, reason=f"malformed model output ({e}); TD's split runs", error=f"malformed model output: {e}")  # fmt: skip
         if not isinstance(out, dict):
             raise AssertionError("parse_model_output accepts only objects")
         sources, missing = failure_list_sources(changed_files, grep)
@@ -657,6 +658,8 @@ def apply_selection(
     else:
         fallback = None
     enforced = wanted and fallback is None
+    if selection.error is not None:
+        print(f"LLM selection: the selector failed ({selection.error[:200]!r}), using TD", file=sys.stderr)  # fmt: skip
     if wanted and not enforced:
         print(f"LLM selection: {fallback}, using TD", file=sys.stderr)
     if enforced:
