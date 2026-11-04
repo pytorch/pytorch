@@ -3801,11 +3801,11 @@ class _TestParamsMaxPoolBase:
             'return_indices': [True, False]
         }
 
-        # Python-level arg forms (int vs tuple) that don't need to be crossed with self.kwargs
+        # Uncrossed samples: the other arg form, and non-overlapping windows for the max_unpool*d grads
         self.extra_kwargs = []
 
         self.shapes = [
-            [1, None],  # batch
+            [2, None],  # batch
             [2],  # channels
             [3, 6]  # signal
         ]
@@ -3835,7 +3835,7 @@ class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
     def __init__(self) -> None:
         super().__init__()
         self.extra_kwargs.append(
-            dict(kernel_size=(3,), stride=(2,), ceil_mode=False, padding=(1,), dilation=(1,), return_indices=True))
+            dict(kernel_size=(3,), stride=(2,), ceil_mode=False, padding=(1,), dilation=1, return_indices=True))
 
 class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
 
@@ -5925,15 +5925,14 @@ def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S, S), (1, ),),
         ((S, S, S), (1, True, ),),
         ((), (0,),),
+        ((), (0, True,),),
+        # Non-fused mode kernel on CUDA (slice size > 2 * MAX_BLOCK_SIZE)
+        ((2049,), ()),
     )
     make_arg = partial(make_tensor, dtype=dtype, device=device,
                        requires_grad=requires_grad, low=None, high=None)
-    for input_shape, input_args in args:
-        yield SampleInput(make_arg(input_shape), *input_args)
-
-    if torch.device(device).type == 'cuda':
-        # Non-fused mode kernel on CUDA (slice size > 2 * MAX_BLOCK_SIZE)
-        yield SampleInput(make_arg((2049,)))
+    return (SampleInput(make_arg(input_tensor), *args)
+            for input_tensor, args in args)
 
 # Missing to test the nondeterminism of the operation
 # https://github.com/pytorch/pytorch/issues/53352
@@ -7279,8 +7278,8 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 def _large_logit_linear_cross_entropy_samples(device, dtype, requires_grad, **kwargs):
     """Samples whose logits are large, which the curated shapes are not.
 
-    The samples above reach |z| of about 20 at most, median 6, because their
-    tensors come from the shared linear generator. Accuracy of a chunked
+    The samples above reach |z| of about 20 at most, because their tensors
+    are small (in_features=3, values in [-2, 2]). Accuracy of a chunked
     implementation can depend on |z| well past that: an implementation may hold
     the logits at low precision -- eager does for fp16 -- and such a buffer
     stores ``z`` with absolute error proportional to ``|z|`` while the softmax
@@ -7405,12 +7404,13 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
                  weight="<to be initialized>", reduction="sum"),
         ]
 
-    # (input, linear_weight) shapes: unbatched, 2-D batch, and N-D linear_weight (K-dim loss)
-    shapes = (((3,), (4, 3)), ((8, 3), (4, 3)), ((4, 3), (2, 3, 3)))
+    # (input, linear_weight) shapes: unbatched, 1-D batch, and N-D linear_weight (K-dim loss).
+    # Keep them non-empty: gradcheck's forward AD uses zero tolerance for empty inputs (#190436).
+    shapes = (((3,), (4, 3)), ((8, 3), (4, 3)), ((4, 3), (2, 1, 5, 3)))
     make_linear_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=-2, high=2)
     for kwargs, probabilities_target in itertools.product(kwargs_list, (False, True)):
-        # ignore_index is not supported for probabilities target, and linear_bias is independent of the target type
-        if probabilities_target and ("ignore_index" in kwargs or "linear_bias" in kwargs):
+        # ignore_index is not supported for probabilities target
+        if probabilities_target and "ignore_index" in kwargs:
             continue
         for input_shape, weight_shape in shapes:
             linear_input = make_linear_arg(input_shape)
@@ -7432,12 +7432,9 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
                 # non-contig drift) stay within bounds.
                 kwargs["weight"] = make_tensor((num_classes,), device=device, dtype=dtype, low=0.5, high=2)
             if "linear_bias" in kwargs:
-                # Logical shape matches the logits-per-batch slice:
-                # (num_classes, *out_features). Derived from
-                # linear_weight.shape[:-1] so it covers both the 2-D
-                # and K-dim swapped cases above.
+                # Logical shape matches the logits-per-batch slice: (num_classes, *out_features)
                 kwargs["linear_bias"] = make_tensor(
-                    linear_weight.shape[:-1],
+                    weight_shape[:-1],
                     device=device, dtype=dtype, requires_grad=requires_grad,
                 )
             if probabilities_target:
@@ -10486,7 +10483,9 @@ def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwarg
         # i.e. the index tensor has to be comprised of only unique
         # indices.
         # Here we go with the solution 2, the easiest of all.
-        if indices.unique().numel() == indices.numel():
+        # Indices are per (N, C) plane, so only duplicates within a plane matter.
+        sorted_indices = indices.flatten(2).sort(dim=-1).values
+        if (sorted_indices[..., 1:] != sorted_indices[..., :-1]).all():
             yield sample
 
 def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_grad, **kwargs):
@@ -18031,10 +18030,7 @@ op_db: list[OpInfo] = [
            skips=(
                # Resized a non-empty tensor but did not warn about it
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # FIXME:
-               # Expected 2114 but got 1123.
-               # Absolute difference: 991 (up to 0.001 allowed)
-               # Relative difference: 0.46877956480605487 (up to 0.001 allowed)
+               # FIXME: indices can differ between CPU and GPU on tied values
                DecorateInfo(
                    unittest.skip("Skipped!"),
                    "TestCommon",
