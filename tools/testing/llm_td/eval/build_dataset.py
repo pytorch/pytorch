@@ -67,7 +67,8 @@ adds. PR samples carry the raw PR body.
 Samples are only written once, so rebuilding into an existing DIR keeps them.
 PR truth reads failures and disables up to --end + WINDOW, so pr and head
 refuse to run before that has passed; pr_ samples record their --start and
---end as `window`, and head refuses pr_ samples of another window.
+--end as `window`, and pr and head refuse to run on a DIR with pr_ samples
+of another window or of none.
 PR and head samples carry the PR's title and body as of the build, which may
 have been edited after the failure; revert and neutral samples carry the
 landed commit message without what the merge bot added (see commit_text).
@@ -143,7 +144,7 @@ from typing import Any, TYPE_CHECKING
 
 from tools.testing.llm_td.eval import REPO, write_json
 from tools.testing.llm_td.eval.clickhouse import query
-from tools.testing.llm_td.eval.score import job_runs_td
+from tools.testing.llm_td.eval.score import has_head, job_runs_td
 from tools.testing.llm_td.select_tests import (
     changed_files,
     diffstat_and_diff,
@@ -201,9 +202,7 @@ def fetch(shas: list[str]) -> None:
 
 
 def has_commit(sha: str) -> bool:
-    if subprocess.run(
-        ["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=REPO, capture_output=True
-    ).returncode:
+    if not has_head(sha):
         print(f"skipping {sha}: not fetched", flush=True)
         return False
     return True
@@ -230,7 +229,7 @@ def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
     rows: list[dict] = []
     d = start
     while d < end:
-        n = d + dt.timedelta(days=2)
+        n = min(d + dt.timedelta(days=2), end)
         rows += query(f"""
             WITH f AS (
               SELECT job_id, replaceRegexpOne(file, '\\.py$', '') tf, classname, name, min(time_inserted) t
@@ -308,9 +307,10 @@ def own_change(sha: str) -> bytes:
     """PR head `sha`'s diff against its merge base with main, as bytes since files need not be UTF-8; empty when `sha` is not fetched."""
     if not (main_base := git("merge-base", "origin/main", sha, check=False).strip()):
         return b""
-    # Plumbing-stable output for `git apply`, whatever the user's diff config.
-    cmd = ["git", "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--binary", "--full-index", "--no-renames", main_base, sha]  # fmt: skip
-    return subprocess.run(cmd, cwd=REPO, capture_output=True).stdout
+    # Plumbing-stable output for `git apply`, whatever the user's diff config; GIT_DIFF_OPTS would override -U.
+    cmd = ["git", "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--binary", "--full-index", "--no-renames", "-U3", "--inter-hunk-context=0", "--submodule=short", main_base, sha]  # fmt: skip
+    env = {k: v for k, v in os.environ.items() if k != "GIT_DIFF_OPTS"}
+    return subprocess.run(cmd, cwd=REPO, env=env, capture_output=True).stdout
 
 
 @functools.cache
@@ -675,17 +675,17 @@ def print_dropped(kind: str, dropped: list[collections.Counter]) -> None:
     )
 
 
-def other_window(h: History, out: Path, kind: str) -> bool:
-    """Whether some pr_ sample in `out` was built with another --start/--end than `h`, printing that `kind` is skipped if so."""
-    window = [str(h.start), str(h.end)]
-    if other := sorted(p.stem for p in out.glob("pr_*.json") if json.loads(p.read_text()).get("window") != window):  # fmt: skip
-        print(f"skipping {kind} samples: pr_ samples in {out}, e.g. {other[0]}, were built with another --start/--end than {h.start}/{h.end}", flush=True)  # fmt: skip
-    return bool(other)
+def other_window(out: Path, start: dt.date, end: dt.date) -> str | None:
+    """Why the pr_ samples in `out` cannot be extended with --start `start` and --end `end`, if they cannot."""
+    windows = {p.stem: json.loads(p.read_text()).get("window") for p in sorted(out.glob("pr_*.json"))}  # fmt: skip
+    if legacy := [k for k, w in windows.items() if w is None]:
+        return f"pr_ samples in {out}, e.g. {legacy[0]}, predate the window field; build pr and head samples into a fresh --data"  # fmt: skip
+    if other := [k for k, w in windows.items() if w != [str(start), str(end)]]:
+        return f"pr_ samples in {out}, e.g. {other[0]}, were built with another --start/--end than {start}/{end}"  # fmt: skip
+    return None
 
 
 def pr_samples(h: History, out: Path, jobs: int) -> None:
-    if other_window(h, out, "pr"):
-        return
     lo = ts(f"{h.start} 00:00:00")
     own = [r for rows in h.heads.values() for r in rows if ts(r["t"]) >= lo and h.why_dropped(r) is None]  # fmt: skip
     h.load_green({r["sha"] for r in own})
@@ -727,7 +727,7 @@ def pr_samples(h: History, out: Path, jobs: int) -> None:
                                 window=[str(h.start), str(h.end)], truth_strong=sorted(strong), truth_jobs=truth_jobs):  # fmt: skip
                     sources.append(bases["base_source"])
             except subprocess.CalledProcessError as e:
-                print(f"skipping PR {pr}: {e}", flush=True)
+                print(f"skipping PR {pr}: {e} {e.stderr or ''}", flush=True)
 
     run_each("PR", go, sorted(first), jobs)
     print_dropped("pr", dropped)
@@ -767,8 +767,6 @@ def head_samples(h: History, out: Path, jobs: int) -> None:
     if not prs:
         print(f"no head samples: there are no pr_ samples in {out}", flush=True)
         return
-    if other_window(h, out, "head"):
-        return
     shas = {sha for sha, rows in h.heads.items() if rows[0]["pr"] in prs}
     h.load_green(shas)
     shas = {sha for sha in shas if any(h.why_dropped(r) is None for r in h.heads[sha])}
@@ -801,7 +799,7 @@ def head_samples(h: History, out: Path, jobs: int) -> None:
                                 truth=sorted(truth_jobs), truth_jobs=truth_jobs, previous_failures=previous):
                     sources.append(bases["base_source"])
             except subprocess.CalledProcessError as e:
-                print(f"skipping head {sha}: {e}", flush=True)
+                print(f"skipping head {sha}: {e} {e.stderr or ''}", flush=True)
 
     run_each("head", go, sorted(shas), jobs)
     print_dropped("head", dropped)
@@ -884,7 +882,7 @@ def revert_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
             write_sample(out, f"rev_{sha[:12]}", "revert", sha, sha + "^", title, body, date=r["reverted_at"],
                          truth=sorted(truth_jobs), truth_jobs=truth_jobs)  # fmt: skip
         except subprocess.CalledProcessError as e:
-            print(f"skipping revert {sha}: {e}", flush=True)
+            print(f"skipping revert {sha}: {e} {e.stderr or ''}", flush=True)
 
     run_each("revert", go, list(rows), jobs)
 
@@ -927,7 +925,7 @@ def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:
         try:
             write_sample(out, f"neu_{sha[:12]}", "neutral", sha, sha + "^", title, body, truth=[])  # fmt: skip
         except subprocess.CalledProcessError as e:
-            print(f"skipping neutral {sha}: {e}", flush=True)
+            print(f"skipping neutral {sha}: {e} {e.stderr or ''}", flush=True)
 
     run_each("neutral", go, random.Random(0).sample(shas, min(n, len(shas))), 1)
 
@@ -947,6 +945,8 @@ def main() -> None:
         p.error(f"PR truth looks for other authors' failures and disables up to --end + {WINDOW.days} days; rerun on or after {closes}")  # fmt: skip
     out = args.data / "samples"
     out.mkdir(parents=True, exist_ok=True)
+    if {"pr", "head"} & set(args.kinds) and (why := other_window(out, args.start, args.end)):  # fmt: skip
+        raise SystemExit(f"refusing pr and head samples: {why}")
     git("fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main")
     if {"pr", "head"} & set(args.kinds):
         h = History.load(args.start, args.end)
