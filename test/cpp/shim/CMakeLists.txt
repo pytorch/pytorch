@@ -26,6 +26,8 @@ add_executable(test_shim
 
 # TODO temporary until we can delete the old gtest polyfills.
 target_compile_definitions(test_shim PRIVATE USE_GTEST)
+# It links libtorch, so the AOTI runtime headers keep shim error messages.
+target_compile_definitions(test_shim PRIVATE AOTI_LIBTORCH_LINKED)
 if(USE_CUDA)
   target_compile_definitions(test_shim PRIVATE USE_CUDA)
 endif()
