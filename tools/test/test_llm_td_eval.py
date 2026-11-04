@@ -1626,6 +1626,11 @@ class TestClickhouse(unittest.TestCase):
         gateway = subprocess.CompletedProcess([], 1, "", "502 Bad Gateway")
         token = subprocess.CompletedProcess([], 22, "", "curl: (22) The requested URL returned error: 503")  # fmt: skip
         bad = subprocess.CompletedProcess([], 2, "", "Code: 62. Syntax error")
+        # gcx's Go network errors, and the wrapper's re-login when its token check hit one.
+        dial = subprocess.CompletedProcess([], 1, "", 'Error: Post "https://x/api/ds/query": dial tcp 10.0.0.1:443: i/o timeout')  # fmt: skip
+        eof = subprocess.CompletedProcess([], 1, "", 'Error: Post "https://x/api/ds/query": unexpected EOF')  # fmt: skip
+        tls = subprocess.CompletedProcess([], 1, "", "Error: net/http: TLS handshake timeout")  # fmt: skip
+        login = subprocess.CompletedProcess([], 1, "", "error: gcx login failed for pytorchci")  # fmt: skip
         # A result that is not one, whose rows would look transient if searched.
         null = subprocess.CompletedProcess([], 0, '{"columns": null, "rows": [["connection timed out"]]}', "")  # fmt: skip
         hung = subprocess.TimeoutExpired("gcx", clickhouse.TIMEOUT)
@@ -1637,6 +1642,8 @@ class TestClickhouse(unittest.TestCase):
             ([slow, ok], 1, "attempt 1 of 3 exited with code 1: Code: 159. DB::Exception: Timeout exceeded: elapsed 500 seconds"),
             ([gateway, ok], 2, [{"a": 1}]),
             ([token, ok], 2, [{"a": 1}]),
+            ([dial, eof, ok], 3, [{"a": 1}]),
+            ([tls, login, ok], 3, [{"a": 1}]),
             ([busy, hung, ok], 2, "attempt 2 of 3 timed out after 600s"),
             ([null, ok], 1, 'attempt 1 of 3 returned no result: {"columns": null, "rows": [["connection timed out"]]}'),
             ([busy, busy, busy], 3, "attempt 3 of 3 exited with code 1: HTTP 503 Service Unavailable"),
@@ -2036,12 +2043,14 @@ class TestBuildDataset(unittest.TestCase):
         self.assertEqual(out.getvalue(), "skipping s: merge base before the loaded failures\n")  # fmt: skip
 
     def test_pull_failures_marks_flaky_rows(self) -> None:
-        rows = [{"job": JOB, "flaky": 1}, {"job": JOB, "flaky": 0}, {"job": "pull / test (default, 1, 1, mem_leak_check)", "flaky": 0}]  # fmt: skip
+        rows = [{"job": JOB, "flaky": 1}, {"job": JOB, "flaky": 0}]
         with mock.patch.object(bd, "query", return_value=rows) as query, contextlib.redirect_stdout(io.StringIO()):  # fmt: skip
             got = bd.pull_failures(dt.date(2026, 10, 1), dt.date(2026, 10, 2))
-        self.assertEqual(got, rows[:2])
+        self.assertEqual(got, rows)
         sql = query.call_args.args[0]
         self.assertIn("(f.job_id, f.tf, f.classname, f.name) IN (SELECT * FROM passed) flaky", sql)  # fmt: skip
+        # SKIP_JOBS are left out in ClickHouse, before the empty-chunk check.
+        self.assertIn("repository_full_name = 'pytorch/pytorch'\n                AND name NOT LIKE '%rerun_disabled_tests%' AND name NOT LIKE '%mem_leak_check%')", sql)  # fmt: skip
         self.assertNotIn("NOT IN", sql)
         # The last two-day chunk stops at `end`.
         with mock.patch.object(bd, "query", return_value=rows[:1]) as query, contextlib.redirect_stdout(io.StringIO()):  # fmt: skip
@@ -2283,8 +2292,10 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_y", "2026-09-05 00:00:00", "m", br="main", tf="test_c"),
             # The earliest failing head before --start is not the sample's.
             fail("test_x", "2026-09-30 00:00:00", "s0", tf="test_a"),
-            # A later head reproduces test_c.
+            # A later head reproduces test_c, and a head before --start test_e.
             fail("test_x", "2026-10-06 00:00:00", "s1", tf="test_c"),
+            fail("test_x", t, "s", tf="test_e"),
+            fail("test_x", "2026-09-28 00:00:00", "s0", tf="test_e"),
         ]
         h = history(rows, {"s": 1, "s0": 1, "s1": 1}, {1: "me"})
         merge_bases = {("origin/main", "s"): "main_mb", ("lower", "s"): "lower"}
@@ -2309,9 +2320,41 @@ class TestBuildDataset(unittest.TestCase):
         commit_time.assert_called_once_with("main_mb")
         kw = write.call_args.kwargs
         win = ("pull", "win / test (default, 1, 1)")
-        self.assertEqual((kw["truth"], kw["truth_strong"], kw["truth_jobs"]), (["test_b", "test_c", "test_d"], ["test_b", "test_c"], {"test_b": [("pull", JOB), win], "test_c": [("pull", JOB)], "test_d": [("pull", JOB)]}))  # fmt: skip
+        self.assertEqual((kw["truth"], kw["truth_strong"], kw["truth_jobs"]), (["test_b", "test_c", "test_d", "test_e"], ["test_b", "test_c", "test_e"], {"test_b": [("pull", JOB), win], "test_c": [("pull", JOB)], "test_d": [("pull", JOB)], "test_e": [("pull", JOB)]}))  # fmt: skip
         self.assertEqual({k: kw[k] for k in ("base", "merge_base", "main_base", "base_source")}, {"base": "lower", "merge_base": "lower", "main_base": "main_mb", "base_source": "ci"})  # fmt: skip
         self.assertIn("pr truth: dropped by rule over 1 heads: {'main_near_base': 1}", stdout.getvalue())  # fmt: skip
+
+    def test_empty_truth_writes_no_sample(self) -> None:
+        # main_near_base drops all of the earliest head's failures, so PR 1 gets no pr_ sample and the later head does not stand in.
+        rows = [
+            fail("test_x", "2026-10-05 00:00:00", "s"),
+            fail("test_x", "2026-09-05 00:00:00", "m", br="main"),
+            fail("test_x", "2026-10-06 00:00:00", "s1", tf="test_b"),
+        ]
+        h = history(rows, {"s": 1, "s1": 1}, {1: "me"})
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch_ci_jobs(TD_JOBS),
+            mock.patch.object(bd, "green_jobs", return_value=set()),
+            mock.patch.object(bd, "fetch"),
+            mock.patch.object(bd, "has_commit", return_value=True),
+            mock.patch.object(bd, "git", return_value="main_mb\n"),
+            mock.patch.object(bd, "commit_time", return_value=day(15, 9)),
+            mock.patch.object(bd, "ci_bases", return_value={}),
+            mock.patch.object(bd, "head_created", return_value={}),
+            mock.patch.object(bd, "pr_text", return_value=("t", "b")),
+            mock.patch.object(bd, "write_sample") as write,
+            contextlib.redirect_stdout(io.StringIO()) as stdout,
+        ):  # fmt: skip
+            out = Path(d)
+            bd.pr_samples(h, out, 1)
+            write.assert_not_called()
+            self.assertIn("pr truth: dropped by rule over 1 heads: {'main_near_base': 1}", stdout.getvalue())  # fmt: skip
+            # Given a pr_ sample, the head pass writes the later head but not the one whose truth is empty.
+            bd.write_json(out / "pr_1.json", {"pr": 1, "title": "t", "body": "b"})
+            bd.head_samples(h, out, 1)
+        self.assertEqual([c.args[1] for c in write.call_args_list], ["head_1_s1"])
+        self.assertIn("head truth: dropped by rule over 2 heads: {'main_near_base': 1}", stdout.getvalue())  # fmt: skip
 
     def test_pr_and_head_truth_agree(self) -> None:
         green_job = "pull / test (default, 2, 2)"
@@ -2473,11 +2516,12 @@ class TestBuildDataset(unittest.TestCase):
             self.assertEqual(kw, {"title": "t", "body": "b", **bases, "pr": 1, "window": (START, END), "truth": sorted(truth_jobs), "truth_jobs": truth_jobs, "previous_failures": previous[sid]})  # fmt: skip
 
     def test_revert_truth_is_truth_jobs(self) -> None:
-        rows = [{"reverted_at": t, "commit_sha": "c" * 40, "source_signal_keys": ["test_a.py::x", "test_b.py::TestB::y", "no_test_key"]} for t in ("1", "2")]  # fmt: skip
+        rows = [{"reverted_at": t, "commit_sha": "c" * 40, "source_signal_keys": ["test_a.py::x", "test_b.py::TestB::y", "no_test_key"]} for t in ("2026-10-02 01:00:00", "2026-10-03 01:00:00")]  # fmt: skip
         jobs = {"test_a": [("trunk", "linux / test (default, 1, 1)")]}
         with (
             tempfile.TemporaryDirectory() as out,
             mock.patch.object(bd, "query", return_value=rows),
+            mock.patch.object(bd, "check_written"),
             mock.patch.object(bd, "fetch"),
             mock.patch.object(bd, "has_commit", return_value=True),
             mock.patch.object(bd, "commit_time"),
@@ -2486,12 +2530,13 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "write_sample") as write,
         ):  # fmt: skip
             bd.revert_samples(Path(out), 1, dt.date(2026, 10, 1), dt.date(2026, 10, 26))
-        truth_jobs.assert_called_once_with({("test_a", "", "x"), ("test_b", "TestB", "y")}, "c" * 40, mock.ANY, "1")  # fmt: skip
+        truth_jobs.assert_called_once_with({("test_a", "", "x"), ("test_b", "TestB", "y")}, "c" * 40, mock.ANY, "2026-10-02 01:00:00")  # fmt: skip
         kw = write.call_args.kwargs
         self.assertEqual((kw["window"], kw["truth"], kw["truth_jobs"]), ((dt.date(2026, 10, 1), dt.date(2026, 10, 26)), ["test_a"], jobs))  # fmt: skip
         with (
             tempfile.TemporaryDirectory() as out,
             mock.patch.object(bd, "query", return_value=rows),
+            mock.patch.object(bd, "check_written"),
             mock.patch.object(bd, "fetch"),
             mock.patch.object(bd, "has_commit", return_value=True),
             mock.patch.object(bd, "commit_time"),
@@ -2499,6 +2544,8 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "git", return_value="t\nb"),
             mock.patch.object(bd, "write_sample") as write,
             contextlib.redirect_stdout(io.StringIO()),
+            # With no revert left, the store is suspect rather than every revert truthless.
+            self.assertRaisesRegex(RuntimeError, "none of the 1 reverts has a failure of its signal tests"),
         ):  # fmt: skip
             bd.revert_samples(Path(out), 1, dt.date(2026, 10, 1), dt.date(2026, 10, 26))
         write.assert_not_called()
@@ -2506,6 +2553,7 @@ class TestBuildDataset(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as out,
             mock.patch.object(bd, "query", return_value=rows),
+            mock.patch.object(bd, "check_written"),
             mock.patch.object(bd, "fetch"),
             mock.patch.object(bd, "has_commit", return_value=True),
             mock.patch.object(bd, "commit_time"),
@@ -2514,6 +2562,37 @@ class TestBuildDataset(unittest.TestCase):
         ):  # fmt: skip
             bd.revert_samples(Path(out), 1, dt.date(2026, 10, 1), dt.date(2026, 10, 26))
         self.assertIn("1 of 1 revert samples raised and were skipped", stdout.getvalue())  # fmt: skip
+
+    def test_revert_samples_check_the_store(self) -> None:
+        rows = [{"reverted_at": f"2026-10-0{d} 01:00:00", "commit_sha": c * 40, "source_signal_keys": ["test_a.py::x"]} for d, c in ((2, "a"), (5, "b"), (9, "c"))]  # fmt: skip
+        written = [{"d": "2026-10-02"}]
+
+        def query(sql: str) -> list[dict]:
+            return rows if "autorevert_events_v2" in sql else written
+
+        def revert(truth: dict, raises: str | None) -> list[str]:
+            with (
+                mock.patch.object(bd, "query", side_effect=query) as q,
+                mock.patch.object(bd, "fetch"),
+                mock.patch.object(bd, "has_commit", return_value=True),
+                mock.patch.object(bd, "commit_time"),
+                mock.patch.object(bd, "revert_truth_jobs", side_effect=lambda s, sha, *a: truth.get(sha, {})),
+                mock.patch.object(bd, "commit_text", return_value=("t", "b")),
+                mock.patch.object(bd, "write_sample"),
+                contextlib.redirect_stdout(io.StringIO()),
+                self.assertRaisesRegex(RuntimeError, raises) if raises else contextlib.nullcontext(),
+            ):  # fmt: skip
+                bd.revert_samples(Path("unused"), 1, dt.date(2026, 10, 1), dt.date(2026, 10, 26))  # fmt: skip
+            return [c.args[0] for c in q.call_args_list[1:]]
+
+        # Only the first and last revert days are probed; the last has no failing test, as a store no longer written gives.
+        (probe,) = revert({}, "tests.all_test_runs has no failing test on 2026-10-09")
+        self.assertIn("'2026-10-02'", probe)
+        self.assertIn("'2026-10-09'", probe)
+        self.assertNotIn("'2026-10-05'", probe)
+        written.append({"d": "2026-10-09"})
+        revert({}, "none of the 3 reverts has a failure of its signal tests")
+        revert({"b" * 40: {"test_a": [("trunk", JOB)]}}, None)
 
     def test_neutral_samples(self) -> None:
         start, end = dt.date(2026, 10, 1), dt.date(2026, 10, 26)
@@ -2568,6 +2647,27 @@ class TestBuildDataset(unittest.TestCase):
         by_msg, by_bot = before[:2]
         later = draw(f"This reverts commit {by_msg}.", [{"commit_sha": by_bot}])
         self.assertEqual(later, before[2:])
+
+    def test_neutral_population_drops_revert_titles(self) -> None:
+        plain = [f"{i:02d}" + "a" * 38 for i in range(20)]
+        titles = dict.fromkeys(plain, "Add x") | {f"{i:02d}" + "b" * 38: t for i, t in enumerate(["Revert x"] * 10 + ["Reland x"] * 10)}  # fmt: skip
+
+        def git(*args: str) -> str:
+            if args[:2] == ("log", "-1"):
+                return titles[args[-1]] + "\n\nbody"
+            if "--first-parent" in args:
+                return "".join(f"{sha} {t}\n" for sha, t in titles.items())
+            return ""
+
+        with (
+            tempfile.TemporaryDirectory() as out,
+            mock.patch.object(bd, "git", git),
+            mock.patch.object(bd, "query", return_value=[]),
+            mock.patch.object(bd, "write_sample") as write,
+        ):
+            bd.neutral_samples(Path(out), dt.date(2026, 10, 1), dt.date(2026, 10, 26), 10)  # fmt: skip
+        # The draw is from the titles that do not start with Revert or Reland, so all 10 survive.
+        self.assertEqual([c.args[3] for c in write.call_args_list], random.Random(0).sample(plain, 10))  # fmt: skip
 
     def test_checked_in_ids(self) -> None:
         ids = {n: set((REPO_ROOT / "tools/testing/llm_td/eval/ids" / f"{n}.txt").read_text().split()) for n in ("eval", "dev", "agentic", "neutral", "head")}  # fmt: skip

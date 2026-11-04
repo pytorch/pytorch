@@ -24,7 +24,8 @@ TIMEOUT = 600
 ATTEMPTS = 3
 # Server-side "Timeout exceeded" is deterministic, so it is not here; code 202 is "Too many simultaneous queries".
 # HTTP codes need an HTTP/status prefix or their reason phrase, so "elapsed 500 seconds" is not transient.
-TRANSIENT = re.compile(r"timed out|throttl|rate.?limit|connection (reset|refused|closed)|temporar(il)?y unavailable|too many simultaneous queries|(HTTP|status)\D{0,12}\b(429|500|502|503|504)\b|returned error: (429|5\d\d)\b|\b(429 Too Many|500 Internal Server|502 Bad Gateway|503 Service Unavailable|504 Gateway Time)", re.IGNORECASE)  # fmt: skip
+# Go's (gcx's) and curl's network errors are transient, and so is the wrapper's re-login, which it runs when its token check fails for any reason.
+TRANSIENT = re.compile(r"timed out|throttl|rate.?limit|connection (reset|refused|closed)|temporar(il)?y unavailable|too many simultaneous queries|dial tcp|i/o timeout|TLS handshake timeout|unexpected EOF|: EOF\b|no such host|broken pipe|network is unreachable|could not resolve host|failed to connect|gcx login failed|failed to fetch gcx token|(HTTP|status)\D{0,12}\b(429|500|502|503|504)\b|returned error: (429|5\d\d)\b|\b(429 Too Many|500 Internal Server|502 Bad Gateway|503 Service Unavailable|504 Gateway Time)", re.IGNORECASE)  # fmt: skip
 
 
 def query(sql: str) -> list[dict]:
