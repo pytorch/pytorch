@@ -13,6 +13,10 @@
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/headeronly/util/shim_utils.h>
+#ifdef AOTI_LIBTORCH_LINKED
+// Also a stable C ABI, for torch_exception_get_what_without_backtrace.
+#include <torch/csrc/stable/c/shim.h>
+#endif
 
 #if defined(__GNUC__) || defined(__clang__)
 #define AOTI_NOINLINE __attribute__((noinline))
@@ -22,10 +26,20 @@
 #define AOTI_NOINLINE
 #endif
 
+// Keeps the shim's message, e.g. "out of memory", along with the failed call,
+// in code that links libtorch, as cpp_builder tells it. Other code reports
+// the call alone, since its shim provider may not export the message getter.
+#ifdef AOTI_LIBTORCH_LINKED
+#define AOTI_TORCH_ERROR_CODE_CHECK(call)                                     \
+  if ((call) != AOTI_TORCH_SUCCESS) {                                         \
+    torch::aot_inductor::detail::throw_shim_error(#call, __FILE__, __LINE__); \
+  }
+#else
 #define AOTI_TORCH_ERROR_CODE_CHECK(call)                                  \
   if ((call) != AOTI_TORCH_SUCCESS) {                                      \
     torch::headeronly::detail::throw_exception(#call, __FILE__, __LINE__); \
   }
+#endif
 
 // The condition is tested directly rather than through a `bool` local so that
 // AOTI_RUNTIME_CHECK(false, ...) can end a non-void function without tripping
@@ -37,6 +51,43 @@
       throw std::runtime_error(MSG);                                      \
     }                                                                     \
   } while (0)
+
+#ifdef AOTI_LIBTORCH_LINKED
+namespace torch::aot_inductor::detail {
+// Formats like torch::stable::detail::throw_exception, without its backtrace
+// dump to stderr, which callers that handle the error don't want. A shim that
+// returns failure must record its message, as
+// AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE does, or an earlier one shows.
+[[noreturn]] AOTI_NOINLINE inline void throw_shim_error(
+    const char* call,
+    const char* file,
+    int64_t line) {
+  const char* what = torch_exception_get_what_without_backtrace();
+  std::stringstream ss;
+  if (what != nullptr && *what != '\0') {
+    ss << what << " (originally from " << call << " API call failed at " << file
+       << ", line " << line << ")";
+  } else {
+    ss << call << " API call failed at " << file << ", line " << line;
+  }
+  // @allow-raw-throw: keeps the caller's location in the message
+  throw std::runtime_error(std::move(ss).str());
+}
+} // namespace torch::aot_inductor::detail
+#endif // AOTI_LIBTORCH_LINKED
+
+namespace torch::aot_inductor {
+// For destructors, which log errors instead of throwing.
+inline void log_shim_error(AOTITorchError error, const char* what) {
+  if (error != AOTI_TORCH_SUCCESS) {
+    std::cerr << "AOTInductor: " << what
+#ifdef AOTI_LIBTORCH_LINKED
+              << ": " << torch_exception_get_what_without_backtrace()
+#endif
+              << '\n';
+  }
+}
+} // namespace torch::aot_inductor
 
 using AOTIRuntimeError = int32_t;
 #define AOTI_RUNTIME_SUCCESS 0

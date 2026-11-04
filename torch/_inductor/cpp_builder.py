@@ -1890,6 +1890,9 @@ def get_cpp_torch_options(
         + mmap_self_macros
         + caching_allocator_macros
     )
+    if not aot_mode or config.aot_inductor.link_libtorch:
+        # AOTI_TORCH_ERROR_CODE_CHECK may then use the stable C ABI.
+        definitions.append("AOTI_LIBTORCH_LINKED")
     include_dirs = (
         sys_libs_include_dirs
         + python_include_dirs
