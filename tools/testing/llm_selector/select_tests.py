@@ -377,7 +377,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--enforce",
         action="store_true",
-        help="request that run_test.py replace TD's split with the selection (see selection.apply_selection); a no-op until selection.ENFORCEMENT_ENABLED is flipped, and ignored when the selector fails",
+        help="request that run_test.py replace TD's split with the selection (see selection.apply_selection); a no-op until selection.ENFORCEMENT_ENABLED is flipped, and refused (enforce stays false in the selection file) when the selector fails or its answer is not_enforced",
     )
     parser.add_argument("--print-prompt", action="store_true", help="print the prompt instead of calling the model; writes no file")  # fmt: skip
     args = parser.parse_args(argv)
