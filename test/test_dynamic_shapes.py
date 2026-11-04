@@ -7357,8 +7357,8 @@ class ShapeEnvReplacementCacheTest(TestCase):
         self.assertEqual(fn(a), b + 1)
         shape_env._update_var_to_range(c, ValueRanges(0, 50))
         shape_env._update_var_to_range(d, ValueRanges(0, 49))
-        # c + d + 1 now fits a's range, so a resolves fully. Previously the
-        # cached, partially resolved b + 1 was returned.
+        # c + d + 1 now fits a's range, so a resolves fully. Guards the narrower
+        # cache key: a range change must still clear it.
         self.assertEqual(fn(a), c + d + 1)
 
     def test_range_change_refreshes_sym_node_expr(self):
