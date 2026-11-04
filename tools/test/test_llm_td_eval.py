@@ -556,7 +556,7 @@ class TestScore(unittest.TestCase):
 
     def test_no_td_configs_match_test_sh(self) -> None:
         # The TEST_CONFIG patterns of test.sh's top-level dispatch that set NO_TD, inline or through a function they call.
-        # As the Test tools job runs this on every test.sh edit, a layout the scan cannot follow skips it rather than fails.
+        # A setter the scan cannot map to a pattern (a helper no branch calls, or a top-level NO_TD=) fails it.
         func_def = re.compile(r"(?:function\s+(\w+)|(\w+)\s*\(\s*\))")
         dispatch = re.compile(r'(?:el)?if \[\[ "?\$\{?TEST_CONFIG\}?"? ==? "?([^ "]+)')
         func, sets_no_td, branch, calls = None, set(), None, {}
@@ -576,8 +576,8 @@ class TestScore(unittest.TestCase):
             if re.search(r"\bNO_TD=", line):
                 sets_no_td.add(func or branch)
         unmapped = {f for f in sets_no_td if f not in calls and not any(f in words for words in calls.values())}  # fmt: skip
-        if not calls or unmapped:
-            self.skipTest(f"cannot map test.sh's NO_TD to TEST_CONFIG patterns (setters outside the dispatch: {unmapped}); check NO_TD_CONFIGS by hand")  # fmt: skip
+        self.assertTrue(calls, "found no TEST_CONFIG dispatch in test.sh")
+        self.assertFalse(unmapped, f"cannot map test.sh's NO_TD to TEST_CONFIG patterns (setters outside the dispatch: {unmapped}); update this scan or NO_TD_CONFIGS")  # fmt: skip
         dispatched = {p for p, words in calls.items() if p in sets_no_td or words & sets_no_td}  # fmt: skip
         self.assertEqual(dispatched, {f"*{c}*" for c in score.NO_TD_CONFIGS})
 
@@ -692,7 +692,7 @@ class TestScore(unittest.TestCase):
                 mock.patch.object(selection, "get_pr_number", return_value=1),
                 mock.patch("sys.stderr", io.StringIO()),
             ):
-                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config=config, td_enabled=True, previously_failed=prev)  # fmt: skip
+                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config=config, td_enabled=True, previous_failures=prev)  # fmt: skip
             ran = {x.test_file for x in CallSplit(include, exclude, applied).include}
             self.assertEqual({f for f in job if choice.covers(f, config)}, ran, (seconds, job, n, scored, out, prev, changed, how))  # fmt: skip
 
@@ -733,6 +733,14 @@ class TestScore(unittest.TestCase):
         tests = [{"file": "test_a", "confidence": "low"}, {"file": "bogus", "confidence": "high"}]  # fmt: skip
         for name in ("final", "final-hm"):
             self.assertTrue(pick(name, {"out": {"tests": tests}}, None).sel.run_all)
+        # With grep, a file a driver runs names the driver under every policy.
+        jit = {**SAMPLE, "candidates": [*SAMPLE["candidates"], "test_jit"]}
+        out = {"tests": [{"file": "jit/test_freezing", "confidence": "high"}]}
+        for name in ("model", "final", "final-hm"):
+            choice = policy(name, jit, {"out": out}, None, SECONDS, lambda p: ["test/jit/test_freezing.py"] if p == "^" else [])  # fmt: skip
+            if choice is None:
+                raise AssertionError(f"{name} chose nothing")
+            self.assertEqual((choice.sel.files, choice.sel.run_all), ({"test_jit"}, False), name)  # fmt: skip
         # Filtering out every name leaves a well-formed empty answer.
         tests = [{"file": "test_a", "confidence": "low"}]
         self.assertEqual(pick("final", {"out": {"tests": tests}}, None).sel.files, {"test_a"})  # fmt: skip
@@ -856,29 +864,32 @@ class TestScore(unittest.TestCase):
         td = {"scored": [], "top25": [], "top25_cfg": {}}
         files = {
             "test-times.json": {"linux": {"default": {"test_a": 10.0}}},
-            "samples/a.json": SAMPLE, "samples/b.json": SAMPLE,
-            "td/a.json": td, "td/b.json": td,
-            "results/m/a.json": {"out": {"tests": [{"file": "bogus"}]}, "error": None, "cost_usd": 0.1, "transient": True},
+            "samples/a.json": SAMPLE, "samples/b.json": SAMPLE, "samples/c.json": SAMPLE,
+            "td/a.json": td, "td/b.json": td, "td/c.json": td,
+            "results/m/a.json": {"out": None, "error": "429 rate limited", "cost_usd": 0.1, "transient": True},
             "results/m/b.json": {"out": {"tests": []}, "error": None, "cost_usd": 0.1},
+            "results/m/c.json": {"out": {"tests": [{"file": "bogus"}]}, "error": None, "cost_usd": 0.1},
         }  # fmt: skip
         with (
             tempfile.TemporaryDirectory() as d,
             patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
+            # No file under test/ is named bogus.
+            mock.patch.object(score, "grep_at", return_value=[]),
         ):
             data = write_data(d, files)
             (data / "samples/b.json").write_text(json.dumps({**SAMPLE, "sha": "rebuilt"}))  # fmt: skip
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
-                rows = score.score(data, ["a", "b"], ["m"], ["model", "final"], True, data / "samples", data / "td", "")  # fmt: skip
+                rows = score.score(data, ["a", "b", "c"], ["m"], ["model", "final"], True, data / "samples", data / "td", "")  # fmt: skip
                 # Replays of another STATS snapshot or TD code are stale too, even ones that record it.
                 (data / "td/a.json").write_text(json.dumps({**json.loads((data / "td/a.json").read_text()), "stats": "new"}))  # fmt: skip
                 stale = score.score(data, ["a", "b"], ["m"], ["model"], True, data / "samples", data / "td", "new")  # fmt: skip
-        # A malformed answer runs everything and counts as an error, as select_tests records it.
-        self.assertEqual([(x["id"], x["run_all"], x["error"]) for x in rows], [("a", True, True)] * 2)  # fmt: skip
+        # A failed model call and a malformed answer run everything and count as errors, as select_tests records them.
+        self.assertEqual([(x["id"], x["run_all"], x["error"]) for x in rows], [("a", True, True)] * 2 + [("c", True, True)] * 2)  # fmt: skip
         self.assertEqual(stale, [])
         why = "td replay of the current test-times.json, sample, STATS and TD code"
-        throttled = "scored 1 m results as errors that were still throttled after run_eval's retries, which CI does not provoke"
-        self.assertEqual(err.getvalue(), f"dropped 1 of 2 ids with no {why}\n{throttled}\ndropped 2 of 2 ids with no {why}\n")  # fmt: skip
+        transient = "scored 1 m results as errors that still had transient (throttled or 5xx) errors after run_eval's retries"
+        self.assertEqual(err.getvalue(), f"dropped 1 of 3 ids with no {why}\n{transient}\ndropped 2 of 2 ids with no {why}\n")  # fmt: skip
 
     def test_score_stale_replay_of_test_times(self) -> None:
         files = {
@@ -1101,7 +1112,7 @@ class TestScore(unittest.TestCase):
         score.runs_td.cache_clear()
         self.assertTrue(score.runs_td("default"))
         self.assertIn("pull", {w for w, _, c in ci_jobs()[True] if c == "default"})
-        self.assertEqual(score.MATRIX_CONFIG.findall("""{ config: "a" }, { config: 'b' }, { config: c }"""), ["a", "b", "c"])  # fmt: skip
+        self.assertEqual(score.MATRIX_CONFIG.findall("""{ config: "a" }, { config: 'b' }, {config: c }\n# No `d` config: trunk.yml runs it"""), ["a", "b", "c"])  # fmt: skip
 
     def test_td25_per_config(self) -> None:
         cands = ["test_a", "test_b", "test_c", "test_d", "test_e"]
