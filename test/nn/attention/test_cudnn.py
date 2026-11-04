@@ -158,8 +158,8 @@ class TestCuDNNPythonSDPALifecycle(TestCase):
         _cudnn.disable()
 
     def test_old_provider_names_the_required_version(self):
-        # 1.32 has install_sdpa_overrides(), but its varlen overrides ignore the
-        # backend varlen_attn selected.
+        # 1.32.1 has install_sdpa_overrides(), but its varlen overrides ignore
+        # the backend varlen_attn selected.
         _use_provider(self, _fake_install(self.live, "cudnn"), version="1.32.1")
         required = f"nvidia-cudnn-frontend>={_cudnn._MIN_FRONTEND_VERSION}"
         with self.assertRaisesRegex(RuntimeError, f"{required}.*1.32.1"):
