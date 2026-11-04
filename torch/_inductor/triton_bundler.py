@@ -5,6 +5,7 @@ import os
 import shutil
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
 from torch._utils_internal import justknobs_check
@@ -14,6 +15,9 @@ from torch.utils._ordered_set import OrderedSet
 from .runtime.runtime_utils import triton_cache_dir, triton_hash_to_path_key
 from .utils import _IS_WINDOWS, GPU_KERNEL_BIN_EXTS
 
+
+if TYPE_CHECKING:
+    from .runtime.triton_heuristics import CachingAutotuner
 
 log = logging.getLogger(__name__)
 
@@ -30,8 +34,8 @@ class TritonBundleEntry:
     kernel_hash: str
     device: int
     directory: str
-    # id() of the CachingAutotuner that compiled this kernel
-    owner: int | None = None
+    # Held by reference: an id() could be reused once the autotuner is freed
+    owner: "CachingAutotuner | None" = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -111,7 +115,7 @@ class TritonBundler:
     _static_autotuners: list[StaticallyLaunchedAutotuner] | None = None
     _winners: OrderedSet[str] | None = None
     # Owners (see TritonBundleEntry.owner) that recorded at least one winner
-    _tuned_owners: OrderedSet[int] | None = None
+    _tuned_owners: "OrderedSet[CachingAutotuner] | None" = None
 
     # __grp__kernel_name.json contains metadata with source code paths
     # we use this as sentinel value for search and replace
@@ -166,7 +170,12 @@ class TritonBundler:
         cls._tuned_owners = None
 
     @classmethod
-    def put(cls, kernel_hash: str, device: int, owner: int | None = None) -> None:
+    def put(
+        cls,
+        kernel_hash: str,
+        device: int,
+        owner: "CachingAutotuner | None" = None,
+    ) -> None:
         """
         Lazily observes that we have seen a Triton kernel compilation. Remembers
         it for when collect is later called.
@@ -177,7 +186,11 @@ class TritonBundler:
             )
 
     @classmethod
-    def put_winner(cls, kernel_hash: str, owner: int | None = None) -> None:
+    def put_winner(
+        cls,
+        kernel_hash: str,
+        owner: "CachingAutotuner | None" = None,
+    ) -> None:
         """Marks kernel_hash as owner's winner; collect() drops its other configs."""
         if cls._winners is not None and cls._tuned_owners is not None:
             cls._winners.add(kernel_hash)

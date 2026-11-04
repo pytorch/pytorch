@@ -5250,7 +5250,7 @@ class TestTritonBundlerCollect(TestCase):
             "untuned_dynamic": ["untuned_dynamic"],
             "coordesc": ["coordesc_a", "coordesc_b", "coordesc_found"],
         }
-        owners = {name: i for i, name in enumerate(compiled)}
+        owners = {name: object() for name in compiled}
         keys = {h: triton_hash_to_path_key(h) for hs in compiled.values() for h in hs}
         for path_key in keys.values():
             kernel_dir = os.path.join(cache_dir, path_key)

@@ -817,7 +817,7 @@ class CachingAutotuner(KernelInterface):
                 TritonBundler.put(
                     triton_hash_to_path_key(result.kernel.hash),  # type: ignore[attr-defined]
                     cast(int, self.triton_meta.get("device", 0)),
-                    id(self),
+                    self,
                 )
             return
         if self.launchers:
@@ -1459,7 +1459,7 @@ class CachingAutotuner(KernelInterface):
         TritonBundler.put(
             triton_hash_to_path_key(binary.hash),
             cast(int, self.triton_meta.get("device", 0)),
-            id(self),
+            self,
         )
         # If the binary has a cubin file to directly launch, save it on the binary
         static_launcher = StaticTritonCompileResult.can_statically_launch(
@@ -1949,7 +1949,7 @@ class CachingAutotuner(KernelInterface):
             launcher.shared,
         )
 
-        TritonBundler.put_winner(launcher.cache_hash, id(self))
+        TritonBundler.put_winner(launcher.cache_hash, self)
 
         if self.save_cache_hook:
             self.save_cache_hook(
@@ -2377,7 +2377,7 @@ class CachingAutotuner(KernelInterface):
             ).make_launcher()
 
         winner = config2launcher[best_config]
-        TritonBundler.put_winner(winner.cache_hash, id(self))
+        TritonBundler.put_winner(winner.cache_hash, self)
 
         fn_hash = generate_lookup_hash_from_source_code(
             str(self.size_hints), self.fn.src
@@ -2550,7 +2550,7 @@ class CachingAutotuner(KernelInterface):
         # For multi-config autotuning and coordesc, put_winner was already called
         # (this is an idempotent set-add). For single-config kernels that skip
         # autotuning entirely, this is the only call site that records the winner.
-        TritonBundler.put_winner(launcher.cache_hash, id(self))
+        TritonBundler.put_winner(launcher.cache_hash, self)
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             if self.device_props.type == "cpu":
                 if not self.cpu_kernel_saved:
