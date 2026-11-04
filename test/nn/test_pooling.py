@@ -45,7 +45,6 @@ from torch.testing._internal.common_utils import (
     parametrize as parametrize_test,
     run_tests,
     set_default_dtype,
-    skipIfMPS,
     slowTest,
     subtest,
     TEST_WITH_UBSAN,
@@ -735,7 +734,6 @@ class TestPoolingNNDevice(NNTestCase):
         self.assertFalse(torch.isnan(out).any())
 
     @onlyAccelerator
-    @skipIfMPS
     @largeTensorTest("10GB")
     def test_adaptive_avg_pool2d_backward_large_index_offsets(self, device):
         height = 32769
