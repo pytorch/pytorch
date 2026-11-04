@@ -560,16 +560,21 @@ def load_pending_mutation(
 def getset_load_or_build(
     accessor: Callable[[Any], Any],
     name: str,
-    source: Callable[[Any], Source | None] = lambda self: None,
+    source: Callable[[Any], Source | None] | None = None,
 ) -> Getter:
     """Getter that builds a VT from the raw value returned by `accessor`,
-    attaching the Source returned by `source` (defaults to sourceless)."""
+    attaching the Source returned by `source` (defaults to `self.source.name`)."""
+
+    def default_source(self: Any) -> Source | None:
+        return self.source and AttrSource(self.source, name)
+
+    get_source = default_source if source is None else source
 
     def getter(self, tx: InstructionTranslatorBase) -> VariableTracker:
         pending = load_pending_mutation(tx, self, name)
         if pending is not None:
             return pending
-        return VariableTracker.build(tx, accessor(self), source(self))
+        return VariableTracker.build(tx, accessor(self), get_source(self))
 
     return getter
 
@@ -577,7 +582,18 @@ def getset_load_or_build(
 def getset_set(name: str) -> Callable[..., None]:
     """Setter for a GetSet/Member whose value is an already-built VT."""
 
-    return lambda self, tx, val: store_attr_mutation(tx, self, name, val)
+    def setter(
+        vt: VariableTracker,
+        tx: InstructionTranslatorBase,
+        value: VariableTracker | None,
+    ) -> None:
+        if value is None:
+            from .constant import ConstantVariable
+
+            value = ConstantVariable.create(None)
+        store_attr_mutation(tx, vt, name, value)
+
+    return setter
 
 
 # This helps users of `as_python_constant` to catch unimplemented error with
