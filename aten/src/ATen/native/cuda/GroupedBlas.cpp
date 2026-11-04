@@ -1,11 +1,14 @@
 #include <cstdint>
 #include <limits>
+#include <sstream>
+#include <utility>
 #include <c10/util/typeid.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/BlasBackend.h>
 #include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -67,6 +70,118 @@ namespace at::native {
 
 namespace {
 
+void raise_unsupported_grouped_scaling(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    ArrayRef<Tensor> scales_a,
+    ArrayRef<ScalingType> recipes_a,
+    ArrayRef<SwizzleType> swizzles_a,
+    ArrayRef<Tensor> scales_b,
+    ArrayRef<ScalingType> recipes_b,
+    ArrayRef<SwizzleType> swizzles_b,
+    const std::optional<Tensor>& offs,
+    ScalarType out_dtype,
+    bool use_fast_accum) {
+  std::ostringstream inputs;
+  inputs << "mat_a: dtype=" << mat_a.scalar_type() << ", shape=" << mat_a.sizes()
+         << ", stride=" << mat_a.strides() << ", device=" << mat_a.device()
+         << "\nmat_b: dtype=" << mat_b.scalar_type() << ", shape=" << mat_b.sizes()
+         << ", stride=" << mat_b.strides() << ", device=" << mat_b.device();
+  auto describe_scales = [&](const char* name, ArrayRef<Tensor> scales,
+                             ArrayRef<ScalingType> recipes, ArrayRef<SwizzleType> swizzles) {
+    inputs << "\n" << name << " recipes=[";
+    for (size_t i = 0; i < recipes.size(); ++i) {
+      inputs << (i ? ", " : "") << at::blas::ScalingTypeToString(recipes[i]);
+    }
+    inputs << "], swizzles=[";
+    for (size_t i = 0; i < swizzles.size(); ++i) {
+      inputs << (i ? ", " : "") << at::blas::SwizzleTypeToString(swizzles[i]);
+    }
+    inputs << "], scale_count=" << scales.size();
+    for (size_t i = 0; i < scales.size(); ++i) {
+      inputs << "\n" << name << "[" << i << "]: dtype=" << scales[i].scalar_type()
+             << ", shape=" << scales[i].sizes() << ", stride=" << scales[i].strides()
+             << ", device=" << scales[i].device();
+    }
+  };
+  describe_scales("scale_a", scales_a, recipes_a, swizzles_a);
+  describe_scales("scale_b", scales_b, recipes_b, swizzles_b);
+  inputs << "\nout_dtype=" << out_dtype << ", use_fast_accum=" << use_fast_accum;
+  if (offs.has_value()) {
+    inputs << ", offs: dtype=" << offs->scalar_type() << ", shape=" << offs->sizes()
+           << ", stride=" << offs->strides() << ", device=" << offs->device();
+  } else {
+    inputs << ", offs=None";
+  }
+  TORCH_CHECK_VALUE(
+      false,
+      "Invalid scaling configuration for grouped GEMM. Expected:\n"
+      "- TensorWise/TensorWise or RowWise/RowWise: float8 inputs, one float32 scale per input; swizzle metadata is ignored.\n"
+      "- MXFP8: matching BlockWise1x32 recipes, float8_e4m3fn inputs, one float8_e8m0fnu scale per input.\n"
+      "- MXFP4: matching BlockWise1x32 recipes, packed float4 inputs, one float8_e8m0fnu scale per input.\n"
+      "- NVFP4: packed float4 inputs, one BlockWise1x16 float8_e4m3fn scale per input, "
+      "followed by one TensorWise float32 global scale on both inputs.\n"
+      "MSLK MXFP4/NVFP4 ignore swizzle metadata.\n"
+      "Each scale list must match its recipe list.\nGot ", inputs.str());
+}
+
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13040
+void _check_cublaslt_grouped_inputs(
+    const Tensor& mat_a,
+    const Tensor& mat_b) {
+  const auto major = at::cuda::getCurrentDeviceProperties()->major;
+  TORCH_CHECK_VALUE(
+      major >= 9 && major <= 11, "cuBLASLt grouped GEMM requires SM9.x/SM10.x/SM11.x; got SM", major, ".x");
+  TORCH_CHECK_VALUE(
+      scaled_blas::is_valid_cublaslt_input_pair(mat_a.scalar_type(), mat_b.scalar_type()),
+      "cuBLASLt grouped GEMM inputs must both be float8_e4m3fn/e5m2 with at least one float8_e4m3fn input; got ",
+      mat_a.scalar_type(), " and ", mat_b.scalar_type());
+}
+#endif
+
+void _check_mslk_grouped_support(
+    ScaledGemmImplementation impl) {
+  const bool mx8 = impl == ScaledGemmImplementation::MXFP8_MXFP8;
+  const auto recipe = mx8 ? "MXFP8" : impl == ScaledGemmImplementation::NVFP4_NVFP4 ? "NVFP4" : "MXFP4";
+#if defined(USE_ROCM)
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false, "MSLK ", recipe, " grouped GEMM is not supported on ROCm; only rowwise grouped GEMM has a ROCm MSLK path");
+#endif
+  const auto dprops = at::cuda::getCurrentDeviceProperties();
+  TORCH_CHECK_VALUE(
+      scaled_mm_arch_allowed(/*sm90_only*/ false, /*sm100_only*/ true),
+      "MSLK ", recipe, " grouped GEMM requires SM10.x; got SM", dprops->major, ".", dprops->minor);
+  // MXFP8/NVFP4/MXFP4 use CUDA-only MSLK APIs. Rowwise has a separate ROCm MSLK path.
+#if !defined(USE_MSLK)
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "MSLK ", recipe, " grouped GEMM requires a build with USE_MSLK");
+#endif
+#if !defined(CUDA_VERSION) || CUDA_VERSION < 12080
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "MSLK ", recipe, " grouped GEMM requires CUDA >= 12.8");
+#endif
+}
+
+void _check_mslk_grouped_kernel_inputs(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const std::optional<Tensor>& offs,
+    const Tensor& out,
+    const char* recipe) {
+  TORCH_CHECK_VALUE(
+      mat_a.dim() == 2 && (mat_b.dim() == 2 || mat_b.dim() == 3),
+      "MSLK ", recipe, " grouped GEMM requires 2D/2D or 2D/3D inputs, got ",
+      mat_a.dim(), "D/", mat_b.dim(), "D with shapes ", mat_a.sizes(), " and ", mat_b.sizes());
+  TORCH_CHECK_VALUE(offs.has_value(), "MSLK ", recipe, " grouped GEMM requires offsets");
+  const auto batch_count = offs->size(0);
+  // MSLK's mx8mx8bf16_grouped_common.cuh and f4f4bf16_grouped_common.cuh
+  // launch one setup thread per group in a single block (CUDA limit: 1024 threads).
+  TORCH_CHECK_VALUE(
+      batch_count >= 1 && batch_count <= 1024,
+      "MSLK ", recipe, " grouped GEMM batchCount must be in [1, 1024], got ", batch_count);
+  TORCH_CHECK_VALUE(
+      out.is_contiguous(),
+      "MSLK ", recipe, " grouped GEMM requires a contiguous output, got strides ", out.strides());
+}
+
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 bool should_use_cublaslt_grouped_gemm(
     const Tensor& mat_a,
@@ -79,12 +194,6 @@ bool should_use_cublaslt_grouped_gemm(
   if (!valid_sm) {
     return false;
   }
-  const bool fp16_grouped_gemm =
-      mat_a.dtype() == at::kHalf && mat_b.dtype() == at::kHalf &&
-      out_dtype.value_or(at::kHalf) == at::kHalf;
-  const bool bf16_grouped_gemm =
-      mat_a.dtype() == at::kBFloat16 && mat_b.dtype() == at::kBFloat16 &&
-      out_dtype.value_or(at::kBFloat16) == at::kBFloat16;
 
   // The arg-packing kernel launches one thread per group in a single block, so
   // cuBLASLt grouped GEMM only handles [1, 1024] groups. Fall back otherwise.
@@ -97,13 +206,138 @@ bool should_use_cublaslt_grouped_gemm(
     return false;
   }
 
+  const bool fp16_grouped_gemm =
+      mat_a.dtype() == at::kHalf && mat_b.dtype() == at::kHalf &&
+      out_dtype.value_or(at::kHalf) == at::kHalf;
   if (fp16_grouped_gemm) {
     return true;
   }
-  return bf16_grouped_gemm &&
-      at::globalContext().preferCublasltGroupedGemm();
+
+  const bool bf16_grouped_gemm =
+      mat_a.dtype() == at::kBFloat16 && mat_b.dtype() == at::kBFloat16 &&
+      out_dtype.value_or(at::kBFloat16) == at::kBFloat16;
+  return bf16_grouped_gemm && at::globalContext().preferCublasltGroupedGemm();
+}
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 13040
+std::pair<CublasGroupedScaleLayout, CublasGroupedScaleLayout>
+get_cublaslt_grouped_scale_layouts(
+    ScaledGemmImplementation impl,
+    const Tensor& scale_a,
+    const Tensor& scale_b) {
+  using Layout = CublasGroupedScaleLayout;
+  switch (impl) {
+    case ScaledGemmImplementation::TENSORWISE_TENSORWISE: {
+      const auto layout = scale_a.numel() == 1 && scale_b.numel() == 1
+          ? Layout::Scalar : Layout::PerBatchScalar;
+      return {layout, layout};
+    }
+    default:
+      TORCH_INTERNAL_ASSERT(false, "unsupported cuBLASLt grouped GEMM implementation: ", static_cast<int>(impl));
+  }
+}
+
+
+void check_cublaslt_grouped_scale_storage(
+    const Tensor& scale,
+    int64_t batchCount,
+    const char* name) {
+  TORCH_CHECK_VALUE(
+      scale.numel() == 1 ||
+          (scale.dim() == 1 && scale.numel() == batchCount && scale.is_contiguous()),
+      name,
+      " tensorwise scale must be a single float32 value or a contiguous 1D float32 tensor with one value per group, got dtype ",
+      scale.scalar_type(),
+      ", shape ",
+      scale.sizes(),
+      ", and ",
+      scale.numel(),
+      " elements for ",
+      batchCount,
+      " groups");
+}
+
+#endif
+
+bool cublaslt_grouped_mm_use_int64(const Tensor& mat_a, const Tensor& mat_b, const Tensor& out) {
+  // cuBLAS grouped GEMM packs per-group m/n/k and lda/ldb/ldd into device
+  // arrays whose width is either 32-bit or 64-bit. Switch to 64-bit if any
+  // dimension or any stride that ends up as a leading dim could overflow
+  // int32_t. Per-group deltas (jagged dim) are bounded by the corresponding
+  // total size, so checking sizes is sufficient.
+  const int64_t int32_max = std::numeric_limits<int32_t>::max();
+  return mat_a.size(-2) > int32_max || mat_a.size(-1) > int32_max ||
+      mat_b.size(-2) > int32_max || mat_b.size(-1) > int32_max ||
+      mat_a.stride(-2) > int32_max || mat_a.stride(-1) > int32_max ||
+      mat_b.stride(-2) > int32_max || mat_b.stride(-1) > int32_max ||
+      out.stride(-2) > int32_max;
 }
 #endif
+
+void _check_scales_blocked(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx) {
+  // if {mx,nv}fp4, will need to modify K later
+  bool is_fp4 = (mat.scalar_type() == kFloat4_e2m1fn_x2);
+  int blocksize = 32;
+  // check for nvfp4 vs. mxfp4 to fix blocksize
+  if (is_fp4 && scale.scalar_type() == kFloat8_e4m3fn) {
+    blocksize = 16;
+  }
+
+  // Checks scales for 2d or 3d target tensors (`mat`).
+  if (mat.dim() == 2) {
+    // For MXFP8, 2d tensors have variable size groups represented as subtensors,
+    // that are converted to blocked padded format individually,
+    // so we can't check the scale sizes without doing a d2h sync to get the group sizes here.
+    TORCH_CHECK(
+      scale.dim() == mat.dim(),
+      "for block-scaled, scale must have same number of dimensions as parent tensor, but got mat.dim() = ", mat.dim(),
+      " and scale.dim() = ", scale.dim(), " for arg ", arg_idx
+    );
+
+    // LHS mat shape (M, total_K) -> scale shape (rounded_up(M, 128), rounded_up_per_group(K/blocksize, 4))
+    // RHS mat shape (total_K, N) -> scale shape (rounded_up(N, 128), rounded_up_per_group(K/blocksize, 4))
+    //   * weight is transposed prior to the call, scale stays non-transposed.
+    bool LHS = arg_idx == 0;
+    int scale_dim_to_check = 0;
+    int mat_dim_to_check = LHS ? 0 : 1;
+    TORCH_CHECK(
+        scale.size(scale_dim_to_check) >= mat.size(mat_dim_to_check),
+        "for block-scaled, arg ", arg_idx, " tensor shape (", mat.size(0), ", ", mat.size(1), ") ",
+        "must have scale.shape[", scale_dim_to_check, "] >= ", mat.size(mat_dim_to_check), " but got scale.shape=(", scale.size(0), ", ", scale.size(1), ")");
+  } else {
+    // For MXFP8, 3d tensors have static group sizes (stack of 2d tensors),
+    // so we can check the exact expected scale sizes here without a d2h sync.
+    auto round_up = [](auto x, auto y) {
+        return ((x + y - 1) / y) * y;
+    };
+
+    // TODO: this is for 3d tensor in 2d-3d case specifically.
+    // We'll need to support 3d-3d and 3d-2d cases once mxfp8/nvfp4 grouped gemm supports them.
+    int64_t G = mat.size(0);
+    int64_t K = mat.size(1);
+    if (is_fp4) {
+      // FP4 packs 2 values into a single 8b word - the "real" K is 2x the
+      // reported K. Reverse that adjustment.
+      const int fp4_elems_per_byte = 2;
+      K *= fp4_elems_per_byte;
+    }
+    int64_t N = mat.size(2);
+    int64_t blocked_scale_K = round_up(K/blocksize, 4);
+    int64_t blocked_scale_N = round_up(N, 128);
+
+    // mslk expects stack of flattened blocked scales for 3d tensor, shape (G, blocked_scale_K * blocked_scale_N).
+    TORCH_CHECK(
+      scale.dim() == mat.dim() - 1,
+      "for block-scaled 2d-3d grouped GEMM, the 3d tensor of shape (G,K,N) must have a 2d scale of shape (G, blocked_scale_K * blocked_scale_N),",
+      "but scale is ", scale.dim(), "D for arg ", arg_idx
+    );
+    TORCH_CHECK(
+      scale.size(0) == G && scale.size(1) == blocked_scale_K * blocked_scale_N,
+      "for block-scaled grouped GEMM, the tensor shape (", G, ", ", K, ", ", N, ") must have scale shape (", G, ",", blocked_scale_K, ",", blocked_scale_N, ")",
+      " for arg ", arg_idx, ", got: ", scale.size(0), ", ", scale.size(1)
+    );
+  }
+}
 
 // 2d-2d and 2d-3d
 // scaling=MXFP8
@@ -118,14 +352,9 @@ _mx8_mx8_bf16_grouped_mm_mslk(
         const SwizzleType swizzle_b,
         const std::optional<at::Tensor>& offs,
         Tensor& out) {
-    const bool a_is_2d = mat_a.dim() == 2;
-    const bool b_is_2d = mat_b.dim() == 2;
-    bool b_is_3d = mat_b.dim() == 3;
-    bool is_2d_2d = a_is_2d && b_is_2d;
-    bool is_2d_3d = a_is_2d && b_is_3d;
-    TORCH_CHECK_VALUE(is_2d_2d || is_2d_3d, "MXFP8 grouped GEMM currently only supports 2d-2d and 2d-3d cases");
-    TORCH_CHECK_VALUE(offs.has_value(), "MXFP8 2d-2d and 2d-3d grouped GEMMs requires offsets");
-    TORCH_CHECK_VALUE(out.scalar_type() == at::kBFloat16, "Only bf16 out_dtype is supported for MXFP8 grouped gemm");
+    _check_mslk_grouped_kernel_inputs(mat_a, mat_b, offs, out, "MXFP8");
+    _check_scales_blocked(mat_a, scale_a, 0, 0);
+    _check_scales_blocked(mat_b, scale_b, 1, 1);
     // MXFP8 expects float8_e8m0fnu scales.
     TORCH_CHECK_VALUE(scale_a.scalar_type() == at::kFloat8_e8m0fnu && scale_b.scalar_type() == at::kFloat8_e8m0fnu,
         "For MXFP8 grouped gemm, both scales must be float8_e8m0fnu tensors.");
@@ -266,6 +495,10 @@ _f4_f4_bf16_grouped_mm_mslk(
       const std::optional<Tensor>& offs,
       const std::optional<Tensor>& bias,
       Tensor& out) {
+  const auto recipe = scale_a.scalar_type() == kFloat8_e8m0fnu ? "MXFP4" : "NVFP4";
+  _check_mslk_grouped_kernel_inputs(mat_a, mat_b, offs, out, recipe);
+  _check_scales_blocked(mat_a, scale_a, 0, 0);
+  _check_scales_blocked(mat_b, scale_b, 1, 1);
 #if !defined(USE_ROCM) && defined(USE_MSLK)
   // Typing checks
   TORCH_CHECK_VALUE(mat_a.scalar_type() == at::kFloat4_e2m1fn_x2,
@@ -348,82 +581,6 @@ void _check_scales_fp8_rowwise(const Tensor& mat, const Tensor& scale, const int
   }
 }
 
-void _check_scales_blocked(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx) {
-  // if {mx,nv}fp4, will need to modify K later
-  bool is_fp4 = (mat.scalar_type() == kFloat4_e2m1fn_x2);
-  int blocksize = 32;
-  // check for nvfp4 vs. mxfp4 to fix blocksize
-  if (is_fp4 && scale.scalar_type() == kFloat8_e4m3fn) {
-    blocksize = 16;
-  }
-
-  // Checks scales for 2d or 3d target tensors (`mat`).
-  if (mat.dim() == 2) {
-    // For MXFP8, 2d tensors have variable size groups represented as subtensors,
-    // that are converted to blocked padded format individually,
-    // so we can't check the scale sizes without doing a d2h sync to get the group sizes here.
-    TORCH_CHECK(
-      scale.dim() == mat.dim(),
-      "for block-scaled, scale must have same number of dimensions as parent tensor, but got mat.dim() = ", mat.dim(),
-      " and scale.dim() = ", scale.dim(), " for arg ", arg_idx
-    );
-
-    // LHS mat shape (M, total_K) -> scale shape (rounded_up(M, 128), rounded_up_per_group(K/blocksize, 4))
-    // RHS mat shape (total_K, N) -> scale shape (rounded_up(N, 128), rounded_up_per_group(K/blocksize, 4))
-    //   * weight is transposed prior to the call, scale stays non-transposed.
-    bool LHS = arg_idx == 0;
-    int scale_dim_to_check = 0;
-    int mat_dim_to_check = LHS ? 0 : 1;
-    TORCH_CHECK(
-        scale.size(scale_dim_to_check) >= mat.size(mat_dim_to_check),
-        "for block-scaled, arg ", arg_idx, " tensor shape (", mat.size(0), ", ", mat.size(1), ") ",
-        "must have scale.shape[", scale_dim_to_check, "] >= ", mat.size(mat_dim_to_check), " but got scale.shape=(", scale.size(0), ", ", scale.size(1), ")");
-  } else {
-    // For MXFP8, 3d tensors have static group sizes (stack of 2d tensors),
-    // so we can check the exact expected scale sizes here without a d2h sync.
-    auto round_up = [](auto x, auto y) {
-        return ((x + y - 1) / y) * y;
-    };
-
-    // TODO: this is for 3d tensor in 2d-3d case specifically.
-    // We'll need to support 3d-3d and 3d-2d cases once mxfp8/nvfp4 grouped gemm supports them.
-    int64_t G = mat.size(0);
-    int64_t K = mat.size(1);
-    if (is_fp4) {
-      // FP4 packs 2 values into a single 8b word - the "real" K is 2x the
-      // reported K. Reverse that adjustment.
-      const int fp4_elems_per_byte = 2;
-      K *= fp4_elems_per_byte;
-    }
-    int64_t N = mat.size(2);
-    int64_t blocked_scale_K = round_up(K/blocksize, 4);
-    int64_t blocked_scale_N = round_up(N, 128);
-
-    // mslk expects stack of flattened blocked scales for 3d tensor, shape (G, blocked_scale_K * blocked_scale_N).
-    TORCH_CHECK(
-      scale.dim() == mat.dim() - 1,
-      "for block-scaled 2d-3d grouped GEMM, the 3d tensor of shape (G,K,N) must have a 2d scale of shape (G, blocked_scale_K * blocked_scale_N),",
-      "but scale is ", scale.dim(), "D for arg ", arg_idx
-    );
-    TORCH_CHECK(
-      scale.size(0) == G && scale.size(1) == blocked_scale_K * blocked_scale_N,
-      "for block-scaled grouped GEMM, the tensor shape (", G, ", ", K, ", ", N, ") must have scale shape (", G, ",", blocked_scale_K, ",", blocked_scale_N, ")",
-      " for arg ", arg_idx, ", got: ", scale.size(0), ", ", scale.size(1)
-    );
-  }
-}
-
-void check_scale(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {
-  bool using_fp8_rowwise = scale.scalar_type() == kFloat;
-  bool using_mx = scale.scalar_type() == at::kFloat8_e8m0fnu;
-  if (using_fp8_rowwise) {
-    _check_scales_fp8_rowwise(mat, scale, dim, arg_idx, scale_multiplier);
-  } else if (using_mx) {
-    _check_scales_blocked(mat, scale, dim, arg_idx);
-  } else {
-    TORCH_CHECK(false, "scale must be float32 or float8_e8m0fnu, but got ", scale.dtype());
-  }
-}
 
 } // namespace
 
@@ -448,29 +605,17 @@ std::optional<c10::ScalarType> out_dtype) {
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
 
-  // cuBLAS grouped GEMM packs per-group m/n/k and lda/ldb/ldd into device
-  // arrays whose width is either 32-bit or 64-bit. Switch to 64-bit if any
-  // dimension or any stride that ends up as a leading dim could overflow
-  // int32_t. Per-group deltas (jagged dim) are bounded by the corresponding
-  // total size, so checking sizes is sufficient.
-  const bool needs_int64 =
-      mat_a.size(-2) > std::numeric_limits<int32_t>::max() ||
-      mat_a.size(-1) > std::numeric_limits<int32_t>::max() ||
-      mat_b.size(-2) > std::numeric_limits<int32_t>::max() ||
-      mat_b.size(-1) > std::numeric_limits<int32_t>::max() ||
-      mat_a.stride(-2) > std::numeric_limits<int32_t>::max() ||
-      mat_a.stride(-1) > std::numeric_limits<int32_t>::max() ||
-      mat_b.stride(-2) > std::numeric_limits<int32_t>::max() ||
-      mat_b.stride(-1) > std::numeric_limits<int32_t>::max() ||
-      out.stride(-2) > std::numeric_limits<int32_t>::max();
+  const bool needs_int64 = cublaslt_grouped_mm_use_int64(mat_a, mat_b, out);
 
   cublasGroupedArgs args(mat_a, mat_b, offs, out, batchCount, needs_int64);
   at::cuda::blas::grouped_gemm(args.transa, args.transb,
                                args.mArray, args.m,
                                args.nArray, args.n,
                                args.kArray, args.k,
-                               args.alphaPtrArray, args.alphaScalar, mat_a.scalar_type(),
+                               args.alphaPtrArray, args.alphaScalar,
+                               mat_a.scalar_type(),
                                args.APtrArray, args.ldaArray,
+                               mat_b.scalar_type(),
                                args.BPtrArray, args.ldbArray,
                                args.betaPtrArray, args.betaScalar, out.scalar_type(),
                                args.DPtrArray, args.lddArray,
@@ -480,6 +625,86 @@ std::optional<c10::ScalarType> out_dtype) {
 #else
   TORCH_CHECK(false, "cublasLt grouped GEMM requires CUDA >= 13.3 and is not supported on ROCm. Current build does not meet these requirements.");
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
+}
+
+static void scaled_grouped_mm_cublaslt(
+    ScaledGemmImplementation gemm_impl,
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    ArrayRef<Tensor> scale_a,
+    ArrayRef<ScalingType> recipe_a,
+    ArrayRef<SwizzleType> swizzle_a,
+    ArrayRef<Tensor> scale_b,
+    ArrayRef<ScalingType> recipe_b,
+    ArrayRef<SwizzleType> swizzle_b,
+    const std::optional<Tensor>& offs,
+    bool use_fast_accum,
+    int64_t batchCount,
+    Tensor& out) {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13040
+  _check_cublaslt_grouped_inputs(mat_a, mat_b);
+  const bool empty_out = out.numel() == 0;
+  const int64_t min_batch_count = empty_out ? 0 : 1;
+  TORCH_CHECK_VALUE(
+      batchCount >= min_batch_count && batchCount <= 1024,
+      "cuBLASLt grouped GEMM batchCount must be in [", min_batch_count, ", 1024], got ", batchCount);
+  const auto scaling_a = recipe_a[0];
+  const auto scaling_b = recipe_b[0];
+  // NO_SWIZZLE is a placeholder for omitted metadata, not a claim that scales
+  // are unswizzled. Their storage layout is determined by gemm_impl.
+  const auto swizzle_a_value = swizzle_a.empty() ? SwizzleType::NO_SWIZZLE : swizzle_a[0];
+  const auto swizzle_b_value = swizzle_b.empty() ? SwizzleType::NO_SWIZZLE : swizzle_b[0];
+  const auto [layout_a, layout_b] = get_cublaslt_grouped_scale_layouts(gemm_impl, scale_a[0], scale_b[0]);
+  check_cublaslt_grouped_scale_storage(scale_a[0], batchCount, "scale_a");
+  check_cublaslt_grouped_scale_storage(scale_b[0], batchCount, "scale_b");
+
+  if (empty_out) {
+    return;
+  }
+  const bool needs_int64 = cublaslt_grouped_mm_use_int64(mat_a, mat_b, out);
+
+  cublasGroupedArgs args(
+      mat_a,
+      mat_b,
+      offs,
+      out,
+      batchCount,
+      needs_int64,
+      scale_a[0],
+      scale_b[0],
+      layout_a,
+      layout_b);
+  at::cuda::blas::GroupedGemmScaleOptions scales;
+  scales.A_scale_ptr = args.scale_mata_ptr;
+  scales.B_scale_ptr = args.scale_matb_ptr;
+  scales.use_fast_accum = use_fast_accum;
+  scales.A_scaling_type = scaling_a;
+  scales.B_scaling_type = scaling_b;
+  scales.A_swizzle_type = swizzle_a_value;
+  scales.B_swizzle_type = swizzle_b_value;
+  scales.A_scale_dtype = scale_a[0].scalar_type();
+  scales.B_scale_dtype = scale_b[0].scalar_type();
+  scales.A_per_batch = layout_a == CublasGroupedScaleLayout::PerBatchScalar;
+  scales.B_per_batch = layout_b == CublasGroupedScaleLayout::PerBatchScalar;
+  at::cuda::blas::grouped_gemm(
+      args.transa, args.transb,
+      args.mArray, args.m,
+      args.nArray, args.n,
+      args.kArray, args.k,
+      args.alphaPtrArray, args.alphaScalar,
+      mat_a.scalar_type(),
+      args.APtrArray, args.ldaArray,
+      mat_b.scalar_type(),
+      args.BPtrArray, args.ldbArray,
+      args.betaPtrArray, args.betaScalar, out.scalar_type(),
+      args.DPtrArray, args.lddArray,
+      args.DPtrArray, args.lddArray,
+      args.batchCount, args.use_int64,
+      scales);
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false, "cuBLASLt scaled grouped GEMM requires CUDA >= 13.4 and a non-ROCm build");
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13040
 }
 
 Tensor
@@ -530,6 +755,7 @@ _scaled_grouped_mm_cuda(
   if (offs.has_value()) {
     TORCH_CHECK_VALUE(offs->dim() == 1, "offs has to be 1D");
     TORCH_CHECK_VALUE(offs->dtype() == at::kInt, "Offsets have to be int32");
+    TORCH_CHECK_VALUE(offs->is_contiguous(), "Offsets have to be contiguous");
   }
   // FP8 per-tensor and per-row scaling expect fp32 scales.
   // MXFP8 expects float8_e8m0fnu scales.
@@ -539,8 +765,10 @@ _scaled_grouped_mm_cuda(
       "For FP8 tensorwise and rowwise, both scales must both be float32 tensors. For MXFP8, scales must both be float8_e8m0fnu tensors.");
 
   const int scale_multiplier = (mat_a.dim() == 2 && mat_b.dim() == 2) ? offs->size(0) : 1;
-  check_scale(mat_a, scale_a, 0 ,0, scale_multiplier);
-  check_scale(mat_b, scale_b, 1, 1, scale_multiplier);
+  if (scale_a.scalar_type() == kFloat) {
+    _check_scales_fp8_rowwise(mat_a, scale_a, 0, 0, scale_multiplier);
+    _check_scales_fp8_rowwise(mat_b, scale_b, 1, 1, scale_multiplier);
+  }
 
   const auto out_dtype_ = out_dtype.value_or(kBFloat16);
   TORCH_CHECK_VALUE(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
@@ -558,8 +786,7 @@ _scaled_grouped_mm_cuda(
 #endif
 
   if (is_mx8mx8bf16) {
-    // Note: Passing implied SwizzleType here, correctness of scale previously checked
-    //       in `check_scale` call
+    // The callee validates the blocked scales for the implied swizzle.
     return _mx8_mx8_bf16_grouped_mm_mslk(
         mat_a,
         mat_b,
@@ -567,7 +794,7 @@ _scaled_grouped_mm_cuda(
         SwizzleType::SWIZZLE_32_4_4,
         scale_b,
         SwizzleType::SWIZZLE_32_4_4,
-        offs.value(),
+        offs,
         out);
   }
 
@@ -587,7 +814,8 @@ namespace {
 
 using scaled_blas::ScaleKernelDispatchEntry;
 
-std::array<ScaleKernelDispatchEntry, 4> scale_grouped_kernel_dispatch = {{
+std::array<ScaleKernelDispatchEntry, 5> scale_grouped_kernel_dispatch = {{
+  { "tensorwise_tensorwise", scaled_blas::check_tensorwise_recipe, ScaledGemmImplementation::TENSORWISE_TENSORWISE},
   { "rowwise_rowwise", scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
   { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
   { "mxfp4_mxfp4", scaled_blas::check_mxfp4_recipe, ScaledGemmImplementation::MXFP4_MXFP4},
@@ -613,11 +841,17 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
           IntArrayRef contraction_dim,
           bool use_fast_accum,
           const Tensor& out) {
-  bool allowed_device = scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/true);
-  TORCH_CHECK_VALUE(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
-
   TORCH_CHECK_VALUE(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
   TORCH_CHECK_VALUE(check_valid_strides_and_return_transposed(mat_b), "Expected mat2 to be transposed");
+  if (out.numel() != 0) {
+    const int64_t alignment = 16 / out.element_size();
+    TORCH_CHECK_VALUE(
+        out.stride(-1) == 1 && out.stride(-2) >= out.size(-1) &&
+            reinterpret_cast<uintptr_t>(out.const_data_ptr()) % 16 == 0 &&
+            out.stride(-2) % alignment == 0 &&
+            (out.dim() != 3 || (out.stride(0) % alignment == 0 && out.stride(0) >= out.size(1) * out.stride(1))),
+        "Expected out to be row-major with a 16-byte-aligned data pointer and strides, got strides ", out.strides());
+  }
 
   // Materialize the scale lists so the existing acceptance helpers (which take
   // ArrayRef<Tensor>) work unchanged.
@@ -660,11 +894,23 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
       mat_b.scalar_type(),
       scale_recipe_b_enum,
       scale_b_ref);
-  TORCH_CHECK_VALUE(gemm_impl != ScaledGemmImplementation::NONE,
-      "No gemm implementation was found");
+  const int64_t batch_count = (mat_a.dim() == 2 || mat_b.dim() == 2)
+      ? offs->size(0) : mat_a.size(0);
 
   switch (gemm_impl) {
+    // These cases are only supported by cuBLASLt
+    case ScaledGemmImplementation::TENSORWISE_TENSORWISE: {
+      scaled_grouped_mm_cublaslt(
+          gemm_impl, mat_a, mat_b, scale_a_ref, scale_recipe_a_enum, swizzle_a_enum,
+          scale_b_ref, scale_recipe_b_enum, swizzle_b_enum, offs_opt, use_fast_accum, batch_count, out_mut);
+      return;
+    }
+    // RowWise uses in-tree CUTLASS on CUDA and MSLK on ROCm.
     case ScaledGemmImplementation::ROWWISE_ROWWISE: {
+      TORCH_CHECK_VALUE(
+          scaled_mm_arch_allowed(/*sm90_only*/ true, /*sm100_only*/ true),
+          "Rowwise grouped GEMM is only supported on CUDA devices with "
+          "compute capability = [9.0, 10.0], or ROCm MI300+");
       const int scale_multiplier = (mat_a.dim() == 2 && mat_b.dim() == 2) ? offs->size(0) : 1;
       _check_scales_fp8_rowwise(mat_a, scale_a[0], 0 /* dim */ , 0 /* arg_idx */, scale_multiplier);
       _check_scales_fp8_rowwise(mat_b, scale_b[0], 1 /* dim */ , 1 /* arg_idx */, scale_multiplier);
@@ -680,9 +926,7 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
       return;
     }
     case ScaledGemmImplementation::MXFP8_MXFP8: {
-      // scale shape checks
-      _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
-      _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
+      _check_mslk_grouped_support(gemm_impl);
       // swizze checks
       TORCH_CHECK_VALUE(swizzle_a_enum.size() == 1 && swizzle_b_enum.size() == 1, "Expected single swizzle argument");
       _mx8_mx8_bf16_grouped_mm_mslk(
@@ -697,9 +941,7 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
       return;
     }
     case ScaledGemmImplementation::MXFP4_MXFP4: {
-      // scale shape checks
-      _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
-      _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
+      _check_mslk_grouped_support(gemm_impl);
       _f4_f4_bf16_grouped_mm_mslk(
           mat_a,
           mat_b,
@@ -713,9 +955,7 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
       return;
     }
     case ScaledGemmImplementation::NVFP4_NVFP4: {
-      // scale shape checks
-      _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
-      _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
+      _check_mslk_grouped_support(gemm_impl);
       _f4_f4_bf16_grouped_mm_mslk(
           mat_a,
           mat_b,
@@ -728,10 +968,16 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
           out_mut);
       return;
     }
+    // Unsupported
+    case ScaledGemmImplementation::NONE:
+      break;
     default:
       TORCH_CHECK_NOT_IMPLEMENTED(false,
           "_scaled_grouped_mm_cuda_v2 is in an inconsistent state - should never reach here");
   }
+  raise_unsupported_grouped_scaling(
+      mat_a, mat_b, scale_a_ref, scale_recipe_a_enum, swizzle_a_enum,
+      scale_b_ref, scale_recipe_b_enum, swizzle_b_enum, offs_opt, out.scalar_type(), use_fast_accum);
 }
 
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)

@@ -224,11 +224,11 @@ TORCH_META_FUNC(_scaled_addmm)(
       self.options());
 }
 
-// V2: Grouped scaled matrix multiply. Shape inference + output allocation runs
-// here; recipe-independent input validation runs here too (in eager, before
-// TORCH_IMPL_FUNC, and during `torch.compile` tracing). Per-recipe scale-shape
-// checks, the device-capability gate, and kernel dispatch live in the CUDA
-// TORCH_IMPL_FUNC. Output is bf16 only.
+// V2: Grouped scaled matrix multiply. Shape inference, output allocation,
+// and recipe-specific output-dtype validation run here in eager mode.
+// FakeTensor and torch.compile use the corresponding Python meta checks.
+// Scale layouts, device capabilities, and backend selection are checked in
+// the CUDA implementation.
 //
 // `self`/`mat2` may be 2D or 3D; `offs` carries group boundaries when either
 // operand is 2D. The output size/stride mirror `create_grouped_gemm_output_tensor`.
@@ -247,7 +247,7 @@ TORCH_META_FUNC(_scaled_grouped_mm_v2)(
     at::IntArrayRef contraction_dim,
     bool use_fast_accum) {
   scaled_blas::validate_scaled_grouped_mm_v2_inputs(
-      self, mat2, offs, bias, contraction_dim, out_dtype);
+      self, mat2, recipe_a, recipe_b, offs, bias, contraction_dim, out_dtype);
 
   const auto out_dtype_ = out_dtype.value_or(kBFloat16);
   std::optional<Tensor> offs_opt =
