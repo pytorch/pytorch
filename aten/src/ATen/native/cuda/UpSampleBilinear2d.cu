@@ -87,12 +87,15 @@ __global__ void upsample_bilinear2d_out_frame(
 #ifdef USE_ROCM
 // upsample_bilinear2d_out_frame runs one thread per output pixel and loops
 // over all N*C planes. Below this many output pixels per CU it leaves the
-// device idle, and the one-thread-per-element kernels below are faster.
-// The cut is tuned per architecture from perf sweeps.
-int64_t plane_kernel_min_pixels_per_sm(const cudaDeviceProp* props) {
+// device idle, and the one-thread-per-element kernels below are faster. More
+// planes lengthen the plane loop's serial work, which moves the crossover to
+// larger planes. The cut is tuned per architecture from perf sweeps.
+int64_t plane_kernel_min_pixels_per_sm(
+    const cudaDeviceProp* props,
+    int64_t planes) {
   const c10::basic_string_view<char> arch(props->gcnArchName);
   if (arch.starts_with("gfx950")) {
-    return 512;
+    return planes >= 256 ? 640 : 512;
   }
   if (arch.starts_with("gfx1250")) {
     return 768;
@@ -210,7 +213,8 @@ bool use_per_element_kernels(const Tensor& output) {
   const int64_t plane_numel = output.size(2) * output.size(3);
   return output.numel() > 0 &&
       plane_numel < static_cast<int64_t>(props->multiProcessorCount) *
-          plane_kernel_min_pixels_per_sm(props);
+          plane_kernel_min_pixels_per_sm(
+              props, output.size(0) * output.size(1));
 }
 
 template <typename scalar_t>
