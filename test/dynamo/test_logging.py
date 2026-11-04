@@ -1588,32 +1588,52 @@ TorchDynamo attempted to trace the following frames: [
         )
 
 
-class PartitionedScatterLoggingTests(LoggingTestCase):
-    """
-    Dedicated tests for the partitioned_scatter TORCH_LOGS artifact.
-    """
+class ScatterPreaggLoggingTests(LoggingTestCase):
+    @requires_gpu
+    @unittest.skipIf(torch.version.hip is None, "scatter template is ROCm only")
+    @torch._inductor.config.patch(scatter_preagg_template=True)
+    @make_logging_test(scatter_preagg=True)
+    def test_scatter_preagg(self, records):
+        def fn(x, i, v):
+            return x.index_put((i,), v, accumulate=True)
 
-    @make_logging_test(partitioned_scatter=True)
-    def test_partitioned_scatter(self, records):
-        from torch._inductor import config as inductor_config
+        x = torch.zeros(24, 32, device=device_type)
+        idx = torch.randint(0, 24, (20_000,), device=device_type)
+        v = torch.randn(20_000, 32, device=device_type)
+        torch.compile(fn, backend="inductor")(x, idx, v)
+        self.assertTrue(any("applied" in r.getMessage() for r in records))
 
-        N, n = 8192, 8
+    def test_partitioned_scatter_deprecated(self):
+        import warnings
 
-        def f(out, idx, vals):
-            return out.index_put([idx], vals, accumulate=True)
+        from torch._logging import _internal
+        from torch.testing._internal.common_utils import set_warn_always_context
+        from torch.testing._internal.logging_utils import preserve_log_state
 
-        with inductor_config.patch(
-            partitioned_scatter_enabled=True,
-            partitioned_scatter_force=True,
+        message = "Use 'scatter_preagg' instead"
+        with (
+            preserve_log_state(),
+            unittest.mock.patch.object(
+                _internal, "_warned_deprecated_artifacts", set()
+            ),
         ):
-            fn_opt = torch.compile(f, backend="inductor", fullgraph=True)
-            out = torch.zeros(n)
-            idx = torch.randint(0, 4, (N,), dtype=torch.int64)
-            vals = torch.randn(N)
-            fn_opt(out, idx, vals)
-
-        # At least one debug record should be emitted (APPLY or SKIP decision).
-        self.assertGreater(len(records), 0)
+            with self.assertWarnsRegex(FutureWarning, message) as cm:
+                torch._logging.set_logs(partitioned_scatter=True)
+            self.assertEqual(cm.filename, __file__)
+            self.assertTrue(
+                _internal.log_state.is_artifact_enabled("partitioned_scatter")
+            )
+            self.assertFalse(_internal.log_state.is_artifact_enabled("scatter_preagg"))
+            # Once per process, unless warn_always is set.
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                torch._logging.set_logs(partitioned_scatter=True)
+            self.assertFalse([w for w in caught if w.category is FutureWarning])
+            with (
+                set_warn_always_context(True),
+                self.assertWarnsRegex(FutureWarning, message),
+            ):
+                torch._logging.set_logs(partitioned_scatter=True)
 
 
 # non single record tests
@@ -1671,9 +1691,12 @@ exclusions = {
     "node_runtime_estimation",
     "caching",
     "overlap_scheduling",
-    "partitioned_scatter",
     # Only emits for torch._native DSL ops, not for a plain torch.compile.
     "native_dsl_compile",
+    # Only emits for accumulating scatters on ROCm (see ScatterPreaggLoggingTests).
+    "scatter_preagg",
+    # Deprecated, logs nothing.
+    "partitioned_scatter",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

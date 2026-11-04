@@ -1950,6 +1950,9 @@ class TestTemplateRender(TestCase):
             "epilogue_fusion_first": True,
             "epilogue_fusion_with_atomic_add": True,
             "max_autotune_gemm_backends": "TRITON",
+            # On ROCm the scatter template would take the index_add_ (covered
+            # in test_scatter_preagg.py) and bring its own atomics.
+            "scatter_preagg_template": False,
         }
     )
     @requires_gpu()
@@ -1979,6 +1982,9 @@ class TestTemplateRender(TestCase):
             "epilogue_fusion_first": True,
             "epilogue_fusion_with_atomic_add": False,
             "max_autotune_gemm_backends": "TRITON",
+            # On ROCm the scatter template would take the index_add_ (covered
+            # in test_scatter_preagg.py) and bring its own atomics.
+            "scatter_preagg_template": False,
         }
     )
     @requires_gpu()

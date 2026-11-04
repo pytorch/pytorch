@@ -1,0 +1,47 @@
+{%- macro inner_block(iters, width, vec=None) -%}
+inner_start = (pid_inner * {{iters}} + it) * {{width}}
+if INNER_SHIFT:
+    # The last block shifts back to end at NUM_INNER, masking the lanes the
+    # block before it covers. Clamping instead hides contiguity, which
+    # disables vectorized loads.
+    inner_raw = tl.minimum(inner_start, NUM_INNER - {{width}}) + tl.arange(0, {{width}})
+    inner_mask = inner_raw >= inner_start
+    inner = inner_raw[None, :]
+{%- if vec %}
+    if {{vec}}:
+        atomic_inner = tl.max_contiguous(
+            tl.multiple_of(inner_raw, {{vec}}), {{vec}}
+        )[None, :]
+    else:
+        atomic_inner = inner
+{%- endif %}
+else:
+    inner_raw = inner_start + tl.arange(0, {{width}})
+    inner_mask = inner_raw < NUM_INNER
+    inner = tl.minimum(inner_raw, NUM_INNER - 1)[None, :]
+{%- if vec %}
+    atomic_inner = inner
+{%- endif %}
+{%- endmacro %}
+{%- macro segmented_sum() %}
+
+@triton.jit
+def _preagg_segmented_sum(key_a, val_a, key_b, val_b):
+    return key_b, tl.where(key_a == key_b, val_a + val_b, val_b)
+{%- endmacro %}
+{%- macro sorted_prelude() -%}
+{{preagg_def_kernel("PART", "SKEYS", "PERM")}}
+    {{preagg_sizes() | indent_except_first(1)}}
+    NUM_CHUNKS = tl.cdiv(NUM_TOKENS, BLOCK_T)
+    pid_tok = tl.program_id(0).to(INDEX_DTYPE)
+    pid_inner = tl.program_id(1).to(INDEX_DTYPE)
+    pos = tl.arange(0, BLOCK_T).to(INDEX_DTYPE)
+    first = pid_tok * BLOCK_T
+    last = tl.minimum(first + BLOCK_T, NUM_TOKENS) - 1
+    first_key = tl.load(SKEYS + first)
+    last_key = tl.load(SKEYS + last)
+    prev_key = tl.where(pid_tok > 0, tl.load(SKEYS + tl.maximum(first - 1, 0)), -1)
+    next_key = tl.where(
+        last + 1 < NUM_TOKENS, tl.load(SKEYS + tl.minimum(last + 1, NUM_TOKENS - 1)), -1
+    )
+{%- endmacro %}
