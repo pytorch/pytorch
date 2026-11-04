@@ -508,6 +508,9 @@ _ROUTED_TRAITS = {
 }
 
 
+# Selections return input elements, so their values must match exactly.
+_EXACT_REFS = {"amax", "amin", "absmax", "absmin", "max_dim", "min_dim", "aminmax"}
+
 # Traits by field count for the gate's output minimums.
 _FIELD_TRAITS = {1: T.SumOps(), 2: T.ArgMaxOps(), 3: T.WelfordOps(correction=1)}
 
@@ -844,9 +847,13 @@ class TestOrderedColDevice(TestCase):
         self.assertEqual(got, want, atol=1e-2, rtol=1e-3)
 
     def _reduce(self, device, trait, key, x, dim, outputs, *, route):
-        """Inner-tree _reduce with the column route on (this device) or off; also return
-        whether an ordered column plan exists for this key and dtype."""
+        """Inner-tree _reduce with the column route on (this device), off, or as shipped
+        (None); also return whether this call compiled an ordered column plan."""
+        for k in [k for k in ct._CACHE if k[1:3] == (key, x.dtype)]:
+            del ct._CACHE[k]
         ccs = (torch.cuda.get_device_capability(device),) if route else ()
+        if route is None:
+            ccs = kg._ORDERED_COL_CCS
         with mock.patch.object(kg, "_ORDERED_COL_CCS", ccs):
             got = kg._reduce(
                 trait, key, x, dim, outputs, len(outputs), order="inner_tree"
@@ -857,6 +864,11 @@ class TestOrderedColDevice(TestCase):
     def _assert_torch_refs(self, name, got, x):
         for g, ref in zip(got, _TORCH_REFS[name](x), strict=True):
             tol = _TOL.get(g.dtype, {"atol": 0, "rtol": 0})
+            if name in _EXACT_REFS:
+                tol = {"atol": 0, "rtol": 0}
+            elif name == "mean":
+                # Column means are near 0.02-0.06, below the 16-bit sum tolerances.
+                tol = {"atol": 1e-5, "rtol": tol["rtol"]}
             self.assertEqual(g, ref.to(g.dtype), **tol)
 
     def _assert_bitwise(self, got, want):
@@ -926,6 +938,42 @@ class TestOrderedColDevice(TestCase):
         self._assert_bitwise(got, want)
         # Masked leaves and identity padding, checked independently of the traits.
         self._assert_torch_refs(name, got, x)
+
+    @parametrize("name", ["argmax", "max_dim", "aminmax", "var_mean"])
+    def test_multi_field_traits_on_one_padded_warp(self, device, name):
+        """fp32 R = 200 runs one warp with masked leaves and no shared-memory merge."""
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        make, outputs, prepare = _ROUTED_TRAITS[name]
+        rows, columns = 200, 64
+        plan = rt.trait_itree_plan(make(), rows, 2 * columns, 4, stage=False)
+        self.assertEqual((plan.wpr, plan.tms[0].exact), (1, False))
+        x = prepare(torch.randn(2, rows, columns, device=device))
+        outputs = [torch.float32 if out is None else out for out in outputs]
+        nouts, key = len(outputs), f"one_warp_{name}"
+        got = ct.reduce_ordered_col(make(), key, x, outputs, nouts)
+        self.assertIsNotNone(got)
+        kept = [(columns, 1), (2, rows * columns)]
+        want = kg._try_indexed_itree(
+            make(),
+            key + "_ref",
+            x,
+            [(rows, columns)],
+            kept,
+            2 * columns,
+            rows,
+            outputs,
+            nouts,
+        )
+        self._assert_bitwise(got, want)
+        self._assert_torch_refs(name, got, x)
+
+    def test_shipped_route_serves_b200_only(self, device):
+        x = torch.randn(16, 128, 128, device=device)
+        trait, f32 = T.SumOps(acc=cutlass.Float32), [torch.float32]
+        _, served = self._reduce(device, trait, "shipped", x, 1, f32, route=None)
+        b200 = torch.cuda.get_device_capability(device) == (10, 0)
+        self.assertEqual(served, b200)
 
     def test_narrow_columns_stay_on_the_indexed_tree(self, device):
         # The kernel tiles 32 columns, so the gate and the kernel both decline 16.
