@@ -1305,6 +1305,27 @@ class TestBuildDataset(unittest.TestCase):
         msg = "Body line\n\nCo-authored-by: x\nPull Request resolved: https://x\nApproved by: https://y\nghstack-source-id: 1\nKeep: me\n"  # @lint-ignore
         self.assertEqual(strip_trailers(msg), "Body line\n\nKeep: me")
 
+    def test_main_refuses_open_window(self) -> None:
+        argv = ["build_dataset", "--data", "d", "--start", "2026-10-01", "--end", str(dt.date.today()), "--kinds", "head"]  # fmt: skip
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(bd, "git") as git,
+            contextlib.redirect_stderr(io.StringIO()) as err,
+            self.assertRaises(SystemExit),
+        ):  # fmt: skip
+            bd.main()
+        git.assert_not_called()
+        self.assertIn("rerun on or after", err.getvalue())
+
+    def test_commit_text(self) -> None:
+        # As trymerge.py's gen_commit_message lands a ghstack PR and native_stack.py a GitHub-native one.
+        msg = "Fix (#12) the thing (#203)\n\nBody\n\nPull Request resolved: https://github.com/pytorch/pytorch/pull/203\nApproved by: https://github.com/y\nghstack dependencies: #201, #202\nStack dependencies: #200\n\nCo-authored-by: z <z@z>\n"  # @lint-ignore
+        with scratch_repo():
+            bd.git("commit", "-q", "--allow-empty", "-m", msg)
+            self.assertEqual(bd.commit_text("HEAD"), ("Fix (#12) the thing", "Body"))
+            bd.git("commit", "-q", "--allow-empty", "-m", "No PR\n\nKeep: me")
+            self.assertEqual(bd.commit_text("HEAD"), ("No PR", "Keep: me"))
+
     def test_history_load(self) -> None:
         rows = [
             fail("test_x", "2026-10-05 00:00:00", "a"),
@@ -1314,6 +1335,8 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_x", "2026-10-05 00:00:00", "g", br="f/pytorch:main"),
             fail("test_x", "2026-10-05 00:00:00", "u"),
         ]
+        # A cache may hold the flag as a string.
+        rows[0]["flaky"], rows[1]["flaky"] = "0", "1"
         landed = {1: day(7)}
         with (
             mock.patch.object(bd, "pull_failures", return_value=rows) as pull,
@@ -1330,7 +1353,8 @@ class TestBuildDataset(unittest.TestCase):
         self.assertEqual({sha: [r["pr"] for r in rs] for sha, rs in h.heads.items()}, {"a": [1], "g": [2]})  # fmt: skip
         k = ("test_a", "TestA", "test_x")
         self.assertEqual(len(h.main[k]), 2)
-        self.assertEqual(sorted(who for _, who, _, _ in h.seen[k]), ["2", "main", "main", "main", "me"])  # fmt: skip
+        self.assertEqual(sorted((who, fl) for _, who, _, _, fl in h.seen[k]), [("2", False), ("main", False), ("main", False), ("main", True), ("me", False)])  # fmt: skip
+        self.assertIs(h.heads["a"][0]["flaky"], False)
         self.assertEqual(h.landed, landed)
 
     def test_why_dropped(self) -> None:
@@ -1487,6 +1511,42 @@ class TestBuildDataset(unittest.TestCase):
         self.assertEqual(sorted(r["test"] for r in kept or []), ["test_y", "test_z"])
         self.assertEqual(dropped, {"stacked": 2})
 
+    def test_stacked_bounds(self) -> None:
+        # U (pr 1, "me") is based on B, which has the changes of O (pr 2, another author's, landed),
+        # S (pr 3, mine) and F (pr 4, mine). O and S broke their tests 20 days before U's failure,
+        # outside WINDOW; F's failure passed again in its job. D (pr 5, mine) deletes a line whose
+        # context is two blank lines, which B has elsewhere, so D's change reverse-applies to B
+        # with one line of context though B does not have it.
+        main = {"a": "a\n\nX\n\nb\n\n\nc\n", "o": "o\n", "s": "s\n", "f": "f\n"}
+        with scratch_repo():
+            m = commit_files(main)
+            bd.git("update-ref", "refs/remotes/origin/main", m)
+            changed = dict.fromkeys("osf", "changed\n")
+            o, s, f = (commit_files({**main, k: v}, m) for k, v in changed.items())
+            d = commit_files({**main, "a": "a\n\n\nb\n\n\nc\n"}, m)
+            b = commit_files({**main, **changed}, m)
+            u = commit_files({**main, **changed, "u": "u\n"}, b)
+            rows = [
+                fail("test_o", "2026-09-17 00:00:00", o),
+                fail("test_s", "2026-09-17 00:00:00", s),
+                fail("test_f", "2026-10-06 00:00:00", f, flaky=True),
+                fail("test_d", "2026-10-06 00:00:00", d),
+            ] + [fail(t, "2026-10-07 00:00:00", u) for t in ("test_o", "test_s", "test_f", "test_d")]  # fmt: skip
+            h = history(rows, {u: 1, o: 2, s: 3, f: 4, d: 5}, {1: "me", 2: "x", 3: "me", 4: "me", 5: "me"}, {2: day(18, 9)})  # fmt: skip
+            dropped: collections.Counter = collections.Counter()
+            with (
+                patch_ci_jobs(TD_JOBS),
+                mock.patch.object(bd, "green_jobs", return_value=set()),
+                mock.patch.object(bd, "commit_time", return_value=day(20)),
+            ):  # fmt: skip
+                h.load_green({u})
+                kept = h.truth(u, {"base": b, "merge_base": b, "main_base": m, "base_source": "ci"}, dropped)  # fmt: skip
+            self.assertTrue(all(bd.below(x, b) for x in (o, s, f)))
+            self.assertFalse(bd.below(d, b))
+            self.assertEqual(len(bd.deletion_hunks(bd.own_change(d))), 1)
+        self.assertEqual(sorted(r["test"] for r in kept or []), ["test_d", "test_f", "test_o"])  # fmt: skip
+        self.assertEqual(dropped, {"stacked": 1})
+
     def test_truth_skips_a_main_base_before_the_loaded_failures(self) -> None:
         h = history([fail("test_x", "2026-10-05 00:00:00", "s")], {"s": 1}, {1: "me"})
         h.green["s"] = set()
@@ -1590,18 +1650,20 @@ class TestBuildDataset(unittest.TestCase):
                 mock.patch.object(bd, "query", lambda sql: queries.append(sql) or failed),
                 mock.patch.object(bd, "green_jobs", return_value={(commits["change"], *rerun), (commits["after"], *td)}) as green,
             ):  # fmt: skip
-                got = bd.revert_truth_jobs({"test_a", "test_b"}, commits["change"], landed, "2026-10-05 04:00:00")  # fmt: skip
+                got = bd.revert_truth_jobs({("test_a", "test_x"), ("test_b", "test_q'r")}, commits["change"], landed, "2026-10-05 04:00:00")  # fmt: skip
                 # Decided before the change landed: no commit qualifies, so only the change itself.
-                bd.revert_truth_jobs({"test_a"}, commits["change"], landed, "2026-10-05 00:30:00")  # fmt: skip
+                bd.revert_truth_jobs({("test_a", "test_x")}, commits["change"], landed, "2026-10-05 00:30:00")  # fmt: skip
                 self.assertEqual(green.call_args.args[0], [commits["change"]])
                 failed = failed[1:]
                 # Failing only in jobs that do not run TD, so revert_samples skips it.
-                none = bd.revert_truth_jobs({"test_a", "test_b"}, commits["change"], landed, "2026-10-05 04:00:00")  # fmt: skip
+                none = bd.revert_truth_jobs({("test_a", "test_x"), ("test_b", "test_q'r")}, commits["change"], landed, "2026-10-05 04:00:00")  # fmt: skip
         self.assertEqual(got, {"test_a": [td]})
         self.assertEqual(none, {})
         # The change and the commit after it, not the revert or what landed after the decision.
         self.assertIn(f"head_sha IN ('{commits['after']}','{commits['change']}')", queries[0])  # fmt: skip
         self.assertIn(f"head_sha IN ('{commits['change']}')", queries[1])
+        # Only the signal tests count, not every test of their files.
+        self.assertIn("AND (file, t.name) IN (('test_a.py', 'test_x'),('test_b.py', 'test_q\\'r'))", queries[0])  # fmt: skip
         # A test that also passed in its job is not a failure there.
         self.assertIn("HAVING countIf(failure_count > 0 OR error_count > 0) > 0 AND countIf(failure_count = 0 AND error_count = 0 AND skipped_count = 0) = 0", queries[0])  # fmt: skip
 
@@ -1695,7 +1757,7 @@ class TestBuildDataset(unittest.TestCase):
             tempfile.TemporaryDirectory() as out,
             patch_ci_jobs({True: {("pull", "pull", "default"), ("pull", "win", "default")}, False: set()}),
             mock.patch.object(bd, "green_jobs", return_value=set()),
-            mock.patch.object(bd, "fetch"),
+            mock.patch.object(bd, "fetch") as fetch,
             mock.patch.object(bd, "has_commit", return_value=True),
             mock.patch.object(bd, "git", lambda *a, check=True: merge_bases[a[1:]] + "\n"),
             mock.patch.object(bd, "commit_time", return_value=day(15, 9)) as commit_time,
@@ -1706,6 +1768,8 @@ class TestBuildDataset(unittest.TestCase):
         ):  # fmt: skip
             bd.pr_samples(h, Path(out), 1)
         ci_bases.assert_called_once_with({"s": 1})
+        # A CI base recorded after the head is not in its history, so it is fetched too.
+        self.assertEqual(fetch.call_args_list[-1].args, (["lower"],))
         # Main breakage is checked around the merge base with main, the diff is against the PR's CI base.
         commit_time.assert_called_once_with("main_mb")
         kw = write.call_args.kwargs
@@ -1752,7 +1816,7 @@ class TestBuildDataset(unittest.TestCase):
             samples = {p.stem: json.loads(p.read_text()) for p in out.glob("*.json")}
         self.assertEqual(sorted(samples), ["head_1_h1", "head_1_h2", "pr_1"])
         pr, head = samples["pr_1"], samples["head_1_h1"]
-        self.assertEqual((pr["sha"], pr["truth"]), ("h1", ["test_a"]))
+        self.assertEqual((pr["sha"], pr["truth"], pr["window"]), ("h1", ["test_a"], [str(START), str(END)]))  # fmt: skip
         self.assertEqual((pr["truth"], pr["truth_jobs"]), (head["truth"], head["truth_jobs"]))  # fmt: skip
         dropped = (
             "{'disabled': 1, 'job_green': 1, 'main_near_base': 1, 'other_failure': 1}"
@@ -1808,7 +1872,7 @@ class TestBuildDataset(unittest.TestCase):
             tempfile.TemporaryDirectory() as out,
             patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}),
             mock.patch.object(bd, "green_jobs", return_value={("h1", "pull", job_a), ("h5", "pull", job_a)}),
-            mock.patch.object(bd, "fetch"),
+            mock.patch.object(bd, "fetch") as fetch,
             mock.patch.object(bd, "has_commit", return_value=True),
             mock.patch.object(bd, "commit_time", return_value=day(4)),
             mock.patch.object(bd, "ci_bases", return_value={"h1": ["b1"], "h2": ["b2"], "h3": ["b3"]}) as ci_bases,
@@ -1818,9 +1882,14 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "write_sample") as write,
             contextlib.redirect_stdout(io.StringIO()),
         ):  # fmt: skip
-            (Path(out) / "pr_1.json").write_text(json.dumps({"pr": 1, "sha": "h1", "base": "pr_base", "title": "t", "body": "b"}))  # fmt: skip
+            pr_1 = {"pr": 1, "sha": "h1", "base": "pr_base", "title": "t", "body": "b", "window": [str(START), str(END)]}  # fmt: skip
+            (Path(out) / "pr_1.json").write_text(json.dumps({**pr_1, "window": [str(START), "2026-10-27"]}))  # fmt: skip
+            with self.assertRaisesRegex(SystemExit, "pr_1, were built with another --start/--end"):  # fmt: skip
+                bd.head_samples(h, Path(out), 1)
+            (Path(out) / "pr_1.json").write_text(json.dumps(pr_1))
             bd.head_samples(h, Path(out), 1)
         ci_bases.assert_called_once_with({"h1": 1, "h2": 1, "h3": 1, "h4": 1})
+        self.assertEqual(fetch.call_args_list[-1].args, (["b1", "b2", "b3"],))
         got = {c.args[1]: (c.args[2:], c.kwargs) for c in write.call_args_list}
         self.assertEqual(sorted(got), ["head_1_h1", "head_1_h2", "head_1_h4"])
         # h2's previous failures are the other heads' (also of h3 and h5, which have no sample) but h3's test_h and test_i.
@@ -1844,7 +1913,7 @@ class TestBuildDataset(unittest.TestCase):
             self.assertEqual(kw, {"title": "t", "body": "b", **bases, "pr": 1, "truth": sorted(truth_jobs), "truth_jobs": truth_jobs, "previous_failures": previous[sid]})  # fmt: skip
 
     def test_revert_truth_is_truth_jobs(self) -> None:
-        rows = [{"reverted_at": t, "commit_sha": "c" * 40, "source_signal_keys": ["test_a.py::x", "test_b.py::y"]} for t in ("1", "2")]  # fmt: skip
+        rows = [{"reverted_at": t, "commit_sha": "c" * 40, "source_signal_keys": ["test_a.py::x", "test_b.py::TestB::y", "no_test_key"]} for t in ("1", "2")]  # fmt: skip
         jobs = {"test_a": [("trunk", "linux / test (default, 1, 1)")]}
         with (
             tempfile.TemporaryDirectory() as out,
@@ -1857,7 +1926,7 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "write_sample") as write,
         ):  # fmt: skip
             bd.revert_samples(Path(out), 1, dt.date(2026, 10, 1), dt.date(2026, 10, 26))
-        truth_jobs.assert_called_once_with({"test_a", "test_b"}, "c" * 40, mock.ANY, "1")  # fmt: skip
+        truth_jobs.assert_called_once_with({("test_a", "x"), ("test_b", "y")}, "c" * 40, mock.ANY, "1")  # fmt: skip
         kw = write.call_args.kwargs
         self.assertEqual((kw["truth"], kw["truth_jobs"]), (["test_a"], jobs))
         with (
