@@ -1612,8 +1612,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       std::optional<uint64_t> epoch);
 
   // The item memo, or nullptr if there is none or it is stale: the tensor was
-  // mutated since, or it was set in an epoch other than `epoch` (a memo kept
-  // across epochs is only dropped on mutation). A stale memo is dropped.
+  // mutated since (not checked for inference tensors, which track no version),
+  // or it was set in an epoch other than `epoch` (a memo kept across epochs is
+  // only dropped on mutation). A stale memo is dropped.
   std::shared_ptr<c10::SafePyObject> fake_item_memo(uint64_t epoch);
 
   // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.

@@ -1648,7 +1648,8 @@ static PyObject* get_dispatch_stack_at(
 // (push/pop_torch_dispatch_stack, _len_torch_dispatch_stack) do not see it, so
 // a C++ mode is installed and removed only through set/unset_dispatch_mode.
 // get/unset return the mode's wrapper, rebuilding it if it was collected, and
-// raise if that fails; see Note [C++ FakeTensorMode Python wrapper lifetime].
+// raise if that fails, which it does until CppFakeTensorMode exists (a later PR
+// in this stack); see Note [C++ FakeTensorMode Python wrapper lifetime].
 static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(!Py_IsNone(mode));
