@@ -43,7 +43,7 @@ ALWAYS_COVERED = {
     "inductor_cpp_wrapper": frozenset({"test_torch"}),
     "inductor": frozenset({"test_modules", "test_ops", "test_ops_gradients", "test_torch"}),
 }  # fmt: skip
-LLM_TD_SELECTION_FILE = "llm_td_selection.json"
+LLM_SELECTION_FILE = "llm_selection.json"
 # The selector runs from the default branch and run_test.py from the PR, so
 # bump this whenever an older reader would misread the selection file.
 SELECTION_VERSION = 1
@@ -57,7 +57,6 @@ MAX_FAILURE_LIST_CLASSES = 50
 # torch_openreg/tests, whose driver test_openreg is never a candidate), and
 # TD's ADDITIONAL_MAPPINGS.
 DRIVER_MAPPINGS = {
-    **ADDITIONAL_MAPPINGS,
     # run_test.py runs test_cpp_extensions_aot.py as both aot drivers.
     **{
         t: [*ADDITIONAL_MAPPINGS[t], r"^test/test_cpp_extensions_aot\.py$"]
@@ -314,7 +313,9 @@ def parse_model_output(
     jit/test_freezing, names the driver instead."""
     if not isinstance(out, dict):
         raise ValueError("not an object")
-    tests, dirs, sweeps = out.get("tests"), out.get("dirs", []), out.get("sweeps", [])
+    if missing := sorted({"tests", "dirs", "sweeps", "run_all", "reason"} - out.keys()):
+        raise ValueError(f"missing {missing}")
+    tests, dirs, sweeps = out["tests"], out["dirs"], out["sweeps"]
     if not isinstance(tests, list) or not all(isinstance(t, dict) and isinstance(t.get("file"), str) for t in tests):  # fmt: skip
         raise ValueError("tests is not a list of objects with a string file")
     for key, value in (("dirs", dirs), ("sweeps", sweeps)):
@@ -322,7 +323,7 @@ def parse_model_output(
             raise ValueError(f"{key} is not a list of strings")
     if unknown := set(sweeps) - set(SWEEPS):
         raise ValueError(f"unknown sweeps {sorted(unknown)}")
-    if not isinstance(out.get("run_all", False), bool):
+    if not isinstance(out["run_all"], bool):
         raise ValueError("run_all is not a boolean")
     names = {t["file"]: normalize_test_name(t["file"], candidates) for t in tests}
     if grep is not None and not all(names.values()):
@@ -345,13 +346,18 @@ def parse_model_output(
 class Selection:
     files: set[str] = field(default_factory=set)
     sweeps: set[str] = field(default_factory=set)
+    # The model's own run_all, or a fallback of from_model_output: those its
+    # docstring lists, more than MAX_DATA_FILES edited files under test/ that
+    # are not tests, and an edited inductor failure list that is not looked up
+    # (an entry without exactly one ".", no grep, or more than
+    # MAX_FAILURE_LIST_CLASSES classes).
     run_all: bool = False
     reason: str = ""
     # Whether run_test.py should skip the files the selection does not cover,
     # rather than only reporting what it would have skipped.
     enforce: bool = False
-    # The test files the model chose from. Any other file, such as a custom
-    # run_test.py handler or a C++ test, is always covered. None covers no extra file.
+    # The test files the model chose from. Any other file, such as a C++ test
+    # or test_openreg, is always covered. None covers no extra file.
     candidates: set[str] | None = None
     # Why the selector got no usable answer (git, the model call or its output,
     # or the test times); None for a deliberate run_all.
@@ -409,7 +415,7 @@ class Selection:
                 if f is not None and not found:
                     return cls(run_all=True, reason=f"nothing found that reads {f}")
                 files |= found
-        run_all, reason = out.get("run_all", False), str(out.get("reason", ""))
+        run_all, reason = out["run_all"], str(out["reason"])
         return cls(files, sweeps, run_all, reason, candidates=set(candidates))
 
     def covers(self, test_file: str, test_config: str) -> bool:

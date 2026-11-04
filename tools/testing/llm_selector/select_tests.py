@@ -1,8 +1,8 @@
 """Ask an LLM which test files a change can break.
 
-    python -m tools.testing.llm_td.select_tests --base origin/main --head <pr-head-sha> --output llm_td_selection.json
+    python -m tools.testing.llm_selector.select_tests --base origin/main --head <pr-head-sha> --output llm_selection.json
 
-LLM_TD_MODEL and LLM_TD_EFFORT, when set and not empty, are the defaults of
+LLM_SELECTOR_MODEL and LLM_SELECTOR_EFFORT, when set and not empty, are the defaults of
 --model and --effort.
 
 The prompt holds the PR title and description, the diff, and every test file
@@ -11,7 +11,7 @@ in CI this script runs from the default branch and only reads the PR through git
 with a JSON schema; on Bedrock set CLAUDE_CODE_USE_BEDROCK=1 and AWS
 credentials. A failure of git, the model call or its output, or the test times
 yields a run_all selection, so CI never skips tests because the selector broke;
-a bad LLM_TD_EFFORT or a failed write of --output writes no file.
+a bad LLM_SELECTOR_EFFORT or a failed write of --output writes no file.
 """
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.import_test_stats import get_test_times
 from tools.testing.discover_tests import BLOCKLISTED_PATTERNS, TESTS
-from tools.testing.llm_td.selection import (
-    LLM_TD_SELECTION_FILE,
+from tools.testing.llm_selector.selection import (
+    LLM_SELECTION_FILE,
     needs_run_all,
     Selection,
     SWEEPS,
@@ -206,7 +206,8 @@ def query_model(
         "--json-schema", json.dumps(SCHEMA),
     ]  # fmt: skip
     if checkout:
-        allowed = f"Read(/{os.path.abspath(checkout)}/**)"
+        checkout = os.path.abspath(checkout)
+        allowed = f"Read(/{checkout}/**)"
         cmd += ["--allowed-tools", allowed, "--add-dir", checkout]
         prompt = CHECKOUT_PREAMBLE.format(checkout=checkout) + prompt
     # An empty working directory keeps the CLI from picking up any project
@@ -365,10 +366,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--title", help="the PR title; by default the PR event's, else head's commit subject")  # fmt: skip
     parser.add_argument("--body", help="the PR description; needs --title")
     # An unset repository variable reaches the workflow as an empty string.
-    parser.add_argument("--model", default=os.environ.get("LLM_TD_MODEL") or DEFAULT_MODEL, help=f"the claude model (default: LLM_TD_MODEL or {DEFAULT_MODEL})")  # fmt: skip
+    parser.add_argument("--model", default=os.environ.get("LLM_SELECTOR_MODEL") or DEFAULT_MODEL, help=f"the claude model (default: LLM_SELECTOR_MODEL or {DEFAULT_MODEL})")  # fmt: skip
     efforts = ["low", "medium", "high", "xhigh", "max"]
-    parser.add_argument("--effort", default=os.environ.get("LLM_TD_EFFORT") or "medium", choices=efforts, help="the model's effort (default: LLM_TD_EFFORT or medium)")  # fmt: skip
-    parser.add_argument("--output", type=Path, default=REPO_ROOT / LLM_TD_SELECTION_FILE, help="where to write the selection file")  # fmt: skip
+    parser.add_argument("--effort", default=os.environ.get("LLM_SELECTOR_EFFORT") or "medium", choices=efforts, help="the model's effort (default: LLM_SELECTOR_EFFORT or medium)")  # fmt: skip
+    parser.add_argument("--output", type=Path, default=REPO_ROOT / LLM_SELECTION_FILE, help="where to write the selection file")  # fmt: skip
     parser.add_argument(
         "--enforce",
         action="store_true",
@@ -380,7 +381,7 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("--body needs --title")
     # argparse checks choices only for values given on the command line.
     if args.effort not in efforts:
-        parser.error(f"LLM_TD_EFFORT={args.effort!r} is not one of {efforts}")
+        parser.error(f"LLM_SELECTOR_EFFORT={args.effort!r} is not one of {efforts}")
 
     record: dict = {
         "model": args.model,
@@ -408,12 +409,12 @@ def main(argv: list[str] | None = None) -> None:
         json.dumps({**selection.to_json(), "diagnostics": record}, indent=1)
     )
     print(
-        f"LLM TD: run_all={selection.run_all} sweeps={sorted(selection.sweeps)} files={len(selection.files)}"
+        f"LLM selector: run_all={selection.run_all} sweeps={sorted(selection.sweeps)} files={len(selection.files)}"
     )
     # json.dumps keeps a model-written newline from starting a workflow command,
     # and escaping "#" keeps the runner from parsing a legacy ##[command].
     reason = json.dumps(selection.reason).replace("#", "\\u0023")
-    print(f"LLM TD: {reason}")
+    print(f"LLM selector: {reason}")
 
 
 if __name__ == "__main__":
