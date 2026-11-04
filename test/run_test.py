@@ -2559,7 +2559,6 @@ def main():
         test_config=TEST_CONFIG,
         td_enabled=options.enable_td,
         percent=percent_to_run,
-        emit=emit_metric if IS_CI else None,
     )
     include, exclude = split.include, split.exclude
 
@@ -2569,8 +2568,11 @@ def main():
         gen_ci_artifact(
             [x.to_json() for x in include],
             [x.to_json() for x in exclude],
-            split.source,
+            source=split.source,
+            td_excluded=[x.to_json() for x in split.td_exclude],
         )
+        if split.llm is not None:
+            emit_metric("llm_td_selection", split.llm.selection_metric)
 
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
@@ -2618,17 +2620,19 @@ def main():
             for test, _ in all_failures:
                 test_stats = test_prioritizations.get_test_stats(test)
                 print_to_stderr("Emitting td_test_failure_stats_v2")
-                # emit_metric records its caller, so this stays in main().
+                # emit_metric records its caller, so these stay in main().
                 emit_metric(
                     "td_test_failure_stats_v2",
                     {
                         "selected_tests": selected_tests,
                         "failure": str(test),
                         "llm_enforced": split.enforced,
+                        "call_id": split.call_id,
                         **test_stats,
                     },
                 )
-                split.report_failure(test)
+                if split.llm is not None:
+                    emit_metric("llm_td_failure", split.llm.failure_metric(test))
             gen_additional_test_failures_file(
                 [test.test_file for test, _ in all_failures]
             )
