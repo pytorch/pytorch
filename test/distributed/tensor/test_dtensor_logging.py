@@ -141,26 +141,44 @@ sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[
 
         x_dt = DTensor.from_local(torch.randn(2, 4), mesh, [Shard(0)], run_check=False)
 
-        for level, expected_records in ((logging.WARNING, 0), (logging.DEBUG, 2)):
-            log_records.clear()
-            dispatch_logger.setLevel(level)
+        def run_worker():
+            worker_exc: BaseException | None = None
+            cache_stats: tuple[int, int] | None = None
 
             def worker():
-                x_dt + x_dt  # miss (populates thread-local C++ cache)
-                x_dt + x_dt  # hit (invokes log_sharding_prop_cache_hit on worker thread)
+                nonlocal worker_exc, cache_stats
+                try:
+                    x_dt + x_dt  # miss (populates thread-local C++ cache)
+                    (
+                        x_dt + x_dt
+                    )  # hit (invokes log_sharding_prop_cache_hit on worker thread)
+                    cache_stats = (
+                        torch._C._get_DTensor_sharding_propagator_cache_stats()
+                    )
+                except BaseException as exc:
+                    worker_exc = exc
 
             thread = threading.Thread(target=worker)
             thread.start()
             thread.join()
+            if worker_exc is not None:
+                raise worker_exc
+            self.assertIsNotNone(cache_stats)
+            hits, _ = cache_stats
+            self.assertGreaterEqual(hits, 1)
+
+        for level, expected_records in ((logging.WARNING, 0), (logging.DEBUG, 2)):
+            log_records.clear()
+            dispatch_logger.setLevel(level)
+            run_worker()
             self.assertEqual(len(log_records), expected_records)
 
         # Also test when the logger returned to C++ has no other Python references,
         # so any dangling thread_local py::object deallocates it during thread exit
         # after PyThreadState_DeleteCurrent() has released the GIL (even under -DNDEBUG).
         with patch.object(logging, "getLogger", side_effect=logging.Logger):
-            thread = threading.Thread(target=worker)
-            thread.start()
-            thread.join()
+            run_worker()
+
 
 if __name__ == "__main__":
     run_tests()

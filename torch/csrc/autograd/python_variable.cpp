@@ -1183,8 +1183,10 @@ struct hash<NativeOpSchema> {
 } // namespace std
 
 // Helper to check if dtensor debug logging is enabled and log cache hits.
-// We cache the logger and debug-enabled check to avoid repeated Python calls.
-// Pattern follows torch/csrc/jit/passes/onnx/onnx_log.cpp
+// We cache the debug-enabled check per thread to avoid repeated Python calls,
+// and fetch the logger on each logged hit. Only plain bools may be kept in
+// thread_local storage here, because a thread_local py::object is destroyed at
+// thread exit after PyThreadState_DeleteCurrent() has released the GIL.
 namespace {
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_logging_module,
