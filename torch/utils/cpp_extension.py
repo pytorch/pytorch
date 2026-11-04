@@ -1846,7 +1846,10 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
         ])
     if device_type == "cuda" and IS_HIP_EXTENSION:
         paths.append(os.path.join(lib_include, 'THH'))
-        paths.append(_join_rocm_home('include'))
+        rocm_home_include = _join_rocm_home('include')
+        # Distros that package ROCm under /usr give /usr/include; see the CUDA branch below.
+        if rocm_home_include != '/usr/include':
+            paths.append(rocm_home_include)
     elif device_type == "cuda":
         cuda_home_include = _join_cuda_home('include')
         # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
@@ -3151,9 +3154,13 @@ def _write_ninja_file_to_build_library(path,
         cflags = common_cflags + ['-fPIC', '-std=c++20'] + extra_cflags
 
     if with_cuda and IS_HIP_EXTENSION:
-        cuda_flags = ['-DWITH_HIP'] + common_cflags + extra_cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
+        # On Windows, extra_cflags may hold MSVC-syntax flags (/O2, /std:c++17)
+        # for cl.exe or clang-cl. hipcc's clang driver reads those as input file
+        # paths, so drop them; dash-style flags (-DFOO, -I..., -O3) still apply.
+        hip_host_cflags = [f for f in extra_cflags if not f.startswith('/')] if IS_WINDOWS else extra_cflags
+        cuda_flags = ['-DWITH_HIP'] + common_cflags + hip_host_cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
         cuda_flags = cuda_flags + ['-std=c++20']
-        cuda_flags += _get_rocm_arch_flags(cuda_flags)
+        cuda_flags += _get_rocm_arch_flags(cuda_flags + extra_cuda_cflags)
         cuda_flags += extra_cuda_cflags
         if IS_WINDOWS:
             cuda_flags = _nt_quote_args(cuda_flags)
