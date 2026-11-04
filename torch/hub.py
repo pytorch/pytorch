@@ -264,6 +264,28 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
     )
 
 
+@contextlib.contextmanager
+def _cache_lock(path):
+    """Hold the lock for cache entry ``path``, saying so if another process has it.
+
+    Processes that share a cache directory (for example DDP ranks) take this lock
+    so that only one of them populates an entry while the others wait for it.
+    """
+    from filelock import Timeout
+
+    from torch.utils._filelock import FileLock
+
+    lock = FileLock(path + ".lock")
+    try:
+        lock.acquire(timeout=0)
+    except Timeout:
+        sys.stderr.write(f"Waiting for another process to download {path}\n")
+    else:
+        lock.release()
+    with lock:
+        yield
+
+
 def _get_cache_or_reload(
     github,
     force_reload,
@@ -300,54 +322,66 @@ def _get_cache_or_reload(
     if use_cache:
         if verbose:
             sys.stderr.write(f"Using cache found in {repo_dir}\n")
-    else:
+        return repo_dir
+
+    # force_reload is not coordinated between processes: each caller that passes
+    # it downloads the repo again, one at a time, and replaces the directory that
+    # other processes may be using.
+    with _cache_lock(repo_dir):
+        # Another process may have populated the cache while we waited.
+        if not force_reload and os.path.exists(repo_dir):
+            if verbose:
+                sys.stderr.write(f"Using cache found in {repo_dir}\n")
+            return repo_dir
+
         # Validate the tag/branch is from the original repo instead of a forked repo
         if not skip_validation:
             _validate_not_a_forked_repo(repo_owner, repo_name, ref)
 
-        from torch.utils._filelock import FileLock
+        # Name the archive after the repo and not only the branch, so that
+        # different repos on the same branch don't share it.
+        cached_file = os.path.join(hub_dir, owner_name_branch + ".zip")
+        _remove_if_exists(cached_file)
 
-        # Another process may have populated the cache while we waited.
-        with FileLock(repo_dir + ".lock"):
-            if force_reload or not os.path.exists(repo_dir):
-                cached_file = os.path.join(hub_dir, normalized_br + ".zip")
-                _remove_if_exists(cached_file)
+        try:
+            url = _git_archive_link(repo_owner, repo_name, ref)
+            sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
+            download_url_to_file(url, cached_file, progress=False)
+        except HTTPError as err:
+            if err.code == 300:
+                # Getting a 300 Multiple Choices error likely means that the ref is both a tag and a branch
+                # in the repo. This can be disambiguated by explicitly using refs/heads/ or refs/tags
+                # See https://git-scm.com/book/en/v2/Git-Internals-Git-References
+                # Here, we do the same as git: we throw a warning, and assume the user wanted the branch
+                warnings.warn(
+                    f"The ref {ref} is ambiguous. Perhaps it is both a tag and a branch in the repo? "
+                    "Torchhub will now assume that it's a branch. "
+                    "You can disambiguate tags and branches by explicitly passing refs/heads/branch_name or "
+                    "refs/tags/tag_name as the ref. That might require using skip_validation=True.",
+                    stacklevel=2,
+                )
+                disambiguated_branch_ref = f"refs/heads/{ref}"
+                url = _git_archive_link(
+                    repo_owner, repo_name, ref=disambiguated_branch_ref
+                )
+                download_url_to_file(url, cached_file, progress=False)
+            else:
+                raise
 
-                try:
-                    url = _git_archive_link(repo_owner, repo_name, ref)
-                    sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
-                    download_url_to_file(url, cached_file, progress=False)
-                except HTTPError as err:
-                    if err.code == 300:
-                        # Getting a 300 Multiple Choices error likely means that the ref is both a tag and a branch
-                        # in the repo. This can be disambiguated by explicitly using refs/heads/ or refs/tags
-                        # See https://git-scm.com/book/en/v2/Git-Internals-Git-References
-                        # Here, we do the same as git: we throw a warning, and assume the user wanted the branch
-                        warnings.warn(
-                            f"The ref {ref} is ambiguous. Perhaps it is both a tag and a branch in the repo? "
-                            "Torchhub will now assume that it's a branch. "
-                            "You can disambiguate tags and branches by explicitly passing refs/heads/branch_name or "
-                            "refs/tags/tag_name as the ref. That might require using skip_validation=True.",
-                            stacklevel=2,
-                        )
-                        disambiguated_branch_ref = f"refs/heads/{ref}"
-                        url = _git_archive_link(
-                            repo_owner, repo_name, ref=disambiguated_branch_ref
-                        )
-                        download_url_to_file(url, cached_file, progress=False)
-                    else:
-                        raise
+        # Extract into a private directory: refs of the same repo at the same
+        # commit unpack to the same top-level directory name.
+        extract_dir = tempfile.mkdtemp(dir=hub_dir)
+        try:
+            with zipfile.ZipFile(cached_file) as cached_zipfile:
+                extracted_repo_name = cached_zipfile.infolist()[0].filename
+                # Unzip the code and rename the base folder using safe extraction
+                _safe_extract_zip(cached_zipfile, extract_dir)
 
-                with zipfile.ZipFile(cached_file) as cached_zipfile:
-                    extraced_repo_name = cached_zipfile.infolist()[0].filename
-                    extracted_repo = os.path.join(hub_dir, extraced_repo_name)
-                    _remove_if_exists(extracted_repo)
-                    # Unzip the code and rename the base folder using safe extraction
-                    _safe_extract_zip(cached_zipfile, hub_dir)
-
-                _remove_if_exists(cached_file)
-                _remove_if_exists(repo_dir)
-                shutil.move(extracted_repo, repo_dir)  # rename the repo
+            _remove_if_exists(cached_file)
+            _remove_if_exists(repo_dir)
+            shutil.move(os.path.join(extract_dir, extracted_repo_name), repo_dir)
+        finally:
+            shutil.rmtree(extract_dir, ignore_errors=True)
 
     return repo_dir
 
@@ -850,6 +884,11 @@ def load_state_dict_from_url(
     The default value of ``model_dir`` is ``<hub_dir>/checkpoints`` where
     ``hub_dir`` is the directory returned by :func:`~torch.hub.get_dir`.
 
+    Processes that share ``model_dir`` (for example DDP ranks) don't download
+    the same file at the same time: one of them downloads it while the others
+    wait and then load the cached copy. This uses a ``<file_name>.lock`` file
+    next to the downloaded file.
+
     Args:
         url (str): URL of the object to download
         model_dir (str, optional): directory in which to save the object
@@ -891,11 +930,9 @@ def load_state_dict_from_url(
         filename = file_name
     cached_file = os.path.join(model_dir, filename)
     if not os.path.exists(cached_file):
-        from torch.utils._filelock import FileLock
-
         # Processes sharing the cache (e.g. DDP ranks) wait for whichever one
         # downloads first instead of all downloading the same file.
-        with FileLock(cached_file + ".lock"):
+        with _cache_lock(cached_file):
             if not os.path.exists(cached_file):
                 sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
                 hash_prefix = None

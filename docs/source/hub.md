@@ -140,6 +140,14 @@ Users can force a reload by calling `hub.load(..., force_reload=True)`. This wil
 the existing GitHub folder and downloaded weights, reinitialize a fresh download. This is useful
 when updates are published to the same branch, users can keep up with the latest release.
 
+Processes that share the hub directory, such as DDP ranks on the same machine, coordinate
+through lock files: when several of them need an entry that isn't cached yet, one of them
+downloads it while the others wait and then use the cached copy. The lock files
+(`<entry>.lock`) are kept next to the entries, in the hub directory and in its `checkpoints`
+subdirectory. `force_reload=True` isn't coordinated this way: every caller that passes it
+downloads the entry again, one at a time, and replaces the copy other processes may be using,
+so avoid passing it from several processes at once.
+
 ### Known limitations:
 
 Torch hub works by importing the package as if it was installed. There are some side effects

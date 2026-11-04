@@ -450,7 +450,7 @@ class TestHub(TestCase):
         ) as mock_download:
             with ThreadPoolExecutor(num_workers) as pool:
                 futures = [pool.submit(worker) for _ in range(num_workers)]
-                results = [f.result() for f in futures]
+                results = [f.result(timeout=120) for f in futures]
         return results, mock_download.call_count
 
     def test_load_state_dict_from_url_concurrent(self):
@@ -468,13 +468,7 @@ class TestHub(TestCase):
             self.assertEqual(state_dict["w"], torch.arange(10))
 
     def test_get_cache_or_reload_concurrent(self):
-        archive = os.path.join(self.tmpdir.name, "archive.zip")
-        # Mimic a GitHub archive: a single top-level directory.
-        with zipfile.ZipFile(archive, "w") as zf:
-            zf.writestr("repo-main/", "")
-            zf.writestr("repo-main/hubconf.py", "dependencies = []\n")
-
-        url = Path(archive).as_uri()
+        url = self._make_hub_archive()
         with patch.object(hub, "_git_archive_link", return_value=url):
             results, num_downloads = self._run_concurrently(
                 lambda: hub._get_cache_or_reload(
@@ -489,6 +483,78 @@ class TestHub(TestCase):
         repo_dir = os.path.join(hub.get_dir(), "owner_repo_main")
         self.assertEqual(results, [repo_dir] * len(results))
         self.assertEqual(os.listdir(repo_dir), ["hubconf.py"])
+
+    def _make_hub_archive(self):
+        archive = os.path.join(self.tmpdir.name, "archive.zip")
+        # Mimic a GitHub archive: a single top-level directory.
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("repo-main/", "")
+            zf.writestr("repo-main/hubconf.py", "dependencies = []\n")
+        return Path(archive).as_uri()
+
+    def test_get_cache_or_reload_force_reload(self):
+        def load(force_reload):
+            return hub._get_cache_or_reload(
+                "owner/repo:main",
+                force_reload=force_reload,
+                trust_repo=True,
+                verbose=False,
+                skip_validation=True,
+            )
+
+        url = self._make_hub_archive()
+        real_download = hub.download_url_to_file
+        with (
+            patch.object(hub, "_git_archive_link", return_value=url),
+            patch.object(
+                hub, "download_url_to_file", side_effect=real_download
+            ) as mock_download,
+        ):
+            repo_dir = load(force_reload=False)
+            load(force_reload=False)
+            self.assertEqual(mock_download.call_count, 1)
+            self.assertEqual(load(force_reload=True), repo_dir)
+            self.assertEqual(mock_download.call_count, 2)
+        self.assertEqual(os.listdir(repo_dir), ["hubconf.py"])
+
+    def test_load_state_dict_from_url_failed_download_releases_lock(self):
+        src = os.path.join(self.tmpdir.name, "weights.pt")
+        torch.save({"w": torch.arange(10)}, src)
+        model_dir = os.path.join(self.tmpdir.name, "checkpoints")
+        real_download = hub.download_url_to_file
+        calls = []
+
+        def flaky_download(*args, **kwargs):
+            calls.append(None)
+            time.sleep(0.5)
+            if len(calls) == 1:
+                raise RuntimeError("download failed")
+            return real_download(*args, **kwargs)
+
+        barrier = threading.Barrier(2)
+
+        def worker():
+            barrier.wait()
+            try:
+                return hub.load_state_dict_from_url(
+                    Path(src).as_uri(), model_dir=model_dir, progress=False
+                )
+            except RuntimeError as e:
+                return e
+
+        with patch.object(hub, "download_url_to_file", side_effect=flaky_download):
+            with ThreadPoolExecutor(2) as pool:
+                futures = [pool.submit(worker) for _ in range(2)]
+                outcomes = [f.result(timeout=120) for f in futures]
+
+        # The worker whose download failed releases the lock, and the one that
+        # was waiting for it downloads the file itself.
+        self.assertEqual(len(calls), 2)
+        errors = [o for o in outcomes if isinstance(o, RuntimeError)]
+        state_dicts = [o for o in outcomes if not isinstance(o, RuntimeError)]
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(len(state_dicts), 1)
+        self.assertEqual(state_dicts[0]["w"], torch.arange(10))
 
 
 if __name__ == "__main__":
