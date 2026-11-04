@@ -12055,6 +12055,12 @@ class TestLinalgCudaOnly(TestCase):
         # The verdict stands: the second call of the same shape is an exact
         # hit, since RecordBorrowed persisted the borrow. The caller's Lookup
         # guard protects this. Counted in a subprocess (VERBOSE is sticky).
+        #
+        # Tuned here rather than in the child: Default can win a one-iteration
+        # tune of this shape, and LookupNearest skips Default donors, so the
+        # child would have nothing to borrow and the count would depend on
+        # which kernel happened to win. _force_nondefault_donor settles that,
+        # and the child is handed the finished file.
         import os
         import shutil
         import subprocess
@@ -12070,27 +12076,19 @@ class TestLinalgCudaOnly(TestCase):
             try:
                 torch.cuda.tunable.enable(False)
                 torch.cuda.tunable.record_untuned_enable(False)
-                torch.cuda.tunable.tuning_enable(True)
-                torch.cuda.tunable.set_max_tuning_duration(1)
-                torch.cuda.tunable.set_max_tuning_iterations(1)
-                torch.cuda.tunable.set_rotating_buffer_size(0)
-                torch.cuda.tunable.set_numerical_check_tolerances(False)
+                torch.cuda.tunable.tuning_enable(False)
                 torch.cuda.tunable.set_filename(results_filename, False)
                 torch.cuda.tunable.enable(True)
+                assert torch.cuda.tunable.read_file(results_filename)
 
-                device = {device!r}
-                dtype = {dtype}
-                K = 64
-                A = torch.randn(64, K, device=device, dtype=dtype)
-                B = torch.randn(K, 32, device=device, dtype=dtype)
-                torch.matmul(A, B)
-
-                torch.cuda.tunable.tuning_enable(False)
                 torch.cuda.tunable._nearest_match_enable(True)
                 torch.cuda.tunable._record_borrowed_enable({record_borrowed})
 
+                device = {device!r}
+                dtype = {dtype}
                 # Same borrow shape twice: only the first may validate.
-                A2 = torch.randn(32, K, device=device, dtype=dtype)
+                B = torch.randn(64, 32, device=device, dtype=dtype)
+                A2 = torch.randn(32, 64, device=device, dtype=dtype)
                 torch.matmul(A2, B)
                 torch.matmul(A2, B)
             finally:
@@ -12098,26 +12096,42 @@ class TestLinalgCudaOnly(TestCase):
             """
         )
 
-        for record_borrowed in (True, False):
-            with self.subTest(record_borrowed=record_borrowed):
-                # A fresh results file per run: reading back the previous run's
-                # entries would skip tuning and change the count.
-                results_dir = tempfile.mkdtemp(prefix="tunableop_borrow_cache_")
-                env = os.environ.copy()
-                # An inherited kill switch would stop the borrow entirely.
-                env.pop("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", None)
-                env.pop("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", None)
-                env["PYTORCH_TUNABLEOP_VERBOSE"] = "3"
-                env["PYTORCH_TUNABLEOP_VERBOSE_FILENAME"] = "out"
-                try:
+        donor_dir = tempfile.mkdtemp(prefix="tunableop_borrow_donor_")
+        donor_file = os.path.join(donor_dir, "donors.csv")
+        try:
+            with self._tunableop_ctx():
+                torch.cuda.tunable.set_max_tuning_iterations(1)
+                A = torch.randn(64, 64, device=device, dtype=dtype)
+                B = torch.randn(64, 32, device=device, dtype=dtype)
+                torch.matmul(A, B)
+                self._force_nondefault_donor()
+                shutil.copyfile(torch.cuda.tunable.get_filename(), donor_file)
+
+            for record_borrowed in (True, False):
+                with self.subTest(record_borrowed=record_borrowed):
+                    # A private copy per run: the child appends its verdict,
+                    # and the next run must start from the donor alone.
+                    results_filename = os.path.join(
+                        donor_dir, f"results_{record_borrowed}.csv"
+                    )
+                    shutil.copyfile(donor_file, results_filename)
+                    env = os.environ.copy()
+                    # An inherited kill switch would stop the borrow entirely.
+                    env.pop("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", None)
+                    env.pop("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", None)
+                    env["PYTORCH_TUNABLEOP_VERBOSE"] = "3"
+                    env["PYTORCH_TUNABLEOP_VERBOSE_FILENAME"] = "out"
+                    # The child resolves its own interpreter and modules;
+                    # ours describe this process and can leave it unable to
+                    # import torch at all.
+                    env.pop("PYTHONPATH", None)
+                    env.pop("PYTHONHOME", None)
                     result = subprocess.run(
                         [
                             sys.executable,
                             "-c",
                             script.format(
-                                results_filename=os.path.join(
-                                    results_dir, "results.csv"
-                                ),
+                                results_filename=results_filename,
                                 device=device,
                                 dtype=dtype,
                                 record_borrowed=record_borrowed,
@@ -12129,25 +12143,27 @@ class TestLinalgCudaOnly(TestCase):
                         cwd=os.path.dirname(__file__),
                         check=True,
                     )
-                finally:
-                    shutil.rmtree(results_dir, ignore_errors=True)
 
-                # One "finding fastest for" from FindFastest, one more from
-                # the borrow's FindFastestAmong; the repeat must log nothing.
-                # Raw matches, not parse_tunable_log: that keys on
-                # (op_sig, param_sig), so a second validation of the same shape
-                # overwrites the first and the repeat goes unseen -- which is
-                # the regression this test exists for. Two candidates means
-                # FindFastestAmong ran over Default and the donor, proof the
-                # donor was measured. With recording off nothing is borrowed.
-                validations = len(
-                    re.findall(
-                        r"finding fastest for .*out of 2 candidates", result.stdout
+                    # The child only borrows, so the single search it may log
+                    # is the borrow's FindFastestAmong; the repeat must log
+                    # nothing. Raw matches, not parse_tunable_log: that keys on
+                    # (op_sig, param_sig), so a second validation of the same
+                    # shape overwrites the first and the repeat goes unseen --
+                    # which is the regression this test exists for. Two
+                    # candidates means FindFastestAmong ran over Default and
+                    # the donor, proof the donor was measured. With recording
+                    # off nothing is borrowed.
+                    validations = len(
+                        re.findall(
+                            r"finding fastest for .*out of 2 candidates",
+                            result.stdout,
+                        )
                     )
-                )
-                self.assertEqual(
-                    validations, 1 if record_borrowed else 0, result.stdout
-                )
+                    self.assertEqual(
+                        validations, 1 if record_borrowed else 0, result.stdout
+                    )
+        finally:
+            shutil.rmtree(donor_dir, ignore_errors=True)
 
     @onlyCUDA
     @dtypes(torch.float)
