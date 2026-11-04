@@ -338,7 +338,7 @@ def hedge(
     split = sel.split(ranked, lambda x: float(x.test_file in positive), seconds, config, previously_failed=previous, td_include=td_cut, share=share)  # fmt: skip
     if split.chose_nothing:
         return set(td_cut)
-    return split.previously_failed | split.hedged
+    return split.previous_failures_added | split.hedged
 
 
 grep_at = functools.cache(git_grep)
