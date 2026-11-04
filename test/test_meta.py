@@ -2913,6 +2913,7 @@ class TestMetaKernelRegistrations(TestCase):
             return out.sum()
 
         x = torch.randn(2, 3, 8, 8).to(memory_format=torch.channels_last)
+        x.requires_grad_()
         compiled = torch.compile(fn, dynamic=True, backend="aot_eager")
         result = compiled(x)
         result.backward()
