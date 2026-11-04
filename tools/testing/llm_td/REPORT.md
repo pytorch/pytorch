@@ -478,7 +478,7 @@ run v3_opus55_medium_r2 $OPUS medium $IDS/eval.txt; run v3_opus55_low_r2 $OPUS l
 LLM_TD_AGENTIC_SANDBOX=1 run v3_sonnet5_medium_agentic $SONNET medium $IDS/agentic.txt --agentic
 ```
 
-`--agentic` gives the model Read, Grep and Glob with no path limits on untrusted PR text, so run_eval refuses it without `LLM_TD_AGENTIC_SANDBOX=1`: set that only in a sandbox whose only secret is the model credential.
+`--agentic` gives the model Read, Grep and Glob over the checkout on untrusted PR text, so run_eval refuses it without `LLM_TD_AGENTIC_SANDBOX=1`: set that only in a sandbox whose only secret is the model credential.
 
 The order matters for the recorded $/call: runs that share a prompt prefix with an earlier run read it from cache (see Dollar model).
 
