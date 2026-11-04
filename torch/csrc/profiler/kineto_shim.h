@@ -1,7 +1,6 @@
 #pragma once
 
 #include <memory>
-#include <optional>
 #include <string>
 
 // Skip Kineto dependency on mobile unless explicitly asked for.
@@ -123,12 +122,11 @@ using ProfilerExtensionMap = std::unordered_map<std::string, std::string>;
 // stops.
 bool isDevicePresent();
 
-// cpuOnly matters only when this call registers libkineto, which happens once
-// per process. It then fixes whether libkineto can trace a device at all, and
-// isDevicePresent decides when it is empty. Each trace arms device tracing only
-// if activities request a device.
+// The first call in a process registers libkineto, with device support if
+// isDevicePresent says there is a device. A caller that needs libkineto without
+// device support, such as a test, can register it first with libkineto_init.
+// Each trace arms device tracing only if activities request a device.
 TORCH_API void prepareTrace(
-    const std::optional<bool> cpuOnly,
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config,
     const std::string& trace_id = "",

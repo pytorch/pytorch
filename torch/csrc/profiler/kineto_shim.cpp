@@ -310,7 +310,6 @@ static const std::string appendCustomConfig(
 #endif
 
 void prepareTrace(
-    const std::optional<bool> cpuOnly,
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config,
     const std::string& trace_id,
@@ -319,9 +318,7 @@ void prepareTrace(
 #ifdef USE_KINETO
   libkineto::api().resetKinetoTLS();
   if (!libkineto::api().isProfilerRegistered()) {
-    libkineto_init(
-        /*cpuOnly=*/cpuOnly.has_value() ? *cpuOnly : !isDevicePresent(),
-        /*logOnError=*/true);
+    libkineto_init(/*cpuOnly=*/!isDevicePresent(), /*logOnError=*/true);
     libkineto::api().suppressLogMessages();
   }
 
