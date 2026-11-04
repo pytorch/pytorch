@@ -703,7 +703,7 @@ class TestSerialFileXdistWorkers(TestCase):
                 if arg.startswith("--nodeid-file=")
             ]
             with open(path) as f:
-                nodeids = f.read().split()
+                nodeids = f.read().splitlines()
             retried.append((command, continue_through_error, env, nodeids))
             return 0, False
 
