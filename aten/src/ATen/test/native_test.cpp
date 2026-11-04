@@ -293,11 +293,18 @@ TEST(TestNative, MarkFakeStorage) {
   auto mode = std::make_shared<c10::FakeTensorMode>(nullptr, nullptr);
   auto make_fake = [&]() {
     auto t = at::empty({2}, at::device(at::kMeta));
-    auto* impl = t.unsafeGetTensorImpl();
-    at::set_and_normalize_fake_device(impl, c10::Device(c10::kCPU));
-    impl->set_fake_tensor_mode(mode);
-    at::mark_fake_storage(impl, *mode);
+    at::init_cpp_fake(t.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
     return t;
+  };
+  auto expect_throws = [](const at::Tensor& t) {
+    try {
+      t.mutable_data_ptr();
+      ADD_FAILURE() << "expected mutable_data_ptr() to throw";
+    } catch (const c10::Error& e) {
+      EXPECT_NE(
+          std::string(e.what()).find("Cannot access data pointer of Tensor"),
+          std::string::npos);
+    }
   };
   struct CaptureWarnings : c10::WarningHandler {
     std::vector<std::string> messages;
@@ -317,11 +324,16 @@ TEST(TestNative, MarkFakeStorage) {
       handler.messages[0].find("Accessing the data pointer of FakeTensor"),
       std::string::npos);
 
-  // Disallowing unsafe access makes fakes created afterwards throw
+  // Disallowing unsafe access makes fakes made afterwards throw, and a new fake
+  // sharing an earlier fake's storage, as a view of it, makes that throw too
   mode->allow_unsafe_data_ptr_access_ = false;
-  EXPECT_THROW(make_fake().mutable_data_ptr(), c10::Error);
+  expect_throws(make_fake());
   fake.mutable_data_ptr();
   EXPECT_EQ(handler.messages.size(), 2);
+  auto alias = at::empty({0}, at::device(at::kMeta));
+  alias.unsafeGetTensorImpl()->set_storage_keep_dtype(fake.storage());
+  at::init_cpp_fake(alias.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
+  expect_throws(fake);
 }
 
 TEST(TestNative, InKernelInvocationReportsMetaDevice) {
