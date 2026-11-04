@@ -1007,6 +1007,8 @@ class TestMain(unittest.TestCase):
             select_tests.query_model("p", "m", "medium", checkout=wt)
         cmd, cwd = seen["cmd"], seen["cwd"]
         self.assertEqual(cmd[cmd.index("--add-dir") + 1], wt)
+        self.assertEqual(cmd[cmd.index("--tools") + 1], select_tests.AGENTIC_TOOLS)
+        self.assertEqual(cmd[cmd.index("--allowed-tools") + 1], f"Read(/{wt}/**)")
         # A fresh, empty temp dir outside the checkout, removed afterwards.
         self.assertEqual(seen["contents"], [])
         self.assertEqual(cwd.parent, Path(tempfile.gettempdir()))
