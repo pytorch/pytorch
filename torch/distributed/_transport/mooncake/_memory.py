@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import operator
 from dataclasses import dataclass
-from typing import Any, Literal, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, Literal, Self, TYPE_CHECKING
 
 from .._serialization import _WireDescriptor
 
