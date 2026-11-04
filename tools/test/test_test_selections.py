@@ -477,7 +477,7 @@ class TestCalculateShards(unittest.TestCase):
     def test_xdist_workers_split_divided_time_in_test_order(self) -> None:
         # run_test.py shards its main batch with sort_by_time=False, and splits a
         # serial xdist file by its divided time.
-        test_times = {"xdist_test": THRESHOLD * 7}
+        test_times: dict[str, float] = {"xdist_test": THRESHOLD * 7}
         shards = calculate_shards(
             3,
             [TestRun("xdist_test")],

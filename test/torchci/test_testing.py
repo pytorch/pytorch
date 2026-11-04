@@ -600,6 +600,7 @@ class TestReportEnablement(TestCase):
                 self.assertEqual(default(), expected)
 
 
+@skipIfTorchDynamo("tests run_test.py's scheduling, not the tests it runs")
 class TestSerialFileXdistWorkers(TestCase):
     """run_test.py runs the non-@serial tests of XDIST_SERIAL_LIST files under
     xdist only where each worker keeps the per-process isolation it needs."""
