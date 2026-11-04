@@ -1,5 +1,5 @@
 # Driver project that builds nccl-extensions/nccl_ep against a prebuilt NCCL
-# (the Makefile-built or installed tree in NCCL_HOME). nccl_ep is written to be
+# (the Makefile-built tree in NCCL_HOME). nccl_ep is written to be
 # add_subdirectory'd, so it has no project()/languages of its own and expects
 # CUDA_MAJOR/CUDA_MINOR (mirroring NCCL's root CMakeLists); this driver supplies
 # them. Invoked by the nccl_ep_external ExternalProject in
@@ -17,13 +17,3 @@ list(GET __cuda_ver_parts 1 CUDA_MINOR)
 # The updated EP layout moved this generated header under nccl_ep/.
 file(REMOVE "${NCCL_EP_BUILDDIR}/include/ep_enums.h")
 add_subdirectory("${NCCL_EP_SOURCE_DIR}" nccl_ep)
-
-# The wrapper and JIT also need core NCCL headers in the combined include tree.
-# Copy only core headers so stale EP headers cannot overwrite the pinned ones.
-if(NOT "${NCCL_HOME}" STREQUAL "${NCCL_EP_BUILDDIR}")
-  file(COPY
-    "${NCCL_HOME}/include/nccl.h"
-    "${NCCL_HOME}/include/nccl_device.h"
-    "${NCCL_HOME}/include/nccl_device"
-    DESTINATION "${NCCL_EP_BUILDDIR}/include")
-endif()
