@@ -2552,7 +2552,7 @@ def main():
             s += "".join(f"    {test}\n" for test in parallel)
             return s.strip()
 
-    # The LLM test selection, if CI downloaded one; see tools/testing/llm_td.
+    # TD's split, or the LLM test selection's if CI downloaded one; see tools/testing/llm_td.
     split = split_tests(
         test_prioritizations=test_prioritizations,
         test_times=test_file_times_dict,
@@ -2564,7 +2564,7 @@ def main():
     )
     test_batch = TestBatch("tests to run", split.include, False)
     test_batch_exclude = TestBatch("excluded", split.exclude, True)
-    # emit_metric records its caller, so these stay in main().
+    # emit_metric records its caller, so this stays in main().
     if IS_CI and split.llm is not None:
         emit_metric("llm_td_selection", split.llm.selection_metric)
 
@@ -2614,7 +2614,7 @@ def main():
             for test, _ in all_failures:
                 test_stats = test_prioritizations.get_test_stats(test)
                 print_to_stderr("Emitting td_test_failure_stats_v2")
-                # emit_metric records its caller, so these stay in main().
+                # emit_metric records its caller, so this stays in main().
                 emit_metric(
                     "td_test_failure_stats_v2",
                     {
