@@ -3,6 +3,7 @@
 import unittest
 
 import torch
+import torch.nn.functional as F
 from torch._inductor import config, ir
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.debug import DebugContext
@@ -331,6 +332,106 @@ class TestJaggedReductionIR(TestCase):
             actual, codes = run_and_get_code(torch.compile(fn), data, offsets, bias)
             self.assertEqual("\n".join(codes).count(".run("), launches)
             self.assertEqual(actual, fn(data, offsets, bias), atol=1e-4, rtol=1e-4)
+
+    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+    @parametrize("mode", ["sum", "mean"])
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    def test_embedding_bag(self, mode, dtype):
+        # Bags of 2, 0, 1027 and 1 indices.
+        offsets = torch.tensor([0, 2, 2, 1029], device="cuda")
+        indices = torch.randint(0, 100, (1030,), device="cuda")
+        weight = torch.randn(100, 16, device="cuda", dtype=dtype)
+
+        def fn(weight, indices, offsets):
+            return F.embedding_bag(indices, weight, offsets, mode=mode)
+
+        actual, codes = run_and_get_code(torch.compile(fn), weight, indices, offsets)
+        self.assertIn("r0_bound", "\n".join(codes))
+        # The summation order differs from eager.
+        self.assertEqual(actual, fn(weight, indices, offsets), atol=1e-2, rtol=1e-2)
+
+    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+    def test_embedding_bag_options(self):
+        offsets = torch.tensor([0, 2, 2, 1029], device="cuda")
+        indices = torch.randint(0, 5, (1030,), device="cuda")
+        weight = torch.randn(5, 16, device="cuda")
+        per_sample_weights = torch.randn(1030, device="cuda")
+
+        def weighted(weight, indices, offsets):
+            return F.embedding_bag(
+                indices,
+                weight,
+                offsets,
+                mode="sum",
+                per_sample_weights=per_sample_weights,
+            )
+
+        def padded_mean(weight, indices, offsets):
+            return F.embedding_bag(indices, weight, offsets, mode="mean", padding_idx=3)
+
+        def last_offset(weight, indices, offsets):
+            offsets = torch.cat([offsets, offsets.new_tensor([1030])])
+            return F.embedding_bag(
+                indices, weight, offsets, mode="mean", include_last_offset=True
+            )
+
+        for fn in (weighted, padded_mean, last_offset):
+            torch._dynamo.reset()
+            actual, codes = run_and_get_code(
+                torch.compile(fn), weight, indices, offsets
+            )
+            self.assertIn("r0_bound", "\n".join(codes))
+            expected = fn(weight, indices, offsets)
+            self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+    @parametrize("mode", ["sum", "mean"])
+    def test_embedding_bag_backward(self, mode):
+        # The backward stays a fallback that reads offset2bag and bag_size.
+        offsets = torch.tensor([0, 2, 2, 1029], device="cuda")
+        indices = torch.randint(0, 5, (1030,), device="cuda")
+
+        def fn(weight, indices, offsets):
+            out = F.embedding_bag(indices, weight, offsets, mode=mode, padding_idx=3)
+            return (out**2).sum()
+
+        eager = torch.randn(5, 16, device="cuda", requires_grad=True)
+        compiled = eager.detach().clone().requires_grad_()
+        fn(eager, indices, offsets).backward()
+        torch.compile(fn)(compiled, indices, offsets).backward()
+        self.assertEqual(compiled.grad, eager.grad, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+    def test_embedding_bag_max_falls_back(self):
+        offsets = torch.tensor([0, 2, 2, 1029], device="cuda")
+        indices = torch.randint(0, 100, (1030,), device="cuda")
+        weight = torch.randn(100, 16, device="cuda")
+
+        def fn(weight, indices, offsets):
+            return F.embedding_bag(indices, weight, offsets, mode="max")
+
+        actual, codes = run_and_get_code(torch.compile(fn), weight, indices, offsets)
+        self.assertNotIn("r0_bound", "\n".join(codes))
+        self.assertEqual(actual, fn(weight, indices, offsets))
+
+    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+    def test_embedding_bag_fusion(self):
+        offsets = torch.tensor([0, 2, 2, 1029], device="cuda")
+        indices = torch.randint(0, 100, (1030,), device="cuda")
+        weights = torch.randn(2, 100, 16, device="cuda")
+        bias = torch.randn(16, device="cuda")
+
+        def fn(weights, indices, offsets, bias):
+            a = F.embedding_bag(indices, weights[0], offsets, mode="sum")
+            b = F.embedding_bag(indices, weights[1], offsets, mode="mean")
+            return torch.relu(a + b + bias)
+
+        # One kernel appends len(indices) to offsets; one runs both bags and
+        # the epilogue in a single loop.
+        args = (weights, indices, offsets, bias)
+        actual, codes = run_and_get_code(torch.compile(fn), *args)
+        self.assertEqual("\n".join(codes).count(".run("), 2)
+        self.assertEqual(actual, fn(*args), atol=1e-2, rtol=1e-2)
 
 
 instantiate_parametrized_tests(TestJaggedReductionIR)
