@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -113,6 +114,8 @@ DRIVER_MAPPINGS = {
     "test_cpp_extensions_stream_and_event": [r"^test/cpp_extensions/"],
     "test_dispatch": [r"^test/cpp_extensions/dangling_impl_extension\.cpp$"],
     "test_ao_sparsity": [r"^test/ao/"],
+    # It checks every CPython test .diff against its .py.
+    "test_cpython_diff_sync": [r"^test/cpython/.*\.diff$"],
     "test_autograd": [r"^test/autograd/"],
     "test_fx": [r"^test/fx/"],
     "test_jit": [r"^test/jit/"],
@@ -122,6 +125,17 @@ DRIVER_MAPPINGS = {
         for t in ("test_jit_profiling", "test_jit_legacy")
     },
     "test_jit_fuser_te": [r"^test/jit/test_fuser_common\.py$"],
+    # They import these blocklisted files, or run them as subprocesses.
+    "test_jit_fuser_legacy": [r"^test/test_jit_fuser\.py$"],
+    **{
+        f"distributed/test_c10d_spawn_{b}": [r"^test/distributed/test_c10d_spawn\.py$"]
+        for b in ("gloo", "nccl", "ucc")
+    },
+    "onnx/test_models_onnxruntime": [r"^test/onnx/test_models\.py$"],
+    "distributed/launcher/test_run": [
+        r"^test/distributed/launcher/bin/test_script(_init_method|_is_torchelastic_launched)?\.py$"
+    ],
+    "distributed/test_launcher": [r"^test/distributed/bin/test_script\.py$"],
     "test_package": [r"^test/package/"],
     "test_quantization": [r"^test/quantization/"],
 }
@@ -138,9 +152,14 @@ FAILURE_LIST_RE = re.compile(FAILURE_LIST_DIR_RE.pattern + r"(?:.*-)?(\w+)\.[^./
 DEVICE_SUFFIX_RE = re.compile(r"(CPU|CUDA|MPS|XPU|HPU|META|LAZY|PRIVATEUSE1)$")
 # assertExpected reads test/expect/<TestClass>.<test>[-<name>].expect.
 EXPECT_RE = re.compile(r"^test/expect/(\w+)\.")
-# Edited files under test/ that need no reader: docs, the notes on CPython's
-# tests, and the C++ tests, which are never candidates and so always run.
-NO_READER_RE = re.compile(r"\.(md|rst|diff)$|^test/cpp/")
+# Edited files under test/ that need no reader: docs; files under test/cpp/,
+# mostly sources and data of the C++ tests, which are never candidates and so
+# always run (importers still finds the Python tests importing one); and the
+# non-.py files of the blocklisted directories without a driver, which only
+# CI scripts build and run_test.py never runs.
+NO_READER_RE = re.compile(
+    r"\.(md|rst)$|^test/cpp/|^test/(custom_backend|custom_operator|mobile)/.*(?<!\.py)$"
+)
 # discover_tests.py's test modules. One that is not a candidate is always
 # covered (see Selection.candidates), so it needs no reader.
 TEST_MODULE_RE = re.compile(r"^test/(.*/)?test_[^/]*\.py$")
@@ -170,18 +189,18 @@ RUN_ALL_PATTERNS = [
     r"^\.ci/pytorch/(build|win-build|macos-build|rocm_utils|test|multigpu-test|win-test|macos-test|macos-common|common|common-build|common_utils|torch_trace)\.sh$",
     r"^\.ci/pytorch/numba-cuda-13\.patch$",
     r"^scripts/onnx/test\.sh$",
-    r"^\.ci/pytorch/win-test-helpers/(build_pytorch\.bat|setup_pytorch_env\.bat|test_python_shard\.bat|test_python_jit_legacy\.bat|installation-helpers/activate_miniconda3\.bat)$",
+    r"^\.ci/pytorch/win-test-helpers/(build_pytorch\.bat|setup_pytorch_env\.bat|test_python_shard\.bat|test_python_jit_legacy\.bat|installation-helpers/(activate_miniconda3|install_magma|install_sccache)\.bat)$",
     r"^\.github/workflows/_(linux|win|mac|rocm|xpu|s390x|tpu)-test(-no-dind)?\.yml$",
     r"^\.github/workflows/_(linux|win|mac|s390x)-build\.yml$",
     # setup-linux is left out: the test jobs use it from main, not from the PR.
-    r"^\.github/actions/(setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts)/",
+    r"^\.github/actions/(setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts|download-build-artifacts)/",
     r"^\.github/scripts/filter_test_configs\.py$",
     # The pytest plugin every test job loads.
     r"^torch/testing/_internal/torchci/",
     # Installed by .ci/pytorch/common_utils.sh, and torch_tpu by install_torch_tpu.sh, for the test jobs.
     r"^\.github/ci_commit_pins/(audio|vision|spmd_types|torch_tpu)\.txt$",
     # The CI test images: a new package version or toolchain can break any test.
-    r"^\.ci/docker/(build\.sh|requirements-ci\.txt|triton(_xpu)?_version\.txt|common/|ci_commit_pins/|ubuntu)",
+    r"^\.ci/docker/(build\.sh|requirements-ci\.txt|triton(_xpu)?_version\.txt|common/|ci_commit_pins/|ubuntu(-rocm|-xpu)?/)",
 ]
 
 
@@ -251,39 +270,35 @@ def import_pattern(modules: Iterable[str]) -> str:
     # directory; and load_test_module (a SourceFileLoader) takes the path.
     # The CPython tests under test/cpython redirect test.<name> to <name>, so
     # `from test import <name>` imports their sibling module <name>.
-    # A parenthesized `from <package> import (` may span lines, so it counts
-    # as importing every module of that package. A bare name that is also a
-    # standard library module, such as random, imports that module instead,
-    # and a bare `test` the test/ package.
+    # A parenthesized `from <package> import (`, or `from . import (`, may
+    # span lines, so it counts as importing every module of that package (for
+    # `from . import (`, of any package). Without a relative or `test.` prefix,
+    # a name that is also a standard library module, such as random, imports
+    # that module instead, and a bare `test` the test/ package.
     bare = sys.stdlib_module_names | {"test"}
+
+    def dotted(names: set[str]) -> str:
+        alt = rf"(\.+|test\.)({alts(names)})"
+        if unprefixed := alts(n for n in names if n not in bare):
+            alt += f"|{unprefixed}"
+        return f"({alt})"
+
     mods = sorted(f[5:-3].removesuffix("/__init__") for f in modules)
     parts = [m.split("/") for m in mods]
-    names = alts(
-        ".".join(p[i:])
-        for p in parts
-        for i in range(len(p))
-        if i < len(p) - 1 or p[i] not in bare
-    )
+    names = dotted({".".join(p[i:]) for p in parts for i in range(len(p))})
     bases = alts(p[-1] for p in parts)
-    parents = alts(
-        ".".join(p[i:-1])
-        for p in parts
-        for i in range(len(p) - 1)
-        if i < len(p) - 2 or p[i] not in bare
-    )
+    parents = {".".join(p[i:-1]) for p in parts for i in range(len(p) - 1)}
     paths = alts(n for m in mods for n in (m, m.replace("/", ".")))
     end = "([^[:alnum:]_]|$)"
+    names_of = rf"import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})"
     forms = [
-        *([rf"(from|import)[[:space:]]+\.*(test\.)?({names}){end}"] if names else []),
-        rf"from[[:space:]]+(\.+|test)[[:space:]]+import[[:space:]]+(.*[^[:alnum:]_.])?({bases}){end}",
+        rf"(from|import)[[:space:]]+{names}{end}",
+        rf"from[[:space:]]+(\.+|test)[[:space:]]+{names_of}",
     ]
     if parents:
-        forms.append(
-            rf"from[[:space:]]+\.*(test\.)?({parents})[[:space:]]+import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})"
-        )
+        forms.append(rf"from[[:space:]]+{dotted(parents)}[[:space:]]+{names_of}")
     quoted = rf"""load_test_module\(["']({paths})["']\)"""
-    if names:
-        quoted += rf"""|import_module\(["'](test\.)?({names})["']\)"""
+    quoted += rf"""|import_module\(["']{names}["']\)"""
     return rf"^[[:space:]]*({'|'.join(forms)})|{quoted}"
 
 
@@ -319,11 +334,11 @@ def data_file_readers(
     edited_tests), when it is a test module (see TEST_MODULE_RE) that is not a
     candidate, or when it is read by such a test module or by a file under
     test/cpp/ other than a .md or .rst that names it outside a // comment line.
-    None for more than MAX_DATA_FILES files only their readers can read. A file is read by the paths naming its
-    basename outside a # comment line, as test_run.py runs
-    bin/test_script.py; a .py file also by its importers; and an expect
-    file (see EXPECT_RE) also by the paths defining a class whose name starts
-    with its test class, as test_tensorboard.py builds the path of
+    None for more than MAX_DATA_FILES files only their readers can read. A file
+    is read by the paths naming its basename outside a # comment line, as
+    test_run.py runs bin/test_script.py; a .py file also by its importers; and
+    an expect file (see EXPECT_RE) also by the paths defining a class whose
+    name starts with its test class, as test_tensorboard.py builds the path of
     TestTensorBoard.*.expect for TestTensorBoardSummary."""
     data = [
         f
@@ -345,16 +360,24 @@ def data_file_readers(
         return None
 
     def name_pattern(files: list[str], cpp: bool = False) -> str:
+        # A basename not preceded by a name character, on a line whose first
+        # non-space character is not # (`[^#`), which rejects # comments and
+        # #include lines; with `cpp` the line also does not start with //, as
+        # `/[^/]` admits a / only if no / follows it.
         names = alts(f.rsplit("/", 1)[-1] for f in files)
         first = "([^#/[:space:]]|/[^/])" if cpp else "[^#[:space:]]"
         return rf"^[[:space:]]*([^#[:space:][:alnum:]_.-]|{first}.*[^[:alnum:]_.-])?({names})([^[:alnum:]_.-]|$)"
 
-    # A deleted expect file breaks the tests that still assert against it.
+    # The readers of an exempt file can still break unless NO_READER_RE
+    # matches it and it is not deleted; those of a deleted expect file include
+    # the tests of its class, which assert against it.
+    named = [f for f in exempt if f in deleted or not NO_READER_RE.search(f)]
     classes = [m[1] for f in exempt if (m := EXPECT_RE.match(f))]
-    patterns = [name_pattern(exempt)] + (
-        [class_pattern(classes, prefix=True)] if classes else []
-    )
-    readers = grep("|".join(f"({p})" for p in patterns)) if exempt else []
+    n = MAX_GREP_MODULES
+    patterns = [name_pattern(named[i : i + n]) for i in range(0, len(named), n)]
+    for i in range(0, len(classes), n):
+        patterns.append(class_pattern(classes[i : i + n], prefix=True))
+    readers = [r for p in patterns for r in grep(p)]
     read_by: dict[str, list[str]] = {}
     for f in data:
         patterns = [name_pattern([f])]
@@ -493,20 +516,20 @@ def parse_model_output(
     return files, set(sweeps)
 
 
-def grep_failure_is_an_error(
-    from_model_output: Callable[..., Selection],
-) -> Callable[..., Selection]:
-    """Make a `grep` that fails, with an OSError such as E2BIG or git_grep's
-    RuntimeError, an error of from_model_output rather than an exception."""
+# A failed `grep`: an OSError such as E2BIG, or git_grep's RuntimeError or timeout.
+GREP_ERRORS = (OSError, RuntimeError, subprocess.SubprocessError)
 
-    def wrapped(cls: type[Selection], *args: object, **kwargs: object) -> Selection:
-        try:
-            return from_model_output(cls, *args, **kwargs)
-        except (OSError, RuntimeError) as e:
-            error = f"{type(e).__name__}: {e}"
-            return cls(run_all=True, reason=f"grep failed ({error})", error=error)
 
-    return wrapped
+def grep_failure(e: Exception) -> Selection:
+    """from_model_output's Selection for a `grep` that raised one of GREP_ERRORS."""
+    # A SubprocessError's message holds the argv, ~90 KB of pattern.
+    if isinstance(e, subprocess.TimeoutExpired):
+        error = f"TimeoutExpired after {e.timeout}s"
+    elif isinstance(e, subprocess.SubprocessError):
+        error = type(e).__name__
+    else:
+        error = f"{type(e).__name__}: {e}"
+    return Selection(run_all=True, reason=f"grep failed ({error})", error=error)
 
 
 @dataclass
@@ -534,10 +557,15 @@ class Selection:
     def __post_init__(self) -> None:
         if self.candidates is None and not self.run_all:
             raise ValueError("a selection without candidates must be run_all")
+        if unknown := self.sweeps - set(SWEEPS):
+            raise ValueError(f"unknown sweeps {sorted(unknown)}")
+        if self.candidates is not None and not self.files <= self.candidates:
+            raise ValueError("files must be candidates")
+        if self.error is not None and not self.run_all:
+            raise ValueError("a selection with an error must be run_all")
         self.enforce_requested = self.enforce_requested or self.enforce
 
     @classmethod
-    @grep_failure_is_an_error
     def from_model_output(
         cls,
         out: object,
@@ -551,17 +579,21 @@ class Selection:
         when failure_list_sources reports the inductor list or dynamo_cpython,
         that is for an inductor entry it rejects or does not resolve to a file
         or a CPython entry in any list it does not resolve; the other lists it
-        reports add the dynamo_wrapped sweep.
+        reports add the dynamo_wrapped sweep. `deleted` lists the changed files
+        the change deletes, including the old path of every moved file, since
+        changed_files diffs with --no-renames: a deleted file needs no reader,
+        so one missing from it can run everything.
 
         A missing or malformed output, a change to test infrastructure, an
         edited inductor failure list naming an unknown class, too many import
-        hops, and with `grep` an edited file under test/ that no test reads
-        (see data_file_readers) all fall back to running everything; only a
-        missing or malformed output sets error. Test files the change edits
-        and their drivers are always selected, and with `grep` so are the
-        test files that import them (see importers), those defining the tests
-        that an edited failure list names (see failure_list_sources), and those
-        reading an edited data file (see data_file_readers), with their importers."""
+        hops, with `grep` an edited file under test/ that no test reads (see
+        data_file_readers) and a failed `grep` all fall back to running
+        everything; only a missing or malformed output and a failed `grep` set
+        error. Test files the change edits and their drivers are always
+        selected, and with `grep` so are the test files that import them (see
+        importers), those defining the tests that an edited failure list names
+        (see failure_list_sources), and those reading an edited data file (see
+        data_file_readers), with their importers."""
         if out is None:
             return cls(
                 run_all=True,
@@ -576,11 +608,16 @@ class Selection:
                 reason=f"malformed model output ({e}); running everything",
                 error=f"malformed model output: {e}",
             )
+        except GREP_ERRORS as e:
+            return grep_failure(e)
         if needs_run_all(changed_files):
             return cls(run_all=True, reason="change touches test infrastructure")
         if not isinstance(out, dict):
             raise AssertionError("parse_model_output accepts only objects")
-        sources, missing = failure_list_sources(changed_files, grep)
+        try:
+            sources, missing = failure_list_sources(changed_files, grep)
+        except GREP_ERRORS as e:
+            return grep_failure(e)
         if "inductor" in missing:
             return cls(
                 run_all=True,
@@ -599,21 +636,27 @@ class Selection:
         if "doctests" in candidates and edits_doctest(diff):
             files.add("doctests")
         if grep is not None:
-            data = data_file_readers(changed_files, candidates, grep, deleted)
+            try:
+                data = data_file_readers(changed_files, candidates, grep, deleted)
+            except GREP_ERRORS as e:
+                return grep_failure(e)
             if data is None:
                 return cls(
                     run_all=True,
                     reason=f"more than {MAX_DATA_FILES} edited files under test/ need a reader",
                 )
             readers, read_by = data
-            # A file is read only if its readers lead to a test that runs.
             # The drivers of edited non-.py files, such as test_jit for test/jit/*.txt, have importers too.
             drivers = [f"test/{t}.py" for t in sorted(edited)]
+            # A file is read only if its readers lead to a test that runs.
             for f, paths in [
                 (None, changed_files + sources + readers + drivers),
                 *read_by.items(),
             ]:
-                found = importers(paths, candidates, grep)
+                try:
+                    found = importers(paths, candidates, grep)
+                except GREP_ERRORS as e:
+                    return grep_failure(e)
                 if found is None:
                     return cls(
                         run_all=True,
@@ -720,21 +763,15 @@ class Selection:
             raise TypeError("run_all, enforce and enforce_requested must be booleans")
         if not isinstance(reason, str) or not isinstance(error, (str, type(None))):
             raise TypeError("reason must be a string and error a string or null")
-        if unknown := set(sweeps) - set(SWEEPS):
-            raise ValueError(f"unknown sweeps {sorted(unknown)}")
-        if candidates is not None and not set(files) <= set(candidates):
-            raise ValueError("files must be candidates")
-        if error is not None and not run_all:
-            raise ValueError("a selection with an error must be run_all")
         return cls(
-            set(files),
-            set(sweeps),
-            run_all,
-            reason,
-            enforce,
-            None if candidates is None else set(candidates),
-            error,
-            bool(enforce_requested),
+            files=set(files),
+            sweeps=set(sweeps),
+            run_all=run_all,
+            reason=reason,
+            enforce=enforce,
+            candidates=None if candidates is None else set(candidates),
+            error=error,
+            enforce_requested=enforce_requested,
         )
 
     @classmethod
