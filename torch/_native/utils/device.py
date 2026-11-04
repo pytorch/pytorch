@@ -30,9 +30,11 @@ def cuda_device_guard(
 
     @functools.wraps(fn)
     def guarded(self: torch.Tensor, *args: P.args, **kwargs: P.kwargs) -> R:
-        # get_device() is -1 off CUDA and avoids building a torch.device.
+        if not self.is_cuda:
+            return fn(self, *args, **kwargs)
+        # get_device() avoids building a torch.device.
         index = self.get_device()
-        if index < 0 or index == torch.cuda.current_device():
+        if index == torch.cuda.current_device():
             return fn(self, *args, **kwargs)
         with torch.cuda.device(index):
             return fn(self, *args, **kwargs)
