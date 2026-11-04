@@ -1429,7 +1429,11 @@ DLPack is propagated.
 .. versionchanged:: 2.16
     An object with a ``__dlpack__`` method is read through DLPack rather than its buffer
     protocol or ``__cuda_array_interface__``, so the result keeps its shape and device, and
-    :attr:`dtype` converts its values instead of reinterpreting its bytes.
+    :attr:`dtype` converts its values instead of reinterpreting its bytes. With ``copy=False``,
+    passing a :attr:`dtype` or :attr:`device` other than the object's now raises. Use
+    :func:`torch.frombuffer` to reinterpret the bytes of a buffer. On Apple silicon, an MLX
+    array is read as an MPS tensor: pass ``device="cpu"`` to get a CPU tensor, and convert it
+    to a dtype MPS doesn't support afterwards, as in ``torch.asarray(a, device="cpu").double()``.
 
 When :attr:`obj` is not a tensor, NumPy array, or object with DLPack support but implements
 Python's buffer protocol then the buffer is interpreted as an array of bytes grouped
