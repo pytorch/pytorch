@@ -4,6 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -52,6 +53,47 @@ class TestHeuristicsUtils(unittest.TestCase):
                 TestRun("test3"): 0.2,
             },
         )
+
+    def test_td_enabled(self) -> None:
+        for workflow in ("pull", "trunk", "rocm-mi300", "periodic-rocm-mi200"):
+            self.assertTrue(utils.td_enabled_workflow(workflow), workflow)
+        for workflow in ("periodic", "inductor", "slow", "pull-rocm"):
+            self.assertFalse(utils.td_enabled_workflow(workflow), workflow)
+
+        def job(env: str, macos: bool = False, no_td: bool = False) -> bool:
+            return utils.td_enabled_job(env, macos=macos, no_td=no_td)
+
+        self.assertTrue(job("linux-jammy-py3.10"))
+        self.assertFalse(job("linux-xpu"))
+        self.assertFalse(job("linux-onnx"))
+        self.assertFalse(job("linux", macos=True))
+        self.assertFalse(job("linux", no_td=True))
+
+    def test_td_enabled_default(self) -> None:
+        def default(
+            env: str = "linux",
+            workflow: str = "pull",
+            is_ci: bool = True,
+            pr: int | None = 1,
+            macos: bool = False,
+            no_td: bool = False,
+        ) -> bool:
+            with mock.patch.object(utils, "get_pr_number", return_value=pr):
+                return utils.td_enabled_default(
+                    build_environment=env,
+                    workflow=workflow,
+                    is_ci=is_ci,
+                    macos=macos,
+                    no_td=no_td,
+                )
+
+        self.assertTrue(default())
+        self.assertFalse(default(is_ci=False))
+        self.assertFalse(default(pr=None))
+        self.assertFalse(default(env="linux-xpu"))
+        self.assertFalse(default(macos=True))
+        self.assertFalse(default(no_td=True))
+        self.assertFalse(default(workflow="slow"))
 
 
 if __name__ == "__main__":
