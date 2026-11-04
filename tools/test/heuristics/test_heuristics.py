@@ -282,7 +282,7 @@ class TestParsePrevTests(TestTD):
                     ("1", TypeError, "not iterable"),
                     ('[["x"]]', nested_error, nested_regex),
                     ("[[1]]", nested_error, nested_regex),
-                    ("[" * 100_000, RecursionError, ""),
+                    ("[" * 100_000, RecursionError, "maximum recursion depth"),
                 ]
                 for text, error, regex in cases:
                     (folder / name).write_text(text)
