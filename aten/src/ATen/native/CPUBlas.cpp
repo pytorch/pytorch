@@ -61,7 +61,10 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 #elif ((IDEEP_VERSION_MAJOR == 3 && IDEEP_VERSION_MINOR >= 6) || (IDEEP_VERSION_MAJOR > 3))
 #define ONEDNN_UKERNEL_2
 #endif
-#if ((defined(ONEDNN_UKERNEL_1) || defined(ONEDNN_UKERNEL_2)) && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))))
+// dnnl_ukernel.hpp is installed even when the library was built without
+// DNNL_EXPERIMENTAL_UKERNEL. The brgemm entry points exist only then, so a
+// system oneDNN configured without the ukernel must not take this path.
+#if ((defined(ONEDNN_UKERNEL_1) || defined(ONEDNN_UKERNEL_2)) && defined(DNNL_EXPERIMENTAL_UKERNEL) && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))))
 #define ONEDNN_UKERNEL_ENABLED
 #endif
 

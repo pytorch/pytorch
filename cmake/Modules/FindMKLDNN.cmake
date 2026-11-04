@@ -11,10 +11,152 @@
 # The following variables are used:
 #  MKLDNN_USE_NATIVE_ARCH : Whether native CPU instructions should be used in MKLDNN. This should be turned off for
 #  general packaging to avoid incompatible CPU instructions. Default: OFF.
+#  USE_SYSTEM_ONEDNN      : Use an installed oneDNN (CMake package "dnnl", target DNNL::dnnl)
+#                           for the CPU ideep path and, when USE_XPU is on, the XPU path.
+#  PYTORCH_ONEDNN_MIN_VERSION : Oldest oneDNN accepted with USE_SYSTEM_ONEDNN. Defaults to the
+#                           bundled release. Newer oneDNN 3.x releases are accepted.
+
+# Bundled oneDNN consumed by third_party/ideep/mkl-dnn and the XPU ExternalProject.
+set(PYTORCH_BUNDLED_ONEDNN_VERSION "3.13.3")
+
+function(_pytorch_use_system_onednn)
+  if(NOT PYTORCH_ONEDNN_MIN_VERSION)
+    set(PYTORCH_ONEDNN_MIN_VERSION "${PYTORCH_BUNDLED_ONEDNN_VERSION}" CACHE STRING
+      "Minimum oneDNN version when USE_SYSTEM_ONEDNN=ON. Newer oneDNN 3.x releases are accepted.")
+    set(PYTORCH_ONEDNN_MIN_VERSION "${PYTORCH_BUNDLED_ONEDNN_VERSION}")
+  endif()
+
+  find_package(dnnl CONFIG QUIET)
+  if(NOT dnnl_FOUND OR NOT TARGET DNNL::dnnl)
+    message(FATAL_ERROR
+      "USE_SYSTEM_ONEDNN is ON, but the oneDNN CMake package was not found. "
+      "Install oneDNN ${PYTORCH_ONEDNN_MIN_VERSION} or newer and add its prefix to CMAKE_PREFIX_PATH. "
+      "The package must provide dnnl-config.cmake and the imported target DNNL::dnnl.")
+  endif()
+  if(NOT dnnl_VERSION AND DEFINED DNNL_VERSION)
+    set(dnnl_VERSION "${DNNL_VERSION}")
+  endif()
+  if(NOT dnnl_VERSION)
+    message(FATAL_ERROR "The oneDNN CMake package did not report a version.")
+  endif()
+  if(dnnl_VERSION VERSION_LESS "${PYTORCH_ONEDNN_MIN_VERSION}" OR dnnl_VERSION VERSION_GREATER_EQUAL "4.0.0")
+    message(FATAL_ERROR
+      "Found oneDNN ${dnnl_VERSION}, but PyTorch requires ${PYTORCH_ONEDNN_MIN_VERSION} or newer within the 3.x series. "
+      "Install a matching oneDNN, or pass -DPYTORCH_ONEDNN_MIN_VERSION=<version> to accept a different minimum.")
+  endif()
+
+  if(NOT MKLDNN_CPU_RUNTIME)
+    set(MKLDNN_CPU_RUNTIME "OMP")
+  endif()
+  if(NOT DNNL_CPU_RUNTIME)
+    message(FATAL_ERROR
+      "The oneDNN CMake package did not report DNNL_CPU_RUNTIME. "
+      "PyTorch's CPU kernels need a oneDNN built with a CPU runtime such as OMP.")
+  endif()
+  if(NOT DNNL_CPU_RUNTIME STREQUAL "${MKLDNN_CPU_RUNTIME}")
+    message(FATAL_ERROR
+      "System oneDNN was built with DNNL_CPU_RUNTIME=${DNNL_CPU_RUNTIME}, "
+      "but PyTorch is configured with MKLDNN_CPU_RUNTIME=${MKLDNN_CPU_RUNTIME}. "
+      "Rebuild oneDNN with -DDNNL_CPU_RUNTIME=${MKLDNN_CPU_RUNTIME}, "
+      "or pass -DMKLDNN_CPU_RUNTIME=${DNNL_CPU_RUNTIME}.")
+  endif()
+  if(USE_XPU AND NOT DNNL_GPU_RUNTIME STREQUAL "SYCL")
+    message(FATAL_ERROR
+      "USE_XPU=ON requires a system oneDNN built with -DDNNL_GPU_RUNTIME=SYCL. "
+      "This oneDNN reports DNNL_GPU_RUNTIME=${DNNL_GPU_RUNTIME}. "
+      "One installed libdnnl serves both the CPU and XPU paths.")
+  endif()
+
+  get_target_property(_raw DNNL::dnnl INTERFACE_INCLUDE_DIRECTORIES)
+  set(_includes "")
+  if(NOT _raw MATCHES "NOTFOUND")
+    foreach(_inc IN LISTS _raw)
+      if(_inc MATCHES "^\\$<")
+        continue()
+      endif()
+      list(APPEND _includes "${_inc}")
+      if(EXISTS "${_inc}/oneapi/dnnl/dnnl.hpp")
+        # ideep includes <dnnl.hpp>. Some packages only install that header under oneapi/dnnl.
+        list(APPEND _includes "${_inc}/oneapi/dnnl")
+      endif()
+    endforeach()
+  endif()
+  if(NOT _includes)
+    message(FATAL_ERROR "DNNL::dnnl does not publish an include directory.")
+  endif()
+
+  set(_graph_header "")
+  set(_graph_sycl_header "")
+  foreach(_inc IN LISTS _includes)
+    if(NOT _graph_header AND EXISTS "${_inc}/oneapi/dnnl/dnnl_graph.hpp")
+      set(_graph_header "${_inc}/oneapi/dnnl/dnnl_graph.hpp")
+    elseif(NOT _graph_header AND EXISTS "${_inc}/dnnl_graph.hpp")
+      set(_graph_header "${_inc}/dnnl_graph.hpp")
+    endif()
+    if(NOT _graph_sycl_header AND EXISTS "${_inc}/oneapi/dnnl/dnnl_graph_sycl.hpp")
+      set(_graph_sycl_header "${_inc}/oneapi/dnnl/dnnl_graph_sycl.hpp")
+    elseif(NOT _graph_sycl_header AND EXISTS "${_inc}/dnnl_graph_sycl.hpp")
+      set(_graph_sycl_header "${_inc}/dnnl_graph_sycl.hpp")
+    endif()
+  endforeach()
+
+  set(_need_graph FALSE)
+  if(NOT APPLE AND NOT WIN32 AND NOT BUILD_LITE_INTERPRETER)
+    set(_need_graph TRUE)
+  endif()
+  if(_graph_header)
+    set(_build_graph ON)
+  else()
+    set(_build_graph OFF)
+  endif()
+  if(_need_graph AND NOT _build_graph)
+    message(FATAL_ERROR
+      "System oneDNN ${dnnl_VERSION} has no graph API (dnnl_graph.hpp). "
+      "Rebuild it with -DONEDNN_BUILD_GRAPH=ON.")
+  endif()
+  if(USE_XPU AND _build_graph AND NOT _graph_sycl_header)
+    message(FATAL_ERROR
+      "System oneDNN is missing dnnl_graph_sycl.hpp. "
+      "Rebuild it with -DDNNL_GPU_RUNTIME=SYCL and -DONEDNN_BUILD_GRAPH=ON.")
+  endif()
+
+  set(_ideep_root "${PROJECT_SOURCE_DIR}/third_party/ideep")
+  find_path(IDEEP_INCLUDE_DIR ideep.hpp PATHS "${_ideep_root}" PATH_SUFFIXES include NO_DEFAULT_PATH)
+  if(NOT IDEEP_INCLUDE_DIR)
+    message(FATAL_ERROR
+      "USE_SYSTEM_ONEDNN is ON, but ideep headers were not found in ${_ideep_root}. "
+      "PyTorch still compiles against ideep. Initialize the third_party/ideep submodule.")
+  endif()
+
+  set(_onednn_includes "${_includes}")
+  list(APPEND _includes "${IDEEP_INCLUDE_DIR}")
+
+  if(USE_XPU)
+    add_library(xpu_mkldnn INTERFACE)
+    target_link_libraries(xpu_mkldnn INTERFACE DNNL::dnnl)
+    set(XPU_MKLDNN_LIBRARIES DNNL::dnnl PARENT_SCOPE)
+    set(XPU_MKLDNN_INCLUDE "${_onednn_includes}" PARENT_SCOPE)
+  endif()
+
+  set(BUILD_ONEDNN_GRAPH ${_build_graph} PARENT_SCOPE)
+  set(MKLDNN_INCLUDE_DIR "${_includes}" PARENT_SCOPE)
+  set(MKLDNN_LIBRARIES DNNL::dnnl PARENT_SCOPE)
+  set(MKLDNN_FOUND TRUE PARENT_SCOPE)
+  set(MKLDNN_CPU_RUNTIME "${MKLDNN_CPU_RUNTIME}" PARENT_SCOPE)
+  message(STATUS
+    "Using system oneDNN ${dnnl_VERSION} "
+    "(CPU runtime ${DNNL_CPU_RUNTIME}, GPU runtime ${DNNL_GPU_RUNTIME})")
+  message(STATUS "Found MKL-DNN: TRUE")
+endfunction()
 
 IF(NOT MKLDNN_FOUND)
   SET(MKLDNN_LIBRARIES)
   SET(MKLDNN_INCLUDE_DIR)
+
+  if(USE_SYSTEM_ONEDNN)
+    _pytorch_use_system_onednn()
+    return()
+  endif()
 
   SET(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
   SET(MKLDNN_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn")
@@ -73,7 +215,7 @@ IF(NOT MKLDNN_FOUND)
       endif()
       ExternalProject_Add(xpu_mkldnn_proj
         GIT_REPOSITORY https://github.com/uxlfoundation/oneDNN
-        GIT_TAG v3.13.3
+        GIT_TAG v${PYTORCH_BUNDLED_ONEDNN_VERSION}
         PREFIX "${_xpu_mkldnn_prefix}"
         BUILD_IN_SOURCE 0
         CMAKE_ARGS  -DCMAKE_C_COMPILER=${DNNL_C_COMPILER}

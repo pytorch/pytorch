@@ -53,6 +53,12 @@
 #   USE_MKLDNN=0              disables MKLDNN
 #   USE_MKLDNN_ACL           enables Compute Library backend for MKLDNN on Arm
 #                            (USE_MKLDNN must be explicitly enabled)
+#   USE_SYSTEM_ONEDNN=1      link an installed oneDNN (CMake package dnnl,
+#                            target DNNL::dnnl) for the CPU and XPU paths
+#                            instead of building the bundled copy. Requires
+#                            oneDNN >= the vendored release, still in the 3.x
+#                            series. USE_SYSTEM_LIBS turns this on with MKLDNN.
+#   PYTORCH_ONEDNN_MIN_VERSION  oldest oneDNN accepted when USE_SYSTEM_ONEDNN=1
 #   USE_STATIC_MKL           prefer to link MKL statically (Unix only)
 #   USE_FLASH_ATTENTION=0    disables flash attention for scaled dot product attn
 #   USE_MEM_EFF_ATTENTION=0  disables memory efficient attention for SDPA
@@ -153,6 +159,7 @@ set(_ENV_PASSTHROUGH
   LLVM_BOLT_PROFILES_DIR
   MKL_THREADING
   MKLDNN_CPU_RUNTIME
+  PYTORCH_ONEDNN_MIN_VERSION
   MSVC_Z7_OVERRIDE
   CAFFE2_USE_MSVC_STATIC_RUNTIME
   CAFFE2_CUSTOM_PROTOC_EXECUTABLE
