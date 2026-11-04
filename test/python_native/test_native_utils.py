@@ -135,10 +135,17 @@ class TestNativeUtils(TestCase):
             self.assertTrue(cap.device_ok(x, (11,)), "the (9,10,12) answer was reused")
 
     def test_cuda_device_guard_passes_non_cuda_inputs(self):
+        from unittest.mock import patch
+
         from torch._native.utils.device import cuda_device_guard
 
+        # torch.cuda.device(-1) is a no-op, so only the patches show the guard skipped it.
         x = torch.ones(2)
-        self.assertIs(cuda_device_guard(lambda t: t)(x), x)
+        with (
+            patch.object(torch.cuda, "current_device", side_effect=AssertionError),
+            patch.object(torch.cuda, "device", side_effect=AssertionError),
+        ):
+            self.assertIs(cuda_device_guard(lambda t: t)(x), x)
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_cuda_device_guard_enters_the_inputs_device(self):
