@@ -1034,16 +1034,20 @@ jobs:
               "ready_for_human_review", unless the review names a defect that
               must be fixed before approval: then it is "changes_requested". An
               open question, a request for data or discussion, or files left
-              unreviewed is not such a defect.
+              unreviewed is not such a defect. If the review labels every
+              point it raises non-blocking, the verdict is
+              "ready_for_human_review", even under Request Changes.
             - `summary`: the review's one-sentence summary and its
               Recommendation, in at most three sentences. If such a defect
               made the verdict "changes_requested" under Approve or Needs
-              Discussion, say so in words.
+              Discussion, or only non-blocking points made it
+              "ready_for_human_review" under Request Changes, say so in words.
             - `findings`: one per problem the review raises, in the review's
               words. `severity` is `major` for each point the review gives as a
               reason for Request Changes or as a defect that must be fixed
               before approval, `minor` for other problems, `info` for
-              suggestions.
+              suggestions. A point the review labels non-blocking is
+              `minor`, never `major`.
 
             Keep each finding's `message` to at most 1200 characters, counting
             each `&`, `<` and `>` as five, since posting escapes them. A longer
