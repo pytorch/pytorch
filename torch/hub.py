@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
 import tempfile
 import time
@@ -20,6 +21,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import torch
+from torch._vendor.packaging.version import Version
 from torch.serialization import MAP_LOCATION
 
 
@@ -269,7 +271,7 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
 _CACHE_LOCK_TIMEOUT_S = 3600
 
 
-def _lock_unavailable(lock_path):
+def _lock_unavailable(lock_path, mode):
     """Return the error that makes ``lock_path`` impossible to lock, or None.
 
     filelock 3.x reports some "can't lock" errors the same way as a lock held
@@ -291,7 +293,7 @@ def _lock_unavailable(lock_path):
     import fcntl
 
     try:
-        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, mode)
     except OSError as e:
         return e
     try:
@@ -316,29 +318,40 @@ def _cache_lock(path, stacklevel, verbose):
     If the lock can't be taken (no flock support, an unwritable lock file) or
     stays held for more than ``_CACHE_LOCK_TIMEOUT_S``, the entry is populated
     without it, with a warning that ``stacklevel`` points at the user's call.
+    With filelock older than 3.20.1, it isn't taken at all.
     """
-    from filelock import Timeout
+    import filelock
 
     from torch.utils._filelock import FileLock
 
+    # Older filelock follows a symlink planted at the lock path (CVE-2025-68146).
+    if Version(filelock.__version__) < Version("3.20.1"):
+        yield
+        return
+
     lock_path = path + ".lock"
+    # filelock gives the lock files it creates this mode, whatever the umask.
+    # They are group-writable only in a group-writable directory (a cache shared
+    # by a group), so that every member of the group can take the lock.
+    lock_dir_mode = os.stat(os.path.dirname(lock_path)).st_mode
+    mode = 0o664 if lock_dir_mode & stat.S_IWGRP else 0o644
 
     def new_lock(timeout):
-        return FileLock(lock_path, timeout=timeout)
+        return FileLock(lock_path, timeout=timeout, mode=mode)
 
     stack = contextlib.ExitStack()
     message = None
     try:
         try:
             stack.enter_context(new_lock(timeout=0))
-        except Timeout:
-            error = _lock_unavailable(lock_path)
+        except filelock.Timeout:
+            error = _lock_unavailable(lock_path, mode)
             if error is not None:
                 raise error from None
             if verbose:
                 sys.stderr.write(f"Waiting for another process to download {path}\n")
             stack.enter_context(new_lock(timeout=_CACHE_LOCK_TIMEOUT_S))
-    except Timeout:
+    except filelock.Timeout:
         message = (
             f"Another process has held {lock_path} for more than "
             f"{_CACHE_LOCK_TIMEOUT_S} s, so this process downloads the entry as "

@@ -5,6 +5,8 @@ import errno
 import io
 import linecache
 import os
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -15,10 +17,11 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
-from filelock import Timeout
+import filelock
 
 import torch
 import torch.hub as hub
+from torch._vendor.packaging.version import Version
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_SANDCASTLE,
@@ -440,6 +443,40 @@ class TestHub(TestCase):
 
                 self.assertIn("directory traversal", str(cm.exception))
 
+
+# torch.hub takes no cache lock with older filelock.
+skipIfOldFilelock = unittest.skipIf(
+    Version(filelock.__version__) < Version("3.20.1"), "needs filelock 3.20.1"
+)
+
+
+class _StderrRecorder(io.StringIO):
+    """Sets ``waiting`` once hub reports that it waits for another process."""
+
+    def __init__(self):
+        super().__init__()
+        self.waiting = threading.Event()
+
+    def write(self, s):
+        if "Waiting for another process" in s:
+            self.waiting.set()
+        return super().write(s)
+
+
+class TestHubCache(TestCase):
+    """Offline tests of populating the cache; unlike TestHub, they run on Sandcastle."""
+
+    def setUp(self):
+        super().setUp()
+        self.previous_hub_dir = hub.get_dir()
+        self.tmpdir = tempfile.TemporaryDirectory("hub_dir")
+        hub.set_dir(self.tmpdir.name)
+
+    def tearDown(self):
+        super().tearDown()
+        hub.set_dir(self.previous_hub_dir)
+        self.tmpdir.cleanup()
+
     def _run_concurrently(self, fns):
         # Slow down the download so that, without locking, every worker would
         # see an empty cache and start its own download. With the short lock
@@ -516,6 +553,7 @@ class TestHub(TestCase):
         ]
         self.assertEqual(leftovers, [])
 
+    @skipIfOldFilelock
     def test_load_state_dict_from_url_concurrent(self):
         url, model_dir = self._save_weights()
 
@@ -529,6 +567,7 @@ class TestHub(TestCase):
         for state_dict in results:
             self.assertEqual(state_dict["w"], torch.arange(10))
 
+    @skipIfOldFilelock
     def test_get_cache_or_reload_concurrent(self):
         repos = ["repo", "other"]
         urls = {repo: self._make_hub_archive(repo) for repo in repos}
@@ -591,24 +630,19 @@ class TestHub(TestCase):
         self.assertFalse(os.path.exists(os.path.join(hub.get_dir(), "owner_repo_main")))
         self._assert_no_leftovers()
 
+    @skipIfOldFilelock
     def test_load_state_dict_from_url_failed_download_releases_lock(self):
         url, model_dir = self._save_weights()
         real_download = hub.download_url_to_file
-        waiting = threading.Event()
+        stderr = _StderrRecorder()
         calls = []
-
-        class StderrRecorder(io.StringIO):
-            def write(self, s):
-                if "Waiting for another process" in s:
-                    waiting.set()
-                return super().write(s)
 
         def flaky_download(*args, **kwargs):
             calls.append(None)
             if len(calls) > 1:
                 return real_download(*args, **kwargs)
             # Fail only once the other worker is blocked on the lock.
-            if not waiting.wait(timeout=60):
+            if not stderr.waiting.wait(timeout=60):
                 raise AssertionError("the other worker never waited for the lock")
             raise RuntimeError("download failed")
 
@@ -624,7 +658,7 @@ class TestHub(TestCase):
         with (
             self._assert_lock_used(),
             patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 5),
-            patch("sys.stderr", new=StderrRecorder()),
+            patch("sys.stderr", new=stderr),
             patch.object(hub, "download_url_to_file", side_effect=flaky_download),
             ThreadPoolExecutor(2) as pool,
         ):
@@ -639,6 +673,42 @@ class TestHub(TestCase):
         self.assertEqual(len(state_dicts), 1)
         self.assertEqual(state_dicts[0]["w"], torch.arange(10))
 
+    @skipIfOldFilelock
+    def test_lock_released_when_holder_is_killed(self):
+        url, model_dir = self._save_weights()
+        os.makedirs(model_dir)
+        # Another process holds the lock and is killed, like a DDP rank that
+        # crashes in the middle of a download.
+        script = (
+            "import sys, filelock; lock = filelock.FileLock(sys.argv[1]); "
+            "lock.acquire(); print('locked', flush=True); sys.stdin.read()"
+        )
+        lock_path = os.path.join(model_dir, "weights.pt.lock")
+
+        def load():
+            return hub.load_state_dict_from_url(url, model_dir=model_dir, progress=True)
+
+        stderr = _StderrRecorder()
+        with subprocess.Popen(
+            [sys.executable, "-c", script, lock_path],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+        ) as holder:
+            self.assertEqual(holder.stdout.readline(), "locked\n")
+            with (
+                ThreadPoolExecutor(1) as pool,
+                self._assert_lock_used(),
+                patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 30),
+                patch("sys.stderr", new=stderr),
+            ):
+                future = pool.submit(load)
+                self.assertTrue(stderr.waiting.wait(timeout=60))
+                holder.kill()
+                state_dict = future.result(timeout=60)
+        self.assertEqual(state_dict["w"], torch.arange(10))
+
+    @skipIfOldFilelock
     def test_load_state_dict_from_url_without_lock(self):
         url, model_dir = self._save_weights()
         with (
@@ -650,6 +720,7 @@ class TestHub(TestCase):
             )
         self.assertEqual(state_dict["w"], torch.arange(10))
 
+    @skipIfOldFilelock
     def test_get_cache_or_reload_concurrent_validates_once(self):
         url = self._make_hub_archive("repo")
         with (
@@ -699,6 +770,7 @@ class TestHub(TestCase):
                 self.assertEqual(f.read(), f"ref = {ref!r}\n")
         self.assertEqual(os.listdir(sentinel), [])
 
+    @skipIfOldFilelock
     def test_get_cache_or_reload_unlocked_keeps_published_repo(self):
         url = self._make_hub_archive("repo")
         repo_dir = os.path.join(hub.get_dir(), "owner_repo_main")
@@ -752,6 +824,7 @@ class TestHub(TestCase):
         self.assertTrue(os.path.isdir(other_ref))
 
     @parametrize("progress", [True, False])
+    @skipIfOldFilelock
     def test_load_state_dict_from_url_lock_timeout(self, progress):
         url, model_dir = self._save_weights()
         os.makedirs(model_dir)
@@ -774,6 +847,7 @@ class TestHub(TestCase):
         self.assertEqual(state_dict["w"], torch.arange(10))
         self.assertEqual("Waiting for another process" in stderr.getvalue(), progress)
 
+    @skipIfOldFilelock
     def test_get_cache_or_reload_lock_timeout(self):
         url = self._make_hub_archive("repo")
         repo_dir = os.path.join(hub.get_dir(), "owner_repo_main")
@@ -806,17 +880,18 @@ class TestHub(TestCase):
         with (
             patch.object(hub, "_git_archive_link", return_value=url),
             patch("os.rename", side_effect=rename),
-            self.assertRaises(PermissionError),
+            self.assertRaisesRegex(PermissionError, "Access is denied"),
         ):
             self._load_repo("repo")
         self.assertFalse(os.path.exists(repo_dir))
         self._assert_no_leftovers()
 
+    @skipIfOldFilelock
     def test_load_state_dict_from_url_unlockable_falls_back_at_once(self):
         url, model_dir = self._save_weights()
         error = OSError(errno.ENOLCK, "No locks available")
         # filelock 3.x reports ENOLCK as a held lock; the probe must not wait.
-        busy = Timeout(os.path.join(model_dir, "weights.pt.lock"))
+        busy = filelock.Timeout(os.path.join(model_dir, "weights.pt.lock"))
         with (
             patch.object(hub, "_lock_unavailable", return_value=error),
             patch.object(FileLock, "__enter__", side_effect=[busy, AssertionError]),
@@ -832,10 +907,10 @@ class TestHub(TestCase):
         lock_path = os.path.join(self.tmpdir.name, "entry.lock")
         enolck = OSError(errno.ENOLCK, "No locks available")
         with patch("fcntl.flock", side_effect=enolck):
-            self.assertIs(hub._lock_unavailable(lock_path), enolck)
+            self.assertIs(hub._lock_unavailable(lock_path, 0o644), enolck)
         with patch("fcntl.flock", side_effect=BlockingIOError(errno.EWOULDBLOCK, "")):
-            self.assertIsNone(hub._lock_unavailable(lock_path))
-        self.assertIsNone(hub._lock_unavailable(lock_path))
+            self.assertIsNone(hub._lock_unavailable(lock_path, 0o644))
+        self.assertIsNone(hub._lock_unavailable(lock_path, 0o644))
 
     @unittest.skipIf(IS_WINDOWS, "flock probe is Unix only")
     def test_lock_unavailable_reports_unwritable_lock_file(self):
@@ -845,15 +920,35 @@ class TestHub(TestCase):
         # A lock file created by another user without group write access.
         open(lock_path, "w").close()
         os.chmod(lock_path, 0o444)
-        error = hub._lock_unavailable(lock_path)
+        error = hub._lock_unavailable(lock_path, 0o644)
         self.assertIsInstance(error, PermissionError)
+
+    @unittest.skipIf(IS_WINDOWS, "Creating symlinks needs extra privileges on Windows")
+    def test_load_state_dict_from_url_does_not_follow_lock_symlink(self):
+        url, model_dir = self._save_weights()
+        os.makedirs(model_dir)
+        # Planted by another user of a shared cache, pointing outside of it.
+        target = os.path.join(self.tmpdir.name, "target")
+        with open(target, "w") as f:
+            f.write("keep")
+        os.symlink(target, os.path.join(model_dir, "weights.pt.lock"))
+        with warnings.catch_warnings():
+            # The lock can't be taken through the symlink, so the entry is
+            # downloaded without it.
+            warnings.simplefilter("ignore")
+            state_dict = hub.load_state_dict_from_url(
+                url, model_dir=model_dir, progress=False
+            )
+        self.assertEqual(state_dict["w"], torch.arange(10))
+        with open(target) as f:
+            self.assertEqual(f.read(), "keep")
 
     @unittest.skipIf(IS_WINDOWS, "flock probe is Unix only")
     def test_lock_unavailable_does_not_follow_symlinks(self):
         target = os.path.join(self.tmpdir.name, "victim")
         lock_path = os.path.join(self.tmpdir.name, "entry.lock")
         os.symlink(target, lock_path)
-        self.assertEqual(hub._lock_unavailable(lock_path).errno, errno.ELOOP)
+        self.assertEqual(hub._lock_unavailable(lock_path, 0o644).errno, errno.ELOOP)
         self.assertFalse(os.path.exists(target))
 
     @unittest.skipIf(not IS_WINDOWS, "Windows probe")
@@ -861,8 +956,25 @@ class TestHub(TestCase):
         lock_path = os.path.join(self.tmpdir.name, "entry.lock")
         denied = PermissionError(errno.EACCES, "Access is denied")
         with patch("tempfile.mkstemp", side_effect=denied):
-            self.assertIs(hub._lock_unavailable(lock_path), denied)
+            self.assertIs(hub._lock_unavailable(lock_path, 0o644), denied)
 
+    @skipIfOldFilelock
+    @unittest.skipIf(IS_WINDOWS, "Windows deletes lock files on release")
+    def test_lock_file_group_writable_only_in_shared_dir(self):
+        url, _ = self._save_weights()
+        old_umask = os.umask(0o022)
+        try:
+            for dir_mode, lock_mode in ((0o775, 0o664), (0o755, 0o644)):
+                model_dir = os.path.join(self.tmpdir.name, oct(dir_mode))
+                os.makedirs(model_dir)
+                os.chmod(model_dir, dir_mode)
+                hub.load_state_dict_from_url(url, model_dir=model_dir, progress=False)
+                mode = os.stat(os.path.join(model_dir, "weights.pt.lock")).st_mode
+                self.assertEqual(mode & 0o777, lock_mode)
+        finally:
+            os.umask(old_umask)
+
+    @skipIfOldFilelock
     def test_lock_fallback_warning_points_at_caller(self):
         url, model_dir = self._save_weights()
         hubconf = "def model():\n    'Doc.'\n    return 1\n"
@@ -899,8 +1011,23 @@ class TestHub(TestCase):
                 hub.load_state_dict_from_url(url, model_dir=model_dir, progress=False)
                 self.assertEqual(self._load_repo("repo"), repo_dir)
 
+    def test_old_filelock_does_not_lock(self):
+        url, model_dir = self._save_weights()
+        repo_url = self._make_hub_archive("repo")
+        with (
+            patch.object(filelock, "__version__", "3.20.0"),
+            patch.object(FileLock, "__enter__", side_effect=AssertionError),
+            patch.object(hub, "_git_archive_link", return_value=repo_url),
+        ):
+            state_dict = hub.load_state_dict_from_url(
+                url, model_dir=model_dir, progress=False
+            )
+            repo_dir = self._load_repo("repo")
+        self.assertEqual(state_dict["w"], torch.arange(10))
+        self.assertEqual(os.listdir(repo_dir), ["hubconf.py"])
 
-instantiate_parametrized_tests(TestHub)
+
+instantiate_parametrized_tests(TestHubCache)
 
 if __name__ == "__main__":
     run_tests()

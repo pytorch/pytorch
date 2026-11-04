@@ -143,12 +143,16 @@ when updates are published to the same branch, users can keep up with the latest
 Processes that share a cache directory (the hub directory, or the `model_dir` passed to
 {func}`~torch.hub.load_state_dict_from_url`), such as DDP ranks on the same machine, coordinate
 through lock files: when several of them need an entry that isn't cached yet, one of them
-downloads it while the others wait and then use the cached copy. On Linux and macOS the lock
-files (`<entry>.lock`) stay next to the entries. In a cache shared by several users, only the user who
-created a lock file can take it; the others download without the lock.
-If the lock can't be taken (for example on a filesystem without `flock` support) or another
-process holds it for more than an hour, the entry is downloaded without it, as in earlier
-releases, and a `UserWarning` is raised. Checkpoints in the legacy zip format are extracted on every load, without the lock.
+downloads it while the others wait and then use the cached copy. This needs filelock 3.20.1 or
+later; with an older filelock, every process downloads the entry, as in earlier releases.
+On Linux and macOS the lock files (`<entry>.lock`) stay next to the entries; they are
+group-writable if the directory is, so that users who share the cache through a group can take
+each other's locks.
+If the lock can't be taken (for example on a filesystem without `flock` support, or a lock file
+another user created without giving this user write access) or another process holds it for
+more than an hour, the entry is downloaded without it, as in earlier releases, and a
+`UserWarning` is raised. Checkpoints in the legacy zip format are extracted on every load,
+without the lock.
 `force_reload=True` isn't coordinated this way: every caller that passes it downloads the
 entry again, one at a time, and replaces the copy other processes may be using, so avoid
 passing it from several processes at once.
