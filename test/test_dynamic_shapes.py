@@ -7358,8 +7358,8 @@ class ShapeEnvReplacementCacheTest(TestCase):
         self.assertEqual(fn(a), b + 1)
         shape_env._update_var_to_range(c, ValueRanges(0, 50))
         shape_env._update_var_to_range(d, ValueRanges(0, 49))
-        # c + d + 1 now fits a's range, so a resolves fully. Previously the
-        # cached, partially resolved b + 1 was returned.
+        # c + d + 1 now fits a's range, so a resolves fully. Guards the narrower
+        # cache key: a range change must still clear it.
         self.assertEqual(fn(a), c + d + 1)
 
     def test_range_change_refreshes_sym_node_expr(self):
@@ -7454,12 +7454,18 @@ class ShapeEnvReplacementCacheTest(TestCase):
         s1 = create_symint(shape_env, 4, duck=False)
         s2 = create_symint(shape_env, 5, duck=False)
         s3 = create_symint(shape_env, 5, duck=False)
-        t = s0 + s1
+        s4 = create_symint(shape_env, 6, duck=False)
+        # Three terms: _optimized_add only re-derives the flag for two-term sums,
+        # so this relies on the flag passed in.
+        t = s0 + s1 + s4
         self.assertTrue(t.node._optimized_summation)
         shape_env._set_replacement(s3.node.expr, s2.node.expr, "test")
         r = t + s2
         self.assertTrue(r.node._optimized_summation)
-        self.assertEqual(r.node.expr, s0.node.expr + s1.node.expr + s2.node.expr)
+        self.assertEqual(
+            r.node.expr,
+            s0.node.expr + s1.node.expr + s2.node.expr + s4.node.expr,
+        )
 
     def test_replacement_change_clears_symop_memo(self):
         shape_env = ShapeEnv()

@@ -95,6 +95,10 @@ class SymNode:
     # Note [optimized_summation]: indicates that SymNode is an Add expression of the form
     # a + b + c + d... etc where all terms are unique symbols. This allows us to do some optimizations
     # for common patterns see _optimized_add.
+    #
+    # The flag describes the unresolved _expr. A replacement can turn expr into something
+    # that is no longer such a sum (s0 + s1 becomes 2*s1 after s0 -> s1), so only trust the
+    # flag together with expr when expr is _expr.
 
     # The unfortunate reason we have this here is because sympy sets  __slots__ = () for add expression,
     # so we cannot add the attribute directly to the sympy expression. Furthermore, we cannot use it as
@@ -1590,8 +1594,6 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
                     out = PythonMod(self.expr, other.expr)
             elif method == "add":
                 # see Note [optimized_summation]
-                # The flags describe _expr; a replacement may have turned expr
-                # into something that is no longer a summation of symbols.
                 (optimized_summation, out) = _optimized_add(
                     self.expr,
                     other.expr,
