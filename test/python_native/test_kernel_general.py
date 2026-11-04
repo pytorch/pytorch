@@ -245,15 +245,28 @@ class TestKernelGeneral(TestCase):
         self.assertEqual(out, 1)
 
     def test_float64_norm2_tree_leaves(self):
-        """Square float64 norm2 tree leaves with the float64 rounded multiply."""
-        x = torch.randn(64, 2000, device="cuda", dtype=torch.float64)
-        trait = T.NormOps(2, acc=cutlass.Float64)
-        # Contiguous rows take the row tree; strided rows take the indexed tree.
-        for view in (x, x[:, ::2]):
-            got = kg.reduce_dim(
-                trait, "norm2_f64", view, [1], torch.float64, order="inner_tree"
-            )
-            self.assertEqual(got, torch.linalg.vector_norm(view, dim=1))
+        """Round float64 norm2 tree leaves alike in the row and indexed trees."""
+        x = torch.randn(64, 4000, device="cuda", dtype=torch.float64)[:, ::2]
+        trait, f64 = T.NormOps(2, acc=cutlass.Float64), torch.float64
+        kw = {"order": "inner_tree"}
+        rows = kg.reduce_dim(trait, "norm2_rows", x.contiguous(), [1], f64, **kw)
+        indexed = kg.reduce_dim(trait, "norm2_indexed", x, [1], f64, **kw)
+        row_tags = {k[0] for k in rt._CACHE if k[1] == "norm2_rows"}
+        self.assertTrue(any(t.startswith("rowitree") for t in row_tags), row_tags)
+        idx_tags = _plan_tags("norm2_indexed")
+        self.assertTrue(any(t.startswith("genitree") for t in idx_tags), idx_tags)
+        self.assertEqual(rows.view(torch.int64), indexed.view(torch.int64))
+        self.assertEqual(rows, torch.linalg.vector_norm(x, dim=1))
+
+    def test_all_folds_zero_flags_serially(self):
+        """Fold all()'s flags through the serial reduce of the unordered kernels."""
+        x = torch.ones(64, 4096, device="cuda")
+        x[::2, 6] = 0
+        trait, i32 = T.AllOps(acc=cutlass.Float32), torch.int32
+        # Contiguous rows take the row kernel; strided rows take the general kernel.
+        for key, view in (("all_rows", x), ("all_strided", x[:, ::2])):
+            got = kg.reduce_dim(trait, key, view, [1], i32, order="unordered")
+            self.assertEqual(got, (view != 0).all(1).to(i32))
 
     def test_empty_inner_tree_reduce_all(self):
         """Use the reduction identity when an empty input has no tree order."""
