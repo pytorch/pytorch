@@ -261,19 +261,24 @@ class TestKernelGeneral(TestCase):
         )
         self.assertEqual(out, 1)
 
-    def test_float64_norm2_tree_leaves(self):
-        """Round float64 norm2 tree leaves alike in the row and indexed trees."""
-        x = torch.randn(64, 4000, device="cuda", dtype=torch.float64)[:, ::2]
-        trait, f64 = T.NormOps(2, acc=cutlass.Float64), torch.float64
-        kw = {"order": "inner_tree"}
-        rows = kg.reduce_dim(trait, "norm2_rows", x.contiguous(), [1], f64, **kw)
-        indexed = kg.reduce_dim(trait, "norm2_indexed", x, [1], f64, **kw)
-        row_tags = {k[0] for k in rt._CACHE if k[1] == "norm2_rows"}
-        self.assertTrue(any(t.startswith("rowitree") for t in row_tags), row_tags)
-        idx_tags = _plan_tags("norm2_indexed")
-        self.assertTrue(any(t.startswith("genitree") for t in idx_tags), idx_tags)
-        self.assertEqual(rows.view(torch.int64), indexed.view(torch.int64))
-        self.assertEqual(rows, torch.linalg.vector_norm(x, dim=1))
+    def test_norm2_tree_leaves_match_across_trees(self):
+        """Round norm2 tree leaves alike in the row and indexed trees, whose row bits
+        test_inner_tree_order pins."""
+        for dtype, acc, bits in (
+            (torch.float32, cutlass.Float32, torch.int32),
+            (torch.float64, cutlass.Float64, torch.int64),
+        ):
+            with self.subTest(dtype=dtype):
+                x = torch.randn(64, 4000, device="cuda", dtype=dtype)[:, ::2]
+                trait, kw = T.NormOps(2, acc=acc), {"order": "inner_tree"}
+                row_key, idx_key = f"norm2_rows_{dtype}", f"norm2_indexed_{dtype}"
+                rows = kg.reduce_dim(trait, row_key, x.contiguous(), [1], dtype, **kw)
+                indexed = kg.reduce_dim(trait, idx_key, x, [1], dtype, **kw)
+                row_tags = {k[0][:8] for k in rt._CACHE if k[1] == row_key}
+                self.assertIn("rowitree", row_tags)
+                self.assertIn("genitree", {t[:8] for t in _plan_tags(idx_key)})
+                self.assertEqual(rows.view(bits), indexed.view(bits))
+                self.assertEqual(rows, torch.linalg.vector_norm(x, dim=1))
 
     def test_all_folds_zero_flags_serially(self):
         """Fold all()'s flags through the serial reduce of the unordered kernels."""
