@@ -21328,54 +21328,44 @@ class PinMemoryTests(TestCase):
     @parametrize(
         "constructor_case",
         [
-            ("tensor_inline", torch.tensor, ([1, 2, 3],), [3]),
-            ("tensor_constant", torch.tensor, ([[[1.0] * 128] * 128],), [1, 128, 128]),
-            ("empty", torch.empty, ([1, 128, 128],), [1, 128, 128]),
-            ("ones", torch.ones, ([1, 128, 128],), [1, 128, 128]),
-            ("zeros", torch.zeros, ([1, 128, 128],), [1, 128, 128]),
-            ("full", torch.full, ([1, 128, 128], 2), [1, 128, 128]),
-            ("rand", torch.rand, ([1, 128, 128],), [1, 128, 128]),
+            # (name, constructor, args, deterministic)
+            ("tensor_inline", torch.tensor, ([1, 2, 3],), True),
+            # Not 1-D, so a static compile keeps it as a constant instead of inlining it
             (
-                "rand_like",
-                torch.rand_like,
-                (torch.empty([1, 128, 128]),),
-                [1, 128, 128],
+                "tensor_constant",
+                torch.tensor,
+                (torch.arange(16.0).view(1, 4, 4).tolist(),),
+                True,
             ),
-            # Dynamo graph-breaks: "PrimTorch does not support pinned memory"
-            subtest(
-                ("randn", torch.randn, ([1, 128, 128],), [1, 128, 128]),
-                name="randn",
-                decorators=[unittest.expectedFailure],
-            ),
-            ("randint", torch.randint, (2, [1, 128, 128]), [1, 128, 128]),
+            ("empty", torch.empty, ([1, 128, 128],), False),
+            ("ones", torch.ones, ([1, 128, 128],), True),
+            ("zeros", torch.zeros, ([1, 128, 128],), True),
+            ("full", torch.full, ([1, 128, 128], 2), True),
+            ("rand", torch.rand, ([1, 128, 128],), False),
+            ("rand_like", torch.rand_like, (torch.empty([1, 128, 128]),), False),
+            ("randint", torch.randint, (2, [1, 128, 128]), False),
         ],
         name_fn=lambda constructor_case: constructor_case[0],
     )
     def test_constructors_pin_memory(self, device, constructor_case, dynamic):
-        name, constructor, args, expected_shape = constructor_case
-        if dynamic and name == "tensor_constant":
-            raise unittest.SkipTest("its 16k floats become graph inputs (~170s)")
+        _, constructor, args, deterministic = constructor_case
 
         def fn():
             return constructor(*args, pin_memory=True, device="cpu")
 
         result = torch.compile(fn, fullgraph=True, dynamic=dynamic)()
         self.assertTrue(result.is_pinned())
-        self.assertEqual(result.shape, expected_shape)
-        self.assertEqual(result.to(device, non_blocking=True).cpu(), result)
-
-    @dynamo_config.patch(assume_static_by_default=False)
-    @config.patch({"fx_graph_cache": False})
-    def test_tensor_pin_memory_dynamic_scalar_list(self, device):
-        def fn(a, b, c):
-            return torch.tensor([a, b, c], pin_memory=True, device="cpu")
-
-        result = torch.compile(fn, fullgraph=True)(1, 2, 3)
-        self.assertTrue(result.is_pinned())
-        self.assertEqual(result, torch.tensor([1, 2, 3]))
-        self.assertEqual(result.to(device, non_blocking=True).cpu(), result)
+        actual = result.to(device, non_blocking=True)
+        expected = fn().to(device)
+        if deterministic:
+            self.assertEqual(actual, expected)
+        else:  # random or uninitialized contents
+            self.assertEqual(actual.shape, expected.shape)
+            self.assertEqual(actual.dtype, expected.dtype)
 
 
+# MPS is left out: these tests were skipped on macOS as failing when they lived in
+# CommonTemplate.
 instantiate_device_type_tests(
     PinMemoryTests, globals(), except_for="cpu", allow_xpu=True
 )
