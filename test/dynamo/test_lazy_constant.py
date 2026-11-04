@@ -164,6 +164,8 @@ class CachedConstantSourceLocationTests(TestCase):
 
 
 class LazyConstantVariableTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_lazy_hashability_uses_actual_type(self):
         class Key:
             @property
@@ -174,8 +176,6 @@ class LazyConstantVariableTests(TestCase):
         lazy = LazyVariableTracker.create(key, LocalSource("key"))
         self.assertFalse(lazy.is_hashable_lazy())
         self.assertFalse(lazy.is_realized())
-
-    hw_classification = HardwareClassification.GENERIC
 
     def _assert_compile_count(self, fn, arg_sets, expected_frames):
         counter = CompileCounter()
