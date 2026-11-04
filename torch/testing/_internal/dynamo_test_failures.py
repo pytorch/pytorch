@@ -38,19 +38,21 @@ def find_test_dir() -> str | None:
     if exists(join(test_dir, "dynamo_expected_failures")):
         return test_dir
 
-    # Check relative to __main__ (installed builds relative to test file):
+    # Installed builds: check relative to the test file run as __main__, then
+    # relative to the working directory. pytest-xdist workers run the test file
+    # as an imported module from the directory run_test.py runs tests in.
     main = sys.modules["__main__"]
     file = getattr(main, "__file__", None)
-    if file is None:
-        # Generated files do not have a module.__file__
-        return None
-    test_dir = dirname(abspath(file))
-    while dirname(test_dir) != test_dir:
-        if basename(test_dir) == "test" and exists(
-            join(test_dir, "dynamo_expected_failures")
-        ):
-            return test_dir
-        test_dir = dirname(test_dir)
+    # Generated files do not have a module.__file__
+    starts = [dirname(abspath(file))] if file is not None else []
+    starts.append(os.getcwd())
+    for test_dir in starts:
+        while dirname(test_dir) != test_dir:
+            if basename(test_dir) == "test" and exists(
+                join(test_dir, "dynamo_expected_failures")
+            ):
+                return test_dir
+            test_dir = dirname(test_dir)
 
     # Not found
     return None
