@@ -1,6 +1,6 @@
 """Ask an LLM which test files a change can break.
 
-    python -m tools.testing.llm_selector.select_tests --base origin/main --head <pr-head-sha> --output llm_selection.json
+    python -m tools.testing.llm_selector.select_tests --base origin/main --head <pr-head-sha>
 
 LLM_SELECTOR_MODEL and LLM_SELECTOR_EFFORT, when set and not empty, are the defaults of
 --model and --effort.
@@ -244,7 +244,8 @@ def git_grep(pattern: str, rev: str, timeout: float | None = None) -> list[str]:
         text=True,
         timeout=timeout,
     )
-    if p.returncode > 1:
+    # 1 is no match; a signal kill is negative.
+    if p.returncode not in (0, 1):
         raise RuntimeError(f"git grep failed: {p.stderr.strip()[-500:]}")
     return [line.split(":", 1)[1] for line in p.stdout.split("\0")[:-1]]
 
@@ -345,7 +346,7 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
                 raise RuntimeError(f"git grep ran past the {GREP_BUDGET}s budget after the model call") from None  # fmt: skip
         return greps[pattern]
 
-    selection = Selection.from_model_output(out, set(candidates), changed, grep, set(deleted))  # fmt: skip
+    selection = Selection.from_model_output(out, set(candidates), changed, grep, set(deleted), diff)  # fmt: skip
     if selection.error is not None:
         # Without an answer, the CLI's own output says why.
         cli = str(result.get("result") or "") if out is None else ""
