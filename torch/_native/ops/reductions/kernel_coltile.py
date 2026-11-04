@@ -437,6 +437,8 @@ def reduce_ordered_col(
     if sum(b[2] for b in plan.batches) * WARP * plan.vec > tile.MAX_UNROLL:
         return None
     op = _OrderedColReduce(trait, plan, R, C, nouts)
+    device = x.get_device()
+    _L.check_current(device)
     outs = [
         torch.empty(out_shape, device=x.device, dtype=dtype)
         for dtype in out_dtypes[:nouts]
@@ -451,13 +453,13 @@ def reduce_ordered_col(
         ]
         return fake_in, fake_outs
 
-    args = (Int64(x.storage_offset()), Int32(B * C), Int32(C), _stream())
+    args = (Int64(x.storage_offset()), Int32(B * C), Int32(C), _stream(device))
     key = (
         "ordered_col",
         trait_key,
         x.dtype,
         tuple(out_dtypes[:nouts]),
-        str(x.device),
+        device,
     ) + op.cache_sig
     build = lambda: _compile(op, *_fake(), *args)  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(
@@ -545,6 +547,8 @@ def _reduce_col_tile(
     # Stage one compiles a packed row-major descriptor.
     if x.dim() not in (2, 3) or not x.is_cuda or not x.is_contiguous():
         raise AssertionError(f"want contiguous 2D/3D CUDA, got {tuple(x.shape)}")
+    device = x.get_device()
+    _L.check_current(device)
     if len(out_dtypes) < nouts:
         raise AssertionError(f"want {nouts} output dtypes, got {len(out_dtypes)}")
     if x.dim() == 2:
@@ -650,7 +654,7 @@ def _reduce_col_tile(
             None,
             None,
             None,
-            _stream(),
+            _stream(device),
         )
 
     # vec can be narrower than the compile-time alignment, so key both.
@@ -660,7 +664,7 @@ def _reduce_col_tile(
         x.dtype,
         tuple(out_dtypes[:nouts]),
         align,
-        str(x.device),
+        device,
     ) + op.cache_sig
     build = lambda: _compile(op, *_fake())  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(
@@ -677,7 +681,7 @@ def _reduce_col_tile(
         None,
         None,
         None,
-        _stream(),
+        _stream(device),
     )
     if single:
         return tuple(outs)
@@ -689,7 +693,7 @@ def _reduce_col_tile(
             trait_key,
             tuple(out_dtypes[:nouts]),
             pdt,
-            str(x.device),
+            device,
         ) + tiled.cache_sig
         build2 = lambda: _compile(  # noqa: E731
             tiled,
@@ -701,11 +705,11 @@ def _reduce_col_tile(
             Int32(total),
             nrows,
             Int32(npar),
-            _stream(),
+            _stream(device),
         )
         ins = [_L.read_only(pp) for pp in parts]
         cached_plan(_CACHE, key2, build2, op=f"aten::{trait_key}")(
-            ins, kernel_outs, Int32(total), nrows, Int32(npar), _stream()
+            ins, kernel_outs, Int32(total), nrows, Int32(npar), _stream(device)
         )
         return tuple(outs)
 
@@ -764,7 +768,7 @@ def _reduce_col_tile(
             None,
             None,
             None,
-            _stream(),
+            _stream(device),
         )
 
     pdt = tuple(pp.dtype for pp in parts)
@@ -774,7 +778,7 @@ def _reduce_col_tile(
         x.dtype,
         tuple(out_dtypes[:nouts]),
         pdt,
-        str(x.device),
+        device,
     ) + op2.cache_sig
     build2 = lambda: _compile(op2, *_fake2())  # noqa: E731
     cached_plan(_CACHE, key2, build2, op=f"aten::{trait_key}")(
@@ -791,6 +795,6 @@ def _reduce_col_tile(
         None,
         None,
         None,
-        _stream(),
+        _stream(device),
     )
     return tuple(outs)
