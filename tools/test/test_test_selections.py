@@ -732,7 +732,13 @@ class TestSplitTests(LlmSelectorTestCase):
         self.assertSplit(split, ["p"], ["a"])
         self.assertEqual(stderr, self.TD_LINE)
         self.assertEqual([x["source"] for x in artifacts], ["td"])
-        metric = {**shadow.llm.selection_metric, "enforce_requested": True, "enforcement_enabled": False}  # fmt: skip
+        metric = {
+            **shadow.llm.selection_metric,
+            "enforce_requested": True,
+            "enforce": True,
+            "would_enforce": True,
+            "enforcement_enabled": False,
+        }
         self.assertEqual(split.llm.selection_metric, metric)
 
     def test_enforced_selection_replaces_td(self) -> None:
@@ -815,11 +821,17 @@ class TestSplitTests(LlmSelectorTestCase):
             (requested, False, True, False),
             (requested, True, False, False),
         ):
-            split, stderr, _ = self.split(sel, td_enabled=td_enabled, enforcement=enforcement)  # fmt: skip
-            self.assertEqual(failed_line in stderr, printed, (sel, td_enabled, enforcement))  # fmt: skip
+            split, stderr, _ = self.split(
+                sel, td_enabled=td_enabled, enforcement=enforcement
+            )
+            self.assertEqual(
+                failed_line in stderr, printed, (sel, td_enabled, enforcement)
+            )
             if split.llm is None:
                 raise AssertionError("no selection read")
-            self.assertEqual(split.llm.selection_metric["enforcement_enabled"], enforcement)  # fmt: skip
+            self.assertEqual(
+                split.llm.selection_metric["enforcement_enabled"], enforcement
+            )
 
     def test_broken_llm_selector_keeps_td(self) -> None:
         sel = Selection(files={"a"}, enforce=True, candidates={"a"})
@@ -857,17 +869,25 @@ class TestSplitTests(LlmSelectorTestCase):
             row = {**td, "llm_enforced": s is not None}
             expected: list[tuple[str, object]] = [("td_test_failure_stats_v2", row)]
             if split.llm is not None:
-                expected.append(("llm_selection_failure", split.llm.failure_metric(test)))  # fmt: skip
+                expected.append(
+                    ("llm_selection_failure", split.llm.failure_metric(test))
+                )
             self.assertEqual(metrics, expected)
 
     def test_broken_llm_selector_metrics_are_skipped(self) -> None:
         split, _, _ = self.split(Selection(files={"a"}, candidates={"a"}))
         bug = RuntimeError("bug")
         with (
-            mock.patch.object(selection.AppliedSelection, "selection_metric", property(mock.Mock(side_effect=bug))),
-            mock.patch.object(selection.AppliedSelection, "failure_metric", side_effect=bug),
+            mock.patch.object(
+                selection.AppliedSelection,
+                "selection_metric",
+                property(mock.Mock(side_effect=bug)),
+            ),
+            mock.patch.object(
+                selection.AppliedSelection, "failure_metric", side_effect=bug
+            ),
             mock.patch("sys.stderr", io.StringIO()) as stderr,
-        ):  # fmt: skip
+        ):
             self.assertEqual(split.selection_metrics(True), [])
             metrics = split.failure_metrics(TestRun("a"), [], {})
         self.assertEqual([name for name, _ in metrics], ["td_test_failure_stats_v2"])
@@ -915,8 +935,10 @@ class TestRunTestSplit(LlmSelectorTestCase):
             self.assertIs(split.call_args.kwargs["previous_failures"], prev)
 
     def test_runs_without_llm_selector(self) -> None:
-        self.assertEqual(test_selections.LLM_SELECTION_FILE, selection.LLM_SELECTION_FILE)  # fmt: skip
-        code = "import sys; sys.modules['tools.testing.llm_selector'] = None; import tools.testing.test_selections"  # fmt: skip
+        self.assertEqual(
+            test_selections.LLM_SELECTION_FILE, selection.LLM_SELECTION_FILE
+        )
+        code = "import sys; sys.modules['tools.testing.llm_selector'] = None; import tools.testing.test_selections"
         subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, check=True)
 
     def test_unknown_previous_failures_keep_td(self) -> None:
@@ -954,17 +976,38 @@ class TestRunTestSplit(LlmSelectorTestCase):
         src = ast.unparse(main)
         self.assertIn("add_global_metric('call_id', ", src)
         self.assertIn("test_prioritizations, previous_failures = import_results()", src)
-        call = next(n for n in nodes if isinstance(n, ast.Call) and ast.unparse(n.func) == "run_test_split")  # fmt: skip
+        call = next(
+            n
+            for n in nodes
+            if isinstance(n, ast.Call) and ast.unparse(n.func) == "run_test_split"
+        )
         self.assertEqual(
             ast.unparse(call),
             "run_test_split(test_prioritizations, test_file_times_dict, previous_failures=previous_failures, test_config=TEST_CONFIG, td_enabled=options.enable_td, is_ci=IS_CI)",
         )
-        batches = [ast.unparse(n) for n in nodes if isinstance(n, ast.Call) and ast.unparse(n.func) == "TestBatch"]  # fmt: skip
-        self.assertEqual(batches, ["TestBatch('tests to run', split.include, False)", "TestBatch('excluded', split.exclude, True)"])  # fmt: skip
+        batches = [
+            ast.unparse(n)
+            for n in nodes
+            if isinstance(n, ast.Call) and ast.unparse(n.func) == "TestBatch"
+        ]
+        self.assertEqual(
+            batches,
+            [
+                "TestBatch('tests to run', split.include, False)",
+                "TestBatch('excluded', split.exclude, True)",
+            ],
+        )
         self.assertIn("split = run_test_split(", src)
-        loops = {ast.unparse(n.iter): [ast.unparse(b) for b in n.body] for n in nodes if isinstance(n, ast.For)}  # fmt: skip
+        loops = {
+            ast.unparse(n.iter): [ast.unparse(b) for b in n.body]
+            for n in nodes
+            if isinstance(n, ast.For)
+        }
         emit = ["emit_metric(name, payload)"]
-        for it in ("split.selection_metrics(IS_CI)", "split.failure_metrics(test, selected_tests, test_stats)"):  # fmt: skip
+        for it in (
+            "split.selection_metrics(IS_CI)",
+            "split.failure_metrics(test, selected_tests, test_stats)",
+        ):
             self.assertEqual(loops.get(it), emit)
 
 
