@@ -2855,7 +2855,9 @@ class aot_inductor:
     # This name can only contain letters, numbers, and underscores.
     model_name_for_generated_files: str | None = None
 
-    # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
+    # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict.
+    # A C shim that fails must record its message, as AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE
+    # does; generated code reports it as the cause.
     custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
     # custom op libs that have implemented C shim wrappers
     custom_op_libs: list[str] | None = None

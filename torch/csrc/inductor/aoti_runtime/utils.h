@@ -9,12 +9,12 @@
 
 // WARNING: Be careful when adding new includes here. This header will be used
 // in model.so, and should not refer to any aten/c10 headers except the stable
-// C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
-// applies to other files under torch/csrc/inductor/aoti_runtime/.
+// C ABIs defined in torch/csrc/inductor/aoti_torch/c/shim.h and
+// torch/csrc/stable/c/shim.h, and header-only torch/headeronly code. The same
+// rule applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/headeronly/util/shim_utils.h>
-#ifdef AOTI_LIBTORCH_LINKED
-// Also a stable C ABI, for torch_exception_get_what_without_backtrace.
+#ifdef AOTI_LIBTORCH_PROVIDES_SHIMS
 #include <torch/csrc/stable/c/shim.h>
 #endif
 
@@ -27,9 +27,10 @@
 #endif
 
 // Keeps the shim's message, e.g. "out of memory", along with the failed call,
-// in code that links libtorch, as cpp_builder tells it. Other code reports
-// the call alone, since its shim provider may not export the message getter.
-#ifdef AOTI_LIBTORCH_LINKED
+// when cpp_builder says the libtorch loaded in the process provides the
+// shims. Other code reports the call alone, since its shim provider may not
+// export the stable C ABI's message getter.
+#ifdef AOTI_LIBTORCH_PROVIDES_SHIMS
 #define AOTI_TORCH_ERROR_CODE_CHECK(call)                                     \
   if ((call) != AOTI_TORCH_SUCCESS) {                                         \
     torch::aot_inductor::detail::throw_shim_error(#call, __FILE__, __LINE__); \
@@ -52,36 +53,28 @@
     }                                                                     \
   } while (0)
 
-#ifdef AOTI_LIBTORCH_LINKED
+#ifdef AOTI_LIBTORCH_PROVIDES_SHIMS
 namespace torch::aot_inductor::detail {
-// Formats like torch::stable::detail::throw_exception, without its backtrace
-// dump to stderr, which callers that handle the error don't want. A shim that
-// returns failure must record its message, as
+// Like torch::stable::detail::throw_exception, without its backtrace dump to
+// stderr, which callers that handle the error don't want. A shim that returns
+// failure must record its message, as
 // AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE does, or an earlier one shows.
 [[noreturn]] AOTI_NOINLINE inline void throw_shim_error(
     const char* call,
     const char* file,
     int64_t line) {
-  const char* what = torch_exception_get_what_without_backtrace();
-  std::stringstream ss;
-  if (what != nullptr && *what != '\0') {
-    ss << what << " (originally from " << call << " API call failed at " << file
-       << ", line " << line << ")";
-  } else {
-    ss << call << " API call failed at " << file << ", line " << line;
-  }
-  // @allow-raw-throw: keeps the caller's location in the message
-  throw std::runtime_error(std::move(ss).str());
+  torch::headeronly::detail::throw_exception(
+      torch_exception_get_what_without_backtrace(), call, file, line);
 }
 } // namespace torch::aot_inductor::detail
-#endif // AOTI_LIBTORCH_LINKED
+#endif // AOTI_LIBTORCH_PROVIDES_SHIMS
 
 namespace torch::aot_inductor {
 // For destructors, which log errors instead of throwing.
 inline void log_shim_error(AOTITorchError error, const char* what) {
   if (error != AOTI_TORCH_SUCCESS) {
     std::cerr << "AOTInductor: " << what
-#ifdef AOTI_LIBTORCH_LINKED
+#ifdef AOTI_LIBTORCH_PROVIDES_SHIMS
               << ": " << torch_exception_get_what_without_backtrace()
 #endif
               << '\n';
