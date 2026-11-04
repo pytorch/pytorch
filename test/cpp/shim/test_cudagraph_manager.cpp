@@ -74,7 +74,7 @@ struct Region {
       int64_t size = int64_t(1) << 50;
       int64_t stride = 1;
       AtenTensorHandle huge = nullptr;
-      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
+      AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(aoti_torch_empty_strided(
           1,
           &size,
           &stride,

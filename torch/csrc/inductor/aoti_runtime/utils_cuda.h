@@ -166,7 +166,7 @@ class AOTICudaMemPool {
     // A real index, which AOTICudaGraph's cleanup guards to.
     AOTI_RUNTIME_CHECK(device_index >= 0, "AOTICudaMemPool: bad device index");
     CUDAMemPoolHandle ptr = nullptr;
-    AOTI_TORCH_ERROR_CODE_CHECK(
+    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
         aoti_torch_create_cuda_mem_pool(device_index, &ptr));
     pool_.reset(ptr);
   }
@@ -195,7 +195,7 @@ class AOTICudaGraph {
  public:
   AOTICudaGraph() : graph_(nullptr, delete_cuda_graph) {
     CUDAGraphHandle ptr = nullptr;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_cuda_graph(
+    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(aoti_torch_create_cuda_graph(
         /*keep_graph=*/0, /*num_rng_states=*/0, &ptr));
     graph_.reset(ptr);
   }
@@ -212,9 +212,9 @@ class AOTICudaGraph {
   // code changed the current stream.
   void capture_begin(const AOTICudaMemPool& pool, cudaStreamCaptureMode mode) {
     void* stream = nullptr;
-    AOTI_TORCH_ERROR_CODE_CHECK(
+    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
         aoti_torch_get_current_cuda_stream(pool.device(), &stream));
-    AOTI_TORCH_ERROR_CODE_CHECK(
+    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
         aoti_torch_cuda_graph_capture_begin(graph_.get(), pool.get(), mode));
     capture_stream_ = static_cast<cudaStream_t>(stream);
     device_index_ = pool.device();
@@ -226,12 +226,13 @@ class AOTICudaGraph {
     AOTICudaStreamGuard guard(capture_stream_, device_index_);
     // Called once per capture, as the shim requires, even if it fails.
     capture_stream_ = nullptr;
-    AOTI_TORCH_ERROR_CODE_CHECK(
+    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
         aoti_torch_cuda_graph_capture_end(graph_.get()));
   }
 
   void replay() {
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda_graph_replay(graph_.get()));
+    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+        aoti_torch_cuda_graph_replay(graph_.get()));
   }
 
  private:
