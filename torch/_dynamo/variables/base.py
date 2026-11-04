@@ -941,7 +941,12 @@ def _wrap_getattro(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 1:
         raise_type_error(tx, f"expected 1 argument, got {len(args)}")
-    return func(self, tx, args[0].as_python_constant())
+    name = args[0].as_python_constant()
+    if not isinstance(name, str):
+        raise_type_error(
+            tx, f"attribute name must be string, not '{type(name).__name__}'"
+        )
+    return func(self, tx, name)
 
 
 def _wrap_descr_get(
@@ -1813,12 +1818,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         its own table entries into its own tp_dict, and lookup walks the MRO with
         the most-derived class winning. A subclass table therefore *adds* to
         (rather than replaces) the entries it inherits. Within a class the tables
-        are consulted in the order given.
+        are consulted in the order given. A table may be a property of the
+        instance, for a VT that wraps several Python types.
         """
         for klass in type(self).__mro__:
             d = klass.__dict__
             for attr in table_attrs:
                 table = d.get(attr)
+                if isinstance(table, property):
+                    table = table.__get__(self)
                 if table is not None and name in table:
                     return table[name]
         return None

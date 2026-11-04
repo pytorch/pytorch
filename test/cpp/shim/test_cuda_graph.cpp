@@ -4,12 +4,16 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/Sleep.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
+#include <algorithm>
 #include <optional>
+#include <string>
 #include <thread>
 
 namespace {
@@ -324,4 +328,214 @@ TEST_F(AOTICudaGraphTest, EndingInvalidatedCaptureFailsButEndsIt) {
 
 TEST_F(AOTICudaGraphTest, ReplayBeforeCaptureFails) {
   EXPECT_EQ(replay(), AOTI_TORCH_FAILURE);
+}
+
+namespace {
+
+class AOTICudaGraphRAIITest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    if (c10::cuda::device_count() == 0 || uses_cuda_malloc_async()) {
+      GTEST_SKIP() << "Needs CUDA and the native caching allocator";
+    }
+    pool_.emplace(0);
+    stream_.emplace(0);
+  }
+
+  // Deleting the pool with a capture open aborts, so a test whose cleanup
+  // regressed fails here rather than taking down the binary.
+  void TearDown() override {
+    if (stream_) {
+      end_leftover_capture(stream_->get());
+    }
+  }
+
+  static void end_leftover_capture(cudaStream_t stream) {
+    cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
+    if (cudaStreamIsCapturing(stream, &status) == cudaSuccess &&
+        status != cudaStreamCaptureStatusNone) {
+      ADD_FAILURE() << "a capture was left open";
+      cudaGraph_t graph = nullptr;
+      (void)cudaStreamEndCapture(stream, &graph);
+      if (graph != nullptr) {
+        (void)cudaGraphDestroy(graph);
+      }
+    }
+    (void)cudaGetLastError();
+  }
+
+  template <typename Fn>
+  static std::string error_of(Fn&& fn) {
+    try {
+      fn();
+    } catch (const std::exception& e) {
+      return e.what();
+    }
+    return "no error";
+  }
+
+  bool stream_is_capturing() {
+    return at::cuda::getStreamFromExternal(stream_->get(), 0).is_capturing();
+  }
+
+  // Makes the test's stream current.
+  at::cuda::CUDAStreamGuard on_stream() {
+    return at::cuda::CUDAStreamGuard(
+        at::cuda::getStreamFromExternal(stream_->get(), 0));
+  }
+
+  std::optional<torch::aot_inductor::AOTICudaMemPool> pool_;
+  std::optional<torch::aot_inductor::AOTICudaStream> stream_;
+};
+
+} // namespace
+
+TEST_F(AOTICudaGraphRAIITest, CapturesReplaysAndKeepsShimErrors) {
+  torch::aot_inductor::AOTICudaGraph graph;
+  auto x = at::ones({8}, at::kCUDA);
+  at::Tensor y;
+  {
+    auto guard = on_stream();
+    graph.capture_begin(*pool_, cudaStreamCaptureModeThreadLocal);
+    y = x * 2;
+    graph.capture_end();
+  }
+  x.fill_(3);
+  graph.replay();
+  EXPECT_TRUE(y.equal(at::full({8}, 6.0f, at::kCUDA)));
+  auto what = error_of([] { torch::aot_inductor::AOTICudaGraph().replay(); });
+  EXPECT_NE(what.find("aoti_torch_cuda_graph_replay("), what.npos) << what;
+  EXPECT_NE(what.find("capture_end() must have been called"), what.npos)
+      << what;
+}
+
+TEST_F(AOTICudaGraphRAIITest, EndsTheCaptureItLeftOpen) {
+  {
+    auto guard = on_stream();
+    torch::aot_inductor::AOTICudaGraph graph;
+    graph.capture_begin(*pool_, cudaStreamCaptureModeThreadLocal);
+    auto y = at::ones({8}, at::kCUDA) * 2;
+    // Leaves another stream current, as captured code may, when the graph is
+    // destroyed.
+    at::cuda::setCurrentCUDAStream(at::cuda::getStreamFromPool());
+  }
+  EXPECT_FALSE(stream_is_capturing());
+}
+
+TEST_F(AOTICudaGraphRAIITest, EndsTheCaptureOnItsStream) {
+  torch::aot_inductor::AOTICudaGraph graph;
+  at::Tensor y;
+  {
+    auto guard = on_stream();
+    graph.capture_begin(*pool_, cudaStreamCaptureModeThreadLocal);
+    y = at::ones({8}, at::kCUDA) * 2;
+    // As captured code may leave another stream current.
+    at::cuda::setCurrentCUDAStream(at::cuda::getStreamFromPool());
+    graph.capture_end();
+  }
+  EXPECT_FALSE(stream_is_capturing());
+  graph.replay();
+  EXPECT_TRUE(y.equal(at::full({8}, 2.0f, at::kCUDA)));
+}
+
+TEST_F(AOTICudaGraphRAIITest, RejectsANegativeDeviceIndex) {
+  EXPECT_EQ(
+      error_of([] { torch::aot_inductor::AOTICudaMemPool(-1); }),
+      "AOTICudaMemPool: bad device index");
+}
+
+TEST_F(AOTICudaGraphRAIITest, EndsOnlyACaptureItBegan) {
+  torch::aot_inductor::AOTICudaGraph graph;
+  EXPECT_EQ(
+      error_of([&] { graph.capture_end(); }),
+      "AOTICudaGraph: no capture to end");
+  {
+    auto guard = on_stream();
+    graph.capture_begin(*pool_, cudaStreamCaptureModeThreadLocal);
+    auto y = at::ones({8}, at::kCUDA) * 2;
+    graph.capture_end();
+  }
+  EXPECT_EQ(
+      error_of([&] { graph.capture_end(); }),
+      "AOTICudaGraph: no capture to end");
+}
+
+TEST_F(AOTICudaGraphRAIITest, MakesNonBlockingStreamsAndEvents) {
+  for (int32_t device = 0;
+       device < std::min<int32_t>(c10::cuda::device_count(), 2);
+       ++device) {
+    torch::aot_inductor::AOTICudaStream stream(device);
+    unsigned int flags = 0;
+    ASSERT_EQ(cudaStreamGetFlags(stream.get(), &flags), cudaSuccess);
+    EXPECT_EQ(flags, cudaStreamNonBlocking);
+    // With device 0 current, recording fails unless the event and the stream
+    // share a device, so check each wrapper against one known to be on it.
+    torch::aot_inductor::AOTICudaEvent event(device);
+    auto known_stream = at::cuda::getStreamFromPool(false, device);
+    EXPECT_EQ(cudaEventRecord(event.get(), known_stream.stream()), cudaSuccess);
+    at::cuda::CUDAEvent known_event;
+    known_event.record(at::cuda::getStreamFromExternal(stream.get(), device));
+    EXPECT_EQ(cudaEventSynchronize(event.get()), cudaSuccess);
+    known_event.synchronize();
+  }
+}
+
+TEST_F(AOTICudaGraphRAIITest, LeavesALaterCaptureOnTheStreamAlone) {
+  auto guard = on_stream();
+  auto first = std::make_unique<torch::aot_inductor::AOTICudaGraph>();
+  first->capture_begin(*pool_, cudaStreamCaptureModeThreadLocal);
+  // Invalidates the capture, so capture_end fails after ending it.
+  EXPECT_NE(cudaStreamSynchronize(stream_->get()), cudaSuccess);
+  (void)cudaGetLastError();
+  auto what = error_of([&] { first->capture_end(); });
+  EXPECT_NE(what.find("aoti_torch_cuda_graph_capture_end("), what.npos) << what;
+  torch::aot_inductor::AOTICudaGraph second;
+  second.capture_begin(*pool_, cudaStreamCaptureModeThreadLocal);
+  auto y = at::ones({8}, at::kCUDA) * 2;
+  first.reset();
+  second.capture_end();
+  second.replay();
+  EXPECT_TRUE(y.equal(at::full({8}, 2.0f, at::kCUDA)));
+}
+
+TEST_F(AOTICudaGraphRAIITest, EndsTheInvalidatedCaptureItLeftOpen) {
+  {
+    auto guard = on_stream();
+    torch::aot_inductor::AOTICudaGraph graph;
+    graph.capture_begin(*pool_, cudaStreamCaptureModeThreadLocal);
+    auto x = at::ones({8}, at::kCUDA) * 2;
+    // As when the captured code throws after a call that broke the capture.
+    EXPECT_NE(cudaStreamSynchronize(stream_->get()), cudaSuccess);
+    (void)cudaGetLastError();
+  }
+  ASSERT_FALSE(stream_is_capturing());
+  // The stream captures again, into a new pool: a pool can't take a capture
+  // once every graph captured into it is gone.
+  pool_.emplace(0);
+  auto guard = on_stream();
+  torch::aot_inductor::AOTICudaGraph graph;
+  graph.capture_begin(*pool_, cudaStreamCaptureModeThreadLocal);
+  auto y = at::ones({8}, at::kCUDA) * 3;
+  graph.capture_end();
+  graph.replay();
+  EXPECT_TRUE(y.equal(at::full({8}, 3.0f, at::kCUDA)));
+}
+
+TEST_F(AOTICudaGraphRAIITest, EndsTheCaptureOnItsDevice) {
+  if (c10::cuda::device_count() < 2) {
+    GTEST_SKIP() << "Needs two GPUs";
+  }
+  torch::aot_inductor::AOTICudaMemPool pool(1);
+  torch::aot_inductor::AOTICudaStream stream(1);
+  auto graph = std::make_unique<torch::aot_inductor::AOTICudaGraph>();
+  {
+    c10::cuda::CUDAGuard device_guard(1);
+    at::cuda::CUDAStreamGuard stream_guard(
+        at::cuda::getStreamFromExternal(stream.get(), 1));
+    graph->capture_begin(pool, cudaStreamCaptureModeThreadLocal);
+  }
+  // Destroyed with device 0 current.
+  graph.reset();
+  EXPECT_FALSE(at::cuda::getStreamFromExternal(stream.get(), 1).is_capturing());
+  end_leftover_capture(stream.get());
 }
