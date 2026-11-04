@@ -3801,7 +3801,7 @@ class _TestParamsMaxPoolBase:
             'return_indices': [True, False]
         }
 
-        # Uncrossed samples: the other arg form, and non-overlapping windows for the max_unpool*d grads
+        # Uncrossed samples for the other arg form; stride=kernel_size lets the max_unpool*d grads keep them
         self.extra_kwargs = []
 
         self.shapes = [
@@ -3835,14 +3835,15 @@ class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
     def __init__(self) -> None:
         super().__init__()
         self.extra_kwargs.append(
-            dict(kernel_size=(3,), stride=(2,), ceil_mode=False, padding=(1,), dilation=1, return_indices=True))
+            dict(kernel_size=(3,), stride=(3,), ceil_mode=False, padding=(1,), dilation=1, return_indices=True))
 
 class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
 
     def __init__(self) -> None:
         super().__init__()
         self.kwargs['kernel_size'] = [(3, 2)]
-        self.kwargs['stride'] = [None, (2, 1)]
+        # Overlapping stride first: some tests only use the first sample
+        self.kwargs['stride'] = [(2, 1), None]
         self.kwargs['padding'] = [0, (1, 1)]
         self.kwargs['dilation'] = [1, (1, 2)]
         self.extra_kwargs.append(
@@ -3855,7 +3856,7 @@ class _TestParamsMaxPool3d(_TestParamsMaxPoolBase):
     def __init__(self) -> None:
         super().__init__()
         self.kwargs['kernel_size'] = [(3, 2, 3)]
-        self.kwargs['stride'] = [None, (2, 1, 2)]
+        self.kwargs['stride'] = [(2, 1, 2), None]
         self.kwargs['dilation'] = [1, (1, 2, 1)]
         self.extra_kwargs.append(
             dict(kernel_size=3, stride=3, ceil_mode=False, padding=1, dilation=1, return_indices=True))
@@ -7278,8 +7279,8 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 def _large_logit_linear_cross_entropy_samples(device, dtype, requires_grad, **kwargs):
     """Samples whose logits are large, which the curated shapes are not.
 
-    The samples above reach |z| of about 20 at most, because their tensors
-    are small (in_features=3, values in [-2, 2]). Accuracy of a chunked
+    The samples above reach |z| of about 20 at most: in_features=3, values
+    in [-2, 2] and linear_bias in [-9, 9]. Accuracy of a chunked
     implementation can depend on |z| well past that: an implementation may hold
     the logits at low precision -- eager does for fp16 -- and such a buffer
     stores ``z`` with absolute error proportional to ``|z|`` while the softmax
@@ -7406,7 +7407,7 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
 
     # (input, linear_weight) shapes: unbatched, 1-D batch, and N-D linear_weight (K-dim loss).
     # Keep them non-empty: gradcheck's forward AD uses zero tolerance for empty inputs (#190436).
-    shapes = (((3,), (4, 3)), ((8, 3), (4, 3)), ((4, 3), (2, 1, 5, 3)))
+    shapes = (((3,), (4, 3)), ((8, 3), (4, 3)), ((4, 3), (2, 1, 5, 4, 3)))
     make_linear_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=-2, high=2)
     for kwargs, probabilities_target in itertools.product(kwargs_list, (False, True)):
         # ignore_index is not supported for probabilities target
@@ -10466,7 +10467,6 @@ def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwargs):
     for sample in sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
-        indices = sample.args[0]
         # The samples for max_unpool are generated with max_pool.
         # It could be that a single element from the max_pool's
         # input is mapped to several locations in its output.
@@ -10482,10 +10482,11 @@ def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwarg
         # 2. Make sure that the equivalence classes are all singletons,
         # i.e. the index tensor has to be comprised of only unique
         # indices.
-        # Here we go with the solution 2, the easiest of all.
-        # Indices are per (N, C) plane, so only duplicates within a plane matter.
-        sorted_indices = indices.flatten(2).sort(dim=-1).values
-        if (sorted_indices[..., 1:] != sorted_indices[..., :-1]).all():
+        # Here we go with the solution 2, the easiest of all: non-overlapping
+        # windows (stride == kernel_size) always give unique indices.
+        # gradcheck is expensive, so only the smallest input shape is kept.
+        stride = sample.kwargs['stride']
+        if (stride is None or stride == sample.kwargs['kernel_size']) and sample.input.shape[2] == 3:
             yield sample
 
 def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_grad, **kwargs):
