@@ -2084,7 +2084,8 @@ class outer_fn(torch.nn.Module):
             out.sum().backward()
 
     @unittest.skipUnless(
-        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED
+        or IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED,
         "Requires CUDA with SM >= 8.0, and Triton",
     )
     def test_nested_compile_transformer_with_flex_attention_compiled_layers(
@@ -2243,6 +2244,8 @@ class outer_fn(torch.nn.Module):
 
         fake_store = FakeStore()
         dist.init_process_group("fake", store=fake_store, rank=0, world_size=2)
+        # A leaked default group would make CI's in-process rerun mask the real error.
+        self.addCleanup(dist.destroy_process_group)
         device_mesh = init_device_mesh(device_type, (2,))
 
         with (
@@ -2334,8 +2337,6 @@ class outer_fn(torch.nn.Module):
 
             out = wrapped_fn(x)
             out.sum().backward()
-
-        dist.destroy_process_group()
 
     @unittest.skipUnless(
         IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED
