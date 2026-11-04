@@ -107,7 +107,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 // a fast vectored __half2 atomic (this can be worth up to a 6x
 // speedup, see https://github.com/pytorch/pytorch/pull/21879).
 // We can convert a __half atomic into a __half2 atomic by simply
-// pairing the __half with a zero entry on the left/right depending
+// pairing the __half with a -0.0 entry on the left/right depending
 // on alignment... but only if this wouldn't cause an out of bounds
 // access!  Thus, you must specify tensor and numel so we can check
 // if you would be out-of-bounds and use a plain __half atomic if

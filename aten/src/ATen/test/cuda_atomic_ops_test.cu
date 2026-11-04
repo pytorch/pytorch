@@ -10,7 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <type_traits>
+#include <limits>
 #include <vector>
 
 constexpr int blocksize = 256;
@@ -308,15 +308,14 @@ namespace {
 // TestFastAtomicAdd.VectorizedBounds in
 // test/cpp/aoti_abi_check/cuda/test_kernel_utils.cu, for the pointer form.
 template <typename scalar_t>
-constexpr uint16_t kSignalingNaNBits =
-    std::is_same_v<scalar_t, at::Half> ? 0x7c01 : 0x7f81;
+constexpr uint16_t kSignalingNaN = std::numeric_limits<scalar_t>::signaling_NaN().x;
 
 // The buffer holds signaling NaNs except for the target, which starts at 0.
 template <typename scalar_t>
 std::vector<scalar_t> seededBuffer(int64_t buf_numel, int64_t target) {
   std::vector<scalar_t> buf(buf_numel);
   for (auto& v : buf) {
-    v.x = kSignalingNaNBits<scalar_t>;
+    v.x = kSignalingNaN<scalar_t>;
   }
   buf[target] = static_cast<scalar_t>(0);
   return buf;
@@ -361,7 +360,7 @@ std::vector<scalar_t> accessorScatter(
 
 template <typename scalar_t>
 bool wasWritten(scalar_t v) {
-  return v.x != kSignalingNaNBits<scalar_t>;
+  return v.x != kSignalingNaN<scalar_t>;
 }
 
 template <typename scalar_t>
