@@ -2,8 +2,10 @@
 
 import json
 import os
+import shlex
 import subprocess
 import tempfile
+from pathlib import Path
 from typing import Any
 from unittest import main, mock, TestCase
 
@@ -347,6 +349,36 @@ class TestConfigFilter(TestCase):
                 yaml.safe_load(case["test_matrix"]), selected_test_configs
             )
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
+
+    def test_periodic_strict_matrix_transport(self) -> None:
+        workflow_path = (
+            Path(__file__).resolve().parents[1] / "workflows/periodic-strict.yml"
+        )
+        workflow = yaml.load(workflow_path.read_text(), Loader=yaml.BaseLoader)
+        marker_expr = "${{ github.event.schedule == '30 0 * * *' && 'periodic_daily' || inputs.periodic-marker || 'periodic' }}"
+        prefix_expr = "${{ needs.get-label-type.outputs.label-type }}"
+        for job_name, job in workflow["jobs"].items():
+            raw = job.get("with", {}).get("test-matrix", "")
+            if not raw.lstrip().startswith("{ include:"):
+                continue
+            self.assertIn(marker_expr, raw)
+            for marker in ("periodic", "periodic_daily"):
+                matrix_text = raw.replace(marker_expr, marker).replace(prefix_expr, "")
+                expected = yaml.safe_load(matrix_text)
+                for entry in expected["include"]:
+                    self.assertEqual(
+                        entry["extra_flags"], f"--periodic-filter={marker}"
+                    )
+                # The action interpolates the matrix into double-quoted shell
+                # source, first as YAML and then as serialized JSON for tests.
+                for stage, text in (
+                    ("build", matrix_text),
+                    ("test", json.dumps(expected)),
+                ):
+                    with self.subTest(job=job_name, marker=marker, stage=stage):
+                        args = shlex.split(f'--test-matrix "{text}"')
+                        self.assertEqual(len(args), 2)
+                        self.assertEqual(yaml.safe_load(args[1]), expected)
 
     def test_set_periodic_modes(self) -> None:
         testcases: list[dict[str, str]] = [

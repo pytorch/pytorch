@@ -3047,8 +3047,13 @@ def requires_multigpu(fn):
     return unittest.skipIf(skip, reason)(wrapper)
 
 
-def periodic(fn):
+def periodic(fn=None, *, hours=4):
     """Marks a test that CI runs only in periodic test mode.
+
+    In periodic-strict, plain @periodic runs every four hours and
+    @periodic(hours=24) runs daily. These use the mutually exclusive periodic
+    and periodic_daily pytest markers. Both reuse PYTORCH_TEST_WITH_PERIODIC
+    to enable tests in periodic mode.
 
     The periodic test configuration selects the corresponding pytest marker
     and sets PYTORCH_TEST_WITH_PERIODIC. Other periodic jobs can also run the
@@ -3064,12 +3069,18 @@ def periodic(fn):
     while the periodic gate keeps a test marked both out of the slow shards.
     Such a test runs only in jobs that set both flags, like periodic-strict.
     """
+    if hours not in (4, 24):
+        raise ValueError("periodic supports only hours=4 or hours=24")
+    if fn is None:
+        return partial(periodic, hours=hours)
+
+    marker = "periodic_daily" if hours == 24 else "periodic"
     reason = "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
     skip = (IS_CI or IS_SANDCASTLE) and not TEST_WITH_PERIODIC
 
     if isinstance(fn, type):
         if has_pytest:
-            fn = pytest.mark.periodic(fn)
+            fn = getattr(pytest.mark, marker)(fn)
         return unittest.skipIf(skip, reason)(fn)
 
     # Isolate decorator metadata when parameter variants share the original
@@ -3079,7 +3090,7 @@ def periodic(fn):
         return fn(*args, **kwargs)
 
     if has_pytest:
-        wrapper = pytest.mark.periodic(wrapper)
+        wrapper = getattr(pytest.mark, marker)(wrapper)
 
     return unittest.skipIf(skip, reason)(wrapper)
 

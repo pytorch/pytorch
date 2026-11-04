@@ -7,15 +7,24 @@ on:
       - .github/workflows/periodic-strict.yml
   schedule:
     - cron: 45 */4 * * *
+    - cron: 30 0 * * *
   push:
     tags:
       - ciflow/periodic-strict/*
     branches:
       - release/*
   workflow_dispatch:
+    inputs:
+      periodic-marker:
+        description: Periodic test marker to run
+        type: choice
+        default: periodic
+        options:
+          - periodic
+          - periodic_daily
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
   cancel-in-progress: true
 
 permissions:
@@ -48,8 +57,8 @@ jobs:
       cuda-arch-list: '7.5 8.6 8.9'
       test-matrix: |
         { include: [
-          { config: "periodic", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
-          { config: "periodic", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "periodic", extra_flags: "--periodic-filter=${{ github.event.schedule == '30 0 * * *' && 'periodic_daily' || inputs.periodic-marker || 'periodic' }}", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "periodic", extra_flags: "--periodic-filter=${{ github.event.schedule == '30 0 * * *' && 'periodic_daily' || inputs.periodic-marker || 'periodic' }}", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -83,8 +92,8 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "periodic", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "periodic", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "periodic", extra_flags: "--periodic-filter=${{ github.event.schedule == '30 0 * * *' && 'periodic_daily' || inputs.periodic-marker || 'periodic' }}", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "periodic", extra_flags: "--periodic-filter=${{ github.event.schedule == '30 0 * * *' && 'periodic_daily' || inputs.periodic-marker || 'periodic' }}", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
         ]}
       python-version: "3.11"
       compiler: clang21

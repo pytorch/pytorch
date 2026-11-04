@@ -246,6 +246,7 @@ fi
 
 if [[ "$TEST_CONFIG" == 'periodic' ]]; then
   export PYTORCH_TEST_WITH_PERIODIC=1
+  PYTHON_TEST_EXTRA_OPTION="${PYTHON_TEST_EXTRA_OPTION:-} ${EXTRA_FLAGS:-}"
   # Allows @periodic tests that are also marked slow (@slowTest or
   # slow-tests.json) to run.
   export PYTORCH_TEST_WITH_SLOW=1

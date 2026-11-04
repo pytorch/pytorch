@@ -1603,6 +1603,13 @@ def parse_args():
         help="Run all distributed tests",
     )
     parser.add_argument(
+        "--periodic-filter",
+        choices=["periodic", "periodic_daily"],
+        default="periodic",
+        help="Select the pytest marker to run in TEST_CONFIG=periodic. "
+        "Defaults to four-hour tests; periodic_daily selects daily tests.",
+    )
+    parser.add_argument(
         "--multigpu-filter",
         choices=["multigpu", "not-multigpu"],
         default=None,
@@ -2330,7 +2337,7 @@ def run_tests(
         "multigpu": "multigpu",
         "not-multigpu": "not multigpu",
     }.get(getattr(options, "multigpu_filter", None))
-    periodic_marker = "periodic" if TEST_CONFIG == "periodic" else None
+    periodic_marker = options.periodic_filter if TEST_CONFIG == "periodic" else None
 
     # Orthogonal min-GPU threshold on the `multigpu` tests, applied by a pytest
     # plugin (see test/conftest.py). 0 disables it, so it is a no-op unless a
