@@ -131,6 +131,7 @@ class TestSelection(unittest.TestCase):
             out, CANDIDATES, ["torch/_dynamo/x.py", "test/test_nn.py"]
         )
         self.assertEqual(sel.files, {"test_ops", "test_nn", "dynamo/test_misc"})
+        self.assertEqual(sel.reason, "r")
         self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
         self.assertFalse(sel.run_all)
         self.assertTrue(sel.covers("inductor/test_torchinductor", "dynamo_wrapped"))
@@ -254,7 +255,6 @@ g () {
         self.assertEqual(sel.candidates, CANDIDATES)
         for f in ("test_openreg", "cpp/test_jit"):
             self.assertTrue(sel.covers(f, "default"), f)
-            self.assertFalse(Selection().covers(f, "default"), f)
         self.assertFalse(sel.covers("test_nn", "default"))
         self.assertEqual(Selection.from_json(sel.to_json()), sel)
 
@@ -337,6 +337,55 @@ g () {
             sources, CANDIDATES | {"test_jit", "test_jit_legacy"}, ["test/jit/data.txt"]
         )
         self.assertEqual(sel.files, {"test_jit", "test_jit_legacy"})
+
+    def test_bare_names_that_import_something_else_are_not_matched(self) -> None:
+        sources = {
+            "test_nn.py": "from . import random\nfrom server.test import x\nfrom typing.helper import y\n",
+            "test_ops.py": "from . import other\nfrom test.test_math import y\nimport test\nfrom typing import (\n    Any,\n)\n",
+        }
+        # random and typing are standard library modules, and test is test/.
+        for changed in (
+            "test/random.py",
+            "test/server/test/__init__.py",
+            "test/typing/helper.py",
+        ):
+            sel = self.select_in_tree(sources, CANDIDATES, [changed])
+            self.assertEqual((sel.files, sel.run_all), ({"test_nn"}, False), changed)
+
+    def test_import_greps_are_chunked(self) -> None:
+        patterns: list[str] = []
+
+        def grep(pattern: str) -> list[str]:
+            patterns.append(pattern)
+            return [f"test/{t}.py" for t in ("test_nn", "test_ops") if t in pattern]
+
+        files = [f"test/m{i}.py" for i in range(5)]
+        with mock.patch.object(selection, "MAX_GREP_MODULES", 2):
+            found = selection.importers(files, CANDIDATES, grep)
+        self.assertEqual(found, set())
+        chunks = [selection.import_pattern(files[i : i + 2]) for i in (0, 2, 4)]
+        self.assertEqual(patterns, chunks)
+        sources = {"test_nn.py": "import m0\n", "test_ops.py": "import m4\n"}
+        with mock.patch.object(selection, "MAX_GREP_MODULES", 1):
+            sel = self.select_in_tree(sources, CANDIDATES, ["test/m0.py", "test/m4.py"])
+        self.assertEqual(sel.files, {"test_nn", "test_ops"})
+
+    def test_grep_failure_runs_all(self) -> None:
+        for e in (
+            OSError("[Errno 7] Argument list too long"),
+            RuntimeError("git grep failed: fatal"),
+        ):
+            sel = Selection.from_model_output(
+                answer(run_all=True),
+                CANDIDATES,
+                ["test/test_nn.py"],
+                mock.Mock(side_effect=e),
+            )
+            error = f"{type(e).__name__}: {e}"
+            self.assertEqual(
+                (sel.run_all, sel.reason, sel.error),
+                (True, f"grep failed ({error})", error),
+            )
 
     def test_import_forms(self) -> None:
         sources = {
@@ -431,6 +480,9 @@ g () {
         self.assertFalse(
             Selection.from_model_output(out, CANDIDATES, ["docs/a.md"]).run_all
         )
+        # A malformed answer sets error even when the change runs everything anyway.
+        sel = Selection.from_model_output([], CANDIDATES, ["test/run_test.py"])
+        self.assertRegex(str(sel.error), "^malformed model output: ")
 
     def test_load_malformed_file(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -459,6 +511,9 @@ g () {
                 {**valid, "candidates": [1]},
                 {**valid, "candidates": None},
                 {**valid, "error": 1},
+                {**valid, "sweeps": ["default"]},
+                {**valid, "files": ["test_ops"]},
+                {**valid, "error": "e"},
             ]
             bad += [
                 {k: v for k, v in valid.items() if k != key}
@@ -479,6 +534,32 @@ g () {
             sel = Selection({"test_nn"}, candidates={"test_nn", "test_ops"})
             p.write_text(json.dumps(sel.to_json()))
             self.assertEqual(Selection.load(p), sel)
+
+    def test_covers(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be run_all"):
+            Selection()
+        cands = {"test_nn", "test_ops", "test_torch"}
+        sel = Selection({"test_nn"}, {"dynamo_wrapped"}, candidates=cands)
+        # The model was not shown test_openreg, so it always runs.
+        for f, config, covered in [
+            ("test_openreg", "default", True),
+            ("test_nn", "default", True),
+            ("test_ops", "default", False),
+            ("test_ops", "dynamo_wrapped", True),
+            ("test_ops", "crossref", False),
+        ]:
+            self.assertEqual(sel.covers(f, config), covered, (f, config))
+        self.assertTrue(Selection(run_all=True).covers("test_ops", "default"))
+        # The first of TEST_SH_GLOBS a config contains decides its ALWAYS_COVERED.
+        for config, torch, ops in [
+            ("inductor", True, True),
+            ("inductor_amx", True, True),
+            ("inductor_cpp_wrapper", True, False),
+            ("inductor_core", False, False),
+            ("inductor_huggingface", False, False),
+        ]:
+            got = (sel.covers("test_torch", config), sel.covers("test_ops", config))
+            self.assertEqual(got, (torch, ops), config)
 
     def test_run_all_patterns(self) -> None:
         for f in [
@@ -617,18 +698,46 @@ g () {
         sel = Selection.from_model_output(answer(dirs=["cpython"]), candidates, [])
         self.assertEqual(sel.files, {"cpython/v3_13/test_set"})
 
+    def test_parse_model_output_rejects_malformed_answers(self) -> None:
+        malformed: list[Any] = [
+            [],
+            "tests",
+            *({k: v for k, v in answer().items() if k != key} for key in answer()),
+            answer(tests="test_nn"),
+            answer(tests=["test_nn"]),
+            answer(tests=[{"file": 3}]),
+            answer(dirs="dynamo"),
+            answer(sweeps=[1]),
+            answer(sweeps=["default"]),
+            answer(run_all=0),
+            answer(reason=None),
+            answer(reason=["r"]),
+            answer(dirs=["nn"]),
+            # An empty prefix must not match every candidate.
+            *(answer(dirs=[d]) for d in ("", "*", "test/")),
+        ]
+        for out in malformed:
+            with self.assertRaises(ValueError, msg=repr(out)):
+                selection.parse_model_output(out, CANDIDATES)
+
     def test_edited_tests_select_their_driver(self) -> None:
         aot, autoload = (
             {"test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja"},
             {"test_autoload_enable", "test_autoload_disable"},
         )
-        candidates = CANDIDATES | {"test_jit"} | aot | autoload
+        jit = {"test_jit", "test_jit_profiling", "test_jit_legacy"}
+        fuser, dispatch = {"test_jit_fuser_te"}, {"test_dispatch"}
+        candidates = CANDIDATES | jit | fuser | dispatch | aot | autoload
+        dangling = "test/cpp_extensions/dangling_impl_extension.cpp"
         for changed, expected in [
-            ("test/jit/test_freezing.py", {"test_jit"}),
+            ("test/jit/test_freezing.py", jit),
+            ("test/test_jit.py", jit),
+            ("test/jit/test_fuser_common.py", jit | fuser),
             ("test/cpp_extensions/extension.cpp", aot | autoload),
+            (dangling, aot | autoload | dispatch),
             ("test/test_cpp_extensions_aot.py", aot),
             ("test/test_autoload.py", autoload),
-            ("test/test_jit_fuser_te.py", set()),
+            ("test/test_jit_fuser_te.py", fuser),
         ]:
             sel = Selection.from_model_output(answer(), candidates, [changed])
             self.assertEqual(sel.files, expected, changed)
@@ -641,7 +750,7 @@ g () {
         # Directories whose files no candidate runs. torch_openreg/tests runs
         # through test_openreg, which is never a candidate and so is always
         # covered; edits there also select the cpp_extensions drivers.
-        undriven = {"custom_backend", "mobile", "onnx_caffe2"}
+        undriven = {"custom_backend", "mobile"}
         for pattern in BLOCKLISTED_PATTERNS:
             path = f"test/{pattern}/test_x.py"
             driven = any(
@@ -690,6 +799,38 @@ class TestPrompt(unittest.TestCase):
         self.assertLessEqual(len(short), 40_000)
         for i in range(500):
             self.assertIn(f"diff --git a/f{i} b/f{i}\n", short)
+
+    def test_query_model_without_a_checkout_has_no_tools(self) -> None:
+        done = subprocess.CompletedProcess([], 0, '{"structured_output": {}}', "")
+        run = mock.Mock(return_value=done)
+        with mock.patch.object(select_tests.subprocess, "run", run):
+            result = select_tests.query_model("p", "m", "medium")
+        self.assertEqual(result, {"structured_output": {}})
+        cmd = run.call_args.args[0]
+        self.assertEqual(cmd[cmd.index("--tools") + 1], "")
+        for flag in ("--allowed-tools", "--disallowed-tools", "--add-dir"):
+            self.assertNotIn(flag, cmd)
+        self.assertEqual(run.call_args.kwargs["input"], "p")
+
+    def test_query_model_failures_are_error_envelopes(self) -> None:
+        def completed(stdout: str, code: int = 0) -> mock.Mock:
+            done = subprocess.CompletedProcess([], code, stdout, "e")
+            return mock.Mock(return_value=done)
+
+        timeout = subprocess.TimeoutExpired(["claude", "-p", "<prompt>"], 600)
+        missing = FileNotFoundError("claude")
+        for run, why in [
+            (completed("not json"), "not jsone"),
+            (completed("[]"), "[]e"),
+            (completed("null"), "nulle"),
+            (completed("x" * 3000), "x" * 1999 + "e"),
+            (completed('{"result": "r"}', code=1), '{"result": "r"}e'),
+            (mock.Mock(side_effect=timeout), "model call timed out after 600s"),
+            (mock.Mock(side_effect=missing), "FileNotFoundError: claude"),
+        ]:
+            with mock.patch.object(select_tests.subprocess, "run", run):
+                result = select_tests.query_model("p", "m", "medium")
+            self.assertEqual(result, {"is_error": True, "result": why})
 
     def test_build_prompt(self) -> None:
         minutes = select_tests.test_minutes(
@@ -759,6 +900,8 @@ class TestMain(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--add-dir") + 1], wt)
         self.assertEqual(cmd[cmd.index("--tools") + 1], select_tests.AGENTIC_TOOLS)
         self.assertEqual(cmd[cmd.index("--allowed-tools") + 1], f"Read(/{wt}/**)")
+        denied = f"Read(/{wt}/.git/**)"
+        self.assertEqual(cmd[cmd.index("--disallowed-tools") + 1], denied)
         # A fresh, empty temp dir outside the checkout, removed afterwards.
         self.assertEqual(seen["contents"], [])
         self.assertEqual(cwd.parent, Path(tempfile.gettempdir()))
@@ -783,6 +926,40 @@ class TestMain(unittest.TestCase):
                         select_tests.git_grep("x", "HEAD")
                 else:
                     self.assertEqual(select_tests.git_grep("x", "HEAD"), [])
+
+    def test_run_all_reason_counts_changed_files(self) -> None:
+        cap = select_tests.MAX_CHANGED_FILES
+        files = [f"torch/f{i}.py" for i in range(cap + 1)]
+        self.assertEqual(select_tests.run_all_reason([]), "no changed files")
+        self.assertIsNone(select_tests.run_all_reason(files[:cap]))
+        reason = f"more than {cap} changed files"
+        self.assertEqual(select_tests.run_all_reason(files), reason)
+
+    def test_git_readers_on_a_rename(self) -> None:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+        with (
+            tempfile.TemporaryDirectory() as repo,
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(select_tests, "REPO_ROOT", Path(repo)),
+        ):
+            git = select_tests.git
+            user = ["-c", "user.name=a", "-c", "user.email=a@b.c"]
+            git("init", "-q")
+            git(*user, "commit", "-q", "--allow-empty", "-m", "base")
+            for name in ("test/test_a.py", "torch/b.py"):
+                (Path(repo) / name).parent.mkdir(exist_ok=True)
+                (Path(repo) / name).write_text("import x\n")
+            git("add", "-A")
+            git(*user, "commit", "-qm", "add")
+            git("mv", "test/test_a.py", "test/test_c.py")
+            git(*user, "commit", "-qm", "move")
+            moved = ["test/test_a.py", "test/test_c.py"]
+            self.assertEqual(select_tests.changed_files("HEAD~1", "HEAD"), moved)
+            self.assertEqual(select_tests.git_grep("import", "HEAD"), moved[1:])
+            # The worktree matches, but the base commit has no files.
+            self.assertEqual(select_tests.git_grep("import", "HEAD~2"), [])
+            self.assertEqual(select_tests.git_grep("-v", "HEAD"), [])
 
     def test_non_ascii_paths_are_unquoted(self) -> None:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
