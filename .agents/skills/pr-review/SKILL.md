@@ -268,7 +268,7 @@ This precedence governs the eight finding sections only. Summary and Recommendat
 
 Do not invent sections outside this template. File a finding by its *consequence*, not its file type: a docstring that misstates operator semantics is API Design, not documentation. Where [review-checklist.md](review-checklist.md) groups or names a topic differently — e.g. it nests API Design under Code Quality, calls its infrastructure section "PyTorch Infrastructure", and has no Backward Compatibility section at all (that lives in [bc-guidelines.md](bc-guidelines.md)) — that organizes the checklist, not the output; this precedence wins.
 
-Do not say who owns the changed code or who should review, approve or merge the PR, even when asked about merge readiness. You have no reliable ownership data, so any names are guesses, and an @-mention notifies whoever it names. Naming the maintainer behind an unaddressed comment (see "Maintainer Comments") is still required.
+Code ownership data (CODEOWNERS, requested reviewers) is not reliable, so don't use it: don't say who owns the code or who should review, approve or merge the PR, even when asked about merge readiness. Don't @-mention anyone except a maintainer whose comment you report as unaddressed (see "Maintainer Comments").
 
 ### Specific Comments (Detailed Review Only)
 
