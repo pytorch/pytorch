@@ -241,18 +241,25 @@ def pr_text(args: argparse.Namespace) -> tuple[str, str]:
     )
 
 
+def run_all_reason(changed: list[str]) -> str | None:
+    """Why select runs everything on these changed files without asking the model, if it does."""
+    if not changed:
+        return "no changed files"
+    if needs_run_all(changed):
+        return "change touches test infrastructure"
+    if len(changed) > MAX_CHANGED_FILES:
+        return f"more than {MAX_CHANGED_FILES} changed files"
+    return None
+
+
 def select(args: argparse.Namespace, record: dict) -> Selection | None:
     """Make the selection, filling `record` with diagnostics; None after --print-prompt."""
     merge_base = git("merge-base", args.base, args.head).strip()
     record["merge_base"] = merge_base
     record["head"] = git("rev-parse", args.head).strip()
     changed = changed_files(merge_base, args.head)
-    if not changed and not args.print_prompt:
-        return Selection(run_all=True, reason="no changed files")
-    if needs_run_all(changed) and not args.print_prompt:
-        return Selection(run_all=True, reason="change touches test infrastructure")
-    if len(changed) > MAX_CHANGED_FILES and not args.print_prompt:
-        return Selection(run_all=True, reason=f"more than {MAX_CHANGED_FILES} changed files")  # fmt: skip
+    if (reason := run_all_reason(changed)) and not args.print_prompt:
+        return Selection(run_all=True, reason=reason)
     # get_test_times reports its download on stdout, where --print-prompt writes.
     with contextlib.redirect_stdout(sys.stderr):
         test_times = get_test_times()
