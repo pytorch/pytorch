@@ -2,10 +2,12 @@
 """Sanitize the hardened PR review's model output into a publishable verdict.
 
 The review job runs Claude against UNTRUSTED pull-request content with network
-egress locked down, no GitHub write token, and no S3 credentials. The only thing
-that leaves that job is the JSON this script produces, so this file is the egress
-boundary and every control here exists because that text is attacker-influenced
-and ends up somewhere a human or a dashboard reads.
+egress locked down, no GitHub write token, and an S3 credential that can write
+only under the private pr_review_traces/ prefix. Apart from token and cost
+numbers, the only thing that leaves that job for a public surface is the JSON
+this script produces, so this file is the egress boundary and every control here
+exists because that text is attacker-influenced and ends up somewhere a human or
+a dashboard reads.
 
 The model is given the output shape in the prompt, NOT as an enforced schema -
 the workflow passes no --json-schema - so shape, types, the verdict enum and the
@@ -31,9 +33,9 @@ even if one were enforced:
 None of this closes the channel, and it is not the thing keeping us safe. A few
 hundred characters of prose can still carry a secret via an acrostic or semantic
 encoding, and no output filter fixes that. The control that actually bounds the
-damage is upstream: a one-hour, Bedrock-only role with no S3 and no GitHub
-write. This script raises the cost of the naive attempts and makes the
-deliberate ones narrow.
+damage is upstream: a one-hour role limited to Bedrock and S3 writes under
+pr_review_traces/, with no GitHub write. This script raises the cost of the
+naive attempts and makes the deliberate ones narrow.
 
 A well-formed file is written on every path where writing is possible, and the
 exit code is 0 — a rejected or malformed result is reported as a
@@ -91,8 +93,8 @@ _BLOB = re.compile(r"[A-Za-z0-9+/=_-]{120,}")
 # hex digest is 128 characters, which is over the floor.
 # ACCEPTED COST: this leaves a hole exactly the width of a digest — an attacker
 # can hex-encode up to 64 bytes and shape it like one. That is far below a
-# session token, and the one-hour Bedrock-only credential is what bounds the
-# damage anyway.
+# session token, and the one-hour credential (Bedrock, plus S3 writes under
+# pr_review_traces/) is what bounds the damage anyway.
 _DIGEST_LENGTHS = {32, 40, 56, 64, 96, 128}
 _HEX_ONLY = re.compile(r"^[0-9a-fA-F]+$")
 
@@ -252,7 +254,8 @@ def check_no_encoded_blob(text: str, where: str) -> None:
     splitting a payload into sub-120-character runs, or base64ing text that
     decodes back to printable ASCII, both walk straight past it. It catches the
     careless case cheaply. What bounds the damage is that the review job's
-    credential is Bedrock-only and expires within an hour.
+    credential reaches only Bedrock and S3 writes under pr_review_traces/, and
+    expires within an hour.
     """
     # Scanned TWICE: a tag can keep each half under the floor, and stripping
     # rejoins them. Neither subsumes the other -- stripping eats a bracketed
