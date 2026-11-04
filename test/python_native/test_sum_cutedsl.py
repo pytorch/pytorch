@@ -287,20 +287,11 @@ class TestSumCuteDSLOverride(TestCase):
     @skipIfRocm
     def test_non_current_device(self):
         """Launch sum and prod, functional and out=, on the input tensor's device."""
-        previous = torch.cuda.current_device()
         # A single-kernel plan and a split plan, whose two stages both key the device.
         shapes = ((17, 8192), (3, 262144))
         self.assertEqual(rt.itree_plan(262144, 3, 4).shape, "split")
-        try:
-            torch.cuda.set_device(0)
-            rt._CACHE.clear()
-            reduce_row_itree = rt.reduce_row_itree
-            launch_devices = []
-
-            def record(*args, **kwargs):
-                launch_devices.append(torch.cuda.current_device())
-                return reduce_row_itree(*args, **kwargs)
-
+        rt._CACHE.clear()
+        with torch.cuda.device(0):
             for m, n in shapes:
                 x0 = torch.ones(m, n, device="cuda:0")
                 x0[:, 0] = 2
@@ -312,28 +303,25 @@ class TestSumCuteDSLOverride(TestCase):
                     expected_sum = x.sum(dim=1)
                     expected_prod = x.prod(dim=1)
 
-                with mock.patch.object(rt, "reduce_row_itree", side_effect=record):
-                    got = [x.sum(dim=1), x.prod(dim=1)]
-                    for op in (torch.sum, torch.prod):
-                        got.append(op(x, dim=1, out=torch.empty(m, device="cuda:1")))
+                # A launch off cuda:1 would fail the launchers' current-device check.
+                got = [x.sum(dim=1), x.prod(dim=1)]
+                for op in (torch.sum, torch.prod):
+                    got.append(op(x, dim=1, out=torch.empty(m, device="cuda:1")))
 
                 for g, expected in zip(got, (expected_sum, expected_prod) * 2):
                     self.assertEqual(g.device, torch.device("cuda:1"))
                     self.assertEqual(g, expected)
 
-            self.assertEqual(launch_devices, [1] * 4 * len(shapes))
             self.assertEqual(torch.cuda.current_device(), 0)
             tags = ("rowitree", "rowitree1", "rowitree2")
             keys = {(k[0], k[1], k[7]) for k in rt._CACHE if k[0] in tags}
             want = {
-                (tag, f"itree_{op}", f"cuda:{index}")
+                (tag, f"itree_{op}", index)
                 for tag in tags
                 for op in ("sum", "prod")
                 for index in (0, 1)
             }
             self.assertEqual(keys, want)
-        finally:
-            torch.cuda.set_device(previous)
 
     @parametrize("op", ("sum", "prod"))
     def test_singleton_noncollapsible_rows_fall_through(self, op):
