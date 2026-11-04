@@ -56,6 +56,7 @@ from torch.testing._internal.opinfo.core import (
     ReductionOpInfo,
     S,
     SampleInput,
+    sample_inputs_reduction,
 )
 from torch.testing._internal.opinfo.refs import PythonRefInfo, ReductionPythonRefInfo
 
@@ -82,16 +83,29 @@ def sample_kwargs_vector_norm(t, **kwargs):
 def sample_inputs_linalg_vector_norm(
     op_info, device, dtype, requires_grad=False, **kwargs
 ):
+    yield from sample_inputs_reduction(
+        op_info,
+        device,
+        dtype,
+        requires_grad,
+        supports_multiple_dims=True,
+        generate_args_kwargs=sample_kwargs_vector_norm,
+        **kwargs,
+    )
     yield SampleInput(
         torch.empty(0, 5, device=device, dtype=dtype, requires_grad=requires_grad),
-        dim=-1,
+        kwargs=dict(ord=float("inf"), dim=-1),
+    )
+    yield SampleInput(
+        torch.empty(0, 5, 3, device=device, dtype=dtype, requires_grad=requires_grad),
+        kwargs=dict(ord=-1, dim=(-1,)),
     )
 
 
-def error_inputs_linalg_vector_norm(op_info, device, dtype, **kwargs):
+def error_inputs_linalg_vector_norm(op_info, device, **kwargs):
     yield ErrorInput(
         SampleInput(
-            torch.empty(0, 5, device=device, dtype=dtype),
+            torch.empty(0, 5, device=device, dtype=torch.float32),
             args=(float("inf"),),
             kwargs=dict(dim=(-1, -2)),
         ),
@@ -100,7 +114,7 @@ def error_inputs_linalg_vector_norm(op_info, device, dtype, **kwargs):
     )
     yield ErrorInput(
         SampleInput(
-            torch.empty(3, 0, device=device, dtype=dtype),
+            torch.empty(3, 0, device=device, dtype=torch.float32),
             args=(float("inf"),),
             kwargs=dict(dim=-3),
         ),
