@@ -1,0 +1,28 @@
+# .github/workflows/test-team-review-request.yml
+name: Test team review request (do not merge)
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ENDPOINT: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/requested_reviewers
+    steps:
+      - name: Request the team with GITHUB_TOKEN
+        run: gh api --method POST "$ENDPOINT" -f 'team_reviewers[]=pytorch-dev-infra'
+      - name: Request a nonexistent user alone
+        if: always()
+        run: gh api --method POST "$ENDPOINT" -f 'reviewers[]=pt-codeowners-test-no-such-user' || true
+      - name: Request the nonexistent user together with the team
+        if: always()
+        run: gh api --method POST "$ENDPOINT" -f 'reviewers[]=pt-codeowners-test-no-such-user' -f 'team_reviewers[]=pytorch-dev-infra' || true
+      - name: Show pending requests
+        if: always()
+        run: gh api "$ENDPOINT"
