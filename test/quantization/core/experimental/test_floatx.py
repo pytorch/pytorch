@@ -6,7 +6,7 @@ import struct
 import unittest
 
 import torch
-from torch._prims_common import _uncastable_shell_dtypes
+from torch._prims_common import _packed_shell_float_dtypes, _uncastable_shell_dtypes
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -1002,6 +1002,282 @@ class TestFloat6E2M3FNx4(TestCase):
 
 
 instantiate_device_type_tests(TestFloat6E2M3FNx4, globals(), except_for="mps")
+
+
+class TestPackedFloatShellOps(TestCase):
+    """Ops that move or compare whole elements of the packed float shell dtypes
+    must match the same op on the [..., itemsize] uint8 view of the bytes."""
+
+    def _random(self, dtype, *shape, device):
+        raw = torch.randint(
+            0, 256, (*shape, dtype.itemsize), dtype=torch.uint8, device=device
+        )
+        return raw.view(dtype).squeeze(-1)
+
+    def _inputs(self, dtype, device):
+        x = self._random(dtype, 6, 5, 4, device=device)
+        return x, x.transpose(0, 2), x[1::2, :, 1:]
+
+    def _expand_index(self, index, dtype):
+        return index.unsqueeze(-1).expand(*index.shape, dtype.itemsize)
+
+    def _unique_index(self, x, dim):
+        # distinct along dim, so scatter has no colliding writes
+        perm = torch.rand(x.shape, device=x.device).argsort(dim=dim)
+        return perm.narrow(dim, 0, min(3, x.shape[dim]))
+
+    @dtypes(torch.float4_e2m1fn_x2, torch.float6_e2m3fn_x4)
+    def test_dim_ops(self, device, dtype):
+        for x in self._inputs(dtype, device):
+            xb = _as_bytes(x)
+            for dim in range(-x.dim(), x.dim()):
+                bdim = dim % x.dim()  # negative dims count from the element dims
+                n = x.shape[dim]
+                idx = torch.tensor([n - 1, 0, n - 1], device=device)
+                self.assertEqual(_as_bytes(x.flip(dim)), xb.flip(bdim))
+                self.assertEqual(_as_bytes(x.roll(2, dim)), xb.roll(2, bdim))
+                self.assertEqual(
+                    _as_bytes(x.index_select(dim, idx)), xb.index_select(bdim, idx)
+                )
+                index = self._unique_index(x, dim)
+                index_b = self._expand_index(index, dtype)
+                self.assertEqual(
+                    _as_bytes(x.gather(dim, index)), xb.gather(bdim, index_b)
+                )
+                src = self._random(dtype, *index.shape, device=device)
+                expected = xb.scatter(bdim, index_b, _as_bytes(src))
+                self.assertEqual(_as_bytes(x.scatter(dim, index, src)), expected)
+                y = x.clone()
+                y.scatter_(dim, index, src)
+                self.assertEqual(_as_bytes(y), expected)
+            self.assertEqual(_as_bytes(x.flip(0, -1)), xb.flip(0, 2))
+            self.assertEqual(
+                _as_bytes(x.roll((1, -1), (0, -1))), xb.roll((1, -1), (0, 2))
+            )
+            self.assertEqual(
+                _as_bytes(x.roll(3)), xb.flatten(0, -2).roll(3, 0).view_as(xb)
+            )
+            empty = torch.empty(0, dtype=torch.long, device=device)
+            self.assertEqual(
+                x.index_select(1, empty).shape, (x.shape[0], 0, x.shape[2])
+            )
+            out = torch.empty(0, dtype=dtype, device=device)
+            torch.index_select(x, -1, idx, out=out)
+            self.assertEqual(_as_bytes(out), xb.index_select(2, idx))
+            index = self._unique_index(x, 0)
+            out = torch.empty(0, dtype=dtype, device=device)
+            torch.gather(x, 0, index, out=out)
+            self.assertEqual(
+                _as_bytes(out), xb.gather(0, self._expand_index(index, dtype))
+            )
+
+    @dtypes(torch.float4_e2m1fn_x2, torch.float6_e2m3fn_x4)
+    def test_gather_scatter_deterministic(self, device, dtype):
+        # NaN-filling new tensors needs a value conversion
+        with DeterministicGuard(True, fill_uninitialized_memory=False):
+            for x in self._inputs(dtype, device):
+                xb = _as_bytes(x)
+                for dim in range(x.dim()):
+                    index = self._unique_index(x, dim)
+                    index_b = self._expand_index(index, dtype)
+                    self.assertEqual(
+                        _as_bytes(x.gather(dim, index)), xb.gather(dim, index_b)
+                    )
+                    src = self._random(dtype, *index.shape, device=device)
+                    self.assertEqual(
+                        _as_bytes(x.scatter(dim, index, src)),
+                        xb.scatter(dim, index_b, _as_bytes(src)),
+                    )
+
+    @dtypes(torch.float4_e2m1fn_x2, torch.float6_e2m3fn_x4)
+    def test_cat_roll(self, device, dtype):
+        # small contiguous pieces take the serial CPU cat path
+        for shape in ((1, 4), (2, 1, 3), (1, 4, 3), (6, 5, 4)):
+            y = self._random(dtype, *shape, device=device)
+            yb = _as_bytes(y)
+            self.assertEqual(_as_bytes(y.roll(1, 1)), yb.roll(1, 1))
+            self.assertEqual(_as_bytes(torch.cat([y, y], 1)), torch.cat([yb, yb], 1))
+            self.assertEqual(_as_bytes(torch.cat([y, y], 0)), torch.cat([yb, yb], 0))
+
+    @dtypes(torch.float4_e2m1fn_x2, torch.float6_e2m3fn_x4)
+    def test_advanced_indexing(self, device, dtype):
+        for x in self._inputs(dtype, device):
+            xb = _as_bytes(x)
+            i0 = torch.tensor([2, 0], device=device)
+            i2 = torch.tensor([1, 2], device=device)
+            mask = torch.rand(x.shape[:2], device=device) > 0.5
+            for key in ((i0,), (slice(None), i0), (i0, slice(None), i2), (mask,)):
+                self.assertEqual(_as_bytes(x[key]), xb[key])
+                v = self._random(dtype, *x[key].shape, device=device)
+                for deterministic in (False, True):
+                    # NaN-filling new tensors needs a value conversion
+                    with DeterministicGuard(
+                        deterministic, fill_uninitialized_memory=False
+                    ):
+                        y, yb = x.clone(), xb.clone()
+                        y[key] = v
+                        yb[key] = _as_bytes(v)
+                        self.assertEqual(_as_bytes(y), yb)
+                # values broadcast like any other dtype
+                v = self._random(dtype, x[key].shape[-1], device=device)
+                y, yb = x.clone(), xb.clone()
+                y[key] = v
+                yb[key] = _as_bytes(v)
+                self.assertEqual(_as_bytes(y), yb)
+            y, yb = x.clone(), xb.clone()
+            v = self._random(dtype, x.shape[-1], device=device)
+            y.index_put_((i0,), v, accumulate=False)
+            yb[i0] = _as_bytes(v)
+            self.assertEqual(_as_bytes(y), yb)
+
+    @dtypes(torch.float4_e2m1fn_x2, torch.float6_e2m3fn_x4)
+    def test_where_eq_ne(self, device, dtype):
+        for x in self._inputs(dtype, device):
+            xb = _as_bytes(x)
+            other = self._random(dtype, *x.shape, device=device)
+            for cond in (
+                torch.rand(x.shape, device=device) > 0.5,
+                torch.rand(x.shape[0], 1, x.shape[2], device=device) > 0.5,
+                torch.rand(x.shape[2], device=device) > 0.5,
+                torch.tensor(True, device=device),
+            ):
+                cond_b = cond if cond.dim() == 0 else cond.unsqueeze(-1)
+                expected = torch.where(cond_b, xb, _as_bytes(other))
+                self.assertEqual(_as_bytes(torch.where(cond, x, other)), expected)
+                out = torch.empty(0, dtype=dtype, device=device)
+                torch.where(cond, x, other, out=out)
+                self.assertEqual(_as_bytes(out), expected)
+            y = torch.where(torch.rand(x.shape, device=device) > 0.5, x, other)
+            yb = _as_bytes(y)
+            self.assertEqual(x == y, (xb == yb).all(-1))
+            self.assertEqual(x != y, (xb != yb).any(-1))
+            self.assertEqual(torch.eq(x, y[0]), (xb == yb[0]).all(-1))
+            self.assertTrue((x == x.clone()).all())
+            self.assertFalse((x != x.clone()).any())
+            out = torch.empty(0, dtype=torch.bool, device=device)
+            torch.ne(x, y, out=out)
+            self.assertEqual(out, (xb != yb).any(-1))
+        if dtype == torch.float6_e2m3fn_x4:
+            with self.assertRaisesRegex(NotImplementedError, r"eq\(\): cannot write"):
+                x.clone().eq_(x)
+
+    @onlyCUDA
+    @dtypes(torch.float4_e2m1fn_x2, torch.float6_e2m3fn_x4)
+    def test_cpu_scalar_operand(self, device, dtype):
+        # A 0-dim CPU tensor is accepted as an operand of a CUDA op, like for
+        # any other dtype.
+        x = self._random(dtype, 4, 6, device=device)
+        s = self._random(dtype, device="cpu")
+        xb, sb = _as_bytes(x), _as_bytes(s).to(device)
+        cond = torch.rand(x.shape, device=device) > 0.5
+        cond_b = cond.unsqueeze(-1)
+        self.assertEqual(
+            _as_bytes(torch.where(cond, x, s)), torch.where(cond_b, xb, sb)
+        )
+        self.assertEqual(
+            _as_bytes(torch.where(cond, s, x)), torch.where(cond_b, sb, xb)
+        )
+        x[1, 2] = s
+        self.assertEqual(x == s, (xb == sb).all(-1))
+        self.assertEqual(s == x, (sb == xb).all(-1))
+        self.assertEqual(x != s, (xb != sb).any(-1))
+        self.assertEqual(s != x, (sb != xb).any(-1))
+        self.assertTrue((x == s)[1, 2])
+
+    @dtypes(torch.float4_e2m1fn_x2, torch.float6_e2m3fn_x4)
+    def test_0dim(self, device, dtype):
+        x = self._random(dtype, 5, device=device)
+        s, sb = x[3], _as_bytes(x[3])
+        zero = torch.tensor(0, device=device)
+        self.assertEqual(_as_bytes(s.flip(0)), sb)
+        self.assertEqual(_as_bytes(s.index_select(0, zero)), sb)
+        self.assertEqual(_as_bytes(s.gather(0, zero)), sb)
+        self.assertEqual(
+            _as_bytes(x.gather(0, torch.tensor(1, device=device))), _as_bytes(x[1])
+        )
+        self.assertEqual(_as_bytes(x[0].scatter(0, zero, s)), sb)
+        self.assertEqual(
+            _as_bytes(torch.where(torch.tensor(False, device=device), x[0], s)), sb
+        )
+        self.assertTrue(s == s.clone())
+        # a 0-dim value may come from the CPU, like for any other dtype
+        rows = torch.tensor([1, 4], device=device)
+        y, yb = x.clone(), _as_bytes(x).clone()
+        y[rows] = s.cpu()
+        yb[rows] = sb
+        self.assertEqual(_as_bytes(y), yb)
+
+    def _arithmetic_ops(self, x):
+        """(message regex, op) pairs that need arithmetic or a Scalar conversion
+        on a [4, 6] tensor x; all must raise NotImplementedError."""
+        idx = torch.tensor([0, 2], device=x.device)
+        index = torch.zeros(1, 6, dtype=torch.long, device=x.device)
+        src = x[:1].clone()
+        v = x[:2].clone()
+        msg = "not supported for .*which has no arithmetic"
+        return [
+            (
+                "accumulate=True.*" + msg,
+                lambda: x.index_put((idx,), v, accumulate=True),
+            ),
+            (
+                "accumulate=True.*" + msg,
+                lambda: x.clone().index_put_((idx,), v, accumulate=True),
+            ),
+            (msg, lambda: x.scatter_add(0, index, src)),
+            (msg, lambda: x.scatter_reduce(0, index, src, "amax")),
+            (msg, lambda: x.scatter(0, index, src, reduce="add")),
+            ("Scalar value.*" + msg, lambda: x.scatter(0, index, 1.0)),
+            ("index_add.*" + msg, lambda: x.index_add(0, idx, v)),
+            ("index_reduce.*" + msg, lambda: x.index_reduce(0, idx, v, "prod")),
+        ]
+
+    @dtypes(torch.float4_e2m1fn_x2, torch.float6_e2m3fn_x4)
+    def test_arithmetic_ops_raise(self, device, dtype):
+        x = self._random(dtype, 4, 6, device=device)
+        for regex, op in self._arithmetic_ops(x):
+            with self.assertRaisesRegex(NotImplementedError, regex):
+                op()
+        idx = torch.tensor([0, 2], device=device)
+        with self.assertRaisesRegex(RuntimeError, "dtypes match"):
+            x.index_put_((idx,), x[:2].view(torch.uint8))
+        # Scalar fills still need a value conversion the dtype does not have
+        with self.assertRaisesRegex(
+            NotImplementedError, r'"masked_fill\w*" not implemented'
+        ):
+            x.masked_fill(torch.ones_like(x, dtype=torch.bool), 1.0)
+        with self.assertRaisesRegex(NotImplementedError, r'"fill\w*" not implemented'):
+            x.fill_(1.0)
+
+    @onlyCPU
+    @dtypes(*_packed_shell_float_dtypes)
+    def test_arithmetic_ops_raise_meta_fake_compile(self, device, dtype):
+        # The Python metas behind Meta, FakeTensor and torch.compile raise the
+        # same error as the eager kernels.
+        x = torch.empty(4, 6, dtype=dtype, device="meta")
+        for regex, op in self._arithmetic_ops(x):
+            with self.assertRaisesRegex(NotImplementedError, regex):
+                op()
+        with FakeTensorMode():
+            x = torch.empty(4, 6, dtype=dtype)
+            for regex, op in self._arithmetic_ops(x):
+                with self.assertRaisesRegex(NotImplementedError, regex):
+                    op()
+        x = self._random(dtype, 4, 6, device=device)
+        for i in range(len(self._arithmetic_ops(x))):
+            torch._dynamo.reset()
+
+            @torch.compile(fullgraph=True, backend="aot_eager")
+            def f(x):
+                return self._arithmetic_ops(x)[i][1]()
+
+            # Unsupported: the error comes from FakeTensor propagation at trace time
+            regex = self._arithmetic_ops(x)[i][0]
+            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, regex):
+                f(x)
+
+
+instantiate_device_type_tests(TestPackedFloatShellOps, globals(), except_for="mps")
 
 
 class TestFloat8DtypeCPUOnly(TestCase):

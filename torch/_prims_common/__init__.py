@@ -1110,6 +1110,19 @@ def check_shell_dtype_cast(src: torch.dtype, dst: torch.dtype) -> None:
     )
 
 
+# Float shell dtypes whose element packs several values. Mirrors
+# c10::isPackedShellFloatType: data-movement ops run on their bytes, but ops
+# that need arithmetic or a Scalar conversion raise, so metas reject them too.
+_packed_shell_float_dtypes = frozenset((torch.float4_e2m1fn_x2, torch.float6_e2m3fn_x4))
+
+
+def check_packed_shell_float_arithmetic(op: str, dtype: torch.dtype) -> None:
+    torch._check_not_implemented(
+        dtype not in _packed_shell_float_dtypes,
+        lambda: f"{op} is not supported for {dtype}, which has no arithmetic",
+    )
+
+
 def is_boolean_dtype(dtype: torch.dtype) -> bool:
     if not isinstance(dtype, torch.dtype):
         raise AssertionError(f"Expected torch.dtype, got {type(dtype)}")
