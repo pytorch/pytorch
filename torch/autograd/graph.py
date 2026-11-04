@@ -45,6 +45,7 @@ __all__ = [
     "Node",
     "GradientEdge",
     "get_gradient_edge",
+    "allow_implicit_grad_accumulation",
     "increment_version",
     "queue_callback",
     "region_activation_memory_budget",
@@ -248,6 +249,52 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
     # for the AccumulateGrad node.
     # pyrefly: ignore [bad-argument-type]
     return GradientEdge(grad_fn, tensor.output_nr, ownership_token=token)
+
+
+def allow_implicit_grad_accumulation(
+    target: torch.Tensor | GradientEdge | Node,
+) -> None:
+    r"""Allow gradients flowing into ``target`` to be summed implicitly.
+
+    When a tensor is used by more than one operation, autograd sums the gradients
+    of its uses during backward. In a backward run with
+    ``disallow_implicit_grad_accumulation=True``, that sum raises an error instead,
+    unless the node output receiving the gradients is allowed by this function:
+
+    - A :class:`GradientEdge` allows that output of its node.
+    - A :class:`Node` allows all of its outputs.
+    - A tensor allows its current gradient edge (see :func:`get_gradient_edge`).
+      For a non-leaf tensor that is the output of ``tensor.grad_fn`` it refers to
+      now; after an in-place operation it refers to a new node, which is not
+      allowed. For a leaf tensor the setting is stored on the tensor.
+
+    Combined with :class:`node_creation_hook`, this allows every node created in
+    a region, e.g. inside library code that uses a tensor more than once. Leaves
+    first used in the region are allowed too.
+
+    Example::
+
+        >>> # xdoctest: +SKIP
+        >>> x = torch.randn(3, requires_grad=True).sin()
+        >>> torch.autograd.graph.allow_implicit_grad_accumulation(x)
+        >>> (x * 2 + x * 3).sum().backward(disallow_implicit_grad_accumulation=True)
+        >>> with torch.autograd.graph.node_creation_hook(
+        ...     torch.autograd.graph.allow_implicit_grad_accumulation
+        ... ):
+        ...     out = library_block(x)
+    """
+    if isinstance(target, torch.Tensor):
+        edge, all_outputs = get_gradient_edge(target), False
+    elif isinstance(target, GradientEdge):
+        edge, all_outputs = target, False
+    elif isinstance(target, Node):
+        edge, all_outputs = GradientEdge(target, 0), True
+    else:
+        raise TypeError(
+            "allow_implicit_grad_accumulation expects a Tensor, GradientEdge or "
+            f"Node, but got {type(target).__name__}"
+        )
+    Variable._execution_engine._allow_implicit_grad_accumulation(edge, all_outputs)
 
 
 def increment_version(tensor: torch.Tensor | Iterable[torch.Tensor]) -> None:

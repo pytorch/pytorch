@@ -324,7 +324,8 @@ def backward(
         disallow_implicit_grad_accumulation (bool, optional): When a tensor is used
             more than once in forward, backward accumulates the gradient
             contributions from each use. If ``True``, raise an error instead of
-            performing that accumulation. See
+            performing that accumulation. Specific accumulations can be allowed with
+            :func:`torch.autograd.graph.allow_implicit_grad_accumulation`. See
             :ref:`disallow-implicit-grad-accumulation`. Defaults to ``False``.
     """
     if torch._C._are_functorch_transforms_active():
@@ -535,7 +536,8 @@ def grad(
         disallow_implicit_grad_accumulation (bool, optional): When a tensor is used
             more than once in forward, backward accumulates the gradient
             contributions from each use. If ``True``, raise an error instead of
-            performing that accumulation. See
+            performing that accumulation. Specific accumulations can be allowed with
+            :func:`torch.autograd.graph.allow_implicit_grad_accumulation`. See
             :ref:`disallow-implicit-grad-accumulation`. Defaults to ``False``.
 
     """

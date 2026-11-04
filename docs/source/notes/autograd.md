@@ -440,6 +440,43 @@ with ``create_graph=True`` accumulates gradients when it is differentiated; do n
 pass the flag when computing such higher-order gradients. The flag is not supported
 with compiled autograd.
 
+### Allowing specific accumulations
+
+When the accumulation happens in code you cannot change, such as inside a library
+function that uses its input more than once, allow it with
+{func}`torch.autograd.graph.allow_implicit_grad_accumulation`:
+
+```python
+x = a.sin()
+torch.autograd.graph.allow_implicit_grad_accumulation(x)
+loss = (x * 2 + x * 3).sum()
+loss.backward(disallow_implicit_grad_accumulation=True)  # no error
+```
+
+Passing a tensor allows accumulation into the output of ``x.grad_fn`` that ``x``
+refers to when you call it; after an in-place operation ``x`` refers to a new node,
+which is not allowed. For a leaf tensor, such as a parameter, the setting is stored
+on the tensor. You can also pass a {class}`torch.autograd.graph.GradientEdge` to
+allow one output of a node, or a {class}`torch.autograd.graph.Node` to allow all of
+its outputs.
+
+To allow every accumulation into tensors created in a region, pass the function to
+{class}`torch.autograd.graph.node_creation_hook`, which calls it on each node
+created inside:
+
+```python
+with torch.autograd.graph.node_creation_hook(
+    torch.autograd.graph.allow_implicit_grad_accumulation
+):
+    out = library_block(x)
+loss = out.sum()
+loss.backward(disallow_implicit_grad_accumulation=True)
+```
+
+Accumulations into tensors created outside the region, such as ``x`` above, are
+still checked, so allow those individually. Leaves first used inside the region are
+allowed too, because their gradient accumulator node is created there.
+
 ## Multithreaded Autograd
 
 The autograd engine is responsible for running all the backward operations

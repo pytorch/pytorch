@@ -108,6 +108,16 @@ struct TORCH_API InputMetadata {
     grad_dtype_ = grad_dtype;
   }
 
+  // Whether gradients flowing into this output may be summed implicitly in a
+  // backward run with disallow_implicit_grad_accumulation.
+  bool implicit_grad_accumulation_allowed() const {
+    return implicit_grad_accumulation_allowed_;
+  }
+
+  void allow_implicit_grad_accumulation() {
+    implicit_grad_accumulation_allowed_ = true;
+  }
+
  private:
   at::Tensor shape_as_tensor() const;
   bool is_nestedness_same(const at::Tensor& grad) const;
@@ -122,6 +132,7 @@ struct TORCH_API InputMetadata {
   bool is_tensor_subclass_ = false;
   bool is_nested_ = false;
   bool was_default_constructed_ = true;
+  bool implicit_grad_accumulation_allowed_ = false;
 
   // The grad_dtype_ field is the dtype that the engine expects the grad to be.
   // When nullopt, grad_dtype_ is allowed to be any dtype.

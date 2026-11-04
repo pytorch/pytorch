@@ -1195,7 +1195,9 @@ std::string implicit_grad_accumulation_error(
       << "accumulating the gradient contributions of a tensor used more than "
       << "once. To accumulate them yourself, use a custom autograd Function "
       << "whose forward returns the tensor once per use and whose backward "
-      << "sums their gradients. See "
+      << "sums their gradients, or allow the accumulation by calling "
+      << "torch.autograd.graph.allow_implicit_grad_accumulation() on the "
+      << "tensor. See "
       << "https://pytorch.org/docs/main/notes/autograd.html#disallow-implicit-grad-accumulation "
       << "for an example. Run under torch.autograd.detect_anomaly() to print "
       << "the forward traceback of the operation that produced this gradient.";
@@ -1366,7 +1368,8 @@ void Engine::evaluate_function(
       // The function already has a buffer
       auto& input_buffer = not_ready_it->second;
       if (C10_UNLIKELY(graph_task->disallow_implicit_grad_accumulation_) &&
-          output.defined() && input_buffer.buffer[next.input_nr].defined()) {
+          output.defined() && input_buffer.buffer[next.input_nr].defined() &&
+          !next.function->implicit_grad_accumulation_allowed(next.input_nr)) {
         TORCH_CHECK(
             false,
             implicit_grad_accumulation_error(

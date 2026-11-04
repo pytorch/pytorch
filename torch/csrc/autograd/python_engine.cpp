@@ -443,12 +443,35 @@ static PyObject* THPEngine_new(
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
+// Implementation of torch._C._EngineBase._allow_implicit_grad_accumulation:
+// allows output `edge.output_nr` of `edge.node`, or all of its outputs.
+static PyObject* THPEngine_allow_implicit_grad_accumulation(
+    PyObject* self,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  PyObject* edge = nullptr;
+  int all_outputs = 0;
+  if (!PyArg_ParseTuple(args, "Op", &edge, &all_outputs)) {
+    return nullptr;
+  }
+  auto gradient_edge = parseGradientEdge(edge, 0);
+  gradient_edge.function->allow_implicit_grad_accumulation(
+      all_outputs ? std::nullopt
+                  : std::optional<uint32_t>(gradient_edge.input_nr));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static struct PyMethodDef THPEngine_methods[] = {
     {"run_backward",
      castPyCFunctionWithKeywords(THPEngine_run_backward),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"queue_callback", THPEngine_queue_callback, METH_O, nullptr},
+    {"_allow_implicit_grad_accumulation",
+     THPEngine_allow_implicit_grad_accumulation,
+     METH_VARARGS,
+     nullptr},
     {"is_checkpoint_valid",
      THPEngine_is_checkpoint_valid,
      METH_NOARGS,
