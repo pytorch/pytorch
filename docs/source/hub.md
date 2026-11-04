@@ -144,9 +144,10 @@ Processes that share the hub directory, such as DDP ranks on the same machine, c
 through lock files: when several of them need an entry that isn't cached yet, one of them
 downloads it while the others wait and then use the cached copy. On Linux and macOS the lock
 files (`<entry>.lock`) stay next to the entries, in the hub directory and in its `checkpoints`
-subdirectory. If the lock can't be taken (for example on a filesystem without `flock`
-support) or another process holds it for more than an hour, the entry is downloaded without
-it, as in earlier releases. `force_reload=True` isn't coordinated this way: every caller that
+subdirectory. If taking the lock fails (for example on a filesystem without `flock`
+support) or it stays unavailable for more than an hour, the entry is downloaded without it,
+as in earlier releases. Checkpoints in the legacy zip format are extracted on every load,
+without the lock. `force_reload=True` isn't coordinated this way: every caller that
 passes it downloads the entry again, one at a time, and replaces the copy other processes may
 be using, so avoid passing it from several processes at once.
 

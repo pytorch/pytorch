@@ -269,37 +269,33 @@ _CACHE_LOCK_TIMEOUT_S = 3600
 
 
 @contextlib.contextmanager
-def _cache_lock(path):
+def _cache_lock(path, stacklevel):
     """Hold the lock for cache entry ``path``, saying so if another process has it.
 
     Processes that share a cache directory (for example DDP ranks) take this lock
     so that only one of them populates an entry while the others wait for it.
-    Where the lock can't be taken (no flock support, a lock file owned by another
-    user) or is held for too long, the entry is downloaded without it, as before.
+    If the lock can't be taken (no flock support, a lock file owned by another
+    user) or stays unavailable for too long, the entry is populated without it,
+    as before. ``stacklevel`` points the fallback warning at the user's call.
     """
     from filelock import Timeout
 
     from torch.utils._filelock import FileLock
 
-    lock = FileLock(path + ".lock")
-    locked = False
+    stack = contextlib.ExitStack()
     try:
         try:
-            lock.acquire(timeout=0)
+            stack.enter_context(FileLock(path + ".lock", timeout=0))
         except Timeout:
             sys.stderr.write(f"Waiting for another process to download {path}\n")
-            lock.acquire(timeout=_CACHE_LOCK_TIMEOUT_S)
-        locked = True
+            stack.enter_context(FileLock(path + ".lock", timeout=_CACHE_LOCK_TIMEOUT_S))
     except (NotImplementedError, OSError) as e:
         warnings.warn(
-            f"Could not lock {path} ({e!r}); downloading it without waiting for other processes.",
-            stacklevel=3,
+            f"Could not lock {path} ({e!r}); continuing without the lock.",
+            stacklevel=stacklevel,
         )
-    try:
+    with stack:
         yield
-    finally:
-        if locked:
-            lock.release()
 
 
 def _get_cache_or_reload(
@@ -343,7 +339,7 @@ def _get_cache_or_reload(
     # force_reload is not coordinated between processes: each caller that passes
     # it downloads the repo again, one at a time, and replaces the directory that
     # other processes may be using.
-    with _cache_lock(repo_dir):
+    with _cache_lock(repo_dir, stacklevel=5):
         # Another process may have populated the cache while we waited.
         if not force_reload and os.path.exists(repo_dir):
             if verbose:
@@ -900,7 +896,8 @@ def load_state_dict_from_url(
     the same file at the same time: one of them downloads it while the others
     wait and then load the cached copy. The lock is a ``.lock`` file next to the
     downloaded file in ``model_dir``. Where it can't be taken, the file is
-    downloaded without it.
+    downloaded without it. Checkpoints in the legacy zip format are still
+    extracted on every load, without the lock.
 
     Args:
         url (str): URL of the object to download
@@ -945,7 +942,7 @@ def load_state_dict_from_url(
     if not os.path.exists(cached_file):
         # Processes sharing the cache (e.g. DDP ranks) wait for whichever one
         # downloads first instead of all downloading the same file.
-        with _cache_lock(cached_file):
+        with _cache_lock(cached_file, stacklevel=4):
             if not os.path.exists(cached_file):
                 sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
                 hash_prefix = None
@@ -955,7 +952,5 @@ def load_state_dict_from_url(
                 download_url_to_file(url, cached_file, hash_prefix, progress=progress)
 
     if _is_legacy_zip_format(cached_file):
-        # Extraction rewrites the extracted file even on a cache hit.
-        with _cache_lock(cached_file):
-            return _legacy_zip_load(cached_file, model_dir, map_location, weights_only)
+        return _legacy_zip_load(cached_file, model_dir, map_location, weights_only)
     return torch.load(cached_file, map_location=map_location, weights_only=weights_only)

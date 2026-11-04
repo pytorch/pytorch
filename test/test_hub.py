@@ -1,5 +1,6 @@
 # Owner(s): ["module: hub"]
 
+import contextlib
 import io
 import os
 import tempfile
@@ -433,9 +434,9 @@ class TestHub(TestCase):
 
     def _run_concurrently(self, fns):
         # Slow down the download so that, without locking, every worker would
-        # see an empty cache and start its own download. The short lock timeout
-        # turns a lock that is never released into extra downloads, so the test
-        # fails instead of hanging.
+        # see an empty cache and start its own download. With the short lock
+        # timeout, a lock that is never released makes the workers fall back
+        # within seconds, which _assert_lock_used catches, instead of hanging.
         real_download = hub.download_url_to_file
 
         def slow_download(*args, **kwargs):
@@ -449,7 +450,8 @@ class TestHub(TestCase):
             return fn()
 
         with (
-            patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 30),
+            self._assert_lock_used(),
+            patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 5),
             patch.object(
                 hub, "download_url_to_file", side_effect=slow_download
             ) as mock_download,
@@ -457,6 +459,14 @@ class TestHub(TestCase):
         ):
             results = list(pool.map(worker, fns))
         return results, mock_download.call_count
+
+    @contextlib.contextmanager
+    def _assert_lock_used(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            yield
+        fallbacks = [w for w in caught if "Could not lock" in str(w.message)]
+        self.assertEqual(fallbacks, [])
 
     def _save_weights(self):
         src = os.path.join(self.tmpdir.name, "weights.pt")
@@ -589,7 +599,8 @@ class TestHub(TestCase):
                 return e
 
         with (
-            patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 30),
+            self._assert_lock_used(),
+            patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 5),
             patch("sys.stderr", new=StderrRecorder()),
             patch.object(hub, "download_url_to_file", side_effect=flaky_download),
             ThreadPoolExecutor(2) as pool,
@@ -610,7 +621,7 @@ class TestHub(TestCase):
 
         url, model_dir = self._save_weights()
         with (
-            patch.object(FileLock, "acquire", side_effect=NotImplementedError),
+            patch.object(FileLock, "__enter__", side_effect=NotImplementedError),
             self.assertWarnsRegex(UserWarning, "Could not lock"),
         ):
             state_dict = hub.load_state_dict_from_url(
