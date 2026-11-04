@@ -13,7 +13,7 @@ import torch._inductor.cpu_vec_isa
 import torch._inductor.select_algorithm as select_algorithm
 from torch._dynamo.utils import counters
 from torch._inductor import test_operators
-from torch._inductor.cpu_vec_isa import VecAMX
+from torch._inductor.cpu_vec_isa import VecAMX, VecSVE
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -2745,6 +2745,52 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self._check_brgemm_counter(vec_amx)
         else:
             self._check_amx_counter(vec_amx)
+
+    @unittest.skipIf(
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecSVE),
+        "SVE ISA support is required",
+    )
+    @patches
+    @torch.no_grad
+    @parametrize("Mdim", (3, 32))
+    @parametrize("Kdim", (36, 2052))
+    @parametrize("Ndim", (48, 385))
+    def test_bmm_bf16_mmla(self, Mdim, Kdim, Ndim):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x @ y
+
+        counters.clear()
+        u = torch.randn(2, Mdim, Kdim).to(dtype=torch.bfloat16)
+        v = torch.randn(2, Kdim, Ndim).to(dtype=torch.bfloat16)
+        with verify(torch.bfloat16) as (atol, rtol):
+            self.common(M(), (u, v), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        self.assertTrue(counters["inductor"]["cpp_micro_gemm_bf16_mmla_counter"] > 0)
+
+    @unittest.skipIf(
+        not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecSVE),
+        "SVE ISA support is required",
+    )
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    def test_bmm_bf16_mmla_constant_weight(self):
+        class M(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight, requires_grad=False)
+
+            def forward(self, x):
+                return x @ self.weight
+
+        counters.clear()
+        u = torch.randn(2, 3, 36).to(dtype=torch.bfloat16)
+        v = torch.randn(2, 36, 385).to(dtype=torch.bfloat16)
+        with verify(torch.bfloat16) as (atol, rtol):
+            self.common(M(v).eval(), (u,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        self.assertTrue(counters["inductor"]["cpp_micro_gemm_bf16_mmla_counter"] > 0)
 
     @patches
     @torch.no_grad
