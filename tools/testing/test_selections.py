@@ -31,16 +31,16 @@ except ImportError:
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Sequence
 
-    from tools.testing.llm_td.selection import AppliedSelection
+    from tools.testing.llm_selector.selection import AppliedSelection
     from tools.testing.target_determination.heuristics.interface import (
         TestPrioritizations,
     )
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-# tools/testing/llm_td/selection.py's LLM_TD_SELECTION_FILE, which is imported
+# tools/testing/llm_selector/selection.py's LLM_SELECTION_FILE, which is imported
 # only when the file exists, so the experimental package cannot break run_test.py.
-LLM_TD_SELECTION_FILE = "llm_td_selection.json"
+LLM_SELECTION_FILE = "llm_selection.json"
 
 IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
@@ -344,16 +344,16 @@ class CallSplit:
 
     def selection_metrics(self, is_ci: bool) -> list[tuple[str, dict[str, Any]]]:
         """The (name, payload) metrics run_test.py emits before running the
-        tests: llm_td_selection, in CI with a selection."""
+        tests: llm_selection, in CI with a selection."""
         if not is_ci or (llm := self.llm) is None:
             return []
-        return _llm_metric("llm_td_selection", lambda: llm.selection_metric)
+        return _llm_metric("llm_selection", lambda: llm.selection_metric)
 
     def failure_metrics(
         self, test: TestRun, selected_tests: list[str], test_stats: dict[str, Any]
     ) -> list[tuple[str, dict[str, Any]]]:
         """The (name, payload) metrics run_test.py emits in CI for a failed
-        `test`: td_test_failure_stats_v2 and, with a selection, llm_td_failure."""
+        `test`: td_test_failure_stats_v2 and, with a selection, llm_selector_failure."""
         stats = {
             "selected_tests": selected_tests,
             "failure": str(test),
@@ -362,7 +362,7 @@ class CallSplit:
         }
         metrics = [("td_test_failure_stats_v2", stats)]
         if (llm := self.llm) is not None:
-            metrics += _llm_metric("llm_td_failure", lambda: llm.failure_metric(test))
+            metrics += _llm_metric("llm_selector_failure", lambda: llm.failure_metric(test))  # fmt: skip
         return metrics
 
 
@@ -370,7 +370,7 @@ def _llm_metric(
     name: str, payload: Callable[[], dict[str, Any]]
 ) -> list[tuple[str, dict[str, Any]]]:
     """[(name, payload())], or none, with a ::warning::, if the experimental
-    llm_td package raises."""
+    llm_selector package raises."""
     try:
         return [(name, payload())]
     except Exception as e:
@@ -390,7 +390,7 @@ def split_tests(
 ) -> CallSplit:
     """TD's split, 25% with TD enabled and everything otherwise, replaced by
     the LLM test selection in `selection_file` when apply_selection enforces
-    it (see tools/testing/llm_td). With `record` (in CI), gen_ci_artifact
+    it (see tools/testing/llm_selector). With `record` (in CI), gen_ci_artifact
     records the split that runs and what TD's split excluded. A selection
     that fails to import, load or apply keeps TD's split. run_test.py emits
     CallSplit's metrics, since emit_metric records its caller."""
@@ -399,7 +399,7 @@ def split_tests(
     llm: AppliedSelection | None = None
     if selection_file.exists():
         try:
-            from tools.testing.llm_td.selection import apply_selection, Selection
+            from tools.testing.llm_selector.selection import apply_selection, Selection
 
             selection = Selection.load(selection_file)
             if selection is not None:
@@ -447,7 +447,7 @@ def run_test_split(
     return split_tests(
         test_prioritizations,
         test_times,
-        selection_file=repo_root / ADDITIONAL_CI_FILES_FOLDER / LLM_TD_SELECTION_FILE,
+        selection_file=repo_root / ADDITIONAL_CI_FILES_FOLDER / LLM_SELECTION_FILE,
         test_config=test_config,
         td_enabled=td_enabled,
         previous_failures=previous_failures,
