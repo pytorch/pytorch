@@ -4,21 +4,21 @@ import torch
 from torch.types import Device
 
 
-def _get_device_index(device: Device, optional: bool = False) -> int:
-    if isinstance(device, int):
+def _get_optional_device_index(device: Device = None) -> int | None:
+    # Return None instead of the current device index, since querying it may trigger lazy init.
+    if device is None or isinstance(device, int):
         return device
-    if isinstance(device, str):
-        device = torch.device(device)
-    device_index: int | None = None
-    if isinstance(device, torch.device):
-        acc = torch.accelerator.current_accelerator()
-        if acc is None:
-            raise RuntimeError("Accelerator expected")
-        if acc.type != device.type:
-            raise ValueError(
-                f"{device.type} doesn't match the current accelerator {acc}."
-            )
-        device_index = device.index
+    device = torch.device(device)
+    acc = torch.accelerator.current_accelerator()
+    if acc is None:
+        raise RuntimeError("Accelerator expected")
+    if acc.type != device.type:
+        raise ValueError(f"{device.type} doesn't match the current accelerator {acc}.")
+    return device.index
+
+
+def _get_device_index(device: Device, optional: bool = False) -> int:
+    device_index = _get_optional_device_index(device)
     if device_index is None:
         if not optional:
             raise ValueError(
