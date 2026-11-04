@@ -1379,8 +1379,6 @@
 # /.github/pi/
 # /.github/workflows/claude-autorevert-advisor.yml
 # /.github/workflows/claude-code.yml
-# /.github/workflows/claude-distributed-triage-cron.yml
-# /.github/workflows/distributed-triage-pi.yml
 # /.github/workflows/issue-triage-pi.yml
 # /.github/workflows/issue-triage.yml
 # /.github/workflows/pi-agent-tests.yml
