@@ -11985,6 +11985,50 @@ instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu', 
 instantiate_device_type_tests(TestTorchCPU, globals(), only_for="cpu")
 instantiate_parametrized_tests(TestTorch)
 
+class TestPythonKernelDefaultTrim(TestCase):
+    def test_python_kernel_default_trim_keeps_signed_zero(self):
+        lib = torch.library.Library("default_trim_repro", "FRAGMENT")
+        lib.define("f(Tensor x, float v=0.) -> Tensor")
+        received = []
+
+        @torch.library.impl(lib, "f", "CPU")
+        def _f(x, v=0):
+            received.append(v)
+            return x.clone()
+
+        x = torch.zeros(3)
+
+        torch.ops.default_trim_repro.f(x, -0.0)
+        self.assertIsInstance(received[-1], float)
+        self.assertEqual(math.copysign(1.0, received[-1]), -1.0)
+
+        torch.ops.default_trim_repro.f(x, v=-0.0)
+        self.assertIsInstance(received[-1], float)
+        self.assertEqual(math.copysign(1.0, received[-1]), -1.0)
+
+        torch.ops.default_trim_repro.f(x, 0.0)
+        self.assertEqual(math.copysign(1.0, received[-1]), 1.0)
+
+        torch.ops.default_trim_repro.f(x)
+        self.assertEqual(math.copysign(1.0, received[-1]), 1.0)
+
+        lib_c = torch.library.Library("complex_default_trim_repro", "FRAGMENT")
+        lib_c.define("g(Tensor x, complex v=0j) -> Tensor")
+        received_c = []
+
+        @torch.library.impl(lib_c, "g", "CPU")
+        def _g(x, v=0j):
+            received_c.append(v)
+            return x.clone()
+
+        torch.ops.complex_default_trim_repro.g(x, complex(-0.0, 0.0))
+        self.assertIsInstance(received_c[-1], complex)
+        self.assertEqual(math.copysign(1.0, received_c[-1].real), -1.0)
+
+        torch.ops.complex_default_trim_repro.g(x, 0j)
+        self.assertEqual(math.copysign(1.0, received_c[-1].real), 1.0)
+
+
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
     run_tests()
