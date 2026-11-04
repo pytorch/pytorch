@@ -9682,9 +9682,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             y = sum(x[:, j] * (j + 1) for j in range(8))
             return torch.stack([y, y], -1), y[None, :] + 1
 
+        torch._inductor.metrics.reset()
         self.common(fn, (torch.randn([4096, 16]),))
+        if self.device != "cpu":
+            # The copy is a second kernel; CPU always lowers cat as ConcatKernel.
+            assertGeneratedKernelCountEqual(self, 2)
 
     def test_stack_realized_input_mutated(self):
+        # Functionalization leaves the placed buffer unmutated, so the cat still
+        # aliases it; the mutation lands on a copy.
         def fn(x):
             a, b = (sum(x[:, j] * (i + j) for j in range(8)) for i in (1, 2))
             out = torch.stack([a, b], -1)
@@ -9694,8 +9700,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (torch.randn([4096, 16]),))
 
     def test_stack_realized_input_strided_readers(self):
-        # ub's eager strides are required before the cat, so b is copied; the
-        # mm reads a's view after the cat placed a in the output.
+        # Both unsqueezes have a second reader that needs eager strides, so
+        # neither is placed; the cat copies both, as it did before this rule.
         def fn(x, w):
             a, b = (sum(x[:, j] * (i + j) for j in range(8)) for i in (1, 2))
             ub = b.unsqueeze(-1)
