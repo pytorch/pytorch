@@ -270,12 +270,13 @@ def changed_files(merge_base: str, head: str) -> list[str]:
 
 
 def diffstat_and_diff(merge_base: str, head: str) -> tuple[str, str]:
-    return git("diff", "--stat=200", "--no-renames", merge_base, head), git(
-        "diff", merge_base, head
-    )
+    # Pin the output edits_doctest and truncate_diff parse, whatever the git config.
+    pinned = ["--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/"]
+    stat = git("diff", "--stat=200", "--no-renames", "--no-color", merge_base, head)
+    return stat, git("diff", *pinned, merge_base, head)
 
 
-def pr_text(args: argparse.Namespace) -> tuple[str, str]:
+def pr_text(args: argparse.Namespace, head: str) -> tuple[str, str]:
     if args.title is not None:
         return args.title, args.body or ""
     event_path = os.environ.get("GITHUB_EVENT_PATH")
@@ -284,8 +285,8 @@ def pr_text(args: argparse.Namespace) -> tuple[str, str]:
             pr = json.load(f).get("pull_request") or {}
         if pr:
             return pr.get("title") or "", pr.get("body") or ""
-    return git("log", "-1", "--format=%s", args.head).strip(), git(
-        "log", "-1", "--format=%b", args.head
+    return git("log", "-1", "--format=%s", head).strip(), git(
+        "log", "-1", "--format=%b", head
     )
 
 
@@ -315,10 +316,11 @@ def added_test_files(added: Iterable[str], listed: Collection[str]) -> set[str]:
 
 def select(args: argparse.Namespace, record: dict) -> Selection | None:
     """Make the selection, filling `record` with diagnostics; None after --print-prompt."""
-    merge_base = git("merge-base", args.base, args.head).strip()
+    head = git("rev-parse", args.head).strip()
+    record["head"] = head
+    merge_base = git("merge-base", args.base, head).strip()
     record["merge_base"] = merge_base
-    record["head"] = git("rev-parse", args.head).strip()
-    changed = changed_files(merge_base, args.head)
+    changed = changed_files(merge_base, head)
     if (reason := run_all_reason(changed)) and not args.print_prompt:
         return Selection(run_all=True, reason=reason)
     # get_test_times reports its download on stdout, where --print-prompt writes.
@@ -326,19 +328,19 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
         test_times = get_test_times()
     if not test_times and not args.print_prompt:
         return Selection(run_all=True, reason="no test times", error="no test times")
-    diffstat, diff = diffstat_and_diff(merge_base, args.head)
+    diffstat, diff = diffstat_and_diff(merge_base, head)
     # TESTS comes from the checkout this script runs from, which in CI is the
     # trusted default branch rather than the PR; add the test files the PR adds
     # (see added_test_files).
     added = git_paths(
-        "diff", "--name-only", "--no-renames", "--diff-filter=A", merge_base, args.head
+        "diff", "--name-only", "--no-renames", "--diff-filter=A", merge_base, head
     )
     new = added_test_files(added, TESTS)
     # The C++ tests, which TESTS lists when the build has them, always run.
     candidates = sorted(
         t for t in set(TESTS) | new if not t.startswith(f"{CPP_TEST_PREFIX}/")
     )
-    title, body = pr_text(args)
+    title, body = pr_text(args, head)
     minutes = test_minutes(test_times)
     prompt = build_prompt(title, body, diffstat, diff, candidates, minutes, new)
     if args.print_prompt:
@@ -351,7 +353,7 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     record["model_output"] = out
     # A deleted file, or the old path of a moved one, needs no reader.
     deleted = git_paths(
-        "diff", "--name-only", "--no-renames", "--diff-filter=D", merge_base, args.head
+        "diff", "--name-only", "--no-renames", "--diff-filter=D", merge_base, head
     )
     deadline = time.monotonic() + GREP_BUDGET
     greps: dict[str, list[str]] = {}
@@ -360,7 +362,7 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
         if pattern not in greps:
             try:
                 greps[pattern] = git_grep(
-                    pattern, args.head, max(deadline - time.monotonic(), 0.001)
+                    pattern, head, max(deadline - time.monotonic(), 0.001)
                 )
             except subprocess.TimeoutExpired:
                 raise RuntimeError(
@@ -443,6 +445,8 @@ def main(argv: list[str] | None = None) -> None:
         "not_enforced": None,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    if not args.print_prompt:
+        args.output.unlink(missing_ok=True)
     try:
         selection = select(args, record)
     except Exception as e:
