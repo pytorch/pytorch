@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
 import inspect
+import operator
 import sys
 import unittest
 from collections import defaultdict
@@ -90,6 +91,11 @@ def customized_ctx_manager_with_graph_break(mode):
         torch._C._set_grad_enabled(prev)
 
 
+def _graph_break(x):
+    torch._dynamo.graph_break()
+    return x
+
+
 class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_no_grad(self):
         def fn1(a, b):
@@ -140,6 +146,108 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.testing.standard_test(
                 self, fn=fn4, nargs=2, expected_ops=3
             )  # coalesced noop
+
+    def _check_filtered_comprehension(self, fn, args, requires_grad, result=None):
+        # Compile fn, run it twice (compile and cache hit), and check that the
+        # adds traced in its resume function ran under the restored context.
+        expected = fn(*args)
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        before = torch.is_grad_enabled()
+        for _ in range(2):
+            actual = compiled(*args)
+            self.assertEqual(actual, expected)
+            out = actual if result is None else result(actual)
+            self.assertEqual(out.requires_grad, requires_grad)
+            self.assertEqual(torch.is_grad_enabled(), before)
+        adds = [
+            node
+            for graph in backend.graphs
+            for node in graph.graph.nodes
+            if node.op == "call_function"
+            and node.target is operator.add
+            and "resume_in_fn" in node.meta.get("stack_trace", "")
+        ]
+        self.assertTrue(adds)
+        for node in adds:
+            self.assertEqual(node.meta["example_value"].requires_grad, requires_grad)
+
+    # The profiling=True variants rely on record_function being traced as a
+    # no-op; with capture on, a graph break inside it is unsupported.
+    @parametrize("profiling", (False, True))
+    @parametrize("none_filter", (False, True))
+    @torch._dynamo.config.patch(capture_profiler_record_function=False)
+    def test_filtered_comprehension_context_graph_break(self, profiling, none_filter):
+        def fn(x, xs, flags):
+            ctx = (
+                torch.profiler.record_function("filtered_comprehension")
+                if profiling
+                else torch.no_grad()
+            )
+            with ctx:
+                if none_filter:
+                    idx = [i for i in range(len(xs)) if flags[i] is not None]
+                else:
+                    idx = [i for i in range(len(xs)) if i >= 1]
+                ys = [xs[i] for i in idx]
+                x = _graph_break(x) + sum(ys)
+            return x
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [torch.randn(4, requires_grad=True) for _ in range(3)]
+        # Grad mode cannot show a lost scope for profiling=True. This variant
+        # checks that the resume function runs: with the scope dropped it
+        # raises TypeError from nullcontext.__init__.
+        self._check_filtered_comprehension(fn, (x, xs, [None, True, None]), profiling)
+
+    def test_filtered_comprehension_nested_context_graph_break(self):
+        def fn(x, xs):
+            with torch.no_grad():
+                with torch.enable_grad():
+                    idx = [i for i in range(len(xs)) if i >= 1]
+                    ys = [xs[i] for i in idx]
+                    return _graph_break(x) + sum(ys)
+
+        x = torch.randn(4, requires_grad=True)
+        xs = [torch.randn(4, requires_grad=True) for _ in range(3)]
+        self._check_filtered_comprehension(fn, (x, xs), True)
+
+    def test_filtered_comprehension_context_data_dependent_filter(self):
+        # The graph break happens at the restored filter jump itself.
+        def fn(x, ts):
+            with torch.no_grad():
+                ys = [t for t in ts if t.sum() > 0]
+                x = x + sum(ys)
+            return x
+
+        x = torch.randn(4, requires_grad=True)
+        ts = [torch.ones(4, requires_grad=True) * s for s in (1, -1, 2)]
+        self._check_filtered_comprehension(fn, (x, ts), False)
+
+    def test_filtered_comprehension_context_exception(self):
+        class Predicate:
+            def __bool__(self):
+                raise ValueError("filter failed")
+
+        def fn(x, flags):
+            # The comprehension's cleanup handler, whose entry the restored
+            # jump gets, must restore the outer i before the ValueError
+            # reaches the except.
+            i = 7
+            with torch.no_grad():
+                try:
+                    idx = [i for i in range(len(flags)) if flags[i]]
+                except ValueError:
+                    idx = [0]
+                ys = [x for i in idx]
+                torch._dynamo.graph_break()
+                x = x + sum(ys)
+            return x, i
+
+        x = torch.randn(4, requires_grad=True)
+        self._check_filtered_comprehension(
+            fn, (x, [Predicate()]), False, result=lambda out: out[0]
+        )
 
     def test_grad_mode_guard(self):
         def fn(a, b):
