@@ -340,8 +340,8 @@ class TestSelection(unittest.TestCase):
                 self.assertEqual(Selection.load(p), sel)
             valid = Selection(candidates={"test_nn"}).to_json()
             # Without candidates, a selection would skip every file it does not name.
-            bad = [{**valid, "version": 2}, {**valid, "version": True}, {**valid, "files": "test_nn"}, {**valid, "files": [1]}, {**valid, "run_all": "false"}, {**valid, "enforce": "false"}, {**valid, "reason": 1}, {**valid, "candidates": [1]}, {**valid, "candidates": None}, {**valid, "error": 1}]  # fmt: skip
-            bad += [{k: v for k, v in valid.items() if k != key} for key in ("version", "candidates", "enforce", "error")]  # fmt: skip
+            bad = [{**valid, "version": 2}, {**valid, "version": True}, {**valid, "files": "test_nn"}, {**valid, "files": [1]}, {**valid, "run_all": "false"}, {**valid, "enforce": "false"}, {**valid, "enforce_requested": "false"}, {**valid, "reason": 1}, {**valid, "candidates": [1]}, {**valid, "candidates": None}, {**valid, "error": 1}]  # fmt: skip
+            bad += [{k: v for k, v in valid.items() if k != key} for key in ("version", "candidates", "enforce", "error", "enforce_requested")]  # fmt: skip
             for text in (
                 "{",
                 '{"sweeps": []}',
@@ -639,6 +639,7 @@ class TestApplySelection(unittest.TestCase):
         return {
             "list_id": "7916c4091b31",  # sha256 of the sorted test list
             "enforced": enforced,
+            "enforce_requested": False,
             "td_enabled": True,
             "run_all": False,
             "selector_error": None,
@@ -680,6 +681,7 @@ class TestApplySelection(unittest.TestCase):
                 "failure": "s",
                 "covered": False,
                 "enforced": False,
+                "enforce_requested": False,
                 "td_enabled": True,
                 "in_td_include": True,
                 "hedged": True,
@@ -786,6 +788,7 @@ class TestApplySelection(unittest.TestCase):
                     "failure": f,
                     "covered": covered,
                     "enforced": True,
+                    "enforce_requested": False,
                     "td_enabled": True,
                     "in_td_include": in_td,
                     "hedged": hedged,
@@ -815,6 +818,9 @@ class TestApplySelection(unittest.TestCase):
                 applied = apply_selection(sel, include, exclude, tp.get_score, times, test_config="default", td_enabled=True, previous_failures=prev)  # fmt: skip
             self.assertTrue(applied.enforced)
             self.assertEqual([str(x) for x in applied.split.include], runs)
+            # TD's include has only class A of f, so a failure in the rest of f is outside it.
+            in_td = [applied.failure_metric(x)["in_td_include"] for x in (f_a, TestRun("f", excluded=["A"]))]  # fmt: skip
+            self.assertEqual(in_td, [True, False])
 
     def test_metrics_tell_a_failed_selector_from_a_run_all(self) -> None:
         # select_tests clears enforce when the selector failed, and a file
@@ -822,12 +828,16 @@ class TestApplySelection(unittest.TestCase):
         failed = Selection(run_all=True, reason="selector failed: x", error="x")
         failed_enforce = Selection(run_all=True, reason="selector failed: x", enforce=True, error="x")  # fmt: skip
         deliberate = Selection(run_all=True, reason="infra", enforce=True)
-        cases = ((failed, "x", False), (failed_enforce, "x", False), (deliberate, None, True))  # fmt: skip
+        # select_tests keeps the request, so a failed enforced selector is counted.
+        requested = Selection(run_all=True, reason="selector failed: x", error="x", enforce_requested=True)  # fmt: skip
+        cases = ((failed, "x", False), (failed_enforce, "x", False), (deliberate, None, True), (requested, "x", False))  # fmt: skip
         for sel, error, enforced in cases:
             applied = self.apply(Selection.from_json(sel.to_json()))
             self.assertEqual((applied.enforced, applied.kept_td), (enforced, False))
-            self.assertEqual(applied.selection_metric["selector_error"], error)
-            self.assertEqual(applied.failure_metric(TestRun("a"))["selector_error"], error)  # fmt: skip
+            failure = applied.failure_metric(TestRun("a"))
+            for metric in (applied.selection_metric, failure):
+                self.assertEqual(metric["selector_error"], error)
+                self.assertEqual(metric["enforce_requested"], sel is requested)
 
 
 class TestPrompt(unittest.TestCase):
@@ -920,6 +930,7 @@ class TestMain(unittest.TestCase):
             record = self.run_main("--enforce")
         self.assertTrue(record["run_all"])
         self.assertFalse(record["enforce"])
+        self.assertTrue(record["enforce_requested"])
         self.assertIn("selector failed", record["reason"])
         self.assertIn("CalledProcessError", record["error"])
         self.assertNotIn("error", record["diagnostics"])
@@ -1066,6 +1077,7 @@ class TestMain(unittest.TestCase):
             record = run(changed, answer, t, *argv)
             self.assertEqual(record["run_all"], answer is not normal)
             self.assertEqual(record["enforce"], enforced, (changed, answer, t, argv))
+            self.assertEqual(record["enforce_requested"], bool(argv))
 
     def run_in_repo(self, answer: dict) -> tuple[dict, str]:
         env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "LLM_TD_", "CLAUDE_CODE_"))}  # fmt: skip
