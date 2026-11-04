@@ -5404,13 +5404,6 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
     )
 
 
-def is_using_cudagraph_partition() -> bool:
-    return (
-        torch._inductor.config.triton.cudagraphs
-        or _unstable_customized_partition_wrapper.wrapper is not None
-    ) and torch._inductor.config.graph_partition
-
-
 def dtype_from_size(size: int) -> torch.dtype:
     from .virtualized import V
 
