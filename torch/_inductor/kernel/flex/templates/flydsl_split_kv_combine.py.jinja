@@ -1,0 +1,69 @@
+from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_split_kv_combine import (
+    build_flex_attn_split_kv_combine_module,
+)
+from torch._inductor.runtime.flydsl_cache import (
+    LazyFlyDSLLauncher,
+    precompile_flydsl_template,
+    run_flydsl_template,
+)
+
+
+{{gen_defines()}}
+
+_launcher = LazyFlyDSLLauncher(
+    lambda: build_flex_attn_split_kv_combine_module(
+        kv_splits=KV_SPLITS,
+        batch_size=BATCH_SIZE,
+        num_heads=NUM_HEADS,
+        seq_q=SEQ_Q,
+        head_dim=HEAD_DIM,
+        partial_stride=PARTIAL_STRIDE,
+        stats_stride=STATS_STRIDE,
+        o_stride=O_STRIDE,
+        lse_stride=LSE_STRIDE,
+        write_max_scores=WRITE_MAX_SCORES,
+        dtype=DTYPE,
+    )
+)
+
+
+{% set kernel_args = ["partials", "split_logsumexp", "split_max_scores", "logsumexp", "max_scores"] %}
+{{def_kernel(*kernel_args)}}
+    output = {{get_output()}}
+    run_flydsl_template(
+        _launcher.get(partials.device),
+        (
+{% for name in kernel_args %}
+            {{name}},
+{% endfor %}
+            output,
+            stream,
+        ),
+        compiler=flyc.compile,
+        tensor_converter=flyc.from_torch_tensor,
+    )
+    return output
+
+
+def {{kernel_name}}_precompile(
+    precompile_shapes,
+    precompile_strides,
+    precompile_dtypes,
+    device_index=0,
+    device_capability=None,
+    flydsl_gpu_arch=None,
+):
+    """Warm FlyDSL's disk cache using metadata-only fake tensors."""
+    del device_index, device_capability
+    precompile_flydsl_template(
+        {{kernel_name}}_main,
+        (
+{% for name in kernel_args %}
+            "{{name}}",
+{% endfor %}
+        ),
+        precompile_shapes,
+        precompile_strides,
+        precompile_dtypes,
+        flydsl_gpu_arch,
+    )

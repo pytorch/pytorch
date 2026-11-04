@@ -21,6 +21,7 @@ from torch._inductor.codegen.flydsl.flydsl_scheduling import (
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel import mm
+from torch._inductor.runtime import flydsl_cache
 from torch._inductor.runtime.flydsl_cache import (
     LazyFlyDSLLauncher,
     precompile_flydsl_template,
@@ -659,6 +660,37 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(compiler_mock.call_count, 2 if compile_only else 1)
         self.assertEqual(dispatch.call_count, 0 if compile_only else 2)
         self.assertEqual(len(converted), 4 if compile_only else 3)
+
+    def test_run_flydsl_template_keys_runtime_layouts(self):
+        # A runtime layout fixes the unit-stride dim of every tensor, not only
+        # of the first: one KV block gives [1, 1, Q, 1] block lists two.
+        jit_func = SimpleNamespace()
+        compiler = mock.Mock(return_value=mock.Mock())
+        query = SimpleNamespace(device=SimpleNamespace(index=0))
+
+        def run(indices):
+            run_flydsl_template(
+                jit_func,
+                (query, indices, 0),
+                compiler=compiler,
+                tensor_converter=flydsl_cache.flydsl_runtime_layout_arg,
+            )
+
+        with (
+            mock.patch.dict(
+                os.environ, {"COMPILE_ONLY": "0", "FLYDSL_COMPILE_ONLY": "0"}
+            ),
+            mock.patch.object(
+                flydsl_cache,
+                "flydsl_runtime_layout_arg",
+                lambda arg: _CacheParam("query") if arg is query else arg,
+            ),
+        ):
+            run(torch.empty(1, 1, 4, 8, dtype=torch.int32))
+            run(torch.empty(2, 2, 6, 16, dtype=torch.int32))
+            self.assertEqual(compiler.call_count, 1)
+            run(torch.empty(1, 1, 4, 1, dtype=torch.int32))
+            self.assertEqual(compiler.call_count, 2)
 
     def test_precompile_flydsl_template(self):
         from torch._subclasses.fake_tensor import FakeTensor

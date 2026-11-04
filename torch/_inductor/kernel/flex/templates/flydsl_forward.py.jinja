@@ -1,7 +1,19 @@
 from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     build_flex_attn_fwd_module,
 )
+{% if CAPTURE_TABLE %}
+from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils import (
+    build_capture_table_launch,
+    CAPTURE_TABLE_SLOTS,
+)
+{% endif %}
 from torch._inductor.runtime.flydsl_cache import (
+{% if CAPTURE_TABLE %}
+    fill_flydsl_capture_table,
+{% endif %}
+{% if RUNTIME_SIZES %}
+    flydsl_runtime_layout_arg,
+{% endif %}
     LazyFlyDSLLauncher,
     precompile_flydsl_template,
     run_flydsl_template,
@@ -9,6 +21,26 @@ from torch._inductor.runtime.flydsl_cache import (
 
 
 {{gen_defines()}}
+{% if HAS_SCORE_MOD %}
+
+
+def score_mod(score, b, h, q_idx, kv_idx, aux):
+    {{ modification(
+        subgraph_number=0,
+        output_name="score_mod_out",
+        score="score",
+        b="b",
+        h="h",
+        m="q_idx",
+        n="kv_idx",
+    ) | indent_except_first(1) }}
+    return score_mod_out
+
+
+{{ scalar_defines() }}
+SCORE_MOD_AUX = {{ aux_slots() }}
+MOD_KEY = "{{ mod_key() }}"
+{% endif %}
 
 
 _launcher = LazyFlyDSLLauncher(
@@ -31,6 +63,7 @@ _launcher = LazyFlyDSLLauncher(
         mask_program_output=MASK_PROGRAM_OUTPUT,
         mask_buffer_shapes=MASK_BUFFER_SHAPES,
         mask_buffer_strides=MASK_BUFFER_STRIDES,
+        mask_buffer_dtypes=MASK_BUFFER_DTYPES,
         q_stride=Q_STRIDE,
         k_stride=K_STRIDE,
         v_stride=V_STRIDE,
@@ -38,9 +71,50 @@ _launcher = LazyFlyDSLLauncher(
         scale=float(SM_SCALE),
         output_stats_in_log2=True,
         write_max_scores=WRITE_MAX_SCORES,
+        dtype=DTYPE,
+        target_limits=TARGET_LIMITS,
+{% if HAS_SCORE_MOD %}
+        score_mod=score_mod,
+        score_mod_aux=SCORE_MOD_AUX,
+        score_mod_buffer_count=SCORE_MOD_BUFFER_COUNT,
+        score_mod_buffer_dtypes=SCORE_MOD_BUFFER_DTYPES,
+        mod_key=MOD_KEY,
+{% endif %}{% if KV_HEAD_DIMS is defined %}
+        kv_head_dims=KV_HEAD_DIMS,
+{% endif %}{% if QO_HEAD_DIMS is defined %}
+        qo_head_dims=QO_HEAD_DIMS,
+{% endif %}{% if TIE_STREAMED_PROBABILITIES is defined %}
+        tie_streamed_probabilities=TIE_STREAMED_PROBABILITIES,
+{% endif %}{% if PLAN is defined %}
+        plan=PLAN,
+{% endif %}{% if HEAD_SLOW_ORDER is defined %}
+        head_slow_order=HEAD_SLOW_ORDER,
+{% endif %}{% if KV_SPLITS is defined %}
+        kv_splits=KV_SPLITS,
+{% endif %}{% if SINGLE_PASS is defined %}
+        single_pass=SINGLE_PASS,
+{% endif %}
     )
 )
 
+{% set buffer_args = [] %}
+{% for index in range(MASK_BUFFER_COUNT) %}
+{% set _ = buffer_args.append("mask_buffer_" ~ index) %}
+{% endfor %}
+{% if HAS_SCORE_MOD %}
+{% for index in range(SCORE_MOD_BUFFER_COUNT) %}
+{% set _ = buffer_args.append("score_mod_buffer_" ~ index) %}
+{% endfor %}
+{% endif %}
+{% set table_args = ["capture_table"] if CAPTURE_TABLE else [] %}{% set extent_args = [] %}{% for index in range(MASK_BUFFER_COUNT) if CAPTURE_TABLE and (none in MASK_BUFFER_SHAPES[index] or none in MASK_BUFFER_STRIDES[index]) %}{% set _ = extent_args.append("mask_buffer_" ~ index) %}{% endfor %}
+{% if CAPTURE_TABLE %}
+_capture_table_launchers = [
+    LazyFlyDSLLauncher(
+        lambda first=first: build_capture_table_launch(first, {{ buffer_args | length }})
+    )
+    for first in range(0, {{ buffer_args | length }}, CAPTURE_TABLE_SLOTS)
+]
+{% endif %}
 
 def _run_flydsl_forward(
     query,
@@ -52,44 +126,57 @@ def _run_flydsl_forward(
     kv_indices,
     full_kv_num_blocks,
     full_kv_indices,
-{% for index in range(MASK_BUFFER_COUNT) %}
-    mask_buffer_{{index}},
+{% for name in buffer_args + table_args %}
+    {{name}},
 {% endfor %}
     output,
     stream,
 ):
+{% if CAPTURE_TABLE %}
+    fill_flydsl_capture_table(
+        _capture_table_launchers,
+        CAPTURE_TABLE_SLOTS,
+        capture_table,
+        ({% for name in buffer_args %}{{name}}, {% endfor %}),
+        stream,
+        compiler=flyc.compile,
+        tensor_converter={{ "flydsl_runtime_layout_arg" if RUNTIME_SIZES else "flyc.from_torch_tensor" }},
+    )
+{% endif %}
+{% if VALUE_SLICES is defined %}
+    for start in range(0, VALUE_SLICES * V_HEAD_DIM, V_HEAD_DIM):
+{% endif %}
+{% filter indent(4 if VALUE_SLICES is defined else 0, first=True) %}
     dispatch_args = (
         query,
         key,
-        value,
+        {{ "value[..., start : start + V_HEAD_DIM]" if VALUE_SLICES is defined else "value" }},
         logsumexp,
         max_scores,
         kv_num_blocks,
         kv_indices,
         full_kv_num_blocks,
         full_kv_indices,
-{% for index in range(MASK_BUFFER_COUNT) %}
-        mask_buffer_{{index}},
+{% for name in (table_args + extent_args if CAPTURE_TABLE else buffer_args) %}
+        {{name}},
 {% endfor %}
-        output,
+        {{ "output[..., start : start + V_HEAD_DIM]" if VALUE_SLICES is defined else "output" }},
         stream,
     )
     run_flydsl_template(
         _launcher.get(query.device),
         dispatch_args,
         compiler=flyc.compile,
-        tensor_converter=flyc.from_torch_tensor,
+        tensor_converter={{ "flydsl_runtime_layout_arg" if RUNTIME_SIZES else "flyc.from_torch_tensor" }},
     )
+{% endfilter %}
     return output
 
 
 {% set kernel_args = [
     "query", "key", "value", "logsumexp", "max_scores",
     "kv_num_blocks", "kv_indices", "full_kv_num_blocks", "full_kv_indices",
-] %}
-{% for index in range(MASK_BUFFER_COUNT) %}
-{% set _ = kernel_args.append("mask_buffer_" ~ index) %}
-{% endfor %}
+] + buffer_args + table_args %}
 {{def_kernel(*kernel_args)}}
     output = {{get_output()}}
     return _run_flydsl_forward(
@@ -102,8 +189,8 @@ def _run_flydsl_forward(
         kv_indices,
         full_kv_num_blocks,
         full_kv_indices,
-{% for index in range(MASK_BUFFER_COUNT) %}
-        mask_buffer_{{index}},
+{% for name in buffer_args + table_args %}
+        {{name}},
 {% endfor %}
         output,
         stream,
