@@ -74,26 +74,22 @@ from trymerge import (
     _revlist_to_prs,
     can_skip_internal_checks,
     categorize_checks,
-    check_ciflow_covers,
+    check_ciflow_runs,
     check_greenlight_reviewed_head_sha,
-    CiflowCover,
     DRCI_CHECKRUN_NAME,
     DRCI_RETRY_DELAYS_SECONDS,
     DRCI_TIMEOUT_SECONDS,
     ensure_mergeable_labels,
-    find_ciflow_covers,
     find_matching_merge_rule,
     format_failure_comment,
     get_classifications,
     get_docker_build_checks,
     get_drci_classifications,
     get_native_stack_prs,
-    get_open_prs_above,
     get_prs_to_merge,
     get_topmost_docker_pr,
     gh_get_pr_info,
     gh_get_team_members,
-    ghstack_listing_above,
     GitHubPR,
     HAS_NO_CONNECTED_DIFF_TITLE,
     IGNORABLE_FAILED_CHECKS_THESHOLD,
@@ -127,7 +123,6 @@ from trymerge import (
     REVIEWS_PER_PAGE,
     sha_from_committed_event,
     sha_from_force_push_after,
-    StackPR,
     try_revert,
     validate_revert,
 )
@@ -2667,7 +2662,7 @@ class TestGreenlightGuardCallSite(TestCase):
         mock_fetch_url.assert_not_called()
 
 
-@mock.patch("trymerge.get_ciflow_cover_runs", return_value=([], []))
+@mock.patch("trymerge.add_needed_ciflow_labels", return_value=[])
 @mock.patch("trymerge.gh_add_labels")
 @mock.patch("trymerge.check_for_sev")
 @mock.patch("trymerge.post_starting_merge_comment")
@@ -2875,7 +2870,7 @@ class TestIgnoreCurrentScope(TestCase):
         self.assertEqual((pending, failed), ([red], []))
 
 
-@mock.patch("trymerge.get_ciflow_cover_runs", return_value=([], []))
+@mock.patch("trymerge.add_needed_ciflow_labels", return_value=[])
 @mock.patch("trymerge.gh_add_labels")
 @mock.patch("trymerge.check_for_sev")
 @mock.patch("trymerge.post_starting_merge_comment")
@@ -3291,14 +3286,14 @@ class TestGetNativeStackPrs(NoNetworkTestCase):
 
     def test_prs_to_merge_of_native_stack(self) -> None:
         prs = get_prs_to_merge(self.repo, self.top, NATIVE_STACK)
-        self.assertEqual(prs, [(self.lower, "head-1001"), (self.top, "head-1002")])
+        self.assertEqual(prs, [self.lower, self.top])
 
     @mock.patch("trymerge.get_ghstack_prs")
     def test_prs_to_merge_of_ghstack_pr(self, mock_get_ghstack_prs: Any) -> None:
         self.top.is_ghstack_pr.return_value = True
         mock_get_ghstack_prs.return_value = [(self.lower, "rev"), (self.top, "rev")]
         prs = get_prs_to_merge(self.repo, self.top, NATIVE_STACK)
-        self.assertEqual(prs, [(self.lower, "rev"), (self.top, "rev")])
+        self.assertEqual(prs, [self.lower, self.top])
         mock_get_ghstack_prs.assert_called_once_with(self.repo, self.top)
         self.landing.assert_not_called()
 
@@ -3549,13 +3544,12 @@ class TestNativeStackMergePlumbing(NoNetworkTestCase):
         ):
             self.patch(target)
         self.patch("trymerge.get_classifications", return_value={})
-        self.patch("trymerge.get_ciflow_cover_runs", return_value=([], []))
+        self.patch("trymerge.add_needed_ciflow_labels", return_value=[])
         self.post = self.patch("trymerge.post_starting_merge_comment")
         self.lower, self.top = stacked_pr(1001), stacked_pr(1002)
         self.patch("trymerge.GitHubPR", return_value=self.top)
         self.prs_to_merge = self.patch(
-            "trymerge.get_prs_to_merge",
-            return_value=[(self.lower, "head-1001"), (self.top, "head-1002")],
+            "trymerge.get_prs_to_merge", return_value=[self.lower, self.top]
         )
         self.repo = mock.MagicMock(spec=GitRepo)
 
@@ -4561,16 +4555,6 @@ CIFLOW_LABELER_CONFIG = """
 - .ci/docker/**
 """
 
-GHSTACK_BODY = """Stack from [ghstack](https://github.com/ezyang/ghstack) (oldest at bottom):
-* #1004
-* #1003
-* __->__ #1002
-* #1001
-
-Summary
-* #1005
-"""
-
 
 def labeler_repo(
     test: TestCase, labeler: str | None = CIFLOW_LABELER_CONFIG
@@ -4664,124 +4648,13 @@ class TestCiflowNeeds(TestCase):
                 self.assertEqual(bool(regex.fullmatch(path)), expected)
 
 
-def stack_pr_info(
-    num: int, head: str, closed: bool = False, cross_repo: bool = False
-) -> dict[str, Any]:
-    return {
-        "number": num,
-        "closed": closed,
-        "isCrossRepository": cross_repo,
-        "headRefName": head,
-        "headRefOid": f"sha-{num}",
-        "labels": {"nodes": [{"name": "ciflow/inductor"}]},
-    }
-
-
-class TestPrsAbove(NoNetworkTestCase):
-    def test_listing_rows_above_the_marked_pr_nearest_first(self) -> None:
-        self.assertEqual(ghstack_listing_above(GHSTACK_BODY, 1002), [1003, 1004])
-        crlf = GHSTACK_BODY.replace("\n", "\r\n")
-        self.assertEqual(ghstack_listing_above(crlf, 1002), [1003, 1004])
-        self.assertEqual(ghstack_listing_above(GHSTACK_BODY, 1004), [])
-        for body in (
-            GHSTACK_BODY.replace("__->__ ", ""),
-            GHSTACK_BODY.replace("* #1004", "* __->__ #1004"),
-            "Stack from [ghstack] (oldest at bottom):\n* (to be filled)\n",
-            "no listing",
-        ):
-            with self.subTest(body=body):
-                self.assertEqual(ghstack_listing_above(body, 1002), [])
-
-    def test_keeps_open_same_repo_prs_of_the_same_ghstack_user(self) -> None:
-        pr = stacked_pr(1002)
-        pr.is_ghstack_pr.return_value = True
-        pr.head_ref.return_value = "gh/alice/2/head"
-        rows = "* #1004\n* #1005\n* #1006\n* #1007"
-        pr.get_body.return_value = GHSTACK_BODY.replace("* #1004", rows)
-        infos = [
-            stack_pr_info(1003, "gh/alice/3/head"),
-            stack_pr_info(1004, "gh/alice/4/head", closed=True),
-            stack_pr_info(1005, "gh/bob/5/head"),
-            stack_pr_info(1006, "gh/alice/6/head", cross_repo=True),
-        ]
-        not_a_pr = {
-            "type": "NOT_FOUND",
-            "path": ["repository", "pr1007"],
-            "message": "Could not resolve to a PullRequest with the number of 1007.",
-        }
-        response = {
-            "data": {
-                "repository": {
-                    **{f"pr{i['number']}": i for i in infos},
-                    "pr1007": None,
-                }
-            },
-            "errors": [not_a_pr],
-        }
-        tips = {
-            "head1003": {"target": {"oid": "sha-1003"}},
-            "orig1003": {"target": {"oid": "orig-sha-1003"}},
-        }
-        gql = self.patch(
-            "trymerge.gh_graphql",
-            side_effect=[
-                GHGraphQLError("not a PR", response),
-                {"data": {"repository": tips}},
-            ],
-        )
-        self.assertEqual(
-            get_open_prs_above(pr, lambda: None),
-            (True, [StackPR(1003, {"ciflow/inductor"}, "sha-1003", "orig-sha-1003")]),
-        )
-        stack_query, tips_query = gql.call_args_list
-        self.assertIn("pr1007: pullRequest(number: 1007)", stack_query.args[0])
-        self.assertEqual(tips_query.kwargs["head1003"], "refs/heads/gh/alice/3/head")
-        self.assertEqual(tips_query.kwargs["orig1003"], "refs/heads/gh/alice/3/orig")
-
-    def test_missing_ghstack_branches_fall_back_to_the_pr_record(self) -> None:
-        pr = stacked_pr(1002)
-        pr.is_ghstack_pr.return_value = True
-        pr.head_ref.return_value = "gh/alice/2/head"
-        pr.get_body.return_value = GHSTACK_BODY.replace("* #1004\n", "")
-        stack = {"pr1003": stack_pr_info(1003, "gh/alice/3/head")}
-        tips = {"head1003": None, "orig1003": {"target": None}}
-        self.patch(
-            "trymerge.gh_graphql",
-            side_effect=[{"data": {"repository": d}} for d in (stack, tips)],
-        )
-        self.assertEqual(
-            get_open_prs_above(pr, lambda: None),
-            (True, [StackPR(1003, {"ciflow/inductor"}, "sha-1003", "gh/alice/3/orig")]),
-        )
-
-    def test_native_stack_entries_above(self) -> None:
-        stack = make_stack(stack_entry(1), stack_entry(2), stack_entry(3, closed=True))
-        gql = self.patch(
-            "trymerge.gh_graphql",
-            return_value={
-                "data": {"repository": {"pr1001": stack_pr_info(1001, "user/1001")}}
-            },
-        )
-        self.assertEqual(
-            get_open_prs_above(stacked_pr(1000), lambda: stack),
-            (True, [StackPR(1001, {"ciflow/inductor"}, "sha-1001", "sha-1001")]),
-        )
-        self.assertNotIn("pr1002", gql.call_args.args[0])
-        self.assertEqual(
-            get_open_prs_above(stacked_pr(1002), lambda: stack), (False, [])
-        )
-
-
-def ciflow_run(
-    run_id: int, branch: str, event: str = "push", status: str = "completed"
-) -> dict[str, Any]:
+def ciflow_run(run_id: int, branch: str) -> dict[str, Any]:
     return {
         "id": run_id,
         "name": f"wf{run_id}",
         "workflow_id": run_id,
         "head_branch": branch,
-        "event": event,
-        "status": status,
+        "status": "completed",
         "conclusion": None,
         "html_url": f"https://run/{run_id}",
     }
@@ -4807,19 +4680,18 @@ def http_error(code: int) -> HTTPError:
     )
 
 
-class TestCiflowCoveringRuns(NoNetworkTestCase):
-    """#1001 and #1002 need ciflow/inductor and land together; #1003 above them
-    carries it."""
+class TestCiflowLabelsAtMerge(NoNetworkTestCase):
+    """#1001 and #1002 both change torch/_inductor and land together."""
 
     def setUp(self) -> None:
         super().setUp()
         for target in (
-            "trymerge.gh_add_labels",
             "trymerge.check_for_sev",
             "trymerge.ensure_mergeable_labels",
             "trymerge.find_matching_merge_rule",
         ):
             self.patch(target)
+        self.add_labels = self.patch("trymerge.gh_add_labels")
         self.drci = self.patch("trymerge.get_drci_classifications", return_value={})
         self.post = self.patch("trymerge.post_starting_merge_comment")
         self.patch("trymerge.time.sleep", side_effect=AssertionError("merge waits"))
@@ -4827,165 +4699,160 @@ class TestCiflowCoveringRuns(NoNetworkTestCase):
         self.lower.get_changed_files.return_value = ["torch/_inductor/a.py"]
         self.top.get_changed_files.return_value = ["torch/_inductor/b.py"]
         self.patch("trymerge.GitHubPR", return_value=self.top)
-        self.landing = [(self.lower, "head-1001"), (self.top, "head-1002")]
-        self.prs_to_merge = self.patch(
-            "trymerge.get_prs_to_merge", return_value=self.landing
-        )
-        self.above = self.patch(
-            "trymerge.get_open_prs_above",
-            return_value=(
-                True,
-                [StackPR(1003, {"ciflow/inductor"}, "sha-1003", "sha-1003")],
-            ),
-        )
+        self.patch("trymerge.get_prs_to_merge", return_value=[self.lower, self.top])
         self.repo = labeler_repo(self)
-        self.runs: list[dict[str, Any]] = []
+        self.runs: dict[str, list[dict[str, Any]]] = {}
         self.jobs: dict[int, list[dict[str, Any]]] = {}
-        self.stale: set[tuple[str, str]] = set()
-        self.run_heads: list[str] = []
+        self.heads: dict[int, str] = {}
         self.fetch = self.patch("trymerge.gh_fetch_json_dict", side_effect=self._fetch)
 
-    def rules(self) -> dict[str, Any]:
-        return read_ciflow_labeler_rules(self.repo)
-
-    def _fetch(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
-        if "/compare/" in url:
-            base, head = url.split("/compare/")[1].split("...")
-            return {"status": "diverged" if (base, head) in self.stale else "ahead"}
+    def _fetch(self, url: str, params: Any = None) -> dict[str, Any]:
+        if "/pulls/" in url:
+            num = int(url.split("/")[-1])
+            return {"head": {"sha": self.heads.get(num, f"head-{num}")}}
         if url.endswith("/actions/runs"):
             self.assertEqual(params["event"], "push")
-            self.run_heads.append(params["head_sha"])
-            return {"workflow_runs": self.runs}
+            return {"workflow_runs": self.runs.get(params["head_sha"], [])}
         return {"jobs": self.jobs[int(url.split("/")[-2])]}
 
-    def check(self) -> None:
-        check_ciflow_covers(self.top, self.landing, self.rules, lambda: None, set())
+    def run_on(self, pr_num: int, status: str, conclusion: str | None) -> None:
+        run_id = pr_num - 1000
+        self.runs[f"head-{pr_num}"] = [ciflow_run(run_id, f"ciflow/inductor/{pr_num}")]
+        self.jobs[run_id] = [ciflow_job(run_id * 10 + 1, status, conclusion)]
+
+    def green(self, *pr_nums: int) -> None:
+        for pr_num in pr_nums:
+            self.run_on(pr_num, "completed", "success")
+
+    def ciflow_labels_added(self) -> dict[int, list[str]]:
+        return {
+            c.args[2]: c.args[3]
+            for c in self.add_labels.call_args_list
+            if c.args[3][0].startswith("ciflow/")
+        }
 
     def merge(self, **kwargs: Any) -> None:
         merge(self.top, self.repo, comment_id=1, dry_run=True, **kwargs)
 
-    def failed_run(self) -> None:
-        self.runs = [ciflow_run(1, "ciflow/inductor/1003")]
-        self.jobs = {1: [ciflow_job(11, "completed", "failure")]}
+    def test_adds_missing_labels_to_every_landing_pr_and_merges_when_green(
+        self,
+    ) -> None:
+        self.green(1001, 1002)
+        self.merge()
+        self.assertEqual(
+            self.ciflow_labels_added(),
+            {1001: ["ciflow/inductor"], 1002: ["ciflow/inductor"]},
+        )
+        self.top.merge_into.assert_called_once()
 
-    def test_failed_run_above_refuses_the_merge(self) -> None:
-        self.failed_run()
-        with self.assertRaises(RuntimeError) as ctx:
+    def test_adds_nothing_to_a_pr_that_carries_the_label(self) -> None:
+        self.green(1001, 1002)
+        self.top.get_labels.return_value = ["ciflow/inductor"]
+        self.merge()
+        self.assertEqual(self.ciflow_labels_added(), {1001: ["ciflow/inductor"]})
+
+    def test_force_merge_adds_and_checks_nothing(self) -> None:
+        self.merge(skip_mandatory_checks=True)
+        self.assertEqual(self.ciflow_labels_added(), {})
+        self.fetch.assert_not_called()
+        self.top.merge_into.assert_called_once()
+
+    def test_docker_is_neither_added_nor_checked(self) -> None:
+        self.lower.get_changed_files.return_value = [".ci/docker/build.sh"]
+        self.green(1002)
+        self.merge()
+        self.assertEqual(self.ciflow_labels_added(), {1002: ["ciflow/inductor"]})
+        self.top.merge_into.assert_called_once()
+
+    def test_waits_for_a_run_that_has_not_started_or_is_running(self) -> None:
+        needs = [(self.lower, ["ciflow/inductor"])]
+        with self.assertRaisesRegex(
+            MandatoryChecksMissingError, "`ciflow/inductor` run on #1001 to start"
+        ):
+            check_ciflow_runs(needs, set())
+        self.run_on(1001, "in_progress", None)
+        with self.assertRaisesRegex(MandatoryChecksMissingError, "wf1 / job11"):
+            check_ciflow_runs(needs, set())
+
+    def test_a_run_of_another_label_on_the_same_head_does_not_count(self) -> None:
+        self.runs["head-1001"] = [ciflow_run(1, "ciflow/trunk/1001")]
+        self.jobs[1] = [ciflow_job(11, "completed", "failure")]
+        with self.assertRaisesRegex(MandatoryChecksMissingError, "to start"):
+            check_ciflow_runs([(self.lower, ["ciflow/inductor"])], set())
+
+    def test_a_push_to_a_lower_pr_while_merging_refuses(self) -> None:
+        self.green(1001, 1002)
+        self.heads[1001] = "pushed-later"
+        with self.assertRaisesRegex(RuntimeError, "New commits were pushed to #1001"):
             self.merge()
-        message = str(ctx.exception)
-        for part in ("`ciflow/inductor`", "#1001, #1002", "#1003", "[wf1 / job11]"):
-            self.assertIn(part, message)
-        self.assertIn("add `ciflow/inductor` to #1002 and merge from #1002", message)
         self.top.merge_into.assert_not_called()
 
-    def test_the_advice_names_the_covered_pr_not_the_merged_one(self) -> None:
-        self.failed_run()
-        self.top.get_changed_files.return_value = ["README.md"]
-        with self.assertRaisesRegex(RuntimeError, "to #1001 and merge from #1001"):
+    def test_a_pr_too_deep_in_a_ghstack_gets_a_label_only_with_trunk(self) -> None:
+        rows = "".join(f"* #{n}\n" for n in range(900, 910))
+        self.lower.get_body.return_value = f"Stack:\n* __->__ #1001\n{rows}"
+        self.green(1002)
+        self.merge()
+        self.assertEqual(self.ciflow_labels_added(), {1002: ["ciflow/inductor"]})
+        self.top.merge_into.assert_called_once()
+        self.add_labels.reset_mock()
+        self.lower.get_labels.return_value = ["ciflow/trunk"]
+        self.green(1001)
+        self.merge()
+        self.assertEqual(
+            self.ciflow_labels_added(),
+            {1001: ["ciflow/inductor"], 1002: ["ciflow/inductor"]},
+        )
+
+    def test_a_deep_pr_that_needs_trunk_gets_it_with_its_other_labels(self) -> None:
+        trunk_rule = '"ciflow/trunk":\n- torch/_inductor/a.py\n'
+        self.repo = labeler_repo(self, CIFLOW_LABELER_CONFIG + trunk_rule)
+        rows = "".join(f"* #{n}\n" for n in range(900, 910))
+        self.lower.get_body.return_value = f"Stack:\n* __->__ #1001\n{rows}"
+        with self.assertRaisesRegex(AssertionError, "merge waits"):
             self.merge()
+        self.assertEqual(
+            self.ciflow_labels_added()[1001], ["ciflow/inductor", "ciflow/trunk"]
+        )
+
+    def test_failed_run_on_a_lower_pr_refuses(self) -> None:
+        self.green(1002)
+        self.run_on(1001, "completed", "failure")
+        with self.assertRaisesRegex(
+            RuntimeError, r"`ciflow/inductor` run on #1001 .*\[wf1 / job11\]"
+        ):
+            self.merge()
+        self.top.merge_into.assert_not_called()
 
     def test_failure_dr_ci_calls_flaky_does_not_block(self) -> None:
-        self.failed_run()
+        self.green(1002)
+        self.run_on(1001, "completed", "failure")
         self.drci.return_value = {"FLAKY": [{"id": 11, "name": "wf1 / job11"}]}
         self.merge()
         self.top.merge_into.assert_called_once()
-        self.drci.assert_any_call(pr_num=1003, project="pytorch")
+        self.drci.assert_any_call(pr_num=1001, project="pytorch")
 
-    def test_failure_the_ai_advisor_clears_still_blocks(self) -> None:
-        self.failed_run()
-        self.drci.return_value = {"AI_NOT_RELATED": [{"id": 11, "name": "wf1 / job11"}]}
-        with self.assertRaisesRegex(RuntimeError, "ran on #1003"):
-            self.merge()
-        self.top.merge_into.assert_not_called()
-        self.drci.assert_any_call(pr_num=1003, project="pytorch")
+    def test_ignore_current_waives_a_failure_present_at_the_start(self) -> None:
+        self.green(1002)
+        self.run_on(1001, "completed", "failure")
+        self.merge(ignore_current=True)
+        kwargs = self.top.merge_into.call_args.kwargs
+        self.assertEqual(kwargs["ignore_current_checks"], {(1001, "wf1 / job11")})
+        info = self.post.call_args.kwargs["ignore_current_checks_info"]
+        self.assertEqual([name for name, _, _ in info], ["wf1 / job11 (#1001)"])
 
-    def test_running_run_above_waits(self) -> None:
-        self.runs = [ciflow_run(1, "ciflow/inductor/1003")]
-        self.jobs = {1: [ciflow_job(11, "in_progress", None)]}
-        with self.assertRaises(MandatoryChecksMissingError) as ctx:
-            self.check()
-        self.assertIn("`ciflow/inductor` run on #1003", str(ctx.exception))
+    def test_a_failed_lookup_for_ignore_current_is_not_fatal(self) -> None:
+        self.green(1001, 1002)
+        errors = [URLError("connection reset")]
 
-    def test_a_running_job_dr_ci_calls_unstable_does_not_wait(self) -> None:
-        self.runs = [ciflow_run(1, "ciflow/inductor/1003")]
-        self.jobs = {1: [ciflow_job(11, "in_progress", None)]}
-        self.drci.return_value = {"UNSTABLE": [{"id": 11, "name": "wf1 / job11"}]}
-        self.check()
+        def runs_fail_once(url: str, params: Any = None) -> dict[str, Any]:
+            if url.endswith("/actions/runs") and errors:
+                raise errors.pop()
+            return self._fetch(url, params)
 
-    def test_finished_passing_runs_skip_dr_ci(self) -> None:
-        self.runs = [ciflow_run(1, "ciflow/inductor/1003")]
-        self.jobs = {1: [ciflow_job(11, "completed", "success")]}
-        self.check()
-        self.drci.assert_not_called()
-
-    def test_a_run_that_has_not_started_waits(self) -> None:
-        with self.assertRaisesRegex(MandatoryChecksMissingError, "#1003.*to start"):
-            self.check()
-
-    def test_runs_of_other_labels_and_pull_requests_are_ignored(self) -> None:
-        self.runs = [
-            ciflow_run(1, "ciflow/inductor/1003"),
-            ciflow_run(2, "ciflow/trunk/1003"),
-            ciflow_run(3, "gh/alice/3/head", event="pull_request"),
-        ]
-        self.jobs = {
-            1: [ciflow_job(11, "completed", "success")],
-            2: [ciflow_job(21, "completed", "failure")],
-            3: [ciflow_job(31, "completed", "failure")],
-        }
-        self.merge()
+        self.fetch.side_effect = runs_fail_once
+        self.merge(ignore_current=True)
+        self.assertEqual(errors, [])
         self.top.merge_into.assert_called_once()
-
-    def test_covering_pr_being_merged_is_skipped(self) -> None:
-        self.top.get_labels.return_value = ["ciflow/inductor"]
-        self.merge()
-        self.top.merge_into.assert_called_once()
-        self.fetch.assert_not_called()
-
-    def test_stale_cover_refuses_the_merged_pr(self) -> None:
-        self.failed_run()
-        self.stale = {("head-1002", "sha-1003")}
-        with self.assertRaisesRegex(RuntimeError, "#1003 is not built on") as ctx:
-            self.merge()
-        self.assertIn("Add `ciflow/inductor` to #1002", str(ctx.exception))
-        self.top.merge_into.assert_not_called()
-
-    def test_stale_cover_does_not_block_a_lower_pr(self) -> None:
-        self.failed_run()
-        self.top.get_changed_files.return_value = ["README.md"]
-        self.stale = {("head-1001", "sha-1003")}
-        self.merge()
-        self.top.merge_into.assert_called_once()
-
-    def test_merged_pr_at_the_top_of_its_stack_is_unchanged(self) -> None:
-        bottom = stacked_pr(1000)
-        bottom.get_changed_files.return_value = ["README.md"]
-        self.lower.get_labels.return_value = ["ciflow/inductor"]
-        self.prs_to_merge.return_value = [(bottom, "head-1000"), *self.landing]
-        self.above.return_value = (False, [])
-        self.merge()
-        self.top.merge_into.assert_called_once()
-
-    def test_a_farther_carrier_built_on_the_pr_is_used(self) -> None:
-        self.above.return_value = (
-            True,
-            [
-                StackPR(1003, {"ciflow/inductor"}, "sha-1003", "sha-1003"),
-                StackPR(1004, {"ciflow/inductor"}, "sha-1004", "sha-1004"),
-            ],
-        )
-        self.stale = {("head-1001", "sha-1003"), ("head-1002", "sha-1003")}
-        self.runs = [ciflow_run(1, "ciflow/inductor/1004")]
-        self.jobs = {1: [ciflow_job(11, "completed", "failure")]}
-        with self.assertRaisesRegex(RuntimeError, "#1001, #1002 and ran on #1004"):
-            self.merge()
-        self.assertEqual(self.run_heads, ["sha-1004"])
-
-    def test_merged_pr_with_nothing_above_carrying_its_label_is_refused(self) -> None:
-        self.above.return_value = (True, [])
-        with self.assertRaisesRegex(RuntimeError, "no open PR above it"):
-            self.merge()
-        self.top.merge_into.assert_not_called()
 
     def test_a_transient_error_retries(self) -> None:
         sleep = self.patch(
@@ -4993,14 +4860,13 @@ class TestCiflowCoveringRuns(NoNetworkTestCase):
         )
         errors = [URLError("connection reset")]
 
-        def fetch_after_an_error(url: str, params: dict[str, Any]) -> dict[str, Any]:
+        def fetch_after_an_error(url: str, params: Any = None) -> dict[str, Any]:
             if errors:
                 raise errors.pop()
             return self._fetch(url, params)
 
         self.fetch.side_effect = fetch_after_an_error
-        self.runs = [ciflow_run(1, "ciflow/inductor/1003")]
-        self.jobs = {1: [ciflow_job(11, "completed", "success")]}
+        self.green(1001, 1002)
         self.merge()
         sleep.assert_called_once()
         self.top.merge_into.assert_called_once()
@@ -5018,130 +4884,11 @@ class TestCiflowCoveringRuns(NoNetworkTestCase):
             (http_error(429), True),
             (http_error(403), True),
             (GHGraphQLError("timeout", {}), True),
-            (NativeStackError("GraphQL errors: timeout"), True),
             (http_error(404), False),
             (http_error(422), False),
         ):
             with self.subTest(error=error):
                 self.assertEqual(is_transient_lookup_error(error), transient)
-
-    def test_no_lookup_when_every_landing_pr_carries_its_labels(self) -> None:
-        self.above.side_effect = get_open_prs_above
-        self.lower.get_labels.return_value = ["ciflow/inductor"]
-        self.top.get_labels.return_value = ["ciflow/inductor"]
-        stack = mock.Mock(return_value=None)
-        self.assertEqual(
-            find_ciflow_covers(self.top, self.landing, self.rules, stack), ([], [])
-        )
-        self.above.assert_not_called()
-        stack.assert_not_called()
-
-    def test_a_ghstack_pr_above_covers_through_its_branches_read_together(
-        self,
-    ) -> None:
-        self.above.side_effect = get_open_prs_above
-        self.top.is_ghstack_pr.return_value = True
-        self.top.head_ref.return_value = "gh/alice/2/head"
-        self.top.get_body.return_value = GHSTACK_BODY
-        above = {"pr1003": stack_pr_info(1003, "gh/alice/3/head")}
-        tips = {
-            "head1003": {"target": {"oid": "sha-1003-resubmitted"}},
-            "orig1003": {"target": {"oid": "orig-sha-1003"}},
-        }
-        self.patch(
-            "trymerge.gh_graphql",
-            side_effect=[{"data": {"repository": d}} for d in (above, tips)],
-        )
-        self.assertEqual(
-            find_ciflow_covers(
-                self.top, [(self.top, "orig-1002")], self.rules, lambda: None
-            ),
-            (
-                [CiflowCover("ciflow/inductor", 1003, "sha-1003-resubmitted", [1002])],
-                [],
-            ),
-        )
-        compare = self.fetch.call_args.args[0]
-        self.assertTrue(compare.endswith("/compare/orig-1002...orig-sha-1003"))
-
-    def test_ignore_current_waives_the_runs_current_failures(self) -> None:
-        self.failed_run()
-        self.merge(ignore_current=True)
-        kwargs = self.top.merge_into.call_args.kwargs
-        self.assertEqual(kwargs["ignore_current_checks"], {(1003, "wf1 / job11")})
-        info = self.post.call_args.kwargs["ignore_current_checks_info"]
-        self.assertEqual([name for name, _, _ in info], ["wf1 / job11 (#1003)"])
-
-    def test_force_merge_looks_nothing_up(self) -> None:
-        self.merge(skip_mandatory_checks=True)
-        self.top.merge_into.assert_called_once()
-        self.above.assert_not_called()
-        self.fetch.assert_not_called()
-
-
-class TestCiflowNativeBottomPr(NoNetworkTestCase):
-    """Merging the bottom PR of a GitHub-native stack lands it alone, as a plain PR,
-    and still checks the run above that covers it."""
-
-    def setUp(self) -> None:
-        super().setUp()
-        for target in (
-            "trymerge.gh_add_labels",
-            "trymerge.check_for_sev",
-            "trymerge.ensure_mergeable_labels",
-            "trymerge.find_matching_merge_rule",
-            "trymerge.post_starting_merge_comment",
-        ):
-            self.patch(target)
-        retry_once = [None, AssertionError("merge keeps waiting")]
-        self.patch("trymerge.time.sleep", side_effect=retry_once)
-        self.patch("trymerge.get_drci_classifications", return_value={})
-        self.bottom = stacked_pr(1000)
-        self.bottom.get_changed_files.return_value = ["torch/_inductor/a.py"]
-        self.patch("trymerge.GitHubPR", return_value=self.bottom)
-        self.stack = make_stack(stack_entry(1), stack_entry(2))
-        self.get_stack = self.patch(
-            "trymerge.get_native_stack", return_value=self.stack
-        )
-        self.patch(
-            "trymerge.gh_graphql",
-            return_value={
-                "data": {"repository": {"pr1001": stack_pr_info(1001, "user/1001")}}
-            },
-        )
-        self.patch("trymerge.gh_fetch_json_dict", side_effect=self.fetch)
-
-    def fetch(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
-        if "/compare/head-1000...sha-1001" in url:
-            return {"status": "ahead"}
-        if url.endswith("/actions/runs"):
-            return {"workflow_runs": [ciflow_run(1, "ciflow/inductor/1001")]}
-        return {"jobs": [ciflow_job(11, "completed", "failure")]}
-
-    def merge(self, **kwargs: Any) -> None:
-        with self.assertRaisesRegex(RuntimeError, "ran on #1001"):
-            merge(self.bottom, labeler_repo(self), comment_id=1, dry_run=True, **kwargs)
-        self.bottom.merge_into.assert_not_called()
-
-    def test_failed_run_above_the_bottom_pr_refuses_the_merge(self) -> None:
-        self.merge()
-        self.get_stack.assert_called_once_with("pytorch", "pytorch", 1000)
-
-    def test_a_failed_stack_read_is_retried(self) -> None:
-        self.get_stack.side_effect = [
-            NativeStackError("GraphQL errors: timeout"),
-            self.stack,
-        ]
-        self.merge()
-        self.assertEqual(self.get_stack.call_count, 2)
-
-    def test_a_failed_lookup_for_ignore_current_is_not_fatal(self) -> None:
-        self.get_stack.side_effect = [
-            NativeStackError("GraphQL errors: timeout"),
-            self.stack,
-        ]
-        self.merge(ignore_current=True)
-        self.assertEqual(self.get_stack.call_count, 2)
 
 
 def _drci_http_error(code: int, body: bytes) -> HTTPError:

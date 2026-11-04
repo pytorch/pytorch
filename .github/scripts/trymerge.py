@@ -22,6 +22,7 @@ from urllib.error import HTTPError, URLError
 from warnings import warn
 
 import yaml
+from filter_test_configs import get_ghstack_below_count, GHSTACK_BELOW_SKIP_THRESHOLD
 from github_utils import (
     gh_close_pr,
     gh_fetch_json_dict,
@@ -297,21 +298,6 @@ query ($owner: String!, $name: String!, $number: Int!) {
 """
 )
 
-GH_STACK_PR_FRAGMENT = """
-fragment StackPR on PullRequest {
-  number
-  closed
-  isCrossRepository
-  headRefName
-  headRefOid
-  labels(first: 100) {
-    nodes {
-      name
-    }
-  }
-}
-"""
-
 GH_GET_PR_NEXT_FILES_QUERY = """
 query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
   repository(name: $name, owner: $owner) {
@@ -492,8 +478,6 @@ CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 # .ci/docker changes.
 CIFLOW_LABELS_NOT_COVERED = frozenset({"ciflow/docker"})
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
-GHSTACK_LISTING_HEADER = "Stack from [ghstack]"
-RE_GHSTACK_LISTING_ROW = re.compile(r"\* (__->__ )?#([1-9][0-9]*)")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 PROBOT_CONFIG_PATH = Path(".github") / "pytorch-probot.yml"
 REMOTE_MAIN_BRANCH = "origin/main"
@@ -1029,17 +1013,13 @@ def get_native_stack_prs(
 
 def get_prs_to_merge(
     repo: GitRepo, pr: GitHubPR, native_stack: NativeStack | None = None
-) -> list[tuple[GitHubPR, str]]:
-    """The open PRs that merging `pr` lands, bottom first, each with the commit
-    whose changes it lands."""
+) -> list[GitHubPR]:
+    """The open PRs that merging `pr` lands, bottom first."""
     if pr.is_ghstack_pr():
-        return get_ghstack_prs(repo, pr)  # raises error if out of sync
+        return [p for p, _ in get_ghstack_prs(repo, pr)]  # raises error if out of sync
     if native_stack is not None:
-        return [
-            (p, entry.head_oid)
-            for p, entry, _ in get_native_stack_prs(repo, pr, native_stack)
-        ]
-    return [(pr, pr.last_commit_sha())]
+        return [p for p, _, _ in get_native_stack_prs(repo, pr, native_stack)]
+    return [pr]
 
 
 class GitHubPR:
@@ -2510,25 +2490,6 @@ class LabelerRule(NamedTuple):
     draft: bool | None
 
 
-class StackPR(NamedTuple):
-    number: int
-    labels: set[str]
-    head_sha: str
-    # What a PR below must be an ancestor of to count as built into this one: the
-    # ghstack orig (ghstack head commits share no history), else the head.
-    content_ref: str
-
-
-class CiflowCover(NamedTuple):
-    """The run of ciflow `label` on PR `pr_num` at `head_sha` tests the landing
-    PRs `covered`, which need the label but do not carry it."""
-
-    label: str
-    pr_num: int
-    head_sha: str
-    covered: list[int]
-
-
 def _minimatch_segment(segment: str) -> str:
     rc = r"(?!\.)" if segment[:1] in ("*", "?") else ""
     for c in segment:
@@ -2629,101 +2590,7 @@ def is_draft_pr(pr: GitHubPR) -> bool:
     return bool(info["draft"])
 
 
-def ghstack_listing_above(body: str, pr_num: int) -> list[int]:
-    """The PRs a ghstack PR's description lists above it, nearest first."""
-    lines = body.splitlines()
-    start = next(
-        (i for i, line in enumerate(lines) if line.startswith(GHSTACK_LISTING_HEADER)),
-        None,
-    )
-    if start is None:
-        return []
-    rows: list[tuple[bool, int]] = []
-    for line in lines[start + 1 :]:
-        m = RE_GHSTACK_LISTING_ROW.fullmatch(line.rstrip("\r"))
-        if m is None:
-            break
-        rows.append((m.group(1) is not None, int(m.group(2))))
-    marked = [idx for idx, (current, _) in enumerate(rows) if current]
-    if len(marked) != 1 or rows[marked[0]][1] != pr_num:
-        return []
-    return [num for _, num in reversed(rows[: marked[0]]) if num != pr_num]
-
-
-def gh_get_stack_prs(org: str, project: str, numbers: list[int]) -> list[Any]:
-    """Fetch the given PRs in one query, in the order given, leaving out numbers
-    that are not PRs."""
-    numbers = list(dict.fromkeys(numbers))
-    if not numbers:
-        return []
-    fields = " ".join(
-        f"pr{n}: pullRequest(number: {n}) {{ ...StackPR }}" for n in numbers
-    )
-    query = (
-        GH_STACK_PR_FRAGMENT
-        + "query ($owner: String!, $name: String!) {"
-        + f" repository(owner: $owner, name: $name) {{ {fields} }} }}"
-    )
-    try:
-        rc = gh_graphql(query, owner=org, name=project)
-    except GHGraphQLError as e:
-        rc = e.response
-        not_prs = all(
-            err.get("type") == "NOT_FOUND"
-            and len(err.get("path") or []) == 2
-            and err["path"][0] == "repository"
-            for err in rc.get("errors") or []
-        )
-        if not not_prs or not (rc.get("data") or {}).get("repository"):
-            raise
-        print(f"Skipping stack entries that are not PRs: {e}")
-    found = rc["data"]["repository"]
-    return [found[f"pr{n}"] for n in numbers if found.get(f"pr{n}") is not None]
-
-
-def gh_get_ghstack_tips(
-    org: str, project: str, infos: list[Any]
-) -> dict[int, tuple[str, str]]:
-    """The commits of the head and orig branches of each ghstack PR in `infos`,
-    read together in one query. A PR's headRefOid can lag its head branch after a
-    push, which could pair an old head with a new orig. A missing head branch falls
-    back to headRefOid, and a missing orig branch to its name, which the compare
-    then fails on."""
-    if not infos:
-        return {}
-    refs: dict[str, str] = {}
-    for info in infos:
-        refs[f"head{info['number']}"] = info["headRefName"]
-        refs[f"orig{info['number']}"] = re.sub(r"/head$", "/orig", info["headRefName"])
-    params = " ".join(f"${alias}: String!" for alias in refs)
-    fields = " ".join(
-        f"{alias}: ref(qualifiedName: ${alias}) {{ target {{ oid }} }}"
-        for alias in refs
-    )
-    query = (
-        f"query ($owner: String!, $name: String!, {params}) {{"
-        f" repository(owner: $owner, name: $name) {{ {fields} }} }}"
-    )
-    found = gh_graphql(
-        query,
-        owner=org,
-        name=project,
-        **{alias: f"refs/heads/{ref}" for alias, ref in refs.items()},
-    )["data"]["repository"]
-
-    def oid(alias: str) -> str | None:
-        return ((found.get(alias) or {}).get("target") or {}).get("oid")
-
-    return {
-        info["number"]: (
-            oid(f"head{info['number']}") or info["headRefOid"],
-            oid(f"orig{info['number']}") or refs[f"orig{info['number']}"],
-        )
-        for info in infos
-    }
-
-
-CIFLOW_LOOKUP_ERRORS = (OSError, GHGraphQLError, NativeStackError)
+CIFLOW_LOOKUP_ERRORS = (OSError, GHGraphQLError)
 
 
 def is_transient_lookup_error(e: Exception) -> bool:
@@ -2731,166 +2598,6 @@ def is_transient_lookup_error(e: Exception) -> bool:
     headers, and reports GraphQL rate limits and timeouts as errors in a 200
     response."""
     return not isinstance(e, HTTPError) or e.code >= 500 or e.code in (403, 429)
-
-
-def get_cover_stack(
-    pr: GitHubPR, native_stack: NativeStack | None
-) -> NativeStack | None:
-    """The GitHub-native stack to find the PRs above `pr` in. The bottom PR of a
-    stack lands as a plain PR, so `native_stack` is None for it."""
-    if native_stack is not None or pr.is_ghstack_pr() or pr.is_cross_repo():
-        return native_stack
-    return get_native_stack(pr.org, pr.project, pr.pr_num)
-
-
-def get_open_prs_above(
-    pr: GitHubPR, stack: Callable[[], NativeStack | None]
-) -> tuple[bool, list[StackPR]]:
-    """Whether `pr`'s stack lists any PR above it, and the open same-repo PRs
-    stacked above it, nearest first."""
-    user: str | None = None
-    if pr.is_ghstack_pr():
-        listed = ghstack_listing_above(pr.get_body(), pr.pr_num)
-        candidates = listed
-        user = pr.head_ref().split("/")[1]
-    elif (native_stack := stack()) is not None:
-        position = next(
-            (e.position for e in native_stack.entries if e.number == pr.pr_num), None
-        )
-        above = [
-            e
-            for e in native_stack.entries
-            if position is not None and e.position > position
-        ]
-        listed = [e.number for e in above]
-        candidates = [e.number for e in above if not e.closed]
-    else:
-        return False, []
-
-    def in_stack(head_ref: str) -> bool:
-        if user is None:
-            return True
-        return bool(RE_GHSTACK_HEAD_REF.match(head_ref)) and (
-            head_ref.split("/")[1] == user
-        )
-
-    infos = [
-        info
-        for info in gh_get_stack_prs(pr.org, pr.project, candidates)
-        if not info["closed"]
-        and not info["isCrossRepository"]
-        and in_stack(info["headRefName"])
-    ]
-    tips = (
-        gh_get_ghstack_tips(pr.org, pr.project, infos)
-        if user is not None
-        else {
-            info["number"]: (info["headRefOid"], info["headRefOid"]) for info in infos
-        }
-    )
-    return bool(listed), [
-        StackPR(
-            info["number"],
-            {node["name"] for node in info["labels"]["nodes"]},
-            *tips[info["number"]],
-        )
-        for info in infos
-    ]
-
-
-def gh_is_ancestor(org: str, project: str, ancestor: str, descendant: str) -> bool:
-    comparison = gh_fetch_json_dict(
-        f"{GITHUB_API_URL}/repos/{org}/{project}/compare/"
-        f"{urllib.parse.quote(ancestor)}...{urllib.parse.quote(descendant)}",
-        {"per_page": 1},
-    )
-    return comparison["status"] in ("ahead", "identical")
-
-
-def find_ciflow_covers(
-    pr: GitHubPR,
-    landing: list[tuple[GitHubPR, str]],
-    rules: Callable[[], dict[str, LabelerRule]],
-    stack: Callable[[], NativeStack | None],
-) -> tuple[list[CiflowCover], list[str]]:
-    """For each landing PR that needs a ciflow label it does not carry, the nearest
-    open PR above it that carries the label and is built on its landing commit,
-    unless that is `pr`, whose own checks the merge already waits for. Also why
-    `pr` itself is not covered, when it has PRs above it and nothing covers it."""
-    landing = [(pr if p.pr_num == pr.pr_num else p, rev) for p, rev in landing]
-    needs = [
-        needed_ciflow_labels(
-            {
-                label: rule
-                for label, rule in rules().items()
-                if label not in p.get_labels()
-            },
-            p.get_changed_files(),
-            partial(is_draft_pr, p),
-        )
-        for p, _ in landing
-    ]
-    if not any(needs):
-        return [], []
-    listed_above, above = get_open_prs_above(pr, stack)
-    if len(landing) == 1 and not listed_above:
-        return [], []
-    chain = [
-        StackPR(
-            p.pr_num,
-            set(p.get_labels()),
-            p.last_commit_sha(),
-            p.get_ghstack_orig_ref() if p.is_ghstack_pr() else p.last_commit_sha(),
-        )
-        for p, _ in landing
-    ] + above
-    carried = {
-        label for p in chain[1:] for label in p.labels if CIFLOW_LABEL.match(label)
-    }
-    if not carried and not listed_above:
-        return [], []
-    contains = cache(partial(gh_is_ancestor, pr.org, pr.project))
-    covers: dict[tuple[str, int], CiflowCover] = {}
-    uncovered: list[str] = []
-    for idx, (stacked, rev) in enumerate(landing):
-        is_merged_pr = stacked.pr_num == pr.pr_num
-        for label in needs[idx]:
-            carriers = [p for p in chain[idx + 1 :] if label in p.labels]
-            cover = next(
-                (
-                    p
-                    for p in carriers
-                    if p.number == pr.pr_num or contains(rev, p.content_ref)
-                ),
-                None,
-            )
-            if cover is None:
-                if is_merged_pr and listed_above:
-                    uncovered.append(ciflow_uncovered_message(pr, label, carriers))
-                continue
-            if cover.number == pr.pr_num:
-                continue
-            key = (label, cover.number)
-            if key not in covers:
-                covers[key] = CiflowCover(label, cover.number, cover.head_sha, [])
-            covers[key].covered.append(stacked.pr_num)
-    return list(covers.values()), uncovered
-
-
-def ciflow_uncovered_message(pr: GitHubPR, label: str, carriers: list[StackPR]) -> str:
-    if not carriers:
-        return (
-            f"#{pr.pr_num} needs `{label}` and no open PR above it in the stack "
-            f"carries it. Add `{label}` to #{pr.pr_num} so it runs there, or to the "
-            "PR above that should run it."
-        )
-    above = carriers[0].number
-    return (
-        f"#{pr.pr_num} needs `{label}`, which #{above} above it carries, but #{above} "
-        f"is not built on the current changes of #{pr.pr_num}. Add `{label}` to "
-        f"#{pr.pr_num} so it runs there, or resubmit or rebase the stack so that "
-        f"#{above} includes them."
-    )
 
 
 def gh_fetch_all_pages(url: str, key: str, params: dict[str, Any]) -> list[Any]:
@@ -2911,15 +2618,16 @@ def _run_or_job_status(item: dict[str, Any]) -> str | None:
 
 
 def get_ciflow_run_checks(
-    org: str, project: str, cover: CiflowCover
+    org: str, project: str, label: str, pr_num: int, head_sha: str
 ) -> JobNameToStateDict:
-    """The jobs of the runs that the ciflow tag of `cover` started on its head, by
-    the latest run of each workflow, named as trymerge and Dr.CI name them."""
+    """The jobs of the runs that the ciflow tag of `label` on PR `pr_num` started on
+    `head_sha`, by the latest run of each workflow, named as trymerge and Dr.CI name
+    them."""
     api = f"{GITHUB_API_URL}/repos/{org}/{project}/actions/runs"
-    tag = f"{cover.label}/{cover.pr_num}"
+    tag = f"{label}/{pr_num}"
     latest: dict[int, dict[str, Any]] = {}
     for run in gh_fetch_all_pages(
-        api, "workflow_runs", {"head_sha": cover.head_sha, "event": "push"}
+        api, "workflow_runs", {"head_sha": head_sha, "event": "push"}
     ):
         if run["head_branch"] != tag:
             continue
@@ -2953,67 +2661,89 @@ def get_ciflow_run_checks(
     return checks
 
 
-def get_ciflow_cover_runs(
-    pr: GitHubPR,
-    landing: list[tuple[GitHubPR, str]],
-    rules: Callable[[], dict[str, LabelerRule]],
-    stack: Callable[[], NativeStack | None],
-) -> tuple[list[tuple[CiflowCover, JobNameToStateDict]], list[str]]:
-    """Each ciflow run that stands in for landing PRs, with its jobs (none while
-    the run has not started), and why the merged PR is not covered, if it is not."""
-    covers, uncovered = find_ciflow_covers(pr, landing, rules, stack)
-    runs = [] if uncovered else covers
+def add_needed_ciflow_labels(
+    repo: GitRepo, landing: list[GitHubPR], dry_run: bool
+) -> list[tuple[GitHubPR, list[str]]]:
+    """Add to each landing PR the labeler's ciflow labels it needs but lacks, and
+    return the PRs that need any, each with the labels it needs."""
+    rules = read_ciflow_labeler_rules(repo)
+    needs: list[tuple[GitHubPR, list[str]]] = []
+    if not rules:
+        return needs
+    for p in landing:
+        labels = needed_ciflow_labels(
+            rules, p.get_changed_files(), partial(is_draft_pr, p)
+        )
+        # filter_test_configs.py fails the CI of a PR this deep in a ghstack unless
+        # it has ciflow/trunk, so a run added here could never pass.
+        if (
+            labels
+            and "ciflow/trunk" not in {*p.get_labels(), *labels}
+            and get_ghstack_below_count(p.get_body()) >= GHSTACK_BELOW_SKIP_THRESHOLD
+        ):
+            continue
+        missing = [label for label in labels if label not in p.get_labels()]
+        if missing:
+            gh_add_labels(p.org, p.project, p.pr_num, missing, dry_run)
+        if labels:
+            needs.append((p, labels))
+    return needs
+
+
+def get_ciflow_runs(
+    needs: list[tuple[GitHubPR, list[str]]],
+) -> list[tuple[GitHubPR, str, JobNameToStateDict]]:
+    """The jobs of each needed label's run on each PR, none while it has not
+    started."""
     return [
-        (cover, get_ciflow_run_checks(pr.org, pr.project, cover)) for cover in runs
-    ], uncovered
+        (
+            p,
+            label,
+            get_ciflow_run_checks(
+                p.org, p.project, label, p.pr_num, p.last_commit_sha()
+            ),
+        )
+        for p, labels in needs
+        for label in labels
+    ]
 
 
-def check_ciflow_covers(
-    pr: GitHubPR,
-    landing: list[tuple[GitHubPR, str]],
-    rules: Callable[[], dict[str, LabelerRule]],
-    stack: Callable[[], NativeStack | None],
+def check_ciflow_runs(
+    needs: list[tuple[GitHubPR, list[str]]],
     ignore_current_checks: set[tuple[int, str]],
 ) -> None:
-    """Refuse the merge when a ciflow run that tests landing PRs from above them
-    failed, or when the merged PR needs a ciflow run that nothing above it covers,
-    and wait while a covering run has not finished."""
+    """Refuse the merge when a landing PR got new commits or a needed ciflow run
+    failed on one, and wait while one has not finished."""
     try:
-        runs, uncovered = get_ciflow_cover_runs(pr, landing, rules, stack)
+        for p, _ in needs:
+            head = gh_fetch_json_dict(
+                f"{GITHUB_API_URL}/repos/{p.org}/{p.project}/pulls/{p.pr_num}"
+            )["head"]["sha"]
+            if head != p.last_commit_sha():
+                raise RuntimeError(
+                    f"New commits were pushed to #{p.pr_num} while merging. "
+                    "Please rerun the merge command."
+                )
         classified = [
             (
-                cover,
-                get_classifications(
-                    cover.pr_num, pr.project, checks, ignore_current_checks
-                )
+                p,
+                label,
+                get_classifications(p.pr_num, p.project, checks, ignore_current_checks)
                 if not all(is_passing_status(c.status) for c in checks.values())
                 else checks,
             )
-            for cover, checks in runs
+            for p, label, checks in get_ciflow_runs(needs)
         ]
     except CIFLOW_LOOKUP_ERRORS as e:
         traceback.print_exc()
-        reason = f"Could not check the ciflow runs above in the stack: {e}"
+        reason = f"Could not check the ciflow runs: {e}"
         if is_transient_lookup_error(e):
             raise MandatoryChecksMissingError(reason) from e
         raise RuntimeError(reason) from e
-    if uncovered:
-        raise RuntimeError(" ".join(uncovered))
     waiting: list[str] = []
-    for cover, checks in classified:
-        covered = ", ".join(f"#{num}" for num in cover.covered)
-        # The AI advisor judges a failure against the cover PR's own diff only.
-        checks = {
-            name: c._replace(classification=None)
-            if c.classification == "AI_NOT_RELATED"
-            else c
-            for name, c in checks.items()
-        }
+    for p, label, checks in classified:
         if not checks:
-            waiting.append(
-                f"the `{cover.label}` run on #{cover.pr_num}, which tests "
-                f"{covered}, to start"
-            )
+            waiting.append(f"the `{label}` run on #{p.pr_num} to start")
             continue
         pending, failing, _ = categorize_checks(
             checks,
@@ -3021,22 +2751,16 @@ def check_ciflow_covers(
             ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD,
         )
         if failing:
-            top = cover.covered[-1]
             raise RuntimeError(
-                f"`{cover.label}` is needed by {covered} and ran on #{cover.pr_num} "
-                f"above in the stack instead, where {len(failing)} jobs have failed, "
+                f"The `{label}` run on #{p.pr_num} has {len(failing)} failed jobs, "
                 "first few of them are: "
                 + ", ".join(f"[{x[0]}]({x[1]})" for x in failing[:5])
-                + f". Fix the failure, use `-i` if it comes from a PR above {covered}, "
-                f"or add `{cover.label}` to #{top} and merge from #{top} once its "
-                "run passes there."
+                + ". Fix the failure or use `-i`."
             )
         if pending:
             waiting.append(
-                f"the `{cover.label}` run on #{cover.pr_num}, which tests {covered} "
-                f"({len(pending)} jobs, first few of them are: "
-                + ", ".join(x[0] for x in pending[:5])
-                + ")"
+                f"the `{label}` run on #{p.pr_num} ({len(pending)} jobs, first few "
+                "of them are: " + ", ".join(x[0] for x in pending[:5]) + ")"
             )
     if waiting:
         raise MandatoryChecksMissingError(f"Still waiting for {'; '.join(waiting)}")
@@ -4171,8 +3895,7 @@ def merge(
     ignore_current_checks_info = []
     ignore_current_checks: set[tuple[int, str]] = set()
 
-    landing = get_prs_to_merge(repo, pr, native_stack)
-    stacked_prs = [p for p, _ in landing]
+    stacked_prs = get_prs_to_merge(repo, pr, native_stack)
 
     check_for_sev(pr.org, pr.project, skip_mandatory_checks)
 
@@ -4194,24 +3917,18 @@ def merge(
 
     ensure_mergeable_labels(pr, comment_id, dry_run)
 
-    cover_stack = cache(partial(get_cover_stack, pr, native_stack))
-    labeler_rules = cache(partial(read_ciflow_labeler_rules, repo))
+    ciflow_needs = add_needed_ciflow_labels(repo, stacked_prs, dry_run)
 
     if ignore_current:
-        snapshot = [
-            (stacked.pr_num, stacked.get_checkrun_conclusions(), len(stacked_prs) > 1)
-            for stacked in stacked_prs
-        ]
+        snapshot = [(p.pr_num, p.get_checkrun_conclusions()) for p in stacked_prs]
         try:
-            cover_runs, _ = get_ciflow_cover_runs(
-                pr, landing, labeler_rules, cover_stack
-            )
+            snapshot += [
+                (p.pr_num, checks) for p, _, checks in get_ciflow_runs(ciflow_needs)
+            ]
         except CIFLOW_LOOKUP_ERRORS:
-            print("Could not read the ciflow runs above in the stack to ignore:")
+            print("Could not read the ciflow runs to ignore:")
             traceback.print_exc()
-            cover_runs = []
-        snapshot += [(cover.pr_num, checks, True) for cover, checks in cover_runs]
-        for pr_num, checks, tagged in snapshot:
+        for pr_num, checks in snapshot:
             _, failing, _ = categorize_checks(
                 checks,
                 list(checks.keys()),
@@ -4221,7 +3938,7 @@ def merge(
                 x for x in failing if (pr_num, x[0]) not in ignore_current_checks
             ]
             ignore_current_checks |= {(pr_num, n) for n, _, _ in failing}
-            tag = f" (#{pr_num})" if tagged else ""
+            tag = f" (#{pr_num})" if len(stacked_prs) > 1 else ""
             ignore_current_checks_info += [(f"{n}{tag}", u, j) for n, u, j in failing]
 
     post_starting_merge_comment(
@@ -4305,9 +4022,7 @@ def merge(
                         + f"first few of them are: {', '.join(x[0] for x in pending[:5])}"
                     )
 
-            check_ciflow_covers(
-                pr, landing, labeler_rules, cover_stack, ignore_current_checks
-            )
+            check_ciflow_runs(ciflow_needs, ignore_current_checks)
 
             return pr.merge_into(
                 repo,
