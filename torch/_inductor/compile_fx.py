@@ -2155,7 +2155,7 @@ class _InProcessFxCompile(FxCompile):
                     # Collect and dump collective-op schedule for external diagnostics
                     torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
 
-                    # When graph_partition is enabled, skip this check - partitioning handles dynamic shapes
+                    # Skip when partitioning splits off cudagraph-unsafe ops: it handles dynamic shapes
                     if (
                         cudagraphs
                         and config.triton.cudagraph_skip_dynamic_graphs
@@ -2184,7 +2184,7 @@ class _InProcessFxCompile(FxCompile):
                         V.graph.disable_cudagraphs_reason = disable
 
                     # pyrefly: ignore [unbound-name]
-                    # When graph_partition is enabled, skip this check - partitioning handles incompatible ops
+                    # Skip when partitioning splits off cudagraph-unsafe ops: it handles incompatible ops
                     if (
                         cudagraphs
                         # pyrefly: ignore [unbound-name]
@@ -2228,7 +2228,7 @@ class _InProcessFxCompile(FxCompile):
                             check_lowering_disable_cudagraph(
                                 # pyrefly: ignore [unbound-name]
                                 V.graph.device_node_mapping,
-                                cudagraphs_per_partition=(
+                                cpu_nodes_partitioned_out=(
                                     # pyrefly: ignore [unbound-name]
                                     V.graph.partition_handles_cudagraph_unsafe_ops
                                 ),
