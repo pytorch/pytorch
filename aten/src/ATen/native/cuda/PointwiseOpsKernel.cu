@@ -12,10 +12,14 @@
 
 namespace at::native {
 
+// If tensor2_ptr is set, tensor2 is read on the device from that single
+// element, which must have the iterator's common dtype, and scalar_tensor2
+// is ignored. Only real dtypes support it.
 void addcmul_cuda_scalar_tensor2_kernel(
   TensorIteratorBase& iter,
   const Scalar& scalar_tensor2,
-  const Scalar& value
+  const Scalar& value,
+  const void* tensor2_ptr = nullptr
 );
 
 #if AT_USE_JITERATOR()
@@ -80,6 +84,16 @@ void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
           iter.remove_operand(3);
           return addcmul_cuda_scalar_tensor2_kernel(iter, tensor2_val, value);
       }
+      if (iter.is_scalar(3) && iter.dtype(3) == dtype) {
+          // A CUDA tensor2 that is one element broadcast with stride 0 (e.g. a
+          // 0-dim tensor) makes the iterator non-contiguous, so the kernel
+          // cannot be vectorized. Read it through its device pointer instead,
+          // which avoids a sync and computes the same values as the
+          // three-input kernel below.
+          const void* tensor2_ptr = iter.data_ptr(3);
+          iter.remove_operand(3);
+          return addcmul_cuda_scalar_tensor2_kernel(iter, /*scalar_tensor2=*/0, value, tensor2_ptr);
+      }
       // note(mkozuki): If scalar_t is fp16 or bfloat16, cast scalar to float
       // and do math in fp32 for better accuracy.
       using accscalar_t = at::acc_type<scalar_t, true>;
@@ -94,10 +108,11 @@ void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
 #if AT_USE_JITERATOR()
 constexpr char addcmul_scalar_tensor2_name[] = "addcmul_scalar_tensor2";
 #endif
-void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& scalar_tensor2, const Scalar& value) {
+void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& scalar_tensor2, const Scalar& value, const void* tensor2_ptr) {
   auto dtype = iter.common_dtype();
 
   if (at::isComplexType(dtype)) {
+    TORCH_INTERNAL_ASSERT(tensor2_ptr == nullptr);
     #if AT_USE_JITERATOR()
       AT_DISPATCH_COMPLEX_TYPES(dtype, "addcmul_cuda", [&]() {
         auto c = scalar_tensor2.to<scalar_t>();
@@ -133,8 +148,10 @@ void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& 
       using accscalar_t = at::acc_type<scalar_t, true>;
       auto c = scalar_tensor2.to<accscalar_t>();
       auto alpha = value.to<accscalar_t>();
-      gpu_kernel(iter, [alpha, c]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return pointwise_op_impl<accscalar_t>(a, b, c, alpha, std::multiplies<accscalar_t>());
+      const auto* c_ptr = static_cast<const scalar_t*>(tensor2_ptr);
+      gpu_kernel(iter, [alpha, c, c_ptr]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        const auto cv = c_ptr ? static_cast<accscalar_t>(*c_ptr) : c;
+        return pointwise_op_impl<accscalar_t>(a, b, cv, alpha, std::multiplies<accscalar_t>());
       });
     });
   }

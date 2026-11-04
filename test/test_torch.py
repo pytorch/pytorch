@@ -3739,8 +3739,25 @@ class TestTorchDeviceType(TestCase):
             a = torch.tensor([60000.0], device=device, dtype=dtype)
             b = torch.tensor([60000.0], device=device, dtype=dtype)
             c = torch.tensor([2.0], device=device, dtype=dtype)
-            out = torch.addcmul(a, b, c, value=-1)
-            self.assertTrue(not (out.isnan() or out.isinf()))
+            for tensor2 in (c, c.expand(2).contiguous()):
+                out = torch.addcmul(a, b, tensor2, value=-1)
+                self.assertTrue(out.isfinite().all())
+
+    @onlyCUDA
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    def test_addcmul_single_element_tensor2(self, device, dtype):
+        # A single-element tensor2 of the common dtype is read through its
+        # device pointer instead of being broadcast. The results must match
+        # the same value expanded to a full tensor bit for bit.
+        n = 3 * 1024 + 17
+        a = make_tensor((n,), dtype=dtype, device=device)
+        b = make_tensor((n,), dtype=dtype, device=device)
+        c = make_tensor((), dtype=dtype, device=device, exclude_zero=True)
+        c_int64 = make_tensor((), dtype=torch.int64, device=device)
+        value = 3.14 if dtype.is_floating_point else 3
+        for tensor2, alpha in product((c, c.view(1), c_int64), (1, value)):
+            expected = torch.addcmul(a, b, tensor2.to(dtype).expand(n).contiguous(), value=alpha)
+            self.assertEqual(torch.addcmul(a, b, tensor2, value=alpha), expected, atol=0, rtol=0)
 
     # FIXME: move to shape ops test suite
     def test_narrow_empty(self, device):
@@ -7297,6 +7314,19 @@ class TestTorchCUDA(TestCase):
         self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_addcmul_0dim_tensor2_emits_vectorized_kernel(self, device, dtype):
+        a = make_tensor((1024, 1024), dtype=dtype, device=device)
+        b = make_tensor((1024, 1024), dtype=dtype, device=device)
+        c = make_tensor((), dtype=dtype, device=device)
+        torch.cuda.synchronize()
+        with torch.profiler.profile() as prof:
+            a.addcmul_(b, c)
+            torch.cuda.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     @parametrize("src_dtype,dst_dtype", [(torch.int32, torch.int64),
                                          (torch.bool, torch.int64),
                                          (torch.bool, torch.float64)])
@@ -7392,7 +7422,9 @@ class TestTorchCUDA(TestCase):
                           lambda: torch.repeat_interleave(x, repeats, output_size=2 * size),
                           lambda: torch.any(y),
                           lambda: torch.combinations(x, r=2),
-                          lambda: torch.normal(x, x))
+                          lambda: torch.normal(x, x),
+                          lambda: torch.addcmul(x, x, y),
+                          lambda: x.addcmul_(x, y))
         expect_sync = (lambda: _ind_put_fn(x, mask, y),
                        lambda: _ind_put_fn(x, ind_cpu, y),
                        lambda: _ind_put_fn(x, scalar_ind, y_cpu),
