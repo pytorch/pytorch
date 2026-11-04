@@ -2500,6 +2500,11 @@ with open(sys.argv[1], "w") as f:
             p.stop()
 
     def test_toggle_uncollected_activity_raises(self):
+        # The check doesn't depend on whether the profiler has started.
+        p = profile(activities=[ProfilerActivity.CPU])
+        with self.assertRaisesRegex(ValueError, "Cannot toggle CUDA"):
+            p.toggle_collection_dynamic(False, [ProfilerActivity.CUDA])
+
         with profile(activities=[ProfilerActivity.CPU]) as p:
             with self.assertRaisesRegex(ValueError, "Cannot toggle CUDA"):
                 p.toggle_collection_dynamic(False, [ProfilerActivity.CUDA])

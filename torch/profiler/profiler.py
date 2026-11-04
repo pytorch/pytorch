@@ -824,8 +824,6 @@ class _KinetoProfile:
                 code_to_profile_2()
             print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
         """
-        if self.profiler is None:
-            return
         activities = set(activities)
         if missing := activities - self.activities:
             names = ", ".join(sorted(activity.name for activity in missing))
@@ -833,6 +831,8 @@ class _KinetoProfile:
             raise ValueError(
                 f"Cannot toggle {names}: this profiler collects only {collected}."
             )
+        if self.profiler is None:
+            return
         self.profiler.toggle_collection_dynamic(enable, activities)
 
     def key_averages(
