@@ -106,13 +106,14 @@ std::unique_ptr<libkineto::IActivityProfilerSession> XPUActivityProfiler::
   if (!config.gpuTracingEnabled()) {
     return nullptr;
   }
-  // On-demand traces configure on the profiler thread, where an exception
-  // would end the process. Without PTI, the trace goes on without XPU
-  // activities.
+  // Without PTI, the trace goes on without XPU activities, as a CUDA trace
+  // does without CUPTI. Raising here would end the process for an on-demand
+  // trace, which configures on the profiler thread.
   if (const pti_result result = ptiViewGPULocalAvailable();
       result != PTI_SUCCESS) {
     LOG(ERROR) << "Failed to enable Kineto Profiler on XPU: "
-               << ptiResultTypeToString(result);
+               << ptiResultTypeToString(result) << " ("
+               << static_cast<int>(result) << ")";
     return nullptr;
   }
   return std::make_unique<XpuptiScopeProfilerSession>(
