@@ -140,6 +140,9 @@ class NodeidFilePlugin:
 
     def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
         selected = [item for item in items if item.nodeid in self.nodeids]
+        if not selected:
+            # An empty selection would exit 5, which run_test.py treats as success.
+            raise pytest.UsageError("--nodeid-file selected no tests")
         config.hook.pytest_deselected(
             items=[item for item in items if item.nodeid not in self.nodeids]
         )

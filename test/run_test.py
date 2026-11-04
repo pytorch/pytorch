@@ -370,7 +370,7 @@ XDIST_SERIAL_LIST = [
 # Serial files (see CI_SERIAL_LIST) that run the same way, but only on CPU-only
 # jobs: their large CUDA tests need more than one worker's share of the GPU and
 # would skip. On CPU, largeTensorTest guards check free host memory without a
-# per-worker share, as they already do for files in the parallel pool.
+# per-worker share, so these files mark their large CPU tests @serialTest.
 XDIST_SERIAL_CPU_LIST = [
     "test_nn",
 ]
@@ -827,10 +827,14 @@ def run_test(
         rerun_options.pytest_xdist_workers = None
         # Run alone, without the xdist workers' memory cap.
         rerun_env = {k: v for k, v in env.items() if k != "NUM_PARALLEL_PROCS"}
-        with tempfile.NamedTemporaryFile("w", suffix="_failed_nodeids.txt") as f:
+        # Closed before the rerun reads it, which Windows requires.
+        nodeid_fd, nodeid_path = tempfile.mkstemp(
+            dir=REPO_ROOT / "test" / "test-reports", suffix="_failed_nodeids.txt"
+        )
+        with os.fdopen(nodeid_fd, "w") as f:
             f.write("\n".join(failed))
-            f.flush()
-            rerun_options.additional_args.append(f"--nodeid-file={f.name}")
+        rerun_options.additional_args.append(f"--nodeid-file={nodeid_path}")
+        try:
             return run_test(
                 test_module,
                 test_directory,
@@ -840,6 +844,8 @@ def run_test(
                 rerun_env,
                 print_log,
             )
+        finally:
+            os.unlink(nodeid_path)
     return ret_code
 
 
