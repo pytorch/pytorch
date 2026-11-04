@@ -4,9 +4,12 @@
     python -m tools.testing.llm_td.eval.build_dataset --data DIR --start 2026-10-01 --end 2026-10-26 --kinds head
     python -m tools.testing.llm_td.eval.build_dataset --data DIR --start 2026-04-01 --end 2026-10-26 --kinds revert
 
-The checked-in ids under eval/ids were built this way on 2026-11-03, with
-these rules but before the window guard below and the `window` field
-existed, so 6 days of the PR truth's forward window were missing.
+The checked-in ids under eval/ids were built this way on 2026-11-03, before
+the window guard below and the `window` field existed, so 6 days of the PR
+truth's forward window were missing, and before the stacked rule skipped the
+author's landed PRs and applied the job rules to the lower head, and before
+revert truth matched a file::class::test signal key's class. They are
+replaced by a rebuild once the window has closed, on or after 2026-11-09.
 
 Four kinds of sample, each a JSON file under DIR/samples:
 
@@ -37,8 +40,10 @@ Four kinds of sample, each a JSON file under DIR/samples:
               truth is the test files whose signal tests (the reverting
               signal's file::test keys) failed on main between landing and
               the revert, on the commits that contain it, with every job that
-              runs TD they failed in there. A revert with no such failure is
-              skipped.
+              runs TD they failed in there. A file::class::test key matches
+              only that class's test; a file::test key, as autorevert writes
+              them, matches the name in any class of the file. A revert with
+              no such failure is skipped.
   neu_<sha12> an ordinary main commit from the 25 days before --end (--start
               is ignored), with no truth, used only to measure how much a
               selector runs on typical traffic. --neutral commits are drawn
@@ -76,7 +81,9 @@ not the PR's own, and is dropped, if
   - its job does not run TD, is unstable, or passed on any attempt on the head;
   - the test passed again in the same job, as when run_test.py reruns it in
     a new process;
-  - the test was disabled within WINDOW of the failure;
+  - the test was disabled within WINDOW of the failure, matched by exact
+    (class, test): a parametrized or device-suffixed variant that
+    check_if_enable would also skip does not count;
   - the same test failed on main, on a branch with no known PR, or on another
     author's PR within WINDOW of the failure, before the PR landed;
   - the same test failed on main within WINDOW of the head's `main_base`,
@@ -84,15 +91,15 @@ not the PR's own, and is dropped, if
   - the same test failed, without passing again in its job, on another PR's
     head whose change `merge_base` already has, so the head's diff leaves it
     out and the failure is the breakage of a PR below it in a stack (or of
-    one that landed before it). The author's own PRs count at any time, since
-    a stack's lower PRs can sit for weeks; another author's count only within
-    WINDOW, so a long-landed PR that once broke the test does not drop the
-    failure. Within WINDOW and before the PR landed, other_failure already
-    drops it, so for another author this rule only adds lower heads that
-    failed after the PR landed, which other_failure leaves out because there
-    it cannot tell this PR's breakage from theirs. The lower head's failure
-    is only required not to have passed again in its job; the job, job_green
-    and other rules are not applied to it.
+    one that landed before it). The author's own PRs count at any time until
+    they land, since a stack's lower PRs can sit for weeks; another author's
+    count only within WINDOW, so a long-landed PR that once broke the test
+    does not drop the failure. Within WINDOW and before the PR landed,
+    other_failure already drops it, so for another author this rule only adds
+    lower heads that failed after the PR landed, which other_failure leaves
+    out because there it cannot tell this PR's breakage from theirs. The
+    lower head's failure must not have passed again in its job and must pass
+    the job and job_green rules; the other rules are not applied to it.
     In a GitHub-native stack that head is an ancestor of `merge_base`.
     ghstack bases each PR on a synthetic gh/USER/N/base commit with the tree
     of the PR below, so no lower head is an ancestor; there the lower head's
@@ -137,7 +144,11 @@ from typing import Any, TYPE_CHECKING
 from tools.testing.llm_td.eval import REPO, write_json
 from tools.testing.llm_td.eval.clickhouse import query
 from tools.testing.llm_td.eval.score import job_runs_td
-from tools.testing.llm_td.select_tests import changed_files, diffstat_and_diff
+from tools.testing.llm_td.select_tests import (
+    changed_files,
+    diffstat_and_diff,
+    git_paths,
+)
 
 
 if TYPE_CHECKING:
@@ -231,7 +242,7 @@ def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
               WHERE time_inserted >= toDate('{d}') - 1 AND time_inserted < toDate('{n}') + 1 AND job_id IN (SELECT job_id FROM f)
                 AND failure_count = 0 AND error_count = 0 AND skipped_count = 0)
             , j AS (
-              SELECT id, run_id, head_sha, head_branch, workflow_name, name FROM default.workflow_job
+              SELECT id, run_id, head_sha, head_branch, workflow_name, name FROM default.workflow_job FINAL
               WHERE id IN (SELECT job_id FROM f) AND repository_full_name = 'pytorch/pytorch')
             SELECT f.job_id job_id, tf, classname, f.name test, toString(t) t, j.head_sha sha,
                    if(r.hr IN ('', 'pytorch/pytorch'), j.head_branch, concat(r.hr, ':', j.head_branch)) br,
@@ -297,7 +308,9 @@ def own_change(sha: str) -> bytes:
     """PR head `sha`'s diff against its merge base with main, as bytes since files need not be UTF-8; empty when `sha` is not fetched."""
     if not (main_base := git("merge-base", "origin/main", sha, check=False).strip()):
         return b""
-    return subprocess.run(["git", "diff", "--binary", "--full-index", "--no-renames", main_base, sha], cwd=REPO, capture_output=True).stdout  # fmt: skip
+    # Plumbing-stable output for `git apply`, whatever the user's diff config.
+    cmd = ["git", "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--binary", "--full-index", "--no-renames", main_base, sha]  # fmt: skip
+    return subprocess.run(cmd, cwd=REPO, capture_output=True).stdout
 
 
 @functools.cache
@@ -317,9 +330,10 @@ def below(other: str, merge_base: str) -> bool:
         def fails(*args: str, stdin: bytes | None = None) -> int:
             return subprocess.run(["git", *args], cwd=REPO, env=env, input=stdin, capture_output=True).returncode  # fmt: skip
 
-        if fails("read-tree", merge_base) or fails("apply", "--cached", "--check", "-R", "-C1", stdin=patch):  # fmt: skip
+        apply = ("apply", "--cached", "--check", "--whitespace=nowarn")
+        if fails("read-tree", merge_base) or fails(*apply, "-R", "-C1", stdin=patch):
             return False
-        return all(fails("apply", "--cached", "--check", stdin=h) for h in deletion_hunks(patch))  # fmt: skip
+        return all(fails(*apply, stdin=h) for h in deletion_hunks(patch))
 
 
 def deletion_hunks(patch: bytes) -> list[bytes]:
@@ -398,10 +412,8 @@ class History:
             return "window"
         if t >= cutoff:
             return "after_landing"
-        if "unstable" in r["job"] or not job_runs_td(r["job"], r["wf"]):
-            return "job"
-        if (r["wf"], r["job"]) in self.green.get(r["sha"], ()):
-            return "job_green"
+        if why := self.job_dropped(r):
+            return why
         if r["flaky"]:
             return "passed_in_job"
         if was_disabled(self.disabled, r):
@@ -410,12 +422,28 @@ class History:
             return "other_failure"
         if base_t is not None and any(abs(base_t - m) < WINDOW and m < cutoff for m in self.main.get(k, [])):  # fmt: skip
             return "main_near_base"
-        if bases is not None and any(
-            pr not in (None, r["pr"]) and not fl and (who == me or abs(wt - t) < WINDOW) and below(sha, bases["merge_base"])
-            for wt, who, sha, pr, fl in self.seen.get(k, [])
-        ):  # fmt: skip
+        if bases is not None and self.stacked(r, bases["merge_base"]):
             return "stacked"
         return None
+
+    def job_dropped(self, r: dict) -> str | None:
+        """The job or job_green rule, if one drops failure `r`."""
+        if "unstable" in r["job"] or not job_runs_td(r["job"], r["wf"]):
+            return "job"
+        if (r["wf"], r["job"]) in self.green.get(r["sha"], ()):
+            return "job_green"
+        return None
+
+    def stacked(self, r: dict, merge_base: str) -> bool:
+        """The stacked rule: whether another PR's head below `merge_base` failed `r`'s test in a way that counts (see the module docstring)."""
+        t, me, k = ts(r["t"]), self.author.get(r["pr"], str(r["pr"])), key(r)
+        others = sorted({sha for _, _, sha, pr, _ in self.seen.get(k, []) if pr not in (None, r["pr"])})  # fmt: skip
+        for o in (o for sha in others for o in self.heads[sha] if key(o) == k):
+            mine = self.author.get(o["pr"], str(o["pr"])) == me
+            near = t < self.landed.get(o["pr"], NEVER) if mine else abs(ts(o["t"]) - t) < WINDOW  # fmt: skip
+            if near and not o["flaky"] and self.job_dropped(o) is None and below(o["sha"], merge_base):  # fmt: skip
+                return True
+        return False
 
     def other_heads(self, shas: set[str]) -> set[str]:
         """The other PRs' heads that failed a test one of PR heads `shas` failed, which the stacked rule compares to them."""
@@ -423,8 +451,8 @@ class History:
 
     def truth(self, sha: str, bases: dict[str, str], dropped: collections.Counter) -> list[dict] | None:  # fmt: skip
         """The failures on PR head `sha` that are the PR's own, counting the others in `dropped` by rule; None if its main_base is older than the loaded failures."""
-        if sha not in self.green:
-            raise AssertionError(f"load_green({sha!r}) first")
+        if missing := ({sha} | self.other_heads({sha})) - self.green.keys():
+            raise AssertionError(f"load_green({sorted(missing)!r}) first")
         base_t = commit_time(bases["main_base"])
         if base_t - WINDOW < ts(f"{self.start - LOOKBACK} 00:00:00"):
             print(f"skipping {sha}: merge base before the loaded failures", flush=True)
@@ -517,17 +545,17 @@ def candidates_at(
             kw[k.arg] = [e.value for e in v.elts if isinstance(e, ast.Constant)]
     patterns = tuple(kw.get("blocklisted_patterns", []))
     out = set(kw.get("extra_tests", []))
-    for f in git("ls-tree", "-r", "--name-only", main, "test/").splitlines():
+    for f in git_paths("ls-tree", "-r", "--name-only", main, "test/"):
         t = f.removeprefix("test/").removesuffix(".py")
         if f.rsplit("/", 1)[-1].startswith("test_") and f.endswith(".py"):
             if not t.startswith(patterns) and t not in kw.get("blocklisted_tests", []):
                 out.add(t)
     if head is not None:
         # As select_tests.select does.
-        added = git(
+        added = git_paths(
             "diff", "--name-only", "--no-renames", "--diff-filter=A", base or main, head
         )
-        for f in added.splitlines():
+        for f in added:
             t = f.removeprefix("test/").removesuffix(".py")
             if re.match(r"test/([\w/]+/)?test_\w+\.py$", f) and not t.startswith(
                 patterns
@@ -544,10 +572,13 @@ def strip_trailers(msg: str) -> str:
 
 
 def commit_text(sha: str) -> tuple[str, str]:
-    """A landed commit's title and body as close to its PR's event as the commit
-    allows: without the " (#N)" the merge bot appends to the title and the
-    trailers it adds to the body (trymerge.py's gen_commit_message). The cc
-    line and ghstack stack list it removes from the body are not restored."""
+    """A landed commit's title and body, near its PR's event: without the " (#N)"
+    the merge bot appends to the title, and without strip_trailers' lines,
+    which are the trailers the bot adds (trymerge.py's gen_commit_message) and
+    also author trailers such as Co-authored-by, Differential Revision and
+    Fixes. The cc line and ghstack stack list the bot removes are not
+    restored. pr_ and head_ samples keep the raw PR body, trailers and all, so
+    their prompts differ slightly from revert and neutral ones."""
     title, _, body = git("log", "-1", "--format=%B", sha).partition("\n")
     return re.sub(r" \(#\d+\)$", "", title.rstrip()), strip_trailers(body)
 
@@ -580,7 +611,7 @@ def pr_text(pr: int, tries: int = 4) -> tuple[str, str]:
 
 def deleted_files(base: str, head: str) -> list[str]:
     """The files `head` deletes against `base`, counting a moved file's old path, as select_tests passes them to from_model_output."""
-    return git("diff", "--name-only", "--no-renames", "--diff-filter=D", base, head).splitlines()  # fmt: skip
+    return git_paths("diff", "--name-only", "--no-renames", "--diff-filter=D", base, head)  # fmt: skip
 
 
 def write_sample(
@@ -594,11 +625,11 @@ def write_sample(
     merge_base: str | None = None,
     main_base: str | None = None,
     **extra,
-) -> None:
-    """Write sample `sid` for `sha` diffed against `merge_base` (default `base`), with main at `main_base` (default `merge_base`), whose TESTS give the candidates."""
+) -> bool:
+    """Write sample `sid` for `sha` diffed against `merge_base` (default `base`), with main at `main_base` (default `merge_base`), whose TESTS give the candidates; False if it already exists."""
     path = out / f"{sid}.json"
     if path.exists():
-        return
+        return False
     merge_base = merge_base or base
     main_base = main_base or merge_base
     diffstat, diff = diffstat_and_diff(merge_base, sha)
@@ -608,6 +639,7 @@ def write_sample(
         "candidates": candidates_at(main_base, sha, merge_base),
         **extra,
     })  # fmt: skip
+    return True
 
 
 def run_each(kind: str, go: Callable[[Any], None], items: list, jobs: int) -> None:
@@ -643,7 +675,17 @@ def print_dropped(kind: str, dropped: list[collections.Counter]) -> None:
     )
 
 
+def other_window(h: History, out: Path, kind: str) -> bool:
+    """Whether some pr_ sample in `out` was built with another --start/--end than `h`, printing that `kind` is skipped if so."""
+    window = [str(h.start), str(h.end)]
+    if other := sorted(p.stem for p in out.glob("pr_*.json") if json.loads(p.read_text()).get("window") != window):  # fmt: skip
+        print(f"skipping {kind} samples: pr_ samples in {out}, e.g. {other[0]}, were built with another --start/--end than {h.start}/{h.end}", flush=True)  # fmt: skip
+    return bool(other)
+
+
 def pr_samples(h: History, out: Path, jobs: int) -> None:
+    if other_window(h, out, "pr"):
+        return
     lo = ts(f"{h.start} 00:00:00")
     own = [r for rows in h.heads.values() for r in rows if ts(r["t"]) >= lo and h.why_dropped(r) is None]  # fmt: skip
     h.load_green({r["sha"] for r in own})
@@ -658,7 +700,8 @@ def pr_samples(h: History, out: Path, jobs: int) -> None:
             first[r["pr"]] = r
     reproduced = {k for k in envs if len(envs[k]) >= 2 or len(heads[k]) >= 2}
     fetch(sorted({f["sha"] for f in first.values()}))
-    fetch(sorted(h.other_heads({f["sha"] for f in first.values()})))
+    fetch(sorted(lower := h.other_heads({f["sha"] for f in first.values()})))
+    h.load_green(lower)
     ci = ci_bases({f["sha"]: pr for pr, f in first.items()})
     # A base CI recorded after this head is not in its history, so fetch it as head_samples' fetch of the later head would.
     fetch(sorted({b for bs in ci.values() for b in bs}))
@@ -672,21 +715,23 @@ def pr_samples(h: History, out: Path, jobs: int) -> None:
         bases = pr_bases(sha, ci.get(sha, []))
         if bases is None:
             return
-        dropped.append(c := collections.Counter())
-        if kept := h.truth(sha, bases, c):
+        if (kept := h.truth(sha, bases, c := collections.Counter())) is None:
+            return
+        dropped.append(c)
+        if kept:
             truth_jobs = by_file(kept)
             strong = {r["tf"] for r in kept if (pr, *key(r)) in reproduced}
             try:
                 title, body = pr_text(pr)
-                write_sample(out, f"pr_{pr}", "pr", sha, title=title, body=body, **bases, pr=pr, date=first[pr]["t"][:19], truth=sorted(truth_jobs),
-                             window=[str(h.start), str(h.end)], truth_strong=sorted(strong), truth_jobs=truth_jobs)  # fmt: skip
-                sources.append(bases["base_source"])
+                if write_sample(out, f"pr_{pr}", "pr", sha, title=title, body=body, **bases, pr=pr, date=first[pr]["t"][:19], truth=sorted(truth_jobs),
+                                window=[str(h.start), str(h.end)], truth_strong=sorted(strong), truth_jobs=truth_jobs):  # fmt: skip
+                    sources.append(bases["base_source"])
             except subprocess.CalledProcessError as e:
                 print(f"skipping PR {pr}: {e}", flush=True)
 
     run_each("PR", go, sorted(first), jobs)
     print_dropped("pr", dropped)
-    print(f"{sources.count('main')} of {len(sources)} PR samples have no CI base and are diffed against main", flush=True)  # fmt: skip
+    print(f"{sources.count('main')} of {len(sources)} PR samples written have no CI base and are diffed against main", flush=True)  # fmt: skip
 
 
 # fmt: off
@@ -722,13 +767,14 @@ def head_samples(h: History, out: Path, jobs: int) -> None:
     if not prs:
         print(f"no head samples: there are no pr_ samples in {out}", flush=True)
         return
-    if other := sorted(n for n, s in prs.items() if s.get("window") != [str(h.start), str(h.end)]):
-        raise SystemExit(f"pr_ samples in {out}, e.g. pr_{other[0]}, were built with another --start/--end than {h.start}/{h.end}")  # fmt: skip
+    if other_window(h, out, "head"):
+        return
     shas = {sha for sha, rows in h.heads.items() if rows[0]["pr"] in prs}
     h.load_green(shas)
     shas = {sha for sha in shas if any(h.why_dropped(r) is None for r in h.heads[sha])}
     fetch(sorted(shas))
-    fetch(sorted(h.other_heads(shas)))
+    fetch(sorted(lower := h.other_heads(shas)))
+    h.load_green(lower)
     ci = ci_bases({sha: h.heads[sha][0]["pr"] for sha in shas})
     fetch(sorted({b for bs in ci.values() for b in bs}))
     created = {sha: ts(t) for sha, t in head_created(sorted(shas)).items()}
@@ -744,30 +790,33 @@ def head_samples(h: History, out: Path, jobs: int) -> None:
         pr = h.heads[sha][0]["pr"]
         if not has_commit(sha) or (bases := pr_bases(sha, ci.get(sha, []))) is None:
             return
-        dropped.append(c := collections.Counter())
-        if kept := h.truth(sha, bases, c):
+        if (kept := h.truth(sha, bases, c := collections.Counter())) is None:
+            return
+        dropped.append(c)
+        if kept:
             truth_jobs = by_file(kept)
             previous = sorted({tf for t, other, tf in failed[pr] if other != sha and sha in created and t < created[sha]})
             try:
-                write_sample(out, f"head_{pr}_{sha[:12]}", "head", sha, title=prs[pr]["title"], body=prs[pr]["body"], **bases, pr=pr,
-                             truth=sorted(truth_jobs), truth_jobs=truth_jobs, previous_failures=previous)
-                sources.append(bases["base_source"])
+                if write_sample(out, f"head_{pr}_{sha[:12]}", "head", sha, title=prs[pr]["title"], body=prs[pr]["body"], **bases, pr=pr,
+                                truth=sorted(truth_jobs), truth_jobs=truth_jobs, previous_failures=previous):
+                    sources.append(bases["base_source"])
             except subprocess.CalledProcessError as e:
                 print(f"skipping head {sha}: {e}", flush=True)
 
     run_each("head", go, sorted(shas), jobs)
     print_dropped("head", dropped)
-    print(f"{sources.count('main')} of {len(sources)} head samples have no CI base and are diffed against main", flush=True)
+    print(f"{sources.count('main')} of {len(sources)} head samples written have no CI base and are diffed against main", flush=True)
 # fmt: on
 
 
 def revert_truth_jobs(
-    signal: set[tuple[str, str]], sha: str, landed: dt.datetime, reverted: str
+    signal: set[tuple[str, str, str]], sha: str, landed: dt.datetime, reverted: str
 ) -> dict[str, list[tuple[str, str]]]:
     """The main-branch (workflow, job)s that run TD each signal test file failed in between landing and the revert, on the main commits from `sha` up to the revert.
 
-    `signal` holds the (test file without .py, test name) pairs of the
-    autorevert signal; other tests of those files do not count.
+    `signal` holds the (test file without .py, class, test name) of the
+    autorevert signal's tests, class "" when its key names none, which then
+    matches the name in any class; other tests of those files do not count.
 
     A failure is dropped as PR truth drops it when its job is unstable or
     passed on any attempt on the commit, or the test passed again in the job.
@@ -775,14 +824,14 @@ def revert_truth_jobs(
     `reverted` is when autorevert decided to revert, so the main commits that
     landed between that and the revert commit are left out: truth is only
     lost, never added."""
-    tests = ",".join(f"({sql_str(f + '.py')}, {sql_str(n)})" for f, n in sorted(signal))
+    tests = ",".join(sorted({f"({sql_str(f + '.py')}, {sql_str(n)})" for f, _, n in signal}))  # fmt: skip
     t0 = landed.strftime("%Y-%m-%d %H:%M:%S")
     with_change = git("rev-list", "--first-parent", "--ancestry-path", f"--until={reverted[:19]} +0000", "--invert-grep",
                       f"--grep=This reverts commit {sha}", f"{sha}^..origin/main").split()  # fmt: skip
     shas = ",".join(f"'{c}'" for c in with_change or [sha])
     failed = query(f"""
         WITH j AS (
-          SELECT id, head_sha, workflow_name, name FROM default.workflow_job
+          SELECT id, head_sha, workflow_name, name FROM default.workflow_job FINAL
           WHERE created_at >= toDateTime('{t0}') - INTERVAL 1 HOUR
             AND created_at <= parseDateTimeBestEffort('{reverted}') + INTERVAL 1 HOUR
             AND repository_full_name = 'pytorch/pytorch' AND (head_branch = 'main' OR head_branch LIKE 'trunk/%')
@@ -790,14 +839,15 @@ def revert_truth_jobs(
             AND run_id IN (SELECT id FROM default.workflow_run WHERE head_repository.full_name = 'pytorch/pytorch'
                            AND created_at >= toDateTime('{t0}') - INTERVAL 1 HOUR)
             AND {" AND ".join(f"name NOT LIKE '%{s}%'" for s in SKIP_JOBS)})
-        SELECT DISTINCT tf, sha, wf, job FROM (
-          SELECT t.job_id, replaceRegexpOne(file, '\\.py$', '') tf, classname, t.name, j.head_sha sha, j.workflow_name wf, j.name job
+        SELECT DISTINCT tf, classname, test, sha, wf, job FROM (
+          SELECT t.job_id, replaceRegexpOne(file, '\\.py$', '') tf, classname, t.name test, j.head_sha sha, j.workflow_name wf, j.name job
           FROM tests.all_test_runs t JOIN j ON j.id = t.job_id
           WHERE t.job_id IN (SELECT id FROM j) AND (file, t.name) IN ({tests})
             AND time_inserted >= toDateTime('{t0}') AND time_inserted <= parseDateTimeBestEffort('{reverted}') + INTERVAL 2 HOUR
-          GROUP BY t.job_id, tf, classname, t.name, sha, wf, job
+          GROUP BY t.job_id, tf, classname, test, sha, wf, job
           -- A test that also passed in the job, as run_test.py's rerun of it in a new process does, is flaky there.
           HAVING countIf(failure_count > 0 OR error_count > 0) > 0 AND countIf(failure_count = 0 AND error_count = 0 AND skipped_count = 0) = 0)""")
+    failed = [f for f in failed if {(f["tf"], "", f["test"]), (f["tf"], f["classname"], f["test"])} & signal]  # fmt: skip
     # As History.why_dropped's job and job_green rules.
     green = green_jobs(sorted({f["sha"] for f in failed}))
     truth_jobs: dict[str, set] = collections.defaultdict(set)
@@ -823,7 +873,8 @@ def revert_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
         r = rows[sha]
         if not has_commit(sha):
             return
-        signal = {(k.split("::")[0].removesuffix(".py"), k.split("::")[-1]) for k in r["source_signal_keys"] if "::" in k}  # fmt: skip
+        keys = [k.split("::") for k in r["source_signal_keys"] if "::" in k]
+        signal = {(k[0].removesuffix(".py"), k[1] if len(k) == 3 else "", k[-1]) for k in keys}  # fmt: skip
         try:
             truth_jobs = revert_truth_jobs(signal, sha, commit_time(sha), r["reverted_at"])  # fmt: skip
             if not truth_jobs:
@@ -832,7 +883,7 @@ def revert_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
             title, body = commit_text(sha)
             write_sample(out, f"rev_{sha[:12]}", "revert", sha, sha + "^", title, body, date=r["reverted_at"],
                          truth=sorted(truth_jobs), truth_jobs=truth_jobs)  # fmt: skip
-        except (subprocess.CalledProcessError, RuntimeError) as e:
+        except subprocess.CalledProcessError as e:
             print(f"skipping revert {sha}: {e}", flush=True)
 
     run_each("revert", go, list(rows), jobs)

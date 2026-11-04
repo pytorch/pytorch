@@ -372,6 +372,9 @@ class Selection:
     # Whether enforcement was asked for, even if a failed selector cleared enforce.
     enforce_requested: bool = False
 
+    def __post_init__(self) -> None:
+        self.enforce_requested = self.enforce_requested or self.enforce
+
     @classmethod
     def from_model_output(
         cls,
@@ -502,7 +505,7 @@ class Selection:
         files, sweeps, candidates = d["files"], d["sweeps"], d["candidates"]
         run_all, enforce, reason, error = d["run_all"], d["enforce"], d["reason"], d["error"]  # fmt: skip
         # Older selectors, which CI runs from the default branch, omit it.
-        enforce_requested = d.get("enforce_requested", False)
+        enforce_requested = d.get("enforce_requested", enforce)
         if not all(
             isinstance(v, list) and all(isinstance(x, str) for x in v)
             for v in (files, sweeps) + (() if candidates is None else (candidates,))
@@ -522,7 +525,7 @@ class Selection:
             enforce,
             None if candidates is None else set(candidates),
             error,
-            enforce_requested,
+            bool(enforce_requested),
         )
 
     @classmethod
