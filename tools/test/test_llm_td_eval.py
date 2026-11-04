@@ -637,6 +637,7 @@ class TestScore(unittest.TestCase):
             self.assertFalse(choice.sel.run_all)
             self.assertEqual(choice.per_config, {"default": {"test_a"}, "slow": set()})
             self.assertEqual(choice.other, {"test_e"})
+            self.assertFalse(choice.covers("test_torch", "inductor"))
         # A deliberate run-all still runs everything.
         self.assertTrue(pick("final+td45", {"out": {"tests": [], "run_all": True}}, td).sel.run_all)  # fmt: skip
         infra = {**SAMPLE, "changed_files": ["test/run_test.py"]}
@@ -827,6 +828,9 @@ class TestScore(unittest.TestCase):
         self.assertFalse(choice.covers("test_c", "slow"))
         self.assertTrue(choice.covers("test_e", "not_in_test_times"))
         self.assertEqual(choice.files(), {"test_a", "test_e"})
+        # TD runs only its cut, even of the files a selection always covers.
+        ind = pick("td25", None, {"top25": [], "top25_cfg": {"inductor": ["test_a"]}})
+        self.assertEqual([ind.covers("test_a", "inductor"), ind.covers("test_torch", "inductor")], [True, False])  # fmt: skip
 
     def test_cost_fraction(self) -> None:
         cands = {"test_a", "test_b", "test_c"}
