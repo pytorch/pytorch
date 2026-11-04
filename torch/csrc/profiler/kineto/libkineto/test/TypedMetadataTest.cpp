@@ -8,7 +8,6 @@
 
 #include "include/TypedMetadata.h"
 #include "include/TypedMetadataJson.h"
-#include "test/NoOpTypedMetadataVisitor.h"
 
 #include <gtest/gtest.h>
 #include <map>
@@ -49,13 +48,8 @@ using RecordedValue = std::variant<
     std::vector<int64_t>,
     std::vector<std::string>>;
 
-class RecordingTypedMetadataVisitor : public NoOpTypedMetadataVisitor {
+class RecordingTypedMetadataVisitor : public ITypedMetadataVisitor {
  public:
-  using NoOpTypedMetadataVisitor::beginDict;
-  using NoOpTypedMetadataVisitor::endDict;
-  using NoOpTypedMetadataVisitor::visitUnsupported;
-  using NoOpTypedMetadataVisitor::visitValue;
-
   void visitValue(const MetadataField<int64_t>& field, int64_t value) override {
     record(field, value);
   }
@@ -90,6 +84,19 @@ class RecordingTypedMetadataVisitor : public NoOpTypedMetadataVisitor {
       override {
     record(field, std::string{value.value});
   }
+
+  void visitValue(
+      [[maybe_unused]] const MetadataField<uint64_t>& field,
+      [[maybe_unused]] uint64_t value) override {}
+
+  void visitValue(
+      [[maybe_unused]] const MetadataField<InputShapes>& field,
+      [[maybe_unused]] const InputShapes& value) override {}
+
+  void visitUnsupported(std::string_view /*name*/) override {}
+
+  void beginDict(std::string_view /*name*/) override {}
+  void endDict() override {}
 
   std::map<std::string, RecordedValue> values;
 

@@ -8,7 +8,6 @@
 
 #include "include/GenericTraceActivity.h"
 #include "include/TypedMetadata.h"
-#include "test/NoOpTypedMetadataVisitor.h"
 
 #include <fmt/format.h>
 #include <gtest/gtest.h>
@@ -27,11 +26,8 @@ namespace {
 // Records each visited field tagged by the visitValue overload that fired, so
 // tests can tell the verbatim RawJson path (string-keyed addMetadata) apart
 // from the typed path (the MetadataField overload).
-class RecordingVisitor : public NoOpTypedMetadataVisitor {
+class RecordingVisitor : public ITypedMetadataVisitor {
  public:
-  using NoOpTypedMetadataVisitor::beginDict;
-  using NoOpTypedMetadataVisitor::endDict;
-
   std::map<std::string, std::string> recorded;
 
   void visitValue(const MetadataField<int64_t>& field, int64_t value) override {
@@ -74,6 +70,8 @@ class RecordingVisitor : public NoOpTypedMetadataVisitor {
   void visitUnsupported(std::string_view name) override {
     recorded[std::string{name}] = "unsupported";
   }
+  void beginDict(std::string_view /*name*/) override {}
+  void endDict() override {}
 };
 
 constexpr uint64_t kBigUnsigned = 18446744073709551615ULL;

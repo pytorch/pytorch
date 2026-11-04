@@ -72,11 +72,6 @@ bool isAsyncKernel(const rocprofAsyncRow& async) {
 }
 
 struct RocmStreamTypedMetadataVisitor final : public NoOpTypedMetadataVisitor {
-  using NoOpTypedMetadataVisitor::beginDict;
-  using NoOpTypedMetadataVisitor::endDict;
-  using NoOpTypedMetadataVisitor::visitUnsupported;
-  using NoOpTypedMetadataVisitor::visitValue;
-
   void visitValue(const MetadataField<int64_t>& field, int64_t value) override {
     if (field == RocmMetadataFields::kStream) {
       stream = value;
@@ -92,6 +87,9 @@ struct RocmStreamTypedMetadataVisitor final : public NoOpTypedMetadataVisitor {
 
   std::optional<int64_t> stream;
   std::optional<uint64_t> hsaQueue;
+
+ private:
+  using NoOpTypedMetadataVisitor::visitValue;
 };
 } // namespace
 

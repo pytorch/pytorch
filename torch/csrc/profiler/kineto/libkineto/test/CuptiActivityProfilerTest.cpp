@@ -37,7 +37,6 @@
 #include "src/ThrowUtil.h"
 #include "test/MockActivitySubProfiler.h"
 #include "test/MockCpuActivityBuffer.h"
-#include "test/NoOpTypedMetadataVisitor.h"
 #include "test/TestUtils.h"
 
 using namespace std::chrono;
@@ -68,7 +67,7 @@ using RecordedMetadataValue = std::variant<
     std::vector<int64_t>,
     std::vector<std::string>>;
 
-class RecordingTypedMetadataVisitor final : public NoOpTypedMetadataVisitor {
+class RecordingTypedMetadataVisitor final : public ITypedMetadataVisitor {
  public:
   template <typename T>
   [[nodiscard]]
@@ -82,8 +81,6 @@ class RecordingTypedMetadataVisitor final : public NoOpTypedMetadataVisitor {
   }
 
  private:
-  using NoOpTypedMetadataVisitor::visitValue;
-
   void visitValue(const MetadataField<int64_t>& field, int64_t value) override {
     values_[std::string{field.name}] = value;
   }
@@ -123,6 +120,15 @@ class RecordingTypedMetadataVisitor final : public NoOpTypedMetadataVisitor {
       override {
     values_[std::string{field.name}] = value;
   }
+
+  void visitValue(
+      [[maybe_unused]] const MetadataField<InputShapes>& field,
+      [[maybe_unused]] const InputShapes& value) override {}
+
+  void visitUnsupported(std::string_view /*name*/) override {}
+
+  void beginDict(std::string_view /*name*/) override {}
+  void endDict() override {}
 
   std::map<std::string, RecordedMetadataValue> values_;
 };
