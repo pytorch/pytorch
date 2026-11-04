@@ -36,6 +36,7 @@ import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._dynamo.symbolic_convert import UNNAMED_SCOPE_PREFIX
+from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._precompile import _write_artifact, PrecompileError
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.compiler.precompile import (
@@ -58,6 +59,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
+    TEST_WITH_CROSSREF,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_TRITON, IS_BIG_GPU
@@ -4892,6 +4894,14 @@ print("served", mod.STANCES)
 """
 
 
+class _NoOpPostGradPass(CustomGraphPass):
+    def __call__(self, graph):
+        pass
+
+    def uuid(self):
+        return "no-op"
+
+
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileDynamoCapture(TestCase):
@@ -4959,6 +4969,111 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(
             load(artifact, cache)(self.model, self.x2), single(self.model, self.x2)
         )
+
+    def test_mode_and_options_are_checked_like_torch_compile(self):
+        single = self.mod.single
+        options = {"size_asserts": True}
+        with self.assertRaisesRegex(RuntimeError, "Either mode or options"):
+            self._capture(single, mode="reduce-overhead", options=options)
+        with self.assertRaisesRegex(ValueError, "backend='eager' takes neither"):
+            self._capture(single, backend="eager", mode="reduce-overhead")
+        with self.assertRaisesRegex(RuntimeError, "Unexpected optimization option"):
+            self._capture(single, options={"no_such_option": True})
+        with self.assertRaisesRegex(RuntimeError, "Unrecognized mode"):
+            self._capture(single, mode="no-such-mode")
+        with self.assertRaisesRegex(TypeError, "tracer must be"):
+            self._capture(single, tracer=object(), mode="reduce-overhead")
+        make_fx = MakeFxTracer()
+        refusals = [
+            (DynamoTracer(), "by the loading process's triton.cudagraphs"),
+            (make_fx, "outside Inductor's CUDA graph wrapper"),
+        ]
+        for tracer, reason in refusals:
+            with self.assertRaisesRegex(PrecompileError, f"{reason}.*Use mode="):
+                self._capture(single, tracer=tracer, mode="reduce-overhead")
+            cudagraphs = {"triton.cudagraphs": True}
+            with self.assertRaisesRegex(PrecompileError, f"{reason}.*Drop triton"):
+                self._capture(single, tracer=tracer, options=cudagraphs)
+        for key in ("freezing", "force_disable_caches", "fx_wrapper"):
+            with self.assertRaisesRegex(PrecompileError, f"'{key}'.*no cache entry"):
+                self._capture(single, options={key: True})
+        remote = {"bundled_autotune_remote_cache": True}
+        with self.assertRaisesRegex(PrecompileError, "remote autotune cache miss"):
+            self._capture(single, options=remote)
+        # The session itself refuses, so a direct caller passing a wrapper does too.
+        from torch._dynamo.exc import PackageError
+        from torch._dynamo.precompile_package import precompile_capture
+
+        wrapper = torch._TorchCompileInductorWrapper(None, remote, None)
+        with self.assertRaisesRegex(PackageError, "remote autotune cache miss"):
+            precompile_capture(single, backend=wrapper)
+        pinned = {
+            "size_asserts": False,
+            "scalar_asserts": False,
+            "cpp_wrapper": True,
+            "fx_wrapper": True,
+            "benchmark-harness": True,
+            "freezing": True,
+            "triton.autotune_at_compile_time": False,
+        }
+        for key, value in pinned.items():
+            with self.assertRaisesRegex(PrecompileError, "always compiles with"):
+                self._capture(single, tracer=make_fx, options={key: value})
+
+    @parametrize("how", ["options", "mode"])
+    @parametrize("tracer", ["make_fx", "dynamo"])
+    def test_options_reach_the_inductor_compile(self, tracer, how):
+        from torch._functorch import aot_autograd
+        from torch._inductor import compile_fx, list_mode_options
+
+        mode = "max-autotune-no-cudagraphs"
+        options = {"max_autotune_gemm_backends": "ATEN"}
+        expected = options if how == "options" else list_mode_options(mode)
+        kwargs = {"options": options} if how == "options" else {"mode": mode}
+        if tracer == "make_fx":
+            target, name, kwarg = aot_autograd, "compile_to_python", "options"
+        else:
+            target, name, kwarg = compile_fx, "compile_fx", "config_patches"
+        # A make_fx capture compiles one graph; step graph-breaks into two.
+        fn = self.mod.single if tracer == "make_fx" else self.mod.step
+        tracer_obj = MakeFxTracer() if tracer == "make_fx" else DynamoTracer()
+        # compile_to_python first runs compile_fx for the passes before lowering
+        # (pre-grad, joint-graph), which must see the options too.
+        held = []
+        real_compile_fx = compile_fx.compile_fx
+
+        def outer_compile(*args, **kwargs):
+            config = torch._inductor.config.get_config_copy()
+            held.append(all(config[k] == v for k, v in expected.items()))
+            return real_compile_fx(*args, **kwargs)
+
+        first_step = contextlib.nullcontext()
+        if tracer == "make_fx":
+            first_step = mock.patch.object(compile_fx, "compile_fx", outer_compile)
+        with (
+            first_step,
+            mock.patch.object(target, name, wraps=getattr(target, name)) as spy,
+        ):
+            with self._capture(fn, tracer=tracer_obj, **kwargs) as cap:
+                y = cap(self.model, self.x2)
+                graphs = cap.summary().backend_graphs if tracer == "dynamo" else 1
+        if tracer == "make_fx":
+            self.assertGreater(len(held), 0)
+            self.assertNotIn(False, held)
+        # compile_fx re-enters itself without config_patches once it has applied
+        # them, so each graph is one call that carries them.
+        seen = [c.kwargs[kwarg] for c in spy.call_args_list if kwarg in c.kwargs]
+        self.assertEqual(len(seen), graphs)
+        self.assertGreaterEqual(len(seen), 2 if tracer == "dynamo" else 1)
+        for patches in seen:
+            self.assertLessEqual(expected.items(), patches.items())
+        # A graph-breaking capture mints resume names this process already holds,
+        # and under crossref its guards hold only inside the harness's mode.
+        if tracer == "dynamo":
+            if not TEST_WITH_CROSSREF:
+                self._serve_in_fresh_process([((self.x2,), {}, y)])
+        else:
+            self.assertEqual(load(self.artifact, self.cache)(self.model, self.x2), y)
 
     # The crossref harness keeps a dispatch mode active while the capture runs,
     # and Dynamo guards on that state; a fresh process has no such mode, so
@@ -5730,6 +5845,69 @@ class TestPrecompileDynamoCapture(TestCase):
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("compiled at serve time", out.stdout)
+
+    @skipIfCrossRef
+    @parametrize("given", ["options", "mode"])
+    def test_serve_time_compiles_take_the_capture_options(self, given):
+        from torch._inductor import list_mode_options
+        from torch._precompile import _parse_artifact_metadata
+
+        if given == "options":
+            kwargs = {"options": {"max_autotune_gemm_backends": "ATEN"}}
+            expected = kwargs["options"]
+        else:
+            # The artifact records the mode's expansion, not the mode's name.
+            kwargs = {"mode": "max-autotune-no-cudagraphs"}
+            expected = list_mode_options(kwargs["mode"])
+        with (
+            torch.no_grad(),
+            self._capture(self.mod.tags_compiled, **kwargs) as cap,
+        ):
+            cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            recorded = _parse_artifact_metadata(f.read())["INDUCTOR_OPTIONS"]
+        self.assertEqual(recorded, expected)
+        script = (
+            "import ast, sys, torch\n"
+            "from torch._inductor import compile_fx\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "mod = __import__(sys.argv[4])\n"
+            "patches = []\n"
+            "real_compile_fx = compile_fx.compile_fx\n"
+            "def spy(*args, **kwargs):\n"
+            "    patches.append(kwargs.get('config_patches') or {})\n"
+            "    return real_compile_fx(*args, **kwargs)\n"
+            "compile_fx.compile_fx = spy\n"
+            "f = torch.compiler.precompile.load(\n"
+            "    sys.argv[2], sys.argv[3], allow_serve_time_compiles=True\n"
+            ")\n"
+            "with torch.no_grad():\n"
+            "    f(mod.Model(), torch.randn(2, 4))\n"
+            "    assert not patches, patches\n"
+            "    f(mod.Model(), torch.randn(3, 4))\n"
+            "options = ast.literal_eval(sys.argv[5])\n"
+            "assert any(p.items() >= options.items() for p in patches), patches\n"
+            "print('compiled with the capture options')\n"
+        )
+        argv = [self.dir, self.artifact, self.cache, self.module_name, repr(expected)]
+        cmd = [sys.executable, "-c", script, *argv]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("compiled with the capture options", out.stdout)
+
+    @skipIfCrossRef
+    def test_serve_time_compiles_refuse_options_without_a_literal_form(self):
+        from torch._precompile import _parse_artifact_metadata
+
+        options = {"post_grad_custom_post_pass": _NoOpPostGradPass()}
+        with self._capture(self.mod.tags_compiled, options=options) as cap:
+            y = cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            self.assertIsNone(_parse_artifact_metadata(f.read())["INDUCTOR_OPTIONS"])
+        with self.assertRaisesRegex(PrecompileError, "not all Python literals"):
+            load(self.artifact, self.cache, allow_serve_time_compiles=True)
+        # The remedy the error names: without the flag the artifact still serves.
+        self._serve_in_fresh_process([((self.x2,), {}, y)], mode="installed")
 
     def test_a_standalone_artifact_refuses_serve_time_compiles(self):
         with self._capture(self.mod.single, backend="eager") as cap:
