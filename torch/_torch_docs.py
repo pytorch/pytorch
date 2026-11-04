@@ -1422,18 +1422,21 @@ returned tensor will have the same history.
 An object that has a ``__dlpack__`` method but isn't a tensor or NumPy array is read
 through DLPack, even if it also implements Python's buffer protocol or
 ``__cuda_array_interface__``. By default it may export a copy when it cannot share its
-memory. With ``copy=False`` it is asked not to, and if it raises a ``BufferError`` because
-it can't, a ``ValueError`` is raised from it. Any other error reading :attr:`obj` through
-DLPack is propagated.
+memory. With ``copy=False`` it is asked not to, and a ``BufferError`` from reading it,
+raised for example when it can't, becomes a ``ValueError`` raised from it. Any other error
+reading :attr:`obj` through DLPack is propagated.
 
 .. versionchanged:: 2.16
     An object with a ``__dlpack__`` method is read through DLPack rather than its buffer
-    protocol or ``__cuda_array_interface__``, so the result keeps its shape and device, and
-    :attr:`dtype` converts its values instead of reinterpreting its bytes. With ``copy=False``,
-    passing a :attr:`dtype` or :attr:`device` other than the object's now raises. Use
-    :func:`torch.frombuffer` to reinterpret the bytes of a buffer. On Apple silicon, an MLX
-    array is read as an MPS tensor: pass ``device="cpu"`` to get a CPU tensor, and convert it
-    to a dtype MPS doesn't support afterwards, as in ``torch.asarray(a, device="cpu").double()``.
+    protocol or ``__cuda_array_interface__``, so the result keeps its shape and the device
+    that ``__dlpack_device__`` reports, and :attr:`dtype` converts its values instead of
+    reinterpreting its bytes. With ``copy=False``, passing a :attr:`dtype` or :attr:`device`
+    other than the object's now raises. If reading it through DLPack fails, the error
+    propagates; the buffer or ``__cuda_array_interface__`` isn't read instead. Use
+    :func:`torch.frombuffer` to reinterpret the bytes of a buffer. For a :attr:`dtype` the
+    object's device doesn't support, read it with ``device="cpu"`` and convert afterwards:
+    for example, an MLX array on Apple silicon is read as an MPS tensor, so use
+    ``torch.asarray(a, device="cpu").double()`` to get ``torch.float64``.
 
 When :attr:`obj` is not a tensor, NumPy array, or object with DLPack support but implements
 Python's buffer protocol then the buffer is interpreted as an array of bytes grouped
