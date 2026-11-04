@@ -12648,7 +12648,7 @@ class Scheduler:
             try:
                 return (
                     self._codegen_partitions()
-                    if torch._inductor.config.graph_partition
+                    if V.graph.split_into_partitions
                     else self._codegen(self.nodes)
                 )
             finally:
