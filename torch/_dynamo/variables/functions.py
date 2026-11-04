@@ -38,7 +38,7 @@ import time
 import traceback
 import types
 import typing
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from types import CellType, FunctionType
 from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
@@ -131,6 +131,7 @@ if TYPE_CHECKING:
         TritonGridType,
         TritonKernelType,
     )
+    from torch._higher_order_ops.user_kernel_hop import UserKernelHOPInfo
 
     from .descriptors import MethodDescriptorVariable
     from .lists import BaseListVariable, ListVariable
@@ -4074,6 +4075,105 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 )
 
 
+def split_user_kernel_args(
+    tx: "InstructionTranslatorBase", combined_args: dict[str, Any]
+) -> tuple[dict[str, Any], dict[VariableTracker, VariableTracker]]:
+    """Split a user kernel's bound arguments into Python constants, which go to the
+    DSL's side table, and the rest, which become the HOP's ``kwargs`` (keyed by
+    ConstantVariable names)."""
+    combined_args_vt = {
+        VariableTracker.build(tx, k): v for k, v in combined_args.items()
+    }
+    # Combine args and kwargs and pass as a dict so that if user defined triton
+    # kernel uses variables as 'grid' or 'kernel', it does not conflict with
+    # parameters of the wrapper function
+    constant_args = {
+        k: v.as_python_constant()
+        for k, v in combined_args.items()
+        if isinstance(v, VariableTracker) and v.is_python_constant()
+    }
+    non_constant_args = {
+        k: v
+        for k, v in combined_args_vt.items()
+        if not (isinstance(v, VariableTracker) and v.is_python_constant())
+    }
+    return constant_args, non_constant_args
+
+
+def check_user_kernel_graph_args(
+    non_constant_args: dict[VariableTracker, VariableTracker],
+    raise_unsupported: Callable[[str], Never],
+    dsl: str,
+) -> None:
+    """Only tensors and symbolic scalars can be graph arguments of a user kernel."""
+    for v in non_constant_args.values():
+        v = v.realize()
+        if not (v.is_tensor() or v.is_symnode_like()):
+            raise_unsupported(
+                f"Unexpected argument type for a {dsl} kernel: {repr(v)}."
+            )
+
+
+def emit_user_kernel_hop(
+    tx: "InstructionTranslatorBase",
+    info: "UserKernelHOPInfo",
+    kernel_idx: object,
+    constant_args: dict[str, Any],
+    non_constant_args: dict[VariableTracker, VariableTracker],
+    raise_unsupported: Callable[[str], Never],
+    *,
+    hop_kwargs: Mapping[str, Any] | None = None,
+    trailing_hop_kwargs: Mapping[str, Any] | None = None,
+) -> ConstantVariable:
+    """Put a call of the DSL's mutation HOP into the graph, for a kernel call split
+    by split_user_kernel_args: the constant arguments go to the DSL's side table, the
+    others become the node's ``kwargs``. The node's keyword arguments are kernel_idx
+    (the kernel variable's side-table index), constant_args_idx, ``hop_kwargs``,
+    kwargs, ``trailing_hop_kwargs``, in this order. Returns the call's result (None).
+    A constant the side table refuses (see user_kernel_hop.constant_key) is a graph
+    break.
+    """
+    from .dicts import ConstDictVariable
+
+    if not isinstance(kernel_idx, int):
+        raise AssertionError(f"kernel_idx must be an int, got {type(kernel_idx)}")
+    check_user_kernel_graph_args(
+        non_constant_args, raise_unsupported, info.display_name
+    )
+    try:
+        constant_args_idx = info.get_side_table().add_constant_args(constant_args)
+    except TypeError as e:
+        name = info.get_kernel_name({"kernel_idx": kernel_idx, **(hop_kwargs or {})})
+        raise_unsupported(f"{name}(): {e}")
+    meta = ConstDictVariable(non_constant_args)
+    tx.output.create_proxy(
+        "call_function",
+        info.mutation,
+        (),
+        {
+            "kernel_idx": kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            **(hop_kwargs or {}),
+            "kwargs": meta.as_proxy(),
+            **(trailing_hop_kwargs or {}),
+        },
+    )
+
+    return VariableTracker.build(tx, None)
+
+
+def specialize_symbolic_variable(arg: Any) -> Any:
+    """``arg``, specialized to its current value (with a guard) if it is symbolic:
+    Dynamo's counterpart of user_kernel_hop.specialize_symbolic, for the kernel
+    variables' specialize_symbolic."""
+    from .tensor import SymNodeVariable
+
+    # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
+    if isinstance(arg, SymNodeVariable):
+        return ConstantVariable.create(arg.evaluate_expr())
+    return arg
+
+
 class DynamoTritonHOPifier(TritonHOPifier):
     def raise_unsupported(self, msg: str) -> Never:
         unimplemented(
@@ -4199,8 +4299,6 @@ class DynamoTritonHOPifier(TritonHOPifier):
         kernel_arg_names: set[str],
         tx: "InstructionTranslatorBase",
     ) -> ConstantVariable | None:
-        from .dicts import ConstDictVariable
-
         # as we can only pass tensors as non-const args in fx graph,
         # here we replace TMA descriptors
         # (TMADescriptorExperimentalVariable and TMADescriptorStableVariable
@@ -4216,28 +4314,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
                 tma_descriptor_metadata[k] = v.to_metadata()
                 combined_args[k] = v.get_tensor()
 
-        combined_args_vt = {
-            VariableTracker.build(tx, k): v for k, v in combined_args.items()
-        }
-
-        from torch._higher_order_ops.triton_kernel_wrap import (
-            kernel_side_table,
-            triton_kernel_wrapper_mutation,
-        )
-
-        # Combine args and kwargs and pass as a dict so that if user defined triton
-        # kernel uses variables as 'grid' or 'kernel', it does not conflict with
-        # parameters of the wrapper function
-        constant_args = {
-            k: v.as_python_constant()
-            for k, v in combined_args.items()
-            if isinstance(v, VariableTracker) and v.is_python_constant()
-        }
-        non_constant_args = {
-            k: v
-            for k, v in combined_args_vt.items()
-            if not (isinstance(v, VariableTracker) and v.is_python_constant())
-        }
+        constant_args, non_constant_args = split_user_kernel_args(tx, combined_args)
         # launch_kwargs records the names passed as kwargs at the Triton launch
         # site. A non-kernel launch kwarg can only be a compiler option, so it
         # must be a Python constant before entering the graph. Kernel launch
@@ -4257,32 +4334,18 @@ class DynamoTritonHOPifier(TritonHOPifier):
                 f"{sorted(non_const_options)!r}."
             )
 
-        for v in non_constant_args.values():
-            v = v.realize()
-            if not (v.is_tensor() or v.is_symnode_like()):
-                self.raise_unsupported(
-                    f"Unexpected argument type for a Triton kernel: {repr(v)}."
-                )
-
-        constant_args_idx = kernel_side_table.add_constant_args(constant_args)
-        meta = ConstDictVariable(non_constant_args)
-        tx.output.create_proxy(
-            "call_function",
-            triton_kernel_wrapper_mutation,
-            (),
-            {
-                "kernel_idx": variable.kernel_idx,
-                "constant_args_idx": constant_args_idx,
+        return emit_user_kernel_hop(
+            tx,
+            self.hop_info,
+            variable.kernel_idx,
+            constant_args,
+            non_constant_args,
+            self.raise_unsupported,
+            hop_kwargs={
                 "grid": grids,
                 "tma_descriptor_metadata": tma_descriptor_metadata,
-                "kwargs": meta.as_proxy(),
-                "launch_kwargs": launch_kwargs,
             },
-        )
-
-        return VariableTracker.build(
-            tx,
-            None,
+            trailing_hop_kwargs={"launch_kwargs": launch_kwargs},
         )
 
 
@@ -4332,13 +4395,7 @@ class TritonKernelVariable(VariableTracker):
         return dynamo_triton_hopifier_singleton.call_run(self, args, kwargs, tx)  # type: ignore[return-value]
 
     def specialize_symbolic(self, arg: Any) -> Any:
-        from .constant import ConstantVariable
-        from .tensor import SymNodeVariable
-
-        # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
-        if isinstance(arg, SymNodeVariable):
-            return ConstantVariable.create(arg.evaluate_expr())
-        return arg
+        return specialize_symbolic_variable(arg)
 
     tp_methods = {"run": Method(run)}
 

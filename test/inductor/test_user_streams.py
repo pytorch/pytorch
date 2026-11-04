@@ -2850,7 +2850,7 @@ class TestAOTIUserStreams(InductorTestCase):
             return cuda_name.replace("cuda", "hip", 1)
         return cuda_name
 
-    def _compile_and_run(self, model, inputs):
+    def _compile_and_run(self, model, inputs, runs=1):
         from torch._inductor.utils import fresh_cache, run_and_get_cpp_code
 
         with fresh_cache():
@@ -2861,8 +2861,8 @@ class TestAOTIUserStreams(InductorTestCase):
 
             package_path, code = run_and_get_cpp_code(_compile)
             loaded = torch._inductor.aoti_load_package(package_path)
-            result = loaded(*inputs)
-        return result, code
+            results = [loaded(*inputs) for _ in range(runs)]
+        return results[-1], code
 
     def test_record_wait_event_basic(self):
         class Model(torch.nn.Module):
@@ -2912,6 +2912,50 @@ class TestAOTIUserStreams(InductorTestCase):
             code.count(self._runtime_name("cudaStreamWaitEvent")), 2
         )
         self.assertIn("_aoti_aux_stream_cache.get(2", code)
+
+    def test_triton_launch_in_region_uses_region_stream(self):
+        # A Triton kernel in a user stream region launches on the region's stream
+        # (named as the region's entry names it), which the region's aten mms run
+        # on, so it reads their finished output.
+        class Model(torch.nn.Module):
+            def forward(self, x, w):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    a = x
+                    for _ in range(8):
+                        a = a @ w
+                    b = torch.relu(a) + 1
+                event = s.record_event()
+                event.wait()
+                return b
+
+        model = Model().cuda()
+        inputs = (
+            torch.randn(4096, 4096, device="cuda"),
+            torch.eye(4096, device="cuda") * 0.9,
+        )
+        expected = model(*inputs)
+
+        # The second run's result: the first run loads the Triton kernel, which
+        # synchronizes the device.
+        result, code = self._compile_and_run(model, inputs, runs=2)
+
+        self.assertEqual(result, expected)
+        (region,) = set(
+            re.findall(
+                r"_aoti_current_stream_guard = std::make_unique<[\w:]+>\((.*), "
+                r"this->device_idx_\);",
+                code,
+            )
+        )
+        self.assertEqual(
+            region, "_aoti_aux_stream_cache.get(1, this->device_idx_, stream)"
+        )
+        # A Triton launch ends with the device index, stream, kernels and cubin dir.
+        calls = re.findall(r"\bcall_triton_\w+\((.*)\);", code)
+        self.assertGreaterEqual(len(calls), 1)
+        tail = f", this->device_idx_, {region}, kernels, this->cubin_dir_"
+        self.assertTrue(all(call.endswith(tail) for call in calls), calls)
 
     def test_stream_synchronize_raises(self):
         class Model(torch.nn.Module):

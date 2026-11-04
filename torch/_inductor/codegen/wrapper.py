@@ -2397,6 +2397,8 @@ class PythonWrapperCodegen(CodeGen):
         self.user_defined_kernel_cache: dict[
             tuple[Any, ...], tuple[str, Any, dict[str, Any]]
         ] = {}
+        # The names of the user kernels of every kind (see _new_user_kernel_name).
+        self.user_defined_kernel_names: OrderedSet[str] = OrderedSet()
         self.unbacked_symbol_decls: OrderedSet[str] = (
             OrderedSet()
         )  # str of sympy.Symbol
@@ -4716,6 +4718,22 @@ class PythonWrapperCodegen(CodeGen):
 
         return TritonKernel
 
+    def _new_user_kernel_name(self, prefix: str, index: int) -> str:
+        """Name a new user kernel ``{prefix}_{index}``, skipping to the next index while
+        the name is taken: the user kernels of different DSLs count ``index`` apart,
+        but are globals of one module."""
+        while True:
+            name = f"{prefix}_{index}"
+            # Prevent Python class-based name mangling (``__x`` -> ``_Class__x``)
+            # when the generated call site is inside a class body.
+            # See https://github.com/pytorch/pytorch/issues/170398
+            if name.startswith("__") and not name.endswith("__"):
+                name = name[1:]
+            if name not in self.user_defined_kernel_names:
+                self.user_defined_kernel_names.add(name)
+                return name
+            index += 1
+
     def define_user_defined_triton_kernel(
         self,
         kernel,
@@ -5011,12 +5029,8 @@ class PythonWrapperCodegen(CodeGen):
                 extra_launcher_call_args,
             )
 
-        name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
-        # Prevent Python class-based name mangling (``__x`` -> ``_Class__x``)
-        # when the generated call site is inside a class body.
-        # See https://github.com/pytorch/pytorch/issues/170398
-        if name.startswith("__") and not name.endswith("__"):
-            name = name[1:]
+        index = len(self.user_defined_kernel_cache)
+        name = self._new_user_kernel_name(original_name, index)
 
         subs_name = name if config.triton.unique_user_kernel_names else original_name
         inductor_meta["kernel_name"] = name
@@ -5601,6 +5615,21 @@ class PythonWrapperCodegen(CodeGen):
             )
         )
 
+    def _get_kernel_call_stream_name(
+        self, device: torch.device, graph_name: str, current_stream_idx: int | None
+    ) -> str:
+        """Write the line fetching the raw stream that a kernel call on ``device``
+        runs on, and return the variable holding it."""
+        if current_stream_idx is not None and current_stream_idx != DEFAULT_STREAM_IDX:
+            # Inside a user stream context: emit a fresh get_raw_stream call so
+            # it picks up the active stream at runtime, rather than reusing the
+            # LRU-cached stream0 variable which captured the default stream.
+            self.write_get_raw_stream_header()
+            device_idx = _coor_device_idx_ref(device.index)
+            self.writeline(f"raw_stream = get_raw_stream({device_idx})")
+            return "raw_stream"
+        return PythonWrapperCodegen.write_get_raw_stream(self, device.index, graph_name)
+
     def _generate_kernel_call_helper(
         self,
         kernel_name: str,
@@ -5630,19 +5659,9 @@ class PythonWrapperCodegen(CodeGen):
 
         call_args_str = self.prepare_triton_kernel_call(call_args)
         call_args_str = ", ".join(call_args_str)
-        if current_stream_idx is not None and current_stream_idx != DEFAULT_STREAM_IDX:
-            # Inside a user stream context: emit a fresh get_raw_stream call so
-            # it picks up the active stream at runtime, rather than reusing the
-            # LRU-cached stream0 variable which captured the default stream.
-            self.write_get_raw_stream_header()
-            stream_name = "raw_stream"
-            self.writeline(
-                f"{stream_name} = get_raw_stream({_coor_device_idx_ref(device.index)})"
-            )
-        else:
-            stream_name = PythonWrapperCodegen.write_get_raw_stream(
-                self, device.index, graph_name
-            )
+        stream_name = self._get_kernel_call_stream_name(
+            device, graph_name, current_stream_idx
+        )
         if not triton:
             stream_ptr = f"c_void_p({stream_name})"
             self.writeline(
@@ -6778,6 +6797,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.src_to_kernel = root.src_to_kernel
         # Same here, only define user-defined Triton kernels in the main graph
         self.user_defined_kernel_cache = root.user_defined_kernel_cache
+        self.user_defined_kernel_names = root.user_defined_kernel_names
         # This subgraph's kernels are spliced into the root module.
         self.kernel_sources = root.kernel_sources
         self.kernel_harness_modules = root.kernel_harness_modules
