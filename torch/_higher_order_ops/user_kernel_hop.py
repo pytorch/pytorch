@@ -19,7 +19,7 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import _dispatch_keys, DispatchKey
-from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger, TRIGGER_DSLS
 from torch._higher_order_ops.utils import redirect_to_mode
 from torch._ops import HigherOrderOperator
 from torch._prims_common import (
@@ -397,10 +397,12 @@ class UserKernelHOPInfo:
     # "flexible_layout" (Inductor picks them). Inductor calls it each time it lowers
     # one of this DSL's mutation HOP nodes.
     get_layout_constraint: Callable[[], UserKernelLayoutConstraint]
-    # Only keys this DSL's reinplacing counters: ReInplaceTrigger.USER_KERNEL_OPS, or
-    # a member of the DSL's own. auto_functionalize's AUTO_FUNC_V1 and AUTO_FUNC_V2
-    # are refused; the reinplacing pass also reads AUTO_FUNC_V2 as a switch that
-    # stops it from rewriting getitem users.
+    # Only keys this DSL's reinplacing counters: ReInplaceTrigger.USER_KERNEL_OPS,
+    # which DSLs share, or a member of the DSL's own, the one TRIGGER_DSLS names for
+    # it, which register_user_kernel_hop refuses to a DSL of another name.
+    # auto_functionalize's AUTO_FUNC_V1 and AUTO_FUNC_V2 are refused too; the
+    # reinplacing pass also reads AUTO_FUNC_V2 as a switch that stops it from
+    # rewriting getitem users.
     reinplace_trigger: ReInplaceTrigger
     # torch.export's serializer can write this DSL's nodes.
     serializable: bool
@@ -420,7 +422,10 @@ def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
       example), if either HOP is not a UserKernelWrapperHOP, or if the functional HOP
       has no CompositeExplicitAutograd py_impl for the decomposition to trace.
     - ValueError if the trigger is auto_functionalize's AUTO_FUNC_V1 or AUTO_FUNC_V2,
-      or if the mutation and functional HOPs are the same HOP.
+      or a member other than USER_KERNEL_OPS that TRIGGER_DSLS does not name for this
+      DSL (another DSL's member, whether or not that DSL has registered yet, or a
+      member without an entry), or if the mutation and functional HOPs are the same
+      HOP.
     - RuntimeError if either HOP is registered already, with another info. Infos
       compare by identity: registering the same object again is accepted and changes
       nothing, but an equal copy of it is refused.
@@ -431,6 +436,17 @@ def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
     if trigger in (ReInplaceTrigger.AUTO_FUNC_V1, ReInplaceTrigger.AUTO_FUNC_V2):
         raise ValueError(
             f"{trigger} belongs to auto_functionalize; register the {info.dsl} DSL "
+            "with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
+        )
+    trigger_dsl = TRIGGER_DSLS.get(trigger)
+    if trigger is not ReInplaceTrigger.USER_KERNEL_OPS and trigger_dsl != info.dsl:
+        if trigger_dsl is None:
+            raise ValueError(
+                f"{trigger} has no entry in TRIGGER_DSLS; add one naming the DSL it "
+                "belongs to"
+            )
+        raise ValueError(
+            f"{trigger} belongs to the {trigger_dsl} DSL; register the {info.dsl} DSL "
             "with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
         )
     if info.mutation is info.functional:
