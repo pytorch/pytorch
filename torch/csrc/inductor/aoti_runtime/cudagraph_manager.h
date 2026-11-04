@@ -269,10 +269,13 @@ class CudaGraphManager {
 
   static TensorLayout layout_of(AtenTensorHandle tensor) {
     TensorLayout layout;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensor, &layout.dtype));
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dim(tensor, &layout.dim));
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(tensor, &layout.sizes));
-    AOTI_TORCH_ERROR_CODE_CHECK(
+    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+        aoti_torch_get_dtype(tensor, &layout.dtype));
+    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+        aoti_torch_get_dim(tensor, &layout.dim));
+    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+        aoti_torch_get_sizes(tensor, &layout.sizes));
+    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
         aoti_torch_get_strides(tensor, &layout.strides));
     return layout;
   }
@@ -329,7 +332,8 @@ class CudaGraphManager {
     std::vector<std::vector<size_t>> groups;
     for (size_t i : indices) {
       int32_t dtype = 0;
-      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensors[i], &dtype));
+      AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+          aoti_torch_get_dtype(tensors[i], &dtype));
       auto [it, added] = group_of_dtype.try_emplace(dtype, groups.size());
       if (added) {
         groups.emplace_back();
@@ -391,7 +395,7 @@ class CudaGraphManager {
       for (size_t i : group) {
         auto layout = layout_of(graph.static_outputs[i]);
         AtenTensorHandle clone = nullptr;
-        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
+        AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(aoti_torch_empty_strided(
             layout.dim,
             layout.sizes,
             layout.strides,
@@ -404,12 +408,12 @@ class CudaGraphManager {
         sources.push_back(graph.static_outputs[i].get());
       }
       auto n = static_cast<int64_t>(sources.size());
-      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__foreach_copy_(
+      AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(aoti_torch__foreach_copy_(
           destinations.data(), n, sources.data(), n, 0));
     }
     for (size_t i : graph.separate_outputs) {
       AtenTensorHandle clone = nullptr;
-      AOTI_TORCH_ERROR_CODE_CHECK(
+      AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
           aoti_torch_clone_preserve_strides(graph.static_outputs[i], &clone));
       clones[i] = RAIIAtenTensorHandle(clone);
     }
@@ -422,7 +426,7 @@ class CudaGraphManager {
   static RAIIAtenTensorHandle block_of(AtenTensorHandle input, int64_t extent) {
     int64_t stride = 1;
     AtenTensorHandle block = nullptr;
-    AOTI_TORCH_ERROR_CODE_CHECK(
+    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
         aoti_torch__reinterpret_tensor(input, 1, &extent, &stride, 0, &block));
     return RAIIAtenTensorHandle(block);
   }
@@ -441,16 +445,16 @@ class CudaGraphManager {
         sources.push_back(blocks.back().get());
       }
       auto n = static_cast<int64_t>(sources.size());
-      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__foreach_copy_(
+      AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(aoti_torch__foreach_copy_(
           group.destinations.data(), n, sources.data(), n, 0));
     }
     for (size_t i : graph.separate_inputs) {
       if (graph.input_storage[i] == Storage::kOverlapping) {
         auto block = block_of(inputs[i], graph.input_extents[i]);
-        AOTI_TORCH_ERROR_CODE_CHECK(
+        AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
             aoti_torch_copy_(graph.input_buffers[i], block.get(), 0));
       } else {
-        AOTI_TORCH_ERROR_CODE_CHECK(
+        AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
             aoti_torch_copy_(graph.static_inputs[i], inputs[i], 0));
       }
     }
@@ -465,9 +469,9 @@ class CudaGraphManager {
           "CudaGraphManager: input " + std::to_string(i) + " is null");
       int32_t device_type = 0;
       int32_t device_index = 0;
-      AOTI_TORCH_ERROR_CODE_CHECK(
+      AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
           aoti_torch_get_device_type(inputs[i], &device_type));
-      AOTI_TORCH_ERROR_CODE_CHECK(
+      AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
           aoti_torch_get_device_index(inputs[i], &device_index));
       AOTI_RUNTIME_CHECK(
           device_type == aoti_torch_device_type_cuda() &&
@@ -497,7 +501,7 @@ class CudaGraphManager {
     for (size_t i = 1; i < num_outputs; ++i) {
       if (outputs[i] != nullptr &&
           std::find(outputs, outputs + i, outputs[i]) != outputs + i) {
-        AOTI_TORCH_ERROR_CODE_CHECK(
+        AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
             aoti_torch_new_tensor_handle(outputs[i], &outputs[i]));
       }
     }
@@ -614,7 +618,7 @@ class CudaGraphManager {
         int64_t extent = storage_extent(layout);
         int64_t stride = 1;
         AtenTensorHandle buffer = nullptr;
-        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
+        AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(aoti_torch_empty_strided(
             1,
             &extent,
             &stride,
@@ -624,7 +628,7 @@ class CudaGraphManager {
             &buffer));
         graph->input_buffers.emplace_back(buffer);
         AtenTensorHandle view = nullptr;
-        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor(
+        AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(aoti_torch__reinterpret_tensor(
             buffer, layout.dim, layout.sizes, layout.strides, 0, &view));
         graph->static_inputs.emplace_back(view);
         graph->input_extents.push_back(extent);
@@ -645,9 +649,9 @@ class CudaGraphManager {
       // Work on another device would run only at capture.
       int32_t device_type = 0;
       int32_t device_index = 0;
-      AOTI_TORCH_ERROR_CODE_CHECK(
+      AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
           aoti_torch_get_device_type(output, &device_type));
-      AOTI_TORCH_ERROR_CODE_CHECK(
+      AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
           aoti_torch_get_device_index(output, &device_index));
       AOTI_RUNTIME_CHECK(
           device_type == aoti_torch_device_type_cuda() &&
@@ -679,7 +683,7 @@ class CudaGraphManager {
     auto clones = clone_outputs(graph);
     for (size_t i = 0; i < num_outputs; ++i) {
       if (graph.output_slots[i] != kNoOutput) {
-        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle(
+        AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(aoti_torch_new_tensor_handle(
             clones[graph.output_slots[i]], &outputs[i]));
       }
     }
