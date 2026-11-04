@@ -3048,6 +3048,13 @@ if has_triton_package():
 """
 
 
+def is_identity_singleton(value: object) -> bool:
+    """Constants whose process-wide identity does not depend on their source."""
+    return any(
+        value is item for item in (None, True, False, Ellipsis, NotImplemented)
+    ) or istype(value, (torch.dtype, torch.layout, torch.memory_format))
+
+
 def is_safe_constant(v: object) -> bool:
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
@@ -3275,6 +3282,10 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
+class InvalidOrderedDict(ValueError):
+    """An OrderedDict's storage and linked keys cannot form one snapshot."""
+
+
 def enumerate_items_with_dict_position(
     obj: dict[K, V],
 ) -> Iterable[tuple[int, K, V | Any]]:
@@ -3286,10 +3297,19 @@ def enumerate_items_with_dict_position(
     dict.keys() position so that ConstDictKeySource indices stay consistent
     with PyDict_Next / C++ DictGuardManager.
     """
-    items = get_items_from_dict(obj)
     if issubclass(cast(type[dict[K, V]], type(obj)), OrderedDict):
-        key_to_pos = {k: i for i, k in enumerate(dict.keys(obj))}
-        return ((key_to_pos[k], k, v) for k, v in items)
+        items = list(dict.items(obj))
+        keys = torch._C._dynamo.guards.ordered_dict_keys(obj)
+        positions = {id(key): (i, key, value) for i, (key, value) in enumerate(items)}
+        if (
+            keys is None
+            or len(positions) != len(items)
+            or len(keys) != len(items)
+            or {id(key) for key in keys} != positions.keys()
+        ):
+            raise InvalidOrderedDict("OrderedDict storage differs from linked keys")
+        return (positions[id(key)] for key in keys)
+    items = get_items_from_dict(obj)
     return ((i, k, v) for i, (k, v) in enumerate(items))
 
 
@@ -5632,6 +5652,18 @@ def is_tensor_getset_descriptor(name: str) -> bool:
         return type(attr) is types.GetSetDescriptorType
     except AttributeError:
         return False
+
+
+def find_type_attribute_name(obj_type: type, value: object, /) -> str | None:
+    """Find a directly declared class attribute by value identity."""
+    return next(
+        (
+            name
+            for name, item in get_type_dict_no_user_code(obj_type).items()
+            if item is value
+        ),
+        None,
+    )
 
 
 def get_type_dict_no_user_code(cls: type) -> Mapping[str, object]:
