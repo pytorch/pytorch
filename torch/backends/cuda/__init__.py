@@ -390,14 +390,12 @@ def blas_workspace_size(
     used.  ``Default`` is resolved to the platform's default backend (cuBLAS
     on NVIDIA, potentially hipBLASLt on supported ROCm architectures).
 
-    .. note::
+    .. versionchanged:: 2.16
 
-       On CUDA, when workspace caching is enabled with
-       ``TORCH_CUBLAS_WORKSPACE_CACHE=1``,
-       ``TORCH_CUBLASLT_UNIFIED_WORKSPACE`` controls whether the cuBLASLt
-       workspace is capped at the cuBLAS workspace size and physically reuses
-       the same allocation. Unified workspaces are enabled by default on
-       open-source CUDA builds when caching is enabled.
+       cuBLAS and cuBLASLt use separate workspace allocations and independent
+       workspace sizes, including when workspace caching is enabled.
+       ``TORCH_CUBLASLT_UNIFIED_WORKSPACE`` no longer has an effect. Use
+       :func:`cublaslt_workspace_size` to control the separate Lt allocation.
 
     .. note::
 
