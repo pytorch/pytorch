@@ -269,6 +269,10 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
 
 # How long to wait for another process's download before downloading anyway.
 _CACHE_LOCK_TIMEOUT_S = 3600
+# Work directories untouched for this long are left by killed processes. It is
+# well above the lock timeout, so a waiter that gives up doesn't remove the
+# directory of a download that is stalled but still running.
+_STALE_WORK_DIR_S = 24 * 3600
 
 
 def _lock_unavailable(lock_path, mode):
@@ -431,7 +435,7 @@ def _get_cache_or_reload(
         work_prefix = owner_name_branch + "~"
         # Remove work directories of processes killed mid-download. A running
         # download keeps writing to a file in its work directory, so only those
-        # untouched for longer than the lock timeout are removed.
+        # untouched for longer than _STALE_WORK_DIR_S are removed.
         for name in os.listdir(hub_dir):
             if not name.startswith(work_prefix):
                 continue
@@ -442,7 +446,7 @@ def _get_cache_or_reload(
                 mtimes.append(os.path.getmtime(stale))
             except OSError:
                 continue
-            if time.time() - max(mtimes) > _CACHE_LOCK_TIMEOUT_S:
+            if time.time() - max(mtimes) > _STALE_WORK_DIR_S:
                 shutil.rmtree(stale, ignore_errors=True)
         work_dir = tempfile.mkdtemp(prefix=work_prefix, dir=hub_dir)
         cached_file = os.path.join(work_dir, "archive.zip")
@@ -636,8 +640,9 @@ def list(
 
             Default is ``"check"``.
         verbose (bool, optional): If ``False``, mute messages about hitting
-            local caches. Note that the message about first download cannot be
-            muted. Default is ``True``.
+            local caches and about waiting for another process to download the
+            repo. Note that the message about first download cannot be muted.
+            Default is ``True``.
 
     Returns:
         list: The available callables entrypoint
@@ -770,9 +775,9 @@ def load(
             the github repo unconditionally. Does not have any effect if
             ``source = 'local'``. Default is ``False``.
         verbose (bool, optional): If ``False``, mute messages about hitting
-            local caches. Note that the message about first download cannot be
-            muted. Does not have any effect if ``source = 'local'``.
-            Default is ``True``.
+            local caches and about waiting for another process to download the
+            repo. Note that the message about first download cannot be muted.
+            Does not have any effect if ``source = 'local'``. Default is ``True``.
         skip_validation (bool, optional): if ``False``, torchhub will check that the branch or commit
             specified by the ``github`` argument properly belongs to the repo owner. This will make
             requests to the GitHub API; you can specify a non-default GitHub token by setting the
@@ -990,18 +995,21 @@ def load_state_dict_from_url(
     The default value of ``model_dir`` is ``<hub_dir>/checkpoints`` where
     ``hub_dir`` is the directory returned by :func:`~torch.hub.get_dir`.
 
-    Processes that share ``model_dir`` (for example DDP ranks) don't download
-    the same file at the same time: one of them downloads it while the others
-    wait and then load the cached copy. The lock is a ``.lock`` file next to the
-    downloaded file in ``model_dir``. Where it can't be taken, the file is
-    downloaded without it and a warning is raised. Checkpoints in the legacy zip
+    With filelock 3.20.1 or later, processes that share ``model_dir`` (for
+    example DDP ranks) don't download the same file at the same time: one of
+    them downloads it while the others wait, for up to an hour, and then load
+    the cached copy. The lock is a ``.lock`` file next to the downloaded file in
+    ``model_dir``. If it can't be taken, or is held for more than an hour, the
+    file is downloaded without it and a warning is raised. With an older
+    filelock, every process downloads the file. Checkpoints in the legacy zip
     format are still extracted on every load, without the lock.
 
     Args:
         url (str): URL of the object to download
         model_dir (str, optional): directory in which to save the object
         map_location (optional): a function or a dict specifying how to remap storage locations (see torch.load)
-        progress (bool, optional): whether or not to display a progress bar to stderr.
+        progress (bool, optional): whether or not to display a progress bar to stderr,
+            and a message while waiting for another process to download the file.
             Default: True
         check_hash(bool, optional): If True, the filename part of the URL should follow the naming convention
             ``filename-<sha256>.ext`` where ``<sha256>`` is the first eight or more

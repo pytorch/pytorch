@@ -3,7 +3,6 @@
 import contextlib
 import errno
 import io
-import linecache
 import os
 import subprocess
 import sys
@@ -674,6 +673,7 @@ class TestHubCache(TestCase):
         self.assertEqual(state_dicts[0]["w"], torch.arange(10))
 
     @skipIfOldFilelock
+    @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
     def test_lock_released_when_holder_is_killed(self):
         url, model_dir = self._save_weights()
         os.makedirs(model_dir)
@@ -804,7 +804,7 @@ class TestHubCache(TestCase):
         hub_dir = hub.get_dir()
         stale = os.path.join(hub_dir, "owner_repo_main~killed01")
         os.makedirs(os.path.join(stale, "repo-main"))
-        old = time.time() - 2 * hub._CACHE_LOCK_TIMEOUT_S
+        old = time.time() - 2 * hub._STALE_WORK_DIR_S
         for path in (stale, os.path.join(stale, "repo-main")):
             os.utime(path, (old, old))
         # A download in progress, possibly without the lock: its directory is
@@ -813,6 +813,15 @@ class TestHubCache(TestCase):
         os.makedirs(live)
         open(os.path.join(live, "archive.zip.partial"), "w").close()
         os.utime(live, (old, old))
+        # A download that has received nothing for longer than the lock timeout,
+        # whose waiters gave up and download on their own.
+        stalled = os.path.join(hub_dir, "owner_repo_main~stalled")
+        os.makedirs(stalled)
+        partial = os.path.join(stalled, "archive.zip.partial")
+        open(partial, "w").close()
+        waited = time.time() - 2 * hub._CACHE_LOCK_TIMEOUT_S
+        for path in (stalled, partial):
+            os.utime(path, (waited, waited))
         # The cached repo of ref "main.1".
         other_ref = os.path.join(hub_dir, "owner_repo_main.1")
         os.makedirs(other_ref)
@@ -821,6 +830,7 @@ class TestHubCache(TestCase):
             self._load_repo("repo")
         self.assertFalse(os.path.exists(stale))
         self.assertTrue(os.path.isdir(live))
+        self.assertTrue(os.path.isdir(stalled))
         self.assertTrue(os.path.isdir(other_ref))
 
     @parametrize("progress", [True, False])
@@ -912,17 +922,28 @@ class TestHubCache(TestCase):
             self.assertIsNone(hub._lock_unavailable(lock_path, 0o644))
         self.assertIsNone(hub._lock_unavailable(lock_path, 0o644))
 
+    @skipIfOldFilelock
     @unittest.skipIf(IS_WINDOWS, "flock probe is Unix only")
-    def test_lock_unavailable_reports_unwritable_lock_file(self):
+    def test_load_state_dict_from_url_unwritable_lock_file(self):
         if os.geteuid() == 0:
             self.skipTest("root can open any lock file")
-        lock_path = os.path.join(self.tmpdir.name, "entry.lock")
+        url, model_dir = self._save_weights()
+        os.makedirs(model_dir)
         # A lock file created by another user without group write access.
+        lock_path = os.path.join(model_dir, "weights.pt.lock")
         open(lock_path, "w").close()
         os.chmod(lock_path, 0o444)
-        error = hub._lock_unavailable(lock_path, 0o644)
-        self.assertIsInstance(error, PermissionError)
+        # Waiting for the lock would end in the timeout warning instead.
+        with (
+            patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 5),
+            self.assertWarnsRegex(UserWarning, "Could not lock"),
+        ):
+            state_dict = hub.load_state_dict_from_url(
+                url, model_dir=model_dir, progress=False
+            )
+        self.assertEqual(state_dict["w"], torch.arange(10))
 
+    @skipIfOldFilelock
     @unittest.skipIf(IS_WINDOWS, "Creating symlinks needs extra privileges on Windows")
     def test_load_state_dict_from_url_does_not_follow_lock_symlink(self):
         url, model_dir = self._save_weights()
@@ -932,10 +953,9 @@ class TestHubCache(TestCase):
         with open(target, "w") as f:
             f.write("keep")
         os.symlink(target, os.path.join(model_dir, "weights.pt.lock"))
-        with warnings.catch_warnings():
-            # The lock can't be taken through the symlink, so the entry is
-            # downloaded without it.
-            warnings.simplefilter("ignore")
+        # The lock can't be taken through the symlink, so the entry is
+        # downloaded without it.
+        with self.assertWarnsRegex(UserWarning, "Could not lock"):
             state_dict = hub.load_state_dict_from_url(
                 url, model_dir=model_dir, progress=False
             )
@@ -998,8 +1018,9 @@ class TestHubCache(TestCase):
                 with self.assertWarnsRegex(UserWarning, "Could not lock") as cm:
                     call()
                 # The line of the API call itself, not of a frame above it.
-                self.assertEqual(cm.filename, __file__)
-                self.assertIn(name, linecache.getline(cm.filename, cm.lineno))
+                code = call.__code__
+                where = (code.co_filename, code.co_firstlineno)
+                self.assertEqual((cm.filename, cm.lineno), where, name)
 
     def test_warm_cache_does_not_lock(self):
         url, model_dir = self._save_weights()
