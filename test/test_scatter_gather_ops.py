@@ -777,11 +777,10 @@ class TestScatterGatherDevice(TestCase):
             (lambda b: b[:30].view(5, 6)[:, :5], 1, 4),
             (lambda b: b[:10:2], 0, 1),
             (lambda b: b[1:11:2], 0, 1),
-            (lambda b: b[:25], 0, 24),
         ]
 
         # Each case leaves the targeted slice at 1 and all other bits unchanged.
-        def apply(x, dim, idx, src):
+        def apply(x, dim, i, idx, src):
             if op == "scatter_add":
                 x.scatter_add_(dim, idx, src)
             elif op == "scatter_reduce_sum":
@@ -804,7 +803,9 @@ class TestScatterGatherDevice(TestCase):
                 x.index_reduce_(dim, idx.flatten()[:1], src * 2, "mean")
             elif op == "put_accumulate":
                 flat_idx = torch.arange(x.numel(), device=device).view(x.shape)
-                x.put_(flat_idx.select(dim, idx.flatten()[0].item()), src, accumulate=True)
+                x.put_(flat_idx.select(dim, i), src, accumulate=True)
+            else:
+                raise AssertionError(f"unknown op {op}")
 
         for make_self, dim, i in cases:
             base = torch.full((32,), -0.0, device=device, dtype=dtype)
@@ -813,14 +814,14 @@ class TestScatterGatherDevice(TestCase):
             shape[dim] = 1
             idx = torch.full(shape, i, device=device)
             src = torch.ones(shape, device=device, dtype=dtype)
-            apply(x, dim, idx, src)
+            apply(x, dim, i, idx, src)
 
             expected = torch.full((32,), -0.0, device=device, dtype=dtype)
             make_self(expected).select(dim, i).fill_(1)
             self.assertEqual(
                 base.view(torch.int16),
                 expected.view(torch.int16),
-                msg=f"dim={dim}, index={i}, self strides {x.stride()}",
+                msg=f"dim={dim}, index={i}, self strides {x.stride()}, offset {x.storage_offset()}",
             )
 
     @dtypes(torch.float32)

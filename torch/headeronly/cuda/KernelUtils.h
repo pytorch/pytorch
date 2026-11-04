@@ -107,15 +107,16 @@ HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 // a fast vectored __half2 atomic (this can be worth up to a 6x
 // speedup, see https://github.com/pytorch/pytorch/pull/21879).
 // We can convert a __half atomic into a __half2 atomic by simply
-// pairing the __half with a zero entry on the left/right depending
+// pairing the __half with a -0.0 entry on the left/right depending
 // on alignment. numel bounds how far that pairing may look: the partner
 // tensor[index +/- 1] is used only if it is inside [0, numel); otherwise
 // a plain __half atomic is used.
 //
 // The partner is always the other half of the 4-byte-aligned word holding
-// tensor[index], so it never leaves that word and cannot fault, but it may
-// touch memory outside the tensor (e.g. the gap of a strided view) or past
-// the requested allocation. It is padded with -0.0, which leaves every
+// tensor[index], so it never leaves that word and cannot fault. Unless numel
+// is exact for the elements at tensor, it may touch memory outside the tensor
+// (e.g. the gap of a strided view) or just past the requested allocation. It
+// is padded with -0.0, which leaves every
 // non-NaN value, including -0.0, bit-for-bit unchanged under
 // round-to-nearest; a NaN partner may be quieted.
 template <
