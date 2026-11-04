@@ -1,7 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
-#include <c10/util/thread_name.h>
 #include <torch/csrc/distributed/c10d/FakeStore.hpp>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
@@ -13,18 +12,10 @@
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/HealthCheckHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/NanCheckHook.hpp>
-#include <algorithm>
-#include <condition_variable>
-#include <deque>
-#include <iterator>
-#include <mutex>
-#include <optional>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 #ifndef _WIN32
-#include <pthread.h>
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
 #endif
 #include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
@@ -166,253 +157,52 @@ class IntrusivePtrNoGilDestructor {
   }
 };
 
-// Set on completion hook threads, which must not (un)register hooks.
-thread_local bool inPythonCompletionHook = false;
-
-// A Python hook registered with ProcessGroup.register_completion_hook. The
-// backend may report completion on its watchdog thread with locks held, where
-// the GIL must not be taken, so the C++ hook only queues the args and this
-// hook's own thread calls the Python callable.
-class PythonCompletionHook
-    : public std::enable_shared_from_this<PythonCompletionHook> {
- public:
-  // Requires the GIL. On failure, hands fn back.
-  void start(py::object& fn) {
-    fn_ = std::move(fn);
-    try {
-      // NOLINTNEXTLINE(facebook-hte-BadCall-detach)
-      std::thread([self = shared_from_this()] { self->run(); }).detach();
-    } catch (...) {
-      fn = std::move(fn_);
-      throw;
-    }
-  }
-
-  // Called by the backend; must not take the GIL.
-  void push(const ::c10d::CompletionHookArgs& args) {
-    bool wasEmpty = false;
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      if (stopped_) {
-        return;
-      }
-      wasEmpty = queue_.empty();
-      queue_.push_back(args);
-    }
-    if (wasEmpty) {
-      cv_.notify_one();
-    }
-  }
-
-  // Drops queued calls; a running call finishes.
-  void stop() {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      stopped_ = true;
-      queue_.clear();
-    }
-    cv_.notify_one();
-  }
-
-  // Waits for the thread to release the callable. Requires stop() and the GIL
-  // to be released.
-  void wait() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    doneCv_.wait(lock, [this] { return done_; });
-  }
-
- private:
-  // Returns all queued args, or nothing once stopped.
-  std::optional<std::deque<::c10d::CompletionHookArgs>> next() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] { return stopped_ || !queue_.empty(); });
-    if (stopped_) {
-      return std::nullopt;
-    }
-    return std::exchange(queue_, {});
-  }
-
-  bool stopped() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return stopped_;
-  }
-
-  // Requires the GIL.
-  void call(const ::c10d::CompletionHookArgs& args) {
-    try {
-      fn_(args);
-      return;
-    } catch (py::error_already_set& e) {
-      e.discard_as_unraisable("completion hook");
-      return;
-    } catch (const std::exception& e) {
-      PyErr_SetString(PyExc_RuntimeError, e.what());
-    } catch (...) {
-      PyErr_SetString(PyExc_RuntimeError, "unknown C++ exception");
-    }
-    PyErr_WriteUnraisable(fn_.ptr());
-  }
-
-  void run() {
-    c10::setThreadName("pt_c10d_cmplhk");
-    inPythonCompletionHook = true;
-    {
-      // Keeps one thread state for the thread's lifetime.
-      py::gil_scoped_acquire gil;
-      {
-        py::gil_scoped_release noGil;
-        while (auto batch = next()) {
-          py::gil_scoped_acquire callGil;
-          for (const auto& args : *batch) {
-            if (stopped()) {
-              break;
-            }
-            call(args);
-          }
+// Takes the GIL to release fn, since the backend may drop its last copy of a
+// completion hook on any thread. Leaks fn once the interpreter is finalizing,
+// when threads must not take the GIL.
+std::shared_ptr<py::object> pythonCompletionHookFn(py::object fn) {
+  return std::shared_ptr<py::object>(
+      new py::object(std::move(fn)), [](py::object* fn) {
+        if (Py_IsInitialized() && !Py_IsFinalizing()) {
+          py::gil_scoped_acquire gil;
+          delete fn;
+          return;
         }
-      }
-      fn_ = py::object();
-    }
-    std::lock_guard<std::mutex> lock(mutex_);
-    done_ = true;
-    doneCv_.notify_all();
-  }
-
-  py::object fn_;
-  std::mutex mutex_;
-  std::condition_variable cv_;
-  std::condition_variable doneCv_;
-  std::deque<::c10d::CompletionHookArgs> queue_;
-  bool stopped_ = false;
-  bool done_ = false;
-};
-
-struct PythonCompletionHookEntry {
-  // Keeps the group's address from being reused while registered.
-  c10::weak_intrusive_ptr<::c10d::ProcessGroup> pg;
-  int64_t hookId;
-  std::shared_ptr<PythonCompletionHook> hook;
-
-  bool matches(const ::c10d::ProcessGroup* other, int64_t otherId) const {
-    return pg._unsafe_get_target() == other && hookId == otherId;
-  }
-};
-
-// Not synchronized: (un)registration must not race with operations or each
-// other, see register_completion_hook.
-struct PythonCompletionHooks {
-  // Set at interpreter exit, after which no hook may start.
-  bool shutdown = false;
-  std::vector<PythonCompletionHookEntry> registered;
-};
-
-// Leaked: hook threads must not outlive the interpreter, and are waited for at
-// exit instead.
-PythonCompletionHooks* pythonCompletionHooks = new PythonCompletionHooks();
-
-#ifndef _WIN32
-// A forked child has none of the parent's hook threads; leak their state
-// rather than wait for threads that do not exist.
-void pythonCompletionHooksAtfork() {
-  auto* hooks = new PythonCompletionHooks();
-  hooks->shutdown = pythonCompletionHooks->shutdown;
-  pythonCompletionHooks = hooks;
-}
-#endif
-
-// Requires the GIL. Stops the hooks and waits for them to release their
-// callables.
-void stopPythonCompletionHooks(std::vector<PythonCompletionHookEntry> entries) {
-  for (const auto& entry : entries) {
-    entry.hook->stop();
-  }
-  py::gil_scoped_release noGil;
-  for (const auto& entry : entries) {
-    entry.hook->wait();
-  }
+        fn->release();
+        delete fn;
+      });
 }
 
 void registerPythonCompletionHook(
     const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
     int64_t hookId,
-    py::object fn) {
+    py::object hook) {
   TORCH_CHECK_TYPE(
-      PyCallable_Check(fn.ptr()),
+      PyCallable_Check(hook.ptr()),
       "register_completion_hook: hook must be callable");
-  TORCH_CHECK(
-      !inPythonCompletionHook,
-      "register_completion_hook: cannot be called from a completion hook");
   TORCH_CHECK(
       pg->supportsCompletionHooks(),
       "register_completion_hook: backend ",
       pg->getBackendName(),
       " does not support completion hooks");
-  auto& state = *pythonCompletionHooks;
-  auto& registered = state.registered;
-  // Stops hooks of destroyed groups.
-  auto destroyed =
-      std::partition(registered.begin(), registered.end(), [](const auto& e) {
-        return !e.pg.expired();
-      });
-  std::vector<PythonCompletionHookEntry> stale(
-      std::make_move_iterator(destroyed),
-      std::make_move_iterator(registered.end()));
-  registered.erase(destroyed, registered.end());
-  stopPythonCompletionHooks(std::move(stale));
-  // Checked after stopPythonCompletionHooks, which releases the GIL.
-  TORCH_CHECK(
-      !state.shutdown,
-      "register_completion_hook: interpreter is shutting down");
-  for (const auto& entry : registered) {
-    TORCH_CHECK_VALUE(
-        !entry.matches(pg.get(), hookId),
-        "register_completion_hook: hook_id ",
-        hookId,
-        " is already registered");
-  }
-  auto hook = std::make_shared<PythonCompletionHook>();
-  registered.reserve(registered.size() + 1);
+  auto fn = pythonCompletionHookFn(std::move(hook));
+  // Don't hold the GIL while taking backend locks.
+  py::gil_scoped_release noGil;
   pg->registerCompletionHook(
-      hookId,
-      [hook](const ::c10d::CompletionHookArgs& args) { hook->push(args); });
-  try {
-    hook->start(fn);
-  } catch (...) {
-    pg->unregisterCompletionHook(hookId);
-    throw;
-  }
-  registered.push_back(
-      {c10::weak_intrusive_ptr<::c10d::ProcessGroup>(pg),
-       hookId,
-       std::move(hook)});
-}
-
-void unregisterPythonCompletionHook(
-    const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
-    int64_t hookId) {
-  TORCH_CHECK(
-      !inPythonCompletionHook,
-      "unregister_completion_hook: cannot be called from a completion hook");
-  auto& registered = pythonCompletionHooks->registered;
-  auto it =
-      std::find_if(registered.begin(), registered.end(), [&](const auto& e) {
-        return e.matches(pg.get(), hookId);
+      hookId, [fn](const ::c10d::CompletionHookArgs& args) {
+        if (!Py_IsInitialized() || Py_IsFinalizing()) {
+          return;
+        }
+        py::gil_scoped_acquire gil;
+        try {
+          (*fn)(args);
+        } catch (py::error_already_set& e) {
+          e.discard_as_unraisable(*fn);
+        } catch (const std::exception& e) {
+          PyErr_SetString(PyExc_RuntimeError, e.what());
+          PyErr_WriteUnraisable(fn->ptr());
+        }
       });
-  if (it == registered.end()) {
-    return;
-  }
-  std::vector<PythonCompletionHookEntry> entries;
-  entries.push_back(std::move(*it));
-  registered.erase(it);
-  pg->unregisterCompletionHook(hookId);
-  stopPythonCompletionHooks(std::move(entries));
-}
-
-// Stops all hooks and waits for them before the interpreter finalizes.
-void shutdownPythonCompletionHooks() {
-  auto& state = *pythonCompletionHooks;
-  state.shutdown = true;
-  stopPythonCompletionHooks(std::exchange(state.registered, {}));
 }
 
 } // anonymous namespace
@@ -1928,13 +1718,6 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
           "duration_ms",
           &::c10d::CompletionHookArgs::duration_ms,
           "The backend's measurement of the operation in milliseconds, or ``None`` if it does not time operations. nccl2 times operations only with ``TORCH_NCCL_ENABLE_TIMING=1`` or after ``_enable_collectives_timing()``; operations issued before that report ``None``.");
-  py::module_::import("atexit").attr("register")(
-      py::cpp_function(&shutdownPythonCompletionHooks));
-#ifndef _WIN32
-  TORCH_CHECK(
-      pthread_atfork(nullptr, nullptr, pythonCompletionHooksAtfork) == 0,
-      "unable to set pthread_atfork handler");
-#endif
 
   py::class_<::c10d::DistributedBackendOptions>(
       module, "_DistributedBackendOptions")
@@ -3729,34 +3512,34 @@ one-to-one to post-hook ``Work`` objects: a key may have no matching post-hook,
 e.g. for operations issued before the post-hook was registered or inside a
 coalescing window, and a post-hook ``Work`` may never be reported.
 
-``hook`` runs on a thread owned by this registration, one call at a time, in
-the order the backend reports completions; the backend never waits for it.
-Exceptions are reported as unraisable. A hook that references its group keeps
-the group alive until unregistered. Hooks are stopped at interpreter exit,
-waiting for a running call to return. Raises if the default backend does not
-support completion hooks, see ``supports_completion_hooks``.
+``hook`` runs with the GIL held on a backend thread such as the watchdog, or on
+a thread issuing, waiting for or shutting down operations on the group, and the
+backend waits for it to return. Calls may run concurrently on several threads
+and out of order. ``hook`` must be fast and thread-safe, and must not block or
+issue operations on process groups. Exceptions are reported as unraisable.
+Hooks are not called once the interpreter is finalizing; destroy the group
+before the interpreter exits. A hook that references its group
+keeps the group alive until unregistered. Raises if the default backend does
+not support completion hooks, see ``supports_completion_hooks``.
 
-Hooks must not issue operations on process groups. Hooks must not be
-registered or unregistered while operations on the group are in flight,
-concurrently with each other on any group, or from a completion hook.
+Must not be called concurrently with other methods of the group.
 
 Args:
-    hook_id (int): Identifies the registration for
-        ``unregister_completion_hook``. Raises ``ValueError`` if already
-        registered with ``register_completion_hook`` on this group.
+    hook_id (int): Identifier for ``unregister_completion_hook``. Registering
+        an existing id keeps the existing hook; unregister it first to replace
+        it.
     hook (Callable[[CompletionHookArgs], None]): The hook.
 )")
           .def(
               "unregister_completion_hook",
-              &unregisterPythonCompletionHook,
+              &::c10d::ProcessGroup::unregisterCompletionHook,
               py::arg("hook_id"),
+              py::call_guard<py::gil_scoped_release>(),
               R"(
-Remove the completion hook registered with ``register_completion_hook`` and
-``hook_id``, drop its pending calls and release it, waiting for a running call
-to return. Does nothing if ``hook_id`` is not registered. Must not be called
-while operations on the group are in flight, concurrently with
-``register_completion_hook`` or ``unregister_completion_hook`` on any group, or
-from a completion hook.)")
+Remove the completion hook registered with ``hook_id``. A call already running
+or about to start may still run after this returns. Does nothing if
+``hook_id`` is not registered on a backend that supports completion hooks. Must
+not be called concurrently with other methods of the group.)")
           .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
                 return torch::jit::toPyObject(c10::IValue(std::move(self)));
           })

@@ -1,11 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
-import subprocess
-import sys
-import tempfile
 import threading
-import weakref
 from unittest import mock
 
 import torch
@@ -266,43 +262,6 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
             pg.register_completion_hook(0, 1)
 
 
-_EXIT_SCRIPT = """
-import atexit
-import sys
-import weakref
-
-
-def check():
-    # Registered before torch's exit handler, so it runs after it.
-    try:
-        dist.group.WORLD.register_completion_hook(1, print)
-    except RuntimeError as e:
-        if "shutting down" in str(e) and ref() is None:
-            print("exit ok", flush=True)
-
-
-atexit.register(check)
-
-import torch
-import torch.distributed as dist
-
-
-def hook(args):
-    pass
-
-
-torch.cuda.set_device(0)
-dist.init_process_group(
-    sys.argv[1], rank=0, world_size=1, store=dist.FileStore(sys.argv[2], 1)
-)
-ref = weakref.ref(hook)
-dist.group.WORLD.register_completion_hook(0, hook)
-del hook
-for _ in range(100):
-    dist.all_reduce(torch.ones(1024, device="cuda"))
-"""
-
-
 @instantiate_parametrized_tests
 class TestProcessGroupCompletionHooks(MultiProcContinuousTest):
     """Completion hooks on each backend that supports them."""
@@ -353,10 +312,9 @@ class TestProcessGroupCompletionHooks(MultiProcContinuousTest):
                 dist.recv(t, src=0, group=pg)
             return dict(ops)
 
-        # Registered before the p2p comm exists.
+        # Registered before nccl-lazy creates the p2p comm.
         first = _CompletionCollector()
         pg.register_completion_hook(0, first)
-        self.addCleanup(pg.unregister_completion_hook, 0)
         keys = run_ops()
         p2p = "SEND" if self.rank == 0 else "RECV"
         self.assertEqual(sorted(op.name for op in keys.values()), ["ALLREDUCE", p2p])
@@ -367,42 +325,21 @@ class TestProcessGroupCompletionHooks(MultiProcContinuousTest):
             self.assertIsInstance(duration, float)
             self.assertGreaterEqual(duration, 0.0)
 
-        # Registered after the p2p comm exists.
+        # Registered after nccl-lazy creates the p2p comm.
         second = _CompletionCollector()
         pg.register_completion_hook(1, second)
-        self.addCleanup(pg.unregister_completion_hook, 1)
-        with self.assertRaisesRegex(ValueError, "already registered"):
-            pg.register_completion_hook(1, second)
         keys = run_ops()
         first.wait_for(keys)
         second.wait_for(keys)
 
-        released = weakref.ref(second)
-        del second
         pg.unregister_completion_hook(1)
-        self.assertIsNone(released())
-        # Unknown ids are ignored.
-        pg.unregister_completion_hook(1)
-        # The id can be reused.
-        again = _CompletionCollector()
-        pg.register_completion_hook(1, again)
-        again.wait_for(run_ops())
+        keys = run_ops()
+        first.wait_for(keys)
+        # No hook calls run after shutdown returns.
+        pg.shutdown()
+        with second.cv:
+            self.assertFalse(keys.keys() & second.calls.keys())
 
-        dist.barrier()
-
-    @parametrize("backend", ["nccl2", "nccl-lazy"])
-    def test_exit_with_registered_hook(self, backend):
-        self._skip_unless(backend)
-        if self.rank == 0:
-            with tempfile.TemporaryDirectory() as tmp:
-                proc = subprocess.run(
-                    [sys.executable, "-c", _EXIT_SCRIPT, backend, f"{tmp}/store"],
-                    capture_output=True,
-                    text=True,
-                    timeout=TIMEOUT,
-                )
-            self.assertEqual(proc.returncode, 0, msg=proc.stderr)
-            self.assertIn("exit ok", proc.stdout, msg=proc.stderr)
         dist.barrier()
 
 

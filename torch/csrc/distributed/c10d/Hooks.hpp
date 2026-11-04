@@ -101,8 +101,10 @@ struct CompletionHookArgs {
 // the one fact a post-mortem needs: that the collective never finished.
 //
 // Fires once per Work. May run on the backend's watchdog thread and with
-// backend locks held, so the hook must be short, must not take the GIL, and
-// must not call back into the backend.
+// backend locks held, so the hook must be short and must not call back into the
+// backend. Python hooks take the GIL (ProcessGroup.register_completion_hook),
+// so a thread must not wait for those locks, or for a thread running hooks,
+// while holding the GIL.
 using CompletionHook = std::function<void(const CompletionHookArgs&)>;
 
 } // namespace c10d
