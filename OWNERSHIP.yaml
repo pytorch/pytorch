@@ -1459,6 +1459,7 @@ ownership:
       - /test/test_view_ops.py
       - /test/test_weak.py
       - /test/forward_backward_compatibility/check_forward_backward_compatibility.py: [larryliu0820]
+      - /test/REVIEW.md: [fffrog]
   - name: backend_device_runtime
     owners: []
     section: backend_device_runtime
@@ -1659,7 +1660,7 @@ ownership:
       - /.github/workflows/claude-autorevert-advisor.yml
       - /.github/workflows/claude-code.yml
       - /.github/workflows/claude-distributed-triage-cron.yml
-      - /.github/workflows/claude-distributed-triage.yml
+      - /.github/workflows/distributed-triage-pi.yml
       - /.github/workflows/issue-triage-pi.yml
       - /.github/workflows/issue-triage.yml
       - /.github/workflows/pi-agent-tests.yml
@@ -1668,6 +1669,7 @@ ownership:
       - /AI_POLICY.md
       - /CLAUDE.md
       - /torch/_dynamo/CLAUDE.md
+      - /torch/REVIEW.md: [albanD]
   - name: docs_general
     owners: []
     section: docs_general
