@@ -735,6 +735,7 @@ class TestSplit(unittest.TestCase):
 @mock.patch.object(selection, "ENFORCEMENT_ENABLED", True)
 class TestApplySelection(unittest.TestCase):
     TIMES: dict[str, float] = {"a": 10, "p": 20, "s": 170, "big": 600, "rest": 200}
+    ENFORCED_LINE = "LLM selection: running 3 of 5 test files (1 covered; 1 previous failures added; 1 hedged within 200s)\n"
 
     def apply(
         self,
@@ -833,10 +834,7 @@ class TestApplySelection(unittest.TestCase):
     def test_enforced_log_line(self) -> None:
         stderr = io.StringIO()
         self.apply(Selection(files={"a"}, enforce=True), prev={"p"}, stderr=stderr)
-        self.assertEqual(
-            stderr.getvalue(),
-            "LLM selection: running 3 of 5 test files (1 covered; 1 previous failures added; 1 hedged within 200s)\n",
-        )
+        self.assertEqual(stderr.getvalue(), self.ENFORCED_LINE)
 
     def test_unknown_previous_failures_fall_back_to_td(self) -> None:
         # td_results.json from a writer that does not store them.
@@ -953,6 +951,20 @@ class TestApplySelection(unittest.TestCase):
             # TD's include has only class A of f, so a failure in the rest of f is outside it.
             in_td = [applied.failure_metric(x)["in_td_include"] for x in (f_a, TestRun("f", excluded=["A"]))]  # fmt: skip
             self.assertEqual(in_td, [True, False])
+
+    def test_refused_request_log_line(self) -> None:
+        refused = "LLM selection: the selector did not enforce the request (see not_enforced in the selection file's diagnostics), using TD\n"  # fmt: skip
+        failed = "LLM selection: the selector failed ('x'), using TD\n"
+        for sel, pr_number, expected in (
+            (Selection(files={"a"}, enforce_requested=True), 1, refused),
+            (Selection(files={"a"}, enforce_requested=True), None, ""),
+            (Selection(run_all=True, error="x", enforce_requested=True), 1, failed),
+            (Selection(files={"a"}, enforce=True), 1, self.ENFORCED_LINE),
+        ):
+            stderr = io.StringIO()
+            applied = self.apply(sel, pr_number=pr_number, prev={"p"}, stderr=stderr)
+            self.assertEqual(stderr.getvalue(), expected)
+            self.assertFalse(applied.kept_td)
 
     def test_metrics_tell_a_failed_selector_from_a_run_all(self) -> None:
         # select_tests clears enforce when the selector failed, and a file
