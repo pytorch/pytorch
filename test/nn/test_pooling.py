@@ -28,7 +28,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCUDA,
     onlyOn,
     TEST_WITH_ROCM,
 )
@@ -989,7 +988,6 @@ class TestPoolingNNDevice(NNTestCase):
                 kernel_size=-1,
             )(samples)
 
-    @onlyOn(("cpu", "cuda"))
     def test_MaxPool2d_dilation_overflow(self, device):
         samples = torch.randn(1, 3, 10, 10, device=device)
         with self.assertRaisesRegex(
@@ -1001,7 +999,6 @@ class TestPoolingNNDevice(NNTestCase):
                 dilation=(1, 9223372036854775803),
             )(samples)
 
-    @onlyOn(("cpu", "cuda"))
     def test_AvgPool3d_stride_overflow(self, device):
         samples = torch.randn(1, 3, 10, 10, 10, device=device)
         with self.assertRaisesRegex(
@@ -1523,6 +1520,7 @@ torch.{device_type}.synchronize()
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.bfloat16, torch.float, torch.double)
     @parametrize_test(
         "channels_last",
         [
@@ -1644,7 +1642,7 @@ torch.{device_type}.synchronize()
         helper(4, 8, 7, 7, 7, 3, padding=1, stride=1)
         helper(2, 16, 10, 10, 10, 3, stride=2)
 
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @parametrize_test("layout", ["contiguous", "unbatched", "channels_last"])
     @parametrize_test(
@@ -2583,8 +2581,8 @@ torch.{device_type}.synchronize()
         F.adaptive_max_pool3d(imgs, (Od, Oh, Ow))
 
 
-class TestPoolingNNCudaOnly(NNTestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestPoolingNNAcceleratorOnly(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @largeTensorTest("18GB", device="cuda")
     def test_avg_pool2d_backward_nonoverlapping_large(self, device):
@@ -2715,7 +2713,9 @@ instantiate_device_type_tests(
     TestPoolingNNDevice, globals(), allow_mps=True, allow_xpu=True
 )
 instantiate_parametrized_tests(TestPoolingNN)
-instantiate_device_type_tests(TestPoolingNNCudaOnly, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestPoolingNNAcceleratorOnly, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 instantiate_device_type_tests(
     TestPoolingNNMpsOnly, globals(), only_for="mps", allow_mps=True
 )
