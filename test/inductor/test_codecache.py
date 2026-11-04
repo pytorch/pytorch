@@ -5885,6 +5885,7 @@ class TestDeviceCodeCacheRegistry(TestCase):
             _lookup_device_codecache,
             CUDACodeCache,
             ROCmCodeCache,
+            XPUCodeCache,
         )
 
         with mock.patch("torch.version.hip", "5.7"):
@@ -5893,10 +5894,16 @@ class TestDeviceCodeCacheRegistry(TestCase):
                 _init_builtin_backend_registration,
             )
 
-            # re-run the builtin registration under the mocked HIP build
+            # re-run the builtin registration under the mocked HIP build;
+            # device_codegens must be cleared too, otherwise the
+            # get_scheduling_for_device("cuda") is None guard skips the cuda
+            # branch (setUp already ran the registration once).
             with mock.patch.dict(
                 "torch._inductor.codecache._DEVICE_CODECACHE_REGISTRY",
                 {"xpu": XPUCodeCache},
+            ), mock.patch.dict(
+                "torch._inductor.codegen.common.device_codegens",
+                clear=True,
             ):
                 _init_builtin_backend_registration.cache_clear()
                 _init_builtin_backend_registration()
