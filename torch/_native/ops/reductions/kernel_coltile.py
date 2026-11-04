@@ -59,9 +59,10 @@ _WIDE_ACC_THREADS_PER_BLOCK = 64  # 3-field traits (Welford): see above
 # By default every planned warp (at most 16) gets its own worker; policies that pick
 # fewer workers have each stride over several original warp trees.
 _ORDERED_WORKER_WARPS = 16
-# Multi-field lane replays roll by this factor. On B200, ordered argmax and var_mean
-# columns compiled in 0.8-1.2s instead of 7.8-8.6s and ran at 0.92-1.06x. Single-field
-# replays stay static: rolled, fp32 sums ran at as little as 0.46x.
+# Multi-field lane replays partially unroll their 32-lane loop by this factor. On B200,
+# fp32 argmax (2, 32769, 33) and bf16 var_mean (2, 32768, 33) columns compiled in
+# 0.8-1.2s instead of the static replay's 7.8-8.6s and ran at 0.92-1.06x of it.
+# Single-field replays stay static: rolled, fp32 sums ran at as little as 0.46x.
 _ORDERED_LANE_UNROLL = 4
 
 
@@ -910,7 +911,8 @@ def reduce_ordered_col(
     plan = trait_itree_plan(
         trait, R, B * C, x.element_size(), stage=False, device=x.device
     )
-    # Linear vector folds change the DAG, and this kernel replays tree folds only.
+    # The planner builds no linear vector folds here; declining one guards future planner
+    # changes, since this kernel replays tree folds only.
     if plan is None or plan.shape not in ("looped", "split") or plan.vec_linear:
         return None
     # Single-field traits replay all 32 lanes' leaves statically. Multi-field traits roll
