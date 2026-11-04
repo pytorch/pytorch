@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 import unittest
+import warnings
 from collections import namedtuple
 from functools import partial
 from threading import Event, Lock
@@ -44,6 +45,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_MACOS,
     load_tests,
+    set_warn_always_context,
     skip_but_pass_in_sandcastle_if,
     TemporaryFileName,
 )
@@ -4296,13 +4298,16 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_init_rpc_twice(self):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
 
-        rpc.init_rpc(
-            name=worker_name(self.rank),
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=self.rpc_backend_options,
-        )
+        with self.assertWarnsRegex(
+            FutureWarning, "torch.distributed.rpc is deprecated"
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=self.rpc_backend_options,
+            )
         rpc.shutdown()
 
         # Wait for all init to complete.
@@ -4312,14 +4317,30 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         new_backend_options = self.rpc_backend_options
         new_backend_options.init_method += "init_2"
 
-        # Ensure rpc initialization works again.
-        rpc.init_rpc(
-            name=worker_name(self.rank),
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=new_backend_options,
-        )
+        # Ensure rpc initialization works again and only warns once.
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=new_backend_options,
+            )
+        deprecations = [
+            str(x.message)
+            for x in w
+            if "torch.distributed.rpc is deprecated" in str(x.message)
+        ]
+        self.assertEqual(deprecations, [])
+
+        # Warns again when warn_always is enabled.
+        with (
+            set_warn_always_context(True),
+            self.assertWarnsRegex(FutureWarning, "torch.distributed.rpc is deprecated"),
+            self.assertRaisesRegex(TypeError, "must be a member of BackendType"),
+        ):
+            rpc.init_rpc(name=worker_name(self.rank), backend="bad")
 
         # Verify RPCs work after re-init.
         dst = worker_name((self.rank + 1) % self.world_size)
