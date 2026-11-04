@@ -791,6 +791,8 @@ class TestSplitTests(unittest.TestCase):
         broken = (
             mock.patch.dict(sys.modules, {"tools.testing.llm_td.selection": None}),
             mock.patch.object(Selection, "load", side_effect=RuntimeError("bug")),
+            mock.patch.object(Selection, "split", side_effect=RuntimeError("bug")),
+            mock.patch.object(selection, "apply_selection", side_effect=RuntimeError),
         )
         for patch in broken:
             with patch:
@@ -800,6 +802,45 @@ class TestSplitTests(unittest.TestCase):
             self.assertTrue(stderr.startswith("::warning::Ignoring the LLM selection"))
             self.assertTrue(stderr.endswith(self.TD_LINE), stderr)
             self.assertEqual([x["source"] for x in artifacts], ["td"])
+
+    def test_selection_metrics(self) -> None:
+        split, _, _ = self.split(Selection(files={"a"}, candidates={"a"}))
+        if split.llm is None:
+            raise AssertionError("no selection read")
+        metric = split.llm.selection_metric
+        self.assertEqual(split.selection_metrics(True), [("llm_td_selection", metric)])
+        self.assertEqual(split.selection_metrics(False), [])
+        self.assertEqual(CallSplit([], [], None).selection_metrics(True), [])
+
+    def test_failure_metrics(self) -> None:
+        sel = Selection(files={"a"}, enforce=True, candidates={"a"})
+        test, stats = TestRun("a"), {"test_name": "a"}
+        td = {"selected_tests": ["a", "p"], "failure": "a", "test_name": "a"}
+        for s in (None, sel):
+            split, _, _ = self.split(s)
+            metrics = split.failure_metrics(test, ["a", "p"], stats)
+            row = {**td, "llm_enforced": s is not None}
+            expected: list[tuple[str, object]] = [("td_test_failure_stats_v2", row)]
+            if split.llm is not None:
+                expected.append(("llm_td_failure", split.llm.failure_metric(test)))
+            self.assertEqual(metrics, expected)
+
+    def test_broken_llm_td_metrics_are_skipped(self) -> None:
+        split, _, _ = self.split(Selection(files={"a"}, candidates={"a"}))
+        bug = RuntimeError("bug")
+        with (
+            mock.patch.object(selection.AppliedSelection, "selection_metric", property(mock.Mock(side_effect=bug))),
+            mock.patch.object(selection.AppliedSelection, "failure_metric", side_effect=bug),
+            mock.patch("sys.stderr", io.StringIO()) as stderr,
+        ):  # fmt: skip
+            self.assertEqual(split.selection_metrics(True), [])
+            metrics = split.failure_metrics(TestRun("a"), [], {})
+        self.assertEqual([name for name, _ in metrics], ["td_test_failure_stats_v2"])
+        self.assertEqual(
+            stderr.getvalue(),
+            "::warning::Not emitting llm_td_selection: RuntimeError('bug')\n"
+            "::warning::Not emitting llm_td_failure: RuntimeError('bug')\n",
+        )
 
     def test_unknown_previous_failures_keep_td(self) -> None:
         sel = Selection(files={"a"}, enforce=True, candidates={"a"})
