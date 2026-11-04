@@ -5537,8 +5537,8 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
             prompt,
         )
         self.assertIn(
-            "Nor is a fix the review itself treats as non-blocking, such as a"
-            " docstring, comment or naming fix.",
+            "Nor is a documentation, comment or code-structure fix that the review"
+            " does not tie to a bug or a violated rule.",
             prompt,
         )
         self.assertIn(
