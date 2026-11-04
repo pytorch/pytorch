@@ -2205,17 +2205,17 @@ def alert_not_deterministic(caller: str):
             )
 
 
-class CUDARngStateHelper:
+class AcceleratorRngStateHelper:
     @staticmethod
     def get_torch_state_as_tuple(
         fake_mode: AbstractContextManager[Any] = nullcontext(),
     ):
-        if not torch.cuda.is_available():
-            raise RuntimeError("CUDA not available")
+        if not torch.accelerator.is_available():
+            raise RuntimeError("Accelerator not available")
 
         with fake_mode:
-            seed = torch.tensor(torch.cuda.initial_seed())
-            offset = torch.tensor(torch.cuda._get_rng_state_offset())
+            seed = torch.tensor(torch.accelerator.random.initial_seed())
+            offset = torch.tensor(torch.accelerator.random.get_rng_offset())
             return seed, offset
 
     @staticmethod
@@ -2224,8 +2224,12 @@ class CUDARngStateHelper:
         seed_portion = seed.reshape([1]).view(torch.uint8)
         offset_portion = offset.reshape([1]).view(torch.uint8)
         new_state = torch.cat([seed_portion, offset_portion])
-        torch.cuda.set_rng_state(new_state)
+        torch.accelerator.random.set_rng_state(new_state)
 
     @staticmethod
     def set_new_offset(relative_offset):
-        torch.cuda._set_rng_state_offset(relative_offset.item())
+        torch.accelerator.random.set_rng_offset(relative_offset.item())
+
+
+# Keep for BC only
+CUDARngStateHelper = AcceleratorRngStateHelper

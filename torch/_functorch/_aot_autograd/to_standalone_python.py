@@ -86,7 +86,7 @@ _COMPILE_LOCK = threading.RLock()
 # The objects a wrapper closes over come in a few kinds:
 #   - public runtime helpers the codegen'd source references (e.g. increment_version,
 #     gen_alias_from_base, _unwrap_tensoralias, mark_dynamo_propagated_dynamic_indices,
-#     the CUDARngStateHelper staticmethods) -- ordinary importable objects;
+#     the AcceleratorRngStateHelper staticmethods) -- ordinary importable objects;
 #   - the inner Inductor ``call`` that the chain ultimately invokes;
 #   - sibling captured wrappers -- the next link of the runtime chain (an inner subclass /
 #     functionalized-RNG wrapper, or an outer dedup / synthetic-base wrapper, whose body
@@ -164,7 +164,7 @@ _COMPILE_LOCK = threading.RLock()
 # artifact imports still resolve on load. Helpers are emitted as either ``import
 # torch`` (the torch module and stable public paths, e.g.
 # torch.autograd.graph.increment_version) or an import from the single small surface
-# standalone_runtime.py (for the AOTAutograd-area internals -- plus CUDARngStateHelper,
+# standalone_runtime.py (for the AOTAutograd-area internals -- plus AcceleratorRngStateHelper,
 # re-exported there for import-ordering -- whose locations are not themselves a stable
 # contract). That file's IDENTITY CONTRACT -- re-exports must preserve object id --
 # exists purely so the COMPOSER's id-lookup keeps matching; it is a compile-time
@@ -202,13 +202,13 @@ def _known_helper_table() -> dict[int, tuple[str, str]]:
             f"{_RT} _unwrap_tensoralias",
             "_unwrap_tensoralias",
         ),
-        id(rt.CUDARngStateHelper.get_torch_state_as_tuple): (
-            f"{_RT} CUDARngStateHelper",
-            "CUDARngStateHelper.get_torch_state_as_tuple",
+        id(rt.AcceleratorRngStateHelper.get_torch_state_as_tuple): (
+            f"{_RT} AcceleratorRngStateHelper",
+            "AcceleratorRngStateHelper.get_torch_state_as_tuple",
         ),
-        id(rt.CUDARngStateHelper.set_new_offset): (
-            f"{_RT} CUDARngStateHelper",
-            "CUDARngStateHelper.set_new_offset",
+        id(rt.AcceleratorRngStateHelper.set_new_offset): (
+            f"{_RT} AcceleratorRngStateHelper",
+            "AcceleratorRngStateHelper.set_new_offset",
         ),
     }
     return table

@@ -13462,11 +13462,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertFalse(torch.allclose(a, b))
 
         check(torch.ones(1024, device=self.device, dtype=torch.float32))
-        # Need comment: should we add "_get_rng_state_offset" to common device interface?
-        self.assertEqual(getattr(torch, self.device)._get_rng_state_offset(), 2048)
+        self.assertEqual(torch.accelerator.random.get_rng_offset(), 2048)
         # Check non-multiple of 4 numel
         check(torch.ones(3, device=self.device, dtype=torch.float32))
-        self.assertEqual(getattr(torch, self.device)._get_rng_state_offset(), 8)
+        self.assertEqual(torch.accelerator.random.get_rng_offset(), 8)
 
     # Already on by default, just want to make sure
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
