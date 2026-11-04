@@ -131,7 +131,7 @@ def td_enabled_job(build_environment: str, *, macos: bool, no_td: bool) -> bool:
 
 
 def td_enabled_default(
-    build_environment: str, workflow: str, *, is_ci: bool, macos: bool, no_td: bool
+    *, build_environment: str, workflow: str, is_ci: bool, macos: bool, no_td: bool
 ) -> bool:
     """run_test.py's --enable-td default: TD runs on CI PR jobs that
     td_enabled_job and td_enabled_workflow allow."""
