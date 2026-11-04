@@ -48,7 +48,7 @@ CHECKOUT_PREAMBLE = "A checkout of the repository at this change is at {checkout
 # The PR text is wrapped in these tags and the prompt marks it as untrusted, so
 # the PR must not be able to close them.
 CLOSING_TAG_RE = re.compile(
-    r"<\s*/\s*(pr_title|pr_description|changed_files|diff)\s*>",
+    r"<\s*/\s*(pr_title|pr_description|changed_files|diff)\b(?:\s*(>))?",
     re.IGNORECASE,
 )
 
@@ -142,8 +142,10 @@ def build_prompt(
     body = body.strip()
     if len(body) > BODY_BUDGET:
         body = body[:BODY_BUDGET] + "\n...[truncated]"
+    # Escape after truncating, so that a cut cannot make or split an escape.
     title, body, diffstat, diff = (
-        CLOSING_TAG_RE.sub(r"<\\/\1>", t) for t in (title, body, diffstat, diff)
+        CLOSING_TAG_RE.sub(r"<\\/\1\2", t)
+        for t in (title, body, diffstat, truncate_diff(diff))
     )
     annotated = {c: f"{c} [{minutes.get(c, 0):.0f}m]" for c in candidates}
     listed = [annotated[c] for c in candidates if c not in added]
@@ -152,7 +154,7 @@ def build_prompt(
         f"# PR title\n<pr_title>\n{title}\n</pr_title>",
         f"# PR description\n<pr_description>\n{body or '(none)'}\n</pr_description>",
         f"# Changed files\n<changed_files>\n{diffstat}\n</changed_files>",
-        f"# Diff\n<diff>\n{truncate_diff(diff)}\n</diff>",
+        f"# Diff\n<diff>\n{diff}\n</diff>",
         f"# Candidate test files ({len(listed)})",
         "\n".join(listed),
     ]
@@ -203,6 +205,16 @@ def query_model(
     ]
     if checkout:
         checkout = os.path.abspath(checkout)
+        # A symlink could lead the Read rules out of the checkout or into its .git.
+        root = os.path.realpath(checkout)
+        for d, dirs, files in os.walk(root):
+            links = [p for n in dirs + files if os.path.islink(p := os.path.join(d, n))]
+            for path in links:
+                top = os.path.relpath(os.path.realpath(path), root).split(os.sep)[0]
+                if top in ("..", ".git"):
+                    why = f"{path} links outside the checkout or into its .git"
+                    return {"is_error": True, "result": why}
+            dirs[:] = [n for n in dirs if n != ".git"]
         allowed, denied = f"Read(/{checkout}/**)", f"Read(/{checkout}/.git/**)"
         cmd += ["--allowed-tools", allowed, "--disallowed-tools", denied]
         cmd += ["--add-dir", checkout]

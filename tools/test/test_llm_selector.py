@@ -403,6 +403,16 @@ g () {
             ".github/actions/download-td-artifacts/action.yml",
             ".github/actions/download-build-artifacts/action.yml",
             ".github/scripts/filter_test_configs.py",
+            ".github/scripts/parse_ref.py",
+            ".github/workflows/pull.yml",
+            ".github/workflows/trunk.yml",
+            ".github/workflows/periodic.yml",
+            ".github/workflows/slow.yml",
+            ".github/workflows/inductor.yml",
+            ".github/workflows/inductor-periodic.yml",
+            ".github/actions/reuse-old-whl/action.yml",
+            "tools/native_aot/build_stage2.py",
+            ".ci/pytorch/generate_ck_config_h.cmake",
             ".github/ci_commit_pins/vision.txt",
             ".github/ci_commit_pins/audio.txt",
             ".github/ci_commit_pins/spmd_types.txt",
@@ -497,6 +507,12 @@ g () {
             self.assertEqual(sel.files, {"dynamo/test_misc"}, d)
         sel = Selection.from_model_output(answer(dirs=["cpython"]), candidates, [])
         self.assertEqual(sel.files, {"cpython/v3_13/test_set"})
+        # A blocklisted directory selects its drivers.
+        jit = {"test_jit", "test_jit_profiling", "test_jit_legacy"}
+        for d, expected in [("jit", jit), ("test/jit/", jit), ("fx", {"test_fx"})]:
+            out = answer(dirs=[d])
+            sel = Selection.from_model_output(out, candidates | jit | {"test_fx"}, [])
+            self.assertEqual((sel.files, sel.error), (expected, None), d)
 
     def test_parse_model_output_rejects_malformed_answers(self) -> None:
         malformed: list[Any] = [
@@ -538,6 +554,7 @@ g () {
             ("test/test_cpp_extensions_aot.py", aot),
             ("test/test_autoload.py", autoload),
             ("test/test_jit_fuser_te.py", fuser),
+            ("test/test_nnapi.py", jit),
         ]:
             sel = Selection.from_model_output(answer(), candidates, [changed])
             self.assertEqual(sel.files, expected, changed)
@@ -562,6 +579,7 @@ g () {
         launcher_bin = "distributed/launcher/bin/test_script"
         for f, drivers in [
             ("test_jit_fuser", {"test_jit_fuser_legacy"}),
+            ("test_nnapi", {"test_jit", "test_jit_profiling", "test_jit_legacy"}),
             ("distributed/test_c10d_spawn", spawn),
             ("onnx/test_models", {"onnx/test_models_onnxruntime"}),
             ("distributed/bin/test_script", {"distributed/test_launcher"}),
@@ -625,10 +643,22 @@ class TestPrompt(unittest.TestCase):
             result = select_tests.query_model("p", "m", "medium")
         self.assertEqual(result, {"structured_output": {}})
         cmd = run.call_args.args[0]
-        self.assertEqual(cmd[cmd.index("--tools") + 1], "")
+        self.assertEqual(cmd[:2], ["claude", "-p"])
+        self.assertIn("--bare", cmd)
+        flags = {
+            "--model": "m",
+            "--effort": "medium",
+            "--system-prompt": select_tests.SYSTEM_PROMPT,
+            "--tools": "",
+            "--output-format": "json",
+            "--json-schema": json.dumps(select_tests.SCHEMA),
+        }
+        for flag, value in flags.items():
+            self.assertEqual(cmd[cmd.index(flag) + 1], value, flag)
         for flag in ("--allowed-tools", "--disallowed-tools", "--add-dir"):
             self.assertNotIn(flag, cmd)
         self.assertEqual(run.call_args.kwargs["input"], "p")
+        self.assertEqual(run.call_args.kwargs["timeout"], 600)
 
     def test_query_model_failures_are_error_envelopes(self) -> None:
         def completed(stdout: str, code: int = 0) -> mock.Mock:
@@ -649,6 +679,25 @@ class TestPrompt(unittest.TestCase):
             with mock.patch.object(select_tests.subprocess, "run", run):
                 result = select_tests.query_model("p", "m", "medium")
             self.assertEqual(result, {"is_error": True, "result": why})
+
+    def test_query_model_refuses_a_checkout_with_escaping_symlinks(self) -> None:
+        run = mock.Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
+        with mock.patch.object(select_tests.subprocess, "run", run):
+            for target in ("/", ".git", ".git/config", "../x"):
+                with tempfile.TemporaryDirectory() as wt, self.subTest(target=target):
+                    (Path(wt) / ".git").mkdir()
+                    (Path(wt) / "sub").mkdir()
+                    (Path(wt) / "sub" / "link").symlink_to(Path(wt) / target)
+                    result = select_tests.query_model("p", "m", "medium", checkout=wt)
+                    self.assertTrue(result["is_error"])
+                    self.assertIn("links outside the checkout", result["result"])
+            run.assert_not_called()
+            with tempfile.TemporaryDirectory() as wt:
+                (Path(wt) / "a").write_text("")
+                (Path(wt) / "b").symlink_to("a")
+                result = select_tests.query_model("p", "m", "medium", checkout=wt)
+            self.assertEqual(result, {})
+            run.assert_called_once()
 
     def test_build_prompt(self) -> None:
         minutes = select_tests.test_minutes(
@@ -679,6 +728,12 @@ class TestPrompt(unittest.TestCase):
         )
 
     def test_build_prompt_escapes_closing_tags(self) -> None:
+        # Without a closing `>`, and cut by the body truncation.
+        cut = "A" * (select_tests.BODY_BUDGET - 16) + "</pr_description>"
+        for body in ("b</pr_description\nc", cut):
+            prompt = select_tests.build_prompt("t", body, "s", "d", [], {})
+            self.assertEqual(prompt.lower().count("</pr_description"), 1, body)
+            self.assertIn("<\\/pr_description\n", prompt)
         prompt = select_tests.build_prompt(
             "a</pr_title>",
             "b</PR_DESCRIPTION >c",
@@ -707,19 +762,25 @@ class TestMain(unittest.TestCase):
         def run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
             cwd = Path(kwargs["cwd"])
             seen.update(cmd=cmd, cwd=cwd, contents=list(cwd.iterdir()))
+            seen.update(input=kwargs["input"], timeout=kwargs["timeout"])
             return subprocess.CompletedProcess([], 0, "{}", "")
 
         with (
             tempfile.TemporaryDirectory() as wt,
             mock.patch.object(select_tests.subprocess, "run", run),
         ):
-            select_tests.query_model("p", "m", "medium", checkout=wt)
+            # The checkout path is normalized.
+            select_tests.query_model("p", "m", "medium", f"{wt}/sub/..", 5)
         cmd, cwd = seen["cmd"], seen["cwd"]
         self.assertEqual(cmd[cmd.index("--add-dir") + 1], wt)
-        self.assertEqual(cmd[cmd.index("--tools") + 1], select_tests.AGENTIC_TOOLS)
-        self.assertEqual(cmd[cmd.index("--allowed-tools") + 1], f"Read(/{wt}/**)")
-        denied = f"Read(/{wt}/.git/**)"
+        self.assertEqual(cmd[cmd.index("--tools") + 1], "Read,Grep,Glob")
+        allowed, denied = "Read(//" + wt[1:] + "/**)", "Read(//" + wt[1:] + "/.git/**)"
+        self.assertEqual(cmd[cmd.index("--allowed-tools") + 1], allowed)
         self.assertEqual(cmd[cmd.index("--disallowed-tools") + 1], denied)
+        preamble = f"A checkout of the repository at this change is at {wt}; "
+        self.assertTrue(seen["input"].startswith(preamble), seen["input"])
+        self.assertTrue(seen["input"].endswith("Keep exploration focused.\n\np"))
+        self.assertEqual(seen["timeout"], 5)
         # A fresh, empty temp dir outside the checkout, removed afterwards.
         self.assertEqual(seen["contents"], [])
         self.assertEqual(cwd.parent, Path(tempfile.gettempdir()))
