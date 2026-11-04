@@ -2607,6 +2607,32 @@ class TestTensorCreation(TestCase):
                 else:
                     self.assertEqual(left.new_tensor(right, device=device_arg).device, device_arg)
 
+    @suppress_warnings
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    def test_new_tensor(self, devices):
+        expected = torch.tensor([1, 1], dtype=torch.uint8, device=devices[1])
+        res1 = expected.new_tensor([1, 1])
+        self.assertEqual(res1.get_device(), expected.get_device())
+        res1 = expected.new_tensor([1, 1], dtype=torch.int)
+        self.assertIs(torch.int, res1.dtype)
+        self.assertEqual(res1.get_device(), expected.get_device())
+
+        res2 = expected.new_tensor(expected)
+        self.assertEqual(res2.get_device(), expected.get_device())
+        res2 = expected.new_tensor(expected, dtype=torch.int)
+        self.assertIs(torch.int, res2.dtype)
+        self.assertEqual(res2.get_device(), expected.get_device())
+        res2 = expected.new_tensor(expected, dtype=torch.int, device=devices[0])
+        self.assertIs(torch.int, res2.dtype)
+        self.assertEqual(res2.get_device(), 0)
+
+        res1 = expected.new_tensor(1)
+        self.assertEqual(res1.get_device(), expected.get_device())
+        res1 = expected.new_tensor(1, dtype=torch.int)
+        self.assertIs(torch.int, res1.dtype)
+        self.assertEqual(res1.get_device(), expected.get_device())
+
     def _test_signal_window_functions(self, name, dtype, device, **kwargs):
         import scipy.signal as signal
 
@@ -3418,32 +3444,6 @@ class TestTensorCreationCudaOnly(TestCase):
         self.assertRaises(RuntimeError, lambda: x.new(device='cpu'))
         self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cpu'))
         self.assertRaises(RuntimeError, lambda: x.new((2.0, 3.0), device='cpu'))
-
-    @suppress_warnings
-    def test_new_tensor(self, device):
-        expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
-        if torch.cuda.device_count() >= 2:
-            expected = expected.cuda(1)
-            res1 = expected.new_tensor([1, 1])
-            self.assertEqual(res1.get_device(), expected.get_device())
-            res1 = expected.new_tensor([1, 1], dtype=torch.int)
-            self.assertIs(torch.int, res1.dtype)
-            self.assertEqual(res1.get_device(), expected.get_device())
-
-            res2 = expected.new_tensor(expected)
-            self.assertEqual(res2.get_device(), expected.get_device())
-            res2 = expected.new_tensor(expected, dtype=torch.int)
-            self.assertIs(torch.int, res1.dtype)
-            self.assertEqual(res2.get_device(), expected.get_device())
-            res2 = expected.new_tensor(expected, dtype=torch.int, device=0)
-            self.assertIs(torch.int, res1.dtype)
-            self.assertEqual(res2.get_device(), 0)
-
-            res1 = expected.new_tensor(1)
-            self.assertEqual(res1.get_device(), expected.get_device())
-            res1 = expected.new_tensor(1, dtype=torch.int)
-            self.assertIs(torch.int, res1.dtype)
-            self.assertEqual(res1.get_device(), expected.get_device())
 
     def test_tensor_factory_gpu_type_inference(self):
         with set_default_tensor_type(torch.cuda.DoubleTensor):
