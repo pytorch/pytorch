@@ -4218,7 +4218,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
                 # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
                 # off TypeSource is not tag-safe.
-                if var_source is not None and can_guard_class_function_code(tx, type_attr):
+                guard_code = can_guard_class_function_code(tx, type_attr)
+                if var_source is not None and guard_code:
                     fn_vt = variables.UserFunctionVariable.create_with_source(
                         type_attr, var_source
                     )
