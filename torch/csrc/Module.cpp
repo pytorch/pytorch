@@ -2999,9 +2999,6 @@ Call this whenever a new thread is created in order to propagate values from
             meta.is_meta(),
             "tensor's device must be 'meta', got ",
             meta.device().type());
-        TORCH_CHECK(
-            device.type() != c10::DeviceType::Meta || mode->allow_meta_,
-            "device.type must not be 'meta' when allow_meta is False");
         // A functional or functorch wrapper would be copied as a wrapper whose
         // inner tensor is not fake
         constexpr auto wrapper_ks =
