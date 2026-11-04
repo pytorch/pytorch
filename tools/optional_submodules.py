@@ -17,25 +17,45 @@ def _read_file(path: Path) -> str:
         return f.read().strip()
 
 
-# Server-side failures of a clone that are worth another attempt: the "unable to
-# handle this request due to load" page gitlab.com serves when it sheds load,
-# HTTP 429 and 5xx, and connections that drop mid-transfer. Everything else (a tag
-# that does not exist, no DNS, an unwritable directory) fails at once instead of
-# stalling for minutes, e.g. in the `cmake` configure step. Connect timeouts are
-# deliberately not retried: on a network that silently drops traffic each attempt
-# would wait for the full connect timeout (~2 minutes) before failing.
+# Failures of a clone that are worth another attempt, matched against git's
+# stderr (English: _clone runs git in the C locale):
+#   - gitlab.com's "unable to handle this request due to load" page;
+#   - HTTP 429 and 5xx, as `The requested URL returned error: 503` or
+#     `RPC failed; HTTP 503`;
+#   - `RPC failed; curl ...`, a transfer that broke part way;
+#   - `early EOF`, `unexpected disconnect` and `GnuTLS recv error`, the same for a
+#     connection that dropped while git was reading;
+#   - `Connection reset` and `SSL_ERROR_SYSCALL`, but not on the lines that are
+#     about setting up the connection (`SSL_connect`, `in connection to`): a proxy
+#     that resets every handshake would otherwise stall each attempt's 10 to 60 s
+#     wait for a failure that never goes away.
+# Everything else fails at once instead of stalling for minutes, e.g. in the
+# `cmake` configure step: a tag that does not exist, HTTP 4xx, no DNS, an
+# unwritable directory. Connect timeouts are not retried either: on a network that
+# silently drops traffic each attempt would wait for the full connect timeout
+# (~2 minutes) before failing.
 _TRANSIENT_CLONE_ERROR = re.compile(
     r"unable to handle this request due to load"
     r"|The requested URL returned error: (?:429|5\d\d)"
-    r"|RPC failed|early EOF|unexpected disconnect"
-    r"|Connection reset"
-    r"|SSL_ERROR_SYSCALL|GnuTLS recv error",
+    r"|RPC failed; (?:HTTP (?:429|5\d\d)|curl)"
+    r"|early EOF|unexpected disconnect|GnuTLS recv error"
+    r"|Connection reset|SSL_ERROR_SYSCALL",
     re.IGNORECASE,
 )
+_CONNECT_TIME_ERROR = re.compile(r"SSL_connect|in connection to", re.IGNORECASE)
+
+
+def _is_transient_clone_error(stderr: str) -> bool:
+    return any(
+        _TRANSIENT_CLONE_ERROR.search(line) and not _CONNECT_TIME_ERROR.search(line)
+        for line in stderr.splitlines()
+    )
 
 
 def _clone(
     cmd: list[str],
+    /,
+    *,
     cwd: Path | None = None,
     attempts: int = 8,
     backoff: int = 10,
@@ -44,6 +64,12 @@ def _clone(
     # git has no retry or backoff setting for `clone` (`http.lowSpeedLimit` and
     # `http.lowSpeedTime` only abort a stalled transfer), so retry here. A failed
     # clone removes the directory it created, so there is nothing to clean up.
+    #
+    # stderr is captured so that it can be matched and kept on the exception. git
+    # shows its progress meter only when stderr is a terminal, so an interactive
+    # run prints nothing until each attempt ends; CI output is not affected.
+    if attempts < 1:
+        raise ValueError(f"attempts must be at least 1, got {attempts}")
     for attempt in range(1, attempts + 1):
         # The message is matched against English text, and git's output must not
         # fail to decode under the locale's encoding, so force the C locale.
@@ -59,7 +85,7 @@ def _clone(
             print(result.stderr, end="", file=sys.stderr, flush=True)
         if result.returncode == 0:
             return
-        if attempt == attempts or not _TRANSIENT_CLONE_ERROR.search(result.stderr):
+        if attempt == attempts or not _is_transient_clone_error(result.stderr):
             raise CalledProcessError(result.returncode, cmd, stderr=result.stderr)
         delay = min(backoff * 2 ** (attempt - 1), max_delay)
         print(
@@ -69,11 +95,10 @@ def _clone(
         time.sleep(delay)
 
 
-def _checkout_by_tag(repo: str, tag: str, **retry: int) -> None:
+def _checkout_by_tag(repo: str, tag: str) -> None:
     _clone(
         ["git", "clone", "--depth", "1", "--branch", tag, repo],
         cwd=third_party_path,
-        **retry,
     )
 
 
