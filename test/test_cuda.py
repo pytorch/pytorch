@@ -935,39 +935,44 @@ print(t.is_pinned())
     # not reliably OOM past the free memory, Jetson segfaults on this pattern.
     @unittest.skipIf(IS_WINDOWS and SM89OrLater, "Fails on windows with SM89+")
     @unittest.skipIf(IS_JETSON, "Segmentation fault (core dumped)")
-    @skipIfRocmArch(MI350_ARCH)
     @serialTest()
     def test_oom_retry_message_logged_at_info(self):
         # Regression test for #193195: the alloc_block OOM message fires on
-        # every failed cudaMalloc attempt (each one flags a costly
-        # release-and-retry cycle) but at INFO level, so recoverable retries
-        # are silent at the default WARNING log level and visible with
-        # TORCH_CPP_LOG_LEVEL=INFO. The message is written by C++ straight to
-        # stderr, so run the scenario in a subprocess and inspect its stderr.
+        # every failed cudaMalloc attempt, including the one before the
+        # release-and-retry, but at INFO level, so it is silent at the default
+        # WARNING log level and visible with TORCH_CPP_LOG_LEVEL=INFO. The
+        # message is written by C++ straight to stderr, so run the scenario in
+        # a subprocess and inspect its stderr. Requesting twice the device's
+        # memory makes cudaMalloc fail on the first attempt and on the retry
+        # without filling the GPU, so the test does not depend on how much
+        # memory the driver will actually hand out.
         marker = "memory allocation failed with OOM"
-        recoverable_script = """\
+        retry_script = """\
 import torch
-free, total = torch.cuda.mem_get_info()
-block = free // 32
-blocks = [torch.empty(block, dtype=torch.uint8, device="cuda") for _ in range(27)]
-del blocks  # freed but cached: the driver still sees the memory as used
-big = torch.empty(int(free * 0.7), dtype=torch.uint8, device="cuda")
+total = torch.cuda.get_device_properties(0).total_memory
+try:
+    torch.empty(2 * total, dtype=torch.uint8, device="cuda")
+except torch.OutOfMemoryError:
+    pass
+else:
+    raise AssertionError("allocating twice the device memory did not fail")
 if torch.cuda.memory_stats()["num_alloc_retries"] < 1:
     raise AssertionError("allocation did not exercise the release-and-retry path")
-print("RECOVERED")
+print("RETRIED")
 """
         for level, expect_message in (("WARNING", False), ("INFO", True)):
             proc = subprocess.run(
-                [sys.executable, "-c", recoverable_script],
+                [sys.executable, "-c", retry_script],
                 capture_output=True,
                 text=True,
                 timeout=120,
                 env={**os.environ, "TORCH_CPP_LOG_LEVEL": level},
             )
             self.assertEqual(proc.returncode, 0, msg=proc.stderr)
-            self.assertIn("RECOVERED", proc.stdout)
+            self.assertIn("RETRIED", proc.stdout)
             if expect_message:
-                self.assertIn(marker, proc.stderr)
+                # Once for the first attempt and once for the retry.
+                self.assertGreaterEqual(proc.stderr.count(marker), 2, proc.stderr)
             else:
                 self.assertNotIn(marker, proc.stderr)
 
