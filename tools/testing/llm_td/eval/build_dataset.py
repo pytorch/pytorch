@@ -392,8 +392,9 @@ def pr_bases(sha: str, bases: list[str]) -> dict[str, str] | None:
         return None
     by_mb: dict[str, str] = {}
     for b in bases:
-        if mb := git("merge-base", b, sha, check=False).strip():
-            by_mb.setdefault(mb, b)
+        # A later ghstack base B2 is a child of the pushed B1, so both merge-base at B1: B1 is the one CI saw.
+        if (mb := git("merge-base", b, sha, check=False).strip()) and (mb not in by_mb or b == mb):  # fmt: skip
+            by_mb[mb] = b
     if not by_mb:
         return {"base": main_base, "merge_base": main_base, "main_base": main_base, "base_source": "main"}  # fmt: skip
     # When the merge bases are truly independent (rare), --independent keeps them all and this picks one.

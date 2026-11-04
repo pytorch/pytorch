@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 from tools.testing.llm_td import select_tests, selection
-from tools.testing.llm_td.eval import build_dataset as bd, score
+from tools.testing.llm_td.eval import build_dataset as bd, clickhouse, score
 from tools.testing.llm_td.eval.build_dataset import strip_trailers
 from tools.testing.llm_td.eval.run_eval import run_one
 from tools.testing.llm_td.eval.score import (
@@ -625,7 +625,7 @@ class TestScore(unittest.TestCase):
             prev = set(rng.sample(files, rng.randint(0, 2)))
             split = sel.split(ranked, lambda x: float(x.test_file in scored), seconds, "c", previously_failed=prev, td_include=cut)  # fmt: skip
             got = score.hedge(sel, scored, seconds, score.LLM_TD_HEDGE, "c", cut, untimed, prev)  # fmt: skip
-            want = cut if split.kept_td or not sum(seconds.values()) else split.previously_failed | split.hedged  # fmt: skip
+            want = cut if split.chose_nothing or not sum(seconds.values()) else split.previously_failed | split.hedged  # fmt: skip
             self.assertEqual(got, want, (scored, seconds, untimed, sel, cut, prev))
 
     def test_policy_matches_apply_selection(self) -> None:
@@ -652,7 +652,7 @@ class TestScore(unittest.TestCase):
                 mock.patch.object(selection, "get_pr_number", return_value=1),
                 mock.patch("sys.stderr", io.StringIO()),
             ):
-                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config="c", td_enabled=True, previously_failed=prev)  # fmt: skip
+                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config="c", td_enabled=True, previously_failed=prev, call_id="c")  # fmt: skip
             ran = {x.test_file for x in applied.include}
             self.assertEqual({f for f in job if choice.covers(f, "c")}, ran, (seconds, job, n, scored, picked, prev))  # fmt: skip
 
@@ -887,6 +887,32 @@ def scratch_repo() -> Iterator[None]:
     with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, env, clear=True), mock.patch.object(bd, "REPO", Path(d)):  # fmt: skip
         bd.git("init", "-q")
         yield
+
+
+class TestClickhouse(unittest.TestCase):
+    def test_query(self) -> None:
+        ok = subprocess.CompletedProcess([], 0, 'log\n{"columns": [{"name": "a"}], "rows": [[1]]}', "")  # fmt: skip
+        busy = subprocess.CompletedProcess([], 1, "", "HTTP 503 Service Unavailable")
+        bad = subprocess.CompletedProcess([], 2, "", "Code: 62. Syntax error")
+        hung = subprocess.TimeoutExpired("gcx", clickhouse.TIMEOUT)
+        # fmt: off
+        cases = [
+            ([ok], [{"a": 1}]),
+            ([busy, hung, ok], [{"a": 1}]),
+            ([bad, ok], "attempt 1 of 3 exited with code 2: Code: 62. Syntax error\nSQL: SELECT 1"),
+            ([busy, busy, hung], "attempt 3 of 3 timed out after 600s\nSQL: SELECT 1"),
+        ]
+        # fmt: on
+        for outcomes, want in cases:
+            with mock.patch.object(subprocess, "run", side_effect=outcomes) as run, mock.patch.object(clickhouse.time, "sleep"):  # fmt: skip
+                if isinstance(want, list):
+                    self.assertEqual(clickhouse.query("SELECT 1"), want)
+                else:
+                    with self.assertRaises(RuntimeError) as e:
+                        clickhouse.query("SELECT 1")
+                    self.assertEqual(str(e.exception), f"ClickHouse query failed, {want}")  # fmt: skip
+                self.assertEqual(run.call_count, min(len(outcomes), 1 if outcomes[0] is bad else 3))  # fmt: skip
+                self.assertEqual(run.call_args.kwargs["timeout"], clickhouse.TIMEOUT)
 
 
 class TestBuildDataset(unittest.TestCase):
@@ -1206,6 +1232,7 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "diffstat_and_diff", return_value=("", "")),
             mock.patch.object(bd, "changed_files", return_value=[]),
             mock.patch.object(bd, "candidates_at", return_value=[]),
+            mock.patch.object(bd, "head_created", return_value={}),
             contextlib.redirect_stdout(io.StringIO()) as stdout,
         ):  # fmt: skip
             out = Path(d)
@@ -1236,6 +1263,10 @@ class TestBuildDataset(unittest.TestCase):
             got = bd.pr_bases("h", ["b_gone", "b_later", "b_push"])
             self.assertEqual(got, {"base": "b_push", "merge_base": "b_push", "main_base": "m", "base_source": "ci"})  # fmt: skip
             self.assertEqual(bd.pr_bases("h", ["b_later"])["merge_base"], "b_old")  # type: ignore[index]
+            # b_child is a later ghstack base on top of b_push, so it merge-bases at b_push too; b_push wins in either order.
+            merge_bases[("b_child", "h")] = "b_push"
+            for order in (["b_child", "b_push"], ["b_push", "b_child"]):
+                self.assertEqual(bd.pr_bases("h", order)["base"], "b_push")  # type: ignore[index]
             main = {"base": "m", "merge_base": "m", "main_base": "m", "base_source": "main"}  # fmt: skip
             self.assertEqual(bd.pr_bases("h", ["b_gone"]), main)
             self.assertEqual(bd.pr_bases("h", []), main)
