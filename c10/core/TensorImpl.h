@@ -258,9 +258,9 @@ struct C10_API FakeTensorMode {
   // so read this through PyInterpreterVTable::allow_non_fake_inputs().
   bool allow_non_fake_inputs_ = false;
 
-  // Whether reading a fake's mutable data pointer only warns (true) or throws
-  // (false); Python's _allow_unsafe_data_ptr_access, exposed under that name.
-  // See at::init_cpp_fake.
+  // Whether reading the mutable data pointer of a fake made afterwards only
+  // warns (true) or throws (false); a storage's marking is never relaxed.
+  // Python's _allow_unsafe_data_ptr_access, exposed under that name.
   bool allow_unsafe_data_ptr_access_ = true;
 
   FakeTensorMode(
@@ -321,9 +321,9 @@ struct C10_API ExtraMeta {
   };
   std::unordered_map<std::string, FakeSymMemo> fake_sym_memos_;
   // The item memo of a C++ fake (Python FakeTensor.item_memo); see
-  // TensorImpl::set_fake_item_memo. Held as a Python object, since item() can
-  // return a SymFloat or SymBool as well as a SymInt. Like fake_sym_memos_, the
-  // copy constructor does not copy it.
+  // TensorImpl::set_fake_item_memo. Held as the Python object that was set, so
+  // that every read returns that same object, as SymNumberMemoDescriptor does.
+  // Like fake_sym_memos_, the copy constructor does not copy it.
   struct FakeItemMemo {
     std::shared_ptr<c10::SafePyObject> value;
     std::optional<uint32_t> version;
@@ -1604,15 +1604,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       uint64_t epoch);
 
   // Records memo as this fake's item memo, set in fake mode epoch `epoch`, or
-  // kept across epochs if `epoch` is nullopt (a backed SymFloat, see
-  // SymNumberMemoDescriptor). Like set_fake_sym_memo, safe to call
-  // concurrently.
+  // kept across epochs if `epoch` is nullopt. The caller decides which memos
+  // are kept (a backed SymFloat, see SymNumberMemoDescriptor); this does not
+  // check. Like set_fake_sym_memo, safe to call concurrently.
   void set_fake_item_memo(
       std::shared_ptr<c10::SafePyObject> memo,
       std::optional<uint64_t> epoch);
 
-  // The item memo, or nullptr if there is none or it is stale, like
-  // fake_sym_memo. A stale memo is dropped.
+  // The item memo, or nullptr if there is none or it is stale: the tensor was
+  // mutated since, or it was set in an epoch other than `epoch` (a memo kept
+  // across epochs is only dropped on mutation). A stale memo is dropped.
   std::shared_ptr<c10::SafePyObject> fake_item_memo(uint64_t epoch);
 
   // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.

@@ -294,6 +294,8 @@ TEST(TestNative, MarkFakeStorage) {
   auto make_fake = [&]() {
     auto t = at::empty({2}, at::device(at::kMeta));
     at::init_cpp_fake(t.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
+    EXPECT_EQ(t.unsafeGetTensorImpl()->fake_tensor_mode(), mode);
+    EXPECT_EQ(t.device(), c10::Device(c10::kCPU));
     return t;
   };
   auto expect_throws = [](const at::Tensor& t) {
@@ -317,20 +319,27 @@ TEST(TestNative, MarkFakeStorage) {
   c10::WarningUtils::WarningHandlerGuard handler_guard(&handler);
   c10::WarningUtils::WarnAlways warn_always;
 
+  auto expect_warns = [&](const at::Tensor& t) {
+    auto count = handler.messages.size();
+    t.mutable_data_ptr();
+    ASSERT_EQ(handler.messages.size(), count + 1);
+    const auto& msg = handler.messages.back();
+    EXPECT_NE(
+        msg.find("Accessing the data pointer of FakeTensor"),
+        std::string::npos);
+  };
+
   // Reading the data pointer of a fake of a default mode warns
   auto fake = make_fake();
-  fake.mutable_data_ptr();
-  ASSERT_EQ(handler.messages.size(), 1);
-  EXPECT_NE(
-      handler.messages[0].find("Accessing the data pointer of FakeTensor"),
-      std::string::npos);
+  expect_warns(fake);
 
-  // Disallowing unsafe access makes fakes made afterwards throw, and a new fake
-  // sharing an earlier fake's storage, as a view of it, makes that throw too
+  // Disallowing unsafe access makes fakes made afterwards throw. A view made
+  // within a kernel does not mark the shared storage again, but a new fake of
+  // it, as the fake fallback makes for a view op's output, does.
   mode->allow_unsafe_data_ptr_access_ = false;
   expect_throws(make_fake());
-  fake.mutable_data_ptr();
-  EXPECT_EQ(handler.messages.size(), 2);
+  expect_warns(fake);
+  expect_warns(at::native::as_strided_tensorimpl(fake, {1}, {1}));
   auto alias = at::empty({0}, at::device(at::kMeta));
   alias.unsafeGetTensorImpl()->set_storage_keep_dtype(fake.storage());
   at::init_cpp_fake(alias.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
