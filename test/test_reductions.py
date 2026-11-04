@@ -1408,7 +1408,9 @@ class TestReductionsDevice(TestCase):
     def test_sum_all(self, device, dtype) -> None:
         def check_sum_all(tensor: torch.Tensor) -> None:
             pylist = tensor.reshape(-1).tolist()
-            self.assertEqual(tensor.sum(), sum(pylist))
+            # Dynamo would trace the reference sum over each of up to 200000
+            # Python floats, which takes ~17 min under dynamo_wrapped.
+            self.assertEqual(tensor.sum(), torch._dynamo.disable(sum)(pylist))
 
         if dtype != torch.bool:
             check_sum_all(torch.tensor([1, 2, 3, 4, 5], dtype=dtype, device=device))
