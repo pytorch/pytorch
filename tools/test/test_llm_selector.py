@@ -1,0 +1,167 @@
+from __future__ import annotations
+
+import io
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+from tools.testing.llm_selector.selection import needs_run_all, Selection
+
+
+sys.path.remove(str(REPO_ROOT))
+
+
+class TestSelection(unittest.TestCase):
+    def test_load_malformed_file(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "sel.json"
+            stderr = io.StringIO()
+            with mock.patch("sys.stderr", stderr):
+                self.assertIsNone(Selection.load(p))
+            self.assertEqual(stderr.getvalue(), "")
+            for sel in (
+                Selection(candidates={"test_nn"}),
+                Selection(run_all=True),
+                Selection(run_all=True, error="e"),
+            ):
+                p.write_text(json.dumps(sel.to_json()))
+                self.assertEqual(Selection.load(p), sel)
+            valid = Selection(candidates={"test_nn"}).to_json()
+            # Without candidates, a selection would skip every file it does not name.
+            bad = [
+                {**valid, "version": 2},
+                {**valid, "version": True},
+                {**valid, "files": "test_nn"},
+                {**valid, "files": [1]},
+                {**valid, "run_all": "false"},
+                {**valid, "enforce": "false"},
+                {**valid, "reason": 1},
+                {**valid, "candidates": [1]},
+                {**valid, "candidates": None},
+                {**valid, "error": 1},
+            ]
+            bad += [
+                {k: v for k, v in valid.items() if k != key}
+                for key in ("version", "candidates", "enforce", "error")
+            ]
+            for text in (
+                "{",
+                '{"sweeps": []}',
+                "[]",
+                "[" * 100_000,
+                *map(json.dumps, bad),
+            ):
+                p.write_text(text)
+                stderr = io.StringIO()
+                with mock.patch("sys.stderr", stderr):
+                    self.assertIsNone(Selection.load(p), text[:100])
+                self.assertTrue(stderr.getvalue().startswith("::warning::"), text[:100])
+            sel = Selection({"test_nn"}, candidates={"test_nn", "test_ops"})
+            p.write_text(json.dumps(sel.to_json()))
+            self.assertEqual(Selection.load(p), sel)
+
+    def test_run_all_patterns(self) -> None:
+        for f in [
+            ".ci/docker/common/install_cuda.sh",
+            ".ci/docker/requirements-ci.txt",
+            ".ci/docker/build.sh",
+            ".ci/docker/ci_commit_pins/triton.txt",
+            ".ci/docker/ubuntu/Dockerfile",
+            ".ci/pytorch/test.sh",
+            ".ci/pytorch/multigpu-test.sh",
+            ".ci/pytorch/win-test.sh",
+            ".ci/pytorch/macos-test.sh",
+            ".ci/pytorch/macos-common.sh",
+            ".ci/pytorch/build.sh",
+            ".ci/pytorch/common.sh",
+            ".ci/pytorch/common-build.sh",
+            ".ci/pytorch/common_utils.sh",
+            ".ci/pytorch/torch_trace.sh",
+            ".ci/pytorch/win-build.sh",
+            ".ci/pytorch/macos-build.sh",
+            ".ci/pytorch/rocm_utils.sh",
+            ".ci/pytorch/win-test-helpers/build_pytorch.bat",
+            ".github/ci_commit_pins/torch_tpu.txt",
+            "tools/stats/export_test_times.py",
+            ".ci/pytorch/win-test-helpers/setup_pytorch_env.bat",
+            ".ci/pytorch/win-test-helpers/test_python_shard.bat",
+            ".ci/pytorch/win-test-helpers/installation-helpers/activate_miniconda3.bat",
+            ".github/workflows/_linux-test.yml",
+            ".github/workflows/_win-test.yml",
+            ".github/workflows/_mac-test.yml",
+            ".github/workflows/_rocm-test.yml",
+            ".github/workflows/_rocm-test-no-dind.yml",
+            ".github/workflows/_xpu-test.yml",
+            ".github/workflows/_s390x-test.yml",
+            ".github/workflows/_tpu-test.yml",
+            ".github/workflows/_linux-build.yml",
+            ".github/workflows/_win-build.yml",
+            ".github/workflows/_mac-build.yml",
+            ".github/workflows/_s390x-build.yml",
+            ".github/actions/setup-rocm/action.yml",
+            ".github/actions/setup-win/action.yml",
+            ".github/actions/setup-xpu/action.yml",
+            ".github/actions/filter-test-configs/action.yml",
+            ".github/actions/download-td-artifacts/action.yml",
+            ".github/scripts/filter_test_configs.py",
+            ".github/ci_commit_pins/vision.txt",
+            ".github/ci_commit_pins/audio.txt",
+            ".github/ci_commit_pins/spmd_types.txt",
+            "torch/testing/_internal/torchci/plugin.py",
+            "test/run_test.py",
+            "test/conftest.py",
+            "test/torch_np/conftest.py",
+            "test/slow_tests.json",
+            "torch/testing/_internal/dynamo_test_failures.py",
+            "test/pytest_shard_custom.py",
+            "pytest.ini",
+            "torch/testing/_internal/common_utils.py",
+            "torch/testing/_internal/common_device_type.py",
+            "torch/testing/_internal/common_dtype.py",
+            "torch/testing/_internal/common_cuda.py",
+            "torch/testing/_comparison.py",
+            "scripts/onnx/test.sh",
+            ".ci/docker/triton_version.txt",
+            ".ci/docker/triton_xpu_version.txt",
+            ".ci/pytorch/numba-cuda-13.patch",
+            ".ci/pytorch/win-test-helpers/test_python_jit_legacy.bat",
+            "tools/testing/discover_tests.py",
+            "tools/stats/import_test_stats.py",
+            "tools/stats/upload_metrics.py",
+            "test/cpp_extensions/open_registration_extension/torch_openreg/pyproject.toml",
+        ]:
+            self.assertTrue(needs_run_all([f]), f)
+            self.assertTrue(
+                (REPO_ROOT / f).exists(),
+                f"{f} is gone: update selection.RUN_ALL_PATTERNS",
+            )
+        # pytest reads the first of these it finds from the test's directory up.
+        for f in [
+            "conftest.py",
+            "test/pytest.ini",
+            "test/.pytest.ini",
+            "test/dynamo/pyproject.toml",
+            "test/tox.ini",
+            "test/setup.cfg",
+        ]:
+            self.assertTrue(needs_run_all([f]), f)
+        for f in [
+            "docs/source/index.rst",
+            "test/data/setup.cfg.in",
+            ".github/workflows/lint.yml",
+            ".github/workflows/_binary-build-linux.yml",
+            ".github/workflows/docs-build.yml",
+            ".github/actions/setup-linux/action.yml",
+            ".github/ci_commit_pins/vllm.txt",
+        ]:
+            self.assertFalse(needs_run_all([f]), f)
+
+
+if __name__ == "__main__":
+    unittest.main()
