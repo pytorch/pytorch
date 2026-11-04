@@ -402,6 +402,12 @@ class TestUtils(TestCase):
         self.assertIsInstance(parsed, dict)
         self.assertNotIn("ignore_logging_functions", parsed)
 
+    def test_ordered_hook_fast_unpack(self):
+        from torch._dynamo.utils import _unpack_fast_types
+        from torch._dynamo.variables import NNModuleHooksOrderedDictVariable
+
+        self.assertIn(NNModuleHooksOrderedDictVariable, _unpack_fast_types())
+
     @parametrize("mapping_type", [dict, OrderedDict])
     def test_enumerate_items_with_dict_position_snapshots(self, mapping_type):
         # VariableBuilder wraps a dict by consuming this generator lazily inside

@@ -91,6 +91,7 @@ from ..utils import (
     is_pybind11_enum_member,
     is_torch_class,
     istype,
+    iter_mro_static_dicts,
     list_methods,
     namedtuple_fields,
     no_keywords,
@@ -121,7 +122,13 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .dicts import ConstDictVariable, OrderedDictVariable, pyanydict_check
+from .dicts import (
+    ConstDictVariable,
+    NNModuleHooksDictVariable,
+    NNModuleHooksOrderedDictVariable,
+    OrderedDictVariable,
+    pyanydict_check,
+)
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
@@ -138,6 +145,7 @@ from .object_protocol import (
     type_disallows_instantiation,
     type_implements_nb_slot,
     type_implements_sq_inplace_concat,
+    type_is_immutable,
 )
 from .sets import FrozensetVariable, SetVariable
 
@@ -1179,6 +1187,79 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return variables.LambdaVariable(fake_cross_entropy_loss)
 
+    # tp_new slot inheritance (CPython slot_tp_new): a subtype's __new__
+    # slot is whatever the closest ancestor that actually *declares*
+    # __new__ in its own __dict__ provides -- not necessarily an immediate
+    # base. This finds that ancestor so callers can delegate to its own
+    # tp_new_impl instead of re-deriving per-type arg-handling rules here.
+    _new_slot_owners_with_choke_points: set[type] = {
+        dict,
+        tuple,
+        set,
+        frozenset,
+        list,
+    }
+
+    @staticmethod
+    def new_slot_owner(cls: type) -> type:
+        for klass in cls.__mro__:
+            if "__new__" in klass.__dict__:
+                return klass
+        raise AssertionError(f"no class in the MRO of {cls} declares __new__")
+
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # tp_new_impl is reachable two ways: (1) the explicit `__new__`
+        # branch in call_method below, which already gates on
+        # is_supported_new_method, and (2) the generic TPSLOT/slotdef
+        # dispatch (base.py's SLOTDEFS table maps "__new__" to
+        # tp_new_impl unconditionally for every VariableTracker, e.g. via
+        # `cls.__new__(cls, ...)` resolving to a BoundBuiltinMethodVariable
+        # whose call_function forwards to call_method("__new__", ...)).
+        # Re-check here so unsupported C-level __new__ methods (e.g. a
+        # pybind11 extension type's own __new__) gracefully graph-break
+        # instead of reaching track_new_user_defined_object with a
+        # base_cls whose __new__ get_example_value cannot safely invoke.
+        if not UserDefinedClassVariable.is_supported_new_method(self.value.__new__):
+            unimplemented(
+                gb_type="unsupported __new__ method",
+                context=f"tp_new_impl for {self.value}",
+                explanation=(
+                    f"Dynamo does not know how to construct `{self.value}` "
+                    f"via `{self.value.__new__}`, which is not a supported "
+                    "constructor (not a plain Python __new__, and not one "
+                    "of the recognized C-level __new__ methods)."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if self.value is collections.OrderedDict:
+            return OrderedDictVariable({}, mutation_type=ValueMutationNew())
+        owner = self.new_slot_owner(self.value)
+        if owner in self._new_slot_owners_with_choke_points:
+            # Delegate to the VariableTracker that already implements this
+            # type's real tp_new (arg handling + track_new_user_defined_object
+            # wiring), instead of re-deriving the same rules here.
+            owner_vt = VariableTracker.build(tx, owner)
+            return owner_vt.tp_new_impl(tx, args, kwargs)
+        # Remaining owners have no dedicated choke-point VT. Some C-level
+        # tp_new functions (collections.deque.__new__,
+        # types.SimpleNamespace.__new__) ignore extra args -- only the type
+        # arg matters. Pass init_args=[] for those so reconstruction emits
+        # base_cls.__new__(cls) without unreconstructable args (e.g.
+        # generators). Everything else (object.__new__, BaseException
+        # subclasses, structseq classes) uses the extra args.
+        if owner in (collections.deque, types.SimpleNamespace):
+            init_args: list[VariableTracker] = []
+        else:
+            init_args = list(args[1:])
+        return tx.output.side_effects.track_new_user_defined_object(
+            self, args[0], init_args, tx=tx
+        )
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -1268,34 +1349,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and name == "__enter__"
         ):
             return args[0].enter(tx)
-        elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
-            self.value.__new__
-        ):
-            if self.value is collections.OrderedDict:
-                # Exact OrderedDict: represent as a bare OrderedDictVariable,
-                # mirroring dict.__new__(dict) -> ConstDictVariable.
-                return OrderedDictVariable({}, mutation_type=ValueMutationNew())
-            # Some C-level tp_new functions (dict.__new__, set.__new__) ignore
-            # extra args — only the type arg matters.  Pass init_args=[] for
-            # those so reconstruction emits base_cls.__new__(cls) without
-            # unreconstructable args (e.g. generators).  Other tp_new functions
-            # (tuple.__new__, BaseException.__new__) use the extra args.
-            new_fn = self.value.__new__
-            if new_fn in (
-                dict.__new__,
-                set.__new__,
-                collections.deque.__new__,
-                types.SimpleNamespace.__new__,
-            ):
-                init_args: list[VariableTracker] = []
-            else:
-                init_args = list(args[1:])
-            return tx.output.side_effects.track_new_user_defined_object(
-                self,
-                args[0],
-                init_args,
-                tx=tx,
-            )
         elif name == "__setattr__" and self.ban_mutation:
             unimplemented(
                 gb_type="Class attribute mutation when the __dict__ was already materialized",
@@ -3205,12 +3258,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         from .. import trace_rules
         from . import UserMethodVariable
         from .builder import VariableBuilder
-        from .constant import ConstantVariable
 
         method = self._maybe_get_baseclass_method(name)
         if method is not None:
             if method is object.__init__:
-                return ConstantVariable.create(None)
+                return VariableTracker.tp_init_impl(self, tx, args, kwargs)
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 check_setattr_args(tx, args, kwargs)
@@ -3267,6 +3319,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     return result
 
             # Other non-slot methods use the base VT; slots preserve subclass semantics.
+            # Comparisons use the UserDefined* slot implementation rather than `list_cmp`,
+            # which would trace tensor elements while dispatching a base method.
             if (
                 self._base_methods is not None
                 and method in self._base_methods
@@ -3342,7 +3396,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return super().tp_init_impl(tx, args, kwargs)
         method = self._maybe_get_baseclass_method("__init__")
         if method is object.__init__:
-            return variables.ConstantVariable.create(None)
+            return VariableTracker.tp_init_impl(self, tx, args, kwargs)
         res = self._vectorcall_method(tx, "__init__", args, kwargs)
         if not res.is_constant_none():
             raise_type_error(
@@ -3923,6 +3977,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return result
 
         # Step 7: AttributeError.
+        if (
+            self.source
+            and not self._object_has_getattribute
+            and not tx.output.side_effects.has_pending_mutation_of_attr(self, name)
+        ):
+            # Absence can change when a mutable class gains the attribute.
+            install_guard(
+                self.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
+            )
         raise_observed_exception(
             AttributeError,
             tx,
@@ -3956,6 +4021,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return variables.UserMethodVariable(
                     # Keep this off the builder so the instance-bound function
                     # guard does not disable recursive module dictionary tags.
+                    # See `test_nn_module_tag_overridden_getattr_safe`.
                     VariableBuilder.create_internal_user_function(
                         getattribute_fn,
                         source=new_source and AttrSource(new_source, "__func__"),
@@ -4088,12 +4154,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if isinstance(type_attr, types.MethodDescriptorType):
                 method = self.lookup_method_descriptor(type_attr)
                 if self.cls_source:
-                    # CallMethodVariable also specializes this C-method dispatch.
-                    install_guard(
-                        self.get_source_by_walking_mro(tx, name).make_guard(
-                            GuardBuilder.FUNCTION_MATCH
-                        )
+                    # Keep shadowing/MRO guards even when the declaring builtin is immutable.
+                    descriptor_source = self.get_source_by_walking_mro(tx, name)
+                    owner = next(
+                        owner
+                        for owner, namespace in iter_mro_static_dicts(type(self.value))
+                        if name in namespace
                     )
+                    if not type_is_immutable(owner) and not any(
+                        guard.inner_create_fn() is GuardBuilder.FUNCTION_MATCH
+                        for guard in tx.output.guards.get_guards_for_source(
+                            descriptor_source
+                        )
+                    ):
+                        install_guard(
+                            descriptor_source.make_guard(GuardBuilder.FUNCTION_MATCH)
+                        )
                 if method is not None:
                     return variables.BoundBuiltinMethodVariable(
                         type_attr, self, source=source
@@ -5137,7 +5213,9 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
     def __init__(
         self,
         value: object,
-        items: dict[VariableTracker, VariableTracker] | None = None,
+        items: dict[VariableTracker, VariableTracker]
+        | dict[HashableTracker, VariableTracker]
+        | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value, items=items if items is not None else {}, **kwargs)
@@ -5229,6 +5307,18 @@ class UserDefinedOrderedDictVariable(UserDefinedDictVariable, OrderedDictVariabl
         *UserDefinedDictVariable._nonvar_fields,
         *OrderedDictVariable._nonvar_fields,
     }
+
+
+class UserDefinedNNModuleHooksDictVariable(
+    UserDefinedDictVariable, NNModuleHooksDictVariable
+):
+    """Preserve subclass protocols while deferring local hook-ID specialization."""
+
+
+class UserDefinedNNModuleHooksOrderedDictVariable(
+    UserDefinedOrderedDictVariable, NNModuleHooksOrderedDictVariable
+):
+    """Ordered hook storage with the subclass's attributes and overrides."""
 
 
 # TODO: move to dicts.py alongside ConstDictVariable.
@@ -5573,8 +5663,8 @@ class UserDefinedFrozensetVariable(UserDefinedObjectVariable, FrozensetVariable)
             if init_args:
                 arg = init_args[0]
                 if isinstance(arg, (SetVariable, ConstDictVariable)):
-                    if isinstance(arg, variables.NNModuleHooksDictVariable):
-                        arg.install_key_escape_guard()
+                    if isinstance(arg, ConstDictVariable):
+                        arg.materialize_keys()
                     items = list(arg.items.keys())
                 else:
                     items = unpack_iterable(tx, arg)

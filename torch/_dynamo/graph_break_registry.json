@@ -1725,16 +1725,6 @@
       "Hints": []
     }
   ],
-  "GB9539": [
-    {
-      "Gb_type": "frozendict subclass allocation",
-      "Context": "frozendict.__new__",
-      "Explanation": "Dynamo does not yet support allocating frozendict subclasses.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0105": [
     {
       "Gb_type": "Tensor.numpy() with trace_numpy=False",
@@ -2440,6 +2430,16 @@
       "Hints": []
     }
   ],
+  "GB4188": [
+    {
+      "Gb_type": "unsupported __new__ method",
+      "Context": "tp_new_impl for {self.value}",
+      "Explanation": "Dynamo does not know how to construct `{self.value}` via `{self.value.__new__}`, which is not a supported constructor (not a plain Python __new__, and not one of the recognized C-level __new__ methods).",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0142": [
     {
       "Gb_type": "Unsupported context manager",
@@ -2542,16 +2542,6 @@
       "Hints": [
         "Avoid calling `{self.debug_repr()}` in your code.",
         "Please report an issue to PyTorch."
-      ]
-    }
-  ],
-  "GB9100": [
-    {
-      "Gb_type": "frozendict operators",
-      "Context": "frozendict",
-      "Explanation": "Dynamo does not yet support these frozendict operators.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -4044,6 +4034,28 @@
       "Hints": []
     }
   ],
+  "GB3320": [
+    {
+      "Gb_type": "Builtin method keys with custom metaclass equality",
+      "Context": "builtin method key hashing",
+      "Explanation": "Dynamo cannot trace custom metaclass equality against builtin method keys.",
+      "Hints": [
+        "Avoid mixing class keys with custom equality and builtin method keys.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2418": [
+    {
+      "Gb_type": "Builtin method keys with custom equality and local receivers",
+      "Context": "builtin method key hashing",
+      "Explanation": "Custom key equality can observe hash collisions with builtin methods, but a locally created receiver cannot be identity-guarded.",
+      "Hints": [
+        "Avoid mixing keys with custom equality and methods of locally created containers.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0223": [
     {
       "Gb_type": "torch.compile call with > 1 args",
@@ -4230,16 +4242,6 @@
       "Hints": []
     }
   ],
-  "GB5370": [
-    {
-      "Gb_type": "Unsupported dictionary union storage",
-      "Context": "{type(self)}, {type(other)}",
-      "Explanation": "Dynamo cannot access this dictionary's stored keys and values.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0233": [
     {
       "Gb_type": "Attempted to use strided NestedTensor",
@@ -4317,17 +4319,6 @@
       ]
     }
   ],
-  "GB8811": [
-    {
-      "Gb_type": "OrderedDict storage differs from linked keys",
-      "Context": "OrderedDict input snapshot",
-      "Explanation": "Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
-      "Hints": [
-        "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
-        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
-      ]
-    }
-  ],
   "GB0238": [
     {
       "Gb_type": "Input marked with `pytree.register_constant` constructed in the `torch.compile` region",
@@ -4368,16 +4359,6 @@
         "* `torch.utils._pytree.register_constant`\n",
         "* `torch.utils._pytree.register_dataclass`\n",
         "* `torch.utils._pytree.register_pytree_node`",
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB2418": [
-    {
-      "Gb_type": "Builtin method keys with custom equality and local receivers",
-      "Context": "builtin method key hashing",
-      "Explanation": "Custom key equality can observe runtime method hash collisions, but a locally created receiver has no guardable identity.",
-      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -5251,6 +5232,26 @@
       ]
     }
   ],
+  "GB1586": [
+    {
+      "Gb_type": "__init__ called through a builtin class",
+      "Context": "{cls.__name__}.__init__ on {obj}",
+      "Explanation": "Dynamo does not support {cls.__name__}.__init__ on an instance of the subclass {obj.python_type_name()}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3832": [
+    {
+      "Gb_type": "bytearray.__init__ with non-constant arguments",
+      "Context": "bytearray.__init__ {self}",
+      "Explanation": "Dynamo only models bytearray.__init__ with constant arguments.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0285": [
     {
       "Gb_type": "unsupported arguments to torch.accelerator.current_stream",
@@ -5477,6 +5478,24 @@
       ]
     }
   ],
+  "GB8503": [
+    {
+      "Gb_type": "missing tp_new",
+      "Context": "tp_new_impl not implemented for {klass.__name__}",
+      "Explanation": "Dynamo does not know how to trace __new__ on `{self.debug_repr()}`.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "missing tp_new",
+      "Context": "tp_new_impl not implemented for {self.python_type_name()}",
+      "Explanation": "Dynamo does not know how to trace __new__ on `{self.debug_repr()}`.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
   "GB0298": [
     {
       "Gb_type": "attempted to trace torch._numpy.random function with config.use_numpy_random_stream=True",
@@ -5556,16 +5575,6 @@
       "Explanation": "P2P compilation is disabled.",
       "Hints": [
         "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable."
-      ]
-    }
-  ],
-  "GB5295": [
-    {
-      "Gb_type": "builtin method hash with unstable receiver",
-      "Context": "{self}",
-      "Explanation": "Dynamo cannot compute the hash of a builtin method without a stable receiver identity.",
-      "Hints": [
-        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
       ]
     }
   ],
@@ -5710,16 +5719,6 @@
       "Hints": [
         "Avoid comparing id() or hash() of objects created inside ",
         "the compiled region against other values.",
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB1160": [
-    {
-      "Gb_type": "Unsupported dictionary view owner",
-      "Context": "str(type(dict_vt))",
-      "Explanation": "Dynamo cannot access this dictionary view's owner storage.",
-      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -6073,16 +6072,6 @@
       "Explanation": "associative_scan() operator doesn't support zero-sized tensors during tracing.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    }
-  ],
-  "GB3320": [
-    {
-      "Gb_type": "Builtin method keys with custom metaclass equality",
-      "Context": "builtin method key hashing",
-      "Explanation": "Dynamo cannot trace custom metaclass equality against builtin method keys.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -6974,16 +6963,6 @@
       ]
     }
   ],
-  "GB1146": [
-    {
-      "Gb_type": "frozendict subclass methods",
-      "Context": "str(type(args[0]))",
-      "Explanation": "Dynamo cannot access this dictionary's stored keys and values.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0370": [
     {
       "Gb_type": "record_function escaped from compiled region",
@@ -7166,13 +7145,64 @@
       ]
     }
   ],
-  "GB9291": [
+  "GB8811": [
     {
-      "Gb_type": "Preexisting frozendict with user-defined hashes",
-      "Context": "self.python_type_name()",
-      "Explanation": "The builtin may have cached a hash before user-defined keys or values changed. Dynamo cannot inspect that cache.",
+      "Gb_type": "OrderedDict storage differs from linked keys",
+      "Context": "OrderedDict input snapshot",
+      "Explanation": "Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
       "Hints": [
-        "Construct the frozendict inside the compiled function."
+        "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB5295": [
+    {
+      "Gb_type": "builtin method hash with unstable receiver",
+      "Context": "{self}",
+      "Explanation": "Dynamo cannot compute the hash of a builtin method without a stable receiver identity.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB9539": [
+    {
+      "Gb_type": "frozendict subclass allocation",
+      "Context": "frozendict.__new__",
+      "Explanation": "Dynamo does not yet support allocating frozendict subclasses.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9100": [
+    {
+      "Gb_type": "frozendict operators",
+      "Context": "frozendict",
+      "Explanation": "Dynamo does not yet support these frozendict operators.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1160": [
+    {
+      "Gb_type": "Unsupported dictionary view owner",
+      "Context": "str(type(dict_vt))",
+      "Explanation": "Dynamo cannot access this dictionary view's owner storage.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1146": [
+    {
+      "Gb_type": "frozendict subclass methods",
+      "Context": "str(type(args[0]))",
+      "Explanation": "Dynamo cannot access this dictionary's stored keys and values.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -7193,6 +7223,26 @@
       "Explanation": "Reconstruction cannot preserve stored key hashes or a cached container hash involving user-defined hash functions.",
       "Hints": [
         "Keep this frozendict inside the compiled region."
+      ]
+    }
+  ],
+  "GB5370": [
+    {
+      "Gb_type": "Unsupported dictionary union storage",
+      "Context": "{type(self)}, {type(other)}",
+      "Explanation": "Dynamo cannot access this dictionary's stored keys and values.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9291": [
+    {
+      "Gb_type": "Preexisting frozendict with user-defined hashes",
+      "Context": "self.python_type_name()",
+      "Explanation": "The builtin may have cached a hash before user-defined keys or values changed. Dynamo cannot inspect that cache.",
+      "Hints": [
+        "Construct the frozendict inside the compiled function."
       ]
     }
   ]
