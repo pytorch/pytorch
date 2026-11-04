@@ -19310,10 +19310,83 @@ class TestDisallowImplicitGradAccumulation(TestCase):
         self.assertIn("torch.autograd.detect_anomaly()", message)
 
     def test_leaf(self, device):
+        allow = torch.autograd.graph.allow_implicit_grad_accumulation
         a = torch.randn(3, device=device, requires_grad=True)
         msg = r"leaf tensor of shape \[3\] and dtype Float"
         with self.assertRaisesRegex(RuntimeError, msg):
             (a * 2 + a * 3).sum().backward(disallow_implicit_grad_accumulation=True)
+        # A leaf has one output; a bad index raises and allows nothing.
+        node = torch.autograd.graph.get_gradient_edge(a).node
+        with self.assertRaisesRegex(RuntimeError, "AccumulateGrad has no output 1"):
+            allow(torch.autograd.graph.GradientEdge(node, 1))
+        with self.assertRaisesRegex(RuntimeError, msg):
+            (a * 2 + a * 3).sum().backward(disallow_implicit_grad_accumulation=True)
+        a.grad = None
+        allow(a)
+        (a * 2 + a * 3).sum().backward(disallow_implicit_grad_accumulation=True)
+        self.assertEqual(a.grad, torch.full_like(a, 5))
+
+    def test_allow(self, device):
+        allow = torch.autograd.graph.allow_implicit_grad_accumulation
+        a = torch.randn(3, device=device, requires_grad=True)
+
+        def check(allow_fn):
+            x = a.sin()
+            allow_fn(x)
+            (x * 2 + x * 3).sum().backward(disallow_implicit_grad_accumulation=True)
+
+        check(allow)
+        check(lambda x: allow(torch.autograd.graph.get_gradient_edge(x)))
+        check(lambda x: allow(x.grad_fn))
+        x = a.sin()
+        edge = torch.autograd.graph.GradientEdge(x.grad_fn, 1)
+        with self.assertRaisesRegex(RuntimeError, "has no output 1"):
+            allow(edge)
+        for output_nr in (2**32, -1):
+            edge = torch.autograd.graph.GradientEdge(x.grad_fn, output_nr)
+            with self.assertRaisesRegex(RuntimeError, f"has no output {output_nr}"):
+                allow(edge)
+        # Allowing a tensor allows its current node; an in-place op makes a new one.
+        x = a.sin()
+        allow(x)
+        x.mul_(2)
+        with self.assertRaisesRegex(RuntimeError, "MulBackward0"):
+            (x * 2 + x * 3).sum().backward(disallow_implicit_grad_accumulation=True)
+
+    def test_allow_region(self, device):
+        allow = torch.autograd.graph.allow_implicit_grad_accumulation
+        a = torch.randn(3, device=device, requires_grad=True)
+        x = a.sin()
+        with torch.autograd.graph.node_creation_hook(allow):
+            h = x.cos()
+            out = h * h
+        out.sum().backward(disallow_implicit_grad_accumulation=True)
+        # x's node was created outside the region, so its sum is still checked.
+        x = a.sin()
+        with torch.autograd.graph.node_creation_hook(allow):
+            out = x * x
+        with self.assertRaisesRegex(RuntimeError, "SinBackward0"):
+            out.sum().backward(disallow_implicit_grad_accumulation=True)
+
+    def test_allow_region_cpp_node(self, device):
+        # An op without an autograd kernel gets a C++ fallback node with no
+        # registered Python type; the region form must accept it. Using the
+        # second output also checks that a Node allows all of its outputs.
+        allow = torch.autograd.graph.allow_implicit_grad_accumulation
+        with torch.library._scoped_library("_test_allow_accum", "FRAGMENT") as lib:
+            lib.define("foo(Tensor a) -> (Tensor, Tensor)")
+
+            def foo(a):
+                return a.detach().clone(), a.detach().clone()
+
+            lib.impl("foo", foo, "CompositeExplicitAutograd")
+            a = torch.randn(3, device=device, requires_grad=True)
+            with torch.autograd.graph.node_creation_hook(allow):
+                _, out = torch.ops._test_allow_accum.foo(a)
+            loss = (out * 2 + out * 3).sum()
+            msg = "autograd kernel was not registered"
+            with self.assertWarnsRegex(UserWarning, msg):
+                loss.backward(disallow_implicit_grad_accumulation=True)
 
     def test_no_sum_no_error(self, device):
         a = torch.randn(3, device=device, requires_grad=True)
