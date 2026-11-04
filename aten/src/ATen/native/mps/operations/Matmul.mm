@@ -633,13 +633,7 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
 
 void metal_mm_out(const Tensor& a, const Tensor& b, const Tensor& out) {
   check_mm_shapes(a, b, "metal_mm_out");
-  TORCH_CHECK_VALUE(out.dim() == 2 && out.size(0) == a.size(0) && out.size(1) == b.size(1),
-                    "metal_mm_out: expected out of shape [",
-                    a.size(0),
-                    ", ",
-                    b.size(1),
-                    "], got ",
-                    out.sizes());
+  checkSize("metal_mm_out", TensorArg(out, "out", 3), {a.size(0), b.size(1)});
   const auto scalar_type = out.scalar_type();
   TORCH_CHECK_TYPE(a.scalar_type() == scalar_type && b.scalar_type() == scalar_type,
                    "metal_mm_out: expected matching dtypes, got ",
