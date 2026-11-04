@@ -602,8 +602,9 @@ class TestReportEnablement(TestCase):
 
 @skipIfTorchDynamo("tests run_test.py's scheduling, not the tests it runs")
 class TestSerialFileXdistWorkers(TestCase):
-    """run_test.py runs the non-@serial tests of XDIST_SERIAL_LIST files under
-    xdist only where each worker keeps the per-process isolation it needs."""
+    """run_test.py runs the non-@serial tests of XDIST_SERIAL_FILES under xdist
+    only where each worker keeps the per-process isolation it needs, and
+    XDIST_SERIAL_CPU_LIST files only on CPU-only jobs."""
 
     def workers(
         self,
@@ -720,6 +721,9 @@ class TestSerialFileXdistWorkers(TestCase):
             unittest.mock.patch.object(
                 run_test_module, "read_lastfailed", lambda: lastfailed
             ),
+            unittest.mock.patch.object(
+                run_test_module, "drop_lastfailed", lambda prefix: None
+            ),
             unittest.mock.patch.dict(os.environ, {"NUM_PARALLEL_PROCS": "3"}),
         ):
             ret_code = run_test_module.run_test(test, "test", options)
@@ -739,7 +743,8 @@ class TestSerialFileXdistWorkers(TestCase):
             nodeids,
             ["test/inductor/test_flex_attention.py::TestFlexAttentionCUDA::test_a"],
         )
-        self.assertFalse(continue_through_error)
+        # Keep-going still classifies every failure.
+        self.assertTrue(continue_through_error)
         self.assertNotIn("NUM_PARALLEL_PROCS", env)
 
     def test_xdist_timeout_crash_or_unrecorded_failure_is_not_rerun(self) -> None:
