@@ -25,31 +25,30 @@ def _read_file(path: Path) -> str:
 #   - `RPC failed; curl ...`, a transfer that broke part way;
 #   - `early EOF`, `unexpected disconnect` and `GnuTLS recv error`, the same for a
 #     connection that dropped while git was reading;
-#   - `Connection reset` and `SSL_ERROR_SYSCALL`, but not on the lines that are
-#     about setting up the connection (`SSL_connect`, `in connection to`): a proxy
-#     that resets every handshake would otherwise stall each attempt's 10 to 60 s
-#     wait for a failure that never goes away.
+#   - `SSL_read: Connection reset` and `SSL_read: SSL_ERROR_SYSCALL`, a connection
+#     that was reset while data was being read.
+# Only these read-time signatures are matched. A reset while the connection is
+# being set up (`SSL_connect: Connection reset ... in connection to`, or curl's
+# `Recv failure: Connection reset by peer` from a proxy that refuses the CONNECT)
+# is not retried: it usually never goes away, and each attempt would stall for the
+# 10 to 60 s wait.
 # Everything else fails at once instead of stalling for minutes, e.g. in the
-# `cmake` configure step: a tag that does not exist, HTTP 4xx, no DNS, an
-# unwritable directory. Connect timeouts are not retried either: on a network that
-# silently drops traffic each attempt would wait for the full connect timeout
-# (~2 minutes) before failing.
+# `cmake` configure step: a tag that does not exist, HTTP 4xx other than 429, no
+# DNS, an unwritable directory. Connect timeouts are not retried either: on a
+# network that silently drops traffic each attempt would wait for the full connect
+# timeout (~2 minutes) before failing.
 _TRANSIENT_CLONE_ERROR = re.compile(
     r"unable to handle this request due to load"
     r"|The requested URL returned error: (?:429|5\d\d)"
     r"|RPC failed; (?:HTTP (?:429|5\d\d)|curl)"
     r"|early EOF|unexpected disconnect|GnuTLS recv error"
-    r"|Connection reset|SSL_ERROR_SYSCALL",
+    r"|SSL_read: (?:Connection reset|SSL_ERROR_SYSCALL)",
     re.IGNORECASE,
 )
-_CONNECT_TIME_ERROR = re.compile(r"SSL_connect|in connection to", re.IGNORECASE)
 
 
 def _is_transient_clone_error(stderr: str) -> bool:
-    return any(
-        _TRANSIENT_CLONE_ERROR.search(line) and not _CONNECT_TIME_ERROR.search(line)
-        for line in stderr.splitlines()
-    )
+    return _TRANSIENT_CLONE_ERROR.search(stderr) is not None
 
 
 def _clone(
@@ -71,8 +70,9 @@ def _clone(
     if attempts < 1:
         raise ValueError(f"attempts must be at least 1, got {attempts}")
     for attempt in range(1, attempts + 1):
-        # The message is matched against English text, and git's output must not
-        # fail to decode under the locale's encoding, so force the C locale.
+        # The messages are matched as English text, so force the C locale for git.
+        # errors="replace" keeps non-ASCII output (paths, `remote:` text) from
+        # raising UnicodeDecodeError when it is decoded here.
         result = run(
             cmd,
             cwd=cwd,
