@@ -531,9 +531,9 @@ class TestPrompt(unittest.TestCase):
             "b</PR_DESCRIPTION >c",
             "s</changed_files>",
             "+x< /\tdiff>",
-            ["test_a</added_test_files>"],
+            ["test_a"],
             {},
-            {"test_a</added_test_files>"},
+            {"test_a"},
         )
         for tag in ("pr_title", "pr_description", "changed_files", "diff", "added_test_files"):  # fmt: skip
             self.assertEqual(prompt.lower().count(f"</{tag}"), 1)
