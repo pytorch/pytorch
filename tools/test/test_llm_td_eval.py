@@ -216,22 +216,22 @@ class TestRunEval(unittest.TestCase):
                 contextlib.chdir(data.parent),  # --data is relative to this cwd.
                 mock.patch.object(sys, "argv", argv),
                 mock.patch.object(run_eval, "checkout", return_value="wt") as co,
-                mock.patch.object(run_eval, "query_model", return_value={"type": "result", "is_error": True, "result": "529"}),
+                mock.patch.object(run_eval, "query_model", return_value={"type": "result", "is_error": True, "result": "529"}) as query,
                 mock.patch.object(run_eval.time, "sleep"),
                 mock.patch("sys.stdout", io.StringIO()),
             ):  # fmt: skip
                 run_eval.main()
-            root = co.call_args.args[0]
-            self.assertEqual(root, data.resolve() / "worktrees/t")
+            self.assertEqual(co.call_args.args, (data.resolve() / "worktrees/t", 0, "f" * 40))  # fmt: skip
             r = json.loads((data / "results/t/a.json").read_text())
         self.assertEqual(
             (r["error"], r["transient"], r["agentic"]), ("529", True, True)
         )
-        # The checkout preamble and the tools are sent too.
         prompt = run_eval.sample_prompt(sample, {})
+        self.assertEqual(query.call_args, mock.call(prompt, "m", "medium", checkout="wt"))  # fmt: skip
+        # The checkout preamble and the tools are sent too.
         self.assertEqual(r["prompt_sha"], run_eval.prompt_sha(prompt, True))
         self.assertNotEqual(r["prompt_sha"], run_eval.prompt_sha(prompt))
-        for name in ("AGENTIC_TOOLS", "CHECKOUT_PREAMBLE"):
+        for name in ("SYSTEM_PROMPT", "AGENTIC_TOOLS", "CHECKOUT_PREAMBLE"):
             with mock.patch.object(score, name, "x"):
                 self.assertNotEqual(r["prompt_sha"], run_eval.prompt_sha(prompt, True))
 
@@ -1052,9 +1052,9 @@ class TestScore(unittest.TestCase):
             (data / "results/m/c.json").write_text(json.dumps(result))
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
-                rows = score.score(data, ["a", "b", "c"], ["m", "td"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
+                rows = score.score(data, ["a", "b", "c", "gone"], ["m", "td"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
         self.assertEqual({x["id"] for x in rows}, {"a"})
-        self.assertEqual(err.getvalue(), "dropped 2 of 3 ids with no m result of the current sample, test-times.json, prompt and schema\n")  # fmt: skip
+        self.assertEqual(err.getvalue(), "dropped 2 of 4 ids with no m result of the current sample, test-times.json, prompt and schema\ndropped 1 of 4 ids with no sample\n")  # fmt: skip
 
     def test_score_results_of_another_prompt_are_stale(self) -> None:
         # The prompt carries the sample's diff and each candidate's minutes from test-times.json.
@@ -1107,9 +1107,9 @@ class TestScore(unittest.TestCase):
             tempfile.TemporaryDirectory() as repo,
             mock.patch.dict(os.environ, env, clear=True),
             mock.patch.object(select_tests, "REPO_ROOT", Path(repo)),
-            mock.patch.object(select_tests, "TESTS", ["test_bar", "test_foo"]),
+            mock.patch.object(select_tests, "TESTS", ["test_bar", "test_foo", "test_listed"]),
             mock.patch.object(select_tests, "get_test_times", return_value=times),
-        ):
+        ):  # fmt: skip
             git, test = select_tests.git, Path(repo) / "test"
             git("init", "-q")
             (test / "nn").mkdir(parents=True)
@@ -1117,21 +1117,34 @@ class TestScore(unittest.TestCase):
             (test / "test_bar.py").write_text("")
             git("add", "-A")
             git("commit", "-qm", "base")
+            base = git("rev-parse", "HEAD").strip()
+            # Main, whose TESTS CI reads, added test_listed after the PR's merge base.
+            (test / "test_listed.py").write_text("")
+            git("add", "-A")
+            git("commit", "-qm", "main")
+            main = git("rev-parse", "HEAD").strip()
+            git("checkout", "-q", base)
             git("mv", "test/test_foo.py", "test/nn/test_foo.py")
             (test / "test_new.py").write_text("y = 2\n")
+            (test / "test_listed.py").write_text("z = 3\n")
             (test / "helper.py").write_text("")
             (test / "test_bar.py").write_text("import helper\n")
             git("add", "-A")
             git("commit", "-qm", "head")
-            diffstat, diff = select_tests.diffstat_and_diff("HEAD~1", "HEAD")
+            diffstat, diff = select_tests.diffstat_and_diff(base, "HEAD")
             with contextlib.redirect_stdout(io.StringIO()) as out:
-                select_tests.main(["--title", "t", "--body", "b", "--base", "HEAD~1", "--print-prompt"])  # fmt: skip
-        candidates = ["nn/test_foo", "test_bar", "test_foo", "test_new"]
-        sample = {"title": "t", "body": "b", "diffstat": diffstat, "diff": diff, "candidates": candidates}  # fmt: skip
-        prompt = score.sample_prompt(sample, select_tests.test_minutes(times))
+                select_tests.main(["--title", "t", "--body", "b", "--base", main, "--print-prompt"])  # fmt: skip
+            candidates = ["nn/test_foo", "test_bar", "test_foo", "test_listed", "test_new"]  # fmt: skip
+            sample = {"title": "t", "body": "b", "diffstat": diffstat, "diff": diff, "candidates": candidates, "base": base, "main_base": main}  # fmt: skip
+            minutes = select_tests.test_minutes(times)
+            prompt = score.sample_prompt(sample, minutes)
+            unlisted = score.sample_prompt({**sample, "main_base": None}, minutes)
         self.assertEqual(prompt + "\n", out.getvalue())
         self.assertIn("rename to test/nn/test_foo.py", diff)
+        self.assertIn("b/test/test_listed.py\nnew file mode ", diff)
         self.assertIn("<added_test_files>\nnn/test_foo [0m]\ntest_new [0m]\n</added_test_files>", prompt)  # fmt: skip
+        # Diffed against main_base, which a sample without one defaults to, test_listed is new.
+        self.assertIn("<added_test_files>\nnn/test_foo [0m]\ntest_listed [0m]\ntest_new [0m]\n</added_test_files>", unlisted)  # fmt: skip
 
     def test_test_seconds_skips_non_td_envs(self) -> None:
         times = {
@@ -1412,13 +1425,14 @@ def scratch_repo() -> Iterator[None]:
                 c.cache_clear()
 
 
-def commit_files(files: dict[str, str], *parents: str) -> str:
-    """In a scratch_repo, a commit of a tree holding `files`, so commits of equal files have equal trees."""
+def commit_files(files: dict[str, str], *parents: str, links: dict[str, str] | None = None) -> str:  # fmt: skip
+    """In a scratch_repo, a commit of a tree holding `files` and submodule commits `links`, so commits of equal files have equal trees."""
 
     def piped(args: list[str], stdin: str) -> str:
         return subprocess.run(["git", *args], cwd=bd.REPO, input=stdin, capture_output=True, text=True, check=True).stdout.strip()  # fmt: skip
 
     entries = "".join(f"100644 blob {piped(['hash-object', '-w', '--stdin'], v)}\t{k}\n" for k, v in sorted(files.items()))  # fmt: skip
+    entries += "".join(f"160000 commit {v}\t{k}\n" for k, v in sorted((links or {}).items()))  # fmt: skip
     return bd.git("commit-tree", piped(["mktree"], entries), *(a for p in parents for a in ("-p", p)), "-m", "c").strip()  # fmt: skip
 
 
@@ -1691,15 +1705,31 @@ class TestBuildDataset(unittest.TestCase):
 
     def test_below_ignores_diff_config(self) -> None:
         # B has O's change but is not its descendant, so only the reverse-applied patch finds it.
+        # O's two hunks are five lines apart, and it bumps a submodule.
+        lines = [f"{i}\n" for i in range(20)]
+        changed = [*lines[:3], "o\n", *lines[4:15], "o\n", *lines[16:]]
         with scratch_repo():
-            m = commit_files({"a": "a\n"})
+            m = commit_files({"a": "".join(lines)}, links={"s": "1" * 40})
             bd.git("update-ref", "refs/remotes/origin/main", m)
-            o = commit_files({"a": "o\n"}, m)
-            b = commit_files({"a": "o\n", "z": "z\n"}, m)
-            for k, v in (("diff.noprefix", "true"), ("diff.external", "false"), ("color.diff", "always"), ("apply.whitespace", "error")):  # fmt: skip
-                bd.git("config", k, v)
-            self.assertTrue(bd.below(o, b))
-            self.assertFalse(bd.below(o, m))
+            o = commit_files({"a": "".join(changed)}, m, links={"s": "2" * 40})
+            b = commit_files({"a": "".join(changed), "z": "z\n"}, m, links={"s": "2" * 40})  # fmt: skip
+            want = bd.own_change(o)
+            self.assertEqual(want.count(b"\n@@ "), 3)
+            self.assertIn(b"+Subproject commit " + b"2" * 40, want)
+            plain = (("diff.noprefix", "true"), ("diff.external", "false"), ("color.diff", "always"), ("apply.whitespace", "error"))  # fmt: skip
+            cases = [(plain, {}), ((("diff.context", "0"),), {}), ((("diff.context", "1"),), {}), ((("diff.context", "5"), ("diff.interHunkContext", "10")), {}),
+                     ((("diff.submodule", "log"),), {}), ((("diff.submodule", "diff"),), {}), ((), {"GIT_DIFF_OPTS": "--unified=0"})]  # fmt: skip
+            for config, env in cases:
+                with self.subTest(config=config, env=env), mock.patch.dict(os.environ, env):  # fmt: skip
+                    for k, v in config:
+                        bd.git("config", k, v)
+                    for c in (bd.own_change, bd.below):
+                        c.cache_clear()
+                    self.assertEqual(bd.own_change(o), want)
+                    self.assertTrue(bd.below(o, b))
+                    self.assertFalse(bd.below(o, m))
+                    for k, _ in config:
+                        bd.git("config", "--unset", k)
 
     def test_stacked_bounds(self) -> None:
         # U (pr 1, "me") is based on B, which has the changes of O (pr 2, another author's, landed),
@@ -1797,6 +1827,10 @@ class TestBuildDataset(unittest.TestCase):
         sql = query.call_args.args[0]
         self.assertIn("(f.job_id, f.tf, f.classname, f.name) IN (SELECT * FROM passed) flaky", sql)  # fmt: skip
         self.assertNotIn("NOT IN", sql)
+        # The last two-day chunk stops at `end`.
+        with mock.patch.object(bd, "query", return_value=[]) as query, contextlib.redirect_stdout(io.StringIO()):  # fmt: skip
+            bd.pull_failures(dt.date(2026, 10, 1), dt.date(2026, 10, 4))
+        self.assertEqual([re.findall(r"time_inserted >= '(\S+)' AND time_inserted < '(\S+)'", c.args[0]) for c in query.call_args_list], [[("2026-10-01", "2026-10-03")], [("2026-10-03", "2026-10-04")]])  # fmt: skip
 
     def test_write_sample(self) -> None:
         with scratch_repo():
@@ -2118,16 +2152,27 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "head_created", return_value={"h1": "2026-10-04 00:00:00", "h2": "2026-10-06 00:00:00"}),
             mock.patch.object(bd, "git", lambda *a, check=True: merge_bases[a[1:]] + "\n"),
             mock.patch.object(bd, "write_sample") as write,
-            contextlib.redirect_stdout(io.StringIO()) as stdout,
+            contextlib.redirect_stdout(io.StringIO()),
         ):  # fmt: skip
             pr_1 = {"pr": 1, "sha": "h1", "base": "pr_base", "title": "t", "body": "b", "window": [str(START), str(END)]}  # fmt: skip
-            (Path(out) / "pr_1.json").write_text(json.dumps({**pr_1, "window": [str(START), "2026-10-27"]}))  # fmt: skip
-            # A pr_ sample of another window skips both PR kinds, without exiting before the later kinds.
-            for kind, go in (("pr", bd.pr_samples), ("head", bd.head_samples)):
-                go(h, Path(out), 1)
-                self.assertIn(f"skipping {kind} samples: pr_ samples in {out}, e.g. pr_1, were built with another --start/--end", stdout.getvalue())  # fmt: skip
+            # pr_ samples of another window, or of none, refuse both PR kinds before History.load.
+            data = Path(out) / "data"
+            (samples := data / "samples").mkdir(parents=True)
+            argv = ["build_dataset", "--data", str(data), "--start", str(START), "--end", str(END), "--kinds"]  # fmt: skip
+            want = {"2026-10-27": f"pr_ samples in {samples}, e.g. pr_1, were built with another --start/--end than {START}/{END}", None: f"pr_ samples in {samples}, e.g. pr_1, predate the window field"}  # fmt: skip
+            for end, msg in want.items():
+                (samples / "pr_1.json").write_text(json.dumps({**pr_1, "window": end and [str(START), end]}))  # fmt: skip
+                self.assertIn(msg, bd.other_window(samples, START, END) or "")
+                for kind in ("pr", "head"):
+                    # A zero WINDOW lets the guard on --end + WINDOW pass.
+                    with mock.patch.object(sys, "argv", [*argv, kind]), mock.patch.object(bd, "WINDOW", dt.timedelta(0)), mock.patch.object(bd.History, "load") as load, self.assertRaises(SystemExit) as e:  # fmt: skip
+                        bd.main()
+                    self.assertIn(msg, str(e.exception.code))
+                    load.assert_not_called()
             fetch.assert_not_called()
             write.assert_not_called()
+            (samples / "pr_1.json").write_text(json.dumps(pr_1))
+            self.assertIsNone(bd.other_window(samples, START, END))
             (Path(out) / "pr_1.json").write_text(json.dumps(pr_1))
             bd.head_samples(h, Path(out), 1)
         ci_bases.assert_called_once_with({"h1": 1, "h2": 1, "h3": 1, "h4": 1})
