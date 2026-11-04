@@ -4080,6 +4080,80 @@ def forward(self, arg0_1, arg1_1):
     return (mm_2,)""",
         )
 
+    def test_sac_in_scan_body_under_non_strict(self):
+        # scan min-cuts its own body, so the SAC policy must reach min-cut as
+        # recompute tags even under non-strict tracing.
+        from torch._guards import tracing, TracingContext
+        from torch._higher_order_ops.scan import scan
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.traceback import preserve_node_meta
+
+        def policy_fn(ctx, func, *args, **kwargs):
+            if func == torch.ops.aten.sin.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.MUST_RECOMPUTE
+
+        def body(c, w):
+            y = checkpoint(
+                lambda c, w: torch.mm(c, w).sin().cos(),
+                c,
+                w,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts, policy_fn
+                ),
+            )
+            return y, y.new_zeros(())
+
+        def train_step(init, xs):
+            out = scan(body, init, xs)[0]
+            return torch.autograd.grad(out.sum(), (init, xs))
+
+        init = torch.randn(2, 4, requires_grad=True)
+        xs = torch.randn(3, 4, 4, requires_grad=True)
+        fake_mode = FakeTensorMode()
+        with (
+            fake_mode,
+            tracing(TracingContext(fake_mode)),
+            torch.compiler._non_strict_tracing_context(),
+            torch.compiler._patch_autograd_grad(),
+            preserve_node_meta(),
+        ):
+            fake_args = [fake_mode.from_tensor(t) for t in (init, xs)]
+            gm = make_fx(train_step)(*fake_args)
+
+        def source(n):
+            # Look through copies and transposes to the node that made the value.
+            copies = (
+                torch.ops.aten.alias_copy.default,
+                torch.ops.aten.clone.default,
+                torch.ops.aten.t_copy.default,
+            )
+            while n.op == "call_function" and n.target in copies:
+                n = n.args[0]
+            return n
+
+        # The forward body saves only sin and the carry, not mm or xs.
+        fw = gm.scan_combine_graph_0
+        carry = fw.graph.find_nodes(op="placeholder")[0]
+        (sin,) = fw.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sin.default
+        )
+        saved = fw.graph.output_node().args[0][2:]
+        self.assertEqual({source(n) for n in saved}, {carry, sin})
+        # The backward body recomputes mm from the carry and xs.
+        bw = gm.scan_combine_graph_1
+        recomputed = [
+            n
+            for n in bw.graph.find_nodes(
+                op="call_function", target=torch.ops.aten.mm.default
+            )
+            if all(a.op == "placeholder" for a in n.args)
+        ]
+        self.assertEqual(len(recomputed), 1)
+        self.assertEqual(gm(init, xs), train_step(init, xs))
+
 
 class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase):
     @requires_gpu_and_triton

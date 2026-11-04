@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import functools
 import itertools
 import platform
@@ -1419,10 +1420,30 @@ class _checkpoint_hook(_checkpoint_internal_hook):
             super().__init__(pack_hook, unpack_hook)
 
 
+# Set while a HOP (e.g. scan) traces a body that min-cut will partition.
+# Under non-strict tracing, checkpoint then writes recompute tags for min-cut
+# instead of tracing its own recompute, which min-cut's CSE would undo.
+_tag_recompute_for_partitioner_var: contextvars.ContextVar[bool] = (
+    contextvars.ContextVar("_tag_recompute_for_partitioner", default=False)
+)
+
+
+@contextlib.contextmanager
+def _tag_recompute_for_partitioner():
+    token = _tag_recompute_for_partitioner_var.set(True)
+    try:
+        yield
+    finally:
+        _tag_recompute_for_partitioner_var.reset(token)
+
+
 def _is_compiling(func, args, kwargs):
     # Check if we are under AOTAutograd tracing or export tracing
     # Checking that a proxy mode is active should always do what we want
-    if torch.compiler._is_non_strict_tracing():
+    if (
+        torch.compiler._is_non_strict_tracing()
+        and not _tag_recompute_for_partitioner_var.get()
+    ):
         return False
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) is not None
 
