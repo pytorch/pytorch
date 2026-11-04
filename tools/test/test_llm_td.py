@@ -88,6 +88,9 @@ class TestSelection(unittest.TestCase):
         self.assertTrue(sel.covers("inductor/test_torchinductor", "dynamo_wrapped"))
         self.assertFalse(sel.covers("inductor/test_torchinductor", "default"))
         self.assertTrue(sel.covers("test_ops", "default"))
+        # The inductor config compiles every test of its few files.
+        self.assertTrue(sel.covers("inductor/test_torchinductor", "inductor"))
+        self.assertIsNone(sel.error)
         self.assertEqual(Selection.from_json(sel.to_json()), sel)
 
     def test_files_the_model_never_saw_are_covered(self) -> None:
@@ -210,6 +213,10 @@ class TestSelection(unittest.TestCase):
         gone = ["test/gone.json", "test/distributed/launcher/bin/unused.py"]
         sel = self.select_in_tree(sources, candidates, gone, deleted=tuple(gone))
         self.assertEqual((sel.files, sel.run_all), (set(), False))
+        # Except an expect file, which the tests of its class still assert against.
+        gone = ["test/expect/TestNNCPU.test_x-y.expect"]
+        sel = self.select_in_tree(sources, candidates, gone, deleted=tuple(gone))
+        self.assertEqual((sel.files, sel.run_all), ({"test_nn", "dynamo/test_misc"}, False))  # fmt: skip
         many = [f"test/data{i}.json" for i in range(selection.MAX_DATA_FILES + 1)]
         self.assertTrue(self.select_in_tree(sources, candidates, many).run_all)
 
@@ -264,13 +271,11 @@ class TestSelection(unittest.TestCase):
         self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
 
     def test_fallbacks_run_all(self) -> None:
-        self.assertTrue(
-            Selection.from_model_output(None, CANDIDATES, ["torch/a.py"]).run_all
-        )
+        sel = Selection.from_model_output(None, CANDIDATES, ["torch/a.py"])
+        self.assertEqual((sel.run_all, sel.error), (True, "no model output"))
         out = {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": []}
-        self.assertTrue(
-            Selection.from_model_output(out, CANDIDATES, ["test/run_test.py"]).run_all
-        )
+        sel = Selection.from_model_output(out, CANDIDATES, ["test/run_test.py"])
+        self.assertEqual((sel.run_all, sel.error), (True, None))
         self.assertFalse(
             Selection.from_model_output(out, CANDIDATES, ["docs/a.md"]).run_all
         )
@@ -449,6 +454,14 @@ class TestSelection(unittest.TestCase):
             "pytest.ini",
             "torch/testing/_internal/common_utils.py",
             "torch/testing/_internal/common_device_type.py",
+            "torch/testing/_internal/common_dtype.py",
+            "torch/testing/_internal/common_cuda.py",
+            "torch/testing/_comparison.py",
+            "scripts/onnx/test.sh",
+            ".ci/docker/triton_version.txt",
+            ".ci/docker/triton_xpu_version.txt",
+            ".ci/pytorch/numba-cuda-13.patch",
+            ".ci/pytorch/win-test-helpers/test_python_jit_legacy.bat",
             "tools/testing/discover_tests.py",
             "tools/stats/import_test_stats.py",
             "tools/stats/upload_metrics.py",
@@ -490,6 +503,7 @@ class TestSelection(unittest.TestCase):
             sel = Selection.from_model_output(out, CANDIDATES, ["test/test_nn.py"])
             self.assertTrue(sel.run_all, out)
             self.assertIn("malformed", sel.reason)
+            self.assertRegex(str(sel.error), "^malformed model output: ")
 
     def test_dirs(self) -> None:
         candidates = CANDIDATES | {"dynamo_foo/test_a"}
@@ -653,6 +667,7 @@ class TestApplySelection(unittest.TestCase):
         # p previously failed, and s is hedged within the 200s budget.
         return {
             "call_id": CALL_ID,
+            "list_id": "7916c4091b31",  # sha256 of the sorted test list
             "enforced": enforced,
             "td_enabled": True,
             "run_all": False,
@@ -830,8 +845,12 @@ class TestSplitTests(unittest.TestCase):
 
     def test_call_id_is_random_per_call(self) -> None:
         # test.sh runs one file several times in a job with different -k filters.
-        ids = {self.run_split(Selection(candidates={"a"}))[0].call_id for _ in range(2)}
+        splits = [self.run_split(Selection(candidates={"a"}))[0] for _ in range(2)]
+        ids = {x.call_id for x in splits}
         self.assertEqual(len(ids), 2)
+        # Every shard of a config emits the same list_id.
+        list_ids = {x.llm.selection_metric["list_id"] for x in splits if x.llm}
+        self.assertEqual(len(list_ids), 1)
         self.assertTrue(all(re.fullmatch("[0-9a-f]{32}", x) for x in ids), ids)
 
     def test_previous_failure_in_td_include_runs_when_enforced(self) -> None:
@@ -1050,6 +1069,7 @@ class TestMain(unittest.TestCase):
             record = self.run_main()
         self.assertTrue(record["run_all"])
         self.assertEqual(record["reason"], "no test times")
+        self.assertEqual(record["diagnostics"]["error"], "no test times")
 
     def test_no_changed_files_runs_all(self) -> None:
         with (
@@ -1060,6 +1080,7 @@ class TestMain(unittest.TestCase):
         times.assert_not_called()
         self.assertTrue(record["run_all"])
         self.assertEqual(record["reason"], "no changed files")
+        self.assertIsNone(record["diagnostics"]["error"])
 
     def test_bad_effort_env_is_rejected(self) -> None:
         stderr = io.StringIO()
@@ -1082,6 +1103,7 @@ class TestMain(unittest.TestCase):
             record = self.run_main()
         times.assert_not_called()
         self.assertTrue(record["run_all"])
+        self.assertIsNone(record["diagnostics"]["error"])
 
     def test_query_model_runs_outside_the_checkout(self) -> None:
         run = mock.Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
@@ -1099,7 +1121,7 @@ class TestMain(unittest.TestCase):
         for run, error in [
             (completed("not json"), "not jsonerr"),
             (completed(json.dumps({"is_error": True, "result": "overloaded"})), "overloaded"),
-            (completed(json.dumps({"result": "", "total_cost_usd": 0.5})), "no structured output"),
+            (completed(json.dumps({"result": "", "total_cost_usd": 0.5})), "no model output"),
             (mock.Mock(side_effect=timeout), "model call timed out after 600s"),
             (mock.Mock(side_effect=FileNotFoundError("claude")), "FileNotFoundError: claude"),
         ]:  # fmt: skip
@@ -1132,6 +1154,7 @@ class TestMain(unittest.TestCase):
             record = self.run_main()
         times.assert_not_called()
         self.assertTrue(record["run_all"])
+        self.assertIsNone(record["diagnostics"]["error"])
 
     def test_only_a_deliberate_run_all_is_enforced(self) -> None:
         def run(changed: str, answer: dict, times: dict, *argv: str) -> dict:
@@ -1160,7 +1183,7 @@ class TestMain(unittest.TestCase):
             ("docs/a.md\n", error, times, False, ["--enforce"]),
             ("docs/a.md\n", malformed, times, False, ["--enforce"]),
             ("docs/a.md\n", model_run_all, {}, False, ["--enforce"]),
-            ("", model_run_all, times, False, ["--enforce"]),
+            ("", model_run_all, times, True, ["--enforce"]),
         ]:
             record = run(changed, answer, t, *argv)
             self.assertEqual(record["run_all"], answer is not normal)
