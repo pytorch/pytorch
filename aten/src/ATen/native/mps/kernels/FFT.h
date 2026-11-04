@@ -1,0 +1,106 @@
+#pragma once
+#include <c10/metal/common.h>
+
+// Kernel variant bits. Their combination is part of the kernel name.
+enum class FFTFlag : uint32_t {
+  Inverse = 1u << 0,
+  PackedLoads = 1u << 1,
+  FourStepTwiddles = 1u << 2,
+  ExtendedStores = 1u << 3,
+  ExtendedLoads = 1u << 4,
+  GlobalStage = 1u << 5,
+};
+
+inline constexpr uint32_t fft_flag_bit(FFTFlag flag) {
+  return static_cast<uint32_t>(flag);
+}
+
+inline constexpr bool fft_has_flag(uint32_t flags, FFTFlag flag) {
+  return (flags & fft_flag_bit(flag)) != 0;
+}
+
+// Whether a kernel does without four-step, chirp and global-memory handling
+inline constexpr bool fft_is_basic(uint32_t flags) {
+  return (flags &
+          (fft_flag_bit(FFTFlag::FourStepTwiddles) |
+           fft_flag_bit(FFTFlag::ExtendedStores) |
+           fft_flag_bit(FFTFlag::ExtendedLoads) |
+           fft_flag_bit(FFTFlag::GlobalStage))) == 0;
+}
+
+// Metal's threadgroup memory limit, and the complex points that fit in it
+C10_METAL_CONSTEXPR uint32_t kFFTSmemBytes = 32768;
+C10_METAL_CONSTEXPR uint32_t kFFTMaxPoints =
+    kFFTSmemBytes / (2 * sizeof(float));
+C10_METAL_CONSTEXPR uint32_t kFFTMaxStages = 16;
+
+C10_METAL_CONSTEXPR uint32_t kFFTPointsPerThread = 8;
+C10_METAL_CONSTEXPR uint32_t kFFTPointsPerThreadWide = 16;
+C10_METAL_CONSTEXPR uint32_t kFFTWideThreadLength = 1024;
+
+inline constexpr uint32_t fft_points_per_thread(uint32_t n, uint32_t flags) {
+  return n == kFFTWideThreadLength && fft_is_basic(flags)
+      ? kFFTPointsPerThreadWide
+      : kFFTPointsPerThread;
+}
+
+// Spare smem slots: one every 1 << kFFTPadShift slots, none with kFFTNoPadShift
+C10_METAL_CONSTEXPR uint32_t kFFTPadShift = 4;
+C10_METAL_CONSTEXPR uint32_t kFFTNoPadShift = 31;
+
+// A group holding one contiguous transform pads if the padded row fits smem
+inline constexpr uint32_t fft_contig_pad_shift(uint32_t n) {
+  return n + (n >> kFFTPadShift) <= kFFTMaxPoints ? kFFTPadShift
+                                                  : kFFTNoPadShift;
+}
+
+// Two-level twiddle table: W^b for b < kFFTTwiddleBlock, then
+// W^(kFFTTwiddleBlock a)
+C10_METAL_CONSTEXPR uint32_t kFFTTwiddleBits = 12;
+C10_METAL_CONSTEXPR uint32_t kFFTTwiddleBlock = 1u << kFFTTwiddleBits;
+
+// Radix of the global-memory stage that only unpacks a real transform
+C10_METAL_CONSTEXPR uint32_t kFFTUnpackRadix = 1;
+
+// Radices of the dynamic kernel families, one bit per radix. Bit 1 is length 1.
+C10_METAL_CONSTEXPR uint32_t kFFTMaskP2 =
+    (1u << 1) | (1u << 2) | (1u << 4) | (1u << 8) | (1u << 16);
+C10_METAL_CONSTEXPR uint32_t kFFTMaskP235 = kFFTMaskP2 | (1u << 3) | (1u << 5);
+C10_METAL_CONSTEXPR uint32_t kFFTMaskP2357 = kFFTMaskP235 | (1u << 7);
+C10_METAL_CONSTEXPR uint32_t kFFTMaskP16 = (1u << 16) | (1u << 1);
+
+// Global-memory stage radices, largest first: lengths factor in this order
+#define FFT_GLOBAL_RADICES(_) \
+  _(28) _(25) _(21) _(16) _(15) _(12) _(9) _(8) _(7) _(5) _(4) _(3) _(2)
+
+#define FFT_FIXED_SIZES(_) \
+  _(64) _(128) _(200) _(240) _(256) _(512) _(1024) _(2048) _(4096)
+#define FFT_CONTIG_SIZES(_) _(512) _(1024) _(2048) _(4096)
+
+#define FFT_LENGTH_IS(N) n == N ||
+inline constexpr bool fft_has_fixed_kernel(uint32_t n) {
+  return FFT_FIXED_SIZES(FFT_LENGTH_IS) false;
+}
+
+inline constexpr bool fft_has_contig_kernel(uint32_t n) {
+  return FFT_CONTIG_SIZES(FFT_LENGTH_IS) false;
+}
+#undef FFT_LENGTH_IS
+
+// tgb transforms of n points per group, jt threads each. n_sig: full signal
+// (zero-padded beyond), n_out: outputs. Four-step: input e * ld_mul + i0,
+// output k * out_k_mul + i0, mirror_out adds conj X[k] at n_sig - k, i0_dim1
+// reads i0 from batch dim 1. Smem slot i of a row of `row` slots is at
+// i + (i >> padshift); tiles interleave by es.
+struct FFTParams {
+  uint32_t n, n_sig, n_out, tgb, jt, ndim, nstages;
+  int32_t in_stride, out_stride; // along the axis
+  float scale;
+  uint32_t ld_mul, out_k_mul, row, padshift, es;
+  bool mirror_out, i0_dim1, via_smem;
+  ::c10::metal::array<uint32_t, kFFTMaxStages> radix, ns,
+      twstep; // ns: product so far
+  ::c10::metal::array<float, kFFTMaxStages> inv_ns;
+  ::c10::metal::array<uint32_t, ::c10::metal::max_ndim> sizes;
+  ::c10::metal::array<int32_t, ::c10::metal::max_ndim> in_strides, out_strides;
+};
