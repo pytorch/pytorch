@@ -3,10 +3,11 @@
 Runs in the target-determination job, which uploads the result for the test
 jobs of the same run, so every shard of the run applies the same selection.
 The selection comes from the newest llm-selector.yml run for the PR head. It is
-enforced only while the PR is labeled ci-llm-selector and not ci-no-td, only if the
-PR's author is a member or collaborator (TRUSTED_AUTHORS), and only in the
-workflows where run_test.py enables TD (TD_ENABLED). Then, while that run
-is pending, this waits for it, polling with backoff up to once a minute until
+enforced only while ENFORCEMENT_ENABLED is set and the PR is labeled
+ci-llm-selector and not ci-no-td, only if the PR's author is a member or
+collaborator (TRUSTED_AUTHORS), and only in the workflows where run_test.py
+enables TD (TD_ENABLED). Then, while that run is pending, this waits for it,
+polling with backoff up to once a minute until
 WAIT_SECONDS have passed (plus at most one API call), and takes its selection
 only if it succeeded. Otherwise the newest successful run's selection is used
 in shadow. Nothing orders llm-selector.yml (a pull_request_target workflow) before
@@ -29,7 +30,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
-from tools.testing.llm_selector.selection import LLM_SELECTION_FILE, Selection
+from tools.testing.llm_selector.selection import (
+    ENFORCEMENT_ENABLED,
+    LLM_SELECTION_FILE,
+    Selection,
+)
 
 
 sys.path.remove(str(REPO_ROOT))
@@ -122,8 +127,11 @@ def main(output: Path = Path(LLM_SELECTION_FILE)) -> None:
     # The PR's current labels, not the event's: a tag push carries none, and
     # removing ci-llm-selector must stop enforcement even at an already selected head.
     labels = {label["name"] for label in info["labels"]}
+    # While enforcement is off, run_test.py treats every selection as shadow,
+    # so waiting for a pending run would only delay the test jobs.
     enforce = (
-        os.environ.get("TD_ENABLED") == "true"
+        ENFORCEMENT_ENABLED
+        and os.environ.get("TD_ENABLED") == "true"
         and info.get("author_association") in TRUSTED_AUTHORS
         and "ci-llm-selector" in labels
         and "ci-no-td" not in labels
