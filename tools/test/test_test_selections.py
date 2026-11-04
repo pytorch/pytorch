@@ -731,7 +731,7 @@ class TestSplitTests(LlmSelectorTestCase):
         self.assertSplit(split, ["p"], ["a"])
         self.assertEqual(stderr, self.TD_LINE)
         self.assertEqual([x["source"] for x in artifacts], ["td"])
-        metric = {**shadow.llm.selection_metric, "enforce_requested": True}
+        metric = {**shadow.llm.selection_metric, "enforce_requested": True, "enforcement_enabled": False}  # fmt: skip
         self.assertEqual(split.llm.selection_metric, metric)
 
     def test_enforced_selection_replaces_td(self) -> None:
@@ -808,13 +808,17 @@ class TestSplitTests(LlmSelectorTestCase):
         requested = Selection(
             run_all=True, reason="selector failed: x", error="x", enforce_requested=True
         )
-        for sel, td_enabled, printed in (
-            (shadow, True, False),
-            (requested, True, True),
-            (requested, False, False),
+        for sel, td_enabled, enforcement, printed in (
+            (shadow, True, True, False),
+            (requested, True, True, True),
+            (requested, False, True, False),
+            (requested, True, False, False),
         ):
-            _, stderr, _ = self.split(sel, td_enabled=td_enabled)
-            self.assertEqual(failed_line in stderr, printed, (sel, td_enabled))
+            split, stderr, _ = self.split(sel, td_enabled=td_enabled, enforcement=enforcement)  # fmt: skip
+            self.assertEqual(failed_line in stderr, printed, (sel, td_enabled, enforcement))  # fmt: skip
+            if split.llm is None:
+                raise AssertionError("no selection read")
+            self.assertEqual(split.llm.selection_metric["enforcement_enabled"], enforcement)  # fmt: skip
 
     def test_broken_llm_selector_keeps_td(self) -> None:
         sel = Selection(files={"a"}, enforce=True, candidates={"a"})
