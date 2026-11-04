@@ -763,6 +763,10 @@ if not TEST_WITH_ASAN:
                 _cls.test_randint_distribution_dynamic_shapes
             )
 
+    # The loops above leave these module-level names bound to test classes,
+    # which the test loader would collect again under those names.
+    _variant_cls = _cls = None
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

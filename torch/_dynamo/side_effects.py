@@ -1826,12 +1826,13 @@ def _codegen_ordered_dict_mutation(ctx: SideEffectReplayContext) -> None:
         raise AssertionError(type(var))
     if (
         var.should_reconstruct_all
+        and var.items
         and var.source
         and isinstance(
             var.mutation_type, (ValueMutationExisting, AttributeMutationExisting)
         )
     ):
-        # Replay specializes on both storage order and linked-list iteration order.
+        # Nonempty reconstruction reads positional keys. Clearing needs no key order.
         cg.tx.output.guard_on_key_order.add(var.source)
         var.install_dict_keys_match_guard()
         install_guard(var.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))

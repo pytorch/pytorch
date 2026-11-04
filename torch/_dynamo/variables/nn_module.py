@@ -76,6 +76,7 @@ from ..utils import (
     unpatched_nn_module_call,
     unpatched_nn_module_call_impl,
 )
+from . import user_defined
 from .base import Method, typestr, ValueMutationNew, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .hashable import HashableTracker
@@ -1586,6 +1587,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        from .builder import _dict_input_snapshot
+
         if (
             tx.output.side_effects.is_attribute_mutation(self)
             and name
@@ -1628,7 +1631,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             # hooks guard via skip_nnmodule_hook_guards
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
                 hooks_dict = getattr(self.value, name)
-                if issubclass(type(hooks_dict), dict) and len(hooks_dict) == 0:
+                if self.source is not None and hooks_dict in tx.output.side_effects:
+                    return VariableTracker.build(
+                        tx, hooks_dict, source=AttrSource(self.source, name)
+                    )
+                if issubclass(type(hooks_dict), dict) and dict.__len__(hooks_dict) == 0:
                     hooks_source = (
                         AttrSource(self.source, name) if self.source else None
                     )
@@ -1649,10 +1656,19 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                             if issubclass(type(hooks_dict), collections.OrderedDict)
                             else variables.NNModuleHooksDictVariable
                         )
-                    from .builder import _dict_input_snapshot
-
                     _dict_input_snapshot(hooks_dict)
-                    return hooks_vt_cls({}, source=hooks_source)
+                    if type(hooks_dict) not in (dict, collections.OrderedDict):
+                        subclass_cls = (
+                            user_defined.UserDefinedNNModuleHooksOrderedDictVariable
+                            if issubclass(type(hooks_dict), collections.OrderedDict)
+                            else user_defined.UserDefinedNNModuleHooksDictVariable
+                        )
+                        result = subclass_cls(hooks_dict, items={}, source=hooks_source)
+                    else:
+                        result = hooks_vt_cls({}, source=hooks_source)
+                    if hooks_source is not None:
+                        return tx.output.side_effects.track_mutable(hooks_dict, result)
+                    return result
 
         # Hook IDs differ across equivalent module instances (RemovableHandle;
         # https://github.com/pytorch/pytorch/issues/125836). Track them lazily so
@@ -1686,7 +1702,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # hashing a key in user code must still realize and guard it.
                 key_vt = LazyVariableTracker.create(k, source_key, tx=tx)
                 key = (
-                    HashableTracker.from_known_hash(key_vt, hash(k))
+                    HashableTracker(key_vt, known_hash=hash(k))
                     if type(k) is int
                     else HashableTracker(key_vt)
                 )
@@ -1707,7 +1723,18 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 if issubclass(type(hooks_dict), collections.OrderedDict)
                 else variables.NNModuleHooksDictVariable
             )
-            return hooks_vt_cls(result, source=hooks_dict_source)
+            if type(hooks_dict) not in (dict, collections.OrderedDict):
+                subclass_cls = (
+                    user_defined.UserDefinedNNModuleHooksOrderedDictVariable
+                    if issubclass(type(hooks_dict), collections.OrderedDict)
+                    else user_defined.UserDefinedNNModuleHooksDictVariable
+                )
+                result_vt = subclass_cls(
+                    hooks_dict, items=result, source=hooks_dict_source
+                )
+            else:
+                result_vt = hooks_vt_cls(result, source=hooks_dict_source)
+            return tx.output.side_effects.track_mutable(hooks_dict, result_vt)
         return super().tp_getattro_impl(tx, name)
 
     def manually_trace_nn_module_getattr(
