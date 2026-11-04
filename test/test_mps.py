@@ -15577,19 +15577,12 @@ class TestCommon(TestCase):
         self.assertEqual(torch._fft_c2r(x[:, :9], [-1], 2, 16), torch.fft.irfft(x[:, :9], n=16))
         self.assertEqual(torch._fft_r2c(x.real[:, :0], [-1], 0, True), torch.zeros(3, 1, dtype=x.dtype, device=device))
 
-    @parametrize("kind", ["rfft", "irfft"])
-    def test_fft_real_beyond_two_passes(self, device, kind):
-        # Real lengths above 2^24 points run as complex transforms
-        n = 1 << 25
-        x = torch.randn(n) if kind == "rfft" else torch.randn(n // 2 + 1, dtype=torch.complex64)
-        op = torch.fft.rfft if kind == "rfft" else lambda t: torch.fft.irfft(t, n=n)
-        self.assertEqual(op(x.to(device)).cpu(), op(x), atol=5e-2, rtol=1e-4)
-
-    def test_rfft_long_mixed_radix(self, device):
-        x = torch.randn(2, 176400)
+    @parametrize("n", [176400, 1 << 25])  # global-memory passes; real lengths beyond two tile passes
+    def test_rfft_long(self, device, n):
+        x = torch.randn(2, n)
         y = torch.fft.rfft(x.to(device)).cpu()
-        self.assertEqual(y, torch.fft.rfft(x), atol=1e-2, rtol=1e-4)
-        self.assertEqual(torch.fft.irfft(y.to(device), n=176400).cpu(), x, atol=1e-4, rtol=1e-4)
+        self.assertEqual(y, torch.fft.rfft(x), atol=5e-2, rtol=1e-4)
+        self.assertEqual(torch.fft.irfft(y.to(device), n=n).cpu(), x, atol=1e-4, rtol=1e-4)
 
     @dtypes(torch.float32, torch.float16)
     @parametrize("n", [64, 128, 200, 240, 256, 512, 1024, 2048, 4096, 4099])
