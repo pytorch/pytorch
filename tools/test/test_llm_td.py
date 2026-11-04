@@ -33,6 +33,9 @@ if TYPE_CHECKING:
     from collections.abc import Collection
 
 
+sys.path.remove(str(REPO_ROOT))
+
+
 CANDIDATES = {
     "test_nn",
     "test_ops",
@@ -106,13 +109,17 @@ class TestSelection(unittest.TestCase):
         start = max(i for i in range(end) if lines[i].startswith("if [["))
         dispatch = re.compile(r'(?:el)?if \[\[ "?\$\{?TEST_CONFIG\}?"? ==? (\S+) \]\]; then$')  # fmt: skip
         branches = [m.group(1) for line in lines[start:end] if (m := dispatch.match(line))]  # fmt: skip
+        # A branch on anything else would hide the configs it catches from the globs.
+        others = [line for line in lines[start:end] if re.match(r"(el)?if ", line) and not dispatch.match(line)]  # fmt: skip
+        self.assertEqual(others, ['elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then'])  # fmt: skip
         globs = tuple(b.strip("*") for b in branches if b.startswith("*"))
         self.assertEqual(globs, selection.TEST_SH_GLOBS)
         self.assertFalse([b for b in branches if not b.startswith("*") and "inductor" in b])  # fmt: skip
         funcs = {"test_inductor_shard": "inductor", "test_inductor_cpp_wrapper_shard": "inductor_cpp_wrapper"}  # fmt: skip
         runs: dict[str, set[str]] = {}
         for func, body in re.findall(r"^(\w+)\(\) \{\n(.*?)^\}", sh, re.MULTILINE | re.DOTALL):  # fmt: skip
-            for include in re.findall(r"run_test\.py --inductor \\\n\s+--include ([^\\\n]+)", body):  # fmt: skip
+            # The option after the list keeps a wrapped list from being cut short.
+            for include in re.findall(r"run_test\.py --inductor \\\n\s+--include ([^\\\n]+)(?:\\\n\s+-|\n)", body):  # fmt: skip
                 runs.setdefault(funcs.get(func, func), set()).update(include.split())
         self.assertEqual(runs, selection.ALWAYS_COVERED)
         sel = Selection.from_model_output({"tests": []}, CANDIDATES | {"test_torch"}, [])  # fmt: skip
@@ -143,18 +150,21 @@ class TestSelection(unittest.TestCase):
         changed: list[str],
         deleted: tuple[str, ...] = (),
     ) -> Selection:
-        """from_model_output with an empty answer and a grep over `sources`, a test/ tree."""
-        with tempfile.TemporaryDirectory() as d:
+        """from_model_output with an empty answer and select_tests.git_grep over `sources`, a test/ tree."""
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(select_tests, "REPO_ROOT", Path(d)),
+        ):
             for name, text in sources.items():
-                (Path(d) / name).parent.mkdir(parents=True, exist_ok=True)
-                (Path(d) / name).write_text(text)
-
-            def grep(pattern: str) -> list[str]:
-                cmd = ["grep", "-rlE", pattern, "."]
-                found = subprocess.run(cmd, cwd=d, capture_output=True, text=True).stdout.split()  # fmt: skip
-                return [f"test/{f.removeprefix('./')}" for f in found]
-
-            return Selection.from_model_output({"tests": []}, candidates, changed, grep, deleted)  # fmt: skip
+                (Path(d) / "test" / name).parent.mkdir(parents=True, exist_ok=True)
+                (Path(d) / "test" / name).write_text(text)
+            select_tests.git("init", "-q")
+            select_tests.git("add", "-A")
+            select_tests.git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-q", "--allow-empty", "-m", "tree")  # fmt: skip
+            return Selection.from_model_output({"tests": []}, candidates, changed, lambda p: select_tests.git_grep(p, "HEAD"), deleted)  # fmt: skip
 
     def test_importers_are_selected(self) -> None:
         sources = {
@@ -379,6 +389,7 @@ class TestSelection(unittest.TestCase):
             ".ci/pytorch/win-test.sh",
             ".ci/pytorch/macos-test.sh",
             ".ci/pytorch/macos-common.sh",
+            ".ci/pytorch/build.sh",
             ".ci/pytorch/common.sh",
             ".ci/pytorch/common-build.sh",
             ".ci/pytorch/common_utils.sh",
@@ -430,7 +441,6 @@ class TestSelection(unittest.TestCase):
         for f in [
             "docs/source/index.rst",
             ".github/workflows/lint.yml",
-            ".ci/pytorch/build.sh",
             ".github/actions/setup-linux/action.yml",
             ".github/ci_commit_pins/vllm.txt",
         ]:
@@ -945,8 +955,35 @@ class TestMain(unittest.TestCase):
         self.assertFalse(record["enforce"])
         self.assertTrue(record["enforce_requested"])
         self.assertIn("selector failed", record["reason"])
-        self.assertIn("CalledProcessError", record["error"])
-        self.assertNotIn("error", record["diagnostics"])
+        self.assertEqual(record["error"], f"CalledProcessError: {error}")
+        self.assertIsNone(record["diagnostics"]["merge_base"])
+
+    def test_greps_are_memoized_and_bounded(self) -> None:
+        answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": []}}  # fmt: skip
+        with mock.patch.object(select_tests, "git_grep", wraps=select_tests.git_grep) as grep:  # fmt: skip
+            record, _ = self.run_in_repo(answer)
+        patterns = [c.args[0] for c in grep.call_args_list]
+        self.assertTrue(patterns)
+        self.assertEqual(len(patterns), len(set(patterns)))
+        self.assertTrue(all(0 < c.args[2] <= select_tests.GREP_BUDGET for c in grep.call_args_list))  # fmt: skip
+        self.assertIsNone(record["error"])
+        timeout = subprocess.TimeoutExpired(["git", "grep"], 1)
+        with mock.patch.object(select_tests, "git_grep", side_effect=timeout):
+            record, _ = self.run_in_repo(answer)
+        self.assertTrue(record["run_all"])
+        self.assertEqual(record["error"], f"RuntimeError: git grep ran past the {select_tests.GREP_BUDGET}s budget after the model call")  # fmt: skip
+        self.assertIsNotNone(record["diagnostics"]["model_output"])
+
+    def test_body_needs_title(self) -> None:
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(select_tests, "select") as select,
+            mock.patch("sys.stderr", stderr),
+            self.assertRaises(SystemExit),
+        ):
+            select_tests.main(["--body", "b"])
+        select.assert_not_called()
+        self.assertIn("--body needs --title", stderr.getvalue())
 
     def test_no_test_times_runs_all(self) -> None:
         with (
