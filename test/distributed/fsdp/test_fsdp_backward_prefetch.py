@@ -14,7 +14,10 @@ from torch.distributed.fsdp._runtime_utils import (
     _get_training_state,
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
@@ -204,6 +207,7 @@ class TestBackwardPrefetch(FSDPTestContinuous):
 
                 all_handle_fqns = []
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(2)
     def test_backward_prefetch(self, device):
         # subtest reuse process group to shorten test time
@@ -222,8 +226,6 @@ class TestBackwardPrefetch(FSDPTestContinuous):
         self._dist_train(backward_prefetch)
 
 
-instantiate_device_type_tests(
-    TestBackwardPrefetch, globals(), except_for=("cpu",), allow_xpu=True
-)
+instantiate_device_type_tests(TestBackwardPrefetch, globals(), allow_xpu=True)
 if __name__ == "__main__":
     run_tests()
