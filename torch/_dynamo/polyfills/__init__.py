@@ -377,8 +377,6 @@ def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
         if v is not ov and v != ov:
             return False
 
-    if isinstance(d, OrderedDict) and isinstance(other, OrderedDict):
-        return list(OrderedDict.keys(d)) == list(OrderedDict.keys(other))
     return True
 
 

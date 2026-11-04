@@ -43,8 +43,8 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, cast, NamedTuple, NoReturn, TYPE_CHECKING
-from typing_extensions import LiteralString, TypeAliasType, TypeVar
+from typing import Any, cast, LiteralString, NamedTuple, NoReturn, TYPE_CHECKING
+from typing_extensions import TypeAliasType, TypeVar
 from weakref import ReferenceType
 
 import torch
@@ -184,6 +184,7 @@ from .source import (
     OptimizerSource,
     ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
+    SkipGuardSource,
     SubclassAttrListSource,
     TorchFunctionModeStackSource,
     TupleIteratorGetItemSource,
@@ -212,6 +213,7 @@ from .utils import (
     dataclass_fields,
     dict_keys,
     enumerate_items_with_dict_position,
+    find_type_attribute_name,
     get_current_stream,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
@@ -453,45 +455,49 @@ class GuardManagerWrapper:
         # 0, so we collect them as well. Later on, we accumulate the diff guard
         # sources for all the guard managers.
 
-        def visit_dict_manager(node: DictGuardManager) -> bool:
-            is_diff_guard_node = (
-                node.get_source() in self.diff_guard_sources or node.fail_count() > 0
-            )
-            for _idx, (key_mgr, val_mgr) in sorted(
-                node.get_key_value_managers().items()
-            ):
-                is_diff_guard_node |= visit(key_mgr) | visit(val_mgr)
+        # A relational check needs all participants, including their access paths.
+        # This closure applies only to unsafe diff selection, not explicit filters.
+        parents: dict[str, OrderedSet[str]] = {}
+        groups: dict[int, OrderedSet[str]] = {}
+        source_groups: dict[str, list[int]] = {}
 
-            if is_diff_guard_node:
-                self.diff_guard_sources.add(node.get_source())
-
-            return is_diff_guard_node
-
-        def visit_manager(node: GuardManager) -> bool:
+        def visit(node: GuardManager, parent: str | None = None) -> None:
+            source = node.get_source()
+            if parent is not None:
+                parents.setdefault(source, OrderedSet()).add(parent)
+            if node.fail_count() > 0:
+                self.diff_guard_sources.add(source)
+            for guard in node.get_leaf_guards():
+                if isinstance(guard, RelationalGuard):
+                    group = guard.get_group_id()
+                    groups.setdefault(group, OrderedSet()).add(source)
+                    source_groups.setdefault(source, []).append(group)
             if isinstance(node, DictGuardManager):
-                raise AssertionError(
-                    f"Expected non-DictGuardManager node, got {type(node)}"
-                )
-
-            is_diff_guard_node = (
-                node.get_source() in self.diff_guard_sources or node.fail_count() > 0
-            )
-            for child_mgr in node.get_child_managers():
-                is_diff_guard_node |= visit(child_mgr)
-
-            if is_diff_guard_node:
-                self.diff_guard_sources.add(node.get_source())
-
-            return is_diff_guard_node
-
-        def visit(node: GuardManager) -> bool:
-            if node is None:
-                return False
-            if isinstance(node, DictGuardManager):
-                return visit_dict_manager(node)
-            return visit_manager(node)
+                children = [
+                    manager
+                    for pair in node.get_key_value_managers().values()
+                    for manager in pair
+                    if manager is not None
+                ]
+            else:
+                children = node.get_child_managers()
+            for child in children:
+                visit(child, source)
 
         visit(self.root)
+        pending = list(self.diff_guard_sources)
+        retained_groups: set[int] = set()
+        while pending:
+            source = pending.pop()
+            dependencies = OrderedSet(parents.get(source, ()))
+            for group in source_groups.get(source, ()):
+                if group not in retained_groups:
+                    retained_groups.add(group)
+                    dependencies.update(groups[group])
+            for dependency in dependencies:
+                if dependency not in self.diff_guard_sources:
+                    self.diff_guard_sources.add(dependency)
+                    pending.append(dependency)
 
         return self.diff_guard_sources
 
@@ -987,10 +993,10 @@ def _get_closure_vars() -> dict[str, object]:
             "___key_to_id": key_to_id,
             "___dict_version": dict_version,
             "___dict_contains": lambda a, b: dict.__contains__(b, a),
+            "___ordered_dict_order": _ordered_dict_order,
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_count_iter": normalize_count_iter,
             "___normalize_range_iter": normalize_range_iter,
-            "___ordered_dict_order": _ordered_dict_order,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
             "___list_reverseiterator_len": list_reverseiterator_len,
             "___list_reverseiterator_backing_list": list_reverseiterator_backing_list,
@@ -1363,11 +1369,13 @@ class GuardCheckSpec(NamedTuple):
         information from the guarded value at build time.
     eval_fn: (value, metadata) -> bool  — re-evaluates the guard at lookup
         time using a fresh value and the previously saved metadata.
+    get_extra_sources_fn: optional ordered dependencies. Both functions receive the
+        tuple (originating value, *dependency values) for a relational check.
     """
 
     get_metadata_fn: GuardCheckGetMetadataFn
     eval_fn: GuardCheckEvalFn
-    # When present, handlers receive (originating value, *extra values).
+    # Relational checks receive (originating value, *dependency values).
     get_extra_sources_fn: Callable[[Guard], tuple[Source, ...]] | None = None
 
 
@@ -1484,16 +1492,6 @@ def check_closure(value: object, metadata: Any) -> bool:
     return id(value) == metadata
 
 
-def _ordered_dict_order(value: object) -> tuple[int, ...] | None:
-    if not issubclass(type(value), collections.OrderedDict):
-        return None
-    try:
-        value = cast(collections.OrderedDict[Any, Any], value)
-        return tuple(index for index, _, _ in enumerate_items_with_dict_position(value))
-    except InvalidOrderedDict:
-        return None
-
-
 def _constant_subclass_base_value(value: object) -> Any:
     """Extract the base constant value from a constant subclass instance."""
     from .variables.user_defined import _CONSTANT_BASE_TYPES
@@ -1534,7 +1532,11 @@ def register_guard_check_spec(
     get_extra_sources_fn: Callable[[Guard], tuple[Source, ...]] | None = None,
 ):
     """Attach a GuardCheckSpec to a guard method for auto-dispatch."""
-    handler = GuardCheckSpec(get_metadata_fn, eval_fn, get_extra_sources_fn)
+    handler = GuardCheckSpec(
+        get_metadata_fn=get_metadata_fn,
+        eval_fn=eval_fn,
+        get_extra_sources_fn=get_extra_sources_fn,
+    )
 
     def decorator(fn):
         fn.guard_check_spec = handler
@@ -1571,6 +1573,16 @@ def unsupported_guard_check_spec(fn):
     """Mark a guard method as unsupported for auto-cache dispatch."""
     fn.guard_check_spec = UnsupportedGuardCheckSpec(fn.__name__)
     return fn
+
+
+def _ordered_dict_order(value: object) -> tuple[int, ...] | None:
+    if not issubclass(type(value), collections.OrderedDict):
+        return None
+    try:
+        value = cast(collections.OrderedDict[Any, Any], value)
+        return tuple(index for index, _, _ in enumerate_items_with_dict_position(value))
+    except InvalidOrderedDict:
+        return None
 
 
 class GuardBuilder(GuardBuilderBase):
@@ -1943,6 +1955,9 @@ class GuardBuilder(GuardBuilderBase):
                 if not issubclass(example_type, dict):
                     raise AssertionError(f"Expected dict, got {type(example_value)}")
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
+        if guard_manager_enum == GuardManagerType.DICT_GUARD_MANAGER:
+            # Module attribute access can build this manager without a source lookup.
+            self.guard_tree_values[id(example_value)] = example_value
         return guard_manager_enum
 
     def manager_guards_on_keys(self, mgr_enum: GuardManagerType) -> bool:
@@ -1957,6 +1972,9 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def get_guard_manager_from_source(self, source: Source) -> GuardManager:
+        if isinstance(source, SkipGuardSource):
+            # A relational check can depend on a skipped source without guarding it alone.
+            return self.get_guard_manager_from_source(source.base)
         root_guard_manager = self.guard_manager.root
 
         example_value = None
@@ -3736,10 +3754,14 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
-    # Multi-source guard (two inputs aliasing) — not expressible as a
-    # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
-    @skip_guard_check_spec
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, values: values[0] is values[1],
+        eval_fn=lambda values, expected: (values[0] is values[1]) == expected,
+        get_extra_sources_fn=lambda guard: (
+            _guard_create_fn_keyword(guard, "source_b"),
+        ),
+    )
     def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
         if is_from_skip_guard_source(
             guard.originating_source
@@ -3848,6 +3870,22 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _ordered_dict_order(value),
+        eval_fn=lambda value, order: order is not None
+        and _ordered_dict_order(value) == order,
+    )
+    def ORDERED_DICT_ORDER_MATCH(self, guard: Guard) -> None:
+        order = _ordered_dict_order(self.get(guard))
+        if order is None:
+            raise AssertionError("Expected a valid OrderedDict snapshot")
+        ref = self.arg_ref(guard)
+        code = [f"___ordered_dict_order({ref}) == {order!r}"]
+        self.get_guard_manager(guard).add_ordered_dict_order_guard(
+            order, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+        self._set_guard_export_info(guard, code)
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: (
             _guard_create_fn_keyword(guard, "hooks_name"),
             _nn_module_hook_membership(
@@ -3873,10 +3911,12 @@ class GuardBuilder(GuardBuilderBase):
                 self.check_fn_manager.additional_used_local_vars.add(name)
             if name := get_global_source_name(flags_source):
                 self.check_fn_manager.additional_used_global_vars.add(name)
-        if not flags:
+        flags_ref = self.arg_ref(flags_source.name)
+        hooks_ref = self.arg_ref(hooks_source.name)
+        if dict.__len__(flags) == 0:
             # Empty flags make every membership false, independent of hook IDs.
             # Keep the logical relation for nested reuse, but use a tag-safe leaf.
-            code = f"dict.__len__({flags_source.name}) == 0"
+            code = f"dict.__len__({flags_ref}) == 0"
             if code in self.already_added_code_parts:
                 return
             self.already_added_code_parts.add(code)
@@ -3887,10 +3927,12 @@ class GuardBuilder(GuardBuilderBase):
             )
             self._set_guard_export_info(guard, [code])
             return
-        membership = tuple(key in flags for key in dict.keys(self.get(hooks_source)))
+        membership = tuple(
+            dict.__contains__(flags, key) for key in dict.keys(self.get(hooks_source))
+        )
         code = (
-            f"tuple(key in {flags_source.name} for key in "
-            f"dict.keys({hooks_source.name})) == {membership!r}"
+            f"tuple(dict.__contains__({flags_ref}, key) for key in "
+            f"dict.keys({hooks_ref})) == {membership!r}"
         )
         if code in self.already_added_code_parts:
             return
@@ -3905,22 +3947,6 @@ class GuardBuilder(GuardBuilderBase):
         )
         self._set_guard_export_info(guard, [code])
         self.already_added_code_parts.add(code)
-
-    @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: _ordered_dict_order(value),
-        eval_fn=lambda value, order: order is not None
-        and _ordered_dict_order(value) == order,
-    )
-    def ORDERED_DICT_ORDER_MATCH(self, guard: Guard) -> None:
-        order = _ordered_dict_order(self.get(guard))
-        if order is None:
-            raise AssertionError("Expected a valid OrderedDict snapshot")
-        ref = self.arg_ref(guard)
-        code = [f"___ordered_dict_order({ref}) == {order!r}"]
-        self.get_guard_manager(guard).add_ordered_dict_order_guard(
-            order, get_verbose_code_parts(code, guard), guard.user_stack
-        )
-        self._set_guard_export_info(guard, code)
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: list(dict.keys(value)),
@@ -5443,8 +5469,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             actual_attrs = vars(obj)
             adopt_attrs = state is actual_attrs or (
                 isinstance(state, tuple)
-                and len(state) == 2
-                and state[0] is actual_attrs
+                and tuple.__len__(state) == 2
+                and tuple.__getitem__(state, 0) is actual_attrs
             )
             return (
                 reduced[0],
@@ -5497,16 +5523,21 @@ class GuardsStatePickler(FunctionPicklerBase):
             # Parameter without one carries the Parameter marker. Guards on a
             # live fake (TENSOR_MATCH, TYPE_MATCH) must not use this fallback.
             pytype = type(obj)
+            is_param = isinstance(obj, torch.nn.Parameter)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
-                is_param = isinstance(obj, torch.nn.Parameter)
                 default = torch.nn.Parameter if is_param else torch.Tensor
                 pytype = obj.pytype or default
-            # A fake answers empty_like with another fake through its own
-            # __torch_dispatch__, whether or not its FakeTensorMode is active,
-            # and that fake would drag the mode and its converters into the
-            # pickle; no_dispatch makes the template a plain meta tensor.
+            elif is_fake and is_param and pytype is torch.Tensor:
+                # A C++ fake's own type is the real type, but a C++ fake
+                # Parameter can be a plain Tensor carrying the marker.
+                pytype = torch.nn.Parameter
+            # A fake answers empty_like with another fake (a Python fake through
+            # its own __torch_dispatch__, whether or not its FakeTensorMode is
+            # active), and that fake would drag the mode and its converters into
+            # the pickle; no_dispatch, which also excludes the Fake dispatch key,
+            # makes the template a plain meta tensor.
             with no_dispatch() if is_fake else contextlib.nullcontext():
                 meta = torch.empty_like(
                     obj, device="meta", requires_grad=obj.requires_grad
@@ -5610,17 +5641,16 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(
             obj, (types.MethodDescriptorType, types.ClassMethodDescriptorType)
         ):
-            from .variables.object_protocol import Py_TPFLAGS_IMMUTABLETYPE
+            from .variables.object_protocol import type_is_immutable
 
             owner = obj.__objclass__
-            flags = type.__dict__["__flags__"].__get__(owner, type(owner))
-            if not flags & Py_TPFLAGS_IMMUTABLETYPE:
+            if not type_is_immutable(owner):
                 raise torch._dynamo.exc.PackageError(
                     f"Cannot serialize {type(obj).__name__} with a mutable owner"
                 )
-            for name, value in get_type_dict_no_user_code(owner).items():
-                if value is obj:
-                    return type(self)._unpickle_type_dict_item, (owner, name)
+            name = find_type_attribute_name(owner, obj)
+            if name is not None:
+                return type(self)._unpickle_type_dict_item, (owner, name)
             raise torch._dynamo.exc.PackageError(
                 f"Cannot locate {obj!r} in {owner!r}.__dict__"
             )
@@ -5892,17 +5922,13 @@ def _resolves_by_reference(value: object) -> bool:
             and getattr(owner, value.name, None) is value
         )
     if isinstance(value, (types.MethodDescriptorType, types.ClassMethodDescriptorType)):
-        from .variables.object_protocol import Py_TPFLAGS_IMMUTABLETYPE
+        from .variables.object_protocol import type_is_immutable
 
         owner = value.__objclass__
-        # Match GuardsStatePickler's immutable-owner descriptor reducer.
-        flags = type.__dict__["__flags__"].__get__(owner, type(owner))
         return (
-            bool(flags & Py_TPFLAGS_IMMUTABLETYPE)
+            type_is_immutable(owner)
             and _resolves_by_reference(owner)
-            and any(
-                item is value for item in get_type_dict_no_user_code(owner).values()
-            )
+            and find_type_attribute_name(owner, value) is not None
         )
     if _is_nested_named_tuple_type(value):
         # GuardsStatePickler.reducer_override rebuilds it as a fresh class.
@@ -6009,14 +6035,9 @@ def to_portable_function_guard(guard: Guard, builder: GuardBuilder) -> Guard:
     if portable is None:
         return guard
     create_fn, expected = portable
-    return dataclasses.replace(
-        guard,
+    return guard.with_source(
+        guard.originating_source,
         create_fn=functools.partial(create_fn, expected=expected),
-        guard_types=None,
-        code_list=None,
-        obj_weakref=None,
-        guarded_class_weakref=None,
-        _hash=None,
     )
 
 
@@ -6456,6 +6477,12 @@ class CheckFunctionManager:
                 used_local_vars.add(name)
 
         output_graph_guards_state = output_graph.dump_guards_state()
+        # Retain sources whose object has a kept manager, including aliased bases.
+        retained_order_sources = {
+            source
+            for source in output_graph_guards_state.guard_on_key_order
+            if id(builder.get(source)) in builder.guard_tree_values
+        }
         # Only serialize the global variables that are actually used in guards.
         for guard in sorted_guards:
             if isinstance(guard.originating_source, ShapeEnvSource):
@@ -6468,7 +6495,7 @@ class CheckFunctionManager:
             else:
                 prune_variable(guard.originating_source)
 
-        for source in output_graph.guard_on_key_order:
+        for source in retained_order_sources:
             prune_variable(source)
 
         def normalize_create_fn(x: Callable[..., None]) -> Callable[..., None]:
@@ -6527,12 +6554,7 @@ class CheckFunctionManager:
                     for guard in sorted_guards
                 )
             ),
-            # Filtered guards need order annotations only for retained dictionaries.
-            guard_on_key_order={
-                source
-                for source in output_graph_guards_state.guard_on_key_order
-                if id(builder.get(source)) in builder.guard_tree_values
-            },
+            guard_on_key_order=retained_order_sources,
             input_source_to_sizes_strides=pytree.tree_map(
                 convert_int_to_concrete_values,
                 output_graph_guards_state.input_source_to_sizes_strides,
