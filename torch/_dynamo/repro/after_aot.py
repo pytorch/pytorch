@@ -553,14 +553,30 @@ def _generate_triton_config(config: Any, dropped: list[str]) -> str:
     return f"triton.Config({', '.join(config_args)})"
 
 
+def _unwrap_jit_function(kernel: Any) -> Any:
+    """The JITFunction under any @triton.autotune / @triton.heuristics wrappers."""
+    while not isinstance(kernel, JITFunction) and hasattr(kernel, "fn"):
+        kernel = kernel.fn
+    return kernel
+
+
 def generate_custom_triton_kernel(kernel: Any) -> str:
     res = ""
     if isinstance(kernel, Autotuner):
+        heuristics: list[str] = []
         # pyrefly: ignore [missing-attribute]
-        if isinstance(kernel.fn, Heuristics):
-            res += "ERROR: Repro will not work as intended, "
-            res += "triton.runtime.autotuner.Heuristics is not currently supported\n"
-            return res
+        fn = kernel.fn
+        while isinstance(fn, Heuristics):
+            # pyrefly: ignore [missing-attribute]
+            heuristics.extend(fn.values)
+            # pyrefly: ignore [missing-attribute]
+            fn = fn.fn
+        if heuristics:
+            # The heuristics are arbitrary Python callables. Dynamo folds them
+            # into the configs of a re-wrapped kernel, which is the one the
+            # graph launches, so this original is only written to keep the
+            # side table indices stable.
+            res += f"# triton.heuristics not reproduced: {', '.join(heuristics)}\n"
 
         dropped: list[str] = []
         config_strs = [
@@ -595,8 +611,7 @@ def generate_custom_triton_kernel(kernel: Any) -> str:
         res += "".join(f"    {arg},\n" for arg in autotune_args)
         res += ")"
 
-    # pyrefly: ignore [missing-attribute]
-    src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
+    src_code = _unwrap_jit_function(kernel).src
     res += "\n@triton.jit\n"
     res += src_code
     res += "\n"
@@ -683,8 +698,7 @@ if "__compile_source__" in globals():
     )
 
     def get_fn_name(kernel: Any) -> str:
-        fn: Any = kernel if isinstance(kernel, JITFunction) else kernel.fn
-        return fn.__name__.split(".")[-1]
+        return _unwrap_jit_function(kernel).__name__.split(".")[-1]
 
     def get_triton_import_line(name: str, val: object) -> str | None:
         # User-defined Triton kernels are serialized from their source, not from
@@ -721,7 +735,7 @@ if "__compile_source__" in globals():
     ) -> str:
         """Write out global triton imports, tl.constexpr vars, and nested kernels."""
         result = ""
-        jit_fn = kernel if isinstance(kernel, JITFunction) else kernel.fn
+        jit_fn = _unwrap_jit_function(kernel)
         if not getattr(jit_fn, "fn", None) or not getattr(jit_fn, "src", None):
             return result
 

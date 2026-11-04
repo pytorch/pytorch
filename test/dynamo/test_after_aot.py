@@ -637,6 +637,24 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
             "# triton.autotune arguments not reproduced: prune_configs_by", repro
         )
 
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    def test_save_graph_repro_keeps_heuristics_kernel_index(self):
+        from triton.runtime.autotuner import Heuristics
+
+        kernels = self.import_test_module("_triton_repro_kernels")
+        # Dynamo registers the original autotune + heuristics kernel before the
+        # re-wrapped kernel the graph launches, so the repro must still load
+        # and give the re-wrapped kernel the same side table index.
+        repro, _, id_to_kernel = self.save_graph_repro_with_kernels(
+            [kernels.autotuned_heuristics_kernel, kernels.autotuned_kernel]
+        )
+
+        self.assertEqual(list(id_to_kernel), [0, 1])
+        self.assertNotIsInstance(id_to_kernel[0].fn, Heuristics)
+        self.assertEqual(id_to_kernel[0].fn.__name__, "autotuned_heuristics_kernel_0")
+        self.assertEqual(id_to_kernel[1].fn.__name__, "autotuned_kernel_1")
+        self.assertIn("# triton.heuristics not reproduced: EVEN, SCALE", repro)
+
     def test_repro_run_accuracy_does_not_reuse_compiled_graph(self):
         class Repro(torch.nn.Module):
             def forward(self, arg0, arg1, arg2):
