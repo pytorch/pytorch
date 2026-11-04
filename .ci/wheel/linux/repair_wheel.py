@@ -33,12 +33,6 @@ from build_env_setup import PLATFORM_TAGS
 PATCHELF = "/usr/local/bin/patchelf"
 
 
-def is_pre_rocm_10(version: str) -> bool:
-    if version == "preview":
-        return False
-    return not version or tuple(map(int, version.split(".")[:2])) < (10, 0)
-
-
 def wheel_platform_tags(wheel_name: str) -> list[str]:
     """Platform tags encoded in a wheel filename.
 
@@ -271,7 +265,10 @@ def main() -> None:
         # directly instead (rocm-systems#6640), so bundle a bare-named
         # copy, reached via $ORIGIN on the RPATHs above, only for older
         # SDKs. The builder image installs numactl-libs for this.
-        if is_pre_rocm_10(gpu_arch_version):
+        ver = gpu_arch_version
+        if ver != "preview" and (
+            not ver or tuple(map(int, ver.split(".")[:2])) < (10, 0)
+        ):
             is_ubuntu = "Ubuntu" in Path("/etc/os-release").read_text()
             libdir = "/usr/lib/x86_64-linux-gnu" if is_ubuntu else "/usr/lib64"
             libnuma = Path(libdir) / "libnuma.so.1"

@@ -75,6 +75,10 @@ if [[ "$DESIRED_CUDA" == "rocmpreview" ]]; then
   if [[ -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
     export PYTORCH_EXTRA_INSTALL_REQUIREMENTS=$(sed -E \
       "s/(^|\| *)(rocm\[[^]]*\])( *(\||$))/\1\2==${ROCM_PREVIEW_PIN}\3/" <<< "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS}")
+    if [[ "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS}" != *"]==${ROCM_PREVIEW_PIN}"* ]]; then
+      echo "ERROR: could not pin rocm==${ROCM_PREVIEW_PIN} in: ${PYTORCH_EXTRA_INSTALL_REQUIREMENTS}" >&2
+      exit 1
+    fi
   fi
 fi
 

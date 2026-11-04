@@ -72,11 +72,6 @@ printf '%s\\n' "$@" >> "$DOCKER_LOG"
             return result, docker_log.read_text().splitlines()
 
     def test_docker_builders_use_preview_pin_and_index(self) -> None:
-        pin = (
-            (REPO_ROOT / ".ci/docker/ci_commit_pins/rocm-preview.txt")
-            .read_text()
-            .strip()
-        )
         nightly_index = "https://nightly.repo.amd.com/rocm/core/whl-next/"
         builders = (
             (
@@ -93,7 +88,9 @@ printf '%s\\n' "$@" >> "$DOCKER_LOG"
                 result, docker_args = self.run_builder(script, image)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 build_args = set(itertools.pairwise(docker_args))
-                self.assertIn(("--build-arg", f"ROCM_VERSION={pin}"), build_args)
+                self.assertIn(
+                    ("--build-arg", f"ROCM_VERSION={PREVIEW_PIN}"), build_args
+                )
                 self.assertIn(
                     ("--build-arg", f"THEROCK_INDEX_URL={nightly_index}"),
                     build_args,
@@ -192,44 +189,50 @@ class TestRocmPreviewWheels(unittest.TestCase):
             lt_stable["source_wheel_build_name"], "manywheel-py3_11-rocm10_1"
         )
 
+    def populate_env(
+        self, tmp: str, desired_cuda: str, requirement: str
+    ) -> tuple[subprocess.CompletedProcess[str], Path]:
+        root = Path(tmp) / "pytorch"
+        (root / ".git").mkdir(parents=True)
+        for name in (".ci", "version.txt"):
+            (root / name).symlink_to(REPO_ROOT / name)
+        envfile = Path(tmp) / "env"
+        result = subprocess.run(
+            ["bash", str(REPO_ROOT / ".ci/pytorch/binary_populate_env.sh")],
+            env=os.environ
+            | {
+                "PYTORCH_ROOT": str(root),
+                "PACKAGE_TYPE": "manywheel",
+                "DESIRED_CUDA": desired_cuda,
+                "GPU_ARCH_TYPE": "rocm",
+                "BINARY_ENV_FILE": str(envfile),
+                "PYTORCH_EXTRA_INSTALL_REQUIREMENTS": requirement,
+            },
+            capture_output=True,
+            text=True,
+        )
+        return result, envfile
+
     def test_preview_build_version_records_pin(self) -> None:
+        matrix = load_module(
+            "generate_binary_build_matrix",
+            REPO_ROOT / ".github/scripts/generate_binary_build_matrix.py",
+        )
+        reqs = matrix.PYTORCH_EXTRA_INSTALL_REQUIREMENTS
         for desired_cuda, local, requirement, pinned in (
             (
                 "rocmpreview",
                 f"rocm{PREVIEW_PIN}",
-                "rocm[libraries,device-gfx942]",
-                f"rocm[libraries,device-gfx942]=={PREVIEW_PIN}",
+                reqs["preview"],
+                f"{reqs['preview']}=={PREVIEW_PIN}",
             ),
-            (
-                "rocm10.1",
-                "rocm10.1",
-                "rocm[libraries,device-all]==10.1.*",
-                "rocm[libraries,device-all]==10.1.*",
-            ),
+            ("rocm10.1", "rocm10.1", reqs["10.1"], reqs["10.1"]),
         ):
             with (
                 self.subTest(desired_cuda=desired_cuda),
                 tempfile.TemporaryDirectory() as tmp,
             ):
-                root = Path(tmp) / "pytorch"
-                (root / ".git").mkdir(parents=True)
-                for name in (".ci", "version.txt"):
-                    (root / name).symlink_to(REPO_ROOT / name)
-                envfile = Path(tmp) / "env"
-                result = subprocess.run(
-                    ["bash", str(REPO_ROOT / ".ci/pytorch/binary_populate_env.sh")],
-                    env=os.environ
-                    | {
-                        "PYTORCH_ROOT": str(root),
-                        "PACKAGE_TYPE": "manywheel",
-                        "DESIRED_CUDA": desired_cuda,
-                        "GPU_ARCH_TYPE": "rocm",
-                        "BINARY_ENV_FILE": str(envfile),
-                        "PYTORCH_EXTRA_INSTALL_REQUIREMENTS": requirement,
-                    },
-                    capture_output=True,
-                    text=True,
-                )
+                result, envfile = self.populate_env(tmp, desired_cuda, requirement)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 (line,) = [
                     env_line
@@ -243,6 +246,20 @@ class TestRocmPreviewWheels(unittest.TestCase):
                     if env_line.startswith("export PYTORCH_EXTRA_INSTALL_REQUIREMENTS=")
                 ]
                 self.assertIn(f'="{pinned} | ', reqs)
+
+    def test_preview_build_fails_when_pin_cannot_apply(self) -> None:
+        # A marker or version on the rocm term must not ship an unpinned wheel.
+        for requirement in (
+            "rocm[libraries,device-gfx942]; platform_system == 'Linux'",
+            "rocm[libraries,device-gfx942]==10.2.0a20261014",
+        ):
+            with (
+                self.subTest(requirement=requirement),
+                tempfile.TemporaryDirectory() as tmp,
+            ):
+                result, _ = self.populate_env(tmp, "rocmpreview", requirement)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"could not pin rocm=={PREVIEW_PIN}", result.stderr)
 
     def test_workflow_isolates_preview_lane(self) -> None:
         workflow = (
