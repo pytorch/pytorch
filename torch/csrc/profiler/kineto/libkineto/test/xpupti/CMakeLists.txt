@@ -83,14 +83,19 @@ endif()
 add_dependencies(xpupti_compute xpupti_compute_ep)
 
 # Runtime tests: host code linking the kernel-only compute library.
+# The library is copied next to each test, where $ORIGIN (Linux)
+# or the executable's directory (Windows) finds it,
+# so the tests run from wherever they are shipped.
 function(add_sycl_test test_file)
   get_filename_component(test_name "${test_file}" NAME_WE)
   add_executable(${test_name} ${test_file} XpuptiTestUtilities.cpp)
   target_link_libraries(${test_name} PRIVATE
     ${LINK_LIBRARIES}
     xpupti_compute)
-  set_target_properties(${test_name} PROPERTIES
-    BUILD_RPATH ${CMAKE_CURRENT_BINARY_DIR})
+  set_target_properties(${test_name} PROPERTIES BUILD_RPATH "$ORIGIN")
+  add_custom_command(TARGET ${test_name} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      ${XPUPTI_COMPUTE_LIB} $<TARGET_FILE_DIR:${test_name}>)
   gtest_discover_tests(${test_name} ${ARGN})
 endfunction()
 
