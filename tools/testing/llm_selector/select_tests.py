@@ -241,7 +241,7 @@ def added_test_files(added: Iterable[str], listed: Collection[str]) -> set[str]:
     tests = {
         f.removeprefix("test/").removesuffix(".py")
         for f in added
-        if re.match(r"test/([\w/]+/)?test_\w+\.py$", f)
+        if re.fullmatch(r"test/([\w/]+/)?test_\w+\.py", f)
     }
     blocked = tuple(BLOCKLISTED_PATTERNS)
     return {t for t in tests if not t.startswith(blocked) and t not in listed}
