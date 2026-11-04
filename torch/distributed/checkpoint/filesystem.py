@@ -256,7 +256,8 @@ class _StorageWriterTransforms:
         # append to the raw stream, we can't close the actual stream.
         # So, we use this to put a wrapper around the raw stream's
         # close() to make it a noop, and it gets closed once all files
-        # are appended.
+        # are appended. The inherited io.IOBase.close() neither flushes nor
+        # closes raw; _write_files_from_queue does that once per file.
 
         class NoCloseWriter(io.IOBase):
             def __init__(self, raw: io.IOBase):
@@ -267,15 +268,6 @@ class _StorageWriterTransforms:
 
             def write(self, b: Buffer) -> int:
                 return self.raw.write(b)
-
-            def close(self):
-                # Flushes any internal buffers of this writer or attached transformers,
-                # but does NOT eagerly flush the underlying raw file/cloud stream per item.
-                # The raw stream will be cleanly flushed and closed once all items in the
-                # file are written, avoiding unnecessary flush/sync overhead (especially on
-                # cloud storage backends like GCS/S3).
-                self.flush()
-                # but not close.
 
         transform_to = cast(IO[bytes], NoCloseWriter(raw_stream))
 
