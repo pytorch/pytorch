@@ -1554,7 +1554,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     gb_type="wrap_cutedsl: host_fn is not a @cute.jit function",
                     context=f"host_fn={host_fn}",
                     explanation="wrap_cutedsl only works on host functions decorated "
-                    "with @cute.jit, not on a wrapper that wrap_cutedsl returned.",
+                    "with @cute.jit: not on a wrapper that wrap_cutedsl returned, a "
+                    "functools.wraps decorator of a host function, a @cute.kernel "
+                    "function, a kernel object (one whose class's __call__ is "
+                    "@cute.jit) or a bound @cute.jit method. For the last two, as "
+                    "eager wrap_cutedsl says, wrap a @cute.jit function that takes the "
+                    "object as a cutlass.Constexpr parameter and calls the method on "
+                    "it, and pass the object to that wrapper.",
                     hints=[*graph_break_hints.USER_ERROR],
                 )
             mutates_args = kwargs["mutates_args"]
@@ -1565,7 +1571,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     explanation="Dynamo supports wrap_cutedsl(host_fn, "
                     "mutates_args=...) only where mutates_args is a constant.",
                     hints=[
-                        "Pass mutates_args as a list or tuple of parameter names.",
+                        "Pass mutates_args as 'unknown' or a list of parameter names.",
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
