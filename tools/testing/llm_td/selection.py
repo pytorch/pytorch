@@ -417,6 +417,7 @@ class Selection:
         *,
         previously_failed: Collection[str] = (),
         td_include: Collection[str] = (),
+        share: float | None = None,
     ) -> Split:
         """Split TD's ranked TestRuns into the covered files, the
         `previously_failed` files (those that already failed on the PR) that
@@ -425,9 +426,9 @@ class Selection:
         the hedge: their pool spans the PR's SHAs, build environments and
         configs, so one large earlier failure would otherwise use up the hedge
         of every config, while TD's include bounds what they cost. The hedge
-        is LLM_TD_HEDGE (20%) of the test time of `ranked`, spent greedily in
-        rank order on the other files with a positively scored TestRun,
-        including the other previous failures. One positive class-level run
+        is `share` (by default LLM_TD_HEDGE, 20%) of the test time of
+        `ranked`, spent greedily in rank order on the other files with a
+        positively scored TestRun, including the other previous failures. One positive class-level run
         hedges its whole file at the file's full time. Files without a time
         are never hedged. Partial TestRuns of one file share its time, so a
         file is charged once and lands in one batch. If that chooses nothing,
@@ -437,7 +438,8 @@ class Selection:
         covered = {f for f in files if self.covers(f, test_config)}
         prev = {f for f in previously_failed if f in files and f in td_include}
         prev -= covered
-        left = budget = LLM_TD_HEDGE * sum(file_time.get(f, 0) for f in files)
+        share = LLM_TD_HEDGE if share is None else share
+        left = budget = share * sum(file_time.get(f, 0) for f in files)
         hedged: set[str] = set()
         chosen = covered | prev
         for x in ranked:

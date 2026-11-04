@@ -36,7 +36,10 @@ from tools.testing.target_determination.heuristics.previously_failed_in_pr impor
 
 sys.path.remove(str(REPO_ROOT))
 
-TD_RESULTS = REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / "td_results.json"
+# main() writes TD_RESULTS_FILE to REPO_ROOT; CI uploads it and the test jobs'
+# download-td-artifacts moves it to TD_RESULTS.
+TD_RESULTS_FILE = "td_results.json"
+TD_RESULTS = REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / TD_RESULTS_FILE
 # main() stores get_all_previous_failures() with TD's ranking, so that every
 # shard sees the same ones; TestPrioritizations.from_json ignores the key.
 PREVIOUS_FAILURES_KEY = "previous_failures"
@@ -46,7 +49,8 @@ def import_results(
     path: Path = TD_RESULTS,
 ) -> tuple[TestPrioritizations, set[str] | None]:
     """TD's ranking and the previous failures stored with it, or None for
-    those if they are missing (no TD results, or an older writer) or malformed."""
+    those if they are missing (no TD results, an older writer, or a TD job
+    that could not read them) or malformed."""
     if not path.exists():
         print("No TD results found")
         return TestPrioritizations([], {}), None
@@ -110,8 +114,15 @@ def main() -> None:
             {"aggregated_heuristics": aggregated_heuristics.to_json()},
         )
 
-    td_results = td_results_json(test_prioritizations, get_all_previous_failures())
-    with open(REPO_ROOT / "td_results.json", "w") as f:
+    # The download step is continue-on-error, and a failed download leaves no
+    # cache, as does a PR without one yet; only the step's outcome tells them apart.
+    if os.getenv("PYTEST_CACHE_DOWNLOAD_OUTCOME") == "success":
+        previous_failures = get_all_previous_failures()
+    else:
+        print("The pytest cache was not downloaded", file=sys.stderr)
+        previous_failures = None
+    td_results = td_results_json(test_prioritizations, previous_failures)
+    with open(REPO_ROOT / TD_RESULTS_FILE, "w") as f:
         f.write(json.dumps(td_results))
 
 
