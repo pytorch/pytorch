@@ -2343,7 +2343,7 @@ class BenchmarkRunner:
             except Exception as e:
                 # Sometimes torch.allclose may throw RuntimeError
                 log.exception("Failed to compare eager outputs for %s", name)
-                if isinstance(e, torch.cuda.OutOfMemoryError):
+                if isinstance(e, torch._C.OutOfMemoryError):
                     return record_status("OOM", dynamo_start_stats=start_stats)
                 is_same = False
 
