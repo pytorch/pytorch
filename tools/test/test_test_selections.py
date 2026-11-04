@@ -656,6 +656,7 @@ class TestSplitTests(LlmSelectorTestCase):
         td_enabled: bool = True,
         record: bool = True,
         test_config: str = "default",
+        enforcement: bool = True,
     ) -> tuple[CallSplit, str, list[dict]]:
         """split_tests' result, its stderr and the artifacts it wrote, with the
         selection file holding `sel` (a str is written as is)."""
@@ -663,6 +664,7 @@ class TestSplitTests(LlmSelectorTestCase):
         stderr = io.StringIO()
         with (
             tempfile.TemporaryDirectory() as d,
+            mock.patch.object(selection, "ENFORCEMENT_ENABLED", enforcement),
             mock.patch.object(selection, "get_pr_number", return_value=1),
             mock.patch.object(gen_artifact, "REPO_ROOT", Path(d)),
             mock.patch("sys.stderr", stderr),
@@ -717,6 +719,20 @@ class TestSplitTests(LlmSelectorTestCase):
         self.assertSplit(split, ["p"], ["a"])
         self.assertEqual(stderr, self.TD_LINE)
         self.assertEqual([x["source"] for x in artifacts], ["td"])
+
+    def test_enforcement_disabled_keeps_td(self) -> None:
+        shadow, _, _ = self.split(Selection(files={"a"}, candidates={"a"}))
+        sel = Selection(files={"a"}, enforce=True, candidates={"a"})
+        split, stderr, artifacts = self.split(sel, enforcement=False)
+        if split.llm is None or shadow.llm is None:
+            raise AssertionError("no selection read")
+        self.assertFalse(split.llm_enforced)
+        self.assertFalse(split.llm.kept_td)
+        self.assertSplit(split, ["p"], ["a"])
+        self.assertEqual(stderr, self.TD_LINE)
+        self.assertEqual([x["source"] for x in artifacts], ["td"])
+        metric = {**shadow.llm.selection_metric, "enforce_requested": True}
+        self.assertEqual(split.llm.selection_metric, metric)
 
     def test_enforced_selection_replaces_td(self) -> None:
         sel = Selection(files={"a"}, enforce=True, candidates={"a"})
@@ -836,7 +852,7 @@ class TestSplitTests(LlmSelectorTestCase):
             row = {**td, "llm_enforced": s is not None}
             expected: list[tuple[str, object]] = [("td_test_failure_stats_v2", row)]
             if split.llm is not None:
-                expected.append(("llm_selector_failure", split.llm.failure_metric(test)))  # fmt: skip
+                expected.append(("llm_selection_failure", split.llm.failure_metric(test)))  # fmt: skip
             self.assertEqual(metrics, expected)
 
     def test_broken_llm_selector_metrics_are_skipped(self) -> None:
@@ -853,7 +869,7 @@ class TestSplitTests(LlmSelectorTestCase):
         self.assertEqual(
             stderr.getvalue(),
             "::warning::Not emitting llm_selection: RuntimeError('bug')\n"
-            "::warning::Not emitting llm_selector_failure: RuntimeError('bug')\n",
+            "::warning::Not emitting llm_selection_failure: RuntimeError('bug')\n",
         )
 
     def test_unknown_previous_failures_keep_td(self) -> None:
@@ -903,6 +919,7 @@ class TestRunTestSplit(LlmSelectorTestCase):
         sel = Selection(files={"a"}, enforce=True, candidates={"a"})
         with (
             tempfile.TemporaryDirectory() as d,
+            mock.patch.object(selection, "ENFORCEMENT_ENABLED", True),
             mock.patch.object(selection, "get_pr_number", return_value=1),
             mock.patch("sys.stderr", io.StringIO()),
         ):

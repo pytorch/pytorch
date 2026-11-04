@@ -46,7 +46,7 @@ WORKFLOWS = [
     ("trunk", "cpu", 133.4, 0.62, 0.46, True),
     ("trunk", "gpu", 136.5, 0.60, 0.47, True),
     ("inductor (unit tests)", "ind_cpu", 54.9, 0.78, 0.30, False),
-    ("inductor (unit tests)", "ind_gpu", 50.7, 0.77, 0.34, False),
+    ("inductor (unit tests)", "ind_gpu", 48.5, 0.77, 0.32, False),
     ("periodic", "gpu", 17.2, 0.08, 0.37, False),
     ("slow", "cpu", 6.2, 0.04, 0.37, False),
 ]
@@ -82,7 +82,6 @@ SELECT uniqExact(head_sha) heads FROM default.workflow_run FINAL
 WHERE created_at >= toDateTime({end}) - INTERVAL 30 DAY AND created_at < toDateTime({end}) AND repository.full_name = 'pytorch/pytorch'
   AND name = 'pull' AND event = 'pull_request' AND head_repository.full_name = 'pytorch/pytorch'
 """
-CONFIG = re.compile(r"/ test \(([^,]+),")
 IDS = Path(__file__).parent / "ids"
 LABELER = REPO / ".github/labeler.yml"
 
@@ -122,14 +121,14 @@ def fractions(
     """The mean (cpu, gpu) shares of test time `pol` of `tag` and TD's cut run, from score.score's rows on `ids`.
 
     The inductor shares ("ind_cpu", "ind_gpu") are over the rows whose change
-    the ciflow/inductor labeler rule matches, of the time of inductor.yml's
-    unit-test configs (inductor-unittest.yml) that TD never runs."""
+    the ciflow/inductor labeler rule matches, of the time of
+    land_time.inductor_unit_configs(), the configs the Time to land replay
+    shrinks in inductor."""
     rows = score.score(data, ids, list(dict.fromkeys([tag, "td"])), [pol], strong=True, samples=samples, td_dir=td_dir, stats=stats)  # fmt: skip
     seconds = score.test_seconds(data / "test-times.json")
     fallback = score.fallback_seconds(data / "test-times.json")
     globs = inductor_globs(labeler)
-    unit = {c for w, n, c in score.ci_jobs()[False] if w == "inductor" and n.startswith("unit-test / ")}  # fmt: skip
-    inductor = {c for c in unit if not score.runs_td(c)}
+    inductor = land_time.inductor_unit_configs()
     if not inductor:
         raise SystemExit("no inductor unit-test configs without TD in workflows")
     out = {}
@@ -236,12 +235,11 @@ def constants(end: int) -> tuple[list[tuple[str, str, float, float, float, bool]
     WORKFLOWS row, and cost whose misc.runner_cost GPU flag disagrees with
     land_time.GPU_LABEL on the job's runner, are printed to stderr; a row
     with hours but no cost raises."""
-    no_td = land_time.no_td_configs()
+    unit = land_time.inductor_unit_configs()
     gpu_label = re.compile(land_time.GPU_LABEL)
 
     def key(wf: str, name: str, gpu: bool) -> tuple[str, str] | None:
-        m = CONFIG.search(name)
-        if m is None or not land_time.selectable(wf, m.group(1), name, no_td):
+        if not land_time.selectable(wf, name, unit):
             return None
         return wf, ("ind_" if wf == "inductor" else "") + ("gpu" if gpu else "cpu")
 

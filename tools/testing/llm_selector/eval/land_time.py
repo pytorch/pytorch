@@ -12,10 +12,9 @@ report replays the runs created between 29.5 days and 12 hours before the
 end. Each same-repo test job's `Test` step is shrunk by r, new over old test
 time on a typical change, from a dollars.py --json output: fractions over
 td_fractions where TD runs, and the inductor unit-test fractions (old = 1)
-in inductor, whose model benchmarks (BENCH) keep r = 1. Jobs run_test.py
-runs without TD keep r = 1 (see no_td_configs; the cache has no job names,
-so macOS and xpu jobs are told by score.NO_TD_ENV on their runner labels),
-and so do fork-PR runs, which keep TD, unless --all-prs. Each job keeps its start time; a run's time to signal
+in inductor, whose model benchmarks keep r = 1 (see selectable). Jobs
+run_test.py runs without TD keep r = 1, and so do fork-PR runs, which keep
+TD, unless --all-prs. Each job keeps its start time; a run's time to signal
 (TTS) is its last job's completion minus its creation. Only first attempts
 count, and runs that did not conclude success or failure, have a cancelled
 job, ran no test job or have a TTS outside (0, 24 h] are left out. A PR
@@ -49,8 +48,8 @@ if TYPE_CHECKING:
 WORKFLOWS = ("pull", "trunk", "inductor", "rocm-mi300")
 # Configs of TD workflows whose .ci/pytorch/test.sh branch does not run run_test.py.
 NO_RUN_TEST = {"backwards_compat", "docs_test", "libtorch_agnostic_targetting", "pr_time_benchmarks", "verify_cachebench", "aoti_cross_compile_for_windows"}  # fmt: skip
-# Inductor's model-benchmark configs, the ones outside its unit-test jobs.
-BENCH = re.compile(r"huggingface|timm|torchbench|_perf")
+# The job name before ' / test (' and the config, in workflow_job's and misc.runner_cost's job names.
+TEST_JOB = re.compile(r"^(.*) / test \(([^,]+),")
 CIFLOW_PR = re.compile(r"^ciflow/[^/]+/(\d+)$")
 GPU_LABEL = "gpu|nvidia|-a10g|-l4|-t4|h100|h200|b200|gb[0-9]00|a100|rocm|xpu"
 CONCURRENT_S = 600
@@ -63,7 +62,7 @@ WHERE created_at >= toDateTime({end}) - INTERVAL 31 DAY AND created_at < toDateT
   AND repository.full_name = 'pytorch/pytorch' AND name IN ('pull','trunk','inductor','rocm-mi300')
 """
 
-# Per run: cancelled job count, last build and non-test job end; per test job: (end, Test step seconds, config, GPU, job seconds, queue seconds, labels).
+# Per run: cancelled job count, last build and non-test job end; per test job: (end, Test step seconds, job name, GPU, job seconds, queue seconds, labels).
 JOBS_SQL = """
 WITH jobs AS (
   SELECT id, any(run_id) run_id, any(head_sha) head_sha, any(name) nm, any(conclusion) concl,
@@ -78,7 +77,6 @@ WITH jobs AS (
   SELECT *, indexOf(sn, 'Test') ti,
     if(ti > 0 AND se[ti] >= ss[ti] AND ss[ti] >= js AND se[ti] <= je, dateDiff('second', ss[ti], se[ti]), 0) tsec,
     multiIf(nm LIKE '%/ test (%', 'test', match(nm, '/ build($| )'), 'build', 'other') kind,
-    extract(nm, '/ test \\\\(([^,]+),') cfg,
     arrayExists(l -> match(l, '{gpu}'), lbl) gpu,
     arrayStringConcat(lbl, ',') lab
   FROM jobs
@@ -87,7 +85,7 @@ SELECT run_id, any(head_sha) sha,
   countIf(concl = 'cancelled') ncancel,
   maxIf(toUnixTimestamp(je), kind='build' AND concl != 'skipped') last_build,
   maxIf(toUnixTimestamp(je), kind='other' AND concl != 'skipped') last_other,
-  groupArrayIf((toUnixTimestamp(je), tsec, cfg, gpu, dateDiff('second', js, je), dateDiff('second', jc, js), lab), kind='test' AND concl != 'skipped') tests
+  groupArrayIf((toUnixTimestamp(je), tsec, nm, gpu, dateDiff('second', js, je), dateDiff('second', jc, js), lab), kind='test' AND concl != 'skipped') tests
 FROM j2 GROUP BY run_id
 """
 
@@ -154,19 +152,29 @@ def ratios(dollars: dict) -> dict[str, float]:
     return {"cpu": round(f["cpu"] / t["cpu"], 3), "gpu": round(f["gpu"] / t["gpu"], 3), "ind_cpu": round(f["ind_cpu"], 3), "ind_gpu": round(f["ind_gpu"], 3)}  # fmt: skip
 
 
-def no_td_configs() -> set[str]:
-    """NO_RUN_TEST and the configs every pull and trunk test job of runs without TD (force-no-td, score.NO_TD_CONFIGS, macOS, xpu)."""
-    jobs = score.ci_jobs()
-    return NO_RUN_TEST | ({c for w, _, c in jobs[False] if w in ("pull", "trunk")} - {c for _, _, c in jobs[True]})  # fmt: skip
+def inductor_unit_configs() -> set[str]:
+    """The configs of inductor's unit-test jobs (inductor-unittest.yml, run as 'unit-test / ...') that TD never runs; the rest of inductor are model benchmarks."""
+    unit = {c for w, n, c in score.ci_jobs()[False] if w == "inductor" and n.startswith("unit-test / ")}  # fmt: skip
+    return {c for c in unit if not score.runs_td(c)}
 
 
-def selectable(wf: str, cfg: str, env: str, no_td: set[str]) -> bool:
-    """Whether the selection shrinks a `wf` test job of config `cfg`: inductor's unit tests, and elsewhere the jobs run_test.py runs with TD.
+def selectable(wf: str, job: str, unit: set[str]) -> bool:
+    """Whether the selection shrinks the `wf` test job named `job`: inductor's unit tests (`unit` is inductor_unit_configs()), and elsewhere the jobs run_test.py runs with TD (score.job_runs_td).
 
-    `no_td` is no_td_configs(), and `env` the job's name or runner labels, for score.NO_TD_ENV."""
+    TD is off in periodic and slow, so ci_jobs has no job-level verdict there;
+    their follow-up rows apply run_test.py's config and build-environment
+    rules (periodic.yml and slow.yml set no force-no-td)."""
+    if (m := TEST_JOB.search(job)) is None:
+        return False
+    name, cfg = m.groups()
     if wf == "inductor":
-        return not BENCH.search(cfg)
-    return not (cfg in no_td or any(fnmatch.fnmatchcase(cfg, n) for n in score.NO_TD_CONFIGS) or score.NO_TD_ENV.search(env))  # fmt: skip
+        return cfg in unit
+    if cfg in NO_RUN_TEST:
+        return False
+    if wf in ("periodic", "slow"):
+        return not score.NO_TD_ENV.search(name) and not any(fnmatch.fnmatchcase(cfg, n) for n in score.NO_TD_CONFIGS)  # fmt: skip
+    # misc.runner_cost's names have no shard numbers, which score.config_of needs.
+    return score.job_runs_td(f"{name} / test ({cfg}, 1, 1)", wf)
 
 
 def fork_runs(cache: Path, wfruns: list[dict]) -> set[int]:
@@ -189,10 +197,10 @@ def replay(cache: Path, r: dict[str, float], keep: set[int]) -> dict[str, list[d
     """The included PR runs of each workflow, with their old and new TTS. Runs in `keep` are not shrunk."""
     end = json.loads((cache / "meta.json").read_text())["end"]
     wfr = {w["id"]: w for w in json.loads((cache / "wfruns.json").read_text())}
-    no_td = no_td_configs()
+    unit = inductor_unit_configs()
 
-    def ratio(wf: str, cfg: str, gpu: bool, labels: str) -> float:
-        if not selectable(wf, cfg, labels, no_td):
+    def ratio(wf: str, job: str, gpu: bool) -> float:
+        if not selectable(wf, job, unit):
             return 1.0
         return r[("ind_" if wf == "inductor" else "") + ("gpu" if gpu else "cpu")]
 
@@ -217,7 +225,7 @@ def replay(cache: Path, r: dict[str, float], keep: set[int]) -> dict[str, list[d
                 continue
             last_build, last_other = x["last_build"] or c, x["last_other"] or c
             for t in x["tests"]:
-                t.append(1.0 if rid in keep else ratio(wf, t[2], t[3], t[6]))
+                t.append(1.0 if rid in keep else ratio(wf, t[2], t[3]))
             t_old = max(t[0] for t in x["tests"])
             t_new = max(t[0] - t[1] * (1 - t[-1]) for t in x["tests"])
             old = max(last_build, last_other, t_old) - c

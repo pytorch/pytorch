@@ -61,9 +61,6 @@ from tools.testing.test_run import TestRun
 sys.path.remove(str(REPO_ROOT))
 
 
-# Consistency checks of files outside tools/testing/llm_selector (.ci/pytorch/test.sh, .github/labeler.yml and workflows), which unrelated edits can break; opt in with LLM_SELECTOR_REPO_CHECKS=1.
-repo_check = unittest.skipUnless(os.environ.get("LLM_SELECTOR_REPO_CHECKS") == "1", "set LLM_SELECTOR_REPO_CHECKS=1 to check files outside tools/testing/llm_selector")  # fmt: skip
-
 # config -> file -> [cpu, gpu] seconds
 SECONDS = {
     "default": {"test_a": [100.0, 0.0], "test_b": [50.0, 50.0], "test_c": [10.0, 0.0], "test_d": [40.0, 0.0]},
@@ -955,6 +952,7 @@ class TestScore(unittest.TestCase):
             applied, ran = {}, {}
             for c in (config, ""):
                 with (
+                    mock.patch.object(selection, "ENFORCEMENT_ENABLED", True),
                     mock.patch.object(selection, "get_pr_number", return_value=1),
                     mock.patch("sys.stderr", io.StringIO()),
                 ):
@@ -1743,7 +1741,6 @@ class TestDollars(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, msg):
                 dollars.inductor_globs(data / "bad.yml")
 
-    @repo_check
     def test_real_labeler(self) -> None:
         real = dollars.inductor_globs(dollars.LABELER)
         self.assertTrue(real.fullmatch("torch/_inductor/codegen/wrapper.py"))
@@ -1951,7 +1948,7 @@ class TestDollars(unittest.TestCase):
             return cost if "runner_cost" in sql else hours if "workflow_job" in sql else [{"heads": 12345}]  # fmt: skip
 
         workflows = [("pull", "cpu", 0.0, 0.0, 0.0, True), ("inductor (unit tests)", "ind_gpu", 0.0, 0.0, 0.0, False)]  # fmt: skip
-        with patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}), mock.patch.object(clickhouse, "query", side_effect=query):  # fmt: skip
+        with patch_ci_jobs({True: {("pull", "linux", "default")}, False: {("inductor", "unit-test / inductor", "inductor_core")}}), mock.patch.object(clickhouse, "query", side_effect=query):  # fmt: skip
             with mock.patch.object(dollars, "WORKFLOWS", workflows), contextlib.redirect_stderr(io.StringIO()) as err:  # fmt: skip
                 got = dollars.constants(1000)
             self.assertEqual(err.getvalue(), "left out ('periodic', 'cpu'), which has no WORKFLOWS row: $2.0k, 0 test hours, 0 of them PR\n$2.0k of ('periodic', 'cpu') is on runners misc.runner_cost and land_time.GPU_LABEL classify differently\n")  # fmt: skip
@@ -2028,12 +2025,12 @@ class TestLandTime(unittest.TestCase):
         runs.append({**runs[0], "id": 4, "name": "trunk", "event": "push", "head_branch": "ciflow/trunk/7"})  # fmt: skip
         runs += [{**runs[0], "id": 5}, {**runs[3], "id": 6}]
         # smoke_b200 is TD-off through force-no-td, not by name.
-        b200 = [c + 1800, 1000, "smoke_b200", True, 1200, 60, "nv-l-arm64grace-16-200-gb300"]  # fmt: skip
-        # (end, Test step seconds, config, GPU, job seconds, queue seconds, labels): a CPU and a TD-off job.
-        tests = [[c + 3600, 3000, "default", False, 3500, 60, "l"], [c + 1800, 1000, "docs_test", False, 1200, 60, "l"]]  # fmt: skip
+        b200 = [c + 1800, 1000, "b200 / test (smoke_b200, 1, 1, nv)", True, 1200, 60, "nv-l-arm64grace-16-200-gb300"]  # fmt: skip
+        # (end, Test step seconds, job name, GPU, job seconds, queue seconds, labels): a CPU and a TD-off job.
+        tests = [[c + 3600, 3000, "linux / test (default, 1, 1, l)", False, 3500, 60, "l"], [c + 1800, 1000, "linux / test (docs_test, 1, 1, l)", False, 1200, 60, "l"]]  # fmt: skip
         job = {"ncancel": 0, "last_build": c + 300, "last_other": 0}
         # run_test.py runs every test in dynamo_cpython and on macOS, so those jobs do not shrink.
-        cpython, mac = [[c + 3600, 3000, "dynamo_cpython", False, 3500, 60, "l"]], [[c + 3600, 3000, "default", False, 3500, 60, "macos-m1-14"]]  # fmt: skip
+        cpython, mac = [[c + 3600, 3000, "linux / test (dynamo_cpython, 1, 1, l)", False, 3500, 60, "l"]], [[c + 3600, 3000, "macos-14-py3-arm64 / test (default, 1, 1, macos-m1-14)", False, 3500, 60, "macos-m1-14"]]  # fmt: skip
         files = {
             "meta.json": {"end": end},
             "wfruns.json": runs,
@@ -2072,16 +2069,26 @@ class TestLandTime(unittest.TestCase):
         self.assertTrue(math.isnan(land_time.pct([], 50)))
 
     def test_selectable(self) -> None:
-        no_td = {"docs_test"}
-        for wf, cfg, env, want in [
-            ("pull", "default", "l", True),
-            ("pull", "docs_test", "l", False),
-            ("pull", "dynamo_cpython", "l", False),
-            ("trunk", "default", "macos-m1-14", False),
-            ("inductor", "inductor_core", "g", True),
-            ("inductor", "inductor_huggingface", "g", False),
+        self.enterContext(patch_ci_jobs({True: {("pull", "linux", "default"), ("pull", "linux", "docs_test")}, False: {("trunk", "b200", "smoke_b200"), *DOLLAR_JOBS[False]}}))  # fmt: skip
+        unit = land_time.inductor_unit_configs()
+        self.assertEqual(unit, {"inductor_core"})
+        for wf, job, want in [
+            ("pull", "linux / test (default, 1, 2, l)", True),
+            # misc.runner_cost's job names have no shard numbers.
+            ("pull", "linux / test (default, l))", True),
+            ("pull", "linux / test (docs_test, 1, 1, l)", False),
+            ("pull", "linux / test (dynamo_cpython, 1, 1, l)", False),
+            ("trunk", "b200 / test (smoke_b200, 1, 1, nv)", False),
+            ("trunk", "macos-14-py3-arm64 / test (default, 1, 1, macos-m1-14)", False),
+            ("pull", "linux / build", False),
+            # TD is off in periodic and slow, so only run_test.py's config and build-environment rules apply.
+            ("slow", "linux / test (slow, 1, 1, l)", True),
+            ("periodic", "linux / test (dynamo_cpython, 1, 1, l)", False),
+            ("periodic", "macos-14 / test (default, 1, 1, macos-m1-14)", False),
+            ("inductor", "unit-test / inductor / test (inductor_core, 1, 2, g)", True),
+            ("inductor", "inductor / test (inductor_huggingface, 1, 1, g)", False),
         ]:
-            self.assertEqual(land_time.selectable(wf, cfg, env, no_td), want, (wf, cfg, env))  # fmt: skip
+            self.assertEqual(land_time.selectable(wf, job, unit), want, (wf, job))
 
     def test_no_run_test_configs(self) -> None:
         test_sh = textwrap.dedent("""\
@@ -2113,21 +2120,24 @@ class TestLandTime(unittest.TestCase):
         configs = {"docs_test", "bench", "default", "early_run", "late_run", "x_run"}
         self.assertEqual(no_run_test_configs(test_sh, configs), {"docs_test", "bench", "early_run"})  # fmt: skip
 
-    @repo_check
     def test_no_run_test_matches_test_sh(self) -> None:
         configs = {c for w, _, c in ci_jobs()[True] if w in ("pull", "trunk")}
         self.assertEqual(no_run_test_configs((REPO_ROOT / ".ci/pytorch/test.sh").read_text(), configs), land_time.NO_RUN_TEST)  # fmt: skip
 
-    @repo_check
     def test_rules_match_workflows(self) -> None:
         jobs = ci_jobs()
         td_configs = {c for w, _, c in jobs[True] | jobs[False] if w in ("pull", "trunk")}  # fmt: skip
         self.assertLessEqual(land_time.NO_RUN_TEST, td_configs)
-        self.assertIn("smoke_b200", land_time.no_td_configs())
+        unit = land_time.inductor_unit_configs()
+        b200 = {n for w, n, c in jobs[False] if w == "trunk" and c == "smoke_b200"}
+        self.assertTrue(b200)
+        for n in b200:
+            self.assertFalse(land_time.selectable("trunk", f"{n} / test (smoke_b200, 1, 1, x)", unit), n)  # fmt: skip
+        # The config split dollars.fractions times is the job split the replay shrinks.
         inductor = {(n, c) for w, n, c in jobs[False] if w == "inductor"}
-        self.assertTrue(inductor)
+        self.assertTrue(unit)
         for n, c in inductor:
-            self.assertEqual(bool(land_time.BENCH.search(c)), not n.startswith("unit-test / "), (n, c))  # fmt: skip
+            self.assertEqual(c in unit, n.startswith("unit-test / "), (n, c))
 
     def test_ratios_and_wait(self) -> None:
         dollars_json = {"fractions": {"cpu": 0.3, "gpu": 0.3, "ind_cpu": 0.5, "ind_gpu": 0.4}, "td_fractions": {"cpu": 0.6, "gpu": 0.4, "ind_cpu": 0.8, "ind_gpu": 0.9}}  # fmt: skip
@@ -2137,7 +2147,7 @@ class TestLandTime(unittest.TestCase):
         self.assertEqual(land_time.wait([head], "end_new"), [5.0])
 
     def test_report(self) -> None:
-        self.enterContext(patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}))  # fmt: skip
+        self.enterContext(patch_ci_jobs({True: {("pull", "linux", "default")}, False: {("inductor", "unit-test / inductor", "inductor_core")}}))  # fmt: skip
         end = 100 * 86400
         c0 = end - 86400
         # id -> (workflow, sha, creation offset).
@@ -2150,7 +2160,7 @@ class TestLandTime(unittest.TestCase):
 
         def job(i: int, tests: list[tuple[int, int, str, bool]], **kw: int) -> dict:
             c = c0 + spec[i][2]
-            return {"run_id": i, "ncancel": 0, "last_build": c + 300, "last_other": 0, **kw, "tests": [[c + e, t, cfg, gpu, t + 500, 60, "g" if gpu else "l"] for e, t, cfg, gpu in tests]}  # fmt: skip
+            return {"run_id": i, "ncancel": 0, "last_build": c + 300, "last_other": 0, **kw, "tests": [[c + e, t, f"linux / test ({cfg}, 1, 1, g)", gpu, t + 500, 60, "g" if gpu else "l"] for e, t, cfg, gpu in tests]}  # fmt: skip
 
         cpu = [(3600, 3000, "default", False)]  # 60 -> 35 min
         gpu = [(7200, 6000, "default", True)]  # 120 -> 95 min
@@ -2693,6 +2703,19 @@ class TestBuildDataset(unittest.TestCase):
                         for k, _ in config:
                             bd.git("config", "--unset", k)
 
+    def test_below_needs_the_lower_main_base(self) -> None:
+        # Main added g after U's merge base m0 and D, based on m1, deletes it: D's change reverse-applies
+        # to m0 and has no deletion hunk of a file that stays, but m0 predates g rather than having D's change.
+        with scratch_repo():
+            m0 = commit_files({"a": "a\n"})
+            m1 = commit_files({"a": "a\n", "g": "g\n"}, m0)
+            bd.git("update-ref", "refs/remotes/origin/main", m1)
+            d = commit_files({"a": "a\n"}, m1)
+            b = commit_files({"a": "a\n", "z": "z\n"}, m1)
+            self.assertFalse(bd.below(d, m0))
+            # Based on m1, which has g, U's base lacking it does have D's change.
+            self.assertTrue(bd.below(d, b))
+
     def test_stacked_bounds(self) -> None:
         # U (pr 1, "me") is based on B, which has the changes of O (pr 2, another author's, landed),
         # S (pr 3, mine) and F (pr 4, mine). O and S broke their tests 20 days before U's failure,
@@ -2826,7 +2849,10 @@ class TestBuildDataset(unittest.TestCase):
                 bd.write_sample(Path(d), "s", "neutral", head, base, "t2", "b", window=(START, END), truth=[])  # fmt: skip
                 self.assertEqual(json.loads((Path(d) / "s.json").read_text()), s)
         self.assertEqual(s["deleted"], ["gone.py", "moved.py"])
-        self.assertEqual((s["title"], s["builder"], s["window"]), ("t", bd.BUILDER, [str(START), str(END)]))  # fmt: skip
+        self.assertEqual((s["title"], s["builder"], s["window"], s["workflows"]), ("t", bd.BUILDER, [str(START), str(END)], bd.workflows()))  # fmt: skip
+        # The mark follows the job classification.
+        with patch_ci_jobs(TD_JOBS):
+            self.assertNotEqual(bd.workflows(), s["workflows"])
 
     def test_main_refuses_another_build(self) -> None:
         neutral = [str(END - dt.timedelta(days=25)), str(END)]
@@ -2837,6 +2863,8 @@ class TestBuildDataset(unittest.TestCase):
             ("rev_x", {"builder": bd.BUILDER + 1, "window": [str(START), str(END)]}, "revert", f"rev_ samples in {{}}, e.g. rev_x, were written by builder {bd.BUILDER + 1}, not {bd.BUILDER}; build into a fresh --data"),
             ("neu_x", {"builder": bd.BUILDER, "window": [neutral[0], "2026-10-27"]}, "neutral", f"neu_ samples in {{}}, e.g. neu_x, were drawn from {[neutral[0], '2026-10-27']}, not {neutral[0]}/{END}"),
             ("head_1_x", {}, "head", "head_ samples in {}, e.g. head_1_x, predate the builder field; build into a fresh --data"),
+            # Judged by another checkout's workflows, whose job classification can differ.
+            ("rev_x", {"builder": bd.BUILDER, "window": [str(START), str(END)], "workflows": "0" * 12}, "revert", f"rev_ samples in {{}}, e.g. rev_x, judged jobs by workflows {'0' * 12}, not this checkout's {bd.workflows()}; extend it from the checkout that built it or build into a fresh --data"),
         ]  # fmt: skip
         for sid, mark, kind, msg in cases:
             with (
@@ -2862,8 +2890,8 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "neutral_samples") as neutral_samples,
         ):  # fmt: skip
             (Path(tmp) / "samples").mkdir()
-            (Path(tmp) / "samples" / "rev_x.json").write_text(json.dumps({"builder": bd.BUILDER, "window": [str(START), str(END)]}))  # fmt: skip
-            (Path(tmp) / "samples" / "neu_x.json").write_text(json.dumps({"builder": bd.BUILDER, "window": neutral}))  # fmt: skip
+            (Path(tmp) / "samples" / "rev_x.json").write_text(json.dumps({"builder": bd.BUILDER, "window": [str(START), str(END)], "workflows": bd.workflows()}))  # fmt: skip
+            (Path(tmp) / "samples" / "neu_x.json").write_text(json.dumps({"builder": bd.BUILDER, "window": neutral, "workflows": bd.workflows()}))  # fmt: skip
             bd.main()
         revert.assert_called_once_with(Path(tmp) / "samples", 8, START, END)
         neutral_samples.assert_called_once_with(Path(tmp) / "samples", END - dt.timedelta(days=25), END, 200)  # fmt: skip
@@ -2929,6 +2957,8 @@ class TestBuildDataset(unittest.TestCase):
                 got = bd.revert_truth_jobs(signal, commits["change"], landed, "2026-10-05 04:00:00")  # fmt: skip
                 # Decided before the change landed: no commit qualifies, so only the change itself.
                 bd.revert_truth_jobs({("test_a", "", "test_x")}, commits["change"], landed, "2026-10-05 00:30:00")  # fmt: skip
+                # Decided after the revert landed: the range still ends before the revert, so "late" is not counted.
+                bd.revert_truth_jobs({("test_a", "", "test_x")}, commits["change"], landed, "2026-10-05 06:00:00")  # fmt: skip
                 failed = failed[1:]
                 # Without the TD job's row, only periodic, unstable and rerun-green rows remain, so revert_samples skips it.
                 none = bd.revert_truth_jobs(signal, commits["change"], landed, "2026-10-05 04:00:00")  # fmt: skip
@@ -2937,6 +2967,7 @@ class TestBuildDataset(unittest.TestCase):
         # The change and the commit after it, not the revert or what landed after the decision.
         self.assertIn(f"head_sha IN ('{commits['after']}','{commits['change']}')", queries[0])  # fmt: skip
         self.assertIn(f"head_sha IN ('{commits['change']}')", queries[1])
+        self.assertIn(f"head_sha IN ('{commits['after']}','{commits['change']}')", queries[2])  # fmt: skip
         self.assertEqual(queries[0].count("created_at <= parseDateTimeBestEffort('2026-10-05 04:00:00') + INTERVAL 1 HOUR"), 2)  # fmt: skip
         # Only the signal tests count, not every test of their files.
         self.assertIn("AND (file, t.name) IN (('test_a.py', 'test_x'),('test_b.py', 'test_q\\'r'),('test_c.py', 'test_y'))", queries[0])  # fmt: skip
@@ -3039,7 +3070,7 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_x", "2026-09-28 00:00:00", "s0", tf="test_e"),
         ]
         h = history(rows, {"s": 1, "s0": 1, "s1": 1}, {1: "me"})
-        merge_bases = {("origin/main", "s"): "main_mb", ("lower", "s"): "lower"}
+        merge_bases = {("origin/main", "s"): "main_mb", ("lower", "s"): "lower", ("origin/main", "s0"): "main_mb0", ("origin/main", "s1"): "main_mb1"}  # fmt: skip
         with (
             tempfile.TemporaryDirectory() as out,
             patch_ci_jobs({True: {("pull", "pull", "default"), ("pull", "win", "default")}, False: set()}),
@@ -3054,15 +3085,47 @@ class TestBuildDataset(unittest.TestCase):
             contextlib.redirect_stdout(io.StringIO()) as stdout,
         ):  # fmt: skip
             bd.pr_samples(h, Path(out), 1)
-        ci_bases.assert_called_once_with({"s": 1})
+        # Every head of the PR is judged, as each can reproduce a failure of the sample's head.
+        ci_bases.assert_called_once_with({"s": 1, "s0": 1, "s1": 1})
         # A CI base recorded after the head is not in its history, so it is fetched too.
         self.assertEqual(fetch.call_args_list[-1].args, (["lower"],))
         # Main breakage is checked around the merge base with main, the diff is against the PR's CI base.
-        commit_time.assert_called_once_with("main_mb")
+        self.assertEqual(sorted(c.args[0] for c in commit_time.call_args_list), ["main_mb", "main_mb0", "main_mb1"])  # fmt: skip
         kw = write.call_args.kwargs
         win = ("pull", "win / test (default, 1, 1)")
         self.assertEqual((kw["truth"], kw["truth_strong"], kw["truth_jobs"]), (["test_b", "test_c", "test_d", "test_e"], ["test_b", "test_c", "test_e"], {"test_b": [("pull", JOB), win], "test_c": [("pull", JOB)], "test_d": [("pull", JOB)], "test_e": [("pull", JOB)]}))  # fmt: skip
         self.assertEqual({k: kw[k] for k in ("base", "merge_base", "main_base", "base_source")}, {"base": "lower", "merge_base": "lower", "main_base": "main_mb", "base_source": "ci"})  # fmt: skip
+        self.assertIn("pr truth: dropped by rule over 1 heads: {'main_near_base': 1}", stdout.getvalue())  # fmt: skip
+
+    def test_pr_samples_judge_every_head_by_all_rules(self) -> None:
+        rows = [
+            # Main broke test_z 15 days before the sample's head failed it, so only the rule on the head's merge base drops it.
+            fail("test_z", "2026-10-05 00:00:00", "s", tf="test_z"),
+            fail("test_z", "2026-09-20 00:00:00", "m", br="main", tf="test_z"),
+            fail("test_x", "2026-10-07 00:00:00", "s", tf="test_b"),
+            # The later head reproduces test_b, but main broke it 6 days before that head's merge base with main.
+            fail("test_x", "2026-10-08 00:00:00", "s1", tf="test_b"),
+            fail("test_x", "2026-09-10 00:00:00", "m", br="main", tf="test_b"),
+        ]
+        h = history(rows, {"s": 1, "s1": 1}, {1: "me"})
+        merge_bases = {("origin/main", "s"): "mb", ("origin/main", "s1"): "mb1"}
+        with (
+            tempfile.TemporaryDirectory() as out,
+            patch_ci_jobs(TD_JOBS),
+            mock.patch.object(bd, "green_jobs", return_value=set()),
+            mock.patch.object(bd, "fetch"),
+            mock.patch.object(bd, "has_commit", return_value=True),
+            mock.patch.object(bd, "git", lambda *a, check=True: merge_bases[a[1:]] + "\n"),
+            mock.patch.object(bd, "commit_time", side_effect={"mb": day(25, 9), "mb1": day(16, 9)}.get),
+            mock.patch.object(bd, "ci_bases", return_value={}),
+            mock.patch.object(bd, "pr_text", return_value=("t", "b")),
+            mock.patch.object(bd, "write_sample") as write,
+            contextlib.redirect_stdout(io.StringIO()) as stdout,
+        ):  # fmt: skip
+            bd.pr_samples(h, Path(out), 1)
+        kw = write.call_args.kwargs
+        # The date is the sample's earliest failure in its truth, not test_z's, and s1's test_b is not a reproduction.
+        self.assertEqual((write.call_args.args[3], kw["truth"], kw["truth_strong"], kw["date"]), ("s", ["test_b"], [], "2026-10-07 00:00:00"))  # fmt: skip
         self.assertIn("pr truth: dropped by rule over 1 heads: {'main_near_base': 1}", stdout.getvalue())  # fmt: skip
 
     def test_empty_truth_writes_no_sample(self) -> None:
@@ -3207,7 +3270,7 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "write_sample") as write,
             contextlib.redirect_stdout(io.StringIO()),
         ):  # fmt: skip
-            pr_1 = {"pr": 1, "sha": "h1", "base": "pr_base", "title": "t", "body": "b", "builder": bd.BUILDER, "window": [str(START), str(END)]}  # fmt: skip
+            pr_1 = {"pr": 1, "sha": "h1", "base": "pr_base", "title": "t", "body": "b", "builder": bd.BUILDER, "window": [str(START), str(END)], "workflows": bd.workflows()}  # fmt: skip
             # pr_ samples of another builder or window, or of none, refuse both PR kinds before History.load.
             data = Path(out) / "data"
             (samples := data / "samples").mkdir(parents=True)
@@ -3440,9 +3503,9 @@ class TestBuildDataset(unittest.TestCase):
             return {"show": src, "ls-tree": ls, "diff": added}[a[0]]
 
         def unquoted(*a: str) -> str:
-            if a[:2] != select_tests.UNQUOTED_PATHS:
+            if a[1] != "-z":
                 raise AssertionError(f"paths may be quoted: {a}")
-            return git(*a[2:])
+            return git(a[0], *a[2:]).replace("\n", "\0")
 
         for src, want, new in ((named, ["extra", "fx/test_c", "test_a"], ["fx/test_e", "test_new"]), (inline, ["ao/test_b", "test_a"], ["ao/test_d", "test_new"])):  # fmt: skip
             with mock.patch.object(bd, "git", git), mock.patch.object(select_tests, "git", unquoted):  # fmt: skip
@@ -3456,7 +3519,7 @@ class TestBuildDataset(unittest.TestCase):
 
     def test_write_sample_matches_select_tests(self) -> None:
         # select_tests' git and build_dataset's both run in the scratch repo. git C-quotes a
-        # non-ASCII path unless core.quotePath is false, as select_tests sets it.
+        # non-ASCII path in a listing without -z, which select_tests passes.
         odd = "test/test_\u00e9.py"
         with scratch_repo():
             repo, git = bd.REPO, bd.git
