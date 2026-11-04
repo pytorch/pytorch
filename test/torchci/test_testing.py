@@ -643,6 +643,10 @@ class TestSerialFileXdistWorkers(TestCase):
         self.assertEqual(self.workers(cuda=False), 3)
 
     def test_unlisted_file(self) -> None:
+        self.assertEqual(self.workers("test_ops"), 1)
+
+    def test_cpu_only_file(self) -> None:
+        self.assertEqual(self.workers("test_nn", cuda=False), 3)
         self.assertEqual(self.workers("test_nn"), 1)
 
     def test_backends_without_per_worker_isolation(self) -> None:

@@ -367,6 +367,14 @@ CI_SERIAL_LIST = [
 XDIST_SERIAL_LIST = [
     "inductor/test_flex_attention",
 ]
+# Serial files (see CI_SERIAL_LIST) that run the same way, but only on CPU-only
+# jobs: their large CUDA tests need more than one worker's share of the GPU and
+# would skip. On CPU, largeTensorTest guards check free host memory without a
+# per-worker share, as they already do for files in the parallel pool.
+XDIST_SERIAL_CPU_LIST = [
+    "test_nn",
+]
+XDIST_SERIAL_FILES = XDIST_SERIAL_LIST + XDIST_SERIAL_CPU_LIST
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
     "onnx/test_models",
@@ -731,7 +739,7 @@ def run_test(
         # for estimates that run low.
         else max(THRESHOLD * 6, 3 * test_module.time)
         if options.pytest_xdist_workers is not None
-        and test_file in XDIST_SERIAL_LIST
+        and test_file in XDIST_SERIAL_FILES
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
         else None
@@ -797,7 +805,7 @@ def run_test(
         ]
         if ret_code == 1
         and options.pytest_xdist_workers is not None
-        and test_file in XDIST_SERIAL_LIST
+        and test_file in XDIST_SERIAL_FILES
         else []
     )
     if failed:
@@ -1556,10 +1564,10 @@ def get_pytest_args(options, test_file, is_cpp_test=False, is_distributed_test=F
         # -x means stop at the first failure. Set PYTORCH_NUM_PYTEST_RERUNS=0 to disable.
         rerun_options = ["-x", f"--reruns={NUM_PYTEST_RERUNS}"]
         if options.pytest_xdist_workers is not None and (
-            options.continue_through_error or test_file in XDIST_SERIAL_LIST
+            options.continue_through_error or test_file in XDIST_SERIAL_FILES
         ):
             # Without -x the xdist session keeps going past failures, as
-            # run_test_retries does for non-xdist runs. XDIST_SERIAL_LIST files
+            # run_test_retries does for non-xdist runs. XDIST_SERIAL_FILES
             # always run every test so run_test reruns all of their failures.
             rerun_options.remove("-x")
 
@@ -1999,7 +2007,7 @@ def must_serial(file: str | ShardedTest) -> bool:
     )
 
 
-# Smallest per-worker GPU memory cap for XDIST_SERIAL_LIST files; flex's
+# Smallest per-worker GPU memory cap for XDIST_SERIAL_FILES; flex's
 # largeTensorTest("2GB") guards skip below 2 GiB of free memory per worker.
 MIN_XDIST_WORKER_GPU_GIB = 4
 
@@ -2008,14 +2016,15 @@ def serial_file_xdist_workers(
     file: str | ShardedTest, options, num_procs: int = NUM_PROCS
 ) -> int:
     """Number of pytest-xdist workers that run the non-@serial tests of an
-    XDIST_SERIAL_LIST file in its serial slot, or 1 to run it without xdist.
+    XDIST_SERIAL_FILES file in its serial slot, or 1 to run it without xdist.
 
     The global --pytest-xdist-workers mode already schedules every file under
     xdist, so this returns 1 in that mode."""
     if isinstance(file, ShardedTest):
         file = file.name
     if (
-        file not in XDIST_SERIAL_LIST
+        file not in XDIST_SERIAL_FILES
+        or (file in XDIST_SERIAL_CPU_LIST and torch.accelerator.is_available())
         or options.pytest_xdist_workers is not None
         or os.getenv("PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL", "0") == "1"
         # Only CUDA caps each worker's memory (NUM_PARALLEL_PROCS); CPU-only
