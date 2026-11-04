@@ -19281,6 +19281,7 @@ class TestAutogradCudaOnly(TestCase):
                 torch.cuda.memory._record_memory_history(None)
 
 
+@skipIfTorchDynamo("compiled autograd rejects disallow_implicit_grad_accumulation")
 class TestDisallowImplicitGradAccumulation(TestCase):
     def test_raises_instead_of_summing(self, device):
         a = torch.randn(3, device=device, requires_grad=True)
