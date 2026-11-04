@@ -66,7 +66,8 @@ def get_td_exclusions(
 ) -> dict[str, dict[str, Any]]:
     """The test files TD's split excluded (TD_SOURCE), and those the LLM
     selection excluded where it made the split (LLM_SELECTION_SOURCE), per build
-    and test config."""
+    and test config. Every config with an enforced call is listed under
+    LLM_SELECTION_SOURCE, with no files if it excluded none."""
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
         os.chdir(temp_dir)
@@ -90,14 +91,13 @@ def get_td_exclusions(
                 if exclusions.get("source") == LLM_SELECTION_SOURCE:
                     sources[LLM_SELECTION_SOURCE] = exclusions["excluded"]
                 for source, excluded in sources.items():
-                    for exclusion in excluded:
-                        job_id = get_job_id(td_exclusions)
-                        job_name = get_job_name(job_id)
+                    # An enforced call is recorded even if it excluded nothing.
+                    if excluded or source == LLM_SELECTION_SOURCE:
+                        job_name = get_job_name(get_job_id(td_exclusions))
                         build_name = get_build_name(job_name)
                         test_config = get_test_config(job_name)
-                        grouped_tests[source][build_name][test_config].add(
-                            exclusion["test_file"]
-                        )
+                        tests = grouped_tests[source][build_name][test_config]
+                        tests.update(x["test_file"] for x in excluded)
 
         for by_build in grouped_tests.values():
             for build in by_build.values():
