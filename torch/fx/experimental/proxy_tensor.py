@@ -1017,13 +1017,14 @@ def track_tensor_tree(
                 wrap_with_proxy(ee, proxy[idx], get_constant(constant, idx))  # type: ignore[index]
 
         elif isinstance(e, dict):
-            # example use case: triton_kernel_wrapper takes arguments as kwargs
+            # example use case: a user-kernel functional HOP (e.g.
+            # triton_kernel_wrapper_functional) returns its written tensors by name
 
             # In theory we could support const-prop when proxy-tensor-tracing
             # operators that returns dicts of tensors, but we have no use case
-            # for it today (since the only op we currently trace that can
-            # return a dict is triton_kernel_wrapper_functional/mutation,
-            # which does not participate in const-prop)
+            # for it today (since the only ops we currently trace that can
+            # return a dict are the user-kernel functional HOPs, which do not
+            # participate in const-prop)
             if constant is not None:
                 raise AssertionError("Expected constant to be None")
 

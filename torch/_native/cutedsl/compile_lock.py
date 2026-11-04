@@ -7,8 +7,7 @@ fallback), so every in-process ``cute.compile`` site must hold this lock.
 Subprocess compile workers take it uncontended.
 
 It lives outside torch._inductor so that eager launches of user CuTeDSL kernels
-(torch._native.cutedsl.user_kernel) can take it without importing Inductor;
-torch._inductor.codegen.cutedsl.compile_lock re-exports it.
+(torch._native.cutedsl.user_kernel) can take it without importing Inductor.
 """
 
 import threading
