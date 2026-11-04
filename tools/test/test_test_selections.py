@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import functools
+import importlib.util
 import io
 import json
 import random
@@ -48,6 +49,7 @@ else:
 
 if TYPE_CHECKING:
     from collections.abc import Collection
+    from types import ModuleType
 
 
 def gen_class_times(test_times: dict[str, float]) -> dict[str, dict[str, float]]:
@@ -1009,6 +1011,98 @@ class TestRunTestSplit(LlmSelectorTestCase):
             "split.failure_metrics(test, selected_tests, test_stats)",
         ):
             self.assertEqual(loops.get(it), emit)
+
+
+@unittest.skipUnless(importlib.util.find_spec("torch"), "run_test.py imports torch")
+class TestRunTestMain(unittest.TestCase):
+    run_test: ModuleType
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        sys.path.insert(0, str(REPO_ROOT / "test"))
+        try:
+            import run_test
+        finally:
+            sys.path.remove(str(REPO_ROOT / "test"))
+        cls.run_test = run_test
+
+    def run_main(self, *args: str, is_ci: bool = False) -> dict[str, mock.Mock]:
+        tp = TestPrioritizations(["test_nn", "test_torch"], {TestRun("test_torch"): 1})
+        split = mock.Mock(include=[TestRun("test_torch")], exclude=[TestRun("test_nn")])
+        split.selection_metrics.return_value = [("sel", {"s": 1})]
+        split.failure_metrics.return_value = [("fail", {"f": 1})]
+        argv = ["run_test.py", "--enable-td", "-i", "test_nn", "test_torch", *args]
+        mocks = {
+            name: mock.MagicMock()
+            for name in (
+                "add_global_metric",
+                "emit_metric",
+                "check_pip_packages",
+                "get_test_case_configs",
+                "gen_additional_test_failures_file",
+                "print_to_stderr",
+            )
+        }
+        mocks["import_results"] = mock.Mock(return_value=(tp, {"test_torch"}))
+        mocks["run_test_split"] = mock.Mock(return_value=split)
+        failure = (TestRun("test_torch"), "err")
+        mocks["run_tests"] = mock.Mock(side_effect=lambda *a: a[-1].append(failure))
+        with (
+            mock.patch.multiple(
+                self.run_test,
+                IS_CI=is_ci,
+                load_test_file_times=dict,
+                load_test_class_times=dict,
+                **mocks,
+            ),
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.dict("os.environ", {"TESTS_TO_INCLUDE": ""}),
+        ):
+            if "--dry-run" in args:
+                self.run_test.main()
+            else:
+                with self.assertRaises(SystemExit) as e:
+                    self.run_test.main()
+                self.assertEqual(e.exception.code, 1)
+        return mocks
+
+    def test_dry_run_runs_the_split(self) -> None:
+        mocks = self.run_main("--dry-run")
+        call_ids = [
+            c.args[1]
+            for c in mocks["add_global_metric"].call_args_list
+            if c.args[0] == "call_id"
+        ]
+        self.assertEqual(len(call_ids), 1)
+        self.assertEqual(json.loads(json.dumps(call_ids[0])), call_ids[0])
+        self.assertIsInstance(call_ids[0], str)
+        split_kwargs = mocks["run_test_split"].call_args.kwargs
+        self.assertEqual(split_kwargs["previous_failures"], {"test_torch"})
+        self.assertTrue(split_kwargs["td_enabled"])
+        batches = {
+            b.name: {t.name for t in b.sharded_tests}
+            for c in mocks["print_to_stderr"].call_args_list
+            if hasattr(b := c.args[0], "sharded_tests")
+        }
+        self.assertEqual(
+            batches, {"tests to run": {"test_torch"}, "excluded": {"test_nn"}}
+        )
+        mocks["emit_metric"].assert_called_once_with("sel", {"s": 1})
+        mocks["run_tests"].assert_not_called()
+
+    def test_failures_emit_failure_metrics(self) -> None:
+        mocks = self.run_main(is_ci=True)
+        self.assertEqual(
+            [t.name for t in mocks["run_tests"].call_args.args[0]], ["test_torch"]
+        )
+        self.assertEqual(
+            mocks["run_test_split"].return_value.failure_metrics.call_args.args[0],
+            TestRun("test_torch"),
+        )
+        self.assertEqual(
+            mocks["emit_metric"].call_args_list,
+            [mock.call("sel", {"s": 1}), mock.call("fail", {"f": 1})],
+        )
 
 
 if __name__ == "__main__":
