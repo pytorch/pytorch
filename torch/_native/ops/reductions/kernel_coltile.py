@@ -233,17 +233,7 @@ class _OrderedColReduce:
 
     @property
     def cache_sig(self) -> tuple[Any, ...]:
-        return (
-            self.plan.shape,
-            self.R,
-            self.wide,
-            self.plan.vec,
-            self.plan.wpr,
-            self.plan.depth,
-            self.plan.batches,
-            self.plan.kchunk,
-            self.nouts,
-        )
+        return (self.R, self.wide, self.trait.nfields, self.nouts, self.plan.sig)
 
     @cute.jit
     def __call__(
