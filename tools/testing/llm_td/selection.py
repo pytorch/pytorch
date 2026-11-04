@@ -7,7 +7,7 @@ config when the selection names the file, names that config as a sweep, or is
 run_all, and so is every test file the model was not shown and every file that
 ALWAYS_COVERED lists for that config. When run_test.py enforces the selection,
 it runs the covered files, the files that already failed on the PR and that TD
-runs, and, within a hedge budget, TD's top-scored files.
+runs, and, within a hedge budget, TD's positively scored files (see LLM_TD_HEDGE).
 """
 
 from __future__ import annotations
@@ -17,12 +17,8 @@ import json
 import re
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Protocol, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
-from tools.testing.target_determination.gen_artifact import (
-    LLM_SELECTION_SOURCE,
-    TD_SOURCE,
-)
 from tools.testing.target_determination.heuristics.edited_by_pr import (
     ADDITIONAL_MAPPINGS,
 )
@@ -33,9 +29,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Iterable
     from pathlib import Path
 
-    from tools.testing.target_determination.heuristics.interface import (
-        TestPrioritizations,
-    )
     from tools.testing.test_run import TestRun
 
 
@@ -205,9 +198,9 @@ def importers(
 
 def import_pattern(modules: Iterable[str]) -> str:
     """A `git grep -E` pattern for importing one of `modules`, .py paths under test/."""
-    # A module is imported by any dotted suffix of its path, optionally under
-    # the test. package, also through importlib.import_module, a package by its
-    # directory, and load_test_module (a SourceFileLoader) takes the path.
+    # A module is imported by any dotted suffix of its path, optionally prefixed
+    # with `test.`, or by importlib.import_module of one; a package by its
+    # directory; and load_test_module (a SourceFileLoader) takes the path.
     # A parenthesized `from <package> import (` may span lines, so it counts
     # as importing every module of that package.
     mods = sorted(f[5:-3].removesuffix("/__init__") for f in modules)
@@ -366,7 +359,7 @@ class Selection:
     run_all: bool = False
     reason: str = ""
     # Whether run_test.py should replace TD's split with Selection.split rather
-    # than only reporting it. It does so only on PRs with TD enabled.
+    # than only reporting it; see apply_selection for when it does.
     enforce: bool = False
     # The test files the model chose from. Any other file, such as a custom
     # run_test.py handler or a C++ test, is always covered. None covers no extra file.
@@ -630,10 +623,10 @@ def apply_selection(
     """Apply the selection to TD's (include, exclude) split.
 
     The selection is enforced, replacing TD's split, only on a PR with TD
-    enabled and the selection's enforce set, only if some of the files have a
-    test time, only if `previous_failures` (the PR's previous failures stored
-    with TD's ranking, see import_results) is known, and only if the split
-    chooses some file.
+    enabled, the selection's enforce set and no selector error, only if some
+    of the files have a test time, only if `previous_failures` (the PR's
+    previous failures stored with TD's ranking, see import_results) is known,
+    and only if the split chooses some file.
     run_test.py falls back to the default job's times for a config without its
     own, so the times are missing when none of the call's files has a time
     (for example without test-times.json, or a call of only new test files).
@@ -683,87 +676,3 @@ def apply_selection(
         td_include=td,
         file_time=file_time,
     )
-
-
-@dataclass
-class CallSplit:
-    """TD's split of one run_test.py call (td_include, td_exclude) and the LLM
-    selection applied to it, if there is one; include and exclude are the
-    split that runs."""
-
-    td_include: list[TestRun]
-    td_exclude: list[TestRun]
-    llm: AppliedSelection | None
-
-    @property
-    def enforced(self) -> bool:
-        return self.llm is not None and self.llm.enforced
-
-    @property
-    def include(self) -> list[TestRun]:
-        llm = self.llm
-        return llm.split.include if llm and llm.enforced else self.td_include
-
-    @property
-    def exclude(self) -> list[TestRun]:
-        llm = self.llm
-        return llm.split.exclude if llm and llm.enforced else self.td_exclude
-
-    @property
-    def source(self) -> str:
-        return LLM_SELECTION_SOURCE if self.enforced else TD_SOURCE
-
-
-class GenArtifact(Protocol):
-    """gen_ci_artifact's signature."""
-
-    def __call__(
-        self,
-        included: list[Any],
-        excluded: list[Any],
-        *,
-        source: str,
-        td_excluded: list[Any],
-    ) -> None: ...
-
-
-def split_tests(
-    *,
-    test_prioritizations: TestPrioritizations,
-    test_times: dict[str, float],
-    selection_file: Path,
-    test_config: str,
-    td_enabled: bool,
-    previous_failures: Collection[str] | None,
-    gen_artifact: GenArtifact | None,
-) -> CallSplit:
-    """run_test.py's split of one call's tests: TD's split, 25% with TD enabled
-    and everything otherwise, with the selection in `selection_file`, if any,
-    applied. It records the split with `gen_artifact` (gen_ci_artifact, in
-    CI). run_test.py emits the metrics, since emit_metric records its caller."""
-    percent_to_run = 25 if td_enabled else 100
-    include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
-    llm = None
-    if (selection := Selection.load(selection_file)) is not None:
-        llm = apply_selection(
-            selection,
-            include,
-            exclude,
-            test_prioritizations.get_score,
-            test_times,
-            test_config=test_config,
-            td_enabled=td_enabled,
-            previous_failures=previous_failures,
-        )
-    split = CallSplit(include, exclude, llm)
-    if not split.enforced:
-        td_line = f"Running {percent_to_run}% of tests based on TD"
-        print(td_line if td_enabled else "Running all tests", file=sys.stderr)
-    if gen_artifact is not None:
-        gen_artifact(
-            [x.to_json() for x in split.include],
-            [x.to_json() for x in split.exclude],
-            source=split.source,
-            td_excluded=[x.to_json() for x in split.td_exclude],
-        )
-    return split
