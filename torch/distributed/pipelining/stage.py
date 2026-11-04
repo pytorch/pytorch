@@ -52,6 +52,7 @@ from ._backward import (
     stage_backward_weight,
 )
 from ._debug import map_debug_info
+from ._fsdp_policy import FSDPPolicy
 from ._p2p import _DirectedRankEdge, _warn_if_eager_nccl
 from ._recv_buffers import (
     _assign_recv_info_buffers,
@@ -229,6 +230,8 @@ class _PipelineStageBase(ABC):
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks: list[Any] = []
         self._gradient_reduction_handle: GradientReductionHandle | None = None
+        # Set by the schedule before each step.
+        self._fsdp_policy = FSDPPolicy()
 
         # Initialize has_backward to false; this will be set to true if loss
         # function is passed to pipeline schedule
@@ -1064,17 +1067,61 @@ class _PipelineStageBase(ABC):
                 if p.grad is not None:
                     p.grad.div_(grad_scale_factor)
 
+    def _set_fsdp_policy(self, policy: FSDPPolicy) -> None:
+        """Apply the schedule's FSDP policy to this stage."""
+        self._fsdp_policy = policy
+        if policy.reshard == "layer" and isinstance(self.submod, FSDPModule):
+            self.submod.set_reshard_after_forward(True)
+
+    def _fsdp_backward_settings(
+        self, backward_type: str, microbatch_index: int | None
+    ) -> tuple[bool, bool]:
+        """Return ``(reshard_after_backward, requires_gradient_sync)`` for one backward.
+
+        The default policy keeps parameters unsharded and defers gradient
+        reduction to the stage's final ``REDUCE_GRAD``. Other policies decide
+        by microbatch index, so the result does not depend on the order in
+        which the schedule runs the backwards.
+        """
+        policy = self._fsdp_policy
+        if not policy._requires_full_backward:
+            return False, False
+        # FSDP's hooks reduce and reshard at the end of each full backward.
+        # A split backward or a custom weight pass runs after those hooks.
+        if backward_type != "full" or self.dw_builder is not None:
+            raise RuntimeError(
+                f"{policy} requires one full backward per microbatch, but stage "
+                f"{self.stage_index} ran a {backward_type!r} backward"
+                f"{' with a dw_builder' if self.dw_builder is not None else ''}. "
+                "Use FSDPPolicy() with split-backward schedules."
+            )
+        if microbatch_index is None:
+            raise RuntimeError(
+                f"{policy} needs the microbatch index of each backward, but stage "
+                f"{self.stage_index} got none. Pass microbatch_index to "
+                "backward_maybe_with_nosync."
+            )
+        requires_gradient_sync = (
+            policy.reduce == "microbatch"
+            and (microbatch_index + 1) % policy.k_microbatch_reduce == 0
+        )
+        return policy.reshard == "layer", requires_gradient_sync
+
     def backward_maybe_with_nosync(
         self,
         backward_type,
         bwd_kwargs: dict,
         last_backward: bool = False,
+        microbatch_index: int | None = None,
     ) -> tuple[tuple[torch.Tensor | None, ...], list[dict[str, Any]] | None]:
         """
         Whether using PP with FSDP, DDP, or replicate there are some runtime differences between the last backward step and the
         other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
         there are additional state-variables and performance considerations depending on the data parallelism used.
         This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
+
+        ``microbatch_index`` is required for FSDP stages whose schedule uses a
+        non-default :class:`~torch.distributed.pipelining.FSDPPolicy`.
         """
 
         def perform_backward(
@@ -1128,8 +1175,11 @@ class _PipelineStageBase(ABC):
 
         # If submod is a FSDP or replicate module
         elif isinstance(self.submod, FSDPModule):
-            self.submod.set_reshard_after_backward(False)
-            self.submod.set_requires_gradient_sync(False)
+            reshard_after_backward, requires_gradient_sync = (
+                self._fsdp_backward_settings(backward_type, microbatch_index)
+            )
+            self.submod.set_reshard_after_backward(reshard_after_backward)
+            self.submod.set_requires_gradient_sync(requires_gradient_sync)
             result = perform_backward(backward_type)()
 
         else:
@@ -1303,6 +1353,7 @@ class _PipelineStageBase(ABC):
                 "full",
                 bwd_kwargs,
                 last_backward=last_backward,
+                microbatch_index=bwd_chunk_id,
             )
             if full_backward:
                 self.dw_builder()()
@@ -1311,7 +1362,10 @@ class _PipelineStageBase(ABC):
         else:
             if full_backward:
                 grads_input, _ = self.backward_maybe_with_nosync(
-                    "full", bwd_kwargs, last_backward=last_backward
+                    "full",
+                    bwd_kwargs,
+                    last_backward=last_backward,
+                    microbatch_index=bwd_chunk_id,
                 )
             else:
                 param_groups: list[dict[str, Any]] | None = None
@@ -1324,7 +1378,10 @@ class _PipelineStageBase(ABC):
                     # perform the partial backwards for the inputs with a custom backward function
                     # when the "stage_ouput" is a loss, then it is a tensor, otherwise it is a tuple of tensors
                     grads_input, param_groups = self.backward_maybe_with_nosync(
-                        "input", bwd_kwargs, last_backward=last_backward
+                        "input",
+                        bwd_kwargs,
+                        last_backward=last_backward,
+                        microbatch_index=bwd_chunk_id,
                     )
 
                     # Weight backward resumes from param_groups and does not need
@@ -1396,7 +1453,10 @@ class _PipelineStageBase(ABC):
                     "param_groups": param_groups,
                 }
                 self.backward_maybe_with_nosync(
-                    "weight", bwd_kwargs, last_backward=last_backward
+                    "weight",
+                    bwd_kwargs,
+                    last_backward=last_backward,
+                    microbatch_index=bwd_chunk_id,
                 )
             else:
                 # TODO: figure out a better way to do this:
@@ -1410,7 +1470,10 @@ class _PipelineStageBase(ABC):
                     "input_values": input_values,
                 }
                 self.backward_maybe_with_nosync(
-                    "full", bwd_kwargs, last_backward=last_backward
+                    "full",
+                    bwd_kwargs,
+                    last_backward=last_backward,
+                    microbatch_index=bwd_chunk_id,
                 )
 
     def perform_reduce_grad(self, grad_scale_factor: int):

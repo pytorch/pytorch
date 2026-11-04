@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from ._fsdp_policy import FSDPPolicy
 from ._IR import Pipe, pipe_split, pipeline, SplitPoint
 from .schedules import (
     _ScheduleForwardOnly,
@@ -15,8 +16,11 @@ from .schedules import (
 from .stage import build_stage, PipelineStage, PipelineStageInfo
 
 
+FSDPPolicy.__module__ = "torch.distributed.pipelining"
+
 __all__ = [
     "analyze_pipeline_activation_liveness",
+    "FSDPPolicy",
     "Pipe",
     "pipe_split",
     "SplitPoint",

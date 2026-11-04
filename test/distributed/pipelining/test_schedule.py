@@ -12,8 +12,10 @@ from model_registry import MultiMLP
 import torch
 import torch.distributed.config as dist_config
 from torch._dynamo import OptimizedModule
+from torch.distributed.fsdp import FSDPModule
 from torch.distributed.pipelining import (
     analyze_pipeline_activation_liveness,
+    FSDPPolicy,
     PipelineActivationLiveness,
     Schedule1F1B,
     ScheduleDualPipeV,
@@ -3927,6 +3929,183 @@ instantiate_device_type_tests(
     except_for=["cpu"],
     allow_xpu=True,
 )
+
+
+class TestFSDPPolicy(TestCase):
+    _NON_DEFAULT_POLICIES = (
+        FSDPPolicy(reduce="microbatch"),
+        FSDPPolicy(reshard="layer"),
+        FSDPPolicy(reshard="layer", reduce="microbatch", k_microbatch_reduce=2),
+    )
+
+    def _interleaved_lowering(self, fsdp_policy):
+        stages = [
+            MockPipelineStage(group_size=2, group_rank=0, num_stages=8)
+            for _ in range(4)
+        ]
+        schedule = ScheduleInterleaved1F1B(
+            stages, n_microbatches=8, fsdp_policy=fsdp_policy
+        )
+        return schedule.pipeline_order_with_comms
+
+    def test_invalid_policy(self):
+        for kwargs in (
+            {"reshard": "stage"},
+            {"reduce": "layer"},
+            {"reduce": "microbatch", "k_microbatch_reduce": 0},
+            {"reduce": "microbatch", "k_microbatch_reduce": True},
+            {"k_microbatch_reduce": 2},
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    FSDPPolicy(**kwargs)
+        with self.assertRaisesRegex(TypeError, "must be an FSDPPolicy"):
+            Schedule1F1B(
+                MockPipelineStage(num_stages=1), n_microbatches=1, fsdp_policy="layer"
+            )
+
+    def test_policy_without_unshard_change_keeps_lowering(self):
+        default = self._interleaved_lowering(None)
+        self.assertEqual(self._interleaved_lowering(FSDPPolicy()), default)
+        self.assertEqual(
+            self._interleaved_lowering(FSDPPolicy(reduce="microbatch")), default
+        )
+
+    def test_layer_policy_lowers_no_unshard_or_reshard(self):
+        default = self._interleaved_lowering(None)
+        layer = self._interleaved_lowering(FSDPPolicy(reshard="layer"))
+        kept_types = {F, B, REDUCE_GRAD, WAIT_REDUCE_GRAD}
+        for rank in default:
+            default_types = {action.computation_type for action in default[rank]}
+            self.assertIn(UNSHARD, default_types)
+            self.assertFalse(
+                any(
+                    action.computation_type in (UNSHARD, RESHARD)
+                    for action in layer[rank]
+                )
+            )
+            # Compute and gradient reduction keep their order. P2P actions may
+            # move because UNSHARD actions take lowering rounds.
+            self.assertEqual(
+                [a for a in layer[rank] if a.computation_type in kept_types],
+                [a for a in default[rank] if a.computation_type in kept_types],
+            )
+
+    def test_split_backward_schedules_reject_policy(self):
+        def make_v_stages():
+            stages = [MockPipelineStage(group_size=2, num_stages=4) for _ in range(2)]
+            stages[0].stage_index = 0
+            stages[1].stage_index = 3
+            return stages
+
+        def make_interleaved_stages():
+            return [
+                MockPipelineStage(group_size=2, group_rank=0, num_stages=4)
+                for _ in range(2)
+            ]
+
+        for schedule_class, make_stages in (
+            (ScheduleInterleavedZeroBubble, make_interleaved_stages),
+            (ScheduleZBVZeroBubble, make_v_stages),
+            (ScheduleDualPipeV, make_v_stages),
+        ):
+            for policy in self._NON_DEFAULT_POLICIES:
+                with self.subTest(schedule=schedule_class.__name__, policy=policy):
+                    with self.assertRaisesRegex(
+                        ValueError, "requires one full backward per microbatch"
+                    ):
+                        schedule_class(
+                            make_stages(), n_microbatches=4, fsdp_policy=policy
+                        )
+
+    def test_layer_policy_rejects_lowered_unshard(self):
+        schedule = _PipelineScheduleRuntime(
+            [MockPipelineStage(num_stages=1)],
+            n_microbatches=1,
+            fsdp_policy=FSDPPolicy(reshard="layer"),
+        )
+        with self.assertRaisesRegex(ValueError, "lets FSDP unshard each module"):
+            schedule._prepare_schedule_with_comms(
+                {
+                    0: [
+                        _Action(0, UNSHARD),
+                        _Action(0, F, 0),
+                        _Action(0, B, 0),
+                        _Action(0, REDUCE_GRAD),
+                        _Action(0, WAIT_REDUCE_GRAD),
+                        _Action(0, RESHARD),
+                    ]
+                },
+                format="compute_comms",
+            )
+
+    def test_stage_backward_settings(self):
+        stage = MockPipelineStage(num_stages=1)
+        stage.stage_index = 0
+        stage.dw_builder = None
+
+        def settings(policy, backward_type="full", count=4):
+            stage._set_fsdp_policy(policy)
+            return [
+                stage._fsdp_backward_settings(backward_type, microbatch_index)
+                for microbatch_index in range(count)
+            ]
+
+        self.assertEqual(settings(FSDPPolicy()), [(False, False)] * 4)
+        self.assertEqual(settings(FSDPPolicy(), "input"), [(False, False)] * 4)
+        self.assertEqual(settings(FSDPPolicy(reduce="microbatch")), [(False, True)] * 4)
+        self.assertEqual(
+            settings(FSDPPolicy(reduce="microbatch", k_microbatch_reduce=2)),
+            [(False, False), (False, True)] * 2,
+        )
+        layer_k3 = FSDPPolicy(
+            reshard="layer", reduce="microbatch", k_microbatch_reduce=3
+        )
+        self.assertEqual(
+            settings(layer_k3),
+            [(True, False), (True, False), (True, True), (True, False)],
+        )
+        for policy in self._NON_DEFAULT_POLICIES:
+            with self.subTest(policy=policy):
+                for backward_type in ("input", "weight"):
+                    with self.assertRaisesRegex(RuntimeError, "full backward"):
+                        settings(policy, backward_type, count=1)
+                stage.dw_builder = lambda: lambda: None
+                with self.assertRaisesRegex(RuntimeError, "with a dw_builder"):
+                    settings(policy, count=1)
+                stage.dw_builder = None
+                with self.assertRaisesRegex(RuntimeError, "microbatch index"):
+                    stage._fsdp_backward_settings("full", None)
+
+    def test_backward_sets_fsdp_flags_by_microbatch_index(self):
+        stage = MockPipelineStage(num_stages=1)
+        stage.stage_index = 0
+        stage.dw_builder = None
+        stage.submod = MagicMock(spec=FSDPModule)
+        stage._set_fsdp_policy(
+            FSDPPolicy(reshard="layer", reduce="microbatch", k_microbatch_reduce=2)
+        )
+        # Out-of-order backwards: the flags follow the index, not the call order.
+        for microbatch_index in (1, 0, 3, 2):
+            x = torch.ones(2, requires_grad=True)
+            stage.backward_maybe_with_nosync(
+                "full",
+                {
+                    "stage_output": (x * 2).sum(),
+                    "output_grads": None,
+                    "input_values": [x],
+                },
+                microbatch_index=microbatch_index,
+            )
+        submod = stage.submod
+        self.assertEqual(
+            [c.args[0] for c in submod.set_requires_gradient_sync.call_args_list],
+            [True, False, True, False],
+        )
+        self.assertEqual(
+            [c.args[0] for c in submod.set_reshard_after_backward.call_args_list],
+            [True] * 4,
+        )
 
 
 class TestValidateSchedule(TestCase):

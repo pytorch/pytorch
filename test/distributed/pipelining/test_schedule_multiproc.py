@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import logging
+import math
 import os
 import weakref
 from contextlib import contextmanager, ExitStack, nullcontext
@@ -30,6 +31,7 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.pipelining import (
     _ScheduleForwardOnly,
+    FSDPPolicy,
     pipeline,
     PipelineStage,
     PipelineStageInfo,
@@ -49,6 +51,7 @@ from torch.distributed.pipelining.schedules import (
     _wait_batch_p2p,
     FORWARD,
     OVERLAP_F_B,
+    PipelineScheduleSingle,
     UNSHARD,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase
@@ -1681,6 +1684,108 @@ class ScheduleTest(MultiProcContinuousTest):
             )
         for limited_grad, full_grad in zip(limited_grads, full_grads, strict=True):
             torch.testing.assert_close(limited_grad, full_grad)
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @parametrize(
+        "ScheduleClass",
+        [ScheduleGPipe, Schedule1F1B, ScheduleInterleaved1F1B, ScheduleLoopedBFS],
+    )
+    @parametrize(
+        "fsdp_policy",
+        [
+            FSDPPolicy(reduce="microbatch"),
+            FSDPPolicy(reduce="microbatch", k_microbatch_reduce=2),
+            FSDPPolicy(reshard="layer"),
+            FSDPPolicy(reshard="layer", reduce="microbatch"),
+        ],
+        name_fn=lambda p: f"{p.reshard}_{p.reduce}_k{p.k_microbatch_reduce}",
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_fsdp_policy_parity(self, ScheduleClass, fsdp_policy):
+        # Bind each worker before the 2D mesh creates its NCCL process groups.
+        torch.accelerator.set_device_index(self.rank)
+        mesh = init_device_mesh(device_type, (2, 2), mesh_dim_names=("dp", "pp"))
+        pp_mesh = mesh["pp"]
+        dp_mesh = mesh["dp"]
+        pp_group = pp_mesh.get_group()
+        pp_rank = pp_mesh.get_local_rank()
+        pp_size = pp_mesh.size()
+        config = PipelineTestConfig(pp_size, self.device, pp_rank)
+        stages_per_rank = 1 if issubclass(ScheduleClass, PipelineScheduleSingle) else 2
+        num_stages = stages_per_rank * pp_size
+        n_microbatches = 2 * num_stages
+        base_mod, _, x, target, loss_fn = setup_models_and_data(
+            config, n_layers=num_stages
+        )
+        # Static receive metadata must preserve activation gradients across PP
+        # boundaries, so its input exemplar must require gradients.
+        x.requires_grad_(True)
+        microbatch = x.chunk(n_microbatches)[0]
+
+        def run(policy):
+            mod = copy.deepcopy(base_mod)
+            stage_indices = [pp_rank + i * pp_size for i in range(stages_per_rank)]
+            stage_modules = [mod.layers[index] for index in stage_indices]
+            stages = []
+            for module, stage_index in zip(stage_modules, stage_indices, strict=True):
+                stages.append(
+                    PipelineStage(
+                        module,
+                        stage_index,
+                        num_stages,
+                        self.device,
+                        group=pp_group,
+                        input_args=microbatch,
+                        output_args=module(microbatch),
+                    )
+                )
+            # Each stage module is one FSDP module with one reduce-scatter.
+            for stage_module in stage_modules:
+                fully_shard(stage_module, mesh=dp_mesh)
+            schedule = ScheduleClass(
+                stages[0] if stages_per_rank == 1 else stages,
+                n_microbatches,
+                loss_fn=loss_fn,
+                scale_grads=False,
+                fsdp_policy=policy,
+            )
+            losses = []
+            with mock.patch.object(
+                dist, "reduce_scatter_single", wraps=dist.reduce_scatter_single
+            ) as reduce_scatter:
+                if pp_rank == 0:
+                    output = schedule.step(x)
+                elif pp_rank == pp_size - 1:
+                    output = schedule.step(target=target, losses=losses)
+                else:
+                    output = schedule.step()
+            grads = []
+            for module in stage_modules:
+                for parameter in module.parameters():
+                    if parameter.grad is None:
+                        raise AssertionError("FSDP parameter gradient is missing")
+                    grads.append(parameter.grad.to_local().clone())
+            return output, losses, grads, reduce_scatter.call_count
+
+        ref_output, ref_losses, ref_grads, ref_reductions = run(FSDPPolicy())
+        output, losses, grads, reductions = run(fsdp_policy)
+
+        self.assertEqual(ref_reductions, stages_per_rank)
+        reductions_per_stage = (
+            math.ceil(n_microbatches / fsdp_policy.k_microbatch_reduce)
+            if fsdp_policy.reduce == "microbatch"
+            else 1
+        )
+        self.assertEqual(reductions, stages_per_rank * reductions_per_stage)
+        if pp_rank == pp_size - 1:
+            torch.testing.assert_close(output, ref_output)
+            torch.testing.assert_close(torch.stack(losses), torch.stack(ref_losses))
+        # Per-microbatch reduction sums the gradients in a different order.
+        for grad, ref_grad in zip(grads, ref_grads, strict=True):
+            torch.testing.assert_close(grad, ref_grad, rtol=1e-5, atol=1e-5)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
