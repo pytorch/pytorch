@@ -961,7 +961,7 @@ class TestStaticTritonLauncher(TestCase):
         # Allocate too much shared memory
         compiled_kernel.shared = 99999999
         self.assertRaisesRegex(
-            orch.OutOfMemoryError,
+            torch.OutOfMemoryError,
             "out of resource: simple_kernel",
             lambda: self._make_launcher(compiled_kernel),
         )
