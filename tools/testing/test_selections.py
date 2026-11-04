@@ -7,7 +7,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from tools.stats.import_test_stats import ADDITIONAL_CI_FILES_FOLDER, get_disabled_tests
 from tools.testing.target_determination.gen_artifact import (
@@ -342,6 +342,41 @@ class CallSplit:
     def llm_enforced(self) -> bool:
         return self.llm is not None and self.llm.enforced
 
+    def selection_metrics(self, is_ci: bool) -> list[tuple[str, dict[str, Any]]]:
+        """The (name, payload) metrics run_test.py emits before running the
+        tests: llm_td_selection, in CI with a selection."""
+        if not is_ci or (llm := self.llm) is None:
+            return []
+        return _llm_metric("llm_td_selection", lambda: llm.selection_metric)
+
+    def failure_metrics(
+        self, test: TestRun, selected_tests: list[str], test_stats: dict[str, Any]
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """The (name, payload) metrics run_test.py emits in CI for a failed
+        `test`: td_test_failure_stats_v2 and, with a selection, llm_td_failure."""
+        stats = {
+            "selected_tests": selected_tests,
+            "failure": str(test),
+            "llm_enforced": self.llm_enforced,
+            **test_stats,
+        }
+        metrics = [("td_test_failure_stats_v2", stats)]
+        if (llm := self.llm) is not None:
+            metrics += _llm_metric("llm_td_failure", lambda: llm.failure_metric(test))
+        return metrics
+
+
+def _llm_metric(
+    name: str, payload: Callable[[], dict[str, Any]]
+) -> list[tuple[str, dict[str, Any]]]:
+    """[(name, payload())], or none, with a ::warning::, if the experimental
+    llm_td package raises."""
+    try:
+        return [(name, payload())]
+    except Exception as e:
+        print(f"::warning::Not emitting {name}: {e!r}", file=sys.stderr)
+        return []
+
 
 def split_tests(
     test_prioritizations: TestPrioritizations,
@@ -357,8 +392,8 @@ def split_tests(
     the LLM test selection in `selection_file` when apply_selection enforces
     it (see tools/testing/llm_td). With `record` (in CI), gen_ci_artifact
     records the split that runs and what TD's split excluded. A selection
-    that fails to import or load keeps TD's split. run_test.py emits the
-    metrics, since emit_metric records its caller."""
+    that fails to import, load or apply keeps TD's split. run_test.py emits
+    CallSplit's metrics, since emit_metric records its caller."""
     percent_to_run = 25 if td_enabled else 100
     include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
     llm: AppliedSelection | None = None
@@ -367,9 +402,6 @@ def split_tests(
             from tools.testing.llm_td.selection import apply_selection, Selection
 
             selection = Selection.load(selection_file)
-        except Exception as e:
-            print(f"::warning::Ignoring the LLM selection: {e!r}", file=sys.stderr)
-        else:
             if selection is not None:
                 llm = apply_selection(
                     selection,
@@ -381,6 +413,8 @@ def split_tests(
                     td_enabled=td_enabled,
                     previous_failures=previous_failures,
                 )
+        except Exception as e:
+            print(f"::warning::Ignoring the LLM selection: {e!r}", file=sys.stderr)
     if llm is not None and llm.enforced:
         split = CallSplit(llm.split.include, llm.split.exclude, llm)
     else:

@@ -184,22 +184,22 @@ class TestRunEval(unittest.TestCase):
                 contextlib.chdir(data.parent),  # --data is relative to this cwd.
                 mock.patch.object(sys, "argv", argv),
                 mock.patch.object(run_eval, "checkout", return_value="wt") as co,
-                mock.patch.object(run_eval, "query_model", return_value={"type": "result", "is_error": True, "result": "529"}),
+                mock.patch.object(run_eval, "query_model", return_value={"type": "result", "is_error": True, "result": "529"}) as query,
                 mock.patch.object(run_eval.time, "sleep"),
                 mock.patch("sys.stdout", io.StringIO()),
             ):  # fmt: skip
                 run_eval.main()
-            root = co.call_args.args[0]
-            self.assertEqual(root, data.resolve() / "worktrees/t")
+            self.assertEqual(co.call_args.args, (data.resolve() / "worktrees/t", 0, "f" * 40))  # fmt: skip
             r = json.loads((data / "results/t/a.json").read_text())
         self.assertEqual(
             (r["error"], r["transient"], r["agentic"]), ("529", True, True)
         )
-        # The checkout preamble and the tools are sent too.
         prompt = run_eval.sample_prompt(sample, {})
+        self.assertEqual(query.call_args, mock.call(prompt, "m", "medium", checkout="wt"))  # fmt: skip
+        # The checkout preamble and the tools are sent too.
         self.assertEqual(r["prompt_sha"], run_eval.prompt_sha(prompt, True))
         self.assertNotEqual(r["prompt_sha"], run_eval.prompt_sha(prompt))
-        for name in ("AGENTIC_TOOLS", "CHECKOUT_PREAMBLE"):
+        for name in ("SYSTEM_PROMPT", "AGENTIC_TOOLS", "CHECKOUT_PREAMBLE"):
             with mock.patch.object(score, name, "x"):
                 self.assertNotEqual(r["prompt_sha"], run_eval.prompt_sha(prompt, True))
 
@@ -1020,9 +1020,9 @@ class TestScore(unittest.TestCase):
             (data / "results/m/c.json").write_text(json.dumps(result))
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
-                rows = score.score(data, ["a", "b", "c"], ["m", "td"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
+                rows = score.score(data, ["a", "b", "c", "gone"], ["m", "td"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
         self.assertEqual({x["id"] for x in rows}, {"a"})
-        self.assertEqual(err.getvalue(), "dropped 2 of 3 ids with no m result of the current sample, test-times.json, prompt and schema\n")  # fmt: skip
+        self.assertEqual(err.getvalue(), "dropped 2 of 4 ids with no m result of the current sample, test-times.json, prompt and schema\ndropped 1 of 4 ids with no sample\n")  # fmt: skip
 
     def test_score_results_of_another_prompt_are_stale(self) -> None:
         # The prompt carries the sample's diff and each candidate's minutes from test-times.json.
@@ -1075,9 +1075,9 @@ class TestScore(unittest.TestCase):
             tempfile.TemporaryDirectory() as repo,
             mock.patch.dict(os.environ, env, clear=True),
             mock.patch.object(select_tests, "REPO_ROOT", Path(repo)),
-            mock.patch.object(select_tests, "TESTS", ["test_bar", "test_foo"]),
+            mock.patch.object(select_tests, "TESTS", ["test_bar", "test_foo", "test_listed"]),
             mock.patch.object(select_tests, "get_test_times", return_value=times),
-        ):
+        ):  # fmt: skip
             git, test = select_tests.git, Path(repo) / "test"
             git("init", "-q")
             (test / "nn").mkdir(parents=True)
@@ -1085,21 +1085,34 @@ class TestScore(unittest.TestCase):
             (test / "test_bar.py").write_text("")
             git("add", "-A")
             git("commit", "-qm", "base")
+            base = git("rev-parse", "HEAD").strip()
+            # Main, whose TESTS CI reads, added test_listed after the PR's merge base.
+            (test / "test_listed.py").write_text("")
+            git("add", "-A")
+            git("commit", "-qm", "main")
+            main = git("rev-parse", "HEAD").strip()
+            git("checkout", "-q", base)
             git("mv", "test/test_foo.py", "test/nn/test_foo.py")
             (test / "test_new.py").write_text("y = 2\n")
+            (test / "test_listed.py").write_text("z = 3\n")
             (test / "helper.py").write_text("")
             (test / "test_bar.py").write_text("import helper\n")
             git("add", "-A")
             git("commit", "-qm", "head")
-            diffstat, diff = select_tests.diffstat_and_diff("HEAD~1", "HEAD")
+            diffstat, diff = select_tests.diffstat_and_diff(base, "HEAD")
             with contextlib.redirect_stdout(io.StringIO()) as out:
-                select_tests.main(["--title", "t", "--body", "b", "--base", "HEAD~1", "--print-prompt"])  # fmt: skip
-        candidates = ["nn/test_foo", "test_bar", "test_foo", "test_new"]
-        sample = {"title": "t", "body": "b", "diffstat": diffstat, "diff": diff, "candidates": candidates}  # fmt: skip
-        prompt = score.sample_prompt(sample, select_tests.test_minutes(times))
+                select_tests.main(["--title", "t", "--body", "b", "--base", main, "--print-prompt"])  # fmt: skip
+            candidates = ["nn/test_foo", "test_bar", "test_foo", "test_listed", "test_new"]  # fmt: skip
+            sample = {"title": "t", "body": "b", "diffstat": diffstat, "diff": diff, "candidates": candidates, "base": base, "main_base": main}  # fmt: skip
+            minutes = select_tests.test_minutes(times)
+            prompt = score.sample_prompt(sample, minutes)
+            unlisted = score.sample_prompt({**sample, "main_base": None}, minutes)
         self.assertEqual(prompt + "\n", out.getvalue())
         self.assertIn("rename to test/nn/test_foo.py", diff)
+        self.assertIn("b/test/test_listed.py\nnew file mode ", diff)
         self.assertIn("<added_test_files>\nnn/test_foo [0m]\ntest_new [0m]\n</added_test_files>", prompt)  # fmt: skip
+        # Diffed against main_base, which a sample without one defaults to, test_listed is new.
+        self.assertIn("<added_test_files>\nnn/test_foo [0m]\ntest_listed [0m]\ntest_new [0m]\n</added_test_files>", unlisted)  # fmt: skip
 
     def test_test_seconds_skips_non_td_envs(self) -> None:
         times = {

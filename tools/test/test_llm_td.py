@@ -851,6 +851,10 @@ class TestApplySelection(unittest.TestCase):
 
 
 class TestPrompt(unittest.TestCase):
+    def test_added_test_files(self) -> None:
+        added = ["test/test_a.py", "test/nn/test_b.py", "test/test_c.py", "test/helper.py", "torch/test_d.py", "test/fx/test_e.py"]  # fmt: skip
+        self.assertEqual(select_tests.added_test_files(added, ["test_c"]), {"test_a", "nn/test_b"})  # fmt: skip
+
     def test_truncate_diff_keeps_every_file(self) -> None:
         diff = "\n".join(
             f"diff --git a/f{i} b/f{i}\n" + "+x\n" * 5000 for i in range(4)
