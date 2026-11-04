@@ -2555,8 +2555,8 @@ def main():
     test_batch = TestBatch("tests to run", split.include, False)
     test_batch_exclude = TestBatch("excluded", split.exclude, True)
     # emit_metric records its caller, so this stays in main().
-    if IS_CI and split.llm is not None:
-        emit_metric("llm_td_selection", split.llm.selection_metric)
+    for name, payload in split.selection_metrics(IS_CI):
+        emit_metric(name, payload)
 
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
@@ -2605,17 +2605,10 @@ def main():
                 test_stats = test_prioritizations.get_test_stats(test)
                 print_to_stderr("Emitting td_test_failure_stats_v2")
                 # emit_metric records its caller, so this stays in main().
-                emit_metric(
-                    "td_test_failure_stats_v2",
-                    {
-                        "selected_tests": selected_tests,
-                        "failure": str(test),
-                        "llm_enforced": split.llm_enforced,
-                        **test_stats,
-                    },
-                )
-                if split.llm is not None:
-                    emit_metric("llm_td_failure", split.llm.failure_metric(test))
+                for name, payload in split.failure_metrics(
+                    test, selected_tests, test_stats
+                ):
+                    emit_metric(name, payload)
             gen_additional_test_failures_file(
                 [test.test_file for test, _ in all_failures]
             )
