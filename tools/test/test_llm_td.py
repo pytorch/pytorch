@@ -89,10 +89,16 @@ class TestSelection(unittest.TestCase):
         self.assertTrue(sel.covers("inductor/test_torchinductor", "dynamo_wrapped"))
         self.assertFalse(sel.covers("inductor/test_torchinductor", "default"))
         self.assertTrue(sel.covers("test_ops", "default"))
-        # The inductor config compiles every test of its few files.
-        self.assertTrue(sel.covers("inductor/test_torchinductor", "inductor"))
+        # The inductor config compiles every test of the files it runs with --inductor.
+        bare = Selection.from_model_output({"tests": []}, CANDIDATES | {"test_torch"}, [])  # fmt: skip
+        self.assertTrue(bare.covers("test_torch", "inductor"))
+        self.assertFalse(bare.covers("test_torch", "default"))
+        self.assertFalse(bare.covers("inductor/test_torchinductor", "inductor"))
         self.assertIsNone(sel.error)
         self.assertEqual(Selection.from_json(sel.to_json()), sel)
+        failed = Selection.from_model_output(None, CANDIDATES, [])
+        self.assertIsNotNone(failed.error)
+        self.assertEqual(Selection.from_json(failed.to_json()), failed)
 
     def test_files_the_model_never_saw_are_covered(self) -> None:
         sel = Selection.from_model_output({"tests": []}, CANDIDATES, [])
