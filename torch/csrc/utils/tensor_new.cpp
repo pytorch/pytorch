@@ -1979,7 +1979,8 @@ Tensor asarray(
                    .cast<Tensor>();
     } catch (py::error_already_set& e) {
       // A producer that can only export a copy raises BufferError for
-      // copy=False, which the Array API reports as a ValueError.
+      // copy=False, which the Array API reports as a ValueError. Other export
+      // failures raise BufferError too, so a copy is only suggested.
       if (!force_alias || !e.matches(PyExc_BufferError)) {
         throw;
       }
@@ -1989,8 +1990,8 @@ Tensor asarray(
           c10::str(
               "can't alias an object of type '",
               Py_TYPE(obj)->tp_name,
-              "' into a tensor, because reading it through DLPack with copy=False raised a BufferError. "
-              "Pass copy=None or copy=True to allow a copy.")
+              "' into a tensor, because reading it through DLPack raised a BufferError. "
+              "If it can only export a copy, pass copy=None or copy=True.")
               .c_str());
       throw py::error_already_set();
     }
