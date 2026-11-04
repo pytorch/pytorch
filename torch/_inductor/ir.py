@@ -8799,7 +8799,68 @@ class SubgraphBuffer(ExternKernel):
         )
 
 
-class UserDefinedTritonKernel(ExternKernel):
+class UserDefinedKernel(ExternKernel):
+    """
+    Base of the IR nodes for user-defined kernels (UserDefinedTritonKernel): an opaque
+    launch that returns nothing (NoneLayout) and writes some of its tensor arguments in
+    place. Each written argument gets a
+    MutationOutput, which orders later readers after the launch and keeps it alive.
+    """
+
+    def __init__(
+        self,
+        kernel_args: dict[str, Any],
+        wrap_tensor_arg: Callable[[str, IRNode], IRNode] | None = None,
+    ) -> None:
+        inputs: list[IRNode] = []
+        kwargs: dict[str, IRNode] = {}
+        constant_args: list[IRNode] = []
+
+        for k, v in kernel_args.items():
+            if isinstance(v, TensorBox):
+                t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
+                if wrap_tensor_arg is not None:
+                    t = wrap_tensor_arg(k, t)
+                inputs.append(t)
+                kwargs[k] = t
+            else:
+                constant_args.append(v)
+                kwargs[k] = v
+
+        if len(inputs) == 0:
+            raise AssertionError("Expected len(inputs) != 0")
+        self.device = inputs[0].get_device()
+
+        if not isinstance(inputs, Sequence):
+            raise AssertionError(type(inputs))
+        super().__init__(
+            None,
+            NoneLayout(device=self.device),
+            inputs,
+            tuple(constant_args),
+            kwargs,
+        )
+
+    def register_mutations(self, mutable_args: list[Any]) -> None:
+        """Record the written arguments, then register the node with the graph."""
+        self.mutable_args = mutable_args
+        self.mutation_outputs = [
+            MutationOutput(NoneLayout(device=self.device), buf, self)
+            for buf in self.mutable_args
+        ]
+        V.graph.register_operation(self)
+
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
+
+    def get_outputs(self) -> list[Buffer]:
+        return list(self.mutation_outputs)
+
+    def get_device(self) -> torch.device | None:
+        return self.device
+
+
+class UserDefinedTritonKernel(UserDefinedKernel):
     """
     A user-defined triton kernel (e.g. via @triton.jit).
     """
@@ -9015,9 +9076,6 @@ class UserDefinedTritonKernel(ExternKernel):
             self.grid, unbacked_only
         )
 
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
-
     def __init__(
         self,
         *,
@@ -9027,34 +9085,12 @@ class UserDefinedTritonKernel(ExternKernel):
         kernel_args: dict[str, Any],
         launch_kwargs: tuple[str, ...],
     ) -> None:
-        inputs: list[IRNode] = []
-        kwargs: dict[str, IRNode] = {}
-        constant_args: list[IRNode] = []
+        def wrap_tensor_arg(k: str, t: IRNode) -> IRNode:
+            if k in tma_descriptor_metadata:
+                return TMADescriptor.create(t, tma_descriptor_metadata[k])
+            return t
 
-        for k, v in kernel_args.items():
-            if isinstance(v, TensorBox):
-                t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
-                if k in tma_descriptor_metadata:
-                    t = TMADescriptor.create(t, tma_descriptor_metadata[k])
-                inputs.append(t)
-                kwargs[k] = t
-            else:
-                constant_args.append(v)
-                kwargs[k] = v
-
-        if len(inputs) == 0:
-            raise AssertionError("Expected len(inputs) != 0")
-        self.device = inputs[0].get_device()
-
-        if not isinstance(inputs, Sequence):
-            raise AssertionError(type(inputs))
-        super().__init__(
-            None,
-            NoneLayout(device=self.device),
-            inputs,
-            tuple(constant_args),
-            kwargs,
-        )
+        super().__init__(kernel_args, wrap_tensor_arg)
         self.kernel_idx = kernel_idx
         self.grid = grid
         self.launch_kwargs = launch_kwargs
@@ -9091,23 +9127,13 @@ class UserDefinedTritonKernel(ExternKernel):
 
         # Filter to only tensor args: with Triton 3.7+, ordered_arg_names
         # includes scalars, so writes may reference non-tensor args like SymInts.
-        self.mutable_args = [
-            kernel_args[key.name]
-            for key in self.arg_accesses.read_writes.writes
-            if isinstance(kernel_args.get(key.name), TensorBox)
-        ]
-
-        self.mutation_outputs = [
-            MutationOutput(NoneLayout(device=self.device), buf, self)
-            for buf in self.mutable_args
-        ]
-        V.graph.register_operation(self)
-
-    def get_outputs(self) -> list[Buffer]:
-        return list(self.mutation_outputs)
-
-    def get_device(self) -> torch.device | None:
-        return self.device
+        self.register_mutations(
+            [
+                kernel_args[key.name]
+                for key in self.arg_accesses.read_writes.writes
+                if isinstance(kernel_args.get(key.name), TensorBox)
+            ]
+        )
 
 
 class InplaceBernoulliFallback(ExternKernel):

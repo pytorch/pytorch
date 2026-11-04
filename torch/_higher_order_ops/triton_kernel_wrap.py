@@ -11,7 +11,7 @@ import operator
 import types
 import typing
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
 from typing_extensions import Never
 
@@ -21,25 +21,19 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import DispatchKey
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
 from torch._higher_order_ops.user_kernel_hop import (
-    functional_hop_dense,
-    functional_hop_fake,
-    functionalize_functional_hop,
-    functionalize_mutation_hop,
     KernelSideTable,
-    register_user_kernel_hop_dispatch,
+    register_user_kernel_hop_impls,
+    specialize_symbolic,
     store_non_graphable_args,
-    trace_user_kernel_wrapper,
     UserKernelHOPifier,
     UserKernelWrapperHOP,
 )
-from torch._higher_order_ops.utils import register_fake
 
 # Re-exported: MTIA's cpu_dispatch / dtype_conversion dispatch modes and the APS memory
 # estimator import it from this module.
 from torch._prims_common import clone_preserve_strides  # noqa: F401
-from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
-from torch.fx.experimental.symbolic_shapes import guard_scalar
 from torch.types import IntLikeType
 from torch.utils._ordered_set import OrderedSet
 
@@ -56,7 +50,6 @@ if TYPE_CHECKING:
     from torch._dynamo.variables.functions import TritonKernelVariable
     from torch._guards import Source
     from torch._inductor.dependencies import ReadWrites
-    from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
     from torch.fx.proxy import Proxy
     from torch.utils._triton import has_triton
 
@@ -1664,7 +1657,6 @@ def get_kernel(kernel_idx: int) -> "TritonKernelType":
     return kernel_side_table.get_kernel(kernel_idx)
 
 
-@triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_mutation_dense(
     *,
     kernel_idx: int,
@@ -1769,82 +1761,6 @@ def triton_kernel_wrapper_mutation_dense(
     kernel[grid_fn](*args, **kwargs, **constant_args)
 
 
-@register_fake(triton_kernel_wrapper_mutation, skip_cache=True)
-def triton_kernel_wrapper_mutation_fake_tensor_mode(
-    *,
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: list["TritonGridType"],
-    tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: dict[str, Any],
-    launch_kwargs: tuple[str, ...] | None = None,
-) -> None:
-    return None
-
-
-@triton_kernel_wrapper_mutation.py_impl(DispatchKey.Meta)
-def _(
-    *,
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: list["TritonGridType"],
-    tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: dict[str, Any],
-    launch_kwargs: tuple[str, ...] | None = None,
-) -> None:
-    return None
-
-
-def _triton_hop_kwargs(
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: list["TritonGridType"],
-    tma_descriptor_metadata: TMADescriptorMetadata,
-    launch_kwargs: tuple[str, ...] | None,
-) -> dict[str, Any]:
-    """The Triton HOP arguments that the shared helpers pass through unchanged
-    (everything but kwargs, tensors_to_clone and tensor_bases)."""
-    hop_kwargs: dict[str, Any] = {
-        "kernel_idx": kernel_idx,
-        "constant_args_idx": constant_args_idx,
-        "grid": grid,
-        "tma_descriptor_metadata": tma_descriptor_metadata,
-    }
-    if launch_kwargs:
-        hop_kwargs["launch_kwargs"] = launch_kwargs
-    return hop_kwargs
-
-
-@triton_kernel_wrapper_mutation.py_impl(ProxyTorchDispatchMode)
-def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
-    mode: ProxyTorchDispatchMode,
-    *,
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: list["TritonGridType"],
-    tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: dict[str, Any],
-    launch_kwargs: tuple[str, ...] | None = None,
-) -> None:
-    node_args: dict[str, Any] = {
-        "kernel_idx": kernel_idx,
-        "constant_args_idx": constant_args_idx,
-        "grid": grid,
-        "tma_descriptor_metadata": tma_descriptor_metadata,
-        "kwargs": kwargs,
-    }
-    if launch_kwargs:
-        node_args["launch_kwargs"] = launch_kwargs
-
-    trace_user_kernel_wrapper(
-        mode,
-        triton_kernel_wrapper_mutation,
-        node_args,
-    )
-
-    return None
-
-
 def get_mutated_tensors(
     kernel_idx: int,
     constant_args_idx: int,
@@ -1865,140 +1781,60 @@ def get_mutated_tensors(
     ]
 
 
-@triton_kernel_wrapper_mutation.py_functionalize_impl
-def triton_kernel_wrapper_mutation_functionalize(
-    ctx: "BaseFunctionalizeAPI",
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: list["TritonGridType"],
-    tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: dict[str, Any],
-    launch_kwargs: tuple[str, ...] | None = None,
-) -> None:
-    hop_kwargs = _triton_hop_kwargs(
-        kernel_idx, constant_args_idx, grid, tma_descriptor_metadata, launch_kwargs
-    )
-    # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
-    # other, and one gets mutated in kernel, and later another gets mutated,
-    # they are no longer equal. Fix this by graph breaking on this condition
-    # earlier in dynamo.
-    functionalize_mutation_hop(
-        ctx,
-        triton_kernel_wrapper_functional,
-        lambda unwrapped_kwargs: get_mutated_tensors(
-            kernel_idx, constant_args_idx, unwrapped_kwargs, tma_descriptor_metadata
-        ),
-        hop_kwargs=hop_kwargs,
-        kwargs=kwargs,
-    )
-    return None
+def get_triton_kernel_name(hop_kwargs: Mapping[str, Any]) -> str:
+    from triton.runtime.autotuner import Autotuner
+    from triton.runtime.jit import JITFunction
+
+    from torch._inductor import config
+
+    kernel = kernel_side_table.get_kernel(hop_kwargs["kernel_idx"])
+    if isinstance(kernel, JITFunction):
+        return kernel.fn.__name__
+    elif isinstance(kernel, Autotuner):
+        if config.is_fbcode():
+            # Autotuner has different implementations for AMD and NV
+            import torch
+
+            if torch.version.hip is None:
+                return kernel.base_fn.__name__
+            else:
+                return kernel.fn.__name__
+        else:
+            return kernel.base_fn.__name__
+    else:
+        raise AssertionError("Unknown triton kernel type")
 
 
-@triton_kernel_wrapper_functional.py_impl(DispatchKey.CompositeExplicitAutograd)
-def triton_kernel_wrapper_functional_dense(
-    *,
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: list["TritonGridType"],
-    tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: dict[str, Any],
-    tensors_to_clone: list[str],
-    launch_kwargs: tuple[str, ...] | None = None,
-    tensor_bases: dict[str, Tensor] | None = None,
-) -> dict[str, Any]:
-    hop_kwargs = _triton_hop_kwargs(
-        kernel_idx, constant_args_idx, grid, tma_descriptor_metadata, launch_kwargs
-    )
-    return functional_hop_dense(
-        triton_kernel_wrapper_mutation,
-        hop_kwargs=hop_kwargs,
-        kwargs=kwargs,
-        tensors_to_clone=tensors_to_clone,
-        tensor_bases=tensor_bases,
-    )
+def get_triton_layout_constraint() -> str:
+    from torch._inductor import config
+
+    return config.triton_kernel_default_layout_constraint
 
 
-@register_fake(triton_kernel_wrapper_functional, skip_cache=True)
-def triton_kernel_wrapper_functional_fake_tensor_mode(
-    *,
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: list["TritonGridType"],
-    tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: dict[str, Any],
-    tensors_to_clone: list[str],
-    launch_kwargs: tuple[str, ...] | None = None,
-    tensor_bases: dict[str, Tensor] | None = None,
-) -> dict[str, Any]:
-    return functional_hop_fake(
-        kwargs=kwargs, tensors_to_clone=tensors_to_clone, tensor_bases=tensor_bases
-    )
-
-
-@triton_kernel_wrapper_functional.py_impl(ProxyTorchDispatchMode)
-def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
-    mode: ProxyTorchDispatchMode,
-    *,
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: list["TritonGridType"],
-    tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: dict[str, Any],
-    tensors_to_clone: list[str],
-    launch_kwargs: tuple[str, ...] | None = None,
-    tensor_bases: dict[str, Tensor] | None = None,
-) -> dict[str, Any]:
-    node_args: dict[str, Any] = {
-        "kernel_idx": kernel_idx,
-        "constant_args_idx": constant_args_idx,
-        "grid": grid,
-        "tma_descriptor_metadata": tma_descriptor_metadata,
-        "kwargs": kwargs,
-        "tensors_to_clone": tensors_to_clone,
-    }
-    if tensor_bases:
-        node_args["tensor_bases"] = tensor_bases
-    if launch_kwargs:
-        node_args["launch_kwargs"] = launch_kwargs
-
-    ret = trace_user_kernel_wrapper(
-        mode,
-        triton_kernel_wrapper_functional,
-        node_args,
-    )
-    if ret is None:
-        raise AssertionError("trace_user_kernel_wrapper returned None")
-    return ret
-
-
-@triton_kernel_wrapper_functional.py_functionalize_impl
-def triton_kernel_wrapper_functional_functionalize(
-    ctx: "BaseFunctionalizeAPI",
-    kernel_idx: int,
-    constant_args_idx: int,
-    grid: list["TritonGridType"],
-    tma_descriptor_metadata: TMADescriptorMetadata,
-    kwargs: dict[str, Any],
-    tensors_to_clone: list[str],
-    launch_kwargs: tuple[str, ...] | None = None,
-    tensor_bases: dict[str, Tensor] | None = None,
-) -> dict[str, Any]:
-    hop_kwargs = _triton_hop_kwargs(
-        kernel_idx, constant_args_idx, grid, tma_descriptor_metadata, launch_kwargs
-    )
-    return functionalize_functional_hop(
-        ctx,
-        triton_kernel_wrapper_functional,
-        hop_kwargs=hop_kwargs,
-        kwargs=kwargs,
-        tensors_to_clone=tensors_to_clone,
-        tensor_bases=tensor_bases,
-    )
-
-
-register_user_kernel_hop_dispatch(
-    triton_kernel_wrapper_mutation, triton_kernel_wrapper_functional
+triton_kernel_hop_info = register_user_kernel_hop_impls(
+    triton_kernel_wrapper_mutation,
+    triton_kernel_wrapper_functional,
+    dsl="triton",
+    display_name="Triton",
+    side_table=kernel_side_table,
+    launch=triton_kernel_wrapper_mutation_dense,
+    get_mutated_tensors=lambda hop_kwargs, kwargs: get_mutated_tensors(
+        hop_kwargs["kernel_idx"],
+        hop_kwargs["constant_args_idx"],
+        kwargs,
+        hop_kwargs["tma_descriptor_metadata"],
+    ),
+    get_kernel_name=get_triton_kernel_name,
+    get_layout_constraint=get_triton_layout_constraint,
+    reinplace_trigger=ReInplaceTrigger.TRITON_OPS,
+    serializable=True,
 )
+# The functional HOP's dense impl (clones plus the mutation HOP), kept under the name
+# this module defined it by.
+triton_kernel_wrapper_functional_dense = triton_kernel_wrapper_functional.py_kernels[
+    DispatchKey.CompositeExplicitAutograd
+]
+
 
 ###############################################################################
 # The "TritonHOPifier": a class that transforms a call to a triton kernel into
@@ -2888,9 +2724,4 @@ class TraceableTritonKernelWrapper:
             return self.kernel[self.grid](*args, **kwargs)
 
     def specialize_symbolic(self, arg: Sequence[Any]) -> Any:
-        import torch
-
-        # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
-        if isinstance(arg, (torch.SymInt, torch.SymBool, torch.SymFloat)):
-            return guard_scalar(arg)
-        return arg
+        return specialize_symbolic(arg)
