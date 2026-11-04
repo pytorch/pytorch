@@ -1151,6 +1151,27 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, 1, 2), (t, 3, 4)], expected_frames=2)
 
+    @torch._dynamo.config.patch(specialize_int=False)
+    def test_computed_constant_dict_setitem_and_fstring_do_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, d, n):
+            if n in d:
+                d[n + 1] = f"{n + 1}"
+                return t + 1
+            return t + 2
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        d = {1: "1"}
+        for n in range(1, 5):
+            expected_d = d.copy()
+            expected = fn(t, expected_d, n)
+            result = opt_fn(t, d, n)
+            self.assertTrue(same(expected, result))
+            self.assertEqual(d, expected_d)
+        self.assertEqual(counter.frame_count, 1)
+
     def test_computed_constant_as_list_index_realizes(self):
         t = torch.ones(2)
 
