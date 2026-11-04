@@ -204,7 +204,8 @@ class TestSelection(unittest.TestCase):
             self.assertEqual(len(callers[f]), 1, f)
             m = dispatch.match(next(iter(callers[f])))
             self.assertTrue(m and m.group(1).startswith("*"), callers[f])
-            runs[m.group(1).strip("*")] = tests
+            glob = m.group(1).strip("*")
+            runs[glob] = runs.get(glob, set()) | tests
         self.assertEqual(
             runs,
             selection.ALWAYS_COVERED,
