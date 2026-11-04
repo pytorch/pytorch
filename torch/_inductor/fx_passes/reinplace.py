@@ -1026,9 +1026,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                             continue
                         replacement = output_idx_to_replacement[idx]
                         replace_and_collect(user, replacement)
-        elif (
-            user_kernel_hop := get_user_kernel_hop_info(node.target)
-        ) is not None and node.target is user_kernel_hop.functional:
+        elif user_kernel_hop := get_user_kernel_hop_info(node.target, "functional"):
             kernel_name = user_kernel_hop.get_kernel_name(node.kwargs)
 
             # User-kernel functional HOPs take an additional argument called
