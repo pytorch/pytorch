@@ -9715,6 +9715,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (torch.randn([4096, 16]),))
         assertGeneratedKernelCountEqual(self, 1)
 
+    def test_stack_slices_of_realized_input(self):
+        # Slices are not whole buffers, so they take the ordinary copy path.
+        def fn(x):
+            y = sum(x[:, j] * (j + 1) for j in range(8))
+            half = y.shape[0] // 2
+            return torch.stack([y[:half], y[half:]], -1)
+
+        self.common(fn, (torch.randn([4096, 16]),))
+
     def test_stack_realized_channels_last_inputs(self):
         def fn(x):
             a = (x.sin() + x.cos() + x.exp() + x).sum(1)

@@ -4229,6 +4229,7 @@ class View(GenericView):
         return reindex
 
 
+@ir_dataclass
 class StackUnitDimView(GenericView):
     """
     The size-1 unsqueeze of a stack input, when the cat is the only consumer of
@@ -4249,6 +4250,10 @@ class StackUnitDimView(GenericView):
             return None
         node = V.graph.current_node
         source = node.args[0] if node is not None and node.args else None
+        # An fx-level check: it bounds the views built over this buffer, not the
+        # buffer's readers. A lowering that returns its input unchanged (expand to
+        # the same size) leaves other readers, which is fine: they read the buffer
+        # where the cat places it, as they would for a plain cat.
         if not (
             node is not None
             and node.target is torch.ops.aten.unsqueeze.default
