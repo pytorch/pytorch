@@ -338,7 +338,7 @@ std::unique_ptr<sycl::kernel> loadKernel(
     int device_idx) {
   // Launching with more SLM than the device has hangs the GPU; fail the way
   // cuda.cpp does so autotune drops the config.
-  const auto slmLimit = at::xpu::getDeviceLocalMemSize();
+  const auto slmLimit = at::xpu::getDeviceLocalMemSize(device_idx);
   TORCH_CHECK_WITH(
       OutOfMemoryError,
       sharedMemBytes <= slmLimit,
