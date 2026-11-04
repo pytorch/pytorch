@@ -15571,6 +15571,20 @@ class TestCommon(TestCase):
         result = torch.fft.ifftn(spectrum.to(device)).cpu().to(torch.complex64)
         self.assertEqual(result, x, atol=1, rtol=0)
 
+    def test_fft_private_ops_edge_dims(self, device):
+        # The private ops wrap negative dims and transform empty axes like the CPU
+        x = torch.randn(3, 16, dtype=torch.complex64, device=device)
+        self.assertEqual(torch._fft_c2c(x, [-1], 0, True), torch.fft.fft(x))
+        self.assertEqual(torch._fft_r2c(x.real[:, :0], [-1], 0, True), torch.zeros(3, 1, dtype=x.dtype, device=device))
+
+    @parametrize("kind", ["rfft"])
+    def test_fft_real_beyond_two_passes(self, device, kind):
+        # Real lengths above 2^24 points run as complex transforms
+        n = 1 << 25
+        x = torch.randn(n) if kind == "rfft" else torch.randn(n // 2 + 1, dtype=torch.complex64)
+        op = torch.fft.rfft if kind == "rfft" else lambda t: torch.fft.irfft(t, n=n)
+        self.assertEqual(op(x.to(device)).cpu(), op(x), atol=5e-2, rtol=1e-4)
+
     def test_rfft_long_mixed_radix(self, device):
         x = torch.randn(2, 176400)
         y = torch.fft.rfft(x.to(device)).cpu()
