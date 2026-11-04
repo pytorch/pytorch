@@ -123,6 +123,12 @@ class TestKernelRowTile(TestCase):
         with torch.cuda.device(0):
             self._assert_launchers_reject(x)
 
+    def test_itree_output_shares_the_input_device(self):
+        x = torch.randn(64, 512, device="cuda")
+        trait = T.SumOps(acc=cutlass.Float32)
+        with self.assertRaisesRegex(AssertionError, "out on cpu"):
+            rt.reduce_row_itree(trait, "off_out", x, torch.empty(64))
+
     def test_plans_require_the_current_device(self):
         # One GPU has no other device, so pretend another one is current.
         x = torch.randn(64, 512, device="cuda")
