@@ -174,6 +174,10 @@ elseif(KINETO_BACKEND STREQUAL "rocm")
   endif()
   message(STATUS "Building with: rocprofiler-sdk")
 elseif(KINETO_BACKEND STREQUAL "xpu")
+  if(PROJECT_IS_TOP_LEVEL)
+    message(FATAL_ERROR "Building standalone Kineto for XPU is not supported.")
+  endif()
+
   # find xpupti sdk
   find_package(Pti GLOBAL REQUIRED)
   get_target_property(PTI_VIEW_LOCATION Pti::pti_view LOCATION)
