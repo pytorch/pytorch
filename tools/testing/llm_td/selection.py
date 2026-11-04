@@ -540,7 +540,7 @@ class AppliedSelection:
 
     @property
     def selection_metric(self) -> dict[str, object]:
-        """The llm_td_selection metric. Every shard of a call emits the same
+        """The llm_td_selection metric. Every shard of a config emits the same
         one, so count one per (workflow run, run attempt, build_environment,
         config, list_id): list_id hashes only the call's test file names."""
         split, times = self.split, self.file_time
