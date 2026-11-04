@@ -4556,6 +4556,44 @@ def set_current_node(node: torch.fx.Node) -> Generator[None, None, None]:
         _current_node.value = old
 
 
+def safe_repr(x: object) -> str:
+    """repr(x), falling back to reprs of the elements of a list, tuple or dict
+    when that raises, and to <ClassName> for an element whose repr raises, so
+    that one bad repr does not hide the others or the error being reported."""
+    try:
+        return repr(x)
+    except Exception:
+        pass
+    if isinstance(x, (list, tuple)):
+        items = ", ".join(safe_repr(e) for e in x)
+        if isinstance(x, list):
+            return f"[{items}]"
+        return f"({items},)" if len(x) == 1 else f"({items})"
+    if isinstance(x, dict):
+        items = ", ".join(f"{safe_repr(k)}: {safe_repr(v)}" for k, v in x.items())
+        return f"{{{items}}}"
+    return f"<{type(x).__name__}>"
+
+
+def summarize_example_value(v: object) -> str:
+    """A short description of a graph input's example value for logs and
+    errors. Tensors, including those in a list or tuple, are shown as in
+    TensorVariable.debug_repr rather than by repr, since a real tensor input's
+    repr can be large and a tensor subclass's repr can raise; other values go
+    through safe_repr."""
+    if isinstance(v, torch.Tensor):
+        from torch._subclasses.fake_tensor import is_fake_tensor
+
+        from .variables.tensor import _tensor_debug_repr
+
+        type_name = "FakeTensor" if is_fake_tensor(v) else type(v).__name__
+        return _tensor_debug_repr(v, type_name)
+    if isinstance(v, (list, tuple)):
+        items = ", ".join(summarize_example_value(e) for e in v)
+        return f"{type(v).__name__}[{items}]"
+    return safe_repr(v)
+
+
 def run_node(
     tracer: Any, node: torch.fx.Node, args: Any, kwargs: Any, nnmodule: Any
 ) -> Any:
@@ -4579,8 +4617,8 @@ def run_node(
 
         def make_error_message(e: object) -> str:
             return (
-                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
-                + repr(e)
+                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{safe_repr(args)}, **{safe_repr(kwargs)}): got "
+                + safe_repr(e)
             )
 
         from .exc import Unsupported
