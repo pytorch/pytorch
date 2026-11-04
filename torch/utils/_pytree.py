@@ -39,11 +39,12 @@ from typing import (
     NoReturn,
     overload,
     Protocol,
+    Self,
     TYPE_CHECKING,
     TypeAlias,
     TypeVar,
 )
-from typing_extensions import deprecated, NamedTuple, Self, TypeIs
+from typing_extensions import deprecated, NamedTuple, TypeIs
 
 from torch.torch_version import TorchVersion as _TorchVersion
 
