@@ -6,6 +6,9 @@ neither the token nor network access to the API. The file is handed over as a
 `prepare` job output and rewritten in the review job from an environment
 variable, so it is one line of compact JSON capped at ``MAX_TOTAL_BYTES``.
 
+``labels`` are the names of the labels on the PR when the file was made, at most
+``MAX_LABELS`` of them; ``labels_truncated`` is set when there were more.
+
 Kept: issue comments, reviews and inline review comments written by the PR
 author or by a user with triage access or above, and this workflow's own
 earlier findings (role ``automated_review``): its inline findings still on the
@@ -60,10 +63,11 @@ MAX_BODY = 4000
 MAX_REVIEW_BODY = 40_000
 # Of the description once JSON-escaped; leaves most of MAX_TOTAL_BYTES to comments.
 MAX_PR_BODY_BYTES = 40_000
-# Labels the review is shown, and the length of each name. Real label names are
+# Labels the review is shown, and the JSON-escaped size of each name, so the
+# labels add at most MAX_LABELS * MAX_LABEL_BYTES to the file. Real label names are
 # short; the caps only bound what a PR with hundreds of labels can add.
 MAX_LABELS = 50
-MAX_LABEL_NAME = 100
+MAX_LABEL_BYTES = 120
 MAX_HUNK = 1500
 MAX_ITEMS = 200
 # Of the whole serialized file. One environment variable is limited to 128 KiB
@@ -240,16 +244,18 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
     body = cap_encoded(pull.get("body"), MAX_PR_BODY_BYTES)
     # The review has no network, so this is the only way it learns which labels
     # (for example the ciflow/* ones that start CI) are already on the PR.
-    labels = [
-        cap(label["name"], MAX_LABEL_NAME)
-        for label in (pull.get("labels") or [])[:MAX_LABELS]
+    names = [
+        label["name"]
+        for label in (pull.get("labels") or [])
         if isinstance(label, dict) and isinstance(label.get("name"), str)
     ]
+    labels = [cap_encoded(name, MAX_LABEL_BYTES) for name in names[:MAX_LABELS]]
     head = {
         "pr_author": author,
         "head_sha": head_sha,
         "title": pull.get("title") or "",
         "labels": labels,
+        "labels_truncated": len(names) > MAX_LABELS,
         "body": body,
     }
     sources = {

@@ -289,27 +289,78 @@ class TestCollect(unittest.TestCase):
         api = FakeApi()
         api.pull = {
             **api.pull,
-            "labels": [{"name": "ciflow/docker"}, {"name": "ciflow/binaries"}, {}],
+            "labels": [{"name": "ciflow/docker"}, {"name": "ciflow/binaries"}],
         }
         out = fpc.collect(api, REPO, PR)
         self.assertEqual(out["labels"], ["ciflow/docker", "ciflow/binaries"])
+        self.assertFalse(out["labels_truncated"])
 
     def test_a_pr_without_labels_has_an_empty_list(self):
-        api = FakeApi()
-        api.pull = {k: v for k, v in api.pull.items() if k != "labels"}
-        self.assertEqual(fpc.collect(api, REPO, PR)["labels"], [])
+        for labels in (None, []):
+            with self.subTest(labels=labels):
+                api = FakeApi()
+                api.pull = {**api.pull, "labels": labels}
+                out = fpc.collect(api, REPO, PR)
+                self.assertEqual(out["labels"], [])
+                self.assertFalse(out["labels_truncated"])
+        # The key is absent from some API responses.
+        self.assertEqual(fpc.collect(FakeApi(), REPO, PR)["labels"], [])
 
-    def test_the_labels_are_capped(self):
-        issue = [comment("maint", body="y" * fpc.MAX_BODY)] * 80
-        api = FakeApi(issue=issue, maintainers={"maint"})
+    def test_malformed_label_entries_are_skipped(self):
+        api = FakeApi()
         api.pull = {
             **api.pull,
-            "labels": [{"name": "l" * 500}] * (fpc.MAX_LABELS + 20),
+            "labels": [
+                "ciflow/docker",
+                None,
+                {},
+                {"name": 5},
+                {"name": None},
+                {"name": "ciflow/binaries"},
+            ],
+        }
+        self.assertEqual(fpc.collect(api, REPO, PR)["labels"], ["ciflow/binaries"])
+
+    def test_malformed_entries_do_not_use_up_the_label_limit(self):
+        api = FakeApi()
+        labels = [{"name": f"l{i}"} for i in range(fpc.MAX_LABELS)]
+        api.pull = {**api.pull, "labels": ["junk"] * 10 + labels}
+        out = fpc.collect(api, REPO, PR)
+        self.assertEqual(out["labels"], [f"l{i}" for i in range(fpc.MAX_LABELS)])
+        self.assertFalse(out["labels_truncated"])
+
+    def test_the_label_count_is_capped_and_says_so(self):
+        api = FakeApi()
+        api.pull = {
+            **api.pull,
+            "labels": [{"name": f"l{i}"} for i in range(fpc.MAX_LABELS + 20)],
         }
         out = fpc.collect(api, REPO, PR)
         self.assertEqual(len(out["labels"]), fpc.MAX_LABELS)
-        self.assertTrue(all(n.endswith(" [truncated]") for n in out["labels"]))
+        self.assertEqual(out["labels"][-1], f"l{fpc.MAX_LABELS - 1}")
+        self.assertTrue(out["labels_truncated"])
+
+    def test_each_label_name_is_capped_by_its_encoded_size(self):
+        suffix = " [truncated]"
+        e = "\U0001f600"  # 12 bytes once escaped
+        issue = [comment("maint", body="y" * fpc.MAX_BODY)] * 80
+        api = FakeApi(issue=issue, maintainers={"maint"})
+        names = ["l" * 500, e * 500]
+        api.pull = {
+            **api.pull,
+            "labels": [{"name": n} for n in names] * (fpc.MAX_LABELS // 2),
+            "body": e * 60000,
+        }
+        out = fpc.collect(api, REPO, PR)
+        self.assertEqual(len(out["labels"]), fpc.MAX_LABELS)
+        for name in out["labels"]:
+            self.assertTrue(name.endswith(suffix))
+            self.assertLessEqual(
+                len(fpc.dumps(name[: -len(suffix)])), fpc.MAX_LABEL_BYTES
+            )
         self.assertLessEqual(len(fpc.dumps(out)), fpc.MAX_TOTAL_BYTES)
+        # Even worst-case labels leave room for comments.
+        self.assertGreaterEqual(len(out["items"]), 5)
 
     def test_the_description_is_capped_and_counted(self):
         issue = [comment("maint", body="y" * fpc.MAX_BODY)] * 80

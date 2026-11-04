@@ -6669,7 +6669,7 @@ COMMENTS = "/tmp/pr-comments.json"
 # names in its place (None: in a mode a bare `/pr-review <N>` never selects).
 SKILL_COMMANDS = {
     # Local CLI mode.
-    "gh pr view <PR_NUMBER> --json title,body,author,baseRefName,headRefName,files,additions,deletions,commits": COMMENTS,
+    "gh pr view <PR_NUMBER> --json title,body,author,labels,baseRefName,headRefName,files,additions,deletions,commits": COMMENTS,
     "gh pr diff <PR_NUMBER>": "/tmp/pr-diff.txt",
     "gh pr view <PR_NUMBER> --json comments,reviews": COMMENTS,
     "gh api --paginate repos/pytorch/pytorch/issues/<PR_NUMBER>/comments": COMMENTS,
@@ -6719,6 +6719,26 @@ class TestStageACoversTheSkillOffline(unittest.TestCase):
         for command, source in SKILL_COMMANDS.items():
             if source:
                 self.assertIn(source, offline, f"stage A no longer maps {command!r}")
+
+
+class TestStageAShowsTheLabels(unittest.TestCase):
+    """The review is offline, so it learns the PR's labels only from the file; the
+    prompt and the file's keys must stay in step, or it asks for labels already set."""
+
+    def test_the_prompt_names_the_label_keys_that_collect_emits(self):
+        import fetch_pr_comments
+
+        def api(endpoint, body=None):
+            if endpoint.endswith("/pulls/1"):
+                return {"user": {"login": "author"}, "labels": []}
+            return []
+
+        out = fetch_pr_comments.collect(api, "pytorch/pytorch", 1)
+        offline = stage_a_system_prompt()
+        for key in ("labels", "labels_truncated"):
+            self.assertIn(key, out, f"collect() no longer emits {key!r}")
+            self.assertIn(f"`{key}`", offline, f"stage A no longer names {key!r}")
+        self.assertIn("already in `labels`", offline)
 
 
 class TestStageAFanOut(unittest.TestCase):
