@@ -46,3 +46,22 @@ def autotuned_kernel(x_ptr, out_ptr, n_elements, BLOCK: tl.constexpr):
     offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
     mask = offsets < n_elements
     tl.atomic_add(out_ptr + offsets, tl.load(x_ptr + offsets, mask=mask), mask=mask)
+
+
+@triton.autotune(
+    configs=[triton.Config({"BLOCK": 64}), triton.Config({"BLOCK": 128})],
+    key=["n_elements"],
+)
+@triton.heuristics({"EVEN": lambda args: args["n_elements"] % args["BLOCK"] == 0})
+@triton.heuristics({"SCALE": lambda args: 2})
+@triton.jit
+def autotuned_heuristics_kernel(
+    x_ptr, n_elements, BLOCK: tl.constexpr, EVEN: tl.constexpr, SCALE: tl.constexpr
+):
+    offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    if EVEN:
+        tl.store(x_ptr + offsets, tl.load(x_ptr + offsets) * SCALE)
+    else:
+        mask = offsets < n_elements
+        values = tl.load(x_ptr + offsets, mask=mask)
+        tl.store(x_ptr + offsets, values * SCALE, mask=mask)
