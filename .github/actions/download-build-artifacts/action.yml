@@ -30,7 +30,8 @@ runs:
       with:
         name: ${{ inputs.name }}
 
-    # Only target_determination.yml's LLM test selection counts (see download-td-artifacts).
+    # A build artifact never supplies the LLM test selection; it comes from llm-td.yml
+    # (added in the PR above) through download-td-artifacts.
     - name: Unzip artifacts
       shell: bash
       run: |
