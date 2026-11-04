@@ -21,8 +21,8 @@ from __future__ import annotations
 import contextlib
 import functools
 import logging
-from typing import Any, TYPE_CHECKING
-from typing_extensions import ParamSpec, Required, TypedDict, TypeVar, Unpack
+from typing import Any, Required, TYPE_CHECKING
+from typing_extensions import ParamSpec, TypedDict, TypeVar, Unpack
 from unittest.mock import patch
 
 import torch

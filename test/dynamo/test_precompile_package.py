@@ -562,7 +562,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         control_state, _ = _kept_types(control)
         # The kept keys-match is all that tells the two artifacts' guards apart
         # beyond the identity guards on objects a load resolves by reference
-        # (G['pytree'], two of its classes and torch), which the pre-check's type
+        # (G['pytree'], its referenced classes and torch), which the pre-check's type
         # tests drop. Counted per type, because a set of type names hides a
         # second divergence in a type that keeps another instance.
         self.assertIn("DICT_KEYS_MATCH", kept)
@@ -2076,6 +2076,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(verdicts["G['_user_op']"], False, verdicts)
             self.assertEqual(len(risky), 1, verdicts)
             self.assertTrue(risky[0].startswith(root), verdicts)
+
+    def test_receiver_alias_guard_policy(self):
+        from torch._dynamo.precompile_package import (
+            _INVARIANT_DROPPABLE_GUARD_TYPES,
+            _SHAPE_BEARING_GUARD_TYPES,
+        )
+
+        self.assertIn("BUILTIN_METHOD_RECEIVER_ALIAS", _SHAPE_BEARING_GUARD_TYPES)
+        self.assertNotIn(
+            "BUILTIN_METHOD_RECEIVER_ALIAS", _INVARIANT_DROPPABLE_GUARD_TYPES
+        )
 
     def test_guard_policy_classification_is_total(self):
         # A guard type in no set is KEPT, so a drop policy can only ever
