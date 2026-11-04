@@ -6,7 +6,6 @@ import json
 import os
 import re
 import shutil
-import stat
 import sys
 import tempfile
 import time
@@ -270,13 +269,13 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
 _CACHE_LOCK_TIMEOUT_S = 3600
 
 
-def _lock_unavailable(lock_path, mode):
+def _lock_unavailable(lock_path):
     """Return the error that makes ``lock_path`` impossible to lock, or None.
 
-    filelock reports some "can't lock" errors the same way as a lock held by
-    another process: ENOLCK (NFS without lockd) and EOPNOTSUPP (some FUSE/SMB
-    mounts) on Unix, EACCES (an unwritable directory) on Windows. A lock that is
-    held or free counts as available.
+    filelock 3.x reports some "can't lock" errors the same way as a lock held
+    by another process: ENOLCK (NFS without lockd) and EOPNOTSUPP (some FUSE/SMB
+    mounts) on Unix, EACCES (an unwritable directory or lock file) on both. 4.x
+    raises most of them instead. A lock that is held or free counts as available.
     """
     if sys.platform == "win32":
         # os.access reports every directory as writable on Windows.
@@ -292,7 +291,7 @@ def _lock_unavailable(lock_path, mode):
     import fcntl
 
     try:
-        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, mode)
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o644)
     except OSError as e:
         return e
     try:
@@ -323,14 +322,9 @@ def _cache_lock(path, stacklevel, verbose):
     from torch.utils._filelock import FileLock
 
     lock_path = path + ".lock"
-    # filelock fchmods lock files to this mode, ignoring the umask. They are
-    # group-writable only in a group-writable directory (a cache shared by a
-    # group), so that every member of the group can take the lock.
-    lock_dir_mode = os.stat(os.path.dirname(lock_path)).st_mode
-    mode = 0o664 if lock_dir_mode & stat.S_IWGRP else 0o644
 
     def new_lock(timeout):
-        return FileLock(lock_path, timeout=timeout, mode=mode)
+        return FileLock(lock_path, timeout=timeout)
 
     stack = contextlib.ExitStack()
     message = None
@@ -338,7 +332,7 @@ def _cache_lock(path, stacklevel, verbose):
         try:
             stack.enter_context(new_lock(timeout=0))
         except Timeout:
-            error = _lock_unavailable(lock_path, mode)
+            error = _lock_unavailable(lock_path)
             if error is not None:
                 raise error from None
             if verbose:

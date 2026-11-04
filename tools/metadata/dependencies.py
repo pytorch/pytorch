@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 __all__ = ["dynamic_metadata", "dynamic_wheel"]
 
 BASE_DEPENDENCIES = [
-    "filelock>=3.20.1",
+    "filelock",
     "typing-extensions>=4.15.0",
     "setuptools>=77.0.3",
     "sympy>=1.13.3",

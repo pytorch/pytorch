@@ -364,7 +364,7 @@ dev = [
     # PyTorch root until the project fully migrates to pyproject.toml
     "build[uv]",  # for building sdist and wheel
     "expecttest>=0.3.0",
-    "filelock>=3.20.1",
+    "filelock",
     "fsspec>=0.8.5",
     "hypothesis",
     "jinja2",

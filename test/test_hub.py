@@ -498,12 +498,12 @@ class TestHub(TestCase):
                 zf.writestr(name, content)
         return Path(archive).as_uri()
 
-    def _load_repo(self, repo, force_reload=False, skip_validation=True):
+    def _load_repo(self, repo, force_reload=False, skip_validation=True, verbose=False):
         return hub._get_cache_or_reload(
             f"owner/{repo}:main",
             force_reload=force_reload,
             trust_repo=True,
-            verbose=False,
+            verbose=verbose,
             skip_validation=skip_validation,
         )
 
@@ -756,12 +756,13 @@ class TestHub(TestCase):
         url, model_dir = self._save_weights()
         os.makedirs(model_dir)
         stderr = io.StringIO()
+        # The pool is outermost, so the lock is released before it joins the worker.
         with (
+            ThreadPoolExecutor(1) as pool,
             FileLock(os.path.join(model_dir, "weights.pt.lock")),
             patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 0.2),
             patch("sys.stderr", new=stderr),
             self.assertWarnsRegex(UserWarning, "for more than 0.2 s"),
-            ThreadPoolExecutor(1) as pool,
         ):
             # Another thread, so that the held lock looks like another process's.
             state_dict = pool.submit(
@@ -777,14 +778,18 @@ class TestHub(TestCase):
         url = self._make_hub_archive("repo")
         repo_dir = os.path.join(hub.get_dir(), "owner_repo_main")
         os.makedirs(hub.get_dir(), exist_ok=True)
+        stderr = io.StringIO()
         with (
+            ThreadPoolExecutor(1) as pool,
             FileLock(repo_dir + ".lock"),
             patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 0.2),
             patch.object(hub, "_git_archive_link", return_value=url),
+            patch("sys.stderr", new=stderr),
             self.assertWarnsRegex(UserWarning, "for more than 0.2 s"),
-            ThreadPoolExecutor(1) as pool,
         ):
-            self.assertEqual(pool.submit(self._load_repo, "repo").result(60), repo_dir)
+            load = pool.submit(self._load_repo, "repo", verbose=True)
+            self.assertEqual(load.result(timeout=60), repo_dir)
+        self.assertIn("Waiting for another process", stderr.getvalue())
         self.assertEqual(os.listdir(repo_dir), ["hubconf.py"])
         self._assert_no_leftovers()
 
@@ -827,10 +832,10 @@ class TestHub(TestCase):
         lock_path = os.path.join(self.tmpdir.name, "entry.lock")
         enolck = OSError(errno.ENOLCK, "No locks available")
         with patch("fcntl.flock", side_effect=enolck):
-            self.assertIs(hub._lock_unavailable(lock_path, 0o644), enolck)
+            self.assertIs(hub._lock_unavailable(lock_path), enolck)
         with patch("fcntl.flock", side_effect=BlockingIOError(errno.EWOULDBLOCK, "")):
-            self.assertIsNone(hub._lock_unavailable(lock_path, 0o644))
-        self.assertIsNone(hub._lock_unavailable(lock_path, 0o644))
+            self.assertIsNone(hub._lock_unavailable(lock_path))
+        self.assertIsNone(hub._lock_unavailable(lock_path))
 
     @unittest.skipIf(IS_WINDOWS, "flock probe is Unix only")
     def test_lock_unavailable_reports_unwritable_lock_file(self):
@@ -840,7 +845,7 @@ class TestHub(TestCase):
         # A lock file created by another user without group write access.
         open(lock_path, "w").close()
         os.chmod(lock_path, 0o444)
-        error = hub._lock_unavailable(lock_path, 0o644)
+        error = hub._lock_unavailable(lock_path)
         self.assertIsInstance(error, PermissionError)
 
     @unittest.skipIf(IS_WINDOWS, "flock probe is Unix only")
@@ -848,7 +853,7 @@ class TestHub(TestCase):
         target = os.path.join(self.tmpdir.name, "victim")
         lock_path = os.path.join(self.tmpdir.name, "entry.lock")
         os.symlink(target, lock_path)
-        self.assertEqual(hub._lock_unavailable(lock_path, 0o644).errno, errno.ELOOP)
+        self.assertEqual(hub._lock_unavailable(lock_path).errno, errno.ELOOP)
         self.assertFalse(os.path.exists(target))
 
     @unittest.skipIf(not IS_WINDOWS, "Windows probe")
@@ -856,22 +861,7 @@ class TestHub(TestCase):
         lock_path = os.path.join(self.tmpdir.name, "entry.lock")
         denied = PermissionError(errno.EACCES, "Access is denied")
         with patch("tempfile.mkstemp", side_effect=denied):
-            self.assertIs(hub._lock_unavailable(lock_path, 0o644), denied)
-
-    @unittest.skipIf(IS_WINDOWS, "Windows deletes lock files on release")
-    def test_lock_file_group_writable_only_in_shared_dir(self):
-        url, _ = self._save_weights()
-        old_umask = os.umask(0o002)
-        try:
-            for dir_mode, lock_mode in ((0o775, 0o664), (0o755, 0o644)):
-                model_dir = os.path.join(self.tmpdir.name, oct(dir_mode))
-                os.makedirs(model_dir)
-                os.chmod(model_dir, dir_mode)
-                hub.load_state_dict_from_url(url, model_dir=model_dir, progress=False)
-                mode = os.stat(os.path.join(model_dir, "weights.pt.lock")).st_mode
-                self.assertEqual(mode & 0o777, lock_mode)
-        finally:
-            os.umask(old_umask)
+            self.assertIs(hub._lock_unavailable(lock_path), denied)
 
     def test_lock_fallback_warning_points_at_caller(self):
         url, model_dir = self._save_weights()
