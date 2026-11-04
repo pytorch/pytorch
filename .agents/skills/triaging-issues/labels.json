@@ -16,7 +16,7 @@
     },
     {
       "name": "enhancement",
-      "description": "Improvement to something that already works: performance optimization, better error messages, adding a backend-native implementation for an op that already runs via fallback/composite"
+      "description": "Improvement to something that already works: performance optimization, clearer diagnostics for inputs already rejected, adding a backend-native implementation for an op that already runs via fallback/composite. Missing validation that accepts invalid inputs is a bug, not an enhancement, even if phrased as a feature request."
     },
     {
       "name": "feature",
@@ -356,7 +356,7 @@
     },
     {
       "name": "module: error checking",
-      "description": "Bugs where PyTorch fails to validate inputs or raises a wrong/missing error message at a validation boundary (e.g., shape checks, dtype checks, device checks). Do NOT apply just because the user complains about a bad error message — if the root cause is a bug in a specific feature, use the feature-specific label instead."
+      "description": "Bugs where PyTorch fails to validate inputs or raises a wrong/missing error at a validation boundary (e.g., shape, dtype, device checks). Silently accepting invalid inputs, including replacement weights or constants, is a missing-check bug. Apply alongside the affected component label when validation is the root cause; an unrelated feature bug with a poor error message should get the feature-specific label instead."
     },
     {
       "name": "module: expecttest",
