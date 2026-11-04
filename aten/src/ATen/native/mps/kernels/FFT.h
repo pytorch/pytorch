@@ -4,6 +4,7 @@
 // Kernel variant bits. Their combination is part of the kernel name.
 enum class FFTFlag : uint32_t {
   Inverse = 1u << 0,
+  PackedLoads = 1u << 1,
   FourStepTwiddles = 1u << 2,
   ExtendedStores = 1u << 3,
   ExtendedLoads = 1u << 4,
@@ -58,6 +59,9 @@ inline constexpr uint32_t fft_contig_pad_shift(uint32_t n) {
 C10_METAL_CONSTEXPR uint32_t kFFTTwiddleBits = 12;
 C10_METAL_CONSTEXPR uint32_t kFFTTwiddleBlock = 1u << kFFTTwiddleBits;
 
+// Radix of the global-memory stage that only unpacks a real transform
+C10_METAL_CONSTEXPR uint32_t kFFTUnpackRadix = 1;
+
 // Radices of the dynamic kernel families, one bit per radix. Bit 1 is length 1.
 C10_METAL_CONSTEXPR uint32_t kFFTMaskP2 =
     (1u << 1) | (1u << 2) | (1u << 4) | (1u << 8) | (1u << 16);
@@ -85,14 +89,15 @@ inline constexpr bool fft_has_contig_kernel(uint32_t n) {
 
 // tgb transforms of n points per group, jt threads each. n_sig: full signal
 // (zero-padded beyond), n_out: outputs. Four-step: input e * ld_mul + i0,
-// output k * out_k_mul + i0, i0_dim1 reads i0 from batch dim 1. Smem slot i
-// of a row of `row` slots is at i + (i >> padshift); tiles interleave by es.
+// output k * out_k_mul + i0, mirror_out adds conj X[k] at n_sig - k, i0_dim1
+// reads i0 from batch dim 1. Smem slot i of a row of `row` slots is at
+// i + (i >> padshift); tiles interleave by es.
 struct FFTParams {
   uint32_t n, n_sig, n_out, tgb, jt, ndim, nstages;
   int32_t in_stride, out_stride; // along the axis
   float scale;
   uint32_t ld_mul, out_k_mul, row, padshift, es;
-  bool i0_dim1, via_smem;
+  bool mirror_out, i0_dim1, via_smem;
   ::c10::metal::array<uint32_t, kFFTMaxStages> radix, ns,
       twstep; // ns: product so far
   ::c10::metal::array<float, kFFTMaxStages> inv_ns;

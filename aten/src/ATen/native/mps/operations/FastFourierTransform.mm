@@ -131,6 +131,7 @@ constexpr int64_t kPadPeriod = 1 << kFFTPadShift;
 constexpr int64_t kContiguousThreads = 64;
 constexpr int64_t kStridedThreads = 256;
 constexpr int64_t kGlobalThreads = 64;
+constexpr int64_t kUnpackThreads = 256;
 constexpr int64_t kMinStridedBatch = 4;
 constexpr int64_t kMaxContiguousBatch = 8;
 constexpr int64_t kMaxBatch = 32;
@@ -248,6 +249,7 @@ struct Pass {
   std::optional<Tensor> cl;
   std::optional<Tensor> cs;
   std::optional<Tensor> tt;
+  bool mirror_out = false;
   bool i0_dim1 = false;
 };
 
@@ -289,7 +291,7 @@ int64_t contiguous_batch(int64_t padded, int64_t J, int64_t rows) {
   return std::clamp<int64_t>(fits(c) ? c : base, 1, std::min<int64_t>(rows, kMaxBatch));
 }
 
-Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, const Batch& b, const Pass& x) {
+Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, bool half, const Batch& b, const Pass& x) {
   TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(in) && canUse32BitIndexMath(out),
                               "MPS FFT: tensors must have fewer than 2^31 elements");
   const auto radix = radices(x.global ? x.global : n, x.global ? kGlobalRadices : kRadices);
@@ -309,13 +311,13 @@ Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, const B
   const bool st = x.out_k_mul > 1 || x.cs;
   const bool tw4 = x.tt && !x.global;
   const auto flag_if = [](bool on, FFTFlag flag) { return on ? fft_flag_bit(flag) : 0; };
-  const uint32_t F = flag_if(inv, FFTFlag::Inverse) | flag_if(tw4, FFTFlag::FourStepTwiddles) |
-      flag_if(st, FFTFlag::ExtendedStores) | flag_if(ld, FFTFlag::ExtendedLoads) |
-      flag_if(x.global, FFTFlag::GlobalStage);
+  const uint32_t F = flag_if(inv, FFTFlag::Inverse) | flag_if(half, FFTFlag::PackedLoads) |
+      flag_if(tw4, FFTFlag::FourStepTwiddles) | flag_if(st, FFTFlag::ExtendedStores) |
+      flag_if(ld, FFTFlag::ExtendedLoads) | flag_if(x.global, FFTFlag::GlobalStage);
 
   const int64_t ept = fft_points_per_thread(n_u32, F);
   const int64_t rows = b.dims[0].size;
-  const int64_t J = !x.global ? at::ceil_div(n, ept) : kGlobalThreads;
+  const int64_t J = !x.global ? at::ceil_div(n, ept) : x.global == kFFTUnpackRadix ? kUnpackThreads : kGlobalThreads;
 
   // Batch small transforms (<= 5% idle lanes), tile strided axes; pad contiguous rows, interleave strided ones
   const bool strided = b.si != 1 || b.so != 1;
@@ -341,6 +343,7 @@ Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, const B
       .row = to_u32(row),
       .padshift = pad ? kFFTPadShift : kFFTNoPadShift,
       .es = to_u32(strided ? B : 1),
+      .mirror_out = x.mirror_out,
       .i0_dim1 = x.i0_dim1,
       .via_smem = (b.si == 1) != (b.so == 1),
   };
@@ -349,7 +352,7 @@ Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, const B
   for (uint32_t s = 0; s < radix.size(); s++) {
     params.radix[s] = radix[s];
     params.ns[s] = ns;
-    params.twstep[s] = n_u32 / radix[s] / ns;
+    params.twstep[s] = n_u32 / radix[s] / ns * (half ? 2 : 1);
     params.inv_ns[s] = 1.0f / ns;
     ns *= radix[s];
   }
@@ -364,7 +367,7 @@ Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, const B
   const auto name = fmt::format(
       "fft_{}_{}_{}{}_{}", scalarToMetalTypeString(in), scalarToMetalTypeString(out), family, contig ? "c" : "", F);
   const int64_t ny = b.dims.size() > 1 ? b.dims[1].size : 1;
-  const int64_t threads = n / std::max<int64_t>(x.global, 1);
+  const int64_t threads = x.global == kFFTUnpackRadix ? n / 2 + 1 : n / std::max<int64_t>(x.global, 1);
   const MTLSize grid = x.global ? MTLSizeMake(at::ceil_div(threads, J), rows, b.numel / rows)
                                 : MTLSizeMake(at::ceil_div(rows, B), ny, b.numel / rows / ny);
   const int64_t bytes =
@@ -373,7 +376,7 @@ Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, const B
   return {
       .in = in,
       .out = out,
-      .tw = twiddles(n),
+      .tw = twiddles(half ? 2 * n : n),
       .cl = x.cl,
       .cs = x.cs,
       .tt = x.tt,
@@ -413,32 +416,39 @@ bool fits_one_pass(const Batch& b, int64_t n, bool chirped) {
 void fft_batch(const Tensor& in, const Tensor& out, const Batch& b, int64_t n, bool inv, const Pass& x) {
   const auto n_sig = x.n_sig ? x.n_sig : n;
   const auto n_out = x.n_out ? x.n_out : n;
-  if (fits_one_pass(b, n, x.cs.has_value())) {
-    run({prepare(in, out, n, inv, b, x)});
+  const bool real = !in.is_complex();
+  const int64_t m = real && n % 2 == 0 ? n / 2 : n;
+  const bool half = !x.cl && !x.cs && n > 2 && m < n && m <= kMaxPoints;
+  const int64_t pass_n = half ? m : n;
+  if (fits_one_pass(b, pass_n, x.cs.has_value())) {
+    run({prepare(in, out, pass_n, inv, half, b, x)});
     return;
   }
 
-  // Long non-pow2 lengths: one global-memory stage per radix between two contiguous temps
+  // Long non-pow2 lengths: one global-memory stage per radix between two contiguous temps, then the unpack
   const bool plain = !x.cl && !x.cs && !x.n_sig;
-  const auto gplan = radices(n, kGlobalRadices);
-  if (n >= kLongPoints && (n & (n - 1)) && plain && !gplan.empty()) {
-    const auto tmp = at::empty({2, b.numel * n}, out.options());
-    const auto tt = twiddles(n, true);
+  const bool packs = !real || n % 2 == 0;
+  auto gplan = radices(m, kGlobalRadices);
+  if (n >= kLongPoints && (n & (n - 1)) && plain && packs && !gplan.empty()) {
+    gplan.resize(gplan.size() + !in.is_complex(), kFFTUnpackRadix);
+    const auto tmp = at::empty({2, b.numel * m}, out.options().dtype(kComplexFloat));
+    const auto tt = twiddles(m, true);
     std::vector<Launch> launches;
     size_t ns = 1;
     for (size_t s = 0; s < gplan.size(); s++) {
       const bool first = s == 0;
       const bool last = s + 1 == gplan.size();
       Batch bp{{}, b.numel, first ? b.si : 1, last ? b.so : 1};
-      int64_t tstride = n;
+      int64_t tstride = m;
       for (int64_t d = 0; d < static_cast<int64_t>(b.dims.size()); d++) {
         bp.dims.push_back(
             {b.dims[d].size, first ? b.dims[d].in_stride : tstride, last ? b.dims[d].out_stride : tstride});
         tstride *= b.dims[d].size;
       }
       const Pass pass{
-          .n_out = last ? n_out : n, .global = gplan[s], .ns = int64_t(ns), .scale = last ? x.scale : 1, .tt = tt};
-      launches.push_back(prepare(first ? in : tmp[s % 2], last ? out : tmp[(s + 1) % 2], n, inv, bp, pass));
+          .n_out = last ? n_out : m, .global = gplan[s], .ns = int64_t(ns), .scale = last ? x.scale : 1, .tt = tt};
+      launches.push_back(
+          prepare(first ? in : tmp[s % 2], last ? out : tmp[(s + 1) % 2], m, inv, first && real, bp, pass));
       ns *= gplan[s];
     }
     run(launches);
@@ -446,45 +456,52 @@ void fft_batch(const Tensor& in, const Tensor& out, const Batch& b, int64_t n, b
   }
 
   // Four-step: n = n1*n2, temp [outer batch][n2][n1][inner batch]; pass 1 transforms strided n1-point columns
-  // times W_n^(k1*i0), pass 2 writes k1+n1*k2 (n1 <= 256 if it recurses).
+  // times W_n^(k1*i0), pass 2 writes k1+n1*k2 (n1 <= 256 if it recurses). Real transforms halve one pass.
+  const bool big = plain && b.numel * n >= kLongPoints;
+  bool r2c = big && !in.is_complex();
   const bool nest = !x.cs && n_out == n;
 
-  // n1: the largest smooth divisor <= sqrt(n) whose cofactor fits a pass
+  // n1: the largest smooth divisor <= sqrt(n) whose cofactor fits a pass; nr: with an even halved real pass
   int64_t n1 = 0;
+  int64_t nr = 0;
   for (int64_t d = 1; d * d <= n; d++) {
     const int64_t q = n / d;
     if (n % d || !is_smooth(d) || !is_smooth(q)) {
       continue;
     }
+    nr = q <= kMaxPoints && d % 2 == 0 && d > 2 && d <= 2 * kMaxPoints ? d : nr;
     n1 = (q <= kMaxPoints || nest) && (!nest || d <= kMaxNestedColumns) ? d : n1;
   }
+  r2c = r2c && nr;
+  n1 = r2c ? nr : n1;
   TORCH_CHECK_NOT_IMPLEMENTED(n1 > 0, "MPS FFT does not support transforms of length ", n);
 
   const auto n2 = n / n1;
+  const auto rl = r2c ? n1 / 2 + 1 : n1;
   const bool inner = b.dims[0].size > 1 && std::abs(b.dims[0].in_stride) < std::abs(b.si);
   const int64_t ninner = inner ? b.dims[0].size : 1;
   Batch b1{{}, b.numel * n2, b.si * n2, ninner};
-  Batch b2{{}, b.numel * n1, n1 * ninner, b.so * n1};
+  Batch b2{{}, b.numel * rl, rl * ninner, b.so * n1};
   int64_t t = 1;
   for (int64_t d = 0; d < static_cast<int64_t>(b.dims.size()); d++) {
-    const int64_t ts = d < inner ? t : t * n; // The temp's stride of batch dim d
+    const int64_t ts = d < inner ? t : t * n2 * rl; // The temp's stride of batch dim d
     b1.dims.push_back({b.dims[d].size, b.dims[d].in_stride, ts});
     b2.dims.push_back({b.dims[d].size, ts, b.dims[d].out_stride});
     t *= b.dims[d].size;
   }
-  b1.dims.insert(b1.dims.begin() + inner, Dim{n2, b.si, n1 * ninner});
-  b2.dims.insert(b2.dims.begin() + inner, Dim{n1, ninner, b.so});
+  b1.dims.insert(b1.dims.begin() + inner, Dim{n2, b.si, rl * ninner});
+  b2.dims.insert(b2.dims.begin() + inner, Dim{rl, ninner, b.so});
 
-  const bool inplace = n_out == n && n2 > kMaxRowsForTemp && b.so == ninner && !in.is_alias_of(out) &&
-      std::all_of(b2.dims.begin(), b2.dims.end(), [](const Dim& d) {
-                         return d.size == 1 || d.in_stride == d.out_stride;
-                       });
-  auto tmp = inplace ? out : at::empty({b.numel * n}, out.options());
-  const Pass load{.n_sig = n_sig, .n_out = n1, .ld_mul = n2, .cl = x.cl, .tt = twiddles(n, true), .i0_dim1 = inner};
-  auto first = prepare(in, tmp, n1, inv, b1, load);
-  if (n2 <= kMaxCoalescedPoints || !nest) {
-    const Pass store{.n_sig = n, .n_out = n_out, .out_k_mul = n1, .scale = x.scale, .cs = x.cs, .i0_dim1 = inner};
-    run({first, prepare(tmp, out, n2, inv, b2, store)});
+  const bool inplace = !r2c && n_out == n && n2 > kMaxRowsForTemp && b.so == ninner && !in.is_alias_of(out) &&
+      std::all_of(
+          b2.dims.begin(), b2.dims.end(), [](const Dim& d) { return d.size == 1 || d.in_stride == d.out_stride; });
+  auto tmp = inplace ? out : at::empty({b.numel * n2 * rl}, out.options());
+  const Pass load{.n_sig = n_sig, .n_out = rl, .ld_mul = n2, .cl = x.cl, .tt = twiddles(n, true), .i0_dim1 = inner};
+  auto first = prepare(in, tmp, r2c ? n1 / 2 : n1, inv, r2c, b1, load);
+  if (r2c || n2 <= kMaxCoalescedPoints || !nest) {
+    const Pass store{
+        .n_sig = n, .n_out = n_out, .out_k_mul = n1, .scale = x.scale, .cs = x.cs, .mirror_out = r2c, .i0_dim1 = inner};
+    run({first, prepare(tmp, out, n2, inv, false, b2, store)});
     return;
   }
 
@@ -503,9 +520,9 @@ void fft_pass(const Tensor& in, const Tensor& out, int64_t dim, int64_t n, bool 
   const auto M = B.numel();
   DimVector sizes(in.sizes());
   sizes[dim] = M;
-  auto tmp = at::empty(sizes, in.options());
+  auto tmp = at::empty(sizes, in.options().dtype(c10::toComplexType(in.scalar_type())));
   fft_pass(in, tmp, dim, M, false, {.n_sig = n, .scale = x.scale / M, .cl = c, .cs = B});
-  fft_pass(tmp, out, dim, M, true, {.n_out = n, .cs = c});
+  fft_pass(tmp, out, dim, M, true, {.n_out = x.n_out ? x.n_out : n, .cs = c});
 }
 
 // fp16 partials overflow and lose precision between passes, so transforms taking more than one pass run in fp32
@@ -513,7 +530,9 @@ bool needs_fp32(const Tensor& in, const Tensor& out, IntArrayRef dim, int64_t n)
   if (c10::toRealValueType(in.scalar_type()) != kHalf) {
     return false;
   }
-  return dim.size() > 1 || !is_smooth(n) || !fits_one_pass(collapse(in, out, dim.back()), n, false);
+  const bool real = !in.is_complex();
+  const int64_t pass_n = real && n % 2 == 0 && n > 2 ? n / 2 : n;
+  return dim.size() > 1 || !is_smooth(n) || !fits_one_pass(collapse(in, out, dim.back()), pass_n, false);
 }
 
 double norm_scale(int64_t normalization, const Tensor& t, IntArrayRef dims) {
@@ -542,7 +561,6 @@ Tensor _fft_c2c_mps(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   return _fft_c2c_mps_out(self, dim, normalization, forward, out);
 }
 
-// TODO: Investigate numerical discrepancies see https://github.com/pytorch/pytorch/issues/120237
 Tensor& _fft_r2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided, Tensor& out) {
   TORCH_CHECK(self.scalar_type() == kFloat || self.scalar_type() == kHalf, "Only float and half dtypes are supported");
   TORCH_CHECK(out.scalar_type() == c10::toComplexType(self.scalar_type()));
@@ -559,40 +577,15 @@ Tensor& _fft_r2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
     return out;
   }
 
-  auto key = __func__ + getTensorsStringKey({self, out}) + ":" + getArrayRefString(dim) + ":" +
-      std::to_string(normalization) + ":" + std::to_string(onesided);
-  @autoreleasepool {
-    auto cachedGraph = LookUpOrCreateCachedGraph<MPSUnaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-      auto axisPlan = computeFFTAxisPlan(dim, self.dim());
-      auto fftInput = applyFFTInputPlan(mpsGraph, inputTensor, axisPlan);
-      auto descriptor = [MPSGraphFFTDescriptor descriptor];
-      descriptor.scalingMode = normalization_to_ScalingMode(normalization);
-      MPSGraphTensor* outputTensor;
-      if (onesided) {
-        // Return only unique results:
-        outputTensor = [mpsGraph realToHermiteanFFTWithTensor:fftInput
-                                                         axes:axisPlan.axes
-                                                   descriptor:descriptor
-                                                         name:nil];
-      } else {
-        // Return with Hermitean conjugate results:
-        auto useDataType =
-            (fftInput.dataType == MPSDataTypeFloat16) ? MPSDataTypeComplexFloat16 : MPSDataTypeComplexFloat32;
-        auto cTensor = [mpsGraph castTensor:fftInput toType:useDataType name:nil];
-        outputTensor = [mpsGraph fastFourierTransformWithTensor:cTensor
-                                                           axes:axisPlan.axes
-                                                     descriptor:descriptor
-                                                           name:nil];
-      }
-      outputTensor = applyFFTOutputPlan(mpsGraph, outputTensor, axisPlan);
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
+  if (needs_fp32(self, out, dim, self.size(last_dim))) {
+    auto wide = at::empty(out.sizes(), out.options().dtype(kComplexFloat));
+    _fft_r2c_mps_out(self.to(kFloat), dim, normalization, onesided, wide);
+    return out.copy_(wide);
+  }
+  const Pass x{.n_out = out.size(last_dim), .scale = norm_scale(normalization, self, dim)};
+  fft_pass(self, out, last_dim, self.size(last_dim), false, x);
+  for (const auto i : c10::irange(dim.size() - 1)) {
+    fft_pass(out, out, dim[i], self.size(dim[i]), false);
   }
   return out;
 }
