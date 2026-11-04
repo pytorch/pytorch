@@ -4,10 +4,18 @@ import math
 import os
 import re
 import subprocess
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tools.stats.import_test_stats import get_disabled_tests
+from tools.testing.llm_td.selection import apply_selection, Selection
+from tools.testing.target_determination.gen_artifact import (
+    gen_ci_artifact,
+    LLM_SELECTION_SOURCE,
+    TD_SOURCE,
+)
 from tools.testing.test_run import ShardedTest, TestRun
 
 
@@ -22,7 +30,12 @@ except ImportError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Collection, Sequence
+
+    from tools.testing.llm_td.selection import AppliedSelection
+    from tools.testing.target_determination.heuristics.interface import (
+        TestPrioritizations,
+    )
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -312,3 +325,62 @@ JOB_BASE_NAME_RE = re.compile(r" / test(?:-osdc)? \(")
 
 def get_job_base_name(job_name: str) -> str:
     return JOB_BASE_NAME_RE.split(job_name, maxsplit=1)[0]
+
+
+@dataclass
+class CallSplit:
+    """The split of one run_test.py call's tests that runs, and the LLM test
+    selection applied to TD's split if CI downloaded one."""
+
+    include: list[TestRun]
+    exclude: list[TestRun]
+    llm: AppliedSelection | None
+
+    @property
+    def llm_enforced(self) -> bool:
+        return self.llm is not None and self.llm.enforced
+
+
+def split_tests(
+    test_prioritizations: TestPrioritizations,
+    test_times: dict[str, float],
+    *,
+    selection_file: Path,
+    test_config: str,
+    td_enabled: bool,
+    previous_failures: Collection[str] | None,
+    record: bool,
+) -> CallSplit:
+    """TD's split, 25% with TD enabled and everything otherwise, replaced by
+    the LLM test selection in `selection_file` when apply_selection enforces
+    it (see tools/testing/llm_td). With `record` (in CI), gen_ci_artifact
+    records the split that runs and what TD's split excluded. run_test.py
+    emits the metrics, since emit_metric records its caller."""
+    percent_to_run = 25 if td_enabled else 100
+    include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
+    llm = None
+    if (selection := Selection.load(selection_file)) is not None:
+        llm = apply_selection(
+            selection,
+            include,
+            exclude,
+            test_prioritizations.get_score,
+            test_times,
+            test_config=test_config,
+            td_enabled=td_enabled,
+            previous_failures=previous_failures,
+        )
+    if llm is not None and llm.enforced:
+        split = CallSplit(llm.split.include, llm.split.exclude, llm)
+    else:
+        split = CallSplit(include, exclude, llm)
+        td_line = f"Running {percent_to_run}% of tests based on TD"
+        print(td_line if td_enabled else "Running all tests", file=sys.stderr)
+    if record:
+        gen_ci_artifact(
+            [x.to_json() for x in split.include],
+            [x.to_json() for x in split.exclude],
+            source=LLM_SELECTION_SOURCE if split.llm_enforced else TD_SOURCE,
+            td_excluded=[x.to_json() for x in exclude],
+        )
+    return split
