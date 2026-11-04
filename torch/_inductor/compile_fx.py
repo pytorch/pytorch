@@ -1250,11 +1250,12 @@ def _compile_fx_inner(
             # The region asked to be left out of an enclosing capture. We cannot
             # split it off, but dropping every CUDA graph in the model is further
             # from the request than leaving the enclosing capture alone.
-            cudagraphs_log.warning(
-                "cannot exclude a nested compile region from cudagraphs: "
-                "graph partition is unsupported under cpp_wrapper/aot_mode"
+            torch._logging.warning_once(
+                cudagraphs_log,
+                "cannot exclude a nested compile region from cudagraphs under "
+                "cpp_wrapper: the region stays captured with the enclosing graph",
             )
-    elif region_aware and not config.graph_partition:
+    elif region_aware and not config.graph_partition and graph_kwargs["cudagraphs"]:
         graph_kwargs["cudagraph_region_forced_partition"] = True
     if config.save_args:
         save_args_for_compile_fx_inner(
@@ -1898,10 +1899,10 @@ class _InProcessFxCompile(FxCompile):
                 # only; the ambient config stays at what the user asked for so
                 # passes that merely assume "partitioning will split this off"
                 # do not fire for the enclosing graph.
-                region_forced_partition = graph_kwargs.get(
+                region_forced = graph_kwargs.get(
                     "cudagraph_region_forced_partition", False
                 )
-                graph_partition = config.graph_partition or region_forced_partition
+                split_into_partitions = config.graph_partition or region_forced
                 cudagraphs_top_level = graph_kwargs.get(
                     "cudagraphs_top_level", config.triton.cudagraphs
                 )
@@ -1932,15 +1933,15 @@ class _InProcessFxCompile(FxCompile):
                     inputs_to_check=inputs_to_check,
                     fx_wrapper=fx_wrapper,
                     get_decomp_fn=get_decomp_fn,
-                    graph_partition=graph_partition,
-                    use_cudagraph_partition=graph_partition
+                    split_into_partitions=split_into_partitions,
+                    cudagraphs_per_partition=split_into_partitions
                     and (
                         cudagraphs_top_level
                         or region_requests_cudagraphs
                         or _unstable_customized_partition_wrapper.wrapper is not None
                     ),
                     cudagraphs_top_level=cudagraphs_top_level,
-                    cudagraph_region_forced_partition=region_forced_partition,
+                    cudagraph_region_forced_partition=region_forced,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
@@ -2178,7 +2179,7 @@ class _InProcessFxCompile(FxCompile):
                             check_lowering_disable_cudagraph(
                                 # pyrefly: ignore [unbound-name]
                                 V.graph.device_node_mapping,
-                                use_cudagraph_partition=(
+                                cudagraphs_per_partition=(
                                     # pyrefly: ignore [unbound-name]
                                     V.graph.partition_handles_cudagraph_unsafe_ops
                                 ),
