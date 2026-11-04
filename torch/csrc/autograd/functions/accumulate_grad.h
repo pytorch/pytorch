@@ -45,6 +45,25 @@ struct TORCH_API AccumulateGrad : public Node {
 
   variable_list apply(variable_list&& grads) override;
 
+  bool implicit_grad_accumulation_allowed(
+      uint32_t /*output_nr*/) const override {
+    // A reset variable (the leaf is gone) has nothing to accumulate into.
+    const auto* meta = impl::get_autograd_meta(variable);
+    return !meta || meta->implicit_grad_accumulation_allowed_;
+  }
+
+  void allow_implicit_grad_accumulation(
+      std::optional<uint32_t> output_nr) override {
+    TORCH_CHECK(
+        !output_nr.has_value() || *output_nr == 0,
+        name(),
+        " has no output ",
+        output_nr.value_or(0));
+    TORCH_CHECK(variable.defined(), "AccumulateGrad has no leaf tensor");
+    impl::materialize_autograd_meta(variable)
+        ->implicit_grad_accumulation_allowed_ = true;
+  }
+
   void release_resources() override {
     variable.reset();
     Node::release_resources();

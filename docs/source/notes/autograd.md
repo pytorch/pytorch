@@ -448,6 +448,55 @@ with ``create_graph=True`` accumulates gradients when it is differentiated; do n
 pass the flag when computing such higher-order gradients. The flag is not supported
 with compiled autograd.
 
+### Allowing specific accumulations
+
+When the accumulation happens in code you cannot change, such as inside a library
+function that uses its input more than once, allow it with
+{func}`torch.autograd.graph.allow_implicit_grad_accumulation`:
+
+```python
+a = torch.randn(3, requires_grad=True)
+x = a.sin()
+torch.autograd.graph.allow_implicit_grad_accumulation(x)
+loss = (x * 2 + x * 3).sum()
+loss.backward(disallow_implicit_grad_accumulation=True)  # no error
+```
+
+Passing a tensor allows accumulation into the output of ``x.grad_fn`` that ``x``
+refers to when you call it; after an in-place operation ``x`` refers to a new node,
+which is not allowed. For a leaf tensor, such as a parameter, the setting is stored
+on the tensor and is permanent: it applies to every later backward, and there is no
+way to undo it. You can also pass a {class}`torch.autograd.graph.GradientEdge` to
+allow one output of a node, or a {class}`torch.autograd.graph.Node` to allow all of
+its outputs.
+
+To allow every accumulation into tensors created in a region, pass the function to
+{class}`torch.autograd.graph.node_creation_hook`, which calls it on each node
+created inside:
+
+```python
+def library_block(t):
+    h = t.cos()
+    return h * h  # uses h twice
+
+y = torch.randn(3, requires_grad=True).sin()
+with torch.autograd.graph.node_creation_hook(
+    torch.autograd.graph.allow_implicit_grad_accumulation
+):
+    out = library_block(y)
+loss = out.sum()
+loss.backward(disallow_implicit_grad_accumulation=True)  # no error
+```
+
+Accumulations into tensors created outside the region are still checked: if
+``library_block`` used ``t`` itself twice, the sum into ``y`` would raise, so allow
+such tensors individually. A leaf is allowed, permanently as
+described above, when its gradient accumulator node is created inside the region.
+That node is created on the leaf's first use and reused while anything holds it,
+such as a graph from an earlier use that is still alive, or DDP. So a leaf already
+used outside the region, or one whose accumulator is held, is not allowed by the
+region; allow it explicitly if needed.
+
 ## Multithreaded Autograd
 
 The autograd engine is responsible for running all the backward operations

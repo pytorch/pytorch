@@ -618,8 +618,9 @@ class Tensor(torch._C.TensorBase):
             disallow_implicit_grad_accumulation (bool, optional): When a tensor is
                 used more than once in forward, backward accumulates the gradient
                 contributions from each use. If ``True``, raise an error instead of
-                performing that accumulation. See
-                :ref:`disallow-implicit-grad-accumulation`. Defaults to ``False``.
+                performing that accumulation. Specific accumulations can be allowed
+                with :func:`torch.autograd.graph.allow_implicit_grad_accumulation`.
+                See :ref:`disallow-implicit-grad-accumulation`. Defaults to ``False``.
         """
         if has_torch_function_unary(self):
             # Pass the flag only when set, so overrides written against the
