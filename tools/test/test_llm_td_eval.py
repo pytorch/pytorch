@@ -1216,6 +1216,7 @@ class TestScore(unittest.TestCase):
         self.assertEqual(cut, {"default": ["test_a", "test_e"], "slow": ["test_a", "test_e"]})  # fmt: skip
         timed = {**s, "candidates": ["test_a", "test_b", "test_c", "test_d"]}
         self.assertEqual(top25_per_config(tp, score.job_files(timed, SECONDS)), {"default": ["test_a", "test_c"], "slow": ["test_a"]})  # fmt: skip
+        self.assertEqual(tp.get_top_per_tests(100)[0][0], TestRun("test_e"))
         # A file that failed in slow was in slow's job, though slow records no time of it.
         failed = {**timed, "truth": ["test_d"], "truth_jobs": {"test_d": [["pull", "linux / test (slow, 1, 1)"]]}}  # fmt: skip
         self.assertEqual(score.job_files(failed, SECONDS)["slow"], {"test_a", "test_c", "test_d"})  # fmt: skip
