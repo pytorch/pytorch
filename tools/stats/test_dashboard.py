@@ -66,9 +66,9 @@ def get_td_exclusions(
 ) -> dict[str, dict[str, Any]]:
     """The test files TD's split excluded (TD_SOURCE) and, for every config
     with a call where the LLM selection made the split, the files that some
-    call of that config excluded and no call of it ran (LLM_SELECTION_SOURCE),
-    per build and test config. Such a config is listed even if it excluded no
-    file."""
+    call of that config excluded and no call of it ran whole
+    (LLM_SELECTION_SOURCE), per build and test config. Such a config is listed
+    even if it excluded no file."""
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
         os.chdir(temp_dir)
@@ -107,8 +107,10 @@ def get_td_exclusions(
                 tests = grouped_tests[TD_SOURCE][build_name][test_config]
                 tests.update(x["test_file"] for x in td_excluded)
             config = build_name, test_config
-            excluded_by_config[config].update(x["test_file"] for x in excluded)
-            ran[config].update(included)
+            excluded_files = {x["test_file"] for x in excluded}
+            excluded_by_config[config].update(excluded_files)
+            # A file TD split by class ran only if none of its runs were excluded.
+            ran[config].update(f for f in included if f not in excluded_files)
             if is_llm:
                 enforced.add(config)
         for path, included in ran_only if enforced else []:
