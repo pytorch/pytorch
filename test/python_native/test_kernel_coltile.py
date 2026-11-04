@@ -824,6 +824,8 @@ class TestOrderedColDevice(TestCase):
             outputs,
             1,
         )
+        self.assertIsNotNone(got)
+        self.assertIsNotNone(reference)
         self.assertEqual(got[0].view(torch.uint8), reference[0].view(torch.uint8))
         if pattern == "ties":
             self.assertEqual(got[0], torch.zeros_like(got[0]))
@@ -855,9 +857,10 @@ class TestOrderedColDevice(TestCase):
         # The last row starts (R - 1) * C = 2**31 elements in, past Int32 offsets.
         x = torch.randn(129, 1 << 24, device=device, dtype=torch.bfloat16)
         trait = T.SumOps(acc=cutlass.Float32)
-        (got,) = ct.reduce_ordered_col(trait, "ordered_wide", x, [torch.float32], 1)
+        got = ct.reduce_ordered_col(trait, "ordered_wide", x, [torch.float32], 1)
+        self.assertIsNotNone(got)
         want = x.sum(dim=0, dtype=torch.float32)
-        self.assertEqual(got, want, atol=1e-2, rtol=1e-3)
+        self.assertEqual(got[0], want, atol=1e-2, rtol=1e-3)
 
     def _reduce(self, device, trait, key, x, dim, outputs, *, route):
         """Inner-tree _reduce with the column route on (this device), off, or as shipped
