@@ -1643,18 +1643,23 @@ static PyObject* get_dispatch_stack_at(
 // mode slot, but set/get/unset_dispatch_mode treat it as the FAKE mode (through
 // its Python CppFakeTensorMode wrapper) whenever no Python FakeTensorMode is
 // set, so callers that enter, suspend and restore the fake mode through these
-// calls handle either kind the same way. The mode stack APIs
-// (push/pop_torch_dispatch_stack, _len_torch_dispatch_stack) do not see it.
+// calls handle either kind the same way; they use the wrapper as the fake mode
+// (e.g. read its shape_env). The mode stack APIs
+// (push/pop_torch_dispatch_stack, _len_torch_dispatch_stack) do not see it, so
+// a C++ mode is installed and removed only through set/unset_dispatch_mode.
+// get/unset return the mode's wrapper, rebuilding it if it was collected, and
+// raise if that fails; see Note [C++ FakeTensorMode Python wrapper lifetime].
 static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(!Py_IsNone(mode));
 
-  if (PyObject_HasAttrString(mode, "_cpp_mode")) {
+  py::object cpp_mode_obj = PyObject_FastGetAttrString(mode, "_cpp_mode");
+  if (cpp_mode_obj) {
     TORCH_CHECK(
         c10::impl::FakeTensorModeTLS::get_state() == nullptr,
-        "trying to set the current FAKE, but one already exists");
-    auto cpp_mode = py::cast<std::shared_ptr<c10::FakeTensorMode>>(
-        py::handle(mode).attr("_cpp_mode"));
+        "trying to set the current C++ FakeTensorMode, but one already exists");
+    auto cpp_mode =
+        py::cast<std::shared_ptr<c10::FakeTensorMode>>(cpp_mode_obj);
     c10::impl::FakeTensorModeTLS::set_state(std::move(cpp_mode));
     Py_RETURN_NONE;
   }
@@ -1662,7 +1667,7 @@ static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
   py::object maybe_mode_key_obj = PyObject_FastGetAttrString(mode, "_mode_key");
   TORCH_CHECK(
       maybe_mode_key_obj,
-      "set_dispatch_mode() called with a mode that does not contain a _mode_key attribute!");
+      "set_dispatch_mode() called with a mode that has no _cpp_mode or _mode_key attribute!");
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj);
 
   Py_INCREF(mode);

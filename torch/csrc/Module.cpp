@@ -3057,27 +3057,30 @@ Call this whenever a new thread is created in order to propagate values from
       [](const at::Tensor& meta,
          c10::Device device,
          const std::shared_ptr<c10::FakeTensorMode>& mode) {
-        TORCH_CHECK(mode != nullptr, "Expected a C++ FakeTensorMode");
-        TORCH_CHECK(
+        // A functional or functorch wrapper would be copied as a wrapper whose
+        // inner tensor is not fake. Checked first, as reading a subclass's
+        // device can run its __torch_dispatch__.
+        constexpr auto wrapper_ks = c10::python_ks |
+            c10::DispatchKeySet(c10::DispatchKey::Functionalize) |
+            c10::functorch_transforms_ks |
+            c10::DispatchKeySet(c10::DispatchKey::BatchedNestedTensor);
+        TORCH_CHECK_TYPE(
+            !meta.key_set().has_any(wrapper_ks),
+            "_from_meta_and_device does not accept tensor subclasses with "
+            "__torch_dispatch__ or functional or functorch wrappers, got "
+            "dispatch keys ",
+            meta.key_set());
+        TORCH_CHECK_VALUE(
             meta.is_meta(),
             "tensor's device must be 'meta', got ",
             meta.device().type());
-        // A functional or functorch wrapper would be copied as a wrapper whose
-        // inner tensor is not fake
-        constexpr auto wrapper_ks =
-            c10::DispatchKeySet(c10::DispatchKey::Python) |
-            c10::DispatchKeySet(c10::DispatchKey::Functionalize) |
-            c10::functorch_transforms_ks;
-        TORCH_CHECK(
-            !meta.key_set().has_any(wrapper_ks),
-            "Expected a plain meta tensor");
         auto* impl = meta.unsafeGetTensorImpl();
         // A fake reads as meta on the meta device or inside a kernel, and
         // Python accepts it then too. Unlike Python, a fake of another mode is
         // rejected.
-        TORCH_CHECK(
+        TORCH_CHECK_VALUE(
             !impl->is_fake() || impl->fake_tensor_mode() == mode,
-            "Expected a fake of the given mode");
+            "Expected a fake of the given mode, got a fake of another or no mode");
         // Like Python's FakeTensor(mode, meta, device), which goes through
         // _make_subclass: a new detached fake sharing meta's storage, made
         // without dispatching. meta keeps its own device, autograd state and
@@ -3094,17 +3097,18 @@ Call this whenever a new thread is created in order to propagate values from
         // Python's new FakeTensor has no real tensor or recorded dispatch keys
         out_impl->set_real_tensor(nullptr);
         out_impl->set_fake_dispatch_keys(std::nullopt);
+        // Before marking the shared storage, as this can throw
+        out_impl->set_requires_grad(meta.requires_grad());
         at::init_cpp_fake(out_impl.get(), device, mode);
-        at::Tensor out(std::move(out_impl));
-        out.set_requires_grad(meta.requires_grad());
-        return out;
+        return at::Tensor(std::move(out_impl));
       },
       py::arg("meta"),
       py::arg("device"),
-      py::arg("mode"));
+      py::arg("mode").none(false));
 
-  // The Python wrapper of a C++ fake's mode, or None for any other tensor.
-  // Unlike Python's maybe_get_fake_mode, it does not look inside functional or
+  // The Python wrapper of a C++ fake's mode, or None for any other tensor,
+  // including a Python FakeTensor (maybe_get_fake_mode handles those). Unlike
+  // maybe_get_fake_mode, it does not look inside functional, functorch or
   // traceable wrapper tensors. If the wrapper has been collected,
   // getCppFakeTensorModePyObj rebuilds it.
   py_module.def("_maybe_get_fake_mode", [](const at::Tensor& t) -> py::object {

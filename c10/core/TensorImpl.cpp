@@ -311,9 +311,8 @@ bool TensorImpl::try_incref_pyobject() const noexcept {
   return pyobj_slot_.try_incref();
 }
 
-// Guards ExtraMeta::fake_sym_memos_ and fake_item_memo_ of every tensor. Only
-// the nonzero, unique and item fake impls use these memos, so one lock is
-// enough.
+// Guards ExtraMeta::fake_sym_memos_ and fake_item_memo_ of every tensor. These
+// memos are only used while tracing with a fake mode, so one lock is enough.
 static std::mutex& fake_memo_mutex() {
   static std::mutex mutex;
   return mutex;
