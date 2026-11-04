@@ -620,12 +620,26 @@ class TestMain(unittest.TestCase):
         self.assertIsNone(record["error"])
 
     def test_query_model_runs_outside_the_checkout(self) -> None:
-        run = mock.Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
-        with mock.patch.object(select_tests.subprocess, "run", run):
-            select_tests.query_model("p", "m", "medium", checkout="/wt")
-        cmd = run.call_args.args[0]
-        self.assertEqual(cmd[cmd.index("--add-dir") + 1], "/wt")
-        self.assertNotEqual(run.call_args.kwargs["cwd"], "/wt")
+        seen: dict[str, Any] = {}
+
+        def run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+            cwd = Path(kwargs["cwd"])
+            seen.update(cmd=cmd, cwd=cwd, contents=list(cwd.iterdir()))
+            return subprocess.CompletedProcess([], 0, "{}", "")
+
+        with (
+            tempfile.TemporaryDirectory() as wt,
+            mock.patch.object(select_tests.subprocess, "run", run),
+        ):
+            select_tests.query_model("p", "m", "medium", checkout=wt)
+        cmd, cwd = seen["cmd"], seen["cwd"]
+        self.assertEqual(cmd[cmd.index("--add-dir") + 1], wt)
+        # A fresh, empty temp dir outside the checkout, removed afterwards.
+        self.assertEqual(seen["contents"], [])
+        self.assertEqual(cwd.parent, Path(tempfile.gettempdir()))
+        self.assertNotEqual(cwd, Path(wt))
+        self.assertNotIn(REPO_ROOT, cwd.parents)
+        self.assertFalse(cwd.exists())
 
     def test_query_model_failures_run_all(self) -> None:
         def completed(stdout: str) -> subprocess.CompletedProcess:
@@ -634,6 +648,7 @@ class TestMain(unittest.TestCase):
         timeout = subprocess.TimeoutExpired(["claude", "-p", "<prompt>"], 600)
         for run, error in [
             (completed("not json"), "not jsonerr"),
+            (completed("[1]"), "[1]err"),
             (completed(json.dumps({"is_error": True, "result": "overloaded"})), "overloaded"),
             (completed(json.dumps({"result": "", "total_cost_usd": 0.5})), "no model output"),
             (mock.Mock(side_effect=timeout), "model call timed out after 600s"),
@@ -715,6 +730,25 @@ class TestMain(unittest.TestCase):
                 )
             record = json.loads(output.read_text())
         return record, query.call_args.args[0].split("# Candidate test files", 1)[1]
+
+    def test_non_ascii_paths_are_unquoted(self) -> None:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+        name = "test/test_caf\u00e9.py"
+        with (
+            tempfile.TemporaryDirectory() as repo,
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(select_tests, "REPO_ROOT", Path(repo)),
+        ):
+            git = select_tests.git
+            git("init", "-q")
+            git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-q", "--allow-empty", "-m", "base")  # fmt: skip
+            (Path(repo) / "test").mkdir()
+            (Path(repo) / name).write_text("import x\n")
+            git("add", "-A")
+            git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-qm", "add")  # fmt: skip
+            self.assertEqual(select_tests.changed_files("HEAD~1", "HEAD"), [name])
+            self.assertEqual(select_tests.git_grep("import", "HEAD"), [name])
 
     def test_moved_test_file_is_selected(self) -> None:
         answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": []}}  # fmt: skip
