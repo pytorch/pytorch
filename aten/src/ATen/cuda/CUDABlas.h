@@ -17,6 +17,7 @@
 #include <ATen/BlasBackend.h>
 #include <ATen/Context.h>
 #include <ATen/OpMathType.h>
+#include <optional>
 
 namespace at::cuda::blas {
 
@@ -195,6 +196,20 @@ void scaled_gemm(
     float alpha_multiplier = 1.0f,
     const Tensor* device_beta = nullptr);
 
+struct GroupedGemmScaleOptions {
+  const void* A_scale_ptr = nullptr;
+  const void* B_scale_ptr = nullptr;
+  bool use_fast_accum = false;
+  at::blas::ScalingType A_scaling_type = at::blas::ScalingType::TensorWise;
+  at::blas::ScalingType B_scaling_type = at::blas::ScalingType::TensorWise;
+  at::blas::SwizzleType A_swizzle_type = at::blas::SwizzleType::NO_SWIZZLE;
+  at::blas::SwizzleType B_swizzle_type = at::blas::SwizzleType::NO_SWIZZLE;
+  ScalarType A_scale_dtype = ScalarType::Float;
+  ScalarType B_scale_dtype = ScalarType::Float;
+  bool A_per_batch = false;
+  bool B_per_batch = false;
+};
+
 void grouped_gemm(
       char transa,
       char transb,
@@ -206,9 +221,10 @@ void grouped_gemm(
       int64_t avgK,
       const int64_t* alphaArrayDev,
       const float* alphaScalar,
-      ScalarType input_dtype,
+      ScalarType A_dtype,
       const int64_t* APtrArrayDev,
       const void* ldaArrayDev,
+      ScalarType B_dtype,
       const int64_t* BPtrArrayDev,
       const void* ldbArrayDev,
       const int64_t* betaArrayDev,
@@ -219,7 +235,8 @@ void grouped_gemm(
       int64_t* DPtrArrayDev,
       const void* lddArrayDev,
       int batchCount,
-      bool use_int64_dims);
+      bool use_int64_dims,
+      const std::optional<GroupedGemmScaleOptions>& scales = std::nullopt);
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)  CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, Dtype)
 
