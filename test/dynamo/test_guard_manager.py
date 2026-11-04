@@ -335,6 +335,182 @@ def less_match_verbose_code_parts(expected):
     return [f"expected < {expected}"]
 
 
+@instantiate_parametrized_tests
+class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_storage_overlap_diff_participant_closure(self):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        storage = torch.randn(6)
+        values = {"a": storage[:2], "b": storage[1:3], "c": storage[3:5]}
+        root = RootGuardManager()
+        managers = [
+            root.dict_getitem_manager(name, name, value, default_mgr_enum)
+            for name, value in values.items()
+        ]
+        install_storage_overlapping_guard(managers[:2], managers[2:], [], None)
+        wrapper = GuardManagerWrapper(root)
+        wrapper.diff_guard_sources.add("a")
+        wrapper.prepare_diff_guard_manager()
+        self.assertIn("c", wrapper.diff_guard_sources)
+        self.assertTrue(wrapper.diff_guard_root.check(values))
+        self.assertFalse(wrapper.diff_guard_root.check({**values, "c": values["a"]}))
+
+    def test_object_alias_pattern_diff_participant_closure(self):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        first, second = [], []
+        root = RootGuardManager()
+        pair = {"left": first, "right": second}
+        parent = root.dict_getitem_manager("pair", "L['pair']", pair, default_mgr_enum)
+        managers = [
+            parent.dict_getitem_manager(
+                name, f"L['pair']['{name}']", pair[name], default_mgr_enum
+            )
+            for name in pair
+        ]
+        guards.install_object_alias_pattern_guard(
+            managers, [0, 1], ["distinct receivers"], None
+        )
+        unrelated = [
+            root.dict_getitem_manager(name, name, [], default_mgr_enum)
+            for name in ("unrelated_left", "unrelated_right")
+        ]
+        guards.install_object_alias_pattern_guard(unrelated, [0, 1], [], None)
+        wrapper = GuardManagerWrapper(root)
+        wrapper.diff_guard_sources.add("L['pair']['left']")
+        wrapper.prepare_diff_guard_manager()
+        self.assertIn("L['pair']['right']", wrapper.diff_guard_sources)
+        self.assertIn("L['pair']", wrapper.diff_guard_sources)
+        self.assertNotIn("unrelated_left", wrapper.diff_guard_sources)
+        self.assertNotIn("unrelated_right", wrapper.diff_guard_sources)
+        self.assertTrue(wrapper.diff_guard_root.check({"pair": pair}))
+        self.assertFalse(
+            wrapper.diff_guard_root.check({"pair": {"left": first, "right": first}})
+        )
+        # An explicit partial clone still means exactly the caller's selected managers.
+        partial = root.clone_manager(
+            lambda manager: "right" not in manager.get_source()
+        )
+        self.assertTrue(
+            partial.check(
+                {
+                    "pair": {"left": first, "right": first},
+                    "unrelated_left": [],
+                    "unrelated_right": [],
+                }
+            )
+        )
+
+    def test_object_alias_pattern_reentrant_clone(self):
+        root = RootGuardManager()
+        first, second = [], []
+        values = {"0": first, "1": first, "2": second}
+        managers = [
+            root.dict_getitem_manager(name, name, value, default_mgr_enum)
+            for name, value in values.items()
+        ]
+        guards.install_object_alias_pattern_guard(managers, [0, 0, 2], [], None)
+        clone = root.clone_manager(lambda manager: True)
+        calls = []
+
+        def check_clone(value):
+            calls.append(value)
+            return clone.check(values)
+
+        managers[0].add_lambda_guard(check_clone, ["clone check"], None)
+        # No earlier failure may reorder accessors past the callback.
+        self.assertFalse(root.check({"0": first, "1": second, "2": []}))
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(root.check(values))
+        self.assertEqual(len(calls), 2)
+
+        def broken_filter(manager):
+            if manager.get_source() == "1":
+                raise RuntimeError("clone filter failed")
+            return True
+
+        with self.assertRaisesRegex(RuntimeError, "clone filter failed"):
+            root.clone_manager(broken_filter)
+        self.assertTrue(root.check(values))
+        self.assertTrue(root.clone_manager(lambda manager: True).check(values))
+
+    @parametrize("verbose", [False, True])
+    def test_object_alias_pattern_reset_after_cpp_throw(self, verbose):
+        root = RootGuardManager()
+        first, second = [], []
+        managers = [
+            root.dict_getitem_manager(name, name, value, default_mgr_enum)
+            for name, value in (("left", first), ("right", second))
+        ]
+        guards.install_object_alias_pattern_guard(managers, [0, 1], [], None)
+        nested = torch.nested.nested_tensor([torch.randn(2, 3), torch.randn(3, 3)])
+        tensor = root.dict_getitem_manager("tensor", "tensor", nested, default_mgr_enum)
+        tensor.add_tensor_match_guard(
+            nested,
+            [None] * 3,
+            [None] * 3,
+            "tensor",
+            [],
+            None,
+            type(nested),
+            torch._C._dispatch_keys(nested),
+        )
+        inputs = {"left": first, "right": second, "tensor": nested}
+        check = root.check_verbose if verbose else root.check
+        with self.assertRaisesRegex(RuntimeError, "NestedTensorImpl doesn't support"):
+            check(inputs)
+        # The original alias classes must not retain receivers from the failed check.
+        inputs.update(left=second, right=first)
+        with self.assertRaisesRegex(RuntimeError, "NestedTensorImpl doesn't support"):
+            check(inputs)
+        self.assertFalse(root.check({"left": first, "right": first, "tensor": nested}))
+
+    def test_object_alias_pattern_guard(self):
+        root = RootGuardManager()
+        first, second = [], []
+        values = [first, first, second]
+        managers = [
+            root.dict_getitem_manager(str(i), str(i), value, default_mgr_enum)
+            for i, value in enumerate(values)
+        ]
+        guards.install_object_alias_pattern_guard(
+            managers, [0, 0, 2], ["receiver alias pattern"], None
+        )
+        cloned = root.clone_manager(lambda manager: True)
+        for manager in (root, cloned, root):
+            self.assertTrue(manager.check(dict(zip(map(str, range(3)), values))))
+            self.assertFalse(manager.check({"0": first, "1": second, "2": second}))
+            self.assertFalse(manager.check({"0": first, "1": first, "2": first}))
+            self.assertFalse(
+                manager.check_verbose({"0": first, "1": second, "2": second}).result
+            )
+            self.assertTrue(manager.check({"0": second, "1": second, "2": first}))
+
+    def test_object_alias_pattern_temporary_lifetimes(self):
+        class Value:
+            pass
+
+        class Owner:
+            @property
+            def item(self):
+                return Value()
+
+        root = RootGuardManager()
+        owner = Owner()
+        managers = [
+            root.getattr_manager("item", str(i), Value(), default_mgr_enum)
+            for i in range(2)
+        ]
+        guards.install_object_alias_pattern_guard(
+            managers, [0, 1], ["distinct temporary receivers"], None
+        )
+        for manager in (root, root.clone_manager(lambda node: True)):
+            self.assertTrue(manager.check(owner))
+            self.assertTrue(manager.check(owner))
+
+
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 

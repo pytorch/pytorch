@@ -29,7 +29,8 @@ class ORDERED_DICT_ORDER_MATCH(LeafGuard):
 
 def ordered_dict_keys(value: Any) -> list[Any] | None: ...
 
-class RelationalGuard: ...
+class RelationalGuard(LeafGuard):
+    def get_group_id(self) -> int: ...
 
 class GuardDebugInfo:
     verbose_code_parts: list[str]
@@ -476,6 +477,12 @@ class FuncKwDefaultsGuardAccessor(GuardAccessor): ...
 class GetAttrGuardAccessor(GuardAccessor):
     def get_attr_name(self) -> str: ...
 
+def install_object_alias_pattern_guard(
+    guard_managers: Sequence[GuardManager],
+    aliases: Sequence[int],
+    verbose_code_parts: list[str],
+    user_stack: traceback.StackSummary | None,
+) -> None: ...
 def install_object_aliasing_guard(
     x: GuardManager,
     y: GuardManager,
