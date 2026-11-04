@@ -401,7 +401,7 @@ def policy(
             return None
         cut = {c: set(fs) for c, fs in td["top25_cfg"].items()}
         # TD runs only its cut, not even the files a selection always covers.
-        return Choice(Selection(), cut, set(td["top25"]), {*cut, ""})
+        return Choice(Selection(candidates=cands), cut, set(td["top25"]), {*cut, ""})
     if name not in POLICIES and not HEDGE.fullmatch(name):
         raise ValueError(f"unknown policy {name!r}")
     out = (r or {}).get("out")
