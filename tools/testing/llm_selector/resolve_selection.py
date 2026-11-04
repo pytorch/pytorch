@@ -127,20 +127,19 @@ def main(output: Path = Path(LLM_SELECTION_FILE)) -> None:
     # The PR's current labels, not the event's: a tag push carries none, and
     # removing ci-llm-selector must stop enforcement even at an already selected head.
     labels = {label["name"] for label in info["labels"]}
-    # While enforcement is off, run_test.py treats every selection as shadow,
-    # so waiting for a pending run would only delay the test jobs.
-    enforce = (
-        ENFORCEMENT_ENABLED
-        and os.environ.get("TD_ENABLED") == "true"
+    requested = (
+        os.environ.get("TD_ENABLED") == "true"
         and info.get("author_association") in TRUSTED_AUTHORS
         and "ci-llm-selector" in labels
         and "ci-no-td" not in labels
     )
-    selection = resolve(pr, sha, enforce)
+    # While enforcement is off, run_test.py treats every selection as shadow,
+    # so waiting for a pending run would only delay the test jobs.
+    selection = resolve(pr, sha, ENFORCEMENT_ENABLED and requested)
     if selection is not None:
         # select_tests clears enforce when its model call failed.
-        selection.enforce = enforce and selection.enforce
-        selection.enforce_requested = enforce and selection.enforce_requested
+        selection.enforce = requested and selection.enforce
+        selection.enforce_requested = requested and selection.enforce_requested
         output.write_text(json.dumps(selection.to_json()))
         print(f"Resolved the LLM test selection, enforce={selection.enforce}")
 
