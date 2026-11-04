@@ -59,7 +59,6 @@ _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 
 _HAS_PYNVML = False
 _HAS_AMDSMI = False
-_PYNVML_ERR = None
 _AMDSMI_ERR = None
 
 try:
@@ -176,8 +175,8 @@ try:
         pass
     finally:
         del _version
-except ImportError as err:
-    _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
+except ImportError:
+    pass
 
 _lazy_seed_tracker = _LazySeedTracker()
 
@@ -1522,12 +1521,6 @@ def get_sync_debug_mode() -> int:
 
 
 def _get_pynvml_handler(device: Device = None):
-    if not _HAS_PYNVML:
-        raise ModuleNotFoundError(
-            "nvidia-ml-py does not seem to be installed or it can't be imported."
-            # pyrefly: ignore [invalid-inheritance]
-        ) from _PYNVML_ERR
-
     try:
         pynvml.nvmlInit()
     except pynvml.NVMLError_DriverNotLoaded as e:

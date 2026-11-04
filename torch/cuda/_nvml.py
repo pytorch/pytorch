@@ -30,7 +30,7 @@ NVML_CLOCK_SM = 1
 class NVMLError(Exception):
     def __init__(self, value: int) -> None:
         self.value = value
-        super().__init__(f"NVML call failed with error {value}")
+        super().__init__(_error_string(value))
 
 
 class NVMLError_DriverNotLoaded(NVMLError):
@@ -79,6 +79,23 @@ def _load() -> ctypes.CDLL:
             except OSError as err:
                 raise NVMLError_DriverNotLoaded(NVML_ERROR_DRIVER_NOT_LOADED) from err
     return _lib
+
+
+def _error_string(code: int) -> str:
+    # nvmlErrorString returns a const char* (e.g. "Not Supported"); without an
+    # explicit restype ctypes would truncate the pointer to int on 64-bit. It is
+    # only usable once the library is loaded, so a load failure (or a driver too
+    # old to export it) falls back to the bare error code.
+    lib = _lib
+    if lib is not None:
+        try:
+            lib.nvmlErrorString.restype = ctypes.c_char_p
+            text = lib.nvmlErrorString(ctypes.c_uint(code))
+        except (OSError, AttributeError):
+            text = None
+        if text:
+            return f"{text.decode(errors='replace')} (NVML error {code})"
+    return f"NVML call failed with error {code}"
 
 
 def _check(result: int) -> None:
@@ -154,13 +171,25 @@ def nvmlDeviceGetComputeRunningProcesses(
             continue
     if fn is None:
         raise NVMLError(NVML_ERROR_FUNCTION_NOT_FOUND)
-    # Query the count first (NVML_ERROR_INSUFFICIENT_SIZE), then the entries.
+    # Query the required count (NVML_ERROR_INSUFFICIENT_SIZE) first, then fetch
+    # the entries. A process can start between the two calls -- list_gpu_processes
+    # is typically called while a shared GPU is under memory pressure, which is
+    # exactly when the count changes -- so over-allocate like pynvml does and
+    # retry if NVML still reports the buffer is too small.
     count = ctypes.c_uint(0)
     result = fn(handle, ctypes.byref(count), None)
     if result == NVML_SUCCESS:
         return []
     if result != NVML_ERROR_INSUFFICIENT_SIZE:
         _check(result)
-    procs = (_nvmlProcessInfo_t * count.value)()
-    _check(fn(handle, ctypes.byref(count), procs))
-    return [procs[i] for i in range(count.value)]
+    for _ in range(3):
+        capacity = ctypes.c_uint(count.value * 2 + 5)
+        procs = (_nvmlProcessInfo_t * capacity.value)()
+        result = fn(handle, ctypes.byref(capacity), procs)
+        if result == NVML_ERROR_INSUFFICIENT_SIZE:
+            count = capacity  # NVML wrote the new required count into capacity
+            continue
+        _check(result)
+        return [procs[i] for i in range(capacity.value)]
+    _check(result)
+    return []
