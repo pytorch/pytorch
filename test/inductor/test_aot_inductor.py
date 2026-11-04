@@ -11201,6 +11201,15 @@ class AOTInductorTestsTemplate:
                     if "NEEDED" in line:
                         for lib in torch_libs:
                             self.assertTrue(lib not in line)
+                # Nor a libtorch-only stable C ABI function, which the
+                # libtorch-free error check doesn't use.
+                undefined = subprocess.run(
+                    ["nm", "-D", "--undefined-only", str(so_copy)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout
+                self.assertNotIn("torch_exception_get_what", undefined)
 
     @unittest.skipUnless(IS_LINUX, "the flag it checks is passed to ELF linkers")
     def test_libtorch_free_so_has_no_unused_openmp_dependency(self):
