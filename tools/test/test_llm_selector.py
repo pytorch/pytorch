@@ -184,9 +184,11 @@ g () {
 }
 """
         self.assertEqual(inductor_includes(sh), {"": {"top"}, "f": {"a", "b", "c", "d"}, "g": {"e"}})  # fmt: skip
-        for bad in ('run_test.py --inductor --include "$TESTS"', "run_test.py --inductor --verbose", "run_test.py --inductor --include=a", "run_test.py --inductor -i 'a"):  # fmt: skip
-            with self.assertRaises(ValueError, msg=bad):
+        for bad in ('run_test.py --inductor --include "$TESTS"', "run_test.py --inductor --verbose", "run_test.py --inductor --include=a"):  # fmt: skip
+            with self.assertRaisesRegex(ValueError, "unreadable run_test.py --inductor call", msg=bad):  # fmt: skip
                 inductor_includes(bad)
+        with self.assertRaisesRegex(ValueError, "No closing quotation"):
+            inductor_includes("run_test.py --inductor -i 'a")
 
     def test_files_the_model_never_saw_are_covered(self) -> None:
         sel = Selection.from_model_output(answer(), CANDIDATES, [])
@@ -522,11 +524,16 @@ g () {
             "tools/testing/discover_tests.py",
             "tools/stats/import_test_stats.py",
             "tools/stats/upload_metrics.py",
+            "test/cpp_extensions/open_registration_extension/torch_openreg/pyproject.toml",
         ]:
             self.assertTrue(needs_run_all([f]), f)
             self.assertTrue((REPO_ROOT / f).exists(), f)
+        # pytest reads the first of these it finds from the test's directory up.
+        for f in ["conftest.py", "test/pytest.ini", "test/.pytest.ini", "test/dynamo/pyproject.toml", "test/tox.ini", "test/setup.cfg"]:  # fmt: skip
+            self.assertTrue(needs_run_all([f]), f)
         for f in [
             "docs/source/index.rst",
+            "test/data/setup.cfg.in",
             ".github/workflows/lint.yml",
             ".github/actions/setup-linux/action.yml",
             ".github/ci_commit_pins/vllm.txt",
@@ -584,6 +591,25 @@ g () {
         ]:  # fmt: skip
             sel = Selection.from_model_output(answer(), candidates, [changed])
             self.assertEqual(sel.files, expected, changed)
+
+    def test_doctest_edits_select_doctests(self) -> None:
+        def diff(path: str, line: str) -> str:
+            return f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n     >>> context\n{line}\n"
+
+        candidates = CANDIDATES | {"doctests"}
+        for d, expected in [
+            (diff("torch/nn/functional.py", "+    >>> x = 1"), {"doctests"}),
+            (diff("torch/nn/functional.py", "-    >>> x = 1"), {"doctests"}),
+            (diff("torch/a.py", "-    >>> x = 1").replace("+++ b/torch/a.py", "+++ /dev/null"), {"doctests"}),
+            (diff("torch/nn/functional.py", "+    x = 1  # >> not a doctest"), set()),
+            (diff("test/test_nn.py", "+    >>> x = 1"), set()),
+            (diff("torch/a.txt", "+    >>> x = 1"), set()),
+            (diff("docs/a.py", "+>>> x") + diff("torch/a.py", "+x"), set()),
+        ]:  # fmt: skip
+            sel = Selection.from_model_output(answer(), candidates, ["torch/a.py"], diff=d)  # fmt: skip
+            self.assertEqual(sel.files, expected, d)
+        d = diff("torch/nn/functional.py", "+    >>> x = 1")
+        self.assertEqual(Selection.from_model_output(answer(), CANDIDATES, ["torch/a.py"], diff=d).files, set())  # fmt: skip
 
     def test_drivers_match_the_test_list(self) -> None:
         for test in DRIVER_MAPPINGS:
@@ -851,6 +877,8 @@ class TestMain(unittest.TestCase):
                 mock.patch.object(select_tests, "get_test_times", return_value=times),
                 mock.patch.object(select_tests, "TESTS", ["test_nn"]),
                 mock.patch.object(select_tests, "query_model", return_value=answer),
+                mock.patch.object(select_tests, "git_grep", return_value=[]),
+                mock.patch.object(select_tests, "REPO_ROOT", Path(tmp)),
             ):
                 out = Path(tmp) / "out.json"
                 select_tests.main(["--title", "t", "--enforce", "--output", str(out)])
@@ -976,6 +1004,42 @@ class TestMain(unittest.TestCase):
             # The default --output, which run_test.py reads.
             record = json.loads((Path(repo) / ".additional_ci_files/llm_selection.json").read_text())  # fmt: skip
         return record, query.call_args.args[0].split("# Candidate test files", 1)[1]
+
+    def test_doctest_edit_selects_doctests(self) -> None:
+        empty = {"structured_output": answer()}
+        diff = "diff --git a/torch/a.py b/torch/a.py\n--- a/torch/a.py\n+++ b/torch/a.py\n@@ -1 +1 @@\n+    >>> x\n"  # fmt: skip
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            clean_env(),
+            mock.patch.object(select_tests, "git", return_value="torch/a.py\0"),
+            mock.patch.object(
+                select_tests, "diffstat_and_diff", return_value=("", diff)
+            ),  # fmt: skip
+            mock.patch.object(
+                select_tests,
+                "get_test_times",
+                return_value={"env": {"default": {"test_nn": 1.0}}},
+            ),  # fmt: skip
+            mock.patch.object(select_tests, "TESTS", ["test_nn", "doctests"]),
+            mock.patch.object(select_tests, "query_model", return_value=empty),
+            mock.patch.object(select_tests, "git_grep", return_value=[]),
+            mock.patch.object(select_tests, "REPO_ROOT", Path(tmp)),
+        ):
+            out = Path(tmp) / "out.json"
+            select_tests.main(["--title", "t", "--output", str(out)])
+            record = json.loads(out.read_text())
+        self.assertIsNone(record["error"])
+        self.assertEqual(record["files"], ["doctests"])
+
+    def test_git_grep_failures_raise(self) -> None:
+        for code, raises in [(0, False), (1, False), (2, True), (128, True), (-9, True)]:  # fmt: skip
+            done = subprocess.CompletedProcess([], code, "", "killed")
+            with mock.patch.object(select_tests.subprocess, "run", return_value=done):
+                if raises:
+                    with self.assertRaisesRegex(RuntimeError, "git grep failed: killed", msg=code):  # fmt: skip
+                        select_tests.git_grep("x", "HEAD")
+                else:
+                    self.assertEqual(select_tests.git_grep("x", "HEAD"), [])
 
     def test_non_ascii_paths_are_unquoted(self) -> None:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}

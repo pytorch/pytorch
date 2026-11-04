@@ -62,12 +62,12 @@ DRIVER_MAPPINGS = {
     **{
         t: [*ADDITIONAL_MAPPINGS[t], r"^test/test_cpp_extensions_aot\.py$"]
         for t in ("test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja")
-    },  # fmt: skip
+    },
     # run_test.py runs test_autoload.py, with the cpp_extensions installed, as both autoload drivers.
     **{
         t: [r"^test/test_autoload\.py$", r"^test/cpp_extensions/"]
         for t in ("test_autoload_enable", "test_autoload_disable")
-    },  # fmt: skip
+    },
     # They build or load the extensions, which #include the headers there.
     "test_cpp_extensions_jit": [r"^test/cpp_extensions/"],
     "test_cpp_extensions_mtia_backend": [r"^test/cpp_extensions/"],
@@ -106,6 +106,8 @@ RUN_ALL_PATTERNS = [
     # Loaded by every test process; it moves tests between configs.
     r"^test/slow_tests\.json$",
     r"^pytest\.ini$",
+    r"^conftest\.py$",
+    r"^test/(.*/)?(\.?pytest\.ini|pyproject\.toml|tox\.ini|setup\.cfg)$",
     r"^torch/testing/_internal/common_(utils|device_type|dtype|cuda)\.py$",
     # assertEqual.
     r"^torch/testing/_comparison\.py$",
@@ -308,6 +310,24 @@ def failure_list_sources(
     return sources, missing
 
 
+def edits_doctest(diff: str) -> bool:
+    """Whether `diff`, a `git diff`, adds or removes a line with `>>>`, which
+    the doctests test runs with xdoctest, in a .py file under torch/."""
+    paths: list[str] = []
+    in_header = in_torch = False
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            paths, in_header, in_torch = [], True, False
+        elif in_header and line.startswith(("--- a/", "+++ b/")):
+            paths.append(line[6:])
+        elif line.startswith("@@"):
+            in_header = False
+            in_torch = any(re.match(r"torch/.*\.py$", f) for f in paths)
+        elif in_torch and line[:1] in ("+", "-") and ">>>" in line:
+            return True
+    return False
+
+
 def needs_run_all(changed_files: list[str]) -> bool:
     return any(re.search(p, f) for p in RUN_ALL_PATTERNS for f in changed_files)
 
@@ -382,6 +402,7 @@ class Selection:
         changed_files: list[str],
         grep: Callable[[str], list[str]] | None = None,
         deleted: Collection[str] = (),
+        diff: str = "",
     ) -> Selection:
         """Turn the model's structured output into a Selection.
 
@@ -415,6 +436,8 @@ class Selection:
         if missing & {"dynamo", "compiled_autograd"}:
             sweeps.add("dynamo_wrapped")
         files |= edited_tests(changed_files, candidates)
+        if "doctests" in candidates and edits_doctest(diff):
+            files.add("doctests")
         if grep is not None:
             data = data_file_readers(changed_files, candidates, grep, deleted)
             if data is None:
