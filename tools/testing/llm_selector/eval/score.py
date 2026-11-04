@@ -1,6 +1,6 @@
 """Score selector results: recall of real failures, and the share of CI test time selected.
 
-    python -m tools.testing.llm_td.eval.score --data DIR --ids tools/testing/llm_td/eval/ids/eval.txt sonnet5_medium opus55_high td
+    python -m tools.testing.llm_selector.eval.score --data DIR --ids tools/testing/llm_selector/eval/ids/eval.txt sonnet5_medium opus55_high td
 
 A failure is a (test file, CI config) pair. It counts as caught when the
 selection runs that file in that config. Cost is the share of one full CI
@@ -11,7 +11,7 @@ Policies: `model` is the raw model output, `final` adds what CI adds (edited
 test files, the run-all rules), `final-hm` keeps only high/medium-confidence
 picks of a well-formed answer and otherwise falls back as `final` does, and
 `final+tdN` hedges `final` with TD's files that fit in N% of each config's
-test time (N defaults to 100*LLM_TD_HEDGE), and keeps TD's cut alone in a
+test time (N defaults to 100*LLM_SELECTOR_HEDGE), and keeps TD's cut alone in a
 config in which that runs nothing or that has no test time, as
 Selection.split and apply_selection do. `final+tdN` falls back to
 TD's own cut when the model call failed or its answer is malformed, as CI
@@ -94,8 +94,8 @@ from tools.stats.import_test_stats import (
     TD_HEURISTIC_PROFILING_FILE,
     TEST_FILE_RATINGS_FILE,
 )
-from tools.testing.llm_td.eval import REPO
-from tools.testing.llm_td.select_tests import (
+from tools.testing.llm_selector.eval import REPO
+from tools.testing.llm_selector.select_tests import (
     added_test_files,
     AGENTIC_TOOLS,
     build_prompt,
@@ -107,7 +107,11 @@ from tools.testing.llm_td.select_tests import (
     SYSTEM_PROMPT,
     test_minutes,
 )
-from tools.testing.llm_td.selection import LLM_TD_HEDGE, parse_model_output, Selection
+from tools.testing.llm_selector.selection import (
+    LLM_SELECTOR_HEDGE,
+    parse_model_output,
+    Selection,
+)
 from tools.testing.target_determination.heuristics.utils import (
     NO_TD_BUILD_ENVS,
     td_enabled_job,
@@ -404,7 +408,7 @@ def policy(
     if m := HEDGE.fullmatch(name):
         if td is None:
             return None
-        share = float(m.group(1)) / 100 if m.group(1) else LLM_TD_HEDGE
+        share = float(m.group(1)) / 100 if m.group(1) else LLM_SELECTOR_HEDGE
         sel = Selection(run_all=True) if unasked(s) else Selection.from_model_output(out, cands, s["changed_files"], grep, s.get("deleted", []))  # fmt: skip
         if sel.error is not None:
             # Not enforced, so apply_selection keeps TD's split.
@@ -652,7 +656,7 @@ def main() -> None:
     policies = list(dict.fromkeys(args.policies.split(",")))
     if unknown := [x for x in policies if x not in POLICIES and not HEDGE.fullmatch(x)]:
         p.error(f"unknown --policies {unknown}; the tag td is always scored as td25")
-    shares = [float(m.group(1)) / 100 if m.group(1) else LLM_TD_HEDGE for x in policies if (m := HEDGE.fullmatch(x))]  # fmt: skip
+    shares = [float(m.group(1)) / 100 if m.group(1) else LLM_SELECTOR_HEDGE for x in policies if (m := HEDGE.fullmatch(x))]  # fmt: skip
     if len(shares) != len(set(shares)):
         p.error(f"--policies {policies} has two hedge policies of the same share")
     if missing := [a for a in STATS_ARTIFACTS if not (args.stats / a).exists()]:
