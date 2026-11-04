@@ -264,8 +264,7 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     with contextlib.redirect_stdout(sys.stderr):
         test_times = get_test_times()
     if not test_times and not args.print_prompt:
-        record["error"] = "no test times"
-        return Selection(run_all=True, reason="no test times")
+        return Selection(run_all=True, reason="no test times", error="no test times")
     diffstat, diff = diffstat_and_diff(merge_base, args.head)
     # TESTS comes from the checkout this script runs from, which in CI is the
     # trusted default branch rather than the PR; add the test files the PR adds
@@ -304,7 +303,7 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     if selection.error is not None:
         # Without an answer, the CLI's own output says why.
         cli = str(result.get("result") or "") if out is None else ""
-        record["error"] = (cli or selection.error)[:2000]
+        selection.error = (cli or selection.error)[:2000]
     return selection
 
 
@@ -342,10 +341,6 @@ def main(argv: list[str] | None = None) -> None:
         "merge_base": None,
         "head": None,
         "cost_usd": None,
-        # Set exactly when the selector failed to produce a usable answer (git,
-        # the model call or its output, or the test times); never for a
-        # deliberate run_all.
-        "error": None,
         "model_output": None,
     }
     try:
@@ -358,8 +353,7 @@ def main(argv: list[str] | None = None) -> None:
             error = f"model call timed out after {e.timeout}s"
         else:
             error = f"{type(e).__name__}: {e}"
-        record["error"] = error[:2000]
-        selection = Selection(run_all=True, reason=f"selector failed: {error[:500]}")
+        selection = Selection(run_all=True, reason=f"selector failed: {error[:500]}", error=error[:2000])  # fmt: skip
     if selection is None:
         return
     # A deliberate run_all (no changed files, test infrastructure, too many
@@ -367,7 +361,7 @@ def main(argv: list[str] | None = None) -> None:
     # edited files under test/ that are not tests, too many import hops, an
     # edited file under test/ that nothing reads, or the model) is enforced; a
     # broken selector leaves TD's split in place.
-    selection.enforce = args.enforce and record["error"] is None
+    selection.enforce = args.enforce and selection.error is None
     args.output.write_text(
         json.dumps({**selection.to_json(), "diagnostics": record}, indent=1)
     )
