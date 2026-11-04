@@ -68,6 +68,8 @@ LLM_SELECTION_FILE = "llm_selection.json"
 SELECTION_VERSION = 1
 # Longest chain of test modules importing each other that importers() follows.
 MAX_IMPORT_HOPS = 8
+# More edited failure-list classes than this are not looked up one by one.
+MAX_FAILURE_LIST_CLASSES = 50
 
 # Tests that run the files a change matches although they do not import them:
 # the drivers of the directories discover_tests.py blocklists (except
@@ -96,6 +98,16 @@ DRIVER_MAPPINGS = {
     "test_package": [r"^test/package/"],
     "test_quantization": [r"^test/quantization/"],
 }
+
+# common_utils xfails or skips a test named in one of these lists, one file per
+# test such as TestNNCPU.test_x or CPython313-test_set-TestSet.test_x, when it
+# runs under dynamo (the dynamo_wrapped config), inductor or compiled autograd.
+FAILURE_LIST_DIR_RE = re.compile(
+    r"^test/(dynamo|inductor|compiled_autograd)_(?:expected_failures|skips)/"
+)
+FAILURE_LIST_RE = re.compile(FAILURE_LIST_DIR_RE.pattern + r"(?:.*-)?(\w+)\.[^./]+$")
+# instantiate_device_type_tests names TestFooCPU after TestFoo.
+DEVICE_SUFFIX_RE = re.compile(r"(CPU|CUDA|MPS|XPU|HPU|META|LAZY|PRIVATEUSE1)$")
 
 # Changes to these paths alter how every test is collected or run, so no
 # subset is safe whatever the model says.
@@ -232,6 +244,52 @@ def alts(names: Iterable[str]) -> str:
     )
 
 
+def class_pattern(classes: Iterable[str], prefix: bool = False) -> str:
+    """A `git grep -E` pattern for the definition of one of `classes` or of
+    the generic class instantiate_device_type_tests made it from, or with
+    `prefix` of a class whose name starts with one of them."""
+    names = alts(n for c in classes for n in (c, DEVICE_SUFFIX_RE.sub("", c)))
+    end = "" if prefix else "([^[:alnum:]_]|$)"
+    return rf"^[[:space:]]*class[[:space:]]+({names}){end}"
+
+
+def failure_list_sources(
+    changed_files: list[str], grep: Callable[[str], list[str]] | None
+) -> tuple[list[str], set[str]]:
+    """The paths under test/ that define the classes named by the edited
+    failure-list entries (see FAILURE_LIST_RE), and the lists ("dynamo",
+    "inductor", "compiled_autograd", or "dynamo_cpython" for a CPython entry,
+    which the dynamo_cpython config runs) naming a class that is not looked up
+    (no `grep`, see importers, or more than MAX_FAILURE_LIST_CLASSES classes)
+    or that `grep` does not find. Also the list ("dynamo", "inductor" or
+    "compiled_autograd", even for a CPython entry) holding an entry in a
+    subdirectory or, for the dynamo and inductor lists, one without exactly
+    one ".", which dynamo_test_failures.py rejects at import."""
+    classes: dict[str, set[str]] = {}
+    unparsed: set[str] = set()
+    for f in changed_files:
+        if not (d := FAILURE_LIST_DIR_RE.match(f)):
+            continue
+        if "/" in f[d.end() :] or (
+            d[1] != "compiled_autograd" and f.rsplit("/", 1)[-1].count(".") != 1
+        ):
+            unparsed.add(d[1])
+        elif m := FAILURE_LIST_RE.match(f):
+            classes.setdefault(m[2], set()).add(
+                "dynamo_cpython" if f[d.end() :].startswith("CPython") else m[1]
+            )
+    if grep is None or len(classes) > MAX_FAILURE_LIST_CLASSES:
+        return [], unparsed.union(*classes.values())
+    sources: list[str] = []
+    missing = unparsed
+    for c, lists in sorted(classes.items()):
+        found = grep(class_pattern([c]))
+        sources += found
+        if not found:
+            missing |= lists
+    return sources, missing
+
+
 def needs_run_all(changed_files: list[str]) -> bool:
     return any(re.search(p, f) for p in RUN_ALL_PATTERNS for f in changed_files)
 
@@ -312,13 +370,18 @@ class Selection:
         changed_files: list[str],
         grep: Callable[[str], list[str]] | None = None,
     ) -> Selection:
-        """Turn the model's structured output into a Selection.
+        """Turn the model's structured output into a Selection. Everything runs
+        when failure_list_sources reports the inductor list or dynamo_cpython
+        (a CPython entry whose class could not be resolved); the other lists it
+        reports add the dynamo_wrapped sweep.
 
-        A missing or malformed output, a change to test infrastructure and too
-        many import hops fall back to running everything; only a missing or
+        A missing or malformed output, a change to test infrastructure, an
+        edited inductor failure list naming an unknown class and too many
+        import hops fall back to running everything; only a missing or
         malformed output sets error. Test files the change edits and their
         drivers are always selected, and with `grep` so are the test files that
-        import them (see importers)."""
+        import them (see importers) and those defining the tests that an edited
+        failure list names (see failure_list_sources), with their importers."""
         if out is None:
             return cls(
                 run_all=True,
@@ -337,12 +400,26 @@ class Selection:
             )
         if not isinstance(out, dict):
             raise AssertionError("parse_model_output accepts only objects")
+        sources, missing = failure_list_sources(changed_files, grep)
+        if "inductor" in missing:
+            return cls(
+                run_all=True,
+                reason="an edited inductor failure list names a test class that could not be resolved",
+            )
+        if "dynamo_cpython" in missing:
+            return cls(
+                run_all=True,
+                reason="an edited dynamo failure list names a CPython test class that could not be resolved",
+            )
+        # dynamo_wrapped also runs with compiled autograd on (see common_utils).
+        if missing & {"dynamo", "compiled_autograd"}:
+            sweeps.add("dynamo_wrapped")
         edited = edited_tests(changed_files, candidates)
         files |= edited
         if grep is not None:
             # The drivers of edited non-.py files, such as test_jit for test/jit/*.txt, have importers too.
             drivers = [f"test/{t}.py" for t in sorted(edited)]
-            found = importers(changed_files + drivers, candidates, grep)
+            found = importers(changed_files + sources + drivers, candidates, grep)
             if found is None:
                 return cls(
                     run_all=True,
