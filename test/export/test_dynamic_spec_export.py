@@ -748,6 +748,29 @@ Range constraints: {u0: VR[0, int_oo]}""",
         with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed"):
             ep.module()(torch.randn(4, 3), torch.randn(7, 5))
 
+    def test_derived_scalar_arg_runtime_enforced(self):
+        """An int input declared as ``A * 4 + 16`` is bound to ``A``: the
+        relation resolves the branch at trace time and a violating input
+        raises a runtime assertion."""
+        A = IntVar("a")
+
+        class M(torch.nn.Module):
+            def forward(self, n, m):
+                if m == n * 4 + 16:
+                    return torch.ones(m)
+                return torch.zeros(n)
+
+        ep = export(
+            M(),
+            (14, 72),
+            dynamic_shapes=PARAMS({"n": A, "m": A * 4 + 16}),
+            strict=self.strict,
+        )
+        self.assertTrue(_has_assert_scalar(ep.graph_module))
+        self.assertEqual(ep.module()(3, 28).shape, (28,))
+        with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed"):
+            ep.module()(3, 29)
+
     def test_multi_var_derived_runtime_enforced(self):
         A = VAR("a")
         B = VAR("b")
