@@ -66,6 +66,7 @@ from torch._inductor.codegen.common import DataTypePropagation, OptimizationCont
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
+    fresh_cache,
     run_and_get_code,
     run_and_get_cpp_code,
     run_and_get_kernels,
@@ -136,6 +137,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR,
+    TestCase as TorchTestCase,
     xfailIf,
 )
 from torch.testing._internal.logging_utils import logs_to_string
@@ -21320,60 +21322,90 @@ if RUN_TPU:
     SweepInputsTpuTest.populate()
 
 
-# Pinned memory is CPU memory, but pinning it needs an accelerator.
-class PinMemoryTests(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    @parametrize("dynamic", [False, True])
-    @parametrize(
-        "constructor_case",
-        [
-            # (name, constructor, args, deterministic)
-            ("tensor_inline", torch.tensor, ([1, 2, 3],), True),
-            (
-                "tensor_constant",
-                torch.tensor,
-                (torch.arange(16.0).view(1, 4, 4).tolist(),),
-                True,
-            ),
-            ("empty", torch.empty, ([1, 128, 128],), False),
-            ("ones", torch.ones, ([1, 128, 128],), True),
-            ("zeros", torch.zeros, ([1, 128, 128],), True),
-            ("full", torch.full, ([1, 128, 128], 2), True),
-            ("rand", torch.rand, ([1, 128, 128],), False),
-            ("rand_like", torch.rand_like, (torch.empty([1, 128, 128]),), False),
-            ("randint", torch.randint, (2, [1, 128, 128]), False),
-        ],
-        name_fn=lambda constructor_case: constructor_case[0],
-    )
-    def test_constructors_pin_memory(self, device, constructor_case, dynamic):
-        name, constructor, args, deterministic = constructor_case
-
-        def fn():
-            return constructor(*args, pin_memory=True, device="cpu")
-
-        compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
-        result, codes = run_and_get_code(compiled)
-        self.assertTrue(result.is_pinned())
-        code = "\n".join(codes)
-        if name == "tensor_constant" and not dynamic:
-            # Not 1-D, so it must stay a pinned constant rather than be inlined
-            self.assertIn("_tensor_constant0", code)
-        elif dynamic and name != "tensor_constant":
-            # Sizes and values come from a closure; check they weren't specialized
-            self.assertRegex(code, r"\bs\d+\b")
-        actual = result.to(device, non_blocking=True)
-        expected = fn().to(device)
-        if deterministic:
-            self.assertEqual(actual, expected)
-        else:  # random or uninitialized contents
-            self.assertEqual(actual.shape, expected.shape)
-            self.assertEqual(actual.dtype, expected.dtype)
-
-
-# MPS is left out: these tests were skipped on macOS as failing when they lived in
-# CommonTemplate.
+# Pinned memory is CPU memory, but pinning it needs an accelerator. Most cases
+# also compile a CPU kernel, so this needs a working C++ compiler.
 if HAS_CPU:
+    # Not based on this file's TestCase or InductorTestCase: generating each
+    # accelerator class calls its setUpClass at import time, to find its primary
+    # device, and their class-level config patches would then leak into every
+    # file that imports this one.
+    class PinMemoryTests(TorchTestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
+
+        def setUp(self):
+            super().setUp()
+            stack = contextlib.ExitStack()
+            self.addCleanup(stack.close)
+            # A constructor that loses its lowering must fail, not fall back
+            stack.enter_context(config.patch(implicit_fallbacks=False))
+            # A warm FX graph cache would hide changes to how Inductor compiles these
+            if (
+                os.environ.get("INDUCTOR_TEST_DISABLE_FRESH_CACHE") != "1"
+                and os.environ.get("TORCH_COMPILE_DEBUG") != "1"
+            ):
+                stack.enter_context(fresh_cache())
+
+        @parametrize("dynamic", [False, True])
+        @parametrize(
+            "constructor_case",
+            [
+                # (name, constructor, args, deterministic)
+                ("tensor_inline", torch.tensor, ([1, 2, 3],), True),
+                (
+                    "tensor_constant",
+                    torch.tensor,
+                    (torch.arange(16.0).view(1, 4, 4).tolist(),),
+                    True,
+                ),
+                ("empty", torch.empty, ([1, 128, 128],), False),
+                ("ones", torch.ones, ([1, 128, 128],), True),
+                ("zeros", torch.zeros, ([1, 128, 128],), True),
+                ("full", torch.full, ([1, 128, 128], 2), True),
+                ("rand", torch.rand, ([1, 128, 128],), False),
+                ("rand_like", torch.rand_like, (torch.empty([1, 128, 128]),), False),
+                ("randint", torch.randint, (2, [1, 128, 128]), False),
+            ],
+            name_fn=lambda constructor_case: constructor_case[0],
+        )
+        def test_constructors_pin_memory(self, device, constructor_case, dynamic):
+            name, constructor, args, deterministic = constructor_case
+
+            def fn():
+                return constructor(*args, pin_memory=True, device="cpu")
+
+            compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
+            result, codes = run_and_get_code(compiled)
+            self.assertTrue(result.is_pinned())
+            code = "\n".join(codes)
+            if dynamic:
+                # Skip the lines binding graph inputs and example inputs, which
+                # appear however the constructor itself was compiled.
+                binding = re.compile(r"\s*(int64_t )?(s\d+ = arg\d+_1|arg\d+_1 = )")
+                lines = code.splitlines()
+                body = "\n".join(line for line in lines if not binding.match(line))
+                if name == "tensor_constant":
+                    # The tensorify pass specializes the floats and restarts Dynamo,
+                    # so no symbols are left; update this if they ever stay symbolic.
+                    self.assertNotRegex(body, r"\b(s|zf)\d+\b")
+                else:
+                    self.assertRegex(body, r"\bs\d+\b")
+                    self.assertNotRegex(body, r"\b128L?, 128L?\b")
+            elif name == "tensor_constant":
+                # Not 1-D, so it must stay a pinned constant rather than be inlined
+                self.assertIn("_tensor_constant0", code)
+            elif name == "tensor_inline":
+                # 1-D with at most 8 elements, so it must be inlined
+                self.assertNotIn("_tensor_constant0", code)
+            actual = result.to(device, non_blocking=True)
+            expected = fn().to(device)
+            if deterministic:
+                self.assertEqual(actual, expected)
+            else:  # random or uninitialized contents
+                self.assertEqual(actual.shape, expected.shape)
+                self.assertEqual(actual.dtype, expected.dtype)
+
+    # Untested on MPS: in CommonTemplate these were skipped on macOS as failing,
+    # for reasons nobody diagnosed, so MPS stays out here too.
     instantiate_device_type_tests(
         PinMemoryTests, globals(), except_for="cpu", allow_xpu=True
     )
