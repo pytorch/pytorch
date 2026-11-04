@@ -230,6 +230,40 @@ def _tensor_layout_key(arg: Any, runtime_layout: bool) -> tuple[Any, ...]:
     return (tensor.dtype, tuple(tensor.shape), stride)
 
 
+class FlyDSLHostLauncher:
+    """Run a launcher that packs its own arguments and compiles on its first
+    call, such as the split backward's. That call compiles for the device's
+    arch into Inductor's FlyDSL cache; ``precompile`` only warms the cache."""
+
+    def __init__(self, launch: Callable[..., Any]) -> None:
+        self._launch = launch
+        self._compiled = False
+
+    def __call__(self, *args: Any, device: Any, **kwargs: Any) -> Any:
+        if self._compiled:
+            return self._launch(*args, **kwargs)
+        configure_flydsl_cache_dir()
+        with (
+            _compiled_cache_lock,
+            temporary_env({"FLYDSL_GPU_ARCH": _device_gpu_arch(device)}),
+        ):
+            result = self._launch(*args, **kwargs)
+        self._compiled = True
+        return result
+
+    def precompile(
+        self, *args: Any, flydsl_gpu_arch: str | None = None, **kwargs: Any
+    ) -> None:
+        updates: dict[str, str | None] = {
+            "COMPILE_ONLY": "1",
+            "FLYDSL_COMPILE_ONLY": "1",
+            "FLYDSL_GPU_ARCH": flydsl_gpu_arch,
+        }
+        configure_flydsl_cache_dir()
+        with _compiled_cache_lock, temporary_env(updates):
+            self._launch.compile(*args, **kwargs)  # type: ignore[attr-defined]
+
+
 def fill_flydsl_capture_table(
     launchers: Sequence[LazyFlyDSLLauncher],
     slots: int,

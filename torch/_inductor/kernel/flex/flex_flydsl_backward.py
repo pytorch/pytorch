@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 
 import logging
+import math
 from collections.abc import Sequence
 from typing import Any
 
@@ -42,19 +43,24 @@ from .common import (
     load_flex_template,
     maybe_realize,
 )
-from .flex_flash_attention import is_trivial_mask_graph
+from .flex_flash_attention import is_trivial_mask_graph, is_trivial_score_graph
 from .flex_flydsl_attention import (
     _bhsd_sizes,
     _BlockStates,
     _broadcast_kv_batch,
     _capture_table_reason,
+    _causal_block_mask_window,
     _ceil_div,
     _create_dense_metadata,
+    _expr,
+    _FLYDSL_DTYPES,
     _get_block_mask_metadata,
     _get_flydsl_common_config,
     _get_mask_program_config,
     _get_score_mod_config,
+    _get_supported_bhsd_stride,
     _head_dim_reason,
+    _is_gfx950_device,
     _is_runtime,
     _maybe_split_block_mask,
     _mod_inputs,
@@ -76,11 +82,24 @@ from .flex_flydsl_attention import (
 flex_flydsl_backward_template = FlyDSLFlexTemplate(
     name="flex_flydsl_backward", source=load_flex_template("flydsl_backward")
 )
+flex_flydsl_split_backward_template = FlyDSLFlexTemplate(
+    name="flex_flydsl_split_backward",
+    source=load_flex_template("flydsl_split_backward"),
+)
 
 aten = torch.ops.aten
 log = logging.getLogger(__name__)
 
 _METADATA_BLOCK_SIZE = 128
+_SPLIT_BACKWARD_MAX_HEAD_DIM = 512
+# Up to head dim 192, the fused backward is faster for decode-length queries
+# and for one 128-row Q block with at most this many (batch, head) rows, or
+# with one 128-row KV block and head dims the fused kernels take unpadded.
+_FUSED_SHORT_QUERY_MAX_HEAD_DIM = 192
+_FUSED_DECODE_QUERY_LEN = 16
+_FUSED_SHORT_QUERY_HEADS = 512
+# Buffer descriptors start at each (batch, head) slab and bound it in bytes.
+_MAX_SLAB_BYTES = 1 << 32
 # Inductor's sum over a short leading dim reads the partials uncoalesced; an
 # unrolled fp32 add is several times faster up to this many query batches.
 _MAX_UNROLLED_BATCH_SUM = 32
@@ -383,6 +402,210 @@ def _empty_gradient(source, size, *, dtype, device):
     )
 
 
+def _get_flydsl_split_backward_config(
+    query,
+    key,
+    value,
+    out,
+    grad_out,
+    *,
+    fw_subgraph,
+    mask_graph,
+    mask_mod_other_buffers,
+    block_mask,
+    sparse_q_block_size,
+    sparse_kv_block_size,
+    block_mask_is_dense,
+    trust_block_mask=False,
+    scale,
+) -> tuple[dict[str, Any] | None, str]:
+    """Gate the split dQ and dK/dV kernels: no score_mod, and no BlockMask or
+    ``create_block_mask``'s top-left causal one."""
+    if not _is_gfx950_device(query.get_device()):
+        return None, "requires gfx950"
+    if not is_trivial_score_graph(fw_subgraph.graph_module):
+        return None, "takes no score_mod"
+    dtype = query.get_dtype()
+    if dtype not in _FLYDSL_DTYPES or any(
+        node.get_dtype() != dtype for node in (key, value, out, grad_out)
+    ):
+        return None, "requires BF16 or FP16 Q/K/V/OUT/grad_out of one dtype"
+    try:
+        (b, h, sq, qk_dim), (bk, hk, sk, k_dim), (bv, hv, sv, v_dim) = (
+            _bhsd_sizes(node) for node in (query, key, value)
+        )
+        sparse_q_block_size, sparse_kv_block_size = (
+            V.graph.sizevars.guard_int(size)
+            for size in (sparse_q_block_size, sparse_kv_block_size)
+        )
+    except (AttributeError, TypeError, ValueError):
+        return None, "requires backed shapes"
+    if (bk, hk, sk) != (bv, hv, sv) or bk != b:
+        return None, "requires K/V with the Q batch and matching heads and lengths"
+    if k_dim != qk_dim or hk <= 0 or h % hk:
+        return None, "requires matching Q/K head dims and Q heads divisible by KV heads"
+    if max(qk_dim, v_dim) > _SPLIT_BACKWARD_MAX_HEAD_DIM:
+        return None, f"supports head dims up to {_SPLIT_BACKWARD_MAX_HEAD_DIM}"
+    sizevars = V.graph.sizevars
+    if max(qk_dim, v_dim) <= _FUSED_SHORT_QUERY_MAX_HEAD_DIM and (
+        sizevars.statically_known_leq(sq, _FUSED_DECODE_QUERY_LEN)
+        or (
+            sizevars.statically_known_leq(sq, 128)
+            and (
+                sizevars.statically_known_leq(b * h, _FUSED_SHORT_QUERY_HEADS)
+                or (
+                    sizevars.statically_known_leq(sk, 128)
+                    and kernel_head_dims(qk_dim, v_dim) == (qk_dim, v_dim)
+                )
+            )
+        )
+    ):
+        return None, "leaves short queries to the fused backward"
+    causal = not block_mask_is_dense
+    window = None
+    if causal and not trust_block_mask:
+        return (
+            None,
+            "requires explicit FLYDSL_SPLIT_BACKWARD=True for trusted causal block lists",
+        )
+    if causal:
+        if (
+            not mask_mod_other_buffers
+            and sparse_q_block_size == sparse_kv_block_size == 128
+        ):
+            causal, window = _causal_block_mask_window(
+                query, key, mask_graph, block_mask
+            )
+        else:
+            causal = False
+        if not causal:
+            return None, (
+                "takes a BlockMask only as create_block_mask's top-left causal "
+                "or causal sliding-window one"
+            )
+    from ..vendored_templates.flydsl.kernels.flex_attn_split_bwd_common import (
+        tile_width_for,
+    )
+
+    # Both head dims are zero-padded to one tile width: the kernels' masked
+    # D-tail paths are much slower than reading the zero columns.
+    return {
+        "NUM_HEADS": h,
+        "NUM_KV_HEADS": hk,
+        "HEAD_DIM": tile_width_for(max(qk_dim, v_dim)),
+        "LDS_BYTES": _target_limits(query).lds_bytes,
+        "DTYPE_STR": "bf16" if dtype == torch.bfloat16 else "f16",
+        "CAUSAL": causal,
+        # The split kernels' window keeps keys from ``q - WINDOW_LEFT`` up to ``q``.
+        "WINDOW_LEFT": None if window is None else window - 1,
+        "SM_SCALE": float(scale),
+    }, ""
+
+
+def _require_aligned_rows(node):
+    """``node``, copied to dense strides unless its head dim is unit-strided and
+    its B/H/S strides keep every row 16-byte aligned."""
+    stride = _get_supported_bhsd_stride(node)
+    if stride is not None and all(
+        V.graph.sizevars.statically_known_multiple_of(_expr(entry), 8)
+        for entry in stride[:3]
+    ):
+        return node
+    sizes = node.get_size()
+    return ExternKernel.require_exact_strides(
+        node, infer_dense_strides(sizes, node.get_stride())
+    )
+
+
+def _fits_slabs(nodes) -> bool:
+    """Whether every (batch, head) slab of ``nodes`` spans less than 4 GiB."""
+    for node in nodes:
+        size, stride = node.get_size(), node.get_stride()
+        slab = size[2] * stride[2] * torch._utils._element_size(node.get_dtype())
+        if V.graph.sizevars.guard_or_true(sympy.Ge(slab, _MAX_SLAB_BYTES)):
+            return False
+    return True
+
+
+def _split_backward_rows(out, grad_out, logsumexp, grad_logsumexp):
+    """Contiguous FP32 [B, H, Sq] ``rowsum(dO * O) - dLSE * log2(e)`` and the
+    forward's log2 LSE, as the split kernels take them."""
+    f32 = torch.float32
+    out, grad_out, logsumexp = (
+        node if isinstance(node, TensorBox) else TensorBox(node)
+        for node in (out, grad_out, logsumexp)
+    )
+    if grad_logsumexp is not None and not isinstance(grad_logsumexp, TensorBox):
+        grad_logsumexp = TensorBox(grad_logsumexp)
+    delta = lowerings[aten.sum](
+        lowerings[aten.mul](to_dtype(grad_out, f32), to_dtype(out, f32)), [-1]
+    )
+    if grad_logsumexp is not None:
+        delta = lowerings[aten.sub](
+            delta,
+            lowerings[aten.mul](to_dtype(grad_logsumexp, f32), 1 / math.log(2)),
+        )
+    lse = to_dtype(logsumexp, f32)
+    return maybe_realize([ExternKernel.require_contiguous(t) for t in (lse, delta)])
+
+
+def _create_flydsl_split_backward(
+    query, key, value, out, logsumexp, grad_out, grad_logsumexp, config
+):
+    sources = (query, key, value)
+    width = config["HEAD_DIM"]
+    batch_size, num_heads, seq_len_q, _ = query.get_size()
+    _, num_kv_heads, seq_len_kv, _ = value.get_size()
+    device, dtype = query.get_device(), query.get_dtype()
+    padded = [
+        _require_aligned_rows(_pad_head_dim(node, width))
+        for node in (query, key, value, grad_out)
+    ]
+    grad_query, grad_key, grad_value = (
+        _empty_gradient(
+            source, [batch_size, heads, length, width], dtype=dtype, device=device
+        )
+        for source, heads, length in (
+            (padded[0], num_heads, seq_len_q),
+            (padded[1], num_kv_heads, seq_len_kv),
+            (padded[2], num_kv_heads, seq_len_kv),
+        )
+    )
+    if not _fits_slabs((*padded, grad_query, grad_key, grad_value)):
+        return None, "requires every (batch, head) slab to be smaller than 4 GiB"
+    lse, delta = _split_backward_rows(out, grad_out, logsumexp, grad_logsumexp)
+    query, key, value, grad_out = maybe_realize(padded)
+    layout = FixedLayout(
+        device=device,
+        dtype=dtype,
+        size=grad_query.get_size(),
+        stride=[sympy.sympify(s) for s in grad_query.get_stride()],
+    )
+    input_nodes = [query, key, value, grad_out, lse, delta, grad_key, grad_value]
+    choices: list[Any] = []
+    error = flex_flydsl_split_backward_template.maybe_append_choice(
+        choices,
+        input_nodes=input_nodes,
+        layout=layout,
+        mutated_inputs=[grad_key, grad_value],
+        **config,
+    )
+    if not choices:
+        raise RuntimeError(f"FlyDSL split backward template failed: {error}")
+    grad_query, _ = autotune_select_algorithm(
+        "flex_flydsl_attention_backward",
+        choices,
+        input_nodes,
+        layout,
+        return_multi_template=False,
+    )
+    grad_query, grad_key, grad_value = (
+        _unpad_gradient(grad, source, V.graph.sizevars.guard_int(source.get_size()[-1]))
+        for grad, source in zip((grad_query, grad_key, grad_value), sources)
+    )
+    return (grad_query, grad_key, grad_value, tuple()), ""
+
+
 def create_flydsl_flex_attention_backward_kernel(
     query: TensorBox,
     key: TensorBox,
@@ -406,14 +629,18 @@ def create_flydsl_flex_attention_backward_kernel(
     fw_subgraph_buffer: Any = None,
     joint_outputs: Any = None,
     single_pass: bool = False,
+    split_backward: bool | None = None,
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple] | None:
-    """Create a FlyDSL backward kernel, or return None for Triton fallback."""
+    """Create a FlyDSL backward kernel, or return None for Triton fallback.
+    ``split_backward`` takes the split dQ and dK/dV kernels where they apply."""
     for name, option in (
         ("FLYDSL_DQ_ACCUM_FP32", dq_accum_fp32),
         ("FLYDSL_WIDE_SINGLE_PASS", single_pass),
     ):
         if not isinstance(option, bool):
             raise ValueError(f"FlyDSL {name} must be a bool")
+    if split_backward is not None and not isinstance(split_backward, bool):
+        raise ValueError("FlyDSL FLYDSL_SPLIT_BACKWARD must be a bool")
     if not runtime_available():
         _record_backward_fallback("FlyDSL runtime is unavailable")
         return None
@@ -459,6 +686,39 @@ def create_flydsl_flex_attention_backward_kernel(
             full_kv_indices,
         ]
     )
+    if split_backward is not False:
+        split_config, reason = _get_flydsl_split_backward_config(
+            query,
+            key,
+            value,
+            out,
+            grad_out,
+            fw_subgraph=fw_subgraph,
+            mask_graph=mask_graph,
+            mask_mod_other_buffers=mask_mod_other_buffers,
+            block_mask=(kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices),
+            sparse_q_block_size=sparse_q_block_size,
+            sparse_kv_block_size=sparse_kv_block_size,
+            block_mask_is_dense=block_mask_is_dense,
+            trust_block_mask=split_backward is True,
+            scale=scale,
+        )
+        if split_config is not None:
+            result, reason = _create_flydsl_split_backward(
+                query,
+                key,
+                value,
+                out,
+                logsumexp,
+                grad_out,
+                grad_logsumexp,
+                split_config,
+            )
+            if result is not None:
+                return result
+        (perf_hint_log.info if split_backward else log.debug)(
+            "FlyDSL split flex attention backward not used: %s", reason
+        )
     gradient_sources = (query, key, value)
     qk_dim, v_dim = (
         V.graph.sizevars.guard_int(node.get_size()[-1]) for node in (query, value)

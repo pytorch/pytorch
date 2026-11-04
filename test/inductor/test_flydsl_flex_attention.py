@@ -1255,6 +1255,15 @@ def _as_gfx950():
     )
 
 
+def _fused_backward():
+    """Route every FlyDSL backward to the fused template."""
+    return mock.patch.object(
+        flex_flydsl_backward,
+        "_get_flydsl_split_backward_config",
+        return_value=(None, "fused backward under test"),
+    )
+
+
 def _bottom_right_mask(seq_q, seq_kv, device, *, batch=1):
     return create_block_mask(
         lambda b, h, q, kv: q + seq_kv - seq_q >= kv,
@@ -1360,6 +1369,8 @@ def _spy_choices(fake_run=None, kinds=("forward", "backward")):
 
     with contextlib.ExitStack() as stack:
         stack.enter_context(_as_gfx950())
+        if "backward" in kinds:
+            stack.enter_context(_fused_backward())
         stack.enter_context(
             mock.patch.object(FlyDSLKernelWrapper, "run", fake_run or mock.DEFAULT)
         )
@@ -1573,6 +1584,35 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
             self.assertEqual(
                 flex_attn_utils.runtime_strides(strides, object(), 16), expected
             )
+
+    def test_gfx950_split_backward_row_descriptors(self):
+        if importlib.util.find_spec("flydsl") is None:
+            self.skipTest("requires FlyDSL")
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            flex_attn_split_bwd_dq as dq,
+        )
+
+        ctx = SimpleNamespace(
+            lse_tokens_i32=16384,
+            num_head_q=65536,
+            batch_idx=3,
+            q_head_idx=65535,
+            q_row_off=0,
+            LSE=object(),
+            Delta=object(),
+        )
+        with (
+            mock.patch.object(dq.fx, "Index", int),
+            mock.patch.object(dq.ops, "make_buffer_rsrc") as resource,
+        ):
+            dq.BwdDqKernelContext.init_row_inputs(ctx)
+        span = 16384 * 4
+        base = (3 * 65536 + 65535) * span
+        self.assertEqual(
+            [entry.args for entry in resource.call_args_list],
+            [(ctx.LSE, base, span), (ctx.Delta, base, span)],
+        )
+        self.assertEqual((ctx.row_base, ctx.row_oob_off), (0, 16384))
 
     @_subtests(
         "shape,stride,supported,metadata",
@@ -2301,6 +2341,7 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
         counters.clear()
         with (
             V.set_graph_handler(_fake_graph()),
+            _fused_backward(),
             mock.patch.object(
                 flex_flydsl_backward, "runtime_available", return_value=True
             ),
@@ -2352,6 +2393,7 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
         [
             ("dq_accum_fp32", "DQ_ACCUM_FP32"),
             ("single_pass", "FLYDSL_WIDE_SINGLE_PASS"),
+            ("split_backward", "FLYDSL_SPLIT_BACKWARD"),
         ],
     )
     def test_invalid_backward_bool_option(self, option, name):
@@ -2492,11 +2534,13 @@ class _FlyDSLFlexAttentionRuntimeMixin:
         reference_block_mask=None,
         reference_options=None,
         flydsl_options=None,
+        split=False,
     ):
         """``expand_kv`` expands a batch-1 K/V to the query batch in the graph;
         the Triton reference runs on ``reference_block_mask`` (else
         ``block_mask``) with kernel options ``reference_options``, FlyDSL with
-        ``flydsl_options``. FlyDSL uses the fused backward."""
+        ``flydsl_options``. FlyDSL takes the split backward with ``split``, else
+        the fused one."""
         torch.manual_seed(24)
         grad_output = torch.randn(
             *query.shape[:3], value.size(-1), device=query.device, dtype=query.dtype
@@ -2515,6 +2559,8 @@ class _FlyDSLFlexAttentionRuntimeMixin:
             selected_mask = block_mask
             if backend == "FLYDSL":
                 kernel_options["bwd_FLYDSL_DQ_ACCUM_FP32"] = dq_accum_fp32
+                if split is not None:
+                    kernel_options["FLYDSL_SPLIT_BACKWARD"] = split
                 kernel_options.update(flydsl_options or {})
             elif reference_block_mask is not None:
                 selected_mask = reference_block_mask
@@ -2570,6 +2616,8 @@ class _FlyDSLFlexAttentionRuntimeMixin:
         if (flydsl_options or {}).get("FLYDSL_SPLIT_KV"):
             self.assertIn("kv_splits=KV_SPLITS", code)
         self.assertRegex(backward_code, r"flydsl_fused_\w*flex_attention_backward_")
+        self.assertEqual("build_split_bwd_dq" in backward_code, bool(split))
+        self.assertEqual("build_split_bwd_dkdv" in backward_code, bool(split))
         self.assertNotIn("flydsl_fused_", reference_backward_code)
         if flydsl_options:
             self.assertEqual(
@@ -6054,6 +6102,212 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
             query, key, value, block_mask=block_mask, dq_accum_fp32=True
         )
 
+    @parametrize(
+        "shape,dims,causal,dtype",
+        [
+            subtest(
+                ((2, 4, 4, 512, 512), (128, 128), False, torch.bfloat16), name="d128"
+            ),
+            subtest(
+                ((2, 4, 4, 1000, 1000), (64, 64), True, torch.bfloat16),
+                name="d64_causal_ragged",
+            ),
+            subtest(
+                ((1, 8, 2, 700, 1300), (96, 96), True, torch.bfloat16),
+                name="d96_gqa_causal_long_kv",
+            ),
+            subtest(
+                ((1, 4, 1, 1300, 700), (128, 128), True, torch.float16),
+                name="mqa_causal_long_q_fp16",
+            ),
+            subtest(
+                ((1, 4, 2, 640, 384), (192, 128), False, torch.bfloat16),
+                name="qk192_v128",
+            ),
+            subtest(
+                ((1, 2, 2, 300, 300), (512, 512), False, torch.bfloat16), name="d512"
+            ),
+            subtest(
+                ((1, 4, 2, 1000, 1000), (128, 128), 300, torch.bfloat16),
+                name="d128_gqa_window_ragged",
+            ),
+        ],
+    )
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    def test_gfx950_split_backward(self, device, shape, dims, causal, dtype):
+        # An int ``causal`` is a sliding window's lookback.
+        self._require_runtime()
+        batch, q_heads, kv_heads, seq_q, seq_kv = shape
+        query, key, value = _make_qkv(
+            device=device,
+            batch=batch,
+            q_heads=q_heads,
+            kv_heads=kv_heads,
+            seq_q=seq_q,
+            seq_kv=seq_kv,
+            qk_dim=dims[0],
+            v_dim=dims[1],
+            seed=53,
+            dtype=dtype,
+        )
+        block_mask = mask_mod = None
+        if causal is True:
+
+            def mask_mod(b, h, q, kv):
+                return q >= kv
+
+        elif causal:
+
+            def mask_mod(b, h, q, kv):
+                return (q >= kv) & (q - kv < causal)
+
+        if causal:
+            block_mask = create_block_mask(
+                mask_mod, 1, 1, seq_q, seq_kv, device=device, BLOCK_SIZE=128
+            )
+        self._compare_backward(
+            query,
+            key,
+            value,
+            block_mask=block_mask,
+            dq_accum_fp32=True,
+            fp64_mask_mod=mask_mod,
+            split=True,
+        )
+
+    @parametrize("layout", ("transposed", "kv_expanded", "grad_lse"))
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    def test_gfx950_split_backward_layouts(self, device, layout):
+        self._require_runtime()
+        query, key, value = _make_qkv(
+            device=device,
+            batch=1 if layout == "kv_expanded" else 2,
+            q_heads=4,
+            kv_heads=2,
+            seq_q=640,
+            seq_kv=640,
+            seed=59,
+            transposed=layout == "transposed",
+        )
+        if layout == "kv_expanded":
+            query = query.expand(2, -1, -1, -1).contiguous()
+        self._compare_backward(
+            query,
+            key,
+            value,
+            block_mask=None,
+            dq_accum_fp32=True,
+            grad_lse=layout == "grad_lse",
+            expand_kv=layout == "kv_expanded",
+            split=True,
+        )
+
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    def test_gfx950_split_backward_dynamic_shapes(self, device):
+        self._require_runtime()
+        torch._dynamo.reset()
+        compiled = torch.compile(
+            lambda q, k, v: flex_attention(
+                q, k, v, enable_gqa=True, kernel_options={"BACKEND": "FLYDSL"}
+            ),
+            dynamic=True,
+            fullgraph=True,
+        )
+        codes = []
+        # 1001 query rows leave a partial 4-row group in the last Q block.
+        for batch, seq_q, seq_kv in ((1, 384, 512), (2, 1001, 777)):
+            query, key, value = (
+                t.requires_grad_()
+                for t in _make_qkv(
+                    device=device,
+                    batch=batch,
+                    q_heads=4,
+                    kv_heads=2,
+                    seq_q=seq_q,
+                    seq_kv=seq_kv,
+                    seed=61,
+                )
+            )
+            grad_output = torch.randn_like(query)
+            # Under dynamic shapes the backward may compile with the forward.
+            output, code = run_and_get_code(compiled, query, key, value)
+            grads, backward_code = run_and_get_code(
+                lambda: torch.autograd.grad(output, (query, key, value), grad_output)
+            )
+            codes += code + backward_code
+            expected = _attention_grads_fp64(
+                query, key, value, grad_output, lambda b, h, q, kv: q >= 0
+            )
+            for grad, expected_grad in zip(grads, expected):
+                error = (grad.double() - expected_grad).norm() / expected_grad.norm()
+                self.assertLess(error.item(), 0.005)
+        codes = "\n".join(codes)
+        self.assertIn("build_split_bwd_dq", codes)
+        self.assertNotIn("build_flex_attn_bwd_module", codes)
+
+    @parametrize(
+        "case",
+        ["score_mod", "causal_block_256", "document", "opted_out", "one_kv_block"],
+    )
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    def test_gfx950_split_backward_falls_back_to_fused(self, device, case):
+        self._require_runtime()
+        if case == "one_kv_block":
+            query, key, value = _make_qkv(
+                device=device, batch=128, q_heads=8, seq_q=128, qk_dim=64, v_dim=64
+            )
+        else:
+            query, key, value = _make_qkv(device=device, seed=67)
+        block_mask = score_mod = None
+        options = {}
+
+        def causal(b, h, q, kv):
+            return q >= kv
+
+        def two_documents(b, h, q, kv):
+            return (q >= kv) & ((q < 128) | (kv >= 128))
+
+        if case == "score_mod":
+
+            def score_mod(score, b, h, q, kv):
+                return score * 0.5
+
+        elif case in ("causal_block_256", "document"):
+            # Only an explicit opt-in reaches the BlockMask checks.
+            options["FLYDSL_SPLIT_BACKWARD"] = True
+            block_mask = create_block_mask(
+                two_documents if case == "document" else causal,
+                1,
+                1,
+                256,
+                256,
+                device=device,
+                BLOCK_SIZE=128 if case == "document" else 256,
+            )
+        elif case == "opted_out":
+            options["FLYDSL_SPLIT_BACKWARD"] = False
+        torch._dynamo.reset()
+        query.requires_grad_()
+        output, _ = run_and_get_code(
+            torch.compile(
+                lambda q, k, v: flex_attention(
+                    q,
+                    k,
+                    v,
+                    score_mod=score_mod,
+                    block_mask=block_mask,
+                    kernel_options={"BACKEND": "FLYDSL", **options},
+                )
+            ),
+            query,
+            key,
+            value,
+        )
+        _, backward_code = run_and_get_code(lambda: output.sum().backward())
+        backward_code = "\n".join(backward_code)
+        self.assertIn("build_flex_attn_bwd_module", backward_code)
+        self.assertNotIn("build_split_bwd_dq", backward_code)
+
     @parametrize("qk_dim", (128, 192))
     @torch._inductor.config.patch({"fx_graph_cache": False})
     def test_long_causal_dq_matches_fp64(self, device, qk_dim):
@@ -6081,7 +6335,7 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
                 k,
                 v,
                 block_mask=block_mask,
-                kernel_options={"BACKEND": "FLYDSL"},
+                kernel_options={"BACKEND": "FLYDSL", "FLYDSL_SPLIT_BACKWARD": True},
             ),
             fullgraph=True,
         )
@@ -6090,7 +6344,7 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
             lambda: torch.autograd.grad(output, query, grad_output)
         )
         self.assertIn("build_flex_attn_fwd_module", "\n".join(forward_code))
-        self.assertIn("build_flex_attn_bwd_module", "\n".join(backward_code))
+        self.assertIn("build_split_bwd_dq", "\n".join(backward_code))
         grad_query = gradients[0]
         reference = torch.empty_like(query, dtype=torch.float64)
         scale = qk_dim**-0.5
@@ -6405,6 +6659,11 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
                     if backend is None
                     else {
                         "BACKEND": backend,
+                        **(
+                            {"FLYDSL_SPLIT_BACKWARD": True}
+                            if backend == "FLYDSL"
+                            else {}
+                        ),
                     },
                 ),
                 fullgraph=True,
@@ -6424,7 +6683,7 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
         reference, _, _ = run("TRITON")
         golden, _, _ = run(None)
         self.assertIn("build_flex_attn_fwd_module", forward_code)
-        self.assertIn("build_flex_attn_bwd_module", backward_code)
+        self.assertIn("build_split_bwd_dq", backward_code)
         for gradient, expected, exact in zip(gradients, reference, golden):
             self._assert_close_to_fp64(gradient, expected, exact, atol=0.03, rtol=0.02)
 
@@ -6588,6 +6847,7 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
             value,
             block_mask=block_mask,
             dq_accum_fp32=True,
+            split=None,
         )
 
     @parametrize(
@@ -8185,9 +8445,16 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
                 *inputs,
             )
             self.assertIn("build_flex_attn_fwd_module", "\n".join(code))
-        _, backward_code = run_and_get_code(lambda: output.sum().backward())
+        # Only the fused backward repeats the forward's rounding of logits
+        # near 1e11, which keeps P <= 1; the split one runs moderate logits.
+        # Single-row queries take the fused backward regardless.
+        extreme = value >= 1024
+        with _fused_backward() if extreme else contextlib.nullcontext():
+            _, backward_code = run_and_get_code(lambda: output.sum().backward())
         self.assertIn(
-            "build_flex_attn_bwd_module",
+            "build_flex_attn_bwd_module"
+            if extreme or seq == 1
+            else "build_split_bwd_dq",
             "\n".join(backward_code),
         )
 

@@ -1000,6 +1000,10 @@ def flex_attention_backward(*args, **kwargs):
                 bool,
                 _flydsl_option(kernel_options, "bwd", "FLYDSL_WIDE_SINGLE_PASS", False),
             ),
+            split_backward=cast(
+                bool | None,
+                _flydsl_option(kernel_options, "bwd", "FLYDSL_SPLIT_BACKWARD", None),
+            ),
             **mod_kwargs,
         )
 

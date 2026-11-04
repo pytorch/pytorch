@@ -290,6 +290,16 @@ class FlexKernelOptions(TypedDict, total=False):
     ``create_block_mask`` builds for that mask_mod: edited or sparser block
     lists give different results. Default: False."""
 
+    FLYDSL_SPLIT_BACKWARD: NotRequired[bool]
+    """Use separate gfx950 dQ and dK/dV kernels ported from AOTriton for
+    identity score_mod, BF16/FP16 and head dims up to 512. Unset, use them only
+    without a BlockMask. True also allows BlockMasks whose mask_mod is
+    recognized as top-left causal or causal sliding-window. The split kernels
+    compute that mask from the mask_mod and do not read the block lists, so
+    True trusts them to be unchanged from create_block_mask: edited or sparser
+    lists give different results. False always uses the fused backward. Short
+    queries stay fused where faster. Default: unset."""
+
     FLYDSL_HEAD_SLOW_ORDER: NotRequired[bool]
     """Let FlyDSL forwards (``BACKEND="FLYDSL"``) without a BlockMask, or with a
     dense one, run long, many-headed grids in head-slow workgroup order to keep
