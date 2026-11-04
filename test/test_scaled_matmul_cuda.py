@@ -1883,7 +1883,7 @@ class TestFP8Matmul(TestCase):
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b, out_dtype=e4m3_type, use_fast_accum=True)
         self.assertEqual(out_fp8, out_fp8_s)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or (IS_WINDOWS and not torch.version.hip), f8_msg)
     @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
@@ -1911,7 +1911,7 @@ class TestFP8Matmul(TestCase):
             out_fp8.to(torch.float32), torch.full((M, N), K * (fill_value**2), device=device)
         )
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or (IS_WINDOWS and not torch.version.hip), f8_msg)
     @skipIfTorchDynamo("error message checks rely on eager exception types")
     def test_float8_error_messages(self, device) -> None:
         M, K, N = (1024, 512, 2048)
@@ -2019,7 +2019,7 @@ class TestFP8Matmul(TestCase):
             ):
                 e5m2()
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or (IS_WINDOWS and not torch.version.hip), f8_msg)
     @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("base_dtype", [torch.bfloat16, torch.float16, torch.float32])
     @parametrize("shapes", [
@@ -2092,7 +2092,7 @@ class TestFP8Matmul(TestCase):
         # fp32 output is now supported on both the cuBLAS and CUTLASS row-wise paths.
         test()
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or (IS_WINDOWS and not torch.version.hip), f8_msg)
     @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
     @parametrize("wrap_v2", [True, False])
