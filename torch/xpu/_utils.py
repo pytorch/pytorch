@@ -1,9 +1,72 @@
+import enum
+import functools
 from typing import Any
 
 import torch
 
 # The _get_device_index has been moved to torch.utils._get_device_index
 from torch._utils import _get_device_index as _torch_get_device_index
+from torch.types import Device
+
+
+class XPUCodename(enum.Enum):
+    PVC = "PVC"  # Intel® Data Center GPU Max Series
+    BMG = "BMG"  # Intel® Arc™ Pro Battlemage Graphics
+
+
+class XPUArch(enum.IntEnum):
+    Unknown = 0
+    Xe = 1  # Xe HPC
+    Xe2 = 2
+
+
+# device_id -> GPU codename
+# From https://github.com/intel/intel-graphics-compiler/blob/master/inc/common/igfxfmid.h
+_DEVICE_ID_TO_CODENAME = {
+    0x0BD0: XPUCodename.PVC,
+    0x0BD4: XPUCodename.PVC,
+    0x0BD5: XPUCodename.PVC,
+    0x0BD6: XPUCodename.PVC,
+    0x0BD7: XPUCodename.PVC,
+    0x0BD8: XPUCodename.PVC,
+    0x0BD9: XPUCodename.PVC,
+    0x0BDA: XPUCodename.PVC,
+    0x0BDB: XPUCodename.PVC,
+    0x0B69: XPUCodename.PVC,
+    0x0B6E: XPUCodename.PVC,
+    0xE202: XPUCodename.BMG,
+    0xE20B: XPUCodename.BMG,
+    0xE20C: XPUCodename.BMG,
+    0xE20D: XPUCodename.BMG,
+    0xE210: XPUCodename.BMG,
+    0xE211: XPUCodename.BMG,
+    0xE212: XPUCodename.BMG,
+    0xE215: XPUCodename.BMG,
+    0xE216: XPUCodename.BMG,
+    0xE220: XPUCodename.BMG,
+    0xE221: XPUCodename.BMG,
+    0xE222: XPUCodename.BMG,
+    0xE223: XPUCodename.BMG,
+}
+
+_CODENAME_TO_ARCH = {
+    XPUCodename.PVC: XPUArch.Xe,
+    XPUCodename.BMG: XPUArch.Xe2,
+}
+
+
+@functools.lru_cache(1)
+def get_xpu_codename(device: Device = None) -> XPUCodename | None:
+    device_id = torch.xpu.get_device_capability(device)["device_id"]
+    return _DEVICE_ID_TO_CODENAME.get(device_id)
+
+
+@functools.lru_cache(1)
+def get_xpu_arch(device: Device = None) -> XPUArch:
+    codename = get_xpu_codename(device)
+    if codename is None:
+        return XPUArch.Unknown
+    return _CODENAME_TO_ARCH.get(codename, XPUArch.Unknown)
 
 
 def _get_device_index(
