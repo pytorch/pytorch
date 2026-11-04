@@ -387,6 +387,10 @@ class OpsWrapper(DefaultHandler):
         index = OpsWrapper._unwrap(index)
         return _ops.indirect_indexing(index, size, check, wrap_neg)
 
+    @staticmethod
+    def register_jagged_range(bound, jagged_range):
+        return _ops.register_jagged_range(OpsWrapper._unwrap(bound), jagged_range)
+
 
 ops: OpsHandler[Any] = OpsWrapper()
 
