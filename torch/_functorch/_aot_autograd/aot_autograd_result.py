@@ -713,7 +713,38 @@ def deserialize_bundled_cache_entry(
     # TODO: this isn't exactly right, because cudagraphs needs to be a shared config
     # which is set by compile_fx. But in precompile, we never actually call compile_fx
     # so we don't have a place to track cudagraphs here.
-    cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
+    # A nested compile region's cudagraph opt-in belongs to the artifact, not to
+    # this process's config: a graph compiled for capture with the top level off
+    # got it from a region. One whose request was dropped asks too, so that
+    # post_compile reports the skip again. The backward's box is shared with the
+    # forward's only when both request capture, as in a fresh compile.
+    fw_result = entry.compiled_fw.result
+    region_requested_cudagraphs = (
+        isinstance(fw_result, CompiledFxGraph)
+        and (
+            fw_result.cudagraph_info is not None
+            or "cudagraphs_dropped_reason" in fw_result.fx_kwargs
+        )
+        and not fw_result.fx_kwargs.get("cudagraphs_top_level", True)
+    )
+    cudagraphs = BoxedBool(
+        torch._inductor.config.triton.cudagraphs or region_requested_cudagraphs
+    )
+    bw_result = entry.compiled_bw.result if entry.compiled_bw is not None else None
+    bw_requested = (
+        isinstance(bw_result, CompiledFxGraph)
+        and (
+            bw_result.compiled_with_cudagraphs
+            or "cudagraphs_dropped_reason" in bw_result.fx_kwargs
+        )
+        and (
+            torch._inductor.config.triton.cudagraphs
+            or not bw_result.fx_kwargs.get("cudagraphs_top_level", True)
+        )
+    )
+    backward_cudagraphs = (
+        cudagraphs if cudagraphs and bw_requested else BoxedBool(bw_requested)
+    )
     boxed_forward_device_index = BoxedDeviceIndex(None)
     # We need to make a clean copy of the cache entry
     # in case it needs to be serialized again
@@ -733,6 +764,7 @@ def deserialize_bundled_cache_entry(
             entry.sanitized_aot_config,
             {
                 "cudagraphs": cudagraphs,
+                "backward_cudagraphs": backward_cudagraphs,
                 "boxed_forward_device_index": boxed_forward_device_index,
             },
         )
