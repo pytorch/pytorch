@@ -201,27 +201,16 @@ def maybe_handle_backward_generation(
 
         def compiled_artifact(new_inputs: Sequence[InputType]) -> object:
             # Looked up per call: an AOTAutograd cache hit post-compiles the
-            # backward before the forward has run and created the manager.
+            # backward before the forward has run and created the manager. It is
+            # gone if the trees were reset since the forward ran.
             manager = torch._inductor.cudagraph_trees.get_manager(
                 device_index, create_if_none_exists=False
             )
-            if manager is None:
-                raise AssertionError("CUDAGraph manager must not be None")
-            manager.set_to_running_backward()
+            if manager is not None:
+                manager.set_to_running_backward()
             return compiled_graph_callable(new_inputs)
 
         compiled_graph.current_callable = compiled_artifact
-
-
-def _handle_uncaptured_backward_generation(
-    compiled_graph: CompiledFxGraph, graph_kwargs: _CompileFxKwargs
-) -> None:
-    # A backward compiled without cudagraphs (override_cudagraphs(bwd=False), a
-    # region opting out for its backward) still has to tell the cudagraph tree
-    # that its captured forward's backward is running.
-    boxed_forward_device_index = graph_kwargs.get("boxed_forward_device_index")
-    if boxed_forward_device_index is not None:
-        maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
 
 
 def prepare_cudagraph_post_compile(
@@ -373,6 +362,12 @@ def cudagraph_partition_post_compile(
         or compiled_graph.partition_maps is None
         or len(compiled_graph.partition_maps) == 0
     ):
+        if not compiled_graph.fx_kwargs.get("cudagraphs_top_level", True):
+            # Only nested regions asked for capture and none of them got it.
+            reason = ", ".join(cudagraph_fail_reasons) or "no region can be captured"
+            log_cudagraph_skip_and_bump_counter(
+                f"skipping cudagraphs requested by a nested compile region: {reason}"
+            )
         # cudagraphify is not called if there are no partitions
         BoxedBool.disable(cudagraphs)
         maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
@@ -568,6 +563,10 @@ class CompiledFxGraph(OutputCode):
     inductor_provenance_stack_traces_str: str | None
     kernel_free_cudagraph: bool
 
+    # Whether this graph was compiled with cudagraphs on; an AOTAutograd cache
+    # hit or a precompile load can post-compile it with a box that differs from
+    # the one it was compiled with.
+    compiled_with_cudagraphs: bool
     cudagraph_info: CudagraphCachedInfo | None
     partition_maps: list[GraphPartitionMap] | None
     has_uncaptured_partition: bool
@@ -667,6 +666,7 @@ class CompiledFxGraph(OutputCode):
         self.counter_deltas = counter_deltas
         self.guards_expr = None
         self.extern_libs_key = None
+        self.compiled_with_cudagraphs = bool(cudagraphs)
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
         self.has_uncaptured_partition = graph.has_uncaptured_partition
@@ -932,10 +932,26 @@ class CompiledFxGraph(OutputCode):
 
         handed_to_cudagraphs = False
         if cudagraphs:
+            if not self.compiled_with_cudagraphs:
+                # This graph never requested capture, or compile_fx_inner dropped
+                # a region-only request, so treat it like a fresh compile would,
+                # even if lowering recorded a disabled reason. Only a loader whose
+                # box is not the one this graph was compiled with gets here: an
+                # AOTAutograd cache hit (see CompilerConfigExtra.backward_cudagraphs)
+                # or a precompile load, for a backward sharing its forward's box or
+                # a forward whose request was dropped under cpp_wrapper/aot_mode.
+                # So leave that box alone and continue with a local one.
+                if reason := self.fx_kwargs.get("cudagraphs_dropped_reason"):
+                    log_cudagraph_skip_and_bump_counter(reason)
+                else:
+                    log.debug(
+                        "not capturing a graph that was compiled without cudagraphs"
+                    )
+                cudagraphs = BoxedBool(False)
             # It's possible that cudagraphs is enabled, but was disabled
             # during a previous compilation we're loading from the cache.
             # If so, we need to disable it on this new process too.
-            if self.disabled_cudagraphs_reason:
+            elif self.disabled_cudagraphs_reason:
                 if any(is_gpu(device) for device in self.device_types):
                     log_cudagraph_skip_and_bump_counter(
                         f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
@@ -943,14 +959,6 @@ class CompiledFxGraph(OutputCode):
                 else:
                     counters["inductor"]["cudagraph_skips"] += 1
                 BoxedBool.disable(cudagraphs)
-            elif self.cudagraph_info is None:
-                # Compiled with cudagraphs off: this graph never requested capture,
-                # so treat it like a fresh compile would. Only an AOTAutograd cache
-                # hit gets here, with a box that can be shared with the forward
-                # (see CompilerConfigExtra.backward_cudagraphs), so leave that box
-                # alone and continue with a local one.
-                log.debug("not capturing a graph that was compiled without cudagraphs")
-                cudagraphs = BoxedBool(False)
             else:
                 handed_to_cudagraphs = True
                 if is_backward:
@@ -989,10 +997,14 @@ class CompiledFxGraph(OutputCode):
                         constants.unwrap(self),
                         boxed_forward_device_index,
                     )
-        # The cudagraph post-compiles handle the backward generation themselves,
-        # including when they end up not capturing.
+        # A backward compiled without cudagraphs (override_cudagraphs(bwd=False),
+        # a region opting out for its backward) still has to tell the cudagraph
+        # tree that its captured forward's backward is running. The cudagraph
+        # post-compiles do this themselves, also when they end up not capturing.
         if not handed_to_cudagraphs and is_backward and policy is None:
-            _handle_uncaptured_backward_generation(self, graph_kwargs)
+            boxed_forward_device_index = graph_kwargs.get("boxed_forward_device_index")
+            if boxed_forward_device_index is not None:
+                maybe_handle_backward_generation(self, boxed_forward_device_index)
         inputs_to_check = self.inputs_to_check
         # cudagraphs could have been disabled from the earlier conditions
         # so we still need to realign inputs if that happens

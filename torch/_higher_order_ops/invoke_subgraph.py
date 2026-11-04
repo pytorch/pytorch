@@ -10,7 +10,7 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from operator import attrgetter
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -44,6 +44,11 @@ from torch.fx.immutable_collections import immutable_dict
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._debug_mode import DebugMode
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
+
+
+if TYPE_CHECKING:
+    from torch._inductor.cudagraph_utils import BoxedDeviceIndex
+    from torch._inductor.utils import BoxedBool
 
 
 invoke_subgraph_counter = 0
@@ -101,8 +106,8 @@ class OutputMetadata:
 
 @dataclass
 class _InvokeSubgraphCudagraphState:
-    forward_cudagraphs: Any = None
-    forward_device_index: Any = None
+    forward_cudagraphs: "BoxedBool | None" = None
+    forward_device_index: "BoxedDeviceIndex | None" = None
     forward_requested: bool = False
 
 
@@ -293,6 +298,9 @@ def _specialize_nested_region_configs_for_backward(
                 node.meta["custom"] = {
                     **custom,
                     "nested_region_config": backward_config,
+                    # Tells a check of this backward graph that the config was
+                    # set for the backward rather than inherited from the forward.
+                    "nested_region_config_from_bw_patches": True,
                 }
         retargeted = False
         for target, child in child_modules(module).items():
@@ -1658,9 +1666,10 @@ def invoke_subgraph_inductor_compile(
     # TODO: Do we need the post compile passes in _aot_stage2b_compile_forward_or_inference?
     # TODO: add a real serialize function for SerializableCompiledFunction like _cache_inference_info
     forward.serialize = SerializableCompiledFunction(forward, lambda: None)  # type: ignore[attr-defined]
-    # Strong reference that keeps this region's entry in the weak registry alive
-    # until the matching backward region compiles.
-    forward._cudagraph_state = cudagraph_state  # type: ignore[attr-defined]
+    if not is_backward and not is_inference:
+        # Keeps this region's entry in the weak registry alive as long as the
+        # compiled forward, for the backward regions that pair with it.
+        forward._cudagraph_state = cudagraph_state  # type: ignore[attr-defined]
     return AOTCompiledArtifact(forward)
 
 
