@@ -42,6 +42,20 @@ name: !{{ build_environment }}
   {%- endif %}
 {%- endfor %}
 
+{#- Every (image, tag prefix) pair the build/test/upload jobs pull from the registry
+    selected by get-docker-tag: all configs, not only the unified groups, so the
+    ROCm images (manywheel-build matrix) are covered too. get-docker-tag probes
+    and waits for exactly this list. -#}
+{%- set img = namespace(pairs=[]) %}
+{%- for cfg in build_configs %}
+  {%- if cfg['container_image'] %}
+    {%- set pair = [cfg['container_image'], cfg['container_image_tag_prefix']] %}
+    {%- if pair not in img.pairs %}
+      {%- set _ = img.pairs.append(pair) %}
+    {%- endif %}
+  {%- endif %}
+{%- endfor %}
+
 {#- Per-OS values that shape the build/test runner labels.
     s390x runners are self-hosted, register only with the bare `linux.s390x`
     label (no `lf.` prefix), and lack a host-level `docker` CLI compatible
@@ -200,17 +214,27 @@ jobs:
             # published this tree, else from ECR via the PR's ciflow/docker run.
             suffix="-$(git rev-parse HEAD:.ci/docker)"
             registry_host="308535385114.dkr.ecr.us-east-1.amazonaws.com/"
-{%- if ns.groups %}
-            # build-manywheel-images builds and pushes all variants together, so
-            # probe a single representative image. The tag API needs no login;
-            # any failure (404, outage) keeps the ECR path.
-            repo="pytorch/!{{ ns.groups[0]['configs'][0]['container_image'] }}"
-            tag="!{{ ns.groups[0]['configs'][0]['container_image_tag_prefix'] }}${suffix}"
-            if curl -fsS --retry 3 -o /dev/null "https://hub.docker.com/v2/repositories/${repo}/tags/${tag}"; then
-              echo "docker.io/${repo}:${tag} exists; using Docker Hub"
+{%- if img.pairs %}
+            # build-manywheel-images pushes each variant as its own job, so main
+            # may have published some variants of this tree but not others. Use
+            # Docker Hub only when every image this workflow pulls is there. The
+            # tag API needs no login; any failure (404, outage) keeps the ECR path.
+            images=(
+{%- for repo, prefix in img.pairs %}
+              "pytorch/!{{ repo }}:!{{ prefix }}${suffix}"
+{%- endfor %}
+            )
+            on_hub=true
+            for image in "${images[@]}"; do
+              if ! curl -fsS --retry 3 -o /dev/null "https://hub.docker.com/v2/repositories/${image%%:*}/tags/${image#*:}"; then
+                echo "docker.io/${image} not on Docker Hub; using ECR"
+                on_hub=false
+                break
+              fi
+            done
+            if [[ "${on_hub}" == true ]]; then
+              echo "Every builder image exists on Docker Hub; using Docker Hub"
               registry_host=""
-            else
-              echo "docker.io/${repo}:${tag} not on Docker Hub; using ECR"
             fi
 {%- endif %}
           elif [[ "${REF_TYPE}" == "tag" && "${REF_NAME}" == v* ]]; then
@@ -227,8 +251,8 @@ jobs:
       - name: Login to ECR
         if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') && steps.calc.outputs.docker_registry_host != '' }}
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-{%- if ns.groups %}
-      - name: Wait for content-addressed builder image in ECR
+{%- if img.pairs %}
+      - name: Wait for content-addressed builder images in ECR
         if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') && steps.calc.outputs.docker_registry_host != '' }}
         env:
           DOCKER_IMAGE_SUFFIX: ${{ steps.calc.outputs.docker_image_suffix }}
@@ -240,12 +264,14 @@ jobs:
           # build-manywheel-images pushes each variant as its own job, so wait for
           # every image this workflow pulls, not just the first one pushed.
           images=(
-{%- for g in ns.groups %}
-            "pytorch/!{{ g['configs'][0]['container_image'] }}:!{{ g['configs'][0]['container_image_tag_prefix'] }}-${tree_hash}"
+{%- for repo, prefix in img.pairs %}
+            "pytorch/!{{ repo }}:!{{ prefix }}-${tree_hash}"
 {%- endfor %}
           )
-          # Poll every 5 min, up to 60 min in total.
-          deadline=$(( SECONDS + 60 * 60 ))
+          # Poll every 5 min, up to 120 min in total. The images build in parallel;
+          # the slowest (CUDA, which builds NCCL from source) took up to ~60 min in
+          # build-manywheel-images recently, so 60 min left no margin.
+          deadline=$(( SECONDS + 120 * 60 ))
           for image in "${images[@]}"; do
             repo="${image%%:*}"
             tag="${image#*:}"
@@ -255,7 +281,7 @@ jobs:
                 --repository-name "${repo}" \
                 --image-ids imageTag="${tag}" >/dev/null 2>&1; do
               if (( SECONDS > deadline )); then
-                echo "ERROR: timed out (60 min) waiting for ${repo}:${tag} in ECR." >&2
+                echo "ERROR: timed out (120 min) waiting for ${repo}:${tag} in ECR." >&2
                 echo "Is build-manywheel-images / build-almalinux-images still running or did it fail?" >&2
                 exit 1
               fi

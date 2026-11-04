@@ -103,16 +103,29 @@ jobs:
             # published this tree, else from ECR via the PR's ciflow/docker run.
             suffix="-$(git rev-parse HEAD:.ci/docker)"
             registry_host="308535385114.dkr.ecr.us-east-1.amazonaws.com/"
-            # build-manywheel-images builds and pushes all variants together, so
-            # probe a single representative image. The tag API needs no login;
-            # any failure (404, outage) keeps the ECR path.
-            repo="pytorch/manylinux2_28-builder"
-            tag="cpu${suffix}"
-            if curl -fsS --retry 3 -o /dev/null "https://hub.docker.com/v2/repositories/${repo}/tags/${tag}"; then
-              echo "docker.io/${repo}:${tag} exists; using Docker Hub"
+            # build-manywheel-images pushes each variant as its own job, so main
+            # may have published some variants of this tree but not others. Use
+            # Docker Hub only when every image this workflow pulls is there. The
+            # tag API needs no login; any failure (404, outage) keeps the ECR path.
+            images=(
+              "pytorch/manylinux2_28-builder:cpu${suffix}"
+              "pytorch/manylinux2_28-builder:cuda13.2${suffix}"
+              "pytorch/manylinux2_28-builder:cuda13.4${suffix}"
+              "pytorch/manylinux2_28-builder:rocm10.0${suffix}"
+              "pytorch/manylinux2_28-builder:rocm10.1${suffix}"
+              "pytorch/manylinux2_28-builder:xpu${suffix}"
+            )
+            on_hub=true
+            for image in "${images[@]}"; do
+              if ! curl -fsS --retry 3 -o /dev/null "https://hub.docker.com/v2/repositories/${image%%:*}/tags/${image#*:}"; then
+                echo "docker.io/${image} not on Docker Hub; using ECR"
+                on_hub=false
+                break
+              fi
+            done
+            if [[ "${on_hub}" == true ]]; then
+              echo "Every builder image exists on Docker Hub; using Docker Hub"
               registry_host=""
-            else
-              echo "docker.io/${repo}:${tag} not on Docker Hub; using ECR"
             fi
           elif [[ "${REF_TYPE}" == "tag" && "${REF_NAME}" == v* ]]; then
             # Release candidate: pin the Docker Hub image.
@@ -128,7 +141,7 @@ jobs:
       - name: Login to ECR
         if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') && steps.calc.outputs.docker_registry_host != '' }}
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-      - name: Wait for content-addressed builder image in ECR
+      - name: Wait for content-addressed builder images in ECR
         if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') && steps.calc.outputs.docker_registry_host != '' }}
         env:
           DOCKER_IMAGE_SUFFIX: ${{ steps.calc.outputs.docker_image_suffix }}
@@ -143,10 +156,14 @@ jobs:
             "pytorch/manylinux2_28-builder:cpu-${tree_hash}"
             "pytorch/manylinux2_28-builder:cuda13.2-${tree_hash}"
             "pytorch/manylinux2_28-builder:cuda13.4-${tree_hash}"
+            "pytorch/manylinux2_28-builder:rocm10.0-${tree_hash}"
+            "pytorch/manylinux2_28-builder:rocm10.1-${tree_hash}"
             "pytorch/manylinux2_28-builder:xpu-${tree_hash}"
           )
-          # Poll every 5 min, up to 60 min in total.
-          deadline=$(( SECONDS + 60 * 60 ))
+          # Poll every 5 min, up to 120 min in total. The images build in parallel;
+          # the slowest (CUDA, which builds NCCL from source) took up to ~60 min in
+          # build-manywheel-images recently, so 60 min left no margin.
+          deadline=$(( SECONDS + 120 * 60 ))
           for image in "${images[@]}"; do
             repo="${image%%:*}"
             tag="${image#*:}"
@@ -156,7 +173,7 @@ jobs:
                 --repository-name "${repo}" \
                 --image-ids imageTag="${tag}" >/dev/null 2>&1; do
               if (( SECONDS > deadline )); then
-                echo "ERROR: timed out (60 min) waiting for ${repo}:${tag} in ECR." >&2
+                echo "ERROR: timed out (120 min) waiting for ${repo}:${tag} in ECR." >&2
                 echo "Is build-manywheel-images / build-almalinux-images still running or did it fail?" >&2
                 exit 1
               fi
