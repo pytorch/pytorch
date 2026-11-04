@@ -3155,6 +3155,24 @@ class GraphModule(torch.nn.Module):
                 out_test = compiled_f(view)
                 self.assertEqual(out_ref, out_test)
 
+    @parametrize("dynamic", [False, True])
+    def test_subclass_dtype_changing_views(self, dynamic):
+        def f(x):
+            return x * 2
+
+        compiled_f = torch.compile(
+            f, backend="aot_eager", fullgraph=True, dynamic=dynamic
+        )
+
+        c = TwoTensor(
+            torch.randn(4, 3, dtype=torch.cfloat), torch.randn(4, 3, dtype=torch.cfloat)
+        )
+        r = TwoTensor(torch.randn(4, 3, 2), torch.randn(4, 3, 2))
+        views = [c.real, c.imag, torch.view_as_real(c), torch.view_as_complex(r)]
+        for view in views:
+            torch._dynamo.reset()
+            self.assertEqual(f(view), compiled_f(view))
+
     @parametrize("dynamic", [True, False])
     def test_mark_static_with_subclass_desugaring(self, dynamic):
         from collections.abc import Callable
