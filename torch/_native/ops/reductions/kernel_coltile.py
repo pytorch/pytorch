@@ -98,7 +98,7 @@ def select_ordered_col_config(
         and dtype in (torch.float16, torch.bfloat16, torch.float32)
         and (partials > 1 or full_tiles)
     ):
-        cfg = OrderedColConfig(0, tile_columns=WARP, full_tiles=True)
+        cfg = OrderedColConfig(0, tile_columns=WARP, full_tiles=full_tiles)
     if (
         cfg is None
         or dtype not in (torch.float32, torch.bfloat16, torch.float16)
@@ -126,7 +126,7 @@ def select_ordered_col_config(
             cfg = cfg._replace(tile_columns=16, full_tiles=True)
         elif 32768 <= rows <= 131072 and 128 <= columns <= 257:
             width = WARP if partials >= 16 and columns == 257 else 16
-            cfg = OrderedColConfig(0, tile_columns=width, full_tiles=True)
+            cfg = cfg._replace(tile_columns=width, full_tiles=True)
         bf16_amax = dtype == torch.bfloat16 and trait_key == "amax"
         if bf16_amax and rows == 32768 and columns == 4096:
             cfg = cfg._replace(tile_columns=16)
