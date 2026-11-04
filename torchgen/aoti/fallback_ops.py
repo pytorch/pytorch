@@ -159,6 +159,7 @@ inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = 
     "aten.nanmedian.default": {},
     "aten.narrow.default": {},
     "aten.native_dropout.default": {},
+    "aten.native_layer_norm.default": {"since": "TORCH_VERSION_2_16_0"},
     "aten.nonzero.default": {},
     "aten.nonzero_static.default": {"since": "TORCH_VERSION_2_11_0"},
     "aten.normal_functional.default": {},
