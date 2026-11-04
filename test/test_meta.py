@@ -2848,6 +2848,79 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(f_result.stride(), expected.stride())
         self.assertEqual(f_result.dtype, expected.dtype)
 
+    def test_upsample_bicubic2d_aa_backward_meta_dynamic_shapes(self):
+        # The same channels-last contract under symbolic/dynamic sizes: the
+        # fake tensor keeps the stride it was created with, and the meta result
+        # must still agree with eager for a channels-last grad_output.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            ShapeEnv,
+            StatelessSymbolicContext,
+        )
+
+        input_size = [2, 3, 8, 8]
+        output_size = [16, 16]
+        fwd_op = torch.ops.aten._upsample_bicubic2d_aa.default
+        bwd_op = torch.ops.aten._upsample_bicubic2d_aa_backward.default
+        x = torch.randn(*input_size).to(memory_format=torch.channels_last)
+        grad_out = torch.randn_like(fwd_op(x, output_size, False)).to(
+            memory_format=torch.channels_last
+        )
+        expected = bwd_op(grad_out, output_size, input_size, False)
+
+        shape_env = ShapeEnv()
+        with (
+            FakeTensorMode(shape_env=shape_env) as fake_mode,
+            enable_python_dispatcher(),
+        ):
+            f_grad = fake_mode.from_tensor(
+                grad_out,
+                symbolic_context=StatelessSymbolicContext(
+                    dynamic_sizes=[
+                        DimDynamic.STATIC,
+                        DimDynamic.DYNAMIC,
+                        DimDynamic.DYNAMIC,
+                        DimDynamic.DYNAMIC,
+                    ],
+                    constraint_sizes=[None, None, None, None],
+                ),
+            )
+            f_result = bwd_op(
+                f_grad,
+                [f_grad.shape[2], f_grad.shape[3]],
+                input_size,
+                False,
+            )
+
+        self.assertEqual(f_result.shape, expected.shape)
+        self.assertEqual(f_result.stride(), expected.stride())
+        self.assertEqual(f_result.dtype, expected.dtype)
+        self.assertEqual(len(shape_env.guards), 0)
+
+    def test_upsample_bicubic2d_aa_backward_compiles_dynamic(self):
+        # #197622: with dynamic=True the backward used to fall back to the
+        # composite kernel and crash with isIntList(); this drives the real
+        # Dynamo path instead of the raw op, so a regression in either the
+        # registration or the compiled graph shows up here.
+        if not hasattr(torch, "compile"):
+            self.skipTest("torch.compile is not available")
+
+        def fn(x):
+            out = torch.nn.functional.interpolate(
+                x, size=(16, 16), mode="bicubic", antialias=True
+            )
+            return out.sum()
+
+        x = torch.randn(2, 3, 8, 8).to(memory_format=torch.channels_last)
+        compiled = torch.compile(fn, dynamic=True, backend="aot_eager")
+        result = compiled(x)
+        result.backward()
+
+        self.assertEqual(result.item(), fn(x).item())
+        self.assertIsNotNone(x.grad)
+        self.assertEqual(x.grad.stride(), x.stride())
+
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_upsample_bicubic2d_aa_backward_meta_channels_last(self):
         # The shared Python meta propagates grad_output's memory format while
