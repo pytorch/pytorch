@@ -62,7 +62,9 @@ if TYPE_CHECKING:
 MutatesArgs = tuple[str, ...] | Literal["unknown"]
 
 # The write set Dynamo gives a raw call (a host function called as in eager code, not
-# through wrap_cutedsl): every tensor argument.
+# through wrap_cutedsl): every tensor argument. With
+# torch._dynamo.config.capture_cutedsl_raw_calls = False, Dynamo graph-breaks on a raw
+# call instead.
 RAW_CALL_MUTATES_ARGS: MutatesArgs = "unknown"
 
 
@@ -588,23 +590,29 @@ def _rows_disjoint(a: Tensor, b: Tensor) -> bool:
 
 
 def _may_overlap(a: Tensor, b: Tensor) -> bool:
-    """Whether two tensors may share memory: the same tensor, or two on one storage
-    that compute_overlapping_tensors, which reinplacing uses too, does not find
-    disjoint (with _rows_disjoint agreeing for 2-D views with contiguous rows of one
-    stride). It guards on the symbolic sizes it compares, and a size it cannot guard
-    on (an unbacked one) counts as an overlap. It counts offsets and strides in
+    """Whether two tensors may share memory. A tensor known to be empty
+    (statically_known_true, which neither guards nor raises) shares memory with no
+    tensor, not even itself. Otherwise the same tensor does, and so do two on one
+    storage that compute_overlapping_tensors, which reinplacing uses too, does not
+    find disjoint (with _rows_disjoint agreeing for 2-D views with contiguous rows of
+    one stride). It guards on the symbolic sizes it compares, and a size it cannot
+    guard on (an unbacked one) counts as an overlap. It counts offsets and strides in
     elements, so views of one storage with different element sizes are compared by
     their byte ranges instead, without guards (statically_known_true)."""
-    if a is b:
-        return True
-    if not _same_storage(a, b):
-        return False
     from torch._C._dynamo.guards import compute_overlapping_tensors
     from torch.fx.experimental.symbolic_shapes import (
         GuardOnDataDependentSymNode,
         statically_known_true,
     )
 
+    # An empty tensor overlaps nothing, not even itself, though its byte range below
+    # need not be empty: a (5, 0) view with row stride s spans 4 * s elements.
+    if statically_known_true(a.numel() == 0) or statically_known_true(b.numel() == 0):
+        return False
+    if a is b:
+        return True
+    if not _same_storage(a, b):
+        return False
     if a.element_size() == b.element_size():
         try:
             if compute_overlapping_tensors([a, b]):
@@ -621,7 +629,8 @@ def _may_overlap(a: Tensor, b: Tensor) -> bool:
             return True
 
     def byte_range(t: Tensor) -> tuple[Any, Any]:
-        # Exact unless t is empty, and an empty tensor overlaps nothing.
+        # Exact unless t is empty, which it can be here only if that is not
+        # statically known: its range then errs toward an overlap.
         start = t.storage_offset() * t.element_size()
         last = sum((n - 1) * s for n, s in zip(t.shape, t.stride()))
         return start, start + (last + 1) * t.element_size()
@@ -647,7 +656,11 @@ def check_written_args_disjoint(
     ``wrapped``. Functional tensors that alias share a storage; where their
     unwrapped values do not, functionalization copied the views
     (torch.func.functionalize with remove="mutations_and_views"), and the copies do
-    not show where the views sit, so they count as overlapping."""
+    not show where the views sit, so they count as overlapping, unless one of them
+    is known to be empty: a tensor known to be empty overlaps nothing (_may_overlap),
+    and the copy of an empty view is empty too."""
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
     for i, later in enumerate(written):
         for earlier in written[:i]:
             a, b = kwargs[earlier], kwargs[later]
@@ -655,7 +668,11 @@ def check_written_args_disjoint(
             if _may_overlap(a, b):
                 problem = "are the same tensor or views that may overlap"
                 fix = "Pass tensors that do not overlap."
-            elif aliases and not _same_storage(a, b):
+            elif (
+                aliases
+                and not _same_storage(a, b)
+                and not any(statically_known_true(t.numel() == 0) for t in (a, b))
+            ):
                 problem = (
                     "are views of one tensor, which functionalization with "
                     'remove="mutations_and_views" copied, so PT2 cannot tell whether '
@@ -800,7 +817,8 @@ class CuteDSLHOPifier(UserKernelHOPifier):
     HOP. A raw call is written as for eager, with ``from_dlpack(t)`` for each tensor
     and ``cutlass.torch.current_stream()`` for the stream; it is captured as the call
     of ``wrap_cutedsl(fn, mutates_args=RAW_CALL_MUTATES_ARGS)`` with the torch
-    tensors and no stream.
+    tensors and no stream (unless ``torch._dynamo.config.capture_cutedsl_raw_calls``
+    is False).
 
     2. For make_fx and non-strict export, which cannot see a raw call, wrap_cutedsl
     returns a TraceableCuteDSLKernelWrapper, whose calls TracingCuteDSLHOPifier turns
@@ -812,15 +830,18 @@ class CuteDSLHOPifier(UserKernelHOPifier):
     kernel, so symbolic values for them are specialized; tensors and scalars are
     kernel arguments (see CuteDSLHostFnInfo).
 
-    Every mistake of the user's (a write set, host function or call that PT2 cannot
-    take) goes through raise_user_error as a TypeError or ValueError naming the
-    kernel and any parameter involved: the one CuteDSLKernel or the eager launch
-    raises for the same mistake, where they check it.
+    Every mistake of the user's that it finds (a write set, host function or call
+    that PT2 cannot take) goes through raise_user_error (see UserKernelHOPifier) as
+    a TypeError or ValueError naming the kernel and any parameter involved: the one
+    CuteDSLKernel or the eager launch raises for the same mistake, where they check
+    it. What a wrapper refuses in a call (bind_call and bind_args, and for a raw call
+    its host function, see unwrap_raw_args) goes there through raise_wrapper_error,
+    which DynamoCuteDSLHOPifier makes refuse a raw call as unsupported instead: eager
+    CuTeDSL may run a raw call that its wrapper refuses. What wrap_cutedsl cannot
+    wrap (a function that is not ``@cute.jit``, a bound ``@cute.jit`` method, a
+    kernel object) it refuses itself, with a TypeError it raises before any HOPifier
+    is involved.
     """
-
-    def raise_user_error(self, exc: TypeError | ValueError) -> Never:
-        """Refuse a write set, host function or call with ``exc``."""
-        raise NotImplementedError("abstract method")
 
     def is_tensor(self, val: Any) -> bool:
         raise NotImplementedError("abstract method")
@@ -857,6 +878,15 @@ class CuteDSLHOPifier(UserKernelHOPifier):
         """The wrapper a raw call of ``variable`` is captured through:
         ``wrap_cutedsl(variable.kernel, mutates_args=RAW_CALL_MUTATES_ARGS)``."""
         raise NotImplementedError("abstract method")
+
+    def raise_wrapper_error(self, variable: Any, exc: TypeError | ValueError) -> Never:
+        """Refuse a call of ``variable`` with ``exc``, what the eager call of a wrapper
+        raises for it (a host function PT2 cannot launch, a call that does not bind
+        to it, a constant the side table's walk refuses): a user error (see
+        raise_user_error). Dynamo checks a raw call as the call of its wrapper (see
+        wrap_raw), and DynamoCuteDSLHOPifier refuses it as unsupported instead, since
+        eager CuTeDSL may run the raw call."""
+        self.raise_user_error(exc)
 
     def call_HOP(  # type: ignore[no-untyped-def]
         self,
@@ -932,22 +962,23 @@ class CuteDSLHOPifier(UserKernelHOPifier):
             by_keyword = info.params[info.stream_index + 1 : len(args) + 1]
             if by_keyword:
                 msg += f"; pass {', '.join(map(repr, by_keyword))} by keyword"
-            self.raise_user_error(TypeError(msg))
+            self.raise_wrapper_error(variable, TypeError(msg))
         combined_args = dict(zip(info.params, args))
         for key, val in kwargs.items():
             if key in combined_args:
-                self.raise_user_error(
+                self.raise_wrapper_error(
+                    variable,
                     TypeError(
                         f"CuTeDSL kernel {name}: got multiple values for argument "
                         f"{key!r}"
-                    )
+                    ),
                 )
             combined_args[key] = val
 
         try:
             info.check_call(name, combined_args)
         except TypeError as e:
-            self.raise_user_error(e)
+            self.raise_wrapper_error(variable, e)
 
         # PT2 can only functionalize a tensor that the call passes: a written
         # parameter takes a tensor, or None for an optional tensor that the call
@@ -957,34 +988,37 @@ class CuteDSLHOPifier(UserKernelHOPifier):
             if key in combined_args:
                 continue
             if isinstance(default, Tensor):
-                self.raise_user_error(_tensor_default_error(name, key))
+                self.raise_wrapper_error(variable, _tensor_default_error(name, key))
             if key in written and default is not None:
-                self.raise_user_error(
+                self.raise_wrapper_error(
+                    variable,
                     ValueError(
                         f"CuTeDSL kernel {name}: mutates_args names parameter {key!r}, "
                         "which takes a tensor or None, but the call leaves it to its "
                         f"default, of type {type(default).__name__}"
-                    )
+                    ),
                 )
         for key, val in combined_args.items():
             if self.is_tensor(val):
                 if key in info.constexpr_params or key in info.numeric_params:
-                    self.raise_user_error(_scalar_param_error(name, key))
+                    self.raise_wrapper_error(variable, _scalar_param_error(name, key))
                 continue
             val_type = self.python_type(val)
             if is_dsl_runtime_object(val_type):
-                self.raise_user_error(
+                self.raise_wrapper_error(
+                    variable,
                     TypeError(
                         f"CuTeDSL kernel {name}: parameter {key!r} got a "
                         f"{val_type.__name__}: {_DSL_RUNTIME_OBJECT_FIX}"
-                    )
+                    ),
                 )
             if key in written and val_type is not type(None):
-                self.raise_user_error(
+                self.raise_wrapper_error(
+                    variable,
                     TypeError(
                         f"CuTeDSL kernel {name}: mutates_args names parameter {key!r}, "
                         f"which takes a tensor or None, not {val_type.__name__}"
-                    )
+                    ),
                 )
         return combined_args
 
@@ -1007,7 +1041,7 @@ class CuteDSLHOPifier(UserKernelHOPifier):
                 leaves = self.leaves(val)
             except (TypeError, ValueError) as e:
                 msg = f"CuTeDSL kernel {info.name}: parameter {key!r}: {e}"
-                self.raise_user_error(type(e)(msg))
+                self.raise_wrapper_error(variable, type(e)(msg))
             is_container = not (len(leaves) == 1 and leaves[0] is val)
             if key in info.constexpr_params or is_container:
                 # The DSL bakes a Constexpr argument into the compiled kernel, and a
@@ -1027,12 +1061,18 @@ class CuteDSLHOPifier(UserKernelHOPifier):
         """A raw call's arguments, by name, as its wrapper takes them: each
         ``from_dlpack(t)`` as ``t``, and no stream. The stream has to be
         ``cutlass.torch.current_stream()`` read on the stream current at the call,
-        because the wrapper launches on that stream. A call that eager CuTeDSL
-        refuses too (one that does not bind, or with a torch.Tensor for a parameter)
-        is a user error (see raise_user_error)."""
+        because the wrapper launches on that stream. A call that does not bind, or
+        that passes a torch.Tensor for a parameter, is a user error (see
+        raise_user_error), as eager CuTeDSL refuses it too; a host function that PT2
+        cannot launch, which eager CuTeDSL may run, is refused as the wrapper refuses
+        it (see raise_wrapper_error), as is anything else the wrapper refuses (see
+        bind_args), whether eager CuTeDSL refuses it too or not."""
         kernel = variable.kernel
         name = cutedsl_kernel_name(kernel)
-        info = self.host_fn_info(kernel)
+        try:
+            info = get_host_fn_info(kernel)
+        except ValueError as e:
+            self.raise_wrapper_error(variable, e)
         if len(args) > len(info.params):
             self.raise_user_error(
                 TypeError(
@@ -1113,18 +1153,10 @@ class CuteDSLHOPifier(UserKernelHOPifier):
 
 
 class TracingCuteDSLHOPifier(CuteDSLHOPifier):
-    def raise_unsupported(self, msg: str) -> Never:
-        # The UserKernelHOPifier interface's: what this path refuses is a mistake of
-        # the user's (raise_user_error).
-        raise RuntimeError(msg)
-
     def raise_user_error(self, exc: TypeError | ValueError) -> Never:
         # from None: where exc is an error caught, or one that translates it,
         # chaining would print its message twice.
         raise exc from None
-
-    def get_value(self, val: Any) -> Any:
-        return val
 
     def is_tensor(self, val: Any) -> bool:
         return isinstance(val, Tensor)
@@ -1181,7 +1213,11 @@ tracing_cutedsl_hopifier_singleton = TracingCuteDSLHOPifier()
 
 class TraceableCuteDSLKernelWrapper:
     """What wrap_cutedsl returns: calling it launches the host function eagerly, or
-    records a cutedsl_kernel_wrapper_mutation node under make_fx / non-strict export."""
+    records a cutedsl_kernel_wrapper_mutation node under make_fx / non-strict export.
+    Dynamo captures a call of it as that node too (see CuteDSLKernelVariable), and so
+    the call of this __call__ in the override of a subclass (super().__call__(...)),
+    through the Dynamo branch below; a call that Dynamo refuses graph-breaks, and
+    runs eagerly unless fullgraph=True or strict export refuses it."""
 
     kernel: Callable[..., Any]
     mutates_args: MutatesArgs
@@ -1192,7 +1228,21 @@ class TraceableCuteDSLKernelWrapper:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         from torch._library.triton import is_wrap_triton_enabled
+        from torch.compiler import is_dynamo_compiling
 
+        if (
+            is_dynamo_compiling()
+            and type(self).__call__ is not TraceableCuteDSLKernelWrapper.__call__
+        ):
+            # Dynamo captures a call of a wrapper itself (see CuteDSLKernelVariable),
+            # but traces an instance of a subclass that overrides __call__ as any
+            # object, so that the override runs, and gets here when the override
+            # calls this method (super().__call__(...)): the call is captured as that
+            # of a wrapper of the instance's host function and write set.
+            from torch._library.cutedsl import wrap_cutedsl
+
+            wrapper = wrap_cutedsl(self.kernel, mutates_args=self.mutates_args)
+            return wrapper(*args, **kwargs)
         if is_wrap_triton_enabled():
             return tracing_cutedsl_hopifier_singleton.call_cutedsl_kernel(
                 self, args, kwargs, None
