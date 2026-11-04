@@ -75,6 +75,7 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss_tensor(
 
 #include <ATen/hip/HIPContext.h>
 #include <c10/hip/HIPStream.h>
+#include <c10/hip/HIPGraphsC10Utils.h>
 #include <c10/hip/HIPException.h>
 #include <c10/util/irange.h>
 
@@ -185,6 +186,8 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
   std::vector<int> input_lengths(input_lengths_.begin(), input_lengths_.end());
   std::vector<int> target_lengths(target_lengths_.begin(), target_lengths_.end());
 
+  // See Note [MIOpen calls during HIP graph capture]
+  c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{hipStreamCaptureModeRelaxed};
   miopenHandle_t handle = getMiopenHandle();
   miopenCTCLossDescriptor_t ctc_desc;
   MIOPEN_CHECK(miopenCreateCTCLossDescriptor(&ctc_desc));
