@@ -8,7 +8,12 @@ from torch.testing._internal.common_quantized import (
     from_blocked_format,
     to_mxfp,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.mxfp8_test_utils import (
     assert_mxfp8_semantics,
     make_f32_to_e8m0_rceil_cases,
@@ -17,6 +22,8 @@ from torch.testing._internal.mxfp8_test_utils import (
 
 
 class TestMXFP8ReferenceNumerics(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_f32_to_e8m0_rceil(self, device):
         # copied from
         # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/test/prototype/mx_formats/test_mx_tensor.py#L113
