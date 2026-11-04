@@ -98,6 +98,10 @@ if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_
     # https://github.com/pytorch/pytorch/issues/149422
     python /pytorch/.ci/pytorch/smoke_test/check_gomp.py
   fi
+elif [[ "\$GPU_ARCH_TYPE" != *s390x* && "$PACKAGE_TYPE" != libtorch ]]; then
+  # XPU and ROCm wheels skip the full smoke test; still check that they link the
+  # MKL that has the LAPACK DLASD2 fix (a build without MKL has nothing to check)
+  python /pytorch/.ci/pytorch/smoke_test/smoke_test.py --mkl-version-only
 fi
 
 # Clean temp files

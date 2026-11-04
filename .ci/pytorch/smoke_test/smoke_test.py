@@ -699,6 +699,31 @@ def _mkl_version() -> tuple[int, int] | None:
     return (int(match[1]), int(match[2])) if match else None
 
 
+def check_mkl_version() -> tuple[int, int] | None:
+    """Fail if PyTorch is linked with an MKL older than 2026.2, which has the LAPACK
+    DLASD2 bug (https://github.com/pytorch/pytorch/issues/202596).
+
+    Returns the version, or None for a build without MKL (nothing to check).
+    """
+    if not torch.backends.mkl.is_available():
+        return None
+    mkl_version = _mkl_version()
+    if mkl_version is None:
+        # Every build with MKL prints it, so a missing line means the format changed.
+        raise RuntimeError(
+            "PyTorch is built with MKL but torch.__config__.show() has no MKL "
+            "version line to check"
+        )
+    if mkl_version < (2026, 2):
+        raise RuntimeError(
+            f"PyTorch is linked with MKL {mkl_version[0]}.{mkl_version[1]}, which has "
+            "the LAPACK DLASD2 bug (fixed in MKL 2026.2): torch.linalg.svd can fail "
+            "on well-conditioned matrices"
+        )
+    print(f"MKL {mkl_version[0]}.{mkl_version[1]}: has the LAPACK DLASD2 fix")
+    return mkl_version
+
+
 def test_linalg_svd_dlasd2() -> None:
     """Regression test for https://github.com/pytorch/pytorch/issues/202596
 
@@ -717,19 +742,7 @@ def test_linalg_svd_dlasd2() -> None:
     print("Testing smoke_test_linalg_svd_dlasd2")
     # The numeric reproducer below can pass with an affected MKL, because it
     # depends on rounding, so check the version directly as well.
-    mkl_version = _mkl_version()
-    if mkl_version is None:
-        # Every build with MKL prints it, so a missing line means the format changed.
-        raise RuntimeError(
-            "PyTorch is built with MKL but torch.__config__.show() has no MKL "
-            "version line to check"
-        )
-    if mkl_version < (2026, 2):
-        raise RuntimeError(
-            f"PyTorch is linked with MKL {mkl_version[0]}.{mkl_version[1]}, which has "
-            "the LAPACK DLASD2 bug (fixed in MKL 2026.2): torch.linalg.svd can fail "
-            "on well-conditioned matrices"
-        )
+    mkl_version = check_mkl_version()
     A = _inv_eps(158.05)
     num_threads = torch.get_num_threads()
     torch.set_num_threads(1)
@@ -739,8 +752,8 @@ def test_linalg_svd_dlasd2() -> None:
         except torch.linalg.LinAlgError as e:
             raise RuntimeError(
                 "torch.linalg.svd failed on a well-conditioned matrix with MKL "
-                f"{mkl_version[0]}.{mkl_version[1]}, which should have the LAPACK "
-                f"DLASD2 fix (2026.2) -- the bug is still there or has come back. {e}"
+                f"{mkl_version}, which should have the LAPACK DLASD2 fix (2026.2): "
+                f"the bug is still there or has come back. {e}"
             ) from e
     finally:
         torch.set_num_threads(num_threads)
@@ -909,6 +922,11 @@ def smoke_test_modules(package: str):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--mkl-version-only",
+        help="Only check that the MKL PyTorch is linked with has the LAPACK DLASD2 fix",
+        action="store_true",
+    )
+    parser.add_argument(
         "--package",
         help="Package to include in smoke testing",
         type=str,
@@ -942,6 +960,11 @@ def parse_args():
 def main() -> None:
     options = parse_args()
     print(f"torch: {torch.__version__}")
+    if options.mkl_version_only:
+        # For wheel types whose tests skip the rest of this file (XPU, ROCm) or
+        # that run no GPU job (Windows CPU).
+        check_mkl_version()
+        return
     print(torch.__config__.parallel_info())
     # All PyTorch binary builds should be built with OpenMP
     if not torch.backends.openmp.is_available():
