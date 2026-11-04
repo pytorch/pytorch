@@ -21330,7 +21330,6 @@ class PinMemoryTests(TestCase):
         [
             # (name, constructor, args, deterministic)
             ("tensor_inline", torch.tensor, ([1, 2, 3],), True),
-            # Not 1-D, so a static compile keeps it as a constant instead of inlining it
             (
                 "tensor_constant",
                 torch.tensor,
@@ -21348,13 +21347,17 @@ class PinMemoryTests(TestCase):
         name_fn=lambda constructor_case: constructor_case[0],
     )
     def test_constructors_pin_memory(self, device, constructor_case, dynamic):
-        _, constructor, args, deterministic = constructor_case
+        name, constructor, args, deterministic = constructor_case
 
         def fn():
             return constructor(*args, pin_memory=True, device="cpu")
 
-        result = torch.compile(fn, fullgraph=True, dynamic=dynamic)()
+        compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
+        result, code = run_and_get_code(compiled)
         self.assertTrue(result.is_pinned())
+        if name == "tensor_constant" and not dynamic:
+            # Not 1-D, so it must stay a pinned constant rather than be inlined
+            self.assertIn("_tensor_constant0", "\n".join(code))
         actual = result.to(device, non_blocking=True)
         expected = fn().to(device)
         if deterministic:
