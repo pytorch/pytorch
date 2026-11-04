@@ -295,13 +295,3 @@ The distributed autograd design note covers the design of the RPC-based distribu
 The RRef design note covers the design of the {ref}`rref` (Remote REFerence) protocol used to refer to values on remote workers by the framework.
 
 -  {ref}`remote-reference-protocol`
-
-## Tutorials
-
-The RPC tutorials introduce users to the RPC framework, provide several example applications
-using {ref}`torch.distributed.rpc<distributed-rpc-framework>` APIs, and demonstrate how
-to use [the profiler](https://pytorch.org/docs/stable/autograd.html#profiler) to profile RPC-based workloads.
-
--  [Implementing a Parameter Server using Distributed RPC Framework](https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html)
--  [Combining Distributed DataParallel with Distributed RPC Framework](https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html) (covers **RemoteModule** as well)
--  [Implementing batch RPC processing](https://pytorch.org/tutorials/intermediate/rpc_async_execution.html)
