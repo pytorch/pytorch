@@ -180,10 +180,10 @@ class BenchmarkJob:
         """Warm, then measure.
 
         The first call is where TunableOp does its compile-time-only work, and
-        folding that into the average reports it as the kernel's cost: on a
-        3072x1894x242432 addmm it took aten from 3.5 ms to 7.45 ms and lost the
-        autotune race to a 4.71 ms triton kernel, while the solution just recorded
-        ran in 2.9 ms.
+        timing it reports that work as the kernel's cost: on a 3072x1894x242432
+        addmm aten came back at 7.45 ms and lost to a 4.71 ms triton kernel,
+        while the solution just recorded ran in 2.9 ms. Observed, not derived:
+        how the cost survives the benchmarker's own warm-up is not traced.
         """
         try:
             measured = self.bmreq.benchmark()
@@ -222,8 +222,8 @@ class BenchmarkJob:
         tunable.enable(True)
         tunable.tuning_enable(self.tuning)
         tunable._nearest_match_enable(self.nearest_match)
-        # The write path is gated on it, so without this a validated borrow is
-        # thrown away.
+        # _nearest_match_enable reads this, so without it nothing is borrowed
+        # at all: it is the master switch of the pair, not just the write.
         tunable._record_borrowed_enable(self.record_borrowed)
         for name, value in settings.items():
             getattr(tunable, name)(value)
@@ -810,10 +810,11 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
         return
     if winner.bmreq is None:
         return
-    # The hooks fire while lowering, before finalize() decides layouts: a still
-    # flexible operand would be tuned at placeholder strides, and TunableOp keys
-    # on ld. A recorded constraint is not this case -- _meta_at reads the strides
-    # through it. #201769 defers the ladder past finalize() instead.
+    # Reached from run_queued_pretunes, so layouts are already decided. Still
+    # flexible here means finalize() left this operand undecided, and tuning it
+    # would record placeholder strides, which TunableOp keys on through ld. A
+    # recorded constraint is not this case -- _meta_at reads the strides
+    # through it.
     layouts = [_as_buffer(n).maybe_get_layout() for n in winner.input_nodes]
     if any(lay is None or isinstance(lay, ir.FlexibleLayout) for lay in layouts):
         return

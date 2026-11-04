@@ -3869,7 +3869,8 @@ class ExternKernelCaller(ChoiceCaller):
         # is_enabled() reports only that the process has CUDA and a mode set;
         # submit() pins the worker to the current CUDA device, so a CPU extern
         # candidate must not be routed there. Route only GEMMs TunableOp tunes
-        # (same set the ladder uses): other extern kernels -- convolutions,
+        # (_TUNABLEOP_ROUTING_CHOICES -- the ladder's set plus bias_addmm):
+        # other extern kernels -- convolutions,
         # grouped/sparse GEMMs, custom-op fallbacks -- would tune GEMMs they
         # call internally into the results file, and their bmreqs build inputs
         # (rand_strided, zero-filled integer tensors) that mis-time them.
@@ -3898,15 +3899,18 @@ class ExternKernelCaller(ChoiceCaller):
             if outcome.status == "ok":
                 return outcome.time
             # Time the untuned kernel inline rather than dropping the candidate.
-            # TunableOp must be off while doing so: PYTORCH_TUNABLEOP_ENABLED=1
-            # or a user enable(True) would otherwise tune hipBLASLt inline in
-            # the parent -- exactly the abort or hang the worker contains.
-            # Restored afterwards so later compiles see the caller's setting.
+            # Tuning must be off while doing so, or a user enable(True) lets
+            # hipBLASLt tune inline in the parent -- exactly the abort or hang
+            # the worker contains. enable(False) alone does not get there:
+            # IsTunableOpEnabled honours PYTORCH_TUNABLEOP_ENABLED=1 over the
+            # setting, so an existing exact or wildcard hit is still served and
+            # only tuning_enable(False) stops new tuning. Both are restored so
+            # later compiles see the caller's setting.
             tunable = torch.cuda.tunable
             was_enabled = tunable.is_enabled()
             was_tuning = tunable.tuning_is_enabled()
             log.warning(
-                "TunableOp benchmark of %s hit %s; timing the default kernel instead.",
+                "TunableOp benchmark of %s hit %s; timing it inline instead.",
                 self.name,
                 outcome.status,
             )

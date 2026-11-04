@@ -124,10 +124,10 @@ class TunableNearestTest : public ::testing::Test {
 };
 
 TEST_F(TunableNearestTest, LookupNearestIgnoresPolicyFlags) {
-  // Calling LookupNearest is itself the opt-in: dispatch never reaches it, so
-  // it answers the question asked rather than re-deciding from the pass's
-  // mutable policy flags. The env kill switch IS still honoured here -- see
-  // EnvKillSwitchVetoesLookupAndRecord below.
+  // Calling LookupNearest is itself the opt-in: ResolveWithoutExactHit checks
+  // the policy flags before it calls in, so LookupNearest answers the question
+  // asked rather than re-deciding from them. The env kill switch IS still
+  // honoured here -- see EnvKillSwitchVetoesLookupAndRecord below.
   FlagGuard g;
   auto* ctx = getTuningContext();
   TuningResultsManager mgr;
