@@ -995,6 +995,40 @@ class TestScore(unittest.TestCase):
                 rows = score.score(data, ["a", "b", "c"], ["m"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
         self.assertEqual({x["id"] for x in rows}, {"a"})
 
+    def test_sample_prompt_is_the_ci_prompt(self) -> None:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="a", GIT_AUTHOR_EMAIL="a@a", GIT_COMMITTER_NAME="a", GIT_COMMITTER_EMAIL="a@a")  # fmt: skip
+        times = {"linux": {"default": {"test_foo": 600.0}}}
+        with (
+            tempfile.TemporaryDirectory() as repo,
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(select_tests, "REPO_ROOT", Path(repo)),
+            mock.patch.object(select_tests, "TESTS", ["test_bar", "test_foo"]),
+            mock.patch.object(select_tests, "get_test_times", return_value=times),
+        ):
+            git, test = select_tests.git, Path(repo) / "test"
+            git("init", "-q")
+            (test / "nn").mkdir(parents=True)
+            (test / "test_foo.py").write_text("x = 1\n" * 50)
+            (test / "test_bar.py").write_text("")
+            git("add", "-A")
+            git("commit", "-qm", "base")
+            git("mv", "test/test_foo.py", "test/nn/test_foo.py")
+            (test / "test_new.py").write_text("y = 2\n")
+            (test / "helper.py").write_text("")
+            (test / "test_bar.py").write_text("import helper\n")
+            git("add", "-A")
+            git("commit", "-qm", "head")
+            diffstat, diff = select_tests.diffstat_and_diff("HEAD~1", "HEAD")
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                select_tests.main(["--title", "t", "--body", "b", "--base", "HEAD~1", "--print-prompt"])  # fmt: skip
+        candidates = ["nn/test_foo", "test_bar", "test_foo", "test_new"]
+        sample = {"title": "t", "body": "b", "diffstat": diffstat, "diff": diff, "candidates": candidates}  # fmt: skip
+        prompt = score.sample_prompt(sample, select_tests.test_minutes(times))
+        self.assertEqual(prompt + "\n", out.getvalue())
+        self.assertIn("rename to test/nn/test_foo.py", diff)
+        self.assertIn("<added_test_files>\nnn/test_foo [0m]\ntest_new [0m]\n</added_test_files>", prompt)  # fmt: skip
+
     def test_test_seconds_skips_non_td_envs(self) -> None:
         times = {
             "linux": {"default": {"test_a": 10.0}},
