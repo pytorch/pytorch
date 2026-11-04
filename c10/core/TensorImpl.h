@@ -258,9 +258,9 @@ struct C10_API FakeTensorMode {
   // so read this through PyInterpreterVTable::allow_non_fake_inputs().
   bool allow_non_fake_inputs_ = false;
 
-  // Whether reading a fake's mutable data pointer only warns (true) or throws
-  // (false); Python's _allow_unsafe_data_ptr_access, exposed under that name.
-  // See at::init_cpp_fake.
+  // Whether reading the mutable data pointer of a fake made afterwards only
+  // warns (true) or throws (false); a storage's marking is never relaxed.
+  // Python's _allow_unsafe_data_ptr_access, exposed under that name.
   bool allow_unsafe_data_ptr_access_ = true;
 
   FakeTensorMode(
