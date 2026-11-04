@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     has_cpp_wrapper_for_device,
-    requires_triton,
+    requires_triton_inc_cpu,
     TRITON_TYPE,
 )
 from torch.testing._internal.triton_utils import requires_gpu
@@ -50,7 +50,7 @@ inner(torch.randn(20, 20).to("{device}"))
         ):
             self._test_after_aot("cpu", "AccuracyError")
 
-    @requires_triton()
+    @requires_triton_inc_cpu()
     def test_after_aot_triton_compile_error(self):
         with (
             with_device_backend("triton", TRITON_TYPE),
@@ -60,7 +60,7 @@ inner(torch.randn(20, 20).to("{device}"))
         ):
             self._test_after_aot(TRITON_TYPE, "SyntaxError")
 
-    @requires_triton()
+    @requires_triton_inc_cpu()
     def test_after_aot_triton_accuracy_error(self):
         with (
             with_device_backend("triton", TRITON_TYPE),
@@ -314,7 +314,7 @@ def forward(self, linear_default):
             res = self._test_aoti_unflattened_inputs("cpu", "CppCompileError")
             self._aoti_check_relu_repro(res)
 
-    @requires_triton()
+    @requires_triton_inc_cpu()
     def test_aoti_triton_compile_error(self):
         with (
             with_device_backend("triton", TRITON_TYPE),
@@ -325,7 +325,7 @@ def forward(self, linear_default):
             res = self._test_aoti(TRITON_TYPE, "SyntaxError")
             self._aoti_check_relu_repro(res)
 
-    @requires_triton()
+    @requires_triton_inc_cpu()
     def test_aoti_triton_compile_error_unflatten(self):
         with (
             with_device_backend("triton", TRITON_TYPE),
@@ -345,7 +345,7 @@ def forward(self, linear_default):
             res = self._test_aoti("cpu", "AccuracyError")
             self._aoti_check_relu_repro(res)
 
-    @requires_triton()
+    @requires_triton_inc_cpu()
     def test_aoti_triton_accuracy_error(self):
         with (
             with_device_backend("triton", TRITON_TYPE),

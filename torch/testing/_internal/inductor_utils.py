@@ -66,6 +66,7 @@ def test_cpu():
 HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
+HAS_TRITON_INC_CPU = has_triton(include_cpu=True)
 # Respect triton_disable_device_detection when probing the CPU backend.
 TRITON_HAS_CPU = has_triton(include_cpu=True) and has_triton_cpu_backend()
 
@@ -86,7 +87,7 @@ HAS_GPU_AND_TRITON = HAS_GPU
 
 GPU_TYPE = get_gpu_type()
 
-TRITON_TYPE: str | None = get_triton_type()
+TRITON_TYPE: str | None = get_triton_type(include_cpu=True)
 
 def running_on_tdm_device() -> bool:
     """Return whether the active ROCm device and Triton support gfx1250 TDM."""
@@ -203,6 +204,7 @@ requires_gpu = functools.partial(
     unittest.skipIf, not (HAS_GPU or HAS_MPS), "requires gpu"
 )
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
+requires_triton_inc_cpu = functools.partial(unittest.skipIf, not HAS_TRITON_INC_CPU, "requires triton")
 requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires helion")
 # Only run tests that assert Triton block-pointer codegen where the frontend API
 # still exists (removed in triton-lang/triton#10833); elsewhere Inductor falls back

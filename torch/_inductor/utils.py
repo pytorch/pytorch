@@ -213,7 +213,9 @@ def should_use_thread_workers() -> bool:
 
 
 @functools.cache
-def _get_triton_type(disable_device_detection: bool) -> str | None:
+def _get_triton_type(
+    *, include_cpu: bool = True, disable_device_detection: bool = False
+) -> str | None:
     """Body of functionality for ``get_triton_type``.
 
     Split the function like this so that we can still cache the result per-value
@@ -222,7 +224,11 @@ def _get_triton_type(disable_device_detection: bool) -> str | None:
     from torch.utils._triton import _devices_supporting_triton
 
     # (note we're getting a copy here)
-    candidates: list[str] = list(_devices_supporting_triton(disable_device_detection))
+    candidates: list[str] = list(
+        _devices_supporting_triton(
+            include_cpu=include_cpu, disable_device_detection=disable_device_detection
+        )
+    )
 
     if len(candidates) == 0:
         return None
@@ -232,12 +238,12 @@ def _get_triton_type(disable_device_detection: bool) -> str | None:
         candidates.remove("cpu")
 
     if len(candidates) == 0:
-        return "cpu"
+        return "cpu" if include_cpu else None
 
     return candidates.pop()
 
 
-def get_triton_type() -> str | None:
+def get_triton_type(*, include_cpu: bool = True) -> str | None:
     """Get a device type that supports generating Triton code as a backend, or
     ``None`` if there aren't any. Note that the returned device may not
     currently be configured to generate Triton.
@@ -245,7 +251,10 @@ def get_triton_type() -> str | None:
     Will prefer to return any other device type before CPU."""
     from torch._inductor.config import triton_disable_device_detection
 
-    return _get_triton_type(triton_disable_device_detection)
+    return _get_triton_type(
+        include_cpu=include_cpu,
+        triton_disable_device_detection=triton_disable_device_detection,
+    )
 
 
 from torch._dynamo.device_interface import get_interface_for_device
