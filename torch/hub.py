@@ -8,6 +8,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 import uuid
 import warnings
 import zipfile
@@ -266,31 +267,39 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
 
 # How long to wait for another process's download before downloading anyway.
 _CACHE_LOCK_TIMEOUT_S = 3600
+# Group-writable, so that every user of a cache shared by a group (setgid
+# directory, umask 002) can take the lock. filelock applies the mode with fchmod,
+# ignoring the umask, so 0o666 would make the lock files world-writable.
+_LOCK_FILE_MODE = 0o664
 
 
 def _lock_unavailable(lock_path):
-    """Return the error that makes ``lock_path`` unlockable here, or None.
+    """Return the error that makes ``lock_path`` impossible to lock, or None.
 
-    filelock reports some "can't lock" errors (ENOLCK on NFS without lockd,
-    EOPNOTSUPP on some FUSE/SMB mounts) the same way as a lock held by another
-    process, which would make callers wait for the full timeout. This probe tells
-    the two apart; a lock that is merely held counts as available.
+    filelock reports some "can't lock" errors the same way as a lock held by
+    another process: ENOLCK (NFS without lockd) and EOPNOTSUPP (some FUSE/SMB
+    mounts) on Unix, EACCES (an unwritable directory) on Windows. A lock that is
+    held or free counts as available.
     """
     if sys.platform == "win32":
-        # filelock treats EACCES as a held lock on Windows.
-        target = lock_path if os.path.exists(lock_path) else os.path.dirname(lock_path)
-        if not os.access(target, os.W_OK):
-            return PermissionError(errno.EACCES, "Permission denied", target)
+        # os.access reports every directory as writable on Windows.
+        try:
+            fd, probe = tempfile.mkstemp(dir=os.path.dirname(lock_path))
+        except OSError as e:
+            return e
+        os.close(fd)
+        os.remove(probe)
         return None
 
     import fcntl
 
     try:
-        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o666)
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, _LOCK_FILE_MODE)
     except OSError as e:
         return e
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # Shared, so that concurrent probes don't see each other as a held lock.
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
     except OSError as e:
         if e.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES):
             return e
@@ -302,44 +311,52 @@ def _lock_unavailable(lock_path):
 
 
 @contextlib.contextmanager
-def _cache_lock(path, stacklevel):
-    """Hold the lock for cache entry ``path``, saying so if another process has it.
+def _cache_lock(path, stacklevel, verbose):
+    """Hold the lock for cache entry ``path`` while populating it.
 
     Processes that share a cache directory (for example DDP ranks) take this lock
-    so that only one of them populates an entry while the others wait for it.
-    If the lock can't be taken (no flock support, a lock file owned by another
-    user) or stays held for more than ``_CACHE_LOCK_TIMEOUT_S``, the entry is
-    populated without it, as before. Yields whether the lock is held.
-    ``stacklevel`` points the fallback warning at the user's call.
+    so that only one of them downloads an entry while the others wait for it.
+    If the lock can't be taken (no flock support, an unwritable lock file) or
+    stays held for more than ``_CACHE_LOCK_TIMEOUT_S``, the entry is populated
+    without it, with a warning that ``stacklevel`` points at the user's call.
     """
     from filelock import Timeout
 
     from torch.utils._filelock import FileLock
 
     lock_path = path + ".lock"
+
+    def new_lock(timeout):
+        return FileLock(lock_path, timeout=timeout, mode=_LOCK_FILE_MODE)
+
     stack = contextlib.ExitStack()
-    error = _lock_unavailable(lock_path)
-    if error is None:
+    message = None
+    try:
         try:
-            try:
-                stack.enter_context(FileLock(lock_path, timeout=0))
-            except Timeout:
+            stack.enter_context(new_lock(timeout=0))
+        except Timeout:
+            error = _lock_unavailable(lock_path)
+            if error is not None:
+                raise error from None
+            if verbose:
                 sys.stderr.write(f"Waiting for another process to download {path}\n")
-                stack.enter_context(FileLock(lock_path, timeout=_CACHE_LOCK_TIMEOUT_S))
-        except Timeout as e:
-            error = e
-        except (NotImplementedError, OSError) as e:
-            error = e
-    if error is not None:
-        warnings.warn(
-            f"Could not lock {lock_path} ({error!r}), so other processes may "
-            "populate this cache entry at the same time. Point TORCH_HOME (or "
-            "model_dir) at a filesystem that supports file locks, or make the "
-            "lock file writable, to avoid this.",
-            stacklevel=stacklevel,
+            stack.enter_context(new_lock(timeout=_CACHE_LOCK_TIMEOUT_S))
+    except Timeout:
+        message = (
+            f"Another process has held {lock_path} for more than "
+            f"{_CACHE_LOCK_TIMEOUT_S} s, so this process downloads the entry as well."
         )
+    except (NotImplementedError, OSError) as e:
+        message = (
+            f"Could not lock {lock_path} ({e!r}), so other processes may download "
+            "this entry at the same time. To avoid this, use a cache directory on a "
+            "filesystem that supports file locks (see torch.hub.set_dir()), or make "
+            "the lock file writable."
+        )
+    if message is not None:
+        warnings.warn(message, stacklevel=stacklevel)
     with stack:
-        yield error is None
+        yield
 
 
 def _get_cache_or_reload(
@@ -383,7 +400,7 @@ def _get_cache_or_reload(
     # force_reload is not coordinated between processes: each caller that passes
     # it downloads the repo again, one at a time, and replaces the directory that
     # other processes may be using.
-    with _cache_lock(repo_dir, stacklevel=5) as locked:
+    with _cache_lock(repo_dir, stacklevel=5, verbose=verbose):
         # Another process may have populated the cache while we waited.
         if not force_reload and os.path.exists(repo_dir):
             if verbose:
@@ -396,15 +413,24 @@ def _get_cache_or_reload(
 
         # Download and extract in a private directory: different repos on the same
         # branch, and refs of a repo at the same commit, would otherwise share the
-        # archive or the extracted top-level directory.
-        # "~" can't appear in a git ref, so no other ref's directory has this prefix.
+        # archive or the extracted top-level directory. "~" can't appear in a git
+        # ref, so no other ref's directory has this prefix.
         work_prefix = owner_name_branch + "~"
-        if locked:
-            # Work directories left behind by a process killed mid-download.
-            for name in os.listdir(hub_dir):
-                stale = os.path.join(hub_dir, name)
-                if name.startswith(work_prefix) and os.path.isdir(stale):
-                    shutil.rmtree(stale, ignore_errors=True)
+        # Remove work directories of processes killed mid-download. A running
+        # download keeps writing to a file in its work directory, so only those
+        # untouched for longer than the lock timeout are removed.
+        for name in os.listdir(hub_dir):
+            if not name.startswith(work_prefix):
+                continue
+            stale = os.path.join(hub_dir, name)
+            try:
+                with os.scandir(stale) as entries:
+                    mtimes = [e.stat().st_mtime for e in entries]
+                mtimes.append(os.path.getmtime(stale))
+            except OSError:
+                continue
+            if time.time() - max(mtimes) > _CACHE_LOCK_TIMEOUT_S:
+                shutil.rmtree(stale, ignore_errors=True)
         work_dir = tempfile.mkdtemp(prefix=work_prefix, dir=hub_dir)
         cached_file = os.path.join(work_dir, "archive.zip")
         try:
@@ -438,11 +464,15 @@ def _get_cache_or_reload(
                 # Unzip the code and rename the base folder using safe extraction
                 _safe_extract_zip(cached_zipfile, work_dir)
 
-            if not force_reload and os.path.exists(repo_dir):
-                # Without the lock, another process may have published it meanwhile.
-                return repo_dir
-            _remove_if_exists(repo_dir)
-            shutil.move(os.path.join(work_dir, extracted_repo_name), repo_dir)
+            if force_reload:
+                _remove_if_exists(repo_dir)
+            try:
+                # Unlike shutil.move, os.rename never moves into an existing repo_dir.
+                os.rename(os.path.join(work_dir, extracted_repo_name), repo_dir)
+            except OSError:
+                # Without the lock, another process may have published it first.
+                if force_reload or not os.path.isdir(repo_dir):
+                    raise
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -951,8 +981,8 @@ def load_state_dict_from_url(
     the same file at the same time: one of them downloads it while the others
     wait and then load the cached copy. The lock is a ``.lock`` file next to the
     downloaded file in ``model_dir``. Where it can't be taken, the file is
-    downloaded without it. Checkpoints in the legacy zip format are still
-    extracted on every load, without the lock.
+    downloaded without it and a warning is raised. Checkpoints in the legacy zip
+    format are still extracted on every load, without the lock.
 
     Args:
         url (str): URL of the object to download
@@ -997,7 +1027,7 @@ def load_state_dict_from_url(
     if not os.path.exists(cached_file):
         # Processes sharing the cache (e.g. DDP ranks) wait for whichever one
         # downloads first instead of all downloading the same file.
-        with _cache_lock(cached_file, stacklevel=4):
+        with _cache_lock(cached_file, stacklevel=4, verbose=progress):
             if not os.path.exists(cached_file):
                 sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
                 hash_prefix = None
