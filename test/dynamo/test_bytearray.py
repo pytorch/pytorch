@@ -1406,6 +1406,8 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             "format",
             "split",
             "rsplit",
+            "replace",
+            "translate",
             "upper",
             "lower",
             "title",
@@ -1435,6 +1437,10 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 value = source.split(b"b")[0]
             elif operation == "rsplit":
                 value = source.rsplit(b"b")[0]
+            elif operation == "replace":
+                value = source.replace(b"b", b"x")
+            elif operation == "translate":
+                value = source.translate(bytes(range(256)))
             elif operation == "upper":
                 value = source.upper()
             elif operation == "lower":
