@@ -95,6 +95,8 @@ class TestColumnCombine(TestCase):
             (torch.float32, "var_mean", "offset", 32, (257, 260)),
             (torch.float32, "var_mean", "offset", 16, (3, 257, 36)),
             (torch.float32, "mean", "signed", 16, (3, 257, 36)),
+            # Chunks of two rows leave the last two of seven partitions empty.
+            (torch.float32, "var_mean", "offset", 8, (9, 260)),
         ],
     )
     def test_tiled_combine_numerics(self, device, dtype, op, pattern, width, shape):
@@ -146,6 +148,7 @@ class TestColumnCombine(TestCase):
         tol = 0 if op == "argmax" else 0.016 if dtype == torch.bfloat16 else 1e-4
         with patch.object(ct, "select_col_config", return_value=cfg):
             got = run()
+        # Stage-two keys end with PartialColumns.cache_sig, (tile_columns, nouts).
         tiled = {k[-2] for k in ct._CACHE if k[:2] == ("coltile2t", key)}
         self.assertEqual(tiled, {width})
         self.assertEqual(got, reference(), rtol=tol, atol=tol, equal_nan=True)
@@ -176,10 +179,11 @@ class TestColumnCombine(TestCase):
         cfg = ct.ColConfig("test_unroll", 64, 7, 4, "column", 0, 2)
         trait = T.SumOps(acc=cutlass.Float32)
         args = (trait, "unroll", x, [torch.float32], 1, None, None, None)
-        stage = patch.object(ct.tile, "TileReduce", wraps=ct.tile.TileReduce)
-        with patch.object(ct, "select_col_config", return_value=cfg), stage as built:
+        with patch.object(ct, "select_col_config", return_value=cfg):
             got = ct._reduce_col_tile(*args)[0]
-        self.assertEqual(built.call_args_list[0].kwargs["unroll"], 2)
+        # Six key fields precede TileReduce.cache_sig, whose unroll is its seventh field.
+        unrolls = {k[12] for k in ct._CACHE if k[:2] == ("coltile", "unroll")}
+        self.assertEqual(unrolls, {2})
         with (
             native._unconditional_masked(),
             torch.backends.python_native.cutedsl.disabled(),
