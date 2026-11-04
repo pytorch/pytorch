@@ -14,7 +14,7 @@ import dataclasses
 import threading
 import types
 from collections.abc import Callable, Mapping
-from typing import Any, Generic, NamedTuple, TYPE_CHECKING, TypeVar
+from typing import Any, ClassVar, Generic, NamedTuple, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 
 import torch.fx as fx
@@ -1050,13 +1050,61 @@ class UserKernelHOPifier:
     Each DSL has one subclass per capture environment: Dynamo, which works on
     VariableTrackers and reports unsupported features as graph breaks, and tracing
     (make_fx, non-strict export), which works on real or fake values.
+
+    The steps that do not depend on the DSL are here: recording the kernel in the
+    DSL's side table (record_kernel) and, for tracing, the call of the mutation HOP
+    with the non-graphable arguments moved to the side table (call_mutation_hop).
+    Dynamo's counterpart of the latter is emit_user_kernel_hop in
+    torch/_dynamo/variables/functions.py.
     """
+
+    # The DSL's HOP pair and side table (set by each DSL's HOPifier).
+    hop_info: ClassVar[UserKernelHOPInfo]
 
     def raise_unsupported(self, msg: str) -> Never:
         raise NotImplementedError("abstract method")
 
     def get_value(self, val: Any) -> Any:
         raise NotImplementedError("abstract method")
+
+    def record_kernel(self, variable: Any, record: Any, kernel_idx: int | None) -> int:
+        """Add ``record`` (the side-table entry of the kernel ``variable`` stands
+        for) to the DSL's side table and set ``variable.kernel_idx`` to its index.
+        ``kernel_idx``, if given, is the index the caller expects."""
+        variable.kernel_idx = self.hop_info.get_side_table().add_kernel(record)
+
+        if kernel_idx is not None and variable.kernel_idx != kernel_idx:
+            raise AssertionError(
+                f"kernel_idx mismatch: expected {kernel_idx}, got {variable.kernel_idx}"
+            )
+        return variable.kernel_idx
+
+    def store_non_graphable_args(
+        self,
+        combined_args: dict[str, Any],
+    ) -> tuple[dict[str, Any], int]:
+        """
+        Some args cannot be stored in the FX graph.
+        Put them in the side table.
+        """
+        return store_non_graphable_args(self.hop_info.get_side_table(), combined_args)
+
+    def call_mutation_hop(
+        self, kernel_idx: object, combined_args: dict[str, Any], **hop_kwargs: Any
+    ) -> Any:
+        """Tracing: call the DSL's mutation HOP for a kernel call whose arguments are
+        bound to ``combined_args`` by parameter name. The arguments that cannot be in
+        the graph go to the side table; ``hop_kwargs`` are the DSL's other HOP
+        arguments (Triton: grid, TMA descriptor metadata, launch kwargs)."""
+        if not isinstance(kernel_idx, int):
+            raise AssertionError(f"kernel_idx must be an int, got {type(kernel_idx)}")
+        graphable_args, constant_args_idx = self.store_non_graphable_args(combined_args)
+        return self.hop_info.mutation(
+            kernel_idx=kernel_idx,
+            constant_args_idx=constant_args_idx,
+            **hop_kwargs,
+            kwargs=graphable_args,
+        )
 
 
 def specialize_symbolic(arg: Any) -> Any:
