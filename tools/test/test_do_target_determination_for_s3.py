@@ -96,7 +96,9 @@ class TestTDResults(unittest.TestCase):
                     do_target_determination_for_s3.main()
                     ranking, loaded = import_results(Path(d) / "td_results.json")
                 self.assertEqual(loaded, failed, (outcome, cache))
-                self.assertEqual(ranking.to_json(), tp.to_json(), (outcome, cache))
+                ranked = [(t, ranking.get_score(t)) for t in ranking.get_all_tests()]
+                expected = [(t, tp.get_score(t)) for t in tp.get_all_tests()]
+                self.assertEqual(ranked, expected, (outcome, cache))
 
     def test_import_results(self) -> None:
         with tempfile.TemporaryDirectory() as d, mock.patch("sys.stdout"):
