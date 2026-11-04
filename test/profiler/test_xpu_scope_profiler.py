@@ -9,6 +9,7 @@ from pathlib import Path
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
+from torch.testing._internal.common_xpu import _pti_version_at_least
 
 
 Verbose = False
@@ -130,6 +131,12 @@ class XpuScopeProfilerTest(TestCase):
         )
 
     @unittest.skipIf(not TEST_XPU, "test requires XPU")
+    @unittest.skipIf(
+        TEST_XPU
+        and os.environ.get("ZET_ENABLE_METRICS") != "1"
+        and not _pti_version_at_least(1, 2, 0),
+        "ZET_ENABLE_METRICS=1 required for PTI version < 1.2.0",
+    )
     def test_scope_profiler(self):
         if not self.required_paranoid_settings():
             self.skipTest("paranoid settings missing")
@@ -139,26 +146,15 @@ class XpuScopeProfilerTest(TestCase):
         # Hardware metrics are requested through the fine-grained activity dict:
         # {ProfilerActivity.XPU: [<metric names>]} enables the XPUPTI scope
         # profiler and forwards the metric names to it.
-        try:
-            with torch.profiler.profile(
-                activities=[
-                    torch.profiler.ProfilerActivity.CPU,
-                    {torch.profiler.ProfilerActivity.XPU: self.metrics_names},
-                ],
-            ) as p:
-                r1 = torch.matmul(a, b)
-                r2 = torch.add(r1, 1.0)
-                result = torch.abs(r2)
-        except RuntimeError as e:
-            # Runtime metrics enabling unsupported: ZET_ENABLE_METRICS=1 needed.
-            if os.environ.get("ZET_ENABLE_METRICS") != "1" and (
-                "PTI_ERROR_DRIVER" in str(e)
-                or "PTI_ERROR_METRICS_RUNTIME_ENABLE_UNSUPPORTED" in str(e)
-            ):
-                self.skipTest(
-                    "runtime metrics enabling unsupported; set ZET_ENABLE_METRICS=1"
-                )
-            raise
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                {torch.profiler.ProfilerActivity.XPU: self.metrics_names},
+            ],
+        ) as p:
+            r1 = torch.matmul(a, b)
+            r2 = torch.add(r1, 1.0)
+            result = torch.abs(r2)
 
         self.assertTrue(result.numel() > 0)
 

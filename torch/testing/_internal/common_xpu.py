@@ -1,9 +1,16 @@
 import enum
 import functools
+import json
+import re
 
 import torch
 import torch.xpu
-from torch.testing._internal.common_utils import IS_WINDOWS, LazyVal, TEST_XPU
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    LazyVal,
+    TemporaryFileName,
+    TEST_XPU,
+)
 from torch.types import Device
 
 
@@ -67,6 +74,28 @@ def get_xpu_codename(device: Device = None) -> XPUCodename | None:
 def get_xpu_arch(device: Device = None) -> XPUArch:
     codename = get_xpu_codename(device)
     return _CODENAME_TO_ARCH.get(codename, XPUArch.Unknown)
+
+
+@functools.lru_cache(1)
+def _pti_version():
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.XPU,
+        ],
+    ) as p:
+        pass
+    with TemporaryFileName() as trace_path:
+        p.export_chrome_trace(trace_path)
+        with open(trace_path) as f:
+            data = json.load(f)
+    match = re.match(r"(\d+)\.(\d+)\.(\d+)", str(data.get("xpupti_version", "")))
+    return tuple(int(component) for component in match.groups()) if match else None
+
+
+def _pti_version_at_least(major, minor, patch):
+    version = _pti_version()
+    return version is not None and version >= (major, minor, patch)
 
 
 Xe2_Or_Later = LazyVal(
