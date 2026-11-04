@@ -8,8 +8,8 @@
 #include <cuda_runtime.h>
 
 #include <cstdint>
+#include <limits>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 namespace {
@@ -21,18 +21,6 @@ namespace {
       GTEST_SKIP() << "No CUDA device available";          \
     }                                                      \
   } while (0)
-
-// Packed fp16 atomics need sm_70 and packed bf16 atomics sm_80; below that
-// fastAtomicAdd never pairs, so the pairing assertions do not apply.
-int computeCapabilityMajor() {
-  int device = 0;
-  cudaDeviceProp prop{};
-  if (cudaGetDevice(&device) != cudaSuccess ||
-      cudaGetDeviceProperties(&prop, device) != cudaSuccess) {
-    return 0;
-  }
-  return prop.major;
-}
 
 #define CUDA_ASSERT_OK(expr)                                        \
   do {                                                              \
@@ -125,8 +113,7 @@ void testScatterAdd(bool fast_atomics) {
 constexpr uint16_t kNegZero = 0x8000; // -0.0 in both fp16 and bf16
 
 template <typename scalar_t>
-constexpr uint16_t kSignalingNaN =
-    std::is_same_v<scalar_t, torch::headeronly::Half> ? 0x7c01 : 0x7f81;
+constexpr uint16_t kSignalingNaN = std::numeric_limits<scalar_t>::signaling_NaN().x;
 
 // The tensor is buf[offset, offset + numel); targets start at -0.0 and every
 // other slot holds a signaling NaN.
@@ -210,26 +197,41 @@ TEST(TestFastAtomicAdd, ScatterAdd) {
   }
 }
 
-TEST(TestFastAtomicAdd, VectorizedBounds) {
+// Packed fp16 atomics need sm_70 and packed bf16 atomics sm_80; below that
+// fastAtomicAdd never pairs, so the pairing tests do not apply.
+#define SKIP_IF_NO_PACKED_ATOMIC(min_major)                            \
+  do {                                                                 \
+    int device_ = 0;                                                   \
+    cudaDeviceProp prop_{};                                            \
+    CUDA_ASSERT_OK(cudaGetDevice(&device_));                           \
+    CUDA_ASSERT_OK(cudaGetDeviceProperties(&prop_, device_));          \
+    if (prop_.major < (min_major)) {                                   \
+      GTEST_SKIP() << "packed atomics need sm_" << (min_major) << "0"; \
+    }                                                                  \
+  } while (0)
+
+TEST(TestFastAtomicAdd, VectorizedBoundsHalf) {
   SKIP_IF_NO_CUDA();
-  const int major = computeCapabilityMajor();
-  if (major >= 7) {
-    testVectorizedBounds<torch::headeronly::Half>();
-  }
-  if (major >= 8) {
-    testVectorizedBounds<torch::headeronly::BFloat16>();
-  }
+  SKIP_IF_NO_PACKED_ATOMIC(7);
+  testVectorizedBounds<torch::headeronly::Half>();
 }
 
-TEST(TestFastAtomicAdd, PairedNeighbourUnchanged) {
+TEST(TestFastAtomicAdd, VectorizedBoundsBFloat16) {
   SKIP_IF_NO_CUDA();
-  const int major = computeCapabilityMajor();
-  if (major >= 7) {
-    testPairedNeighbourUnchanged<torch::headeronly::Half>();
-  }
-  if (major >= 8) {
-    testPairedNeighbourUnchanged<torch::headeronly::BFloat16>();
-  }
+  SKIP_IF_NO_PACKED_ATOMIC(8);
+  testVectorizedBounds<torch::headeronly::BFloat16>();
+}
+
+TEST(TestFastAtomicAdd, PairedNeighbourUnchangedHalf) {
+  SKIP_IF_NO_CUDA();
+  SKIP_IF_NO_PACKED_ATOMIC(7);
+  testPairedNeighbourUnchanged<torch::headeronly::Half>();
+}
+
+TEST(TestFastAtomicAdd, PairedNeighbourUnchangedBFloat16) {
+  SKIP_IF_NO_CUDA();
+  SKIP_IF_NO_PACKED_ATOMIC(8);
+  testPairedNeighbourUnchanged<torch::headeronly::BFloat16>();
 }
 
 TEST(TestFastAtomicAdd, FastSpecializedAtomicAdd) {
