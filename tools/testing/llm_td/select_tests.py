@@ -187,7 +187,8 @@ def query_model(
 ) -> dict:
     """Run `claude -p` and return its JSON result.
 
-    With `checkout`, the model may Read/Grep/Glob that tree; otherwise it has no tools."""
+    With `checkout`, the model may Read/Grep/Glob that tree and nothing else (the
+    `Read` permission rule also scopes Grep and Glob); otherwise it has no tools."""
     tools = AGENTIC_TOOLS if checkout else ""
     cmd = [
         "claude", "-p", "--bare", "--no-session-persistence",
@@ -199,7 +200,8 @@ def query_model(
         "--json-schema", json.dumps(SCHEMA),
     ]  # fmt: skip
     if checkout:
-        cmd += ["--allowed-tools", tools, "--add-dir", checkout]
+        allowed = f"Read(/{os.path.abspath(checkout)}/**)"
+        cmd += ["--allowed-tools", allowed, "--add-dir", checkout]
         prompt = CHECKOUT_PREAMBLE.format(checkout=checkout) + prompt
     # An empty working directory keeps the CLI from picking up any project
     # settings, also those of a checkout, which it reads only through --add-dir.
