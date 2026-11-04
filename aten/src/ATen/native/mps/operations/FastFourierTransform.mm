@@ -120,6 +120,8 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 constexpr auto kRadices = {16, 8, 4, 2, 3, 5, 7};
 #define FFT_RADIX_ENTRY(R) R,
 constexpr auto kGlobalRadices = {FFT_GLOBAL_RADICES(FFT_RADIX_ENTRY)};
+constexpr auto kFixedSizes = {FFT_FIXED_SIZES(FFT_RADIX_ENTRY)};
+constexpr auto kContigSizes = {FFT_CONTIG_SIZES(FFT_RADIX_ENTRY)};
 #undef FFT_RADIX_ENTRY
 // Below this many elements, extra launches cost more than they save
 constexpr int64_t kLongPoints = 1 << 17;
@@ -266,24 +268,22 @@ int64_t transforms_per_group(int64_t n, int64_t padded, int64_t J, int64_t rows,
 
 Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, const Batch& b, const Pass& x) {
   const auto radix = radices(x.global ? x.global : n, x.global ? kGlobalRadices : kRadices);
-  TORCH_INTERNAL_ASSERT(!radix.empty(), "no radix plan for ", n);
-  TORCH_INTERNAL_ASSERT(radix.size() <= kFFTMaxStages);
   const auto to_u32 = [](int64_t v) { return c10::checked_convert<uint32_t>(v, "uint32_t"); };
   const auto to_i32 = [](int64_t v) { return c10::checked_convert<int32_t>(v, "int32_t"); };
   const uint32_t n_u32 = to_u32(n);
 
   // Kernel family: a global radix, a fixed length, or the smallest radix set factoring n (p16: lengths 1 and 16)
   const auto set = n % 7 == 0 ? "p2357" : n % 3 == 0 || n % 5 == 0 ? "p235" : n == 1 || n == 16 ? "p16" : "p2";
-  const auto family = x.global ? "g" + std::to_string(x.global) : fft_has_fixed_kernel(n_u32) ? std::to_string(n) : set;
+  const auto has = [](const auto& list, int64_t v) { return std::ranges::find(list, v) != list.end(); };
+  const auto family = x.global ? "g" + std::to_string(x.global) : has(kFixedSizes, n) ? std::to_string(n) : set;
 
   const auto n_sig = x.n_sig ? x.n_sig : n;
   const auto n_out = x.n_out ? x.n_out : n;
   const bool ld = x.cl || n_sig < n * x.ld_mul;
   const bool st = x.out_k_mul > 1 || x.cs;
   const bool tw4 = x.tt && !x.global;
-  const auto flag_if = [](bool on, uint32_t flag) { return on ? flag : 0u; };
-  const uint32_t F = flag_if(inv, kFFTInverse) | flag_if(tw4, kFFTFourStepTwiddles) | flag_if(st, kFFTExtendedStores) |
-      flag_if(ld, kFFTExtendedLoads) | flag_if(x.global, kFFTGlobalStage);
+  const uint32_t F = inv * kFFTInverse | tw4 * kFFTFourStepTwiddles | st * kFFTExtendedStores | ld * kFFTExtendedLoads |
+      (x.global > 0) * kFFTGlobalStage;
 
   const int64_t ept = fft_points_per_thread(n_u32, F);
   const int64_t rows = b.dims[0].size;
@@ -296,7 +296,6 @@ Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, const B
   const int64_t B = transforms_per_group(n, padded, J, rows, strided);
   const bool pad = !strided && B * (padded - (B == 1)) <= kFFTMaxPoints;
   const int64_t row = strided ? 1 : pad ? padded - (B == 1) : n + (B > 1);
-  TORCH_INTERNAL_ASSERT(b.dims.size() <= c10::metal::max_ndim);
 
   FFTParams params{
       .n = n_u32,
@@ -333,7 +332,7 @@ Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, const B
     params.out_strides[d] = to_i32(b.dims[d].out_stride);
   }
 
-  const bool contig = !strided && B == 1 && fft_has_contig_kernel(n_u32) && fft_is_basic(F);
+  const bool contig = !strided && B == 1 && has(kContigSizes, n) && fft_is_basic(F);
   const auto name = fmt::format(
       "fft_{}_{}_{}{}_{}", scalarToMetalTypeString(in), scalarToMetalTypeString(out), family, contig ? "c" : "", F);
   const int64_t ny = b.dims.size() > 1 ? b.dims[1].size : 1;
@@ -484,10 +483,9 @@ void fft_pass(const Tensor& in, const Tensor& out, int64_t dim, int64_t n, bool 
     return fft_batch(in, out, collapse(in, out, dim), n, inv, x);
   }
 
-  // Bluestein: X = c * IFFT_M(FFT_M(x * c) * B)[:n], M a power of two >= 2n - 1, chirps folded into the kernels
-  TORCH_CHECK_NOT_IMPLEMENTED(n <= kFFTMaxPoints * kFFTMaxPoints / 2,
-                              "MPS FFT: lengths with prime factors above 7 are limited to ",
-                              kFFTMaxPoints * kFFTMaxPoints / 2);
+  // Bluestein: X = c * IFFT_M(FFT_M(x * c) * B)[:n], M a power of two >= 2n - 1 (at most two tile passes, 2^24),
+  // chirps folded into the kernels
+  TORCH_CHECK_NOT_IMPLEMENTED(n <= 1 << 23, "MPS FFT: lengths with prime factors above 7 are limited to 2^23");
   const auto& [c, B] = chirp_tables(n, inv);
   const auto M = B.numel();
   DimVector sizes(in.sizes());
@@ -499,11 +497,9 @@ void fft_pass(const Tensor& in, const Tensor& out, int64_t dim, int64_t n, bool 
 
 // fp16 partials overflow and lose precision between passes, so transforms taking more than one pass run in fp32
 bool needs_fp32(const Tensor& in, const Tensor& out, IntArrayRef dim, int64_t n) {
-  if (c10::toRealValueType(in.scalar_type()) != kHalf) {
-    return false;
-  }
-  const auto b = collapse(in, out, maybe_wrap_dim(dim.back(), in.dim()));
-  return dim.size() > 1 || !is_smooth(n) || !fits_one_pass(b, n, false);
+  return c10::toRealValueType(in.scalar_type()) == kHalf &&
+      (dim.size() > 1 || !is_smooth(n) ||
+       !fits_one_pass(collapse(in, out, maybe_wrap_dim(dim.back(), in.dim())), n, false));
 }
 
 double norm_scale(int64_t normalization, const Tensor& t, IntArrayRef dims) {
@@ -650,9 +646,7 @@ Tensor& _fft_c2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
     return out.copy_(self);
   }
   if (needs_fp32(self, out, dim, self.size(dim.back()))) {
-    auto wide = at::empty(out.sizes(), out.options().dtype(kComplexFloat));
-    _fft_c2c_mps_out(self.to(kComplexFloat), dim, normalization, forward, wide);
-    return out.copy_(wide);
+    return out.copy_(_fft_c2c_mps(self.to(kComplexFloat), dim, normalization, forward));
   }
   const auto scale = norm_scale(normalization, self, dim);
   for (const auto i : c10::irange(dim.size())) {
