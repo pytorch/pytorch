@@ -1492,6 +1492,19 @@ class TestMain(unittest.TestCase):
         self.assertEqual(record["error"], f"CalledProcessError: {error}")
         self.assertIsNone(record["diagnostics"]["merge_base"])
 
+    def test_interrupted_run_leaves_no_earlier_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, clean_env():
+            output = Path(tmp) / "out.json"
+            output.write_text("{}")
+            with (
+                mock.patch.object(
+                    select_tests, "select", side_effect=KeyboardInterrupt
+                ),
+                self.assertRaises(KeyboardInterrupt),
+            ):
+                select_tests.main(["--title", "t", "--output", str(output)])
+            self.assertFalse(output.exists())
+
     def test_greps_are_memoized_and_bounded(self) -> None:
         answer = {
             "structured_output": {
@@ -1544,7 +1557,7 @@ class TestMain(unittest.TestCase):
         self.assertIn("--body needs --title", stderr.getvalue())
 
     def test_pr_text_fallbacks(self) -> None:
-        args = select_tests.argparse.Namespace(title=None, body=None, head="h")
+        args = select_tests.argparse.Namespace(title=None, body=None)
         log = {"%s": "subject\n", "%b": "body\n"}
         with tempfile.TemporaryDirectory() as tmp, clean_env():
             event = Path(tmp) / "event.json"
@@ -1560,8 +1573,10 @@ class TestMain(unittest.TestCase):
                 ]:
                     event.write_text(json.dumps(payload))
                     with mock.patch.dict(os.environ, {"GITHUB_EVENT_PATH": str(event)}):
-                        self.assertEqual(select_tests.pr_text(args), expected, payload)
-                self.assertEqual(select_tests.pr_text(args), ("subject", "body\n"))
+                        self.assertEqual(
+                            select_tests.pr_text(args, "h"), expected, payload
+                        )
+                self.assertEqual(select_tests.pr_text(args, "h"), ("subject", "body\n"))
             self.assertEqual({c.args[3] for c in git.call_args_list}, {"h"})
 
     def run_cli(self, result: dict, reason: str | None = None) -> tuple[dict, str]:
@@ -1583,9 +1598,8 @@ class TestMain(unittest.TestCase):
             if reason is None:
                 select_tests.main(["--title", "t", "--output", str(output)])
             else:
-                with mock.patch.object(
-                    select_tests, "select", return_value=Selection(reason=reason)
-                ):
+                selected = (Selection(reason=reason), True)
+                with mock.patch.object(select_tests, "select", return_value=selected):
                     select_tests.main(["--title", "t", "--output", str(output)])
             return json.loads(output.read_text()), stdout.getvalue()
 
@@ -1968,6 +1982,30 @@ class TestMain(unittest.TestCase):
             git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-qm", "add")
             self.assertEqual(select_tests.changed_files("HEAD~1", "HEAD"), [name])
             self.assertEqual(select_tests.git_grep("import", "HEAD"), [name])
+
+    def test_diff_ignores_the_git_config(self) -> None:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        with (
+            tempfile.TemporaryDirectory() as repo,
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(select_tests, "REPO_ROOT", Path(repo)),
+        ):
+            config = Path(repo) / "gitconfig"
+            config.write_text(
+                "[diff]\n\tnoprefix = true\n\texternal = true\n[color]\n\tdiff = always\n"
+            )
+            os.environ |= {"GIT_CONFIG_GLOBAL": str(config), "GIT_CONFIG_NOSYSTEM": "1"}
+            git = select_tests.git
+            git("init", "-q")
+            (Path(repo) / "torch").mkdir()
+            (Path(repo) / "torch" / "a.py").write_text('"""\n>>> x\n"""\n')
+            git("add", "torch")
+            git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-qm", "base")
+            (Path(repo) / "torch" / "a.py").write_text('"""\n>>> y\n"""\n')
+            git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-qam", "edit")
+            _, diff = select_tests.diffstat_and_diff("HEAD~1", "HEAD")
+        self.assertTrue(diff.startswith("diff --git a/torch/a.py b/torch/a.py\n"))
+        self.assertTrue(selection.edits_doctest(diff))
 
     def test_c_quoted_paths_are_read_verbatim(self) -> None:
         # git C-quotes a path with a quote, backslash, tab or newline even when core.quotePath is false.
