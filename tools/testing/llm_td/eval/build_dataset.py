@@ -4,8 +4,20 @@
     python -m tools.testing.llm_td.eval.build_dataset --data DIR --start 2026-10-01 --end 2026-10-26 --kinds head
     python -m tools.testing.llm_td.eval.build_dataset --data DIR --start 2026-04-01 --end 2026-10-26 --kinds revert
 
-eval/ids lists the samples the report scored; see the PR description for
-how they were built.
+eval/ids lists the samples the report scored, as sorted ids (file names under
+DIR/samples without .json), split by each sample's `date` (a PR sample's
+failure, a revert's revert time):
+  eval.txt    the pr_, rev_ and neu_ samples of the three builds above, less
+              the 10 neutral pilot samples read while writing the prompt
+  neutral.txt the neu_ ids of eval.txt
+  head.txt    the head_ samples of the head build above, all of eval.txt's PRs
+  dev.txt     the pr_ samples of a build with --start 2026-09-20 dated before
+              2026-10-01 and the rev_ samples reverted before 2026-04-01
+              (from 2025-11-11 on), so no PR or revert is in both
+  agentic.txt the eval.txt samples the agentic rerun was made on, a subset
+              recorded with that run rather than derived from a build
+The checked-in lists were cut this way from builds by an earlier builder (the
+PR description says which), so a rebuild gives similar, not identical, lists.
 
 Four kinds of sample, each a JSON file under DIR/samples:
 
@@ -117,8 +129,8 @@ WINDOW is 14 days, Dr.CI's flaky window: truth is a lower bound anyway, so a
 shorter window would buy a few more truths at the price of counting more
 flakes and parallel breakages as the PR's. The builder prints how many
 failures each rule dropped. PR truths that reproduced (same test failing in
-two build environments, or on two heads of the PR) are kept in
-`truth_strong`. A one-off is not necessarily a flake: often only one
+two build environments, or on two heads of the PR, also heads from before
+--start that the window rule keeps) are kept in `truth_strong`. A one-off is not necessarily a flake: often only one
 environment runs the test, or the author fixed it in the next push.
 """
 
@@ -255,7 +267,8 @@ def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
                 AND failure_count = 0 AND error_count = 0 AND skipped_count = 0)
             , j AS (
               SELECT id, run_id, head_sha, head_branch, workflow_name, name FROM default.workflow_job FINAL
-              WHERE id IN (SELECT job_id FROM f) AND repository_full_name = 'pytorch/pytorch')
+              WHERE id IN (SELECT job_id FROM f) AND repository_full_name = 'pytorch/pytorch'
+                AND {" AND ".join(f"name NOT LIKE '%{s}%'" for s in SKIP_JOBS)})
             SELECT f.job_id job_id, tf, classname, f.name test, toString(t) t, j.head_sha sha,
                    if(r.hr IN ('', 'pytorch/pytorch'), j.head_branch, concat(r.hr, ':', j.head_branch)) br,
                    j.workflow_name wf, j.name job, (f.job_id, f.tf, f.classname, f.name) IN (SELECT * FROM passed) flaky
@@ -269,7 +282,14 @@ def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
         rows += chunk
         print(d, len(rows), flush=True)
         d = n
-    return [r for r in rows if not any(s in r["job"] for s in SKIP_JOBS)]
+    return rows
+
+
+def check_written(days: list[dt.date]) -> None:
+    """Raise unless tests.all_test_runs has a failing test on each of `days`, so a store no longer written, or one whose retention no longer reaches them, is not read as no truth."""
+    sql = " UNION ALL ".join(f"SELECT '{d}' d FROM (SELECT 1 FROM tests.all_test_runs WHERE time_inserted >= '{d}' AND time_inserted < '{d + dt.timedelta(days=1)}' AND (failure_count > 0 OR error_count > 0) LIMIT 1)" for d in days)  # fmt: skip
+    if missing := sorted({str(d) for d in days} - {r["d"] for r in query(sql)}):
+        raise RuntimeError(f"tests.all_test_runs has no failing test on {', '.join(missing)}; check that it is still written and kept that long (see pull_failures)")  # fmt: skip
 
 
 def pr_of_shas(shas: list[str]) -> dict[str, int]:
@@ -697,16 +717,17 @@ def other_build(out: Path, prefix: str, window: tuple[dt.date, dt.date]) -> str 
 
 def pr_samples(h: History, out: Path, jobs: int) -> None:
     lo = ts(f"{h.start} 00:00:00")
-    own = [r for rows in h.heads.values() for r in rows if ts(r["t"]) >= lo and h.why_dropped(r) is None]  # fmt: skip
+    own = [r for rows in h.heads.values() for r in rows if h.why_dropped(r) is None]
     h.load_green({r["sha"] for r in own})
     own = [r for r in own if h.why_dropped(r) is None]
     envs, heads = collections.defaultdict(set), collections.defaultdict(set)
     first: dict[int, dict] = {}
+    # A reproduction counts on any head the window rule keeps, also one from before --start.
     for r in own:
         k = (r["pr"], *key(r))
         envs[k].add(r["job"].split(" / ")[0])
         heads[k].add(r["sha"])
-        if r["pr"] not in first or r["t"] < first[r["pr"]]["t"]:
+        if ts(r["t"]) >= lo and (r["pr"] not in first or r["t"] < first[r["pr"]]["t"]):
             first[r["pr"]] = r
     reproduced = {k for k in envs if len(envs[k]) >= 2 or len(heads[k]) >= 2}
     fetch(sorted({f["sha"] for f in first.values()}))
@@ -746,18 +767,15 @@ def pr_samples(h: History, out: Path, jobs: int) -> None:
     print(f"{sources.count('main')} of {len(sources)} PR samples written have no CI base and are diffed against main", flush=True)  # fmt: skip
 
 
-# fmt: off
-
-
 def landed_times(since: dt.date) -> dict[int, dt.datetime]:
     """PR number -> when it first landed on main since `since`, from the merge bot's `Pull Request resolved:` line, the last one of a body that quotes others.
 
     A PR that first landed before `since` gets the time of its first reland, or none.
     """
     out: dict[int, dt.datetime] = {}
-    for c in git("log", "origin/main", f"--since={since} 00:00 +0000", "--format=%ct %b%x00").split("\0"):
-        if (m := re.match(r"\s*(\d+) ", c)) and (prs := re.findall(r"Pull Request resolved: \S+/pull/(\d+)", c)):
-            t, pr = dt.datetime.fromtimestamp(int(m.group(1)), tz=dt.timezone.utc), int(prs[-1])
+    for c in git("log", "origin/main", f"--since={since} 00:00 +0000", "--format=%ct %b%x00").split("\0"):  # fmt: skip
+        if (m := re.match(r"\s*(\d+) ", c)) and (prs := re.findall(r"Pull Request resolved: \S+/pull/(\d+)", c)):  # fmt: skip
+            t, pr = dt.datetime.fromtimestamp(int(m.group(1)), tz=dt.timezone.utc), int(prs[-1])  # fmt: skip
             out[pr] = min(t, out.get(pr, t))
     return out
 
@@ -805,18 +823,17 @@ def head_samples(h: History, out: Path, jobs: int) -> None:
         dropped.append(c)
         if kept:
             truth_jobs = by_file(kept)
-            previous = sorted({tf for t, other, tf in failed[pr] if other != sha and sha in created and t < created[sha]})
+            previous = sorted({tf for t, other, tf in failed[pr] if other != sha and sha in created and t < created[sha]})  # fmt: skip
             try:
                 if write_sample(out, f"head_{pr}_{sha[:12]}", "head", sha, title=prs[pr]["title"], body=prs[pr]["body"], **bases, pr=pr,
-                                window=(h.start, h.end), truth=sorted(truth_jobs), truth_jobs=truth_jobs, previous_failures=previous):
+                                window=(h.start, h.end), truth=sorted(truth_jobs), truth_jobs=truth_jobs, previous_failures=previous):  # fmt: skip
                     sources.append(bases["base_source"])
             except subprocess.CalledProcessError as e:
                 print(f"skipping head {sha}: {e} {e.stderr or ''}", flush=True)
 
     run_each("head", go, sorted(shas), jobs)
     print_dropped("head", dropped)
-    print(f"{sources.count('main')} of {len(sources)} head samples written have no CI base and are diffed against main", flush=True)
-# fmt: on
+    print(f"{sources.count('main')} of {len(sources)} head samples written have no CI base and are diffed against main", flush=True)  # fmt: skip
 
 
 def revert_truth_jobs(
@@ -879,7 +896,12 @@ def revert_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
     rows: dict[str, dict] = {}
     for r in query(sql):
         rows.setdefault(r["commit_sha"], r)
+    if days := sorted({dt.date.fromisoformat(r["reverted_at"][:10]) for r in rows.values()}):  # fmt: skip
+        # Revert truth reads tests.all_test_runs around each revert, so its first and last must still be there.
+        check_written(sorted({days[0], days[-1]}))
     fetch(sorted(rows))
+    found: list[str] = []
+    empty: list[str] = []
 
     def go(sha: str) -> None:
         r = rows[sha]
@@ -889,6 +911,7 @@ def revert_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
         signal = {(k[0].removesuffix(".py"), k[1] if len(k) == 3 else "", k[-1]) for k in keys}  # fmt: skip
         try:
             truth_jobs = revert_truth_jobs(signal, sha, commit_time(sha), r["reverted_at"])  # fmt: skip
+            (found if truth_jobs else empty).append(sha)
             if not truth_jobs:
                 print(f"skipping revert {sha}: no failure of its signal tests in a main job that runs TD survives the job, job_green and passed_in_job rules", flush=True)  # fmt: skip
                 return
@@ -899,6 +922,8 @@ def revert_samples(out: Path, jobs: int, start: dt.date, end: dt.date) -> None:
             print(f"skipping revert {sha}: {e} {e.stderr or ''}", flush=True)
 
     run_each("revert", go, list(rows), jobs)
+    if empty and not found:
+        raise RuntimeError(f"none of the {len(empty)} reverts has a failure of its signal tests in tests.all_test_runs; check that it is still written (see pull_failures)")  # fmt: skip
 
 
 def neutral_samples(out: Path, start: dt.date, end: dt.date, n: int) -> None:

@@ -60,6 +60,10 @@ from tools.testing.test_run import TestRun
 
 sys.path.remove(str(REPO_ROOT))
 
+
+# Consistency checks of files outside tools/testing/llm_td (.ci/pytorch/test.sh, .github/labeler.yml and workflows), which unrelated edits can break; opt in with LLM_TD_REPO_CHECKS=1.
+repo_check = unittest.skipUnless(os.environ.get("LLM_TD_REPO_CHECKS") == "1", "set LLM_TD_REPO_CHECKS=1 to check files outside tools/testing/llm_td")  # fmt: skip
+
 # config -> file -> [cpu, gpu] seconds
 SECONDS = {
     "default": {"test_a": [100.0, 0.0], "test_b": [50.0, 50.0], "test_c": [10.0, 0.0], "test_d": [40.0, 0.0]},
@@ -1731,7 +1735,9 @@ class TestDollars(unittest.TestCase):
             (data / "bad.yml").write_text(text)
             with self.assertRaisesRegex(SystemExit, msg):
                 dollars.inductor_globs(data / "bad.yml")
-        # The real labeler config parses, and its globs match what they name.
+
+    @repo_check
+    def test_real_labeler(self) -> None:
         real = dollars.inductor_globs(dollars.LABELER)
         self.assertTrue(real.fullmatch("torch/_inductor/codegen/wrapper.py"))
         self.assertFalse(real.fullmatch("torch/nn/functional.py"))
@@ -1917,8 +1923,10 @@ class TestDollars(unittest.TestCase):
         cost = [
             {"wf": "pull", "gpu": 0, "name": "pull / test (default, l)", "k": 10.0},
             {"wf": "pull", "gpu": 0, "name": "pull / test (docs_test, l)", "k": 5.0},
-            {"wf": "inductor", "gpu": 1, "name": "inductor / test (inductor_core, g)", "k": 4.0},
-            {"wf": "inductor", "gpu": 1, "name": "inductor / test (inductor_huggingface, g)", "k": 9.0},
+            {"wf": "inductor", "gpu": 1, "name": "inductor / test (inductor_core, g.nvidia)", "k": 4.0},
+            {"wf": "inductor", "gpu": 1, "name": "inductor / test (inductor_huggingface, g.nvidia)", "k": 9.0},
+            # No WORKFLOWS row, and its runner_cost GPU flag disagrees with GPU_LABEL.
+            {"wf": "periodic", "gpu": 0, "name": "periodic / test (default, x-l4)", "k": 2.0},
         ]  # fmt: skip
         hours = [
             {"wf": "pull", "name": "pull / test (default, 1, 2, l)", "gpu": False, "pr": True, "same": True, "h": 6.0},
@@ -1937,14 +1945,71 @@ class TestDollars(unittest.TestCase):
 
         workflows = [("pull", "cpu", 0.0, 0.0, 0.0, True), ("inductor (unit tests)", "ind_gpu", 0.0, 0.0, 0.0, False)]  # fmt: skip
         with patch_ci_jobs({True: {("pull", "linux", "default")}, False: set()}), mock.patch.object(clickhouse, "query", side_effect=query):  # fmt: skip
-            with mock.patch.object(dollars, "WORKFLOWS", workflows):
+            with mock.patch.object(dollars, "WORKFLOWS", workflows), contextlib.redirect_stderr(io.StringIO()) as err:  # fmt: skip
                 got = dollars.constants(1000)
+            self.assertEqual(err.getvalue(), "left out ('periodic', 'cpu'), which has no WORKFLOWS row: $2.0k, 0 test hours, 0 of them PR\n$2.0k of ('periodic', 'cpu') is on runners misc.runner_cost and land_time.GPU_LABEL classify differently\n")  # fmt: skip
             # docs_test runs no run_test.py and the benchmark is no unit test, so neither counts.
             self.assertEqual(got, ([("pull", "cpu", 10.0, 0.8, 0.25, True), ("inductor (unit tests)", "ind_gpu", 4.0, 0.75, 0.0, False)], 12.3))  # fmt: skip
             self.assertIn(f"match(l, '{land_time.GPU_LABEL}')", sqls[1])
             self.assertIn("toDateTime(1000)", sqls[2])
             with mock.patch.object(dollars, "WORKFLOWS", [("slow", "cpu", 0.0, 0.0, 0.0, False)]), self.assertRaisesRegex(SystemExit, "no PR test hours for"):  # fmt: skip
                 dollars.constants(1000)
+            del cost[2:4]
+            with mock.patch.object(dollars, "WORKFLOWS", workflows), self.assertRaisesRegex(SystemExit, r"^\('inductor', 'ind_gpu'\) has 4 test hours but no misc.runner_cost$"):  # fmt: skip
+                dollars.constants(1000)
+
+    def test_current_results_without_base(self) -> None:
+        # As in score.score, a sample whose prompt needs a base the clone lacks is left out.
+        data = self.data()
+        prompt = score.sample_prompt
+
+        def no_base(s: dict, minutes: dict) -> str:
+            if s["changed_files"] == ["torch/_inductor/x.py"]:
+                raise subprocess.CalledProcessError(128, "git ls-tree")
+            return prompt(s, minutes)
+
+        with mock.patch.object(score, "sample_prompt", no_base), contextlib.redirect_stderr(io.StringIO()) as err:  # fmt: skip
+            got = dollars.current_results(data, "m", ["a", "b"], data / "samples")
+        self.assertEqual([r["cost_usd"] for r in got], [0.4])
+        self.assertEqual(err.getvalue(), "left out 1 m results whose sample's base is not in the clone\n")  # fmt: skip
+
+
+def no_run_test_configs(test_sh: str, configs: set[str]) -> set[str]:
+    """The `configs` whose test.sh branch does not run run_test.py: the first earlier TEST_CONFIG branch a config matches that exits, else the main (longest) dispatch's."""
+    func_def = re.compile(r"(?:function\s+(\w+)|(\w+)\s*\(\s*\))")
+    cond = re.compile(r'(el)?if \[\[ "?\$\{?TEST_CONFIG\}?"? ==? ["\']?([^ "\']+)')  # fmt: skip
+    func, bodies, chains, body = None, {}, [], None
+    for line in test_sh.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        if m := func_def.match(line):
+            func = m.group(1) or m.group(2)
+            bodies[func] = set()
+        elif line.startswith("}"):
+            func = None
+        elif func:
+            bodies[func].update(re.findall(r"[\w.]+", line))
+        elif m := cond.match(line):
+            if not m.group(1):
+                chains.append([])
+            chains[-1].append((m.group(2), body := set()))
+        elif re.match(r"el(se|if)\b", line):
+            chains[-1].append(("*" if line.startswith("else") else None, body := set()))  # fmt: skip
+        elif line.startswith("fi"):
+            body = None
+        elif body is not None:
+            body.update(re.findall(r"[\w.]+", line))
+    main = max(chains, key=len)
+
+    def runs_run_test(words: set[str], seen: frozenset[str] = frozenset()) -> bool:
+        return "run_test.py" in words or any(runs_run_test(bodies[w], seen | {w}) for w in words - seen if w in bodies)  # fmt: skip
+
+    out = set()
+    for cfg in configs:
+        branches = (ws for chain in chains for p, ws in chain if p and fnmatch.fnmatchcase(cfg, p) and (chain is main or "exit" in ws))  # fmt: skip
+        if not runs_run_test(next(branches)):
+            out.add(cfg)
+    return out
 
 
 class TestLandTime(unittest.TestCase):
@@ -2011,44 +2076,42 @@ class TestLandTime(unittest.TestCase):
         ]:
             self.assertEqual(land_time.selectable(wf, cfg, env, no_td), want, (wf, cfg, env))  # fmt: skip
 
+    def test_no_run_test_configs(self) -> None:
+        test_sh = textwrap.dedent("""\
+            run_docs() {
+              build_docs
+            }
+            run_unit() {
+              python test/run_test.py "$@"
+            }
+            # if [[ "${TEST_CONFIG}" == *commented* ]]; then
+            if [[ "${TEST_CONFIG}" == *early* ]]; then
+              run_docs
+              exit 0
+            fi
+            if [[ "${TEST_CONFIG}" == *late* ]]; then
+              run_docs
+            fi
+            if [[ "${TEST_CONFIG}" == docs* ]]; then
+              run_docs
+            elif [[ "$TEST_CONFIG" == bench ]]; then
+              python benchmarks/run.py
+            elif [[ "${TEST_CONFIG}" == *_run* ]]; then
+              run_unit
+            else
+              run_unit
+            fi
+            """)
+        # early_run matches the earlier, exiting *early* branch first; late_run's *late* branch does not exit, so the main dispatch decides.
+        configs = {"docs_test", "bench", "default", "early_run", "late_run", "x_run"}
+        self.assertEqual(no_run_test_configs(test_sh, configs), {"docs_test", "bench", "early_run"})  # fmt: skip
+
+    @repo_check
     def test_no_run_test_matches_test_sh(self) -> None:
-        # A pull or trunk TD config's test.sh branch: the first earlier branch it matches that exits, else the main dispatch's.
-        func_def = re.compile(r"(?:function\s+(\w+)|(\w+)\s*\(\s*\))")
-        cond = re.compile(r'(el)?if \[\[ "?\$\{?TEST_CONFIG\}?"? ==? ["\']?([^ "\']+)')  # fmt: skip
-        func, bodies, chains, body = None, {}, [], None
-        for line in (REPO_ROOT / ".ci/pytorch/test.sh").read_text().splitlines():
-            if line.lstrip().startswith("#"):
-                continue
-            if m := func_def.match(line):
-                func = m.group(1) or m.group(2)
-                bodies[func] = set()
-            elif line.startswith("}"):
-                func = None
-            elif func:
-                bodies[func].update(re.findall(r"[\w.]+", line))
-            elif m := cond.match(line):
-                if not m.group(1):
-                    chains.append([])
-                chains[-1].append((m.group(2), body := set()))
-            elif re.match(r"el(se|if)\b", line):
-                chains[-1].append(("*" if line.startswith("else") else None, body := set()))  # fmt: skip
-            elif line.startswith("fi"):
-                body = None
-            elif body is not None:
-                body.update(re.findall(r"[\w.]+", line))
-        main = max(chains, key=len)
+        configs = {c for w, _, c in ci_jobs()[True] if w in ("pull", "trunk")}
+        self.assertEqual(no_run_test_configs((REPO_ROOT / ".ci/pytorch/test.sh").read_text(), configs), land_time.NO_RUN_TEST)  # fmt: skip
 
-        def runs_run_test(words: set[str], seen: frozenset[str] = frozenset()) -> bool:
-            return "run_test.py" in words or any(runs_run_test(bodies[w], seen | {w}) for w in words - seen if w in bodies)  # fmt: skip
-
-        jobs = ci_jobs()
-        no_run_test = set()
-        for cfg in {c for w, _, c in jobs[True] if w in ("pull", "trunk")}:
-            branches = (ws for chain in chains for p, ws in chain if p and fnmatch.fnmatchcase(cfg, p) and (chain is main or "exit" in ws))  # fmt: skip
-            if not runs_run_test(next(branches)):
-                no_run_test.add(cfg)
-        self.assertEqual(no_run_test, land_time.NO_RUN_TEST)
-
+    @repo_check
     def test_rules_match_workflows(self) -> None:
         jobs = ci_jobs()
         td_configs = {c for w, _, c in jobs[True] | jobs[False] if w in ("pull", "trunk")}  # fmt: skip
@@ -2073,7 +2136,9 @@ class TestLandTime(unittest.TestCase):
         # id -> (workflow, sha, creation offset).
         spec = {1: ("pull", "a", 0), 4: ("pull", "a", 5000), 5: ("pull", "b", 0), 8: ("pull", "d", 0), 13: ("pull", "e", 0), 14: ("pull", "f", 0),
                 2: ("trunk", "a", 300), 6: ("trunk", "b", 3600), 9: ("trunk", "d", 100), 15: ("trunk", "f", 50),
-                3: ("inductor", "a", 100), 10: ("inductor", "d", 5000), 16: ("inductor", "f", 400), 11: ("rocm-mi300", "a", 0), 12: ("rocm-mi300", "b", 0)}  # fmt: skip
+                3: ("inductor", "a", 100), 10: ("inductor", "d", 5000), 16: ("inductor", "f", 400), 11: ("rocm-mi300", "a", 0), 12: ("rocm-mi300", "b", 0),
+                # A trunk run with no job rows, so the replay leaves it out.
+                17: ("trunk", "g", 300)}  # fmt: skip
         runs = [{"id": i, "name": wf, "event": "pull_request" if wf == "pull" else "push", "head_branch": "b" if wf == "pull" else f"ciflow/{wf}/7", "head_sha": sha, "created": c0 + o, "run_attempt": 1, "conclusion": "success"} for i, (wf, sha, o) in spec.items()]  # fmt: skip
 
         def job(i: int, tests: list[tuple[int, int, str, bool]], **kw: int) -> dict:
@@ -2107,6 +2172,8 @@ class TestLandTime(unittest.TestCase):
                 {"pr": 6, "f": 1, "i": 0, "cc": c0, "mt": c0 + 60, "pt": c0, "sha": "a"},
                 {"pr": 7, "f": 0, "i": 1, "cc": c0 + 300, "mt": c0 + 300 + 60, "pt": c0, "sha": "a"},
                 {"pr": 8, "f": 0, "i": 0, "cc": c0 + 600, "mt": c0 + 300, "pt": None, "sha": "a"},
+                # Started trunk run 17, which has no new time, so it is left out of both old and new.
+                {"pr": 9, "f": 0, "i": 0, "cc": c0 + 300, "mt": c0 + 300 + 10 * 60, "pt": c0, "sha": "g"},
             ],
         }  # fmt: skip
         cache = write_data(self.enterContext(tempfile.TemporaryDirectory[str]()), files)  # fmt: skip
@@ -2122,8 +2189,8 @@ class TestLandTime(unittest.TestCase):
             # Heads a and f; d's inductor run is 5000 s after its pull run.
             "| pull, trunk and inductor | 2 | 136 | 149 | 136 | 124 | 146 | 124 |",
             "Inductor ends last for 50% of the pull, trunk and inductor heads, 50% after.",
-            "Merges without -f (n=6): comment to merge p50 10 / p90 135 min; first PR pull run to merge p50 0.8 / p90 2.3 h.",
-            "Merge comment started trunk (n=2): comment to merge p50 135 / p90 139 min, new p50 118 / p90 120 min. Trunk ran before the comment (n=2): p50 6 / p90 9 min.",
+            "Merges without -f (n=7): comment to merge p50 10 / p90 134 min; first PR pull run to merge p50 0.5 / p90 2.3 h.",
+            "Merge comment started trunk (n=2, 1 more whose trunk run was not replayed left out): comment to merge p50 135 / p90 139 min, new p50 118 / p90 120 min. Trunk ran before the comment (n=2): p50 6 / p90 9 min.",
         ]:
             self.assertIn(line, out)
         # fmt: on
@@ -2293,6 +2360,11 @@ class TestClickhouse(unittest.TestCase):
         gateway = subprocess.CompletedProcess([], 1, "", "502 Bad Gateway")
         token = subprocess.CompletedProcess([], 22, "", "curl: (22) The requested URL returned error: 503")  # fmt: skip
         bad = subprocess.CompletedProcess([], 2, "", "Code: 62. Syntax error")
+        # gcx's Go network errors, and the wrapper's re-login when its token check hit one.
+        dial = subprocess.CompletedProcess([], 1, "", 'Error: Post "https://x/api/ds/query": dial tcp 10.0.0.1:443: i/o timeout')  # fmt: skip
+        eof = subprocess.CompletedProcess([], 1, "", 'Error: Post "https://x/api/ds/query": unexpected EOF')  # fmt: skip
+        tls = subprocess.CompletedProcess([], 1, "", "Error: net/http: TLS handshake timeout")  # fmt: skip
+        login = subprocess.CompletedProcess([], 1, "", "error: gcx login failed for pytorchci")  # fmt: skip
         # A result that is not one, whose rows would look transient if searched.
         null = subprocess.CompletedProcess([], 0, '{"columns": null, "rows": [["connection timed out"]]}', "")  # fmt: skip
         hung = subprocess.TimeoutExpired("gcx", clickhouse.TIMEOUT)
@@ -2304,6 +2376,8 @@ class TestClickhouse(unittest.TestCase):
             ([slow, ok], 1, "attempt 1 of 3 exited with code 1: Code: 159. DB::Exception: Timeout exceeded: elapsed 500 seconds"),
             ([gateway, ok], 2, [{"a": 1}]),
             ([token, ok], 2, [{"a": 1}]),
+            ([dial, eof, ok], 3, [{"a": 1}]),
+            ([tls, login, ok], 3, [{"a": 1}]),
             ([busy, hung, ok], 2, "attempt 2 of 3 timed out after 600s"),
             ([null, ok], 1, 'attempt 1 of 3 returned no result: {"columns": null, "rows": [["connection timed out"]]}'),
             ([busy, busy, busy], 3, "attempt 3 of 3 exited with code 1: HTTP 503 Service Unavailable"),
@@ -2703,12 +2777,14 @@ class TestBuildDataset(unittest.TestCase):
         self.assertEqual(out.getvalue(), "skipping s: merge base before the loaded failures\n")  # fmt: skip
 
     def test_pull_failures_marks_flaky_rows(self) -> None:
-        rows = [{"job": JOB, "flaky": 1}, {"job": JOB, "flaky": 0}, {"job": "pull / test (default, 1, 1, mem_leak_check)", "flaky": 0}]  # fmt: skip
+        rows = [{"job": JOB, "flaky": 1}, {"job": JOB, "flaky": 0}]
         with mock.patch.object(bd, "query", return_value=rows) as query, contextlib.redirect_stdout(io.StringIO()):  # fmt: skip
             got = bd.pull_failures(dt.date(2026, 10, 1), dt.date(2026, 10, 2))
-        self.assertEqual(got, rows[:2])
+        self.assertEqual(got, rows)
         sql = query.call_args.args[0]
         self.assertIn("(f.job_id, f.tf, f.classname, f.name) IN (SELECT * FROM passed) flaky", sql)  # fmt: skip
+        # SKIP_JOBS are left out in ClickHouse, before the empty-chunk check.
+        self.assertIn("repository_full_name = 'pytorch/pytorch'\n                AND name NOT LIKE '%rerun_disabled_tests%' AND name NOT LIKE '%mem_leak_check%')", sql)  # fmt: skip
         self.assertNotIn("NOT IN", sql)
         # The last two-day chunk stops at `end`.
         with mock.patch.object(bd, "query", return_value=rows[:1]) as query, contextlib.redirect_stdout(io.StringIO()):  # fmt: skip
@@ -2950,8 +3026,10 @@ class TestBuildDataset(unittest.TestCase):
             fail("test_y", "2026-09-05 00:00:00", "m", br="main", tf="test_c"),
             # The earliest failing head before --start is not the sample's.
             fail("test_x", "2026-09-30 00:00:00", "s0", tf="test_a"),
-            # A later head reproduces test_c.
+            # A later head reproduces test_c, and a head before --start test_e.
             fail("test_x", "2026-10-06 00:00:00", "s1", tf="test_c"),
+            fail("test_x", t, "s", tf="test_e"),
+            fail("test_x", "2026-09-28 00:00:00", "s0", tf="test_e"),
         ]
         h = history(rows, {"s": 1, "s0": 1, "s1": 1}, {1: "me"})
         merge_bases = {("origin/main", "s"): "main_mb", ("lower", "s"): "lower"}
@@ -2976,9 +3054,41 @@ class TestBuildDataset(unittest.TestCase):
         commit_time.assert_called_once_with("main_mb")
         kw = write.call_args.kwargs
         win = ("pull", "win / test (default, 1, 1)")
-        self.assertEqual((kw["truth"], kw["truth_strong"], kw["truth_jobs"]), (["test_b", "test_c", "test_d"], ["test_b", "test_c"], {"test_b": [("pull", JOB), win], "test_c": [("pull", JOB)], "test_d": [("pull", JOB)]}))  # fmt: skip
+        self.assertEqual((kw["truth"], kw["truth_strong"], kw["truth_jobs"]), (["test_b", "test_c", "test_d", "test_e"], ["test_b", "test_c", "test_e"], {"test_b": [("pull", JOB), win], "test_c": [("pull", JOB)], "test_d": [("pull", JOB)], "test_e": [("pull", JOB)]}))  # fmt: skip
         self.assertEqual({k: kw[k] for k in ("base", "merge_base", "main_base", "base_source")}, {"base": "lower", "merge_base": "lower", "main_base": "main_mb", "base_source": "ci"})  # fmt: skip
         self.assertIn("pr truth: dropped by rule over 1 heads: {'main_near_base': 1}", stdout.getvalue())  # fmt: skip
+
+    def test_empty_truth_writes_no_sample(self) -> None:
+        # main_near_base drops all of the earliest head's failures, so PR 1 gets no pr_ sample and the later head does not stand in.
+        rows = [
+            fail("test_x", "2026-10-05 00:00:00", "s"),
+            fail("test_x", "2026-09-05 00:00:00", "m", br="main"),
+            fail("test_x", "2026-10-06 00:00:00", "s1", tf="test_b"),
+        ]
+        h = history(rows, {"s": 1, "s1": 1}, {1: "me"})
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch_ci_jobs(TD_JOBS),
+            mock.patch.object(bd, "green_jobs", return_value=set()),
+            mock.patch.object(bd, "fetch"),
+            mock.patch.object(bd, "has_commit", return_value=True),
+            mock.patch.object(bd, "git", return_value="main_mb\n"),
+            mock.patch.object(bd, "commit_time", return_value=day(15, 9)),
+            mock.patch.object(bd, "ci_bases", return_value={}),
+            mock.patch.object(bd, "head_created", return_value={}),
+            mock.patch.object(bd, "pr_text", return_value=("t", "b")),
+            mock.patch.object(bd, "write_sample") as write,
+            contextlib.redirect_stdout(io.StringIO()) as stdout,
+        ):  # fmt: skip
+            out = Path(d)
+            bd.pr_samples(h, out, 1)
+            write.assert_not_called()
+            self.assertIn("pr truth: dropped by rule over 1 heads: {'main_near_base': 1}", stdout.getvalue())  # fmt: skip
+            # Given a pr_ sample, the head pass writes the later head but not the one whose truth is empty.
+            bd.write_json(out / "pr_1.json", {"pr": 1, "title": "t", "body": "b"})
+            bd.head_samples(h, out, 1)
+        self.assertEqual([c.args[1] for c in write.call_args_list], ["head_1_s1"])
+        self.assertIn("head truth: dropped by rule over 2 heads: {'main_near_base': 1}", stdout.getvalue())  # fmt: skip
 
     def test_pr_and_head_truth_agree(self) -> None:
         green_job = "pull / test (default, 2, 2)"
@@ -3140,11 +3250,12 @@ class TestBuildDataset(unittest.TestCase):
             self.assertEqual(kw, {"title": "t", "body": "b", **bases, "pr": 1, "window": (START, END), "truth": sorted(truth_jobs), "truth_jobs": truth_jobs, "previous_failures": previous[sid]})  # fmt: skip
 
     def test_revert_truth_is_truth_jobs(self) -> None:
-        rows = [{"reverted_at": t, "commit_sha": "c" * 40, "source_signal_keys": ["test_a.py::x", "test_b.py::TestB::y", "no_test_key"]} for t in ("1", "2")]  # fmt: skip
+        rows = [{"reverted_at": t, "commit_sha": "c" * 40, "source_signal_keys": ["test_a.py::x", "test_b.py::TestB::y", "no_test_key"]} for t in ("2026-10-02 01:00:00", "2026-10-03 01:00:00")]  # fmt: skip
         jobs = {"test_a": [("trunk", "linux / test (default, 1, 1)")]}
         with (
             tempfile.TemporaryDirectory() as out,
             mock.patch.object(bd, "query", return_value=rows),
+            mock.patch.object(bd, "check_written"),
             mock.patch.object(bd, "fetch"),
             mock.patch.object(bd, "has_commit", return_value=True),
             mock.patch.object(bd, "commit_time"),
@@ -3153,12 +3264,13 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "write_sample") as write,
         ):  # fmt: skip
             bd.revert_samples(Path(out), 1, dt.date(2026, 10, 1), dt.date(2026, 10, 26))
-        truth_jobs.assert_called_once_with({("test_a", "", "x"), ("test_b", "TestB", "y")}, "c" * 40, mock.ANY, "1")  # fmt: skip
+        truth_jobs.assert_called_once_with({("test_a", "", "x"), ("test_b", "TestB", "y")}, "c" * 40, mock.ANY, "2026-10-02 01:00:00")  # fmt: skip
         kw = write.call_args.kwargs
         self.assertEqual((kw["window"], kw["truth"], kw["truth_jobs"]), ((dt.date(2026, 10, 1), dt.date(2026, 10, 26)), ["test_a"], jobs))  # fmt: skip
         with (
             tempfile.TemporaryDirectory() as out,
             mock.patch.object(bd, "query", return_value=rows),
+            mock.patch.object(bd, "check_written"),
             mock.patch.object(bd, "fetch"),
             mock.patch.object(bd, "has_commit", return_value=True),
             mock.patch.object(bd, "commit_time"),
@@ -3166,6 +3278,8 @@ class TestBuildDataset(unittest.TestCase):
             mock.patch.object(bd, "git", return_value="t\nb"),
             mock.patch.object(bd, "write_sample") as write,
             contextlib.redirect_stdout(io.StringIO()),
+            # With no revert left, the store is suspect rather than every revert truthless.
+            self.assertRaisesRegex(RuntimeError, "none of the 1 reverts has a failure of its signal tests"),
         ):  # fmt: skip
             bd.revert_samples(Path(out), 1, dt.date(2026, 10, 1), dt.date(2026, 10, 26))
         write.assert_not_called()
@@ -3173,6 +3287,7 @@ class TestBuildDataset(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as out,
             mock.patch.object(bd, "query", return_value=rows),
+            mock.patch.object(bd, "check_written"),
             mock.patch.object(bd, "fetch"),
             mock.patch.object(bd, "has_commit", return_value=True),
             mock.patch.object(bd, "commit_time"),
@@ -3181,6 +3296,37 @@ class TestBuildDataset(unittest.TestCase):
         ):  # fmt: skip
             bd.revert_samples(Path(out), 1, dt.date(2026, 10, 1), dt.date(2026, 10, 26))
         self.assertIn("1 of 1 revert samples raised and were skipped", stdout.getvalue())  # fmt: skip
+
+    def test_revert_samples_check_the_store(self) -> None:
+        rows = [{"reverted_at": f"2026-10-0{d} 01:00:00", "commit_sha": c * 40, "source_signal_keys": ["test_a.py::x"]} for d, c in ((2, "a"), (5, "b"), (9, "c"))]  # fmt: skip
+        written = [{"d": "2026-10-02"}]
+
+        def query(sql: str) -> list[dict]:
+            return rows if "autorevert_events_v2" in sql else written
+
+        def revert(truth: dict, raises: str | None) -> list[str]:
+            with (
+                mock.patch.object(bd, "query", side_effect=query) as q,
+                mock.patch.object(bd, "fetch"),
+                mock.patch.object(bd, "has_commit", return_value=True),
+                mock.patch.object(bd, "commit_time"),
+                mock.patch.object(bd, "revert_truth_jobs", side_effect=lambda s, sha, *a: truth.get(sha, {})),
+                mock.patch.object(bd, "commit_text", return_value=("t", "b")),
+                mock.patch.object(bd, "write_sample"),
+                contextlib.redirect_stdout(io.StringIO()),
+                self.assertRaisesRegex(RuntimeError, raises) if raises else contextlib.nullcontext(),
+            ):  # fmt: skip
+                bd.revert_samples(Path("unused"), 1, dt.date(2026, 10, 1), dt.date(2026, 10, 26))  # fmt: skip
+            return [c.args[0] for c in q.call_args_list[1:]]
+
+        # Only the first and last revert days are probed; the last has no failing test, as a store no longer written gives.
+        (probe,) = revert({}, "tests.all_test_runs has no failing test on 2026-10-09")
+        self.assertIn("'2026-10-02'", probe)
+        self.assertIn("'2026-10-09'", probe)
+        self.assertNotIn("'2026-10-05'", probe)
+        written.append({"d": "2026-10-09"})
+        revert({}, "none of the 3 reverts has a failure of its signal tests")
+        revert({"b" * 40: {"test_a": [("trunk", JOB)]}}, None)
 
     def test_neutral_samples(self) -> None:
         start, end = dt.date(2026, 10, 1), dt.date(2026, 10, 26)
@@ -3235,6 +3381,27 @@ class TestBuildDataset(unittest.TestCase):
         by_msg, by_bot = before[:2]
         later = draw(f"This reverts commit {by_msg}.", [{"commit_sha": by_bot}])
         self.assertEqual(later, before[2:])
+
+    def test_neutral_population_drops_revert_titles(self) -> None:
+        plain = [f"{i:02d}" + "a" * 38 for i in range(20)]
+        titles = dict.fromkeys(plain, "Add x") | {f"{i:02d}" + "b" * 38: t for i, t in enumerate(["Revert x"] * 10 + ["Reland x"] * 10)}  # fmt: skip
+
+        def git(*args: str) -> str:
+            if args[:2] == ("log", "-1"):
+                return titles[args[-1]] + "\n\nbody"
+            if "--first-parent" in args:
+                return "".join(f"{sha} {t}\n" for sha, t in titles.items())
+            return ""
+
+        with (
+            tempfile.TemporaryDirectory() as out,
+            mock.patch.object(bd, "git", git),
+            mock.patch.object(bd, "query", return_value=[]),
+            mock.patch.object(bd, "write_sample") as write,
+        ):
+            bd.neutral_samples(Path(out), dt.date(2026, 10, 1), dt.date(2026, 10, 26), 10)  # fmt: skip
+        # The draw is from the titles that do not start with Revert or Reland, so all 10 survive.
+        self.assertEqual([c.args[3] for c in write.call_args_list], random.Random(0).sample(plain, 10))  # fmt: skip
 
     def test_checked_in_ids(self) -> None:
         ids = {n: set((REPO_ROOT / "tools/testing/llm_td/eval/ids" / f"{n}.txt").read_text().split()) for n in ("eval", "dev", "agentic", "neutral", "head")}  # fmt: skip

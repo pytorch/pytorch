@@ -24,6 +24,7 @@ import collections
 import json
 import re
 import statistics as st
+import subprocess
 import sys
 from pathlib import Path
 
@@ -159,20 +160,28 @@ def current_results(data: Path, tag: str, ids: list[str], samples: Path) -> list
     """`tag`'s current results on the `ids` select_tests asks the model about.
 
     As in score.score, a result is current if it was made from the prompt the
-    sample gives now (see score.prompt_sha)."""
+    sample gives now (see score.prompt_sha), and a sample whose prompt cannot
+    be built because its base is not in the clone is left out."""
     minutes = test_minutes(json.loads((data / "test-times.json").read_text()))
-    results, stale = [], 0
+    results, stale, no_base = [], 0, 0
     for i in ids:
         s = json.loads((samples / f"{i}.json").read_text())
         if score.unasked(s) or not (p := data / "results" / tag / f"{i}.json").exists():
             continue
         r = json.loads(p.read_text())
-        if r.get("prompt_sha") == score.prompt_sha(score.sample_prompt(s, minutes), bool(r.get("agentic"))):  # fmt: skip
+        try:
+            prompt = score.sample_prompt(s, minutes)
+        except subprocess.CalledProcessError:
+            no_base += 1
+            continue
+        if r.get("prompt_sha") == score.prompt_sha(prompt, bool(r.get("agentic"))):
             results.append(r)
         else:
             stale += 1
     if stale:
         print(f"left out {stale} {tag} results of another prompt", file=sys.stderr)
+    if no_base:
+        print(f"left out {no_base} {tag} results whose sample's base is not in the clone", file=sys.stderr)  # fmt: skip
     return results
 
 
@@ -223,8 +232,12 @@ def constants(end: int) -> tuple[list[tuple[str, str, float, float, float, bool]
 
     A row counts only the test jobs the selection can shrink, as the Time to
     land replay does (land_time.selectable): its cost, the PR share of their
-    hours and the fork share of those PR hours."""
+    hours and the fork share of those PR hours. Selectable buckets without a
+    WORKFLOWS row, and cost whose misc.runner_cost GPU flag disagrees with
+    land_time.GPU_LABEL on the job's runner, are printed to stderr; a row
+    with hours but no cost raises."""
     no_td = land_time.no_td_configs()
+    gpu_label = re.compile(land_time.GPU_LABEL)
 
     def key(wf: str, name: str, gpu: bool) -> tuple[str, str] | None:
         m = CONFIG.search(name)
@@ -233,9 +246,12 @@ def constants(end: int) -> tuple[list[tuple[str, str, float, float, float, bool]
         return wf, ("ind_" if wf == "inductor" else "") + ("gpu" if gpu else "cpu")
 
     cost: collections.defaultdict[tuple[str, str], float] = collections.defaultdict(float)  # fmt: skip
+    disagree: collections.Counter[tuple[str, str]] = collections.Counter()
     for r in clickhouse.query(COST_SQL.format(end=end)):
         if k := key(r["wf"], r["name"], r["gpu"]):
             cost[k] += r["k"]
+            if bool(r["gpu"]) != bool(gpu_label.search(r["name"].partition("/ test (")[2])):  # fmt: skip
+                disagree[k] += r["k"]
     # (all, PR, fork-PR) hours.
     hours: dict[tuple[str, str], list[float]] = collections.defaultdict(lambda: [0.0, 0.0, 0.0])  # fmt: skip
     for r in clickhouse.query(HOURS_SQL.format(end=end, gpu=land_time.GPU_LABEL)):
@@ -243,12 +259,21 @@ def constants(end: int) -> tuple[list[tuple[str, str, float, float, float, bool]
             hours[k][0] += r["h"]
             hours[k][1] += r["h"] if r["pr"] else 0.0
             hours[k][2] += r["h"] if r["pr"] and not r["same"] else 0.0
-    out = []
+    out, listed = [], set()
     for wf, k, *_, has_td in WORKFLOWS:
         total, pr, fork = hours[w := ("inductor" if k.startswith("ind_") else wf, k)]
         if not pr:
             raise SystemExit(f"no PR test hours for {w}")
+        if not cost[w]:
+            raise SystemExit(f"{w} has {total:.0f} test hours but no misc.runner_cost")
+        listed.add(w)
         out.append((wf, k, round(cost[w], 1), round(pr / total, 2), round(fork / pr, 2), has_td))  # fmt: skip
+    for w in sorted((cost.keys() | hours.keys()) - listed):
+        total, pr, _ = hours[w]
+        print(f"left out {w}, which has no WORKFLOWS row: ${cost[w]:.1f}k, {total:.0f} test hours, {pr:.0f} of them PR", file=sys.stderr)  # fmt: skip
+    for w, k in sorted(disagree.items()):
+        if round(k, 1):
+            print(f"${k:.1f}k of {w} is on runners misc.runner_cost and land_time.GPU_LABEL classify differently", file=sys.stderr)  # fmt: skip
     heads = clickhouse.query(HEADS_SQL.format(end=end))[0]["heads"]
     return out, round(heads / 1000, 1)
 

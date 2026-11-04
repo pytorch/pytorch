@@ -23,7 +23,8 @@ head's merge wait is the latest end of its first pull and trunk runs (and
 inductor's) minus the earliest creation, over the heads whose trunk (and
 inductor) run was created within 10 minutes of pull. The merges
 whose comment started trunk are replayed by taking that trunk run's saving
-off their comment to merge time.
+off their comment to merge time; those whose trunk run the replay left out
+are left out of both the old and the new times.
 """
 
 from __future__ import annotations
@@ -279,19 +280,22 @@ def report(cache: Path, dollars: dict, all_prs: bool) -> list[str]:
         if w["name"] == "trunk" and w["head_branch"].startswith("ciflow/"):
             trunk[w["head_sha"]].append(w["created"])
     saved = {(x["sha"], x["c"]): x["old"] - x["new"] for x in runs["trunk"]}
-    started, started_new, before = [], [], []
+    started, started_new, before, unreplayed = [], [], [], 0
     for m in merges:
         if m["i"] or not (ts := trunk.get(m["sha"])):
             continue
         if min(ts) < m["cc"] - 300:
             before.append((m["mt"] - m["cc"]) / 60)
         elif abs((t := min(ts, key=lambda t: abs(t - m["cc"]))) - m["cc"]) <= 300:
+            if (k := (m["sha"], t)) not in saved:
+                unreplayed += 1
+                continue
             started.append((m["mt"] - m["cc"]) / 60)
-            started_new.append(started[-1] - saved.get((m["sha"], t), 0.0))
+            started_new.append(started[-1] - saved[k])
     lines += [
         "",
         f"Merges without -f (n={len(c2m)}): comment to merge p50 {pct(c2m, 50):.0f} / p90 {pct(c2m, 90):.0f} min; first PR pull run to merge p50 {pct(p2m, 50):.1f} / p90 {pct(p2m, 90):.1f} h.",
-        f"Merge comment started trunk (n={len(started)}): comment to merge p50 {pct(started, 50):.0f} / p90 {pct(started, 90):.0f} min, new p50 {pct(started_new, 50):.0f} / p90 {pct(started_new, 90):.0f} min. Trunk ran before the comment (n={len(before)}): p50 {pct(before, 50):.0f} / p90 {pct(before, 90):.0f} min.",
+        f"Merge comment started trunk (n={len(started)}, {unreplayed} more whose trunk run was not replayed left out): comment to merge p50 {pct(started, 50):.0f} / p90 {pct(started, 90):.0f} min, new p50 {pct(started_new, 50):.0f} / p90 {pct(started_new, 90):.0f} min. Trunk ran before the comment (n={len(before)}): p50 {pct(before, 50):.0f} / p90 {pct(before, 90):.0f} min.",
     ]
 
     queues: dict[str, list] = collections.defaultdict(lambda: [[], 0.0, 0.0])
