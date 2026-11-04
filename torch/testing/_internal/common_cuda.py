@@ -401,6 +401,17 @@ def evaluate_platform_supports_mx_gemm():
         return True
     return False
 
+def evaluate_platform_supports_mxfp8_cast():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            if ROCM_VERSION >= (7, 0):
+                gcn_name = torch.cuda.get_device_properties(0).gcnArchName
+                return 'gfx950' in gcn_name or ('gfx1250' in gcn_name and ROCM_VERSION >= (7, 14))
+        else:
+            return SM100OrLater
+    # TODO(later): Add XPU support only for devices with hardware (not emulated) MXFP8.
+    return False
+
 def evaluate_platform_supports_mxfp8_grouped_gemm():
     if torch.cuda.is_available() and not torch.version.hip:
         built_with_mslk = "USE_MSLK" in torch.__config__.show()
@@ -433,6 +444,7 @@ def evaluate_platform_supports_fp8_sparse():
     return False
 
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
+PLATFORM_SUPPORTS_MXFP8_CAST: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_cast())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 PLATFORM_SUPPORTS_FP8_SPARSE: bool = LazyVal(lambda: evaluate_platform_supports_fp8_sparse())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
