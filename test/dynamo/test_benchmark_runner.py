@@ -3,6 +3,7 @@
 import sys
 import types
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from unittest import mock
 
@@ -24,6 +25,58 @@ requires_distributed = unittest.skipIf(
 
 
 class BenchmarkRunnerTests(TestCase):
+    def test_fp64_oom_falls_back_to_cosine(self):
+        runner = mock.Mock(spec=common.BenchmarkRunner())
+        runner.args = types.SimpleNamespace(
+            backend="inductor",
+            training=False,
+            cosine=False,
+            export=False,
+            export_aot_inductor=False,
+            export_nativert=False,
+            torchscript_jit_trace=False,
+            aot_precompile=False,
+            freezing=False,
+            save_model_outputs_to=None,
+            compare_model_outputs_with=None,
+        )
+        runner.non_deterministic_models = set()
+        runner.skip_accuracy_checks_large_models_dashboard = set()
+        runner.skip_accuracy_check_as_eager_non_deterministic = set()
+        runner.pick_grad = mock.Mock(return_value=nullcontext())
+        runner.get_tolerance_and_cosine_flag.side_effect = lambda *args: (
+            1e-4,
+            runner.args.cosine,
+        )
+        runner.get_accuracy_check_runs.return_value = 1
+        model = mock.Mock()
+        runner.maybe_cast.return_value = (model, [])
+        result = object()
+        runner.run_n_iterations.side_effect = [
+            torch.cuda.OutOfMemoryError("fp64 reference OOM"),
+            result,
+            result,
+            result,
+        ]
+
+        with (
+            mock.patch.object(common, "cast_to_fp64", return_value=(model, [])),
+            mock.patch.object(common, "empty_gpu_cache"),
+            mock.patch.object(common, "reset_rng_state"),
+            mock.patch.object(common, "same", return_value=True) as same,
+            self.assertLogs(common.log, level="WARNING") as logs,
+        ):
+            status = common.BenchmarkRunner.check_accuracy(
+                runner, "test_model", model, [], lambda fn: fn, None, None
+            )
+
+        self.assertEqual(status, "pass")
+        self.assertTrue(runner.args.cosine)
+        self.assertEqual(runner.run_n_iterations.call_count, 4)
+        self.assertIsNone(same.call_args.args[2])
+        self.assertTrue(same.call_args.kwargs["cos_similarity"])
+        self.assertIn("fp64 reference OOM", "\n".join(logs.output))
+
     @requires_distributed
     def test_default_fsdp_policy_does_not_import_model_dependencies(self):
         from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
