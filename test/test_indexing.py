@@ -1274,6 +1274,23 @@ class TestIndexingDevice(TestCase):
             self.assertEqual(output, input_list)
 
     @onlyNativeDeviceTypes
+    def test_index_put_accumulate_long_duplicate_runs(self, device):
+        cases = [
+            ([1] * 50 + [0] + [1] * 50 + [4, 3], [1] * 50 + [2] + [1] * 50 + [3, 4], [2, 100, 0, 4, 3]),
+            ([1] * 256 + [0] + [1] * 256 + [4, 3], [1] * 256 + [2] + [1] * 256 + [3, 4], [2, 512, 0, 4, 3]),
+            ([2] * 600, [1] * 600, [0, 0, 600, 0, 0]),
+            ([1] * 300 + [3] * 300, [1] * 300 + [2] * 300, [0, 300, 0, 600, 0]),
+            ([0] * 200 + [1] * 100 + [3] * 300, [1] * 600, [200, 100, 0, 300, 0]),
+        ]
+        outer_factors = torch.arange(1, 4, device=device)[:, None, None]
+        for (indices, row_values, expected_rows), slice_size in product(cases, (16, 200)):
+            feature_factors = torch.arange(1, slice_size + 1, device=device)
+            values = torch.tensor(row_values, device=device, dtype=torch.float)[:, None] * feature_factors * outer_factors
+            input = torch.zeros(3, 5, slice_size, device=device)
+            output = torch.ops.aten.index_put_(input, [None, torch.tensor(indices, device=device)], values, True)
+            self.assertEqual(output, torch.tensor(expected_rows, device=device, dtype=torch.float)[:, None] * feature_factors * outer_factors)
+
+    @onlyNativeDeviceTypes
     def test_index_ind_dtype(self, device):
         x = torch.randn(4, 4, device=device)
         ind_long = torch.randint(4, (4,), dtype=torch.long, device=device)
