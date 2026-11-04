@@ -21353,11 +21353,15 @@ class PinMemoryTests(TestCase):
             return constructor(*args, pin_memory=True, device="cpu")
 
         compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
-        result, code = run_and_get_code(compiled)
+        result, codes = run_and_get_code(compiled)
         self.assertTrue(result.is_pinned())
+        code = "\n".join(codes)
         if name == "tensor_constant" and not dynamic:
             # Not 1-D, so it must stay a pinned constant rather than be inlined
-            self.assertIn("_tensor_constant0", "\n".join(code))
+            self.assertIn("_tensor_constant0", code)
+        elif dynamic and name != "tensor_constant":
+            # Sizes and values come from a closure; check they weren't specialized
+            self.assertRegex(code, r"\bs\d+\b")
         actual = result.to(device, non_blocking=True)
         expected = fn().to(device)
         if deterministic:
@@ -21369,9 +21373,10 @@ class PinMemoryTests(TestCase):
 
 # MPS is left out: these tests were skipped on macOS as failing when they lived in
 # CommonTemplate.
-instantiate_device_type_tests(
-    PinMemoryTests, globals(), except_for="cpu", allow_xpu=True
-)
+if HAS_CPU:
+    instantiate_device_type_tests(
+        PinMemoryTests, globals(), except_for="cpu", allow_xpu=True
+    )
 
 if RUN_GPU:
 
