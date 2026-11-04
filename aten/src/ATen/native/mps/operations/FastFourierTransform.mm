@@ -22,6 +22,7 @@
 #include <ATen/ops/fft_fft.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/polar.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at::native {
@@ -115,37 +116,15 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/FFT_metallib.h>
 #endif
 
-// Complex points per transform that fit in threadgroup memory; longer transforms take several passes
-constexpr int64_t kMaxPoints = kFFTMaxPoints;
-// Stage radices of the threadgroup kernels, and of the global-memory passes (one radix per pass)
+// Stage radices of the threadgroup kernels (the kFFTMaskP2357 set) and of the global-memory passes, largest first
 constexpr auto kRadices = {16, 8, 4, 2, 3, 5, 7};
-static_assert(std::ranges::all_of(kRadices, [](int r) { return (kFFTMaskP2357 & (1u << r)) != 0; }));
 #define FFT_RADIX_ENTRY(R) R,
 constexpr auto kGlobalRadices = {FFT_GLOBAL_RADICES(FFT_RADIX_ENTRY)};
 #undef FFT_RADIX_ENTRY
-
-constexpr int64_t kSimdWidth = c10::metal::simdgroup_size;
-constexpr int64_t kMaxThreads = c10::metal::max_threadgroup_size;
-constexpr int64_t kTwiddleBlock = kFFTTwiddleBlock;
-constexpr int64_t kPadPeriod = 1 << kFFTPadShift;
-constexpr int64_t kContiguousThreads = 64;
-constexpr int64_t kStridedThreads = 256;
-constexpr int64_t kGlobalThreads = 64;
-constexpr int64_t kMinStridedBatch = 4;
-constexpr int64_t kMaxContiguousBatch = 8;
-constexpr int64_t kMaxBatch = 32;
-// A contiguous batch grows while more than 1 in this many SIMD lanes sits idle
-constexpr int64_t kIdleLaneDivisor = 20;
-constexpr int64_t kSmemBytes = kFFTSmemBytes;
-// setThreadgroupMemoryLength takes multiples of this; global-memory kernels bind the minimum and leave it unused
-constexpr int64_t kSmemAlign = 16;
-constexpr int64_t kFloatsPerSlot = 2;
-constexpr int64_t kFloatsPerSoloSlot = 3;
+// Below this many elements, extra launches cost more than they save
+constexpr int64_t kLongPoints = 1 << 17;
 // Past this length, tiles strided on both sides no longer coalesce
 constexpr int64_t kMaxCoalescedPoints = 1024;
-constexpr int64_t kLongPoints = 1 << 17;
-constexpr int64_t kMaxNestedColumns = 256;
-constexpr int64_t kMaxRowsForTemp = 16;
 
 // Radix sequence of n over `rs` (largest first; {1} for n = 1), empty when n has other prime factors
 c10::SmallVector<uint32_t, kFFTMaxStages> radices(int64_t n, std::initializer_list<int> rs) {
@@ -170,7 +149,7 @@ Tensor twiddles(int64_t n, bool two_level = false) {
   auto& t = cache[{n, two_level}];
   if (!t.defined()) {
     const auto k = two_level
-        ? at::cat({at::arange(kTwiddleBlock, at::kDouble), at::arange(0, n, kTwiddleBlock, at::kDouble)})
+        ? at::cat({at::arange(kFFTTwiddleBlock, at::kDouble), at::arange(0, n, kFFTTwiddleBlock, at::kDouble)})
         : at::arange(n, at::kDouble);
     t = at::polar(at::ones_like(k), k.mul(-2 * M_PI / n)).to(at::device(kMPS).dtype(kComplexFloat));
   }
@@ -265,33 +244,27 @@ struct Launch {
   NSUInteger smem;
 };
 
-// Transforms per group on a strided axis: a tile limited by smem and threads, stretched over batches up to 1.5x
-int64_t strided_batch(int64_t n, int64_t J, int64_t rows) {
-  const int64_t tile =
-      std::min<int64_t>({kMaxPoints / n, kMaxThreads / J, std::max<int64_t>(kMinStridedBatch, kStridedThreads / J)});
-  const int64_t B = std::clamp<int64_t>(tile, 1, std::min<int64_t>(rows, kMaxBatch));
-  const bool stretch = rows > B && rows <= B + B / 2 && rows * n <= kMaxPoints && rows * J <= kMaxThreads;
-  return stretch ? rows : B;
-}
-
-// Transforms per group on a contiguous axis: grown while too many SIMD lanes sit idle, as long as the batch fits smem
-int64_t contiguous_batch(int64_t padded, int64_t J, int64_t rows) {
-  const int64_t base = kContiguousThreads / J;
-  const auto fits = [&](int64_t c) { return c <= kMaxContiguousBatch && c * padded <= kMaxPoints; };
-  const auto too_idle = [&](int64_t c) {
-    const int64_t threads = c * J;
-    return (at::round_up(threads, kSimdWidth) - threads) * kIdleLaneDivisor > threads;
-  };
-  int64_t c = std::max<int64_t>(base, 1);
-  while (fits(c) && too_idle(c)) {
+// Transforms per group, within smem. A strided axis tiles rows for 256 threads (4 to 32 rows), stretched to the
+// whole batch when that is at most 1.5x the tile; a contiguous axis fills 64 threads, then adds rows (up to 8)
+// while more than 1 in 20 SIMD lanes would sit idle
+int64_t transforms_per_group(int64_t n, int64_t padded, int64_t J, int64_t rows, bool strided) {
+  constexpr int64_t simd = c10::metal::simdgroup_size, threads = c10::metal::max_threadgroup_size;
+  if (strided) {
+    const int64_t tile = std::min<int64_t>({kFFTMaxPoints / n, threads / J, std::max<int64_t>(4, 256 / J)});
+    const int64_t B = std::clamp<int64_t>(tile, 1, std::min<int64_t>(rows, 32));
+    const bool stretch = rows > B && rows <= B + B / 2 && rows * n <= kFFTMaxPoints && rows * J <= threads;
+    return stretch ? rows : B;
+  }
+  const auto fits = [&](int64_t c) { return c <= 8 && c * padded <= kFFTMaxPoints; };
+  const int64_t base = std::max<int64_t>(64 / J, 1);
+  int64_t c = base;
+  while (fits(c) && (at::round_up(c * J, simd) - c * J) * 20 > c * J) {
     c++;
   }
-  return std::clamp<int64_t>(fits(c) ? c : base, 1, std::min<int64_t>(rows, kMaxBatch));
+  return std::clamp<int64_t>(fits(c) ? c : base, 1, std::min<int64_t>(rows, 32));
 }
 
 Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, const Batch& b, const Pass& x) {
-  TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(in) && canUse32BitIndexMath(out),
-                              "MPS FFT: tensors must have fewer than 2^31 elements");
   const auto radix = radices(x.global ? x.global : n, x.global ? kGlobalRadices : kRadices);
   TORCH_INTERNAL_ASSERT(!radix.empty(), "no radix plan for ", n);
   TORCH_INTERNAL_ASSERT(radix.size() <= kFFTMaxStages);
@@ -308,20 +281,20 @@ Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, const B
   const bool ld = x.cl || n_sig < n * x.ld_mul;
   const bool st = x.out_k_mul > 1 || x.cs;
   const bool tw4 = x.tt && !x.global;
-  const auto flag_if = [](bool on, FFTFlag flag) { return on ? fft_flag_bit(flag) : 0; };
-  const uint32_t F = flag_if(inv, FFTFlag::Inverse) | flag_if(tw4, FFTFlag::FourStepTwiddles) |
-      flag_if(st, FFTFlag::ExtendedStores) | flag_if(ld, FFTFlag::ExtendedLoads) |
-      flag_if(x.global, FFTFlag::GlobalStage);
+  const auto flag_if = [](bool on, uint32_t flag) { return on ? flag : 0u; };
+  const uint32_t F = flag_if(inv, kFFTInverse) | flag_if(tw4, kFFTFourStepTwiddles) | flag_if(st, kFFTExtendedStores) |
+      flag_if(ld, kFFTExtendedLoads) | flag_if(x.global, kFFTGlobalStage);
 
   const int64_t ept = fft_points_per_thread(n_u32, F);
   const int64_t rows = b.dims[0].size;
-  const int64_t J = !x.global ? at::ceil_div(n, ept) : kGlobalThreads;
+  // Threads per transform; global passes spread transforms over 64-thread groups
+  const int64_t J = !x.global ? at::ceil_div(n, ept) : 64;
 
-  // Batch small transforms (<= 5% idle lanes), tile strided axes; pad contiguous rows, interleave strided ones
+  // Pad contiguous rows (a spare slot every 16), interleave strided tiles
   const bool strided = b.si != 1 || b.so != 1;
-  const int64_t padded = n + n / kPadPeriod + 1;
-  const int64_t B = strided ? strided_batch(n, J, rows) : contiguous_batch(padded, J, rows);
-  const bool pad = !strided && B * (padded - (B == 1)) <= kMaxPoints;
+  const int64_t padded = n + (n >> kFFTPadShift) + 1;
+  const int64_t B = transforms_per_group(n, padded, J, rows, strided);
+  const bool pad = !strided && B * (padded - (B == 1)) <= kFFTMaxPoints;
   const int64_t row = strided ? 1 : pad ? padded - (B == 1) : n + (B > 1);
   TORCH_INTERNAL_ASSERT(b.dims.size() <= c10::metal::max_ndim);
 
@@ -367,9 +340,9 @@ Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, const B
   const int64_t threads = n / std::max<int64_t>(x.global, 1);
   const MTLSize grid = x.global ? MTLSizeMake(at::ceil_div(threads, J), rows, b.numel / rows)
                                 : MTLSizeMake(at::ceil_div(rows, B), ny, b.numel / rows / ny);
-  const int64_t bytes =
-      B * (strided ? n : row) * (strided || B > 1 ? kFloatsPerSlot : kFloatsPerSoloSlot) * sizeof(float);
-  const int64_t smem = x.global ? kSmemAlign : std::min<int64_t>(kSmemBytes, at::round_up(bytes, kSmemAlign));
+  // Single contiguous rows get 1.5x their size (faster above 2048 points); global passes bind the 16-byte minimum
+  const int64_t bytes = B * (strided ? n : row) * (strided || B > 1 ? 2 : 3) * sizeof(float);
+  const int64_t smem = x.global ? 16 : std::min<int64_t>(kFFTSmemBytes, at::round_up<int64_t>(bytes, 16));
   return {
       .in = in,
       .out = out,
@@ -406,7 +379,7 @@ void run(const std::vector<Launch>& launches) {
 bool fits_one_pass(const Batch& b, int64_t n, bool chirped) {
   // Strided on both sides past 1024 points the tiles no longer coalesce: two tile passes move less
   const bool both = std::abs(b.si) != 1 && std::abs(b.so) != 1 && !chirped && n > kMaxCoalescedPoints;
-  return n <= kMaxPoints && !both;
+  return n <= kFFTMaxPoints && !both;
 }
 
 // n-point transforms of the batch from `in` into `out`: x.n_out outputs
@@ -456,7 +429,7 @@ void fft_batch(const Tensor& in, const Tensor& out, const Batch& b, int64_t n, b
     if (n % d || !is_smooth(d) || !is_smooth(q)) {
       continue;
     }
-    n1 = (q <= kMaxPoints || nest) && (!nest || d <= kMaxNestedColumns) ? d : n1;
+    n1 = (q <= kFFTMaxPoints || nest) && (!nest || d <= 256) ? d : n1;
   }
   TORCH_CHECK_NOT_IMPLEMENTED(n1 > 0, "MPS FFT does not support transforms of length ", n);
 
@@ -475,7 +448,7 @@ void fft_batch(const Tensor& in, const Tensor& out, const Batch& b, int64_t n, b
   b1.dims.insert(b1.dims.begin() + inner, Dim{n2, b.si, n1 * ninner});
   b2.dims.insert(b2.dims.begin() + inner, Dim{n1, ninner, b.so});
 
-  const bool inplace = n_out == n && n2 > kMaxRowsForTemp && b.so == ninner && !in.is_alias_of(out) &&
+  const bool inplace = n_out == n && b.so == ninner && !in.is_alias_of(out) &&
       std::all_of(b2.dims.begin(), b2.dims.end(), [](const Dim& d) {
                          return d.size == 1 || d.in_stride == d.out_stride;
                        });
@@ -494,11 +467,27 @@ void fft_batch(const Tensor& in, const Tensor& out, const Batch& b, int64_t n, b
 
 // n-point transforms along `dim`; lengths with other prime factors use Bluestein's algorithm
 void fft_pass(const Tensor& in, const Tensor& out, int64_t dim, int64_t n, bool inv, const Pass& x = {}) {
+  dim = maybe_wrap_dim(dim, in.dim());
+  if (!canUse32BitIndexMath(in) || !canUse32BitIndexMath(out)) {
+    // Kernels index with 32 bits: halve the largest batch dim
+    int64_t d = dim == 0;
+    for (const auto i : c10::irange(in.dim())) {
+      d = i != dim && in.size(i) > in.size(d) ? i : d;
+    }
+    TORCH_CHECK_NOT_IMPLEMENTED(in.dim() > 1 && in.size(d) > 1,
+                                "MPS FFT: a transform must have fewer than 2^31 elements");
+    const auto h = in.size(d) / 2;
+    fft_pass(in.narrow(d, 0, h), out.narrow(d, 0, h), dim, n, inv, x);
+    return fft_pass(in.narrow(d, h, in.size(d) - h), out.narrow(d, h, in.size(d) - h), dim, n, inv, x);
+  }
   if (is_smooth(n)) {
     return fft_batch(in, out, collapse(in, out, dim), n, inv, x);
   }
 
   // Bluestein: X = c * IFFT_M(FFT_M(x * c) * B)[:n], M a power of two >= 2n - 1, chirps folded into the kernels
+  TORCH_CHECK_NOT_IMPLEMENTED(n <= kFFTMaxPoints * kFFTMaxPoints / 2,
+                              "MPS FFT: lengths with prime factors above 7 are limited to ",
+                              kFFTMaxPoints * kFFTMaxPoints / 2);
   const auto& [c, B] = chirp_tables(n, inv);
   const auto M = B.numel();
   DimVector sizes(in.sizes());
@@ -513,7 +502,8 @@ bool needs_fp32(const Tensor& in, const Tensor& out, IntArrayRef dim, int64_t n)
   if (c10::toRealValueType(in.scalar_type()) != kHalf) {
     return false;
   }
-  return dim.size() > 1 || !is_smooth(n) || !fits_one_pass(collapse(in, out, dim.back()), n, false);
+  const auto b = collapse(in, out, maybe_wrap_dim(dim.back(), in.dim()));
+  return dim.size() > 1 || !is_smooth(n) || !fits_one_pass(b, n, false);
 }
 
 double norm_scale(int64_t normalization, const Tensor& t, IntArrayRef dims) {

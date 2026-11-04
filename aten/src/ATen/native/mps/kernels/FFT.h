@@ -1,30 +1,18 @@
 #pragma once
 #include <c10/metal/common.h>
 
-// Kernel variant bits. Their combination is part of the kernel name.
-enum class FFTFlag : uint32_t {
-  Inverse = 1u << 0,
-  FourStepTwiddles = 1u << 2,
-  ExtendedStores = 1u << 3,
-  ExtendedLoads = 1u << 4,
-  GlobalStage = 1u << 5,
-};
-
-inline constexpr uint32_t fft_flag_bit(FFTFlag flag) {
-  return static_cast<uint32_t>(flag);
-}
-
-inline constexpr bool fft_has_flag(uint32_t flags, FFTFlag flag) {
-  return (flags & fft_flag_bit(flag)) != 0;
-}
+// Kernel variant bits; their sum ends the kernel name
+C10_METAL_CONSTEXPR uint32_t kFFTInverse = 1u << 0;
+C10_METAL_CONSTEXPR uint32_t kFFTFourStepTwiddles = 1u << 2;
+C10_METAL_CONSTEXPR uint32_t kFFTExtendedStores = 1u << 3;
+C10_METAL_CONSTEXPR uint32_t kFFTExtendedLoads = 1u << 4;
+C10_METAL_CONSTEXPR uint32_t kFFTGlobalStage = 1u << 5;
 
 // Whether a kernel does without four-step, chirp and global-memory handling
 inline constexpr bool fft_is_basic(uint32_t flags) {
   return (flags &
-          (fft_flag_bit(FFTFlag::FourStepTwiddles) |
-           fft_flag_bit(FFTFlag::ExtendedStores) |
-           fft_flag_bit(FFTFlag::ExtendedLoads) |
-           fft_flag_bit(FFTFlag::GlobalStage))) == 0;
+          (kFFTFourStepTwiddles | kFFTExtendedStores | kFFTExtendedLoads |
+           kFFTGlobalStage)) == 0;
 }
 
 // Metal's threadgroup memory limit, and the complex points that fit in it
@@ -33,14 +21,10 @@ C10_METAL_CONSTEXPR uint32_t kFFTMaxPoints =
     kFFTSmemBytes / (2 * sizeof(float));
 C10_METAL_CONSTEXPR uint32_t kFFTMaxStages = 16;
 
-C10_METAL_CONSTEXPR uint32_t kFFTPointsPerThread = 8;
-C10_METAL_CONSTEXPR uint32_t kFFTPointsPerThreadWide = 16;
-C10_METAL_CONSTEXPR uint32_t kFFTWideThreadLength = 1024;
-
+// 8 points per thread; 16 only pay for basic 1024-point kernels (one stage
+// fewer at full occupancy)
 inline constexpr uint32_t fft_points_per_thread(uint32_t n, uint32_t flags) {
-  return n == kFFTWideThreadLength && fft_is_basic(flags)
-      ? kFFTPointsPerThreadWide
-      : kFFTPointsPerThread;
+  return n == 1024 && fft_is_basic(flags) ? 16 : 8;
 }
 
 // Spare smem slots: one every 1 << kFFTPadShift slots, none with kFFTNoPadShift
@@ -55,8 +39,7 @@ inline constexpr uint32_t fft_contig_pad_shift(uint32_t n) {
 
 // Two-level twiddle table: W^b for b < kFFTTwiddleBlock, then
 // W^(kFFTTwiddleBlock a)
-C10_METAL_CONSTEXPR uint32_t kFFTTwiddleBits = 12;
-C10_METAL_CONSTEXPR uint32_t kFFTTwiddleBlock = 1u << kFFTTwiddleBits;
+C10_METAL_CONSTEXPR uint32_t kFFTTwiddleBlock = 4096;
 
 // Radices of the dynamic kernel families, one bit per radix. Bit 1 is length 1.
 C10_METAL_CONSTEXPR uint32_t kFFTMaskP2 =

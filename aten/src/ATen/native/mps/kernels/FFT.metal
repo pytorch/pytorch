@@ -4,7 +4,7 @@
 using namespace metal;
 using namespace c10::metal;
 
-// Stockham FFT with four-step twiddles and chirps. F holds FFTFlag bits.
+// Stockham FFT with four-step twiddles and chirps. F holds kFFT* variant bits.
 
 inline float2 mul_i(float2 a) {
   return float2(-a.y, a.x);
@@ -121,7 +121,7 @@ inline int2 batch_off(constant FFTParams& p, uint y, uint z, uint d0) {
 inline float2 twid(device const float2* tt, uint m) {
   return mul(
       tt[m & (kFFTTwiddleBlock - 1)],
-      tt[kFFTTwiddleBlock + (m >> kFFTTwiddleBits)]);
+      tt[kFFTTwiddleBlock + m / kFFTTwiddleBlock]);
 }
 
 inline uint pad(uint i, uint sh) { // Padding separates banks at pow2 strides
@@ -149,7 +149,7 @@ template <class I, class O, uint F, bool C>
 inline float2 load_pt(Bufs<I, O> b, Params p, uint e) {
   const int s = C ? 1 : p.in_stride;
 
-  if (!fft_has_flag(F, FFTFlag::ExtendedLoads)) {
+  if (!(F & kFFTExtendedLoads)) {
     return cast_to<float2>(b.in[int(e) * s]);
   }
 
@@ -164,26 +164,29 @@ inline float2 load_pt(Bufs<I, O> b, Params p, uint e) {
 
 template <class I, class O, uint F, bool C>
 inline void store_pt(Bufs<I, O> b, Params p, uint k, float2 v, float2 w) {
-  constexpr bool extended = fft_has_flag(F, FFTFlag::ExtendedStores);
+  constexpr bool extended = F & kFFTExtendedStores;
   v *= p.scale;
   const int s = C ? 1 : p.out_stride;
 
-  v = fft_has_flag(F, FFTFlag::FourStepTwiddles)
-      ? mul(v, fft_has_flag(F, FFTFlag::Inverse) ? conj(w) : w)
-      : v;
+  v = (F & kFFTFourStepTwiddles) ? mul(v, (F & kFFTInverse) ? conj(w) : w) : v;
   const uint kf = extended && p.out_k_mul > 1 ? k * p.out_k_mul + b.i0 : k;
-  if (fft_has_flag(F, FFTFlag::GlobalStage) || kf < p.n_out) {
+  if ((F & kFFTGlobalStage) || kf < p.n_out) {
     b.out[int(k) * s] = cast_to<O>(extended && b.cs ? mul(v, b.cs[kf]) : v);
   }
 }
 
-template <bool P2>
+template <bool P2, bool G>
 inline uint mod_ns(uint j, uint ns, float inv_ns) {
   if (P2) {
     return j & (ns - 1);
   }
 
   int k = int(j) - int(ns) * int(float(j) * inv_ns);
+  // Global stages reach j = 2^31, past float's exact integers: a second step
+  // on the small remainder makes it exact
+  if (G) {
+    k -= int(ns) * int(float(k) * inv_ns);
+  }
   k = k < 0 ? k + int(ns) : k;
   return k >= int(ns) ? k - ns : k;
 }
@@ -192,9 +195,9 @@ inline uint mod_ns(uint j, uint ns, float inv_ns) {
 // exchanges stages. G: one global-memory stage.
 template <uint R, bool P2, class I, class O, uint F, uint N, uint NS, bool C>
 inline void stage(Bufs<I, O> b, Params p, uint s, uint lane, bool valid) {
-  constexpr bool G = fft_has_flag(F, FFTFlag::GlobalStage);
-  constexpr bool INV = fft_has_flag(F, FFTFlag::Inverse);
-  constexpr bool four_step = fft_has_flag(F, FFTFlag::FourStepTwiddles);
+  constexpr bool G = F & kFFTGlobalStage;
+  constexpr bool INV = F & kFFTInverse;
+  constexpr bool four_step = F & kFFTFourStepTwiddles;
   constexpr uint EPT = G ? R : fft_points_per_thread(N, F);
   constexpr uint M = (EPT + R - 1) / R;
   const uint n = N ? N : p.n, J = N ? N / EPT : p.jt, nR = n / R,
@@ -213,7 +216,7 @@ inline void stage(Bufs<I, O> b, Params p, uint s, uint lane, bool valid) {
   for (uint m = 0; m < M; m++) {
     const uint j = lane + m * J;
     if (j < nR) {
-      const uint k = mod_ns<P2>(j, Ns, inv_ns);
+      const uint k = mod_ns<P2, G>(j, Ns, inv_ns);
       if (first && !G) {
         for (uint r = 0; r < R; r++) {
           v[m][r] = load_pt<I, O, F, C>(b, p, j + r * nR);
@@ -249,7 +252,7 @@ inline void stage(Bufs<I, O> b, Params p, uint s, uint lane, bool valid) {
       const uint j = lane + m * J;
       if (j < nRv) {
         float2 w = four_step ? twid(b.tt, j * b.i0) : 0.0f;
-        const uint k = G ? mod_ns<P2>(j, Ns, inv_ns) : 0;
+        const uint k = G ? mod_ns<P2, G>(j, Ns, inv_ns) : 0;
         const uint base = G ? (j - k) * R + k : j, step = G ? Ns : nR;
         for (uint r = 0; r < R; r++) {
           store_pt<I, O, F, C>(b, p, base + r * step, v[m][opos<R>(r)], w);
@@ -267,7 +270,7 @@ inline void stage(Bufs<I, O> b, Params p, uint s, uint lane, bool valid) {
   for (uint m = 0; m < M; m++) {
     const uint j = lane + m * J;
     if (j < nR) {
-      const uint k = mod_ns<P2>(j, Ns, inv_ns);
+      const uint k = mod_ns<P2, G>(j, Ns, inv_ns);
       const uint base = (j - k) * R + k, bb = pad(base, sh) * es;
       for (uint r = 0; r < R; r++) {
         b.buf[P2 ? bb + r * ws : pad(base + r * Ns, sh) * es] =
@@ -298,9 +301,9 @@ kernel void fft_kernel(
     threadgroup float2* buf [[threadgroup(0)]],
     uint tid [[thread_index_in_threadgroup]],
     uint3 tg [[threadgroup_position_in_grid]]) {
-  constexpr bool G = fft_has_flag(F, FFTFlag::GlobalStage);
+  constexpr bool G = F & kFFTGlobalStage;
   constexpr bool P2 = !G && MASK && (MASK & ~kFFTMaskP2) == 0;
-  constexpr bool four_step = fft_has_flag(F, FFTFlag::FourStepTwiddles);
+  constexpr bool four_step = F & kFFTFourStepTwiddles;
   constexpr uint EPT = fft_points_per_thread(N, F);
   const uint n = N ? N : p.n, B = C || G ? 1 : p.tgb, J = N ? N / EPT : p.jt;
   const uint first_b = G ? 0 : tg.x * B, nb = min(B, p.sizes[0] - first_b);
@@ -384,7 +387,7 @@ kernel void fft_kernel(
 // Only single-pass kernels come in fp16: anything longer runs in fp32
 #define INST_FP32(IK, OK, F, X) INSTF(IK##_f, OK##_f, F, X)
 
-// FFTFlag combinations the planner requests (LD extended loads, ST extended
+// Flag combinations the planner requests (LD extended loads, ST extended
 // stores, TW four-step twiddles), as literals because #F is part of the kernel
 // name
 #define F_PLAIN 0
