@@ -12,6 +12,7 @@ It includes functionality for:
 
 import collections
 import dataclasses
+import enum
 import re
 import sys
 import types
@@ -47,18 +48,19 @@ from .source import (
     DictKeysSource,
     Source,
 )
-from .utils import is_safe_constant
+from .utils import is_identity_singleton, is_safe_constant
 from .variables.base import ValueMutationExisting, VariableTracker
 from .variables.constant import ConstantVariable
+from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
-from .variables.lazy import ComputedLazyConstantVariable, LazyVariableTracker
+from .variables.lazy import ComputedLazyConstantVariable
 from .variables.lists import BaseListVariable, SliceVariable, TupleVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.script_object import CustomClassObjectVariable
-from .variables.sets import FrozensetVariable
+from .variables.sets import FrozensetVariable, SetVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -66,6 +68,7 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 from .variables.torch_function import TensorWithTFOverrideVariable
+from .variables.user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
@@ -136,21 +139,19 @@ class PyCodegen:
         self.pycodes = []
 
     def _constant_requires_reconstruction(self, value: VariableTracker) -> bool:
+        if not value.is_realized():
+            # Neither sourced leaves nor computed expressions may be specialized here.
+            return True
         if value.source is not None:
-            if isinstance(value, LazyVariableTracker) and not value.is_realized():
-                # Inspect singleton identity without specializing lazy values.
-                constant = value.peek_value()
-            elif isinstance(value, ConstantVariable):
-                constant = value.value
-            else:
-                return True
-            # Only guaranteed singletons may discard their source identity.
+            # These trackers have already specialized their class/member identity.
+            if isinstance(value, UserDefinedClassVariable) or (
+                isinstance(value, UserDefinedObjectVariable)
+                and issubclass(type(value.value), enum.Enum)
+            ):
+                return False
             return not (
-                any(
-                    constant is item
-                    for item in (None, True, False, Ellipsis, NotImplemented)
-                )
-                or type(constant) is torch.dtype
+                isinstance(value, ConstantVariable)
+                and is_identity_singleton(value.value)
             )
         if value in self._constant_reconstruction_cache:
             return self._constant_reconstruction_cache[value]
@@ -158,9 +159,10 @@ class PyCodegen:
             items = value.items
         elif isinstance(value, FrozensetVariable):
             items = [key.vt for key in value.set_items]
+        elif isinstance(value, (BaseListVariable, ConstDictVariable, SetVariable)):
+            # Probing mutable containers would specialize their lazy children.
+            return True
         else:
-            # `is_safe_constant` accepts slices without checking their members.
-            # Symbolic and mutable members must be reconstructed.
             return not value.is_python_constant() or not is_safe_constant(
                 value.as_python_constant()
             )
@@ -378,9 +380,9 @@ class PyCodegen:
                 self._output.append(create_dup_top())
                 self.add_cache(value)
         elif (
-            # Mutable sequences cannot use LOAD_CONST. Probing their constness
-            # would unnecessarily specialize lazy elements such as hook IDs.
-            not (
+            # Mutable containers cannot use LOAD_CONST. Do not specialize their children.
+            not isinstance(value, (ConstDictVariable, SetVariable))
+            and not (
                 isinstance(value, BaseListVariable)
                 and not isinstance(value, TupleVariable)
             )
