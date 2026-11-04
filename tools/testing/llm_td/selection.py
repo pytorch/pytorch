@@ -33,6 +33,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Iterable
     from pathlib import Path
 
+    from tools.testing.target_determination.heuristics.interface import (
+        TestPrioritizations,
+    )
     from tools.testing.test_run import TestRun
 
 
@@ -523,7 +526,7 @@ class Split:
     include: list[TestRun]
     exclude: list[TestRun]
     covered: set[str]
-    previously_failed: set[str]
+    previous_failures_added: set[str]
     hedged: set[str]
     budget: float
     chose_nothing: bool
@@ -562,14 +565,14 @@ class AppliedSelection:
             "num_covered": len(split.covered),
             "num_td_include": len(self.td_include),
             "num_hedged": len(split.hedged),
-            "num_previous_failures_added": len(split.previously_failed),
+            "num_previous_failures_added": len(split.previous_failures_added),
             "kept_td": self.kept_td,
             "previous_failures_known": self.previous_failures_known,
             "time_total": sum(times.values()),
             "time_covered": sum(times[f] for f in split.covered),
             "time_hedged": sum(times[f] for f in split.hedged),
             "time_previous_failures_added": sum(
-                times[f] for f in split.previously_failed
+                times[f] for f in split.previous_failures_added
             ),
         }
 
@@ -582,7 +585,7 @@ class AppliedSelection:
             "td_enabled": self.td_enabled,
             "in_td_include": f in self.td_include,
             "hedged": f in self.split.hedged,
-            "previous_failure_added": f in self.split.previously_failed,
+            "previous_failure_added": f in self.split.previous_failures_added,
             "kept_td": self.kept_td,
             "previous_failures_known": self.previous_failures_known,
             "selector_error": self.selection.error,
@@ -620,7 +623,12 @@ def apply_selection(
     split = selection.split(
         ranked, score, file_time, test_config, previously_failed=prev, td_include=td
     )
-    wanted = td_enabled and selection.enforce and get_pr_number() is not None
+    wanted = (
+        td_enabled
+        and selection.enforce
+        and selection.error is None
+        and get_pr_number() is not None
+    )
     if not sum(file_time.values()):
         fallback = "no test times"
     elif previously_failed is None:
@@ -636,8 +644,9 @@ def apply_selection(
         s, n = split, len({x.test_file for x in split.include})
         print(
             f"LLM selection: running {n} of {len(file_time)} test files"
-            f" ({len(s.covered)} covered; {len(s.previously_failed)} previously"
-            f" failed; {len(s.hedged)} hedged within {s.budget:.0f}s)",
+            f" ({len(s.covered)} covered; {len(s.previous_failures_added)}"
+            f" previous failures added; {len(s.hedged)} hedged within"
+            f" {s.budget:.0f}s)",
             file=sys.stderr,
         )
     return AppliedSelection(
@@ -682,28 +691,42 @@ class CallSplit:
 
 
 def split_tests(
-    include: list[TestRun],
-    exclude: list[TestRun],
-    score: Callable[[TestRun], float],
-    test_times: dict[str, float],
     *,
+    test_prioritizations: TestPrioritizations,
+    test_times: dict[str, float],
     selection_file: Path,
     test_config: str,
     td_enabled: bool,
     previously_failed: Collection[str] | None,
+    gen_artifact: Callable[..., None] | None,
 ) -> CallSplit:
-    """TD's (include, exclude) split with the selection in `selection_file`, if
-    any, applied."""
+    """run_test.py's split of one call's tests: TD's split, 25% with TD enabled
+    and everything otherwise, with the selection in `selection_file`, if any,
+    applied. It records the split with `gen_artifact` (gen_ci_artifact, in
+    CI). run_test.py emits the metrics, since emit_metric records its caller."""
+    percent_to_run = 25 if td_enabled else 100
+    include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
     llm = None
     if (selection := Selection.load(selection_file)) is not None:
         llm = apply_selection(
             selection,
             include,
             exclude,
-            score,
+            test_prioritizations.get_score,
             test_times,
             test_config=test_config,
             td_enabled=td_enabled,
             previously_failed=previously_failed,
         )
-    return CallSplit(include, exclude, llm)
+    split = CallSplit(include, exclude, llm)
+    if not split.enforced:
+        td_line = f"Running {percent_to_run}% of tests based on TD"
+        print(td_line if td_enabled else "Running all tests", file=sys.stderr)
+    if gen_artifact is not None:
+        gen_artifact(
+            [x.to_json() for x in split.include],
+            [x.to_json() for x in split.exclude],
+            source=split.source,
+            td_excluded=[x.to_json() for x in split.td_exclude],
+        )
+    return split
