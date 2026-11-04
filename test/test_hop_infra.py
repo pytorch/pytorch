@@ -6,6 +6,7 @@ import dataclasses
 import importlib
 import logging
 import pkgutil
+import types
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any, cast
 from unittest import mock
@@ -20,6 +21,7 @@ from torch._higher_order_ops.user_kernel_hop import (
     get_user_kernel_hop_info,
     KernelSideTable,
     register_user_kernel_hop_impls,
+    UserKernelHOPifier,
     UserKernelHOPInfo,
     UserKernelWrapperHOP,
 )
@@ -1050,6 +1052,97 @@ class TestUserKernelHOPShared(TestCase):
                 )
                 (node,) = gm.graph.find_nodes(op="call_function", target=toy.functional)
                 self.assertEqual(node.kwargs["tensors_to_clone"], ["a", "b"])
+
+    def test_hopifier_record_kernel(self):
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+
+        self.assertIs(tkw.TritonHOPifier.hop_info, tkw.triton_kernel_hop_info)
+
+        class ToyHOPifier(UserKernelHOPifier):
+            hop_info = dataclasses.replace(
+                tkw.triton_kernel_hop_info, side_table=KernelSideTable()
+            )
+
+        hopifier = ToyHOPifier()
+        variable = types.SimpleNamespace()
+        record = _ToyKernel(_toy_fn, ("out",))
+        self.assertEqual(hopifier.record_kernel(variable, record, None), 0)
+        self.assertEqual(variable.kernel_idx, 0)
+        # The index a rebuilt variable expects.
+        self.assertEqual(hopifier.record_kernel(variable, record, 0), 0)
+        with self.assertRaisesRegex(
+            AssertionError, "kernel_idx mismatch: expected 0, got 1"
+        ):
+            hopifier.record_kernel(variable, _ToyKernel(_toy_fn, "unknown"), 0)
+        self.assertEqual(
+            hopifier.hop_info.get_side_table().get_kernel(1).mutates_args, "unknown"
+        )
+
+    def test_hopifier_call_mutation_hop(self):
+        # Tracing's call of the mutation HOP: the graphable arguments are the node's
+        # kwargs, the others go to the DSL's side table.
+        def scale(x: torch.Tensor, out: torch.Tensor, n: int, alphas: tuple) -> None:
+            out.copy_(x * alphas[0] * alphas[1])
+
+        with _toy_dsl() as toy:
+
+            class ToyHOPifier(UserKernelHOPifier):
+                hop_info = toy
+
+            hopifier = ToyHOPifier()
+            kidx = toy.get_side_table().add_kernel(_ToyKernel(scale, ("out",)))
+
+            def f(x: torch.Tensor) -> torch.Tensor:
+                out = torch.zeros_like(x)
+                hopifier.call_mutation_hop(
+                    kidx, {"x": x, "out": out, "n": 4, "alphas": (3.0, 1.0)}
+                )
+                return out
+
+            x = torch.arange(4.0)
+            self.assertEqual(f(x), x * 3)
+            gm = make_fx(f)(x)
+            (node,) = gm.graph.find_nodes(op="call_function", target=toy.mutation)
+            self.assertEqual(
+                list(node.kwargs), ["kernel_idx", "constant_args_idx", "kwargs"]
+            )
+            self.assertEqual(list(node.kwargs["kwargs"]), ["x", "out", "n"])
+            self.assertEqual(
+                toy.get_side_table().get_constant_args(
+                    node.kwargs["constant_args_idx"]
+                ),
+                {"alphas": (3.0, 1.0)},
+            )
+            with self.assertRaisesRegex(AssertionError, "kernel_idx must be an int"):
+                hopifier.call_mutation_hop(None, {})
+
+    def test_tracing_triton_hopifier_store_non_graphable_args(self):
+        # Inductor's FX wrapper codegen (wrapper_fxir.py) and MTIA's custom Triton
+        # kernel nodes call it on the singleton.
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+
+        x, obj = torch.ones(2), object()
+        hopifier = tkw.tracing_triton_hopifier_singleton
+        graphable, idx = hopifier.store_non_graphable_args({"x": x, "n": 3, "o": obj})
+        self.assertEqual(graphable, {"x": x, "n": 3})
+        self.assertEqual(tkw.kernel_side_table.get_constant_args(idx), {"o": obj})
+
+    def test_specialize_symbolic(self):
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(
+            5, ConstantSource("n"), dynamic_dim=DimDynamic.DYNAMIC
+        )
+        n = shape_env.create_symintnode(symbol, hint=5)
+        specialized = user_kernel_hop.specialize_symbolic(n)
+        self.assertIs(type(specialized), int)
+        self.assertEqual(specialized, 5)
+        # The specialization is guarded.
+        self.assertEqual(len(shape_env.guards), 1)
+        for value in (torch.ones(1), 0.5, "s"):
+            self.assertIs(user_kernel_hop.specialize_symbolic(value), value)
 
 
 if __name__ == "__main__":
