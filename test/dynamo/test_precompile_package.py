@@ -2049,6 +2049,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(len(risky), 1, verdicts)
             self.assertTrue(risky[0].startswith(root), verdicts)
 
+    def test_receiver_alias_guard_policy(self):
+        from torch._dynamo.precompile_package import (
+            _INVARIANT_DROPPABLE_GUARD_TYPES,
+            _SHAPE_BEARING_GUARD_TYPES,
+        )
+
+        self.assertIn("BUILTIN_METHOD_RECEIVER_ALIAS", _SHAPE_BEARING_GUARD_TYPES)
+        self.assertNotIn(
+            "BUILTIN_METHOD_RECEIVER_ALIAS", _INVARIANT_DROPPABLE_GUARD_TYPES
+        )
+
     def test_guard_policy_classification_is_total(self):
         # A guard type in no set is KEPT, so a drop policy can only ever
         # drop what _INVARIANT_DROPPABLE_GUARD_TYPES names. This test is
