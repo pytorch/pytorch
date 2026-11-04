@@ -6,6 +6,8 @@
 using namespace metal;
 using namespace c10::metal;
 
+#include <ATen/native/mps/kernels/NormBackward.h>
+
 template <typename T, typename idx_t>
 kernel void layer_norm_single_row(
     device T* input [[buffer(0)]],
@@ -221,6 +223,79 @@ kernel void layer_norm_looped(
 instantiate_layer_norm(float);
 instantiate_layer_norm(half);
 instantiate_layer_norm(bfloat);
+
+template <typename T>
+struct LayerNormOp {
+  using opmath = opmath_t<T>;
+  using extra_t = const T;
+  using acc_t = vec<opmath, 2>;
+  opmath mean, rstd;
+  device const T* gamma;
+  opmath grad(opmath dy, uint j) const {
+    return dy * (gamma != nullptr ? opmath(gamma[j]) : opmath(1));
+  }
+  opmath dir(opmath x) const {
+    return (x - mean) * rstd;
+  }
+  NormBackwardCoeffs<T> coeffs(
+      threadgroup opmath* tg_a,
+      threadgroup opmath* tg_b,
+      opmath sum_grad,
+      opmath sum_prod,
+      uint row_size,
+      uint,
+      uint tid,
+      uint lsize) const {
+    const auto sums =
+        threadgroup_sum2(tg_a, tg_b, sum_grad, sum_prod, tid, lsize);
+    return {rstd, sums[0] / opmath(row_size), sums[1] / opmath(row_size)};
+  }
+  static acc_t column_term(
+      opmath dy,
+      opmath x,
+      device const T* means,
+      device const T* rstds,
+      uint row) {
+    return acc_t(dy * (x - opmath(means[row])) * opmath(rstds[row]), dy);
+  }
+};
+
+template <typename T>
+kernel void layer_norm_backward_affine_combine(
+    device const float2* part [[buffer(0)]],
+    device T* dgamma [[buffer(1)]],
+    device T* dbeta [[buffer(2)]],
+    constant uint2& dims [[buffer(3)]],
+    uint col [[thread_position_in_grid]]) {
+  float2 acc = 0;
+  for (uint p = 0; p < dims.x; ++p) {
+    acc += part[p * dims.y + col];
+  }
+  if (dgamma != nullptr) {
+    dgamma[col] = static_cast<T>(acc.x);
+  }
+  if (dbeta != nullptr) {
+    dbeta[col] = static_cast<T>(acc.y);
+  }
+}
+
+#define REGISTER_LAYER_NORM_BACKWARD(T)                                       \
+  template [[host_name("layer_norm_backward_single_row_" #T)]] [[kernel]]     \
+  decltype(norm_backward_single_row<T, LayerNormOp<T>>)                       \
+      norm_backward_single_row<T, LayerNormOp<T>>;                            \
+  template [[host_name("layer_norm_backward_looped_" #T)]] [[kernel]]         \
+  decltype(norm_backward_looped<T, LayerNormOp<T>>)                           \
+      norm_backward_looped<T, LayerNormOp<T>>;                                \
+  template [[host_name("layer_norm_backward_affine_" #T)]] [[kernel]]         \
+  decltype(norm_backward_column_partials<T, LayerNormOp<T>>)                  \
+      norm_backward_column_partials<T, LayerNormOp<T>>;                       \
+  template [[host_name("layer_norm_backward_affine_combine_" #T)]] [[kernel]] \
+  decltype(layer_norm_backward_affine_combine<T>)                             \
+      layer_norm_backward_affine_combine<T>
+
+REGISTER_LAYER_NORM_BACKWARD(float);
+REGISTER_LAYER_NORM_BACKWARD(half);
+REGISTER_LAYER_NORM_BACKWARD(bfloat);
 
 template <typename I>
 inline vec<I, 2> batch_norm_offset(constant BatchNormLayout<>& layout, I o) {
