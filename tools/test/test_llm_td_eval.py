@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -204,6 +205,19 @@ class TestRunEval(unittest.TestCase):
         self.assertEqual((r["out"], r["error"], r["transient"], r["attempts"]), (None, "529 overloaded", True, 4))  # fmt: skip
         self.assertEqual((query.call_count, sleep.call_count), (4, 3))
 
+    def test_stop_during_backoff_ends_the_retries(self) -> None:
+        sample = {"id": "x", "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a"]}  # fmt: skip
+        stop = threading.Event()
+        reply = {"type": "result", "is_error": True, "result": "529 overloaded"}
+        with (
+            mock.patch("tools.testing.llm_td.eval.run_eval.query_model", return_value=reply) as query,
+            mock.patch.object(stop, "wait", return_value=True) as wait,
+        ):  # fmt: skip
+            r = run_one(sample, {}, argparse.Namespace(model="m", effort="medium"), None, stop)  # fmt: skip
+        # Ctrl-C lands during the first backoff: no second call is started.
+        self.assertEqual((query.call_count, r["transient"], r["attempts"]), (1, True, 1))  # fmt: skip
+        wait.assert_called_once_with(30)
+
     def test_main_writes_exhausted_and_resolves_data(self) -> None:
         from tools.testing.llm_td.eval import run_eval
 
@@ -388,6 +402,20 @@ class TestRunEval(unittest.TestCase):
             ):
                 run_eval.main()
         self.assertEqual((out.getvalue(), query.call_count), ("t: 0 without a result\n", 0))  # fmt: skip
+        # Without a result yet it is skipped with one line, not a traceback.
+        with tempfile.TemporaryDirectory() as d:
+            data = write_data(d, {"samples/a.json": sample, "test-times.json": {}})
+            (data / "ids.txt").write_text("a")
+            argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt")]  # fmt: skip
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch("sys.stdout", io.StringIO()) as out,
+                mock.patch.object(run_eval, "query_model") as query,
+            ):
+                run_eval.main()
+        lines = out.getvalue().splitlines()
+        self.assertEqual((len(lines), query.call_count), (2, 0))
+        self.assertTrue(lines[1].startswith("a: git cannot build its prompt in this clone, skipped"))  # fmt: skip
 
     def test_main_tops_up_agentic_results(self) -> None:
         from tools.testing.llm_td.eval import run_eval
