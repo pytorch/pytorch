@@ -52,8 +52,8 @@ _C_THREAD_STAGE2 = 8192
 _THREADS_PER_BLOCK = 32
 _WIDE_ACC_THREADS_PER_BLOCK = 64  # 3-field traits (Welford): see above
 # Multi-field lane replays partially unroll their 32-lane loop by this factor. On B200,
-# fp32 argmax (2, 32769, 33) and bf16 var_mean (2, 32768, 33) columns compiled in
-# 0.8-1.2s instead of the static replay's 7.8-8.6s and ran at 0.92-1.06x of it.
+# fp32 argmax and bf16 var_mean columns (16, R, 1024) at R = 2048-8192 compiled in
+# 0.4-1.2s instead of the static replay's 1.2-12.2s, running at 0.65-1.00x of its speed.
 # Single-field replays stay static: rolled, fp32 sums ran at as little as 0.46x.
 _ORDERED_LANE_UNROLL = 4
 
