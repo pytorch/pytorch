@@ -62,7 +62,12 @@ from ..exc import (
     unimplemented,
 )
 from ..graph_bytecode_inputs import get_external_object_by_index
-from ..guards import GuardBuilder, install_guard, install_not_in_instance_dict_guard
+from ..guards import (
+    GuardBuilder,
+    install_guard,
+    install_not_in_instance_dict_guard,
+    is_portable_function_guard,
+)
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
@@ -2137,6 +2142,16 @@ def call_random_fn(
     return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
 
 
+def can_guard_class_function_code(tx: "InstructionTranslatorBase", fn: object) -> bool:
+    """Whether a function reached through an instance's class can get its
+    CLOSURE_MATCH. A package must serialize every guard it keeps, and a function
+    whose globals no importable module owns (one exec'd into a plain dict) has
+    no portable form of that guard: under strict_precompile it would fail the
+    compile. Under a package such a function stays unguarded, as it was before
+    this guard existed."""
+    return tx.output.package is None or is_portable_function_guard("CLOSURE_MATCH", fn)
+
+
 class UserDefinedObjectVariable(UserDefinedVariable):
     """
     Mostly objects of defined type.  Catch-all for something where we only know the type.
@@ -4173,16 +4188,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # the method's closure sourcelessly and SourcelessBuilder fails on
             # a captured tensor (test_modes.py,
             # test_nested_torch_function_mode).
-            fn_source = var_source or (
-                self.source and AttrSource(TypeSource(self.source), name)
-            )
-            return variables.UserMethodVariable(
-                VariableBuilder.create_internal_user_function(
-                    type_attr, source=fn_source
-                ),
-                self,
-                source=source,
-            )
+            # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
+            # off TypeSource is not tag-safe.
+            if var_source is not None and can_guard_class_function_code(tx, type_attr):
+                im_func = variables.UserFunctionVariable.create_with_source(
+                    type_attr, var_source
+                )
+            else:
+                im_func = VariableBuilder.create_internal_user_function(
+                    type_attr,
+                    source=var_source
+                    or (self.source and AttrSource(TypeSource(self.source), name)),
+                )
+            return variables.UserMethodVariable(im_func, self, source=source)
         # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
