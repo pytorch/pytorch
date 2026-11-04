@@ -2979,10 +2979,20 @@ Call this whenever a new thread is created in order to propagate values from
           py::arg("converter"),
           py::arg("shape_env"),
           py::arg("wrapper"))
-      .def_readwrite("allow_meta", &c10::FakeTensorMode::allow_meta_)
-      .def_readwrite(
+      .def_property(
+          "allow_meta",
+          [](const c10::FakeTensorMode& mode) { return mode.allow_meta_.load(); },
+          [](c10::FakeTensorMode& mode, bool value) {
+            mode.allow_meta_.store(value);
+          })
+      .def_property(
           "_allow_unsafe_data_ptr_access",
-          &c10::FakeTensorMode::allow_unsafe_data_ptr_access_);
+          [](const c10::FakeTensorMode& mode) {
+            return mode.allow_unsafe_data_ptr_access_.load();
+          },
+          [](c10::FakeTensorMode& mode, bool value) {
+            mode.allow_unsafe_data_ptr_access_.store(value);
+          });
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
