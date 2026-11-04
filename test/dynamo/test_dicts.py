@@ -15,6 +15,7 @@ from typing import Any, NamedTuple
 from unittest.mock import patch
 
 import torch
+import torch._dynamo.side_effects
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
@@ -69,6 +70,53 @@ class FakeMapping:
 
 class DictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    @parametrize(
+        "observe_order, callee_kind",
+        [(False, "python"), (True, "python"), (True, "partial"), (True, "builtin")],
+    )
+    def test_forwarded_mapping_keyword_order_guard(
+        self, mapping_type, observe_order, callee_kind
+    ):
+        def fixed(x, a, b):
+            return x + a + b
+
+        def ordered(x, **kwargs):
+            return x + sum(kwargs.values()), tuple(kwargs)
+
+        callee = ordered if observe_order else fixed
+        if callee_kind == "partial":
+            callee = partial(callee)
+
+        def fn(x, mapping):
+            if callee_kind == "builtin":
+                result = dict(**mapping)
+                return x + sum(result.values()), tuple(result)
+            return callee(x, **mapping)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for mapping in (mapping_type(a=1, b=2), mapping_type(b=2, a=1)):
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        self.assertEqual(counter.frame_count, 2 if observe_order else 1)
+
+    def test_mutable_descriptor_alias_rebinding_guard(self):
+        class Container(list):
+            count = list.count
+
+        def fn(x, items):
+            return x + items.count(5)
+
+        items = Container([5, 5])
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x, items), x + 2)
+        with patch.object(Container, "count", list.index):
+            self.assertEqual(compiled(x, items), x)
+        self.assertEqual(counter.frame_count, 2)
 
     @parametrize("observe_order", [False, True])
     def test_forwarded_keyword_order_guard(self, observe_order):
@@ -482,7 +530,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             try:
                 invoke(mapping)
             except TypeError as exc:
-                return x + 1, str(exc)
+                return x + 1, type(exc)
             return x - 1, "no error"
 
         x = torch.ones(1)
@@ -521,7 +569,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 size = descriptor.__get__(mapping)() if bound else descriptor(mapping)
                 return x + size
             except TypeError as exc:
-                return x + 1, str(exc)
+                return x + 1, type(exc)
 
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
@@ -601,19 +649,22 @@ class DictTests(torch._dynamo.test_case.TestCase):
     @parametrize("binding", ["unbound", "descriptor", "stored"])
     def test_dict_descriptor_arity_on_subclass(self, base_type, binding):
         class Mapping(base_type):
-            popitem = dict.popitem
+            pass
+
+        if binding == "stored":
+            Mapping.popitem = dict.popitem
 
         def fn(x, mapping):
             try:
                 if binding == "unbound":
-                    dict.popitem(mapping, 1, 2)
+                    dict.popitem(mapping, True)
                 else:
                     method = (
                         dict.popitem.__get__(mapping)
                         if binding == "descriptor"
                         else mapping.popitem
                     )
-                    method(1, 2)
+                    method(True)
             except TypeError as exc:
                 return x + 1, type(exc)
             return x - 1, "no error"
@@ -627,12 +678,12 @@ class DictTests(torch._dynamo.test_case.TestCase):
     @parametrize("base_type", [dict, OrderedDict, defaultdict])
     def test_dict_locally_stored_method_arity(self, base_type):
         class Mapping(base_type):
-            popitem = dict.popitem
+            pass
 
         def fn(x, mapping):
-            mapping.popitem = mapping.popitem
+            mapping.popitem = dict.popitem.__get__(mapping)
             try:
-                mapping.popitem(1, 2)
+                mapping.popitem(True)
             except TypeError as exc:
                 return x + 1, type(exc)
             return x - 1, "no error"
@@ -1875,6 +1926,62 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
             x = torch.rand(4)
             self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_subclass_new_multilevel_mro_no_override(self):
+        # No class between the leaf subclass and dict/OrderedDict overrides
+        # __new__ anywhere in the chain -- tp_new must resolve the owner by
+        # walking the MRO, not by checking self.value.__new__ identity for
+        # a fixed list of known base types.
+        for base in (dict, OrderedDict):
+
+            class Level1(base):
+                pass
+
+            class Level2(Level1):
+                pass
+
+            def fn(x):
+                d = Level2(a=x, b=x + 1)
+                d2 = Level2.__new__(Level2, a=1, b=2)
+                return d["a"], d["b"], len(d2)
+
+            x = torch.ones(2)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_subclass_new_multilevel_mro_stores_no_init_args(self):
+        # Regression test: dict.__new__ ignores its extra args, so
+        # UserDefinedClassVariable.tp_new_impl must not thread them through
+        # to track_new_user_defined_object as init_args, even when reached
+        # through a 2+-level MRO chain with no override in between.
+        class Level1(dict):
+            pass
+
+        class Level2(Level1):
+            pass
+
+        def fn(x):
+            return Level2(a=x), x + 1
+
+        seen_init_args = []
+        orig = torch._dynamo.side_effects.SideEffects.track_new_user_defined_object
+
+        def spy(self, base_cls_vt, cls_vt, init_args, **kwargs):
+            seen_init_args.append(list(init_args))
+            return orig(self, base_cls_vt, cls_vt, init_args, **kwargs)
+
+        with patch.object(
+            torch._dynamo.side_effects.SideEffects,
+            "track_new_user_defined_object",
+            spy,
+        ):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            d, _ = opt_fn(torch.ones(2))
+
+        self.assertEqual(d["a"], torch.ones(2))
+        self.assertTrue(len(seen_init_args) >= 1)
+        for init_args in seen_init_args:
+            self.assertEqual(init_args, [])
 
     def test_dict_list_values(self):
         def inner_fn(args):

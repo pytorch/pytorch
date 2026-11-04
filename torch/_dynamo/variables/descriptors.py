@@ -89,8 +89,8 @@ def _check_descriptor_obj_type(
         raise_type_error(
             tx,
             f"descriptor '{descriptor.__name__}' for "
-            f"'{get_type_tp_name(descriptor.__objclass__)}' objects "
-            f"doesn't apply to a '{get_type_tp_name(obj_type)}' object",
+            f"'{descriptor.__objclass__.__name__}' objects "
+            f"doesn't apply to a '{obj_type.__name__}' object",
         )
 
 
@@ -130,6 +130,7 @@ class DescriptorVariable(VariableTracker):
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
+        # Method descriptors inherit `object_richcompare` rather than their receiver's comparison.
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
@@ -212,7 +213,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
             raise_type_error(
                 tx,
                 f"descriptor '{self.descriptor.__name__}' of "
-                f"'{get_type_tp_name(self.descriptor.__objclass__)}' object needs an argument",
+                f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
         obj_type = obj.python_type()
@@ -221,8 +222,8 @@ class WrapperDescriptorVariable(DescriptorVariable):
             raise_type_error(
                 tx,
                 f"descriptor '{self.descriptor.__name__}' requires a "
-                f"'{get_type_tp_name(self.descriptor.__objclass__)}' object "
-                f"but received a '{get_type_tp_name(obj_type)}'",
+                f"'{self.descriptor.__objclass__.__name__}' object "
+                f"but received a '{obj_type.__name__}'",
             )
         # Dispatch through the defining type's builtin or user-defined tracker rather
         # than obj.call_method, which would do MRO resolution from type(obj)
@@ -237,11 +238,13 @@ class WrapperDescriptorVariable(DescriptorVariable):
         tx: "InstructionTranslatorBase",
         obj: VariableTracker,
         owner: VariableTracker,
-    ) -> "MethodWrapperVariable":
+    ) -> "WrapperDescriptorVariable | MethodWrapperVariable":
         # Mirrors wrapperdescr_get which calls PyWrapper_New to produce
         # a bound method-wrapper.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L203-L213
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1489-L1505
+        if obj.is_constant_none():
+            return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
@@ -666,7 +669,6 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
             return obj.call_method(tx, name, args, kwargs)
         method = obj.lookup_method_descriptor(descriptor)
         if method is not None:
-            # PyCFunction errors use the bound qualname; valid calls need no guard on it.
             result = method(
                 obj,
                 tx,
@@ -1127,6 +1129,8 @@ class MemberDescriptorVariable(DescriptorVariable):
         # Mirrors member_get which calls PyMember_GetOne to read the
         # C struct field.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
+        if obj.is_constant_none():
+            return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         from .object_protocol import _UnhandledDescriptorError
 
@@ -1296,6 +1300,8 @@ class GetSetDescriptorVariable(DescriptorVariable):
         # concrete Python object (UDOV.value, or as_python_constant
         # for classes/constants). Fall back to tp_getattro_impl for
         # proxy-based VTs like TensorVariable.
+        if obj.is_constant_none():
+            return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Prefer the VT's declarative table when it models this attribute
         entry = obj.lookup_tp_getset_member(attr_name)

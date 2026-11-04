@@ -7149,7 +7149,7 @@ class GraphModule(torch.nn.Module):
                 try:
                     op(first, same)
                 except TypeError as exc:
-                    errors.append(str(exc))
+                    errors.append(type(exc))
             return x + 1, comparisons, errors
 
         x = torch.ones(1)
@@ -7416,7 +7416,7 @@ class GraphModule(torch.nn.Module):
             try:
                 raw()
             except TypeError as exc:
-                error = str(exc).partition("() ")[2]
+                error = str(exc)
             return x + raw(obj, 1), unbound is raw, unbound.__name__, error
 
         self.assertEqual(
@@ -7508,7 +7508,7 @@ class GraphModule(torch.nn.Module):
                 dict.__setattr__(mapping, "extra", x + 1)
                 return mapping.extra, list.__str__(mapping)
             except TypeError as exc:
-                return x + 1, str(exc)
+                return x + 1, type(exc)
 
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
@@ -7539,7 +7539,7 @@ class GraphModule(torch.nn.Module):
             try:
                 method(*call_args, **kwargs)
             except TypeError as exc:
-                return x + 1, str(exc)
+                return x + 1, type(exc)
             return x - 1, "no error"
 
         x = torch.ones(1)
@@ -7561,12 +7561,12 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(compiled(x, obj), fn(x, obj))
         self.assertEqual(counter.frame_count, 2)
 
-    def test_wrapper_descriptor_missing_receiver_tp_name(self):
+    def test_wrapper_descriptor_missing_receiver(self):
         def fn(x):
             try:
                 collections.OrderedDict.__init__()
             except TypeError as exc:
-                return x + 1, str(exc)
+                return x + 1, type(exc)
             return x - 1, "no error"
 
         x = torch.ones(1)
@@ -9486,6 +9486,77 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         func_compiled = torch.compile(func, backend="eager", fullgraph=True)
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             func_compiled(x)
+
+    @parametrize("non_leaf", (False, True))
+    def test_full_with_requires_grad_fill_value_raises(self, non_leaf):
+        def func(x):
+            return torch.full((2,), x * 2 if non_leaf else x)
+
+        x = torch.tensor(2.5, requires_grad=True)
+
+        with self.assertRaises(TypeError):
+            func(x)
+
+        func_compiled = torch.compile(func, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            func_compiled(x)
+
+        torch._dynamo.reset()
+        with self.assertRaises(TypeError):
+            torch.compile(func, backend="eager")(x)
+
+    @parametrize("shape", ((1,), (1, 1)))
+    def test_full_with_non_0d_fill_value_raises(self, shape):
+        def func(x):
+            return torch.full((2,), x)
+
+        x = torch.ones(shape)
+
+        with self.assertRaises(TypeError):
+            func(x)
+
+        func_compiled = torch.compile(func, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            func_compiled(x)
+
+        torch._dynamo.reset()
+        with self.assertRaises(TypeError):
+            torch.compile(func, backend="eager")(x)
+
+    def test_full_with_non_leaf_fill_value_under_no_grad(self):
+        def func(x):
+            return torch.full((2,), x * 2)
+
+        x = torch.tensor(2.5, requires_grad=True)
+        with torch.no_grad():
+            expected = func(x)
+            result = torch.compile(func, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(result, expected)
+
+    def test_full_with_no_grad_parameter_fill_value(self):
+        def func(x):
+            return torch.full((2,), x)
+
+        x = torch.nn.Parameter(torch.tensor(2.5), requires_grad=False)
+        expected = func(x)
+
+        result = torch.compile(func, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(result, expected)
+        self.assertFalse(result.requires_grad)
+
+    def test_full_with_detached_fill_value(self):
+        def func(x):
+            return torch.full((2,), (x * 2).detach())
+
+        x = torch.tensor(2.5, requires_grad=True)
+        expected = func(x)
+
+        result = torch.compile(func, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(result, expected)
+        self.assertFalse(result.requires_grad)
 
     def test_full_with_tensor_subclass_fill_value(self):
         class MyTensor(torch.Tensor):

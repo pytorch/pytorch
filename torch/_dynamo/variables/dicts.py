@@ -238,6 +238,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             self._checking_python_constant = False
 
     def as_python_constant(self) -> dict[Any, Any]:
+        # Keys may still be lazy, and an empty input is constant: guard before materializing.
         self.install_dict_keys_match_guard()
         return {
             k.vt.as_python_constant(): v.as_python_constant()
@@ -485,15 +486,8 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if self.source and not is_constant_source(self.source):
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
 
-    def install_dict_order_guard(
-        self,
-        tx: "InstructionTranslatorBase | None" = None,
-    ) -> None:
+    def install_dict_order_guard(self, tx: "InstructionTranslatorBase") -> None:
         if self.source and not is_constant_source(self.source):
-            if tx is None:
-                from ..symbolic_convert import InstructionTranslator
-
-                tx = InstructionTranslator.current_tx()
             self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
 
@@ -1027,6 +1021,11 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     # class (see ConstDictVariable.__init__'s storage_cls), which is what
     # gives move_to_end/popitem(last=) below their real backing storage.
     items: "collections.OrderedDict[HashableTracker, VariableTracker]"  # pyrefly: ignore[bad-override]
+
+    def install_dict_order_guard(self, tx: "InstructionTranslatorBase") -> None:
+        super().install_dict_order_guard(tx)
+        if self.source and not is_constant_source(self.source):
+            install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
     # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
     # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
