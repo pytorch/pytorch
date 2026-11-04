@@ -385,14 +385,6 @@ def single_row_config(N: int, dtype_width: int) -> _RowConfig | None:
     return _RowConfig(threads_per_row=rungs[-1], threads_per_block=rungs[-1])
 
 
-def _check_current(device: int) -> None:
-    # Plans compile on the current device, so a plan keyed under another device would be
-    # handed to that device's later calls.
-    current = torch.cuda.current_device()
-    if device != current:
-        raise AssertionError(f"input on cuda:{device}, but cuda:{current} is current")
-
-
 def _launch_itree(
     trait: Any,
     trait_key: str,
@@ -466,11 +458,10 @@ def _run_itree(
     nouts: int = 1,
     out: Sequence[torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, ...]:
-    """Launch each stage on x's device, which must be current; split buffers are per
-    field."""
+    """Launch each stage on x's device, which callers check is current; split buffers
+    are per field."""
     M, N = x.shape
     device = x.get_device()
-    _check_current(device)
 
     def results():
         if out is not None:
@@ -582,6 +573,9 @@ def reduce_row_itree(
 
     x's device must be current.
     """
+    if not x.is_cuda:
+        raise AssertionError(f"want a CUDA input, got {x.device}")
+    _L.check_current(x.get_device())
     M, N = x.shape
     itree = itree_plan(N, M, x.element_size())
     if itree is None:
@@ -613,7 +607,7 @@ def reduce_row_tile(
     if M >= _INT32_LIMIT or N >= _INT32_LIMIT:
         raise AssertionError(f"row reduction needs M and N < 2^31, got M={M}, N={N}")
     device = x.get_device()
-    _check_current(device)
+    _L.check_current(device)
     # leaf/combine serves every trait and N. The opt-in gate leaves partial stages and
     # explicit launch shapes on the default order; explicit requests raise below.
     if order not in (None, "linear", "inner_tree"):
