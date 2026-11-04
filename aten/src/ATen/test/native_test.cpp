@@ -344,6 +344,11 @@ TEST(TestNative, MarkFakeStorage) {
   alias.unsafeGetTensorImpl()->set_storage_keep_dtype(fake.storage());
   at::init_cpp_fake(alias.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
   expect_throws(fake);
+  auto real = at::empty({2});
+  EXPECT_THROW(
+      at::init_cpp_fake(real.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode),
+      c10::Error);
+  EXPECT_FALSE(real.is_fake());
 }
 
 TEST(TestNative, InKernelInvocationReportsMetaDevice) {

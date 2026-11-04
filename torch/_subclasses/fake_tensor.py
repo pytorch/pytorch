@@ -700,13 +700,11 @@ class CppFakeTensorMode:
     # torch/csrc/FakeTensorMode.cpp.
     __slots__ = ("_cpp_mode", "__weakref__")
 
-    def __init__(
-        self, *, shape_env: ShapeEnv | None = None, export: bool = False
-    ) -> None:
+    def __init__(self, *, shape_env: ShapeEnv | None = None) -> None:
         import torch._functorch.config
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
-        converter = FakeTensorConverter(copy_data=copy_data, export=export)
+        converter = FakeTensorConverter(copy_data=copy_data)
         self._cpp_mode = torch._C._CppFakeTensorMode(converter, shape_env, self)
 
     @classmethod
@@ -1092,6 +1090,9 @@ class FakeTensorConverter:
             raise AssertionError(
                 f"tensor's device must be `meta`, got {t.device.type} instead"
             )
+        # A fake also reports meta on the meta device or inside a kernel
+        if is_fake_tensor(t):
+            raise AssertionError("expected a meta tensor that is not fake")
         # This is a bit abusive (this is not the "real" tensor) but whatever,
         # the meta tensor should be fresh so there's no way to get it wrong
         maybe_memo = self._get_memo(t)

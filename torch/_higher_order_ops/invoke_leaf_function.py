@@ -634,7 +634,7 @@ invoke_leaf_function = InvokeLeafFunction()
 #    enable_python_dispatcher), Python (from a Python dispatch mode) and Fake (from a C++ fake
 #    mode) are dropped: they must not intercept the leaf function when it runs eagerly. They are
 #    dropped from the include set rather than excluded, so a tensor that itself carries Python
-#    or Fake still dispatches to it.
+#    or Fake still dispatches to it, unless the captured exclude set excludes that key.
 # 3. Store GradientInfo (gradient edges + tensor metadata) instead of full tensors for backward,
 #    which is sufficient for autograd.grad and avoids keeping tensors alive.
 #
