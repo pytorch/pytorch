@@ -66,14 +66,19 @@ LLM_SELECTION_FILE = "llm_selection.json"
 # The selector runs from the default branch and run_test.py from the PR, so
 # bump this whenever an older reader would misread the selection file.
 SELECTION_VERSION = 1
+# Modules per import_pattern that importers() greps for: Linux caps one
+# argument, such as the pattern git grep gets, at 128 KiB.
+MAX_GREP_MODULES = 100
 # Longest chain of test modules importing each other that importers() follows.
 MAX_IMPORT_HOPS = 8
-# More edited failure-list classes than this are not looked up one by one.
+# More edited failure-list classes than this are not looked up one by one, so
+# everything runs for an inductor or CPython entry and the dynamo_wrapped sweep
+# for the others, as for a class that is not found.
 MAX_FAILURE_LIST_CLASSES = 50
 
 # Tests that run the files a change matches although they do not import them:
 # the drivers of the directories discover_tests.py blocklists (except
-# custom_backend, mobile and onnx_caffe2, which have none, and
+# custom_backend and mobile, which have none, and
 # torch_openreg/tests, whose driver test_openreg is never a candidate), and
 # TD's ADDITIONAL_MAPPINGS.
 DRIVER_MAPPINGS = {
@@ -91,17 +96,25 @@ DRIVER_MAPPINGS = {
     "test_cpp_extensions_jit": [r"^test/cpp_extensions/"],
     "test_cpp_extensions_mtia_backend": [r"^test/cpp_extensions/"],
     "test_cpp_extensions_stream_and_event": [r"^test/cpp_extensions/"],
+    "test_dispatch": [r"^test/cpp_extensions/dangling_impl_extension\.cpp$"],
     "test_ao_sparsity": [r"^test/ao/"],
     "test_autograd": [r"^test/autograd/"],
     "test_fx": [r"^test/fx/"],
     "test_jit": [r"^test/jit/"],
+    # They do `from test_jit import *`.
+    **{
+        t: [r"^test/jit/", r"^test/test_jit\.py$"]
+        for t in ("test_jit_profiling", "test_jit_legacy")
+    },
+    "test_jit_fuser_te": [r"^test/jit/test_fuser_common\.py$"],
     "test_package": [r"^test/package/"],
     "test_quantization": [r"^test/quantization/"],
 }
 
-# common_utils xfails or skips a test named in one of these lists, one file per
-# test such as TestNNCPU.test_x or CPython313-test_set-TestSet.test_x, when it
-# runs under dynamo (the dynamo_wrapped config), inductor or compiled autograd.
+# One file per test, such as TestNNCPU.test_x or CPython313-test_set-TestSet.test_x.
+# Under dynamo (the dynamo_wrapped and dynamo_cpython configs) or inductor,
+# common_utils xfails or skips a test in the dynamo or inductor lists, and under
+# compiled autograd it runs a test in compiled_autograd_skips with it disabled.
 FAILURE_LIST_DIR_RE = re.compile(
     r"^test/(dynamo|inductor|compiled_autograd)_(?:expected_failures|skips)/"
 )
@@ -199,7 +212,9 @@ def importers(
         if hop == MAX_IMPORT_HOPS:
             return None
         seen |= frontier
-        frontier = {f for f in grep(import_pattern(frontier)) if f.endswith(".py")}
+        mods, n = sorted(frontier), MAX_GREP_MODULES
+        greps = [grep(import_pattern(mods[i : i + n])) for i in range(0, len(mods), n)]
+        frontier = {f for g in greps for f in g if f.endswith(".py")}
     return None
 
 
@@ -212,28 +227,37 @@ def import_pattern(modules: Iterable[str]) -> str:
     # `from test import <name>` imports their sibling module <name>.
     # A parenthesized `from <package> import (` may span lines, so it counts
     # as importing every module of that package. A bare name that is also a
-    # standard library module, such as random, imports that module instead.
+    # standard library module, such as random, imports that module instead,
+    # and a bare `test` the test/ package.
+    bare = sys.stdlib_module_names | {"test"}
     mods = sorted(f[5:-3].removesuffix("/__init__") for f in modules)
     parts = [m.split("/") for m in mods]
     names = alts(
         ".".join(p[i:])
         for p in parts
         for i in range(len(p))
-        if i < len(p) - 1 or p[i] not in sys.stdlib_module_names
+        if i < len(p) - 1 or p[i] not in bare
     )
     bases = alts(p[-1] for p in parts)
-    parents = alts(".".join(p[i:-1]) for p in parts for i in range(len(p) - 1))
+    parents = alts(
+        ".".join(p[i:-1])
+        for p in parts
+        for i in range(len(p) - 1)
+        if i < len(p) - 2 or p[i] not in bare
+    )
     paths = alts(n for m in mods for n in (m, m.replace("/", ".")))
     end = "([^[:alnum:]_]|$)"
     forms = [
-        rf"(from|import)[[:space:]]+\.*(test\.)?({names}){end}",
+        *([rf"(from|import)[[:space:]]+\.*(test\.)?({names}){end}"] if names else []),
         rf"from[[:space:]]+(\.+|test)[[:space:]]+import[[:space:]]+(.*[^[:alnum:]_.])?({bases}){end}",
     ]
     if parents:
         forms.append(
             rf"from[[:space:]]+\.*(test\.)?({parents})[[:space:]]+import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})"
         )
-    quoted = rf"""load_test_module\(["']({paths})["']\)|import_module\(["'](test\.)?({names})["']\)"""
+    quoted = rf"""load_test_module\(["']({paths})["']\)"""
+    if names:
+        quoted += rf"""|import_module\(["'](test\.)?({names})["']\)"""
     return rf"^[[:space:]]*({'|'.join(forms)})|{quoted}"
 
 
@@ -248,7 +272,9 @@ def class_pattern(classes: Iterable[str], prefix: bool = False) -> str:
     """A `git grep -E` pattern for the definition of one of `classes` or of
     the generic class instantiate_device_type_tests made it from, or with
     `prefix` of a class whose name starts with one of them."""
-    names = alts(n for c in classes for n in (c, DEVICE_SUFFIX_RE.sub("", c)))
+    stems = {c: DEVICE_SUFFIX_RE.sub("", c) for c in classes}
+    # TestCUDA is not made from a class Test.
+    names = alts([*stems, *(s for s in stems.values() if s not in ("", "Test"))])
     end = "" if prefix else "([^[:alnum:]_]|$)"
     return rf"^[[:space:]]*class[[:space:]]+({names}){end}"
 
@@ -261,10 +287,10 @@ def failure_list_sources(
     "inductor", "compiled_autograd", or "dynamo_cpython" for a CPython entry,
     which the dynamo_cpython config runs) naming a class that is not looked up
     (no `grep`, see importers, or more than MAX_FAILURE_LIST_CLASSES classes)
-    or that `grep` does not find. Also the list ("dynamo", "inductor" or
-    "compiled_autograd", even for a CPython entry) holding an entry in a
-    subdirectory or, for the dynamo and inductor lists, one without exactly
-    one ".", which dynamo_test_failures.py rejects at import."""
+    or that `grep` does not find in a .py file. Also the list ("dynamo",
+    "inductor" or "compiled_autograd", even for a CPython entry) holding an
+    entry in a subdirectory or, for the dynamo and inductor lists, one without
+    exactly one ".", which dynamo_test_failures.py rejects at import."""
     classes: dict[str, set[str]] = {}
     unparsed: set[str] = set()
     for f in changed_files:
@@ -283,7 +309,7 @@ def failure_list_sources(
     sources: list[str] = []
     missing = unparsed
     for c, lists in sorted(classes.items()):
-        found = grep(class_pattern([c]))
+        found = [f for f in grep(class_pattern([c])) if f.endswith(".py")]
         sources += found
         if not found:
             missing |= lists
@@ -320,6 +346,8 @@ def parse_model_output(
         raise ValueError(f"unknown sweeps {sorted(unknown)}")
     if not isinstance(out["run_all"], bool):
         raise ValueError("run_all is not a boolean")
+    if not isinstance(out["reason"], str):
+        raise ValueError("reason is not a string")
     names = {t["file"]: normalize_test_name(t["file"], candidates) for t in tests}
     if grep is not None and not all(names.values()):
         # Every file under test/ at the head.
@@ -343,6 +371,22 @@ def parse_model_output(
     return files, set(sweeps)
 
 
+def grep_failure_is_an_error(
+    from_model_output: Callable[..., Selection],
+) -> Callable[..., Selection]:
+    """Make a `grep` that fails, with an OSError such as E2BIG or git_grep's
+    RuntimeError, an error of from_model_output rather than an exception."""
+
+    def wrapped(cls: type[Selection], *args: object, **kwargs: object) -> Selection:
+        try:
+            return from_model_output(cls, *args, **kwargs)
+        except (OSError, RuntimeError) as e:
+            error = f"{type(e).__name__}: {e}"
+            return cls(run_all=True, reason=f"grep failed ({error})", error=error)
+
+    return wrapped
+
+
 @dataclass
 class Selection:
     files: set[str] = field(default_factory=set)
@@ -356,13 +400,15 @@ class Selection:
     # rather than only reporting what it would have skipped.
     enforce: bool = False
     # The test files the model chose from. Any other file, such as a C++ test
-    # or test_openreg, is always covered. None covers no extra file.
+    # or test_openreg, is always covered. None covers no extra file, so it
+    # requires run_all.
     candidates: set[str] | None = None
     # Why the selector got no usable answer (git, the model call or its output,
     # or the test times); None for a deliberate run_all.
     error: str | None = None
 
     @classmethod
+    @grep_failure_is_an_error
     def from_model_output(
         cls,
         out: object,
@@ -371,8 +417,9 @@ class Selection:
         grep: Callable[[str], list[str]] | None = None,
     ) -> Selection:
         """Turn the model's structured output into a Selection. Everything runs
-        when failure_list_sources reports the inductor list or dynamo_cpython
-        (a CPython entry whose class could not be resolved); the other lists it
+        when failure_list_sources reports the inductor list or dynamo_cpython,
+        that is for an inductor entry it rejects or does not resolve to a file
+        or a CPython entry in any list it does not resolve; the other lists it
         reports add the dynamo_wrapped sweep.
 
         A missing or malformed output, a change to test infrastructure, an
@@ -388,8 +435,6 @@ class Selection:
                 reason="no model output; running everything",
                 error="no model output",
             )
-        if needs_run_all(changed_files):
-            return cls(run_all=True, reason="change touches test infrastructure")
         try:
             files, sweeps = parse_model_output(out, candidates, grep)
         except ValueError as e:
@@ -398,18 +443,20 @@ class Selection:
                 reason=f"malformed model output ({e}); running everything",
                 error=f"malformed model output: {e}",
             )
+        if needs_run_all(changed_files):
+            return cls(run_all=True, reason="change touches test infrastructure")
         if not isinstance(out, dict):
             raise AssertionError("parse_model_output accepts only objects")
         sources, missing = failure_list_sources(changed_files, grep)
         if "inductor" in missing:
             return cls(
                 run_all=True,
-                reason="an edited inductor failure list names a test class that could not be resolved",
+                reason="an edited inductor failure list entry could not be resolved to the file defining its test class",
             )
         if "dynamo_cpython" in missing:
             return cls(
                 run_all=True,
-                reason="an edited dynamo failure list names a CPython test class that could not be resolved",
+                reason="an edited failure list has a CPython test entry that could not be resolved to the file defining its class",
             )
         # dynamo_wrapped also runs with compiled autograd on (see common_utils).
         if missing & {"dynamo", "compiled_autograd"}:
@@ -449,6 +496,10 @@ class Selection:
             "error": self.error,
         }
 
+    def __post_init__(self) -> None:
+        if self.candidates is None and not self.run_all:
+            raise ValueError("a selection without candidates must be run_all")
+
     @classmethod
     def from_json(cls, d: dict) -> Selection:
         """The selection in `d`; ValueError, KeyError or TypeError unless `d`
@@ -476,8 +527,12 @@ class Selection:
             raise TypeError("run_all and enforce must be booleans")
         if not isinstance(reason, str) or not isinstance(error, (str, type(None))):
             raise TypeError("reason must be a string and error a string or null")
-        if candidates is None and not run_all:
-            raise ValueError("a selection without candidates must be run_all")
+        if unknown := set(sweeps) - set(SWEEPS):
+            raise ValueError(f"unknown sweeps {sorted(unknown)}")
+        if candidates is not None and not set(files) <= set(candidates):
+            raise ValueError("files must be candidates")
+        if error is not None and not run_all:
+            raise ValueError("a selection with an error must be run_all")
         return cls(
             set(files),
             set(sweeps),
