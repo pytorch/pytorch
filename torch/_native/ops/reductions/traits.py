@@ -76,9 +76,10 @@ class SumOps:
 
 @dsl_user_op
 def _square_rn(a, *, loc=None, ip=None):
-    """a * a rounded on its own: ptxas never contracts mul.rn into an add."""
+    """a * a rounded on its own: ptxas never contracts mul.rn into an add. Other
+    accumulator types square plainly."""
     if type(a) not in (Float32, Float64):
-        raise TypeError(f"_square_rn takes Float32 or Float64, got {type(a).__name__}")
+        return a * a
     wide = type(a) is Float64
     x = a.ir_value(loc=loc, ip=ip)
     return type(a)(

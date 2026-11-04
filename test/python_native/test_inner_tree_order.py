@@ -53,6 +53,19 @@ def _order_on():
 # Pinned bits outlive the temporary reference. This pairwise matrix covers every plan
 # shape and crosses each operation and dtype through ragged and split paths.
 _GOLDEN = {
+    # --- norm2 (mul.rn leaves, so these bits do not depend on FMA contraction) ---
+    ("norm2", "bfloat16", 8, 27): "16318bb9f336509e",
+    ("norm2", "bfloat16", 8, 1024): "87399980aa7e3a22",
+    ("norm2", "bfloat16", 8, 4097): "f8a3ab3b08181373",
+    ("norm2", "bfloat16", 8, 100003): "7685627c784e7905",
+    ("norm2", "float32", 8, 27): "ac2e163ab7294f7d",
+    ("norm2", "float32", 8, 1024): "7ce6e3bd35d09470",
+    ("norm2", "float32", 8, 4097): "b8d192239fc0a447",
+    ("norm2", "float32", 8, 100003): "221e4548bccabcf9",
+    ("norm2", "float64", 8, 27): "ba17e3c6c9e15c56",
+    ("norm2", "float64", 8, 1024): "251da3e8d9f81d02",
+    ("norm2", "float64", 8, 4097): "3c6103bfc0832300",
+    ("norm2", "float64", 8, 100003): "85739099f72f7f3f",
     # --- sum ---
     ("sum", "float16", 8, 27): "57a3f67d5fd8f69d",
     ("sum", "float16", 8, 1024): "78a863f321707ebf",
@@ -114,6 +127,11 @@ def _trait_key(trait):
     return f"inner_tree_test_{trait.__name__}"
 
 
+def _norm2(acc):
+    # Like the class traits, take only the accumulator.
+    return T.NormOps(2, acc=acc)
+
+
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestInnerTreeOrder(TestCase):
@@ -139,7 +157,7 @@ class TestInnerTreeOrder(TestCase):
                         for tm in plan.tms:
                             self.assertLessEqual(tm.vec * tm.loads, tile.MAX_UNROLL)
 
-    @parametrize("op", ["sum", "prod"])
+    @parametrize("op", ["sum", "prod", "norm2"])
     def test_exact_bits_match_golden(self, op):
         dtypes = {
             "float16": torch.float16,
@@ -148,7 +166,7 @@ class TestInnerTreeOrder(TestCase):
             "float64": torch.float64,
         }
         prod = op == "prod"
-        trait = T.ProdOps if prod else T.SumOps
+        trait = {"sum": T.SumOps, "prod": T.ProdOps, "norm2": _norm2}[op]
         checked = 0
         for (kop, dname, m, n), want in _GOLDEN.items():
             if kop != op:
