@@ -718,8 +718,10 @@ def _launch_itree(
         tuple(strided_outs),
         device,
     ) + op.cache_sig
-    launch = (Int32(N // plan.vec), None, Int32(N))
-    args = lambda pair: _row_args(*pair, *launch, device)  # noqa: E731
+    nchunks, project_n = Int32(N // plan.vec), Int32(N)
+    args = lambda pair: _row_args(  # noqa: E731
+        pair[0], pair[1], nchunks, None, project_n, device
+    )
     build = lambda: _compile(op, *args(fakes))  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*args(operands))
 
