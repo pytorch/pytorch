@@ -734,7 +734,8 @@ class TestSplitTests(unittest.TestCase):
             self.assertEqual(split.llm_enforced, enforced)
             self.assertFalse(split.llm.kept_td)
             self.assertSplit(split, ["p", "a"] if enforced else ["p"], [] if enforced else ["a"])  # fmt: skip
-            self.assertEqual(self.TD_LINE in stderr, not enforced)
+            failed_line = "LLM selection: the selector failed ('x'), using TD\n"
+            self.assertEqual(failed_line + self.TD_LINE == stderr, not enforced)
             self.assertEqual(split.llm.selection_metric["selector_error"], error)
             source = "llm_selection" if enforced else "td"
             self.assertEqual([x["source"] for x in artifacts], [source])
