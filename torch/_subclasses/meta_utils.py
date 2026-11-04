@@ -315,11 +315,9 @@ class MetaTensorDescriber:
         fake = torch._C.DispatchKey.Fake
         if not torch._C._dispatch_tls_is_dispatch_key_included(fake):
             return self._describe_tensor(t, recurse=recurse, trace=trace)
-        torch._C._dispatch_tls_set_dispatch_key_included(fake, False)
-        try:
+        with torch._C._PreserveDispatchKeyGuard():
+            torch._C._dispatch_tls_set_dispatch_key_included(fake, False)
             return self._describe_tensor(t, recurse=recurse, trace=trace)
-        finally:
-            torch._C._dispatch_tls_set_dispatch_key_included(fake, True)
 
     def _describe_tensor(
         self, t: torch.Tensor, *, recurse: bool, trace: bool
