@@ -226,7 +226,7 @@ std::optional<std::string> ScriptTypeParser::parseBaseTypeName(
         // Otherwise, it's a fully qualified class name
         return collectQualname(select);
       }
-    } break;
+    }
   }
   return std::nullopt;
 }
