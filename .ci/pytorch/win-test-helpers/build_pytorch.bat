@@ -44,6 +44,8 @@ if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
 :: TODO: Move to .ci/docker/requirements-ci.txt
+:: Keep the MKL version in sync with install_mkl.sh, requirements-ci.txt and
+:: .ci/wheel/windows/build_install_deps.py.
 call pip install mkl==2026.2.0 mkl-static==2026.2.0 mkl-include==2026.2.0 "intel-openmp<2026.2.0"
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail

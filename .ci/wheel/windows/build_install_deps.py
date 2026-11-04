@@ -37,9 +37,10 @@ PYTORCH_ROOT = _HERE.parents[2]
 PIP_PACKAGES: list[str] = [
     "cmake",
     "pyyaml",
-    # Keep in sync with .ci/docker/common/install_mkl.sh (2026.2 has the LAPACK
-    # DLASD2 fix, #202596). The intel-openmp cap is the one from
-    # .ci/docker/requirements-ci.txt (#201218).
+    # Keep in sync with .ci/docker/common/install_mkl.sh, .ci/docker/requirements-ci.txt
+    # and .ci/pytorch/win-test-helpers/build_pytorch.bat (2026.2 has the LAPACK
+    # DLASD2 fix, #202596). The intel-openmp cap is the one from requirements-ci.txt
+    # (#201218).
     "mkl-include==2026.2.0",
     "mkl-static==2026.2.0",
     "intel-openmp<2026.2.0",

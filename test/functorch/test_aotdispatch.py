@@ -13078,23 +13078,19 @@ aot_autograd_failures = {
     decorate("nn.functional.conv2d", decorator=unittest.skipIf(IS_ARM64, "flaky")),
 }
 
-# Eager and AOTDispatcher gradients of matmul differ by up to ~5e-5 in float32.
-# MKL builds used to match closely enough for the default tolerance; with MKL
-# 2026.2 they do not (the gemm accumulation order changed), so MKL builds get an
-# override as well, a little looser than the non-MKL one.
+# Eager and AOTDispatcher gradients of matmul differ by up to 5.1e-5 in float32
+# with MKL 2026.2 (measured on the AVX-512 CI runners; the default atol is 1e-5).
+# Non-MKL builds already needed this override, and 6e-5 covers the MKL difference
+# too, so there is one value for both.
 aot_autograd_failures.update(
     {
         decorate(
             "matmul",
-            decorator=toleranceOverride(
-                {torch.float32: tol(atol=1e-04 if TEST_MKL else 6e-05, rtol=4e-06)}
-            ),
+            decorator=toleranceOverride({torch.float32: tol(atol=6e-05, rtol=4e-06)}),
         ),
         decorate(
             "__rmatmul__",
-            decorator=toleranceOverride(
-                {torch.float32: tol(atol=1e-04 if TEST_MKL else 6e-05, rtol=4e-06)}
-            ),
+            decorator=toleranceOverride({torch.float32: tol(atol=6e-05, rtol=4e-06)}),
         ),
     }
 )
