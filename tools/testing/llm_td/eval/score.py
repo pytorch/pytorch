@@ -23,9 +23,8 @@ the hedge budget; td_replay ranks them first, as TD's PreviouslyFailedInPR
 does.
 As in select_tests.select, a sample with no changed files, a change to test
 infrastructure (needs_run_all) or more than MAX_CHANGED_FILES runs everything
-under every model policy, at no model cost (with no changed files it is an
-error, so `final+tdN` keeps TD's cut). A malformed answer counts as an error,
-as select_tests records it.
+under every model policy, at no model cost. A malformed answer counts as an
+error, as select_tests records it.
 The tag `td` scores the replayed in-repo TD (see td_replay.py) under the
 single policy `td25`, its CI cut of the top 25% per config, and ignores
 --policies.
@@ -381,8 +380,6 @@ def policy(
     if name not in ("model", "final", "final-hm") and not HEDGE.fullmatch(name):
         raise ValueError(f"unknown policy {name!r}")
     if unasked(s):
-        if HEDGE.fullmatch(name) and not s["changed_files"]:
-            return policy("td25", s, r, td, seconds)
         return Choice(Selection(run_all=True))
     out = (r or {}).get("out")
     if name == "model":
@@ -530,7 +527,7 @@ def score(
                     "tag": tag, "policy": pol, "id": sid, "kind": s["kind"], "pairs": len(pairs), "hit": sum(hit),
                     "cpu": cpu, "gpu": gpu, "run_all": choice.sel.run_all, "files": len(choice.files()),
                     "cost_usd": 0.0 if skipped else (r or {}).get("cost_usd") or 0.0,
-                    "error": not s["changed_files"] if skipped else bool(r) and (bool(r["error"]) or malformed(r["out"], cands)),
+                    "error": not skipped and bool(r) and (bool(r["error"]) or malformed(r["out"], cands)),
                     "missed": [p for p, h in zip(pairs, hit) if not h],
                 })  # fmt: skip
         if sid in ungrepped:

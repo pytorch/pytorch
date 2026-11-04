@@ -543,12 +543,8 @@ class TestScore(unittest.TestCase):
         empty = {**SAMPLE, "changed_files": []}
         infra = {**SAMPLE, "changed_files": ["test/run_test.py"]}
         for name in ("model", "final", "final-hm", "final+td45"):
-            self.assertTrue(pick(name, r, td, huge).sel.run_all, name)
-            self.assertTrue(pick(name, r, td, infra).sel.run_all, name)
-            choice = pick(name, r, td, empty)
-            self.assertEqual(choice.sel.run_all, name != "final+td45", name)
-        # With no changed files select_tests records an error, so TD's cut is kept.
-        self.assertEqual(pick("final+td45", r, td, empty).per_config, {"default": {"test_a"}})  # fmt: skip
+            for s in (huge, empty, infra):
+                self.assertTrue(pick(name, r, td, s).sel.run_all, name)
         files = {
             "test-times.json": {"linux": {"default": {"test_a": 10.0}}},
             "samples/a.json": huge,
