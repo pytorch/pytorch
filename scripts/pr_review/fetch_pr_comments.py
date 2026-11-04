@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect a pull request's title, description and conversation for the review.
+"""Collect a pull request's title, description, labels and conversation for the review.
 
 Runs in the trusted `prepare` job, which holds GITHUB_TOKEN; the review job has
 neither the token nor network access to the API. The file is handed over as a
@@ -60,6 +60,10 @@ MAX_BODY = 4000
 MAX_REVIEW_BODY = 40_000
 # Of the description once JSON-escaped; leaves most of MAX_TOTAL_BYTES to comments.
 MAX_PR_BODY_BYTES = 40_000
+# Labels the review is shown, and the length of each name. Real label names are
+# short; the caps only bound what a PR with hundreds of labels can add.
+MAX_LABELS = 50
+MAX_LABEL_NAME = 100
 MAX_HUNK = 1500
 MAX_ITEMS = 200
 # Of the whole serialized file. One environment variable is limited to 128 KiB
@@ -234,10 +238,18 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
     pull = api(f"repos/{repo}/pulls/{pr}")
     author = human_login(pull)
     body = cap_encoded(pull.get("body"), MAX_PR_BODY_BYTES)
+    # The review has no network, so this is the only way it learns which labels
+    # (for example the ciflow/* ones that start CI) are already on the PR.
+    labels = [
+        cap(label["name"], MAX_LABEL_NAME)
+        for label in (pull.get("labels") or [])[:MAX_LABELS]
+        if isinstance(label, dict) and isinstance(label.get("name"), str)
+    ]
     head = {
         "pr_author": author,
         "head_sha": head_sha,
         "title": pull.get("title") or "",
+        "labels": labels,
         "body": body,
     }
     sources = {

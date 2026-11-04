@@ -285,6 +285,32 @@ class TestCollect(unittest.TestCase):
                 out = fpc.collect(api, REPO, PR)
             self.assertLessEqual(len(fpc.dumps(out)), limit)
 
+    def test_the_labels_on_the_pr_are_passed_on_by_name(self):
+        api = FakeApi()
+        api.pull = {
+            **api.pull,
+            "labels": [{"name": "ciflow/docker"}, {"name": "ciflow/binaries"}, {}],
+        }
+        out = fpc.collect(api, REPO, PR)
+        self.assertEqual(out["labels"], ["ciflow/docker", "ciflow/binaries"])
+
+    def test_a_pr_without_labels_has_an_empty_list(self):
+        api = FakeApi()
+        api.pull = {k: v for k, v in api.pull.items() if k != "labels"}
+        self.assertEqual(fpc.collect(api, REPO, PR)["labels"], [])
+
+    def test_the_labels_are_capped(self):
+        issue = [comment("maint", body="y" * fpc.MAX_BODY)] * 80
+        api = FakeApi(issue=issue, maintainers={"maint"})
+        api.pull = {
+            **api.pull,
+            "labels": [{"name": "l" * 500}] * (fpc.MAX_LABELS + 20),
+        }
+        out = fpc.collect(api, REPO, PR)
+        self.assertEqual(len(out["labels"]), fpc.MAX_LABELS)
+        self.assertTrue(all(n.endswith(" [truncated]") for n in out["labels"]))
+        self.assertLessEqual(len(fpc.dumps(out)), fpc.MAX_TOTAL_BYTES)
+
     def test_the_description_is_capped_and_counted(self):
         issue = [comment("maint", body="y" * fpc.MAX_BODY)] * 80
         api = FakeApi(issue=issue, maintainers={"maint"})
