@@ -2667,6 +2667,7 @@ class TestTensorCreation(TestCase):
     @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
+    @dtypesIfXPU(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
     @dtypes(torch.float, torch.double, torch.long)
     @parametrize("window", ['hann', 'hamming', 'bartlett', 'blackman'])
     def test_signal_window_functions(self, device, dtype, window):
@@ -2923,6 +2924,7 @@ class TestTensorCreation(TestCase):
     @skipCPUIf(True, "compares with CPU")
     @precisionOverride({torch.half: 0.025 + LINSPACE_LOGSPACE_EXTRA_EPS})
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_logspace_device_vs_cpu(self, device, dtype):
         self._test_logspace(device, dtype, steps=10)
@@ -2931,12 +2933,14 @@ class TestTensorCreation(TestCase):
     @skipCPUIf(True, "compares with CPU")
     @precisionOverride({torch.half: 0.0201 + LINSPACE_LOGSPACE_EXTRA_EPS})
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_logspace_base2(self, device, dtype):
         self._test_logspace_base2(device, dtype, steps=10)
 
     @skipCPUIf(True, "compares with CPU")
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_logspace_special_steps(self, device, dtype):
         for steps in self.LINSPACE_LOGSPACE_SPECIAL_STEPS:
@@ -2946,6 +2950,7 @@ class TestTensorCreation(TestCase):
     @dtypes(*all_types_and(torch.bfloat16))
     @dtypesIfCUDA(*integral_types_and(torch.half, torch.bfloat16, torch.float32, torch.float64) if TEST_WITH_ROCM else
                   all_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*all_types_and(torch.half, torch.bfloat16))
     def test_logspace(self, device, dtype):
         _from = random.random()
         to = _from + random.random()
@@ -3633,6 +3638,7 @@ class TestRandomTensorCreation(TestCase):
 
     @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypesIfXPU(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_from_to(self, device, dtype):
         size = 2000
         alpha = 0.1
