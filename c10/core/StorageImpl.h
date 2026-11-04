@@ -306,6 +306,14 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return received_cuda_;
   }
 
+  void set_received_xpu(bool received_xpu) {
+    received_xpu_ = received_xpu;
+  }
+
+  bool received_xpu() {
+    return received_xpu_;
+  }
+
   impl::PyObjectSlot* pyobj_slot() {
     return &pyobj_slot_;
   }
@@ -420,6 +428,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation
   bool received_cuda_;
+  // Same as received_cuda_, for xpu memory
+  bool received_xpu_ = false;
   // Keep the common data access paths behind one branch each.
   bool has_immutable_data_ptr_check_ = false;
   bool has_mutable_data_ptr_check_ = false;

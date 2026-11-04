@@ -15,6 +15,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/xpu/Module.h>
 #include <torch/csrc/xpu/XPUPluggableAllocator.h>
+#include <torch/csrc/xpu/XpuIPCTypes.h>
 #include <torch/csrc/xpu/memory_snapshot.h>
 
 using namespace torch;
@@ -192,6 +193,13 @@ static PyObject* THXPModule_xpuSynchronize(PyObject* self, PyObject* arg) {
 static PyObject* THXPModule_emptyCache(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   c10::xpu::XPUCachingAllocator::emptyCache();
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
+}
+
+static PyObject* THXPModule_xpuIPCCollect(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  torch::XpuIPCCollect();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -897,6 +905,7 @@ static struct PyMethodDef _THXPModule_methods[] = {
      nullptr},
     {"_xpu_synchronize", THXPModule_xpuSynchronize, METH_O, nullptr},
     {"_xpu_emptyCache", THXPModule_emptyCache, METH_NOARGS, nullptr},
+    {"_xpu_ipc_collect", THXPModule_xpuIPCCollect, METH_NOARGS, nullptr},
     {"_xpu_memoryStats", THXPModule_memoryStats, METH_O, nullptr},
     {"_xpu_resetAccumulatedMemoryStats",
      THXPModule_resetAccumulatedMemoryStats,

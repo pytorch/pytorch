@@ -27,6 +27,7 @@
     get_gencode_flags
     get_stream_from_external
     init
+    ipc_collect
     is_available
     is_bf16_supported
     is_initialized

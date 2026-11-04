@@ -729,6 +729,19 @@ def synchronize(device: Device = None) -> None:
     return torch._C._xpu_synchronize(device)
 
 
+def ipc_collect() -> None:
+    r"""Force collects XPU memory after it has been released by XPU IPC.
+
+    .. note::
+        Checks if any sent XPU tensors could be cleaned from the memory. Force
+        closes shared memory file used for reference counting if there is no
+        active counters. Useful when the producer process stopped actively sending
+        tensors and want to release unused memory.
+    """
+    _lazy_init()
+    torch._C._xpu_ipc_collect()
+
+
 def _sleep(cycles: int) -> None:
     r"""Spin the current XPU device for the given number of device clock cycles.
 
@@ -1503,6 +1516,7 @@ __all__ = [
     "graph_pool_handle",
     "init",
     "initial_seed",
+    "ipc_collect",
     "is_available",
     "is_bf16_supported",
     "is_current_stream_capturing",

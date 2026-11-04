@@ -155,7 +155,8 @@ def rebuild_meta_tensor(
     return t
 
 
-def rebuild_cuda_tensor(
+def _rebuild_device_tensor(
+    device_type,
     tensor_cls,
     tensor_size,
     tensor_stride,
@@ -179,8 +180,9 @@ def rebuild_cuda_tensor(
         cache_key = (storage_device, storage_handle, storage_offset_bytes)
         storage = storage_from_cache(storage_cls, cache_key)
         if storage is None:
-            torch.cuda._lazy_init()
-            storage = storage_cls._new_shared_cuda(
+            getattr(torch, device_type)._lazy_init()
+            new_shared = getattr(storage_cls, f"_new_shared_{device_type}")
+            storage = new_shared(
                 storage_device,
                 storage_handle,
                 storage_size_bytes,
@@ -191,10 +193,14 @@ def rebuild_cuda_tensor(
                 event_sync_required,
             )
             shared_cache[cache_key] = StorageWeakRef(storage)
-        else:
+        elif device_type == "cuda":
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
             storage_cls._release_ipc_counter(
                 ref_counter_handle, ref_counter_offset, device=storage_device
+            )
+        else:
+            torch.UntypedStorage._release_ipc_counter_xpu(
+                ref_counter_handle, ref_counter_offset
             )
 
     _storage = (
@@ -218,6 +224,14 @@ def rebuild_cuda_tensor(
         t.requires_grad = requires_grad
 
     return t
+
+
+def rebuild_cuda_tensor(*args, **kwargs):
+    return _rebuild_device_tensor("cuda", *args, **kwargs)
+
+
+def rebuild_xpu_tensor(*args, **kwargs):
+    return _rebuild_device_tensor("xpu", *args, **kwargs)
 
 
 def reduce_tensor(tensor):
@@ -339,8 +353,10 @@ def reduce_tensor(tensor):
         return reduce_sparse_tensor(tensor)
 
     storage = tensor._typed_storage()
+    device_type = storage._untyped_storage.device.type
 
-    if storage._untyped_storage.device.type == "cuda":
+    if device_type in ("cuda", "xpu"):
+        share = storage._share_cuda_ if device_type == "cuda" else storage._share_xpu_
         (
             device,
             handle,
@@ -350,13 +366,13 @@ def reduce_tensor(tensor):
             ref_counter_offset,
             event_handle,
             event_sync_required,
-        ) = storage._share_cuda_()
+        ) = share()
         tensor_offset = tensor.storage_offset()
         shared_cache[handle] = StorageWeakRef(storage)
         # _backward_hooks purposely omitted here, see
         # Note [Don't serialize hooks]
         return (
-            rebuild_cuda_tensor,
+            rebuild_cuda_tensor if device_type == "cuda" else rebuild_xpu_tensor,
             (
                 type(tensor),
                 tensor.size(),
@@ -365,9 +381,9 @@ def reduce_tensor(tensor):
                 type(storage),
                 tensor.dtype,
                 device,
-                handle,  # identifier which CUDA allocation is the storage in.
+                handle,  # identifier which device allocation is the storage in.
                 storage_size_bytes,  # size(in bytes) of the storage
-                storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
+                storage_offset_bytes,  # offset(in bytes) of the storage in the device allocation
                 tensor.requires_grad,
                 ref_counter_handle,
                 ref_counter_offset,
@@ -375,7 +391,7 @@ def reduce_tensor(tensor):
                 event_sync_required,
             ),
         )
-    elif storage._untyped_storage.device.type == "meta":
+    elif device_type == "meta":
         return (
             rebuild_meta_tensor,
             (
@@ -595,6 +611,10 @@ def reduce_storage(storage):
     if storage.is_cuda:
         raise RuntimeError(
             "Cannot pickle CUDA storage; try pickling a CUDA tensor instead"
+        )
+    elif storage.device.type == "xpu":
+        raise RuntimeError(
+            "Cannot pickle XPU storage; try pickling a XPU tensor instead"
         )
     elif storage.device.type == "meta":
         raise RuntimeError(
