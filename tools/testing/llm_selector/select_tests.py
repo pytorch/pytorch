@@ -375,8 +375,8 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
         # Without an answer, the CLI's own output says why.
         cli = str(result.get("result") or "") if out is None else ""
         selection.error = (cli or selection.error)[:2000]
-    # No deterministic rule follows a change outside test/, so an answer
-    # naming nothing for one leaves only ALWAYS_COVERED: never enforce that.
+    # Only the doctest rule follows a change outside test/, so an answer naming
+    # nothing for one leaves at most doctests and ALWAYS_COVERED: never enforce.
     keys = ("tests", "dirs", "sweeps")
     picked = selection.run_all or out is None or any(out[k] for k in keys)
     if not picked and any(not f.startswith("test/") for f in changed):
