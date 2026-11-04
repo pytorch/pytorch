@@ -1990,7 +1990,7 @@ class GraphLowering(torch.fx.Interpreter):
         from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
         from torch._inductor.cudagraph_trees import is_registered_external
 
-        pool = get_external_object_by_index(mempool_index)
+        pool = cast(torch.cuda.MemPool, get_external_object_by_index(mempool_index))
         return is_registered_external(mempool_device, pool.id)
 
     def _realize_inputs_at_context_boundaries(self, n: torch.fx.Node) -> None:

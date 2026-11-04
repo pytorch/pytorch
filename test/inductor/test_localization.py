@@ -32,7 +32,11 @@ import torch._inductor.config as inductor_config
 import torch.nn as nn
 import torch.nn.functional as F
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def _requires_cuda(test_func):
@@ -436,6 +440,8 @@ def _eager_and_localized(module_cls, ctor_args, forward_args, dtype=torch.float3
 class TestLocalizeContract(TestCase):
     """The user-facing contract of torch.cuda.localize on an nn.Module."""
 
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -620,6 +626,8 @@ class TestLocalizableOpRegistry(TestCase):
     fork across branches, and which module types ``localize`` rewrites.
     Nothing keys on ``linear`` specifically."""
 
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -732,6 +740,8 @@ class TestLocalizableOpRegistryCustomOp(TestCase):
     """A downstream op registered with ``register_localizable_op`` gets the
     same treatment the built-in linear does, including through kwargs and
     the module walk."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         super().setUp()
@@ -847,6 +857,8 @@ class TestLocalizableOpSlicedArgs(TestCase):
     default pool, for per-output-channel side tensors like quantization
     scales.  No built-in op registers any -- nn.Linear has none -- so this is
     the only coverage of that path."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         super().setUp()
@@ -979,6 +991,8 @@ class TestLocalizationRuntimeNumerics(TestCase):
     nn.Linear instances that ``torch.cuda.localize`` knows how to
     rewrite."""
 
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -1067,6 +1081,8 @@ class TestLocalizationRuntimeNumerics(TestCase):
 
 
 class TestLocalizationChainNumerics(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -1132,6 +1148,8 @@ class TestLocalizationChainNumerics(TestCase):
 
 
 class TestLocalizationPackingNumerics(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -1263,6 +1281,8 @@ class TestLocalizationPackingNumerics(TestCase):
 
 
 class TestLocalizationSharedWeight(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -1314,6 +1334,8 @@ class TestLocalizationSharedWeight(TestCase):
 
 
 class TestLocalizationDtypes(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -1393,6 +1415,8 @@ class TestLocalizationAllocatorMeta(TestCase):
     ``test_*_baseline_benchmark`` / ``test_*_localized_benchmark`` pairs
     in ``TestLocalizationBenchmarks``.
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         super().setUp()
@@ -1654,6 +1678,8 @@ class TestLocalizationChainIR(TestCase):
     consume it.  These tests pin the numerics across a few common
     chain shapes."""
 
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -1765,6 +1791,8 @@ class TestLocalizationPackingIR(TestCase):
     boundary contract.
     """
 
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -1804,6 +1832,8 @@ class TestLocalizationRequiresInferenceMode(TestCase):
     call is the contract; these pin it for both the ``nn.Module`` and the
     ``GraphModule`` entry points.
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         super().setUp()
@@ -1875,6 +1905,8 @@ class _TwoIndependentLinearsBias(nn.Module):
 class TestLocalizationAddmmNumerics(TestCase):
     """nn.Linear with bias is the userspace shape of addmm; the
     numerics test ports cleanly."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         super().setUp()
@@ -1964,6 +1996,8 @@ class TestLocalizationTritonEpilogue(TestCase):
     fail because inductor's scheduler re-collapses the duplicated GeLU
     into a single post-join kernel.  The failing assertion documents the
     epilogue-fusion gap we want to close next."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         super().setUp()
@@ -2155,6 +2189,8 @@ class TestLocalizationBenchmarks:
 
         pytest test/inductor/test_localization.py -k Benchmark --benchmark-enable
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     @staticmethod
     def _bench_compiled(benchmark, model, args):

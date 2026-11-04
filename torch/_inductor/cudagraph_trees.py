@@ -368,6 +368,7 @@ def mark_warmup_incomplete() -> None:
     if manager is not None:
         manager.mark_warmup_incomplete()
 
+
 # Registry of externally-managed CUDA MemPools that are tracked.
 # Keyed by device index -> {pool_id: (MemPool, stream)}; the MemPool is held so
 # it stays alive while registered, and ``stream`` is the stream cudagraph_trees
