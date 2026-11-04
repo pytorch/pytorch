@@ -19,7 +19,10 @@ from tools.stats.upload_stats_lib import (
     unzip,
     upload_workflow_stats_to_s3,
 )
-from tools.testing.target_determination.gen_artifact import LLM_SELECTION_SOURCE
+from tools.testing.target_determination.gen_artifact import (
+    LLM_SELECTION_SOURCE,
+    TD_SOURCE,
+)
 
 
 REGEX_JOB_INFO = r"(.*) \/ .*test \(([^,]*), .*\)"
@@ -61,8 +64,9 @@ def get_test_config(job_name: str) -> str:
 def get_td_exclusions(
     workflow_run_id: int, workflow_run_attempt: int
 ) -> dict[str, dict[str, Any]]:
-    """The excluded test files per build and test config of every job ("all"),
-    and of the jobs where the LLM selection made the split (LLM_SELECTION_SOURCE)."""
+    """The test files TD's split excluded (TD_SOURCE), and those the LLM
+    selection excluded where it made the split (LLM_SELECTION_SOURCE), per build
+    and test config."""
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
         os.chdir(temp_dir)
@@ -80,15 +84,17 @@ def get_td_exclusions(
         for td_exclusions in Path(".").glob("**/td_exclusions*.json"):
             with open(td_exclusions) as f:
                 exclusions = json.load(f)
-                sources = ["all"]
+                # Older artifacts hold only TD's split.
+                td_excluded = exclusions.get("td_excluded", exclusions["excluded"])
+                sources = {TD_SOURCE: td_excluded}
                 if exclusions.get("source") == LLM_SELECTION_SOURCE:
-                    sources.append(LLM_SELECTION_SOURCE)
-                for exclusion in exclusions["excluded"]:
-                    job_id = get_job_id(td_exclusions)
-                    job_name = get_job_name(job_id)
-                    build_name = get_build_name(job_name)
-                    test_config = get_test_config(job_name)
-                    for source in sources:
+                    sources[LLM_SELECTION_SOURCE] = exclusions["excluded"]
+                for source, excluded in sources.items():
+                    for exclusion in excluded:
+                        job_id = get_job_id(td_exclusions)
+                        job_name = get_job_name(job_id)
+                        build_name = get_build_name(job_name)
+                        test_config = get_test_config(job_name)
                         grouped_tests[source][build_name][test_config].add(
                             exclusion["test_file"]
                         )
@@ -124,7 +130,7 @@ def upload_additional_info(workflow_run_id: int, workflow_run_attempt: int) -> N
         workflow_run_id,
         workflow_run_attempt,
         "additional_info/td_exclusions",
-        [exclusions.get("all", {})],
+        [exclusions.get(TD_SOURCE, {})],
     )
     if LLM_SELECTION_SOURCE in exclusions:
         upload_workflow_stats_to_s3(
