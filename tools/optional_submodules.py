@@ -20,8 +20,8 @@ def _read_file(path: Path) -> str:
 # Failures of a clone that are worth another attempt, matched against git's
 # stderr (English: _clone runs git in the C locale):
 #   - gitlab.com's "unable to handle this request due to load" page;
-#   - HTTP 429 and 5xx, as `The requested URL returned error: 503` or
-#     `RPC failed; HTTP 503`;
+#   - HTTP 429 and 5xx, as `The requested URL returned error: 503` (git prints it
+#     for a failed POST too, after `RPC failed; HTTP 503 curl 22`);
 #   - `RPC failed; curl 18`, `curl 56` and `curl 92 ... CANCEL/INTERNAL_ERROR`, a
 #     transfer that broke part way (partial file, receive failure, HTTP/2 stream
 #     cancelled). The curl code is only checked when the clone fails before any
@@ -34,7 +34,10 @@ def _read_file(path: Path) -> str:
 #     streaming is normally followed by `unexpected disconnect` and `early EOF`, so
 #     it is retried even for a curl code listed above as not retried;
 #   - `SSL_read: Connection reset` and `SSL_read: SSL_ERROR_SYSCALL`, a connection
-#     that was reset while data was being read.
+#     that was reset while data was being read;
+#   - `Operation too slow`, a transfer aborted by the low-speed limit below. A bare
+#     `curl 28` is not matched: the same code is the connect timeout, which is not
+#     retried.
 # Only these read-time signatures are matched. A reset while the connection is
 # being set up (`SSL_connect: Connection reset ... in connection to`) is not
 # retried: it usually never goes away, and each attempt would stall for the 10 to
@@ -51,11 +54,17 @@ def _read_file(path: Path) -> str:
 _TRANSIENT_CLONE_ERROR = re.compile(
     r"unable to handle this request due to load"
     r"|The requested URL returned error: (?:429|5\d\d)"
-    r"|RPC failed; (?:HTTP (?:429|5\d\d)|curl (?:18|56)\b|curl 92\b[^\n]*(?:CANCEL|INTERNAL_ERROR))"
+    r"|RPC failed; (?:curl (?:18|56)\b|curl 92\b[^\n]*(?:CANCEL|INTERNAL_ERROR))"
     r"|early EOF|unexpected disconnect|GnuTLS recv error"
-    r"|SSL_read: (?:Connection reset|SSL_ERROR_SYSCALL)",
+    r"|SSL_read: (?:Connection reset|SSL_ERROR_SYSCALL)"
+    r"|Operation too slow",
     re.IGNORECASE,
 )
+
+
+# Abort a transfer that stays under 1000 bytes/s for 60 s, so a stalled clone fails
+# (and is retried) instead of blocking until the job's timeout.
+_LOW_SPEED_ARGS = ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=60"]
 
 
 def _is_transient_clone_error(stderr: str) -> bool:
@@ -72,8 +81,9 @@ def _clone(
     max_delay: int = 60,
 ) -> None:
     # git has no retry or backoff setting for `clone` (`http.lowSpeedLimit` and
-    # `http.lowSpeedTime` only abort a stalled transfer), so retry here. A failed
-    # clone removes the directory it created, so there is nothing to clean up.
+    # `http.lowSpeedTime`, set by the callers, only abort a stalled transfer), so
+    # retry here. A failed clone removes the directory it created, so there is
+    # nothing to clean up.
     #
     # stderr is captured so that it can be matched and kept on the exception. git
     # shows its progress meter only when stderr is a terminal, so an interactive
@@ -110,7 +120,7 @@ def _clone(
 
 def _checkout_by_tag(repo: str, tag: str) -> None:
     _clone(
-        ["git", "clone", "--depth", "1", "--branch", tag, repo],
+        ["git", *_LOW_SPEED_ARGS, "clone", "--depth", "1", "--branch", tag, repo],
         cwd=third_party_path,
     )
 
@@ -148,6 +158,7 @@ def checkout_nccl_ep() -> None:
         _clone(
             [
                 "git",
+                *_LOW_SPEED_ARGS,
                 "clone",
                 "--no-checkout",
                 "https://github.com/NVIDIA/nccl-extensions.git",
