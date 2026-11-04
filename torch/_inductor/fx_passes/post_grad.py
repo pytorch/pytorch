@@ -2342,7 +2342,8 @@ def _is_bias_like_addmm_input(inp: torch.fx.Node, output: torch.fx.Node) -> bool
 
 
 def should_prefer_unfused_addmm(match):
-    if statically_known_true(match.kwargs.get("alpha", 1) == 0):
+    # See Note [addmm with alpha == 0] in decomposition.py.
+    if match.kwargs.get("alpha", 1) == 0:
         return False
 
     inp = match.kwargs["inp"]

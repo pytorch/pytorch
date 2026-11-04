@@ -532,7 +532,12 @@ def addmm(
     if out_dtype is not None:
         return NotImplemented
 
-    # Zero-alpha NaN/Inf behavior depends on the native GEMM backend.
+    # Note [addmm with alpha == 0]
+    # Native GEMM backends differ in whether zero alpha suppresses NaN/Inf
+    # from the matrix product. Rewriting as alpha * (mat1 @ mat2) can change
+    # that behavior because 0 * NaN and 0 * Inf are NaN. Keep ordinary addmm
+    # intact and select its native ATen kernel, including with C++ wrappers
+    # and autotuning. The out_dtype overload is handled separately.
     if statically_known_true(alpha == 0):
         return NotImplemented
 
