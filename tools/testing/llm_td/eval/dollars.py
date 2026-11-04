@@ -31,6 +31,7 @@ import yaml
 
 from tools.testing.llm_td.eval import REPO, score
 from tools.testing.llm_td.eval.run_eval import TIMED_OUT
+from tools.testing.llm_td.select_tests import test_minutes
 
 
 # 30-day runner cost of test jobs ($k), the PR share of test hours, the fork-PR
@@ -122,12 +123,24 @@ def fractions(
 
 
 def call_results(data: Path, tag: str, ids: list[str], samples: Path) -> list[dict]:
-    """`tag`'s results on the `ids` select_tests asks the model about, without the timed-out calls.
+    """`tag`'s current results on the `ids` select_tests asks the model about, without the timed-out calls.
 
-    A call run_eval timed out records only its earlier attempts' cost, so
-    timed-out calls are left out."""
-    asked = [i for i in ids if not score.unasked(json.loads((samples / f"{i}.json").read_text()))]  # fmt: skip
-    results = [json.loads(p.read_text()) for i in asked if (p := data / "results" / tag / f"{i}.json").exists()]  # fmt: skip
+    As in score.score, a result is current if it was made from the prompt the
+    sample gives now (see score.prompt_sha). A call run_eval timed out records
+    only its earlier attempts' cost, so timed-out calls are left out."""
+    minutes = test_minutes(json.loads((data / "test-times.json").read_text()))
+    results, stale = [], 0
+    for i in ids:
+        s = json.loads((samples / f"{i}.json").read_text())
+        if score.unasked(s) or not (p := data / "results" / tag / f"{i}.json").exists():
+            continue
+        r = json.loads(p.read_text())
+        if r.get("prompt_sha") == score.prompt_sha(score.sample_prompt(s, minutes), bool(r.get("agentic"))):  # fmt: skip
+            results.append(r)
+        else:
+            stale += 1
+    if stale:
+        print(f"left out {stale} {tag} results of another prompt", file=sys.stderr)
     kept = [r for r in results if r["error"] != TIMED_OUT]
     if not kept:
         raise SystemExit(f"no {tag} results that did not time out for the cost ids")
@@ -149,11 +162,19 @@ def cold_call_usd(data: Path, tag: str, ids: list[str], samples: Path) -> tuple[
 
     The eval ran its calls back to back, so most read the cached prompt;
     production calls are spread out and may not. Cold prices every
-    cache-read token as a cache write."""
+    cache-read token as a cache write. A result's cost sums its attempts
+    while its usage is the last one's, so the prices are fitted to the
+    single-attempt results with a recorded usage only, and the fit must be
+    full rank with at least four results per price."""
     rs = call_results(data, tag, ids, samples)
     u = np.array([[(r["usage"] or {}).get(k, 0) for k in USAGE] for r in rs], float) / 1e6  # fmt: skip
     c = np.array([r["cost_usd"] for r in rs], float)
-    price = np.linalg.lstsq(u, c, rcond=None)[0]
+    fit = np.array([r.get("attempts", 1) == 1 and r["usage"] is not None for r in rs], bool)  # fmt: skip
+    price, _, rank, _ = np.linalg.lstsq(u[fit], c[fit], rcond=None)
+    if rank < len(USAGE) or fit.sum() < 4 * len(USAGE):
+        raise SystemExit(f"{tag}: cannot fit {len(USAGE)} prices to {fit.sum()} results of rank {rank}")  # fmt: skip
+    rel = np.linalg.norm(u[fit] @ price - c[fit]) / np.linalg.norm(c[fit])
+    print(f"{tag}: price fit relative residual {rel:.2e} on {fit.sum()} results, cache-read share of input tokens {u[:, 2].sum() / u[:, :3].sum():.2f}", file=sys.stderr)  # fmt: skip
     return float((c + u[:, 2] * (price[1] - price[2])).mean()), [float(x) for x in price]  # fmt: skip
 
 

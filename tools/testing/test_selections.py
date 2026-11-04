@@ -10,11 +10,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tools.stats.import_test_stats import ADDITIONAL_CI_FILES_FOLDER, get_disabled_tests
-from tools.testing.llm_td.selection import (
-    apply_selection,
-    LLM_TD_SELECTION_FILE,
-    Selection,
-)
 from tools.testing.target_determination.gen_artifact import (
     gen_ci_artifact,
     LLM_SELECTION_SOURCE,
@@ -43,6 +38,9 @@ if TYPE_CHECKING:
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# tools/testing/llm_td/selection.py's LLM_TD_SELECTION_FILE, which is imported
+# only when the file exists, so the experimental package cannot break run_test.py.
+LLM_TD_SELECTION_FILE = "llm_td_selection.json"
 
 IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
@@ -358,22 +356,31 @@ def split_tests(
     """TD's split, 25% with TD enabled and everything otherwise, replaced by
     the LLM test selection in `selection_file` when apply_selection enforces
     it (see tools/testing/llm_td). With `record` (in CI), gen_ci_artifact
-    records the split that runs and what TD's split excluded. run_test.py
-    emits the metrics, since emit_metric records its caller."""
+    records the split that runs and what TD's split excluded. A selection
+    that fails to import or load keeps TD's split. run_test.py emits the
+    metrics, since emit_metric records its caller."""
     percent_to_run = 25 if td_enabled else 100
     include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
-    llm = None
-    if (selection := Selection.load(selection_file)) is not None:
-        llm = apply_selection(
-            selection,
-            include,
-            exclude,
-            test_prioritizations.get_score,
-            test_times,
-            test_config=test_config,
-            td_enabled=td_enabled,
-            previous_failures=previous_failures,
-        )
+    llm: AppliedSelection | None = None
+    if selection_file.exists():
+        try:
+            from tools.testing.llm_td.selection import apply_selection, Selection
+
+            selection = Selection.load(selection_file)
+        except Exception as e:
+            print(f"::warning::Ignoring the LLM selection: {e!r}", file=sys.stderr)
+        else:
+            if selection is not None:
+                llm = apply_selection(
+                    selection,
+                    include,
+                    exclude,
+                    test_prioritizations.get_score,
+                    test_times,
+                    test_config=test_config,
+                    td_enabled=td_enabled,
+                    previous_failures=previous_failures,
+                )
     if llm is not None and llm.enforced:
         split = CallSplit(llm.split.include, llm.split.exclude, llm)
     else:
