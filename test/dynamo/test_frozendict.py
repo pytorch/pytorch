@@ -14,6 +14,7 @@ import torch.utils._pytree as python_pytree
 from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._dynamo.testing import CompileCounter
 from torch._dynamo.variables.builder import SourcelessBuilder
+from torch._dynamo.variables.hashable import BuiltinMethodKeyTracker
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -283,6 +284,7 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(Meta.calls, calls)
         literal = builtins.frozendict(a=5)
         tx = Mock()
+        tx.output.builtin_method_keys = BuiltinMethodKeyTracker()
         with InstructionTranslator.set_current_tx(tx):
             self.assertEqual(
                 SourcelessBuilder.create(tx, literal).as_python_constant(), literal

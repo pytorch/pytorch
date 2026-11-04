@@ -20,6 +20,7 @@ from .. import graph_break_hints, variables
 from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..utils import (
     common_constant_types,
+    is_identity_singleton,
     istype,
     np,
     raise_args_mismatch,
@@ -501,12 +502,7 @@ class ConstantVariable(VariableTracker):
 
     def get_id(self, tx: InstructionTranslatorBase) -> int | None:
         # Singletons have guaranteed stable identity across the process lifetime.
-        if (
-            self.value is None
-            or self.value is True
-            or self.value is False
-            or self.value is NotImplemented
-        ):
+        if is_identity_singleton(self.value):
             return id(self.value)
         # Sourceful constants resolve via source like any other sourceful VT.
         # Sourceless non-singleton constants (e.g. literal 42 in compiled code)

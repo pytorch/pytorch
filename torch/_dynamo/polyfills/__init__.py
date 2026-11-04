@@ -509,25 +509,21 @@ def odict_update(
 ) -> None:
     # CPython's mutablemapping_update_arg in Objects/odictobject.c snapshots
     # exact dicts, but dispatches keys/__getitem__ and destination __setitem__.
+    missing = object()
     if type(data) is dict or (
         torch._has_frozendict and type(data) is torch._frozendict
     ):
         data = list(data.items())
     else:
-        try:
-            keys = data.keys
-        except AttributeError:
-            try:
-                items = data.items
-            except AttributeError:
-                pass
-            else:
+        keys: Any = getattr(data, "keys", missing)
+        if keys is missing:
+            items: Any = getattr(data, "items", missing)
+            if items is not missing:
                 data = items()
         else:
             for key in keys():
                 self[key] = data[key]
             data = ()
-    missing = object()
     for pair in data:
         # CPython's mutablemapping_add_pairs consumes at most three items per pair.
         pair = iter(pair)
