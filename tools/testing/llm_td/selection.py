@@ -4,7 +4,8 @@ A selection names test files (paths under test/ without .py), whole test
 directories, and wrapper sweeps (configs such as dynamo_wrapped that re-run
 ordinary test files in a special mode). A test file runs in a given CI config
 when the selection names the file, names that config as a sweep, or is run_all,
-and so does every test file the model was not shown.
+and so does every test file the model was not shown and every file in a
+WHOLE_CONFIGS config.
 """
 
 from __future__ import annotations
@@ -26,6 +27,9 @@ if TYPE_CHECKING:
 
 
 SWEEPS = ("dynamo_wrapped", "crossref")
+# test.sh's test_inductor_shard runs its few files with run_test.py --inductor,
+# which compiles every test, so like a sweep any change can break them.
+WHOLE_CONFIGS = ("inductor",)
 LLM_TD_SELECTION_FILE = "llm_td_selection.json"
 # The selector runs from the default branch and run_test.py from the PR, so
 # bump this whenever an older reader would misread the selection file.
@@ -85,15 +89,18 @@ RUN_ALL_PATTERNS = [
     # Loaded by every test process; it moves tests between configs.
     r"^test/slow_tests\.json$",
     r"^pytest\.ini$",
-    r"^torch/testing/_internal/common_utils\.py$",
-    r"^torch/testing/_internal/common_device_type\.py$",
+    r"^torch/testing/_internal/common_(utils|device_type|dtype|cuda)\.py$",
+    # assertEqual.
+    r"^torch/testing/_comparison\.py$",
     # Loads the failure lists for every dynamo and inductor wrapped run.
     r"^torch/testing/_internal/dynamo_test_failures\.py$",
     r"^tools/testing/",
     r"^test/pytest_shard_custom\.py$",
     r"^tools/stats/(import_test_stats|upload_metrics|upload_test_stats|upload_stats_lib|test_dashboard)\.py$",
     r"^\.ci/pytorch/(test|multigpu-test|win-test|macos-test|macos-common|common|common-build|common_utils|torch_trace)\.sh$",
-    r"^\.ci/pytorch/win-test-helpers/(setup_pytorch_env\.bat|test_python_shard\.bat|installation-helpers/activate_miniconda3\.bat)$",
+    r"^\.ci/pytorch/numba-cuda-13\.patch$",
+    r"^scripts/onnx/test\.sh$",
+    r"^\.ci/pytorch/win-test-helpers/(setup_pytorch_env\.bat|test_python_shard\.bat|test_python_jit_legacy\.bat|installation-helpers/activate_miniconda3\.bat)$",
     r"^\.github/workflows/_(linux|win|mac|rocm|xpu|s390x|tpu)-test(-no-dind)?\.yml$",
     # setup-linux is left out: the test jobs use it from main, not from the PR.
     r"^\.github/actions/(setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts)/",
@@ -103,7 +110,7 @@ RUN_ALL_PATTERNS = [
     # Installed by .ci/pytorch/common_utils.sh for the test jobs.
     r"^\.github/ci_commit_pins/(audio|vision|spmd_types)\.txt$",
     # The CI test images: a new package version or toolchain can break any test.
-    r"^\.ci/docker/(build\.sh|requirements-ci\.txt|common/|ci_commit_pins/|ubuntu)",
+    r"^\.ci/docker/(build\.sh|requirements-ci\.txt|triton(_xpu)?_version\.txt|common/|ci_commit_pins/|ubuntu)",
 ]
 
 
@@ -225,7 +232,10 @@ def data_file_readers(
         names = alts(f.rsplit("/", 1)[-1] for f in files)
         return rf"(^|[^[:alnum:]_.-])({names})([^[:alnum:]_.-]|$)"
 
-    readers = grep(name_pattern(exempt)) if exempt else []
+    # A deleted expect file breaks the tests that still assert against it.
+    classes = [m[1] for f in exempt if (m := EXPECT_RE.match(f))]
+    patterns = [name_pattern(exempt)] + ([class_pattern(classes, prefix=True)] if classes else [])  # fmt: skip
+    readers = grep("|".join(f"({p})" for p in patterns)) if exempt else []
     read_by: dict[str, list[str]] = {}
     for f in data:
         patterns = [name_pattern([f])]
@@ -317,6 +327,8 @@ class Selection:
     # The test files the model chose from. Any other file, such as a custom
     # run_test.py handler or a C++ test, is always covered. None covers no extra file.
     candidates: set[str] | None = None
+    # Why from_model_output got no usable model answer; not serialized.
+    error: str | None = None
 
     @classmethod
     def from_model_output(
@@ -332,19 +344,20 @@ class Selection:
         A missing or malformed output, a change to test infrastructure, an
         edited inductor failure list naming an unknown class, too many import
         hops, and with `grep` an edited file under test/ that no test reads
-        (see data_file_readers) all fall back to running everything. Test files the change
+        (see data_file_readers) all fall back to running everything; only the
+        first two set error. Test files the change
         edits and their drivers are always selected, and with `grep` so are the
         test files that import them (see importers), those defining the tests
         that an edited failure list names (see failure_list_sources), and those
         reading an edited data file (see data_file_readers), with their importers."""
         if out is None:
-            return cls(run_all=True, reason="no model output; running everything")
+            return cls(run_all=True, reason="no model output; running everything", error="no model output")  # fmt: skip
         if needs_run_all(changed_files):
             return cls(run_all=True, reason="change touches test infrastructure")
         try:
             files, sweeps = parse_model_output(out, candidates)
         except ValueError as e:
-            return cls(run_all=True, reason=f"malformed model output ({e}); running everything")  # fmt: skip
+            return cls(run_all=True, reason=f"malformed model output ({e}); running everything", error=f"malformed model output: {e}")  # fmt: skip
         if not isinstance(out, dict):
             raise AssertionError("parse_model_output accepts only objects")
         sources, missing = failure_list_sources(changed_files, grep)
@@ -373,7 +386,8 @@ class Selection:
     def covers(self, test_file: str, test_config: str) -> bool:
         if self.candidates is not None and test_file not in self.candidates:
             return True
-        return self.run_all or test_config in self.sweeps or test_file in self.files
+        whole = self.run_all or test_config in (*self.sweeps, *WHOLE_CONFIGS)
+        return whole or test_file in self.files
 
     def to_json(self) -> dict:
         return {

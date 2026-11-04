@@ -70,6 +70,9 @@ class TestSelection(unittest.TestCase):
         self.assertTrue(sel.covers("inductor/test_torchinductor", "dynamo_wrapped"))
         self.assertFalse(sel.covers("inductor/test_torchinductor", "default"))
         self.assertTrue(sel.covers("test_ops", "default"))
+        # The inductor config compiles every test of its few files.
+        self.assertTrue(sel.covers("inductor/test_torchinductor", "inductor"))
+        self.assertIsNone(sel.error)
         self.assertEqual(Selection.from_json(sel.to_json()), sel)
 
     def test_files_the_model_never_saw_are_covered(self) -> None:
@@ -192,6 +195,10 @@ class TestSelection(unittest.TestCase):
         gone = ["test/gone.json", "test/distributed/launcher/bin/unused.py"]
         sel = self.select_in_tree(sources, candidates, gone, deleted=tuple(gone))
         self.assertEqual((sel.files, sel.run_all), (set(), False))
+        # Except an expect file, which the tests of its class still assert against.
+        gone = ["test/expect/TestNNCPU.test_x-y.expect"]
+        sel = self.select_in_tree(sources, candidates, gone, deleted=tuple(gone))
+        self.assertEqual((sel.files, sel.run_all), ({"test_nn", "dynamo/test_misc"}, False))  # fmt: skip
         many = [f"test/data{i}.json" for i in range(selection.MAX_DATA_FILES + 1)]
         self.assertTrue(self.select_in_tree(sources, candidates, many).run_all)
 
@@ -246,13 +253,11 @@ class TestSelection(unittest.TestCase):
         self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
 
     def test_fallbacks_run_all(self) -> None:
-        self.assertTrue(
-            Selection.from_model_output(None, CANDIDATES, ["torch/a.py"]).run_all
-        )
+        sel = Selection.from_model_output(None, CANDIDATES, ["torch/a.py"])
+        self.assertEqual((sel.run_all, sel.error), (True, "no model output"))
         out = {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": []}
-        self.assertTrue(
-            Selection.from_model_output(out, CANDIDATES, ["test/run_test.py"]).run_all
-        )
+        sel = Selection.from_model_output(out, CANDIDATES, ["test/run_test.py"])
+        self.assertEqual((sel.run_all, sel.error), (True, None))
         self.assertFalse(
             Selection.from_model_output(out, CANDIDATES, ["docs/a.md"]).run_all
         )
@@ -333,6 +338,14 @@ class TestSelection(unittest.TestCase):
             "pytest.ini",
             "torch/testing/_internal/common_utils.py",
             "torch/testing/_internal/common_device_type.py",
+            "torch/testing/_internal/common_dtype.py",
+            "torch/testing/_internal/common_cuda.py",
+            "torch/testing/_comparison.py",
+            "scripts/onnx/test.sh",
+            ".ci/docker/triton_version.txt",
+            ".ci/docker/triton_xpu_version.txt",
+            ".ci/pytorch/numba-cuda-13.patch",
+            ".ci/pytorch/win-test-helpers/test_python_jit_legacy.bat",
             "tools/testing/discover_tests.py",
             "tools/stats/import_test_stats.py",
             "tools/stats/upload_metrics.py",
@@ -374,6 +387,7 @@ class TestSelection(unittest.TestCase):
             sel = Selection.from_model_output(out, CANDIDATES, ["test/test_nn.py"])
             self.assertTrue(sel.run_all, out)
             self.assertIn("malformed", sel.reason)
+            self.assertRegex(str(sel.error), "^malformed model output: ")
 
     def test_dirs(self) -> None:
         candidates = CANDIDATES | {"dynamo_foo/test_a"}
@@ -508,6 +522,7 @@ class TestMain(unittest.TestCase):
             record = self.run_main()
         self.assertTrue(record["run_all"])
         self.assertEqual(record["reason"], "no test times")
+        self.assertEqual(record["diagnostics"]["error"], "no test times")
 
     def test_no_changed_files_runs_all(self) -> None:
         with (
@@ -518,6 +533,7 @@ class TestMain(unittest.TestCase):
         times.assert_not_called()
         self.assertTrue(record["run_all"])
         self.assertEqual(record["reason"], "no changed files")
+        self.assertIsNone(record["diagnostics"]["error"])
 
     def test_bad_effort_env_is_rejected(self) -> None:
         stderr = io.StringIO()
@@ -540,6 +556,7 @@ class TestMain(unittest.TestCase):
             record = self.run_main()
         times.assert_not_called()
         self.assertTrue(record["run_all"])
+        self.assertIsNone(record["diagnostics"]["error"])
 
     def test_query_model_runs_outside_the_checkout(self) -> None:
         run = mock.Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
@@ -557,7 +574,7 @@ class TestMain(unittest.TestCase):
         for run, error in [
             (completed("not json"), "not jsonerr"),
             (completed(json.dumps({"is_error": True, "result": "overloaded"})), "overloaded"),
-            (completed(json.dumps({"result": "", "total_cost_usd": 0.5})), "no structured output"),
+            (completed(json.dumps({"result": "", "total_cost_usd": 0.5})), "no model output"),
             (mock.Mock(side_effect=timeout), "model call timed out after 600s"),
             (mock.Mock(side_effect=FileNotFoundError("claude")), "FileNotFoundError: claude"),
         ]:  # fmt: skip
@@ -590,6 +607,7 @@ class TestMain(unittest.TestCase):
             record = self.run_main()
         times.assert_not_called()
         self.assertTrue(record["run_all"])
+        self.assertIsNone(record["diagnostics"]["error"])
 
     def run_in_repo(self, answer: dict) -> tuple[dict, str]:
         env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "LLM_TD_", "CLAUDE_CODE_"))}  # fmt: skip
