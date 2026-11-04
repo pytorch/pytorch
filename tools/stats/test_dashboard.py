@@ -64,10 +64,10 @@ def get_test_config(job_name: str) -> str:
 def get_td_exclusions(
     workflow_run_id: int, workflow_run_attempt: int
 ) -> dict[str, dict[str, Any]]:
-    """The test files TD's split excluded (TD_SOURCE), and those the LLM
-    selection excluded where it made the split (LLM_SELECTION_SOURCE), per build
-    and test config. Every config with an enforced call is listed under
-    LLM_SELECTION_SOURCE, with no files if it excluded none."""
+    """The test files TD's split excluded (TD_SOURCE) and, for every config
+    with a call where the LLM selection made the split, the files that every
+    call of that config excluded (LLM_SELECTION_SOURCE), per build and test
+    config. Such a config is listed even if it excluded no file."""
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
         os.chdir(temp_dir)
@@ -82,23 +82,30 @@ def get_td_exclusions(
         grouped_tests: dict[str, Any] = defaultdict(
             lambda: defaultdict(lambda: defaultdict(set))
         )
+        ran: dict[tuple[str, str], set[str]] = defaultdict(set)
+        enforced: set[tuple[str, str]] = set()
         for td_exclusions in Path(".").glob("**/td_exclusions*.json"):
             with open(td_exclusions) as f:
                 exclusions = json.load(f)
-                # Older artifacts hold only TD's split.
-                td_excluded = exclusions.get("td_excluded", exclusions["excluded"])
-                sources = {TD_SOURCE: td_excluded}
-                if exclusions.get("source") == LLM_SELECTION_SOURCE:
-                    sources[LLM_SELECTION_SOURCE] = exclusions["excluded"]
-                for source, excluded in sources.items():
-                    # An enforced call is recorded even if it excluded nothing.
-                    if excluded or source == LLM_SELECTION_SOURCE:
-                        job_name = get_job_name(get_job_id(td_exclusions))
-                        build_name = get_build_name(job_name)
-                        test_config = get_test_config(job_name)
-                        tests = grouped_tests[source][build_name][test_config]
-                        tests.update(x["test_file"] for x in excluded)
+            excluded = exclusions["excluded"]
+            # Older artifacts hold only TD's split.
+            td_excluded = exclusions.get("td_excluded", excluded)
+            is_llm = exclusions.get("source") == LLM_SELECTION_SOURCE
+            if not (excluded or td_excluded or is_llm):
+                continue
+            job_name = get_job_name(get_job_id(td_exclusions))
+            build_name = get_build_name(job_name)
+            test_config = get_test_config(job_name)
+            if td_excluded:
+                tests = grouped_tests[TD_SOURCE][build_name][test_config]
+                tests.update(x["test_file"] for x in td_excluded)
+            ran[build_name, test_config].update(x["test_file"] for x in excluded)
+            if is_llm:
+                enforced.add((build_name, test_config))
 
+        for build_name, test_config in enforced:
+            llm = grouped_tests[LLM_SELECTION_SOURCE][build_name]
+            llm[test_config] = ran[build_name, test_config]
         for by_build in grouped_tests.values():
             for build in by_build.values():
                 for test_config, test_files in build.items():
