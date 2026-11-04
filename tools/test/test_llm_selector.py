@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -265,6 +266,14 @@ g () {
         self.assertTrue(sel.covers("test_nn", "default"))
         self.assertTrue(Selection.from_json(sel.to_json()).covers("test_nn", "default"))
 
+    def test_model_run_all_needs_no_grep(self) -> None:
+        out = answer(run_all=True, reason="why", tests=[{"file": "jit/test_freezing"}])
+        grep = mock.Mock(side_effect=OSError("[Errno 7] Argument list too long"))
+        for changed in ("test/test_nn.py", "test/dynamo_skips/TestNN.test_x"):
+            sel = Selection.from_model_output(out, CANDIDATES, [changed], grep)
+            self.assertEqual((sel.run_all, sel.reason, sel.error), (True, "why", None))
+        grep.assert_not_called()
+
     def select_in_tree(
         self,
         sources: dict[str, str],
@@ -338,6 +347,24 @@ g () {
             sources, CANDIDATES | {"test_jit", "test_jit_legacy"}, ["test/jit/data.txt"]
         )
         self.assertEqual(sel.files, {"test_jit", "test_jit_legacy", "test_nn"})
+
+    def test_importers_of_the_files_drivers_run_are_selected(self) -> None:
+        sources = {
+            "cpp_extensions/ext.cpp": "",
+            "test_autoload.py": "",
+            "test_cpp_extensions_aot.py": "",
+            "test_nn.py": "from test_autoload import x\n",
+            "test_ops.py": "import test_cpp_extensions_aot\n",
+        }
+        drivers = {
+            "test_autoload_enable",
+            "test_autoload_disable",
+            "test_cpp_extensions_aot_ninja",
+            "test_cpp_extensions_aot_no_ninja",
+        }
+        changed = ["test/cpp_extensions/ext.cpp"]
+        sel = self.select_in_tree(sources, CANDIDATES | drivers, changed)
+        self.assertEqual(sel.files, drivers | {"test_nn", "test_ops"})
 
     def test_importers_of_drivers_of_importers_are_selected(self) -> None:
         # test_fx runs fx/test_user.py, which imports the edited helper.
@@ -513,8 +540,14 @@ g () {
             "inductor/test_torchinductor.py": "class TestSetCopy:\n",
             "test_ops.py": "class Test:\n",
             "cpp/api/modules.cpp": "class TestModel {\n",
+            "dynamo/test_misc.py": "class MiscTests(TestCase):\n",
         }
         for changed, files, sweeps in [
+            (
+                "test/inductor_skips/CPython313-test_set-TestSet.test_x",
+                {"cpython/v3_13/test_set"},
+                set(),
+            ),
             ("test/dynamo_expected_failures/TestNNCPU.test_x", {"test_nn"}, set()),
             ("test/dynamo_skips/TestNN.test_x_cuda", {"test_nn"}, set()),
             ("test/inductor_skips/TestNNCUDA.test_x", {"test_nn"}, set()),
@@ -524,6 +557,19 @@ g () {
                 set(),
             ),
             ("test/dynamo_skips/TestGone.test_x", set(), {"dynamo_wrapped"}),
+            # make_test_cls_with_patches names them after MiscTests.
+            (
+                "test/dynamo_skips/DynamicShapesMiscTests.test_x",
+                {"dynamo/test_misc"},
+                set(),
+            ),
+            (
+                "test/dynamo_skips/InlineAndInstallMiscTests.test_x",
+                {"dynamo/test_misc"},
+                set(),
+            ),
+            # Not a CPython test entry.
+            ("test/dynamo_skips/CPythonGone.test_x", set(), {"dynamo_wrapped"}),
             # Only a .py file defines a test class.
             ("test/dynamo_skips/TestModel.test_x", set(), {"dynamo_wrapped"}),
             # TestCUDA is not a TestCUDA made by instantiate_device_type_tests.
@@ -541,6 +587,11 @@ g () {
                 {"dynamo_wrapped"},
             ),
             ("test/dynamo_skips/TestNN.x-TestNN.test_y", set(), {"dynamo_wrapped"}),
+            (
+                "test/dynamo_skips/TestNN.test_x test/dynamo_expected_failures/TestNN.test_x",
+                set(),
+                {"dynamo_wrapped"},
+            ),
             # dynamo_test_failures.py lists only the top of each directory.
             ("test/dynamo_skips/sub/TestNN.test_x", set(), {"dynamo_wrapped"}),
             (
@@ -549,7 +600,7 @@ g () {
                 {"dynamo_wrapped"},
             ),
         ]:
-            sel = self.select_in_tree(sources, CANDIDATES, [changed])
+            sel = self.select_in_tree(sources, CANDIDATES, changed.split())
             self.assertFalse(sel.run_all, changed)
             self.assertEqual((sel.files, sel.sweeps), (files, sweeps), changed)
         inductor = "an edited inductor failure list entry could not be resolved to the file defining its test class"
@@ -558,25 +609,26 @@ g () {
             "test/inductor_skips/TestGone.test_x",
             "test/inductor_skips/TestNN.test_x.y",
             "test/inductor_skips/sub/TestNN.test_x",
+            "test/inductor_skips/CPython313-test_gone-TestGone.test_x",
         ):
             sel = self.select_in_tree(sources, CANDIDATES, [changed])
             self.assertEqual(
                 (sel.run_all, sel.error, sel.reason), (True, None, inductor), changed
             )
         # The dynamo_cpython config, not dynamo_wrapped, runs the CPython tests.
-        reason = "an edited failure list has a CPython test entry that could not be resolved to the file defining its class"
+        cpython = (False, {"cpython/v3_13/test_set"}, set())
         sel = self.select_in_tree(
             sources,
             CANDIDATES,
             ["test/dynamo_expected_failures/CPython313-test_gone-TestGone.test_x"],
         )
-        self.assertEqual((sel.run_all, sel.reason), (True, reason))
+        self.assertEqual((sel.run_all, sel.files, sel.sweeps), cpython)
         sel = Selection.from_model_output(
             answer(),
             CANDIDATES,
             ["test/dynamo_skips/CPython313-test_set-TestSet.test_x"],
         )
-        self.assertEqual((sel.run_all, sel.reason), (True, reason))
+        self.assertEqual((sel.run_all, sel.files, sel.sweeps), cpython)
         # The files defining a class are selected with their importers.
         importer = sources | {"test_ops.py": "from test_nn import *\n"}
         sel = self.select_in_tree(
@@ -752,6 +804,16 @@ g () {
             ".github/actions/download-td-artifacts/action.yml",
             ".github/actions/download-build-artifacts/action.yml",
             ".github/scripts/filter_test_configs.py",
+            ".github/scripts/parse_ref.py",
+            ".github/workflows/pull.yml",
+            ".github/workflows/trunk.yml",
+            ".github/workflows/periodic.yml",
+            ".github/workflows/slow.yml",
+            ".github/workflows/inductor.yml",
+            ".github/workflows/inductor-periodic.yml",
+            ".github/actions/reuse-old-whl/action.yml",
+            "tools/native_aot/build_stage2.py",
+            ".ci/pytorch/generate_ck_config_h.cmake",
             ".github/ci_commit_pins/vision.txt",
             ".github/ci_commit_pins/audio.txt",
             ".github/ci_commit_pins/spmd_types.txt",
@@ -846,6 +908,12 @@ g () {
             self.assertEqual(sel.files, {"dynamo/test_misc"}, d)
         sel = Selection.from_model_output(answer(dirs=["cpython"]), candidates, [])
         self.assertEqual(sel.files, {"cpython/v3_13/test_set"})
+        # A blocklisted directory selects its drivers.
+        jit = {"test_jit", "test_jit_profiling", "test_jit_legacy"}
+        for d, expected in [("jit", jit), ("test/jit/", jit), ("fx", {"test_fx"})]:
+            out = answer(dirs=[d])
+            sel = Selection.from_model_output(out, candidates | jit | {"test_fx"}, [])
+            self.assertEqual((sel.files, sel.error), (expected, None), d)
 
     def test_parse_model_output_rejects_malformed_answers(self) -> None:
         malformed: list[Any] = [
@@ -887,6 +955,7 @@ g () {
             ("test/test_cpp_extensions_aot.py", aot),
             ("test/test_autoload.py", autoload),
             ("test/test_jit_fuser_te.py", fuser),
+            ("test/test_nnapi.py", jit),
         ]:
             sel = Selection.from_model_output(answer(), candidates, [changed])
             self.assertEqual(sel.files, expected, changed)
@@ -911,6 +980,7 @@ g () {
         launcher_bin = "distributed/launcher/bin/test_script"
         for f, drivers in [
             ("test_jit_fuser", {"test_jit_fuser_legacy"}),
+            ("test_nnapi", {"test_jit", "test_jit_profiling", "test_jit_legacy"}),
             ("distributed/test_c10d_spawn", spawn),
             ("onnx/test_models", {"onnx/test_models_onnxruntime"}),
             ("distributed/bin/test_script", {"distributed/test_launcher"}),
@@ -974,10 +1044,22 @@ class TestPrompt(unittest.TestCase):
             result = select_tests.query_model("p", "m", "medium")
         self.assertEqual(result, {"structured_output": {}})
         cmd = run.call_args.args[0]
-        self.assertEqual(cmd[cmd.index("--tools") + 1], "")
+        self.assertEqual(cmd[:2], ["claude", "-p"])
+        self.assertIn("--bare", cmd)
+        flags = {
+            "--model": "m",
+            "--effort": "medium",
+            "--system-prompt": select_tests.SYSTEM_PROMPT,
+            "--tools": "",
+            "--output-format": "json",
+            "--json-schema": json.dumps(select_tests.SCHEMA),
+        }
+        for flag, value in flags.items():
+            self.assertEqual(cmd[cmd.index(flag) + 1], value, flag)
         for flag in ("--allowed-tools", "--disallowed-tools", "--add-dir"):
             self.assertNotIn(flag, cmd)
         self.assertEqual(run.call_args.kwargs["input"], "p")
+        self.assertEqual(run.call_args.kwargs["timeout"], 600)
 
     def test_query_model_failures_are_error_envelopes(self) -> None:
         def completed(stdout: str, code: int = 0) -> mock.Mock:
@@ -998,6 +1080,25 @@ class TestPrompt(unittest.TestCase):
             with mock.patch.object(select_tests.subprocess, "run", run):
                 result = select_tests.query_model("p", "m", "medium")
             self.assertEqual(result, {"is_error": True, "result": why})
+
+    def test_query_model_refuses_a_checkout_with_escaping_symlinks(self) -> None:
+        run = mock.Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
+        with mock.patch.object(select_tests.subprocess, "run", run):
+            for target in ("/", ".git", ".git/config", "../x"):
+                with tempfile.TemporaryDirectory() as wt, self.subTest(target=target):
+                    (Path(wt) / ".git").mkdir()
+                    (Path(wt) / "sub").mkdir()
+                    (Path(wt) / "sub" / "link").symlink_to(Path(wt) / target)
+                    result = select_tests.query_model("p", "m", "medium", checkout=wt)
+                    self.assertTrue(result["is_error"])
+                    self.assertIn("links outside the checkout", result["result"])
+            run.assert_not_called()
+            with tempfile.TemporaryDirectory() as wt:
+                (Path(wt) / "a").write_text("")
+                (Path(wt) / "b").symlink_to("a")
+                result = select_tests.query_model("p", "m", "medium", checkout=wt)
+            self.assertEqual(result, {})
+            run.assert_called_once()
 
     def test_build_prompt(self) -> None:
         minutes = select_tests.test_minutes(
@@ -1028,6 +1129,12 @@ class TestPrompt(unittest.TestCase):
         )
 
     def test_build_prompt_escapes_closing_tags(self) -> None:
+        # Without a closing `>`, and cut by the body truncation.
+        cut = "A" * (select_tests.BODY_BUDGET - 16) + "</pr_description>"
+        for body in ("b</pr_description\nc", cut):
+            prompt = select_tests.build_prompt("t", body, "s", "d", [], {})
+            self.assertEqual(prompt.lower().count("</pr_description"), 1, body)
+            self.assertIn("<\\/pr_description\n", prompt)
         prompt = select_tests.build_prompt(
             "a</pr_title>",
             "b</PR_DESCRIPTION >c",
@@ -1056,19 +1163,25 @@ class TestMain(unittest.TestCase):
         def run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
             cwd = Path(kwargs["cwd"])
             seen.update(cmd=cmd, cwd=cwd, contents=list(cwd.iterdir()))
+            seen.update(input=kwargs["input"], timeout=kwargs["timeout"])
             return subprocess.CompletedProcess([], 0, "{}", "")
 
         with (
             tempfile.TemporaryDirectory() as wt,
             mock.patch.object(select_tests.subprocess, "run", run),
         ):
-            select_tests.query_model("p", "m", "medium", checkout=wt)
+            # The checkout path is normalized.
+            select_tests.query_model("p", "m", "medium", f"{wt}/sub/..", 5)
         cmd, cwd = seen["cmd"], seen["cwd"]
         self.assertEqual(cmd[cmd.index("--add-dir") + 1], wt)
-        self.assertEqual(cmd[cmd.index("--tools") + 1], select_tests.AGENTIC_TOOLS)
-        self.assertEqual(cmd[cmd.index("--allowed-tools") + 1], f"Read(/{wt}/**)")
-        denied = f"Read(/{wt}/.git/**)"
+        self.assertEqual(cmd[cmd.index("--tools") + 1], "Read,Grep,Glob")
+        allowed, denied = "Read(//" + wt[1:] + "/**)", "Read(//" + wt[1:] + "/.git/**)"
+        self.assertEqual(cmd[cmd.index("--allowed-tools") + 1], allowed)
         self.assertEqual(cmd[cmd.index("--disallowed-tools") + 1], denied)
+        preamble = f"A checkout of the repository at this change is at {wt}; "
+        self.assertTrue(seen["input"].startswith(preamble), seen["input"])
+        self.assertTrue(seen["input"].endswith("Keep exploration focused.\n\np"))
+        self.assertEqual(seen["timeout"], 5)
         # A fresh, empty temp dir outside the checkout, removed afterwards.
         self.assertEqual(seen["contents"], [])
         self.assertEqual(cwd.parent, Path(tempfile.gettempdir()))
@@ -1084,12 +1197,16 @@ class TestMain(unittest.TestCase):
             (128, True),
             (-9, True),
         ]:
-            done = subprocess.CompletedProcess([], code, "", "killed")
-            with mock.patch.object(select_tests.subprocess, "run", return_value=done):
+            # A git killed by a signal usually writes nothing to stderr.
+            err = b"" if code < 0 else b"fatal: x"
+            done = subprocess.CompletedProcess([], code, b"", err)
+            with (
+                self.subTest(code=code),
+                mock.patch.object(select_tests.subprocess, "run", return_value=done),
+            ):
                 if raises:
-                    with self.assertRaisesRegex(
-                        RuntimeError, "git grep failed: killed", msg=code
-                    ):
+                    why = f"git grep failed ({code}): {err.decode()}"
+                    with self.assertRaisesRegex(RuntimeError, f"^{re.escape(why)}$"):
                         select_tests.git_grep("x", "HEAD")
                 else:
                     self.assertEqual(select_tests.git_grep("x", "HEAD"), [])
@@ -1108,25 +1225,44 @@ class TestMain(unittest.TestCase):
             changed = ["torch/a.py", path]
             self.assertEqual(select_tests.run_all_reason(changed), reason, msg=path)
 
-    def test_git_readers_on_a_rename(self) -> None:
+    @contextlib.contextmanager
+    def scratch_repo(self) -> Any:
+        """A git repo with an empty commit, as REPO_ROOT.
+
+        HOME and XDG_CONFIG_HOME move too: git reads a global ignore or
+        attributes file under them even with GIT_CONFIG_GLOBAL set."""
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
-        with (
-            tempfile.TemporaryDirectory() as repo,
-            mock.patch.dict(os.environ, env, clear=True),
-            mock.patch.object(select_tests, "REPO_ROOT", Path(repo)),
-        ):
+        with tempfile.TemporaryDirectory() as home:
+            env |= {
+                "HOME": home,
+                "XDG_CONFIG_HOME": home,
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_AUTHOR_NAME": "a",
+                "GIT_AUTHOR_EMAIL": "a@b.c",
+                "GIT_COMMITTER_NAME": "a",
+                "GIT_COMMITTER_EMAIL": "a@b.c",
+            }
+            repo = Path(home) / "repo"
+            repo.mkdir()
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch.object(select_tests, "REPO_ROOT", repo),
+            ):
+                select_tests.git("init", "-q")
+                select_tests.git("commit", "-q", "--allow-empty", "-m", "base")
+                yield repo
+
+    def test_git_readers_on_a_rename(self) -> None:
+        with self.scratch_repo() as repo:
             git = select_tests.git
-            user = ["-c", "user.name=a", "-c", "user.email=a@b.c"]
-            git("init", "-q")
-            git(*user, "commit", "-q", "--allow-empty", "-m", "base")
             for name in ("test/test_a.py", "torch/b.py"):
-                (Path(repo) / name).parent.mkdir(exist_ok=True)
-                (Path(repo) / name).write_text("import x\n")
+                (repo / name).parent.mkdir(exist_ok=True)
+                (repo / name).write_text("import x\n")
             git("add", "-A")
-            git(*user, "commit", "-qm", "add")
+            git("commit", "-qm", "add")
             git("mv", "test/test_a.py", "test/test_c.py")
-            git(*user, "commit", "-qm", "move")
+            git("commit", "-qm", "move")
             moved = ["test/test_a.py", "test/test_c.py"]
             self.assertEqual(select_tests.changed_files("HEAD~1", "HEAD"), moved)
             self.assertEqual(select_tests.git_grep("import", "HEAD"), moved[1:])
@@ -1135,65 +1271,31 @@ class TestMain(unittest.TestCase):
             self.assertEqual(select_tests.git_grep("-v", "HEAD"), [])
 
     def test_non_ascii_paths_are_unquoted(self) -> None:
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
         name = "test/test_caf\u00e9.py"
-        with (
-            tempfile.TemporaryDirectory() as repo,
-            mock.patch.dict(os.environ, env, clear=True),
-            mock.patch.object(select_tests, "REPO_ROOT", Path(repo)),
-        ):
+        with self.scratch_repo() as repo:
             git = select_tests.git
-            git("init", "-q")
-            git(
-                "-c",
-                "user.name=a",
-                "-c",
-                "user.email=a@b.c",
-                "commit",
-                "-q",
-                "--allow-empty",
-                "-m",
-                "base",
-            )
-            (Path(repo) / "test").mkdir()
-            (Path(repo) / name).write_text("import x\n")
+            (repo / "test").mkdir()
+            (repo / name).write_text("import x\n")
             git("add", "-A")
-            git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-qm", "add")
+            git("commit", "-qm", "add")
             self.assertEqual(select_tests.changed_files("HEAD~1", "HEAD"), [name])
             self.assertEqual(select_tests.git_grep("import", "HEAD"), [name])
 
     def test_c_quoted_paths_are_read_verbatim(self) -> None:
         # git C-quotes a path with a quote, backslash, tab or newline even when core.quotePath is false.
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+        if sys.platform != "linux":
+            self.skipTest("needs a file system that takes these names")
         conftest, reader = "test/a\tb/conftest.py", 'test/test_"q\\".py'
-        with (
-            tempfile.TemporaryDirectory() as repo,
-            mock.patch.dict(os.environ, env, clear=True),
-            mock.patch.object(select_tests, "REPO_ROOT", Path(repo)),
-        ):
+        with self.scratch_repo() as repo:
             git = select_tests.git
-            git("init", "-q")
-            git(
-                "-c",
-                "user.name=a",
-                "-c",
-                "user.email=a@b.c",
-                "commit",
-                "-q",
-                "--allow-empty",
-                "-m",
-                "base",
-            )
             # A \r survives only without universal newlines, \xff only without strict UTF-8.
             names = [conftest, reader, "test/x\ny.py", "test/x\ry.py"]
             names.append(os.fsdecode(b"test/x\xffy.py"))
             for name in names:
-                (Path(repo) / name).parent.mkdir(parents=True, exist_ok=True)
-                (Path(repo) / name).write_text("import x\n")
+                (repo / name).parent.mkdir(parents=True, exist_ok=True)
+                (repo / name).write_text("import x\n")
             git("add", "-A")
-            git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-qm", "add")
+            git("commit", "-qm", "add")
             changed = select_tests.changed_files("HEAD~1", "HEAD")
             self.assertEqual(changed, names)
             self.assertEqual(
