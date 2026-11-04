@@ -11,6 +11,7 @@ set(TORCH_SHIM_TEST_SRCS
   ${TORCH_SHIM_TEST_ROOT}/test_stable_ivalue.cpp
   ${TORCH_SHIM_TEST_ROOT}/test_pyobject_conversion.cpp
   ${TORCH_SHIM_TEST_ROOT}/test_foreach_copy.cpp
+  ${TORCH_SHIM_TEST_ROOT}/test_error_check.cpp
 )
 
 # CUDA graph capture isn't supported on ROCm yet.
@@ -26,8 +27,6 @@ add_executable(test_shim
 
 # TODO temporary until we can delete the old gtest polyfills.
 target_compile_definitions(test_shim PRIVATE USE_GTEST)
-# It links libtorch, so the AOTI runtime headers keep shim error messages.
-target_compile_definitions(test_shim PRIVATE AOTI_LIBTORCH_PROVIDES_SHIMS)
 if(USE_CUDA)
   target_compile_definitions(test_shim PRIVATE USE_CUDA)
 endif()
