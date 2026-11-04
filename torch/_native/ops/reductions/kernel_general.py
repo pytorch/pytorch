@@ -16,6 +16,7 @@ from torch._tensor_iterator import reduce_op
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
+from ...utils.device import check_current
 from . import tile
 from .traits import WARP
 
@@ -203,7 +204,7 @@ def _launch(
             )
         key += (("input_alignments", alignments),)
     device = ins[0].get_device()
-    _L.check_current(device)
+    check_current(device)
     key = (device,) + key
     plan = _PLAN.get((key, op.geom_sig))
     if plan is None:
