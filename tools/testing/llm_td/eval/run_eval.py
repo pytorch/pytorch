@@ -15,10 +15,10 @@ in CI, which calls the model once. A timeout of the call is final, but an API
 now (see score.prompt_sha), which score.py checks too. Samples that
 select_tests answers without the model (see score.unasked) are skipped. With
 --agentic, each worker checks the sample's head out into its own worktree
-under DIR/worktrees/<tag> and lets the model Read/Grep/Glob it. Those tools
-have no path limits and the prompt holds untrusted PR text, so --agentic runs
-only with LLM_TD_AGENTIC_SANDBOX=1, in a sandbox whose only secret is the
-model credential. Ctrl-C stops the workers after their calls in flight, whose
+under DIR/worktrees/<tag> and lets the model Read/Grep/Glob it; query_model
+limits those tools to the checkout. The prompt holds untrusted PR text, so
+--agentic runs only with LLM_TD_AGENTIC_SANDBOX=1, in a sandbox whose only
+secret is the model credential. Ctrl-C stops the workers after their calls in flight, whose
 results are dropped, as the claude children die with the run.
 """
 
