@@ -1556,7 +1556,21 @@ class CppVecOverrides(CppOverrides):
             _t = f"decltype({b})"
             b = f"{_t}::set({_t}(1), {b}, {cexpr_index(V.kernel.num_elems)})"
             return f"remainder_integral({a}, {b})"
-        return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
+        # Same as the eager kernel: fmod, then add b when the signs of the
+        # result and b differ. a - floordiv(a, b) * b is nan for an infinite
+        # b and returns 0 when |a / b| is large (1e20 % 3).
+        vec_t = f"decltype({a})"
+        code = BracesBuffer()
+        code.writeline("[&]()")
+        with code.indent():
+            code.writeline(f"auto mod = {a}.fmod({b});")
+            code.writeline(f"auto zero = {vec_t}(0);")
+            code.writeline(
+                f"auto mask = (mod != zero) & (({b} < zero) ^ (mod < zero));"
+            )
+            code.writeline(f"return {vec_t}::blendv(mod, mod + {b}, mask);")
+        code.writeline("()")
+        return code
 
     @staticmethod
     def tan(a):
