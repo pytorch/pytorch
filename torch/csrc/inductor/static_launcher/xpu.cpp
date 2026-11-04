@@ -342,7 +342,7 @@ std::unique_ptr<sycl::kernel> loadKernel(
       at::xpu::getDeviceLocalMemSize(static_cast<c10::DeviceIndex>(device_idx));
   TORCH_CHECK_WITH(
       OutOfMemoryError,
-      sharedMemBytes <= slmLimit,
+      sharedMemBytes < slmLimit,
       "out of resource: ",
       funcName,
       " Required: ",
