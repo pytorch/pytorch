@@ -11,9 +11,14 @@ failure, a revert's revert time):
               the 10 neutral pilot samples read while writing the prompt
   neutral.txt the neu_ ids of eval.txt
   head.txt    the head_ samples of the head build above, all of eval.txt's PRs
-  dev.txt     the pr_ samples of a build with --start 2026-09-20 dated before
-              2026-10-01 and the rev_ samples reverted before 2026-04-01
-              (from 2025-11-11 on), so no PR or revert is in both
+  dev.txt     the pr_ samples of a build with --start 2026-09-20 --end
+              2026-10-26 dated before 2026-10-01 and the rev_ samples reverted
+              before 2026-04-01 (from 2025-11-11 on). A PR with own failures
+              on both sides of 2026-10-01 has a sample in this build and in
+              the --start 2026-10-01 one, so eval.txt leaves out dev.txt's
+              PRs (its PRs were first drawn from this build, as the samples
+              dated from 2026-10-01 on, and a build has one sample per PR);
+              test_checked_in_ids checks that no id is in both
   agentic.txt the eval.txt samples the agentic rerun was made on, a subset
               recorded with that run rather than derived from a build
 The checked-in lists were cut this way from builds by an earlier builder (the
@@ -25,10 +30,11 @@ Four kinds of sample, each a JSON file under DIR/samples:
               earliest head with a failure between --start and --end that the
               rules below, short of the two on the head's bases, leave as the
               PR's own. The ground truth is every (test file, CI config) of
-              that head's own failures. When the rules on the head's bases
-              drop every one of them, or its main_base is older than the
-              loaded failures, the PR has no pr_ sample and so no head
-              samples; no later head stands in. These runs are censored:
+              that head's own failures under all the rules, and `date` is the
+              earliest of them from --start on. When the rules on the head's
+              bases drop every one from --start on, or its main_base is older
+              than the loaded failures, the PR has no pr_ sample and so no
+              head samples; no later head stands in. These runs are censored:
               pull/trunk jobs already skip 75% of files through TD, so truth
               is a lower bound.
   head_<N>_<sha12>
@@ -47,7 +53,8 @@ Four kinds of sample, each a JSON file under DIR/samples:
               because it broke a test on main, where every test runs. The
               truth is the test files whose signal tests (the reverting
               signal's file::test keys) failed on main between landing and
-              the revert, on the commits that contain it, with every job that
+              the revert, on the commits before the revert that contain it
+              (up to when autorevert decided, if earlier), with every job that
               runs TD they failed in there, short of the job, job_green and
               passed_in_job rules below. A file::class::test key matches
               only that class's test; a file::test key, as autorevert writes
@@ -75,11 +82,13 @@ TESTS from its main checkout when it runs, which this replaces with TESTS at
 the head's merge base with main (`main_base`), plus the test files the sample
 adds. PR samples carry the raw PR body.
 Samples are only written once, so rebuilding into an existing DIR keeps them.
-Every sample records the BUILDER that wrote it and the window it was drawn
-from (--start and --end; for neutral samples the 25 days before --end) as
-`builder` and `window`, and a kind refuses to run on a DIR whose samples of
-that kind (and, for head, its pr_ samples) have another builder or window,
-or none. PR truth reads failures and disables up to --end + WINDOW, so pr
+Every sample records the BUILDER that wrote it, the window it was drawn
+from (--start and --end; for neutral samples the 25 days before --end) and a
+hash of the job classification score.ci_jobs reads from this checkout's
+.github/workflows, which the job rule, previous_failures and revert truth
+follow, as `builder`, `window` and `workflows`, and a kind refuses to run on a
+DIR whose samples of that kind (and, for head, its pr_ samples) have another
+builder, window or workflows, or none. PR truth reads failures and disables up to --end + WINDOW, so pr
 and head refuse to run before that has passed.
 PR and head samples carry the PR's title and body as of the build, which may
 have been edited after the failure; revert and neutral samples carry the
@@ -116,7 +125,9 @@ not the PR's own, and is dropped, if
     In a GitHub-native stack that head is an ancestor of `merge_base`.
     ghstack bases each PR on a synthetic gh/USER/N/base commit with the tree
     of the PR below, so no lower head is an ancestor; there the lower head's
-    diff against its merge base with main reverse-applies to `merge_base`
+    merge base with main is in `merge_base`'s history, so a lower change that
+    deletes what main added later does not count, and its diff against that
+    merge base reverse-applies to `merge_base`
     with one line of context, for every PR down the stack, and none of its
     hunks that only delete lines applies forward with full context (the
     reverse of such a hunk is just context, which matches almost anywhere).
@@ -130,7 +141,8 @@ shorter window would buy a few more truths at the price of counting more
 flakes and parallel breakages as the PR's. The builder prints how many
 failures each rule dropped. PR truths that reproduced (same test failing in
 two build environments, or on two heads of the PR, also heads from before
---start that the window rule keeps) are kept in `truth_strong`. A one-off is not necessarily a flake: often only one
+--start that the window rule keeps, each failure the PR's own under all the
+rules with its own head's bases) are kept in `truth_strong`. A one-off is not necessarily a flake: often only one
 environment runs the test, or the author fixed it in the next push.
 """
 
@@ -143,6 +155,7 @@ import concurrent.futures as cf
 import dataclasses
 import datetime as dt
 import functools
+import hashlib
 import json
 import os
 import random
@@ -154,7 +167,7 @@ import traceback
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from tools.testing.llm_selector.eval import REPO, write_json
+from tools.testing.llm_selector.eval import REPO, score, write_json
 from tools.testing.llm_selector.eval.clickhouse import query
 from tools.testing.llm_selector.eval.score import has_head, job_runs_td
 from tools.testing.llm_selector.select_tests import (
@@ -170,7 +183,7 @@ if TYPE_CHECKING:
 
 KINDS = ("pr", "head", "revert", "neutral")
 # Recorded on every sample; bump it when a change alters what a sample holds.
-BUILDER = 1
+BUILDER = 2
 WINDOW = dt.timedelta(days=14)
 # Failures this far before --start are loaded: heads are judged from
 # --start - WINDOW, against failures up to WINDOW earlier, and merge bases may be
@@ -342,12 +355,15 @@ def own_change(sha: str) -> bytes:
 def below(other: str, merge_base: str) -> bool:
     """Whether `merge_base` already has PR head `other`'s change, so a diff against it leaves that change out (see the module docstring).
 
-    That is when `other` is an ancestor or its change reverse-applies to
+    That is when `other` is an ancestor, or its merge base with main is in
+    `merge_base`'s history (else a deletion of what main added since
+    `merge_base` would reverse-apply too) and its change reverse-applies to
     `merge_base` with one line of context, so edits two lines away still match,
     and none of its deletion-only hunks applies forward with full context."""
     if is_ancestor(other, merge_base):
         return True
-    if not (patch := own_change(other)):
+    lower_base = git("merge-base", "origin/main", other, check=False).strip()
+    if not lower_base or not is_ancestor(lower_base, merge_base) or not (patch := own_change(other)):  # fmt: skip
         return False
     with tempfile.TemporaryDirectory() as d:
         env = {**os.environ, "GIT_INDEX_FILE": os.path.join(d, "index")}
@@ -663,7 +679,7 @@ def write_sample(
     write_json(path, {
         "id": sid, "kind": kind, "sha": sha, "base": base, "merge_base": merge_base, "main_base": main_base, "title": title, "body": body,
         "diff": diff, "diffstat": diffstat, "changed_files": changed_files(merge_base, sha), "deleted": deleted_files(merge_base, sha),
-        "candidates": candidates_at(main_base, sha, merge_base), "builder": BUILDER, "window": [str(d) for d in window],
+        "candidates": candidates_at(main_base, sha, merge_base), "builder": BUILDER, "window": [str(d) for d in window], "workflows": workflows(),
         **extra,
     })  # fmt: skip
     return True
@@ -702,16 +718,25 @@ def print_dropped(kind: str, dropped: list[collections.Counter]) -> None:
     )
 
 
+def workflows() -> str:
+    """A hash of score.ci_jobs, the job classification the job rule, revert truth and previous_failures read from this checkout's .github/workflows."""
+    jobs = {str(td): sorted(js) for td, js in sorted(score.ci_jobs().items())}
+    return hashlib.sha256(json.dumps(jobs).encode()).hexdigest()[:12]
+
+
 def other_build(out: Path, prefix: str, window: tuple[dt.date, dt.date]) -> str | None:
-    """Why the `prefix` samples in `out` cannot be extended by this BUILDER from `window`, if they cannot."""
+    """Why the `prefix` samples in `out` cannot be extended by this BUILDER from `window` with this checkout's workflows, if they cannot."""
     marks = {p.stem: json.loads(p.read_text()) for p in sorted(out.glob(f"{prefix}*.json"))}  # fmt: skip
-    marks = {k: (m.get("builder"), m.get("window")) for k, m in marks.items()}
-    if legacy := [k for k, (b, _) in marks.items() if b is None]:
+    marks = {k: (m.get("builder"), m.get("window"), m.get("workflows")) for k, m in marks.items()}  # fmt: skip
+    if legacy := [k for k, (b, _, _) in marks.items() if b is None]:
         return f"{prefix} samples in {out}, e.g. {legacy[0]}, predate the builder field; build into a fresh --data"  # fmt: skip
-    if other := [k for k, (b, _) in marks.items() if b != BUILDER]:
+    if other := [k for k, (b, _, _) in marks.items() if b != BUILDER]:
         return f"{prefix} samples in {out}, e.g. {other[0]}, were written by builder {marks[other[0]][0]}, not {BUILDER}; build into a fresh --data"  # fmt: skip
-    if other := [k for k, (_, w) in marks.items() if w != [str(d) for d in window]]:
+    if other := [k for k, (_, w, _) in marks.items() if w != [str(d) for d in window]]:
         return f"{prefix} samples in {out}, e.g. {other[0]}, were drawn from {marks[other[0]][1]}, not {window[0]}/{window[1]}"  # fmt: skip
+    here = workflows()
+    if other := [k for k, (_, _, w) in marks.items() if w != here]:
+        return f"{prefix} samples in {out}, e.g. {other[0]}, judged jobs by workflows {marks[other[0]][2]}, not this checkout's {here}; extend it from the checkout that built it or build into a fresh --data"  # fmt: skip
     return None
 
 
@@ -720,43 +745,49 @@ def pr_samples(h: History, out: Path, jobs: int) -> None:
     own = [r for rows in h.heads.values() for r in rows if h.why_dropped(r) is None]
     h.load_green({r["sha"] for r in own})
     own = [r for r in own if h.why_dropped(r) is None]
-    envs, heads = collections.defaultdict(set), collections.defaultdict(set)
     first: dict[int, dict] = {}
-    # A reproduction counts on any head the window rule keeps, also one from before --start.
     for r in own:
-        k = (r["pr"], *key(r))
-        envs[k].add(r["job"].split(" / ")[0])
-        heads[k].add(r["sha"])
         if ts(r["t"]) >= lo and (r["pr"] not in first or r["t"] < first[r["pr"]]["t"]):
             first[r["pr"]] = r
-    reproduced = {k for k in envs if len(envs[k]) >= 2 or len(heads[k]) >= 2}
-    fetch(sorted({f["sha"] for f in first.values()}))
-    fetch(sorted(lower := h.other_heads({f["sha"] for f in first.values()})))
+    # A reproduction counts on any of the PR's heads the window rule keeps, also one from before --start.
+    shas = {r["sha"] for r in own if r["pr"] in first}
+    fetch(sorted(shas))
+    fetch(sorted(lower := h.other_heads(shas)))
     h.load_green(lower)
-    ci = ci_bases({f["sha"]: pr for pr, f in first.items()})
+    ci = ci_bases({sha: h.heads[sha][0]["pr"] for sha in shas})
     # A base CI recorded after this head is not in its history, so fetch it as head_samples' fetch of the later head would.
     fetch(sorted({b for bs in ci.values() for b in bs}))
+    truths: dict[str, tuple[dict[str, str], list[dict], collections.Counter]] = {}
+
+    def judge(sha: str) -> None:
+        if not has_commit(sha) or (bases := pr_bases(sha, ci.get(sha, []))) is None:
+            return
+        if (kept := h.truth(sha, bases, c := collections.Counter())) is not None:
+            truths[sha] = (bases, kept, c)
+
+    run_each("PR head", judge, sorted(shas), jobs)
+    envs, heads = collections.defaultdict(set), collections.defaultdict(set)
+    for _, kept, _ in truths.values():
+        for r in kept:
+            envs[k := (r["pr"], *key(r))].add(r["job"].split(" / ")[0])
+            heads[k].add(r["sha"])
+    reproduced = {k for k in envs if len(envs[k]) >= 2 or len(heads[k]) >= 2}
     sources: list[str] = []
     dropped: list[collections.Counter] = []
 
     def go(pr: int) -> None:
-        sha = first[pr]["sha"]
-        if not has_commit(sha):
+        if (sha := first[pr]["sha"]) not in truths:
             return
-        bases = pr_bases(sha, ci.get(sha, []))
-        if bases is None:
-            return
-        if (kept := h.truth(sha, bases, c := collections.Counter())) is None:
-            return
+        bases, kept, c = truths[sha]
         dropped.append(c)
-        if kept:
+        if dates := [r["t"] for r in kept if ts(r["t"]) >= lo]:
             truth_jobs = by_file(kept)
             strong = {r["tf"] for r in kept if (pr, *key(r)) in reproduced}
             if (out / f"pr_{pr}.json").exists():
                 return
             try:
                 title, body = pr_text(pr)
-                if write_sample(out, f"pr_{pr}", "pr", sha, title=title, body=body, **bases, pr=pr, date=first[pr]["t"][:19], truth=sorted(truth_jobs),
+                if write_sample(out, f"pr_{pr}", "pr", sha, title=title, body=body, **bases, pr=pr, date=min(dates)[:19], truth=sorted(truth_jobs),
                                 window=(h.start, h.end), truth_strong=sorted(strong), truth_jobs=truth_jobs):  # fmt: skip
                     sources.append(bases["base_source"])
             except subprocess.CalledProcessError as e:
@@ -848,13 +879,15 @@ def revert_truth_jobs(
     A failure is dropped as PR truth drops it when its job is unstable or
     passed on any attempt on the commit, or the test passed again in the job.
 
-    `reverted` is when autorevert decided to revert, so the main commits that
-    landed between that and the revert commit are left out: truth is only
+    `reverted` is when autorevert decided to revert. The range ends before the
+    first commit that reverts `sha` and at `reverted`, whichever is earlier, so
+    the main commits that landed between the two are left out: truth is only
     lost, never added."""
     tests = ",".join(sorted({f"({sql_str(f + '.py')}, {sql_str(n)})" for f, _, n in signal}))  # fmt: skip
     t0 = landed.strftime("%Y-%m-%d %H:%M:%S")
-    with_change = git("rev-list", "--first-parent", "--ancestry-path", f"--until={reverted[:19]} +0000", "--invert-grep",
-                      f"--grep=This reverts commit {sha}", f"{sha}^..origin/main").split()  # fmt: skip
+    reverts = git("rev-list", "--first-parent", f"--grep=This reverts commit {sha}", f"{sha}..origin/main").split()  # fmt: skip
+    tip = f"{reverts[-1]}^" if reverts else "origin/main"
+    with_change = git("rev-list", "--first-parent", "--ancestry-path", f"--until={reverted[:19]} +0000", f"{sha}^..{tip}").split()  # fmt: skip
     shas = ",".join(f"'{c}'" for c in with_change or [sha])
     failed = query(f"""
         WITH j AS (

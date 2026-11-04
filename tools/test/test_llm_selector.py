@@ -5,6 +5,7 @@ import itertools
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -49,6 +50,39 @@ CANDIDATES = {
 def answer(**kw: Any) -> dict:
     """A well-formed model answer selecting nothing, with `kw` replacing its keys."""
     return {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": [], **kw}
+
+
+def inductor_includes(sh: str) -> dict[str, set[str]]:
+    """The files each function of the shell script `sh` passes to `run_test.py
+    --inductor` by --include or -i, under "" outside a function. Raises
+    ValueError on such a call whose files it cannot read."""
+    runs: dict[str, set[str]] = {}
+    func = ""
+    for line in sh.replace("\\\n", " ").splitlines():
+        if m := re.match(r"(\w+)\s*\(\)\s*\{", line):
+            func = m.group(1)
+        elif line.startswith("}"):
+            func = ""
+        if "run_test.py" not in line:
+            continue
+        lex = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        words = list(lex)
+        if not any(w.endswith("run_test.py") for w in words) or "--inductor" not in words:  # fmt: skip
+            continue
+        tests: list[str] = []
+        for i, w in enumerate(words):
+            if w in ("--include", "-i"):
+                for v in words[i + 1 :]:
+                    if v[:1] in "-;&|<>":
+                        break
+                    tests.append(v)
+            elif w.startswith(("--include=", "-i=")):
+                raise ValueError(f"unreadable run_test.py --inductor call: {line}")
+        if not tests or any("$" in t for t in tests):
+            raise ValueError(f"unreadable run_test.py --inductor call: {line}")
+        runs.setdefault(func, set()).update(tests)
+    return runs
 
 
 class TestSelection(unittest.TestCase):
@@ -122,16 +156,34 @@ class TestSelection(unittest.TestCase):
         self.assertEqual(globs, selection.TEST_SH_GLOBS)
         self.assertFalse([b for b in branches if not b.startswith("*") and "inductor" in b])  # fmt: skip
         funcs = {"test_inductor_shard": "inductor", "test_inductor_cpp_wrapper_shard": "inductor_cpp_wrapper"}  # fmt: skip
-        runs: dict[str, set[str]] = {}
-        for func, body in re.findall(r"^(\w+)\(\) \{\n(.*?)^\}", sh, re.MULTILINE | re.DOTALL):  # fmt: skip
-            # The option after the list keeps a wrapped list from being cut short.
-            for include in re.findall(r"run_test\.py --inductor \\\n\s+--include ([^\\\n]+)(?:\\\n\s+-|\n)", body):  # fmt: skip
-                runs.setdefault(funcs.get(func, func), set()).update(include.split())
+        runs = {funcs.get(f, f): tests for f, tests in inductor_includes(sh).items()}  # fmt: skip
         self.assertEqual(runs, selection.ALWAYS_COVERED)
         sel = Selection.from_model_output(answer(), CANDIDATES | {"test_torch"}, [])  # fmt: skip
         for config, covered in [("inductor_amx", True), ("inductor_avx2", True), ("inductor_cpp_wrapper", True), ("inductor_core", False), ("inductor_huggingface", False), ("default", False)]:  # fmt: skip
             self.assertEqual(sel.covers("test_torch", config), covered, config)
         self.assertFalse(sel.covers("test_ops", "inductor_cpp_wrapper"))
+
+    def test_inductor_includes(self) -> None:
+        sh = """python test/run_test.py --inductor --include top
+f() {
+  python test/run_test.py --inductor -i a b \
+    c \
+    --verbose
+  python test/run_test.py --include not_inductor
+  # run_test.py --inductor --include commented
+  if true; then
+    python test/run_test.py -k x --inductor \
+      --include d && echo done
+  fi
+}
+g () {
+  python test/run_test.py --verbose --inductor -i e
+}
+"""
+        self.assertEqual(inductor_includes(sh), {"": {"top"}, "f": {"a", "b", "c", "d"}, "g": {"e"}})  # fmt: skip
+        for bad in ('run_test.py --inductor --include "$TESTS"', "run_test.py --inductor --verbose", "run_test.py --inductor --include=a", "run_test.py --inductor -i 'a"):  # fmt: skip
+            with self.assertRaises(ValueError, msg=bad):
+                inductor_includes(bad)
 
     def test_files_the_model_never_saw_are_covered(self) -> None:
         sel = Selection.from_model_output(answer(), CANDIDATES, [])
@@ -634,6 +686,7 @@ class TestSplit(unittest.TestCase):
             self.assertEqual((include, exclude, split.hedged), (["a", "b"], [], set()))
 
 
+@mock.patch.object(selection, "ENFORCEMENT_ENABLED", True)
 class TestApplySelection(unittest.TestCase):
     TIMES: dict[str, float] = {"a": 10, "p": 20, "s": 170, "big": 600, "rest": 200}
 
@@ -1019,7 +1072,7 @@ class TestMain(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as tmp,
             clean_env(),
-            mock.patch.object(select_tests, "git", return_value="docs/a.md\n"),
+            mock.patch.object(select_tests, "git", return_value="docs/a.md\0"),
             mock.patch.object(select_tests, "get_test_times", return_value={"env": {"default": {"test_nn": 1.0}}}),
             mock.patch.object(select_tests, "query_model", return_value=result),
             mock.patch("sys.stdout", stdout),
@@ -1051,7 +1104,7 @@ class TestMain(unittest.TestCase):
 
     def test_no_test_times_runs_all(self) -> None:
         with (
-            mock.patch.object(select_tests, "git", return_value="docs/a.md\n"),
+            mock.patch.object(select_tests, "git", return_value="docs/a.md\0"),
             mock.patch.object(select_tests, "get_test_times", return_value={}),
         ):
             record = self.run_main()
@@ -1083,7 +1136,7 @@ class TestMain(unittest.TestCase):
         self.assertIn("LLM_SELECTOR_EFFORT='bogus' is not one of", stderr.getvalue())
 
     def test_too_many_changed_files_runs_all(self) -> None:
-        changed = "".join(f"torch/f{i}.py\n" for i in range(select_tests.MAX_CHANGED_FILES + 1))  # fmt: skip
+        changed = "".join(f"torch/f{i}.py\0" for i in range(select_tests.MAX_CHANGED_FILES + 1))  # fmt: skip
         with (
             mock.patch.object(select_tests, "git", return_value=changed),
             mock.patch.object(select_tests, "get_test_times") as times,
@@ -1134,7 +1187,7 @@ class TestMain(unittest.TestCase):
             with (
                 tempfile.TemporaryDirectory() as tmp,
                 clean_env(),
-                mock.patch.object(select_tests, "git", return_value="docs/a.md\n"),
+                mock.patch.object(select_tests, "git", return_value="docs/a.md\0"),
                 mock.patch.object(select_tests, "get_test_times", return_value={"env": {"default": {"test_nn": 1.0}}}),
                 mock.patch.object(select_tests.subprocess, "run", run),
             ):  # fmt: skip
@@ -1153,7 +1206,7 @@ class TestMain(unittest.TestCase):
 
     def test_infra_change_runs_all(self) -> None:
         with (
-            mock.patch.object(select_tests, "git", return_value="test/run_test.py\n"),
+            mock.patch.object(select_tests, "git", return_value="test/run_test.py\0"),
             mock.patch.object(select_tests, "get_test_times") as times,
         ):
             record = self.run_main()
@@ -1181,13 +1234,13 @@ class TestMain(unittest.TestCase):
         error = {"is_error": True, "result": "overloaded"}
         malformed = {"structured_output": {"run_all": False, "tests": "test_nn"}}
         for changed, answer, t, enforced, argv in [
-            ("test/run_test.py\n", error, times, True, ["--enforce"]),
-            ("docs/a.md\n", model_run_all, times, True, ["--enforce"]),
-            ("docs/a.md\n", normal, times, True, ["--enforce"]),
-            ("docs/a.md\n", normal, times, False, []),
-            ("docs/a.md\n", error, times, False, ["--enforce"]),
-            ("docs/a.md\n", malformed, times, False, ["--enforce"]),
-            ("docs/a.md\n", model_run_all, {}, False, ["--enforce"]),
+            ("test/run_test.py\0", error, times, True, ["--enforce"]),
+            ("docs/a.md\0", model_run_all, times, True, ["--enforce"]),
+            ("docs/a.md\0", normal, times, True, ["--enforce"]),
+            ("docs/a.md\0", normal, times, False, []),
+            ("docs/a.md\0", error, times, False, ["--enforce"]),
+            ("docs/a.md\0", malformed, times, False, ["--enforce"]),
+            ("docs/a.md\0", model_run_all, {}, False, ["--enforce"]),
             ("", model_run_all, times, True, ["--enforce"]),
         ]:
             record = run(changed, answer, t, *argv)
@@ -1259,6 +1312,31 @@ class TestMain(unittest.TestCase):
             git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-qm", "add")  # fmt: skip
             self.assertEqual(select_tests.changed_files("HEAD~1", "HEAD"), [name])
             self.assertEqual(select_tests.git_grep("import", "HEAD"), [name])
+
+    def test_c_quoted_paths_are_read_verbatim(self) -> None:
+        # git C-quotes a path with a quote, backslash, tab or newline even when core.quotePath is false.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+        conftest, reader = "test/a\tb/conftest.py", 'test/test_"q\\".py'
+        with (
+            tempfile.TemporaryDirectory() as repo,
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(select_tests, "REPO_ROOT", Path(repo)),
+        ):
+            git = select_tests.git
+            git("init", "-q")
+            git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-q", "--allow-empty", "-m", "base")  # fmt: skip
+            for name in (conftest, reader, "test/x\ny.py"):
+                (Path(repo) / name).parent.mkdir(parents=True, exist_ok=True)
+                (Path(repo) / name).write_text("import x\n")
+            git("add", "-A")
+            git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-qm", "add")  # fmt: skip
+            changed = select_tests.changed_files("HEAD~1", "HEAD")
+            self.assertEqual(changed, [conftest, reader, "test/x\ny.py"])
+            self.assertEqual(select_tests.run_all_reason(changed), "change touches test infrastructure")  # fmt: skip
+            self.assertIsNone(select_tests.run_all_reason(changed[1:]))
+            self.assertEqual(select_tests.git_grep("import", "HEAD"), changed)
+            self.assertEqual(select_tests.git_paths("ls-tree", "-r", "--name-only", "HEAD"), changed)  # fmt: skip
 
     def test_moved_test_file_is_selected(self) -> None:
         answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": []}}  # fmt: skip
