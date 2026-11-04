@@ -182,7 +182,7 @@ The overhead fraction dominates the uncertainty:
 - Cost is the share of one full CI pass's test-seconds that a selection runs, from `test-times.json`, per config. Configs that no TD job runs are left out; the inductor unit-test ones are priced separately.
 - Jobs are classified from `.github/workflows`: by name and config, then with CUDA and Python versions wildcarded (CI has moved to newer ones since the oldest reverts), then by config alone. A reusable workflow's jobs take their caller's TD setting, so `dynamo-unittest` jobs (called from trunk) have TD and `unit-test / ...` jobs (called from inductor) do not. Within a TD workflow, jobs run_test.py runs without TD are classified as non-TD, as in CI: `_mac-test.yml` jobs, xpu and onnx build environments, and jobs with `force-no-td`.
 - `test-times.json` is merged over jobs per config, so a config that TD and non-TD jobs share, like `default` in periodic, is priced as one.
-- Seconds are summed over every build environment. Environments matching `cuda|rocm|sm\d+|xpu|h100|b200|a100|gpu` count as GPU.
+- Seconds are summed over every build environment. Environments matching `cuda|rocm|sm\d+|h100|b200|a100|gpu` count as GPU.
 
 **Dataset** (`eval/build_dataset.py`, ClickHouse plus git). There are four kinds of sample:
 
