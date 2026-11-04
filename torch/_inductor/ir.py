@@ -126,6 +126,7 @@ from .utils import (
     ir_dataclass,
     is_dynamic,
     is_gpu,
+    JaggedRange,
     sympy_dot,
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
@@ -1093,6 +1094,13 @@ class Loops(IRNode):
     dtype: torch.dtype
     inner_fn: Callable[..., Any]
     ranges: Sequence[_IntLike]
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if any(isinstance(size, JaggedRange) for size in self.ranges):
+            raise AssertionError(
+                f"JaggedRange must be a reduction range: {self.ranges}"
+            )
 
     @cache_on_self_and_args("Loops")
     def get_free_symbol_uses(
