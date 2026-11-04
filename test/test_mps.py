@@ -15571,6 +15571,11 @@ class TestCommon(TestCase):
         result = torch.fft.ifftn(spectrum.to(device)).cpu().to(torch.complex64)
         self.assertEqual(result, x, atol=1, rtol=0)
 
+    def test_fft_private_ops_edge_dims(self, device):
+        # The private ops wrap negative dims like the CPU
+        x = torch.randn(3, 16, dtype=torch.complex64, device=device)
+        self.assertEqual(torch._fft_c2c(x, [-1], 0, True), torch.fft.fft(x))
+
     @dtypes(torch.float32, torch.float16)
     @parametrize("n", [64, 128, 200, 240, 256, 512, 1024, 2048, 4096, 4099])
     @parametrize("kind", ["fft", "ifft"])
