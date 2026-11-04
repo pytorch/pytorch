@@ -317,7 +317,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--enforce",
         action="store_true",
-        help="tell run_test.py, on PRs with TD on, to run the covered files, the files that already failed on the PR and that TD runs, and a hedge of TD's top files instead of TD's split; ignored when the selector fails, and run_test.py keeps TD's split when none of the call's files has a test time (for example without test-times.json), when the previous failures are not recorded in the TD results, or when none of those files would run",
+        help="let run_test.py replace TD's split with the selection (see selection.apply_selection); ignored when the selector fails",
     )
     parser.add_argument("--print-prompt", action="store_true")
     args = parser.parse_args(argv)
@@ -353,8 +353,9 @@ def main(argv: list[str] | None = None) -> None:
         return
     # A deliberate run_all (no changed files, test infrastructure, too many
     # changed files, an inductor failure list naming an unknown class, too many
-    # import hops, an edited file under test/ that nothing reads, or the model)
-    # is enforced; a broken selector leaves TD's split in place.
+    # edited files under test/ that are not tests, too many import hops, an
+    # edited file under test/ that nothing reads, or the model) is enforced; a
+    # broken selector leaves TD's split in place.
     selection.enforce = args.enforce and record["error"] is None
     args.output.write_text(
         json.dumps({**selection.to_json(), "diagnostics": record}, indent=1)
