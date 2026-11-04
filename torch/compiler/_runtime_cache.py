@@ -44,14 +44,17 @@ if TYPE_CHECKING:
 # Process-wide: once precompile.load installs them, a frozen kernel serves every
 # later compile of the same Triton source in this process until fresh_cache() /
 # clear_caches() (see FrozenTritonKernels).
+# The frozen-kernel locks are reentrant because clear_caches() takes them and can
+# run from a finalizer (a fresh_cache() exited by the garbage collector) on a
+# thread that already holds one.
 _frozen_triton_kernels: dict[str, bytes] = {}
 _loaded_triton_kernels: dict[str, CachingAutotuner] = {}
-_frozen_triton_kernels_lock = threading.Lock()
+_frozen_triton_kernels_lock = threading.RLock()
 # Keyed by source and the build command with the torch trees relocated
 # (codecache._relocatable_command_line), unlike CppCodeCache, which keys by this
 # host's paths.
 _frozen_cpp_kernels: dict[str, bytes] = {}
-_frozen_cpp_kernels_lock = threading.Lock()
+_frozen_cpp_kernels_lock = threading.RLock()
 
 
 def _triton_runtime_cache() -> ModuleType | None:
