@@ -478,6 +478,36 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
             [(i["id"], i["role"]) for i in out["items"]], [(50, fpc.AUTOMATED)]
         )
 
+    def test_the_commit_the_latest_review_saw_is_handed_on(self):
+        old, new, human = "1" * 40, "2" * 40, "4" * 40
+        # Latest by id, not by list order, and only the automated review's: a later human review is skipped.
+        later_human = {
+            "id": 52,
+            "user": user("maintainer"),
+            "body": "lgtm",
+            "state": "APPROVED",
+            "submitted_at": "2",
+            "commit_id": human,
+        }
+        api = FakeApi(
+            reviews=[
+                {**ours(51), "commit_id": new},
+                {**ours(50), "commit_id": old},
+                later_human,
+            ]
+        )
+        self.assertEqual(
+            fpc.collect(api, REPO, PR, "3" * 40)["previous_review_sha"], new
+        )
+        # A re-run on the same commit still names it; interdiff.py writes "nothing changed".
+        self.assertEqual(fpc.collect(api, REPO, PR, new)["previous_review_sha"], new)
+        # No earlier review, or a malformed id: nothing to compare.
+        self.assertEqual(
+            fpc.collect(FakeApi(), REPO, PR, new)["previous_review_sha"], ""
+        )
+        bad = FakeApi(reviews=[{**ours(), "commit_id": "not-a-sha"}])
+        self.assertEqual(fpc.collect(bad, REPO, PR, new)["previous_review_sha"], "")
+
     def test_inline_comments_say_which_commit_and_review_they_belong_to(self):
         api = FakeApi(
             reviews=[ours()],
