@@ -2139,18 +2139,18 @@ class GraphModule(torch.nn.Module):
 
         getitem: "f32[0]" = with_effects[0];  with_effects = None
 
-        t: "f32[3, 3]" = torch.ops.aten.t.default(primals_3);  primals_3 = None
-        addmm: "f32[3, 3]" = torch.ops.aten.addmm.default(primals_2, primals_4, t);  primals_2 = None
-
-        t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
-        return (getitem, addmm, primals_4, t_1)
+        t: "f32[3, 3]" = torch.ops.aten.t.default(primals_3)
+        addmm: "f32[3, 3]" = torch.ops.aten.addmm.default(primals_2, primals_4, t);  primals_2 = t = None
+        return (getitem, addmm, primals_3, primals_4)
 """,
         )
         self.assertExpectedInline(
             bw_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_4: "f32[3, 3]", t_1: "f32[3, 3]", tangents_1: "f32[3, 3]"):
+    def forward(self, primals_3: "f32[3, 3]", primals_4: "f32[3, 3]", tangents_1: "f32[3, 3]"):
+        t: "f32[3, 3]" = torch.ops.aten.t.default(primals_3);  primals_3 = None
+        t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
         mm: "f32[3, 3]" = torch.ops.aten.mm.default(tangents_1, t_1);  t_1 = None
         t_2: "f32[3, 3]" = torch.ops.aten.t.default(tangents_1)
         mm_1: "f32[3, 3]" = torch.ops.aten.mm.default(t_2, primals_4);  t_2 = primals_4 = None
