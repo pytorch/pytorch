@@ -5,6 +5,7 @@ import ctypes
 import importlib
 import inspect
 import sys
+import threading
 import types
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -1245,6 +1246,10 @@ def _has_script_object_arg(schema: torch.FunctionSchema) -> bool:
     return any(isinstance(arg.type, torch.ClassType) for arg in schema.arguments)
 
 
+# Ensures each torch.ops object is created once; reentrant for nested lookups.
+_torch_ops_creation_lock = threading.RLock()
+
+
 # OpOverloadPacket class contains pointer to a base unresolved operator that doesn't correspond to a specific operator
 # You can obtain an OpOverload object through attribute query.
 class OpOverloadPacket(Generic[_P, _T]):
@@ -1318,33 +1323,36 @@ class OpOverloadPacket(Generic[_P, _T]):
                 f"underlying op {str(self._op)} has no attribute {key} either."
             ) from None
 
-        try:
-            # This is ok since we are guaranteed that an overload name for an aten op can't be 'default'
-            use_key = "" if key == "default" else key
-            # TODO: disallow access to overloads registered by JIT
-            op_dk_tags = torch._C._get_operation_overload(
-                self._qualified_op_name, use_key
-            )
-            if op_dk_tags is None:
+        with _torch_ops_creation_lock:
+            if key in self.__dict__:
+                return self.__dict__[key]
+            try:
+                # This is ok since we are guaranteed that an overload name for an aten op can't be 'default'
+                use_key = "" if key == "default" else key
+                # TODO: disallow access to overloads registered by JIT
+                op_dk_tags = torch._C._get_operation_overload(
+                    self._qualified_op_name, use_key
+                )
+                if op_dk_tags is None:
+                    raise AttributeError(
+                        f"The underlying op of '{str(self)}' has no overload name '{key}'"
+                    )
+
+                op_, op_dk_, tags = op_dk_tags
+                schema = torch._C._get_schema(self._qualified_op_name, use_key)
+                overload: OpOverload[_P, _T] = (
+                    OpOverload(self, op_, op_dk_, schema, tags)
+                    if not _has_script_object_arg(schema)
+                    else TorchBindOpOverload(self, op_, op_dk_, schema, tags)
+                )
+                # cache the overload object
+                setattr(self, key, overload)
+                self._dir.append(key)
+                return overload
+            except RuntimeError:
                 raise AttributeError(
                     f"The underlying op of '{str(self)}' has no overload name '{key}'"
-                )
-
-            op_, op_dk_, tags = op_dk_tags
-            schema = torch._C._get_schema(self._qualified_op_name, use_key)
-            overload: OpOverload[_P, _T] = (
-                OpOverload(self, op_, op_dk_, schema, tags)
-                if not _has_script_object_arg(schema)
-                else TorchBindOpOverload(self, op_, op_dk_, schema, tags)
-            )
-            # cache the overload object
-            setattr(self, key, overload)
-            self._dir.append(key)
-            return overload
-        except RuntimeError:
-            raise AttributeError(
-                f"The underlying op of '{str(self)}' has no overload name '{key}'"
-            ) from None
+                ) from None
 
     def __iter__(self) -> Iterator[str]:
         return iter(self._dir)
@@ -1473,29 +1481,32 @@ class _OpNamespace(types.ModuleType):
         qualified_op_name = f"{namespace_name}::{op_name}"
         module_name = self.__module__ + "." + namespace_name
 
-        try:
-            op, overload_names = _get_packet(qualified_op_name, module_name)
-            if op is None:
+        with _torch_ops_creation_lock:
+            if op_name in self.__dict__:
+                return self.__dict__[op_name]
+            try:
+                op, overload_names = _get_packet(qualified_op_name, module_name)
+                if op is None:
+                    raise AttributeError(
+                        f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
+                    )
+            except RuntimeError as e:
+                # Turn this into AttributeError so getattr(obj, key, default)
+                # works (this is called by TorchScript with __origin__)
                 raise AttributeError(
                     f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
-                )
-        except RuntimeError as e:
-            # Turn this into AttributeError so getattr(obj, key, default)
-            # works (this is called by TorchScript with __origin__)
-            raise AttributeError(
-                f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
-            ) from e
+                ) from e
 
-        op.__module__ = module_name
-        opoverloadpacket = OpOverloadPacket(
-            qualified_op_name, op_name, op, overload_names
-        )
-        opoverloadpacket.__module__ = self.__module__ + "." + namespace_name
-        # cache the opoverloadpacket to ensure that each op corresponds to
-        # a unique OpOverloadPacket object
-        setattr(self, op_name, opoverloadpacket)
-        self._dir.append(op_name)
-        return opoverloadpacket
+            op.__module__ = module_name
+            opoverloadpacket = OpOverloadPacket(
+                qualified_op_name, op_name, op, overload_names
+            )
+            opoverloadpacket.__module__ = self.__module__ + "." + namespace_name
+            # cache the opoverloadpacket to ensure that each op corresponds to
+            # a unique OpOverloadPacket object
+            setattr(self, op_name, opoverloadpacket)
+            self._dir.append(op_name)
+            return opoverloadpacket
 
 
 def _get_packet(qualname, op_module):
@@ -1528,14 +1539,17 @@ class _HigherOrderNamespace(types.ModuleType):
 
     def __getattr__(self, name: str) -> HigherOrderOperator:
         # Following _OpNamespace.__getattr__, we cache the op on this object.
-        op = _higher_order_ops.get(name)
-        if op is None:
-            raise AttributeError(
-                f"'_HigherOrderNamespace' 'torch.ops.higher_order' object has no attribute '{name}'"
-            )
-        setattr(self, name, op)
-        self._dir.append(name)
-        return op
+        with _torch_ops_creation_lock:
+            if name in self.__dict__:
+                return self.__dict__[name]
+            op = _higher_order_ops.get(name)
+            if op is None:
+                raise AttributeError(
+                    f"'_HigherOrderNamespace' 'torch.ops.higher_order' object has no attribute '{name}'"
+                )
+            setattr(self, name, op)
+            self._dir.append(name)
+            return op
 
 
 class _Ops(types.ModuleType):
@@ -1548,11 +1562,14 @@ class _Ops(types.ModuleType):
         self._dir = []
 
     def __getattr__(self, name: str) -> _OpNamespace:
-        # Here we are creating `torch.ops.my_namespace`
-        namespace = _OpNamespace(name)
-        setattr(self, name, namespace)
-        self._dir.append(name)
-        return namespace
+        with _torch_ops_creation_lock:
+            if name in self.__dict__:
+                return self.__dict__[name]
+            # Here we are creating `torch.ops.my_namespace`
+            namespace = _OpNamespace(name)
+            setattr(self, name, namespace)
+            self._dir.append(name)
+            return namespace
 
     def __iter__(self) -> Iterator[str]:
         return iter(self._dir)
