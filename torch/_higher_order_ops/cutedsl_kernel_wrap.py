@@ -20,8 +20,7 @@ import inspect
 import sys
 import weakref
 from collections.abc import Callable, Collection, Mapping
-from typing import Any, Literal, TYPE_CHECKING
-from typing_extensions import Never
+from typing import Any, Literal, Never, TYPE_CHECKING
 
 import sympy
 

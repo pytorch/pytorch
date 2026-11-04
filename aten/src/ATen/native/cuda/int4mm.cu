@@ -1304,6 +1304,9 @@ struct RocmMmaGfx12 {
 // CDNA5 (gfx1250) wave32: the gfx12 layout. There is no 16x16x16 bf16 WMMA; the
 // 16x16x32 WMMA takes a lane's operands of two consecutive k-tiles as values
 // 0-7 and 8-15, so one instruction covers the pair and cTmp[1] stays zero.
+// Defined only for gfx1250: older compilers (ROCm 7.0) do not declare its WMMA
+// builtin, and a non-template body is parsed for every offload arch.
+#if defined(__gfx1250__)
 struct RocmMmaGfx1250 : RocmMmaGfx12 {
   // gfx1250 has a packed bf16 FMA and no v_dot2_f32_bf16, so dequantizing each
   // B value before the multiply is cheaper than the factored form's row sums
@@ -1318,6 +1321,7 @@ struct RocmMmaGfx1250 : RocmMmaGfx12 {
         false, __builtin_bit_cast(BF16x16, aPair), false, __builtin_bit_cast(BF16x16, bPair), 0, cTmp[0], false, false);
   }
 };
+#endif
 
 // RDNA3 (gfx11) wave32: wmma_f32_16x16x16_bf16. Each lane holds the full
 // 16-value A row (B column); the two half-waves carry identical A/B data and
