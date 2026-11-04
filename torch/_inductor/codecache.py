@@ -41,8 +41,8 @@ from types import (
     MethodType,
     ModuleType,
 )
-from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import override, Self, TypedDict
+from typing import Any, cast, Generic, Literal, NoReturn, Self, TYPE_CHECKING, TypeVar
+from typing_extensions import override, TypedDict
 
 import torch
 import torch._library.opaque_object as opaque_object
@@ -672,6 +672,15 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     meta = extract_tensor_metadata(t)
     if not hasattr(t, "_is_inductor_static"):
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
+
+    # compile-on-one-rank: the index is the compiling rank's, and every rank is on
+    # its own accelerator, so keeping it here means no rank can ever hit another's
+    # cache entry. This is the only place the device index reaches the key -- the
+    # graph hashed alongside it is the AOT one, which is already device-agnostic.
+    from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
+    if _coor_device_index_is_current(meta.device):
+        meta = dataclasses.replace(meta, device=torch.device(meta.device.type))
 
     return meta
 
@@ -1701,6 +1710,7 @@ class FxGraphHashDetails:
         self.provenance_tracking_to_timeline = (
             config.trace.provenance_tracking_to_timeline
         )
+        self.provenance_profiler_markers = config.trace.provenance_profiler_markers
 
         # Factory ops with dtype=None are lowered using the ambient default dtype,
         # so cached code compiled under one default dtype is not valid under another.

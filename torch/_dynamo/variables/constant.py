@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import enum
 import operator
-from collections.abc import Iterable
+import types
+from collections.abc import Callable, Iterable
 from typing import Any, cast, Literal, overload, TYPE_CHECKING
 
 import torch
@@ -25,13 +26,94 @@ from ..utils import (
     raise_args_mismatch,
     unpack_iterable,
 )
-from .base import _RICHCOMPARE_OPS, ValueMutationNew, VariableTracker
+from .base import (
+    _RICHCOMPARE_OPS,
+    GetSet,
+    Member,
+    Method,
+    readonly_setter,
+    SourceLocation,
+    ValueMutationNew,
+    VariableTracker,
+)
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .functions import UserFunctionVariable
+
+
+def _constant_method(
+    descriptor: types.MethodDescriptorType,
+) -> Callable[..., VariableTracker | None]:
+    def handler(
+        self: ConstantVariable,
+        tx: InstructionTranslatorBase,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if not all(a.is_python_constant() for a in (*args, *kwargs.values())):
+            return None
+        try:
+            res = descriptor(
+                self.value,
+                *[a.as_python_constant() for a in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+        except Exception as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        # str.split and friends return a fresh list the caller may mutate.
+        mutation_type = ValueMutationNew() if isinstance(res, list) else None
+        return ConstantVariable.create(res, mutation_type=mutation_type)
+
+    return handler
+
+
+def _constant_getter(
+    descriptor: types.GetSetDescriptorType | types.MemberDescriptorType,
+) -> Callable[..., VariableTracker]:
+    def getter(
+        self: ConstantVariable, tx: InstructionTranslatorBase
+    ) -> VariableTracker:
+        return ConstantVariable.create(descriptor.__get__(self.value))
+
+    return getter
+
+
+class _ConstantTables:
+    """Per-type tp_methods / tp_getset / tp_members of the constant types, read
+    from the real descriptors of each type and its bases."""
+
+    def __init__(self) -> None:
+        self.methods: dict[type, dict[str, Method]] = {}
+        self.getset: dict[type, dict[str, GetSet]] = {}
+        self.members: dict[type, dict[str, Member]] = {}
+        for ty in (int, bool, float, complex, str, bytes, type(None), type(...)):
+            methods = self.methods.setdefault(ty, {})
+            getset = self.getset.setdefault(ty, {})
+            members = self.members.setdefault(ty, {})
+            for klass in reversed(ty.__mro__[:-1]):
+                for name, d in klass.__dict__.items():
+                    if isinstance(d, types.MethodDescriptorType):
+                        methods[name] = Method(_constant_method(d))
+                    elif isinstance(d, types.GetSetDescriptorType):
+                        getset[name] = GetSet(_constant_getter(d), readonly_setter)
+                    elif isinstance(d, types.MemberDescriptorType):
+                        members[name] = Member(_constant_getter(d), readonly_setter)
+
+    @staticmethod
+    def of(tables: dict[type, dict[str, Any]], value: object) -> dict[str, Any]:
+        mro = type(value).__mro__
+        for i, ty in enumerate(mro):
+            if ty in tables:
+                # A user subclass's own attributes shadow the builtin's members.
+                shadowed = {n for sub in mro[:i] for n in sub.__dict__}
+                return {n: e for n, e in tables[ty].items() if n not in shadowed}
+        return {}
+
+
+_CONSTANT_TABLES = _ConstantTables()
 
 
 class ConstantVariable(VariableTracker):
@@ -51,6 +133,19 @@ class ConstantVariable(VariableTracker):
     # PyComplex_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L1099
     # _PyNone_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L2022
     _cpython_type = (int, float, str, bytes, bool, type(None), complex, type(...))
+
+    # These depend on the wrapped value's type, so they are properties of the VT.
+    @property
+    def tp_methods(self) -> dict[str, Method]:  # type: ignore[override]
+        return _ConstantTables.of(_CONSTANT_TABLES.methods, self.value)
+
+    @property
+    def tp_getset(self) -> dict[str, GetSet]:  # type: ignore[override]
+        return _ConstantTables.of(_CONSTANT_TABLES.getset, self.value)
+
+    @property
+    def tp_members(self) -> dict[str, Member]:  # type: ignore[override]
+        return _ConstantTables.of(_CONSTANT_TABLES.members, self.value)
 
     @overload
     @staticmethod
@@ -74,7 +169,7 @@ class ConstantVariable(VariableTracker):
         NOTE: the caller must install the proper guards if needed; most often
         the guard will be `CONSTANT_MATCH`.
         """
-        # Return pre-allocated sentinels for None/True/False when there are
+        # Return pre-allocated singleton constants when there are
         # no extra kwargs (source, etc.) that would differentiate the instance.
         if not kwargs:
             match value:
@@ -84,6 +179,8 @@ class ConstantVariable(VariableTracker):
                     return CONSTANT_VARIABLE_TRUE
                 case False:
                     return CONSTANT_VARIABLE_FALSE
+            if value is NotImplemented:
+                return CONSTANT_VARIABLE_NOT_IMPLEMENTED
 
         source = kwargs.get("source")
 
@@ -340,10 +437,11 @@ class ConstantVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
         from .tensor import SymNodeVariable
 
         if name == "format" and istype(self.value, str):
-            return variables.BuiltinVariable(str.format).call_function(
+            return SourcelessBuilder.create_internal_builtin(str.format).call_function(
                 tx,
                 [self, *args],
                 kwargs,
@@ -498,13 +596,28 @@ class ConstantVariable(VariableTracker):
 
     def get_id(self, tx: InstructionTranslatorBase) -> int | None:
         # Singletons have guaranteed stable identity across the process lifetime.
-        if self.value is None or self.value is True or self.value is False:
+        if (
+            self.value is None
+            or self.value is True
+            or self.value is False
+            or self.value is NotImplemented
+        ):
             return id(self.value)
         # Sourceful constants resolve via source like any other sourceful VT.
         # Sourceless non-singleton constants (e.g. literal 42 in compiled code)
         # get FakeIdVariable — CPython interning of small ints/strings is an
         # implementation detail users shouldn't rely on.
         return super().get_id(tx)
+
+    def with_source_location(self, source_location: SourceLocation) -> VariableTracker:
+        if (
+            self is CONSTANT_VARIABLE_NONE
+            or self is CONSTANT_VARIABLE_TRUE
+            or self is CONSTANT_VARIABLE_FALSE
+            or self is CONSTANT_VARIABLE_NOT_IMPLEMENTED
+        ):
+            return ConstantVariable.create(self.value, source_location=source_location)
+        return super().with_source_location(source_location)
 
     def get_real_python_backed_value(self) -> object:
         return self.value
@@ -917,9 +1030,11 @@ class ConstantVariable(VariableTracker):
         return ConstantVariable.create(~self.value)
 
 
-CONSTANT_VARIABLE_NONE = ConstantVariable(None)
-CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
-CONSTANT_VARIABLE_FALSE = ConstantVariable(False)
+# These interned singletons back ConstantVariable.create itself.
+CONSTANT_VARIABLE_NONE = ConstantVariable(None)  # noqa: RVT001
+CONSTANT_VARIABLE_TRUE = ConstantVariable(True)  # noqa: RVT001
+CONSTANT_VARIABLE_FALSE = ConstantVariable(False)  # noqa: RVT001
+CONSTANT_VARIABLE_NOT_IMPLEMENTED = ConstantVariable(NotImplemented)  # noqa: RVT001
 
 
 class FakeValueKind(enum.Enum):
@@ -952,6 +1067,12 @@ class FakeIdVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
         self.kind = kind
+
+    @staticmethod
+    def _create(value: int, kind: FakeValueKind = FakeValueKind.ID) -> FakeIdVariable:
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create_internal_fake_id(value, kind)
 
     def as_python_constant(self) -> int:
         return self.value
@@ -1031,7 +1152,7 @@ class FakeIdVariable(VariableTracker):
             result = op(lhs, rhs)
         except (TypeError, ValueError, OverflowError, ZeroDivisionError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
-        return FakeIdVariable(result)
+        return self._create(result)
 
     def nb_add_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
         return self._nb_binary_impl(tx, other, operator.add, reverse)
@@ -1064,22 +1185,22 @@ class FakeIdVariable(VariableTracker):
         return self._nb_binary_impl(tx, other, operator.rshift, reverse)
 
     def nb_negative_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(-self.value)
+        return self._create(-self.value)
 
     def nb_positive_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(+self.value)
+        return self._create(+self.value)
 
     def nb_absolute_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(abs(self.value))
+        return self._create(abs(self.value))
 
     def nb_invert_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(~self.value)
+        return self._create(~self.value)
 
     def nb_int_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(int(self.value), kind=self.kind)
+        return self._create(int(self.value), kind=self.kind)
 
     def nb_index_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(self.value, kind=self.kind)
+        return self._create(self.value, kind=self.kind)
 
     def reconstruct(self, codegen: Any) -> None:
         unimplemented(
