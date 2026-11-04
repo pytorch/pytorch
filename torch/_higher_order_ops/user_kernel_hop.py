@@ -12,8 +12,7 @@ call to it (the HOPifier).
 import dataclasses
 import threading
 from collections.abc import Callable, Mapping
-from typing import Any, Generic, Literal, TYPE_CHECKING, TypeVar
-from typing_extensions import Never
+from typing import Any, Generic, Literal, Never, TYPE_CHECKING, TypeVar
 
 import torch.fx as fx
 import torch.utils._pytree as pytree

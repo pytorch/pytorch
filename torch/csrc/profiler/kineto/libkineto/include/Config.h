@@ -83,6 +83,10 @@ class Config : public AbstractConfig {
     return rocprofPerThreadBufferEnabled_;
   }
 
+  [[nodiscard]] std::chrono::milliseconds rocprofDispatchRecordWait() const {
+    return rocprofDispatchRecordWait_;
+  }
+
   void setSelectedActivityTypes(const std::set<ActivityType>& types) {
     selectedActivityTypes_ = types;
   }
@@ -328,6 +332,10 @@ class Config : public AbstractConfig {
   // Kept separate from perThreadBufferEnabled_ because existing configs already
   // set that key true, and reusing it would flip every ROCm run onto the path.
   bool rocprofPerThreadBufferEnabled_{false};
+
+  // Upper bound on how long stopping a ROCm trace waits for kernel dispatch
+  // records that are still in flight.
+  std::chrono::milliseconds rocprofDispatchRecordWait_{20};
   std::set<ActivityType> selectedActivityTypes_;
 
   // The activity profiler settings are all on-demand

@@ -12,8 +12,8 @@ import tempfile
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeGuard
-from typing_extensions import final, override, Self
+from typing import final, Self, TYPE_CHECKING, TypeGuard
+from typing_extensions import override
 
 import torch._inductor.async_compile
 import torch.fx
