@@ -96,6 +96,8 @@ class TestColumnConfig(TestCase):
             (torch.float32, "sum", 8192, 4096, 1, False, None),
             (torch.float16, "sum", 8192, 4096, 1, True, (0, 32)),
             (torch.float32, "sum", 65536, 1024, 8, True, (0, 16)),
+            # Views without full tiles keep the default width and their clamps.
+            (torch.float32, "sum", 65536, 1024, 8, False, (0, 32)),
             (torch.float32, "sum", 32768, 257, 4, True, (0, 16)),
             (torch.float32, "sum", 131072, 257, 16, True, (0, 32)),
             (torch.bfloat16, "amax", 32768, 4096, 4, True, (0, 16)),
@@ -126,7 +128,7 @@ class TestColumnConfig(TestCase):
                     continue
                 min_blocks, tile_columns = expected
                 want = ct.OrderedColConfig(min_blocks, tile_columns=tile_columns)
-                self.assertEqual(cfg, want._replace(full_tiles=True))
+                self.assertEqual(cfg, want._replace(full_tiles=full_tiles))
 
 
 class TestColumnCombine(TestCase):
