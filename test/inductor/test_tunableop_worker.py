@@ -1042,11 +1042,11 @@ class WarmMeasureTest(TestCase):
         self.assertFalse(job.bmreq.benchmark_with_cudagraphs)
         self.assertFalse(job.bmreq.config_cudagraph_benchmarking)
 
-    @parametrize("warm_ok", (True, False))
-    def test_measured_call_runs_with_both_flags_off(self, warm_ok):
+    def test_measured_call_runs_with_both_flags_off(self):
         # The donor search is compile-time-only work, like tuning, and cannot
         # change the kernel: a borrow that happened was recorded, so the
-        # measured call is an exact hit.
+        # measured call is an exact hit. Only the warm-succeeded path reaches
+        # here -- a failed warm raises before any measurement.
         job = self._job(nearest_match=True, record_borrowed=True)
         order: list = []
         tunable = mock.Mock()
@@ -1057,8 +1057,6 @@ class WarmMeasureTest(TestCase):
 
         def _benchmark():
             order.append("benchmark")
-            if not warm_ok and order.count("benchmark") == 1:
-                raise RuntimeError("boom")
             return 3.0
 
         job.bmreq.benchmark.side_effect = _benchmark
@@ -1071,14 +1069,21 @@ class WarmMeasureTest(TestCase):
         self.assertIn(("tuning", False), order[:-1])
         self.assertIn(("nearest", False), order[:-1])
 
-    def test_failed_warm_still_measures(self):
-        job = self._job()
+    @parametrize("measure", (True, False))
+    def test_failed_warm_raises_rather_than_timing_anything(self, measure):
+        # A failed warm tuned and validated nothing, so a second benchmark
+        # would report a time for a kernel that was never validated -- and
+        # submit() would file it as "ok". Re-raised instead, so the caller
+        # times the candidate inline and the worker restarts.
+        job = self._job(measure=measure)
         job.bmreq.benchmark.side_effect = [RuntimeError("boom"), 4.0]
         with (
             mock.patch("torch.cuda.set_device"),
             mock.patch("torch.cuda.tunable", mock.Mock()),
         ):
-            self.assertEqual(job(0, "", {}), 4.0)
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                job(0, "", {})
+        self.assertEqual(job.bmreq.benchmark.call_count, 1, "must not measure")
 
     def test_tune_only_skips_second_benchmark(self):
         job = self._job(measure=False)
@@ -1088,19 +1093,6 @@ class WarmMeasureTest(TestCase):
         ):
             self.assertEqual(job(0, "", {}), 3.0)
         self.assertEqual(job.bmreq.benchmark.call_count, 1)
-
-    def test_tune_only_failed_warm_reraises(self):
-        # A failed tune-only warm re-raises (rather than reporting inf) so the
-        # exception crosses the worker pipe and submit() restarts a possibly
-        # poisoned worker.
-        job = self._job(measure=False)
-        job.bmreq.benchmark.side_effect = RuntimeError("boom")
-        with (
-            mock.patch("torch.cuda.set_device"),
-            mock.patch("torch.cuda.tunable", mock.Mock()),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "tune-only warm-up failed"):
-                job(0, "", {})
 
 
 if __name__ == "__main__":
