@@ -4811,7 +4811,7 @@ class TestAsArray(_TestAsArrayBase):
         self.assertEqual(result, original)
         self.assertNotEqual(result.data_ptr(), original.data_ptr())
         # A buffer can be aliased, but it doesn't hold the producer's array.
-        with self.assertRaisesRegex(ValueError, "reading it through DLPack failed") as ctx:
+        with self.assertRaisesRegex(ValueError, f"'{cvt.__name__}' into a tensor, .* copy=False raised a BufferError") as ctx:
             torch.asarray(cvt(original), copy=False)
         self.assertIsInstance(ctx.exception.__cause__, BufferError)
 
@@ -4915,6 +4915,27 @@ class TestAsArrayCpuOnly(_TestAsArrayBase):
             torch.asarray(_Counting(), copy=copy)
         self.assertEqual(len(calls), 1)
 
+    def test_asarray_dlpack_buffer_error_without_copy_false(self, device):
+        # Only for copy=False does a BufferError mean the export needs a copy.
+        class _Unexportable(_FailingDLPack):
+            def __dlpack__(self, *args, **kwargs):
+                raise BufferError("can't export")
+
+        for copy in (None, True):
+            with self.assertRaisesRegex(BufferError, "can't export"):
+                torch.asarray(_Unexportable(), copy=copy)
+
+    def test_asarray_dlpack_without_copy_argument(self, device):
+        # A producer that predates DLPack 1.0 can't be asked not to copy, so
+        # copy=False trusts its export, as torch.from_dlpack does.
+        class _Legacy(_DLPackWrapper):
+            def __dlpack__(self, stream=None):
+                return self._tensor.__dlpack__(stream=stream)
+
+        original = torch.arange(3.0)
+        result = torch.asarray(_Legacy(original), copy=False)
+        self.assertEqual(result.data_ptr(), original.data_ptr())
+
     def test_asarray_dlpack_interrupt_propagates(self, device):
         # A KeyboardInterrupt is neither turned into copy=False's ValueError nor,
         # as with hasattr, taken to mean __dlpack__ is missing.
@@ -4930,7 +4951,7 @@ class TestAsArrayCpuOnly(_TestAsArrayBase):
             with self.assertRaisesRegex(KeyboardInterrupt, "interrupted"):
                 torch.asarray(obj, copy=False)
 
-    @skipIfTorchDynamo("the subprocess doesn't run under Dynamo")
+    @skipIfTorchDynamo("the check runs in a subprocess, so a Dynamo run would only repeat it")
     @skipIfFreeThreaded("needs the GIL")
     def test_asarray_buffer_copy_keeps_gil(self, device):
         # tensor_frombuffer doesn't hold the buffer's export, so if the copy ran
