@@ -2208,8 +2208,14 @@ class CudaReproTests(TestCase):
 
         f1_out, f1_grad = run(f, True)
         eager_out, eager_grad = run(f, False)
-        self.assertEqual(f1_out, eager_out, atol=1e-5, rtol=1e-5)
-        self.assertEqual(f1_grad, eager_grad, atol=1e-5, rtol=1e-5)
+        # Inductor runs the conv channels-last while eager keeps it
+        # contiguous, and oneDNN picks a different fp32 kernel per layout.
+        # The -1000 bias puts the logits where an ulp is 6e-5, so that
+        # sub-ulp kernel difference becomes 1e-4 once log_softmax takes the
+        # shift back out.
+        tol = 1e-3 if TEST_XPU else 1e-5
+        self.assertEqual(f1_out, eager_out, atol=tol, rtol=tol)
+        self.assertEqual(f1_grad, eager_grad, atol=tol, rtol=tol)
 
         opt_fn = torch.compile(f, backend="inductor", fullgraph=True)
         _, codes = run_and_get_code(opt_fn, x.clone().requires_grad_())
