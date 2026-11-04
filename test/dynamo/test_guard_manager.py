@@ -5,8 +5,11 @@ import gc
 import inspect
 import os
 import sys
+import sysconfig
 import unittest
 import weakref
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
 import torch
@@ -15,9 +18,12 @@ import torch._dynamo.test_case
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+from torch._dynamo.guards import _ordered_dict_order, GuardBuilder
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     set_default_dtype,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
@@ -40,6 +46,599 @@ x = torch.tensor(4)
 weakref_x = weakref.ref(x)
 
 default_mgr_enum = torch._dynamo.guards.GuardManagerType.GUARD_MANAGER
+dict_mgr_enum = torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER
+
+
+@instantiate_parametrized_tests
+class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("verbose", [False, True])
+    @parametrize("partial", [False, True])
+    def test_hook_membership_guard_clone_reentry(self, verbose, partial):
+        inputs = {"hooks": {1: None}, "middle": None, "flags": {2: True}}
+        root = RootGuardManager()
+        managers = {
+            name: root.dict_getitem_manager(name, name, value, default_mgr_enum)
+            for name, value in inputs.items()
+        }
+        guards.install_nn_module_hook_membership_guard(
+            managers["hooks"], managers["flags"], (True,), [], None
+        )
+        clone = root.clone_manager(
+            lambda manager: manager.get_source() != "middle"
+            and (not partial or manager.get_source() != "hooks")
+        )
+        seen = []
+
+        def check_clone(_):
+            result = clone.check({"hooks": {3: None}, "flags": {3: True}})
+            seen.append(result)
+            return result
+
+        managers["middle"].add_lambda_guard(check_clone, [], None)
+        if verbose:
+            self.assertFalse(root.check_verbose(inputs).result)
+        else:
+            self.assertFalse(root.check(inputs))
+        self.assertEqual(seen, [True])
+        inputs["flags"] = {1: True}
+        self.assertTrue(root.check(inputs))
+
+    def test_hook_membership_guard_retains_temporary_dictionary(self):
+        references = []
+
+        class Registries:
+            @property
+            def hooks(self):
+                hooks = OrderedDict({1: None})
+                references.append(weakref.ref(hooks))
+                return hooks
+
+            @property
+            def flags(self):
+                if references[-1]() is None:
+                    raise RuntimeError("hook dictionary was freed before comparison")
+                return {1: True}
+
+        root = RootGuardManager()
+        managers = [
+            root.getattr_manager(name, name, {1: None}, default_mgr_enum)
+            for name in ("hooks", "flags")
+        ]
+        guards.install_nn_module_hook_membership_guard(*managers, (True,), [], None)
+        self.assertTrue(root.check(Registries()))
+        self.assertIsNone(references[-1]())
+
+    @parametrize("verbose", [False, True])
+    def test_hook_membership_guard_resets_after_exception(self, verbose):
+        nested = torch.nested.nested_tensor(
+            [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
+        )
+        hooks, flags = OrderedDict({1: None}), {1: True}
+        inputs = {"hooks": hooks, "tensor": nested, "flags": flags}
+        root = RootGuardManager()
+        managers = {
+            name: root.dict_getitem_manager(name, name, value, default_mgr_enum)
+            for name, value in inputs.items()
+        }
+        managers["tensor"].add_tensor_match_guard(
+            nested,
+            [None] * 3,
+            [None] * 3,
+            "tensor",
+            [],
+            None,
+            type(nested),
+            torch._C._dispatch_keys(nested),
+        )
+        guards.install_nn_module_hook_membership_guard(
+            managers["hooks"], managers["flags"], (True,), [], None
+        )
+        check = root.check_verbose if verbose else root.check
+        with self.assertRaisesRegex(RuntimeError, "NestedTensorImpl doesn't support"):
+            check(inputs)
+        # A partial clone must not combine its flags with the previous traversal.
+        clone = root.clone_manager(
+            lambda manager: manager.get_source() not in ("hooks", "tensor")
+        )
+        self.assertTrue(clone.check({"flags": {2: True}}))
+        reference = weakref.ref(hooks)
+        del hooks, inputs
+        self.assertIsNone(reference())
+
+    @parametrize("reverse", [False, True])
+    def test_hook_membership_guard(self, reverse):
+        hooks = OrderedDict.fromkeys((1, 2))
+        flags = {2: True}
+        inputs = {"hooks": hooks, "flags": flags}
+        root = RootGuardManager()
+        managers = {
+            name: root.dict_getitem_manager(name, name, inputs[name], dict_mgr_enum)
+            for name in (reversed(inputs) if reverse else inputs)
+        }
+        guards.install_nn_module_hook_membership_guard(
+            managers["hooks"], managers["flags"], (False, True), ["hook flags"], None
+        )
+        clone = root.clone_manager(lambda manager: True)
+        for manager in (root, clone):
+            self.assertTrue(manager.check(inputs))
+            self.assertTrue(manager.check_verbose(inputs).result)
+            self.assertFalse(manager.check({"hooks": hooks}))
+            self.assertTrue(manager.check(inputs))  # reset after a partial traversal
+            changed = {"hooks": hooks, "flags": {1: True}}
+            self.assertFalse(manager.check(changed))
+            self.assertFalse(manager.check_verbose(changed).result)
+            equivalent = {
+                "hooks": OrderedDict.fromkeys((11, 12)),
+                "flags": {12: True},
+            }
+            self.assertTrue(manager.check(equivalent))
+            flags.clear()
+            flags[1] = True
+            self.assertFalse(manager.check(inputs))
+            flags.clear()
+            flags[2] = True
+            self.assertTrue(manager.check(inputs))
+
+    @parametrize("reverse", [False, True])
+    @parametrize("clone", [False, True])
+    @parametrize("same_root", [False, True])
+    def test_hook_membership_guard_recursive_tags(self, reverse, clone, same_root):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        modules = [torch.nn.Module(), torch.nn.Module()]
+        for key, module in enumerate(modules):
+            module.hooks = OrderedDict({key: None})
+            module.flags = OrderedDict({key: True})
+        root = RootGuardManager()
+        managers = {}
+        module_managers = []
+        for name in ("module",) if same_root else ("hooks", "flags"):
+            module_mgr = root.dict_getitem_manager(
+                name, name, modules[0], default_mgr_enum
+            )
+            module_managers.append(module_mgr)
+            dict_mgr = module_mgr.get_generic_dict_manager(
+                f"{name}.__dict__", vars(modules[0]), default_mgr_enum
+            )
+            for member in ("hooks", "flags") if same_root else (name,):
+                managers[member] = dict_mgr.dict_getitem_manager(
+                    member,
+                    f"{name}.{member}",
+                    getattr(modules[0], member),
+                    default_mgr_enum,
+                )
+        # Either role can be encountered first, independently of accessor order.
+        args = (
+            (managers["flags"], managers["hooks"])
+            if reverse
+            else (managers["hooks"], managers["flags"])
+        )
+        guards.install_nn_module_hook_membership_guard(*args, (True,), [], None)
+        GuardManagerWrapper(root).find_tag_safe_roots()
+        for manager in module_managers:
+            self.assertEqual(
+                manager.is_tag_safe_root(),
+                sys.version_info >= (3, 12)
+                and sysconfig.get_config_var("Py_GIL_DISABLED") != 1,
+            )
+        if clone:
+            root = root.clone_manager(lambda manager: True)
+
+        for module in modules:
+            inputs = (
+                {"module": module} if same_root else {"hooks": module, "flags": module}
+            )
+            self.assertTrue(root.check(inputs))
+            self.assertTrue(root.check(inputs))  # warm each root's pointer cache
+        if not same_root:
+            mixed = {"hooks": modules[0], "flags": modules[1]}
+            self.assertFalse(
+                root.check(mixed)
+            )  # both cached sides must still participate
+        modules[1].flags.clear()
+        modules[1].flags[10] = True
+        self.assertFalse(root.check(inputs))
+        self.assertFalse(root.check_verbose(inputs).result)
+        modules[1].flags = OrderedDict({1: True})
+        self.assertTrue(root.check(inputs))
+        references = [weakref.ref(module.hooks) for module in modules]
+        del module, inputs, modules
+        if not same_root:
+            del mixed
+        gc.collect()
+        self.assertTrue(all(reference() is None for reference in references))
+
+    def test_hook_membership_guard_same_manager(self):
+        mapping = {1: True, 2: True}
+        root = RootGuardManager()
+        guards.install_nn_module_hook_membership_guard(
+            root, root, (True, True), [], None
+        )
+        self.assertTrue(root.check(mapping))
+        self.assertFalse(root.check({1: True}))
+        self.assertFalse(root.check(None))
+        self.assertTrue(root.check(mapping))
+
+    @parametrize("side", ["hooks", "flags"])
+    def test_hook_membership_guard_rejects_noninteger_keys(self, side):
+        calls = []
+
+        class Key:
+            def __hash__(self):
+                calls.append("hash")
+                return 1
+
+            def __eq__(self, other):
+                calls.append("eq")
+                return True
+
+        inputs = {"hooks": {1: None}, "flags": {1: True}}
+        inputs[side] = {Key(): None}
+        root = RootGuardManager()
+        managers = [
+            root.dict_getitem_manager(name, name, inputs[name], dict_mgr_enum)
+            for name in ("hooks", "flags")
+        ]
+        guards.install_nn_module_hook_membership_guard(*managers, (True,), [], None)
+        calls.clear()
+        self.assertFalse(root.check(inputs))
+        self.assertEqual(calls, [])
+
+    @parametrize("populated", [False, True])
+    def test_hook_membership_builder_uses_builtin_dict_methods(self, populated):
+        calls = []
+
+        class Flags(dict):
+            def __bool__(self):
+                calls.append("bool")
+                raise AssertionError("guard builder called __bool__")
+
+            def __contains__(self, key):
+                calls.append("contains")
+                raise AssertionError("guard builder called __contains__")
+
+        from torch._dynamo.source import AttrSource, LocalSource
+
+        hooks, flags = {1: None, 2: None}, Flags({2: True} if populated else {})
+        flags_source = LocalSource("flags")
+        source = LocalSource("module")
+        root = RootGuardManager()
+        managers = [
+            root.dict_getitem_manager(name, name, value, default_mgr_enum)
+            for name, value in (("hooks", hooks), ("flags", flags))
+        ]
+        builder = mock.Mock(spec=GuardBuilder)
+        builder.save_guards = False
+        builder.already_added_code_parts = set()
+        builder.get.side_effect = lambda item: flags if item is flags_source else hooks
+        builder.arg_ref.side_effect = lambda name: name
+        builder.get_guard_manager_from_source.side_effect = (
+            lambda item: managers[1] if item is flags_source else managers[0]
+        )
+        guard = source.make_guard(GuardBuilder.NN_MODULE_HOOKS_DICT_CONTAINS)
+        GuardBuilder.NN_MODULE_HOOKS_DICT_CONTAINS(
+            builder, guard, "_forward_hooks", flags_source
+        )
+        self.assertTrue(root.check({"hooks": hooks, "flags": flags}))
+        self.assertEqual(calls, [])
+        builder.arg_ref.assert_has_calls(
+            [
+                mock.call(flags_source.name),
+                mock.call(AttrSource(source, "_forward_hooks").name),
+            ]
+        )
+        self.assertEqual(builder.arg_ref.call_count, 2)
+
+    def test_hook_membership_diff_keeps_both_roles(self):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        pair = {"hooks": {1: None, 2: None}, "flags": {1: True}}
+        root = RootGuardManager()
+        parent = root.dict_getitem_manager("pair", "L['pair']", pair, default_mgr_enum)
+        managers = [
+            parent.dict_getitem_manager(
+                name, f"L['pair']['{name}']", pair[name], default_mgr_enum
+            )
+            for name in ("hooks", "flags")
+        ]
+        guards.install_nn_module_hook_membership_guard(
+            *managers, (True, False), [], None
+        )
+        wrapper = GuardManagerWrapper(root)
+        wrapper.diff_guard_sources.add("L['pair']['flags']")
+        wrapper.prepare_diff_guard_manager()
+        self.assertIn("L['pair']['hooks']", wrapper.diff_guard_sources)
+        self.assertIn("L['pair']", wrapper.diff_guard_sources)
+        self.assertTrue(wrapper.diff_guard_root.check({"pair": pair}))
+        self.assertFalse(
+            wrapper.diff_guard_root.check({"pair": {**pair, "flags": {2: True}}})
+        )
+
+    def test_hook_flag_validation_cache_invalidation(self):
+        calls = []
+
+        class Key:
+            def __hash__(self):
+                calls.append("hash")
+                return 1
+
+            def __eq__(self, other):
+                calls.append("eq")
+                return True
+
+        hooks, flags = {1: None}, {}
+        inputs = {"hooks": hooks, "flags": flags}
+        root = RootGuardManager()
+        managers = [
+            root.dict_getitem_manager(name, name, inputs[name], default_mgr_enum)
+            for name in inputs
+        ]
+        guards.install_nn_module_hook_membership_guard(*managers, (False,), [], None)
+        self.assertTrue(root.check(inputs))
+        invalid = {Key(): True}
+        flags.update(invalid)
+        calls.clear()
+        self.assertFalse(root.check(inputs))
+        self.assertEqual(calls, [])
+        flags.clear()
+        self.assertTrue(root.check(inputs))
+        flags[2] = True
+        self.assertTrue(root.check(inputs))
+        flags[1] = flags.pop(2)
+        self.assertFalse(root.check(inputs))
+        flags[2] = flags.pop(1)
+        self.assertTrue(root.check(inputs))
+
+
+@instantiate_parametrized_tests
+class OrderedDictOrderGuardTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("order", [(), (0,), (0, 1, 2), (2, 0, 1)])
+    def test_ordered_dict_order_guard(self, order):
+        mapping = OrderedDict.fromkeys(range(len(order)), 1)
+        for key in order:
+            mapping.move_to_end(key)
+        root = RootGuardManager()
+        manager = root.dict_getitem_manager(
+            "mapping", "mapping", mapping, dict_mgr_enum
+        )
+        manager.add_ordered_dict_order_guard(order, ["mapping order"], None)
+        clone = root.clone_manager(lambda manager: True)
+        inputs = {"mapping": mapping}
+        self.assertTrue(root.check(inputs))
+        self.assertTrue(root.check_verbose(inputs).result)
+        self.assertTrue(clone.check(inputs))
+        self.assertIsInstance(
+            manager.get_leaf_guards()[0], guards.ORDERED_DICT_ORDER_MATCH
+        )
+        self.assertTrue(guards.ORDERED_DICT_ORDER_MATCH(root, order, [], None)(mapping))
+        if len(order) > 1:
+            mapping.move_to_end(order[0])
+            self.assertFalse(root.check(inputs))
+            self.assertFalse(clone.check(inputs))
+            self.assertEqual(
+                root.check_verbose(inputs).verbose_code_parts, ["mapping order"]
+            )
+
+    @unittest.skipUnless(
+        sysconfig.get_config_var("Py_GIL_DISABLED") == 1, "requires free threading"
+    )
+    def test_ordered_dict_order_guard_shared_scratch(self):
+        roots = []
+        for size in (17, 128, 16, 1024, 2):
+            mapping = OrderedDict.fromkeys(range(size))
+            mapping.move_to_end(0)
+            root = RootGuardManager()
+            root.add_ordered_dict_order_guard(tuple(mapping), [], None)
+            roots.append((root, root.clone_manager(lambda manager: True), mapping))
+
+        def check_roots():
+            for _ in range(20):
+                for root, clone, mapping in roots:
+                    self.assertTrue(root.check(mapping))
+                    self.assertTrue(clone.check(mapping))
+                    wrong = OrderedDict.fromkeys(range(len(mapping)))
+                    self.assertFalse(root.check(wrong))
+                    self.assertFalse(clone.check(wrong))
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            list(executor.map(lambda _: check_roots(), range(4)))
+
+    @parametrize("clone", [False, True])
+    @parametrize("subclass", [False, True])
+    @parametrize("reordered", [False, True])
+    def test_ordered_dict_order_guard_recursive_tags(self, clone, subclass, reordered):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        class Mapping(OrderedDict):
+            pass
+
+        class OtherMapping(OrderedDict):
+            pass
+
+        module = torch.nn.Module()
+        module.mapping = (Mapping if subclass else OrderedDict)({1: None, 2: None})
+        root = RootGuardManager()
+        module_mgr = root.dict_getitem_manager(
+            "module", "module", module, default_mgr_enum
+        )
+        dict_mgr = module_mgr.get_generic_dict_manager(
+            "module.__dict__", vars(module), default_mgr_enum
+        )
+        mapping_mgr = dict_mgr.dict_getitem_manager(
+            "mapping",
+            "module.mapping",
+            module.mapping,
+            torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER,
+        )
+        if reordered:
+            module.mapping.move_to_end(1)
+        order = (1, 0) if reordered else (0, 1)
+        mapping_mgr.add_ordered_dict_order_guard(order, ["mapping order"], None)
+        GuardManagerWrapper(root).find_tag_safe_roots()
+        self.assertEqual(
+            module_mgr.is_tag_safe_root(),
+            not subclass
+            and sys.version_info >= (3, 12)
+            and sysconfig.get_config_var("Py_GIL_DISABLED") != 1,
+        )
+        if clone:
+            root = root.clone_manager(lambda manager: True)
+        inputs = {"module": module}
+        self.assertTrue(root.check(inputs))
+        self.assertTrue(root.check(inputs))
+        module.mapping.move_to_end(2 if reordered else 1)
+        self.assertFalse(root.check(inputs))
+        module.mapping.move_to_end(1 if reordered else 2)
+        self.assertTrue(root.check(inputs))
+        if subclass:
+            module.mapping.__class__ = OtherMapping
+            self.assertFalse(root.check(inputs))
+
+    @parametrize("reordered", [False, True])
+    def test_ordered_dict_order_guard_bypasses_callbacks(self, reordered):
+        class Key:
+            fail = False
+
+            def __init__(self, value):
+                self.value = value
+
+            def __hash__(self):
+                if self.fail:
+                    raise AssertionError("guard called __hash__")
+                return self.value
+
+            def __eq__(self, other):
+                if self.fail:
+                    raise AssertionError("guard called __eq__")
+                return True
+
+        class Mapping(OrderedDict):
+            def __iter__(self):
+                raise AssertionError("guard called a Python mapping callback")
+
+            keys = __len__ = __iter__
+
+        first, second = Key(1), Key(2)
+        mapping = Mapping([(first, 1), (second, 2)])
+        if reordered:
+            mapping.move_to_end(first)
+        Key.fail = True
+        order = _ordered_dict_order(mapping)
+        self.assertEqual(order, (1, 0) if reordered else (0, 1))
+        root = RootGuardManager()
+        root.add_ordered_dict_order_guard(order, [], None)
+        self.assertTrue(root.check(mapping))
+        Key.fail = False
+        mapping.move_to_end(second if reordered else first)
+        Key.fail = True
+        self.assertFalse(root.check(mapping))
+
+    def test_ordered_dict_order_guard_does_not_specialize_keys(self):
+        root = RootGuardManager()
+        root.add_ordered_dict_order_guard((1, 0), [], None)
+        for keys in ((1, 2), (11, 12)):
+            mapping = OrderedDict.fromkeys((None, *keys))
+            del mapping[None]
+            self.assertFalse(root.check(mapping))
+            mapping.move_to_end(keys[0])
+            self.assertTrue(root.check(mapping))
+
+    @parametrize("order", [(-1,), (1,), (0, 0)])
+    def test_ordered_dict_order_guard_rejects_invalid_positions(self, order):
+        root = RootGuardManager()
+        with self.assertRaisesRegex(ValueError, "permutation"):
+            root.add_ordered_dict_order_guard(order, [], None)
+
+    @parametrize(
+        "mutation, linked_count",
+        [(mode, count) for mode in ("before", "after") for count in (0, 1, 2)]
+        + [("delete", 1), ("replace", 1), ("duplicate", 1)],
+    )
+    @parametrize("key_type", [str, int])
+    def test_ordered_dict_invalid_storage(self, mutation, linked_count, key_type):
+        mapping = OrderedDict()
+        if mutation == "before":
+            dict.__setitem__(mapping, key_type(0), 0)
+        mapping.update((key_type(i), i) for i in range(1, linked_count + 1))
+        if mutation in ("delete", "replace", "duplicate"):
+            dict.__delitem__(mapping, key_type(1))
+        if mutation == "duplicate":
+            mapping[key_type(1)] = 1
+        if mutation in ("after", "replace", "duplicate"):
+            dict.__setitem__(mapping, key_type(0), 0)
+        valid = OrderedDict(dict.items(mapping))
+        spec = GuardBuilder.ORDERED_DICT_ORDER_MATCH.guard_check_spec
+        order = spec.get_metadata_fn(None, valid)
+        self.assertTrue(spec.eval_fn(valid, order))
+        self.assertIsNone(_ordered_dict_order(mapping))
+        self.assertFalse(spec.eval_fn(mapping, order))
+        self.assertFalse(spec.eval_fn(mapping, None))
+        root = RootGuardManager()
+        root.add_ordered_dict_order_guard(order, [], None)
+        self.assertFalse(root.check(mapping))
+
+    def test_ordered_dict_snapshot_preserves_instance_state(self):
+        class State(dict):
+            pass
+
+        mapping = OrderedDict.fromkeys([1, 2])
+        before = tuple(map(id, gc.get_referents(mapping)))
+        self.assertEqual(guards.ordered_dict_keys(mapping), [1, 2])
+        self.assertEqual(tuple(map(id, gc.get_referents(mapping))), before)
+        mapping.__dict__ = State(extra=1)
+        mapping.move_to_end(1)
+        self.assertEqual(_ordered_dict_order(mapping), (1, 0))
+
+    def test_empty_order_guard_runs_under_dictionary_manager(self):
+        root = RootGuardManager()
+        mapping = OrderedDict()
+        manager = root.dict_getitem_manager(
+            "mapping", "mapping", mapping, dict_mgr_enum
+        )
+        manager.add_ordered_dict_order_guard((), [], None)
+        self.assertTrue(root.check({"mapping": mapping}))
+        mapping["orphan"] = None
+        dict.clear(mapping)
+        self.assertEqual(dict.__len__(mapping), 0)
+        self.assertFalse(root.check({"mapping": mapping}))
+        self.assertFalse(root.check_verbose({"mapping": mapping}).result)
+
+    def test_invalid_ordered_dict_input_snapshot_graph_breaks(self):
+        mapping = OrderedDict(a=1)
+        dict.__setitem__(mapping, "unlinked", 2)
+
+        def fn(x, mapping):
+            return x + len(mapping)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend=counter)(x, mapping), x + 2)
+        self.assertEqual(counter.frame_count, 0)
+
+    def test_ordered_dict_snapshot_rejects_duplicate_storage_key(self):
+        from torch._dynamo.utils import (
+            enumerate_items_with_dict_position,
+            InvalidOrderedDict,
+        )
+
+        class Key:
+            hash_value = 0
+
+            def __hash__(self):
+                return self.hash_value
+
+        key = Key()
+        mapping = OrderedDict([(key, 1)])
+        key.hash_value = 1
+        mapping[key] = 2
+        self.assertEqual(len(mapping), 2)
+        with self.assertRaisesRegex(InvalidOrderedDict, "storage differs"):
+            list(enumerate_items_with_dict_position(mapping))
+        self.assertIsNone(_ordered_dict_order(mapping))
 
 
 class Pair:
@@ -79,8 +678,137 @@ def less_match_verbose_code_parts(expected):
     return [f"expected < {expected}"]
 
 
-class GuardManagerTests(torch._dynamo.test_case.TestCase):
+@instantiate_parametrized_tests
+class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_storage_overlap_diff_participant_closure(self):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        storage = torch.randn(6)
+        values = {"a": storage[:2], "b": storage[1:3], "c": storage[3:5]}
+        root = RootGuardManager()
+        managers = [
+            root.dict_getitem_manager(name, name, value, default_mgr_enum)
+            for name, value in values.items()
+        ]
+        install_storage_overlapping_guard(managers[:2], managers[2:], [], None)
+        wrapper = GuardManagerWrapper(root)
+        wrapper.diff_guard_sources.add("a")
+        wrapper.prepare_diff_guard_manager()
+        self.assertIn("c", wrapper.diff_guard_sources)
+        self.assertTrue(wrapper.diff_guard_root.check(values))
+        self.assertFalse(wrapper.diff_guard_root.check({**values, "c": values["a"]}))
+
+    def test_object_alias_pattern_diff_participant_closure(self):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        first, second = [], []
+        root = RootGuardManager()
+        pair = {"left": first, "right": second}
+        parent = root.dict_getitem_manager("pair", "L['pair']", pair, default_mgr_enum)
+        managers = [
+            parent.dict_getitem_manager(
+                name, f"L['pair']['{name}']", pair[name], default_mgr_enum
+            )
+            for name in pair
+        ]
+        guards.install_object_alias_pattern_guard(
+            managers, [0, 1], ["distinct receivers"], None
+        )
+        unrelated = [
+            root.dict_getitem_manager(name, name, [], default_mgr_enum)
+            for name in ("unrelated_left", "unrelated_right")
+        ]
+        guards.install_object_alias_pattern_guard(unrelated, [0, 1], [], None)
+        wrapper = GuardManagerWrapper(root)
+        wrapper.diff_guard_sources.add("L['pair']['left']")
+        wrapper.prepare_diff_guard_manager()
+        self.assertIn("L['pair']['right']", wrapper.diff_guard_sources)
+        self.assertIn("L['pair']", wrapper.diff_guard_sources)
+        self.assertNotIn("unrelated_left", wrapper.diff_guard_sources)
+        self.assertNotIn("unrelated_right", wrapper.diff_guard_sources)
+        self.assertTrue(wrapper.diff_guard_root.check({"pair": pair}))
+        self.assertFalse(
+            wrapper.diff_guard_root.check({"pair": {"left": first, "right": first}})
+        )
+        # An explicit partial clone still means exactly the caller's selected managers.
+        partial = root.clone_manager(
+            lambda manager: "right" not in manager.get_source()
+        )
+        self.assertTrue(
+            partial.check(
+                {
+                    "pair": {"left": first, "right": first},
+                    "unrelated_left": [],
+                    "unrelated_right": [],
+                }
+            )
+        )
+
+    def test_object_alias_pattern_reentrant_clone(self):
+        root = RootGuardManager()
+        first, second = [], []
+        values = {"0": first, "1": first, "2": second}
+        managers = [
+            root.dict_getitem_manager(name, name, value, default_mgr_enum)
+            for name, value in values.items()
+        ]
+        guards.install_object_alias_pattern_guard(managers, [0, 0, 2], [], None)
+        clone = root.clone_manager(lambda manager: True)
+        calls = []
+
+        def check_clone(value):
+            calls.append(value)
+            return clone.check(values)
+
+        managers[0].add_lambda_guard(check_clone, ["clone check"], None)
+        # No earlier failure may reorder accessors past the callback.
+        self.assertFalse(root.check({"0": first, "1": second, "2": []}))
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(root.check(values))
+        self.assertEqual(len(calls), 2)
+
+        def broken_filter(manager):
+            if manager.get_source() == "1":
+                raise RuntimeError("clone filter failed")
+            return True
+
+        with self.assertRaisesRegex(RuntimeError, "clone filter failed"):
+            root.clone_manager(broken_filter)
+        self.assertTrue(root.check(values))
+        self.assertTrue(root.clone_manager(lambda manager: True).check(values))
+
+    @parametrize("verbose", [False, True])
+    def test_object_alias_pattern_reset_after_cpp_throw(self, verbose):
+        root = RootGuardManager()
+        first, second = [], []
+        managers = [
+            root.dict_getitem_manager(name, name, value, default_mgr_enum)
+            for name, value in (("left", first), ("right", second))
+        ]
+        guards.install_object_alias_pattern_guard(managers, [0, 1], [], None)
+        nested = torch.nested.nested_tensor([torch.randn(2, 3), torch.randn(3, 3)])
+        tensor = root.dict_getitem_manager("tensor", "tensor", nested, default_mgr_enum)
+        tensor.add_tensor_match_guard(
+            nested,
+            [None] * 3,
+            [None] * 3,
+            "tensor",
+            [],
+            None,
+            type(nested),
+            torch._C._dispatch_keys(nested),
+        )
+        inputs = {"left": first, "right": second, "tensor": nested}
+        check = root.check_verbose if verbose else root.check
+        with self.assertRaisesRegex(RuntimeError, "NestedTensorImpl doesn't support"):
+            check(inputs)
+        # The original alias classes must not retain receivers from the failed check.
+        inputs.update(left=second, right=first)
+        with self.assertRaisesRegex(RuntimeError, "NestedTensorImpl doesn't support"):
+            check(inputs)
+        self.assertFalse(root.check({"left": first, "right": first, "tensor": nested}))
 
     def test_object_alias_pattern_guard(self):
         root = RootGuardManager()
@@ -103,14 +831,6 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
             )
             self.assertTrue(manager.check({"0": second, "1": second, "2": first}))
 
-        # Reentrant evaluation of a clone must not clear the original's state.
-        managers[0].add_lambda_guard(
-            lambda value: cloned.check({"0": first, "1": first, "2": second}),
-            ["check independent clone"],
-            None,
-        )
-        self.assertFalse(root.check({"0": first, "1": second, "2": []}))
-
     def test_object_alias_pattern_temporary_lifetimes(self):
         class Value:
             pass
@@ -132,6 +852,10 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         for manager in (root, root.clone_manager(lambda node: True)):
             self.assertTrue(manager.check(owner))
             self.assertTrue(manager.check(owner))
+
+
+class GuardManagerTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_empty_dict_identity_guard(self):
         mapping = {}

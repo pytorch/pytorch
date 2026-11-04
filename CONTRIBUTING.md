@@ -165,6 +165,8 @@ Rectangles are states. Rounded boxes are processes that move an item between sta
 
 The `in progress` and `ready for review` labels are managed by bots: authors should not add them by hand.
 
+The labels are the source of truth for where your PR is in the process. For what to do next, check the first pytorchbot comment, which displays status, CI results, doc previews, among other fun details.
+
 **When does my PR become `ready for review`?** The bot replaces `in progress` with `ready for review` once all of the following hold:
 
 - The automated review ([pr-review skill](.agents/skills/pr-review/SKILL.md)) does not flag anything blocking. You can run the skill locally to check your PR before pushing.
