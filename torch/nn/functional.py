@@ -5660,7 +5660,7 @@ def grid_sample(
             used internally will actually be trilinear. However, when the input is 4-D,
             the interpolation mode will legitimately be bilinear. Likewise
             ``mode='bicubic'`` is tricubic on a 5-D input, the separable cubic kernel
-            extended over the third axis; CPU and CUDA, ROCm included, implement the 5-D case.
+            extended over the third axis; CPU, XPU and CUDA, ROCm included, implement the 5-D case.
         padding_mode (str): padding mode for outside grid values
             ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
@@ -7307,9 +7307,6 @@ def quantize_tensor(
     Currently supported formats: ``mxfp8``. See the code samples at the bottom
     of this docblock for how to configure supported formats.
 
-    Positive and negative axis indices are accepted. The output retains the
-    input's logical axis order, with the quantized axis contiguous.
-
     A swizzled scale layout is modeled as packed ``[1, L]`` over the requested
     quantization dims, with ``L`` being swizzle-specific.  For example, for an input
     of shape ``(B, M, K)`` and ``dim=(1, 2)`` and
@@ -7319,10 +7316,7 @@ def quantize_tensor(
     Both outputs preserve the axis positions of the input. For both outputs,
     the quantization axes from ``dim`` form contiguous slices when viewed
     in ``dim=(outer, inner)`` order, with the inner dim varying the fastest
-    and outer next-fastest. An otherwise view-compatible input is copied if
-    compact or square scaling quantizes the physically slower matrix axis.
-    Swizzled scaling along that axis also copies if the faster matrix axis
-    has size not divisible by 16. For example:
+    and outer next-fastest. For example:
 
     - ``mxfp8`` unswizzled quantization of input shaped ``(M, K)`` with
       strides ``(K, 1)`` and ``dim=(0, 1)`` will result in ``qdata`` with
