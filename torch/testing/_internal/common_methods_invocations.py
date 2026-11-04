@@ -15859,9 +15859,6 @@ op_db: list[OpInfo] = [
            dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.float16),
-           dtypesIfMPS=floating_types_and(
-               torch.int64, torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.uint8, torch.bool
-           ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_avg_pool1d,
            sample_inputs_func=sample_inputs_avgpool1d),
@@ -15873,9 +15870,7 @@ op_db: list[OpInfo] = [
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.float16),
-           dtypesIfMPS=floating_types_and(
-               torch.int64, torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.uint8, torch.bool
-           ),
+           dtypesIfMPS=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_avg_pool3d,
            sample_inputs_func=sample_inputs_avgpool3d,
@@ -15887,8 +15882,6 @@ op_db: list[OpInfo] = [
            skips=(
                # AssertionError: Tensor-likes are not close!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
-               # AssertionError: Scalars are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
            )),
     OpInfo(
         "nn.functional.binary_cross_entropy_with_logits",
@@ -16831,15 +16824,10 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           dtypesIfMPS=floating_types_and(
-               torch.int64, torch.float16, torch.bfloat16, torch.int32, torch.uint8, torch.bool, torch.int8, torch.int16
-           ),
            error_inputs_func=error_inputs_avg_pool2d,
            sample_inputs_func=sample_inputs_avgpool2d,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type=('cuda', 'xpu')),
-               # AssertionError: Scalars are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
            )),
     OpInfo('nn.functional.fractional_max_pool2d',
            supports_autograd=True,
@@ -16940,9 +16928,6 @@ op_db: list[OpInfo] = [
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
-           dtypesIfMPS=floating_types_and(
-               torch.bfloat16, torch.float16, torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8, torch.bool
-           ),
            sample_inputs_func=sample_inputs_max_pool,
            skips=(
                # We've defined a custom op here, and we don't handle the case where we receive an out kwarg
