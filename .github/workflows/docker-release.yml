@@ -132,6 +132,11 @@ jobs:
             echo "DOCKER_IMAGE=pytorch-nightly";
             echo "INSTALL_CHANNEL=whl/nightly";
             echo "TRITON_VERSION=$(cut -f 1 .ci/docker/triton_version.txt)+$(cut -c -10 .ci/docker/ci_commit_pins/triton.txt)";
+            # One cache per image variant. Lets the unchanged layers of last
+            # night's image (the torch dependencies) be reused, with the same
+            # digests, on a builder whose local cache is empty. Pull requests
+            # only read it; docker.Makefile writes it just when pushing.
+            echo "CACHE_REF=${DOCKER_REGISTRY}/${DOCKER_ORG}/pytorch-nightly:buildcache-${BUILD_IMAGE_TYPE}-cuda${CUDA_VERSION_SHORT}-${BUILD_PLATFORMS//\//-}";
           } >> "${GITHUB_ENV}"
       - name: Run docker build / push
         # docker.Makefile drives the buildx build (USE_BUILDX=1);

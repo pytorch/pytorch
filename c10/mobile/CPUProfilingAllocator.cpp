@@ -88,7 +88,7 @@ std::vector<MemEvent> create_and_sort_mem_events(
     const std::vector<uint64_t>& allocation_sizes,
     const std::vector<uint64_t>& allocation_lifetimes) {
   std::vector<MemEvent> events;
-  for (uint64_t i = 0; i < allocation_sizes.size(); ++i) {
+  for (const auto i : c10::irange(allocation_sizes.size())) {
     // If observed allocation are freed outside the scope of
     // observation, then allocations are not managed by the
     // AllocationPlan.
