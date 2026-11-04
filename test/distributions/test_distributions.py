@@ -11,17 +11,17 @@ change. This file contains two types of randomized tests:
    initialized with random data. If these fail something is wrong, but it's
    fine to use a fixed seed by inheriting from common.TestCase.
 
-2. The trickier tests are statistical tests. These tests explicitly call
-   set_rng_seed(n) and are marked "see Note [Randomized statistical tests]".
+2. The trickier tests are statistical tests. These tests are decorated with
+   @device_rng_seed(default=n) and are marked "see Note [Randomized statistical tests]".
    These statistical tests have a known positive failure rate
    (we set failure_rate=1e-3 by default). We need to balance strength of these
    tests with annoyance of false alarms. One way that works is to specifically
    set seeds in each of the randomized tests. When a random generator
    occasionally changes (as in #4312 vectorizing the Box-Muller sampler), some
    of these statistical tests may (rarely) fail. If one fails in this case,
-   it's fine to increment the seed of the failing test (but you shouldn't need
-   to increment it more than once; otherwise something is probably actually
-   wrong).
+   it's fine to increment the seed of the failing test, separately for each device
+   type (but you shouldn't need to increment it more than once; otherwise something
+   is probably actually wrong).
 
 3. `test_geometric_sample`, `test_binomial_sample` and `test_poisson_sample`
    are validated against `scipy.stats.` which are not guaranteed to be identical
@@ -119,6 +119,7 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
+    device_rng_seed,
     freeze_rng_state,
     gradcheck,
     HardwareClassification,
@@ -127,7 +128,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     set_default_dtype,
     set_default_dtype_if_supported,
-    set_rng_seed,
     skipIfTorchDynamo,
     TestCase,
 )
@@ -1678,8 +1678,8 @@ class TestDistributionsDevice(DistributionsTestCase):
         )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_geometric_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for prob in [0.01, 0.18, 0.8]:
             self._check_sampler_discrete(
                 Geometric(prob),
@@ -1702,8 +1702,8 @@ class TestDistributionsDevice(DistributionsTestCase):
     test_binomial_bfloat16 = set_default_dtype(torch.bfloat16)(test_binomial)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_binomial_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for prob in [0.01, 0.1, 0.5, 0.8, 0.9]:
             for count in [2, 10, 100, 500]:
                 self._check_sampler_discrete(
@@ -1799,8 +1799,8 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_binomial_vectorized_count(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
         total_count = torch.tensor([[4, 7], [3, 8]], dtype=torch.float64)
         bin0 = Binomial(total_count, torch.tensor(1.0))
         self.assertEqual(bin0.sample(), total_count)
@@ -1969,6 +1969,7 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_multinomial_2d(self):
         total_count = 10
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
@@ -1980,7 +1981,6 @@ class TestDistributionsDevice(DistributionsTestCase):
             Multinomial(total_count, p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3)
         )
         self.assertEqual(Multinomial(total_count, p).sample((6,)).size(), (6, 2, 3))
-        set_rng_seed(0)
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, p), [p])
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
 
@@ -2021,6 +2021,7 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
@@ -2036,7 +2037,6 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._gradcheck_log_prob(Categorical, (p,))
 
         # sample check for extreme value of probs
-        set_rng_seed(0)
         self.assertEqual(
             Categorical(s).sample(sample_shape=(2,)), torch.tensor([[0, 1], [0, 1]])
         )
@@ -2115,6 +2115,7 @@ class TestDistributionsDevice(DistributionsTestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_poisson_log_prob(self):
         rate = torch.randn(2, 3).abs().requires_grad_()
         rate_1d = torch.randn(1).abs().requires_grad_()
@@ -2125,7 +2126,6 @@ class TestDistributionsDevice(DistributionsTestCase):
             expected = scipy.stats.poisson.logpmf(x.cpu(), l.cpu())
             self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
-        set_rng_seed(0)
         self._check_log_prob(Poisson(rate), lambda *args: ref_log_prob(rate, *args))
         self._check_log_prob(
             Poisson(rate_zero), lambda *args: ref_log_prob(rate_zero, *args)
@@ -2141,8 +2141,8 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(rate_zero.grad, torch.inf)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_poisson_sample(self, device):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
         saved_dtype = torch.get_default_dtype()
         try:
             dtypes = [torch.float, torch.bfloat16, torch.half]
@@ -2161,8 +2161,8 @@ class TestDistributionsDevice(DistributionsTestCase):
             torch.set_default_dtype(saved_dtype)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_poisson_tensor_sample(self):
-        set_rng_seed(1)
         for rate in [0.12, 0.9, 4.0]:
             self._check_sampler_discrete(
                 Poisson(torch.tensor([rate])),
@@ -2198,9 +2198,8 @@ class TestDistributionsDevice(DistributionsTestCase):
         s.backward(torch.ones_like(s))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_rounded_relaxed_bernoulli(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
-
         class Rounded:
             def __init__(self, dist):
                 self.dist = dist
@@ -2271,9 +2270,8 @@ class TestDistributionsDevice(DistributionsTestCase):
         )
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_argmax_relaxed_categorical(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
-
         class ArgMax:
             def __init__(self, dist):
                 self.dist = dist
@@ -2328,6 +2326,7 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_uniform(self):
         low = torch.zeros(5, 5, requires_grad=True)
         high = (torch.ones(5, 5) * 3).requires_grad_()
@@ -2350,7 +2349,6 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(uniform.cdf(below_low).item(), 0)
         self.assertEqual(uniform.cdf(above_high).item(), 1)
 
-        set_rng_seed(1)
         self._gradcheck_log_prob(Uniform, (low, high))
         self._gradcheck_log_prob(Uniform, (low, 1.0))
         self._gradcheck_log_prob(Uniform, (0.0, high))
@@ -2391,6 +2389,7 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_cauchy(self):
         loc = torch.zeros(5, 5, requires_grad=True)
         scale = torch.ones(5, 5, requires_grad=True)
@@ -2404,7 +2403,6 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(Cauchy(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Cauchy(0.0, 1.0).sample((1,)).size(), (1,))
 
-        set_rng_seed(1)
         self._gradcheck_log_prob(Cauchy, (loc, scale))
         self._gradcheck_log_prob(Cauchy, (loc, 1.0))
         self._gradcheck_log_prob(Cauchy, (0.0, scale))
@@ -2422,6 +2420,7 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_halfcauchy(self):
         scale = torch.ones(5, 5, requires_grad=True)
         scale_1d = torch.ones(1, requires_grad=True)
@@ -2433,7 +2432,6 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(HalfCauchy(scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(HalfCauchy(1.0).sample((1,)).size(), (1,))
 
-        set_rng_seed(1)
         self._gradcheck_log_prob(HalfCauchy, (scale,))
         self._gradcheck_log_prob(HalfCauchy, (1.0,))
 
@@ -2446,6 +2444,7 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_halfnormal(self):
         std = torch.randn(5, 5).abs().requires_grad_()
         std_1d = torch.randn(1).abs().requires_grad_()
@@ -2458,7 +2457,6 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(HalfNormal(50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of std
-        set_rng_seed(1)
         self.assertEqual(
             HalfNormal(std_delta).sample(sample_shape=(1, 2)),
             torch.tensor([[[0.0, 0.0], [0.0, 0.0]]]),
@@ -2486,8 +2484,8 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_log_prob(HalfNormal(std), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_halfnormal_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for std in [0.1, 1.0, 10.0]:
             self._check_sampler_sampler(
                 HalfNormal(std),
@@ -2516,8 +2514,8 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(log_prob.shape, (2, 3, 4))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_inversegamma_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for concentration, rate in product([2, 5], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(
                 InverseGamma(concentration, rate),
@@ -2527,6 +2525,7 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_lognormal(self):
         mean = torch.randn(5, 5, requires_grad=True)
         std = torch.randn(5, 5).abs().requires_grad_()
@@ -2542,7 +2541,6 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(LogNormal(-0.7, 50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(1)
         self.assertEqual(
             LogNormal(mean_delta, std_delta).sample(sample_shape=(1, 2)),
             torch.tensor([[[math.exp(1), 1.0], [math.exp(1), 1.0]]]),
@@ -2575,8 +2573,8 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_log_prob(LogNormal(mean, std), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_lognormal_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for mean, std in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(
                 LogNormal(mean, std),
@@ -2586,8 +2584,8 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_logisticnormal(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
         mean = torch.randn(5, 5).requires_grad_()
         std = torch.randn(5, 5).abs().requires_grad_()
         mean_1d = torch.randn(1).requires_grad_()
@@ -2602,7 +2600,6 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(LogisticNormal(-0.7, 50.0).sample().size(), (2,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(1)
         self.assertEqual(
             LogisticNormal(mean_delta, std_delta).sample(),
             torch.tensor(
@@ -2659,8 +2656,8 @@ class TestDistributionsDevice(DistributionsTestCase):
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5939")
     @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_logisticnormal_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         means = map(np.asarray, [(-1.0, -1.0), (0.0, 0.0), (1.0, 1.0)])
         covs = map(np.diag, [(0.1, 0.1), (1.0, 1.0), (10.0, 10.0)])
         for mean, cov in product(means, covs):
@@ -2797,6 +2794,7 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_normal(self):
         loc = torch.randn(5, 5, requires_grad=True)
         scale = torch.randn(5, 5).abs().requires_grad_()
@@ -2812,7 +2810,6 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(Normal(-0.7, 50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(1)
         self.assertEqual(
             Normal(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
             torch.tensor([[[1.0, 0.0], [1.0, 0.0]]]),
@@ -2850,8 +2847,8 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_forward_ad(lambda x: x.normal_())
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_normal_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for loc, scale in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(
                 Normal(loc, scale),
@@ -3003,8 +3000,8 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(batched_prob, unbatched_prob, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_lowrank_multivariate_normal_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(5, requires_grad=True)
         cov_factor = torch.randn(5, 1, requires_grad=True)
         cov_diag = torch.randn(5).abs().requires_grad_()
@@ -3036,8 +3033,8 @@ class TestDistributionsDevice(DistributionsTestCase):
     @expectedFailureMPS
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5916")
     @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_lowrank_multivariate_normal_moments(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(5)
         cov_factor = torch.randn(5, 2)
         cov_diag = torch.randn(5).abs()
@@ -3225,8 +3222,8 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @expectedFailureMPS
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_multivariate_normal_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(3, requires_grad=True)
         tmp = torch.randn(3, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
@@ -3273,8 +3270,8 @@ class TestDistributionsDevice(DistributionsTestCase):
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5938")
     @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_multivariate_normal_moments(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(5)
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
         d = MultivariateNormal(mean, scale_tril=scale_tril)
@@ -3287,8 +3284,8 @@ class TestDistributionsDevice(DistributionsTestCase):
     # We applied same tests in Multivariate Normal distribution for Wishart distribution
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_wishart_shape(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
 
         df = torch.rand(5, requires_grad=True) + ndim
@@ -3388,8 +3385,8 @@ class TestDistributionsDevice(DistributionsTestCase):
     @skipMPS  # flaky failure
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4021")
     @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_wishart_stable_with_precision_matrix(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 10
         x = torch.randn(ndim)
         P = torch.exp(-((x - x.unsqueeze(-1)) ** 2))  # RBF kernel
@@ -3397,8 +3394,8 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_wishart_log_prob(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
         # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
@@ -3463,8 +3460,8 @@ class TestDistributionsDevice(DistributionsTestCase):
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5939")
     @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_wishart_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
         # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
@@ -3496,8 +3493,8 @@ class TestDistributionsDevice(DistributionsTestCase):
             multivariate=True,
         )
 
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_wishart_properties(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 5
         df = torch.rand([]) + ndim - 1
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(ndim, ndim))
@@ -3510,8 +3507,8 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5938")
     @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_wishart_moments(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
         df = torch.rand([]) + ndim - 1
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(ndim, ndim))
@@ -3564,8 +3561,8 @@ class TestDistributionsDevice(DistributionsTestCase):
                 mean_var(lambd, torch.rand(sample_len, dtype=dtype))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_exponential_sample(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
         for rate in [1e-5, 1.0, 10.0]:
             self._check_sampler_sampler(
                 Exponential(rate),
@@ -3575,6 +3572,7 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_laplace(self):
         loc = torch.randn(5, 5, requires_grad=True)
         scale = torch.randn(5, 5).abs().requires_grad_()
@@ -3590,7 +3588,6 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(Laplace(-0.7, 50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(0)
         self.assertEqual(
             Laplace(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
             torch.tensor([[[1.0, 0.0], [1.0, 0.0]]]),
@@ -3622,8 +3619,8 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_laplace_sample(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
         for loc, scale in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(
                 Laplace(loc, scale),
@@ -3653,8 +3650,8 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_gamma_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(
                 Gamma(alpha, beta),
@@ -3663,8 +3660,8 @@ class TestDistributionsDevice(DistributionsTestCase):
             )
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_gamma_tensor_sample(self):
-        set_rng_seed(0)
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             a, b = (
                 torch.tensor([alpha]),
@@ -3726,8 +3723,8 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_log_prob(Pareto(scale, alpha), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_pareto_sample(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
         for scale, alpha in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(
                 Pareto(scale, alpha),
@@ -3771,8 +3768,8 @@ class TestDistributionsDevice(DistributionsTestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5939")
     @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_generalized_pareto_sample(self):
-        set_rng_seed(1)  # see note [Randomized statistical tests]
         for loc, scale, concentration in product(
             [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0], [-0.5, 0.0, 0.5]
         ):
@@ -3846,8 +3843,8 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_gumbel_sample(self):
-        set_rng_seed(1)  # see note [Randomized statistical tests]
         for loc, scale in product([-5.0, -1.0, -0.1, 0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(
                 Gumbel(loc, scale),
@@ -3931,8 +3928,8 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @expectedFailureMPS
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_fishersnedecor_sample(self):
-        set_rng_seed(1)  # see note [Randomized statistical tests]
         for df1, df2 in product([0.1, 0.5, 1.0, 5.0, 10.0], [0.1, 0.5, 1.0, 5.0, 10.0]):
             self._check_sampler_sampler(
                 FisherSnedecor(df1, df2),
@@ -3964,8 +3961,8 @@ class TestDistributionsDevice(DistributionsTestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5939")
     @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_chi2_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for df in [0.1, 1.0, 5.0]:
             self._check_sampler_sampler(
                 Chi2(df), scipy.stats.chi2(df), f"Chi2(df={df})"
@@ -4000,8 +3997,8 @@ class TestDistributionsDevice(DistributionsTestCase):
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5939")
     @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=11)  # see Note [Randomized statistical tests]
     def test_studentT_sample(self):
-        set_rng_seed(11)  # see Note [Randomized statistical tests]
         for df, loc, scale in product(
             [0.1, 1.0, 5.0, 10.0], [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]
         ):
@@ -4013,8 +4010,8 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @expectedFailureMPS
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_studentT_log_prob(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         num_samples = 10
         for df, loc, scale in product(
             [0.1, 1.0, 5.0, 10.0], [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]
@@ -4082,8 +4079,8 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(actual_log_prob, expected_log_prob, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_dirichlet_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         alpha = torch.exp(torch.randn(3))
         self._check_sampler_sampler(
             Dirichlet(alpha),
@@ -4132,8 +4129,8 @@ class TestDistributionsDevice(DistributionsTestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_beta_sample(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
         for con1, con0 in product([0.1, 1.0, 10.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(
                 Beta(con1, con0),
@@ -4151,12 +4148,12 @@ class TestDistributionsDevice(DistributionsTestCase):
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.double)
     @dtypesIfXPU(torch.double)
+    @device_rng_seed(default=1)  # see Note [Randomized statistical tests]
     def test_beta_underflow(self, dtype, device):
         # For low values of (alpha, beta), the gamma samples can underflow
         # with float32 and result in a spurious mode at 0.5. To prevent this,
         # torch._sample_dirichlet works with double precision for intermediate
         # calculations.
-        set_rng_seed(1)
         num_samples = 50000
         conc = torch.tensor(1e-2, dtype=dtype)
         beta_samples = Beta(conc, conc).sample([num_samples])
@@ -5880,8 +5877,8 @@ class TestKLDevice(DistributionsTestCase):
             (Uniform(-1, 2), ContinuousBernoulli(0.75)),
         ]
 
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_kl_monte_carlo(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for (p, _), (_, q) in self.finite_examples:
             actual = kl_divergence(p, q)
             numerator = 0
@@ -5908,8 +5905,8 @@ class TestKLDevice(DistributionsTestCase):
 
     # Multivariate normal has a separate Monte Carlo based test due to the requirement of random generation of
     # positive (semi) definite matrices. n is set to 5, but can be increased during testing.
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_kl_multivariate_normal(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for multivariate_normal
         for i in range(n):
             loc = [torch.randn(4) for _ in range(2)]
@@ -5989,6 +5986,7 @@ class TestKLDevice(DistributionsTestCase):
     @skipIfTorchDynamo("This test explicitly invokes torch.compile")
     # Not expectedFailureXPU: subTest failures aren't raised, so the xfail wrapper sees a pass.
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5216")
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_compile_kl_multivariate_normal(self):
         def fn(p_mu, p_log_var, q_mu, q_log_var):
             q_var = torch.diag_embed(torch.exp(q_log_var))
@@ -5997,7 +5995,6 @@ class TestKLDevice(DistributionsTestCase):
             q = MultivariateNormal(q_mu, q_var)
             return kl_divergence(p, q).mean()
 
-        set_rng_seed(0)
         p_mu = torch.randn(4, 3)
         p_log_var = torch.randn(4, 3)
         q_mu = torch.randn(4, 3)
@@ -6011,8 +6008,8 @@ class TestKLDevice(DistributionsTestCase):
                 )(p_mu, p_log_var, q_mu, q_log_var)
                 self.assertEqual(actual, expected)
 
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_kl_lowrank_multivariate_normal(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for lowrank_multivariate_normal
         for i in range(n):
             loc = [torch.randn(4) for _ in range(2)]
@@ -6170,8 +6167,8 @@ class TestKLDevice(DistributionsTestCase):
         self.assertEqual(kl_divergence(trans_dist, trans_dist).shape, (2,))
 
     @set_default_dtype(torch.double)
+    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
     def test_entropy_monte_carlo(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for Dist, params in _get_examples():
             for i, param in enumerate(params):
                 dist = Dist(**param)
