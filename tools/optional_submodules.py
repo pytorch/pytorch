@@ -19,14 +19,16 @@ def _read_file(path: Path) -> str:
 
 # Server-side failures of a clone that are worth another attempt: the "unable to
 # handle this request due to load" page gitlab.com serves when it sheds load,
-# HTTP 429 and 5xx, and connections that drop or time out. Everything else (a tag
+# HTTP 429 and 5xx, and connections that drop mid-transfer. Everything else (a tag
 # that does not exist, no DNS, an unwritable directory) fails at once instead of
-# stalling for minutes, e.g. in the `cmake` configure step.
+# stalling for minutes, e.g. in the `cmake` configure step. Connect timeouts are
+# deliberately not retried: on a network that silently drops traffic each attempt
+# would wait for the full connect timeout (~2 minutes) before failing.
 _TRANSIENT_CLONE_ERROR = re.compile(
     r"unable to handle this request due to load"
     r"|The requested URL returned error: (?:429|5\d\d)"
     r"|RPC failed|early EOF|unexpected disconnect"
-    r"|Connection (?:timed out|reset)|Operation timed out"
+    r"|Connection reset"
     r"|SSL_ERROR_SYSCALL|GnuTLS recv error",
     re.IGNORECASE,
 )
@@ -43,7 +45,16 @@ def _clone(
     # `http.lowSpeedTime` only abort a stalled transfer), so retry here. A failed
     # clone removes the directory it created, so there is nothing to clean up.
     for attempt in range(1, attempts + 1):
-        result = run(cmd, cwd=cwd, stderr=PIPE, text=True)
+        # The message is matched against English text, and git's output must not
+        # fail to decode under the locale's encoding, so force the C locale.
+        result = run(
+            cmd,
+            cwd=cwd,
+            stderr=PIPE,
+            text=True,
+            errors="replace",
+            env={**os.environ, "LC_ALL": "C"},
+        )
         if result.stderr:
             print(result.stderr, end="", file=sys.stderr, flush=True)
         if result.returncode == 0:

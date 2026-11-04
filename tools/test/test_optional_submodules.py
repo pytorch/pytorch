@@ -16,6 +16,10 @@ GITLAB_LOAD = (
 )
 NO_SUCH_TAG = "fatal: Remote branch 5.0.1 not found in upstream origin\n"
 NO_DNS = "fatal: unable to access 'https://gitlab.com/': Could not resolve host\n"
+CONNECT_TIMEOUT = (
+    "fatal: unable to access 'https://gitlab.com/': "
+    "Failed to connect to gitlab.com port 443 after 130000 ms: Connection timed out\n"
+)
 
 
 def result(returncode: int = 0, stderr: str = "") -> CompletedProcess:
@@ -70,7 +74,7 @@ class TestClone(TestCase):
         self.sleep.assert_not_called()
 
     def test_permanent_errors_fail_without_retrying(self):
-        for stderr in (NO_SUCH_TAG, NO_DNS, ""):
+        for stderr in (NO_SUCH_TAG, NO_DNS, CONNECT_TIMEOUT, ""):
             with self.subTest(stderr=stderr):
                 with self.assertRaises(CalledProcessError):
                     self._checkout([result(128, stderr)])
@@ -87,6 +91,12 @@ class TestClone(TestCase):
         self.assertEqual(
             self.run_.call_args.kwargs["cwd"], optional_submodules.third_party_path
         )
+
+    def test_git_runs_in_the_c_locale_and_output_is_decoded_leniently(self):
+        self._checkout([result()])
+        kwargs = self.run_.call_args.kwargs
+        self.assertEqual(kwargs["env"]["LC_ALL"], "C")
+        self.assertEqual(kwargs["errors"], "replace")
 
 
 class TestCheckoutNcclEp(TestCase):
