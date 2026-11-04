@@ -80,7 +80,7 @@ class TestReductionConfig(TestCase):
 
     @parametrize("cc", [(9, 0), (10, 0), (10, 3), (11, 0)])
     def test_architecture_isolation(self, cc):
-        """Return the generic defaults until an architecture adds its own rules."""
+        """Return generic defaults on architectures without their own rules."""
         b200 = kg._GeneralConfig(block=32, rule="b200_strided_one_field")
         expected = b200 if cc == (10, 0) else kg._GeneralConfig()
         self.assertEqual(self.general(cc=cc), expected)
