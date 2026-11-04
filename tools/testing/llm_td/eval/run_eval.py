@@ -92,7 +92,7 @@ def run_one(
         # The last call's latency; cost_usd sums every attempt's.
         "wall_s": round(time.time() - t0, 1),
         "prompt_chars": len(prompt),
-        "prompt_sha": prompt_sha(prompt),
+        "prompt_sha": prompt_sha(prompt, wt is not None),
         "cost_usd": cost,
         "usage": d.get("usage"),
         "num_turns": d.get("num_turns"),
@@ -115,6 +115,8 @@ def main() -> None:
     p.add_argument("--jobs", type=int, default=8)
     p.add_argument("--agentic", action="store_true")
     args = p.parse_args()
+    if args.tag == "td":
+        p.error("the tag td holds the TD replay, which score.py scores as td25")
     # Agentic checkouts are handed to a CLI that runs in a temp dir.
     args.data = args.data.resolve()
 
@@ -125,10 +127,10 @@ def main() -> None:
     done = {x.stem: json.loads(x.read_text()) for x in out.glob("*.json")}
     if other := sorted(i for i, r in done.items() if {k: r.get(k) for k in want} != want):  # fmt: skip
         p.error(f"{len(other)} results in {out}, e.g. {other[0]}, were made with other settings than {want}; use another --tag")  # fmt: skip
-    sent = {i: prompt_sha(sample_prompt(json.loads(x.read_text()), minutes)) for i in done if (x := args.data / "samples" / f"{i}.json").exists()}  # fmt: skip
+    sent = {i: prompt_sha(sample_prompt(json.loads(x.read_text()), minutes), args.agentic) for i in done if (x := args.data / "samples" / f"{i}.json").exists()}  # fmt: skip
     if stale := sorted(i for i, h in sent.items() if done[i].get("prompt_sha") != h):
         p.error(f"{len(stale)} results in {out}, e.g. {stale[0]}, were made from another prompt, schema or sample; use another --tag")  # fmt: skip
-    ids = [i for i in args.ids.read_text().split() if i not in done]
+    ids = [i for i in dict.fromkeys(args.ids.read_text().split()) if i not in done]
     print(f"{args.tag}: {len(ids)} to run", flush=True)
 
     def worker(slot: int) -> None:
@@ -144,15 +146,14 @@ def main() -> None:
                     else None
                 )
                 r = run_one(sample, minutes, args, wt)
+                if r["transient"]:
+                    print(f"{sid}: still failing after {ATTEMPTS} attempts, scored as an error:", r["error"][:200], flush=True)  # fmt: skip
+                write_json(out / f"{sid}.json", r)
             except Exception:
                 print(
                     f"{sid} failed, left for a rerun:\n{traceback.format_exc()}",
                     flush=True,
                 )
-                continue
-            if r["transient"]:
-                print(f"{sid}: still failing after {ATTEMPTS} attempts, scored as an error:", r["error"][:200], flush=True)  # fmt: skip
-            write_json(out / f"{sid}.json", r)
 
     with cf.ThreadPoolExecutor(args.jobs) as ex:
         list(ex.map(worker, range(args.jobs)))
