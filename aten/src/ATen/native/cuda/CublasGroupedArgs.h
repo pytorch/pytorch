@@ -23,7 +23,9 @@ struct cublasGroupedArgs {
       const std::optional<Tensor>& scale_a = std::nullopt,
       const std::optional<Tensor>& scale_b = std::nullopt,
       const std::optional<CublasGroupedScaleLayout>& scale_layout_a = std::nullopt,
-      const std::optional<CublasGroupedScaleLayout>& scale_layout_b = std::nullopt);
+      const std::optional<CublasGroupedScaleLayout>& scale_layout_b = std::nullopt,
+      const std::optional<Tensor>& alpha_scale_a = std::nullopt,
+      const std::optional<Tensor>& alpha_scale_b = std::nullopt);
 
   // In grouped GEMM, m/n/k are the cuBLASLt heuristic averages. The actual
   // per-group dimensions live in mArray, nArray, and kArray.
