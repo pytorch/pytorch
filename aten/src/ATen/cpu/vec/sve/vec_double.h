@@ -174,6 +174,10 @@ class Vectorized<double> {
   double reduce_max() const {
     return svmaxv_f64(ptrue, values);
   }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<double> or_nan_if(VecBool<double> mask) const {
+    return svsel_f64(mask, ALL_F64_TRUE_MASK, values);
+  }
   Vectorized<double> abs() const {
     return svabs_f64_x(ptrue, values);
   }
