@@ -362,7 +362,9 @@ class CallSplit:
         }
         metrics = [("td_test_failure_stats_v2", stats)]
         if (llm := self.llm) is not None:
-            metrics += _llm_metric("llm_selection_failure", lambda: llm.failure_metric(test))  # fmt: skip
+            metrics += _llm_metric(
+                "llm_selection_failure", lambda: llm.failure_metric(test)
+            )
         return metrics
 
 
