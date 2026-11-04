@@ -1469,7 +1469,9 @@ Keyword args:
            Default: ``None``, which causes the returned tensor to share memory with :attr:`obj`
            whenever possible. If ``True`` then the returned tensor does not share its memory.
            If ``False`` then the returned tensor shares its memory with :attr:`obj` and an
-           error is thrown if it cannot.
+           error is thrown if it cannot. An object read through DLPack whose ``__dlpack__``
+           doesn't accept a ``copy`` argument is trusted to share its memory, as with
+           :func:`torch.from_dlpack`.
     device (:class:`torch.device`, optional): the device of the returned tensor.
            Default: ``None``, which causes the device of :attr:`obj` to be used. Or, if
            :attr:`obj` is a Python sequence, the current default device will be used.
