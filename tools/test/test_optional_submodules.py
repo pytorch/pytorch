@@ -23,8 +23,8 @@ GITLAB_LOAD = (
 # alternative; the `RPC failed; curl` ones by their own.
 TRANSIENT = {
     "gitlab load page": "remote: GitLab is currently unable to handle this request due to load",
-    "get 503": "fatal: unable to access 'https://x/': The requested URL returned error: 503",
-    "get 429": "fatal: unable to access 'https://x/': The requested URL returned error: 429",
+    "get 503": "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': The requested URL returned error: 503",
+    "get 429": "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': The requested URL returned error: 429",
     "post 502": "error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502",
     "post 429": "error: RPC failed; HTTP 429 curl 22 The requested URL returned error: 429",
     "transfer closed": "error: RPC failed; curl 18 transfer closed with outstanding read data remaining",
@@ -33,10 +33,10 @@ TRANSIENT = {
     "reset mid-transfer": "error: RPC failed; curl 56 Recv failure: Connection reset by peer",
     "early eof": "fatal: early EOF",
     "unexpected disconnect": "fatal: unexpected disconnect while reading sideband packet",
-    "gnutls": "fatal: unable to access 'https://x/': GnuTLS recv error (-54): Error in the pull function.",
-    "reset while reading": "fatal: unable to access 'https://x/': OpenSSL SSL_read: Connection reset by peer, errno 104",
-    "syscall while reading": "fatal: unable to access 'https://x/': OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 104",
-    "stalled transfer": "fatal: unable to access 'https://x/': Operation too slow. Less than 1000 bytes/sec transferred the last 60 seconds",
+    "gnutls": "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': GnuTLS recv error (-54): Error in the pull function.",
+    "reset while reading": "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': OpenSSL SSL_read: Connection reset by peer, errno 104",
+    "syscall while reading": "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 104",
+    "stalled transfer": "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': Operation too slow. Less than 1000 bytes/sec transferred the last 60 seconds",
     "case": "FATAL: EARLY eof",
     # A curl error that is not retried on its own is retried when it breaks a
     # pack that was already streaming, because git then also reports early EOF.
@@ -56,16 +56,16 @@ TRANSIENT = {
 # the "empty" entry is no output at all.
 PERMANENT = {
     "missing tag": "fatal: Remote branch 5.0.1 not found in upstream origin",
-    "get 404": "fatal: unable to access 'https://x/': The requested URL returned error: 404",
-    "get 403": "fatal: unable to access 'https://x/': The requested URL returned error: 403",
+    "get 404": "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': The requested URL returned error: 404",
+    "get 403": "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': The requested URL returned error: 403",
     "post 403": "error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403",
     "http2 framing": "error: RPC failed; curl 16 Error in the HTTP2 framing layer",
     "http2 other stream error": "error: RPC failed; curl 92 HTTP/2 stream 5 was not closed cleanly: REFUSED_STREAM (err 7)",
     "no dns": "fatal: unable to access 'https://gitlab.com/': Could not resolve host: gitlab.com",
     "connect timeout": "fatal: unable to access 'https://gitlab.com/': Failed to connect to gitlab.com port 443 after 130000 ms: Connection timed out",
-    "proxy refuses connect": "fatal: unable to access 'https://x/': Recv failure: Connection reset by peer",
-    "handshake reset": "fatal: unable to access 'https://x/': OpenSSL SSL_connect: Connection reset by peer in connection to gitlab.com:443",
-    "handshake syscall": "fatal: unable to access 'https://x/': OpenSSL SSL_connect: SSL_ERROR_SYSCALL in connection to gitlab.com:443",
+    "proxy refuses connect": "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': Recv failure: Connection reset by peer",
+    "handshake reset": "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': OpenSSL SSL_connect: Connection reset by peer in connection to gitlab.com:443",
+    "handshake syscall": "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': OpenSSL SSL_connect: SSL_ERROR_SYSCALL in connection to gitlab.com:443",
     "unwritable": "fatal: could not create work tree dir 'eigen': Permission denied",
     "empty": "",
 }
