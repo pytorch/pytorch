@@ -616,7 +616,7 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
     def test_hash_timezone(self):
         import datetime
 
-        self._assert_hash_equals(datetime.timezone.utc)
+        self._assert_hash_equals(datetime.UTC)
 
     def test_hash_decimal(self):
         import decimal
