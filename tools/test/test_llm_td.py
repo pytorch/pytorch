@@ -306,13 +306,13 @@ class TestSelection(unittest.TestCase):
             with mock.patch("sys.stderr", stderr):
                 self.assertIsNone(Selection.load(p))
             self.assertEqual(stderr.getvalue(), "")
-            for sel in (Selection(candidates={"test_nn"}), Selection(run_all=True)):
+            for sel in (Selection(candidates={"test_nn"}), Selection(run_all=True), Selection(run_all=True, error="e")):  # fmt: skip
                 p.write_text(json.dumps(sel.to_json()))
                 self.assertEqual(Selection.load(p), sel)
             valid = Selection(candidates={"test_nn"}).to_json()
             # Without candidates, a selection would skip every file it does not name.
-            bad = [{**valid, "version": 2}, {**valid, "version": True}, {**valid, "files": "test_nn"}, {**valid, "files": [1]}, {**valid, "run_all": "false"}, {**valid, "enforce": "false"}, {**valid, "reason": 1}, {**valid, "candidates": [1]}, {**valid, "candidates": None}]  # fmt: skip
-            bad += [{k: v for k, v in valid.items() if k != key} for key in ("version", "candidates", "enforce")]  # fmt: skip
+            bad = [{**valid, "version": 2}, {**valid, "version": True}, {**valid, "files": "test_nn"}, {**valid, "files": [1]}, {**valid, "run_all": "false"}, {**valid, "enforce": "false"}, {**valid, "reason": 1}, {**valid, "candidates": [1]}, {**valid, "candidates": None}, {**valid, "error": 1}]  # fmt: skip
+            bad += [{k: v for k, v in valid.items() if k != key} for key in ("version", "candidates", "enforce", "error")]  # fmt: skip
             for text in (
                 "{",
                 '{"sweeps": []}',
@@ -769,6 +769,7 @@ class TestApplySelection(unittest.TestCase):
             "enforced": enforced,
             "td_enabled": True,
             "run_all": False,
+            "selector_error": None,
             "num_tests": 5,
             "num_covered": 1,
             "num_td_include": 2,
@@ -814,6 +815,7 @@ class TestApplySelection(unittest.TestCase):
                 "previous_failure_added": False,
                 "kept_td": False,
                 "previous_failures_known": True,
+                "selector_error": None,
             },
         )
 
@@ -919,6 +921,7 @@ class TestApplySelection(unittest.TestCase):
                     "previous_failure_added": prev,
                     "kept_td": False,
                     "previous_failures_known": True,
+                    "selector_error": None,
                 },
             )
 
@@ -1000,6 +1003,19 @@ class TestSplitTests(unittest.TestCase):
             split, _ = self.split_with(sel, tp, times, prev)
             self.assertTrue(split.enforced)
             self.assertEqual([str(x) for x in split.include], runs)
+
+    def test_metrics_tell_a_failed_selector_from_a_run_all(self) -> None:
+        # select_tests clears enforce when the selector failed.
+        failed = Selection(run_all=True, reason="selector failed: x", error="x")
+        deliberate = Selection(run_all=True, reason="infra", enforce=True)
+        for sel, error, enforced in ((failed, "x", False), (deliberate, None, True)):
+            split, _ = self.split_with(sel)
+            if split.llm is None:
+                raise AssertionError("no selection read")
+            self.assertEqual(split.enforced, enforced)
+            self.assertEqual(split.llm.selection_metric["selector_error"], error)
+            failure = split.llm.failure_metric(TestRun("a"))
+            self.assertEqual(failure["selector_error"], error)
 
     def test_td_disabled(self) -> None:
         for sel in [None, Selection(files={"a"}, enforce=True, candidates={"a"})]:
@@ -1291,6 +1307,8 @@ class TestMain(unittest.TestCase):
         self.assertTrue(record["run_all"])
         self.assertFalse(record["enforce"])
         self.assertIn("selector failed", record["reason"])
+        self.assertIn("CalledProcessError", record["error"])
+        self.assertNotIn("error", record["diagnostics"])
 
     def test_no_test_times_runs_all(self) -> None:
         with (
@@ -1300,7 +1318,7 @@ class TestMain(unittest.TestCase):
             record = self.run_main()
         self.assertTrue(record["run_all"])
         self.assertEqual(record["reason"], "no test times")
-        self.assertEqual(record["diagnostics"]["error"], "no test times")
+        self.assertEqual(record["error"], "no test times")
 
     def test_no_changed_files_runs_all(self) -> None:
         with (
@@ -1311,7 +1329,7 @@ class TestMain(unittest.TestCase):
         times.assert_not_called()
         self.assertTrue(record["run_all"])
         self.assertEqual(record["reason"], "no changed files")
-        self.assertIsNone(record["diagnostics"]["error"])
+        self.assertIsNone(record["error"])
 
     def test_bad_effort_env_is_rejected(self) -> None:
         stderr = io.StringIO()
@@ -1334,7 +1352,7 @@ class TestMain(unittest.TestCase):
             record = self.run_main()
         times.assert_not_called()
         self.assertTrue(record["run_all"])
-        self.assertIsNone(record["diagnostics"]["error"])
+        self.assertIsNone(record["error"])
 
     def test_query_model_runs_outside_the_checkout(self) -> None:
         run = mock.Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
@@ -1368,7 +1386,7 @@ class TestMain(unittest.TestCase):
                 select_tests.main(["--title", "t", "--output", str(output)])
                 record = json.loads(output.read_text())
             self.assertTrue(record["run_all"], error)
-            self.assertEqual(record["diagnostics"]["error"], error)
+            self.assertEqual(record["error"], error)
             self.assertEqual(
                 run.call_args.kwargs["timeout"], select_tests.QUERY_TIMEOUT
             )
@@ -1385,7 +1403,7 @@ class TestMain(unittest.TestCase):
             record = self.run_main()
         times.assert_not_called()
         self.assertTrue(record["run_all"])
-        self.assertIsNone(record["diagnostics"]["error"])
+        self.assertIsNone(record["error"])
 
     def test_only_a_deliberate_run_all_is_enforced(self) -> None:
         def run(changed: str, answer: dict, times: dict, *argv: str) -> dict:
@@ -1469,7 +1487,7 @@ class TestMain(unittest.TestCase):
     def test_moved_test_file_is_selected(self) -> None:
         answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": []}}  # fmt: skip
         record, candidates = self.run_in_repo(answer)
-        self.assertIsNone(record["diagnostics"]["error"])
+        self.assertIsNone(record["error"])
         self.assertFalse(record["run_all"])
         self.assertEqual(
             set(record["files"]), {"test_foo", "nn/test_foo", "test_bar", "test_jit"}
@@ -1481,13 +1499,13 @@ class TestMain(unittest.TestCase):
         tests = [{"file": "test_jit", "confidence": "high"}, {"file": "nope", "confidence": "low"}]  # fmt: skip
         answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": tests}}  # fmt: skip
         record, _ = self.run_in_repo(answer)
-        self.assertIn("match no test file: ['nope']", record["diagnostics"]["error"])
+        self.assertIn("match no test file: ['nope']", record["error"])
         self.assertTrue(record["run_all"])
 
     def test_malformed_output_is_an_error(self) -> None:
         answer = {"structured_output": {"run_all": False, "reason": "", "sweeps": [], "dirs": [], "tests": ["test_foo"]}}  # fmt: skip
         record, _ = self.run_in_repo(answer)
-        self.assertIn("malformed", record["diagnostics"]["error"])
+        self.assertIn("malformed", record["error"])
         self.assertTrue(record["run_all"])
 
 

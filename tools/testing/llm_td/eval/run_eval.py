@@ -4,7 +4,9 @@
         --model us.anthropic.claude-sonnet-5 --effort medium --ids tools/testing/llm_td/eval/ids/eval.txt
 
 Results go to DIR/results/<tag>/<id>.json and are never recomputed; rerun the
-same command to fill in samples that crashed. Throttling and 5xx errors, which
+same command to fill in samples on which run_eval itself raised (such as a
+failed checkout), which get no file. A CLI crash is written as an error result,
+as CI scores it, and so is not rerun. Throttling and 5xx errors, which
 the eval's own concurrency provokes, are retried; a call that still fails after
 ATTEMPTS is written as an error, so it is scored as the failed call it would be
 in CI, which calls the model once. Timeouts are final. A tag's results must all
