@@ -46,35 +46,35 @@ goto cuda_download
 set CUDA_INSTALL_VERSION=12.8.0
 set CUDA_INSTALL_EXE=cuda_12.8.0_571.96_windows.exe
 set "ARGS=cuda_profiler_api_12.8 thrust_12.8 nvcc_12.8 cuobjdump_12.8 nvprune_12.8 nvprof_12.8 cupti_12.8 cublas_12.8 cublas_dev_12.8 cudart_12.8 cufft_12.8 cufft_dev_12.8 curand_12.8 curand_dev_12.8 cusolver_12.8 cusolver_dev_12.8 cusparse_12.8 cusparse_dev_12.8 npp_12.8 npp_dev_12.8 nvrtc_12.8 nvrtc_dev_12.8 nvml_dev_12.8 nvjitlink_12.8 nvtx_12.8"
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.26.0.51_cuda12-archive
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.27.0.42_cuda12-archive
 goto cuda_download
 
 :cuda129
 set CUDA_INSTALL_VERSION=12.9.1
 set CUDA_INSTALL_EXE=cuda_12.9.1_576.57_windows.exe
 set "ARGS=cuda_profiler_api_12.9 thrust_12.9 nvcc_12.9 cuobjdump_12.9 nvprune_12.9 nvprof_12.9 cupti_12.9 cublas_12.9 cublas_dev_12.9 cudart_12.9 cufft_12.9 cufft_dev_12.9 curand_12.9 curand_dev_12.9 cusolver_12.9 cusolver_dev_12.9 cusparse_12.9 cusparse_dev_12.9 npp_12.9 npp_dev_12.9 nvrtc_12.9 nvrtc_dev_12.9 nvml_dev_12.9 nvjitlink_12.9 nvtx_12.9"
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.26.0.51_cuda12-archive
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.27.0.42_cuda12-archive
 goto cuda_download
 
 :cuda130
 set CUDA_INSTALL_VERSION=13.0.0
 set CUDA_INSTALL_EXE=cuda_13.0.0_windows.exe
 set "ARGS="
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.26.0.51_cuda13-archive
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.27.0.42_cuda13-archive
 goto cuda_download
 
 :cuda132
 set CUDA_INSTALL_VERSION=13.2.2
 set CUDA_INSTALL_EXE=cuda_13.2.2_windows.exe
 set "ARGS="
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.26.0.51_cuda13-archive
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.27.0.42_cuda13-archive
 goto cuda_download
 
 :cuda134
 set CUDA_INSTALL_VERSION=13.4.2
 set CUDA_INSTALL_EXE=cuda_13.4.2_windows_x86_64.exe
 set "ARGS="
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.26.0.51_cuda13-archive
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.27.0.42_cuda13-archive
 goto cuda_download
 
 :: Common download logic for CUDA toolkit and cuDNN
@@ -179,24 +179,24 @@ if %CUDA_VER% EQU 126 (
     set EXPECTED_CUDNN_VERSION=9.10.2
 )
 if %CUDA_VER% EQU 128 (
-    set CUDNN_FOLDER=cudnn-windows-x86_64-9.26.0.51_cuda12-archive
-    set EXPECTED_CUDNN_VERSION=9.26.0
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.27.0.42_cuda12-archive
+    set EXPECTED_CUDNN_VERSION=9.27.0
 )
 if %CUDA_VER% EQU 129 (
-    set CUDNN_FOLDER=cudnn-windows-x86_64-9.26.0.51_cuda12-archive
-    set EXPECTED_CUDNN_VERSION=9.26.0
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.27.0.42_cuda12-archive
+    set EXPECTED_CUDNN_VERSION=9.27.0
 )
 if %CUDA_VER% EQU 130 (
-    set CUDNN_FOLDER=cudnn-windows-x86_64-9.26.0.51_cuda13-archive
-    set EXPECTED_CUDNN_VERSION=9.26.0
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.27.0.42_cuda13-archive
+    set EXPECTED_CUDNN_VERSION=9.27.0
 )
 if %CUDA_VER% EQU 132 (
-    set CUDNN_FOLDER=cudnn-windows-x86_64-9.26.0.51_cuda13-archive
-    set EXPECTED_CUDNN_VERSION=9.26.0
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.27.0.42_cuda13-archive
+    set EXPECTED_CUDNN_VERSION=9.27.0
 )
 if %CUDA_VER% EQU 134 (
-    set CUDNN_FOLDER=cudnn-windows-x86_64-9.26.0.51_cuda13-archive
-    set EXPECTED_CUDNN_VERSION=9.26.0
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.27.0.42_cuda13-archive
+    set EXPECTED_CUDNN_VERSION=9.27.0
 )
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
 

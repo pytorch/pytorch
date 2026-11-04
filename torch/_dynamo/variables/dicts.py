@@ -263,7 +263,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         return {k.vt.as_python_constant(): v for k, v in self.items.items()}
 
     def python_type(self) -> type:
-        return cast(type, self._cpython_type)
+        return dict
 
     def __contains__(self, vt: VariableTracker) -> bool:
         if not isinstance(vt, VariableTracker):
@@ -1036,6 +1036,9 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     # OrderedDict exposes no tp_getset / tp_members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
 
+    def python_type(self) -> type:
+        return collections.OrderedDict
+
     def move_to_end(
         self: "OrderedDictVariable",
         tx: "InstructionTranslatorBase",
@@ -1083,6 +1086,20 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
     }
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        # odict_richcompare: https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c#L1595-L1625
+        # Runs dict_richcompare first; only an OrderedDict on both sides adds
+        # the key-order check, so dict.__eq__(od1, od2) stays order-insensitive.
+        result = super().tp_richcompare_impl(tx, other, op)
+        if op not in ("__eq__", "__ne__") or not isinstance(other, OrderedDictVariable):
+            return result
+        if result.as_python_constant() is (op == "__ne__"):
+            return result
+        keys_equal = list(self.items) == list(other.items)
+        return ConstantVariable.create(keys_equal is (op == "__eq__"))
 
     def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
         return collections.OrderedDict(super().as_python_constant())
