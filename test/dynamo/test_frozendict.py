@@ -3,6 +3,7 @@
 import builtins
 import io
 import operator
+import time
 import types
 import unittest
 from collections import defaultdict, OrderedDict
@@ -14,6 +15,7 @@ import torch.utils._pytree as python_pytree
 from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._dynamo.testing import CompileCounter
 from torch._dynamo.variables.builder import SourcelessBuilder
+from torch._dynamo.variables.hashable import BuiltinMethodKeyTracker
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -366,6 +368,7 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(Meta.calls, calls)
         literal = builtins.frozendict(a=5)
         tx = Mock()
+        tx.output.builtin_method_keys = BuiltinMethodKeyTracker()
         with InstructionTranslator.set_current_tx(tx):
             self.assertEqual(
                 SourcelessBuilder.create(tx, literal).as_python_constant(), literal
@@ -1188,6 +1191,43 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, fn(x))
         self.assertEqual(result[1:], (True, False, 2))
+
+    @parametrize("wrap", [None, tuple, frozenset])
+    def test_converted_mapping_method_key_hash_cannot_escape(self, wrap):
+        def fn(x, mapping):
+            return x + 1, hash(builtins.frozendict(mapping))
+
+        key = time.time if wrap is None else wrap((time.time,))
+        mapping = {key: 1}
+        x = torch.ones(1)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Reconstruction of FakeIdVariable"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
+
+    def test_converted_method_key_hash_ignores_receiver_contents(self):
+        def fn(x, mapping):
+            return x + 1, hash(builtins.frozendict(mapping))
+
+        receiver = {"unrelated": object()}
+        mapping = {receiver.get: 1}
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
+            fn(x, mapping),
+        )
+
+    @parametrize("wrap", [tuple, frozenset])
+    def test_builtin_method_hash_in_frozen_values_cannot_escape(self, wrap):
+        def fn(x):
+            return x + 1, hash(builtins.frozendict(a=wrap((time.time,))))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Reconstruction of FakeIdVariable"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
 
     def test_hash_and_container_keys(self):
         def fn(x):

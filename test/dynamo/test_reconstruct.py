@@ -3,6 +3,7 @@
 import collections
 import contextlib
 import dis
+import enum
 import functools
 import inspect
 import types
@@ -12,6 +13,7 @@ from unittest import mock
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -83,18 +85,45 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
-    def test_nested_lazy_constant_aggregate_does_not_specialize_values(self):
+    @parametrize("leaf", ["int", "bool", "computed"])
+    @parametrize("aggregate", ["tuple", "list", "slice_list", "slice_dict"])
+    def test_nested_lazy_constant_aggregate_does_not_specialize_values(
+        self, leaf, aggregate
+    ):
         def fn(x, value):
-            return x + 1, ((value, None),)
+            if leaf == "computed":
+                value = value == 1234567
+            if aggregate == "list":
+                contents = [value]
+            elif aggregate == "slice_list":
+                contents = slice([value], None)
+            elif aggregate == "slice_dict":
+                contents = slice({"value": value}, None)
+            else:
+                contents = ((value, None),)
+            return x + 1, contents
 
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.ones(1)
-        for value in (1234567, 2345678, 1234567):
+        values = (True, False, True) if leaf == "bool" else (1234567, 2345678, 1234567)
+        for value in values:
             self.assertEqual(compiled(x, value), fn(x, value))
         self.assertEqual(counter.frame_count, 1)
 
-    @parametrize("value", [None, True, False, Ellipsis, NotImplemented, torch.float32])
+    @parametrize(
+        "value",
+        [
+            None,
+            True,
+            False,
+            Ellipsis,
+            NotImplemented,
+            torch.float32,
+            torch.strided,
+            torch.contiguous_format,
+        ],
+    )
     def test_sourced_singleton_aggregate_uses_load_const(self, value):
         constants = []
 
@@ -106,6 +135,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             )
 
         def fn(x, value):
+            comptime.force_static(value)
             return x + 1, (value, None)
 
         x = torch.ones(1)
@@ -115,6 +145,31 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
                 fn(x, value),
             )
         self.assertIn((value, None), constants)
+
+    @parametrize("kind", ["class", "enum"])
+    def test_identity_specialized_aggregate_uses_load_const(self, kind):
+        class Choice(enum.Enum):
+            member = 1
+
+        class Holder:
+            pass
+
+        value = Choice.member if kind == "enum" else Holder
+        constants = []
+
+        def hook(instructions):
+            constants.extend(i.argval for i in instructions if i.opname == "LOAD_CONST")
+
+        def fn(x, value):
+            return x + 1, (value, None)
+
+        x = torch.ones(1)
+        with self.register_bytecode_hook(hook):
+            result = torch.compile(fn, backend="eager", fullgraph=True)(x, value)
+        self.assertIs(result[1][0], value)
+        self.assertTrue(
+            any(type(item) is tuple and item == (value, None) for item in constants)
+        )
 
     @parametrize(
         "factory",
@@ -143,7 +198,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
     @parametrize("mapping_type", [dict, collections.OrderedDict])
     def test_dict_input_key_snapshot_reused(self, mapping_type):
+        seen = []
+
         def hook(instructions):
+            seen.append(True)
             attrs = [i.argval for i in instructions if i.opname == "LOAD_ATTR"]
             self.assertEqual(attrs.count("keys"), 1)
 
@@ -157,6 +215,43 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         with self.register_bytecode_hook(hook):
             compiled = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(compiled(mapping), fn(mapping))
+        self.assertTrue(seen)
+
+    @parametrize("mutate", [False, True])
+    def test_dict_key_snapshot_suffix_and_mutation(self, mutate):
+        seen = []
+
+        def hook(instructions):
+            seen.append(
+                sum(
+                    i.opname == "LOAD_ATTR" and i.argval == "keys" for i in instructions
+                )
+            )
+
+        def fn(x, mapping, extra):
+            before = tuple(mapping)
+            if mutate:
+                mapping.pop(before[0])
+                mapping[extra] = 9
+            return x + 1, before, tuple(mapping)
+
+        keys = [object(), object(), object()]
+        x = torch.ones(1)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        expected_keys = keys[1:] if mutate else keys[:2]
+        with self.register_bytecode_hook(hook):
+            for _ in range(2):
+                mapping = dict.fromkeys(keys[:2], 1)
+                result = compiled(x, mapping, keys[2])
+                self.assertEqual(result, (x + 1, tuple(keys[:2]), tuple(expected_keys)))
+                self.assertEqual(tuple(mapping), tuple(expected_keys))
+                for got, expected in zip(
+                    result[1] + result[2], keys[:2] + expected_keys
+                ):
+                    self.assertIs(got, expected)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(seen, [1])
 
     @parametrize("container_type", [None, list, dict, set])
     @parametrize("nested", [False, True])
@@ -176,9 +271,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         keys = [b"layer0weight".decode() for _ in range(2)]
         self.assertIsNot(keys[0], keys[1])
+        keys.append("different-weight")
         x = torch.ones(1)
         previous = None
-        for key in keys:
+        for index, key in enumerate(keys):
             result = compiled(x, key)
             self.assertEqual(result, fn(x, key))
             self.assertIs(result[1][0][0], key)
@@ -190,8 +286,8 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
                 self.assertIs(next(iter(contents)), key)
                 self.assertIsNot(contents, previous)
                 previous = contents
-        if container_type is None:
-            self.assertEqual(counter.frame_count, 1)
+            # Constructing the frozenset needs a value guard for its key hash.
+            self.assertEqual(counter.frame_count, 1 if index < 2 else 2)
 
     @parametrize("graph_break", [False, True])
     def test_dynamic_slice_reconstruct(self, graph_break):
@@ -200,14 +296,17 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             value = slice(0, x.shape[0] - 1)
             if graph_break:
                 torch._dynamo.graph_break()
+                result = result.sin()
             return result, value
 
+        counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(
-            fn, backend="eager", dynamic=True, fullgraph=not graph_break
+            fn, backend=counter, dynamic=True, fullgraph=not graph_break
         )
         for size in (4, 6):
             x = torch.randn(size)
             self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 2 if graph_break else 1)
 
     def _compile_and_capture_side_effects(self, fn, *args):
         """Compile fn and return side-effect metadata from bytecode hooks."""

@@ -17,7 +17,7 @@ import types
 import typing
 from collections.abc import Callable, Generator
 from functools import lru_cache, partial
-from typing import NoReturn, TYPE_CHECKING
+from typing import cast, NoReturn, TYPE_CHECKING
 
 import torch
 from torch._C._dynamo import (
@@ -34,6 +34,7 @@ from torch._C._dynamo import (
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     handle_observed_exception,
+    ObservedAttributeError,
     ObservedTypeError,
     raise_observed_exception,
     raise_type_error,
@@ -194,6 +195,13 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
 # Flag Include/object.h
 Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
 Py_TPFLAGS_IMMUTABLETYPE = 1 << 8
+
+
+def type_is_immutable(obj_type: type, /) -> bool:
+    return bool(
+        type.__dict__["__flags__"].__get__(obj_type, type(obj_type))
+        & Py_TPFLAGS_IMMUTABLETYPE
+    )
 
 
 def type_disallows_instantiation(obj_type: type) -> bool:
@@ -806,13 +814,12 @@ def pylong_from_base(
         raise_observed_exception(
             ValueError, tx, args=["int() base must be >= 2 and <= 36, or 0"]
         )
+    if not issubclass(x.python_type(), (str, bytes, bytearray)):
+        raise_type_error(tx, "int() can't convert non-string with explicit base")
     if not x.is_python_constant():
         return None
-    xval = x.as_python_constant()
-    if not isinstance(xval, (str, bytes, bytearray)):
-        raise_type_error(tx, "int() can't convert non-string with explicit base")
     try:
-        return ConstantVariable.create(int(xval, base))
+        return ConstantVariable.create(int(x.as_python_constant(), base))
     except ValueError as e:
         raise_observed_exception(ValueError, tx, args=list(e.args))
 
@@ -1942,6 +1949,22 @@ def python_constant_repr_impl(
         raise_observed_exception(type(e), tx, args=list(e.args))
 
 
+def type_init(
+    tx: "InstructionTranslatorBase",
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    """type_init (a class's tp_init): only validates the arguments.
+
+    https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c#L3385-L3405
+    """
+    if len(args) == 1 and kwargs:
+        raise_type_error(tx, "type.__init__() takes no keyword arguments")
+    if len(args) not in (1, 3):
+        raise_type_error(tx, "type.__init__() takes 1 or 3 arguments")
+    return ConstantVariable.create(None)
+
+
 # _Py_SwappedOp: https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L987
 _REFLECTED_OP: dict[str, str] = {
     "__lt__": "__gt__",
@@ -2586,6 +2609,16 @@ def generic_getattr(
             ):
                 return value
 
+    # A user descriptor must run once; hasattr followed by getattr runs it twice.
+    if default is not _NO_DEFAULT and isinstance(
+        obj, variables.UserDefinedObjectVariable
+    ):
+        try:
+            return generic_getattr(tx, obj, name)
+        except ObservedAttributeError:
+            handle_observed_exception(tx)
+            return cast(VariableTracker, default)
+
     # Handle default for getattr(obj, name, default).
     if default is not _NO_DEFAULT:
         hasattr_var = obj.call_obj_hasattr(tx, name)
@@ -2594,7 +2627,7 @@ def generic_getattr(
                 f"hasattr_var must be a constant True or False, got {hasattr_var}"
             )
         if not hasattr_var.as_python_constant():
-            return default  # type: ignore[return-value]
+            return cast(VariableTracker, default)
 
     # tp_getset/tp_members are data descriptors: resolve ahead of the VT's
     # tp_getattro so a tp_getattro_impl override need not repeat the consult.

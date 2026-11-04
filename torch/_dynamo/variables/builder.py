@@ -257,6 +257,7 @@ from .dicts import (
     FrozenDictVariable,
     MappingProxyVariable,
     NNModuleGlobalHookFlagsDictVariable,
+    NNModuleGlobalOrderedHookFlagsDictVariable,
     OrderedDictVariable,
 )
 from .distributed import WorldMetaClassVariable
@@ -970,7 +971,9 @@ def _build_dict_items(
     if not issubclass(value_type, collections.OrderedDict):
         return {key: item for _, key, item in entries}
     # Preserve both dict storage order and OrderedDict iteration order.
-    items = collections.OrderedDict((key, item) for _, key, item in sorted(entries))
+    items = collections.OrderedDict(
+        (key, item) for _, key, item in sorted(entries, key=lambda entry: entry[0])
+    )
     for _, key, _ in entries:
         items.move_to_end(key)
     return items
@@ -1598,25 +1601,19 @@ class VariableBuilder:
 
             result = _build_dict_items(value, build_key_value)
 
-            global_flags_name = None
-            if istype(value, collections.OrderedDict):
-                global_flags_name = next(
-                    (
-                        name
-                        for name in (
-                            "_global_forward_hooks_with_kwargs",
-                            "_global_forward_hooks_always_called",
-                        )
-                        if value is getattr(torch.nn.modules.module, name)
-                    ),
-                    None,
+            if type(value) in (dict, collections.OrderedDict) and any(
+                value is getattr(torch.nn.modules.module, name)
+                for name in (
+                    "_global_forward_hooks_with_kwargs",
+                    "_global_forward_hooks_always_called",
                 )
-            if global_flags_name is not None:
-                result = NNModuleGlobalHookFlagsDictVariable(
-                    result,
-                    global_flags_name=global_flags_name,
-                    source=self.source,
+            ):
+                flags_cls = (
+                    NNModuleGlobalOrderedHookFlagsDictVariable
+                    if type(value) is collections.OrderedDict
+                    else NNModuleGlobalHookFlagsDictVariable
                 )
+                result = flags_cls(result, source=self.source)
             elif istype(value, collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
                 result = DefaultDictVariable(
