@@ -4528,11 +4528,18 @@ torch.cuda.synchronize()
             op = scaled_grouped_mm
             kwargs = {"offs": offs}
         else:
-            a = torch.ones(16, 128, device=device, dtype=torch.float8_e4m3fn)
-            b_t = a
             block_size = 32 if recipe == ScalingType.BlockWise1x32 else 128
-            scale_a = scale_b = to_mnk4(torch.ones(16, ceil_div(128, block_size), device=device))
-            expected = torch.full((16, 16), 128, device=device, dtype=torch.bfloat16)
+            k = block_size * 5
+            kb = torch.arange(5, device=device)
+            k_scales = torch.exp2((kb % 4 + kb // 4 - 3).float())
+            values = k_scales.reciprocal().square()
+            a = values.repeat_interleave(block_size).expand(16, -1).contiguous().to(torch.float8_e4m3fn)
+            b_t = torch.ones((32, k), device=device, dtype=torch.float8_e4m3fn)
+            row_scales = 2.0 ** (torch.arange(16, device=device) % 3)
+            col_scales = 2.0 ** ((2 * torch.arange(32, device=device) + 1) % 3)
+            scale_a = to_mnk4(row_scales[:, None] * k_scales)
+            scale_b = to_mnk4(col_scales[:, None] * k_scales)
+            expected = (k * row_scales[:, None] * col_scales).to(torch.bfloat16)
             op = scaled_mm
             kwargs = {}
         compiled = torch.compile(op, backend="inductor", fullgraph=True)
@@ -4587,12 +4594,20 @@ torch.cuda.synchronize()
     @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUBLASLT_MNK4, cublaslt_mnk4_skip_msg)
-    def test_scaled_mm_cublaslt_mnk4_tunableop(self, device):
+    @parametrize("recipe,block_size", [(ScalingType.BlockWise1x32, 32), (ScalingType.BlockWise1x128, 128)])
+    def test_scaled_mm_cublaslt_mnk4_tunableop(self, device, recipe, block_size):
         with tempfile.TemporaryDirectory() as directory:
             stdout, stderr = self.run_process_no_exception(f"""
 import torch
-from torch.nn.functional import scaled_mm, ScalingType, SwizzleType
+from torch.nn.functional import pad, scaled_mm, ScalingType, SwizzleType
+from torch.testing._internal.common_quantized import to_blocked
 from torch.testing._internal.common_utils import TestCase
+
+def to_mnk4(scales):
+    outer, inner = scales.shape
+    padded = pad(scales, (0, -inner % 4, 0, -outer % 4))
+    packed = padded.reshape(padded.shape[0], padded.shape[1] // 4, 4).permute(1, 0, 2)
+    return packed.contiguous().flatten().to(torch.float8_e8m0fnu)
 
 case = TestCase()
 tunable = torch.cuda.tunable
@@ -4603,14 +4618,36 @@ tunable.set_max_tuning_iterations(1)
 tunable.set_rotating_buffer_size(0)
 tunable.tuning_enable(True)
 tunable.enable(True)
-a = torch.ones(128, 640, device={device!r}, dtype=torch.float8_e4m3fn)
-b = a.t()
-scale = torch.ones(128 * 20, device={device!r}, dtype=torch.float8_e8m0fnu)
-expected = torch.full((128, 128), 640, device={device!r}, dtype=torch.bfloat16)
+k = {block_size} * 5
+kb = torch.arange(5, device={device!r})
+k_scales = torch.exp2((kb % 4 + kb // 4 - 3).float())
+values = k_scales.reciprocal().square()
+a = values.repeat_interleave({block_size}).expand(128, -1).contiguous().to(torch.float8_e4m3fn)
+b = torch.ones((128, k), device={device!r}, dtype=torch.float8_e4m3fn).t()
+row_scales = 2.0 ** (torch.arange(128, device={device!r}) % 3)
+col_scales = 2.0 ** ((2 * torch.arange(128, device={device!r}) + 1) % 3)
+sa = row_scales[:, None] * k_scales
+sb = col_scales[:, None] * k_scales
+expected = (k * row_scales[:, None] * col_scales).to(torch.bfloat16)
 for swizzle in (SwizzleType.SWIZZLE_32_4_4, SwizzleType.SWIZZLE_MN_K4):
-    result = scaled_mm(a, b, scale, ScalingType.BlockWise1x32, scale, ScalingType.BlockWise1x32,
-                       swizzle_a=swizzle, swizzle_b=swizzle)
+    if swizzle == SwizzleType.SWIZZLE_MN_K4:
+        scale_a, scale_b = to_mnk4(sa), to_mnk4(sb)
+        recipe = ScalingType({recipe.value})
+    else:
+        scale_a = to_blocked(sa.repeat_interleave({block_size} // 32, dim=1)).to(torch.float8_e8m0fnu)
+        scale_b = to_blocked(sb.repeat_interleave({block_size} // 32, dim=1)).to(torch.float8_e8m0fnu)
+        recipe = ScalingType.BlockWise1x32
+    result = scaled_mm(a, b, scale_a, recipe, scale_b, recipe, swizzle_a=swizzle, swizzle_b=swizzle)
     case.assertEqual(result, expected)
+    keys = {{row[1] for row in tunable.get_results()}}
+    if swizzle == SwizzleType.SWIZZLE_32_4_4:
+        case.assertEqual(len(keys), 1)
+        legacy_key = next(iter(keys))
+        case.assertTrue(legacy_key.endswith("_bias_None"))
+        case.assertNotIn("_swz_", legacy_key)
+    else:
+        case.assertEqual(len(keys - {{legacy_key}}), 1)
+        case.assertTrue(next(iter(keys - {{legacy_key}})).endswith("_swz_3_3"))
 results = tunable.get_results()
 case.assertEqual(len(results), 2)
 case.assertEqual(len({{row[1] for row in results}}), 2)
