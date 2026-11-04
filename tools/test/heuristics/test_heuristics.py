@@ -271,18 +271,30 @@ class TestParsePrevTests(TestTD):
             (folder / "previous_failures_additional.json").write_text('[1, "test_ops"]')
             self.assertEqual(previous_failures_or_none(), {"test_nn", "test_ops"})
             self.assertEqual(scored(), {"test_nn", "test_ops"})
-            for name in ("previous_failures.json", "previous_failures_additional.json"):
-                for text in ("{", "1", '[["x"]]', "[[1]]", "[" * 100_000):
+            # The additional file is a list, so a nested list is unhashable.
+            nested: list[tuple[str, type[Exception], str]] = [
+                ("previous_failures.json", AttributeError, "no attribute 'split'"),
+                ("previous_failures_additional.json", TypeError, "unhashable type"),
+            ]
+            for name, nested_error, nested_regex in nested:
+                cases: list[tuple[str, type[Exception], str]] = [
+                    ("{", json.JSONDecodeError, "Expecting property name"),
+                    ("1", TypeError, "not iterable"),
+                    ('[["x"]]', nested_error, nested_regex),
+                    ("[[1]]", nested_error, nested_regex),
+                    ("[" * 100_000, RecursionError, "maximum recursion depth"),
+                ]
+                for text, error, regex in cases:
                     (folder / name).write_text(text)
                     self.assertIsNone(previous_failures_or_none(), (name, text[:10]))
                     # TD's determinator logs the error and skips the heuristic.
-                    with self.assertRaises(
-                        previously_failed_in_pr.PREVIOUS_FAILURES_ERRORS
-                    ):
+                    with self.assertRaisesRegex(error, regex):
                         scored()
                 (folder / name).unlink()
                 (folder / name).mkdir()
                 self.assertIsNone(previous_failures_or_none(), (name, "a directory"))
+                with self.assertRaisesRegex(IsADirectoryError, "Is a directory"):
+                    scored()
                 (folder / name).rmdir()
                 (folder / name).write_text("[]")
 
