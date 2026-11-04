@@ -727,8 +727,9 @@ def run_test(
         else THRESHOLD * 3
         if is_cpp_test
         # The per-file xdist pass (see run_tests) skips the stepcurrent retries
-        # below, so bound a hang by its whole estimated wall time.
-        else max(THRESHOLD * 3, 3 * test_module.time)
+        # below, so bound a hang by its whole estimated wall time, with room
+        # for estimates that run low.
+        else max(THRESHOLD * 6, 3 * test_module.time)
         if options.pytest_xdist_workers is not None
         and test_file in XDIST_SERIAL_LIST
         and isinstance(test_module, ShardedTest)
