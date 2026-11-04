@@ -285,6 +285,93 @@ class TestCollect(unittest.TestCase):
                 out = fpc.collect(api, REPO, PR)
             self.assertLessEqual(len(fpc.dumps(out)), limit)
 
+    def test_the_labels_on_the_pr_are_passed_on_by_name(self):
+        api = FakeApi()
+        api.pull = {
+            **api.pull,
+            "labels": [{"name": "ciflow/docker"}, {"name": "ciflow/binaries"}],
+        }
+        out = fpc.collect(api, REPO, PR)
+        self.assertEqual(out["labels"], ["ciflow/docker", "ciflow/binaries"])
+        self.assertFalse(out["labels_truncated"])
+
+    def test_a_pr_without_labels_has_an_empty_list(self):
+        for labels in (None, []):
+            with self.subTest(labels=labels):
+                api = FakeApi()
+                api.pull = {**api.pull, "labels": labels}
+                out = fpc.collect(api, REPO, PR)
+                self.assertEqual(out["labels"], [])
+                self.assertFalse(out["labels_truncated"])
+        # The key is absent from some API responses.
+        self.assertEqual(fpc.collect(FakeApi(), REPO, PR)["labels"], [])
+
+    def test_malformed_label_entries_are_skipped(self):
+        api = FakeApi()
+        api.pull = {
+            **api.pull,
+            "labels": [
+                "ciflow/docker",
+                None,
+                {},
+                {"name": 5},
+                {"name": None},
+                {"name": "ciflow/binaries"},
+            ],
+        }
+        self.assertEqual(fpc.collect(api, REPO, PR)["labels"], ["ciflow/binaries"])
+
+    def test_malformed_entries_do_not_use_up_the_label_limit(self):
+        api = FakeApi()
+        labels = [{"name": f"l{i}"} for i in range(fpc.MAX_LABELS)]
+        api.pull = {**api.pull, "labels": ["junk"] * 10 + labels}
+        out = fpc.collect(api, REPO, PR)
+        self.assertEqual(out["labels"], [f"l{i}" for i in range(fpc.MAX_LABELS)])
+        self.assertFalse(out["labels_truncated"])
+
+    def test_the_label_count_is_capped_and_says_so(self):
+        api = FakeApi()
+        api.pull = {
+            **api.pull,
+            "labels": [{"name": f"l{i}"} for i in range(fpc.MAX_LABELS + 20)],
+        }
+        out = fpc.collect(api, REPO, PR)
+        self.assertEqual(len(out["labels"]), fpc.MAX_LABELS)
+        self.assertEqual(out["labels"][-1], f"l{fpc.MAX_LABELS - 1}")
+        self.assertTrue(out["labels_truncated"])
+
+    def test_each_label_name_is_capped_by_its_encoded_size(self):
+        suffix = " [truncated]"
+        e = "\U0001f600"  # 12 bytes once escaped
+        api = FakeApi()
+        api.pull = {
+            **api.pull,
+            "labels": [{"name": n} for n in ("l" * 500, e * 500, "short")],
+        }
+        out = fpc.collect(api, REPO, PR)
+        # cap_encoded cuts by tenths until the name fits in MAX_LABEL_BYTES (120):
+        # 110 ASCII characters (112 bytes) or 9 emoji (110 bytes).
+        self.assertEqual(out["labels"], ["l" * 110 + suffix, e * 9 + suffix, "short"])
+
+    def test_worst_case_labels_cost_only_a_few_comments(self):
+        e = "\U0001f600"
+        issue = [comment("maint", body="y" * fpc.MAX_BODY)] * 80
+
+        def collect(labels):
+            api = FakeApi(issue=issue, maintainers={"maint"})
+            api.pull = {**api.pull, "labels": labels, "body": e * 60000}
+            return fpc.collect(api, REPO, PR)
+
+        worst = [{"name": n} for n in ("l" * 500, e * 500)]
+        out = collect((worst * fpc.MAX_LABELS)[: fpc.MAX_LABELS])
+        self.assertEqual(len(out["labels"]), fpc.MAX_LABELS)
+        self.assertLessEqual(len(fpc.dumps(out)), fpc.MAX_TOTAL_BYTES)
+        without = collect([])
+        # About 7 KB of labels is two 4 KB comments at most; a cap several times
+        # looser would cost more.
+        self.assertLessEqual(len(without["items"]) - len(out["items"]), 2)
+        self.assertGreaterEqual(len(out["items"]), 5)
+
     def test_the_description_is_capped_and_counted(self):
         issue = [comment("maint", body="y" * fpc.MAX_BODY)] * 80
         api = FakeApi(issue=issue, maintainers={"maint"})
