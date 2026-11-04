@@ -2213,8 +2213,13 @@ class CudaReproTests(TestCase):
 
         f1_out, f1_grad = run(f, True)
         eager_out, eager_grad = run(f, False)
-        self.assertEqual(f1_out, eager_out, atol=1e-5, rtol=1e-5)
-        self.assertEqual(f1_grad, eager_grad, atol=1e-5, rtol=1e-5)
+        output_atol = grad_atol = 1e-5
+        if device_type == "xpu":
+            # Eager oneDNN fuses bias; Inductor adds it separately. The FP32
+            # output and gradient differ slightly between these paths.
+            output_atol, grad_atol = 2e-4, 1e-4
+        self.assertEqual(f1_out, eager_out, atol=output_atol, rtol=1e-5)
+        self.assertEqual(f1_grad, eager_grad, atol=grad_atol, rtol=1e-5)
 
         opt_fn = torch.compile(f, backend="inductor", fullgraph=True)
         _, codes = run_and_get_code(opt_fn, x.clone().requires_grad_())
