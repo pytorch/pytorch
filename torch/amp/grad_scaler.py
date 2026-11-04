@@ -30,7 +30,10 @@ class _MultiDeviceReplicator:
     def get(self, device: torch.device) -> torch.Tensor:
         retval = self._per_device_tensors.get(device, None)
         if retval is None:
-            retval = self.master.to(device=device, non_blocking=True, copy=True)
+            # CPU consumers use the result immediately. An asynchronous
+            # accelerator-to-CPU copy could leave them reading stale values.
+            non_blocking = device.type != "cpu" or self.master.device.type == "cpu"
+            retval = self.master.to(device=device, non_blocking=non_blocking, copy=True)
             self._per_device_tensors[device] = retval
         return retval
 
@@ -326,7 +329,10 @@ class GradScaler:
             optimizer (torch.optim.Optimizer):  Optimizer that owns the gradients to be unscaled.
 
         .. note::
-            :meth:`unscale_` does not incur a CPU-GPU sync.
+            :meth:`unscale_` does not incur a CPU-GPU sync when the gradients
+            and scaler are on an accelerator. If the scaler is on an
+            accelerator and gradients are on CPU, it synchronizes the copy of
+            the scaling and non-finite flags before accessing them on CPU.
 
         .. warning::
             :meth:`unscale_` should only be called once per optimizer per :meth:`step` call,
