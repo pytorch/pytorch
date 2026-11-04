@@ -268,7 +268,7 @@ fi # if cuda
 ##########################
 if [[ "$PACKAGE_TYPE" != 'libtorch' ]]; then
   pushd "$(dirname ${BASH_SOURCE[0]})/smoke_test"
-  python -c "from smoke_test import test_linalg; test_linalg()"
+  python -c "from smoke_test import test_linalg, test_linalg_svd_dlasd2; test_linalg(); test_linalg_svd_dlasd2()"
   # Skip CUDA linalg test for aarch64 as they run on CPU-only runners
   # TODO: Remove this once CUDA ARM runner is available
   if [[ "$DESIRED_CUDA" == *cuda* && "$(uname -m)" != "aarch64" ]]; then

@@ -686,6 +686,19 @@ def _inv_eps(r: float, a: float = 600.0, e_in: float = 12.25, n: int = 15):
     return ((-1.0) ** (dx + dy) * (1 / e_in - 1) * s + (g == 0)).to(torch.complex128)
 
 
+def _mkl_version() -> tuple[int, int] | None:
+    """(year, minor) of the MKL PyTorch is linked with, e.g. (2026, 2).
+
+    Parsed from the line torch.__config__.parallel_info() prints, which comes from
+    mkl_get_version_string: "Intel(R) oneAPI Math Kernel Library Version
+    2026.2-Product Build ...".
+    """
+    match = re.search(
+        r"Math Kernel Library Version (\d+)\.(\d+)", torch.__config__.parallel_info()
+    )
+    return (int(match[1]), int(match[2])) if match else None
+
+
 def test_linalg_svd_dlasd2() -> None:
     """Regression test for https://github.com/pytorch/pytorch/issues/202596
 
@@ -702,6 +715,17 @@ def test_linalg_svd_dlasd2() -> None:
         print("Skipping smoke_test_linalg_svd_dlasd2: PyTorch is not built with MKL")
         return
     print("Testing smoke_test_linalg_svd_dlasd2")
+    # The numeric reproducer below can pass with an affected MKL, because it
+    # depends on rounding, so check the version directly as well.
+    mkl_version = _mkl_version()
+    if mkl_version is None:
+        print("Could not read the MKL version from torch.__config__.parallel_info()")
+    elif mkl_version < (2026, 2):
+        raise RuntimeError(
+            f"PyTorch is linked with MKL {mkl_version[0]}.{mkl_version[1]}, which has "
+            "the LAPACK DLASD2 bug (fixed in MKL 2026.2): torch.linalg.svd can fail "
+            "on well-conditioned matrices"
+        )
     A = _inv_eps(158.05)
     num_threads = torch.get_num_threads()
     torch.set_num_threads(1)
