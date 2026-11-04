@@ -237,7 +237,8 @@ def query_model(
 
 
 def git(*args: str) -> str:
-    return subprocess.check_output(["git", *args], cwd=REPO_ROOT, text=True)
+    # Not text=True: universal newlines would turn a \r in a path into \n.
+    return os.fsdecode(subprocess.check_output(["git", *args], cwd=REPO_ROOT))
 
 
 def git_paths(command: str, *args: str) -> list[str]:
@@ -252,13 +253,13 @@ def git_grep(pattern: str, rev: str, timeout: float | None = None) -> list[str]:
         ["git", "grep", "-lzE", "-e", pattern, rev, "--", "test/"],
         cwd=REPO_ROOT,
         capture_output=True,
-        text=True,
         timeout=timeout,
     )
+    out, err = os.fsdecode(p.stdout), os.fsdecode(p.stderr)
     # 1 is no match; a signal kill is negative.
     if p.returncode not in (0, 1):
-        raise RuntimeError(f"git grep failed: {p.stderr.strip()[-500:]}")
-    return [line.split(":", 1)[1] for line in p.stdout.split("\0")[:-1]]
+        raise RuntimeError(f"git grep failed: {err.strip()[-500:]}")
+    return [line.split(":", 1)[1] for line in out.split("\0")[:-1]]
 
 
 def changed_files(merge_base: str, head: str) -> list[str]:
@@ -273,6 +274,9 @@ def run_all_reason(changed: list[str]) -> str | None:
         return "no changed files"
     if needs_run_all(changed):
         return "change touches test infrastructure"
+    # The path patterns' `.` and `$` do not handle a newline.
+    if any(re.search(r"[\x00-\x1f\x7f]", f) for f in changed):
+        return "a changed path contains a control character"
     if len(changed) > MAX_CHANGED_FILES:
         return f"more than {MAX_CHANGED_FILES} changed files"
     return None
@@ -285,7 +289,7 @@ def added_test_files(added: Iterable[str], listed: Collection[str]) -> set[str]:
     tests = {
         f.removeprefix("test/").removesuffix(".py")
         for f in added
-        if re.match(r"test/([\w/]+/)?test_\w+\.py$", f)
+        if re.fullmatch(r"test/([\w/]+/)?test_\w+\.py", f)
     }
     blocked = tuple(BLOCKLISTED_PATTERNS)
     return {t for t in tests if not t.startswith(blocked) and t not in listed}

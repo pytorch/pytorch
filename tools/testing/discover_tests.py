@@ -75,9 +75,9 @@ BLOCKLISTED_PATTERNS = [
     "ao",  # partly run by test_ao_sparsity.py
     "custom_backend",  # run directly by the CI scripts, not by run_test.py
     "fx",  # partly run by test_fx.py
-    "jit",  # partly run by test_jit.py
+    "jit",  # partly run by test_jit.py, jit/test_fuser_common.py by test_jit_fuser_te.py
     "mobile",  # not run
-    "package",  # partly run by test_package.py
+    "package",  # run by test_package.py
     "quantization",  # partly run by test_quantization.py
     "autograd",  # partly run by test_autograd.py
     # run by run_test.py's test_openreg handler, only with --openreg
