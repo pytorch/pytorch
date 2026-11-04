@@ -36,14 +36,14 @@ except ModuleNotFoundError:
     print("Can't import required modules, exiting")
     sys.exit(1)
 
-# Only the llm_td tests fail if the experimental package does not import.
+# Only the llm_selector tests fail if the experimental package does not import.
 try:
-    from tools.testing.llm_td import selection
-    from tools.testing.llm_td.selection import Selection
+    from tools.testing.llm_selector import selection
+    from tools.testing.llm_selector.selection import Selection
 except Exception as e:
-    LLM_TD_IMPORT_ERROR: Exception | None = e
+    LLM_SELECTOR_IMPORT_ERROR: Exception | None = e
 else:
-    LLM_TD_IMPORT_ERROR = None
+    LLM_SELECTOR_IMPORT_ERROR = None
 
 if TYPE_CHECKING:
     from collections.abc import Collection
@@ -639,14 +639,14 @@ class TestGetJobBaseName(unittest.TestCase):
             self.assertEqual(get_job_base_name(name), name)
 
 
-class LlmTdTestCase(unittest.TestCase):
+class LlmSelectorTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        if LLM_TD_IMPORT_ERROR is not None:
-            raise LLM_TD_IMPORT_ERROR
+        if LLM_SELECTOR_IMPORT_ERROR is not None:
+            raise LLM_SELECTOR_IMPORT_ERROR
 
 
-class TestSplitTests(LlmTdTestCase):
+class TestSplitTests(LlmSelectorTestCase):
     TD_LINE = "Running 25% of tests based on TD\n"
 
     def split(
@@ -669,7 +669,7 @@ class TestSplitTests(LlmTdTestCase):
         ):
             reports = Path(d) / "test" / "test-reports"
             reports.mkdir(parents=True)
-            selection_file = Path(d) / "llm_td_selection.json"
+            selection_file = Path(d) / "llm_selection.json"
             if isinstance(sel, Selection):
                 sel = json.dumps(sel.to_json())
             if sel is not None:
@@ -800,10 +800,10 @@ class TestSplitTests(LlmTdTestCase):
             _, stderr, _ = self.split(sel, td_enabled=td_enabled)
             self.assertEqual(failed_line in stderr, printed, (sel, td_enabled))
 
-    def test_broken_llm_td_keeps_td(self) -> None:
+    def test_broken_llm_selector_keeps_td(self) -> None:
         sel = Selection(files={"a"}, enforce=True, candidates={"a"})
         broken = (
-            mock.patch.dict(sys.modules, {"tools.testing.llm_td.selection": None}),
+            mock.patch.dict(sys.modules, {selection.__name__: None}),
             mock.patch.object(Selection, "load", side_effect=RuntimeError("bug")),
             mock.patch.object(Selection, "split", side_effect=RuntimeError("bug")),
             mock.patch.object(selection, "apply_selection", side_effect=RuntimeError),
@@ -822,7 +822,7 @@ class TestSplitTests(LlmTdTestCase):
         if split.llm is None:
             raise AssertionError("no selection read")
         metric = split.llm.selection_metric
-        self.assertEqual(split.selection_metrics(True), [("llm_td_selection", metric)])
+        self.assertEqual(split.selection_metrics(True), [("llm_selection", metric)])
         self.assertEqual(split.selection_metrics(False), [])
         self.assertEqual(CallSplit([], [], None).selection_metrics(True), [])
 
@@ -836,10 +836,10 @@ class TestSplitTests(LlmTdTestCase):
             row = {**td, "llm_enforced": s is not None}
             expected: list[tuple[str, object]] = [("td_test_failure_stats_v2", row)]
             if split.llm is not None:
-                expected.append(("llm_td_failure", split.llm.failure_metric(test)))
+                expected.append(("llm_selector_failure", split.llm.failure_metric(test)))  # fmt: skip
             self.assertEqual(metrics, expected)
 
-    def test_broken_llm_td_metrics_are_skipped(self) -> None:
+    def test_broken_llm_selector_metrics_are_skipped(self) -> None:
         split, _, _ = self.split(Selection(files={"a"}, candidates={"a"}))
         bug = RuntimeError("bug")
         with (
@@ -852,8 +852,8 @@ class TestSplitTests(LlmTdTestCase):
         self.assertEqual([name for name, _ in metrics], ["td_test_failure_stats_v2"])
         self.assertEqual(
             stderr.getvalue(),
-            "::warning::Not emitting llm_td_selection: RuntimeError('bug')\n"
-            "::warning::Not emitting llm_td_failure: RuntimeError('bug')\n",
+            "::warning::Not emitting llm_selection: RuntimeError('bug')\n"
+            "::warning::Not emitting llm_selector_failure: RuntimeError('bug')\n",
         )
 
     def test_unknown_previous_failures_keep_td(self) -> None:
@@ -868,7 +868,7 @@ class TestSplitTests(LlmTdTestCase):
         self.assertEqual([x["source"] for x in artifacts], ["td"])
 
 
-class TestRunTestSplit(LlmTdTestCase):
+class TestRunTestSplit(LlmSelectorTestCase):
     def test_forwards_run_test_values(self) -> None:
         tp = TestPrioritizations(["a"], {})
         for prev, is_ci in ((None, True), (set(), False), ({"a"}, True)):
@@ -885,7 +885,7 @@ class TestRunTestSplit(LlmTdTestCase):
             split.assert_called_once_with(
                 tp,
                 {"a": 1},
-                selection_file=Path("/r/.additional_ci_files/llm_td_selection.json"),
+                selection_file=Path("/r/.additional_ci_files/llm_selection.json"),
                 test_config="cfg",
                 td_enabled=True,
                 previous_failures=prev,
@@ -893,9 +893,9 @@ class TestRunTestSplit(LlmTdTestCase):
             )
             self.assertIs(split.call_args.kwargs["previous_failures"], prev)
 
-    def test_runs_without_llm_td(self) -> None:
-        self.assertEqual(test_selections.LLM_TD_SELECTION_FILE, selection.LLM_TD_SELECTION_FILE)  # fmt: skip
-        code = "import sys; sys.modules['tools.testing.llm_td'] = None; import tools.testing.test_selections"  # fmt: skip
+    def test_runs_without_llm_selector(self) -> None:
+        self.assertEqual(test_selections.LLM_SELECTION_FILE, selection.LLM_SELECTION_FILE)  # fmt: skip
+        code = "import sys; sys.modules['tools.testing.llm_selector'] = None; import tools.testing.test_selections"  # fmt: skip
         subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, check=True)
 
     def test_unknown_previous_failures_keep_td(self) -> None:
@@ -908,7 +908,7 @@ class TestRunTestSplit(LlmTdTestCase):
         ):
             folder = Path(d) / ".additional_ci_files"
             folder.mkdir()
-            (folder / "llm_td_selection.json").write_text(json.dumps(sel.to_json()))
+            (folder / "llm_selection.json").write_text(json.dumps(sel.to_json()))
             for prev, enforced in ((None, False), (set(), True)):
                 split = run_test_split(
                     tp,

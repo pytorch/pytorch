@@ -2543,7 +2543,7 @@ def main():
             s += "".join(f"    {test}\n" for test in parallel)
             return s.strip()
 
-    # TD's split, or the LLM test selection's if CI downloaded one; see tools/testing/llm_td.
+    # TD's split, or the LLM test selection's if CI downloaded one; see tools/testing/llm_selector.
     split = run_test_split(
         test_prioritizations,
         test_file_times_dict,

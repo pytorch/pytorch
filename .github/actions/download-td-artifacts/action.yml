@@ -10,11 +10,11 @@ inputs:
 runs:
   using: composite
   steps:
-    # Drop any selection an unzipped build artifact left; its only source is llm-td.yml
+    # Drop any selection an unzipped build artifact left; its only source is llm-selector.yml
     # (added in the PR above).
     - name: Remove any LLM test selection
       shell: bash
-      run: rm -f .additional_ci_files/llm_td_selection.json
+      run: rm -f .additional_ci_files/llm_selection.json
 
     - name: Download TD Artifacts from S3
       if: inputs.use-gha == '' || inputs.use-gha == 'false'
