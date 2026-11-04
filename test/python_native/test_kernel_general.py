@@ -284,6 +284,8 @@ class TestKernelGeneral(TestCase):
         for key, view in (("all_rows", x), ("all_strided", x[:, ::2])):
             got = kg.reduce_dim(trait, key, view, [1], i32, order="unordered")
             self.assertEqual(got, (view != 0).all(1).to(i32))
+        self.assertEqual({k[0] for k in rt._CACHE if k[1] == "all_rows"}, {"rowtile"})
+        self.assertEqual(_plan_tags("all_strided"), {"gensplit1", "gensplit2"})
 
     def test_empty_inner_tree_reduce_all(self):
         """Use the reduction identity when an empty input has no tree order."""
