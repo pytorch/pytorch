@@ -130,6 +130,19 @@ def td_enabled_job(build_environment: str, *, macos: bool, no_td: bool) -> bool:
     return not (no_td or macos or no_td_env)
 
 
+def td_enabled_default(
+    build_environment: str, workflow: str, *, is_ci: bool, macos: bool, no_td: bool
+) -> bool:
+    """run_test.py's --enable-td default: TD runs on CI PR jobs that
+    td_enabled_job and td_enabled_workflow allow."""
+    return (
+        is_ci
+        and get_pr_number() is not None
+        and td_enabled_job(build_environment, macos=macos, no_td=no_td)
+        and td_enabled_workflow(workflow)
+    )
+
+
 @cache
 def get_merge_base() -> str:
     pr_number = get_pr_number()
