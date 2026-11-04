@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -103,6 +104,17 @@ DRIVER_MAPPINGS = {
         for t in ("test_jit_profiling", "test_jit_legacy")
     },
     "test_jit_fuser_te": [r"^test/jit/test_fuser_common\.py$"],
+    # They import these blocklisted files, or run them as subprocesses.
+    "test_jit_fuser_legacy": [r"^test/test_jit_fuser\.py$"],
+    **{
+        f"distributed/test_c10d_spawn_{b}": [r"^test/distributed/test_c10d_spawn\.py$"]
+        for b in ("gloo", "nccl", "ucc")
+    },
+    "onnx/test_models_onnxruntime": [r"^test/onnx/test_models\.py$"],
+    "distributed/launcher/test_run": [
+        r"^test/distributed/launcher/bin/test_script(_init_method|_is_torchelastic_launched)?\.py$"
+    ],
+    "distributed/test_launcher": [r"^test/distributed/bin/test_script\.py$"],
     "test_package": [r"^test/package/"],
     "test_quantization": [r"^test/quantization/"],
 }
@@ -129,18 +141,18 @@ RUN_ALL_PATTERNS = [
     r"^\.ci/pytorch/(build|win-build|macos-build|rocm_utils|test|multigpu-test|win-test|macos-test|macos-common|common|common-build|common_utils|torch_trace)\.sh$",
     r"^\.ci/pytorch/numba-cuda-13\.patch$",
     r"^scripts/onnx/test\.sh$",
-    r"^\.ci/pytorch/win-test-helpers/(build_pytorch\.bat|setup_pytorch_env\.bat|test_python_shard\.bat|test_python_jit_legacy\.bat|installation-helpers/activate_miniconda3\.bat)$",
+    r"^\.ci/pytorch/win-test-helpers/(build_pytorch\.bat|setup_pytorch_env\.bat|test_python_shard\.bat|test_python_jit_legacy\.bat|installation-helpers/(activate_miniconda3|install_magma|install_sccache)\.bat)$",
     r"^\.github/workflows/_(linux|win|mac|rocm|xpu|s390x|tpu)-test(-no-dind)?\.yml$",
     r"^\.github/workflows/_(linux|win|mac|s390x)-build\.yml$",
     # setup-linux is left out: the test jobs use it from main, not from the PR.
-    r"^\.github/actions/(setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts)/",
+    r"^\.github/actions/(setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts|download-build-artifacts)/",
     r"^\.github/scripts/filter_test_configs\.py$",
     # The pytest plugin every test job loads.
     r"^torch/testing/_internal/torchci/",
     # Installed by .ci/pytorch/common_utils.sh, and torch_tpu by install_torch_tpu.sh, for the test jobs.
     r"^\.github/ci_commit_pins/(audio|vision|spmd_types|torch_tpu)\.txt$",
     # The CI test images: a new package version or toolchain can break any test.
-    r"^\.ci/docker/(build\.sh|requirements-ci\.txt|triton(_xpu)?_version\.txt|common/|ci_commit_pins/|ubuntu)",
+    r"^\.ci/docker/(build\.sh|requirements-ci\.txt|triton(_xpu)?_version\.txt|common/|ci_commit_pins/|ubuntu(-rocm|-xpu)?/)",
 ]
 
 
@@ -210,39 +222,35 @@ def import_pattern(modules: Iterable[str]) -> str:
     # directory; and load_test_module (a SourceFileLoader) takes the path.
     # The CPython tests under test/cpython redirect test.<name> to <name>, so
     # `from test import <name>` imports their sibling module <name>.
-    # A parenthesized `from <package> import (` may span lines, so it counts
-    # as importing every module of that package. A bare name that is also a
-    # standard library module, such as random, imports that module instead,
-    # and a bare `test` the test/ package.
+    # A parenthesized `from <package> import (`, or `from . import (`, may
+    # span lines, so it counts as importing every module of that package (for
+    # `from . import (`, of any package). Without a relative or `test.` prefix,
+    # a name that is also a standard library module, such as random, imports
+    # that module instead, and a bare `test` the test/ package.
     bare = sys.stdlib_module_names | {"test"}
+
+    def dotted(names: set[str]) -> str:
+        alt = rf"(\.+|test\.)({alts(names)})"
+        if unprefixed := alts(n for n in names if n not in bare):
+            alt += f"|{unprefixed}"
+        return f"({alt})"
+
     mods = sorted(f[5:-3].removesuffix("/__init__") for f in modules)
     parts = [m.split("/") for m in mods]
-    names = alts(
-        ".".join(p[i:])
-        for p in parts
-        for i in range(len(p))
-        if i < len(p) - 1 or p[i] not in bare
-    )
+    names = dotted({".".join(p[i:]) for p in parts for i in range(len(p))})
     bases = alts(p[-1] for p in parts)
-    parents = alts(
-        ".".join(p[i:-1])
-        for p in parts
-        for i in range(len(p) - 1)
-        if i < len(p) - 2 or p[i] not in bare
-    )
+    parents = {".".join(p[i:-1]) for p in parts for i in range(len(p) - 1)}
     paths = alts(n for m in mods for n in (m, m.replace("/", ".")))
     end = "([^[:alnum:]_]|$)"
+    names_of = rf"import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})"
     forms = [
-        *([rf"(from|import)[[:space:]]+\.*(test\.)?({names}){end}"] if names else []),
-        rf"from[[:space:]]+(\.+|test)[[:space:]]+import[[:space:]]+(.*[^[:alnum:]_.])?({bases}){end}",
+        rf"(from|import)[[:space:]]+{names}{end}",
+        rf"from[[:space:]]+(\.+|test)[[:space:]]+{names_of}",
     ]
     if parents:
-        forms.append(
-            rf"from[[:space:]]+\.*(test\.)?({parents})[[:space:]]+import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})"
-        )
+        forms.append(rf"from[[:space:]]+{dotted(parents)}[[:space:]]+{names_of}")
     quoted = rf"""load_test_module\(["']({paths})["']\)"""
-    if names:
-        quoted += rf"""|import_module\(["'](test\.)?({names})["']\)"""
+    quoted += rf"""|import_module\(["']{names}["']\)"""
     return rf"^[[:space:]]*({'|'.join(forms)})|{quoted}"
 
 
@@ -308,20 +316,20 @@ def parse_model_output(
     return files, set(sweeps)
 
 
-def grep_failure_is_an_error(
-    from_model_output: Callable[..., Selection],
-) -> Callable[..., Selection]:
-    """Make a `grep` that fails, with an OSError such as E2BIG or git_grep's
-    RuntimeError, an error of from_model_output rather than an exception."""
+# A failed `grep`: an OSError such as E2BIG, or git_grep's RuntimeError or timeout.
+GREP_ERRORS = (OSError, RuntimeError, subprocess.SubprocessError)
 
-    def wrapped(cls: type[Selection], *args: object, **kwargs: object) -> Selection:
-        try:
-            return from_model_output(cls, *args, **kwargs)
-        except (OSError, RuntimeError) as e:
-            error = f"{type(e).__name__}: {e}"
-            return cls(run_all=True, reason=f"grep failed ({error})", error=error)
 
-    return wrapped
+def grep_failure(e: Exception) -> Selection:
+    """from_model_output's Selection for a `grep` that raised one of GREP_ERRORS."""
+    # A SubprocessError's message holds the argv, ~90 KB of pattern.
+    if isinstance(e, subprocess.TimeoutExpired):
+        error = f"TimeoutExpired after {e.timeout}s"
+    elif isinstance(e, subprocess.SubprocessError):
+        error = type(e).__name__
+    else:
+        error = f"{type(e).__name__}: {e}"
+    return Selection(run_all=True, reason=f"grep failed ({error})", error=error)
 
 
 @dataclass
@@ -345,7 +353,6 @@ class Selection:
     error: str | None = None
 
     @classmethod
-    @grep_failure_is_an_error
     def from_model_output(
         cls,
         out: object,
@@ -355,11 +362,11 @@ class Selection:
     ) -> Selection:
         """Turn the model's structured output into a Selection.
 
-        A missing or malformed output, a change to test infrastructure and too
-        many import hops fall back to running everything; only a missing or
-        malformed output sets error. Test files the change edits and their
-        drivers are always selected, and with `grep` so are the test files that
-        import them (see importers)."""
+        A missing or malformed output, a change to test infrastructure, too
+        many import hops and a failed `grep` fall back to running everything;
+        only a missing or malformed output and a failed `grep` set error. Test
+        files the change edits and their drivers are always selected, and with
+        `grep` so are the test files that import them (see importers)."""
         if out is None:
             return cls(
                 run_all=True,
@@ -374,6 +381,8 @@ class Selection:
                 reason=f"malformed model output ({e}); running everything",
                 error=f"malformed model output: {e}",
             )
+        except GREP_ERRORS as e:
+            return grep_failure(e)
         if needs_run_all(changed_files):
             return cls(run_all=True, reason="change touches test infrastructure")
         if not isinstance(out, dict):
@@ -383,7 +392,10 @@ class Selection:
         if grep is not None:
             # The drivers of edited non-.py files, such as test_jit for test/jit/*.txt, have importers too.
             drivers = [f"test/{t}.py" for t in sorted(edited)]
-            found = importers(changed_files + drivers, candidates, grep)
+            try:
+                found = importers(changed_files + drivers, candidates, grep)
+            except GREP_ERRORS as e:
+                return grep_failure(e)
             if found is None:
                 return cls(
                     run_all=True,

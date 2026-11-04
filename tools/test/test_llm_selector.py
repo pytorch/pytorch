@@ -332,25 +332,57 @@ g () {
             "jit/data.txt": "",
             "test_jit.py": "",
             "test_jit_legacy.py": "from test_jit import *\n",
+            "test_nn.py": "from test_jit import JitTestCase\n",
         }
         sel = self.select_in_tree(
             sources, CANDIDATES | {"test_jit", "test_jit_legacy"}, ["test/jit/data.txt"]
         )
-        self.assertEqual(sel.files, {"test_jit", "test_jit_legacy"})
+        self.assertEqual(sel.files, {"test_jit", "test_jit_legacy", "test_nn"})
+
+    def test_importers_of_drivers_of_importers_are_selected(self) -> None:
+        # test_fx runs fx/test_user.py, which imports the edited helper.
+        sources = {
+            "helper.py": "",
+            "fx/test_user.py": "from helper import x\n",
+            "test_fx.py": "",
+            "test_nn.py": "from test_fx import TestFX\n",
+        }
+        sel = self.select_in_tree(sources, CANDIDATES | {"test_fx"}, ["test/helper.py"])
+        self.assertEqual(sel.files, {"test_fx", "test_nn"})
 
     def test_bare_names_that_import_something_else_are_not_matched(self) -> None:
         sources = {
             "test_nn.py": "from . import random\nfrom server.test import x\nfrom typing.helper import y\n",
             "test_ops.py": "from . import other\nfrom test.test_math import y\nimport test\nfrom typing import (\n    Any,\n)\n",
+            "dynamo/test_misc.py": "from .random import *\n",
+            "inductor/test_torchinductor.py": "from test.random import x\n",
         }
-        # random and typing are standard library modules, and test is test/.
-        for changed in (
-            "test/random.py",
-            "test/server/test/__init__.py",
-            "test/typing/helper.py",
-        ):
+        # random and typing are standard library modules, and test is test/,
+        # unless relative or prefixed with test.
+        prefixed = {"test_nn", "dynamo/test_misc", "inductor/test_torchinductor"}
+        for changed, expected in [
+            ("test/random.py", prefixed),
+            ("test/server/test/__init__.py", {"test_nn"}),
+            ("test/typing/helper.py", {"test_nn"}),
+        ]:
             sel = self.select_in_tree(sources, CANDIDATES, [changed])
-            self.assertEqual((sel.files, sel.run_all), ({"test_nn"}, False), changed)
+            self.assertEqual((sel.files, sel.run_all), (expected, False), changed)
+
+    def test_parenthesized_relative_imports_are_matched(self) -> None:
+        sources = {
+            "dynamo/helper.py": "",
+            "dynamo/test_misc.py": "from . import (\n    helper,\n)\n",
+            "inductor/pkg/util.py": "",
+            "inductor/test_torchinductor.py": "from .pkg import (\n    util,\n)\n",
+        }
+        # The names of `from . import (` may be on later lines, so it matches every module.
+        both = {"dynamo/test_misc", "inductor/test_torchinductor"}
+        for changed, expected in [
+            ("test/dynamo/helper.py", {"dynamo/test_misc"}),
+            ("test/inductor/pkg/util.py", both),
+        ]:
+            sel = self.select_in_tree(sources, CANDIDATES, [changed])
+            self.assertEqual(sel.files, expected, changed)
 
     def test_import_greps_are_chunked(self) -> None:
         patterns: list[str] = []
@@ -371,21 +403,23 @@ g () {
         self.assertEqual(sel.files, {"test_nn", "test_ops"})
 
     def test_grep_failure_runs_all(self) -> None:
-        for e in (
-            OSError("[Errno 7] Argument list too long"),
-            RuntimeError("git grep failed: fatal"),
-        ):
-            sel = Selection.from_model_output(
-                answer(run_all=True),
-                CANDIDATES,
-                ["test/test_nn.py"],
-                mock.Mock(side_effect=e),
-            )
-            error = f"{type(e).__name__}: {e}"
-            self.assertEqual(
-                (sel.run_all, sel.reason, sel.error),
-                (True, f"grep failed ({error})", error),
-            )
+        argv = ["git", "grep", "x" * 1000]
+        for e, error in [
+            (OSError("[Errno 7] Argument list too long"), None),
+            (RuntimeError("git grep failed: fatal"), None),
+            (subprocess.TimeoutExpired(argv, 60), "TimeoutExpired after 60s"),
+            (subprocess.CalledProcessError(2, argv), "CalledProcessError"),
+        ]:
+            error = error or f"{type(e).__name__}: {e}"
+            # The first answer greps every path, the second only for importers.
+            for out in (answer(tests=[{"file": "jit/test_freezing"}]), answer()):
+                sel = Selection.from_model_output(
+                    out, CANDIDATES, ["test/test_nn.py"], mock.Mock(side_effect=e)
+                )
+                self.assertEqual(
+                    (sel.run_all, sel.reason, sel.error),
+                    (True, f"grep failed ({error})", error),
+                )
 
     def test_import_forms(self) -> None:
         sources = {
@@ -441,35 +475,32 @@ g () {
 
     def test_import_chain_hop_limit(self) -> None:
         reason = "test modules import the change through too many hops"
-        for depth, run_all in [
-            (selection.MAX_IMPORT_HOPS - 1, False),
-            (selection.MAX_IMPORT_HOPS, True),
-            (None, True),
+        hops = selection.MAX_IMPORT_HOPS
+        # Round k greps for the module found in round k - 1 and finds m<k>.
+        for depth, run_all, rounds in [
+            (2, False, 3),
+            (hops - 1, False, hops),
+            (hops, True, hops),
         ]:
             calls: list[str] = []
 
             def grep(pattern: str) -> list[str]:
                 calls.append(pattern)
-                return (
-                    [f"test/m{len(calls)}.py"]
-                    if depth is None or len(calls) <= depth
-                    else []
-                )
+                k = len(calls)
+                grepped = "test/test_nn.py" if k == 1 else f"test/m{k - 1}.py"
+                self.assertEqual(pattern, selection.import_pattern([grepped]))
+                return [f"test/m{k}.py"] if k <= depth else []
 
+            # The module found in the last round that finds one is a candidate.
+            candidates = CANDIDATES | {f"m{depth}"}
             sel = Selection.from_model_output(
-                answer(), CANDIDATES, ["test/test_nn.py"], grep
+                answer(), candidates, ["test/test_nn.py"], grep
             )
             self.assertEqual((sel.run_all, sel.error), (run_all, None), depth)
             self.assertEqual(sel.reason == reason, run_all, depth)
-            self.assertEqual(
-                len(calls),
-                min(
-                    selection.MAX_IMPORT_HOPS, (depth or selection.MAX_IMPORT_HOPS) + 1
-                ),
-                depth,
-            )
+            self.assertEqual(len(calls), rounds, depth)
             if not run_all:
-                self.assertIn("test_nn", sel.files)
+                self.assertEqual(sel.files, {"test_nn", f"m{depth}"}, depth)
 
     def test_fallbacks_run_all(self) -> None:
         sel = Selection.from_model_output(None, CANDIDATES, ["torch/a.py"])
@@ -568,6 +599,8 @@ g () {
             ".ci/docker/build.sh",
             ".ci/docker/ci_commit_pins/triton.txt",
             ".ci/docker/ubuntu/Dockerfile",
+            ".ci/docker/ubuntu-rocm/Dockerfile",
+            ".ci/docker/ubuntu-xpu/Dockerfile",
             ".ci/pytorch/test.sh",
             ".ci/pytorch/multigpu-test.sh",
             ".ci/pytorch/win-test.sh",
@@ -587,6 +620,8 @@ g () {
             ".ci/pytorch/win-test-helpers/setup_pytorch_env.bat",
             ".ci/pytorch/win-test-helpers/test_python_shard.bat",
             ".ci/pytorch/win-test-helpers/installation-helpers/activate_miniconda3.bat",
+            ".ci/pytorch/win-test-helpers/installation-helpers/install_magma.bat",
+            ".ci/pytorch/win-test-helpers/installation-helpers/install_sccache.bat",
             ".github/workflows/_linux-test.yml",
             ".github/workflows/_win-test.yml",
             ".github/workflows/_mac-test.yml",
@@ -604,6 +639,7 @@ g () {
             ".github/actions/setup-xpu/action.yml",
             ".github/actions/filter-test-configs/action.yml",
             ".github/actions/download-td-artifacts/action.yml",
+            ".github/actions/download-build-artifacts/action.yml",
             ".github/scripts/filter_test_configs.py",
             ".github/ci_commit_pins/vision.txt",
             ".github/ci_commit_pins/audio.txt",
@@ -653,6 +689,8 @@ g () {
             ".github/workflows/_binary-build-linux.yml",
             ".github/workflows/docs-build.yml",
             ".github/actions/setup-linux/action.yml",
+            # A cross-build image; no test job runs in it.
+            ".ci/docker/ubuntu-cross-riscv/Dockerfile",
             ".github/ci_commit_pins/vllm.txt",
         ]:
             self.assertFalse(needs_run_all([f]), f)
@@ -757,6 +795,23 @@ g () {
                 re.search(r, path) for rs in DRIVER_MAPPINGS.values() for r in rs
             )
             self.assertEqual(driven, pattern not in undriven, pattern)
+        # Blocklisted test files that candidates import or run as subprocesses.
+        spawn = {f"distributed/test_c10d_spawn_{b}" for b in ("gloo", "nccl", "ucc")}
+        launcher_bin = "distributed/launcher/bin/test_script"
+        for f, drivers in [
+            ("test_jit_fuser", {"test_jit_fuser_legacy"}),
+            ("distributed/test_c10d_spawn", spawn),
+            ("onnx/test_models", {"onnx/test_models_onnxruntime"}),
+            ("distributed/bin/test_script", {"distributed/test_launcher"}),
+            *(
+                (f"{launcher_bin}{s}", {"distributed/launcher/test_run"})
+                for s in ("", "_init_method", "_is_torchelastic_launched")
+            ),
+        ]:
+            path = f"test/{f}.py"
+            self.assertTrue((REPO_ROOT / path).exists(), path)
+            self.assertNotIn(f, TESTS)
+            self.assertEqual(selection.edited_tests([path], set(TESTS)), drivers, f)
 
 
 class TestPrompt(unittest.TestCase):
@@ -768,6 +823,7 @@ class TestPrompt(unittest.TestCase):
             "test/helper.py",
             "torch/test_d.py",
             "test/fx/test_e.py",
+            "test/test_f.py\n",
         ]
         self.assertEqual(
             select_tests.added_test_files(added, ["test_c"]), {"test_a", "nn/test_b"}
@@ -935,6 +991,12 @@ class TestMain(unittest.TestCase):
         reason = f"more than {cap} changed files"
         self.assertEqual(select_tests.run_all_reason(files), reason)
 
+    def test_run_all_reason_on_control_characters(self) -> None:
+        reason = "a changed path contains a control character"
+        for path in ["test/a\nb/conftest.py", "test/test_x.py\n", "test/a\rb.py"]:
+            changed = ["torch/a.py", path]
+            self.assertEqual(select_tests.run_all_reason(changed), reason, msg=path)
+
     def test_git_readers_on_a_rename(self) -> None:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
@@ -1013,18 +1075,21 @@ class TestMain(unittest.TestCase):
                 "-m",
                 "base",
             )
-            for name in (conftest, reader, "test/x\ny.py"):
+            # A \r survives only without universal newlines, \xff only without strict UTF-8.
+            names = [conftest, reader, "test/x\ny.py", "test/x\ry.py"]
+            names.append(os.fsdecode(b"test/x\xffy.py"))
+            for name in names:
                 (Path(repo) / name).parent.mkdir(parents=True, exist_ok=True)
                 (Path(repo) / name).write_text("import x\n")
             git("add", "-A")
             git("-c", "user.name=a", "-c", "user.email=a@b.c", "commit", "-qm", "add")
             changed = select_tests.changed_files("HEAD~1", "HEAD")
-            self.assertEqual(changed, [conftest, reader, "test/x\ny.py"])
+            self.assertEqual(changed, names)
             self.assertEqual(
                 select_tests.run_all_reason(changed),
                 "change touches test infrastructure",
             )
-            self.assertIsNone(select_tests.run_all_reason(changed[1:]))
+            self.assertIsNone(select_tests.run_all_reason([reader, names[-1]]))
             self.assertEqual(select_tests.git_grep("import", "HEAD"), changed)
             self.assertEqual(
                 select_tests.git_paths("ls-tree", "-r", "--name-only", "HEAD"), changed
