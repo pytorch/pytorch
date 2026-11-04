@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
 import tempfile
 import time
@@ -267,13 +268,9 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
 
 # How long to wait for another process's download before downloading anyway.
 _CACHE_LOCK_TIMEOUT_S = 3600
-# Group-writable, so that every user of a cache shared by a group (setgid
-# directory, umask 002) can take the lock. filelock applies the mode with fchmod,
-# ignoring the umask, so 0o666 would make the lock files world-writable.
-_LOCK_FILE_MODE = 0o664
 
 
-def _lock_unavailable(lock_path):
+def _lock_unavailable(lock_path, mode):
     """Return the error that makes ``lock_path`` impossible to lock, or None.
 
     filelock reports some "can't lock" errors the same way as a lock held by
@@ -288,13 +285,14 @@ def _lock_unavailable(lock_path):
         except OSError as e:
             return e
         os.close(fd)
-        os.remove(probe)
+        with contextlib.suppress(OSError):
+            os.remove(probe)
         return None
 
     import fcntl
 
     try:
-        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, _LOCK_FILE_MODE)
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, mode)
     except OSError as e:
         return e
     try:
@@ -325,9 +323,14 @@ def _cache_lock(path, stacklevel, verbose):
     from torch.utils._filelock import FileLock
 
     lock_path = path + ".lock"
+    # filelock fchmods lock files to this mode, ignoring the umask. They are
+    # group-writable only in a group-writable directory (a cache shared by a
+    # group), so that every member of the group can take the lock.
+    lock_dir_mode = os.stat(os.path.dirname(lock_path)).st_mode
+    mode = 0o664 if lock_dir_mode & stat.S_IWGRP else 0o644
 
     def new_lock(timeout):
-        return FileLock(lock_path, timeout=timeout, mode=_LOCK_FILE_MODE)
+        return FileLock(lock_path, timeout=timeout, mode=mode)
 
     stack = contextlib.ExitStack()
     message = None
@@ -335,7 +338,7 @@ def _cache_lock(path, stacklevel, verbose):
         try:
             stack.enter_context(new_lock(timeout=0))
         except Timeout:
-            error = _lock_unavailable(lock_path)
+            error = _lock_unavailable(lock_path, mode)
             if error is not None:
                 raise error from None
             if verbose:
@@ -344,14 +347,17 @@ def _cache_lock(path, stacklevel, verbose):
     except Timeout:
         message = (
             f"Another process has held {lock_path} for more than "
-            f"{_CACHE_LOCK_TIMEOUT_S} s, so this process downloads the entry as well."
+            f"{_CACHE_LOCK_TIMEOUT_S} s, so this process downloads the entry as "
+            "well. If downloading it takes longer than that, populate the cache "
+            "from one process before the others load it."
         )
     except (NotImplementedError, OSError) as e:
         message = (
             f"Could not lock {lock_path} ({e!r}), so other processes may download "
-            "this entry at the same time. To avoid this, use a cache directory on a "
-            "filesystem that supports file locks (see torch.hub.set_dir()), or make "
-            "the lock file writable."
+            "this entry at the same time. To avoid this, use a cache directory "
+            "(torch.hub.set_dir(), or the model_dir argument) on a filesystem that "
+            "supports file locks, where this user can write the directory and its "
+            "lock files."
         )
     if message is not None:
         warnings.warn(message, stacklevel=stacklevel)
@@ -470,8 +476,8 @@ def _get_cache_or_reload(
                 # Unlike shutil.move, os.rename never moves into an existing repo_dir.
                 os.rename(os.path.join(work_dir, extracted_repo_name), repo_dir)
             except OSError:
-                # Without the lock, another process may have published it first.
-                if force_reload or not os.path.isdir(repo_dir):
+                # Another process published it first, which can happen without the lock.
+                if not os.path.isdir(repo_dir):
                     raise
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)

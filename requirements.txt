@@ -6,7 +6,7 @@
 # Install / Development extra requirements
 build[uv]  # for building sdist and wheel
 expecttest>=0.3.0
-filelock
+filelock>=3.20.1
 fsspec>=0.8.5
 hypothesis
 jinja2
