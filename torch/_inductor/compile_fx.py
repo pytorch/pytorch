@@ -2071,7 +2071,7 @@ class _InProcessFxCompile(FxCompile):
                             check_lowering_disable_cudagraph(
                                 # pyrefly: ignore [unbound-name]
                                 V.graph.device_node_mapping,
-                                use_cudagraph_partition=(
+                                cudagraphs_per_partition=(
                                     # pyrefly: ignore [unbound-name]
                                     V.graph.partition_handles_cudagraph_unsafe_ops
                                 ),
