@@ -1,5 +1,6 @@
 #include <ATen/core/function_schema.h>
 
+#include <c10/util/irange.h>
 #include <iostream>
 #include <stack>
 #include <utility>
@@ -467,7 +468,7 @@ bool FunctionSchema::isForwardCompatibleWith(
   }
 
   // make sure among the default args, they are forward compatible
-  for (size_t i = 0; i < std::min(old_out_start_idx, new_out_start_idx); i++) {
+  for (const auto i : c10::irange(std::min(old_out_start_idx, new_out_start_idx))) {
     if (!arguments().at(i).isForwardCompatibleWith(old.arguments().at(i))) {
       if (why_not) {
         why_not
@@ -479,7 +480,7 @@ bool FunctionSchema::isForwardCompatibleWith(
   }
 
   // Validate that all new arguments provided has a default value
-  for (size_t i = old_out_start_idx; i < new_out_start_idx; ++i) {
+  for (const auto i : c10::irange(old_out_start_idx, new_out_start_idx)) {
     auto const &default_value = arguments().at(i).default_value();
     if (!default_value.has_value()) {
       if (why_not) {
@@ -505,7 +506,7 @@ bool FunctionSchema::isForwardCompatibleWith(
   }
 
   // now compare the out args
-  for (size_t i = old_out_start_idx; i < old.arguments().size(); i++) {
+  for (const auto i : c10::irange(old_out_start_idx, old.arguments().size())) {
     if (!arguments()
              .at(i - old_out_start_idx + new_out_start_idx)
              .isForwardCompatibleWith(old.arguments().at(i))) {

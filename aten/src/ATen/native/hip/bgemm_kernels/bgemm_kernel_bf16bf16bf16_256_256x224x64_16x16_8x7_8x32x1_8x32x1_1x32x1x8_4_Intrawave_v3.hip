@@ -4,11 +4,11 @@
 
 namespace at::native {
 
-void bgemm_kernel_bf16bf16bf16_256_256x224x64_16x16_8x7_8x32x1_8x32x1_1x32x1x8_4_Intrawave_v3(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
+bool bgemm_kernel_bf16bf16bf16_256_256x224x64_16x16_8x7_8x32x1_8x32x1_1x32x1x8_4_Intrawave_v3(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
     bool transa_ = std::tolower(transa) != 'n';
     bool transb_ = std::tolower(transb) != 'n';
     if (transa_ && transb_) {
-        bgemm_kernel_impl<
+        return bgemm_kernel_impl<
             ck::bhalf_t, // A_DATA_TYPE
             ck::bhalf_t, // B_DATA_TYPE
             256, // BLOCK_SIZE
@@ -37,7 +37,7 @@ void bgemm_kernel_bf16bf16bf16_256_256x224x64_16x16_8x7_8x32x1_8x32x1_1x32x1x8_4
             true, // TRANS_A
             true>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
     } else if (transa_ && !transb_) {
-        bgemm_kernel_impl<
+        return bgemm_kernel_impl<
             ck::bhalf_t, // A_DATA_TYPE
             ck::bhalf_t, // B_DATA_TYPE
             256, // BLOCK_SIZE
@@ -66,7 +66,7 @@ void bgemm_kernel_bf16bf16bf16_256_256x224x64_16x16_8x7_8x32x1_8x32x1_1x32x1x8_4
             true, // TRANS_A
             false>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
     } else if (!transa_ && transb_) {
-        bgemm_kernel_impl<
+        return bgemm_kernel_impl<
             ck::bhalf_t, // A_DATA_TYPE
             ck::bhalf_t, // B_DATA_TYPE
             256, // BLOCK_SIZE
@@ -95,7 +95,7 @@ void bgemm_kernel_bf16bf16bf16_256_256x224x64_16x16_8x7_8x32x1_8x32x1_1x32x1x8_4
             false, // TRANS_A
             true>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
     } else {
-        bgemm_kernel_impl<
+        return bgemm_kernel_impl<
             ck::bhalf_t, // A_DATA_TYPE
             ck::bhalf_t, // B_DATA_TYPE
             256, // BLOCK_SIZE

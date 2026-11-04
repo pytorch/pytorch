@@ -64,11 +64,9 @@ static void hardswish_backward_kernel(at::TensorIterator& iter) {
 }
 
 static void elu_kernel(TensorIteratorBase& iter, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(c10::kHalf, c10::kBFloat16, iter.common_dtype(), "elu_mps", [&]() {
-    ELUParams<scalar_t> params{alpha.to<scalar_t>(), scale.to<scalar_t>(), input_scale.to<scalar_t>()};
-    lib.exec_unary_kernel_with_params(
-        iter, "elu", params, fmt::format("ELUParams_{}", mps::scalarToMetalTypeString(iter.common_dtype())));
-  });
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.common_dtype()), "elu not implemented for ", iter.common_dtype());
+  ELUParams params{alpha.to<float>(), scale.to<float>(), input_scale.to<float>()};
+  lib.exec_unary_kernel_with_params(iter, "elu", params, "ELUParams");
 }
 
 static void elu_backward_kernel(TensorIteratorBase& iter,
@@ -76,15 +74,10 @@ static void elu_backward_kernel(TensorIteratorBase& iter,
                                 const Scalar& scale,
                                 const Scalar& input_scale,
                                 bool is_result) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(c10::kHalf, c10::kBFloat16, iter.common_dtype(), "elu_backward_mps", [&]() {
-    ELUBackwardParams<scalar_t> params{
-        alpha.to<scalar_t>(), scale.to<scalar_t>(), input_scale.to<scalar_t>(), is_result};
-    lib.exec_binary_kernel_with_params(
-        iter,
-        "elu_backward",
-        params,
-        fmt::format("ELUBackwardParams_{}", mps::scalarToMetalTypeString(iter.common_dtype())));
-  });
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      isFloatingType(iter.common_dtype()), "elu_backward not implemented for ", iter.common_dtype());
+  ELUBackwardParams params{alpha.to<float>(), scale.to<float>(), input_scale.to<float>(), is_result};
+  lib.exec_binary_kernel_with_params(iter, "elu_backward", params, "ELUBackwardParams");
 }
 
 static void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta, const Scalar& threshold) {
@@ -118,6 +111,24 @@ static void threshold_kernel(TensorIteratorBase& iter, const Scalar& threshold, 
 
 static void prelu_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "prelu");
+}
+
+static void prelu_backward_kernel(TensorIterator& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.dtype()), "prelu_backward not implemented for ", iter.dtype());
+  auto input_iter = TensorIteratorConfig()
+                        .add_output(iter.output(0))
+                        .add_const_input(iter.input(0))
+                        .add_const_input(iter.input(1))
+                        .add_const_input(iter.input(2))
+                        .build();
+  auto weight_iter = TensorIteratorConfig()
+                         .add_output(iter.output(1))
+                         .add_const_input(iter.input(0))
+                         .add_const_input(iter.input(1))
+                         .add_const_input(iter.input(2))
+                         .build();
+  lib.exec_ternary_kernel(input_iter, "prelu_backward");
+  lib.exec_ternary_kernel(weight_iter, "prelu_backward_weight");
 }
 
 static void silu_kernel(TensorIteratorBase& iter) {
@@ -382,6 +393,7 @@ REGISTER_DISPATCH(leaky_relu_stub, leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, leaky_relu_backward_kernel);
 REGISTER_DISPATCH(threshold_stub, threshold_kernel);
 REGISTER_DISPATCH(prelu_stub, prelu_kernel);
+REGISTER_DISPATCH(prelu_backward_stub, prelu_backward_kernel);
 REGISTER_DISPATCH(silu_stub, silu_kernel);
 REGISTER_DISPATCH(silu_backward_stub, silu_backward_kernel);
 REGISTER_DISPATCH(mish_stub, mish_kernel);

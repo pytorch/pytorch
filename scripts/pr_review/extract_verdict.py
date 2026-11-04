@@ -2,10 +2,12 @@
 """Sanitize the hardened PR review's model output into a publishable verdict.
 
 The review job runs Claude against UNTRUSTED pull-request content with network
-egress locked down, no GitHub write token, and no S3 credentials. The only thing
-that leaves that job is the JSON this script produces, so this file is the egress
-boundary and every control here exists because that text is attacker-influenced
-and ends up somewhere a human or a dashboard reads.
+egress locked down, no GitHub write token, and an S3 credential that can write
+only under the private pr_review_traces/ prefix. Apart from token and cost
+numbers, the only thing that leaves that job for a public surface is the JSON
+this script produces, so this file is the egress boundary and every control here
+exists because that text is attacker-influenced and ends up somewhere a human or
+a dashboard reads.
 
 The model is given the output shape in the prompt, NOT as an enforced schema -
 the workflow passes no --json-schema - so shape, types, the verdict enum and the
@@ -31,9 +33,9 @@ even if one were enforced:
 None of this closes the channel, and it is not the thing keeping us safe. A few
 hundred characters of prose can still carry a secret via an acrostic or semantic
 encoding, and no output filter fixes that. The control that actually bounds the
-damage is upstream: a one-hour, Bedrock-only role with no S3 and no GitHub
-write. This script raises the cost of the naive attempts and makes the
-deliberate ones narrow.
+damage is upstream: a one-hour role limited to Bedrock and S3 writes under
+pr_review_traces/, with no GitHub write. This script raises the cost of the
+naive attempts and makes the deliberate ones narrow.
 
 A well-formed file is written on every path where writing is possible, and the
 exit code is 0 — a rejected or malformed result is reported as a
@@ -58,7 +60,9 @@ VERDICTS = {"ready_for_human_review", "changes_requested"}
 SEVERITIES = {"info", "minor", "major"}
 
 MAX_FINDINGS = 25
-MAX_MESSAGE = 600
+# Stage B's prompt asks for at most 1200 characters, leaving room for the
+# escaping neutralize() adds; a message that still overflows ends in TRUNCATED.
+MAX_MESSAGE = 1500
 MAX_SUMMARY = 1500
 MAX_PATH = 400
 MAX_DROPPED_TRACKED = (
@@ -89,8 +93,8 @@ _BLOB = re.compile(r"[A-Za-z0-9+/=_-]{120,}")
 # hex digest is 128 characters, which is over the floor.
 # ACCEPTED COST: this leaves a hole exactly the width of a digest — an attacker
 # can hex-encode up to 64 bytes and shape it like one. That is far below a
-# session token, and the one-hour Bedrock-only credential is what bounds the
-# damage anyway.
+# session token, and the one-hour credential (Bedrock, plus S3 writes under
+# pr_review_traces/) is what bounds the damage anyway.
 _DIGEST_LENGTHS = {32, 40, 56, 64, 96, 128}
 _HEX_ONLY = re.compile(r"^[0-9a-fA-F]+$")
 
@@ -164,6 +168,12 @@ _UNESCAPED_BRACKET = re.compile(r"(?<!\\)[\[\]]")
 # neutralize() caps AFTER escaping, so a capped string can end in a cut entity.
 _BARE_AMPERSAND = re.compile(r"&(?!amp;|lt;|gt;|(?:a(?:mp?)?|lt?|gt?)?\Z)")
 _FINDING_KEYS = ("path", "line", "severity", "message")
+# The space keeps the dots from completing a token, such as `www` into a URL.
+TRUNCATED = " ..."
+# A cut entity is allowed only at the very end; it must go before TRUNCATED.
+_PARTIAL_ENTITY = re.compile(r"&(?:a(?:mp?)?|lt?|gt?)?\Z")
+# Anchored at a token start: unanchored, each retry backtracks through long tokens.
+_PARTIAL_TOKEN = re.compile(r"(?<!\S)\S+\Z")
 
 
 class Rejected(Exception):
@@ -244,7 +254,8 @@ def check_no_encoded_blob(text: str, where: str) -> None:
     splitting a payload into sub-120-character runs, or base64ing text that
     decodes back to printable ASCII, both walk straight past it. It catches the
     careless case cheaply. What bounds the damage is that the review job's
-    credential is Bedrock-only and expires within an hour.
+    credential reaches only Bedrock and S3 writes under pr_review_traces/, and
+    expires within an hour.
     """
     # Scanned TWICE: a tag can keep each half under the floor, and stripping
     # rejoins them. Neither subsumes the other -- stripping eats a bracketed
@@ -427,6 +438,43 @@ def neutralize(text: str, cap: int = MAX_SUMMARY) -> str:
     # Capped on the way out as well as in: escaping GROWS the string, and one
     # place deciding the length beats every caller re-truncating.
     return _drop_dangling_escape(text[:cap])
+
+
+def neutralize_message(message: str) -> str:
+    """`neutralize` a finding message to MAX_MESSAGE, ending a cut in TRUNCATED.
+
+    The input is sliced to MAX_MESSAGE first, as `neutralize` would, so its
+    quadratic cost stays bounded; only the output is allowed to grow before the
+    cut, which escaping can make up to 5x longer.
+
+    A cut can leave text that fails a check the whole message passed: half a
+    128-hex digest is a blob, a cut entity mid-string is a bare `&`. So whole
+    tokens are dropped from the end until the result passes the publish check,
+    and a message with no passing prefix comes back empty, which `build` drops.
+    Only failures the cut causes are repaired this way: a message that fails the
+    check whole (a blob neutralize() joined, say) is returned whole, so `build`
+    drops it as `failed_publish_check`.
+    """
+    src = message[:MAX_MESSAGE]
+    if len(src) < len(message) and not message[MAX_MESSAGE].isspace():
+        # The input slice is a cut too: drop the token it split.
+        src = _PARTIAL_TOKEN.sub("", src) or src
+    full = neutralize(src, 5 * MAX_MESSAGE).strip()
+    if not full or (len(message.rstrip()) <= MAX_MESSAGE and len(full) <= MAX_MESSAGE):
+        return full
+    if not is_neutral_prose(full, len(full)):
+        return full
+    kept = full[: MAX_MESSAGE - len(TRUNCATED)]
+    if len(kept) < len(full) and not full[len(kept)].isspace():
+        # Back up to a word boundary, unless the text is one long token.
+        kept = _PARTIAL_TOKEN.sub("", kept) or kept
+    while kept.strip():
+        out = _drop_dangling_escape(kept.rstrip())
+        out = _PARTIAL_ENTITY.sub("", out).rstrip() + TRUNCATED
+        if is_neutral_prose(out, MAX_MESSAGE):
+            return out
+        kept = _PARTIAL_TOKEN.sub("", kept.rstrip())
+    return ""
 
 
 def unquote_git_path(path: str) -> str:
@@ -803,7 +851,7 @@ def sanitize_findings(  # noqa: C901
             drop({"path": path, "reason": "bad_severity"})
             continue
 
-        clean_message = neutralize(message, MAX_MESSAGE).strip()[:MAX_MESSAGE].strip()
+        clean_message = neutralize_message(message)
         if not clean_message:
             # e.g. a message consisting only of `<b></b>`: it survives the
             # non-empty check above but neutralizes to nothing, and an empty
@@ -829,7 +877,8 @@ def sanitize_findings(  # noqa: C901
             "message": clean_message,
         }
         # The publish job drops a finding that fails this, so drop it HERE.
-        # Only a bug in the producer above reaches it.
+        # It catches a message that fails uncut, which neutralize_message()
+        # returns whole, and any bug in the producer above.
         if not is_publishable_finding(finding):
             drop({"path": path, "line": line, "reason": "failed_publish_check"})
             continue
