@@ -129,6 +129,7 @@ class TestSelection(unittest.TestCase):
             out, CANDIDATES, ["torch/_dynamo/x.py", "test/test_nn.py"]
         )
         self.assertEqual(sel.files, {"test_ops", "test_nn", "dynamo/test_misc"})
+        self.assertEqual(sel.reason, "r")
         self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
         self.assertFalse(sel.run_all)
         self.assertTrue(sel.covers("inductor/test_torchinductor", "dynamo_wrapped"))
@@ -252,7 +253,6 @@ g () {
         self.assertEqual(sel.candidates, CANDIDATES)
         for f in ("test_openreg", "cpp/test_jit"):
             self.assertTrue(sel.covers(f, "default"), f)
-            self.assertFalse(Selection().covers(f, "default"), f)
         self.assertFalse(sel.covers("test_nn", "default"))
         self.assertEqual(Selection.from_json(sel.to_json()), sel)
 
@@ -272,6 +272,9 @@ g () {
         self.assertFalse(
             Selection.from_model_output(out, CANDIDATES, ["docs/a.md"]).run_all
         )
+        # A malformed answer sets error even when the change runs everything anyway.
+        sel = Selection.from_model_output([], CANDIDATES, ["test/run_test.py"])
+        self.assertRegex(str(sel.error), "^malformed model output: ")
 
     def test_load_malformed_file(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -300,6 +303,9 @@ g () {
                 {**valid, "candidates": [1]},
                 {**valid, "candidates": None},
                 {**valid, "error": 1},
+                {**valid, "sweeps": ["default"]},
+                {**valid, "files": ["test_ops"]},
+                {**valid, "error": "e"},
             ]
             bad += [
                 {k: v for k, v in valid.items() if k != key}
@@ -320,6 +326,32 @@ g () {
             sel = Selection({"test_nn"}, candidates={"test_nn", "test_ops"})
             p.write_text(json.dumps(sel.to_json()))
             self.assertEqual(Selection.load(p), sel)
+
+    def test_covers(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be run_all"):
+            Selection()
+        cands = {"test_nn", "test_ops", "test_torch"}
+        sel = Selection({"test_nn"}, {"dynamo_wrapped"}, candidates=cands)
+        # The model was not shown test_openreg, so it always runs.
+        for f, config, covered in [
+            ("test_openreg", "default", True),
+            ("test_nn", "default", True),
+            ("test_ops", "default", False),
+            ("test_ops", "dynamo_wrapped", True),
+            ("test_ops", "crossref", False),
+        ]:
+            self.assertEqual(sel.covers(f, config), covered, (f, config))
+        self.assertTrue(Selection(run_all=True).covers("test_ops", "default"))
+        # The first of TEST_SH_GLOBS a config contains decides its ALWAYS_COVERED.
+        for config, torch, ops in [
+            ("inductor", True, True),
+            ("inductor_amx", True, True),
+            ("inductor_cpp_wrapper", True, False),
+            ("inductor_core", False, False),
+            ("inductor_huggingface", False, False),
+        ]:
+            got = (sel.covers("test_torch", config), sel.covers("test_ops", config))
+            self.assertEqual(got, (torch, ops), config)
 
     def test_run_all_patterns(self) -> None:
         for f in [
@@ -425,18 +457,46 @@ g () {
         sel = Selection.from_model_output(answer(dirs=["cpython"]), candidates, [])
         self.assertEqual(sel.files, {"cpython/v3_13/test_set"})
 
+    def test_parse_model_output_rejects_malformed_answers(self) -> None:
+        malformed: list[Any] = [
+            [],
+            "tests",
+            *({k: v for k, v in answer().items() if k != key} for key in answer()),
+            answer(tests="test_nn"),
+            answer(tests=["test_nn"]),
+            answer(tests=[{"file": 3}]),
+            answer(dirs="dynamo"),
+            answer(sweeps=[1]),
+            answer(sweeps=["default"]),
+            answer(run_all=0),
+            answer(reason=None),
+            answer(reason=["r"]),
+            answer(dirs=["nn"]),
+            # An empty prefix must not match every candidate.
+            *(answer(dirs=[d]) for d in ("", "*", "test/")),
+        ]
+        for out in malformed:
+            with self.assertRaises(ValueError, msg=repr(out)):
+                selection.parse_model_output(out, CANDIDATES)
+
     def test_edited_tests_select_their_driver(self) -> None:
         aot, autoload = (
             {"test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja"},
             {"test_autoload_enable", "test_autoload_disable"},
         )
-        candidates = CANDIDATES | {"test_jit"} | aot | autoload
+        jit = {"test_jit", "test_jit_profiling", "test_jit_legacy"}
+        fuser, dispatch = {"test_jit_fuser_te"}, {"test_dispatch"}
+        candidates = CANDIDATES | jit | fuser | dispatch | aot | autoload
+        dangling = "test/cpp_extensions/dangling_impl_extension.cpp"
         for changed, expected in [
-            ("test/jit/test_freezing.py", {"test_jit"}),
+            ("test/jit/test_freezing.py", jit),
+            ("test/test_jit.py", jit),
+            ("test/jit/test_fuser_common.py", jit | fuser),
             ("test/cpp_extensions/extension.cpp", aot | autoload),
+            (dangling, aot | autoload | dispatch),
             ("test/test_cpp_extensions_aot.py", aot),
             ("test/test_autoload.py", autoload),
-            ("test/test_jit_fuser_te.py", set()),
+            ("test/test_jit_fuser_te.py", fuser),
         ]:
             sel = Selection.from_model_output(answer(), candidates, [changed])
             self.assertEqual(sel.files, expected, changed)
@@ -449,7 +509,7 @@ g () {
         # Directories whose files no candidate runs. torch_openreg/tests runs
         # through test_openreg, which is never a candidate and so is always
         # covered; edits there also select the cpp_extensions drivers.
-        undriven = {"custom_backend", "mobile", "onnx_caffe2"}
+        undriven = {"custom_backend", "mobile"}
         for pattern in BLOCKLISTED_PATTERNS:
             path = f"test/{pattern}/test_x.py"
             driven = any(
