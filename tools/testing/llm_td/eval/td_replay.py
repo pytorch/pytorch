@@ -10,7 +10,8 @@ target-determination job does, with the change (changed files, commit text)
 patched in, the sample's `previous_failures` (head samples; see
 build_dataset) as the PR's previous failures, and every other PR-local input
 (LLM mappings, linked issue bodies) empty. A sample on which a heuristic raised
-gets no file, and the run exits non-zero, so a rerun recomputes it. Writes
+gets no file, and the run exits non-zero, so a rerun recomputes it; an
+error in a trial_mode heuristic, which TD's aggregate leaves out, is ignored. Writes
 OUT/<id>.json with:
 
   inputs     a hash of test-times.json, the sample and `stats` (see
@@ -98,6 +99,9 @@ def main() -> None:
         )
 
     from tools.testing.target_determination.determinator import get_test_prioritizations
+    from tools.testing.target_determination.heuristics import HEURISTICS
+
+    trial = tuple(f"Error in {h.__class__.__name__}:" for h in HEURISTICS if h.trial_mode)  # fmt: skip
 
     seconds = test_seconds(args.data / "test-times.json")
     times = (args.data / "test-times.json").read_bytes()
@@ -152,9 +156,7 @@ def main() -> None:
                     cands, file=log
                 ).get_aggregated_priorities()
             # get_test_prioritizations drops a heuristic that raised and goes on without it.
-            errors = [
-                x for x in log.getvalue().splitlines() if x.startswith("Error in ")
-            ]
+            errors = [x for x in log.getvalue().splitlines() if x.startswith("Error in ") and not x.startswith(trial)]  # fmt: skip
             if errors:
                 print(path.stem, *errors, sep="\n", flush=True)
                 failed.append(path.stem)

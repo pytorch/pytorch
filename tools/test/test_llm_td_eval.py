@@ -970,7 +970,10 @@ class TestScore(unittest.TestCase):
         self.assertIn(Path(score.__file__).with_name("td_replay.py"), score.REPLAY_CODE)
 
     def test_td_replay_main(self) -> None:
+        from tools.testing.target_determination.heuristics import HEURISTICS
+
         seen = []
+        trial = next(h.__class__.__name__ for h in HEURISTICS if h.trial_mode)
 
         def prioritize(cands: list[str], file: io.StringIO) -> mock.Mock:
             from tools.testing.target_determination.heuristics import utils
@@ -978,6 +981,8 @@ class TestScore(unittest.TestCase):
             seen.append(utils.query_changed_files())
             if "test_e" not in cands:
                 print("Error in Boom: x", file=file)
+            # get_aggregated_priorities leaves a trial_mode heuristic out.
+            print(f"Error in {trial}: x", file=file)
             tp = TestPrioritizations(cands, {TestRun("test_b"): 2.0, TestRun("test_a", included=["TestX"]): 1.0})  # fmt: skip
             return mock.Mock(get_aggregated_priorities=lambda: tp)
 
