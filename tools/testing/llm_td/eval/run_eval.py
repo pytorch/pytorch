@@ -15,7 +15,11 @@ in CI, which calls the model once. A timeout of the call is final, but an API
 now (see score.prompt_sha), which score.py checks too. Samples that
 select_tests answers without the model (see score.unasked) are skipped. With
 --agentic, each worker checks the sample's head out into its own worktree
-under DIR/worktrees/<tag> and lets the model Read/Grep/Glob it.
+under DIR/worktrees/<tag> and lets the model Read/Grep/Glob it. Those tools
+have no path limits and the prompt holds untrusted PR text, so --agentic runs
+only with LLM_TD_AGENTIC_SANDBOX=1, in a sandbox whose only secret is the
+model credential. Ctrl-C stops the workers after their calls in flight, whose
+results are dropped, as the claude children die with the run.
 """
 
 from __future__ import annotations
@@ -24,8 +28,10 @@ import argparse
 import concurrent.futures as cf
 import contextlib
 import json
+import os
 import re
 import subprocess
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -62,7 +68,11 @@ def checkout(root: Path, slot: int, sha: str) -> str:
 
 
 def run_one(
-    sample: dict, minutes: dict, args: argparse.Namespace, wt: str | None
+    sample: dict,
+    minutes: dict,
+    args: argparse.Namespace,
+    wt: str | None,
+    stop: threading.Event | None = None,
 ) -> dict:
     prompt = sample_prompt(sample, minutes)
     cost = 0.0
@@ -85,7 +95,7 @@ def run_one(
         # CLI's JSON, i.e. a crash, which is final whatever its trace says.
         err = f"{d.get('subtype', '')} {d.get('result', '') if d.get('is_error') else ''}"  # fmt: skip
         transient = out is None and "type" in d and bool(TRANSIENT.search(err))
-        if not transient:
+        if not transient or (stop is not None and stop.is_set()):
             break
     return {
         "id": sample["id"],
@@ -117,10 +127,12 @@ def main() -> None:
     p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])  # fmt: skip
     p.add_argument("--ids", type=Path, required=True)
     p.add_argument("--jobs", type=int, default=8)
-    p.add_argument("--agentic", action="store_true", help="give the model Read, Grep and Glob with no path limits on untrusted PR text; run it only in a sandbox with no credentials")  # fmt: skip
+    p.add_argument("--agentic", action="store_true", help="give the model Read, Grep and Glob with no path limits on untrusted PR text; needs LLM_TD_AGENTIC_SANDBOX=1")  # fmt: skip
     args = p.parse_args()
     if args.tag == "td":
         p.error("the tag td holds the TD replay, which score.py scores as td25")
+    if args.agentic and os.environ.get("LLM_TD_AGENTIC_SANDBOX") != "1":
+        p.error("--agentic lets the model Read, Grep and Glob any path on untrusted PR text, so a prompt injection can copy any file the CLI can read, its credentials included, into a result; run it only in a sandbox whose only secret is the model credential, with LLM_TD_AGENTIC_SANDBOX=1")  # fmt: skip
     # Agentic checkouts are handed to a CLI that runs in a temp dir.
     args.data = args.data.resolve()
 
@@ -139,22 +151,31 @@ def main() -> None:
                 sent[i] = prompt_sha(sample_prompt(json.loads(x.read_text()), minutes), args.agentic)  # fmt: skip
     if stale := sorted(i for i, h in sent.items() if done[i].get("prompt_sha") != h):
         p.error(f"{len(stale)} results in {out}, e.g. {stale[0]}, were made from another prompt, schema, sample or test-times.json; use another --tag")  # fmt: skip
-    ids = [i for i in dict.fromkeys(args.ids.read_text().split()) if i not in done]
+
+    def is_unasked(sid: str) -> bool:
+        x = args.data / "samples" / f"{sid}.json"
+        return x.exists() and unasked(json.loads(x.read_text()))
+
+    ids = [i for i in dict.fromkeys(args.ids.read_text().split()) if i not in done and not is_unasked(i)]  # fmt: skip
     print(f"{args.tag}: {len(ids)} without a result", flush=True)
+    stop = threading.Event()
 
     def worker(slot: int) -> None:
         # Each worker owns one worktree slot, so the ids are dealt out round-robin.
         for sid in ids[slot :: args.jobs]:
+            if stop.is_set():
+                return
             try:
                 sample = json.loads((args.data / "samples" / f"{sid}.json").read_text())
-                if unasked(sample):
-                    continue
                 wt = (
                     checkout(args.data / "worktrees" / args.tag, slot, sample["sha"])
                     if args.agentic
                     else None
                 )
-                r = run_one(sample, minutes, args, wt)
+                r = run_one(sample, minutes, args, wt, stop)
+                # A call Ctrl-C killed returns a crash; give the main thread a moment to set stop.
+                if stop.is_set() or (r["out"] is None and stop.wait(1)):
+                    return
                 if r["transient"]:
                     print(f"{sid}: still failing after {ATTEMPTS} attempts, scored as an error:", r["error"][:200], flush=True)  # fmt: skip
                 write_json(out / f"{sid}.json", r)
@@ -165,7 +186,12 @@ def main() -> None:
                 )
 
     with cf.ThreadPoolExecutor(args.jobs) as ex:
-        list(ex.map(worker, range(args.jobs)))
+        try:
+            list(ex.map(worker, range(args.jobs)))
+        except KeyboardInterrupt:
+            stop.set()
+            print("interrupted: waiting for the calls in flight, whose results are dropped", flush=True)  # fmt: skip
+            raise
 
 
 if __name__ == "__main__":

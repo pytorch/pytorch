@@ -40,7 +40,8 @@ Four kinds of sample, each a JSON file under DIR/samples:
               truth is the test files whose signal tests (the reverting
               signal's file::test keys) failed on main between landing and
               the revert, on the commits that contain it, with every job that
-              runs TD they failed in there. A file::class::test key matches
+              runs TD they failed in there, short of the job, job_green and
+              passed_in_job rules below. A file::class::test key matches
               only that class's test; a file::test key, as autorevert writes
               them, matches the name in any class of the file. A revert with
               no such failure is skipped.
@@ -58,7 +59,8 @@ Each truth file's `truth_jobs` lists the [workflow, job] it failed in.
 Samples are diffed as select_tests diffs them: against `merge_base`, the merge
 base of the head with `base`. For PR and head samples `base` is the PR base CI
 passed to select_tests for that head (the PR below it for a ghstack PR), read
-from the head's pull_request runs (see pr_bases), or the merge base with main
+from the head's pull_request runs (see pr_bases; of several main tips with
+the same merge base, which one is arbitrary, but `merge_base` is not), or the merge base with main
 when no run recorded one (`base_source` says which). For revert and neutral samples it
 is the parent commit. Candidates approximate what select_tests offers: CI reads
 TESTS from its main checkout when it runs, which this replaces with TESTS at
@@ -225,12 +227,15 @@ def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
 
     These read tests.all_test_runs, which keeps about a year of runs, rather
     than ci.runs, which keeps 14 days and so would not reach the backtest
-    window."""
+    window. The ci-metrics skill says not to use the legacy tests database;
+    the rebuild on or after 2026-11-09 should check whether ci.runs now
+    reaches the window and move both these and revert_truth_jobs to it, and
+    an empty chunk, as a store no longer written would give, raises."""
     rows: list[dict] = []
     d = start
     while d < end:
         n = min(d + dt.timedelta(days=2), end)
-        rows += query(f"""
+        chunk = query(f"""
             WITH f AS (
               SELECT job_id, replaceRegexpOne(file, '\\\\.py$', '') tf, classname, name, min(time_inserted) t
               FROM tests.all_test_runs
@@ -251,6 +256,9 @@ def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
               SELECT id, any(head_repository.full_name) hr FROM default.workflow_run
               WHERE id IN (SELECT run_id FROM j) GROUP BY id) r
             ON r.id = j.run_id""")
+        if not chunk:
+            raise RuntimeError(f"tests.all_test_runs has no failing test from {d} to {n}; check that it is still written (see pull_failures)")  # fmt: skip
+        rows += chunk
         print(d, len(rows), flush=True)
         d = n
     return [r for r in rows if not any(s in r["job"] for s in SKIP_JOBS)]
@@ -330,7 +338,8 @@ def below(other: str, merge_base: str) -> bool:
         def fails(*args: str, stdin: bytes | None = None) -> int:
             return subprocess.run(["git", *args], cwd=REPO, env=env, input=stdin, capture_output=True).returncode  # fmt: skip
 
-        apply = ("apply", "--cached", "--check", "--whitespace=nowarn")
+        # The user's apply.* config, such as apply.ignoreWhitespace=change, would let a re-indent reverse-apply.
+        apply = ("-c", "apply.ignoreWhitespace=no", "-c", "apply.whitespace=nowarn", "apply", "--cached", "--check", "--whitespace=nowarn")  # fmt: skip
         if fails("read-tree", merge_base) or fails(*apply, "-R", "-C1", stdin=patch):
             return False
         return all(fails(*apply, stdin=h) for h in deletion_hunks(patch))
@@ -352,6 +361,15 @@ def deletion_hunks(patch: bytes) -> list[bytes]:
 
 def key(r: dict) -> Key:
     return r["tf"], r["classname"], r["test"]
+
+
+def job_dropped(r: dict, green: set[tuple[str, str]]) -> str | None:
+    """The job or job_green rule, if one drops failure `r`, given the (workflow, job)s that passed on its head."""
+    if "unstable" in r["job"] or not job_runs_td(r["job"], r["wf"]):
+        return "job"
+    if (r["wf"], r["job"]) in green:
+        return "job_green"
+    return None
 
 
 @dataclasses.dataclass
@@ -431,12 +449,7 @@ class History:
         return None
 
     def job_dropped(self, r: dict) -> str | None:
-        """The job or job_green rule, if one drops failure `r`."""
-        if "unstable" in r["job"] or not job_runs_td(r["job"], r["wf"]):
-            return "job"
-        if (r["wf"], r["job"]) in self.green.get(r["sha"], ()):
-            return "job_green"
-        return None
+        return job_dropped(r, self.green.get(r["sha"], set()))
 
     def stacked(self, r: dict, merge_base: str) -> bool:
         """The stacked rule: whether another PR's head below `merge_base` failed `r`'s test in a way that counts (see the module docstring)."""
@@ -853,11 +866,12 @@ def revert_truth_jobs(
           -- A test that also passed in the job, as run_test.py's rerun of it in a new process does, is flaky there.
           HAVING countIf(failure_count > 0 OR error_count > 0) > 0 AND countIf(failure_count = 0 AND error_count = 0 AND skipped_count = 0) = 0)""")
     failed = [f for f in failed if {(f["tf"], "", f["test"]), (f["tf"], f["classname"], f["test"])} & signal]  # fmt: skip
-    # As History.why_dropped's job and job_green rules.
-    green = green_jobs(sorted({f["sha"] for f in failed}))
+    green: dict[str, set[tuple[str, str]]] = collections.defaultdict(set)
+    for c, wf, job in green_jobs(sorted({f["sha"] for f in failed})):
+        green[c].add((wf, job))
     truth_jobs: dict[str, set] = collections.defaultdict(set)
     for f in failed:
-        if job_runs_td(f["job"], f["wf"]) and "unstable" not in f["job"] and (f["sha"], f["wf"], f["job"]) not in green:  # fmt: skip
+        if job_dropped(f, green[f["sha"]]) is None:
             truth_jobs[f["tf"]].add((f["wf"], f["job"]))
     return {k: sorted(v) for k, v in truth_jobs.items()}
 
@@ -954,6 +968,8 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     if {"pr", "head"} & set(args.kinds) and (why := other_window(out, args.start, args.end)):  # fmt: skip
         raise SystemExit(f"refusing pr and head samples: {why}")
+    if "head" in args.kinds and "pr" not in args.kinds and not any(out.glob("pr_*.json")):  # fmt: skip
+        raise SystemExit(f"refusing head samples: there are no pr_ samples in {out}; build them with --kinds pr first")  # fmt: skip
     git("fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main")
     if {"pr", "head"} & set(args.kinds):
         h = History.load(args.start, args.end)
