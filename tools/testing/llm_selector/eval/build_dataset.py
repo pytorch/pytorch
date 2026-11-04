@@ -1,8 +1,8 @@
 """Build the labelled eval set from CI history.
 
-    python -m tools.testing.llm_td.eval.build_dataset --data DIR --start 2026-10-01 --end 2026-10-26 --kinds pr neutral
-    python -m tools.testing.llm_td.eval.build_dataset --data DIR --start 2026-10-01 --end 2026-10-26 --kinds head
-    python -m tools.testing.llm_td.eval.build_dataset --data DIR --start 2026-04-01 --end 2026-10-26 --kinds revert
+    python -m tools.testing.llm_selector.eval.build_dataset --data DIR --start 2026-10-01 --end 2026-10-26 --kinds pr neutral
+    python -m tools.testing.llm_selector.eval.build_dataset --data DIR --start 2026-10-01 --end 2026-10-26 --kinds head
+    python -m tools.testing.llm_selector.eval.build_dataset --data DIR --start 2026-04-01 --end 2026-10-26 --kinds revert
 
 eval/ids lists the samples the report scored, as sorted ids (file names under
 DIR/samples without .json), split by each sample's `date` (a PR sample's
@@ -154,10 +154,10 @@ import traceback
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from tools.testing.llm_td.eval import REPO, write_json
-from tools.testing.llm_td.eval.clickhouse import query
-from tools.testing.llm_td.eval.score import has_head, job_runs_td
-from tools.testing.llm_td.select_tests import (
+from tools.testing.llm_selector.eval import REPO, write_json
+from tools.testing.llm_selector.eval.clickhouse import query
+from tools.testing.llm_selector.eval.score import has_head, job_runs_td
+from tools.testing.llm_selector.select_tests import (
     changed_files,
     diffstat_and_diff,
     git_paths,
@@ -511,7 +511,7 @@ def green_jobs(shas: list[str]) -> set[tuple[str, str, str]]:
 def ci_bases(heads: dict[str, int]) -> dict[str, list[str]]:
     """Head sha -> the base shas of PR `heads[sha]` that the head's pull_request runs recorded.
 
-    llm-td.yml passes the base.sha of the head's push event to select_tests.
+    llm-selector.yml passes the base.sha of the head's push event to select_tests.
     pull_request_target runs record the base branch as head_sha, so they never
     match a head. A run records the base as of its latest webhook, which can be
     a base pushed after the head; see pr_bases. Heads with no such run, such

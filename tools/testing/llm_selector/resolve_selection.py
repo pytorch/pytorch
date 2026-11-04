@@ -2,14 +2,14 @@
 
 Runs in the target-determination job, which uploads the result for the test
 jobs of the same run, so every shard of the run applies the same selection.
-The selection comes from the newest llm-td.yml run for the PR head. It is
-enforced only while the PR is labeled ci-llm-td and not ci-no-td, only if the
+The selection comes from the newest llm-selector.yml run for the PR head. It is
+enforced only while the PR is labeled ci-llm-selector and not ci-no-td, only if the
 PR's author is a member or collaborator (TRUSTED_AUTHORS), and only in the
 workflows where run_test.py enables TD (TD_ENABLED). Then, while that run
 is pending, this waits for it, polling with backoff up to once a minute until
 WAIT_SECONDS have passed (plus at most one API call), and takes its selection
 only if it succeeded. Otherwise the newest successful run's selection is used
-in shadow. Nothing orders llm-td.yml (a pull_request_target workflow) before
+in shadow. Nothing orders llm-selector.yml (a pull_request_target workflow) before
 the test jobs, and on a Python-only change the build can finish first.
 """
 
@@ -29,14 +29,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
-from tools.testing.llm_td.selection import LLM_TD_SELECTION_FILE, Selection
+from tools.testing.llm_selector.selection import LLM_SELECTION_FILE, Selection
 
 
 sys.path.remove(str(REPO_ROOT))
 
 WAIT_SECONDS = 600
 PENDING = {"queued", "in_progress", "waiting", "requested", "pending"}
-WORKFLOW = ".github/workflows/llm-td.yml"
+WORKFLOW = ".github/workflows/llm-selector.yml"
 # Anyone can open a PR from a branch of this repository and write its title
 # and description, which the selector reads, so the label is not enough.
 TRUSTED_AUTHORS = {"OWNER", "MEMBER", "COLLABORATOR"}
@@ -56,13 +56,13 @@ def get(path: str) -> dict:
 
 
 def selector_runs(sha: str) -> list[dict]:
-    """llm-td.yml's runs for this head, newest first. Any workflow can upload an
+    """llm-selector.yml's runs for this head, newest first. Any workflow can upload an
     artifact named like the selection, so only main's pull_request_target copy
-    of llm-td.yml, run for a same-repo head, counts."""
+    of llm-selector.yml, run for a same-repo head, counts."""
     q = f"event=pull_request_target&head_sha={sha}&per_page=100"
     runs = [
         r
-        for r in get(f"actions/workflows/llm-td.yml/runs?{q}")["workflow_runs"]
+        for r in get(f"actions/workflows/llm-selector.yml/runs?{q}")["workflow_runs"]
         if r["path"] == WORKFLOW
         and r["event"] == "pull_request_target"
         and r["head_sha"] == sha
@@ -77,7 +77,7 @@ def download(run: dict, name: str) -> Selection | None:
     for a in get(f"actions/runs/{run['id']}/artifacts?name={name}")["artifacts"]:
         if a["name"] == name and not a["expired"]:
             with zipfile.ZipFile(io.BytesIO(fetch(a["archive_download_url"]))) as z:
-                return Selection.from_json(json.loads(z.read(LLM_TD_SELECTION_FILE)))
+                return Selection.from_json(json.loads(z.read(LLM_SELECTION_FILE)))
     print(f"{run['html_url']} has no {name} artifact")
     return None
 
@@ -100,16 +100,16 @@ def resolve(pr: str, sha: str, enforce: bool) -> Selection | None:
         time.sleep(min(delay, left))
         delay = min(2 * delay, 60)
     if run is None:
-        print(f"No llm-td.yml run for {sha}")
+        print(f"No llm-selector.yml run for {sha}")
         return None
     if run["conclusion"] != "success":
         print(f"{run['html_url']} concluded {run['conclusion']}")
         return None
     print(f"Using the selection from {run['html_url']}")
-    return download(run, f"llm_td_selection_{pr}_{sha}")
+    return download(run, f"llm_selection_{pr}_{sha}")
 
 
-def main(output: Path = Path(LLM_TD_SELECTION_FILE)) -> None:
+def main(output: Path = Path(LLM_SELECTION_FILE)) -> None:
     sha = os.environ.get("HEAD_SHA", "")
     # ciflow/<label>/<PR number> tag pushes carry the PR in the ref.
     tag = re.fullmatch(r"refs/tags/ciflow/.+/(\d+)", os.environ.get("GITHUB_REF", ""))
@@ -120,12 +120,12 @@ def main(output: Path = Path(LLM_TD_SELECTION_FILE)) -> None:
     if (info["head"]["repo"] or {}).get("full_name") != os.environ["GITHUB_REPOSITORY"]:
         return
     # The PR's current labels, not the event's: a tag push carries none, and
-    # removing ci-llm-td must stop enforcement even at an already selected head.
+    # removing ci-llm-selector must stop enforcement even at an already selected head.
     labels = {label["name"] for label in info["labels"]}
     enforce = (
         os.environ.get("TD_ENABLED") == "true"
         and info.get("author_association") in TRUSTED_AUTHORS
-        and "ci-llm-td" in labels
+        and "ci-llm-selector" in labels
         and "ci-no-td" not in labels
     )
     selection = resolve(pr, sha, enforce)
