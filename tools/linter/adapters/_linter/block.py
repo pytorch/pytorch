@@ -11,7 +11,7 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from tokenize import TokenInfo
-    from typing_extensions import Self
+    from typing import Self
 
 
 _OVERRIDES = {"@override", "@typing_extensions.override", "@typing.override"}
