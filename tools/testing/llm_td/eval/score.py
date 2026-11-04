@@ -25,8 +25,8 @@ As in select_tests.select, a sample with no changed files, a change to test
 infrastructure or more than MAX_CHANGED_FILES (select_tests.run_all_reason) runs everything
 under every model policy, at no model cost; `final+tdN` keeps TD's cut in a
 config with no test time there too, as it does for any run-all. A malformed answer counts as an
-error, as select_tests records it, and errors still throttled after run_eval's
-retries are counted on stderr.
+error, as select_tests records it, and errors still transient (throttled or
+5xx) after run_eval's retries are counted on stderr.
 The tag `td` scores the replayed in-repo TD (see td_replay.py) under the
 single policy `td25`, its CI cut of the top 25% per config, and ignores
 --policies.
@@ -43,7 +43,7 @@ run_test.py applies TD, and so the selection, only in the pull, trunk and
 ROCm workflows, and not on macOS, in xpu or onnx builds, under NO_TD (from
 force-no-td or .ci/pytorch/test.sh, see NO_TD_CONFIGS) or with
 TESTS_TO_INCLUDE (test/run_test.py's --enable-td default, which calls
-td_enabled_workflow and td_enabled_job; see td_job). Other jobs (inductor's unit tests, periodic, slow, ...) run
+td_enabled_workflow and td_enabled_job, and its main(); see td_job). Other jobs (inductor's unit tests, periodic, slow, ...) run
 every test under every policy, so their failures are left out
 of the truth, and configs no TD job runs are left out of the cost share
 (the report's dollar model prices the inductor ones separately). Jobs are
@@ -119,7 +119,7 @@ GPU_ENV = re.compile(r"cuda|rocm|sm\d+|h100|b200|a100|gpu", re.IGNORECASE)
 HEDGE = re.compile(r"final\+td(\d+(?:\.\d+)?)?")
 # The policies of a model tag besides the final+tdN ones.
 POLICIES = ("model", "final", "final-hm")
-MATRIX_CONFIG = re.compile(r"""config: ['"]?([\w.-]+)""")
+MATRIX_CONFIG = re.compile(r"""\{\s*config:\s*['"]?([\w.-]+)""")
 VERSION = re.compile(r"\d+(\.\d+)*")
 MATRIX_SUFFIX = re.compile(r" \([^()]*\)")
 # run_test.py never runs TD on macOS or in NO_TD_BUILD_ENVS builds.
@@ -192,7 +192,7 @@ def fallback_seconds(path: Path) -> dict[str, dict[str, float]]:
 def td_job(
     uses: str, build_environment: str, force_no_td: object, tests_to_include: str
 ) -> bool:
-    """The job-level rest of run_test.py's TD check: td_enabled_job, with NO_TD from force-no-td and TESTS_TO_INCLUDE from tests-to-include.
+    """The job-level rest of run_test.py's TD check: td_enabled_job, with NO_TD from force-no-td, and main()'s TESTS_TO_INCLUDE override from tests-to-include.
 
     A tests-to-include expression (pull's and trunk's workflow_dispatch input)
     is empty on PRs. ci_jobs also applies test.sh's NO_TD, which depends on
@@ -202,7 +202,7 @@ def td_job(
     prioritizations."""
     include = "" if tests_to_include.strip().startswith("${{") else tests_to_include
     macos, no_td = uses == "_mac-test.yml", force_no_td in (True, "true")
-    return td_enabled_job(build_environment, macos=macos, no_td=no_td, tests_to_include=include)  # fmt: skip
+    return not include.strip() and td_enabled_job(build_environment, macos=macos, no_td=no_td)  # fmt: skip
 
 
 @functools.cache
@@ -339,7 +339,7 @@ def hedge(
     positive = set(scored)
     job = dict.fromkeys([*seconds, *untimed])
     ranked = [TestRun(f) for f in scored if f in job] + [TestRun(f) for f in job if f not in positive]  # fmt: skip
-    split = sel.split(ranked, lambda x: float(x.test_file in positive), seconds, config, previously_failed=previous, td_include=td_cut, share=share)  # fmt: skip
+    split = sel.split(ranked, lambda x: float(x.test_file in positive), seconds, config, previous_failures=previous, td_include=td_cut, share=share)  # fmt: skip
     if split.chose_nothing:
         return set(td_cut)
     return split.previous_failures_added | split.hedged
@@ -425,12 +425,12 @@ def policy(
         return Choice(
             Selection(run_all=True)
             if out is None
-            else Selection.from_model_output(out, cands, [])
+            else Selection.from_model_output(out, cands, [], grep)
         )
     if name == "final-hm":
         # A malformed answer is left for from_model_output to fall back on.
         with contextlib.suppress(ValueError):
-            parse_model_output(out, cands)
+            parse_model_output(out, cands, grep)
             if isinstance(out, dict):
                 out = {**out, "tests": [t for t in out["tests"] if t.get("confidence") in ("high", "medium")]}  # fmt: skip
     return Choice(Selection.from_model_output(out, cands, s["changed_files"], grep, s.get("deleted", [])))  # fmt: skip
@@ -550,7 +550,7 @@ def score(
         sample_rows, sample_throttled = [], []
         for tag, (_, r, td) in loaded.items():
             skipped = tag != "td" and unasked(s)
-            error = not skipped and bool(r) and (bool(r["error"]) or Selection.from_model_output(r["out"], cands, []).error is not None)  # fmt: skip
+            error = not skipped and bool(r) and (bool(r["error"]) or Selection.from_model_output(r["out"], cands, [], grep_head(s, sid, ungrepped)).error is not None)  # fmt: skip
             if error and (r or {}).get("transient"):
                 sample_throttled.append(tag)
             for pol in ["td25"] if tag == "td" else policies:
@@ -580,7 +580,7 @@ def score(
     for why, n in sorted(dropped.items()):
         print(f"dropped {n} of {len(ids)} ids with no {why}", file=sys.stderr)
     for tag, n in sorted(throttled.items()):
-        print(f"scored {n} {tag} results as errors that were still throttled after run_eval's retries, which CI does not provoke", file=sys.stderr)  # fmt: skip
+        print(f"scored {n} {tag} results as errors that still had transient (throttled or 5xx) errors after run_eval's retries", file=sys.stderr)  # fmt: skip
     if no_workflow:
         print(f"scored {len(no_workflow)} of {len(ids)} ids with truth jobs that record no workflow: a job name TD and non-TD workflows share counts as TD", file=sys.stderr)  # fmt: skip
     return rows
