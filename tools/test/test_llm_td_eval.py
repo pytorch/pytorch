@@ -593,7 +593,7 @@ class TestScore(unittest.TestCase):
             prev = set(rng.sample(files, rng.randint(0, 2)))
             split = sel.split(ranked, lambda x: float(x.test_file in scored), seconds, "c", previously_failed=prev, td_include=cut)  # fmt: skip
             got = score.hedge(sel, scored, seconds, score.LLM_TD_HEDGE, "c", cut, untimed, prev)  # fmt: skip
-            want = cut if split.kept_td or not sum(seconds.values()) else split.previously_failed | split.hedged  # fmt: skip
+            want = cut if split.chose_nothing or not sum(seconds.values()) else split.previously_failed | split.hedged  # fmt: skip
             self.assertEqual(got, want, (scored, seconds, untimed, sel, cut, prev))
 
     def test_policy_matches_apply_selection(self) -> None:
@@ -620,7 +620,7 @@ class TestScore(unittest.TestCase):
                 mock.patch.object(selection, "get_pr_number", return_value=1),
                 mock.patch("sys.stderr", io.StringIO()),
             ):
-                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config="c", td_enabled=True, previously_failed=prev)  # fmt: skip
+                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config="c", td_enabled=True, previously_failed=prev, call_id="c")  # fmt: skip
             ran = {x.test_file for x in applied.include}
             self.assertEqual({f for f in job if choice.covers(f, "c")}, ran, (seconds, job, n, scored, picked, prev))  # fmt: skip
 
