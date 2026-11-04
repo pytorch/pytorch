@@ -40,8 +40,9 @@ sys.path.remove(str(REPO_ROOT))
 # download-td-artifacts moves it to TD_RESULTS.
 TD_RESULTS_FILE = "td_results.json"
 TD_RESULTS = REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / TD_RESULTS_FILE
-# main() stores previous_failures_or_none() with TD's ranking, so that every
-# shard sees the same ones; TestPrioritizations.from_json ignores the key.
+# When the pytest cache download step succeeded, main() stores the previous
+# failures with TD's ranking, so that every shard sees the same ones;
+# TestPrioritizations.from_json ignores the key.
 PREVIOUS_FAILURES_KEY = "previous_failures"
 
 
@@ -50,7 +51,9 @@ def import_results(
 ) -> tuple[TestPrioritizations, set[str] | None]:
     """TD's ranking and the previous failures stored with it, or None for
     those if they are missing (no TD results, an older writer, or a TD job
-    that could not read them) or malformed."""
+    whose cache download step failed or that could not read them) or
+    malformed. The download step also succeeds when there is no cache, so
+    stored failures can be empty on a PR that did fail before."""
     if not path.exists():
         print("No TD results found")
         return TestPrioritizations([], {}), None
@@ -115,7 +118,8 @@ def main() -> None:
         )
 
     # The download step is continue-on-error, and a failed download leaves no
-    # cache, as does a PR without one yet; only the step's outcome tells them apart.
+    # cache, as does a PR without one yet; only the step's outcome tells them
+    # apart. A success can still miss failures of jobs that upload no cache.
     if os.getenv("PYTEST_CACHE_DOWNLOAD_OUTCOME") == "success":
         previous_failures = previous_failures_or_none()
     else:

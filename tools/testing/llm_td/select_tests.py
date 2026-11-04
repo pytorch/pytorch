@@ -41,7 +41,7 @@ from tools.testing.llm_td.selection import (
 sys.path.remove(str(REPO_ROOT))
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Collection, Iterable
 
 DEFAULT_MODEL = (
     "us.anthropic.claude-opus-5-5"
@@ -277,6 +277,18 @@ def run_all_reason(changed: list[str]) -> str | None:
     return None
 
 
+def added_test_files(added: Iterable[str], listed: Collection[str]) -> set[str]:
+    """The TESTS names of the paths `added` that run_test.py would discover
+    as test files, except those `listed` already has."""
+    tests = {
+        f.removeprefix("test/").removesuffix(".py")
+        for f in added
+        if re.match(r"test/([\w/]+/)?test_\w+\.py$", f)
+    }
+    blocked = tuple(BLOCKLISTED_PATTERNS)
+    return {t for t in tests if not t.startswith(blocked) and t not in listed}
+
+
 def select(args: argparse.Namespace, record: dict) -> Selection | None:
     """Make the selection, filling `record` with diagnostics; None after --print-prompt."""
     merge_base = git("merge-base", args.base, args.head).strip()
@@ -297,13 +309,7 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     added = git_paths(
         "diff", "--name-only", "--no-renames", "--diff-filter=A", merge_base, args.head
     )
-    added_tests = {
-        f.removeprefix("test/").removesuffix(".py")
-        for f in added
-        if re.match(r"test/([\w/]+/)?test_\w+\.py$", f)
-    }
-    new = {t for t in added_tests if not t.startswith(tuple(BLOCKLISTED_PATTERNS))}
-    new -= set(TESTS)
+    new = added_test_files(added, TESTS)
     candidates = sorted(set(TESTS) | new)
     title, body = pr_text(args)
     minutes = test_minutes(test_times)
