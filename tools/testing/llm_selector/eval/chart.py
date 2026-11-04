@@ -120,7 +120,7 @@ def render(data: dict[str, dict]) -> str:
             ax.annotate(text, q, textcoords="offset points", xytext=(4, -10), fontsize=7)
         ax.scatter(*d["star"], s=220, marker="*", color="gold", edgecolors="black", zorder=5, label="proposed: Opus medium + 20% hedge")
         ax.axhline(d["td"][1], color="#d62728", linestyle=":", linewidth=1, zorder=0, label="TD today's level")
-        ax.scatter(*d["td"], s=70, marker="X", color="#d62728", zorder=5, label="TD today (top 25% of files)")
+        ax.scatter(*d["td"], s=70, marker="X", color="#d62728", zorder=5, label="TD today (top 25% of TestRuns)")
         ax.plot(*zip(*d["frontier"]), color="gray", linestyle="--", linewidth=1, zorder=0, label="Pareto frontier")
         ax.set_title(f"{titles[kind]} (n={d['n']})", fontsize=10)
         ax.set_xlabel("CPU test time run on a typical change (% of a full pass, in seconds)")
