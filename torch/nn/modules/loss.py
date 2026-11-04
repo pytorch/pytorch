@@ -1408,6 +1408,7 @@ class CrossEntropyLoss(_WeightedLoss):
         reduce=None,
         reduction: str = "mean",
         label_smoothing: float = 0.0,
+        *,
         dim: int | None = None,
     ) -> None:
         super().__init__(weight, size_average, reduce, reduction)

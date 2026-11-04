@@ -12485,9 +12485,11 @@ class TestNNDeviceType(NNTestCase):
         shapes_and_dims = [
             ((C,), -1), ((3, C), -1), ((C, 3), 0), ((C, 3, 2, 2), 0), ((3, 4, C), -1), ((3, 4, C), 2),
             ((3, C, 4, 2), -3), ((3, 4, C, 2), 2), ((2, 3, C, 2, 2), 2), ((3, 2, 4, C), -1),
+            ((0, 4, C), -1), ((3, 0, C, 2), 2),
         ]
         weight = torch.rand(C, device=device)
-        kwargs_list = [{}, {'weight': weight}, {'label_smoothing': 0.1}, {'weight': weight, 'label_smoothing': 0.1}]
+        kwargs_list = [{}, {'weight': weight}, {'label_smoothing': 0.1}, {'weight': weight, 'label_smoothing': 0.1},
+                       {'reduce': False}]
         if not prob_target:
             kwargs_list += [{'ignore_index': 1}, {'weight': weight, 'ignore_index': 1},
                             {'weight': weight, 'ignore_index': 1, 'label_smoothing': 0.1}]
@@ -12518,6 +12520,8 @@ class TestNNDeviceType(NNTestCase):
         target = torch.randint(5, (2, 3), device=device)
         with self.assertRaisesRegex(RuntimeError, r"Expected target size \[2, 3\], got \[3, 2\]"):
             F.cross_entropy(input, target.t(), dim=-1)
+        with self.assertRaisesRegex(RuntimeError, r"Expected target size \[2, 3\], got \[2, 5, 3\]"):
+            F.cross_entropy(input, input.transpose(1, 2).softmax(1), dim=-1)
         for dim in (3, -4):
             with self.assertRaisesRegex(IndexError, "Dimension out of range"):
                 F.cross_entropy(input, target, dim=dim)
@@ -12525,8 +12529,9 @@ class TestNNDeviceType(NNTestCase):
             F.cross_entropy(input[0, 0], target[0, 0], dim=1)
         with self.assertRaisesRegex(IndexError, r"range of \[-1, 0\], but got 1"):
             F.cross_entropy(input[0, 0, 0], target[0, 0], dim=1)
-        with self.assertRaisesRegex(TypeError, "dim must be an int or None"):
-            F.cross_entropy(input, target, dim=True)
+        for dim in (True, 1.0, 2.0):
+            with self.assertRaisesRegex(TypeError, "dim must be an int or None"):
+                F.cross_entropy(input, target, dim=dim)
 
     # Ref: https://github.com/pytorch/pytorch/issues/85005
     @onlyAccelerator

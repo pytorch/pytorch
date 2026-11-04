@@ -3514,6 +3514,7 @@ def cross_entropy(
     reduce: bool | None = None,
     reduction: str = "mean",
     label_smoothing: float = 0.0,
+    # Not keyword-only: TorchScript can't compile keyword-only arguments with defaults.
     dim: int | None = None,
 ) -> Tensor:
     r"""Compute the cross entropy loss between input logits and target.
@@ -3604,7 +3605,7 @@ def cross_entropy(
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     out_shape: list[int] | None = None
     if dim is not None:
-        if isinstance(dim, bool):
+        if isinstance(dim, bool) or not isinstance(dim, (int, torch.SymInt)):
             raise TypeError(f"dim must be an int or None, got {type(dim)}")
         ndim = input.dim()
         # As in maybe_wrap_dim, a 0-d input takes the dims of a 1-d one.
