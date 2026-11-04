@@ -11,8 +11,6 @@ set(LINK_LIBRARIES
   kineto_base
   kineto_api
   $<BUILD_INTERFACE:fmt::fmt-header-only>
-  Pti::pti_view
-  torch::sycl
 )
 
 # Pure host-code tests (no SYCL device code): ordinary executables.
