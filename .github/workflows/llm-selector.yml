@@ -1,12 +1,12 @@
-name: llm-td
+name: llm-selector
 
-# Shadow LLM test selection (tools/testing/llm_td). pull_request_target runs this
+# Shadow LLM test selection (tools/testing/llm_selector). pull_request_target runs this
 # file from the default branch and the job checks out main, so the bedrock role is
 # only ever handed to reviewed code. The PR is read through git, never executed.
 # The target-determination job of each test workflow resolves one selection per
 # workflow run from this workflow's newest run for the head (resolve_selection.py).
 # --enforce marks a selection enforceable unless the selector failed; it is
-# enforced only while the PR is labeled ci-llm-td and its author is a member or
+# enforced only while the PR is labeled ci-llm-selector and its author is a member or
 # collaborator, waiting for a pending run first, and run_test.py applies it only
 # where TD is enabled.
 
@@ -61,13 +61,13 @@ jobs:
           # The PR's own base, so a ghstack PR is diffed against the PR below it.
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 -m tools.testing.llm_td.select_tests --base "$BASE_SHA" --head "$HEAD_SHA" --output llm_td_selection.json --enforce
+        run: python3 -m tools.testing.llm_selector.select_tests --base "$BASE_SHA" --head "$HEAD_SHA" --output llm_selection.json --enforce
 
       - name: Upload selection
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: llm_td_selection_${{ github.event.pull_request.number }}_${{ github.event.pull_request.head.sha }}
+          name: llm_selection_${{ github.event.pull_request.number }}_${{ github.event.pull_request.head.sha }}
           overwrite: true
           retention-days: 3
           if-no-files-found: error
-          path: llm_td_selection.json
+          path: llm_selection.json
