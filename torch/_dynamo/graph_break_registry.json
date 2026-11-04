@@ -2698,6 +2698,25 @@
       "Hints": []
     }
   ],
+  "GB4093": [
+    {
+      "Gb_type": "unsupported torch._library.flydsl.wrap_flydsl call",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo supports wrap_flydsl(host_fn, mutates_args=...) where host_fn is a @flyc.jit function and mutates_args is a constant.",
+      "Hints": [
+        "Pass a @flyc.jit function and a constant mutates_args.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4241": [
+    {
+      "Gb_type": "FlyDSL kernel unsupported feature",
+      "Context": "",
+      "Explanation": "Encountered FlyDSL kernel unsupported feature: {msg}",
+      "Hints": []
+    }
+  ],
   "GB0159": [
     {
       "Gb_type": "Unsupported ndarray.__version__ access",
