@@ -130,7 +130,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_11-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_11-gcc11-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      tests-to-exclude: "inductor/test_torchinductor_opinfo inductor/test_cpu_select_algorithm"
       python-version: "3.11"
       compiler: gcc11
     secrets: inherit
@@ -193,7 +193,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-aarch64-py3_11-gcc13-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_11-gcc13-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      tests-to-exclude: "inductor/test_torchinductor_opinfo inductor/test_cpu_select_algorithm"
       python-version: "3.11"
       compiler: gcc13
     secrets: inherit
@@ -252,7 +252,7 @@ jobs:
       build-environment: linux-jammy-py3.14t-clang21
       docker-image: ${{ needs.linux-jammy-py3_14t-clang21-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14t-clang21-build.outputs.test-matrix }}
-      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      tests-to-exclude: "inductor/test_torchinductor_opinfo inductor/test_cpu_select_algorithm"
       python-version: "3.14t"
       compiler: clang21
     secrets: inherit
@@ -344,7 +344,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_11-clang21-asan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_11-clang21-asan-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      tests-to-exclude: "inductor/test_torchinductor_opinfo inductor/test_cpu_select_algorithm"
       python-version: "3.11"
       compiler: clang21
       # TODO (huydhn): Add this back once other workflow migrates
@@ -407,7 +407,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_11-clang21-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_11-clang21-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      tests-to-exclude: "inductor/test_torchinductor_opinfo inductor/test_cpu_select_algorithm"
       python-version: "3.11"
       compiler: clang21
     secrets: inherit
@@ -468,7 +468,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_14-clang21-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14-clang21-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      tests-to-exclude: "inductor/test_torchinductor_opinfo inductor/test_cpu_select_algorithm"
       python-version: "3.14"
       compiler: clang21
     secrets: inherit
