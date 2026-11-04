@@ -260,6 +260,15 @@ class TestTestPrioritizations(TestTD):
         self.assertSetEqual(test_prioritizations._original_tests, set(tests))
         test_prioritizations.validate()
 
+    def test_get_score(self) -> None:
+        # An exact lookup: a part of a scored file scores 0.
+        tp = interface.TestPrioritizations(
+            ["test_nn", "test_ops"], {TestRun("test_nn"): 1}
+        )
+        self.assertEqual(tp.get_score(TestRun("test_nn")), 1)
+        self.assertEqual(tp.get_score(TestRun("test_ops")), 0)
+        self.assertEqual(tp.get_score(TestRun("test_nn", included=["TestNN"])), 0)
+
 
 class TestAggregatedHeuristics(TestTD):
     def check(

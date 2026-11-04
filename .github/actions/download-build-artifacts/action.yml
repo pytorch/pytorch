@@ -30,9 +30,14 @@ runs:
       with:
         name: ${{ inputs.name }}
 
+    # Defense in depth against a stale or planted LLM test selection in a build artifact, not
+    # the trust boundary: test jobs run the PR's own scripts. The selection comes from
+    # .github/workflows/llm-selector.yml, via resolve_selection.py and download-td-artifacts.
     - name: Unzip artifacts
       shell: bash
-      run: unzip -o artifacts.zip
+      run: |
+        unzip -o artifacts.zip
+        rm -f .additional_ci_files/llm_selection.json
 
     - name: Remove artifacts.zip
       shell: bash
