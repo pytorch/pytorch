@@ -7,7 +7,7 @@ config when the selection names the file, names that config as a sweep, or is
 run_all, and so is every test file the model was not shown and every file that
 ALWAYS_COVERED lists for that config. When run_test.py enforces the selection,
 it runs the covered files, the files that already failed on the PR and that TD
-runs, and, within a hedge budget, TD's positively scored files (see LLM_SELECTOR_HEDGE).
+runs, and, within a hedge budget, TD's positively scored files (see HEDGE_SHARE).
 """
 
 from __future__ import annotations
@@ -36,19 +36,38 @@ SWEEPS = ("dynamo_wrapped", "crossref")
 # The TEST_CONFIG globs (*glob*) of .ci/pytorch/test.sh's top-level dispatch,
 # which runs the first branch a config matches, up to its *inductor* branch.
 TEST_SH_GLOBS = (
-    "numpy_2", "backward", "libtorch_agnostic_targetting", "torchtitan", "executorch",
-    "operator_benchmark", "operator_microbenchmark", "attention_microbenchmark",
-    "inductor_distributed", "inductor-halide", "inductor-flydsl", "inductor-pallas",
-    "inductor-triton-cpu", "inductor-micro-benchmark", "inductor_better_benchmark",
-    "aoti_cross_compile_for_windows", "huggingface", "timm", "torchbench",
-    "inductor_cpp_wrapper", "inductor_aoti_fallback", "inductor_core", "inductor",
-)  # fmt: skip
+    "numpy_2",
+    "backward",
+    "libtorch_agnostic_targetting",
+    "torchtitan",
+    "executorch",
+    "operator_benchmark",
+    "operator_microbenchmark",
+    "attention_microbenchmark",
+    "inductor_distributed",
+    "inductor-halide",
+    "inductor-flydsl",
+    "inductor-pallas",
+    "inductor-triton-cpu",
+    "inductor-micro-benchmark",
+    "inductor_better_benchmark",
+    "aoti_cross_compile_for_windows",
+    "huggingface",
+    "timm",
+    "torchbench",
+    "inductor_cpp_wrapper",
+    "inductor_aoti_fallback",
+    "inductor_core",
+    "inductor",
+)
 # The files the branches of those globs run with run_test.py --inductor, which
 # compiles every test, so like a sweep any change can break them.
 ALWAYS_COVERED = {
     "inductor_cpp_wrapper": frozenset({"test_torch"}),
-    "inductor": frozenset({"test_modules", "test_ops", "test_ops_gradients", "test_torch"}),
-}  # fmt: skip
+    "inductor": frozenset(
+        {"test_modules", "test_ops", "test_ops_gradients", "test_torch"}
+    ),
+}
 LLM_SELECTION_FILE = "llm_selection.json"
 # The selector runs from the default branch and run_test.py from the PR, so
 # bump this whenever an older reader would misread the selection file.
@@ -63,7 +82,7 @@ MAX_FAILURE_LIST_CLASSES = 50
 # of the test time of the call's test list (for a whole config, all its shards
 # together; for a targeted --include call, only those files): TD and the model
 # miss largely different failures.
-LLM_SELECTOR_HEDGE = 0.20
+HEDGE_SHARE = 0.20
 # Flip only after the HUD and test-infra consumers of the TD exclusions and
 # recall stats handle llm_selection_exclusions and llm_enforced.
 ENFORCEMENT_ENABLED = False
@@ -139,6 +158,7 @@ RUN_ALL_PATTERNS = [
     r"^scripts/onnx/test\.sh$",
     r"^\.ci/pytorch/win-test-helpers/(build_pytorch\.bat|setup_pytorch_env\.bat|test_python_shard\.bat|test_python_jit_legacy\.bat|installation-helpers/activate_miniconda3\.bat)$",
     r"^\.github/workflows/_(linux|win|mac|rocm|xpu|s390x|tpu)-test(-no-dind)?\.yml$",
+    r"^\.github/workflows/_(linux|win|mac|s390x)-build\.yml$",
     # setup-linux is left out: the test jobs use it from main, not from the PR.
     r"^\.github/actions/(setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts)/",
     r"^\.github/scripts/filter_test_configs\.py$",
@@ -176,7 +196,9 @@ def edited_tests(changed_files: list[str], candidates: set[str]) -> set[str]:
         for n in normalize_test_name(f, candidates)
     }
     for test, regexes in DRIVER_MAPPINGS.items():
-        if test in candidates and any(re.search(r, f) for r in regexes for f in changed_files):  # fmt: skip
+        if test in candidates and any(
+            re.search(r, f) for r in regexes for f in changed_files
+        ):
             edited.add(test)
     return edited
 
@@ -218,7 +240,12 @@ def import_pattern(modules: Iterable[str]) -> str:
     # standard library module, such as random, imports that module instead.
     mods = sorted(f[5:-3].removesuffix("/__init__") for f in modules)
     parts = [m.split("/") for m in mods]
-    names = alts(".".join(p[i:]) for p in parts for i in range(len(p)) if i < len(p) - 1 or p[i] not in sys.stdlib_module_names)  # fmt: skip
+    names = alts(
+        ".".join(p[i:])
+        for p in parts
+        for i in range(len(p))
+        if i < len(p) - 1 or p[i] not in sys.stdlib_module_names
+    )
     bases = alts(p[-1] for p in parts)
     parents = alts(".".join(p[i:-1]) for p in parts for i in range(len(p) - 1))
     paths = alts(n for m in mods for n in (m, m.replace("/", ".")))
@@ -228,14 +255,18 @@ def import_pattern(modules: Iterable[str]) -> str:
         rf"from[[:space:]]+(\.+|test)[[:space:]]+import[[:space:]]+(.*[^[:alnum:]_.])?({bases}){end}",
     ]
     if parents:
-        forms.append(rf"from[[:space:]]+\.*(test\.)?({parents})[[:space:]]+import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})")  # fmt: skip
+        forms.append(
+            rf"from[[:space:]]+\.*(test\.)?({parents})[[:space:]]+import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})"
+        )
     quoted = rf"""load_test_module\(["']({paths})["']\)|import_module\(["'](test\.)?({names})["']\)"""
     return rf"^[[:space:]]*({'|'.join(forms)})|{quoted}"
 
 
 def alts(names: Iterable[str]) -> str:
     """An extended regex alternation of the literal `names`."""
-    return "|".join(re.sub(r"[.^$*+?()\[\]{}|\\]", r"\\\g<0>", n) for n in sorted(set(names)))  # fmt: skip
+    return "|".join(
+        re.sub(r"[.^$*+?()\[\]{}|\\]", r"\\\g<0>", n) for n in sorted(set(names))
+    )
 
 
 def class_pattern(classes: Iterable[str], prefix: bool = False) -> str:
@@ -265,8 +296,18 @@ def data_file_readers(
     file (see EXPECT_RE) also by the paths defining a class whose name starts
     with its test class, as test_tensorboard.py builds the path of
     TestTensorBoard.*.expect for TestTensorBoardSummary."""
-    data = [f for f in changed_files if f.startswith("test/") and not FAILURE_LIST_DIR_RE.match(f) and not (f.endswith(".py") and edited_tests([f], candidates))]  # fmt: skip
-    exempt = [f for f in data if f in deleted or NO_READER_RE.search(f) or edited_tests([f], candidates)]  # fmt: skip
+    data = [
+        f
+        for f in changed_files
+        if f.startswith("test/")
+        and not FAILURE_LIST_DIR_RE.match(f)
+        and not (f.endswith(".py") and edited_tests([f], candidates))
+    ]
+    exempt = [
+        f
+        for f in data
+        if f in deleted or NO_READER_RE.search(f) or edited_tests([f], candidates)
+    ]
     data = [f for f in data if f not in exempt]
     if len(data) > MAX_DATA_FILES:
         return None
@@ -278,7 +319,9 @@ def data_file_readers(
 
     # A deleted expect file breaks the tests that still assert against it.
     classes = [m[1] for f in exempt if (m := EXPECT_RE.match(f))]
-    patterns = [name_pattern(exempt)] + ([class_pattern(classes, prefix=True)] if classes else [])  # fmt: skip
+    patterns = [name_pattern(exempt)] + (
+        [class_pattern(classes, prefix=True)] if classes else []
+    )
     readers = grep("|".join(f"({p})" for p in patterns)) if exempt else []
     read_by: dict[str, list[str]] = {}
     for f in data:
@@ -288,7 +331,11 @@ def data_file_readers(
         if f.endswith(".py"):
             patterns.append(import_pattern([f]))
         found = [r for r in grep("|".join(f"({p})" for p in patterns)) if r != f]
-        cpp = {r for r in found if r.startswith("test/cpp/") and not r.endswith((".md", ".rst"))}  # fmt: skip
+        cpp = {
+            r
+            for r in found
+            if r.startswith("test/cpp/") and not r.endswith((".md", ".rst"))
+        }
         if cpp and cpp & set(grep(name_pattern([f], cpp=True))):
             readers += found
         else:
@@ -302,19 +349,25 @@ def failure_list_sources(
     """The paths under test/ that define the classes named by the edited
     failure-list entries (see FAILURE_LIST_RE), and the lists ("dynamo",
     "inductor", "compiled_autograd", or "dynamo_cpython" for a CPython entry,
-    which the dynamo_cpython config runs) naming a class that `grep` (see
-    importers) does not find, holding an entry in a subdirectory, or holding an
-    entry without exactly one ".", which dynamo_test_failures.py rejects at
-    import for the dynamo and inductor lists."""
+    which the dynamo_cpython config runs) naming a class that is not looked up
+    (no `grep`, see importers, or more than MAX_FAILURE_LIST_CLASSES classes)
+    or that `grep` does not find. Also the list ("dynamo", "inductor" or
+    "compiled_autograd", even for a CPython entry) holding an entry in a
+    subdirectory or, for the dynamo and inductor lists, one without exactly
+    one ".", which dynamo_test_failures.py rejects at import."""
     classes: dict[str, set[str]] = {}
     unparsed: set[str] = set()
     for f in changed_files:
         if not (d := FAILURE_LIST_DIR_RE.match(f)):
             continue
-        if "/" in f[d.end() :] or (d[1] != "compiled_autograd" and f.rsplit("/", 1)[-1].count(".") != 1):  # fmt: skip
+        if "/" in f[d.end() :] or (
+            d[1] != "compiled_autograd" and f.rsplit("/", 1)[-1].count(".") != 1
+        ):
             unparsed.add(d[1])
         elif m := FAILURE_LIST_RE.match(f):
-            classes.setdefault(m[2], set()).add("dynamo_cpython" if f[d.end() :].startswith("CPython") else m[1])  # fmt: skip
+            classes.setdefault(m[2], set()).add(
+                "dynamo_cpython" if f[d.end() :].startswith("CPython") else m[1]
+            )
     if grep is None or len(classes) > MAX_FAILURE_LIST_CLASSES:
         return [], unparsed.union(*classes.values())
     sources: list[str] = []
@@ -328,20 +381,25 @@ def failure_list_sources(
 
 
 def edits_doctest(diff: str) -> bool:
-    """Whether `diff`, a `git diff`, adds or removes a line with `>>>`, which
-    the doctests test runs with xdoctest, in a .py file under torch/."""
+    """Whether `diff`, a `git diff`, adds or removes a line in a hunk of a .py
+    file under torch/ that has a `>>>` line, changed or context: the doctests
+    test runs those examples with xdoctest, including the expected output and
+    `...` lines that follow a `>>>` line within the diff's context."""
     paths: list[str] = []
-    in_header = in_torch = False
+    in_header = in_torch = doctest = changed = False
     for line in diff.splitlines():
         if line.startswith("diff --git "):
             paths, in_header, in_torch = [], True, False
         elif in_header and line.startswith(("--- a/", "+++ b/")):
             paths.append(line[6:])
         elif line.startswith("@@"):
-            in_header = False
+            in_header = doctest = changed = False
             in_torch = any(re.match(r"torch/.*\.py$", f) for f in paths)
-        elif in_torch and line[:1] in ("+", "-") and ">>>" in line:
-            return True
+        elif in_torch and line[:1] in (" ", "+", "-"):
+            doctest = doctest or ">>>" in line
+            changed = changed or line[:1] != " "
+            if doctest and changed:
+                return True
     return False
 
 
@@ -364,7 +422,9 @@ def parse_model_output(
     if missing := sorted({"tests", "dirs", "sweeps", "run_all", "reason"} - out.keys()):
         raise ValueError(f"missing {missing}")
     tests, dirs, sweeps = out["tests"], out["dirs"], out["sweeps"]
-    if not isinstance(tests, list) or not all(isinstance(t, dict) and isinstance(t.get("file"), str) for t in tests):  # fmt: skip
+    if not isinstance(tests, list) or not all(
+        isinstance(t, dict) and isinstance(t.get("file"), str) for t in tests
+    ):
         raise ValueError("tests is not a list of objects with a string file")
     for key, value in (("dirs", dirs), ("sweeps", sweeps)):
         if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
@@ -377,12 +437,18 @@ def parse_model_output(
     if grep is not None and not all(names.values()):
         # Every file under test/ at the head.
         paths = set(grep("^"))
-        names = {t: n or normalize_test_name(t, candidates, paths) for t, n in names.items()}  # fmt: skip
+        names = {
+            t: n or normalize_test_name(t, candidates, paths) for t, n in names.items()
+        }
     if unmatched := sorted(t for t, n in names.items() if not n):
         raise ValueError(f"tests entries match no test file: {unmatched[:10]}")
     files = {f for n in names.values() for f in n}
     for d in dirs:
-        prefix = re.sub(r"(/\*\*?)?/*$", "", d.strip()).removeprefix("./").removeprefix("test/")  # fmt: skip
+        prefix = (
+            re.sub(r"(/\*\*?)?/*$", "", d.strip())
+            .removeprefix("./")
+            .removeprefix("test/")
+        )
         in_dir = {c for c in candidates if c.startswith(prefix + "/")}
         if not in_dir:
             raise ValueError(f"dirs entry {d!r} matches no test file")
@@ -394,11 +460,9 @@ def parse_model_output(
 class Selection:
     files: set[str] = field(default_factory=set)
     sweeps: set[str] = field(default_factory=set)
-    # The model's own run_all, or a fallback of from_model_output: those its
-    # docstring lists, more than MAX_DATA_FILES edited files under test/ that
-    # are not tests, and an edited inductor failure list or CPython entry that
-    # is not looked up (an entry without exactly one "." or in a subdirectory,
-    # no grep, or more than MAX_FAILURE_LIST_CLASSES classes).
+    # The model's own run_all, a fallback of from_model_output (see its
+    # docstring), or one of select_tests.select() and main(), which set it
+    # without asking the model or when the selector fails.
     run_all: bool = False
     reason: str = ""
     # Whether run_test.py should replace TD's split with Selection.split rather
@@ -426,7 +490,10 @@ class Selection:
         deleted: Collection[str] = (),
         diff: str = "",
     ) -> Selection:
-        """Turn the model's structured output into a Selection.
+        """Turn the model's structured output into a Selection. Everything runs
+        when failure_list_sources reports the inductor list or dynamo_cpython
+        (a CPython entry whose class could not be resolved); the other lists it
+        reports add the dynamo_wrapped sweep.
 
         A change to test infrastructure, an edited inductor failure list
         naming an unknown class, too many import hops, and with `grep` an
@@ -439,38 +506,62 @@ class Selection:
         failure_list_sources), and those reading an edited data file (see
         data_file_readers), with their importers."""
         if out is None:
-            return cls(run_all=True, reason="no model output; TD's split runs", error="no model output")  # fmt: skip
+            return cls(
+                run_all=True,
+                reason="no model output; TD's split runs",
+                error="no model output",
+            )
         if needs_run_all(changed_files):
             return cls(run_all=True, reason="change touches test infrastructure")
         try:
             files, sweeps = parse_model_output(out, candidates, grep)
         except ValueError as e:
-            return cls(run_all=True, reason=f"malformed model output ({e}); TD's split runs", error=f"malformed model output: {e}")  # fmt: skip
+            return cls(
+                run_all=True,
+                reason=f"malformed model output ({e}); TD's split runs",
+                error=f"malformed model output: {e}",
+            )
         if not isinstance(out, dict):
             raise AssertionError("parse_model_output accepts only objects")
         sources, missing = failure_list_sources(changed_files, grep)
-        # Also every inductor failure-list edit without `grep` or naming more
-        # than MAX_FAILURE_LIST_CLASSES classes, and an entry without exactly one ".".
         if "inductor" in missing:
-            return cls(run_all=True, reason="an edited inductor failure list names an unknown test class")  # fmt: skip
+            return cls(
+                run_all=True,
+                reason="an edited inductor failure list names a test class that could not be resolved",
+            )
         if "dynamo_cpython" in missing:
-            return cls(run_all=True, reason="an edited dynamo failure list names an unknown CPython test class")  # fmt: skip
+            return cls(
+                run_all=True,
+                reason="an edited dynamo failure list names a CPython test class that could not be resolved",
+            )
         # dynamo_wrapped also runs with compiled autograd on (see common_utils).
         if missing & {"dynamo", "compiled_autograd"}:
             sweeps.add("dynamo_wrapped")
-        files |= edited_tests(changed_files, candidates)
+        edited = edited_tests(changed_files, candidates)
+        files |= edited
         if "doctests" in candidates and edits_doctest(diff):
             files.add("doctests")
         if grep is not None:
             data = data_file_readers(changed_files, candidates, grep, deleted)
             if data is None:
-                return cls(run_all=True, reason=f"more than {MAX_DATA_FILES} edited files under test/ are not tests")  # fmt: skip
+                return cls(
+                    run_all=True,
+                    reason=f"more than {MAX_DATA_FILES} edited files under test/ are not tests",
+                )
             readers, read_by = data
             # A file is read only if its readers lead to a test that runs.
-            for f, paths in [(None, changed_files + sources + readers), *read_by.items()]:  # fmt: skip
+            # The drivers of edited non-.py files, such as test_jit for test/jit/*.txt, have importers too.
+            drivers = [f"test/{t}.py" for t in sorted(edited)]
+            for f, paths in [
+                (None, changed_files + sources + readers + drivers),
+                *read_by.items(),
+            ]:
                 found = importers(paths, candidates, grep)
                 if found is None:
-                    return cls(run_all=True, reason="test modules import the change through too many hops")  # fmt: skip
+                    return cls(
+                        run_all=True,
+                        reason="test modules import the change through too many hops",
+                    )
                 if f is not None and not found:
                     return cls(run_all=True, reason=f"nothing found that reads {f}")
                 files |= found
@@ -503,7 +594,7 @@ class Selection:
         the hedge: their pool spans the PR's SHAs, build environments and
         configs, so one large earlier failure would otherwise use up the hedge
         of every config. A previous failure with any TestRun in TD's include
-        runs its whole file. The hedge is `share` (by default LLM_SELECTOR_HEDGE,
+        runs its whole file. The hedge is `share` (by default HEDGE_SHARE,
         20%) of the test time of `ranked`, spent greedily in rank order on the
         other files with a positively scored TestRun, including the other
         previous failures. One positive class-level run hedges its whole file
@@ -516,7 +607,7 @@ class Selection:
         covered = {f for f in files if self.covers(f, test_config)}
         prev = {f for f in previous_failures if f in files and f in td_include}
         prev -= covered
-        share = LLM_SELECTOR_HEDGE if share is None else share
+        share = HEDGE_SHARE if share is None else share
         left = budget = share * sum(file_time.get(f, 0) for f in files)
         hedged: set[str] = set()
         chosen = covered | prev
@@ -548,10 +639,19 @@ class Selection:
         """The selection in `d`; ValueError, KeyError or TypeError unless `d`
         is a selection file of SELECTION_VERSION. Without candidates it covers
         only the files it names, so it must be run_all."""
-        if not isinstance(d, dict) or type(d.get("version")) is not int or d["version"] != SELECTION_VERSION:  # fmt: skip
+        if (
+            not isinstance(d, dict)
+            or type(d.get("version")) is not int
+            or d["version"] != SELECTION_VERSION
+        ):
             raise ValueError(f"not a selection file of version {SELECTION_VERSION}")
         files, sweeps, candidates = d["files"], d["sweeps"], d["candidates"]
-        run_all, enforce, reason, error = d["run_all"], d["enforce"], d["reason"], d["error"]  # fmt: skip
+        run_all, enforce, reason, error = (
+            d["run_all"],
+            d["enforce"],
+            d["reason"],
+            d["error"],
+        )
         # Older selectors, which CI runs from the default branch, omit it.
         enforce_requested = d.get("enforce_requested", enforce)
         if not all(
@@ -559,7 +659,7 @@ class Selection:
             for v in (files, sweeps) + (() if candidates is None else (candidates,))
         ):
             raise TypeError("files, sweeps and candidates must be lists of strings")
-        if not all(isinstance(v, bool) for v in (run_all, enforce, enforce_requested)):  # fmt: skip
+        if not all(isinstance(v, bool) for v in (run_all, enforce, enforce_requested)):
             raise TypeError("run_all, enforce and enforce_requested must be booleans")
         if not isinstance(reason, str) or not isinstance(error, (str, type(None))):
             raise TypeError("reason must be a string and error a string or null")
@@ -612,11 +712,16 @@ class Split:
 
 @dataclass
 class AppliedSelection:
-    """A Selection applied to TD's split of one run_test.py call's test list;
-    kept_td records that a selection with enforce set fell back to TD's split
-    in apply_selection (no test times, previous failures not recorded, or no
-    file chosen); a request the selector refused (enforce_requested without
-    enforce: a failed selector or a not_enforced answer) is not kept_td.
+    """A Selection applied to TD's split of one run_test.py call's test list.
+    would_enforce records that apply_selection would enforce the selection
+    with ENFORCEMENT_ENABLED (a PR with TD on, enforce set, no selector error
+    and no fallback), and fallback why a selection that would otherwise be
+    enforced keeps TD's split (no test times, previous failures not recorded,
+    or no file chosen), else None; both are set with the flag off too.
+    enforced and kept_td are would_enforce and fallback is not None with
+    ENFORCEMENT_ENABLED, and False without it. A request the selector refused
+    (enforce_requested without enforce: a failed selector or a not_enforced
+    answer) has neither would_enforce nor a fallback.
     previous_failures_known records that the TD results stored previous failures,
     which the TD job does when its pytest cache download step succeeded. That
     step also succeeds without a cache, as on a PR whose only failures were in
@@ -629,6 +734,8 @@ class AppliedSelection:
     enforcement_enabled: bool
     enforced: bool
     kept_td: bool
+    would_enforce: bool
+    fallback: str | None
     previous_failures_known: bool
     td_include: set[str]
     td_include_runs: set[TestRun]
@@ -644,7 +751,9 @@ class AppliedSelection:
         when enforced and whether or not TD is on: the requested enforcements
         that ran TD are the rows with enforcement_enabled, enforce_requested
         and td_enabled but not enforced, on PR jobs; of those, kept_td fell
-        back in apply_selection and the rest the selector refused."""
+        back in apply_selection and the rest the selector refused. With the
+        flag off, would_enforce and fallback record what enforcing would
+        have done, and enforce whether the selector granted the request."""
         split, times = self.split, self.file_time
         files = "\n".join(sorted(times)).encode()
         return {
@@ -661,6 +770,9 @@ class AppliedSelection:
             "num_hedged": len(split.hedged),
             "num_previous_failures_added": len(split.previous_failures_added),
             "kept_td": self.kept_td,
+            "enforce": self.selection.enforce,
+            "would_enforce": self.would_enforce,
+            "fallback": self.fallback,
             "previous_failures_known": self.previous_failures_known,
             "time_total": sum(times.values()),
             "time_covered": sum(times[f] for f in split.covered),
@@ -683,6 +795,9 @@ class AppliedSelection:
             "hedged": f in self.split.hedged,
             "previous_failure_added": f in self.split.previous_failures_added,
             "kept_td": self.kept_td,
+            "enforce": self.selection.enforce,
+            "would_enforce": self.would_enforce,
+            "fallback": self.fallback,
             "previous_failures_known": self.previous_failures_known,
             "selector_error": self.selection.error,
         }
@@ -721,7 +836,7 @@ def apply_selection(
         ranked, score, file_time, test_config, previous_failures=prev, td_include=td
     )
     td_on_pr = td_enabled and get_pr_number() is not None
-    wanted = ENFORCEMENT_ENABLED and td_on_pr and selection.enforce and selection.error is None  # fmt: skip
+    wanted = td_on_pr and selection.enforce and selection.error is None
     # select_tests clears enforce when the selector fails, but keeps the request.
     requested = ENFORCEMENT_ENABLED and td_on_pr and selection.enforce_requested
     if not sum(file_time.values()):
@@ -732,12 +847,20 @@ def apply_selection(
         fallback = "chose no files"
     else:
         fallback = None
-    enforced = wanted and fallback is None
+    fallback = fallback if wanted else None
+    would_enforce = wanted and fallback is None
+    enforced = ENFORCEMENT_ENABLED and would_enforce
     if selection.error is not None and requested:
-        print(f"LLM selection: the selector failed ({selection.error[:200]!r}), using TD", file=sys.stderr)  # fmt: skip
+        print(
+            f"LLM selection: the selector failed ({selection.error[:200]!r}), using TD",
+            file=sys.stderr,
+        )
     elif requested and not selection.enforce:
-        print("LLM selection: the selector did not enforce the request (see not_enforced in the selection file's diagnostics), using TD", file=sys.stderr)  # fmt: skip
-    if wanted and not enforced:
+        print(
+            "LLM selection: the selector did not enforce the request (see not_enforced in the selection file's diagnostics), using TD",
+            file=sys.stderr,
+        )
+    if ENFORCEMENT_ENABLED and fallback is not None:
         print(f"LLM selection: {fallback}, using TD", file=sys.stderr)
     if enforced:
         s, n = split, len({x.test_file for x in split.include})
@@ -754,7 +877,9 @@ def apply_selection(
         td_enabled=td_enabled,
         enforcement_enabled=ENFORCEMENT_ENABLED,
         enforced=enforced,
-        kept_td=wanted and not enforced,
+        kept_td=ENFORCEMENT_ENABLED and fallback is not None,
+        would_enforce=would_enforce,
+        fallback=fallback,
         previous_failures_known=previous_failures is not None,
         td_include=td,
         td_include_runs=set(include),
