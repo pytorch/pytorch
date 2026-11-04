@@ -40,8 +40,7 @@ import types
 import typing
 from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
-from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeVar
-from typing_extensions import Never
+from typing import Any, cast, Literal, Never, Optional, TYPE_CHECKING, TypeVar
 from weakref import WeakKeyDictionary
 
 import torch
@@ -2667,8 +2666,17 @@ class SkipFunctionVariable(VariableTracker):
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         if type(self.value) is types.BuiltinFunctionType:
-            # CPython's meth_hash combines the C function and receiver identities.
-            return hash(self.value), False
+            # A pre-bound method on the skip path needs its own identity guard.
+            receiver = self.value.__self__
+            if (
+                self.source is not None
+                and receiver is not None
+                and not isinstance(receiver, types.ModuleType)
+            ):
+                install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
+                return hash(self.value), False
+            # Module functions resolve to new objects when loading in another process.
+            return hash(self.value), True
         return super().hash_impl(tx)
 
     def get_source(self) -> Source | None:
