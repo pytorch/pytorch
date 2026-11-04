@@ -420,7 +420,12 @@ class TestSelection(unittest.TestCase):
                 stderr = io.StringIO()
                 with mock.patch("sys.stderr", stderr):
                     self.assertIsNone(import_results(p)[1], value)
-                self.assertIn("Ignoring the previous failures", stderr.getvalue())
+                message = (
+                    "Previous failures not recorded in"
+                    if value == "missing"
+                    else "Ignoring the previous failures in"
+                )
+                self.assertIn(message, stderr.getvalue())
             td_results = {
                 **tp.to_json(),
                 PREVIOUS_FAILURES_KEY: ["test_nn", "elsewhere"],
@@ -856,9 +861,6 @@ def import_test_dashboard() -> Any:
     return test_dashboard
 
 
-SplitResult = tuple[selection.CallSplit, str, Any]
-
-
 class TestSplitTests(unittest.TestCase):
     """run_test.py's wiring of the selection."""
 
@@ -869,16 +871,14 @@ class TestSplitTests(unittest.TestCase):
         times: dict[str, float] | None = None,
         prev: set[str] | None = None,
         td_enabled: bool = True,
-        in_ci: bool = True,
-    ) -> SplitResult:
-        """split_tests' result, its stderr, and the artifact it wrote in CI."""
+    ) -> tuple[selection.CallSplit, str]:
+        """split_tests' result and its stderr."""
         tp = tp or TestPrioritizations(["a", "p"], {TestRun("p"): 1})
         include, exclude = tp.get_top_per_tests(25)
         stderr = io.StringIO()
         with (
             tempfile.TemporaryDirectory() as tmp,
             mock.patch.object(selection, "get_pr_number", return_value=1),
-            mock.patch.object(selection, "gen_ci_artifact") as artifact,
             mock.patch("sys.stderr", stderr),
         ):
             selection_file = Path(tmp) / "sel.json"
@@ -893,35 +893,22 @@ class TestSplitTests(unittest.TestCase):
                 test_config="default",
                 td_enabled=td_enabled,
                 previously_failed=set() if prev is None else prev,
-                in_ci=in_ci,
             )
         self.assertEqual((split.td_include, split.td_exclude), (include, exclude))
-        return split, stderr.getvalue(), artifact
+        return split, stderr.getvalue()
 
     def test_wiring(self) -> None:
         enforced_sel = Selection(files={"a"}, enforce=True, candidates={"a"})
         shadow_sel = Selection(files={"a"}, candidates={"a"})
         for sel, enforced in ((None, False), (shadow_sel, False), (enforced_sel, True)):
-            split, stderr, artifact = self.split_with(sel)
+            split, stderr = self.split_with(sel)
             self.assertEqual(split.enforced, enforced)
             include = ["p", "a"] if enforced else ["p"]
             self.assertEqual([str(x) for x in split.include], include)
             self.assertEqual([str(x) for x in split.exclude], [] if enforced else ["a"])
             self.assertEqual((split.llm is None), sel is None)
             self.assertNotIn("::warning::", stderr)
-            source = "llm_selection" if enforced else "td"
-            artifact.assert_called_once_with(
-                [x.to_json() for x in split.include],
-                [x.to_json() for x in split.exclude],
-                source=source,
-                td_excluded=[TestRun("a").to_json()],
-            )
-
-    def test_no_artifact_outside_ci(self) -> None:
-        sel = Selection(files={"a"}, enforce=True, candidates={"a"})
-        split, _, artifact = self.split_with(sel, in_ci=False)
-        self.assertTrue(split.enforced)
-        artifact.assert_not_called()
+            self.assertEqual(split.source, "llm_selection" if enforced else "td")
 
     def test_list_id_is_the_same_on_every_shard(self) -> None:
         splits = [self.split_with(Selection(candidates={"a"}))[0] for _ in range(2)]
@@ -938,27 +925,27 @@ class TestSplitTests(unittest.TestCase):
         sel = Selection(files={"a"}, enforce=True, candidates=set(files))
         times: dict[str, float] = {"a": 1, "f": 300, "r1": 233, "r2": 233, "r3": 233}
         for prev, runs in (({"f"}, ["f, A", "a", "f, not (A)"]), (set(), ["a"])):
-            split, _, _ = self.split_with(sel, tp, times, prev)
+            split, _ = self.split_with(sel, tp, times, prev)
             self.assertTrue(split.enforced)
             self.assertEqual([str(x) for x in split.include], runs)
 
     def test_td_disabled(self) -> None:
         for sel in [None, Selection(files={"a"}, enforce=True, candidates={"a"})]:
-            split, _, _ = self.split_with(sel, td_enabled=False)
+            split, _ = self.split_with(sel, td_enabled=False)
             self.assertFalse(split.enforced)
             self.assertEqual([str(x) for x in split.include], ["p"])
 
     def test_run_test_main_wiring(self) -> None:
-        # main() runs the split split_tests returns, prints TD's line only when
-        # the selection is not enforced, and emits the LLM metrics only when
-        # there is a selection. emit_metric records its caller's file, module
-        # and function, which queries of the metrics filter on, so they are
-        # emitted by main().
+        # main() passes the PR's previous failures to split_tests, runs the
+        # split it returns, records it in TD's exclusions artifact in CI, prints
+        # TD's line only when the selection is not enforced, and emits the LLM
+        # metrics only when there is a selection. emit_metric records its
+        # caller's file, module and function, which queries of the metrics
+        # filter on, so they are emitted by main().
         tree = ast.parse((REPO_ROOT / "test" / "run_test.py").read_text())
         funcs = [f for f in tree.body if isinstance(f, ast.FunctionDef)]
         (main,) = [f for f in funcs if f.name == "main"]
-        batches: list[str] = []
-        guards: dict[str, list[str]] = {}
+        calls: dict[str, list[tuple[list[str], list[str], dict[str, str]]]] = {}
 
         def visit(node: ast.AST, tests: list[str]) -> None:
             for child in ast.iter_child_nodes(node):
@@ -966,22 +953,41 @@ class TestSplitTests(unittest.TestCase):
                 if isinstance(node, ast.If) and child in node.body:
                     inner = [*tests, ast.unparse(node.test)]
                 if isinstance(child, ast.Call):
-                    name = ast.unparse(child.func)
                     args = [ast.unparse(a) for a in child.args]
-                    if name == "TestBatch":
-                        batches.append(args[1])
-                    elif name == "print_to_stderr" and "based on TD" in args[0]:
-                        guards["td_line"] = inner
-                    elif name == "emit_metric" and args[0].startswith("'llm_td_"):
-                        guards[args[0]] = inner
+                    kwargs = {str(k.arg): ast.unparse(k.value) for k in child.keywords}
+                    name = ast.unparse(child.func)
+                    if name in ("print_to_stderr", "emit_metric") and args:
+                        name = f"{name}({args[0]})"
+                    calls.setdefault(name, []).append((inner, args, kwargs))
                 visit(child, inner)
 
         visit(main, [])
+        imported = "test_prioritizations, previous_failures = import_results()"
+        self.assertIn(imported, [ast.unparse(x) for x in ast.walk(main)])
+        split_kwargs = {
+            "selection_file": "selection_file",
+            "test_config": "TEST_CONFIG",
+            "td_enabled": "options.enable_td",
+            "previously_failed": "previous_failures",
+        }
+        self.assertEqual([c[2] for c in calls["split_tests"]], [split_kwargs])
+        global_metrics = {c[1][0]: c[0] for c in calls["add_global_metric"]}
+        self.assertEqual(global_metrics["'call_id'"], [])
+        batches = [c[1][1] for c in calls["TestBatch"]]
         self.assertEqual(batches, ["split.include", "split.exclude"])
-        self.assertEqual(guards["td_line"], ["not split.enforced"])
-        self.assertIn("split.llm is not None", guards["'llm_td_selection'"][-1])
-        self.assertEqual(guards["'llm_td_failure'"][-1], "split.llm is not None")
-        self.assertIn("IS_CI", guards["'llm_td_failure'"])
+        ((guard, args, kwargs),) = calls["gen_ci_artifact"]
+        self.assertEqual(guard, ["IS_CI"])
+        ran = [f"[x.to_json() for x in split.{x}]" for x in ("include", "exclude")]
+        self.assertEqual(args, ran)
+        td_excluded = "[x.to_json() for x in split.td_exclude]"
+        self.assertEqual(kwargs, {"source": "split.source", "td_excluded": td_excluded})
+        td_line = [c[0] for k, v in calls.items() if "based on TD" in k for c in v]
+        self.assertEqual(td_line, [["not split.enforced"]])
+        ((guard, _, _),) = calls["emit_metric('llm_td_selection')"]
+        self.assertEqual(guard, ["IS_CI", "split.llm is not None"])
+        ((guard, _, _),) = calls["emit_metric('llm_td_failure')"]
+        self.assertEqual(guard[-1], "split.llm is not None")
+        self.assertIn("IS_CI", guard)
 
 
 class TestDashboardExclusions(unittest.TestCase):

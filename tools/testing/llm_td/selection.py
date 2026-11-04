@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from tools.testing.target_determination.gen_artifact import (
-    gen_ci_artifact,
     LLM_SELECTION_SOURCE,
     TD_SOURCE,
 )
@@ -665,6 +664,10 @@ class CallSplit:
         llm = self.llm
         return llm.split.exclude if llm and llm.enforced else self.td_exclude
 
+    @property
+    def source(self) -> str:
+        return LLM_SELECTION_SOURCE if self.enforced else TD_SOURCE
+
 
 def split_tests(
     include: list[TestRun],
@@ -676,10 +679,9 @@ def split_tests(
     test_config: str,
     td_enabled: bool,
     previously_failed: Collection[str] | None,
-    in_ci: bool,
 ) -> CallSplit:
     """TD's (include, exclude) split with the selection in `selection_file`, if
-    any, applied; in CI it is recorded in TD's exclusions artifact."""
+    any, applied."""
     llm = None
     if (selection := Selection.load(selection_file)) is not None:
         llm = apply_selection(
@@ -692,12 +694,4 @@ def split_tests(
             td_enabled=td_enabled,
             previously_failed=previously_failed,
         )
-    split = CallSplit(include, exclude, llm)
-    if in_ci:
-        gen_ci_artifact(
-            [x.to_json() for x in split.include],
-            [x.to_json() for x in split.exclude],
-            source=LLM_SELECTION_SOURCE if split.enforced else TD_SOURCE,
-            td_excluded=[x.to_json() for x in exclude],
-        )
-    return split
+    return CallSplit(include, exclude, llm)
