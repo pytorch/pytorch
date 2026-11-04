@@ -184,8 +184,8 @@ def select_ordered_col_config(
             if dtype == torch.bfloat16 and partials >= 8:
                 minimum //= 2
             cfg = OrderedColConfig(minimum, tile_columns=16, full_tiles=True)
-    # Only routed split views (one field, B = 1, C >= 128) reach these B200 rows.
-    elif cc == (10, 0) and full_tiles and rows is not None:
+    # B200 rows are measured on routed split views only (one field, B = 1, C >= 128).
+    elif cc == (10, 0) and full_tiles and rows is not None and fields == 1:
         if rows == 65536 and columns == 1024:
             cfg = cfg._replace(tile_columns=16, full_tiles=True)
         elif 32768 <= rows <= 131072 and 128 <= columns <= 257:
@@ -872,6 +872,8 @@ def reduce_ordered_col(
         out_shape = (B, C)
     else:
         return None
+    if len(out_dtypes) < nouts:
+        raise AssertionError(f"want {nouts} output dtypes, got {len(out_dtypes)}")
     # The last block's Int32 output index must not wrap past the outputs.
     last = B * C + WARP
     if C < WARP or last >= _INT32_LIMIT:

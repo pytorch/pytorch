@@ -72,28 +72,31 @@ class TestKernelRowTile(TestCase):
             f"expected ONE compiled kernel for the vec class, got {sorted(mine)}",
         )
 
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2 or torch.cuda.get_device_capability(1)[0] < 9,
+        "requires a second Hopper+ CUDA device",
+    )
     def test_plans_are_keyed_by_device(self):
         trait = T.SumOps(acc=cutlass.Float32)
         rt._CACHE.clear()
         for device in ("cuda:0", "cuda:1"):
             x = torch.randn(64, 512, device=device)
             with torch.cuda.device(x.device):
-                (out,) = rt.reduce_row_tile(trait, "bydevice", x, [torch.float32])
+                (out,) = rt.reduce_row_tile(
+                    trait, "bydevice", x, [torch.float32], order="linear"
+                )
             torch.testing.assert_close(
                 out, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5
             )
+        # Row-tile keys end their fixed fields with the device index.
         mine = [k for k in rt._CACHE if "bydevice" in k]
-        self.assertEqual(len(mine), 2)
-        for device in ("cuda:0", "cuda:1"):
-            self.assertTrue(any(device in k for k in mine), f"no plan for {device}")
+        self.assertEqual(sorted(k[5] for k in mine), [0, 1])
 
     def test_plans_require_the_current_device(self):
         # Plans compile on the current device, so the launchers refuse any other one.
-        rt._require_current(torch.device("cuda", torch.cuda.current_device()))
-        other = torch.device("cuda", torch.cuda.device_count())
-        with self.assertRaisesRegex(AssertionError, "current device"):
-            rt._require_current(other)
+        rt._check_current(torch.cuda.current_device())
+        with self.assertRaisesRegex(AssertionError, "is current"):
+            rt._check_current(torch.cuda.device_count())
 
     def test_two_output_trait(self):
         # nouts=2 stores values and indices projected from one accumulator.

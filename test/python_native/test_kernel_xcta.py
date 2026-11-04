@@ -121,15 +121,11 @@ class TestKernelXcta(TestCase):
             with (
                 self.subTest(shape=shape, key=key),
                 mock.patch.object(kernel_xcta._hw, "caps", return_value=caps),
-                mock.patch.dict(kernel_xcta._GEOM),
-                mock.patch.object(
-                    kernel_xcta, "_build_geom", return_value=None
-                ) as build,
+                mock.patch.dict(kernel_xcta._GEOM, clear=True),
             ):
-                self.assertIsNone(
-                    kernel_xcta.reduce_row_xcta(trait, key, x, torch.float32)
-                )
-                self.assertEqual(build.call_args.args[-1], want)
+                kernel_xcta.reduce_row_xcta(trait, key, x, torch.float32)
+                # Geometry keys carry the sub-row target sixth.
+                self.assertEqual({k[5] for k in kernel_xcta._GEOM}, {want})
 
 
 if __name__ == "__main__":
