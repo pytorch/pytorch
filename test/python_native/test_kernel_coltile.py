@@ -826,8 +826,7 @@ class TestOrderedColDevice(TestCase):
         want, _ = self._reduce(device, trait, key, x, dim, outputs, route=False)
         self._assert_bitwise(got, want)
 
-    # fp16 plans like bf16.
-    @dtypes(torch.float32, torch.bfloat16)
+    @dtypes(torch.float32, torch.bfloat16, torch.float16)
     @parametrize("name", list(_ROUTED_TRAITS))
     def test_routed_traits_match_the_indexed_tree(self, device, dtype, name):
         """Every trait the gate admits stays bitwise equal to the indexed tree."""
@@ -845,8 +844,8 @@ class TestOrderedColDevice(TestCase):
         self._assert_torch_refs(name, got, x)
 
     # 16-bit rows plan 8 warps of vec 8 and fp32 rows 16 warps of vec 4, so their padding
-    # differs; fp16 pads like bf16.
-    @dtypes(torch.float32, torch.bfloat16)
+    # differs.
+    @dtypes(torch.float32, torch.bfloat16, torch.float16)
     @parametrize("name", list(_ROUTED_TRAITS))
     def test_routed_traits_with_padded_warps(self, device, dtype, name):
         """Padded warps and masked leaves keep every trait bitwise equal."""
@@ -856,7 +855,8 @@ class TestOrderedColDevice(TestCase):
 
     @parametrize("name", ["amax", "absmax", "argmax", "max_dim", "aminmax"])
     def test_selections_through_masked_leaves_past_nan_rows(self, device, name):
-        """Masked leaves re-read row R - 1, so NaN and inf there must count only once."""
+        """Masked leaves re-read row R - 1 and must stay masked: argmax and max_dim would
+        pick a re-read NaN's index, and the value traits check NaN and inf parity."""
         x = torch.randn(2, 3000, 64, device=device)
         x[:, -1, ::3] = float("nan")
         x[:, -1, 1::3] = float("inf")
