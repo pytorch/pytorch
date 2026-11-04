@@ -2,6 +2,9 @@
 
     python -m tools.testing.llm_td.select_tests --base origin/main --head <pr-head-sha> --output llm_td_selection.json
 
+LLM_TD_MODEL and LLM_TD_EFFORT, when set and not empty, are the defaults of
+--model and --effort.
+
 The prompt holds the PR title and description, the diff, and every test file
 CI can run annotated with its CI cost. Nothing from the change is executed:
 in CI this script runs from the default branch and only reads the PR through git. The model answers through `claude -p`
@@ -21,6 +24,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -44,7 +48,7 @@ if TYPE_CHECKING:
     from collections.abc import Collection, Iterable
 
 DEFAULT_MODEL = (
-    "us.anthropic.claude-opus-5-5"
+    "global.anthropic.claude-opus-5-5"
     if os.environ.get("CLAUDE_CODE_USE_BEDROCK", "").lower() in ("1", "true", "yes")
     else "claude-opus-5-5"
 )
@@ -53,8 +57,10 @@ DIFF_BUDGET = 120_000
 BODY_BUDGET = 4_000
 # A larger change runs everything rather than paying for an oversized prompt.
 MAX_CHANGED_FILES = 1000
-# Well under the CI job's 15 minute timeout, so a hung call still yields run_all.
+# Seconds the model call may take, and then all the git greps on its answer
+# together; past either, the selector fails and writes a run_all selection.
 QUERY_TIMEOUT = 600
+GREP_BUDGET = 180
 # Room for the note that replaces a truncated file's tail.
 TRUNCATION_MARKER = 40
 # With a checkout, the model may use these tools on it, and the prompt starts with this.
@@ -231,13 +237,14 @@ def git_paths(*args: str) -> list[str]:
     return git(*UNQUOTED_PATHS, *args).splitlines()
 
 
-def git_grep(pattern: str, rev: str) -> list[str]:
+def git_grep(pattern: str, rev: str, timeout: float | None = None) -> list[str]:
     """The paths under test/ at `rev` with a line matching the extended regex `pattern`."""
     p = subprocess.run(
         ["git", *UNQUOTED_PATHS, "grep", "-lE", pattern, rev, "--", "test/"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        timeout=timeout,
     )
     if p.returncode > 1:
         raise RuntimeError(f"git grep failed: {p.stderr.strip()[-500:]}")
@@ -328,9 +335,18 @@ def select(args: argparse.Namespace, record: dict) -> Selection | None:
     deleted = git_paths(
         "diff", "--name-only", "--no-renames", "--diff-filter=D", merge_base, args.head
     )
-    selection = Selection.from_model_output(
-        out, set(candidates), changed, lambda p: git_grep(p, args.head), set(deleted)
-    )
+    deadline = time.monotonic() + GREP_BUDGET
+    greps: dict[str, list[str]] = {}
+
+    def grep(pattern: str) -> list[str]:
+        if pattern not in greps:
+            try:
+                greps[pattern] = git_grep(pattern, args.head, max(deadline - time.monotonic(), 0.001))  # fmt: skip
+            except subprocess.TimeoutExpired:
+                raise RuntimeError(f"git grep ran past the {GREP_BUDGET}s budget after the model call") from None  # fmt: skip
+        return greps[pattern]
+
+    selection = Selection.from_model_output(out, set(candidates), changed, grep, set(deleted))  # fmt: skip
     if selection.error is not None:
         # Without an answer, the CLI's own output says why.
         cli = str(result.get("result") or "") if out is None else ""
@@ -345,23 +361,23 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--base", default="origin/main", help="diff against merge-base(base, head)"
     )
-    parser.add_argument("--head", default="HEAD")
-    parser.add_argument("--title")
-    parser.add_argument("--body")
+    parser.add_argument("--head", default="HEAD", help="the change to select tests for")
+    parser.add_argument("--title", help="the PR title; by default the PR event's, else head's commit subject")  # fmt: skip
+    parser.add_argument("--body", help="the PR description; needs --title")
     # An unset repository variable reaches the workflow as an empty string.
-    parser.add_argument("--model", default=os.environ.get("LLM_TD_MODEL") or DEFAULT_MODEL)  # fmt: skip
+    parser.add_argument("--model", default=os.environ.get("LLM_TD_MODEL") or DEFAULT_MODEL, help=f"the claude model (default: LLM_TD_MODEL or {DEFAULT_MODEL})")  # fmt: skip
     efforts = ["low", "medium", "high", "xhigh", "max"]
-    parser.add_argument(
-        "--effort", default=os.environ.get("LLM_TD_EFFORT") or "medium", choices=efforts
-    )
-    parser.add_argument("--output", type=Path, default=REPO_ROOT / LLM_TD_SELECTION_FILE)  # fmt: skip
+    parser.add_argument("--effort", default=os.environ.get("LLM_TD_EFFORT") or "medium", choices=efforts, help="the model's effort (default: LLM_TD_EFFORT or medium)")  # fmt: skip
+    parser.add_argument("--output", type=Path, default=REPO_ROOT / LLM_TD_SELECTION_FILE, help="where to write the selection file")  # fmt: skip
     parser.add_argument(
         "--enforce",
         action="store_true",
         help="tell run_test.py to skip uncovered files",
     )
-    parser.add_argument("--print-prompt", action="store_true")
+    parser.add_argument("--print-prompt", action="store_true", help="print the prompt instead of calling the model; writes no file")  # fmt: skip
     args = parser.parse_args(argv)
+    if args.body is not None and args.title is None:
+        parser.error("--body needs --title")
     # argparse checks choices only for values given on the command line.
     if args.effort not in efforts:
         parser.error(f"LLM_TD_EFFORT={args.effort!r} is not one of {efforts}")
