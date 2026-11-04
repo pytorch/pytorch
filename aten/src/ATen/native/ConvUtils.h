@@ -121,6 +121,7 @@ enum class ConvBackend {
   Mkldnn,
   MkldnnTranspose,
   MkldnnEmpty,
+  NnpackSpatial,
   Overrideable,
   Slow2d,
   Slow3d,

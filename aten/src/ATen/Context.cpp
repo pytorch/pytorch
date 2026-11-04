@@ -245,6 +245,14 @@ void Context::alertNotDeterministic(std::string_view const& caller) {
   }
 }
 
+bool Context::userEnabledNNPACK() const {
+  return enabled_nnpack;
+}
+
+void Context::setUserEnabledNNPACK(bool e) {
+  enabled_nnpack = e;
+}
+
 CuDNNDepthwiseKernel Context::cudnnDepthwiseKernel() const {
   return depthwise_kernel_cudnn;
 }

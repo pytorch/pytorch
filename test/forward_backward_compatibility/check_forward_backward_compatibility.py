@@ -161,8 +161,6 @@ ALLOW_LIST = [
     ("aten::.*\\..*names", datetime.date(9999, 1, 1), None, True),
     ("aten::flatten\\.named_out_dim", datetime.date(9999, 1, 1), None, True),
     ("aten::flatten\\.using_names", datetime.date(9999, 1, 1), None, True),
-    # NNPACK was removed
-    ("aten::_nnpack_.*", datetime.date(9999, 1, 1), None, True),
 ]
 
 ALLOW_LIST_COMPILED = [

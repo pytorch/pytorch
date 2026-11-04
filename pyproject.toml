@@ -352,7 +352,6 @@ dev = [
     "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
     "pyyaml",
     "requests",
-    "six",  # dependency chain: NNPACK -> PeachPy -> six
     "typing-extensions>=4.15.0",
     "pip",  # not technically needed, but this makes setup.py invocation work
 
@@ -388,7 +387,6 @@ license-files = [
     "LICENSE",
     "third_party/FP16/LICENSE",
     "third_party/FXdiv/LICENSE",
-    "third_party/NNPACK/LICENSE",
     "third_party/NVTX/LICENSE.txt",
     "third_party/VulkanMemoryAllocator/LICENSE.txt",
     "third_party/XNNPACK/LICENSE",

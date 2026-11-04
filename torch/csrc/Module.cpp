@@ -1350,6 +1350,29 @@ static PyObject* THPModule_deterministicFillUninitializedMemory(
     Py_RETURN_FALSE;
 }
 
+static PyObject* THPModule_setUserEnabledNNPACK(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_enabled_NNPACK expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setUserEnabledNNPACK(Py_IsTrue(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_userEnabledNNPACK(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().userEnabledNNPACK())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+
 static PyObject* THPModule_setWarnAlways(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -2181,6 +2204,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THPModule_setDeterministicFillUninitializedMemory,
      METH_O,
      nullptr},
+    {"_get_nnpack_enabled", THPModule_userEnabledNNPACK, METH_NOARGS, nullptr},
+    {"_set_nnpack_enabled", THPModule_setUserEnabledNNPACK, METH_O, nullptr},
     {"_get_warnAlways", THPModule_warnAlways, METH_NOARGS, nullptr},
     {"_set_warnAlways", THPModule_setWarnAlways, METH_O, nullptr},
     {"_warn", THPModule_warn, METH_NOARGS, nullptr},
@@ -3055,6 +3080,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value("MiopenTranspose", at::native::ConvBackend::MiopenTranspose)
       .value("Mkldnn", at::native::ConvBackend::Mkldnn)
       .value("MkldnnEmpty", at::native::ConvBackend::MkldnnEmpty)
+      .value("NnpackSpatial", at::native::ConvBackend::NnpackSpatial)
       .value("Overrideable", at::native::ConvBackend::Overrideable)
       .value("Slow2d", at::native::ConvBackend::Slow2d)
       .value("Slow3d", at::native::ConvBackend::Slow3d)

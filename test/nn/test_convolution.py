@@ -58,7 +58,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     set_default_dtype,
-    set_warn_always_context,
     skipIfRocmArch,
     subtest,
     TEST_SCIPY,
@@ -972,14 +971,45 @@ class TestConvolutionNN(NNTestCase):
     def test_grad_conv3d_weight(self):
         self.run_grad_conv_test(F.conv3d, F.grad.conv3d_weight, 3, "weight")
 
-    def test_nnpack_backend_deprecated(self):
-        msg = "torch.backends.nnpack is deprecated"
-        with set_warn_always_context(True):
-            with self.assertWarnsRegex(FutureWarning, msg):
-                self.assertFalse(torch.backends.nnpack.is_available())
-            with self.assertWarnsRegex(FutureWarning, msg):
-                with torch.backends.nnpack.flags(enabled=False):
-                    pass
+    @unittest.skipIf(not torch._nnpack_available(), "NNPACK unavailable")
+    def test_nnpack_conv(self):
+        for kern, inp_size in [(3, 6), (3, 7), (4, 9)]:
+            for batch, stride, padding, chan_in, chan_out in product(
+                [1, 2, 3, 4], [1, 2], [0, 1, 2], [2], [3]
+            ):
+                for has_bias in [True, False]:
+                    input_shape = [batch, chan_in]
+                    weight_shape = [chan_out, chan_in]
+                    for _ in range(2):
+                        input_shape.append(inp_size)
+                        weight_shape.append(kern)
+
+                    input = torch.randn(
+                        input_shape, requires_grad=True, dtype=torch.float
+                    )
+                    weight = torch.randn(
+                        weight_shape, requires_grad=True, dtype=torch.float
+                    )
+                    if has_bias:
+                        bias = torch.randn(
+                            [chan_out], requires_grad=True, dtype=torch.float
+                        )
+                    output = torch._nnpack_spatial_convolution(
+                        input, weight, stride=stride, padding=padding, bias=bias
+                    )
+                    output_expected = torch.nn.functional.conv2d(
+                        input, weight, stride=stride, padding=padding, bias=bias
+                    )
+                    self.assertEqual(output, output_expected, atol=3e-4, rtol=0)
+
+                    gradient_o = torch.randn(output.shape, dtype=torch.float)
+
+                    grads = torch.autograd.grad(output, [input, weight], gradient_o)
+                    grads_expected = torch.autograd.grad(
+                        output_expected, [input, weight], gradient_o
+                    )
+                    for gr, gr_expected in zip(grads, grads_expected):
+                        self.assertEqual(gr, gr_expected, atol=3e-4, rtol=0)
 
     def test_conv_padding_mode(self):
         with self.assertRaisesRegex(ValueError, "padding_mode must be one of"):
@@ -2962,7 +2992,7 @@ class TestConvolutionNNDevice(NNTestCase):
                 name="mkldnn_empty_batch_channel3d",
             ),
             # Note: Tests for mobile backends are not currently supported. This comprises
-            # Winograd3x3Depthwise and Xnnpack2d backends. Testing these
+            # NnpackSpatial, Winograd3x3Depthwise, and Xnnpack2d backends. Testing these
             # requires the ability to gate tests by whether PyTorch is built with USE_MOBILE=1.
         ],
     )

@@ -4489,6 +4489,14 @@
 
 - func: is_vulkan_available() -> bool
 
+- func: _nnpack_available() -> bool
+
+- func: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, SymInt[2] padding, SymInt[2] stride=1) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _nnpack_spatial_convolution
+  autogen: _nnpack_spatial_convolution.out
+
 - func: ones(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: ones

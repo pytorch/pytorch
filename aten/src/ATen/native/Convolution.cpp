@@ -1455,6 +1455,8 @@ static at::Tensor _convolution_nogroup_backend(
     const ConvParams<int64_t>& params) {
   auto kernel_size = weight.sizes().slice(2);
   switch(backend) {
+    case ConvBackend::NnpackSpatial:
+      TORCH_CHECK(false, "NnpackSpatial backend has been removed from PyTorch");
     case ConvBackend::Slow2d:
       return at::thnn_conv2d(input, weight, kernel_size, bias, params.stride, params.padding);
     case ConvBackend::SlowDilated2d:
@@ -1727,6 +1729,7 @@ at::Tensor _convolution(
           input, weight, bias, params.padding, params.stride, params.dilation, params.groups);
       break;
     // Handle backends that don't natively support groups > 1.
+    case ConvBackend::NnpackSpatial:
     case ConvBackend::Slow2d:
     case ConvBackend::SlowDilated2d:
     case ConvBackend::SlowDilated3d:
@@ -2017,6 +2020,8 @@ static std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogr
     case ConvBackend::Slow2d:
       return at::_slow_conv2d_backward(
         grad_output, input, weight, kernel_size, params.stride, params.padding, output_mask);
+    // NB: nnpack backward does not support strided convolutions; use slow impl instead
+    case ConvBackend::NnpackSpatial:
     case ConvBackend::SlowDilated2d:
       return slow_conv_dilated2d_backward_stub(
         input.device().type(),
@@ -2296,6 +2301,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
             params.stride, params.padding, output_mask);
       break;
     // Handle backends that don't natively support groups > 1.
+    case ConvBackend::NnpackSpatial:
     case ConvBackend::Slow2d:
     case ConvBackend::SlowDilated2d:
     case ConvBackend::SlowDilated3d:
