@@ -243,6 +243,71 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
 
         self.assertEqual(module.tanh_add.__doc__.split("\n")[2], "Tanh and then sum :D")
 
+    def test_hip_jit_hipcc_flags(self):
+        # load() also hands extra_cflags to hipcc for HIP extensions. On Windows they
+        # may include MSVC-syntax flags, which hipcc's clang driver reads as input
+        # file paths, so only those are dropped.
+        ce = torch.utils.cpp_extension
+        default_arch = "--offload-arch=gfx1201"
+        user_arch = "--offload-arch=gfx942"
+
+        def ninja_flags(is_windows, extra_cflags, extra_cuda_cflags=()):
+            captured = {}
+            with (
+                mock.patch.dict(os.environ, {"PYTORCH_ROCM_ARCH": "gfx1201"}),
+                mock.patch.object(ce, "IS_WINDOWS", is_windows),
+                mock.patch.object(ce, "IS_HIP_EXTENSION", True),
+                mock.patch.object(ce, "COMMON_HIP_FLAGS", list(ce.COMMON_HIP_FLAGS)),
+                mock.patch.object(ce, "include_paths", return_value=[]),
+                mock.patch.object(ce, "library_paths", return_value=[]),
+                mock.patch.object(ce, "_prepare_ldflags", return_value=[]),
+                mock.patch.object(
+                    ce,
+                    "_write_ninja_file",
+                    side_effect=lambda **kw: captured.update(kw),
+                ),
+            ):
+                ce._write_ninja_file_to_build_library(
+                    path="build.ninja",
+                    name="ext",
+                    sources=["kernel.cu"],
+                    extra_cflags=list(extra_cflags),
+                    extra_cuda_cflags=list(extra_cuda_cflags),
+                    extra_sycl_cflags=[],
+                    extra_ldflags=[],
+                    extra_include_paths=[],
+                    with_cuda=True,
+                    with_sycl=False,
+                    is_standalone=False,
+                )
+            return captured["cflags"], captured["cuda_cflags"]
+
+        portable = ["-DFOO=1", "-IC:/custom/headers", "-O3"]
+        cflags, hip_flags = ninja_flags(
+            True, ["/O2", "/std:c++17", *portable], ["-DBAR=1"]
+        )
+        for flag in ["/O2", "/std:c++17", *portable]:
+            self.assertIn(flag, cflags)
+        self.assertNotIn("/O2", hip_flags)
+        self.assertNotIn("/std:c++17", hip_flags)
+        for flag in [*portable, "-DBAR=1", default_arch]:
+            self.assertIn(flag, hip_flags)
+
+        # A user arch replaces the default one, from either flag list.
+        for is_windows in (True, False):
+            for extra_cflags, extra_cuda_cflags in (
+                ([user_arch], []),
+                ([], [user_arch]),
+            ):
+                _, hip_flags = ninja_flags(is_windows, extra_cflags, extra_cuda_cflags)
+                self.assertIn(user_arch, hip_flags)
+                self.assertNotIn(default_arch, hip_flags)
+
+        # Linux passes extra_cflags through unchanged.
+        _, hip_flags = ninja_flags(False, ["-O3", "-DFOO"])
+        self.assertIn("-O3", hip_flags)
+        self.assertIn("-DFOO", hip_flags)
+
     def test_inline_jit_generated_bindings_gil_not_used(self):
         variants = (
             ("default", {}, False),
