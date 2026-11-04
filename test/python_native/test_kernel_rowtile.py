@@ -92,11 +92,37 @@ class TestKernelRowTile(TestCase):
         mine = [k for k in rt._CACHE if "bydevice" in k]
         self.assertEqual(sorted(k[5] for k in mine), [0, 1])
 
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2 or torch.cuda.get_device_capability(1)[0] < 9,
+        "requires a second Hopper+ CUDA device",
+    )
+    def test_launchers_reject_a_non_current_device(self):
+        # Both entry points check before compiling, so nothing is cached under cuda:1.
+        trait = T.SumOps(acc=cutlass.Float32)
+        x = torch.randn(64, 512, device="cuda:1")
+        out = torch.empty(64, device="cuda:1")
+        self.assertIsNotNone(rt.itree_plan(512, 64, 4))
+        before = set(rt._CACHE)
+        with torch.cuda.device(0):
+            with self.assertRaisesRegex(AssertionError, "is current"):
+                rt.reduce_row_tile(trait, "off", x, [torch.float32], order="linear")
+            with self.assertRaisesRegex(AssertionError, "is current"):
+                rt.reduce_row_itree(trait, "off", x, out)
+        self.assertEqual(set(rt._CACHE), before)
+
     def test_plans_require_the_current_device(self):
-        # Plans compile on the current device, so the launchers refuse any other one.
-        rt._check_current(torch.cuda.current_device())
-        with self.assertRaisesRegex(AssertionError, "is current"):
-            rt._check_current(torch.cuda.device_count())
+        # One GPU has no other device, so pretend another one is current.
+        trait = T.SumOps(acc=cutlass.Float32)
+        x = torch.randn(64, 512, device="cuda")
+        out = torch.empty(64, device="cuda")
+        before = set(rt._CACHE)
+        other = x.get_device() + 1
+        with mock.patch.object(torch.cuda, "current_device", return_value=other):
+            with self.assertRaisesRegex(AssertionError, "is current"):
+                rt.reduce_row_tile(trait, "off", x, [torch.float32], order="linear")
+            with self.assertRaisesRegex(AssertionError, "is current"):
+                rt.reduce_row_itree(trait, "off", x, out)
+        self.assertEqual(set(rt._CACHE), before)
 
     def test_two_output_trait(self):
         # nouts=2 stores values and indices projected from one accumulator.
