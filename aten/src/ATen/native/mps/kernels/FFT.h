@@ -60,16 +60,6 @@ C10_METAL_CONSTEXPR uint32_t kFFTMaskP16 = (1u << 16) | (1u << 1);
   _(64) _(128) _(200) _(240) _(256) _(512) _(1024) _(2048) _(4096)
 #define FFT_CONTIG_SIZES(_) _(512) _(1024) _(2048) _(4096)
 
-#define FFT_LENGTH_IS(N) n == N ||
-inline constexpr bool fft_has_fixed_kernel(uint32_t n) {
-  return FFT_FIXED_SIZES(FFT_LENGTH_IS) false;
-}
-
-inline constexpr bool fft_has_contig_kernel(uint32_t n) {
-  return FFT_CONTIG_SIZES(FFT_LENGTH_IS) false;
-}
-#undef FFT_LENGTH_IS
-
 // tgb transforms of n points per group, jt threads each. n_sig: full signal
 // (zero-padded beyond), n_out: outputs. Four-step: input e * ld_mul + i0,
 // output k * out_k_mul + i0, mirror_out adds conj X[k] at n_sig - k, i0_dim1
