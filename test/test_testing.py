@@ -3120,10 +3120,11 @@ class TestImports(TestCase):
         self.assertEqual(out.strip(), "True")
 
     def test_not_import_dynamo_from_user_kernel_hops(self) -> None:
-        # torch._dynamo is imported lazily: importing triton_kernel_wrap, as an eager
-        # wrap_triton launch does, must not import it.
+        # torch._dynamo is imported lazily: importing a user-kernel HOP module, as an
+        # eager kernel launch does, must not import it.
         out = self._check_python_output(
             "import sys;import torch._higher_order_ops.triton_kernel_wrap;"
+            "import torch._higher_order_ops.flydsl_kernel_wrap;"
             "print('torch._dynamo' not in sys.modules)"
         )
         # The last line: fbcode's interpreter can print warnings first.
