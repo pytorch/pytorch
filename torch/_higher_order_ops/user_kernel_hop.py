@@ -12,7 +12,7 @@ call to it (the HOPifier).
 import dataclasses
 import threading
 from collections.abc import Callable, Mapping
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, Literal, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 
 import torch.fx as fx
@@ -341,7 +341,12 @@ def register_user_kernel_hop_dispatch(
 # Registry: what the DSL-agnostic passes need to know about each DSL's HOP pair
 
 
-@dataclasses.dataclass(frozen=True)
+UserKernelLayoutConstraint = Literal["needs_fixed_stride_order", "flexible_layout"]
+
+
+# eq=False: infos compare and hash by identity, as register_user_kernel_hop compares
+# them, so a DSL's callables need not be hashable.
+@dataclasses.dataclass(frozen=True, eq=False)
 class UserKernelHOPInfo:
     """One DSL's user-kernel HOP pair, as seen by the passes that handle every DSL
     the same way (reinplacing, the functional decomposition, Inductor's layout
@@ -391,7 +396,7 @@ class UserKernelHOPInfo:
     # "needs_fixed_stride_order" (the strides they had when the graph was traced) or
     # "flexible_layout" (Inductor picks them). Inductor calls it each time it lowers
     # one of this DSL's mutation HOP nodes.
-    get_layout_constraint: Callable[[], str]
+    get_layout_constraint: Callable[[], UserKernelLayoutConstraint]
     # Only keys this DSL's reinplacing counters: ReInplaceTrigger.USER_KERNEL_OPS, or
     # a member of the DSL's own. auto_functionalize's AUTO_FUNC_V1 and AUTO_FUNC_V2
     # are refused; the reinplacing pass also reads AUTO_FUNC_V2 as a switch that
@@ -405,6 +410,21 @@ _user_kernel_hops: dict[UserKernelWrapperHOP, UserKernelHOPInfo] = {}
 
 
 def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
+    """Register a DSL's HOP pair with the passes that handle every DSL. Each DSL
+    module calls it once, at import time.
+
+    Everything is checked before the registry is written, so a refused registration
+    leaves it as it was. Raises:
+
+    - TypeError if the trigger is not a ReInplaceTrigger member (its name, for
+      example), if either HOP is not a UserKernelWrapperHOP, or if the functional HOP
+      has no CompositeExplicitAutograd py_impl for the decomposition to trace.
+    - ValueError if the trigger is auto_functionalize's AUTO_FUNC_V1 or AUTO_FUNC_V2,
+      or if the mutation and functional HOPs are the same HOP.
+    - RuntimeError if either HOP is registered already, with another info. Infos
+      compare by identity: registering the same object again is accepted and changes
+      nothing, but an equal copy of it is refused.
+    """
     trigger = info.reinplace_trigger
     if not isinstance(trigger, ReInplaceTrigger):
         raise TypeError(f"{trigger!r} is not a ReInplaceTrigger")
@@ -413,34 +433,47 @@ def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
             f"{trigger} belongs to auto_functionalize; register the {info.dsl} DSL "
             "with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
         )
+    if info.mutation is info.functional:
+        raise ValueError(
+            f"{info.mutation} cannot be both the mutation and the functional HOP of "
+            f"the {info.dsl} DSL"
+        )
     hops = (info.mutation, info.functional)
     for hop in hops:
         if not isinstance(hop, UserKernelWrapperHOP):
             raise TypeError(f"{hop} is not a UserKernelWrapperHOP")
         owner = _user_kernel_hops.get(hop, info)
         if owner is not info:
-            raise RuntimeError(f"{hop} is already registered by the {owner.dsl} DSL")
+            raise RuntimeError(
+                f"{hop} is already registered by the {owner.dsl} DSL with another "
+                "UserKernelHOPInfo object; only that object can be registered again"
+            )
     if DispatchKey.CompositeExplicitAutograd not in info.functional.py_kernels:
         raise TypeError(f"{info.functional} has no CompositeExplicitAutograd py_impl")
     for hop in hops:
         _user_kernel_hops[hop] = info
 
 
-def get_user_kernel_hop_info(target: object) -> UserKernelHOPInfo | None:
-    """The registry entry whose mutation or functional HOP is ``target``."""
+def get_user_kernel_hop_info(
+    target: object, role: Literal["mutation", "functional"] | None = None
+) -> UserKernelHOPInfo | None:
+    """The registry entry whose mutation or functional HOP is ``target``; given a
+    ``role``, only if ``target`` is the HOP of its pair with that role."""
     if not isinstance(target, UserKernelWrapperHOP):
         return None
-    return _user_kernel_hops.get(target)
+    info = _user_kernel_hops.get(target)
+    if info is None or role is None:
+        return info
+    hop = info.mutation if role == "mutation" else info.functional
+    return info if target is hop else None
 
 
 def is_user_kernel_mutation_hop(target: object) -> bool:
-    info = get_user_kernel_hop_info(target)
-    return info is not None and target is info.mutation
+    return get_user_kernel_hop_info(target, "mutation") is not None
 
 
 def is_user_kernel_functional_hop(target: object) -> bool:
-    info = get_user_kernel_hop_info(target)
-    return info is not None and target is info.functional
+    return get_user_kernel_hop_info(target, "functional") is not None
 
 
 def user_kernel_hop_infos() -> list[UserKernelHOPInfo]:
