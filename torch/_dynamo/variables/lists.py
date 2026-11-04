@@ -2199,11 +2199,7 @@ class ByteArrayVariable(VariableTracker):
 
     @staticmethod
     def create(data: bytearray) -> "ByteArrayVariable":
-        """Wrap a freshly allocated bytearray.
-
-        New bytearrays must use this factory, not VariableTracker.build, which
-        sends raw bytearrays through SourcelessBuilder with unknown provenance.
-        """
+        """Wrap a bytearray allocated by the traced operation as a new, writable value."""
         return ByteArrayVariable(data, mutation_type=ValueMutationNew())
 
     def as_python_constant(self) -> bytearray:
@@ -2766,10 +2762,7 @@ class ByteArrayVariable(VariableTracker):
                     "are joined, and other constants raise TypeError. Other items "
                     "run in eager, which raises TypeError for items without the "
                     "buffer protocol.",
-                    hints=[
-                        *graph_break_hints.USER_ERROR,
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
+                    hints=[*graph_break_hints.SUPPORTABLE],
                 )
         try:
             return ByteArrayVariable.create(self.data.join(parts))

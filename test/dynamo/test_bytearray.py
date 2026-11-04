@@ -1200,18 +1200,43 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         def fn(sep, ba, items, x):
             return sep.join([ba, b"x"]), sep.join(items), sep.join([ba]), x + 1
 
-        # Changed contents fail the guards on the inputs and recompile.
-        for sep, ba, items, expected in (
-            (b"-", b"ab", [b"ab", bytearray(b"cd")], (b"ab-x", b"ab-cd")),
-            (b"+", b"yz", [b"ef", bytearray(b"gh")], (b"yz+x", b"ef+gh")),
-        ):
-            ba = bytearray(ba)
-            *results, _ = fn(bytearray(sep), ba, items, torch.ones(1))
-            self.assertEqual(results, [*expected, ba])
+        def check(frames):
+            *results, _ = fn(sep, ba, items, torch.ones(1))
+            self.assertEqual(results, [sep.join([ba, b"x"]), sep.join(items), ba])
             self.assertIsNot(results[2], ba)
             for r in results:
                 self.assertIs(type(r), bytearray)
-        self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(cnt.frame_count, frames)
+
+        # Each step changes one input, which must fail its guard and recompile.
+        sep, ba, items = bytearray(b"-"), bytearray(b"ab"), [b"ab", bytearray(b"cd")]
+        check(1)
+        sep = bytearray(b"+")
+        check(2)
+        ba = bytearray(b"yz")
+        check(3)
+        items = [b"ef", items[1]]
+        check(4)
+        items[1][0] = ord("x")
+        check(5)
+        ba[0] = ord("q")
+        check(6)
+
+    def test_join_result_mutated_in_graph(self):
+        def f(sep, ba, x):
+            out = sep.join([ba, b"c"])
+            out += b"!"
+            single = sep.join([ba])
+            single.append(ord("?"))
+            return out, single, x + 1
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        sep, ba = bytearray(b"-"), bytearray(b"ab")
+        self.assertEqual(
+            compiled(sep, ba, torch.ones(1)),
+            f(bytearray(b"-"), bytearray(b"ab"), torch.ones(1)),
+        )
+        self.assertEqual((sep, ba), (b"-", b"ab"))
 
     @make_dynamo_test
     def test_hex(self):
