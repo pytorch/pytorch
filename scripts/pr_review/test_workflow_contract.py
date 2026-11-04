@@ -5772,7 +5772,22 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         )
         # The summary keeps the Recommendation and explains an override.
         self.assertIn("summary and its Recommendation", prompt)
-        self.assertIn("under Approve or Needs Discussion, say so in words", prompt)
+        self.assertIn("under Approve or Needs Discussion, or only non-blocking", prompt)
+
+    def test_a_non_blocking_point_never_posts_as_a_blocker(self):
+        # blocking_findings posts every finding as a blocker under
+        # changes_requested with no major one, so a review whose points are all
+        # labelled non-blocking must not become changes_requested.
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        self.assertIn(
+            "A point the review labels non-blocking is `minor`, never `major`.",
+            prompt,
+        )
+        self.assertIn(
+            "If the review labels every point it raises non-blocking, the verdict is"
+            ' "ready_for_human_review", even under Request Changes.',
+            prompt,
+        )
 
     def test_the_prompt_names_every_file_kind_that_cannot_anchor(self):
         # parse_diff's KNOWN LIMITS: findings on these files are discarded,
