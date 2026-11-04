@@ -40,7 +40,7 @@ from tools.testing.llm_td.eval.score import (
     truth_pairs,
 )
 from tools.testing.llm_td.eval.td_replay import top25_per_config
-from tools.testing.llm_td.selection import apply_selection, Selection
+from tools.testing.llm_td.selection import apply_selection, CallSplit, Selection
 from tools.testing.target_determination.heuristics.interface import TestPrioritizations
 from tools.testing.test_run import TestRun
 
@@ -678,8 +678,8 @@ class TestScore(unittest.TestCase):
                 mock.patch.object(selection, "get_pr_number", return_value=1),
                 mock.patch("sys.stderr", io.StringIO()),
             ):
-                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config=config, td_enabled=True, previously_failed=prev, call_id="c")  # fmt: skip
-            ran = {x.test_file for x in applied.include}
+                applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config=config, td_enabled=True, previously_failed=prev)  # fmt: skip
+            ran = {x.test_file for x in CallSplit(include, exclude, applied).include}
             self.assertEqual({f for f in job if choice.covers(f, config)}, ran, (seconds, job, n, scored, out, prev, changed, how))  # fmt: skip
 
     def test_hedge_previous_failures(self) -> None:
@@ -1019,7 +1019,7 @@ class TestScore(unittest.TestCase):
 def scratch_repo() -> Iterator[None]:
     """A new git repo as bd.REPO, isolated from the caller's git environment and config."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="a", GIT_AUTHOR_EMAIL="a@a", GIT_COMMITTER_NAME="a", GIT_COMMITTER_EMAIL="a@a")  # fmt: skip
+    env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="a", GIT_AUTHOR_EMAIL="a@a", GIT_COMMITTER_NAME="a", GIT_COMMITTER_EMAIL="a@a")  # fmt: skip
     with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, env, clear=True), mock.patch.object(bd, "REPO", Path(d)):  # fmt: skip
         bd.git("init", "-q")
         yield
@@ -1029,25 +1029,32 @@ class TestClickhouse(unittest.TestCase):
     def test_query(self) -> None:
         ok = subprocess.CompletedProcess([], 0, 'log\n{"columns": [{"name": "a"}], "rows": [[1]]}', "")  # fmt: skip
         busy = subprocess.CompletedProcess([], 1, "", "HTTP 503 Service Unavailable")
+        crowded = subprocess.CompletedProcess([], 1, "", "Code: 202. DB::Exception: Too many simultaneous queries")  # fmt: skip
+        slow = subprocess.CompletedProcess([], 1, "", "Code: 159. DB::Exception: Timeout exceeded: elapsed 300 seconds")  # fmt: skip
         bad = subprocess.CompletedProcess([], 2, "", "Code: 62. Syntax error")
+        # A result that is not one, whose rows would look transient if searched.
+        null = subprocess.CompletedProcess([], 0, '{"columns": null, "rows": [["connection timed out"]]}', "")  # fmt: skip
         hung = subprocess.TimeoutExpired("gcx", clickhouse.TIMEOUT)
         # fmt: off
         cases = [
-            ([ok], [{"a": 1}]),
-            ([busy, hung, ok], [{"a": 1}]),
-            ([bad, ok], "attempt 1 of 3 exited with code 2: Code: 62. Syntax error\nSQL: SELECT 1"),
-            ([busy, busy, hung], "attempt 3 of 3 timed out after 600s\nSQL: SELECT 1"),
+            ([ok], 1, [{"a": 1}]),
+            ([busy, crowded, ok], 3, [{"a": 1}]),
+            ([bad, ok], 1, "attempt 1 of 3 exited with code 2: Code: 62. Syntax error"),
+            ([slow, ok], 1, "attempt 1 of 3 exited with code 1: Code: 159. DB::Exception: Timeout exceeded: elapsed 300 seconds"),
+            ([busy, hung, ok], 2, "attempt 2 of 3 timed out after 600s"),
+            ([null, ok], 1, 'attempt 1 of 3 returned no result: {"columns": null, "rows": [["connection timed out"]]}'),
+            ([busy, busy, busy], 3, "attempt 3 of 3 exited with code 1: HTTP 503 Service Unavailable"),
         ]
         # fmt: on
-        for outcomes, want in cases:
+        for outcomes, calls, want in cases:
             with mock.patch.object(subprocess, "run", side_effect=outcomes) as run, mock.patch.object(clickhouse.time, "sleep"):  # fmt: skip
                 if isinstance(want, list):
                     self.assertEqual(clickhouse.query("SELECT 1"), want)
                 else:
                     with self.assertRaises(RuntimeError) as e:
                         clickhouse.query("SELECT 1")
-                    self.assertEqual(str(e.exception), f"ClickHouse query failed, {want}")  # fmt: skip
-                self.assertEqual(run.call_count, min(len(outcomes), 1 if outcomes[0] is bad else 3))  # fmt: skip
+                    self.assertEqual(str(e.exception), f"ClickHouse query failed, {want}\nSQL: SELECT 1")  # fmt: skip
+                self.assertEqual(run.call_count, calls)
                 self.assertEqual(run.call_args.kwargs["timeout"], clickhouse.TIMEOUT)
 
 
@@ -1180,7 +1187,8 @@ class TestBuildDataset(unittest.TestCase):
 
             def truth(sha: str, base: str) -> tuple[list[str], dict]:
                 dropped: collections.Counter = collections.Counter()
-                kept = h.truth(sha, {"base": base, "merge_base": m, "main_base": m, "base_source": "ci"}, dropped)  # fmt: skip
+                mb = bd.git("merge-base", base, sha).strip()
+                kept = h.truth(sha, {"base": base, "merge_base": mb, "main_base": m, "base_source": "ci"}, dropped)  # fmt: skip
                 return sorted(r["test"] for r in kept or []), dict(dropped)
 
             with (
@@ -1192,9 +1200,10 @@ class TestBuildDataset(unittest.TestCase):
                 # Each U head drops what the L version below it broke; its own failures, W's and main's stay.
                 self.assertEqual(truth(u1, u_base1), (["test_q", "test_v", "test_y", "test_z"], {"stacked": 1}))  # fmt: skip
                 self.assertEqual(truth(u2, u_base2), (["test_v", "test_y", "test_z"], {"stacked": 2}))  # fmt: skip
-                # Diffed against L's head or against main, the native PR finds L below it by ancestry.
+                # Diffed against L's head, the native PR finds L below it by ancestry; diffed against
+                # main, its diff contains L's change, so L's failures are its own too.
                 self.assertEqual(truth(n, l2), (["test_v", "test_y", "test_z"], {"stacked": 2}))  # fmt: skip
-                self.assertEqual(truth(n, m), (["test_v", "test_y", "test_z"], {"stacked": 2}))  # fmt: skip
+                self.assertEqual(truth(n, m), (["test_q", "test_v", "test_x", "test_y", "test_z"], {}))  # fmt: skip
                 self.assertEqual(truth(l2, l_base), (["test_q", "test_x"], {}))
             self.assertEqual(h.other_heads({u1}), {l1, l2, w, n})
 
@@ -1221,6 +1230,20 @@ class TestBuildDataset(unittest.TestCase):
                 s = json.loads((Path(d) / "s.json").read_text())
         self.assertEqual(s["deleted"], ["gone.py", "moved.py"])
 
+    def test_fetch_retries_a_failed_batch_per_sha(self) -> None:
+        def run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess:
+            shas = cmd[4:]
+            return subprocess.CompletedProcess(
+                cmd, int("gone" in shas), "", "not our ref"
+            )
+
+        shas = [f"s{i}" for i in range(150)] + ["gone"]
+        with mock.patch.object(bd.subprocess, "run", side_effect=run) as m, contextlib.redirect_stdout(io.StringIO()) as out:  # fmt: skip
+            bd.fetch(shas)
+        # The first batch, then the second and each of its 51 shas.
+        self.assertEqual([c.args[0][4:] for c in m.call_args_list], [shas[:100], shas[100:], *([s] for s in shas[100:])])  # fmt: skip
+        self.assertEqual(out.getvalue(), "git fetch of gone failed: not our ref\n")
+
     def test_is_ancestor(self) -> None:
         with scratch_repo():
             for msg in ("a", "b"):
@@ -1238,11 +1261,11 @@ class TestBuildDataset(unittest.TestCase):
 
     def test_revert_truth_jobs_commits(self) -> None:
         def run(*args: str, cwd: str, date: str = "2026-10-05T00:00:00+00:00") -> str:
-            env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date, "GIT_AUTHOR_NAME": "a", "GIT_AUTHOR_EMAIL": "a@a", "GIT_COMMITTER_NAME": "a", "GIT_COMMITTER_EMAIL": "a@a"}  # fmt: skip
+            env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
             return subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, text=True, check=True).stdout  # fmt: skip
 
-        with tempfile.TemporaryDirectory() as d:
-            run("init", "-q", cwd=d)
+        with scratch_repo():
+            d = str(bd.REPO)
             commits = {}
             for name, hour in (("base", 0), ("change", 1), ("after", 2), ("revert", 3), ("late", 5)):  # fmt: skip
                 msg = f"This reverts commit {commits['change']}." if name == "revert" else name  # fmt: skip
@@ -1277,9 +1300,22 @@ class TestBuildDataset(unittest.TestCase):
             with mock.patch.object(bd.subprocess, "run", side_effect=[bad, bad, ok]):
                 self.assertEqual(bd.pr_text(1), ("t", "b"))
             self.assertEqual(sleep.call_count, 2)
-            with mock.patch.object(bd.subprocess, "run", return_value=bad):
+            with mock.patch.object(bd.subprocess, "run", return_value=bad) as run:
                 with self.assertRaises(subprocess.CalledProcessError):
                     bd.pr_text(1)
+            self.assertEqual(run.call_count, 4)
+            gone = subprocess.CompletedProcess([], 1, "", "gh: Not Found (HTTP 404)")
+            with mock.patch.object(bd.subprocess, "run", return_value=gone) as run:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    bd.pr_text(1)
+            self.assertEqual(run.call_count, 1)
+            junk = subprocess.CompletedProcess([], 0, "null", "")
+            with mock.patch.object(bd.subprocess, "run", return_value=junk) as run:
+                with self.assertRaisesRegex(
+                    ValueError, "gh api returned no PR 1: 'null'"
+                ):
+                    bd.pr_text(1)
+            self.assertEqual(run.call_count, 1)
 
     def test_pr_text_failure_skips_sample(self) -> None:
         h = history([fail("test_x", "2026-10-05 00:00:00", "s")], {"s": 1}, {1: "me"})
@@ -1614,16 +1650,9 @@ class TestBuildDataset(unittest.TestCase):
                 )
 
     def test_write_sample_matches_select_tests(self) -> None:
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        env |= {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}  # fmt: skip
-
-        def git(*args: str) -> str:
-            return subprocess.check_output(["git", *args], cwd=repo, env=env, text=True)
-
-        with tempfile.TemporaryDirectory() as repo:
-            git("init", "-q")
-            git("config", "user.email", "a@b.c")
-            git("config", "user.name", "a")
+        # select_tests' git and build_dataset's both run in the scratch repo.
+        with scratch_repo():
+            repo, git = bd.REPO, bd.git
             (Path(repo) / "test").mkdir()
             (Path(repo) / "test" / "run_test.py").write_text("x = 1\n" * 50)
             git("add", "-A")
@@ -1643,6 +1672,7 @@ class TestBuildDataset(unittest.TestCase):
                 json.loads((Path(repo) / f"{n}.json").read_text()) for n in ("s", "s2")
             )
         self.assertEqual(s["changed_files"], ["test/my file.py", "test/run_test.py"])
+        self.assertEqual((s["deleted"], s2["deleted"]), (["test/run_test.py"], []))
         self.assertIn("test/run_test.py", s["diffstat"])
         self.assertIn("rename from test/run_test.py", s["diff"])
         self.assertEqual((s["base"], s["merge_base"], s["main_base"]), ("HEAD~2", "HEAD~2", "HEAD~2"))  # fmt: skip

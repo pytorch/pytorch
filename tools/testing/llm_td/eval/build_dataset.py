@@ -64,12 +64,14 @@ not the PR's own, and is dropped, if
   - the same test failed on main within WINDOW of the head's `main_base`,
     before the PR landed;
   - the same test failed on another PR's head that is below this head in a
-    stack (see below), which is the breakage of a PR below, and the diff
-    against the CI base does not contain it. In a GitHub-native stack that
-    head is the CI base or one of the head's ancestors. ghstack bases each
-    PR on a synthetic gh/USER/N/base commit with the tree of the PR below,
-    and the lower head is not an ancestor, so there it is a head with the CI
-    base's tree.
+    stack and whose change the head's diff leaves out, so the failure is the
+    breakage of a PR below. In a GitHub-native stack that head is an ancestor
+    of `merge_base` (the CI base or older). ghstack bases each PR on a
+    synthetic gh/USER/N/base commit with the tree of the PR below, and the
+    lower head is not an ancestor, so there it is a head with the CI base's
+    tree. A lower head the diff contains, as for a PR that targets main but
+    branches off another PR, or one diffed against main for want of a CI
+    base, keeps its failures.
 WINDOW is 14 days, Dr.CI's flaky window: truth is a lower bound anyway, so a
 shorter window would buy a few more truths at the price of counting more
 flakes and parallel breakages as the PR's. The builder prints how many
@@ -136,18 +138,19 @@ def commit_time(sha: str) -> dt.datetime:
 
 
 def fetch(shas: list[str]) -> None:
+    """Fetch `shas` 100 at a time; a batch that fails, as one sha the remote no longer has makes it, is retried one sha at a time."""
+
+    def run(batch: list[str]) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "fetch", "-q", "origin", *batch], cwd=REPO, capture_output=True, text=True)  # fmt: skip
+
     for i in range(0, len(shas), 100):
-        p = subprocess.run(
-            ["git", "fetch", "-q", "origin", *shas[i : i + 100]],
-            cwd=REPO,
-            capture_output=True,
-            text=True,
-        )
-        if p.returncode:
-            print(
-                f"git fetch of {len(shas[i : i + 100])} shas failed: {p.stderr.strip()[-500:]}",
-                flush=True,
-            )
+        if not run(batch := shas[i : i + 100]).returncode:
+            continue
+        for sha in batch:
+            if (p := run([sha])).returncode:
+                print(
+                    f"git fetch of {sha} failed: {p.stderr.strip()[-300:]}", flush=True
+                )
 
 
 def has_commit(sha: str) -> bool:
@@ -165,7 +168,10 @@ def is_main(branch: str) -> bool:
 
 
 def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
-    """Every failing (job, test) in pytorch/pytorch CI, two days per query to stay under ClickHouse limits."""
+    """Every failing (job, test) in pytorch/pytorch CI, two days per query to stay under ClickHouse limits.
+
+    A test that also passed in the same job, as when run_test.py's rerun of it
+    in a new process passes and it counts as flaky, is not a failure."""
     rows: list[dict] = []
     d = start
     while d < end:
@@ -176,6 +182,10 @@ def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
               FROM tests.all_test_runs
               WHERE time_inserted >= '{d}' AND time_inserted < '{n}' AND (failure_count > 0 OR error_count > 0)
               GROUP BY job_id, tf, classname, name)
+            , passed AS (
+              SELECT DISTINCT job_id, replaceRegexpOne(file, '\\.py$', '') tf, classname, name FROM tests.all_test_runs
+              WHERE time_inserted >= toDate('{d}') - 1 AND time_inserted < toDate('{n}') + 1 AND job_id IN (SELECT job_id FROM f)
+                AND failure_count = 0 AND error_count = 0 AND skipped_count = 0)
             , j AS (
               SELECT id, run_id, head_sha, head_branch, workflow_name, name FROM default.workflow_job
               WHERE id IN (SELECT job_id FROM f) AND repository_full_name = 'pytorch/pytorch')
@@ -186,7 +196,8 @@ def pull_failures(start: dt.date, end: dt.date) -> list[dict]:
             LEFT JOIN (
               SELECT id, any(head_repository.full_name) hr FROM default.workflow_run
               WHERE id IN (SELECT run_id FROM j) GROUP BY id) r
-            ON r.id = j.run_id""")
+            ON r.id = j.run_id
+            WHERE (f.job_id, f.tf, f.classname, f.name) NOT IN (SELECT * FROM passed)""")
         print(d, len(rows), flush=True)
         d = n
     return [r for r in rows if not any(s in r["job"] for s in SKIP_JOBS)]
@@ -242,9 +253,9 @@ def tree_of(sha: str) -> str:
     return git("rev-parse", "-q", "--verify", f"{sha}^{{tree}}", check=False).strip()
 
 
-def below(other: str, base: str, head: str) -> bool:
-    """Whether PR head `other` is below PR head `head`, whose CI base is `base`, in a stack (see the module docstring)."""
-    if other == base or is_ancestor(other, head):
+def below(other: str, base: str, merge_base: str) -> bool:
+    """Whether PR head `other` is below a head in a stack and left out of its diff against `merge_base`, its merge base with the CI base `base` (see the module docstring)."""
+    if is_ancestor(other, merge_base):
         return True
     tree = tree_of(base)
     return bool(tree) and tree_of(other) == tree
@@ -298,10 +309,10 @@ class History:
         for sha, wf, job in green_jobs(todo):
             self.green[sha].add((wf, job))
 
-    def why_dropped(self, r: dict, base: str | None = None, base_t: dt.datetime | None = None) -> str | None:  # fmt: skip
+    def why_dropped(self, r: dict, bases: dict[str, str] | None = None, base_t: dt.datetime | None = None) -> str | None:  # fmt: skip
         """The first rule (see the module docstring) that drops PR failure `r`, or None if it is the PR's own.
 
-        The rules on the head's CI `base` and the time `base_t` of its merge base
+        The rules on the head's `bases` (see pr_bases) and the time `base_t` of its merge base
         with main are skipped without them, and the job_green rule for a head
         load_green has not loaded."""
         t, cutoff = ts(r["t"]), self.landed.get(r["pr"], NEVER)
@@ -320,7 +331,7 @@ class History:
             return "other_failure"
         if base_t is not None and any(abs(base_t - m) < WINDOW and m < cutoff for m in self.main.get(k, [])):  # fmt: skip
             return "main_near_base"
-        if base is not None and any(pr not in (None, r["pr"]) and below(sha, base, r["sha"]) for _, _, sha, pr in self.seen.get(k, [])):  # fmt: skip
+        if bases is not None and any(pr not in (None, r["pr"]) and below(sha, bases["base"], bases["merge_base"]) for _, _, sha, pr in self.seen.get(k, [])):  # fmt: skip
             return "stacked"
         return None
 
@@ -338,7 +349,7 @@ class History:
             return None
         kept = []
         for r in self.heads[sha]:
-            if why := self.why_dropped(r, bases["base"], base_t):
+            if why := self.why_dropped(r, bases, base_t):
                 dropped[why] += 1
             else:
                 kept.append(r)
@@ -451,20 +462,29 @@ def strip_trailers(msg: str) -> str:
 
 
 def pr_text(pr: int, tries: int = 4) -> tuple[str, str]:
-    """The PR's title and raw body, as select_tests reads them from the event; raises CalledProcessError if gh keeps failing (e.g. rate limited)."""
+    """The PR's title and raw body, as select_tests reads them from the event.
+
+    Raises CalledProcessError when gh fails permanently (not found, bad
+    credentials) or keeps failing for `tries` attempts (e.g. rate limited),
+    and ValueError when it succeeds with output that is not a PR."""
+    if tries < 1:
+        raise ValueError(f"tries must be positive, got {tries}")
     cmd = ["gh", "api", f"repos/pytorch/pytorch/pulls/{pr}", "--jq", "{title:.title, body:.body}"]  # fmt: skip
     for i in range(tries):
+        if i:
+            time.sleep(10 * 2 ** (i - 1))
         p = subprocess.run(cmd, capture_output=True, text=True)
         if p.returncode == 0:
             try:
                 d = json.loads(p.stdout)
                 return d["title"], d["body"] or ""
-            except (ValueError, KeyError, TypeError):
-                pass
-        if i + 1 == tries:
-            raise subprocess.CalledProcessError(p.returncode, cmd, p.stdout, p.stderr)
-        time.sleep(10 * 2**i)
-    raise ValueError(f"tries must be positive, got {tries}")
+            except (ValueError, KeyError, TypeError) as e:
+                raise ValueError(
+                    f"gh api returned no PR {pr}: {p.stdout[:200]!r}"
+                ) from e
+        if re.search(r"HTTP (401|404|410)\b", p.stderr):
+            break
+    raise subprocess.CalledProcessError(p.returncode, cmd, p.stdout, p.stderr)
 
 
 def deleted_files(base: str, head: str) -> list[str]:
@@ -659,17 +679,23 @@ def revert_truth_jobs(
                       f"--grep=This reverts commit {sha}", f"{sha}^..origin/main").split()  # fmt: skip
     shas = ",".join(f"'{c}'" for c in with_change or [sha])
     failed = query(f"""
-        SELECT DISTINCT replaceRegexpOne(file, '\\.py$', '') tf, j.workflow_name wf, j.name job FROM tests.all_test_runs t
-        JOIN (SELECT id, workflow_name, name FROM default.workflow_job
-              WHERE created_at >= toDateTime('{t0}') - INTERVAL 1 HOUR
-                AND created_at <= parseDateTimeBestEffort('{reverted}') + INTERVAL 1 HOUR
-                AND repository_full_name = 'pytorch/pytorch' AND (head_branch = 'main' OR head_branch LIKE 'trunk/%')
-                AND head_sha IN ({shas})
-                AND run_id IN (SELECT id FROM default.workflow_run WHERE head_repository.full_name = 'pytorch/pytorch'
-                               AND created_at >= toDateTime('{t0}') - INTERVAL 1 HOUR)
-                AND {" AND ".join(f"name NOT LIKE '%{s}%'" for s in SKIP_JOBS)}) j ON j.id = t.job_id
-        WHERE time_inserted >= toDateTime('{t0}') AND time_inserted <= parseDateTimeBestEffort('{reverted}') + INTERVAL 2 HOUR
-          AND file IN ({files}) AND (failure_count > 0 OR error_count > 0)""")
+        WITH j AS (
+          SELECT id, workflow_name, name FROM default.workflow_job
+          WHERE created_at >= toDateTime('{t0}') - INTERVAL 1 HOUR
+            AND created_at <= parseDateTimeBestEffort('{reverted}') + INTERVAL 1 HOUR
+            AND repository_full_name = 'pytorch/pytorch' AND (head_branch = 'main' OR head_branch LIKE 'trunk/%')
+            AND head_sha IN ({shas})
+            AND run_id IN (SELECT id FROM default.workflow_run WHERE head_repository.full_name = 'pytorch/pytorch'
+                           AND created_at >= toDateTime('{t0}') - INTERVAL 1 HOUR)
+            AND {" AND ".join(f"name NOT LIKE '%{s}%'" for s in SKIP_JOBS)})
+        SELECT DISTINCT tf, wf, job FROM (
+          SELECT t.job_id, replaceRegexpOne(file, '\\.py$', '') tf, classname, t.name, j.workflow_name wf, j.name job
+          FROM tests.all_test_runs t JOIN j ON j.id = t.job_id
+          WHERE t.job_id IN (SELECT id FROM j) AND file IN ({files})
+            AND time_inserted >= toDateTime('{t0}') AND time_inserted <= parseDateTimeBestEffort('{reverted}') + INTERVAL 2 HOUR
+          GROUP BY t.job_id, tf, classname, t.name, wf, job
+          -- A test that also passed in the job, as run_test.py's rerun of it in a new process does, is flaky there.
+          HAVING countIf(failure_count > 0 OR error_count > 0) > 0 AND countIf(failure_count = 0 AND error_count = 0 AND skipped_count = 0) = 0)""")
     truth_jobs: dict[str, set] = collections.defaultdict(set)
     for f in failed:
         if job_runs_td(f["job"], f["wf"]):
