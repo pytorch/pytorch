@@ -144,6 +144,7 @@ from ..source import (
     DynamicScalarSource,
     FloatTensorSource,
     GetItemSource,
+    GlobalSource,
     GradSource,
     is_constant_source,
     is_from_attr_proxy_source,
@@ -260,6 +261,9 @@ from .functions import (
     CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
     LocalGeneratorFunctionVariable,
+    PolyfilledFunctionVariable,
+    PyTreeGetNodeTypeFunctionVariable,
+    SkipFunctionVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
@@ -317,6 +321,7 @@ if sys.version_info >= (3, 15):
 
 from .nn_module import (
     FSDPManagedNNModuleVariable,
+    NNModuleVariable,
     UnspecializedBuiltinNNModuleVariable,
     UnspecializedNNModuleVariable,
 )
@@ -939,6 +944,62 @@ class VariableBuilder:
     ) -> UserFunctionVariable:
         """Wrap a caller-selected function without applying trace-rule overrides."""
         return UserFunctionVariable(value, source=source, **options)
+
+    def wrap_polyfilled_function(
+        self, value: Callable[..., Any]
+    ) -> PolyfilledFunctionVariable:
+        if not callable(value):
+            raise AssertionError(f"Expected callable, got {type(value)}")
+        if inspect.isclass(value):
+            guard_type = GuardBuilder.CLASS_MATCH
+        elif inspect.ismodule(value):
+            guard_type = GuardBuilder.MODULE_MATCH
+        else:
+            guard_type = GuardBuilder.ID_MATCH
+        guards = self.install_guards(guard_type)
+        if guards is None:
+            raise AssertionError("install_guards returned None")
+        return PolyfilledFunctionVariable(value, source=self.source, **guards)
+
+    @staticmethod
+    def create_internal_skip_function(
+        value: Callable[..., Any], source: Source
+    ) -> SkipFunctionVariable:
+        """Wrap a compiler-generated function whose source is for reconstruction."""
+        if not callable(value):
+            raise AssertionError(f"Expected callable, got {type(value)}")
+        return SkipFunctionVariable(value, source=source)
+
+    @staticmethod
+    def create_internal_nn_module(
+        value: torch.nn.Module, module_key: str, **options: Any
+    ) -> NNModuleVariable:
+        """Wrap a module already registered under module_key."""
+        if options.get("source") is None:
+            raise AssertionError("Registered NNModuleVariable requires a source")
+        return NNModuleVariable(type(value), module_key, value, **options)
+
+    @staticmethod
+    def create_internal_user_defined_object(
+        value: object, source: Source | None = None
+    ) -> UserDefinedObjectVariable:
+        """Wrap a compiler-selected descriptor receiver without reclassification."""
+        return UserDefinedObjectVariable(value, source=source)
+
+    @staticmethod
+    def create_internal_tensor_subclass(
+        value: type[torch.Tensor], source: GlobalSource
+    ) -> TensorSubclassVariable:
+        """Wrap a compiler-installed tensor subclass global without reclassification."""
+        if not isinstance(source, GlobalSource):
+            raise AssertionError(f"Expected GlobalSource, got {type(source)}")
+        if (
+            not isinstance(value, type)
+            or value is torch.Tensor
+            or not issubclass(value, torch.Tensor)
+        ):
+            raise AssertionError(f"Expected tensor subclass, got {value}")
+        return TensorSubclassVariable(value, source=source)
 
     @staticmethod
     def create_internal_base_hop(
@@ -1566,7 +1627,7 @@ class VariableBuilder:
             # Put this above builtin_callable so that print() can be handled
             # along with other builtin debugging functions
             self.install_guards(GuardBuilder.BUILTIN_MATCH)
-            return DebuggingVariable(value, source=self.source)
+            return DebuggingVariable.create_reorderable(value, self.source)
         elif callable(value) and any(
             value is fn for fn in torch._dynamo.config.ignore_logging_functions
         ):
@@ -2208,7 +2269,9 @@ class VariableBuilder:
                 VariableTracker.build(self.tx, frame_locals[n])
                 for n in code.co_varnames[: code.co_argcount]
             ]
-            genfn = LocalGeneratorFunctionVariable(VariableTracker.build(self.tx, fn))
+            genfn = LocalGeneratorFunctionVariable.create(
+                VariableTracker.build(self.tx, fn)
+            )
             return genfn.call_function(self.tx, args, {})
         elif isinstance(value, contextvars.ContextVar):
             from .misc import ContextVarVariable
@@ -5629,8 +5692,12 @@ class SourcelessBuilder:
     def create_internal_user_function(
         value: types.FunctionType | torch.jit.ScriptFunction,  # type: ignore[type-arg]
     ) -> UserFunctionVariable:
-        """Wrap a caller-selected function without applying trace-rule overrides."""
-        return UserFunctionVariable(value)
+        return VariableBuilder.create_internal_user_function(value)
+
+    @staticmethod
+    def create_internal_pytree_get_node_type() -> PyTreeGetNodeTypeFunctionVariable:
+        """Use Dynamo's exact internal pytree helper despite trace-rule overrides."""
+        return PyTreeGetNodeTypeFunctionVariable(torch.utils._pytree._get_node_type)
 
     @staticmethod
     def create_internal_builtin(value: Callable[..., Any]) -> BuiltinVariable:
@@ -5708,6 +5775,8 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
+        elif isinstance(value, torch._functorch.pyfunctorch.FuncTorchInterpreter):
+            return FuncTorchInterpreterVariable(value, mutation_type=ValueMutationNew())
         elif (
             is_opaque_constant_type(type(value))
             and not isinstance(value, enum.Enum)
@@ -6043,13 +6112,16 @@ class SourcelessUserDefinedObjectBuilder:
         raise AssertionError("Use SourcelessUserDefinedObjectBuilder.create()")
 
     @staticmethod
-    def create(tx: "InstructionTranslatorBase", value: object) -> VariableTracker:
+    def create(
+        tx: "InstructionTranslatorBase", value: object, **options: Any
+    ) -> VariableTracker:
+        if options.get("source") is not None:
+            raise AssertionError("SourcelessUserDefinedObjectBuilder got a source")
+        options["mutation_type"] = ValueMutationNew()
         value_type = type(value)
         if issubclass(value_type, MutableMapping):
-            return MutableMappingVariable(value, mutation_type=ValueMutationNew())
+            return MutableMappingVariable(value, **options)
         elif isinstance(value, torch.nn.Module):
-            return UnspecializedNNModuleVariable(
-                value, mutation_type=ValueMutationNew()
-            )
+            return UnspecializedNNModuleVariable(value, **options)
         else:
-            return UserDefinedObjectVariable(value, mutation_type=ValueMutationNew())
+            return UserDefinedObjectVariable(value, **options)

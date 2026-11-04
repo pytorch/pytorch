@@ -10,8 +10,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import partial
-from typing import Any, TYPE_CHECKING, TypeVar
-from typing_extensions import deprecated, Self
+from typing import Any, Self, TYPE_CHECKING, TypeVar
+from typing_extensions import deprecated
 from warnings import warn
 
 import torch

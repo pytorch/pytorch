@@ -2,8 +2,6 @@
 
 namespace torch::jit {
 
-// Avoid storing objects with destructor in thread_local for mobile build.
-#ifndef C10_MOBILE
 // [NOTE: Thread-safe CallStack]
 // `calls` maintains a stack of Python calls that resulted in the
 // currently compiled TorchScript code. RAII ErrorReport::CallStack
@@ -32,7 +30,6 @@ namespace torch::jit {
 //      (since now multiple threads access a given thread_local calls object)
 static thread_local std::shared_ptr<ErrorReport::Calls> calls =
     std::make_shared<ErrorReport::Calls>();
-#endif // C10_MOBILE
 
 ErrorReport::ErrorReport(const ErrorReport& e)
     : ss(e.ss.str()),
@@ -40,7 +37,6 @@ ErrorReport::ErrorReport(const ErrorReport& e)
       the_message(e.the_message),
       error_stack(e.error_stack.begin(), e.error_stack.end()) {}
 
-#ifndef C10_MOBILE
 ErrorReport::ErrorReport(const SourceRange& r)
     : context(r), error_stack(calls->get_stack()) {}
 
@@ -50,8 +46,8 @@ void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
 
 ErrorReport::CallStack::CallStack(
     const std::string& name,
-    const SourceRange& range) {
-  source_callstack_ = calls;
+    const SourceRange& range)
+    : source_callstack_(calls) {
   source_callstack_->push_back({name, range});
 }
 
@@ -60,17 +56,6 @@ ErrorReport::CallStack::~CallStack() {
     source_callstack_->pop_back();
   }
 }
-#else // defined C10_MOBILE
-ErrorReport::ErrorReport(const SourceRange& r) : context(r) {}
-
-void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {}
-
-ErrorReport::CallStack::CallStack(
-    const std::string& name,
-    const SourceRange& range) {}
-
-ErrorReport::CallStack::~CallStack() {}
-#endif // C10_MOBILE
 
 static std::string get_stacked_errors(const std::vector<Call>& error_stack) {
   std::stringstream msg;
@@ -88,11 +73,7 @@ static std::string get_stacked_errors(const std::vector<Call>& error_stack) {
 }
 
 std::string ErrorReport::current_call_stack() {
-#ifndef C10_MOBILE
   return get_stacked_errors(calls->get_stack());
-#else
-  TORCH_CHECK(false, "Call stack not supported on mobile");
-#endif // C10_MOBILE
 }
 
 const char* ErrorReport::what() const noexcept {

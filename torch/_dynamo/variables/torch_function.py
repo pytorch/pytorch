@@ -44,7 +44,6 @@ from torch.utils._device import DeviceContext
 
 from .. import graph_break_hints
 from ..exc import unimplemented
-from ..guards import GuardBuilder, install_guard
 from ..polyfills import NoEnterTorchFunctionMode
 from ..source import AttrSource, GlobalSource, TorchFunctionModeStackSource, TypeSource
 from ..utils import (
@@ -61,7 +60,7 @@ from .ctx_manager import GenericContextWrappingVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .lazy import LazyVariableTracker
 from .lists import TupleVariable
-from .tensor import TensorSubclassVariable, TensorVariable
+from .tensor import TensorVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -644,8 +643,10 @@ class TensorWithTFOverrideVariable(TensorVariable):
         return self.class_type
 
     def class_type_var(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return TensorSubclassVariable(
-            self.class_type, source=GlobalSource(self.global_mangled_class_name(tx))
+        from .builder import VariableBuilder
+
+        return VariableBuilder.create_internal_tensor_subclass(
+            self.class_type, GlobalSource(self.global_mangled_class_name(tx))
         )
 
     def global_mangled_class_name(self, tx: "InstructionTranslatorBase") -> str:
@@ -659,6 +660,8 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # [Note: __torch_function__] We currently only support attributes that are defined on
         # base tensors, custom attribute accesses will graph break.
         import torch
+
+        from .builder import VariableBuilder
 
         # I think only `_base` is breaking because we aren't modelling view
         # relationship perfectly in some scenarios.
@@ -708,9 +711,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 cls_source = GlobalSource(self.global_mangled_class_name(tx))
                 attr_source = AttrSource(cls_source, name)
                 if isinstance(attr, types.FunctionType):
-                    install_guard(attr_source.make_guard(GuardBuilder.CLOSURE_MATCH))
                     return UserMethodVariable(
-                        UserFunctionVariable(attr, source=attr_source), self
+                        UserFunctionVariable.create_with_source(attr, attr_source),
+                        self,
                     )
 
                 elif isinstance(attr, property):
@@ -723,9 +726,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
                 elif isinstance(attr, classmethod):
                     return UserMethodVariable(
-                        UserFunctionVariable(
+                        VariableBuilder.create_internal_user_function(
                             attr.__func__,
-                            source=attr_source and AttrSource(attr_source, "__func__"),
+                            source=AttrSource(attr_source, "__func__"),
                         ),
                         self.class_type_var(tx),
                         source=attr_source,

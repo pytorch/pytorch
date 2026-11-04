@@ -1778,6 +1778,18 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         res_act = fn_opt(x)
         self.assertEqual(res_exp, res_act)
 
+    def test_construct_parameter_subclass(self):
+        class MyParam(torch.nn.Parameter):
+            pass
+
+        def fn(x):
+            return MyParam(x, requires_grad=False)
+
+        x = torch.randn(2)
+        out = compile_full_eager(fn)(x)
+        self.assertIs(type(out), MyParam)
+        self.assertEqual(out, x)
+
     def test_subclass_with_disabled_torch_function(self):
         class MySubclass(torch.Tensor):
             __torch_function__ = torch._C._disabled_torch_function_impl
