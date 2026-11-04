@@ -31,8 +31,8 @@ import inspect
 import sys
 import weakref
 from collections.abc import Callable, Sequence
-from typing import Any, ClassVar, NamedTuple, TYPE_CHECKING
-from typing_extensions import Never, TypeIs
+from typing import Any, ClassVar, NamedTuple, Never, TYPE_CHECKING
+from typing_extensions import TypeIs
 
 import torch
 from torch._higher_order_ops.cutedsl_kernel_wrap import (

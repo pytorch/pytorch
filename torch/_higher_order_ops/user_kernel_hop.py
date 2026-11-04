@@ -15,8 +15,7 @@ import sys
 import threading
 import types
 from collections.abc import Callable, Mapping
-from typing import Any, Generic, Literal, NamedTuple, TYPE_CHECKING, TypeVar
-from typing_extensions import Never
+from typing import Any, Generic, Literal, NamedTuple, Never, TYPE_CHECKING, TypeVar
 
 import torch.fx as fx
 import torch.utils._pytree as pytree
