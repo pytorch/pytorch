@@ -633,8 +633,11 @@ Available options:
   GPU memory blocks if the GPU memory capacity usage exceeds the threshold (i.e.,
   80% of the total memory allocated to the GPU application). The algorithm prefers
   to free old & unused blocks first to avoid freeing blocks that are actively being
-  reused. The threshold value should be between greater than 0.0 and less than 1.0.
-  The default value is set at 1.0.
+  reused. The threshold value should be greater than 0.0 and less than 1.0. By default,
+  automatic garbage collection is disabled on discrete GPUs, and defaults to `0.8` on
+  integrated/unified-memory GPUs (`cudaDeviceProp::integrated == 1`, such as NVIDIA
+  Grace Blackwell GB10 or Tegra) so that unused cached blocks do not starve host OS
+  memory.
 
   `garbage_collection_threshold` is only meaningful with `backend:native`.
   With `backend:cudaMallocAsync`, `garbage_collection_threshold` is ignored.
