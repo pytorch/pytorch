@@ -168,7 +168,6 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     RUN_TPU,
     skipCPUIf,
     skipCUDAIf,
-    TRITON_HAS_CPU,
 )
 from torch.testing._internal.triton_utils import (
     requires_cuda_and_triton,
@@ -12306,7 +12305,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
             self.common(bf16_fn, (torch.zeros(1, dtype=torch.bfloat16),))
 
-    @skipCPUIf(not TRITON_HAS_CPU, "requires Triton CPU support")
     @skip_if_pallas
     def test_index_put_bool_accumulate(self):
         def fn(x, idx, values):

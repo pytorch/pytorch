@@ -118,7 +118,6 @@ if HAS_CPU and TRITON_HAS_CPU:
             )
         generated_cpu_cls = generated_classes[0]
 
-        @unittest.skip(_CPU_TRITON_SKIP_REASON)
         @config.patch({"cpu_backend": "triton"})
         class TestInductorOpInfoTritonCPU(generated_cpu_cls):
             pass
