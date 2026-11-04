@@ -2271,10 +2271,12 @@ class TestResolveSelection(unittest.TestCase):
                 self.assertEqual((self.fetched, self.sleeps), (["zip/1"], []))
 
     def test_enforcement_disabled_neither_waits_nor_enforces(self) -> None:
+        # run_test.py gates on ENFORCEMENT_ENABLED itself; keep enforce so it
+        # can record what enforcing would have done.
         runs = [selector_run(1), pending_run(2)]
         record = self.selected(runs, enforcement=False)
-        self.assertFalse(record["enforce"])
-        self.assertFalse(record["enforce_requested"])
+        self.assertTrue(record["enforce"])
+        self.assertTrue(record["enforce_requested"])
         self.assertEqual((self.fetched, self.sleeps), (["zip/1"], []))
 
     def test_failed_selection_is_not_enforced(self) -> None:
