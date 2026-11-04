@@ -27,10 +27,11 @@ SEPARATOR = ";"
 
 def process_report(
     report: Path,
-) -> dict[str, dict[str, int]]:
+) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, Any]]]:
     """
     Return a list of disabled tests that should be re-enabled and those that are still
-    flaky (failed or skipped)
+    flaky (failed or skipped), and separately the known-failure code skips that ran
+    (see torch/testing/_internal/rerun_code_skip.py)
     """
     root = ET.parse(report)
 
@@ -44,6 +45,7 @@ def process_report(
     #
     # We want to keep track of how many times the test fails (num_red) or passes (num_green)
     all_tests: dict[str, dict[str, int]] = {}
+    code_skips: dict[str, dict[str, Any]] = {}
 
     for test_case in root.iter(TESTCASE_TAG):
         # Parse the test case as string values only.
@@ -78,6 +80,17 @@ def process_report(
         failure = parsed_test_case.get("failure", None)
 
         disabled_test_id = SEPARATOR.join([name, classname, filename])
+
+        code_skip = test_case.find("properties/property[@name='code_skip']")
+        if code_skip is not None:
+            stats = code_skips.setdefault(
+                disabled_test_id,
+                {"num_green": 0, "num_red": 0, "code_skip": code_skip.get("value")},
+            )
+            failed = failure or "error" in parsed_test_case
+            stats["num_red" if failed else "num_green"] += 1
+            continue
+
         if disabled_test_id not in all_tests:
             all_tests[disabled_test_id] = {
                 "num_green": 0,
@@ -100,7 +113,7 @@ def process_report(
         else:
             all_tests[disabled_test_id]["num_green"] += 1
 
-    return all_tests
+    return all_tests, code_skips
 
 
 def get_test_reports(
@@ -171,9 +184,11 @@ def save_results(
     workflow_id: int,
     workflow_run_attempt: int,
     all_tests: dict[str, dict[str, int]],
+    code_skips: dict[str, dict[str, Any]],
 ) -> None:
     """
-    Save the result to S3, which then gets put into the HUD backend database
+    Save the result to S3, which then gets put into the HUD backend database.
+    Code skips go to their own collection so they never reach the flaky bot.
     """
     should_be_enabled_tests = {
         name: stats
@@ -230,6 +245,29 @@ def save_results(
         list(records.values()),
     )
 
+    if not code_skips:
+        return
+    code_skip_records = []
+    for test_id, stats in code_skips.items():
+        _, name, classname, filename = get_disabled_test_name(test_id)
+        code_skip_records.append(
+            {
+                "workflow_id": workflow_id,
+                "workflow_run_attempt": workflow_run_attempt,
+                "name": name,
+                "classname": classname,
+                "filename": filename,
+                **stats,
+            }
+        )
+    print(f"Uploading {len(code_skip_records)} known-failure code skips that ran")
+    upload_workflow_stats_to_s3(
+        workflow_id,
+        workflow_run_attempt,
+        "rerun_disabled_code_skips",
+        code_skip_records,
+    )
+
 
 def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
     """
@@ -237,30 +275,36 @@ def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
     """
     # Aggregated across all jobs
     all_tests: dict[str, dict[str, int]] = {}
+    all_code_skips: dict[str, dict[str, Any]] = {}
 
     for report in get_test_reports(
         args.repo, args.workflow_run_id, args.workflow_run_attempt
     ):
-        tests = process_report(report)
+        tests, code_skips = process_report(report)
 
         # The scheduled workflow has both rerun disabled tests and memory leak check jobs.
         # We are only interested in the former here
         if not is_rerun_disabled_tests(
-            report, workflow_run_id, workflow_run_attempt, tests
+            report, workflow_run_id, workflow_run_attempt, tests | code_skips
         ):
             continue
 
-        for name, stats in tests.items():
-            if name not in all_tests:
-                all_tests[name] = stats.copy()
-            else:
-                all_tests[name]["num_green"] += stats.get("num_green", 0)
-                all_tests[name]["num_red"] += stats.get("num_red", 0)
+        for aggregated, report_stats in (
+            (all_tests, tests),
+            (all_code_skips, code_skips),
+        ):
+            for name, stats in report_stats.items():
+                if name not in aggregated:
+                    aggregated[name] = stats.copy()
+                else:
+                    aggregated[name]["num_green"] += stats.get("num_green", 0)
+                    aggregated[name]["num_red"] += stats.get("num_red", 0)
 
     save_results(
         workflow_run_id,
         workflow_run_attempt,
         all_tests,
+        all_code_skips,
     )
 
 
