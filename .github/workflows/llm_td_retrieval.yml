@@ -113,13 +113,10 @@ jobs:
         shell: bash
         run: echo "::warning title=LLM TD::retrieval produced no results; TD runs without the LLM heuristic"
 
-      # TD takes the LLM part only from this artifact. Whether it ships is decided by the
-      # ship rule of pytorch/test-infra's tools/torchci/td/llm evaluation harness; to ship
-      # it, the condition is `steps.run_retriever.outcome == 'success'`.
       - name: Upload results
         timeout-minutes: 5
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: false
+        if: ${{ steps.run_retriever.outcome == 'success' }}
         with:
           name: llm_results
           retention-days: 1
