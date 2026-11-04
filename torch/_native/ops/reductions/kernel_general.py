@@ -958,8 +958,6 @@ def _reduce(
                     order="inner_tree",
                 )
             else:
-                from . import kernel_coltile as ct
-
                 col_view = None
                 cc = _hw.caps(x.device).cc
                 if cc in _ORDERED_COL_CCS and x.dtype in _ORDERED_COL_DTYPES:
@@ -967,6 +965,8 @@ def _reduce(
                         x, red_axes, red_pairs, kept_pairs, count, num_o
                     )
                 if col_view is not None and _ordered_col_route_ok(col_view, trait):
+                    from . import kernel_coltile as ct
+
                     ordered = ct.reduce_ordered_col(
                         trait,
                         trait_key,
