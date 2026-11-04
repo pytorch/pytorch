@@ -67,6 +67,7 @@ from tools.testing.discover_tests import (
 )
 from tools.testing.do_target_determination_for_s3 import import_results
 from tools.testing.llm_td.selection import LLM_TD_SELECTION_FILE, split_tests
+from tools.testing.target_determination.gen_artifact import gen_ci_artifact
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
 )
@@ -2561,7 +2562,6 @@ def main():
         test_config=TEST_CONFIG,
         td_enabled=options.enable_td,
         previously_failed=previous_failures,
-        in_ci=IS_CI,
     )
     if not split.enforced:
         print_to_stderr(
@@ -2572,8 +2572,15 @@ def main():
 
     test_batch = TestBatch("tests to run", split.include, False)
     test_batch_exclude = TestBatch("excluded", split.exclude, True)
-    if IS_CI and split.llm is not None:
-        emit_metric("llm_td_selection", split.llm.selection_metric)
+    if IS_CI:
+        gen_ci_artifact(
+            [x.to_json() for x in split.include],
+            [x.to_json() for x in split.exclude],
+            source=split.source,
+            td_excluded=[x.to_json() for x in split.td_exclude],
+        )
+        if split.llm is not None:
+            emit_metric("llm_td_selection", split.llm.selection_metric)
 
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
