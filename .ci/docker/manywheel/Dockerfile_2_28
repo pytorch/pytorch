@@ -173,8 +173,10 @@ RUN bash ./install_rocm.sh && rm install_rocm.sh
 FROM cpu_final as xpu_final
 # XPU CD use rolling driver
 ENV XPU_DRIVER_TYPE ROLLING
-# Link the static MKL from install_mkl.sh, not oneAPI's 2026.1 under /opt/intel/oneapi.
-ENV MKLROOT /opt/intel
+# Point only PyTorch's FindMKL.cmake at the static MKL from install_mkl.sh, not at
+# oneAPI's 2026.1 under /opt/intel/oneapi. MKLROOT would also redirect the oneMKL
+# SYCL lookup of torch-xpu-ops.
+ENV INTEL_MKL_DIR /opt/intel
 # cmake-3.28.4 from pip
 RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
