@@ -402,6 +402,16 @@ g () {
             ".github/actions/download-td-artifacts/action.yml",
             ".github/actions/download-build-artifacts/action.yml",
             ".github/scripts/filter_test_configs.py",
+            ".github/scripts/parse_ref.py",
+            ".github/workflows/pull.yml",
+            ".github/workflows/trunk.yml",
+            ".github/workflows/periodic.yml",
+            ".github/workflows/slow.yml",
+            ".github/workflows/inductor.yml",
+            ".github/workflows/inductor-periodic.yml",
+            ".github/actions/reuse-old-whl/action.yml",
+            "tools/native_aot/build_stage2.py",
+            ".ci/pytorch/generate_ck_config_h.cmake",
             ".github/ci_commit_pins/vision.txt",
             ".github/ci_commit_pins/audio.txt",
             ".github/ci_commit_pins/spmd_types.txt",
@@ -463,6 +473,12 @@ g () {
             self.assertEqual(sel.files, {"dynamo/test_misc"}, d)
         sel = Selection.from_model_output(answer(dirs=["cpython"]), candidates, [])
         self.assertEqual(sel.files, {"cpython/v3_13/test_set"})
+        # A blocklisted directory selects its drivers.
+        jit = {"test_jit", "test_jit_profiling", "test_jit_legacy"}
+        for d, expected in [("jit", jit), ("test/jit/", jit), ("fx", {"test_fx"})]:
+            out = answer(dirs=[d])
+            sel = Selection.from_model_output(out, candidates | jit | {"test_fx"}, [])
+            self.assertEqual((sel.files, sel.error), (expected, None), d)
 
     def test_parse_model_output_rejects_malformed_answers(self) -> None:
         malformed: list[Any] = [
@@ -504,6 +520,7 @@ g () {
             ("test/test_cpp_extensions_aot.py", aot),
             ("test/test_autoload.py", autoload),
             ("test/test_jit_fuser_te.py", fuser),
+            ("test/test_nnapi.py", jit),
         ]:
             sel = Selection.from_model_output(answer(), candidates, [changed])
             self.assertEqual(sel.files, expected, changed)
@@ -528,6 +545,7 @@ g () {
         launcher_bin = "distributed/launcher/bin/test_script"
         for f, drivers in [
             ("test_jit_fuser", {"test_jit_fuser_legacy"}),
+            ("test_nnapi", {"test_jit", "test_jit_profiling", "test_jit_legacy"}),
             ("distributed/test_c10d_spawn", spawn),
             ("onnx/test_models", {"onnx/test_models_onnxruntime"}),
             ("distributed/bin/test_script", {"distributed/test_launcher"}),

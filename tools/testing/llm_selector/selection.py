@@ -91,10 +91,11 @@ DRIVER_MAPPINGS = {
     "test_ao_sparsity": [r"^test/ao/"],
     "test_autograd": [r"^test/autograd/"],
     "test_fx": [r"^test/fx/"],
-    "test_jit": [r"^test/jit/"],
+    # test_jit imports jit/test_backend_nnapi.py, which imports test_nnapi.py.
+    "test_jit": [r"^test/jit/", r"^test/test_nnapi\.py$"],
     # They do `from test_jit import *`.
     **{
-        t: [r"^test/jit/", r"^test/test_jit\.py$"]
+        t: [r"^test/jit/", r"^test/test_jit\.py$", r"^test/test_nnapi\.py$"]
         for t in ("test_jit_profiling", "test_jit_legacy")
     },
     "test_jit_fuser_te": [r"^test/jit/test_fuser_common\.py$"],
@@ -133,14 +134,17 @@ RUN_ALL_PATTERNS = [
     r"^tools/stats/(import_test_stats|export_test_times|upload_metrics|upload_test_stats|upload_stats_lib|test_dashboard)\.py$",
     # The build scripts run from the PR in the build jobs and decide what the test jobs get.
     r"^\.ci/pytorch/(build|win-build|macos-build|rocm_utils|test|multigpu-test|win-test|macos-test|macos-common|common|common-build|common_utils|torch_trace)\.sh$",
-    r"^\.ci/pytorch/numba-cuda-13\.patch$",
+    r"^\.ci/pytorch/(numba-cuda-13\.patch|generate_ck_config_h\.cmake)$",
+    r"^tools/native_aot/build_stage2\.py$",
     r"^scripts/onnx/test\.sh$",
     r"^\.ci/pytorch/win-test-helpers/(build_pytorch\.bat|setup_pytorch_env\.bat|test_python_shard\.bat|test_python_jit_legacy\.bat|installation-helpers/(activate_miniconda3|install_magma|install_sccache)\.bat)$",
     r"^\.github/workflows/_(linux|win|mac|rocm|xpu|s390x|tpu)-test(-no-dind)?\.yml$",
     r"^\.github/workflows/_(linux|win|mac|s390x)-build\.yml$",
+    # The workflows that call those test workflows; they set each job's build, image and test matrix.
+    r"^\.github/workflows/(pull|trunk(-rocm-sandbox)?|periodic(-strict|-rocm-mi\d+)?|slow(-rocm-mi200)?|unstable|tsan|xpu|mac-mps|native-aot|dtensor|torchtitan|dynamo-unittest|td-holdout-unstable|s390x-periodic|rocm-[\w-]+|inductor[\w-]*|(b200|h100)-[\w-]+|test-(b200|gb300|h100)|better-benchmark-b200|attention_op_microbenchmark|operator_(benchmark|microbenchmark(_compare)?))\.yml$",
     # setup-linux is left out: the test jobs use it from main, not from the PR.
-    r"^\.github/actions/(setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts|download-build-artifacts)/",
-    r"^\.github/scripts/filter_test_configs\.py$",
+    r"^\.github/actions/(setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts|download-build-artifacts|reuse-old-whl)/",
+    r"^\.github/scripts/(filter_test_configs|parse_ref)\.py$",
     # The pytest plugin every test job loads.
     r"^torch/testing/_internal/torchci/",
     # Installed by .ci/pytorch/common_utils.sh, and torch_tpu by install_torch_tpu.sh, for the test jobs.
@@ -191,8 +195,14 @@ def parse_model_output(
 ) -> tuple[set[str], set[str]]:
     """The files and sweeps a model answer names; ValueError if it is malformed.
 
-    A `dirs` entry is a directory prefix such as "dynamo"; one that matches no
-    candidate is malformed, and so is a `tests` name that matches no
+    `grep` takes a `git grep -E` pattern and lists the repo-relative paths, such
+    as test/jit/test_freezing.py, of the files under test/ at the change's head
+    with a line matching it, so grep("^") lists all but the empty ones, which
+    hold no tests. Its exceptions propagate.
+
+    A `dirs` entry is a directory prefix such as "dynamo", and selects the
+    candidates under it and their drivers, such as test_jit for "jit"; one that
+    selects no candidate is malformed, and so is a `tests` name that matches no
     candidate: the model was told to copy the names from the candidate list.
     With `grep`, which lists the paths under test/ that match a `git grep -E`
     pattern, a name of a file that a driver runs, such as jit/test_freezing,
@@ -232,6 +242,7 @@ def parse_model_output(
             .removeprefix("test/")
         )
         in_dir = {c for c in candidates if c.startswith(prefix + "/")}
+        in_dir |= edited_tests([f"test/{prefix}/"], candidates)
         if not in_dir:
             raise ValueError(f"dirs entry {d!r} matches no test file")
         files |= in_dir
