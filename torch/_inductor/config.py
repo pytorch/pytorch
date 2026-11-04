@@ -3024,7 +3024,10 @@ class cuda(cutlass):
     # lowering, so a graph that routes a CUDA GEMM skips the FX and autotune
     # caches while a mode is set, and pipelined autotuning is turned off.
     # "reuse" instead borrows the nearest recorded shape, benchmarks it against
-    # the default kernel, and records the winner. Run as separate passes:
+    # the default kernel, and records the winner. It borrows only where an aten
+    # GEMM is actually benchmarked, so it shares the precondition above: with
+    # max-autotune off, or on a single-choice or deterministic exit, or on an
+    # autotune cache hit, reuse does nothing. Run as separate passes:
     # "tune" builds the results file, "reuse" borrows from it and appends its own
     # verdicts to the same file, so copy it first to keep the two apart.
     # pyrefly: ignore [bad-assignment]

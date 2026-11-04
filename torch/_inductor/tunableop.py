@@ -125,7 +125,13 @@ def is_tune_mode() -> bool:
 
 
 def is_reuse_mode() -> bool:
-    """True while consuming the results file: borrow and validate, never tune."""
+    """True while reusing the results file: borrow, validate, record, never tune.
+
+    Reads the file for donors and appends its verdicts to the same one. Only
+    a routed ExternKernelCaller.benchmark borrows, so a compile that never
+    benchmarks an aten GEMM -- max-autotune off, a single-choice or
+    deterministic exit, an autotune cache hit -- reuses nothing.
+    """
     if _mode() != "reuse" or not torch.cuda.is_available():
         return False
     _warn_if_env_blocks(_REUSE_BLOCKING_ENV, "reuse mode will not borrow or record")
@@ -274,8 +280,8 @@ class BenchmarkJob:
         tunable.enable(True)
         tunable.tuning_enable(self.tuning)
         tunable._nearest_match_enable(self.nearest_match)
-        # _nearest_match_enable reads this, so without it nothing is borrowed
-        # at all: it is the master switch of the pair, not just the write.
+        # The nearest-match getter reads this, so without it nothing is
+        # borrowed at all: master switch of the pair, not just the write.
         tunable._record_borrowed_enable(self.record_borrowed)
         for name, value in settings.items():
             getattr(tunable, name)(value)
@@ -896,15 +902,13 @@ def maybe_range_pretune(winner: ExternKernelCaller) -> None:
     entries are always recorded concrete -- the mask is deliberately not carried
     into the jobs.
     """
+    # Both are guards for direct callers, tests included: queue_range_pretune
+    # already filters on them, so nothing in production reaches here with the
+    # mode off or the ladder off. What is still covered without the ladder is
+    # described on autotune_tunableop_ladder in config.py.
     if not is_tune_mode():
         return
     if not config.cuda.autotune_tunableop_ladder:
-        # No ladder entries. The traced shape is covered only when autotune
-        # leaves this GEMM more than one choice, so the aten candidate is
-        # benchmarked and routed through the worker (see
-        # ExternKernelCaller.benchmark). The single-choice and deterministic
-        # exits return without benchmarking, so with max-autotune off nothing
-        # is tuned here and only PYTORCH_TUNABLEOP_ENABLED covers the shape.
         return
     # is_tune_mode() proves the host has a GPU, not that this GEMM runs on one.
     # A CPU winner carries an ExternKernelCPUBenchmarkRequest, which the CUDA
