@@ -353,6 +353,140 @@ class TestSelection(unittest.TestCase):
             p.write_text(json.dumps(sel.to_json()))
             self.assertEqual(Selection.load(p), sel)
 
+    def test_run_all_patterns(self) -> None:
+        for f in [
+            ".ci/docker/common/install_cuda.sh",
+            ".ci/docker/requirements-ci.txt",
+            ".ci/docker/build.sh",
+            ".ci/docker/ci_commit_pins/triton.txt",
+            ".ci/docker/ubuntu/Dockerfile",
+            ".ci/pytorch/test.sh",
+            ".ci/pytorch/multigpu-test.sh",
+            ".ci/pytorch/win-test.sh",
+            ".ci/pytorch/macos-test.sh",
+            ".ci/pytorch/macos-common.sh",
+            ".ci/pytorch/common.sh",
+            ".ci/pytorch/common-build.sh",
+            ".ci/pytorch/common_utils.sh",
+            ".ci/pytorch/torch_trace.sh",
+            ".ci/pytorch/win-test-helpers/setup_pytorch_env.bat",
+            ".ci/pytorch/win-test-helpers/test_python_shard.bat",
+            ".ci/pytorch/win-test-helpers/installation-helpers/activate_miniconda3.bat",
+            ".github/workflows/_linux-test.yml",
+            ".github/workflows/_win-test.yml",
+            ".github/workflows/_mac-test.yml",
+            ".github/workflows/_rocm-test.yml",
+            ".github/workflows/_rocm-test-no-dind.yml",
+            ".github/workflows/_xpu-test.yml",
+            ".github/workflows/_s390x-test.yml",
+            ".github/workflows/_tpu-test.yml",
+            ".github/actions/setup-rocm/action.yml",
+            ".github/actions/setup-win/action.yml",
+            ".github/actions/setup-xpu/action.yml",
+            ".github/actions/filter-test-configs/action.yml",
+            ".github/actions/download-td-artifacts/action.yml",
+            ".github/scripts/filter_test_configs.py",
+            ".github/ci_commit_pins/vision.txt",
+            ".github/ci_commit_pins/audio.txt",
+            ".github/ci_commit_pins/spmd_types.txt",
+            "torch/testing/_internal/torchci/plugin.py",
+            "test/run_test.py",
+            "test/conftest.py",
+            "test/torch_np/conftest.py",
+            "test/slow_tests.json",
+            "torch/testing/_internal/dynamo_test_failures.py",
+            "test/pytest_shard_custom.py",
+            "pytest.ini",
+            "torch/testing/_internal/common_utils.py",
+            "torch/testing/_internal/common_device_type.py",
+            "torch/testing/_internal/common_dtype.py",
+            "torch/testing/_internal/common_cuda.py",
+            "torch/testing/_comparison.py",
+            "scripts/onnx/test.sh",
+            ".ci/docker/triton_version.txt",
+            ".ci/docker/triton_xpu_version.txt",
+            ".ci/pytorch/numba-cuda-13.patch",
+            ".ci/pytorch/win-test-helpers/test_python_jit_legacy.bat",
+            "tools/testing/discover_tests.py",
+            "tools/stats/import_test_stats.py",
+            "tools/stats/upload_metrics.py",
+        ]:
+            self.assertTrue(needs_run_all([f]), f)
+            self.assertTrue((REPO_ROOT / f).exists(), f)
+        for f in [
+            "docs/source/index.rst",
+            ".github/workflows/lint.yml",
+            ".ci/pytorch/build.sh",
+            ".github/actions/setup-linux/action.yml",
+            ".github/ci_commit_pins/vllm.txt",
+        ]:
+            self.assertFalse(needs_run_all([f]), f)
+
+    def test_malformed_output_runs_all(self) -> None:
+        malformed: list[Any] = [
+            [],
+            {},
+            {"tests": "test_nn"},
+            {"tests": ["test_nn"]},
+            {"tests": [{"confidence": "high"}]},
+            {"tests": [{"file": 3}]},
+            {"tests": [], "dirs": "dynamo"},
+            {"tests": [], "dirs": [1]},
+            {"tests": [], "sweeps": None},
+            {"tests": [], "sweeps": ["dynamo-wrapped"]},
+            {"tests": [], "run_all": "false"},
+            {"tests": [], "dirs": [""]},
+            {"tests": [], "dirs": ["test"]},
+            {"tests": [], "dirs": ["test/"]},
+            {"tests": [], "dirs": ["dynamo_foo"]},
+            {"tests": [], "dirs": ["dynamo/cpython"]},
+            {"tests": [{"file": "nope"}]},
+            {"tests": [{"file": "test_nn (12m)"}, {"file": "nn/test_conv"}]},
+            {"tests": [{"file": "nope"}, {"file": "test_ops"}]},
+        ]
+        for out in malformed:
+            sel = Selection.from_model_output(out, CANDIDATES, ["test/test_nn.py"])
+            self.assertTrue(sel.run_all, out)
+            self.assertIn("malformed", sel.reason)
+            self.assertRegex(str(sel.error), "^malformed model output: ")
+
+    def test_dirs(self) -> None:
+        candidates = CANDIDATES | {"dynamo_foo/test_a"}
+        for d in ["dynamo", "dynamo/", "dynamo/*", "dynamo/**", " test/dynamo/* "]:
+            sel = Selection.from_model_output({"tests": [], "dirs": [d]}, candidates, [])  # fmt: skip
+            self.assertEqual(sel.files, {"dynamo/test_misc"}, d)
+        sel = Selection.from_model_output({"tests": [], "dirs": ["cpython"]}, candidates, [])  # fmt: skip
+        self.assertEqual(sel.files, {"cpython/v3_13/test_set"})
+
+    def test_edited_tests_select_their_driver(self) -> None:
+        aot, autoload = {"test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja"}, {"test_autoload_enable", "test_autoload_disable"}  # fmt: skip
+        candidates = CANDIDATES | {"test_jit"} | aot | autoload
+        for changed, expected in [
+            ("test/jit/test_freezing.py", {"test_jit"}),
+            ("test/cpp_extensions/extension.cpp", aot | autoload),
+            ("test/test_cpp_extensions_aot.py", aot),
+            ("test/test_autoload.py", autoload),
+            ("test/test_jit_fuser_te.py", set()),
+        ]:  # fmt: skip
+            sel = Selection.from_model_output({"tests": []}, candidates, [changed])
+            self.assertEqual(sel.files, expected, changed)
+
+    def test_drivers_match_the_test_list(self) -> None:
+        for test in DRIVER_MAPPINGS:
+            self.assertIn(test, TESTS)
+        # Directories whose files no candidate runs. torch_openreg/tests runs
+        # through test_openreg, which is never a candidate and so is always
+        # covered; edits there also select the cpp_extensions drivers.
+        undriven = {"custom_backend", "mobile", "onnx_caffe2"}
+        for pattern in BLOCKLISTED_PATTERNS:
+            path = f"test/{pattern}/test_x.py"
+            driven = any(re.search(r, path) for rs in DRIVER_MAPPINGS.values() for r in rs)  # fmt: skip
+            self.assertEqual(driven, pattern not in undriven, pattern)
+
+
+class TestTDInfra(unittest.TestCase):
+    """The TD inputs and outputs the selection shares with run_test.py."""
+
     def test_previous_failures_skip_bad_entries_like_td(self) -> None:
         def scored() -> set[str]:
             heuristic = previously_failed_in_pr.PreviouslyFailedInPR()
@@ -514,136 +648,6 @@ class TestSelection(unittest.TestCase):
             scores = [(str(x), loaded.get_score(x)) for x in loaded.get_all_tests()]
             self.assertEqual(scores, [("test_nn", 1), ("test_ops", 0)])
 
-    def test_run_all_patterns(self) -> None:
-        for f in [
-            ".ci/docker/common/install_cuda.sh",
-            ".ci/docker/requirements-ci.txt",
-            ".ci/docker/build.sh",
-            ".ci/docker/ci_commit_pins/triton.txt",
-            ".ci/docker/ubuntu/Dockerfile",
-            ".ci/pytorch/test.sh",
-            ".ci/pytorch/multigpu-test.sh",
-            ".ci/pytorch/win-test.sh",
-            ".ci/pytorch/macos-test.sh",
-            ".ci/pytorch/macos-common.sh",
-            ".ci/pytorch/common.sh",
-            ".ci/pytorch/common-build.sh",
-            ".ci/pytorch/common_utils.sh",
-            ".ci/pytorch/torch_trace.sh",
-            ".ci/pytorch/win-test-helpers/setup_pytorch_env.bat",
-            ".ci/pytorch/win-test-helpers/test_python_shard.bat",
-            ".ci/pytorch/win-test-helpers/installation-helpers/activate_miniconda3.bat",
-            ".github/workflows/_linux-test.yml",
-            ".github/workflows/_win-test.yml",
-            ".github/workflows/_mac-test.yml",
-            ".github/workflows/_rocm-test.yml",
-            ".github/workflows/_rocm-test-no-dind.yml",
-            ".github/workflows/_xpu-test.yml",
-            ".github/workflows/_s390x-test.yml",
-            ".github/workflows/_tpu-test.yml",
-            ".github/actions/setup-rocm/action.yml",
-            ".github/actions/setup-win/action.yml",
-            ".github/actions/setup-xpu/action.yml",
-            ".github/actions/filter-test-configs/action.yml",
-            ".github/actions/download-td-artifacts/action.yml",
-            ".github/scripts/filter_test_configs.py",
-            ".github/ci_commit_pins/vision.txt",
-            ".github/ci_commit_pins/audio.txt",
-            ".github/ci_commit_pins/spmd_types.txt",
-            "torch/testing/_internal/torchci/plugin.py",
-            "test/run_test.py",
-            "test/conftest.py",
-            "test/torch_np/conftest.py",
-            "test/slow_tests.json",
-            "torch/testing/_internal/dynamo_test_failures.py",
-            "test/pytest_shard_custom.py",
-            "pytest.ini",
-            "torch/testing/_internal/common_utils.py",
-            "torch/testing/_internal/common_device_type.py",
-            "torch/testing/_internal/common_dtype.py",
-            "torch/testing/_internal/common_cuda.py",
-            "torch/testing/_comparison.py",
-            "scripts/onnx/test.sh",
-            ".ci/docker/triton_version.txt",
-            ".ci/docker/triton_xpu_version.txt",
-            ".ci/pytorch/numba-cuda-13.patch",
-            ".ci/pytorch/win-test-helpers/test_python_jit_legacy.bat",
-            "tools/testing/discover_tests.py",
-            "tools/stats/import_test_stats.py",
-            "tools/stats/upload_metrics.py",
-        ]:
-            self.assertTrue(needs_run_all([f]), f)
-            self.assertTrue((REPO_ROOT / f).exists(), f)
-        for f in [
-            "docs/source/index.rst",
-            ".github/workflows/lint.yml",
-            ".ci/pytorch/build.sh",
-            ".github/actions/setup-linux/action.yml",
-            ".github/ci_commit_pins/vllm.txt",
-        ]:
-            self.assertFalse(needs_run_all([f]), f)
-
-    def test_malformed_output_runs_all(self) -> None:
-        malformed: list[Any] = [
-            [],
-            {},
-            {"tests": "test_nn"},
-            {"tests": ["test_nn"]},
-            {"tests": [{"confidence": "high"}]},
-            {"tests": [{"file": 3}]},
-            {"tests": [], "dirs": "dynamo"},
-            {"tests": [], "dirs": [1]},
-            {"tests": [], "sweeps": None},
-            {"tests": [], "sweeps": ["dynamo-wrapped"]},
-            {"tests": [], "run_all": "false"},
-            {"tests": [], "dirs": [""]},
-            {"tests": [], "dirs": ["test"]},
-            {"tests": [], "dirs": ["test/"]},
-            {"tests": [], "dirs": ["dynamo_foo"]},
-            {"tests": [], "dirs": ["dynamo/cpython"]},
-            {"tests": [{"file": "nope"}]},
-            {"tests": [{"file": "test_nn (12m)"}, {"file": "nn/test_conv"}]},
-            {"tests": [{"file": "nope"}, {"file": "test_ops"}]},
-        ]
-        for out in malformed:
-            sel = Selection.from_model_output(out, CANDIDATES, ["test/test_nn.py"])
-            self.assertTrue(sel.run_all, out)
-            self.assertIn("malformed", sel.reason)
-            self.assertRegex(str(sel.error), "^malformed model output: ")
-
-    def test_dirs(self) -> None:
-        candidates = CANDIDATES | {"dynamo_foo/test_a"}
-        for d in ["dynamo", "dynamo/", "dynamo/*", "dynamo/**", " test/dynamo/* "]:
-            sel = Selection.from_model_output({"tests": [], "dirs": [d]}, candidates, [])  # fmt: skip
-            self.assertEqual(sel.files, {"dynamo/test_misc"}, d)
-        sel = Selection.from_model_output({"tests": [], "dirs": ["cpython"]}, candidates, [])  # fmt: skip
-        self.assertEqual(sel.files, {"cpython/v3_13/test_set"})
-
-    def test_edited_tests_select_their_driver(self) -> None:
-        aot, autoload = {"test_cpp_extensions_aot_ninja", "test_cpp_extensions_aot_no_ninja"}, {"test_autoload_enable", "test_autoload_disable"}  # fmt: skip
-        candidates = CANDIDATES | {"test_jit"} | aot | autoload
-        for changed, expected in [
-            ("test/jit/test_freezing.py", {"test_jit"}),
-            ("test/cpp_extensions/extension.cpp", aot | autoload),
-            ("test/test_cpp_extensions_aot.py", aot),
-            ("test/test_autoload.py", autoload),
-            ("test/test_jit_fuser_te.py", set()),
-        ]:  # fmt: skip
-            sel = Selection.from_model_output({"tests": []}, candidates, [changed])
-            self.assertEqual(sel.files, expected, changed)
-
-    def test_drivers_match_the_test_list(self) -> None:
-        for test in DRIVER_MAPPINGS:
-            self.assertIn(test, TESTS)
-        # Directories whose files no candidate runs. torch_openreg/tests runs
-        # through test_openreg, which is never a candidate and so is always
-        # covered; edits there also select the cpp_extensions drivers.
-        undriven = {"custom_backend", "mobile", "onnx_caffe2"}
-        for pattern in BLOCKLISTED_PATTERNS:
-            path = f"test/{pattern}/test_x.py"
-            driven = any(re.search(r, path) for rs in DRIVER_MAPPINGS.values() for r in rs)  # fmt: skip
-            self.assertEqual(driven, pattern not in undriven, pattern)
-
 
 class TestSplit(unittest.TestCase):
     def split(
@@ -686,13 +690,13 @@ class TestSplit(unittest.TestCase):
             split = self.split(Selection(files={"a"}), ranked, times, share=share)[2]
             self.assertEqual(split.hedged, hedged, share)
 
-    def test_nothing_chosen_keeps_td_include(self) -> None:
+    def test_nothing_chosen_sets_chose_nothing(self) -> None:
         # A targeted call such as `run_test.py --include test_cuda`: one file
         # is all of the call's time, so it never fits the 20% hedge.
         scores, times = {TestRun("test_cuda"): 1.0}, {"test_cuda": 100.0}
         for files, include in (({"a"}, []), ({"test_cuda"}, ["test_cuda"])):
             sel = Selection(files=files)
-            got, _, split = self.split(sel, scores, times, td={"test_cuda"})
+            got, _, split = self.split(sel, scores, times)
             self.assertEqual((got, split.chose_nothing), (include, not include))
 
     def test_partial_runs_of_a_file_are_charged_once(self) -> None:
@@ -1249,12 +1253,14 @@ class TestDashboardExclusions(unittest.TestCase):
             "td_exclusions-5.json": {"included": [], "excluded": [], "source": "td"},
             # A call that excluded nothing but ran a file another call excluded.
             "td_exclusions-6.json": {"included": [{"test_file": "a"}], "excluded": [], "source": "td"},
+            # One that ran only files no enforced config excluded.
+            "td_exclusions-7.json": {"included": [{"test_file": "z"}], "excluded": [], "source": "td"},
         }  # fmt: skip
         jobs = {
             "td_exclusions-4.json": "linux / test (slow, 1, 1, x)",
             "td_exclusions-5.json": "linux / test (crossref, 1, 1, x)",
         }
-        exclusions, _ = self.exclusions(artifacts, jobs)
+        exclusions, looked_up = self.exclusions(artifacts, jobs)
         self.assertEqual(
             exclusions,
             {
@@ -1263,6 +1269,9 @@ class TestDashboardExclusions(unittest.TestCase):
                 "llm_selection": {"linux": {"default": ["b"], "slow": []}},
             },
         )
+        # A call that excluded nothing is looked up only if it ran a file an enforced config excluded.
+        expected = [f"td_exclusions-{i}.json" for i in (1, 2, 3, 4, 6)]
+        self.assertEqual(looked_up, expected)
         # Without an enforced call, the calls that excluded nothing are not
         # looked up, and an artifact without a source is TD's.
         td_only = {k: artifacts[k] for k in (f"td_exclusions-{i}.json" for i in (1, 2, 5, 6))}  # fmt: skip
