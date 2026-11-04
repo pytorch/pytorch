@@ -970,8 +970,8 @@ class TestSplitTests(unittest.TestCase):
             "previously_failed": "previous_failures",
         }
         self.assertEqual([c[2] for c in calls["split_tests"]], [split_kwargs])
-        global_metrics = {c[1][0]: c[0] for c in calls["add_global_metric"]}
-        self.assertEqual(global_metrics["'call_id'"], [])
+        global_metrics = [(c[1][0], c[0]) for c in calls["add_global_metric"]]
+        self.assertIn(("'call_id'", []), global_metrics)
         batches = [c[1][1] for c in calls["TestBatch"]]
         self.assertEqual(batches, ["split.include", "split.exclude"])
         ((guard, args, kwargs),) = calls["gen_ci_artifact"]
@@ -982,11 +982,14 @@ class TestSplitTests(unittest.TestCase):
         self.assertEqual(kwargs, {"source": "split.source", "td_excluded": td_excluded})
         td_line = [c[0] for k, v in calls.items() if "based on TD" in k for c in v]
         self.assertEqual(td_line, [["not split.enforced"]])
+        llm_guard = ["IS_CI", "split.llm is not None"]
         ((guard, _, _),) = calls["emit_metric('llm_td_selection')"]
-        self.assertEqual(guard, ["IS_CI", "split.llm is not None"])
+        self.assertEqual(guard, llm_guard)
         ((guard, _, _),) = calls["emit_metric('llm_td_failure')"]
-        self.assertEqual(guard[-1], "split.llm is not None")
-        self.assertIn("IS_CI", guard)
+        self.assertEqual(guard, llm_guard)
+        ((guard, args, _),) = calls["emit_metric('td_test_failure_stats_v2')"]
+        self.assertEqual(guard, ["IS_CI"])
+        self.assertIn("'llm_enforced': split.enforced", args[1])
 
 
 class TestDashboardExclusions(unittest.TestCase):
