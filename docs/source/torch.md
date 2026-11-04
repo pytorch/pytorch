@@ -482,6 +482,7 @@ False
     deg2rad_
     div
     divide
+    divmod
     digamma
     erf
     erf_

@@ -2959,6 +2959,33 @@ class TensorVariable(VariableTracker):
             ),
         )
 
+    def nb_divmod_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder, wrap_fx_proxy
+        from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)):
+            return VariableTracker.build(tx, NotImplemented)
+        args = (other, self) if reverse else (self, other)
+        kwargs = {}
+
+        if can_dispatch_torch_function(tx, args=args, kwargs=kwargs):
+            fn = SourcelessBuilder.create(tx, torch.divmod)
+            return dispatch_torch_function(tx, fn=fn, args=args, kwargs=kwargs)
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                torch.divmod,
+                *proxy_args_kwargs(args, kwargs),
+            ),
+        )
+
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # Tensor.__hash__ is `return id(self)`, so hash == id.
         # Always use the FakeTensor identity so aliased tensors
