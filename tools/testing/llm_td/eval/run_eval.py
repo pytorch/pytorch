@@ -77,8 +77,6 @@ def run_one(
     prompt = sample_prompt(sample, minutes)
     cost = 0.0
     for attempt in range(ATTEMPTS):
-        if attempt:
-            time.sleep(30 * attempt)
         t0 = time.time()
         try:
             d = query_model(prompt, args.model, args.effort, checkout=wt)
@@ -95,7 +93,11 @@ def run_one(
         # CLI's JSON, i.e. a crash, which is final whatever its trace says.
         err = f"{d.get('subtype', '')} {d.get('result', '') if d.get('is_error') else ''}"  # fmt: skip
         transient = out is None and "type" in d and bool(TRANSIENT.search(err))
-        if not transient or (stop is not None and stop.is_set()):
+        if not transient or attempt == ATTEMPTS - 1:
+            break
+        if stop is None:
+            time.sleep(30 * (attempt + 1))
+        elif stop.wait(30 * (attempt + 1)):
             break
     return {
         "id": sample["id"],
@@ -127,12 +129,12 @@ def main() -> None:
     p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])  # fmt: skip
     p.add_argument("--ids", type=Path, required=True)
     p.add_argument("--jobs", type=int, default=8)
-    p.add_argument("--agentic", action="store_true", help="give the model Read, Grep and Glob with no path limits on untrusted PR text; needs LLM_TD_AGENTIC_SANDBOX=1")  # fmt: skip
+    p.add_argument("--agentic", action="store_true", help="give the model Read, Grep and Glob over a checkout of the change, on untrusted PR text; needs LLM_TD_AGENTIC_SANDBOX=1")  # fmt: skip
     args = p.parse_args()
     if args.tag == "td":
         p.error("the tag td holds the TD replay, which score.py scores as td25")
     if args.agentic and os.environ.get("LLM_TD_AGENTIC_SANDBOX") != "1":
-        p.error("--agentic lets the model Read, Grep and Glob any path on untrusted PR text, so a prompt injection can copy any file the CLI can read, its credentials included, into a result; run it only in a sandbox whose only secret is the model credential, with LLM_TD_AGENTIC_SANDBOX=1")  # fmt: skip
+        p.error("--agentic gives the model Read, Grep and Glob on untrusted PR text; query_model limits them to the checkout, but run it only in a sandbox whose only secret is the model credential, with LLM_TD_AGENTIC_SANDBOX=1")  # fmt: skip
     # Agentic checkouts are handed to a CLI that runs in a temp dir.
     args.data = args.data.resolve()
 
@@ -179,6 +181,9 @@ def main() -> None:
                 if r["transient"]:
                     print(f"{sid}: still failing after {ATTEMPTS} attempts, scored as an error:", r["error"][:200], flush=True)  # fmt: skip
                 write_json(out / f"{sid}.json", r)
+            except subprocess.CalledProcessError as e:
+                # As score.py drops it: usually a main_base this clone lacks.
+                print(f"{sid}: git cannot build its prompt in this clone, skipped: {e}", flush=True)  # fmt: skip
             except Exception:
                 print(
                     f"{sid} failed, left for a rerun:\n{traceback.format_exc()}",
