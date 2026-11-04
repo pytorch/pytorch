@@ -165,13 +165,14 @@ ownership:
       - /test/test_spectral_ops.py
   - name: floatx_linear_algebra
     labels: ["module: linear algebra", "module: floatx (formerly float8)"]
-    owners: [drisspg, slayton58]
+    owners: [drisspg, slayton58, vkuzo]
     section: core_aten_linalg
     paths:
       - /aten/src/ATen/native/ScaledBlas.cpp
       - /aten/src/ATen/native/ScaledBlasUtils.cpp
       - /aten/src/ATen/native/ScaledBlasUtils.h
       - /test/test_scaled_matmul_cuda.py: [drisspg, slayton58]
+      - /test/test_quantize_tensor.py: [vkuzo, slayton58]
   - name: sparse
     labels: ["module: sparse"]
     owners: [amjames, nikitaved, pearu]
