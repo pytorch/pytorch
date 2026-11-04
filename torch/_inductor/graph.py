@@ -111,13 +111,13 @@ from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .sizevars import SizeVarAllocator
 from .utils import (
+    _unstable_customized_partition_wrapper,
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_donated_idxs,
     get_sympy_Expr_dtype,
     GraphPartitionMap,
     is_same_tensor,
-    is_using_cudagraph_partition,
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
@@ -611,7 +611,9 @@ class GraphLowering(torch.fx.Interpreter):
         # Whether codegen splits this graph into partition functions. A nested
         # region asking for its own CUDA Graph forces this on for one compile,
         # so it can differ from config.graph_partition, which stays at what the
-        # user asked for.
+        # user asked for and is still read by ConstructorMoverPass, the
+        # cpp_wrapper setup, the scheduler's partition-minimizing reorder and
+        # post-compile cudagraph wrapping.
         self.split_into_partitions = (
             config.graph_partition
             if split_into_partitions is None
@@ -619,11 +621,16 @@ class GraphLowering(torch.fx.Interpreter):
         )
         # Whether the partitions are for CUDA Graphs (or a customized partition
         # wrapper).
-        self.cudagraphs_per_partition = (
-            is_using_cudagraph_partition()
-            if cudagraphs_per_partition is None
-            else cudagraphs_per_partition
-        )
+        if cudagraphs_per_partition is None:
+            cudagraphs_per_partition = self.split_into_partitions and (
+                config.triton.cudagraphs
+                or _unstable_customized_partition_wrapper.wrapper is not None
+            )
+        elif cudagraphs_per_partition and not self.split_into_partitions:
+            raise ValueError(
+                "cudagraphs_per_partition=True requires split_into_partitions=True"
+            )
+        self.cudagraphs_per_partition = cudagraphs_per_partition
         # Effective cudagraph setting outside of any nested region.
         self.cudagraphs_top_level = (
             config.triton.cudagraphs
@@ -1053,9 +1060,11 @@ class GraphLowering(torch.fx.Interpreter):
         enclosing code is still captured: the enclosing capture keeps following
         the user's graph_partition=False rules.
 
-        Only consult this from a site that is already gated on cudagraphs being
-        requested: it folds in cudagraphs_per_partition, which is False whenever
-        capture was not asked for.
+        It folds in cudagraphs_per_partition, so it is False for a graph that is
+        partitioned without triton.cudagraphs or a customized partition wrapper
+        asking for it. Only consult it where that case does not matter: under
+        `if cudagraphs:`, or to record disable_cudagraphs_reason, which matters
+        only when capture is on.
         """
         return self.cudagraphs_per_partition and not (
             self.cudagraph_region_forced_partition and self.cudagraphs_top_level
