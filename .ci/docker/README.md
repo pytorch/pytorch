@@ -99,11 +99,7 @@ If your new Docker image needs a library installed from a specific pinned commit
 3. When updating `rocm-preview.txt`, apply `ciflow/docker` and verify both
    `pytorch-linux-noble-rocm-preview-py3.11` and
    `manylinux2_28-builder:rocm-preview`. The pin drives both images, and the
-   content-addressed PR builders validate it before merge. Preview tests
-   install `rocm==<pin>` from `whl/nightly/rocm-preview`; if the
-   `rocm-preview-mirror-check` job in `build-manywheel-images.yml` fails,
-   have a test-infra admin run `update-s3-dependencies` with `torch_rocm`
-   before merging.
+   content-addressed PR builders validate it before merge.
 
 #### 2. Configure the Base Docker Image
 1. **Add new Base Docker image configuration** (if applicable):
