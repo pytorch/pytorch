@@ -664,11 +664,10 @@ class TestMultiGPUDevice(TestCase):
 
     @deviceCountAtLeast(2)
     def test_get_set_rng_state_all(self, devices):
-        device_module = torch.get_device_module(devices[0])
-        states = device_module.get_rng_state_all()
+        states = torch.accelerator.random.get_rng_state_all()
         before0 = torch.empty(100, device=devices[0]).normal_()
         before1 = torch.empty(100, device=devices[1]).normal_()
-        device_module.set_rng_state_all(states)
+        torch.accelerator.random.set_rng_state_all(states)
         after0 = torch.empty(100, device=devices[0]).normal_()
         after1 = torch.empty(100, device=devices[1]).normal_()
         self.assertEqual(before0, after0, atol=0, rtol=0)
@@ -676,11 +675,10 @@ class TestMultiGPUDevice(TestCase):
 
     @deviceCountAtLeast(2)
     def test_rng_state_offset(self, devices):
-        device_module = torch.get_device_module(devices[0])
-        before = device_module.get_rng_state()
-        device_module._set_rng_state_offset(100)
-        offset = device_module._get_rng_state_offset()
-        device_module.set_rng_state(before)
+        before = torch.accelerator.random.get_rng_state()
+        torch.accelerator.random.set_rng_offset(100)
+        offset = torch.accelerator.random.get_rng_offset()
+        torch.accelerator.random.set_rng_state(before)
         self.assertEqual(offset, 100)
 
     # Verifies that mem_get_info works, including when called for a different device
