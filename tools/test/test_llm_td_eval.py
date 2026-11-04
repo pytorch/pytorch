@@ -672,7 +672,7 @@ class TestScore(unittest.TestCase):
         self.assertTrue(choice.covers("test_a", "default"))
         self.assertFalse(choice.covers("test_a", "slow"))
         # With no fallback job times, unknown configs hedge nothing and keep TD's cut.
-        self.assertEqual(choice.other, set())
+        self.assertEqual(pick("final+td45", NOTHING, {**td, "top25": ["test_b"]}).other, {"test_b"})  # fmt: skip
         # As in run_test.py, an unknown config is hedged over the candidates in default/<config>, else default/default.
         fallback = {"default": {"test_a": 30.0, "test_b": 40.0, "test_d": 30.0, "test_x": 1.0}, "rare": {"test_b": 1.0, "test_c": 9.0}}  # fmt: skip
         choice = policy("final+td45", SAMPLE, NOTHING, td, SECONDS, None, fallback)
@@ -1066,9 +1066,12 @@ class TestScore(unittest.TestCase):
         seen = []
 
         def prioritize(cands: list[str], file: io.StringIO) -> mock.Mock:
-            from tools.testing.target_determination.heuristics import utils
-
-            seen.append(utils.query_changed_files())
+            # What td_replay patched into the heuristics modules for this sample.
+            mod = {m: sys.modules[td_replay.H + m] for m in ("historical_class_failure_correlation", "previously_failed_in_pr", "mentioned_in_pr", *td_replay.CHANGED_FILES_READERS)}  # fmt: skip
+            roots = {mod[m].REPO_ROOT for m in ("utils", "historical_class_failure_correlation")}  # fmt: skip
+            changed = [mod[m].query_changed_files() for m in td_replay.CHANGED_FILES_READERS]  # fmt: skip
+            prev = mod["previously_failed_in_pr"].get_previous_failures()
+            seen.append((roots, prev, mod["mentioned_in_pr"].get_git_commit_info(), changed))  # fmt: skip
             # A heuristic that raised has no results; get_aggregated_priorities leaves a trial_mode one out anyway.
             ran = [h.name for h in heuristics.HEURISTICS if not h.trial_mode]
             if "test_e" not in cands:
@@ -1081,8 +1084,9 @@ class TestScore(unittest.TestCase):
             stats.mkdir()
             for a in score.STATS_ARTIFACTS:
                 (stats / a).write_text("{}")
-            broken = {**SAMPLE, "candidates": ["test_a", "test_b"]}
-            data = write_data(d, {"test-times.json": {"linux": {"default": {"test_a": 100.0, "test_c": 10.0}}}, "samples/a.json": SAMPLE, "samples/b.json": broken, "td/b.json": {}})  # fmt: skip
+            a = {**SAMPLE, "previous_failures": ["test_c"]}
+            broken = {**SAMPLE, "candidates": ["test_a", "test_b"], "changed_files": ["torch/bar.py", "docs/b.md"], "title": "u", "body": "v"}  # fmt: skip
+            data = write_data(d, {"test-times.json": {"linux": {"default": {"test_a": 100.0, "test_c": 10.0}}}, "samples/a.json": a, "samples/b.json": broken, "td/b.json": {}})  # fmt: skip
 
             def replay(*argv: str) -> None:
                 with (
@@ -1095,7 +1099,9 @@ class TestScore(unittest.TestCase):
 
             with self.assertRaisesRegex(SystemExit, r"a heuristic raised on 1 samples, left for a rerun: \['b'\]"):  # fmt: skip
                 replay()
-            self.assertEqual(seen, [["torch/foo.py"]] * 2)
+            n, root = len(td_replay.CHANGED_FILES_READERS), stats.absolute().parent
+            expected = [({root}, {"test_c"}, "t\n", [["torch/foo.py"]] * n), ({root}, set(), "u\nv", [["torch/bar.py", "docs/b.md"]] * n)]  # fmt: skip
+            self.assertEqual(seen, expected)
             self.assertFalse((data / "td/b.json").exists())
             td = json.loads((data / "td/a.json").read_text())
             self.assertEqual((td["scored"], td["top25"], td["top25_cfg"]), (["test_b", "test_a"], ["test_a", "test_b"], {"default": ["test_a", "test_b"]}))  # fmt: skip
@@ -1141,6 +1147,33 @@ class TestScore(unittest.TestCase):
                 rows = score.score(data, ["a"], ["m"], ["model"], True, data / "samples", data / "td", "")  # fmt: skip
         self.assertEqual([(x["id"], x["pairs"]) for x in rows], [("a", 1)])
         self.assertIn("scored 1 of 1 ids with truth jobs that record no workflow", err.getvalue())  # fmt: skip
+
+    def test_score_hedge_over_the_fallback_job(self) -> None:
+        # test_d failed in rare, which no job records, so only the fallback job's rare times let final+td hedge it.
+        jobs = {"test_a": [["pull", "linux / test (default, 1, 2, linux.2xlarge)"]], "test_d": [["pull", "linux / test (rare, 1, 1, linux.2xlarge)"]]}  # fmt: skip
+        sample = {**SAMPLE, "truth": ["test_a", "test_d"], "truth_strong": ["test_a", "test_d"], "truth_jobs": jobs}  # fmt: skip
+        times = {
+            "linux": {"default": {"test_a": 100.0, "test_b": 100.0, "test_c": 100.0}, "slow": {"test_a": 50.0, "test_b": 50.0}},
+            "linux-cuda": {"default": {"test_a": 40.0}},
+            "default": {"rare": {"test_c": 90.0, "test_d": 10.0}},
+        }  # fmt: skip
+        files = {
+            "test-times.json": times,
+            "samples/a.json": sample,
+            "td/a.json": {"scored": ["test_d", "test_b"], "top25": [], "top25_cfg": {"default": ["test_b"]}},
+            "results/m/a.json": {"out": {"tests": [{"file": "test_a"}]}, "error": None, "cost_usd": 0.1},
+        }  # fmt: skip
+        # slow runs no TD, so its seconds are not priced.
+        ci = {True: {("pull", "linux", "default"), ("pull", "linux", "rare")}, False: {("pull", "linux", "slow")}}  # fmt: skip
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch_ci_jobs(ci),
+            mock.patch.object(score, "grep_at", return_value=[]),
+        ):
+            data = write_data(d, files)
+            rows = score.score(data, ["a"], ["m"], ["final+td"], True, data / "samples", data / "td", "")  # fmt: skip
+        fields = ("policy", "pairs", "hit", "missed", "cpu", "gpu")
+        self.assertEqual([tuple(x[k] for k in fields) for x in rows], [("final+td", 2, 2, [], 100 / 300, 1.0)])  # fmt: skip
 
     def test_score_main(self) -> None:
         row = {"tag": "m", "policy": "final+td", "kind": "pr", "pairs": 1, "hit": 1, "cpu": 0.5, "gpu": 0.0, "run_all": False, "files": 3, "cost_usd": 0.1, "error": False}  # fmt: skip
