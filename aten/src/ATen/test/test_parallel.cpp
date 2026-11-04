@@ -4,10 +4,14 @@
 #include <ATen/DLConvertor.h>
 #include <ATen/Parallel.h>
 #include <ATen/ParallelFuture.h>
+#include <c10/core/thread_pool.h>
 
 #include <atomic>
 #include <iostream>
 #include <memory>
+#if defined(__linux__)
+#include <sched.h>
+#endif
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string.h>
 #include <sstream>
@@ -156,3 +160,34 @@ TEST(TestParallel, IntraOpLaunchFuture) {
 
   ASSERT_TRUE(v1 == 1 && v2 == 2);
 }
+
+#if defined(__linux__)
+TEST(TestParallel, DefaultNumThreadsCachedAcrossAffinityChange) {
+  cpu_set_t orig_set;
+  CPU_ZERO(&orig_set);
+  if (sched_getaffinity(0, sizeof(orig_set), &orig_set) != 0 ||
+      CPU_COUNT(&orig_set) < 2) {
+    return;
+  }
+
+  const size_t initial_default = c10::TaskThreadPoolBase::defaultNumThreads();
+
+  int first_cpu = -1;
+  for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
+    if (CPU_ISSET(cpu, &orig_set)) {
+      first_cpu = cpu;
+      break;
+    }
+  }
+  ASSERT_TRUE(first_cpu >= 0);
+
+  cpu_set_t single_cpu_set;
+  CPU_ZERO(&single_cpu_set);
+  CPU_SET(first_cpu, &single_cpu_set);
+  ASSERT_EQ(sched_setaffinity(0, sizeof(single_cpu_set), &single_cpu_set), 0);
+
+  const size_t after_shrink = c10::TaskThreadPoolBase::defaultNumThreads();
+  ASSERT_EQ(sched_setaffinity(0, sizeof(orig_set), &orig_set), 0);
+  ASSERT_EQ(after_shrink, initial_default);
+}
+#endif
