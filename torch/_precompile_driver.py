@@ -51,10 +51,15 @@ if TYPE_CHECKING:
     _PACKAGE: str = ""
     # False as emitted; load(allow_serve_time_compiles=True) flips it to True.
     _ALLOW_SERVE_TIME_COMPILES: bool = False
+    # The capture's normalized mode/options, which a serve-time compile uses;
+    # None when they have no literal form.
+    INDUCTOR_OPTIONS: dict[str, object] | None = {}
     BACKEND: str = ""
     FN_NAME: str = ""
+    ENTRY_MODULE: str = ""
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
     TORCH_VERSION: str = ""
+    SERVED_MODULES: tuple[str, ...] = ()
     # Section 0 of an artifact that calls custom ops.
     CUSTOM_OP_MODULES: tuple[str, ...] = ()
     CUSTOM_OPS: tuple[tuple[str, str], ...] = ()
@@ -81,13 +86,16 @@ if TYPE_CHECKING:
     def call(flat_inputs: list[object]) -> list[object]: ...
 
 
-def _import_custom_op_modules():
+def _import_custom_op_modules(served=(), import_served=None):
     """Import the modules registering the custom ops the graphs call, then check
     that every op in CUSTOM_OPS and the CUSTOM_OP_KERNELS it had at capture are
     registered, and that every module in CUSTOM_OP_OVERRIDE_MODULES imported and
     still registers the active kernel it did at capture. Emitted as section 0 and
-    called at exec time."""
+    called at exec time. The modules in ``served`` are imported with
+    ``import_served``, which fails the load if they do not import."""
+    import contextlib
     import importlib
+    import importlib.util
     import os
     import re
     import sys
@@ -96,16 +104,46 @@ def _import_custom_op_modules():
     import torch
 
     import_errors = {}
+
+    # find_spec imports a dotted name's parents, so this follows the ordered imports.
+    # None when the lookup raised, which import_served then reports.
+    def found(module):
+        try:
+            return module != "__main__" and (
+                module in sys.modules or importlib.util.find_spec(module) is not None
+            )
+        except ModuleNotFoundError:
+            return False
+        except Exception:
+            return None
+
+    # The entry may register a served module find_spec cannot locate (a plugin
+    # loader), so a module not found yet is looked up again after the entry imports.
+    # The module's own import then reports a failure, not the entry's.
+    def import_or_entry(module, import_served):
+        if found(module) is False and ENTRY_MODULE in served:
+            with contextlib.suppress(Exception):
+                import_served(ENTRY_MODULE)
+        import_served(module)
+
     # A module imported from inside another finished first, so the order alone
     # would import an override nested in the module it overrides before that one.
     owners = {m for o in CUSTOM_OP_OVERRIDE_MODULES.values() for m in o.values()}
     for module in sorted(CUSTOM_OP_MODULES, key=lambda m: m in owners):
+        if import_served is not None and module in served:
+            import_or_entry(module, import_served)
+            continue
         try:
             importlib.import_module(module)
-        # Not just ImportError: e.g. importing torch.distributed.device_mesh before
-        # torch.distributed.tensor raises ValueError.
+        # Not just ImportError: a module can raise anything while it registers ops.
         except Exception as e:
             import_errors[module] = e
+    # A served module that does not import fails the load here, not at the op
+    # check, which would report its ops missing. A __main__ entry is refused
+    # before section 0 runs.
+    for module in served:
+        if not found(module) and import_served is not None:
+            import_or_entry(module, import_served)
     missing = []
     has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
     for name, overload in CUSTOM_OPS:
@@ -119,19 +157,25 @@ def _import_custom_op_modules():
             if not has_kernel(qualname, key):
                 missing.append(f"{qualname} ({key} kernel)")
     # Another module's kernel under the same key would pass the check above, so
-    # the active kernel must be registered from the overriding module's file.
+    # the active kernel must be registered from the overriding module's file, or
+    # by a register_kernel or torch.library.impl call from its body.
+    from torch._library.utils import kernel_callers
+
     overridden = []
     real = os.path.realpath
     override_errors = set()
     for qualname, owners in CUSTOM_OP_OVERRIDE_MODULES.items():
         dump = torch._C._dispatch_dump(qualname)
+        callers = kernel_callers(qualname)
         for key, module in owners.items():
             pattern = rf"^{key}(?:\[alias\])?: registered at (.+):\d+ ::"
             active = re.search(pattern, dump, re.MULTILINE)
             path = getattr(sys.modules.get(module), "__file__", None)
             if module in import_errors:
                 override_errors.add(module)
-            elif not (active and path and real(active[1]) == real(path)):
+            elif callers.get(key) != module and not (
+                active and path and real(active[1]) == real(path)
+            ):
                 overridden.append(f"{qualname} ({key} kernel of {module})")
     if missing or override_errors or overridden:
         # Lazily, as _fail does; _fail is emitted after section 0 and cannot chain.
@@ -567,16 +611,27 @@ def _build_multigraph_forward():
             )
         try:
             return importlib.import_module(module_name)
-        except ImportError as _e:
-            # The torch-build / environment lock, surfaced per the documented
-            # contract rather than as a raw ModuleNotFoundError.
+        # Not just ImportError, as in section 0.
+        except Exception as _e:
+            hint = ""
+            if isinstance(_e, (ImportError, AttributeError)):
+                # The torch-build / environment lock, surfaced per the documented
+                # contract rather than as a raw ModuleNotFoundError.
+                hint = (
+                    " It was produced against a different torch build or "
+                    "environment; regenerate the artifact in this one."
+                )
             raise _PrecompileError(
                 f"precompile: this artifact references module {module_name!r}, "
-                f"which is not importable here ({_e}). It was produced against a "
-                f"different torch build or environment; regenerate the artifact "
-                f"in this one."
+                f"which is not importable here ({_e}).{hint}"
             ) from _e
 
+    if "_import_custom_op_modules" in globals():
+        # Section 0 also lists them in case they register its ops; their failure
+        # fails the load, so it is not warned about as a custom op module's.
+        if "__main__" in SERVED_MODULES:
+            _import("__main__")  # Refused before section 0 imports anything.
+        _import_custom_op_modules(SERVED_MODULES, _import)
     frames = pickle.loads(base64.b64decode(_FRAMES))
     backends = pickle.loads(base64.b64decode(_BACKENDS))
     entry_binding = pickle.loads(base64.b64decode(_ENTRY_BINDING))
@@ -781,7 +836,7 @@ def _build_multigraph_forward():
     opened = set()
     for _frame in frames:
         module = _frame["python_module"]
-        # The frames _make_dispatcher opens a scope for.
+        # torch._precompile._opens_scope: the frames _make_dispatcher opens a scope for.
         if _frame["variants"] or (_frame["trivial"] and _frame["resume_names"]):
             opened.add(module)
         for _name in _frame["resume_names"] if module in opened else ():
@@ -865,18 +920,34 @@ def _build_installed_forward():
             f"cannot load on torch {torch.__version__}: it carries pickled Dynamo "
             f"state. Regenerate the artifact under the serving torch."
         )
-    package_state = pickle.loads(base64.b64decode(_PACKAGE))
-    dynamo = package_state["dynamo"]
-    module_name = dynamo.codes[0].python_module
-    if module_name == "__main__":
+    if ENTRY_MODULE == "__main__":
         raise _PrecompileError(
             "precompile: this artifact was captured from a function defined in the "
             "capturing script's __main__ module, which no other process can import. "
             "Regenerate the artifact from a function defined in an importable module."
         )
+    if "_import_custom_op_modules" in globals():
+
+        def _import_served(module_name):
+            try:
+                importlib.import_module(module_name)
+            # Not just ImportError, as in section 0.
+            except Exception as _e:
+                raise _PrecompileError(
+                    f"precompile: this installed artifact serves frames of module "
+                    f"{module_name!r}, which is not importable here ({_e})."
+                ) from _e
+
+        # Section 0 also lists them in case they register its ops; their failure
+        # fails the load, so it is not warned about as a custom op module's.
+        _import_custom_op_modules(SERVED_MODULES, _import_served)
+    package_state = pickle.loads(base64.b64decode(_PACKAGE))
+    dynamo = package_state["dynamo"]
+    module_name = dynamo.codes[0].python_module
     try:
         fn = operator.attrgetter(FN_NAME)(importlib.import_module(module_name))
-    except (ImportError, AttributeError) as _e:
+    # Not just ImportError, as in section 0.
+    except Exception as _e:
         raise _PrecompileError(
             f"precompile: this installed artifact serves {module_name}.{FN_NAME}, "
             f"which is not importable here ({_e})."
@@ -907,9 +978,12 @@ def _build_installed_forward():
         # A serve-time compile is not part of the artifact: record it nowhere.
         # caching_precompile would make optimize(package=None) create its own
         # package, which context(fn) fills from the on-disk Dynamo cache.
+        backend: object = BACKEND
+        if _ALLOW_SERVE_TIME_COMPILES and INDUCTOR_OPTIONS:
+            backend = torch._TorchCompileInductorWrapper(None, INDUCTOR_OPTIONS, None)
         with torch._dynamo.config.patch(caching_precompile=False):
             context = torch._dynamo.optimize(
-                BACKEND, package=None if _ALLOW_SERVE_TIME_COMPILES else package
+                backend, package=None if _ALLOW_SERVE_TIME_COMPILES else package
             )
             if not isinstance(context, OptimizeContext):
                 raise _PrecompileError(
