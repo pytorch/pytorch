@@ -6,7 +6,6 @@ developers do not have direct ClickHouse credentials.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import re
 import subprocess
@@ -20,12 +19,12 @@ GCX = REPO / ".agents/skills/ci-metrics/gcx-wrapper.sh"
 CLICKHOUSE_UID = "ceczcsck1b20wb"
 TIMEOUT = 600
 ATTEMPTS = 3
-TRANSIENT = re.compile(r"timed? ?out|throttl|rate.?limit|connection|temporar|\b(429|500|502|503|504)\b", re.IGNORECASE)  # fmt: skip
+# Server-side "Timeout exceeded" is deterministic, so it is not here; code 202 is "Too many simultaneous queries".
+TRANSIENT = re.compile(r"timed out|throttl|rate.?limit|connection (reset|refused|closed)|temporar|too many simultaneous queries|\b(429|500|502|503|504)\b", re.IGNORECASE)  # fmt: skip
 
 
 def query(sql: str) -> list[dict]:
-    """The rows of `sql`. A timeout or a transient failure is retried up to ATTEMPTS times; any other failure raises at once."""
-    err = ""
+    """The rows of `sql`. A failure whose stderr is transient is retried up to ATTEMPTS times; a local timeout, malformed output or any other failure raises at once."""
     for attempt in range(ATTEMPTS):
         if attempt:
             time.sleep(30 * attempt)
@@ -34,15 +33,18 @@ def query(sql: str) -> list[dict]:
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
         except subprocess.TimeoutExpired:
             err = f"attempt {attempt + 1} of {ATTEMPTS} timed out after {TIMEOUT}s"
-            continue
-        m = re.search(r'\{\s*"columns"', p.stdout)
-        if p.returncode == 0 and m:
-            with contextlib.suppress(ValueError):
+            break
+        if p.returncode == 0:
+            try:
+                if (m := re.search(r'\{\s*"columns"', p.stdout)) is None:
+                    raise ValueError("no JSON result")
                 d = json.JSONDecoder().raw_decode(p.stdout, m.start())[0]
                 cols = [c["name"] for c in d["columns"]]
                 return [dict(zip(cols, r)) for r in d["rows"] or []]
-        out = p.stdout[-2000:] + p.stderr[-2000:]
-        err = f"attempt {attempt + 1} of {ATTEMPTS} exited with code {p.returncode}: {out}"
-        if not TRANSIENT.search(out):
+            except (ValueError, KeyError, TypeError):
+                err = f"attempt {attempt + 1} of {ATTEMPTS} returned no result: {p.stdout[-2000:]}"
+                break
+        err = f"attempt {attempt + 1} of {ATTEMPTS} exited with code {p.returncode}: {p.stderr[-2000:] or p.stdout[-2000:]}"  # fmt: skip
+        if not TRANSIENT.search(p.stderr or p.stdout):
             break
     raise RuntimeError(f"ClickHouse query failed, {err}\nSQL: {sql[:500]}")

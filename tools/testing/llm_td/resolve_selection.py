@@ -3,8 +3,9 @@
 Runs in the target-determination job, which uploads the result for the test
 jobs of the same run, so every shard of the run applies the same selection.
 The selection comes from the newest llm-td.yml run for the PR head. It is
-enforced only while the PR is labeled ci-llm-td and not ci-no-td, and only in
-the workflows where run_test.py enables TD (TD_ENABLED). Then, while that run
+enforced only while the PR is labeled ci-llm-td and not ci-no-td, only if the
+PR's author is a member or collaborator (TRUSTED_AUTHORS), and only in the
+workflows where run_test.py enables TD (TD_ENABLED). Then, while that run
 is pending, this waits for it, polling with backoff up to once a minute until
 WAIT_SECONDS have passed (plus at most one API call), and takes its selection
 only if it succeeded. Otherwise the newest successful run's selection is used
@@ -36,6 +37,9 @@ sys.path.remove(str(REPO_ROOT))
 WAIT_SECONDS = 600
 PENDING = {"queued", "in_progress", "waiting", "requested", "pending"}
 WORKFLOW = ".github/workflows/llm-td.yml"
+# Anyone can open a PR from a branch of this repository and write its title
+# and description, which the selector reads, so the label is not enough.
+TRUSTED_AUTHORS = {"OWNER", "MEMBER", "COLLABORATOR"}
 
 
 def fetch(url: str) -> bytes:
@@ -120,6 +124,7 @@ def main(output: Path = Path(LLM_TD_SELECTION_FILE)) -> None:
     labels = {label["name"] for label in info["labels"]}
     enforce = (
         os.environ.get("TD_ENABLED") == "true"
+        and info.get("author_association") in TRUSTED_AUTHORS
         and "ci-llm-td" in labels
         and "ci-no-td" not in labels
     )

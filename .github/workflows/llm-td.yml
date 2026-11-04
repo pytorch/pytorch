@@ -6,8 +6,9 @@ name: llm-td
 # The target-determination job of each test workflow resolves one selection per
 # workflow run from this workflow's newest run for the head (resolve_selection.py).
 # --enforce marks a selection enforceable unless the selector failed; it is
-# enforced only while the PR is labeled ci-llm-td, waiting for a pending run
-# first, and run_test.py applies it only where TD is enabled.
+# enforced only while the PR is labeled ci-llm-td and its author is a member or
+# collaborator, waiting for a pending run first, and run_test.py applies it only
+# where TD is enabled.
 
 on:
   pull_request_target:
