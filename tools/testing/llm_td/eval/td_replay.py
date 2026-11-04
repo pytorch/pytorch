@@ -160,7 +160,7 @@ def main() -> None:
                 failed.append(path.stem)
                 done.unlink(missing_ok=True)
                 continue
-            scored = [t.test_file for score, t in tp._traverse_scores() if score > 0]
+            scored = [t.test_file for t in tp.get_all_tests() if tp.get_score(t) > 0]
             write_json(done, {
                 "inputs": inputs,
                 "stats": stats,

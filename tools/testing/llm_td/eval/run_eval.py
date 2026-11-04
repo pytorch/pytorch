@@ -9,7 +9,7 @@ the eval's own concurrency provokes, are retried; a call that still fails after
 ATTEMPTS is written as an error, so it is scored as the failed call it would be
 in CI, which calls the model once. Timeouts are final. A tag's results must all
 come from one --model, --effort and --agentic, and from what the model is sent
-for the sample now (see prompt_sha). Samples that
+for the sample now (see score.prompt_sha), which score.py checks too. Samples that
 select_tests answers without the model (see score.unasked) are skipped. With
 --agentic, each worker checks the sample's head out into its own worktree
 under DIR/worktrees/<tag> and lets the model Read/Grep/Glob it.
@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures as cf
-import hashlib
 import json
 import re
 import subprocess
@@ -28,15 +27,8 @@ import traceback
 from pathlib import Path
 
 from tools.testing.llm_td.eval import REPO, write_json
-from tools.testing.llm_td.eval.score import unasked
-from tools.testing.llm_td.select_tests import (
-    build_prompt,
-    query_model,
-    QUERY_TIMEOUT,
-    SCHEMA,
-    SYSTEM_PROMPT,
-    test_minutes,
-)
+from tools.testing.llm_td.eval.score import prompt_sha, sample_prompt, unasked
+from tools.testing.llm_td.select_tests import query_model, QUERY_TIMEOUT, test_minutes
 
 
 TIMED_OUT = f"model call timed out after {QUERY_TIMEOUT}s"
@@ -63,15 +55,6 @@ def checkout(root: Path, slot: int, sha: str) -> str:
             capture_output=True,
         )
     return str(wt)
-
-
-def sample_prompt(sample: dict, minutes: dict) -> str:
-    return build_prompt(sample["title"], sample["body"] or "", sample["diffstat"], sample["diff"], sample["candidates"], minutes)  # fmt: skip
-
-
-def prompt_sha(prompt: str) -> str:
-    """A hash of everything the model is sent: the system prompt, SCHEMA and `prompt`."""
-    return hashlib.sha256(json.dumps([SYSTEM_PROMPT, SCHEMA, prompt]).encode()).hexdigest()  # fmt: skip
 
 
 def run_one(
