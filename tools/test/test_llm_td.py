@@ -207,7 +207,8 @@ class TestSelection(unittest.TestCase):
         self.assertEqual((sel.files, sel.run_all), ({"test_nn", "dynamo/test_misc"}, False))  # fmt: skip
         many = [f"test/data{i}.json" for i in range(selection.MAX_DATA_FILES + 1)]
         sel = self.select_in_tree(sources, candidates, many)
-        self.assertEqual((sel.run_all, sel.error), (True, None))
+        reason = f"more than {selection.MAX_DATA_FILES} edited files under test/ are not tests"
+        self.assertEqual((sel.run_all, sel.reason, sel.error), (True, reason, None))
 
     def test_endless_import_chain_runs_all(self) -> None:
         calls: list[str] = []
@@ -248,8 +249,11 @@ class TestSelection(unittest.TestCase):
         for changed in ("test/inductor_expected_failures/TestGone.test_x", "test/inductor_skips/TestGone.test_x", "test/inductor_skips/TestNN.test_x.y"):  # fmt: skip
             sel = self.select_in_tree(sources, CANDIDATES, [changed])
             self.assertEqual((sel.run_all, sel.error), (True, None), changed)
-        many = [f"test/dynamo_skips/TestNN{i}.test_x" for i in range(selection.MAX_FAILURE_LIST_CLASSES + 1)]  # fmt: skip
-        self.assertEqual(self.select_in_tree(sources, CANDIDATES, many).sweeps, {"dynamo_wrapped"})  # fmt: skip
+        n = selection.MAX_FAILURE_LIST_CLASSES + 1
+        many_sources = sources | {"test_nn.py": "".join(f"class TestNN{i}(TestCase):\n" for i in range(n))}  # fmt: skip
+        many = [f"test/dynamo_skips/TestNN{i}.test_x" for i in range(n)]
+        sel = self.select_in_tree(many_sources, CANDIDATES, many)
+        self.assertEqual((sel.run_all, sel.files, sel.sweeps), (False, set(), {"dynamo_wrapped"}))  # fmt: skip
         # Without a grep, the classes cannot be looked up.
         sel = Selection.from_model_output({"tests": []}, CANDIDATES, ["test/dynamo_skips/TestNN.test_x"])  # fmt: skip
         self.assertEqual(sel.sweeps, {"dynamo_wrapped"})
