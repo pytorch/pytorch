@@ -1864,6 +1864,8 @@ class DeviceCachingAllocator {
     const auto allocation_context = has_active_captures
         ? capture_tracker_.allocationContext(stream)
         : CUDAGraphMemory::AllocationContext{};
+    const cudaStream_t block_reuse_stream =
+        has_active_captures ? capture_tracker_.reuseStream(stream) : stream;
     prepare_for_malloc(context, stream, has_active_captures);
 
     size_t size = round_size(orig_size);
@@ -1877,7 +1879,7 @@ class DeviceCachingAllocator {
     AllocParams params(
         device_id,
         size,
-        stream,
+        block_reuse_stream,
         &pool,
         alloc_size,
         is_expandable_segments_active);
@@ -2178,13 +2180,15 @@ class DeviceCachingAllocator {
     prepare_for_malloc(context, stream, has_active_captures);
 
     const size_t size = round_size(orig_size);
+    const cudaStream_t block_reuse_stream =
+        has_active_captures ? capture_tracker_.reuseStream(stream) : stream;
 
     // The same block pool is used for both prefix block and requested block.
     // Prefix block may have a significantly larger size than requested block
     // when multiple small blocks coalesced into a large prefix block.
     auto& pool = get_pool(size, stream);
     Block* containing_block =
-        get_free_block_containing_address(pool, size, stream, addr);
+        get_free_block_containing_address(pool, size, block_reuse_stream, addr);
     if (!containing_block) {
       return nullptr;
     }
@@ -2211,7 +2215,7 @@ class DeviceCachingAllocator {
       AllocParams prefix_params(
           device_id,
           prefix_size,
-          stream,
+          block_reuse_stream,
           &pool,
           get_allocation_size(prefix_size),
           is_expandable_segments_active);
@@ -2231,7 +2235,7 @@ class DeviceCachingAllocator {
     AllocParams requested_params(
         device_id,
         size,
-        stream,
+        block_reuse_stream,
         &pool,
         get_allocation_size(size),
         is_expandable_segments_active);
@@ -2730,6 +2734,13 @@ class DeviceCachingAllocator {
       // ignore uses on the allocation stream, since those don't require any
       // special synchronization
       return;
+    }
+    if (C10_UNLIKELY(capture_tracker_.hasActiveCaptures())) {
+      if (capture_tracker_.reuseStream(stream.stream()) == block->stream) {
+        // Ignore uses in the allocation's reuse domain, since they don't
+        // require separate stream-lifetime tracking.
+        return;
+      }
     }
     block->stream_uses.insert(stream);
     if (C10_UNLIKELY(is_capture_context())) {
