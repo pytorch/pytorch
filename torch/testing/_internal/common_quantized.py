@@ -592,6 +592,45 @@ def _bfloat16_to_float4_e2m1fn_x2(x):
     return x
 
 
+# exponent and mantissa bits of `torch.float6_e2m3fn_x4`
+FP6_E2M3_EBITS, FP6_E2M3_MBITS = 2, 3
+
+
+def pack_uint6(codes: Tensor) -> Tensor:
+    """Packs 6-bit codes (uint8, [..., 4n]) into bytes (uint8, [..., 3n]).
+
+    Each group of 3 bytes is a little-endian 24-bit word whose bits [6i, 6i + 6)
+    hold code i of the group, which is the `torch.float6_e2m3fn_x4` layout.
+    """
+    if codes.shape[-1] % 4 != 0:
+        raise AssertionError(f"Expected shape[-1] to be divisible by 4, got {codes.shape[-1]}")
+    c = codes.to(torch.int32).unflatten(-1, (-1, 4))
+    word = c[..., 0] | c[..., 1] << 6 | c[..., 2] << 12 | c[..., 3] << 18
+    packed = torch.stack([(word >> (8 * k)) & 0xFF for k in range(3)], dim=-1)
+    return packed.to(torch.uint8).flatten(-2)
+
+
+def unpack_uint6(packed: Tensor) -> Tensor:
+    """Inverse of `pack_uint6`: bytes (uint8, [..., 3n]) to codes (uint8, [..., 4n])."""
+    if packed.shape[-1] % 3 != 0:
+        raise AssertionError(f"Expected shape[-1] to be divisible by 3, got {packed.shape[-1]}")
+    b = packed.to(torch.int32).unflatten(-1, (-1, 3))
+    word = b[..., 0] | b[..., 1] << 8 | b[..., 2] << 16
+    codes = torch.stack([(word >> (6 * i)) & 0x3F for i in range(4)], dim=-1)
+    return codes.to(torch.uint8).flatten(-2)
+
+
+def _float32_to_float6_e2m3fn_x4(x: Tensor) -> Tensor:
+    """Rounds to nearest even, saturating at +-7.5, and packs along the last dim."""
+    codes = _f32_to_floatx_unpacked(x, FP6_E2M3_EBITS, FP6_E2M3_MBITS)
+    return pack_uint6(codes).view(torch.float6_e2m3fn_x4)
+
+
+def _float6_e2m3fn_x4_to_float32(x: Tensor) -> Tensor:
+    codes = unpack_uint6(x.unsqueeze(-1).view(torch.uint8).flatten(-2))
+    return _floatx_unpacked_to_f32(codes, FP6_E2M3_EBITS, FP6_E2M3_MBITS)
+
+
 def data_to_nvfp4_scale(x, block_size=16):
     """Compute per-block E4M3 scales for NVFP4 test inputs."""
     orig_shape = x.shape

@@ -46,6 +46,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantized import (
     _bfloat16_to_float4_e2m1fn_x2,
+    _float6_e2m3fn_x4_to_float32,
     data_to_nvfp4_scale,
     from_blocked,
     to_blocked as to_blocked_reference,
@@ -1488,6 +1489,17 @@ class FlexGemmTestCase(TestCase):
         w = self.makeTensor(len(seqlens), self.N, self.K, device=device)
         return x, w.transpose(-2, -1), offs
 
+    def quantizeMxfp6(self, value):
+        """bf16 [R, K] -> (float6_e2m3fn_x4 [R, K/4], e8m0 [R, K/32], dequantized fp32)."""
+        from torch._vendor.quack.blockscaled.quantize import to_mxfp6_e2m3_packed
+
+        packed, scale = to_mxfp6_e2m3_packed(value, 32)
+        quantized = packed.view(torch.float6_e2m3fn_x4)
+        dequantized = _float6_e2m3fn_x4_to_float32(
+            quantized
+        ) * scale.float().repeat_interleave(32, dim=-1)
+        return quantized, scale, dequantized
+
     def makeBlockScaledMm(
         self, format_name, m, n, k, *, global_scales=None, device="cuda"
     ):
@@ -1496,12 +1508,15 @@ class FlexGemmTestCase(TestCase):
         global_a, global_b = (None, None) if global_scales is None else global_scales
         a = torch.randn(m, k, device=device, dtype=torch.bfloat16)
         b = torch.randn(n, k, device=device, dtype=torch.bfloat16) / math.sqrt(k)
-        operands, scales = [], []
+        operands, scales, dequantized = [], [], []
         for value, global_scale in zip((a, b), (global_a, global_b)):
             if global_scale is not None:
                 value = value.float() / global_scale
             if format_name == "mxfp8_e4m3":
                 scale, quantized = to_mxfp(value)
+            elif format_name == "mxfp6_e2m3_packed":
+                quantized, scale, values = self.quantizeMxfp6(value)
+                dequantized.append(values)
             else:
                 scale = data_to_nvfp4_scale(value)
                 normalized = value.unflatten(-1, (-1, 16)) / scale.float().unsqueeze(-1)
@@ -1515,9 +1530,9 @@ class FlexGemmTestCase(TestCase):
         a, b = operands[0], operands[1].t()
         scale_a, scale_b = scales
         block_recipe = (
-            F.ScalingType.BlockWise1x32
-            if format_name == "mxfp8_e4m3"
-            else F.ScalingType.BlockWise1x16
+            F.ScalingType.BlockWise1x16
+            if format_name == "nvfp4"
+            else F.ScalingType.BlockWise1x32
         )
         recipes, swizzles = [block_recipe], [F.SwizzleType.SWIZZLE_32_4_4]
         if global_scales is not None:
@@ -1530,7 +1545,11 @@ class FlexGemmTestCase(TestCase):
             "swizzle_b": swizzles,
             "output_dtype": torch.bfloat16,
         }
-        reference = F.scaled_mm(a, b, scale_a, scale_b=scale_b, **gemm_kwargs)
+        if format_name == "mxfp6_e2m3_packed":
+            # No eager MXFP6 kernel exists, so the reference multiplies dequantized values.
+            reference = (dequantized[0] @ dequantized[1].t()).bfloat16()
+        else:
+            reference = F.scaled_mm(a, b, scale_a, scale_b=scale_b, **gemm_kwargs)
         return a, b, scale_a, scale_b, gemm_kwargs, reference
 
     def assertFlexGemmGeneratedCode(self, code, *checks):
@@ -2913,17 +2932,39 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ("missing_backend", NotImplementedError),
             ("TRITON", NotImplementedError),
             ("NVGEMM", NotImplementedError),
+            ("fp6_blockwise1x16", NotImplementedError),
+            ("fp6_mixed_data", NotImplementedError),
+            ("fp6_scale_dtype", NotImplementedError),
+            ("fp6_n_major", NotImplementedError),
+            ("fp6_eager", NotImplementedError),
         ),
         name_fn=lambda case: case[0],
     )
     def test_scaled_mm_eager_rejects_invalid_inputs(self, case):
         case, error = case
         nvfp4 = case in ("global_dtype", "global_shape")
-        dtype, scale_dtype, k, scale_size = (
-            (torch.float4_e2m1fn_x2, torch.float8_e4m3fn, 128, 4096)
-            if nvfp4
-            else (torch.float8_e4m3fn, torch.float8_e8m0fnu, 256, 2048)
-        )
+        if nvfp4:
+            dtype, scale_dtype, k, scale_size = (
+                torch.float4_e2m1fn_x2,
+                torch.float8_e4m3fn,
+                128,
+                4096,
+            )
+        elif case.startswith("fp6_"):
+            # K = 256 values packed as 64 x4 elements
+            dtype, scale_dtype, k, scale_size = (
+                torch.float6_e2m3fn_x4,
+                torch.float8_e8m0fnu,
+                64,
+                2048,
+            )
+        else:
+            dtype, scale_dtype, k, scale_size = (
+                torch.float8_e4m3fn,
+                torch.float8_e8m0fnu,
+                256,
+                2048,
+            )
         a = torch.empty(256, k, dtype=dtype)
         b = torch.empty_like(a).t()
         scale_a = [torch.empty(scale_size, dtype=scale_dtype)]
@@ -2986,6 +3027,15 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 kernel_options = None
             case "TRITON" | "NVGEMM":
                 kernel_options["backend"] = case
+            case "fp6_blockwise1x16":
+                gemm_kwargs["scale_recipe_a"] = [F.ScalingType.BlockWise1x16]
+                gemm_kwargs["scale_recipe_b"] = [F.ScalingType.BlockWise1x16]
+            case "fp6_mixed_data":
+                b = torch.empty(256, 256, dtype=torch.float8_e4m3fn).t()
+            case "fp6_scale_dtype":
+                scale_a = [torch.empty(scale_size, dtype=torch.float8_e4m3fn)]
+            case "fp6_n_major":
+                b = torch.empty(k, 256, dtype=dtype)
         args = (a, b, scale_a, scale_b)
         if case == "argument_count":
             args = args[:3]
@@ -8394,6 +8444,8 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
             ("mxfp8_e4m3", False),
             ("nvfp4", False),
             ("mxfp8_e4m3", True),
+            ("mxfp6_e2m3_packed", False),
+            ("mxfp6_e2m3_packed", True),
         ),
         name_fn=lambda case: f"{case[0]}_tuned_{case[1]}",
     )
@@ -8497,7 +8549,13 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
 
     @parametrize(
         "case",
-        (("mxfp8_e4m3", False), ("mxfp8_e4m3", True), ("nvfp4", False)),
+        (
+            ("mxfp8_e4m3", False),
+            ("mxfp8_e4m3", True),
+            ("nvfp4", False),
+            ("mxfp6_e2m3_packed", False),
+            ("mxfp6_e2m3_packed", True),
+        ),
         name_fn=lambda case: f"{case[0]}_local_reduce_{case[1]}",
     )
     def test_scaled_mm_output_contraction_and_local_reduce(self, device, case):
@@ -8553,7 +8611,7 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
             self.assertNotIn("operand2", code)
         self.assertNotIn("aten._scaled_mm_v2", code)
 
-    @parametrize("format_name", ("mxfp8_e4m3", "nvfp4"))
+    @parametrize("format_name", ("mxfp8_e4m3", "nvfp4", "mxfp6_e2m3_packed"))
     def test_scaled_mm_rejects_chunked_output_contraction(self, device, format_name):
         a, b, scale_a, scale_b, gemm_kwargs, _ = self.makeBlockScaledMm(
             format_name, 256, 256, 256, device=device
@@ -8621,11 +8679,12 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
         )
         self.assertEqual(actual, expected, rtol=0, atol=0)
 
-    def test_scaled_mm_quantized_output(self, device):
+    @parametrize("format_name", ("mxfp8_e4m3", "mxfp6_e2m3_packed"))
+    def test_scaled_mm_quantized_output(self, device, format_name):
         m = n = 256
         group = 32
         a, b, (scale_a,), (scale_b,), gemm_kwargs, base = self.makeBlockScaledMm(
-            "mxfp8_e4m3", m, n, 256, device=device
+            format_name, m, n, 256, device=device
         )
         config = self.blockScaledConfig()
 
@@ -8676,13 +8735,23 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
         self.assertIn("flex_gemm_output_layout.BLOCKED_128X4", code)
         self.assertNotIn("aten._scaled_mm_v2", code)
 
-    def test_scaled_mm_dynamic_m(self, device):
+    @parametrize("format_name", ("mxfp8_e4m3", "mxfp6_e2m3_packed"))
+    def test_scaled_mm_dynamic_m(self, device, format_name):
         n = k = 256
-        scale_b, b = to_mxfp(
+
+        def quantize(value):
+            """bf16 -> (data, blocked e8m0 scales, dequantized fp32)."""
+            if format_name == "mxfp6_e2m3_packed":
+                data, scale, dequantized = self.quantizeMxfp6(value)
+            else:
+                scale, data = to_mxfp(value)
+                dequantized = None
+            return data, to_blocked_reference(scale), dequantized
+
+        b, scale_b, b_dequantized = quantize(
             torch.randn(n, k, device=device, dtype=torch.bfloat16) / math.sqrt(k)
         )
         b = b.t()
-        scale_b = to_blocked_reference(scale_b)
         recipe = F.ScalingType.BlockWise1x32
         swizzle = F.SwizzleType.SWIZZLE_32_4_4
         gemm_kwargs = {
@@ -8707,15 +8776,18 @@ class TestFlexGemmScaledMmDevice(FlexGemmTestCase):
 
         compiled = torch.compile(fn, backend="inductor", fullgraph=True)
         for index, m in enumerate((128, 256)):
-            scale_a, a = to_mxfp(torch.randn(m, k, device=device, dtype=torch.bfloat16))
-            scale_a = to_blocked_reference(scale_a)
+            a, scale_a, a_dequantized = quantize(
+                torch.randn(m, k, device=device, dtype=torch.bfloat16)
+            )
             if index == 0:
                 torch._dynamo.mark_dynamic(a, 0)
                 torch._dynamo.mark_dynamic(scale_a, 0)
             actual = compiled(a, scale_a)
-            expected = epilogue_fn(
-                F.scaled_mm(a, b, scale_a, scale_b=scale_b, **gemm_kwargs)
-            )
+            if a_dequantized is None:
+                acc = F.scaled_mm(a, b, scale_a, scale_b=scale_b, **gemm_kwargs)
+            else:
+                acc = (a_dequantized @ b_dequantized.t()).bfloat16()
+            expected = epilogue_fn(acc)
             torch.testing.assert_close(actual, expected, rtol=0.02, atol=0.2)
 
     @parametrize(

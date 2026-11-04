@@ -442,6 +442,122 @@ void launch_tiled_transpose(int64_t element_size, bool vectorized, dim3 grid, di
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+// 3-byte elements (copied as [..., 3] byte views, see hasNonPowerOfTwoElementSize)
+// have no typed kernel, so tiles are moved as 32-bit words: four elements span
+// three words, and each thread transposes a 4x4 block of elements (four src rows
+// of three words) in registers. The tile is stored already transposed, so the
+// write-out copies whole dst rows. Sizes and strides are in words.
+constexpr int kTranspose3ByteTile = 64;  // elements per tile side
+constexpr int kTranspose3ByteThreads = (kTranspose3ByteTile / 4) * (kTranspose3ByteTile / 4);
+
+// Word k of transposed row i (element i of each of four src rows, 12 bytes)
+// gathers bytes from at most three of the twelve src words (row-major,
+// three per row): __byte_perm(w0, w1, s01) assembles the bytes from w0 and
+// w1, then __byte_perm(that, w2, s2) merges in the bytes from w2, if any.
+struct Transpose3BytePerm {
+  int w0 = -1, w1 = -1, w2 = -1;
+  unsigned s01 = 0, s2 = 0;
+};
+
+__host__ __device__ constexpr Transpose3BytePerm transpose_3byte_perm(int i, int k) {
+  Transpose3BytePerm p;
+  for (int b = 0; b < 4; ++b) {
+    const int m = 4 * k + b;       // byte of the output row
+    const int n = 3 * i + m % 3;   // byte within src row m / 3
+    const int w = m / 3 * 3 + n / 4;
+    const unsigned byte = n % 4;
+    if (p.w0 < 0 || p.w0 == w) {
+      p.w0 = w;
+      p.s01 |= byte << (4 * b);
+      p.s2 |= unsigned(b) << (4 * b);
+    } else if (p.w1 < 0 || p.w1 == w) {
+      p.w1 = w;
+      p.s01 |= (4 + byte) << (4 * b);
+      p.s2 |= unsigned(b) << (4 * b);
+    } else {
+      p.w2 = w;
+      p.s2 |= (4 + byte) << (4 * b);
+    }
+  }
+  if (p.w1 < 0) p.w1 = p.w0;
+  return p;
+}
+
+template <bool kBatched>
+__global__ void transpose_copy_3byte_kernel(const uint32_t* __restrict__ src, uint32_t* __restrict__ dst, TransposeCopyArgs a) {
+  constexpr int kBlocks = kTranspose3ByteTile / 4;         // 4x4 element blocks per tile side
+  constexpr int kRowWords = kTranspose3ByteTile * 3 / 4;   // words per tile row
+  // A row stride of 1 mod 8 words keeps the block stores below conflict free.
+  __shared__ uint32_t tile[kTranspose3ByteTile][kRowWords + 1];
+  const int64_t width = a.width / 3 * 4;  // elements
+  const int64_t height = a.height / 3 * 4;
+
+  int64_t by = blockIdx.y;
+  const uint32_t* __restrict__ src_b = src;
+  uint32_t* __restrict__ dst_b = dst;
+  if constexpr (kBatched) {
+    const uint32_t tiles_y = at::ceil_div<int64_t>(height, kTranspose3ByteTile);
+    const uint32_t t = blockIdx.z * gridDim.y + blockIdx.y;
+    if (t >= tiles_y * a.num_slices) return;
+    by = t % tiles_y;
+    const auto slice = a.outer.get(t / tiles_y);
+    src_b += slice[1];
+    dst_b += slice[0];
+  }
+
+  // A warp covers 8 block columns x 4 block rows: with 4-word row groups and
+  // 3-word blocks, its shared-memory stores then hit 32 distinct banks.
+  const int lane = threadIdx.x % 32;
+  const int warp = threadIdx.x / 32;
+  const int bx = lane % 8 + 8 * (warp % (kBlocks / 8));
+  const int bk = lane / 8 + 4 * (warp / (kBlocks / 8));
+  const int64_t x = static_cast<int64_t>(blockIdx.x) * kTranspose3ByteTile + 4 * bx;
+  const int64_t y = by * kTranspose3ByteTile + 4 * bk;
+  // The launch requires width and height to be multiples of 4, so a block is
+  // either fully inside or fully outside the tensor.
+  if (x < width && y < height) {
+    const uint32_t* __restrict__ p = src_b + y * a.src_pitch + x / 4 * 3;
+    uint32_t in[12];
+    #pragma unroll
+    for (int r = 0; r < 4; ++r) {
+      #pragma unroll
+      for (int k = 0; k < 3; ++k) {
+        in[3 * r + k] = p[k];
+      }
+      p += a.src_pitch;
+    }
+    // Output row i holds element i of each input row.
+    #pragma unroll
+    for (int i = 0; i < 4; ++i) {
+      #pragma unroll
+      for (int k = 0; k < 3; ++k) {
+        const auto perm = transpose_3byte_perm(i, k);
+        uint32_t v = __byte_perm(in[perm.w0], in[perm.w1], perm.s01);
+        if (perm.w2 >= 0) v = __byte_perm(v, in[perm.w2], perm.s2);
+        tile[4 * bx + i][3 * bk + k] = v;
+      }
+    }
+  }
+  __syncthreads();
+
+  // Each thread writes one word column of the tile, so the addressing is
+  // hoisted out of the loop; the last 256 % 48 threads idle.
+  constexpr int kRowsPerPass = kTranspose3ByteThreads / kRowWords;
+  const int col = threadIdx.x % kRowWords;
+  const int row0 = threadIdx.x / kRowWords;
+  const int64_t dst_col = by * kRowWords + col;
+  if (row0 >= kRowsPerPass || dst_col >= a.height) return;
+  const int64_t rows_left = width - static_cast<int64_t>(blockIdx.x) * kTranspose3ByteTile;
+  uint32_t* __restrict__ q = dst_b + (static_cast<int64_t>(blockIdx.x) * kTranspose3ByteTile + row0) * a.dst_pitch + dst_col;
+  #pragma unroll
+  for (int row = row0; row < kTranspose3ByteTile; row += kRowsPerPass) {
+    if (row < rows_left) {
+      *q = tile[row][col];
+    }
+    q += kRowsPerPass * a.dst_pitch;
+  }
+}
+
 // Recognizes any permuted copy whose contiguous dim differs between src and
 // dst: dim 0 is dst-contiguous (TensorIterator orders dims by increasing dst
 // stride), some other dim is src-contiguous, and every remaining dim is an
@@ -450,18 +566,28 @@ void launch_tiled_transpose(int64_t element_size, bool vectorized, dim3 grid, di
 // move the innermost dim. Permutes that keep the innermost dim have nothing
 // to tile and, like any other arrangement, take the generic path.
 bool maybe_tiled_transpose_copy(TensorIterator& iter) {
-  const int ndim = iter.ndim();
+  int ndim = iter.ndim();
   // Two transposed dims; everything else must fit the outer offset table.
   if (ndim < 2 || ndim - 2 > MAX_DIMS) return false;
   // The generic path normalizes bool bytes on load (NOTE [Loading boolean
   // values]); this kernel copies raw bytes, so leave bool to the generic path.
   if (iter.dtype(0) == kBool) return false;
-  const int64_t element_size = iter.element_size(0);
+  int64_t element_size = iter.element_size(0);
   if (element_size > 8) return false;
 
   auto shape = iter.shape();
   auto os = iter.strides(0);   // bytes
   auto is = iter.strides(1);   // bytes
+  // 3-byte dtypes are copied as [..., 3] byte views (see copy_), which show up
+  // here as a leading size-3 dim dense in both tensors: treat it as one element.
+  if (element_size == 1 && ndim > 2 && shape[0] == 3 && os[0] == 1 && is[0] == 1 &&
+      iter.device(0) == iter.device(1)) {
+    element_size = 3;
+    shape = shape.slice(1);
+    os = os.slice(1);
+    is = is.slice(1);
+    --ndim;
+  }
   if (os[0] != element_size) return false;
   int tdim = -1;
   for (int d = 1; d < ndim; ++d) {
@@ -490,21 +616,32 @@ bool maybe_tiled_transpose_copy(TensorIterator& iter) {
 
   const void* sp = iter.tensor(1).const_data_ptr();
   void* dp = iter.tensor(0).mutable_data_ptr();
+  if (element_size == 3) {
+    // Word tiles need whole 4-element blocks and word-aligned pitches, slice bases and pointers.
+    const auto word_aligned = [](int64_t bytes) { return bytes % kTransposeWordSize == 0; };
+    if (w % 4 != 0 || h % 4 != 0 || !word_aligned(os[tdim]) || !word_aligned(is[0]) ||
+        !std::all_of(outer_dst, outer_dst + num_outer, word_aligned) ||
+        !std::all_of(outer_src, outer_src + num_outer, word_aligned) ||
+        !word_aligned(reinterpret_cast<uintptr_t>(sp)) || !word_aligned(reinterpret_cast<uintptr_t>(dp))) {
+      return false;
+    }
+  }
   // Vectorized tiles need every row, pitch, slice base and pointer 16-byte aligned.
   const auto aligned = [](int64_t bytes) { return bytes % kTransposeVecBytes == 0; };
-  const bool vectorized = element_size <= kTransposeWordSize &&
+  const bool vectorized = element_size <= kTransposeWordSize && element_size != 3 &&
       aligned(w * element_size) && aligned(h * element_size) && aligned(os[tdim]) && aligned(is[0]) &&
       std::all_of(outer_dst, outer_dst + num_outer, aligned) &&
       std::all_of(outer_src, outer_src + num_outer, aligned) &&
       aligned(reinterpret_cast<uintptr_t>(sp)) && aligned(reinterpret_cast<uintptr_t>(dp));
   // Narrow vectorized copies benefit from tiling at smaller sizes.
-  const int64_t min_bytes = vectorized && element_size < kTransposeWordSize
+  const int64_t min_bytes = (vectorized && element_size < kTransposeWordSize) || element_size == 3
       ? (int64_t(256) << 10) : (int64_t(4) << 20);
   if (num_slices * h * w * element_size < min_bytes) return false;
 
   // One word holds four bytes or two halfwords, giving 128x128 or 64x64 tiles.
-  const int64_t unit = vectorized ? kTransposeWordSize : element_size;
-  const int tile_size = vectorized && element_size == kTransposeWordSize
+  const int64_t unit = vectorized || element_size == 3 ? kTransposeWordSize : element_size;
+  const int tile_size = element_size == 3 ? kTranspose3ByteTile
+      : vectorized && element_size == kTransposeWordSize
       ? kTransposeFp32Tile : kTransposeTile * (vectorized ? kTransposeWordSize / element_size : 1);
   const int64_t tiles_x = at::ceil_div<int64_t>(w, tile_size);
   const int64_t tiles_y = at::ceil_div<int64_t>(h, tile_size);
@@ -546,7 +683,16 @@ bool maybe_tiled_transpose_copy(TensorIterator& iter) {
     args.outer.strides[i][1] = outer_src[i] / unit;
   }
   auto stream = at::cuda::getCurrentCUDAStream();
-  if (batched) {
+  if (element_size == 3) {
+    const auto* src_words = static_cast<const uint32_t*>(sp);
+    auto* dst_words = static_cast<uint32_t*>(dp);
+    if (batched) {
+      transpose_copy_3byte_kernel<true><<<grid, kTranspose3ByteThreads, 0, stream>>>(src_words, dst_words, args);
+    } else {
+      transpose_copy_3byte_kernel<false><<<grid, kTranspose3ByteThreads, 0, stream>>>(src_words, dst_words, args);
+    }
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  } else if (batched) {
     launch_tiled_transpose<true>(element_size, vectorized, grid, block, stream, sp, dp, args);
   } else {
     launch_tiled_transpose<false>(element_size, vectorized, grid, block, stream, sp, dp, args);
