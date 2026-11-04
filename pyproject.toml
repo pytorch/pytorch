@@ -493,6 +493,7 @@ nccl2 = "torch.distributed.distributed_c10d:_register_builtin_nccl2_backend"
 ucc = "torch.distributed.distributed_c10d:_register_builtin_ucc_backend"
 xccl = "torch.distributed.distributed_c10d:_register_builtin_xccl_backend"
 nccl4py = "torch.distributed._nccl4py:_register_nccl4py_backend"
+fake = "torch.distributed._backends.fake:_register_fake_backend"
 
 [project.urls]
 Homepage = "https://pytorch.org"
@@ -531,11 +532,6 @@ first_party = ["caffe2", "torch", "torchgen", "functorch", "test"]
 standard_library = ["typing_extensions"]
 
 [tool.ruff]
-# Ruff takes its target version from requires-python, which is now >=3.11. That
-# turns on UP035/UP036/UP044/UP017 and rewrites ~160 files that still carry the
-# Python 3.10 compatibility code. Keep linting for 3.10 until that code is
-# removed (see the "Remove Python 3.10 support code" cleanups), then delete this.
-target-version = "py310"
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
 extend-exclude = ["third_party", "test/cpython"]
@@ -552,6 +548,7 @@ quote-style = "double"
 external = [
     # lintrunner grep-linter codes (see .lintrunner.toml) suppressed via `# noqa:`.
     "ISINSTANCE_FAKE_TENSOR",
+    "RVT001",
     # Codes from flake8-only plugins that ruff doesn't implement.
     "P201",
     "P204",
@@ -797,3 +794,4 @@ package = 'torch'
 
 [project.entry-points."torch.distributed.transports"]
 nixl = "torch.distributed._transport.nixl:NIXLTransport"
+mooncake = "torch.distributed._transport.mooncake:MooncakeTransport"
