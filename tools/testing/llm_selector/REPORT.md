@@ -169,7 +169,7 @@ Time to signal (TTS) per workflow, in minutes:
 - **Merge wait.** 1,643 PR heads ran pull and `ciflow/trunk` together. On those, the p50 drops by 12 minutes and the p90 by 29. Trunk is the later signal for nearly all of them in both. 1,030 of them also ran `ciflow/inductor` within the same 10 minutes; inductor ends last on 15% of those (17% after), so trunk still bounds most of their wait.
 - **Trunk is where the latency is.** Its long test shards are the critical path, so the test shrinkage shows up as wall-clock time. Trunk's p50 moves less than its mean (14 min saved on average): 46% of its PR test hours are fork PRs', which keep TD, and its macOS jobs run every test under both policies.
 - **Pull leans toward build-bound.** Runs whose last job to finish is a build or another non-test job go from 12% to 22%. The floor is the xpu build (p50 40 / p90 49 min from creation to done) and the ROCm build (p50 23 / p90 53).
-- **The model matches real merges.** When the merge comment started trunk (n=326), comment to merge took p50 186 / p90 269 min, against a simulated trunk TTS of 182 / 277. Taking each of those trunk runs' replayed saving off its merge gives the new 179 / 259. 11 more such merges are left out of both, since the replay left out their trunk run by the TTS rules in Method (a conclusion other than success or failure, a cancelled job, no test job, a TTS outside (0, 24 h], or created outside the window, such as in the last 12 hours). When trunk had already run before the comment (n=533), the merge took p50 3 min.
+- **The model matches real merges.** When the merge comment started trunk (n=326), comment to merge took p50 186 / p90 269 min, against a measured (old) trunk TTS of 182 / 277 over every included trunk run. Taking each of those trunk runs' replayed saving off its merge gives the new 179 / 259. 11 more such merges are left out of both, since the replay left out their trunk run by the TTS rules in Method (a conclusion other than success or failure, a cancelled job, no test job, a TTS outside (0, 24 h], or created outside the window, such as in the last 12 hours). When trunk had already run before the comment (n=533), the merge took p50 3 min.
 - **Two delays are not modelled, so the merge rows and the trunk saving are optimistic.**
   - The selection artifact is kept 3 days (`retention-days: 3` in llm-selector.yml), and resolve_selection.py treats an expired one as missing. A trunk run that a merge starts more than 3 days after the push gets no selection and keeps TD, and the p90 from first run to merge is 94.5 h.
   - Under enforcement the target-determination job waits up to `WAIT_SECONDS` (600 s) for a selector run that is still pending. The replay assumes the selection is ready.
@@ -520,13 +520,13 @@ for t in v3_opus55_medium v3_opus55_low v3_opus55_high v3_sonnet5_medium v3_sonn
 - The intervals are a paired bootstrap (10,000 resamples, seed 0) of the per-sample new-minus-old outcome, `v3_opus55_medium final+td20` against `td td25`.
 - Reverts are resampled per commit. Failing pushes are resampled per PR (the PR number is the second `_`-separated field of a head id) and, for reference, per push.
 - The p-values are an exact two-sided McNemar test on the discordant counts. On pushes it treats the 236 pushes as independent, ignoring that pushes of one PR are correlated, so those p-values are anti-conservative; the PR-resampled intervals are the ones to read.
-- The "without PR history" row reruns `td_replay` and `score` on a copy of `$DATA` whose head samples have `previous_failures` removed.
+- The "without PR history" row reruns `td_replay` and `score` on a copy of `$DATA`, `$DATA_NP`, whose head samples have `previous_failures` removed.
 - `dollars --json` writes the fractions, the per-workflow rows (same-repo PR spend `pr_k`, relative costs, saving), the saving totals and the call cost. It has no total workflow cost, so the Old $k/mo column comes from `dollars.WORKFLOWS`, not from the JSON.
 
 The "without PR history" row. `intervals` compares head rows with the revert rows passed alongside, so the variant's head rows go in with `rows_eval.json`:
 
 ```
-cp -r $DATA $DATA_NP && rm -rf $DATA_NP/td
+rm -rf "$DATA_NP" && cp -r $DATA $DATA_NP && rm -rf $DATA_NP/td
 python -c "import json, pathlib, sys; [p.write_text(json.dumps({**json.loads(p.read_text()), 'previous_failures': []})) for p in pathlib.Path(sys.argv[1]).glob('samples/head_*.json')]" $DATA_NP
 python -m tools.testing.llm_selector.eval.td_replay --data $DATA_NP
 python -m tools.testing.llm_selector.eval.score --data $DATA_NP --ids $IDS/head.txt --policies $H --json rows_head_noprev.json $TAGS
@@ -559,7 +559,7 @@ python -m tools.testing.llm_selector.eval.dollars --constants 1793672225
 The simulation works as follows:
 - It shrinks each same-repo test job's `Test` step by r and keeps its start time.
 - It recomputes each run's TTS as its last job's completion minus its creation.
-- It takes a PR head's wait as the latest end of its first pull and trunk runs, plus inductor's for those rows, minus the earliest of their creations. Both rows count only heads whose trunk (and inductor) run was created within 600 s of pull.
+- It takes a PR head's wait as the latest end of its first included pull and trunk runs (the earliest-created ones the TTS rules kept), plus inductor's for those rows, minus the earliest of their creations. Both rows count only heads whose trunk (and inductor) run was created within 600 s of pull.
 - For the merges whose comment started trunk (a `ciflow/trunk` run created within 300 s of the comment), it takes that trunk run's replayed saving off the comment to merge time. Merges whose trunk run the replay left out are left out of both the old and the new times.
 - r is new over old test time on a typical change, from the unrounded shares: 29.96/49.41 = 0.606 CPU and 33.55/45.86 = 0.732 GPU where TD runs. For inductor's unit-test configs it is the new shares (0.498 / 0.403), against 1 today.
 - With `--all-prs`, fork-PR runs are shrunk too, for the "fork PRs were selected too" line.

@@ -2,8 +2,9 @@
 
     python -m tools.testing.llm_selector.eval.chart rows.json out.svg
 
-Needs matplotlib, which no requirements file installs; the SVG's path data
-depends on its version.
+Needs matplotlib, which the Test tools CI job's image does not install and no
+requirements file pins. The SVG's path data depends on its version; REPORT.md's
+chart was rendered with matplotlib 3.11.1.
 
 Each model and effort level is a line through its hedge budgets (0% to 20%);
 the dashed line is the Pareto frontier over every point. A revert counts when

@@ -18,8 +18,8 @@ TD, unless --all-prs. Each job keeps its start time; a run's time to signal
 (TTS) is its last job's completion minus its creation. Only first attempts
 count, and runs that did not conclude success or failure, have a cancelled
 job, ran no test job or have a TTS outside (0, 24 h] are left out. A PR
-head's merge wait is the latest end of its first pull and trunk runs (and
-inductor's) minus the earliest creation, over the heads whose trunk (and
+head's merge wait is the latest end of its first included pull and trunk
+runs (and inductor's) minus the earliest creation, over the heads whose trunk (and
 inductor) run was created within 10 minutes of pull. The merges
 whose comment started trunk are replayed by taking that trunk run's saving
 off their comment to merge time; those whose trunk run the replay left out

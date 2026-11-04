@@ -216,8 +216,6 @@ class TestRunEval(unittest.TestCase):
     def test_timeout_is_final(self) -> None:
         from subprocess import TimeoutExpired
 
-        from tools.testing.llm_selector.eval.run_eval import TIMED_OUT
-
         r, query, _ = self.run_one([TimeoutExpired("claude", 1)])
         self.assertEqual((r["out"], r["error"], r["transient"], query.call_count), (None, TIMED_OUT, False, 1))  # fmt: skip
         # A timeout the CLI reports is as final as one query_model raises.
@@ -1743,8 +1741,9 @@ class TestDollars(unittest.TestCase):
 
     def test_real_labeler(self) -> None:
         real = dollars.inductor_globs(dollars.LABELER)
-        self.assertTrue(real.fullmatch("torch/_inductor/codegen/wrapper.py"))
-        self.assertFalse(real.fullmatch("torch/nn/functional.py"))
+        msg = "the ciflow/inductor globs in .github/labeler.yml changed; update this test's paths or dollars.inductor_globs"
+        self.assertTrue(real.fullmatch("torch/_inductor/codegen/wrapper.py"), msg)
+        self.assertFalse(real.fullmatch("torch/nn/functional.py"), msg)
 
     def data(self) -> Path:
         sample = {"kind": "neutral", "sha": "x", "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a", "test_b", "test_c", "test_d"], "changed_files": ["torch/foo.py"], "truth": []}  # fmt: skip
@@ -2075,7 +2074,7 @@ class TestLandTime(unittest.TestCase):
         for wf, job, want in [
             ("pull", "linux / test (default, 1, 2, l)", True),
             # misc.runner_cost's job names have no shard numbers.
-            ("pull", "linux / test (default, l))", True),
+            ("pull", "linux / test (default, l)", True),
             ("pull", "linux / test (docs_test, 1, 1, l)", False),
             ("pull", "linux / test (dynamo_cpython, 1, 1, l)", False),
             ("trunk", "b200 / test (smoke_b200, 1, 1, nv)", False),
@@ -2122,22 +2121,23 @@ class TestLandTime(unittest.TestCase):
 
     def test_no_run_test_matches_test_sh(self) -> None:
         configs = {c for w, _, c in ci_jobs()[True] if w in ("pull", "trunk")}
-        self.assertEqual(no_run_test_configs((REPO_ROOT / ".ci/pytorch/test.sh").read_text(), configs), land_time.NO_RUN_TEST)  # fmt: skip
+        msg = "the pull/trunk configs whose .ci/pytorch/test.sh branch skips run_test.py changed; update land_time.NO_RUN_TEST"
+        self.assertEqual(no_run_test_configs((REPO_ROOT / ".ci/pytorch/test.sh").read_text(), configs), land_time.NO_RUN_TEST, msg)  # fmt: skip
 
     def test_rules_match_workflows(self) -> None:
         jobs = ci_jobs()
         td_configs = {c for w, _, c in jobs[True] | jobs[False] if w in ("pull", "trunk")}  # fmt: skip
-        self.assertLessEqual(land_time.NO_RUN_TEST, td_configs)
+        self.assertLessEqual(land_time.NO_RUN_TEST, td_configs, "land_time.NO_RUN_TEST names a config pull/trunk no longer run; drop it")  # fmt: skip
         unit = land_time.inductor_unit_configs()
         b200 = {n for w, n, c in jobs[False] if w == "trunk" and c == "smoke_b200"}
-        self.assertTrue(b200)
+        self.assertTrue(b200, "trunk has no smoke_b200 job; update this test's config")
         for n in b200:
-            self.assertFalse(land_time.selectable("trunk", f"{n} / test (smoke_b200, 1, 1, x)", unit), n)  # fmt: skip
+            self.assertFalse(land_time.selectable("trunk", f"{n} / test (smoke_b200, 1, 1, x)", unit), f"{n}: score.job_runs_td now says TD runs smoke_b200; check land_time.selectable")  # fmt: skip
         # The config split dollars.fractions times is the job split the replay shrinks.
         inductor = {(n, c) for w, n, c in jobs[False] if w == "inductor"}
-        self.assertTrue(unit)
+        self.assertTrue(unit, "inductor has no 'unit-test / ' job TD skips; update land_time.inductor_unit_configs")  # fmt: skip
         for n, c in inductor:
-            self.assertEqual(c in unit, n.startswith("unit-test / "), (n, c))
+            self.assertEqual(c in unit, n.startswith("unit-test / "), f"{(n, c)}: land_time.inductor_unit_configs (configs of inductor's 'unit-test / ' jobs) no longer matches inductor's job names")  # fmt: skip
 
     def test_ratios_and_wait(self) -> None:
         dollars_json = {"fractions": {"cpu": 0.3, "gpu": 0.3, "ind_cpu": 0.5, "ind_gpu": 0.4}, "td_fractions": {"cpu": 0.6, "gpu": 0.4, "ind_cpu": 0.8, "ind_gpu": 0.9}}  # fmt: skip
