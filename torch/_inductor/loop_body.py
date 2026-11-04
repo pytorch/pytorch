@@ -13,8 +13,9 @@ import sympy
 import torch.fx
 from torch._dynamo.utils import identity
 from torch.fx.proxy import Scope, TracerBase
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Mod
-from torch.utils._sympy.symbol import SymT
+from torch.utils._sympy.symbol import make_symbol, SymT
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -22,6 +23,7 @@ from .ops_handler import DefaultHandler, OpsHandler, WrapperHandler
 from .optimize_loop_body import eliminate_redundant_lowp_round_trips
 from .utils import (
     cache_on_self,
+    DataDependentRange,
     decompose_index,
     flatten_index,
     reduction_num_outputs,
@@ -216,6 +218,9 @@ class LoopBody:
         """
         Merge both iteration and reduction loops and return a new LoopBody.
         """
+        if any(isinstance(s, DataDependentRange) for s in self.var_ranges.values()):
+            return self
+
         old_body = self
         old_sizes = self.sizes
         old_iter_vars, old_reduce_vars = old_body.vars
@@ -595,6 +600,103 @@ class LoopBody:
         )
         return set_indirect
 
+    def get_indirect_index_graph(self, index):
+        # Input: this body's MemoryDep.index, e.g. the SymPy symbol tmp1.
+        # Output: a copied FX graph returning the address value given to its setter:
+        #
+        #     base = ops.load("offsets", get_index("index0"))
+        #     j = ops.index_expr(get_index("index2"), torch.int64)
+        #     addr = ops.add(base, j)
+        #     return addr
+        #
+        # Copy the body, change its output, then remove unused nodes.
+        # A live get_index(indirect0) needs set_indirect0 even though FX has
+        # no edge between them. DCE visits the getter before the setter in
+        # reverse order, so is_impure can mark that setter as needed.
+        # Return None for an address defined inside a subblock.
+        symbols = {
+            make_symbol(SymT.TMP, i): var for i, var in enumerate(self.indirect_vars)
+        }
+        index = symbols.get(index, index)
+        markers = self.root_block.graph.find_nodes(
+            op="call_module", target=f"set_{index}"
+        )
+        if not markers:
+            return None
+        marker = markers[0]
+
+        graph = torch.fx.Graph()
+        copies = {}
+        graph.graph_copy(marker.graph, copies)
+        output = graph.output(torch.fx.map_arg(marker.args[0], copies.__getitem__))
+        # Remember the removed setter's size/check/wrap_neg contract.
+        output.meta["indirect_target"] = marker.target
+        setters = {f"set_{var}": var for var in self.indirect_vars}
+        needed = OrderedSet()
+
+        def is_impure(node):
+            if node.op in ("placeholder", "output"):
+                return True
+            if node.op == "call_module" and node.target == "get_index" and node.users:
+                expr = self.indexing_exprs[node.args[0]]
+                needed.update(expr.free_symbols.intersection(self.indirect_vars))
+            return node.op == "call_module" and setters.get(node.target) in needed
+
+        # This is an address-only graph; unused stores and registration
+        # callbacks from the copied body do not belong to its calculation.
+        graph.eliminate_dead_code(is_impure_node=is_impure)
+
+        return graph
+
+    def index_graphs_match(self, left, other, right):
+        # Compare operations and edges without changing either graph.
+        # Coordinates follow loop order. Matching setters give us the
+        # correspondence between indirect symbols, e.g. indirect2 -> indirect0.
+        # get_index then compares their expressions using that correspondence.
+        if left is None or right is None or len(left.nodes) != len(right.nodes):
+            return False
+        replacements = dict(zip(self.var_ranges, other.var_ranges))
+        left_setters = OrderedSet(f"set_{var}" for var in self.indirect_vars)
+        right_setters = OrderedSet(f"set_{var}" for var in other.indirect_vars)
+        nodes = {}
+        for lhs, rhs in zip(left.nodes, right.nodes):
+            if lhs.op != rhs.op:
+                return False
+            if lhs.op == "call_module" and lhs.target == rhs.target == "get_index":
+                lhs_index = sympy_subs(self.indexing_exprs[lhs.args[0]], replacements)
+                if lhs_index != other.indexing_exprs[rhs.args[0]]:
+                    return False
+            else:
+                if lhs.op == "output" or (
+                    lhs.op == "call_module" and lhs.target in left_setters
+                ):
+                    if lhs.op != "output" and rhs.target not in right_setters:
+                        return False
+                    lhs_target = lhs.meta.get("indirect_target", lhs.target)
+                    rhs_target = rhs.meta.get("indirect_target", rhs.target)
+                    lhs_params = self.submodules[lhs_target].clone.keywords
+                    rhs_params = other.submodules[rhs_target].clone.keywords
+                    if (
+                        sympy_subs(lhs_params["size"], replacements)
+                        != rhs_params["size"]
+                        or lhs_params["check"] != rhs_params["check"]
+                        or lhs_params["wrap_neg"] != rhs_params["wrap_neg"]
+                    ):
+                        return False
+                    if lhs.op != "output":
+                        replacements[lhs_params["var"]] = rhs_params["var"]
+                elif lhs.target != rhs.target or (
+                    lhs.op == "call_module" and self is not other
+                ):
+                    # Submodule bodies have not been compared; retain their identity.
+                    return False
+                if torch.fx.node.map_arg(lhs.args, nodes.__getitem__) != rhs.args:
+                    return False
+            if torch.fx.node.map_arg(lhs.kwargs, nodes.__getitem__) != rhs.kwargs:
+                return False
+            nodes[lhs] = rhs
+        return True
+
     def bind_scan_shim(self, combine_fn):
         def shim(dtypes, values):
             return V.ops.scan(dtypes, combine_fn, values)
@@ -897,6 +999,12 @@ class CaptureIndexing(WrapperHandler):
             {},
         )
         return var
+
+    def register_datadep_range(self, value, symbol):
+        # FX passes the SymPy token through the existing index registry.
+        symbol_arg = self._add_index(symbol, MemoryUsageType.INDEX_EXPR)
+        self._inner.register_datadep_range(value, symbol_arg)
+        return symbol
 
     def output(self, *result):
         self.tracer.create_proxy("output", "output", result, {})

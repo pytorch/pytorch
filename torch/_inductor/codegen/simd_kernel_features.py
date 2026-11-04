@@ -211,6 +211,10 @@ class SIMDKernelFeatures:
 
     @cache_on_self
     def select_index_dtype(self) -> torch.dtype:
+        # A dependent loop can have large coordinates even with few valid outputs.
+        if (self.numel * self.reduction_numel).has(ir.DataDependentRange):
+            return torch.int64
+
         # Gather all used buffer names
         buffer_names: OrderedSet[str] = OrderedSet()
         for node in self.indexing_scheduler_nodes():
