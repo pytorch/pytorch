@@ -1,6 +1,6 @@
 """Replay the in-repo TD heuristics on each eval sample.
 
-    python -m tools.testing.llm_td.eval.td_replay --data DIR [--out DIR/td] [--shard I N]
+    python -m tools.testing.llm_selector.eval.td_replay --data DIR [--out DIR/td] [--shard I N]
 
 --shard I N (0 <= I < N, 0-indexed unlike run_test.py's) processes every
 N-th sample starting at the I-th.
@@ -46,8 +46,8 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 from tools.stats.import_test_stats import ADDITIONAL_CI_FILES_FOLDER
-from tools.testing.llm_td.eval import REPO, write_json
-from tools.testing.llm_td.eval.score import (
+from tools.testing.llm_selector.eval import REPO, write_json
+from tools.testing.llm_selector.eval.score import (
     job_files,
     replay_inputs,
     replay_stats,
