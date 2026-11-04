@@ -16,8 +16,9 @@ runs.
 
 import dataclasses
 import inspect
+import sys
 import weakref
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from typing import Any, Literal, TYPE_CHECKING
 
 import sympy
@@ -54,6 +55,10 @@ if TYPE_CHECKING:
 MutatesArgs = tuple[str, ...] | Literal["unknown"]
 
 
+def cutedsl_kernel_name(fn: Callable[..., Any]) -> str:
+    return getattr(inspect.unwrap(fn), "__name__", "cutedsl_kernel")
+
+
 @dataclasses.dataclass(frozen=True)
 class CuteDSLKernel:
     """Side-table entry for a CuTeDSL host function: plays the part a JITFunction
@@ -67,12 +72,18 @@ class CuteDSLKernel:
     def __post_init__(self) -> None:
         if self.mutates_args == "unknown":
             return
+        error = TypeError(
+            f'CuTeDSL kernel {self.name}: mutates_args must be "unknown" or an '
+            f"iterable of parameter names, got {self.mutates_args!r}"
+        )
         if isinstance(self.mutates_args, str):
-            raise ValueError(
-                f'CuTeDSL kernel {self.name}: mutates_args must be "unknown" or a '
-                f"sequence of parameter names, got {self.mutates_args!r}"
-            )
-        names = tuple(dict.fromkeys(self.mutates_args))
+            raise error
+        try:
+            names = tuple(dict.fromkeys(self.mutates_args))
+        except TypeError:
+            raise error from None
+        if not all(isinstance(name, str) for name in names):
+            raise error
         object.__setattr__(self, "mutates_args", names)
         if not names:
             return
@@ -88,7 +99,7 @@ class CuteDSLKernel:
 
     @property
     def name(self) -> str:
-        return getattr(inspect.unwrap(self.fn), "__name__", "cutedsl_kernel")
+        return cutedsl_kernel_name(self.fn)
 
 
 def _is_cutlass_type(cls: type) -> bool:
@@ -131,10 +142,8 @@ class CuteDSLHostFnInfo:
     Arguments fall into four classes: the stream (supplied at launch); tensors and
     runtime scalars, which are kernel arguments; and constants, which the DSL bakes
     into the compiled kernel: Constexpr parameters and values that are neither
-    tensors nor scalars (None, objects). A runtime scalar is a value for a parameter
-    annotated with a cutlass Numeric type such as cutlass.Int32, or a Python
-    int/float/bool for an unannotated parameter, which the DSL converts to
-    Int32/Float32/Boolean.
+    tensors nor runtime scalars (None, objects). See is_runtime_scalar and
+    split_args.
 
     ``defaults`` are the parameters' defaults as written: like a passed value, a
     default that is a runtime scalar goes through python_scalar at launch, and any
@@ -148,21 +157,101 @@ class CuteDSLHostFnInfo:
     defaults: Mapping[str, Any]
 
     def is_runtime_scalar(self, name: str, value: object) -> bool:
+        """Whether ``value``, for parameter ``name``, is a runtime scalar: any value
+        but None for a parameter annotated with a cutlass Numeric type such as
+        cutlass.Int32; for an unannotated parameter, a Python bool, int or float, a
+        numpy scalar that python_scalar converts to one, or a symbolic one (a SymBool,
+        SymInt or SymFloat, or Inductor's sympy expression for one), which the DSL
+        converts to Boolean, Int32 or Float32; never for a Constexpr parameter."""
+        if value is None or name in self.constexpr_params:
+            return False
         if name in self.numeric_params:
             return True
-        if name in self.constexpr_params:
-            return False
         # sympy.Basic: Inductor's symbolic sizes (Expr) and symbolic bools (Boolean).
-        return isinstance(
-            value, (bool, int, float, SymInt, SymFloat, SymBool, sympy.Basic)
-        )
+        scalar_types = (bool, int, float, SymInt, SymFloat, SymBool, sympy.Basic)
+        return isinstance(value, scalar_types) or _numpy_scalar_item(value) is not None
+
+    def check_call(self, name: str, names: Collection[str]) -> None:
+        """Check that ``names``, the arguments of a call by name, bind to the
+        parameters of kernel ``name`` but the stream, which the launch supplies:
+        raises a TypeError for a name that is not a parameter, for the stream, and
+        for missing parameters without a default."""
+        for arg in names:
+            if arg == self.stream_param:
+                raise TypeError(
+                    f"CuTeDSL kernel {name}: got a value for its stream parameter "
+                    f"{arg!r}, which the launch supplies"
+                )
+            if arg not in self.params:
+                raise TypeError(
+                    f"CuTeDSL kernel {name}: got an unexpected argument {arg!r}; its "
+                    f"parameters are {self.params}"
+                )
+        missing = [
+            p
+            for p in self.params
+            if p != self.stream_param and p not in names and p not in self.defaults
+        ]
+        if missing:
+            raise TypeError(f"CuTeDSL kernel {name}: missing arguments {missing}")
+
+    def split_args(
+        self, name: str, args: Mapping[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """The runtime arguments (tensors and runtime scalars) and the constants of a
+        call of kernel ``name`` that binds (see check_call): every parameter but the
+        stream, in signature order, those missing from ``args`` taking their
+        defaults. Raises a TypeError for a tensor for a Constexpr or cutlass Numeric
+        parameter, and a ValueError for a parameter left to a tensor default."""
+        runtime_args: dict[str, Any] = {}
+        constant_args: dict[str, Any] = {}
+        for param in self.params:
+            if param == self.stream_param:
+                continue
+            if param in args:
+                value = args[param]
+            else:
+                value = self.defaults[param]
+                if isinstance(value, Tensor):
+                    raise ValueError(
+                        f"CuTeDSL kernel {name}: parameter {param!r} defaults to a "
+                        "tensor; pass the tensor"
+                    )
+            if isinstance(value, Tensor):
+                if param in self.constexpr_params or param in self.numeric_params:
+                    raise TypeError(
+                        f"CuTeDSL kernel {name}: parameter {param!r} takes a scalar "
+                        "(it is Constexpr or annotated with a cutlass Numeric type), "
+                        "not a tensor"
+                    )
+                runtime_args[param] = value
+            elif self.is_runtime_scalar(param, value):
+                runtime_args[param] = value
+            else:
+                constant_args[param] = value
+        return runtime_args, constant_args
+
+
+def _numpy_scalar_item(value: object) -> bool | int | float | None:
+    """``value.item()`` for a numpy bool, integer or floating scalar whose item is a
+    Python bool, int or float (not a long double wider than a float), else None.
+    numpy is not imported: without it, no value is one of its scalars."""
+    np = sys.modules.get("numpy")
+    if np is None or not isinstance(value, (np.bool_, np.integer, np.floating)):
+        return None
+    item = value.item()
+    return item if type(item) in (bool, int, float) else None
 
 
 def python_scalar(value: Any, annotation: type | None = None) -> Any:
-    """A runtime scalar as the Python value the DSL expects: a cutlass Numeric value
-    as its .value, a subclass of bool/int/float (an IntEnum, a numpy float) as the
-    builtin, which the DSL's argument adapters require exactly, and an int for a
-    parameter annotated with a cutlass float type (``annotation``) as a float."""
+    """A runtime scalar as the Python value the DSL expects, whose argument adapters
+    take only an exact bool, int or float: a numpy bool, integer or floating scalar
+    as its .item(); a subclass of bool, int or float (an IntEnum, np.float64) as that
+    builtin; a cutlass Numeric value as its .value; and an int for a parameter
+    annotated with a cutlass float type (``annotation``) as a float."""
+    item = _numpy_scalar_item(value)
+    if item is not None:
+        value = item
     if isinstance(value, bool):
         return bool(value)
     if isinstance(value, int):
@@ -192,7 +281,7 @@ _host_fn_infos: "weakref.WeakKeyDictionary[Callable[..., Any], CuteDSLHostFnInfo
 
 
 def get_host_fn_info(fn: Callable[..., Any]) -> CuteDSLHostFnInfo:
-    """Parse a ``@cute.jit`` host function's signature; raises ValueError for the
+    """Parse a ``@cute.jit`` host function's signature; raises a ValueError for the
     ones PT2 cannot launch."""
     info = _host_fn_infos.get(fn)
     if info is not None:
@@ -208,7 +297,7 @@ def get_host_fn_info(fn: Callable[..., Any]) -> CuteDSLHostFnInfo:
         is_constexpr = jit_arg_adapters.is_arg_spec_constexpr
 
     inner = inspect.unwrap(fn)
-    name = getattr(inner, "__qualname__", repr(inner))
+    name = cutedsl_kernel_name(fn)
     params, constexpr, defaults = [], set(), {}
     numeric: dict[str, type] = {}
     streams = []
@@ -218,14 +307,16 @@ def get_host_fn_info(fn: Callable[..., Any]) -> CuteDSLHostFnInfo:
             # compiled function by position, which CuTeDSL binds to keyword-only
             # parameters only on its fast path, for one value per runtime parameter.
             raise ValueError(
-                f"{name}: parameter {p.name!r} is {p.kind.description}, but PT2 needs "
-                "every parameter to accept both positional and keyword arguments"
+                f"CuTeDSL kernel {name}: parameter {p.name!r} is "
+                f"{p.kind.description}, but PT2 needs every parameter to accept both "
+                "positional and keyword arguments"
             )
         ann = p.annotation
         if isinstance(ann, str):
             raise ValueError(
-                f"{name}: annotation of {p.name!r} is a string; CuTeDSL needs real "
-                "annotations (remove `from __future__ import annotations`)"
+                f"CuTeDSL kernel {name}: parameter {p.name!r} has a string "
+                "annotation; CuTeDSL needs real annotations (remove `from __future__ "
+                "import annotations`)"
             )
         params.append(p.name)
         if p.default is not p.empty:
@@ -238,8 +329,9 @@ def get_host_fn_info(fn: Callable[..., Any]) -> CuteDSLHostFnInfo:
             numeric[p.name] = ann
     if len(streams) != 1:
         raise ValueError(
-            f"{name}: expected exactly one parameter annotated cuda.CUstream (PT2 "
-            f"launches the kernel on the current CUDA stream), found {streams}"
+            f"CuTeDSL kernel {name}: expected exactly one parameter annotated "
+            "cuda.CUstream (PT2 launches the kernel on the current CUDA stream), "
+            f"found {streams}"
         )
     info = CuteDSLHostFnInfo(
         params=tuple(params),
@@ -259,7 +351,8 @@ def get_host_fn_info(fn: Callable[..., Any]) -> CuteDSLHostFnInfo:
 # Used for wrapping a CuTeDSL host function
 class CuteDSLKernelWrapperMutation(UserKernelWrapperHOP):
     def __init__(self) -> None:
-        # Not cacheable: the generated code binds the host function in-process.
+        # Not cacheable: its side-table indices exist only in the process that
+        # captured them.
         super().__init__("cutedsl_kernel_wrapper_mutation", cacheable=False)
 
     def __call__(
@@ -282,6 +375,8 @@ cutedsl_kernel_wrapper_mutation = CuteDSLKernelWrapperMutation()
 # Used for wrapping a CuTeDSL host function in a functional manner
 class CuteDSLKernelWrapperFunctional(UserKernelWrapperHOP):
     def __init__(self) -> None:
+        # Not cacheable: its side-table indices exist only in the process that
+        # captured them.
         super().__init__("cutedsl_kernel_wrapper_functional", cacheable=False)
 
     def __call__(
@@ -317,9 +412,14 @@ def cutedsl_kernel_wrapper_mutation_dense(
 ) -> None:
     from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
-    kernel = cutedsl_kernel_side_table.get_kernel(kernel_idx)
-    constant_args = cutedsl_kernel_side_table.get_constant_args(constant_args_idx)
-    launch_cutedsl_kernel(kernel.fn, {**kwargs, **constant_args})
+    table = cutedsl_kernel_side_table
+    kernel = table.get_kernel(kernel_idx)
+    constant_args = table.get_constant_args(constant_args_idx)
+    launch_cutedsl_kernel(
+        kernel.fn,
+        {**kwargs, **constant_args},
+        constant_keys=table.get_constant_args_keys(constant_args_idx),
+    )
 
 
 @register_fake(cutedsl_kernel_wrapper_mutation, skip_cache=True)
@@ -470,16 +570,30 @@ def check_written_args_disjoint(
         for earlier in written[:i]:
             a, b = kwargs[earlier], kwargs[later]
             aliases = _same_storage(wrapped[earlier], wrapped[later])
-            if _may_overlap(a, b) or (aliases and not _same_storage(a, b)):
-                kernel = cutedsl_kernel_side_table.get_kernel(kernel_idx)
-                raise RuntimeError(
-                    f"CuTeDSL kernel {kernel.name}: {earlier!r} and {later!r} are the "
-                    "same tensor or views that may overlap, and both count as written "
-                    f"(mutates_args={kernel.mutates_args!r}), which PT2 cannot "
-                    "functionalize: one write would be lost. Pass tensors that do not "
-                    "overlap, or give mutates_args naming only the parameters the "
-                    "kernel writes."
+            if _may_overlap(a, b):
+                problem = "are the same tensor or views that may overlap"
+                fix = "Pass tensors that do not overlap."
+            elif aliases and not _same_storage(a, b):
+                problem = (
+                    "are views of one tensor, which functionalization with "
+                    'remove="mutations_and_views" copied, so PT2 cannot tell whether '
+                    "they overlap"
                 )
+                fix = (
+                    'Functionalize with remove="mutations" (the default), which keeps '
+                    "views, or pass tensors that are not views of one tensor."
+                )
+            else:
+                continue
+            kernel = cutedsl_kernel_side_table.get_kernel(kernel_idx)
+            if kernel.mutates_args == "unknown":
+                fix += " Or give mutates_args naming only the parameters it writes."
+            raise RuntimeError(
+                f"CuTeDSL kernel {kernel.name}: {earlier!r} and {later!r} {problem}, "
+                f"and both count as written (mutates_args={kernel.mutates_args!r}). "
+                "PT2 clones each written argument and writes it back on its own, so "
+                f"one write could be lost. {fix}"
+            )
     return written
 
 
