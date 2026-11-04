@@ -30,7 +30,7 @@ from tools.testing.target_determination.heuristics.interface import (
     TestPrioritizations,
 )
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
-    get_all_previous_failures,
+    previous_failures_or_none,
 )
 
 
@@ -40,7 +40,7 @@ sys.path.remove(str(REPO_ROOT))
 # download-td-artifacts moves it to TD_RESULTS.
 TD_RESULTS_FILE = "td_results.json"
 TD_RESULTS = REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / TD_RESULTS_FILE
-# main() stores get_all_previous_failures() with TD's ranking, so that every
+# main() stores previous_failures_or_none() with TD's ranking, so that every
 # shard sees the same ones; TestPrioritizations.from_json ignores the key.
 PREVIOUS_FAILURES_KEY = "previous_failures"
 
@@ -117,7 +117,7 @@ def main() -> None:
     # The download step is continue-on-error, and a failed download leaves no
     # cache, as does a PR without one yet; only the step's outcome tells them apart.
     if os.getenv("PYTEST_CACHE_DOWNLOAD_OUTCOME") == "success":
-        previous_failures = get_all_previous_failures()
+        previous_failures = previous_failures_or_none()
     else:
         print("The pytest cache was not downloaded", file=sys.stderr)
         previous_failures = None

@@ -48,7 +48,7 @@ from tools.testing.llm_td.eval.score import (
     truth_pairs,
 )
 from tools.testing.llm_td.eval.td_replay import top25_per_config
-from tools.testing.llm_td.selection import apply_selection, CallSplit, Selection
+from tools.testing.llm_td.selection import apply_selection, Selection
 from tools.testing.target_determination.heuristics.interface import TestPrioritizations
 from tools.testing.test_run import TestRun
 
@@ -620,7 +620,7 @@ class TestScore(unittest.TestCase):
         self.assertTrue(calls, "found no TEST_CONFIG dispatch in test.sh")
         self.assertFalse(unmapped, f"cannot map test.sh's NO_TD to TEST_CONFIG patterns (setters outside the dispatch: {unmapped}); update this scan or NO_TD_CONFIGS")  # fmt: skip
         dispatched = {p for p, words in calls.items() if p in sets_no_td or words & sets_no_td}  # fmt: skip
-        self.assertEqual(dispatched, {f"*{c}*" for c in score.NO_TD_CONFIGS})
+        self.assertEqual(dispatched, set(score.NO_TD_CONFIGS))
 
     def test_unasked(self) -> None:
         td = {"scored": ["test_a"], "top25": ["test_e"], "top25_cfg": {"default": ["test_a"]}}  # fmt: skip
@@ -734,7 +734,8 @@ class TestScore(unittest.TestCase):
                 mock.patch("sys.stderr", io.StringIO()),
             ):
                 applied = apply_selection(sel, include, exclude, lambda x: float(x.test_file in scored), seconds, test_config=config, td_enabled=True, previous_failures=prev)  # fmt: skip
-            ran = {x.test_file for x in CallSplit(include, exclude, applied).include}
+            runs = applied.split.include if applied.enforced else include
+            ran = {x.test_file for x in runs}
             self.assertEqual({f for f in job if choice.covers(f, config)}, ran, (seconds, job, n, scored, out, prev, changed, how))  # fmt: skip
 
     def test_hedge_previous_failures(self) -> None:
@@ -1081,8 +1082,10 @@ class TestScore(unittest.TestCase):
             (data / "ids.txt").write_text("a")
             replay("--ids", str(data / "ids.txt"))
             self.assertEqual(len(seen), 2)
-            with self.assertRaises(SystemExit), mock.patch("sys.stderr", io.StringIO()):
+            err = io.StringIO()
+            with self.assertRaises(SystemExit), mock.patch("sys.stderr", err):
                 replay("--shard", "2", "2")
+            self.assertIn("--shard I N needs 0 <= I < N", err.getvalue())
             with self.assertRaisesRegex(SystemExit, "must be a directory named"):
                 replay("--stats", d)
             empty = Path(d) / "empty" / stats.name
@@ -1142,6 +1145,12 @@ class TestScore(unittest.TestCase):
                 scored, err = main("--policies", f"model,{bad}", "m")
                 self.assertIn(f"unknown --policies ['{bad}']", err)
                 scored.assert_not_called()
+            for dup in ("final+td,final+td20", "final+td5,final+td5.0"):
+                scored, err = main("--policies", dup, "m")
+                self.assertIn("two hedge policies of the same share", err)
+                scored.assert_not_called()
+            scored, _ = main("--policies", "model,final+td5,model,final+td5", "m")
+            self.assertEqual(scored.call_args.args[3], ["model", "final+td5"])
             scored, out = main("m", "td")
             self.assertEqual(scored.call_args.args, (data, ["a", "b"], ["m", "td"], ["model", "final", "final-hm", "final+td"], True, data / "samples", data / "td", "s"))  # fmt: skip
             self.assertRegex(out, r"^m +final\+td +pr +n=  1 fail=  1 caught=100.0%")
