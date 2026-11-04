@@ -452,15 +452,15 @@ class Selection:
         the hedge: their pool spans the PR's SHAs, build environments and
         configs, so one large earlier failure would otherwise use up the hedge
         of every config. A previous failure with any TestRun in TD's include
-        runs its whole file. The hedge
-        is `share` (by default LLM_TD_HEDGE, 20%) of the test time of
-        `ranked`, spent greedily in rank order on the other files with a
-        positively scored TestRun, including the other previous failures. One positive class-level run
-        hedges its whole file at the file's full time. Files without a time
-        are never hedged. Partial TestRuns of one file share its time, so a
-        file is charged once and lands in one batch. If that chooses nothing,
-        chose_nothing is set and include is empty: apply_selection then keeps
-        TD's split, so a call never runs zero files when TD's split runs some."""
+        runs its whole file. The hedge is `share` (by default LLM_TD_HEDGE,
+        20%) of the test time of `ranked`, spent greedily in rank order on the
+        other files with a positively scored TestRun, including the other
+        previous failures. One positive class-level run hedges its whole file
+        at the file's full time. Files without a time are never hedged.
+        Partial TestRuns of one file share its time, so a file is charged once
+        and lands in one batch. If that chooses nothing, chose_nothing is set
+        and include is empty: apply_selection then keeps TD's split, so a call
+        never runs zero files when TD's split runs some."""
         files = dict.fromkeys(x.test_file for x in ranked)
         covered = {f for f in files if self.covers(f, test_config)}
         prev = {f for f in previous_failures if f in files and f in td_include}
@@ -501,7 +501,8 @@ class Selection:
             raise ValueError(f"not a selection file of version {SELECTION_VERSION}")
         files, sweeps, candidates = d["files"], d["sweeps"], d["candidates"]
         run_all, enforce, reason, error = d["run_all"], d["enforce"], d["reason"], d["error"]  # fmt: skip
-        enforce_requested = d["enforce_requested"]
+        # Older selectors, which CI runs from the default branch, omit it.
+        enforce_requested = d.get("enforce_requested", False)
         if not all(
             isinstance(v, list) and all(isinstance(x, str) for x in v)
             for v in (files, sweeps) + (() if candidates is None else (candidates,))
@@ -653,12 +654,10 @@ def apply_selection(
     split = selection.split(
         ranked, score, file_time, test_config, previous_failures=prev, td_include=td
     )
-    wanted = (
-        td_enabled
-        and selection.enforce
-        and selection.error is None
-        and get_pr_number() is not None
-    )
+    td_on_pr = td_enabled and get_pr_number() is not None
+    wanted = td_on_pr and selection.enforce and selection.error is None
+    # select_tests clears enforce when the selector fails, but keeps the request.
+    requested = td_on_pr and (selection.enforce or selection.enforce_requested)
     if not sum(file_time.values()):
         fallback = "no test times"
     elif previous_failures is None:
@@ -668,7 +667,7 @@ def apply_selection(
     else:
         fallback = None
     enforced = wanted and fallback is None
-    if selection.error is not None:
+    if selection.error is not None and requested:
         print(f"LLM selection: the selector failed ({selection.error[:200]!r}), using TD", file=sys.stderr)  # fmt: skip
     if wanted and not enforced:
         print(f"LLM selection: {fallback}, using TD", file=sys.stderr)

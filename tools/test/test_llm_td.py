@@ -341,7 +341,7 @@ class TestSelection(unittest.TestCase):
             valid = Selection(candidates={"test_nn"}).to_json()
             # Without candidates, a selection would skip every file it does not name.
             bad = [{**valid, "version": 2}, {**valid, "version": True}, {**valid, "files": "test_nn"}, {**valid, "files": [1]}, {**valid, "run_all": "false"}, {**valid, "enforce": "false"}, {**valid, "enforce_requested": "false"}, {**valid, "reason": 1}, {**valid, "candidates": [1]}, {**valid, "candidates": None}, {**valid, "error": 1}]  # fmt: skip
-            bad += [{k: v for k, v in valid.items() if k != key} for key in ("version", "candidates", "enforce", "error", "enforce_requested")]  # fmt: skip
+            bad += [{k: v for k, v in valid.items() if k != key} for key in ("version", "candidates", "enforce", "error")]  # fmt: skip
             for text in (
                 "{",
                 '{"sweeps": []}',
@@ -356,6 +356,10 @@ class TestSelection(unittest.TestCase):
                 self.assertTrue(stderr.getvalue().startswith("::warning::"), text[:100])
             sel = Selection({"test_nn"}, candidates={"test_nn", "test_ops"})
             p.write_text(json.dumps(sel.to_json()))
+            self.assertEqual(Selection.load(p), sel)
+            # A version-1 file from a selector predating enforce_requested.
+            old = {k: v for k, v in sel.to_json().items() if k != "enforce_requested"}
+            p.write_text(json.dumps(old))
             self.assertEqual(Selection.load(p), sel)
 
     def test_run_all_patterns(self) -> None:

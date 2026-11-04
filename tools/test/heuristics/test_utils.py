@@ -79,7 +79,9 @@ class TestHeuristicsUtils(unittest.TestCase):
             no_td: bool = False,
         ) -> bool:
             with mock.patch.object(utils, "get_pr_number", return_value=pr):
-                return utils.td_enabled_default(env, workflow, is_ci=is_ci, macos=macos, no_td=no_td)  # fmt: skip
+                return utils.td_enabled_default(
+                    env, workflow, is_ci=is_ci, macos=macos, no_td=no_td
+                )
 
         self.assertTrue(default())
         self.assertFalse(default(is_ci=False))

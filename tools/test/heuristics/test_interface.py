@@ -262,7 +262,9 @@ class TestTestPrioritizations(TestTD):
 
     def test_get_score(self) -> None:
         # An exact lookup: a part of a scored file scores 0.
-        tp = interface.TestPrioritizations(["test_nn", "test_ops"], {TestRun("test_nn"): 1})  # fmt: skip
+        tp = interface.TestPrioritizations(
+            ["test_nn", "test_ops"], {TestRun("test_nn"): 1}
+        )
         self.assertEqual(tp.get_score(TestRun("test_nn")), 1)
         self.assertEqual(tp.get_score(TestRun("test_ops")), 0)
         self.assertEqual(tp.get_score(TestRun("test_nn", included=["TestNN"])), 0)
