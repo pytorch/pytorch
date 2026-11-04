@@ -3,6 +3,7 @@
 import copy
 import itertools
 from typing import cast
+from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
@@ -1419,6 +1420,49 @@ class TestFullyShardMixedDtypeParam(FSDPTestMultiThread):
         model = Model()
         fully_shard(model, mesh=mesh)
         model(0)
+
+
+class TestFullyShardAsyncCPUMove(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_uneven_shards(self):
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        current_stream = torch.accelerator.current_stream
+        for rows in (1, 7, 8):  # empty, uneven, and even local shards
+            model = nn.Linear(4096, rows, bias=False, device=device_type.type)
+            fully_shard(model, mesh=mesh)
+            with torch.no_grad():
+                model.weight.to_local().fill_(self.rank + 1)
+            torch.get_device_module(device_type).synchronize()
+            synchronizations = []
+
+            class TrackedStream:
+                def __init__(self, stream):
+                    self.stream = stream
+
+                def synchronize(self):
+                    self.stream.synchronize()
+                    synchronizations.append(True)
+
+                def __getattr__(self, name):
+                    return getattr(self.stream, name)
+
+            def tracked_current_stream(device):
+                return TrackedStream(current_stream(device))
+
+            with patch.object(
+                torch.accelerator, "current_stream", tracked_current_stream
+            ):
+                model.to("cpu", non_blocking=True)
+            # The short, nonempty shard must be ready before FSDP copies it
+            # into padded storage. Empty and even shards need no CPU read.
+            self.assertEqual(len(synchronizations), int(rows == 7 and self.rank == 1))
+            torch.get_device_module(device_type).synchronize()
+            local = model.weight.to_local()
+            self.assertEqual(local, torch.full_like(local, self.rank + 1))
 
 
 class TestFullyShardNonFloatParam(FSDPTest):
