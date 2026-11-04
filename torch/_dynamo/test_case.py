@@ -23,7 +23,7 @@ import torch
 import torch.testing
 from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
-from torch.amp.autocast_mode import (  # noqa: F401
+from torch.amp.autocast_mode import (
     _autocast_state_specs,
     _restore_autocast_state,
     _snapshot_autocast_state,

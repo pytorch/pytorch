@@ -127,9 +127,8 @@ def _create_graph(
             _keep_input_mutations=aot_config.keep_inference_input_mutations,
         )
 
-    # Restore autocast nesting after make_fx (nesting cleanup only; dtype
-    # balance is enforced earlier in the metadata pass). This does not make
-    # unmanaged _enter/_exit_autocast across graph breaks correct at runtime.
+    # The metadata pass rejects unbalanced autocast dtype/enabled; only
+    # nesting, which Dynamo may leave unbalanced, needs restoring here.
     with (
         enable_python_dispatcher(),
         ctx,
