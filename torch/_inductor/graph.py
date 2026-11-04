@@ -1906,16 +1906,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         user_kernel_hop = get_user_kernel_hop_info(fx_node.target)
         if user_kernel_hop is not None and fx_node.target is user_kernel_hop.mutation:
-            kwargs = fx_node.kwargs["kwargs"]
-            if not isinstance(kwargs, dict):
-                raise AssertionError(f"Expected dict, got {type(kwargs)}")
-            mutated = user_kernel_hop.get_mutated_tensors(
-                old_kwargs,
-                {
-                    k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
-                    for k, v in kwargs.items()
-                },
-            )
+            mutated = user_kernel_hop.get_node_mutated_tensors(fx_node, old_kwargs)
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
                 new_arg = new_kwargs["kwargs"][name]
