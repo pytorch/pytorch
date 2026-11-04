@@ -1883,7 +1883,7 @@ class TestFP8Matmul(TestCase):
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b, out_dtype=e4m3_type, use_fast_accum=True)
         self.assertEqual(out_fp8, out_fp8_s)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or (IS_WINDOWS and not torch.version.hip), f8_msg)
     @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
@@ -1911,7 +1911,7 @@ class TestFP8Matmul(TestCase):
             out_fp8.to(torch.float32), torch.full((M, N), K * (fill_value**2), device=device)
         )
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or (IS_WINDOWS and not torch.version.hip), f8_msg)
     @skipIfTorchDynamo("error message checks rely on eager exception types")
     def test_float8_error_messages(self, device) -> None:
         M, K, N = (1024, 512, 2048)
@@ -2019,7 +2019,7 @@ class TestFP8Matmul(TestCase):
             ):
                 e5m2()
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or (IS_WINDOWS and not torch.version.hip), f8_msg)
     @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("base_dtype", [torch.bfloat16, torch.float16, torch.float32])
     @parametrize("shapes", [
@@ -2092,7 +2092,7 @@ class TestFP8Matmul(TestCase):
         # fp32 output is now supported on both the cuBLAS and CUTLASS row-wise paths.
         test()
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or (IS_WINDOWS and not torch.version.hip), f8_msg)
     @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
     @parametrize("wrap_v2", [True, False])
@@ -2815,9 +2815,12 @@ class TestFP8Matmul(TestCase):
         if recipe == "nvfp4" and K % 32 != 0:
             raise unittest.SkipTest("K must be divisible by 32 for nvfp4 cublas gemm, skipping")
 
-        if torch.version.hip:
-            if not (M % 16 == 0 and K % 128 == 0 and N % 16 == 0):
-                raise unittest.SkipTest("M and N must be multiples of 16 and K must be multiple of 128 on ROCm, skipping")
+        if torch.version.hip and recipe in ("mxfp8", "mxfp4"):
+            mat_dtype = torch.float4_e2m1fn_x2 if recipe == "mxfp4" else torch.float8_e4m3fn
+            # SWIZZLE_32_8 only requires K % 32, checked via BLOCK_SIZE below.
+            # NO_SWIZZLE requires M and N multiples of 16 and K a multiple of 128.
+            if not rocm_mx_swizzle(mat_dtype) and not (M % 16 == 0 and K % 128 == 0 and N % 16 == 0):
+                raise unittest.SkipTest("M and N must be multiples of 16 and K must be a multiple of 128 for NO_SWIZZLE on ROCm, skipping")
 
         fp4_scaling_dtype = torch.float8_e8m0fnu if recipe == "mxfp4" else torch.float8_e4m3fn
         BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
@@ -3501,6 +3504,60 @@ class TestFP8Matmul(TestCase):
             use_fast_accum=False,
         )
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
+
+
+    @onlyAccelerator
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @unittest.skipIf(not torch.version.hip, "MX alignment checks are ROCm-only")
+    @parametrize("recipe", ["mxfp8", "mxfp4"])
+    def test_rocm_mx_alignment(self, device, recipe) -> None:
+        # Scales are all ones, so only the element count has to match the kernel.
+        fp4 = recipe == "mxfp4"
+        mat_dtype = torch.float4_e2m1fn_x2 if fp4 else torch.float8_e4m3fn
+
+        def scale_numel(rows, k, swizzle):
+            if swizzle == SwizzleType.SWIZZLE_32_8:
+                return round_up(rows, 32) * round_up(ceil_div(k, 32), 8)
+            stored_k = k // 2 if fp4 else k
+            rows_eff = rows * 2 if fp4 else rows
+            return ceil_div(rows_eff, 32) * stored_k
+
+        def ones_mm(m, k, n, swizzle):
+            a_ref = torch.ones(m, k, device=device, dtype=torch.bfloat16)
+            b_ref = torch.ones(n, k, device=device, dtype=torch.bfloat16)
+            if fp4:
+                a = _bfloat16_to_float4_e2m1fn_x2(a_ref)
+                b = _bfloat16_to_float4_e2m1fn_x2(b_ref)
+            else:
+                a = a_ref.to(mat_dtype)
+                b = b_ref.to(mat_dtype)
+            scale_a = torch.ones(scale_numel(m, k, swizzle), device=device, dtype=torch.float8_e8m0fnu)
+            scale_b = torch.ones(scale_numel(n, k, swizzle), device=device, dtype=torch.float8_e8m0fnu)
+            return scaled_mm_wrap(
+                a, b.t(), scale_a, scale_b,
+                scale_recipe_a=ScalingType.BlockWise1x32,
+                scale_recipe_b=ScalingType.BlockWise1x32,
+                swizzle_a=swizzle, swizzle_b=swizzle,
+                out_dtype=torch.bfloat16, use_fast_accum=False,
+            )
+
+        with self.subTest(swizzle="NO_SWIZZLE", mkn=(32, 64, 32)):
+            with self.assertRaisesRegex(ValueError, "K must be a multiple of 128 for NO_SWIZZLE"):
+                ones_mm(32, 64, 32, SwizzleType.NO_SWIZZLE)
+        with self.subTest(swizzle="NO_SWIZZLE", mkn=(16, 128, 16)):
+            got = ones_mm(16, 128, 16, SwizzleType.NO_SWIZZLE)
+            self.assertEqual(got, torch.full((16, 16), 128, device=device, dtype=torch.bfloat16))
+
+        if not rocm_mx_swizzle(mat_dtype):
+            return
+        with self.subTest(swizzle="SWIZZLE_32_8", mkn=(32, 16, 32)):
+            with self.assertRaisesRegex(ValueError, "K must be a multiple of 32 for SWIZZLE_32_8"):
+                ones_mm(32, 16, 32, SwizzleType.SWIZZLE_32_8)
+        with self.subTest(swizzle="SWIZZLE_32_8", mkn=(8, 32, 16)):
+            # N stays a multiple of 16: _scaled_mm_v2 requires that of mat2
+            # regardless of swizzle. M is not.
+            got = ones_mm(8, 32, 16, SwizzleType.SWIZZLE_32_8)
+            self.assertEqual(got, torch.full((8, 16), 32, device=device, dtype=torch.bfloat16))
 
 
     @onlyAccelerator

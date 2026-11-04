@@ -1,4 +1,5 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/utils/schema_info.h>
 
 namespace torch::utils {
@@ -18,7 +19,7 @@ void SchemaInfo::addArgumentValues(
       value_list.size() <= schema_.arguments().size(),
       "Schema does not have enough arguments for value list");
 
-  for (size_t i = 0; i < value_list.size(); i++) {
+  for (const auto i : c10::irange(value_list.size())) {
     if (value_list[i].has_value()) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       value_map_[schema_.arguments()[i].name()] = *value_list[i];
@@ -322,7 +323,7 @@ void SchemaInfo::initSchemaInfo() {
                                        arguments_list,
                                    c10::SchemaArgType type) {
     std::unordered_set<at::Symbol> seen;
-    for (size_t i = 0; i < arguments_list.size(); i++) {
+    for (const auto i : c10::irange(arguments_list.size())) {
       const c10::Argument& argument = arguments_list[i];
       if (argument.alias_info()) {
         if (argument.alias_info()->isWildcardAfter()) {

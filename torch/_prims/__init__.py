@@ -2003,6 +2003,7 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
         raise AssertionError(f"a must be TensorLike, got {type(a)}")  # mypy
     if not isinstance(dtype, torch.dtype):
         raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
+    utils.check_shell_dtype_cast(a.dtype, dtype)
 
     # dtype conversion preserves dense strides
     if torch._prims_common.is_non_overlapping_and_dense_or_false(a):
@@ -2855,6 +2856,11 @@ def _uniform_meta(
     stride: ShapeType,
     generator: torch.Generator | None = None,
 ) -> TensorLikeType:
+    torch._check_not_implemented(
+        dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+        or dtype.is_complex,
+        lambda: f'"check_uniform_bounds" not implemented for {dtype}',
+    )
     return TensorMeta(shape=shape, strides=stride, dtype=dtype, device=device)
 
 

@@ -58,7 +58,9 @@ VERDICTS = {"ready_for_human_review", "changes_requested"}
 SEVERITIES = {"info", "minor", "major"}
 
 MAX_FINDINGS = 25
-MAX_MESSAGE = 600
+# Stage B's prompt asks for at most 1200 characters, leaving room for the
+# escaping neutralize() adds; a message that still overflows ends in TRUNCATED.
+MAX_MESSAGE = 1500
 MAX_SUMMARY = 1500
 MAX_PATH = 400
 MAX_DROPPED_TRACKED = (
@@ -164,6 +166,12 @@ _UNESCAPED_BRACKET = re.compile(r"(?<!\\)[\[\]]")
 # neutralize() caps AFTER escaping, so a capped string can end in a cut entity.
 _BARE_AMPERSAND = re.compile(r"&(?!amp;|lt;|gt;|(?:a(?:mp?)?|lt?|gt?)?\Z)")
 _FINDING_KEYS = ("path", "line", "severity", "message")
+# The space keeps the dots from completing a token, such as `www` into a URL.
+TRUNCATED = " ..."
+# A cut entity is allowed only at the very end; it must go before TRUNCATED.
+_PARTIAL_ENTITY = re.compile(r"&(?:a(?:mp?)?|lt?|gt?)?\Z")
+# Anchored at a token start: unanchored, each retry backtracks through long tokens.
+_PARTIAL_TOKEN = re.compile(r"(?<!\S)\S+\Z")
 
 
 class Rejected(Exception):
@@ -427,6 +435,43 @@ def neutralize(text: str, cap: int = MAX_SUMMARY) -> str:
     # Capped on the way out as well as in: escaping GROWS the string, and one
     # place deciding the length beats every caller re-truncating.
     return _drop_dangling_escape(text[:cap])
+
+
+def neutralize_message(message: str) -> str:
+    """`neutralize` a finding message to MAX_MESSAGE, ending a cut in TRUNCATED.
+
+    The input is sliced to MAX_MESSAGE first, as `neutralize` would, so its
+    quadratic cost stays bounded; only the output is allowed to grow before the
+    cut, which escaping can make up to 5x longer.
+
+    A cut can leave text that fails a check the whole message passed: half a
+    128-hex digest is a blob, a cut entity mid-string is a bare `&`. So whole
+    tokens are dropped from the end until the result passes the publish check,
+    and a message with no passing prefix comes back empty, which `build` drops.
+    Only failures the cut causes are repaired this way: a message that fails the
+    check whole (a blob neutralize() joined, say) is returned whole, so `build`
+    drops it as `failed_publish_check`.
+    """
+    src = message[:MAX_MESSAGE]
+    if len(src) < len(message) and not message[MAX_MESSAGE].isspace():
+        # The input slice is a cut too: drop the token it split.
+        src = _PARTIAL_TOKEN.sub("", src) or src
+    full = neutralize(src, 5 * MAX_MESSAGE).strip()
+    if not full or (len(message.rstrip()) <= MAX_MESSAGE and len(full) <= MAX_MESSAGE):
+        return full
+    if not is_neutral_prose(full, len(full)):
+        return full
+    kept = full[: MAX_MESSAGE - len(TRUNCATED)]
+    if len(kept) < len(full) and not full[len(kept)].isspace():
+        # Back up to a word boundary, unless the text is one long token.
+        kept = _PARTIAL_TOKEN.sub("", kept) or kept
+    while kept.strip():
+        out = _drop_dangling_escape(kept.rstrip())
+        out = _PARTIAL_ENTITY.sub("", out).rstrip() + TRUNCATED
+        if is_neutral_prose(out, MAX_MESSAGE):
+            return out
+        kept = _PARTIAL_TOKEN.sub("", kept.rstrip())
+    return ""
 
 
 def unquote_git_path(path: str) -> str:
@@ -803,7 +848,7 @@ def sanitize_findings(  # noqa: C901
             drop({"path": path, "reason": "bad_severity"})
             continue
 
-        clean_message = neutralize(message, MAX_MESSAGE).strip()[:MAX_MESSAGE].strip()
+        clean_message = neutralize_message(message)
         if not clean_message:
             # e.g. a message consisting only of `<b></b>`: it survives the
             # non-empty check above but neutralizes to nothing, and an empty
@@ -829,7 +874,8 @@ def sanitize_findings(  # noqa: C901
             "message": clean_message,
         }
         # The publish job drops a finding that fails this, so drop it HERE.
-        # Only a bug in the producer above reaches it.
+        # It catches a message that fails uncut, which neutralize_message()
+        # returns whole, and any bug in the producer above.
         if not is_publishable_finding(finding):
             drop({"path": path, "line": line, "reason": "failed_publish_check"})
             continue

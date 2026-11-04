@@ -15,6 +15,7 @@
 #include <c10/util/env.h>
 #include <c10/util/error.h>
 
+#include <c10/util/irange.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -29,6 +30,27 @@
 #endif
 
 namespace c10d::symmetric_memory {
+
+// Shareable handle spellings, so the rendezvous code below can be written once
+// against `use_fabric_handle` instead of once per vendor per handle type.
+#if defined(USE_ROCM)
+#if ROCM_VERSION >= 100000
+using FabricHandleType = hipMemFabricHandle_t;
+constexpr auto kMemHandleTypeFabric = hipMemHandleTypeFabric;
+#else
+// Unreachable below ROCm 10.0, but rendezvous() instantiates both branches of
+// make_peer_alloc_info. None makes the HIP runtime reject it if reached.
+struct FabricHandleType {
+  unsigned char data[64];
+};
+constexpr auto kMemHandleTypeFabric = hipMemHandleTypeNone;
+#endif
+constexpr auto kMemHandleTypePosixFd = hipMemHandleTypePosixFileDescriptor;
+#else
+using FabricHandleType = CUmemFabricHandle;
+constexpr auto kMemHandleTypeFabric = CU_MEM_HANDLE_TYPE_FABRIC;
+constexpr auto kMemHandleTypePosixFd = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+#endif
 
 /* Start of CUDASymmetricMemory implementation */
 
@@ -90,11 +112,16 @@ AllocationRef::~AllocationRef() {
   }
 #endif
   C10_CUDA_DRIVER_CHECK_WARN(
+      driver_api->cuMemAddressFree_(
+          reinterpret_cast<CUdeviceptr>(ptr), block_size),
+      "SymmetricMemory: failed to free virtual address range during teardown");
+  C10_CUDA_DRIVER_CHECK_WARN(
       driver_api->cuMemRelease_(handle),
       "SymmetricMemory: failed to release allocation during teardown");
 #elif defined(USE_ROCM)
   C10_CUDA_CHECK_WARN(
       hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(ptr), block_size));
+  C10_CUDA_CHECK_WARN(hipMemAddressFree(ptr, block_size));
   C10_CUDA_CHECK_WARN(hipMemRelease(handle));
 #else
   TORCH_CHECK(
@@ -232,7 +259,7 @@ void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
-  GroupStreamGuard stream_guard(pai_->group_name_, pg);
+  GroupStreamGuard stream_guard(pai_->group_name_);
   // The barrier state holds counters for groups of two or more ranks; see
   // alloc().
   if (get_multicast_ptr() != nullptr && world_size_ > 1) {
@@ -283,7 +310,7 @@ void CUDASymmetricMemory::put_signal(
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
-  GroupStreamGuard stream_guard(pai_->group_name_, pg);
+  GroupStreamGuard stream_guard(pai_->group_name_);
   put_signal_kernel<<<
       1,
       at::cuda::warp_size(),
@@ -319,7 +346,7 @@ void CUDASymmetricMemory::wait_signal(
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
-  GroupStreamGuard stream_guard(pai_->group_name_, pg);
+  GroupStreamGuard stream_guard(pai_->group_name_);
   wait_signal_kernel<<<
       1,
       at::cuda::warp_size(),
@@ -415,12 +442,7 @@ void* CUDASymmetricMemoryAllocator::alloc(
       "Allocation maps the block, zeroes the signal pad and synchronizes the "
       "stream. Allocate the buffer with "
       "torch.distributed._symmetric_memory.empty() before starting capture.");
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  CUmemAllocationProp prop = {};
-  prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-  prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-  prop.location.id = device_idx;
+  void* alloc_base = nullptr;
   bool has_fabric_support = at::cuda::get_fabric_access(device_idx);
   LOG(INFO) << "CUDASymmetricMemoryAllocator::alloc: has_fabric_support "
             << has_fabric_support;
@@ -429,11 +451,16 @@ void* CUDASymmetricMemoryAllocator::alloc(
         ? Expandable_Segments_Handle_Type::FABRIC_HANDLE
         : Expandable_Segments_Handle_Type::POSIX_FD;
   }
-  if (handle_type_ == Expandable_Segments_Handle_Type::POSIX_FD) {
-    prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-  } else {
-    prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
-  }
+  [[maybe_unused]] const bool use_fabric =
+      handle_type_ == Expandable_Segments_Handle_Type::FABRIC_HANDLE;
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  CUmemAllocationProp prop = {};
+  prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+  prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+  prop.location.id = device_idx;
+  prop.requestedHandleTypes =
+      use_fabric ? kMemHandleTypeFabric : kMemHandleTypePosixFd;
 
   auto driver_api = c10::cuda::DriverAPI::get();
   int rdma_flag = 0;
@@ -452,15 +479,29 @@ void* CUDASymmetricMemoryAllocator::alloc(
   HandleType handle;
   C10_CUDA_DRIVER_CHECK(
       driver_api->cuMemCreate_(&handle, block_size, &prop, 0));
+  auto rollback = c10::make_scope_exit([&]() noexcept {
+    auto release_result = driver_api->cuMemRelease_(handle);
+    if (release_result != CUDA_SUCCESS) {
+      const char* error = nullptr;
+      if (driver_api->cuGetErrorString_(release_result, &error) != CUDA_SUCCESS) {
+        error = nullptr;
+      }
+      LOG(WARNING) << "SymmetricMemory: failed to release incomplete allocation: "
+                   << (error ? error : "unknown CUDA driver error")
+                   << " (" << static_cast<int>(release_result) << ")";
+    }
+  });
 
 #elif defined(USE_ROCM)
-  handle_type_ = Expandable_Segments_Handle_Type::POSIX_FD;
   hipMemAllocationProp prop = {};
   prop.type = hipMemAllocationTypePinned;
   prop.location.type = hipMemLocationTypeDevice;
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   prop.location.id = device_idx;
-  prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+  // The handle type is fixed at creation: hipMemAllocationProp carries a single
+  // handle type rather than a mask, and ROCm rejects any combined value.
+  prop.requestedHandleType =
+      use_fabric ? kMemHandleTypeFabric : kMemHandleTypePosixFd;
 
   size_t granularity;
   C10_CUDA_CHECK(hipMemGetAllocationGranularity(
@@ -478,8 +519,12 @@ void* CUDASymmetricMemoryAllocator::alloc(
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
 #endif
-  void* alloc_base = nullptr;
   map_block(&alloc_base, handle, block_size, device_idx);
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  auto alloc_ref = c10::make_intrusive<AllocationRef>(
+      alloc_base, handle, block_size, device_idx);
+  rollback.release();
+#endif
 
   // Zero the signal pad and the barrier state ([0, buffer_offset)): both
   // barrier() protocols start from zero. The data buffer that follows does not
@@ -497,8 +542,10 @@ void* CUDASymmetricMemoryAllocator::alloc(
   // block (and thus alloc_base) is released internally by ~AllocationRef.
   void* buffer_ptr = static_cast<char*>(alloc_base) + buffer_offset;
 
+#if defined(USE_ROCM) || !defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto alloc_ref = c10::make_intrusive<AllocationRef>(
       alloc_base, handle, block_size, device_idx);
+#endif
   auto block = c10::make_intrusive<Block>(
       std::move(alloc_ref),
       device_idx,
@@ -536,6 +583,7 @@ struct RendezvousRequest {
   size_t buffer_offset;
   bool has_multicast_support;
   int clique_id;
+  bool use_fabric_handle;
   char hostname[HOST_NAME_MAX + 1];
 };
 
@@ -576,11 +624,39 @@ void validate_rendezvous_requests(
         "from different ranks.");
   }
 
-  for (int r = 1; r < world_size; ++r) {
+  for (const auto r : c10::irange(1, world_size)) {
     TORCH_CHECK(reqs[r].block_size == reqs[0].block_size);
     TORCH_CHECK(reqs[r].buffer_size == reqs[0].buffer_size);
     TORCH_CHECK(reqs[r].buffer_offset == reqs[0].buffer_offset);
   }
+}
+
+// A rank without fabric access falls back to POSIX fds, and the two handle
+// exchanges are different collectives, so a mixed group would block instead of
+// failing.
+static void validate_handle_type_agreement(
+    const std::vector<RendezvousRequest>& reqs,
+    int world_size) {
+  if (std::all_of(reqs.begin(), reqs.end(), [&](const auto& req) {
+        return req.use_fabric_handle == reqs[0].use_fabric_handle;
+      })) {
+    return;
+  }
+  std::ostringstream oss;
+  oss << "CUDASymmetricMemory::rendezvous: "
+      << "ranks disagree on the memory handle type. "
+      << "All ranks must use fabric handles, or all must use POSIX fds. "
+      << "Per-rank info: ";
+  for (const auto r : c10::irange(world_size)) {
+    if (r > 0) {
+      oss << ", ";
+    }
+    oss << "rank " << r << " (host: " << reqs[r].hostname
+        << ", device: " << reqs[r].device_idx
+        << ", handle: " << (reqs[r].use_fabric_handle ? "fabric" : "posix_fd")
+        << ')';
+  }
+  TORCH_CHECK(false, std::move(oss).str());
 }
 
 // All ranks must be in the same NVLink domain (same clique_id). Detect
@@ -600,7 +676,7 @@ static void validate_nvlink_fabric_support(
         << "ranks have mismatched NVLink clique_ids. "
         << "All ranks using fabric handles must be in the same NVLink domain. "
         << "Per-rank info: ";
-    for (int r = 0; r < world_size; ++r) {
+    for (const auto r : c10::irange(world_size)) {
       if (r > 0) {
         oss << ", ";
       }
@@ -615,7 +691,7 @@ static void validate_nvlink_fabric_support(
 static bool check_group_multicast_support(
     const std::vector<RendezvousRequest>& reqs) {
   std::vector<size_t> ranks_with_multicast_support;
-  for (size_t r = 0; r < reqs.size(); ++r) {
+  for (const auto r : c10::irange(reqs.size())) {
     if (reqs[r].has_multicast_support) {
       ranks_with_multicast_support.push_back(r);
     }
@@ -740,8 +816,8 @@ class MulticastSetup {
       return false;
     }
     bound_ = true;
-    // map_block throws, and addr_ holds whatever VA it reserved before it did,
-    // which release() still has to undo.
+    // A failed map_block leaves addr_ null. Convert its error to false so this
+    // rank still participates in the post-map success exchange.
     try {
       map_block(
           &addr_, imported_handle_, block_->block_size, block_->device_idx);
@@ -785,6 +861,11 @@ class MulticastSetup {
           driver_api_->cuMemUnmap_(
               reinterpret_cast<CUdeviceptr>(addr_), block_->block_size),
           "SymmetricMemory[CLEANUP]: failed to unmap multicast address");
+      C10_CUDA_DRIVER_CHECK_WARN(
+          driver_api_->cuMemAddressFree_(
+              reinterpret_cast<CUdeviceptr>(addr_), block_->block_size),
+          "SymmetricMemory[CLEANUP]: failed to free multicast virtual address "
+          "range");
       addr_ = nullptr;
     }
     if (imported_handle_ != 0) {
@@ -857,7 +938,7 @@ static void init_multicast_for_block(
         ? pg_all_gather(group, block->device_idx, flag)
         : storeExchange.all_gather(store, rank, world_size, flag);
     bool all_succeed = true;
-    for (int r = 0; r < world_size; ++r) {
+    for (const auto r : c10::irange(world_size)) {
       all_succeed &= (rank_flags[r] != 0);
     }
     return all_succeed;
@@ -918,13 +999,11 @@ template <bool use_fabric_handle>
 c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
     c10::intrusive_ptr<Block> block,
     const std::string& group_name) {
-#if defined(USE_ROCM)
-  using BlockHandleType = int;
-#else
   using BlockHandleType =
-      std::conditional_t<use_fabric_handle, CUmemFabricHandle, int>;
-#endif
-  BlockHandleType block_handle;
+      std::conditional_t<use_fabric_handle, FabricHandleType, int>;
+  // Value-initialized: ROCm's exporter writes only the leading 16 bytes of the
+  // 64-byte fabric handle, and the whole struct is all-gathered to every rank.
+  BlockHandleType block_handle{};
   c10::cuda::CUDAGuard guard(block->device_idx);
   if constexpr (!use_fabric_handle) {
     LOG(INFO) << "using posix fd to import symmetric memory handles.";
@@ -966,14 +1045,13 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
       &block_handle,
       block->alloc_ref->handle,
-      use_fabric_handle ? CU_MEM_HANDLE_TYPE_FABRIC
-                        : CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,
+      use_fabric_handle ? kMemHandleTypeFabric : kMemHandleTypePosixFd,
       0));
 #elif defined(USE_ROCM)
   C10_CUDA_CHECK(hipMemExportToShareableHandle(
       &block_handle,
       block->alloc_ref->handle,
-      hipMemHandleTypePosixFileDescriptor,
+      use_fabric_handle ? kMemHandleTypeFabric : kMemHandleTypePosixFd,
       0));
 #else
   TORCH_CHECK(
@@ -995,17 +1073,19 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
         .buffer_offset = block->buffer_offset,
         .has_multicast_support =
             device_has_multicast_support(block->device_idx),
-        .clique_id = at::cuda::get_fabric_clique_id(block->device_idx)};
+        .clique_id = at::cuda::get_fabric_clique_id(block->device_idx),
+        .use_fabric_handle = use_fabric_handle};
 
     // Populate hostname field for host identification
     gethostname(local_req.hostname, sizeof(local_req.hostname));
     reqs = use_pg
         ? pg_all_gather(group, block->device_idx, local_req)
         : storeExchange.all_gather(store, rank, world_size, local_req);
+    validate_handle_type_agreement(reqs, world_size);
     validate_nvlink_fabric_support(reqs, world_size);
     validate_rendezvous_requests(reqs, world_size);
 
-    for (int r = 0; r < world_size; ++r) {
+    for (const auto r : c10::irange(world_size)) {
       pids[r] = reqs[r].pid;
     }
 
@@ -1018,7 +1098,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
           : storeExchange.all_gather(store, rank, world_size, block_handle);
     }
 
-    for (int r = 0; r < world_size; ++r) {
+    for (const auto r : c10::irange(world_size)) {
       if (r == rank) {
         // Derive pointers from the allocation base (not the rendezvous ptr,
         // which may be an interior MemPool pointer): this pai is shared by
@@ -1050,14 +1130,32 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
             import_err_msg(rank, r, reqs));
       }
 #elif defined(USE_ROCM)
-      C10_CUDA_CHECK(hipMemImportFromShareableHandle(
-          &handles[r],
+      // The two handle types differ in calling convention, not just in the type
+      // tag: ROCm dereferences the argument for a fabric handle but casts it by
+      // value for an fd.
+      hipError_t import_err = hipSuccess;
+      if constexpr (use_fabric_handle) {
+        import_err = hipMemImportFromShareableHandle(
+            &handles[r], &imported_handles[r], kMemHandleTypeFabric);
+      } else {
+        import_err = hipMemImportFromShareableHandle(
+            &handles[r],
 #if ROCM_VERSION >= 70100
-          reinterpret_cast<void*>(static_cast<uintptr_t>(imported_handles[r])),
+            reinterpret_cast<void*>(
+                static_cast<uintptr_t>(imported_handles[r])),
 #else
-          (void*)(uintptr_t)&(imported_handles[r]),
+            (void*)(uintptr_t)&(imported_handles[r]),
 #endif
-          hipMemHandleTypePosixFileDescriptor));
+            kMemHandleTypePosixFd);
+      }
+      if (import_err != hipSuccess) {
+        (void)hipGetLastError();
+        TORCH_CHECK(
+            false,
+            "hipMemImportFromShareableHandle failed: ",
+            hipGetErrorString(import_err),
+            import_err_msg(rank, r, reqs));
+      }
 #else
       TORCH_CHECK(
           false,
@@ -1096,7 +1194,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   }
 
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs;
-  for (int r = 0; r < world_size; ++r) {
+  for (const auto r : c10::irange(world_size)) {
     if (r == rank) {
       if (mc_addr != nullptr) {
         alloc_refs.push_back(
