@@ -1404,6 +1404,7 @@ class TestResolveSelection(unittest.TestCase):
         head_repo: str = REPO,
         author: str = "MEMBER",
         selected_enforce: bool = True,
+        enforcement: bool = True,
         **env: str,
     ) -> dict | None:
         """Run main() against a fake API that lists the next of `polls` on each
@@ -1451,6 +1452,7 @@ class TestResolveSelection(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as tmp,
             mock.patch.dict(os.environ, env),
+            mock.patch.object(resolve_selection, "ENFORCEMENT_ENABLED", enforcement),
             mock.patch.object(resolve_selection, "get", get),
             mock.patch.object(resolve_selection, "fetch", fetch),
             mock.patch.object(time, "monotonic", lambda: now[0]),
@@ -1541,6 +1543,13 @@ class TestResolveSelection(unittest.TestCase):
                 record = self.selected([selector_run(1), pending_run(2)], author=author)
                 self.assertFalse(record["enforce"])
                 self.assertEqual((self.fetched, self.sleeps), (["zip/1"], []))
+
+    def test_enforcement_disabled_neither_waits_nor_enforces(self) -> None:
+        runs = [selector_run(1), pending_run(2)]
+        record = self.selected(runs, enforcement=False)
+        self.assertFalse(record["enforce"])
+        self.assertFalse(record["enforce_requested"])
+        self.assertEqual((self.fetched, self.sleeps), (["zip/1"], []))
 
     def test_failed_selection_is_not_enforced(self) -> None:
         # select_tests writes enforce=False when the model call failed.
