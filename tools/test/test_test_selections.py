@@ -19,8 +19,6 @@ try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
     from tools.testing import test_selections
-    from tools.testing.llm_td import selection
-    from tools.testing.llm_td.selection import Selection
     from tools.testing.target_determination import gen_artifact
     from tools.testing.target_determination.heuristics.interface import (
         TestPrioritizations,
@@ -37,6 +35,15 @@ try:
 except ModuleNotFoundError:
     print("Can't import required modules, exiting")
     sys.exit(1)
+
+# Only the llm_td tests fail if the experimental package does not import.
+try:
+    from tools.testing.llm_td import selection
+    from tools.testing.llm_td.selection import Selection
+except Exception as e:
+    LLM_TD_IMPORT_ERROR: Exception | None = e
+else:
+    LLM_TD_IMPORT_ERROR = None
 
 if TYPE_CHECKING:
     from collections.abc import Collection
@@ -632,7 +639,14 @@ class TestGetJobBaseName(unittest.TestCase):
             self.assertEqual(get_job_base_name(name), name)
 
 
-class TestSplitTests(unittest.TestCase):
+class LlmTdTestCase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        if LLM_TD_IMPORT_ERROR is not None:
+            raise LLM_TD_IMPORT_ERROR
+
+
+class TestSplitTests(LlmTdTestCase):
     TD_LINE = "Running 25% of tests based on TD\n"
 
     def split(
@@ -854,7 +868,7 @@ class TestSplitTests(unittest.TestCase):
         self.assertEqual([x["source"] for x in artifacts], ["td"])
 
 
-class TestRunTestSplit(unittest.TestCase):
+class TestRunTestSplit(LlmTdTestCase):
     def test_forwards_run_test_values(self) -> None:
         tp = TestPrioritizations(["a"], {})
         for prev, is_ci in ((None, True), (set(), False), ({"a"}, True)):
