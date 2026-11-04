@@ -32,23 +32,39 @@ class PreviouslyFailedInPR(HeuristicInterface):
         super().__init__(**kwargs)
 
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
-        critical_tests = get_all_previous_failures()
-        if critical_tests is None:
-            raise RuntimeError("could not read the previous failures")
+        try:
+            critical_tests = read_all_previous_failures()
+        except PREVIOUS_FAILURES_ERRORS as e:
+            raise RuntimeError("could not read the previous failures") from e
         return TestPrioritizations(
             tests, {TestRun(test): 1 for test in critical_tests if test in tests}
         )
 
 
+PREVIOUS_FAILURES_ERRORS = (
+    OSError,
+    ValueError,
+    TypeError,
+    AttributeError,
+    RecursionError,
+)
+
+
+def read_all_previous_failures() -> set[str]:
+    """The string entries of the PR's failure files: the test files that
+    already failed on this PR."""
+    failed = get_previous_failures() | read_additional_test_failures_file()
+    return {f for f in failed if isinstance(f, str)}
+
+
 def get_all_previous_failures() -> set[str] | None:
-    """The test files that already failed on this PR, without the entries that
-    are not strings, or None if a failure file cannot be read."""
+    """read_all_previous_failures(), or None if a failure file cannot be read
+    or is malformed (including entries that cannot be hashed)."""
     try:
-        failed = get_previous_failures() | read_additional_test_failures_file()
-    except (OSError, ValueError, TypeError, AttributeError, RecursionError) as e:
+        return read_all_previous_failures()
+    except PREVIOUS_FAILURES_ERRORS as e:
         print(f"Ignoring the previous failures: {e!r}", file=sys.stderr)
         return None
-    return {f for f in failed if isinstance(f, str)}
 
 
 def get_previous_failures() -> set[str]:
