@@ -2434,19 +2434,23 @@ with open(sys.argv[1], "w") as f:
 
     def test_toggle_uncollected_activity_raises(self):
         with profile(activities=[ProfilerActivity.CPU]) as p:
-            with self.assertRaisesRegex(ValueError, "does not collect: CUDA"):
+            with self.assertRaisesRegex(ValueError, "Cannot toggle CUDA"):
                 p.toggle_collection_dynamic(False, [ProfilerActivity.CUDA])
             p.toggle_collection_dynamic(False, [ProfilerActivity.CPU])
             p.toggle_collection_dynamic(True, [ProfilerActivity.CPU])
 
-        # Toggling CUDA also toggles XPU, so a session that collects XPU may
-        # toggle CUDA.
-        p = profile(activities=[ProfilerActivity.CPU, ProfilerActivity.XPU])
-        p.profiler = MagicMock()
-        p.toggle_collection_dynamic(False, [ProfilerActivity.CUDA])
-        p.profiler.toggle_collection_dynamic.assert_called_once_with(
-            False, {ProfilerActivity.CUDA}
-        )
+        # Each GPU session may toggle only its own GPU. The inner profiler is
+        # stubbed so this runs without either device.
+        cuda, xpu = ProfilerActivity.CUDA, ProfilerActivity.XPU
+        for collected, other in [(cuda, xpu), (xpu, cuda)]:
+            p = profile(activities=[ProfilerActivity.CPU, collected])
+            p.profiler = MagicMock()
+            with self.assertRaisesRegex(ValueError, f"Cannot toggle {other.name}"):
+                p.toggle_collection_dynamic(False, [other])
+            p.toggle_collection_dynamic(False, [collected])
+            p.profiler.toggle_collection_dynamic.assert_called_once_with(
+                False, {collected}
+            )
 
     def test_init_for_cuda_graphs_traces_cuda(self):
         from torch.profiler._utils import _init_for_cuda_graphs
