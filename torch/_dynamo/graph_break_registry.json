@@ -2712,7 +2712,7 @@
     {
       "Gb_type": "wrap_cutedsl: host_fn is not a @cute.jit function",
       "Context": "host_fn={host_fn}",
-      "Explanation": "wrap_cutedsl only works on host functions decorated with @cute.jit, not on a wrapper that wrap_cutedsl returned.",
+      "Explanation": "wrap_cutedsl only works on host functions decorated with @cute.jit: not on a wrapper that wrap_cutedsl returned, a functools.wraps decorator of a host function, a @cute.kernel function, a kernel object (one whose class's __call__ is @cute.jit) or a bound @cute.jit method. For the last two, as eager wrap_cutedsl says, wrap a @cute.jit function that takes the object as a cutlass.Constexpr parameter and calls the method on it, and pass the object to that wrapper.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
@@ -2724,7 +2724,7 @@
       "Context": "mutates_args={mutates_args}",
       "Explanation": "Dynamo supports wrap_cutedsl(host_fn, mutates_args=...) only where mutates_args is a constant.",
       "Hints": [
-        "Pass mutates_args as a list or tuple of parameter names.",
+        "Pass mutates_args as 'unknown' or a list of parameter names.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -2732,9 +2732,22 @@
   "GB9356": [
     {
       "Gb_type": "CuTeDSL kernel unsupported feature",
-      "Context": "",
-      "Explanation": "Encountered CuTeDSL kernel unsupported feature: {msg}",
-      "Hints": []
+      "Context": "msg",
+      "Explanation": "Dynamo cannot capture this call of a CuTeDSL host function, or this use of a value made for one, which eager may run.",
+      "Hints": [
+        "Change the call as the developer debug context describes.",
+        "Without fullgraph=True, the call graph-breaks and runs eagerly."
+      ]
+    }
+  ],
+  "GB6579": [
+    {
+      "Gb_type": "CuTeDSL kernel call error",
+      "Context": "str(exc)",
+      "Explanation": "Eager refuses this call too: a call of a CuTeDSL host function, of wrap_cutedsl or of the wrapper it returns, or of from_dlpack or cutlass.torch.current_stream for a raw call. A raw call is checked as the call of wrap_cutedsl(fn, mutates_args=\"unknown\").",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
     }
   ],
   "GB0159": [

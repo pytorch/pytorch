@@ -140,7 +140,7 @@ class ConstantFolder(torch.fx.Interpreter):
         ):
             return self.unknown_value
 
-        # TODO - constant folding triton kernel returns the inputs -- fix this
+        # TODO - constant folding a user kernel returns the inputs -- fix this
         if node.op == "call_function" and is_user_kernel_functional_hop(node.target):
             return self.unknown_value
 
