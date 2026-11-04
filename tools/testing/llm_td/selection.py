@@ -184,9 +184,9 @@ def importers(
 
 def import_pattern(modules: Iterable[str]) -> str:
     """A `git grep -E` pattern for importing one of `modules`, .py paths under test/."""
-    # A module is imported by any dotted suffix of its path, optionally under
-    # the test. package, also through importlib.import_module, a package by its
-    # directory, and load_test_module (a SourceFileLoader) takes the path.
+    # A module is imported by any dotted suffix of its path, optionally prefixed
+    # with `test.`, or by importlib.import_module of one; a package by its
+    # directory; and load_test_module (a SourceFileLoader) takes the path.
     # A parenthesized `from <package> import (` may span lines, so it counts
     # as importing every module of that package.
     mods = sorted(f[5:-3].removesuffix("/__init__") for f in modules)
