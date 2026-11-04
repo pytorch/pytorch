@@ -2028,8 +2028,10 @@ static inline void ensure_triton_kernel_compiles_started() {{
             and current_stream_idx != 0
         ):
             stream = get_stream_name(current_stream_idx)
+            aot_stream = self._stream_expr_for_idx(current_stream_idx)
         else:
             stream = self.write_get_raw_stream(device.index, graph_name)
+            aot_stream = "stream"
 
         if triton:
             call_args, arg_types = self.prepare_triton_wrapper_args(
@@ -2077,15 +2079,16 @@ static inline void ensure_triton_kernel_compiles_started() {{
 
             # AOTI side uses this->device_idx_ so the model honors runtime device
             # assignment; JIT side has no this->device_idx_ in scope, so use the
-            # concrete graph device index. Similarly, AOTI side always uses the
-            # `stream` function parameter of run_impl, while JIT side uses the
+            # concrete graph device index. Similarly, AOTI side uses the `stream`
+            # function parameter of run_impl (in a user stream region, the region's
+            # stream, which its aten fallbacks run on), while JIT side uses the
             # locally-declared stream{idx} (see _codegen_entry_impl_prologue).
             aoti_device_idx = (
                 "this->device_idx_" if V.graph.aot_mode else str(device.index)
             )
             jit_device_idx = str(device.index)
             jit_call_args = [*call_args, jit_device_idx, stream]
-            aot_call_args = [*call_args, aoti_device_idx, "stream"]
+            aot_call_args = [*call_args, aoti_device_idx, aot_stream]
             debug_printer_manager = V.graph.wrapper_code.debug_printer
             debug_printer_manager.set_printer_args(
                 jit_call_args[: len(arg_types)], kernel_name, arg_types, None
