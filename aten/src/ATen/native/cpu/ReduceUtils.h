@@ -37,6 +37,10 @@ using namespace vec;
         static constexpr auto reduce = ReductionType::PROD;                    \
         return __VA_ARGS__();                                                  \
       }                                                                        \
+      case ReductionType::NONE: {                                              \
+        static constexpr auto reduce = ReductionType::NONE;                    \
+        return __VA_ARGS__();                                                  \
+      }                                                                        \
     }                                                                          \
   }()
 
@@ -51,9 +55,11 @@ inline vec_scalar_t<scalar_t> init_value() {
     val = static_cast<acc_t>(1);
   } else if (reduce == ReductionType::MAX) {
     val = -std::numeric_limits<acc_t>::infinity();
-  } else {
-    TORCH_INTERNAL_ASSERT(reduce == ReductionType::MIN);
+  } else if (reduce == ReductionType::MIN) {
     val = std::numeric_limits<acc_t>::infinity();
+  } else {
+    TORCH_INTERNAL_ASSERT(reduce == ReductionType::NONE);
+    val = static_cast<acc_t>(0);
   }
   return val;
 }
@@ -189,9 +195,11 @@ inline T update(const T& x, const T& y) {
     return x * y;
   } else if (reduce == ReductionType::MAX) {
     return _max(x, y);
-  } else {
-    TORCH_INTERNAL_ASSERT(reduce == ReductionType::MIN);
+  } else if (reduce == ReductionType::MIN) {
     return _min(x, y);
+  } else {
+    TORCH_INTERNAL_ASSERT(reduce == ReductionType::NONE);
+    return y;
   }
 }
 
