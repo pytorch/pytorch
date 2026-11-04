@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = [
 #   "numpy==1.26.4 ; python_version >= '3.10' and python_version <= '3.11'",
 #   "numpy==2.1.0 ; python_version >= '3.12' and python_version <= '3.13'",
