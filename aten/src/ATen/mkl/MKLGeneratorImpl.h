@@ -35,12 +35,4 @@ struct TORCH_API MKLGeneratorImpl : public c10::GeneratorImpl {
   uint64_t offset_;
 };
 
-namespace detail {
-
-TORCH_API const Generator& getDefaultMKLGenerator();
-TORCH_API Generator
-createMKLGenerator(uint64_t seed_val = default_rng_seed_val);
-
-} // namespace detail
-
 } // namespace at

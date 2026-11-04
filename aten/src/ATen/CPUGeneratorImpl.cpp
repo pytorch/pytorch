@@ -3,6 +3,7 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/core/MT19937RNGEngine.h>
 #include <algorithm>
+#include <cstddef>
 
 #if AT_MKL_ENABLED()
 #include <ATen/mkl/MKLGeneratorImpl.h>
@@ -47,10 +48,8 @@ struct CPUGeneratorImplState {
   CPUGeneratorImplStateLegacy legacy_pod;
   float next_float_normal_sample;
   bool is_next_float_normal_sample_valid;
-#if AT_MKL_ENABLED()
   uint64_t mkl_seed;
   uint64_t mkl_offset;
-#endif
 };
 
 /**
@@ -90,15 +89,7 @@ CPUGeneratorImpl::CPUGeneratorImpl(uint64_t seed_in)
   : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(c10::DispatchKey::CPU)},
     engine_{seed_in},
     next_float_normal_sample_{std::optional<float>()},
-    next_double_normal_sample_{std::optional<double>()} {
-#if AT_MKL_ENABLED()
-      {
-        auto mkl_gen = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
-        std::scoped_lock lock(mkl_gen->mutex_);
-        mkl_gen->set_current_seed(seed_in);
-      }
-#endif
-    }
+    next_double_normal_sample_{std::optional<double>()} { }
 
 /**
  * Manually seeds the engine with the seed input
@@ -109,11 +100,7 @@ void CPUGeneratorImpl::set_current_seed(uint64_t seed) {
   next_double_normal_sample_.reset();
   engine_ = mt19937(seed);
 #if AT_MKL_ENABLED()
-  {
-    auto mkl_gen = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
-    std::scoped_lock lock(mkl_gen->mutex_);
-    mkl_gen->set_current_seed(seed);
-  }
+  mkl_generator_.reset();
 #endif
 }
 
@@ -149,19 +136,12 @@ uint64_t CPUGeneratorImpl::current_seed() const {
 uint64_t CPUGeneratorImpl::seed() {
   auto random = c10::detail::getNonDeterministicRandom();
   this->set_current_seed(random);
-#if AT_MKL_ENABLED()
-  {
-    auto mkl_gen = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
-    std::scoped_lock lock(mkl_gen->mutex_);
-    mkl_gen->set_current_seed(random);
-  }
-#endif
   return random;
 }
 
 /**
  * Sets the internal state of CPUGeneratorImpl. The new internal state
- * must be a strided CPU byte tensor and of the same size as CPUGeneratorImplState.
+ * must be a strided CPU byte tensor in the current or pre-MKL state format.
  */
 void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   using detail::CPUGeneratorImplState;
@@ -169,13 +149,15 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
 
   static_assert(std::is_standard_layout_v<CPUGeneratorImplState>, "CPUGeneratorImplState is not a PODType");
   constexpr size_t size = sizeof(CPUGeneratorImplState);
+  constexpr size_t legacy_size = offsetof(CPUGeneratorImplState, mkl_seed);
 
   detail::check_rng_state(new_state);
 
   at::mt19937 engine;
   auto new_state_size = new_state.numel();
 
-  TORCH_CHECK(new_state_size == size, "Expected a CPUGeneratorImplState of size ", size,
+  TORCH_CHECK(new_state_size == legacy_size || new_state_size == size,
+            "Expected a CPUGeneratorImplState of size ", legacy_size, " or ", size,
             " but found the input RNG state size to be ", new_state_size);
 
   auto rng_state = new_state.data_ptr_impl<CPUGeneratorImplState>();
@@ -192,6 +174,15 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   rng_data.next_ = static_cast<uint32_t>(legacy_pod->next);
   engine.set_data(rng_data);
   TORCH_CHECK(engine.is_valid(), "Invalid mt19937 state");
+#if AT_MKL_ENABLED()
+  std::shared_ptr<MKLGeneratorImpl> mkl_generator;
+  if (new_state_size == size) {
+    mkl_generator = std::make_shared<MKLGeneratorImpl>(rng_state->mkl_seed);
+    mkl_generator->skip_ahead(rng_state->mkl_offset);
+  }
+  // Older states have no MKL position; initialize that stream from the CPU seed.
+  mkl_generator_ = std::move(mkl_generator);
+#endif
   this->engine_ = engine;
   this->next_float_normal_sample_ = rng_state->is_next_float_normal_sample_valid
       ? std::optional<float>(rng_state->next_float_normal_sample)
@@ -199,14 +190,6 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   this->next_double_normal_sample_ = legacy_pod->normal_is_valid
       ? std::optional<double>(legacy_pod->normal_y)
       : std::optional<double>();
-#if AT_MKL_ENABLED()
-  {
-    auto mkl_gen = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
-    std::scoped_lock lock(mkl_gen->mutex_);
-    mkl_gen->set_current_seed(rng_state->mkl_seed);
-    mkl_gen->skip_ahead(rng_state->mkl_offset);
-  }
-#endif
 }
 
 /**
@@ -216,7 +199,11 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
 c10::intrusive_ptr<c10::TensorImpl> CPUGeneratorImpl::get_state() const {
   using detail::CPUGeneratorImplState;
 
+#if AT_MKL_ENABLED()
   static const size_t size = sizeof(CPUGeneratorImplState);
+#else
+  static const size_t size = offsetof(CPUGeneratorImplState, mkl_seed);
+#endif
   static_assert(std::is_standard_layout_v<CPUGeneratorImplState>, "CPUGeneratorImplState is not a PODType");
 
   auto state_tensor = at::detail::empty_cpu({static_cast<int64_t>(size)}, ScalarType::Byte, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
@@ -246,12 +233,8 @@ c10::intrusive_ptr<c10::TensorImpl> CPUGeneratorImpl::get_state() const {
   }
 
 #if AT_MKL_ENABLED()
-  {
-    auto mkl_gen = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
-    std::scoped_lock lock(mkl_gen->mutex_);
-    accum_state->mkl_seed = mkl_gen->current_seed();
-    accum_state->mkl_offset = mkl_gen->get_offset();
-  }
+  accum_state->mkl_seed = mkl_generator_ ? mkl_generator_->current_seed() : current_seed();
+  accum_state->mkl_offset = mkl_generator_ ? mkl_generator_->get_offset() : 0;
 #endif
 
   memcpy(rng_state, accum_state.get(), size);
@@ -349,11 +332,25 @@ std::shared_ptr<CPUGeneratorImpl> CPUGeneratorImpl::clone() const {
  * See Note [Acquire lock when using random generators]
  */
 CPUGeneratorImpl* CPUGeneratorImpl::clone_impl() const {
-  auto gen = new CPUGeneratorImpl();
+  auto gen = std::make_unique<CPUGeneratorImpl>();
   gen->set_engine(engine_);
   gen->set_next_float_normal_sample(next_float_normal_sample_);
   gen->set_next_double_normal_sample(next_double_normal_sample_);
-  return gen;
+#if AT_MKL_ENABLED()
+  if (mkl_generator_) {
+    gen->mkl_generator_ = mkl_generator_->clone();
+  }
+#endif
+  return gen.release();
 }
+
+#if AT_MKL_ENABLED()
+MKLGeneratorImpl& CPUGeneratorImpl::mkl_generator() {
+  if (!mkl_generator_) {
+    mkl_generator_ = std::make_shared<MKLGeneratorImpl>(current_seed());
+  }
+  return *mkl_generator_;
+}
+#endif
 
 } // namespace at

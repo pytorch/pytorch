@@ -1,11 +1,14 @@
 #pragma once
 
+#include <ATen/Config.h>
 #include <ATen/core/Generator.h>
 #include <ATen/core/MT19937RNGEngine.h>
 #include <c10/core/GeneratorImpl.h>
 #include <optional>
 
 namespace at {
+
+struct MKLGeneratorImpl;
 
 struct TORCH_API CPUGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
@@ -30,12 +33,19 @@ struct TORCH_API CPUGeneratorImpl : public c10::GeneratorImpl {
   void set_next_double_normal_sample(std::optional<double> randn);
   at::mt19937 engine();
   void set_engine(at::mt19937 engine);
+#if AT_MKL_ENABLED()
+  // The caller must hold mutex_, including while reserving the MKL stream.
+  MKLGeneratorImpl& mkl_generator();
+#endif
 
  private:
   CPUGeneratorImpl* clone_impl() const override;
   at::mt19937 engine_;
   std::optional<float> next_float_normal_sample_;
   std::optional<double> next_double_normal_sample_;
+#if AT_MKL_ENABLED()
+  std::shared_ptr<MKLGeneratorImpl> mkl_generator_;
+#endif
 };
 
 namespace detail {

@@ -5,29 +5,6 @@
 #include <cstdint>
 
 namespace at {
-namespace detail {
-
-/**
- * PyTorch maintains a collection of default generators that get
- * initialized once. The purpose of these default generators is to
- * maintain a global running state of the pseudo random number generation,
- * when a user does not explicitly mention any generator.
- * getDefaultMKLGenerator gets the default generator for a particular
- * device.
- */
-const Generator& getDefaultMKLGenerator() {
-  static auto gen = createMKLGenerator(c10::detail::getNonDeterministicRandom());
-  return gen;
-}
-
-/**
- * Utility to create an MKLGeneratorImpl. Returns a shared_ptr
- */
-Generator createMKLGenerator(uint64_t seed_val) {
-  return make_generator<MKLGeneratorImpl>(seed_val);
-}
-
-} // namespace detail
 
 /**
  * MKLGeneratorImpl class implementation

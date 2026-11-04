@@ -11826,6 +11826,156 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             torch.set_default_tensor_type(default_type)
 
 
+class TestCPUGenerator(TestCase):
+    def _sample(self, device, dtype, distribution, generator, size=1024, noncontiguous=False):
+        result = torch.empty(size * (2 if noncontiguous else 1), device=device, dtype=dtype)
+        if noncontiguous:
+            result = result[::2]
+        return getattr(result, distribution)(0.5, generator=generator)
+
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    @parametrize("distribution", ["exponential_", "bernoulli_"])
+    def test_interleaved_generators(self, device, dtype, distribution):
+        first = torch.Generator(device=device).manual_seed(123)
+        second = torch.Generator(device=device).manual_seed(123)
+        second_state = second.get_state()
+        first_sample = self._sample(device, dtype, distribution, first)
+        self.assertEqual(second.get_state(), second_state)
+        self.assertEqual(first_sample, self._sample(device, dtype, distribution, second), atol=0, rtol=0)
+        second_sample = self._sample(device, dtype, distribution, second)
+        self.assertEqual(second_sample, self._sample(device, dtype, distribution, first), atol=0, rtol=0)
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("distribution", ["exponential_", "bernoulli_"])
+    @parametrize("use_default", [False, True])
+    @parametrize("operation", ["create", "manual_seed", "seed", "set_state", "clone_state"])
+    def test_unrelated_generator_preserves_state(self, device, dtype, distribution, use_default, operation):
+        with torch.random.fork_rng(devices=[]):
+            other = torch.Generator(device=device).manual_seed(456)
+            other_state = other.get_state()
+            generator = torch.default_generator if use_default else torch.Generator(device=device)
+            generator.manual_seed(123)
+            self._sample(device, dtype, distribution, generator)
+            state = generator.get_state()
+            expected = self._sample(device, dtype, distribution, generator)
+            generator.set_state(state)
+            if operation == "create":
+                torch.Generator(device=device)
+            elif operation == "manual_seed":
+                other.manual_seed(789)
+            elif operation == "set_state":
+                other.set_state(other_state)
+            else:
+                getattr(other, operation)()
+            self.assertEqual(generator.get_state(), state)
+            self.assertEqual(expected, self._sample(device, dtype, distribution, generator), atol=0, rtol=0)
+
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    @parametrize("distribution", ["exponential_", "bernoulli_"])
+    @parametrize("size", [0, 1, 801, 10003])
+    @parametrize("noncontiguous", [False, True])
+    def test_state_roundtrip(self, device, dtype, distribution, size, noncontiguous):
+        with torch.random.fork_rng(devices=[]):
+            generator = torch.Generator(device=device).manual_seed(123)
+            self._sample(device, dtype, distribution, generator)
+            torch.randn(1, device=device, generator=generator)
+            state = generator.get_state()
+            default_state = torch.get_rng_state()
+            expected = self._sample(device, dtype, distribution, generator, size, noncontiguous)
+            expected_normal = torch.randn(3, device=device, generator=generator)
+            generator.set_state(state)
+            actual = self._sample(device, dtype, distribution, generator, size, noncontiguous)
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+            self.assertEqual(torch.randn(3, device=device, generator=generator), expected_normal, atol=0, rtol=0)
+            self.assertEqual(torch.get_rng_state(), default_state)
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("distribution", ["exponential_", "bernoulli_"])
+    @parametrize("use_default", [False, True])
+    @parametrize("advance", [False, True])
+    def test_clone_state(self, device, dtype, distribution, use_default, advance):
+        with torch.random.fork_rng(devices=[]):
+            generator = torch.default_generator if use_default else torch.Generator(device=device)
+            generator.manual_seed(123)
+            if advance:
+                self._sample(device, dtype, distribution, generator)
+            state = generator.get_state()
+            clone = generator.clone_state()
+            self.assertEqual(generator.get_state(), state)
+            self.assertEqual(clone.get_state(), state)
+            expected = self._sample(device, dtype, distribution, generator)
+            self.assertEqual(clone.get_state(), state)
+            self.assertEqual(self._sample(device, dtype, distribution, clone), expected, atol=0, rtol=0)
+            self.assertEqual(clone.get_state(), generator.get_state())
+
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    @parametrize("distribution", ["exponential_", "bernoulli_"])
+    def test_default_and_explicit_generator(self, device, dtype, distribution):
+        with torch.random.fork_rng(devices=[]):
+            torch.default_generator.manual_seed(123)
+            state = torch.get_rng_state()
+            expected = self._sample(device, dtype, distribution, None)
+            expected_state = torch.get_rng_state()
+            torch.set_rng_state(state)
+            self.assertEqual(self._sample(device, dtype, distribution, torch.default_generator), expected, atol=0, rtol=0)
+            self.assertEqual(torch.get_rng_state(), expected_state)
+            generator = torch.Generator(device=device)
+            generator.set_state(state)
+            self.assertEqual(self._sample(device, dtype, distribution, generator), expected, atol=0, rtol=0)
+            self.assertEqual(torch.get_rng_state(), expected_state)
+            generator.manual_seed(123)
+            self.assertEqual(self._sample(device, dtype, distribution, generator), expected, atol=0, rtol=0)
+
+    @dtypes(torch.float64)
+    @parametrize("distribution", ["exponential_", "bernoulli_"])
+    @parametrize("extended", [False, True])
+    def test_legacy_state(self, device, dtype, distribution, extended):
+        generator = torch.Generator(device=device).manual_seed(123)
+        torch.randn(3, device=device, generator=generator)
+        # CPU states before the MKL extension contain 5056 bytes.
+        state = generator.get_state()[:5056].clone()
+        if extended:
+            state = torch.cat((state, torch.tensor([123, 0], dtype=torch.int64).view(torch.uint8)))
+        expected = self._sample(device, dtype, distribution, generator)
+        expected_normal = torch.randn(3, device=device, generator=generator)
+        generator.set_state(state)
+        self.assertEqual(self._sample(device, dtype, distribution, generator), expected, atol=0, rtol=0)
+        self.assertEqual(torch.randn(3, device=device, generator=generator), expected_normal, atol=0, rtol=0)
+
+    @unittest.skipIf(not torch.backends.mkl.is_available() or IS_FBCODE, "Requires the MKL RNG kernels")
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    @parametrize("distribution", ["exponential_", "bernoulli_"])
+    @parametrize("threads", [1, 4])
+    def test_stream_reservation(self, device, dtype, distribution, threads):
+        previous_threads = torch.get_num_threads()
+        try:
+            torch.set_num_threads(threads)
+            generator = torch.Generator(device=device).manual_seed(123)
+            expected = self._sample(device, dtype, distribution, generator, 10003)
+            generator.manual_seed(123)
+            first = self._sample(device, dtype, distribution, generator, 801)
+            second = self._sample(device, dtype, distribution, generator, 9202)
+            self.assertEqual(torch.cat((first, second)), expected, atol=0, rtol=0)
+        finally:
+            torch.set_num_threads(previous_threads)
+
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("distribution", ["exponential_", "bernoulli_"])
+    def test_concurrent_stream_reservation(self, device, dtype, distribution):
+        from concurrent.futures import ThreadPoolExecutor
+
+        generator = torch.Generator(device=device).manual_seed(123)
+
+        def sample(_):
+            return self._sample(device, dtype, distribution, generator).tolist()
+
+        expected = sorted(sample(i) for i in range(8))
+        generator.manual_seed(123)
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            actual = sorted(pool.map(sample, range(8)))
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+
 class TestTorchCPU(TestCase):
     hw_classification = HardwareClassification.CPU
     exact_dtype = True
@@ -11983,6 +12133,7 @@ instantiate_device_type_tests(TestTorchDeviceType, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestTorchCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu', allow_xpu=True)
 instantiate_device_type_tests(TestTorchCPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TestCPUGenerator, globals(), only_for="cpu")
 instantiate_parametrized_tests(TestTorch)
 
 if __name__ == '__main__':

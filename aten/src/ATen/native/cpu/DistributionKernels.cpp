@@ -48,6 +48,7 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Gen
 }
 #else
 void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Generator> gen) {
+  auto* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   int64_t n = self.numel();
   bool contig = self.is_contiguous();
 
@@ -63,16 +64,16 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Gen
     scalar_t *self_ptr = self.data_ptr<scalar_t>();
     int *sample_int_ptr = tmp_int_tensor.data_ptr<int>();
 
-    auto mklGenerator = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
     VSLStreamStatePtr main_stream;
 
-    // Get a local copy of the global stream and immediately advance the global
+    // Get a local copy of the generator's stream and immediately advance its
     // state before the generation step to avoid multiple threads using the same state.
     {
       // See Note [Acquire lock when using random generators]
-      std::lock_guard<std::mutex> lock(mklGenerator->mutex_);
-      mklGenerator->get_stream_copy(main_stream);
-      mklGenerator->skip_ahead(n);
+      std::lock_guard<std::mutex> lock(generator->mutex_);
+      auto& mkl_generator = generator->mkl_generator();
+      mkl_generator.get_stream_copy(main_stream);
+      mkl_generator.skip_ahead(n);
     }
 
     auto sample = [&](int64_t begin, int64_t end) {
@@ -118,6 +119,7 @@ void exponential_kernel(TensorIteratorBase& iter, double lambda, std::optional<G
 }
 #else
 void exponential_kernel(TensorIteratorBase &iter, double lambda, std::optional<Generator> gen) {
+  auto* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   TORCH_CHECK(isFloatingType(iter.dtype()), "Exponential distribution is a continuous probability distribution. dtype must be a floating point but you specified ", iter.dtype());
   Tensor self = iter.tensor(0);
   if (lambda > 0 && !std::isinf(lambda) && !std::isnan(lambda)) {
@@ -152,16 +154,16 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, std::optional<G
       // Variance:    V[X+eps] = 1/lambda**2
       auto eps = std::numeric_limits<tmp_scalar_t>::min();
 
-      auto mklGenerator = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
       VSLStreamStatePtr main_stream;
 
-      // Get a local copy of the global stream and immediately advance the global
+      // Get a local copy of the generator's stream and immediately advance its
       // state before the generation step to avoid multiple threads using the same state.
       {
         // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(mklGenerator->mutex_);
-        mklGenerator->get_stream_copy(main_stream);
-        mklGenerator->skip_ahead(n);
+        std::lock_guard<std::mutex> lock(generator->mutex_);
+        auto& mkl_generator = generator->mkl_generator();
+        mkl_generator.get_stream_copy(main_stream);
+        mkl_generator.skip_ahead(n);
       }
 
       auto sample = [&](int64_t begin, int64_t end) {
