@@ -49,7 +49,7 @@ def read_all_previous_failures() -> set[str]:
     return {f for f in failed if isinstance(f, str)}
 
 
-def get_all_previous_failures() -> set[str] | None:
+def previous_failures_or_none() -> set[str] | None:
     """read_all_previous_failures(), or None if a failure file cannot be read
     or is malformed (including entries that cannot be hashed)."""
     try:
