@@ -442,7 +442,6 @@ static PyObject* THPEngine_new(
   return type->tp_alloc(type, 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 // Implementation of torch._C._EngineBase._allow_implicit_grad_accumulation:
 // allows output `edge.output_nr` of `edge.node`, or all of its outputs.
 static PyObject* THPEngine_allow_implicit_grad_accumulation(
@@ -462,6 +461,7 @@ static PyObject* THPEngine_allow_implicit_grad_accumulation(
   END_HANDLE_TH_ERRORS
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMethodDef THPEngine_methods[] = {
     {"run_backward",
      castPyCFunctionWithKeywords(THPEngine_run_backward),

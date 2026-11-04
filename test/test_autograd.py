@@ -19363,6 +19363,26 @@ class TestDisallowImplicitGradAccumulation(TestCase):
         with self.assertRaisesRegex(RuntimeError, "SinBackward0"):
             out.sum().backward(disallow_implicit_grad_accumulation=True)
 
+    def test_allow_region_cpp_node(self, device):
+        # An op without an autograd kernel gets a C++ fallback node with no
+        # registered Python type; the region form must accept it. Using the
+        # second output also checks that a Node allows all of its outputs.
+        allow = torch.autograd.graph.allow_implicit_grad_accumulation
+        with torch.library._scoped_library("_test_allow_accum", "FRAGMENT") as lib:
+            lib.define("foo(Tensor a) -> (Tensor, Tensor)")
+
+            def foo(a):
+                return a.detach().clone(), a.detach().clone()
+
+            lib.impl("foo", foo, "CompositeExplicitAutograd")
+            a = torch.randn(3, device=device, requires_grad=True)
+            with torch.autograd.graph.node_creation_hook(allow):
+                _, out = torch.ops._test_allow_accum.foo(a)
+            loss = (out * 2 + out * 3).sum()
+            msg = "autograd kernel was not registered"
+            with self.assertWarnsRegex(UserWarning, msg):
+                loss.backward(disallow_implicit_grad_accumulation=True)
+
     def test_no_sum_no_error(self, device):
         a = torch.randn(3, device=device, requires_grad=True)
         w1 = torch.randn(3, device=device, requires_grad=True)

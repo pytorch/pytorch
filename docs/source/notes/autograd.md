@@ -456,7 +456,8 @@ loss.backward(disallow_implicit_grad_accumulation=True)  # no error
 Passing a tensor allows accumulation into the output of ``x.grad_fn`` that ``x``
 refers to when you call it; after an in-place operation ``x`` refers to a new node,
 which is not allowed. For a leaf tensor, such as a parameter, the setting is stored
-on the tensor. You can also pass a {class}`torch.autograd.graph.GradientEdge` to
+on the tensor and is permanent: it applies to every later backward, and there is no
+way to undo it. You can also pass a {class}`torch.autograd.graph.GradientEdge` to
 allow one output of a node, or a {class}`torch.autograd.graph.Node` to allow all of
 its outputs.
 
@@ -474,8 +475,12 @@ loss.backward(disallow_implicit_grad_accumulation=True)
 ```
 
 Accumulations into tensors created outside the region, such as ``x`` above, are
-still checked, so allow those individually. Leaves first used inside the region are
-allowed too, because their gradient accumulator node is created there.
+still checked, so allow those individually. A leaf is allowed, permanently as
+described above, when its gradient accumulator node is created inside the region.
+That node is created on the leaf's first use and reused while anything holds it,
+such as a graph from an earlier use that is still alive, or DDP. So a leaf already
+used outside the region, or one whose accumulator is held, is not allowed by the
+region; allow it explicitly if needed.
 
 ## Multithreaded Autograd
 

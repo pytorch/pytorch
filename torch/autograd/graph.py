@@ -266,11 +266,14 @@ def allow_implicit_grad_accumulation(
     - A tensor allows its current gradient edge (see :func:`get_gradient_edge`).
       For a non-leaf tensor that is the output of ``tensor.grad_fn`` it refers to
       now; after an in-place operation it refers to a new node, which is not
-      allowed. For a leaf tensor the setting is stored on the tensor.
+      allowed. For a leaf tensor the setting is stored on the tensor and is
+      permanent: it applies to every later backward and cannot be undone.
 
     Combined with :class:`node_creation_hook`, this allows every node created in
-    a region, e.g. inside library code that uses a tensor more than once. Leaves
-    first used in the region are allowed too.
+    a region, e.g. inside library code that uses a tensor more than once. A leaf
+    is allowed (permanently, as above) if its gradient accumulator node is
+    created in the region, which happens on its first use unless the accumulator
+    already exists, e.g. because a graph from an earlier use is still alive.
 
     Example::
 
@@ -284,16 +287,13 @@ def allow_implicit_grad_accumulation(
         ...     out = library_block(x)
     """
     if isinstance(target, torch.Tensor):
-        edge, all_outputs = get_gradient_edge(target), False
-    elif isinstance(target, GradientEdge):
+        target = get_gradient_edge(target)
+    if isinstance(target, GradientEdge):
         edge, all_outputs = target, False
-    elif isinstance(target, Node):
-        edge, all_outputs = GradientEdge(target, 0), True
     else:
-        raise TypeError(
-            "allow_implicit_grad_accumulation expects a Tensor, GradientEdge or "
-            f"Node, but got {type(target).__name__}"
-        )
+        # Anything else must be a Node; C++ checks, since nodes without a
+        # registered Python type (e.g. CppNode<T>) are not instances of Node.
+        edge, all_outputs = GradientEdge(target, 0), True
     Variable._execution_engine._allow_implicit_grad_accumulation(edge, all_outputs)
 
 
