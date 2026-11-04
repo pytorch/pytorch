@@ -13,10 +13,8 @@
 // torch/csrc/stable/c/shim.h, and header-only torch/headeronly code. The same
 // rule applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/headeronly/util/shim_utils.h>
-#ifdef AOTI_LIBTORCH_PROVIDES_SHIMS
 #include <torch/csrc/stable/c/shim.h>
-#endif
+#include <torch/headeronly/util/shim_utils.h>
 
 #if defined(__GNUC__) || defined(__clang__)
 #define AOTI_NOINLINE __attribute__((noinline))
@@ -26,21 +24,10 @@
 #define AOTI_NOINLINE
 #endif
 
-// Keeps the shim's message, e.g. "out of memory", along with the failed call,
-// when cpp_builder says the libtorch loaded in the process provides the
-// shims. Other code reports the call alone, since its shim provider may not
-// export the stable C ABI's message getter.
-#ifdef AOTI_LIBTORCH_PROVIDES_SHIMS
-#define AOTI_TORCH_ERROR_CODE_CHECK(call)                                     \
-  if ((call) != AOTI_TORCH_SUCCESS) {                                         \
-    torch::aot_inductor::detail::throw_shim_error(#call, __FILE__, __LINE__); \
-  }
-#else
 #define AOTI_TORCH_ERROR_CODE_CHECK(call)                                  \
   if ((call) != AOTI_TORCH_SUCCESS) {                                      \
     torch::headeronly::detail::throw_exception(#call, __FILE__, __LINE__); \
   }
-#endif
 
 // The condition is tested directly rather than through a `bool` local so that
 // AOTI_RUNTIME_CHECK(false, ...) can end a non-void function without tripping
@@ -53,21 +40,38 @@
     }                                                                     \
   } while (0)
 
-#ifdef AOTI_LIBTORCH_PROVIDES_SHIMS
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 namespace torch::aot_inductor::detail {
-// Like torch::stable::detail::throw_exception, without its backtrace dump to
-// stderr, which callers that handle the error don't want. A shim that returns
-// failure must record its message, as
-// AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE does, or an earlier one shows.
+// Out of line, so call sites stay small.
 [[noreturn]] AOTI_NOINLINE inline void throw_shim_error(
     const char* call,
     const char* file,
     int64_t line) {
-  torch::headeronly::detail::throw_exception(
-      torch_exception_get_what_without_backtrace(), call, file, line);
+  const char* what = torch_exception_get_what_without_backtrace();
+  std::stringstream ss;
+  if (what != nullptr && what[0] != '\0') {
+    ss << what << " (originally from ";
+  }
+  ss << call << " API call failed at " << file << ", line " << line;
+  if (what != nullptr && what[0] != '\0') {
+    ss << ")";
+  }
+  // @allow-raw-throw: keeps the caller's location in the message
+  throw std::runtime_error(std::move(ss).str());
 }
 } // namespace torch::aot_inductor::detail
-#endif // AOTI_LIBTORCH_PROVIDES_SHIMS
+
+// Like AOTI_TORCH_ERROR_CODE_CHECK, but the error starts with the message the
+// failed shim call recorded, e.g. "out of memory", in the format
+// STABLE_TORCH_ERROR_CODE_CHECK uses. The call must be a libtorch shim that
+// records its exception, as AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE does;
+// otherwise the message can be an earlier failure's. It calls a libtorch
+// function, so use it only in code that already needs libtorch's shims.
+#define AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(call)                        \
+  if ((call) != AOTI_TORCH_SUCCESS) {                                         \
+    torch::aot_inductor::detail::throw_shim_error(#call, __FILE__, __LINE__); \
+  }
+#endif
 
 using AOTIRuntimeError = int32_t;
 #define AOTI_RUNTIME_SUCCESS 0
