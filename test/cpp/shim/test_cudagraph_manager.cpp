@@ -22,6 +22,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using torch::aot_inductor::CudaGraphManager;
@@ -335,10 +336,11 @@ TEST_F(CudaGraphManagerTest, RandomRegionsRunEagerly) {
   EXPECT_EQ(region.calls, 3);
   EXPECT_EQ(manager.num_graphs(), 0);
   EXPECT_FALSE(first.equal(second));
-  // Only the manager's warning, not also ATen's about an empty graph.
-  ASSERT_EQ(warnings.messages.size(), 1);
-  EXPECT_TRUE(warnings.contains(0, "capturing failed"));
-  EXPECT_TRUE(warnings.contains(0, "RNG"));
+  // ATen's warning that the abandoned graph is empty, then the manager's.
+  ASSERT_EQ(warnings.messages.size(), 2);
+  EXPECT_TRUE(warnings.contains(0, "CUDA Graph is empty"));
+  EXPECT_TRUE(warnings.contains(1, "capturing failed"));
+  EXPECT_TRUE(warnings.contains(1, "RNG"));
 }
 
 TEST_F(CudaGraphManagerTest, RejectsACallerCapture) {
@@ -451,7 +453,7 @@ TEST_F(CudaGraphManagerTest, RunsConcurrently) {
 TEST_F(CudaGraphManagerTest, FailedCaptureRunsEagerlyAndWarnsOnce) {
   // The region throws in the capture, invalidates it, or runs out of memory.
   const char* causes[] = {
-      "region can't be captured", "capture_end failed", "out of memory"};
+      "region can't be captured", "CUDA error", "out of memory"};
   for (int mode = 0; mode < 3; ++mode) {
     CollectWarnings warnings;
     c10::WarningUtils::WarningHandlerGuard guard(&warnings);
@@ -558,6 +560,38 @@ TEST_F(CudaGraphManagerTest, RejectsADifferentOutputCount) {
   expect_error(
       [&] { run_with(manager, region, {x}, 2); },
       "outputs, but the graph was captured with 1");
+}
+
+TEST_F(CudaGraphManagerTest, CapturesAnFnThatLeavesAnotherStreamCurrent) {
+  CudaGraphManager manager(0, no_warmup());
+  auto original = at::cuda::getCurrentCUDAStream();
+  auto side = at::cuda::getStreamFromPool();
+  auto fn = [&](AtenTensorHandle* inputs,
+                AtenTensorHandle* outputs,
+                cudaStream_t stream) {
+    {
+      at::cuda::CUDAStreamGuard guard(
+          at::cuda::getStreamFromExternal(stream, 0));
+      outputs[0] = new_handle(affine(tensor_of(inputs[0])));
+    }
+    // Without a guard, so the capture must still end on its own stream.
+    at::cuda::setCurrentCUDAStream(side);
+  };
+  auto x = at::randn({16}, at::kCUDA);
+  auto call = [&] {
+    AtenTensorHandle input = new_handle(x);
+    AtenTensorHandle output = nullptr;
+    manager.run(fn, &input, 1, &output, 1, nullptr);
+    aoti_torch_delete_tensor_object(input);
+    auto result = tensor_of(output).clone();
+    aoti_torch_delete_tensor_object(output);
+    return result;
+  };
+  EXPECT_TRUE(call().equal(affine(x)));
+  at::cuda::setCurrentCUDAStream(original);
+  EXPECT_EQ(manager.num_graphs(), 1);
+  x.normal_();
+  EXPECT_TRUE(call().equal(affine(x)));
 }
 
 TEST_F(CudaGraphManagerTest, RegionErrorDuringCaptureKeepsOtherGraphs) {

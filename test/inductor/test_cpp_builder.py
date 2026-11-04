@@ -330,6 +330,7 @@ class TestGetCppTorchDeviceOptionsWindows(TestCase):
         self.assertIn("amdhip64", libraries)
 
 
+@instantiate_parametrized_tests
 class TestCppBuilder(TestCase):
     def test_device_interface_cpp_options(self) -> None:
         class MockDeviceInterface(DeviceInterface):
@@ -375,6 +376,20 @@ class TestCppBuilder(TestCase):
         self.assertEqual(cflags, [])
         self.assertEqual(libraries, [])
         self.assertEqual(passthrough, [])
+
+    @parametrize(
+        "aot_mode,link_libtorch,linked",
+        [(True, False, False), (True, True, True), (False, False, True)],
+    )
+    def test_aoti_libtorch_linked_definition(
+        self, aot_mode: bool, link_libtorch: bool, linked: bool
+    ) -> None:
+        # Selects the error check that uses the stable C ABI.
+        with mock.patch.object(
+            cpp_builder.config.aot_inductor, "link_libtorch", link_libtorch
+        ):
+            options = cpp_builder.CppTorchOptions(aot_mode=aot_mode)
+        self.assertEqual("AOTI_LIBTORCH_LINKED" in options.get_definitions(), linked)
 
     @unittest.skipUnless(IS_LINUX, "--as-needed is an ELF linker flag")
     def test_libtorch_free_aot_link_drops_unused_libraries(self) -> None:
