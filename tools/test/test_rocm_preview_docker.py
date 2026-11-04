@@ -218,15 +218,16 @@ class TestRocmPreviewWheels(unittest.TestCase):
             "generate_binary_build_matrix",
             REPO_ROOT / ".github/scripts/generate_binary_build_matrix.py",
         )
-        reqs = matrix.PYTORCH_EXTRA_INSTALL_REQUIREMENTS
+        requirements = matrix.PYTORCH_EXTRA_INSTALL_REQUIREMENTS
+        preview_req = requirements["preview"]
         for desired_cuda, local, requirement, pinned in (
             (
                 "rocmpreview",
                 f"rocm{PREVIEW_PIN}",
-                reqs["preview"],
-                f"{reqs['preview']}=={PREVIEW_PIN}",
+                preview_req,
+                f"{preview_req}=={PREVIEW_PIN}",
             ),
-            ("rocm10.1", "rocm10.1", reqs["10.1"], reqs["10.1"]),
+            ("rocm10.1", "rocm10.1", requirements["10.1"], requirements["10.1"]),
         ):
             with (
                 self.subTest(desired_cuda=desired_cuda),
@@ -301,6 +302,15 @@ class TestRocmPreviewWheels(unittest.TestCase):
         )
         for name in ("manywheel-rocm-preview-upload", "libtorch-upload-rocm-preview"):
             self.assertEqual(jobs[name]["with"]["UPLOAD_SUBFOLDER"], "rocm-preview")
+
+    def test_mirror_check_runs_on_ciflow_docker(self) -> None:
+        # Pin-bump PRs are auto-labeled ciflow/docker, not ciflow/binaries.
+        workflow = yaml.safe_load(
+            (REPO_ROOT / ".github/workflows/build-manywheel-images.yml").read_text()
+        )
+        self.assertIn("ciflow/docker/*", workflow[True]["push"]["tags"])
+        job = workflow["jobs"]["rocm-preview-mirror-check"]
+        self.assertEqual(job["permissions"], {"contents": "read"})
 
 
 if __name__ == "__main__":

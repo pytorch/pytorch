@@ -279,30 +279,6 @@ jobs:
           echo "docker_registry_host=308535385114.dkr.ecr.us-east-1.amazonaws.com/" >> "${GITHUB_OUTPUT}"
           echo "image_available=true" >> "${GITHUB_OUTPUT}"
           echo "test_available=false" >> "${GITHUB_OUTPUT}"
-  rocm-preview-mirror-check:
-    if: ${{ github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') }}
-    name: rocm-preview-mirror-check
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout PyTorch
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 1
-          submodules: false
-          show-progress: false
-      - name: Check rocm pin is mirrored to the preview index
-        shell: bash
-        run: |
-          set -euo pipefail
-          pin=$(tr -d '[:space:]' < .ci/docker/ci_commit_pins/rocm-preview.txt)
-          index="https://download.pytorch.org/whl/nightly/rocm-preview/rocm/"
-          page=$(curl -fsS --retry 3 --retry-all-errors "${index}")
-          if [[ "${page}" != *"rocm-${pin}"[.-]* ]]; then
-            echo "::error::rocm==${pin} is not on ${index}; a test-infra admin must run update-s3-dependencies with package=torch_rocm."
-            exit 1
-          fi
-          echo "rocm==${pin} is mirrored at ${index}"
 
   manywheel-cpu-build:
     name: manywheel-cpu-build
