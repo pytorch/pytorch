@@ -79,6 +79,7 @@ from ..utils import (
     is_codegen_graph_partition_subgraph,
     is_gpu,
     is_using_cudagraph_partition,
+    JaggedRange,
     LineContext,
     make_codegen_buffer,
     sanitize_constexpr_for_repr,
@@ -5259,6 +5260,9 @@ class PythonWrapperCodegen(CodeGen):
                 return arg + ".item()" if should_unwrap_unspec_arg(arg) else arg
             elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
                 return str(arg)
+            elif isinstance(arg, JaggedRange):
+                # The kernel loads its own bound; this numel argument is unused.
+                return "-1"
             else:
                 return pexpr(V.graph.sizevars.simplify(arg))
 
