@@ -3674,6 +3674,7 @@ def skipIfNoTriton(cls):
 
         return skipped_cls
 
+
 @skipIfNoTriton
 class TestSparseCompressedTritonKernelsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -3748,13 +3749,18 @@ class TestSparseCompressedTritonKernelsDevice(TestCase):
         device_type = torch.device(device).type
         dispatch_key = f"SparseCsr{torch._C._dispatch_key_for_device(device_type)}"
 
-        # The kernel must already be registered by the backend (lazily, so check here and not
-        # in a decorator). Only CUDA does so today, via torch.cuda._register_triton_kernels;
-        # other backends additionally need the DispatchKey check in
-        # aten/src/ATen/native/sparse/SparseBlasImpl.cpp to accept their key.
-        # XPU support is tracked in https://github.com/intel/torch-xpu-ops/issues/5989
-        if ("_triton_bsr_dense_mm_out", dispatch_key) not in torch._TritonLibrary.ops_table:
-            self.skipTest(f"triton::_triton_bsr_dense_mm_out is not registered for {dispatch_key}")
+        # Only CUDA pre-registers the kernel today (torch.cuda._register_triton_kernels) and only
+        # SparseCsrCUDA is accepted by the linear path in
+        # aten/src/ATen/native/sparse/SparseBlasImpl.cpp. Registration is lazy, so other backends
+        # have to be checked here rather than in a decorator.
+        if (
+            device_type != "cuda"
+            and ("_triton_bsr_dense_mm_out", dispatch_key) not in torch._TritonLibrary.ops_table
+        ):
+            self.skipTest(
+                f"triton::_triton_bsr_dense_mm_out is not registered for {dispatch_key}; "
+                "XPU support is tracked in https://github.com/intel/torch-xpu-ops/issues/5989"
+            )
 
         kernel = torch._TritonLibrary.registerOp(
             "_triton_bsr_dense_mm_out",
