@@ -222,6 +222,15 @@
 - .github/actions/binary-docker-build/**
 - .lintrunner.toml
 
+"ciflow/binaries":
+# Pins of the dependencies bundled into or required by the binary wheels
+- .github/scripts/generate_binary_build_matrix.py
+- .ci/docker/common/install_cuda.sh
+- .ci/docker/common/install_cusparselt.sh
+- .ci/docker/common/install_mkl.sh
+- .ci/docker/common/install_nccl.sh
+- .ci/pytorch/windows/internal/cuda_install.bat
+
 "ciflow/torchtitan":
 # torchtitan commit pin updates
 - .github/ci_commit_pins/torchtitan.txt
