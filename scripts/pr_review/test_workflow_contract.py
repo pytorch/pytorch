@@ -5537,6 +5537,11 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
             prompt,
         )
         self.assertIn(
+            "Nor is a fix the review itself treats as non-blocking, such as a"
+            " docstring, comment or naming fix.",
+            prompt,
+        )
+        self.assertIn(
             "reason for Request Changes or as a defect that must be fixed before"
             " approval",
             prompt,

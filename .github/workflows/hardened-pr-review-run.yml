@@ -982,7 +982,8 @@ jobs:
               "ready_for_human_review", unless the review names a defect that
               must be fixed before approval: then it is "changes_requested". An
               open question, a request for data or discussion, or files left
-              unreviewed is not such a defect.
+              unreviewed is not such a defect. Nor is a fix the review itself
+              treats as non-blocking, such as a docstring, comment or naming fix.
             - `summary`: the review's one-sentence summary and its
               Recommendation, in at most three sentences. If such a defect
               made the verdict "changes_requested" under Approve or Needs

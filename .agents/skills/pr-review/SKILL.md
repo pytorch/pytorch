@@ -119,7 +119,7 @@ A single line of code can have deep cross-cutting implications: a missing device
 2. **Investigate, don't guess** — When uncertain whether a checklist item applies, spawn a sub-agent to read the relevant code. A reviewer who guesses wrong provides negative value.
 3. **Review the design, not just the implementation** — A PR can have perfectly correct implementation of a bad design. Question side-channel communication, on/off private flags, and demand concrete interface documentation for new contracts between components.
 4. **Focus on what CI cannot check** — Don't comment on formatting, linting, type errors, or CI failures. Focus on design quality, interface correctness, thread safety, BC implications, test patterns, and pattern adherence.
-5. **Everything is a must-fix** — There are no "nits." If it's worth mentioning, it's worth fixing. Every inconsistency degrades the codebase over time.
+5. **Everything is a must-fix** — If it's worth mentioning, it's worth fixing. Every inconsistency degrades the codebase over time. But only a bug, including a test that cannot fail, or a violated applicable policy or `REVIEW.md` rule blocks approval; style, structure or test coverage lean non-blocking.
 6. **Be specific and actionable** — Reference file paths and line numbers. Name the function/class/file the author should use.
 7. **Match the immediate context** — Read how similar features are already implemented in the same file. Pattern mismatches within a file are always wrong.
 8. **Assume competence** — The author knows PyTorch; explain only non-obvious context.
