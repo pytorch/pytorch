@@ -19420,6 +19420,11 @@ class TestDisallowImplicitGradAccumulation(TestCase):
         out = checkpoint(lambda t: t.cos().exp(), x, use_reentrant=use_reentrant)
         out.sum().backward(disallow_implicit_grad_accumulation=True)
         self.assertEqual(a.grad, -a.sin().cos().exp() * a.sin().sin() * a.cos())
+        # With use_reentrant=True this sum happens in the recomputation's own
+        # backward, so it raises only if that backward inherits the flag.
+        out = checkpoint(lambda t: t * t, a.sin(), use_reentrant=use_reentrant)
+        with self.assertRaisesRegex(RuntimeError, "summed implicitly"):
+            out.sum().backward(disallow_implicit_grad_accumulation=True)
 
     def test_torch_function_kwargs(self, device):
         # The flag reaches __torch_function__ only when set, so overrides

@@ -277,14 +277,18 @@ def allow_implicit_grad_accumulation(
 
     Example::
 
-        >>> # xdoctest: +SKIP
         >>> x = torch.randn(3, requires_grad=True).sin()
         >>> torch.autograd.graph.allow_implicit_grad_accumulation(x)
         >>> (x * 2 + x * 3).sum().backward(disallow_implicit_grad_accumulation=True)
+        >>> def library_block(t):
+        ...     h = t.cos()
+        ...     return h * h
+        >>> y = torch.randn(3, requires_grad=True).sin()
         >>> with torch.autograd.graph.node_creation_hook(
         ...     torch.autograd.graph.allow_implicit_grad_accumulation
         ... ):
-        ...     out = library_block(x)
+        ...     out = library_block(y)
+        >>> out.sum().backward(disallow_implicit_grad_accumulation=True)
     """
     if isinstance(target, torch.Tensor):
         target = get_gradient_edge(target)

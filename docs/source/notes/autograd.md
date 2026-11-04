@@ -422,6 +422,7 @@ class Split(torch.autograd.Function):
         # Accumulate here however you need, e.g. in float32.
         return grad_a + grad_b
 
+a = torch.randn(3, requires_grad=True)
 x = a.sin()
 x1, x2 = Split.apply(x)
 loss = (x1 * 2 + x2 * 3).sum()
@@ -447,6 +448,7 @@ function that uses its input more than once, allow it with
 {func}`torch.autograd.graph.allow_implicit_grad_accumulation`:
 
 ```python
+a = torch.randn(3, requires_grad=True)
 x = a.sin()
 torch.autograd.graph.allow_implicit_grad_accumulation(x)
 loss = (x * 2 + x * 3).sum()
@@ -466,16 +468,22 @@ To allow every accumulation into tensors created in a region, pass the function 
 created inside:
 
 ```python
+def library_block(t):
+    h = t.cos()
+    return h * h  # uses h twice
+
+y = torch.randn(3, requires_grad=True).sin()
 with torch.autograd.graph.node_creation_hook(
     torch.autograd.graph.allow_implicit_grad_accumulation
 ):
-    out = library_block(x)
+    out = library_block(y)
 loss = out.sum()
-loss.backward(disallow_implicit_grad_accumulation=True)
+loss.backward(disallow_implicit_grad_accumulation=True)  # no error
 ```
 
-Accumulations into tensors created outside the region, such as ``x`` above, are
-still checked, so allow those individually. A leaf is allowed, permanently as
+Accumulations into tensors created outside the region are still checked: if
+``library_block`` used ``t`` itself twice, the sum into ``y`` would raise, so allow
+such tensors individually. A leaf is allowed, permanently as
 described above, when its gradient accumulator node is created inside the region.
 That node is created on the leaf's first use and reused while anything holds it,
 such as a graph from an earlier use that is still alive, or DDP. So a leaf already
