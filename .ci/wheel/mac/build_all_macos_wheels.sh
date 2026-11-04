@@ -32,25 +32,16 @@ for desired in ${DESIRED_PYTHONS}; do
     echo "::group::Build wheel for Python ${desired}"
     iter_start=$(date +%s)
 
-    # uv does not select CPython pre-releases by default, and 3.15 has no stable
-    # release yet, so a bare `uv python install/find 3.15` silently resolves to
-    # another interpreter and produces a wrong-ABI wheel. Request the explicit
-    # 3.15 pre-release. The uv pinned in CI (0.11.14) also predates these
-    # pre-releases in its bundled metadata (it only ships up to 3.15.0b1), so
-    # point it at a newer metadata snapshot (same schema) that includes
-    # 3.15.0rc2. Bump the tag + pre-release together as new ones land, keeping
-    # the pre-release aligned with the version the test job's setup-python
-    # resolves. Other versions are unchanged.
-    uv_req="${desired}"
-    case "${desired}" in
-        3.15)  uv_req="3.15.0rc2" ;;
-        3.15t) uv_req="3.15.0rc2+freethreaded" ;;
-    esac
+    # The uv pinned in CI (0.11.14) predates the 3.15 releases in its bundled
+    # metadata (it only ships up to 3.15.0b1), and a bare `uv python install/find
+    # 3.15` would silently resolve to that beta. Point it at a newer metadata
+    # snapshot (same schema) that includes 3.15.0 and later, so `3.15` resolves to
+    # the latest stable release. Drop this once the pinned uv is >= 0.13.
     if [[ "${desired}" == 3.15* ]]; then
-        export UV_PYTHON_DOWNLOADS_JSON_URL="https://raw.githubusercontent.com/astral-sh/uv/0.12.21/crates/uv-python/download-metadata.json"
+        export UV_PYTHON_DOWNLOADS_JSON_URL="https://raw.githubusercontent.com/astral-sh/uv/0.13.7/crates/uv-python-managed/download-metadata.json"
     fi
-    uv python install "${uv_req}"
-    py_bin="$(uv python find "${uv_req}")"
+    uv python install "${desired}"
+    py_bin="$(uv python find "${desired}")"
     py_bin_dir="$(dirname "${py_bin}")"
     export PATH="${py_bin_dir}:${PATH}"
 
@@ -58,7 +49,7 @@ for desired in ${DESIRED_PYTHONS}; do
     # than silently building a wheel with the wrong Python ABI tag.
     found_minor="$("${py_bin}" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
     if [[ "${found_minor}" != "${desired%t}" ]]; then
-        echo "ERROR: uv resolved '${desired}' (request '${uv_req}') to Python ${found_minor} at ${py_bin}; expected ${desired%t}" >&2
+        echo "ERROR: uv resolved '${desired}' to Python ${found_minor} at ${py_bin}; expected ${desired%t}" >&2
         exit 1
     fi
 
