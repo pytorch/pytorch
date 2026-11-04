@@ -103,7 +103,7 @@ def main() -> None:
     from tools.testing.target_determination.determinator import get_test_prioritizations
     from tools.testing.target_determination.heuristics import HEURISTICS
 
-    trial = tuple(f"Error in {h.__class__.__name__}:" for h in HEURISTICS if h.trial_mode)  # fmt: skip
+    required = {h.name for h in HEURISTICS if not h.trial_mode}
 
     seconds = test_seconds(args.data / "test-times.json")
     times = (args.data / "test-times.json").read_bytes()
@@ -148,16 +148,15 @@ def main() -> None:
             cands = current["candidates"]
             log = io.StringIO()
             with contextlib.redirect_stdout(io.StringIO()):
-                tp = get_test_prioritizations(
-                    cands, file=log
-                ).get_aggregated_priorities()
-            # get_test_prioritizations drops a heuristic that raised and goes on without it.
-            errors = [x for x in log.getvalue().splitlines() if x.startswith("Error in ") and not x.startswith(trial)]  # fmt: skip
-            if errors:
-                print(path.stem, *errors, sep="\n", flush=True)
+                agg = get_test_prioritizations(cands, file=log)
+            # get_test_prioritizations leaves out a heuristic that raised and goes on without it.
+            if raised := sorted(required - set(agg.to_json())):
+                errors = [x for x in log.getvalue().splitlines() if x.startswith("Error in ")]  # fmt: skip
+                print(path.stem, f"raised: {raised}", *errors, sep="\n", flush=True)
                 failed.append(path.stem)
                 done.unlink(missing_ok=True)
                 continue
+            tp = agg.get_aggregated_priorities()
             scored = [t.test_file for t in tp.get_all_tests() if tp.get_score(t) > 0]
             write_json(done, {
                 "inputs": inputs,
