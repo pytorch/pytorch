@@ -87,7 +87,7 @@ def get_td_exclusions(
         ran: dict[tuple[str, str], set[str]] = defaultdict(set)
         enforced: set[tuple[str, str]] = set()
         # Calls that excluded nothing matter only for what they ran, so their
-        # jobs are looked up only if some config had an enforced call.
+        # jobs are looked up only if they ran a file an enforced config excluded.
         ran_only: list[tuple[Path, list[str]]] = []
         for td_exclusions in Path(".").glob("**/td_exclusions*.json"):
             with open(td_exclusions) as f:
@@ -113,7 +113,10 @@ def get_td_exclusions(
             ran[config].update(f for f in included if f not in excluded_files)
             if is_llm:
                 enforced.add(config)
-        for path, included in ran_only if enforced else []:
+        watched = set().union(*(excluded_by_config[c] for c in enforced))
+        for path, included in ran_only:
+            if watched.isdisjoint(included):
+                continue
             job_name = get_job_name(get_job_id(path))
             ran[get_build_name(job_name), get_test_config(job_name)].update(included)
 
