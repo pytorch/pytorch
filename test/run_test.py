@@ -69,7 +69,10 @@ from tools.testing.do_target_determination_for_s3 import import_results
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
 )
-from tools.testing.target_determination.heuristics.utils import td_enabled_default
+from tools.testing.target_determination.heuristics.utils import (
+    get_pr_number,
+    td_enabled_default,
+)
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
     calculate_shards,
@@ -1798,6 +1801,7 @@ def parse_args():
             build_environment=BUILD_ENVIRONMENT,
             workflow=os.environ.get("GITHUB_WORKFLOW", "slow"),
             is_ci=IS_CI,
+            pr_number=get_pr_number(),
             macos=IS_MACOS,
             no_td=strtobool(os.environ.get("NO_TD", "False")),
         ),

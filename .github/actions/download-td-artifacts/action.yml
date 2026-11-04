@@ -10,8 +10,8 @@ inputs:
 runs:
   using: composite
   steps:
-    # Defense in depth against a stale or planted LLM test selection an unzipped build artifact
-    # left, not the trust boundary: test jobs run the PR's own scripts.
+    # Clear any LLM test selection already in the checkout before the TD artifacts arrive.
+    # Defense in depth, not the trust boundary: test jobs run the PR's own scripts.
     - name: Remove any LLM test selection
       shell: bash
       run: rm -f .additional_ci_files/llm_selection.json
