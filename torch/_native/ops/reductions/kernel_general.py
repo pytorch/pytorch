@@ -374,9 +374,12 @@ def _general_norm(trait: Any) -> bool:
 
 
 def _ordered_col_route_ok(
-    view: torch.Tensor, nfields: int, cc: tuple[int, int], general_norm: bool = False
+    view: torch.Tensor, nfields: int, general_norm: bool = False
 ) -> bool:
-    """Whether the ordered column kernel beats the indexed tree on this view."""
+    """Whether the ordered column kernel beats the indexed tree on this view.
+
+    Callers check _ORDERED_COL_CCS and _ORDERED_COL_DTYPES first.
+    """
     B, R, C = (1, *view.shape) if view.dim() == 2 else view.shape
     # reduce_ordered_col tiles WARP columns, so narrower views decline anyway.
     if C < WARP:
@@ -384,8 +387,7 @@ def _ordered_col_route_ok(
     min_outputs = _ORDERED_COL_MIN_OUTPUTS[min(nfields, 3)]
     if general_norm:
         min_outputs = _ORDERED_COL_GENERAL_NORM_MIN_OUTPUTS
-    ok = _ORDERED_COL_MIN_R <= R <= _ORDERED_COL_MAX_R and B * C >= min_outputs
-    return cc in _ORDERED_COL_CCS and view.dtype in _ORDERED_COL_DTYPES and ok
+    return _ORDERED_COL_MIN_R <= R <= _ORDERED_COL_MAX_R and B * C >= min_outputs
 
 
 # Largest one-block register-loaded row; only merging uses smem. Larger uses multi-CTA.
@@ -776,12 +778,14 @@ def _reduce(
             else:
                 from . import kernel_coltile as ct
 
+                col_view = None
                 cc = _hw.caps(x.device).cc
-                col_view = _physical_col_view(
-                    x, red_axes, red_pairs, kept_pairs, count, num_o
-                )
+                if cc in _ORDERED_COL_CCS and x.dtype in _ORDERED_COL_DTYPES:
+                    col_view = _physical_col_view(
+                        x, red_axes, red_pairs, kept_pairs, count, num_o
+                    )
                 if col_view is not None and _ordered_col_route_ok(
-                    col_view, trait.nfields, cc, _general_norm(trait)
+                    col_view, trait.nfields, _general_norm(trait)
                 ):
                     ordered = ct.reduce_ordered_col(
                         trait,
