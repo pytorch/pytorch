@@ -1042,6 +1042,9 @@ class FakeTensorConverter:
             raise AssertionError(
                 f"tensor's device must be `meta`, got {t.device.type} instead"
             )
+        # A fake also reports meta on the meta device or inside a kernel
+        if is_fake_tensor(t):
+            raise AssertionError("expected a meta tensor that is not fake")
         # This is a bit abusive (this is not the "real" tensor) but whatever,
         # the meta tensor should be fresh so there's no way to get it wrong
         maybe_memo = self._get_memo(t)
