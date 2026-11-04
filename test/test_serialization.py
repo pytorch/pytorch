@@ -65,6 +65,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    set_warn_always_context,
     skipIfTorchDynamo,
     TemporaryDirectoryName,
     TemporaryFileName,
@@ -1117,7 +1118,61 @@ class TestSerialization(TestCase, SerializationMixin):
             ):
                 torch.load(f, weights_only=True)
             f.seek(0)
-            torch.load(f, weights_only=False)
+            with patch("torch.serialization._torchscript_load_warned", False):
+                with self.assertWarnsRegex(
+                    FutureWarning, r"Loading TorchScript archives through torch\.load is deprecated"
+                ):
+                    torch.load(f, weights_only=False)
+
+    @staticmethod
+    def _torchscript_archive_buffer():
+        unit = torch.jit.CompilationUnit(
+            "def increment(x: Tensor) -> Tensor:\n    return x + 1\n"
+        )
+        return io.BytesIO(unit.increment.save_to_buffer())
+
+    def test_torchscript_load_deprecation_warns_once(self):
+        archive = self._torchscript_archive_buffer()
+        with patch("torch.serialization._torchscript_load_warned", False):
+            with set_warn_always_context(False), warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always", FutureWarning)
+                for _ in range(2):
+                    archive.seek(0)
+                    loaded = torch.load(archive, weights_only=False)
+                    self.assertEqual(loaded(torch.tensor([2.0])), torch.tensor([3.0]))
+        notices = [w for w in caught if "Loading TorchScript archives through torch.load" in str(w.message)]
+        self.assertEqual(len(notices), 1)
+        self.assertIs(notices[0].category, FutureWarning)
+        self.assertEqual(notices[0].filename, __file__)
+
+    def test_torchscript_load_deprecation_honors_warn_always(self):
+        archive = self._torchscript_archive_buffer()
+        with patch("torch.serialization._torchscript_load_warned", True):
+            with set_warn_always_context(True), warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always", FutureWarning)
+                loaded = torch.load(archive, weights_only=False)
+                self.assertEqual(loaded(torch.tensor([2.0])), torch.tensor([3.0]))
+        notices = [w for w in caught if "Loading TorchScript archives through torch.load" in str(w.message)]
+        self.assertEqual(len(notices), 1)
+        self.assertIs(notices[0].category, FutureWarning)
+
+    def test_torchscript_load_deprecation_leaves_weights_only_unchanged(self):
+        archive = self._torchscript_archive_buffer()
+        with patch("torch.serialization._torchscript_load_warned", False):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                with self.assertRaisesRegex(RuntimeError, "weights_only=True"):
+                    torch.load(archive, weights_only=True)
+                self.assertFalse(torch.serialization._torchscript_load_warned)
+        self.assertEqual(caught, [])
+        ordinary = io.BytesIO()
+        value = {"weight": torch.tensor([1.0])}
+        torch.save(value, ordinary)
+        ordinary.seek(0)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self.assertEqual(torch.load(ordinary, weights_only=True), value)
+        self.assertEqual(caught, [])
 
     # Ensure large zip64 serialization works properly
     @serialTest()

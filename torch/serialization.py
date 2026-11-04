@@ -57,6 +57,7 @@ __all__ = [
 ]
 
 DEFAULT_PROTOCOL = 2
+_torchscript_load_warned = False
 
 LONG_SIZE = struct.Struct("=l").size
 INT_SIZE = struct.Struct("=i").size
@@ -1331,6 +1332,12 @@ def load(
 
     Loads an object saved with :func:`torch.save` from a file.
 
+    .. deprecated:: 2.16
+        Loading TorchScript archives through this function is deprecated.
+        Loading ordinary tensor and state-dict checkpoints is unaffected.
+        Re-export the original model with :func:`torch.export.export` and use
+        :func:`torch.export.load` for the exported program.
+
     .. warning::
         :func:`torch.load()` uses an unpickler under the hood. **Never load data from an untrusted source.**
 
@@ -1572,18 +1579,23 @@ def load(
             overall_storage = None
             with _open_zipfile_reader(opened_file) as opened_zipfile:
                 if _is_torchscript_zip(opened_zipfile):
-                    warnings.warn(
-                        "'torch.load' received a zip file that looks like a TorchScript archive"
-                        " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
-                        " silence this warning)",
-                        UserWarning,
-                        stacklevel=2,
-                    )
                     if weights_only:
                         raise RuntimeError(
                             "Cannot use ``weights_only=True`` with TorchScript archives passed to "
                             "``torch.load``. " + UNSAFE_MESSAGE
                         )
+                    global _torchscript_load_warned
+                    if not _torchscript_load_warned or torch.is_warn_always_enabled():
+                        warnings.warn(
+                            "Loading TorchScript archives through torch.load is deprecated "
+                            "since PyTorch 2.16 and will be removed in a future release. "
+                            "Re-export the original model using torch.export and load the "
+                            "exported program with torch.export.load. "
+                            "See https://github.com/pytorch/pytorch/issues/201298.",
+                            FutureWarning,
+                            stacklevel=2,
+                        )
+                        _torchscript_load_warned = True
                     opened_file.seek(orig_position)
                     return torch.jit.load(opened_file, map_location=map_location)
                 if mmap:
