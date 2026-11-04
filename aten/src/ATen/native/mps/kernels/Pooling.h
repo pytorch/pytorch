@@ -45,7 +45,7 @@ struct AvgPoolingParams {
   ::c10::metal::array<idx_type_t, N - 2> kernel_size;
   ::c10::metal::array<idx_type_t, N - 2> stride;
   ::c10::metal::array<idx_type_t, N - 2> padding;
-  int32_t divisor_override;
+  int64_t divisor_override;
   bool count_include_pad;
   bool has_divisor_override;
   bool adaptive;
