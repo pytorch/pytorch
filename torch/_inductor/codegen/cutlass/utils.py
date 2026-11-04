@@ -264,20 +264,25 @@ def toolkit_version(device_type: str) -> str:
     if not version:
         raise RuntimeError(
             f"Unable to determine the {device_type} toolkit version to generate "
-            "CUTLASS kernels for."
+            "CUTLASS kernels for. Set "
+            f"torch._inductor.config.{device_type}.version or run on a "
+            f"{device_type} device."
         )
     return version
 
 
 def get_device_cutlass_config(device_type: str):
     """
-    Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config).
+    Get device-specific CUTLASS config (``config.xpu``/``config.cuda`` override
+    the general ``config.cutlass``).
 
-    Devices that do not have a dedicated namespace fall back to the general
-    ``config.cutlass``; ``xpu`` is currently the only device with an override.
+    Devices without a dedicated config namespace (currently everything except
+    xpu and cuda) fall back to the general ``config.cutlass``.
     """
     if device_type == "xpu":
         return config.xpu
+    if device_type == "cuda":
+        return config.cuda
     from ...config import cutlass as inductor_cutlass_config
 
     return inductor_cutlass_config
@@ -586,7 +591,7 @@ def get_max_alignment(inductor_layout: Layout) -> int:
 
 class CUTLASSCompileSourceCapturingContext:
     # Helper class for Benchmarking and Testing CUTLASS Kernels in isolation.
-    # Can be used to capture the sourcecode passed to CUDACodeCache.compile
+    # Can be used to capture the sourcecode passed to the device CodeCache's compile
 
     def __init__(self, device_type: str):
         self.sources = []
@@ -608,9 +613,9 @@ class CUTLASSCompileSourceCapturingContext:
             return _compile_method_orig(source_code, dst_file_ext)
 
         # pyrefly: ignore [bad-assignment]
-        self._compile_patch = mock.patch(
-            f"torch._inductor.codecache.{codecache_cls.__name__}.compile", my_compile
-        )
+        # Patch the class object itself (not its module path) so custom
+        # CodeCache classes registered by out-of-tree backends work too.
+        self._compile_patch = mock.patch.object(codecache_cls, "compile", my_compile)
         self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
         return self
 
@@ -625,13 +630,21 @@ def cutlass_standalone_runner_compile_command(
     # Passes the correct preprocessor define to nvcc to ensure the standalone runner is enabled.
 
     extra_args = ["-DGENERATE_STANDALONE_RUNNER=1"]
+    if device_type == "xpu":
+        cutlass_compile_command = (
+            torch._inductor.codegen.xpu.compile_utils.xpu_compile_command
+        )
+    elif device_type == "cuda":
+        cutlass_compile_command = (
+            torch._inductor.codegen.cuda.compile_utils.cuda_compile_command
+        )
+    else:
+        raise NotImplementedError(
+            f"CUTLASS standalone runner is not implemented for device type "
+            f"{device_type!r}"
+        )
     if device_type != "xpu":
         extra_args.append("-DCUTLASS_DEBUG_TRACE_LEVEL=1")
-    cutlass_compile_command = (
-        torch._inductor.codegen.xpu.compile_utils.xpu_compile_command
-        if device_type == "xpu"
-        else torch._inductor.codegen.cuda.compile_utils.cuda_compile_command
-    )
     compile_command = cutlass_compile_command(
         [str(srcpath)], str(exepath), "exe", extra_args=extra_args
     )

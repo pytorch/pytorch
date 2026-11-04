@@ -34,13 +34,11 @@ from torch._inductor.codecache import (
     CodeCacheFuture,
     CppCodeCache,
     CppPythonBindingsCodeCache,
-    CUDACodeCache,
+    get_device_codecache,
     HalideCodeCache,
     LambdaFuture,
-    ROCmCodeCache,
     StaticAutotunerFuture,
     torch_key,
-    XPUCodeCache,
 )
 from torch._inductor.compile_worker.subproc_pool import (
     AnyPool,
@@ -747,11 +745,18 @@ class AsyncCompile:
 
     def cuda(self, source_code, dst_file_ext, aot_compile=False):
         kernel_code_log.info("CUDA Kernel:\n%s", source_code)
-        return self.cutlass(CUDACodeCache, source_code, dst_file_ext, aot_compile)
+        # Route through the registry so a custom CodeCache registered for
+        # "cuda" is used consistently by async compilation and the AOTI link
+        # step (which reads aot_kernels_o from the registry class).
+        return self.cutlass(
+            get_device_codecache("cuda"), source_code, dst_file_ext, aot_compile
+        )
 
     def xpu(self, source_code, dst_file_ext, aot_compile=False):
         kernel_code_log.info("XPU Kernel:\n%s", source_code)
-        return self.cutlass(XPUCodeCache, source_code, dst_file_ext, aot_compile)
+        return self.cutlass(
+            get_device_codecache("xpu"), source_code, dst_file_ext, aot_compile
+        )
 
     def rocm(
         self,
@@ -760,14 +765,24 @@ class AsyncCompile:
         aot_compile=False,
     ):
         kernel_code_log.info("ROCm Kernel:\n%s", source_code)
+        # On a HIP build "cuda" is registered to ROCmCodeCache, so the
+        # registry lookup below resolves to it; keep the direct class for a
+        # hypothetical non-HIP caller of this entry point.
+        rocm_codecache = get_device_codecache("cuda") if torch.version.hip else None
+        if rocm_codecache is None:
+            from torch._inductor.codecache import ROCmCodeCache
+
+            rocm_codecache = ROCmCodeCache
 
         def task():
             if aot_compile:
-                output_path, *_ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
-                ROCmCodeCache.aot_kernels_o.append(output_path)
+                output_path, *_ = rocm_codecache.compile(
+                    source_code, dst_file_ext="o"
+                )
+                rocm_codecache.aot_kernels_o.append(output_path)
             if config.rocm.generate_test_runner:
-                _ = ROCmCodeCache.compile(source_code, dst_file_ext="exe")
-            return ROCmCodeCache.load(source_code, dst_file_ext)[0]
+                _ = rocm_codecache.compile(source_code, dst_file_ext="exe")
+            return rocm_codecache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
 

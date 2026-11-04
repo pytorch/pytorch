@@ -5739,25 +5739,47 @@ class TestRemoteAOTAutogradCache(TestCase):
 
 
 class TestDeviceCodeCacheRegistry(TestCase):
+    # Use a fake device name: "npu"/"hpu" etc. are real device names that
+    # out-of-tree backends (torch_npu) register at import time on their
+    # hardware, which would change what get_device_codecache resolves to.
+    FAKE_DEVICE = "fakecache0"
+
     def setUp(self):
         super().setUp()
         from torch._inductor.codecache import _DEVICE_CODECACHE_REGISTRY
 
         self._registry = _DEVICE_CODECACHE_REGISTRY
-        self._saved = dict(self._registry)
+        self._saved_registry = dict(self._registry)
+        # register_backend_for_device also mutates the codegen registries
+        # (which feed the FX graph cache key), so snapshot/restore all of
+        # them the way test_device_backends.py does.
+        from torch._inductor.codegen import common as codegen_common
+
+        codegen_common._init_builtin_backend_registration()
+        self._saved_codegens = dict(codegen_common.device_codegens)
+        self._saved_passes = dict(codegen_common.custom_backend_passes)
+        self._saved_configs = dict(codegen_common.custom_backend_codegen_configs)
 
     def tearDown(self):
+        from torch._inductor.codegen import common as codegen_common
+
         self._registry.clear()
-        self._registry.update(self._saved)
+        self._registry.update(self._saved_registry)
+        codegen_common.device_codegens.clear()
+        codegen_common.device_codegens.update(self._saved_codegens)
+        codegen_common.custom_backend_passes.clear()
+        codegen_common.custom_backend_passes.update(self._saved_passes)
+        codegen_common.custom_backend_codegen_configs.clear()
+        codegen_common.custom_backend_codegen_configs.update(self._saved_configs)
         super().tearDown()
 
     def test_unregistered_device_raises(self):
         from torch._inductor.codecache import get_device_codecache
 
         with self.assertRaisesRegex(
-            NotImplementedError, "No CodeCache registered for device type 'npu'"
+            NotImplementedError, "No CodeCache registered for device type"
         ):
-            get_device_codecache("npu")
+            get_device_codecache(self.FAKE_DEVICE)
 
     def test_register_and_lookup_custom_class(self):
         from torch._inductor.codecache import (
@@ -5776,15 +5798,32 @@ class TestDeviceCodeCacheRegistry(TestCase):
             def compile(cls, source_code, dst_file_ext, extra_args=None):
                 return "dst", "key", "path"
 
-        register_device_codecache("npu", MyCodeCache)
-        self.assertIs(get_device_codecache("npu"), MyCodeCache)
-        # the standalone register entry point is idempotent on re-registration
-        register_device_codecache("npu", MyCodeCache)
-        self.assertIs(get_device_codecache("npu"), MyCodeCache)
+            @classmethod
+            def load(cls, source_code, dst_file_ext):
+                return "dll", "key", "path"
+
+        register_device_codecache(self.FAKE_DEVICE, MyCodeCache)
+        self.assertIs(get_device_codecache(self.FAKE_DEVICE), MyCodeCache)
+
+        class MyOtherCodeCache(MyCodeCache):
+            pass
+
+        # last registration wins
+        register_device_codecache(self.FAKE_DEVICE, MyOtherCodeCache)
+        self.assertIs(get_device_codecache(self.FAKE_DEVICE), MyOtherCodeCache)
 
     def test_register_via_register_backend_for_device(self):
-        from torch._inductor.codecache import get_device_codecache
-        from torch._inductor.codegen.common import register_backend_for_device
+        # register_backend_for_device no longer takes a device_codecache kwarg;
+        # backends must call register_device_codecache from their own hook
+        # (see _init_builtin_backend_registration for the built-in wiring).
+        from torch._inductor.codecache import (
+            get_device_codecache,
+            register_device_codecache,
+        )
+        from torch._inductor.codegen.common import (
+            device_codegens,
+            register_backend_for_device,
+        )
         from torch._inductor.codegen.triton import TritonScheduling
         from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 
@@ -5794,18 +5833,36 @@ class TestDeviceCodeCacheRegistry(TestCase):
         class MyCodeCache:
             aot_kernels_o = []
 
+            @classmethod
+            def write(cls, source_code, dst_file_ext):
+                return "key", "path"
+
+            @classmethod
+            def compile(cls, source_code, dst_file_ext, extra_args=None):
+                return "dst", "key", "path"
+
+            @classmethod
+            def load(cls, source_code, dst_file_ext):
+                return "dll", "key", "path"
+
         register_backend_for_device(
-            "npu",
+            self.FAKE_DEVICE,
             MyScheduling,
             PythonWrapperCodegen,
-            device_codecache=MyCodeCache,
         )
-        # the code cache must be reachable through the device registry
-        self.assertIs(get_device_codecache("npu"), MyCodeCache)
-        # and stored on the DeviceCodegen entry like the other extension fields
-        from torch._inductor.codegen.common import device_codegens
-
-        self.assertIs(device_codegens["npu"].device_codecache, MyCodeCache)
+        register_device_codecache(self.FAKE_DEVICE, MyCodeCache)
+        # the code cache is reachable through the device registry
+        self.assertIs(get_device_codecache(self.FAKE_DEVICE), MyCodeCache)
+        # and the DeviceCodegen entry carries only the codegen fields
+        self.assertEqual(
+            set(vars(device_codegens[self.FAKE_DEVICE]).keys()),
+            {
+                "scheduling",
+                "wrapper_codegen",
+                "cpp_wrapper_codegen",
+                "fx_wrapper_codegen",
+            },
+        )
 
     def test_builtin_devices_resolve(self):
         from torch._inductor.codecache import (
@@ -5817,17 +5874,38 @@ class TestDeviceCodeCacheRegistry(TestCase):
         from torch._inductor.codegen.common import init_backend_registration
 
         init_backend_registration()
-        self.assertEqual(
-            get_device_codecache("cuda"),
-            ROCmCodeCache if torch.version.hip else CUDACodeCache,
-        )
+        self.assertIs(get_device_codecache("cuda"), CUDACodeCache)
         self.assertIs(get_device_codecache("xpu"), XPUCodeCache)
-        # "rocm" itself stays registered for direct lookups
-        self.assertIs(get_device_codecache("rocm"), ROCmCodeCache)
+
+    def test_hip_build_registers_rocm_for_cuda(self):
+        # On a HIP build the "cuda" device is served by the ROCm code cache;
+        # "rocm" is not a registry key, so an out-of-tree override for "cuda"
+        # is the single point of customization.
+        from torch._inductor.codecache import (
+            _lookup_device_codecache,
+            CUDACodeCache,
+            ROCmCodeCache,
+        )
+
+        with mock.patch("torch.version.hip", "5.7"):
+            self.assertIs(_lookup_device_codecache("cuda"), CUDACodeCache)
+            from torch._inductor.codegen.common import (
+                _init_builtin_backend_registration,
+            )
+
+            # re-run the builtin registration under the mocked HIP build
+            with mock.patch.dict(
+                "torch._inductor.codecache._DEVICE_CODECACHE_REGISTRY",
+                {"xpu": XPUCodeCache},
+            ):
+                _init_builtin_backend_registration.cache_clear()
+                _init_builtin_backend_registration()
+                self.assertIs(_lookup_device_codecache("cuda"), ROCmCodeCache)
+            _init_builtin_backend_registration.cache_clear()
+        # non-HIP lookups are unaffected
+        self.assertIs(_lookup_device_codecache("cuda"), CUDACodeCache)
 
     def test_registered_class_satisfies_protocol(self):
-        from typing import runtime_checkable  # noqa: F401
-
         from torch._inductor.codecache import (
             CUDACodeCache,
             DeviceCodeCacheProtocol,
@@ -5863,25 +5941,21 @@ class TestDeviceCodeCacheRegistry(TestCase):
         # environment problem (RuntimeError), not a missing feature.
         from torch._inductor.codegen.cutlass import utils as cutlass_utils
 
+        self.addCleanup(cutlass_utils.cutlass_arch.cache_clear)
+        self.addCleanup(cutlass_utils.toolkit_version.cache_clear)
         cutlass_utils.cutlass_arch.cache_clear()
         cutlass_utils.toolkit_version.cache_clear()
-        try:
-            with mock.patch.object(
-                cutlass_utils, "get_cuda_arch", return_value=None
-            ), mock.patch.object(
-                cutlass_utils, "get_cuda_version", return_value=""
+        with mock.patch.object(
+            cutlass_utils, "get_cuda_arch", return_value=None
+        ), mock.patch.object(cutlass_utils, "get_cuda_version", return_value=None):
+            with self.assertRaisesRegex(
+                RuntimeError, "Unable to determine the CUDA architecture"
             ):
-                with self.assertRaisesRegex(
-                    RuntimeError, "Unable to determine the CUDA architecture"
-                ):
-                    cutlass_utils.cutlass_arch("cuda")
-                with self.assertRaisesRegex(
-                    RuntimeError, "Unable to determine the cuda toolkit version"
-                ):
-                    cutlass_utils.toolkit_version("cuda")
-        finally:
-            cutlass_utils.cutlass_arch.cache_clear()
-            cutlass_utils.toolkit_version.cache_clear()
+                cutlass_utils.cutlass_arch("cuda")
+            with self.assertRaisesRegex(
+                RuntimeError, "Unable to determine the cuda toolkit version"
+            ):
+                cutlass_utils.toolkit_version("cuda")
 
 
 class TestUtils(TestCase):
