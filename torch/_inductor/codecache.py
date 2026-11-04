@@ -3843,7 +3843,7 @@ end
         # with anything that is slow or uses lots of memory copy operations.
         def _quick_format_array_to_string(data: bytes | bytearray) -> str:
             return ",\n".join(
-                str(batch).strip("()") for batch in itertools.batched(data, 16)
+                str(batch).strip("(),") for batch in itertools.batched(data, 16)
             )
 
 
