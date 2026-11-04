@@ -232,23 +232,16 @@ struct LayerNormOp {
   opmath mean, rstd;
   device const T* gamma;
   opmath grad(opmath dy, uint j) const {
-    return dy * (gamma != nullptr ? opmath(gamma[j]) : opmath(1));
+    return dy * (gamma != nullptr ? opmath(gamma[j]) : 1);
   }
   opmath dir(opmath x) const {
     return (x - mean) * rstd;
   }
-  NormBackwardCoeffs<T> coeffs(
-      threadgroup opmath* tg_a,
-      threadgroup opmath* tg_b,
-      opmath sum_grad,
-      opmath sum_prod,
-      uint row_size,
-      uint,
-      uint tid,
-      uint lsize) const {
-    const auto sums =
-        threadgroup_sum2(tg_a, tg_b, sum_grad, sum_prod, tid, lsize);
-    return {rstd, sums[0] / opmath(row_size), sums[1] / opmath(row_size)};
+  METAL_FUNC NormBackwardCoeffs<T> coeffs(
+      thread const NormBackwardRow<T>& row) const {
+    const auto sums = threadgroup_sum2(
+        row.tg_a, row.tg_b, row.sum_grad, row.sum_prod, row.tid, row.lsize);
+    return {rstd, sums[0] / row.size, sums[1] / row.size};
   }
   static acc_t column_term(
       opmath dy,

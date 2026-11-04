@@ -21,18 +21,12 @@ struct WeightNormOp {
     return x;
   }
   METAL_FUNC NormBackwardCoeffs<T> coeffs(
-      threadgroup opmath*,
-      threadgroup opmath* tg_b,
-      opmath,
-      opmath sum_prod,
-      uint,
-      uint row,
-      uint tid,
-      uint lsize) const {
+      thread const NormBackwardRow<T>& row) const {
     const opmath rnorm = 1 / norm;
-    const opmath dot = threadgroup_sum(tg_b, sum_prod, tid, lsize);
-    if (tid == 0) {
-      grad_g[row] = static_cast<T>(dot * rnorm);
+    const opmath dot =
+        threadgroup_sum(row.tg_b, row.sum_prod, row.tid, row.lsize);
+    if (row.tid == 0) {
+      grad_g[row.index] = static_cast<T>(dot * rnorm);
     }
     return {g * rnorm, 0, dot * rnorm * rnorm};
   }

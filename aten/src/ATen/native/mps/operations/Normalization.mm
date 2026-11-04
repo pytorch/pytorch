@@ -468,8 +468,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
                    dtype,
                    " but got ",
                    dOut->scalar_type());
-  TORCH_CHECK(dOut->numel() == M * N && mean.numel() == M && rstd.numel() == M,
-              "native_layer_norm_backward: grad_out, mean and rstd must match the input");
+  TORCH_CHECK_VALUE(dOut->numel() == M * N && mean.numel() == M && rstd.numel() == M,
+                    "native_layer_norm_backward: grad_out, mean and rstd must match the input");
   if (grad_input_mask[1] && grad_input_mask[2]) {
     TORCH_CHECK_TYPE(weight.scalar_type() == bias.scalar_type(),
                      "native_layer_norm_backward: weight and bias gradients are computed in one dtype, got ",

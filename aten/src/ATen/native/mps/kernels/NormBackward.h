@@ -8,14 +8,22 @@ struct NormBackwardCoeffs {
   opmath_t<T> scale, shift, slope;
 };
 
+template <typename T>
+struct NormBackwardRow {
+  threadgroup opmath_t<T>* tg_a;
+  threadgroup opmath_t<T>* tg_b;
+  opmath_t<T> sum_grad, sum_prod;
+  uint size, index, tid, lsize;
+};
+
 template <typename T, typename Op>
 [[max_total_threads_per_threadgroup(c10::metal::max_threadgroup_size)]]
 kernel void norm_backward_single_row(
-    device const T* dY [[buffer(0)]],
-    device const T* X [[buffer(1)]],
+    device const T* grad_out [[buffer(0)]],
+    device const T* input [[buffer(1)]],
     device const T* stat_a [[buffer(2)]],
     device const T* stat_b [[buffer(3)]],
-    device T* dX [[buffer(4)]],
+    device T* grad_input [[buffer(4)]],
     constant uint& row_size [[buffer(5)]],
     device typename Op::extra_t* extra [[buffer(6)]],
     uint row [[threadgroup_position_in_grid]],
@@ -25,9 +33,9 @@ kernel void norm_backward_single_row(
   constexpr int reads = ILP_PER_THREAD;
   const uint base = tid * reads;
   const ulong row_offset = ulong(row) * row_size + base;
-  device const T* dy = dY + row_offset;
-  device const T* x = X + row_offset;
-  device T* dx = dX + row_offset;
+  device const T* dy = grad_out + row_offset;
+  device const T* x = input + row_offset;
+  device T* dx = grad_input + row_offset;
   const int count = min(reads, max(0, int(row_size) - int(base)));
   const Op op{opmath(stat_a[row]), opmath(stat_b[row]), extra};
   opmath grad[reads], dir[reads];
@@ -42,8 +50,9 @@ kernel void norm_backward_single_row(
     }
   }
   threadgroup opmath tg_a[simdgroup_size], tg_b[simdgroup_size];
-  const auto c =
-      op.coeffs(tg_a, tg_b, sum_grad, sum_prod, row_size, row, tid, lsize);
+  const NormBackwardRow<T> row_state{
+      tg_a, tg_b, sum_grad, sum_prod, row_size, row, tid, lsize};
+  const auto c = op.coeffs(row_state);
 #pragma unroll
   for (int i = 0; i < reads; i++) {
     if (i < count) {
@@ -55,11 +64,11 @@ kernel void norm_backward_single_row(
 template <typename T, typename Op>
 [[max_total_threads_per_threadgroup(c10::metal::max_threadgroup_size)]]
 kernel void norm_backward_looped(
-    device const T* dY [[buffer(0)]],
-    device const T* X [[buffer(1)]],
+    device const T* grad_out [[buffer(0)]],
+    device const T* input [[buffer(1)]],
     device const T* stat_a [[buffer(2)]],
     device const T* stat_b [[buffer(3)]],
-    device T* dX [[buffer(4)]],
+    device T* grad_input [[buffer(4)]],
     constant uint& row_size [[buffer(5)]],
     device typename Op::extra_t* extra [[buffer(6)]],
     uint row [[threadgroup_position_in_grid]],
@@ -68,9 +77,9 @@ kernel void norm_backward_looped(
   using opmath = opmath_t<T>;
   constexpr int reads = ILP_PER_THREAD;
   const ulong row_offset = ulong(row) * row_size;
-  device const T* dy = dY + row_offset;
-  device const T* x = X + row_offset;
-  device T* dx = dX + row_offset;
+  device const T* dy = grad_out + row_offset;
+  device const T* x = input + row_offset;
+  device T* dx = grad_input + row_offset;
   const Op op{opmath(stat_a[row]), opmath(stat_b[row]), extra};
   opmath sum_grad = 0, sum_prod = 0;
   for (uint r = tid * reads; r < row_size; r += lsize * reads) {
@@ -85,8 +94,9 @@ kernel void norm_backward_looped(
     }
   }
   threadgroup opmath tg_a[simdgroup_size], tg_b[simdgroup_size];
-  const auto c =
-      op.coeffs(tg_a, tg_b, sum_grad, sum_prod, row_size, row, tid, lsize);
+  const NormBackwardRow<T> row_state{
+      tg_a, tg_b, sum_grad, sum_prod, row_size, row, tid, lsize};
+  const auto c = op.coeffs(row_state);
   for (uint r = tid * reads; r < row_size; r += lsize * reads) {
 #pragma unroll
     for (int i = 0; i < reads; i++) {
@@ -103,8 +113,8 @@ kernel void norm_backward_looped(
 template <typename T, typename Op>
 [[max_total_threads_per_threadgroup(c10::metal::max_threadgroup_size)]]
 kernel void norm_backward_column_partials(
-    device const T* dY [[buffer(0)]],
-    device const T* X [[buffer(1)]],
+    device const T* grad_out [[buffer(0)]],
+    device const T* input [[buffer(1)]],
     device typename Op::acc_t* part [[buffer(2)]],
     constant uint2& rows_cols [[buffer(3)]],
     device const T* stat_a [[buffer(4)]],
@@ -123,8 +133,8 @@ kernel void norm_backward_column_partials(
     ulong idx = ulong(row0) * cols + col;
     const ulong idx_step = ulong(row_step) * cols;
     for (uint i = row0; i < rows; i += row_step, idx += idx_step) {
-      acc +=
-          Op::column_term(opmath(dY[idx]), opmath(X[idx]), stat_a, stat_b, i);
+      acc += Op::column_term(
+          opmath(grad_out[idx]), opmath(input[idx]), stat_a, stat_b, i);
     }
   }
   threadgroup acc_t buf[simdgroup_size][simdgroup_size];
