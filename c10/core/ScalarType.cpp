@@ -235,6 +235,8 @@ std::pair<std::string_view, std::string_view> getDtypeNames(
       return {"float8_e5m3fnu", ""};
     case c10::ScalarType::Float4_e2m1fn_x2:
       return {"float4_e2m1fn_x2", ""};
+    case c10::ScalarType::Float6_e2m3fn_x4:
+      return {"float6_e2m3fn_x4", ""};
     default:
       TORCH_CHECK(false, "Unimplemented scalar type");
   }
@@ -264,6 +266,8 @@ std::string_view getScalarTypeAbbr(ScalarType scalarType) {
       return "f8e5m3fnu";
     case ScalarType::Float4_e2m1fn_x2:
       return "f4e2m1fnx2";
+    case ScalarType::Float6_e2m3fn_x4:
+      return "f6e2m3fnx4";
     case ScalarType::ComplexHalf:
       return "c32";
     case ScalarType::BComplex32:

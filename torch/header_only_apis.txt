@@ -24,6 +24,9 @@ BFloat16
 # torch/headeronly/util/Float4_e2m1fn_x2.h
 Float4_e2m1fn_x2
 
+# torch/headeronly/util/Float6_e2m3fn_x4.h
+Float6_e2m3fn_x4
+
 # torch/headeronly/util/Float8_e4m3fn.h
 Float8_e4m3fn
 

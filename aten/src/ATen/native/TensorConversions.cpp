@@ -909,6 +909,22 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
         dtype,
         " (different element sizes)");
 
+  } else if (
+      std::max(self_element_size, new_element_size) %
+          std::min(self_element_size, new_element_size) !=
+      0) {
+    TORCH_CHECK(
+        false,
+        "Cannot view ",
+        self.scalar_type(),
+        " (element size ",
+        self_element_size,
+        ") as ",
+        dtype,
+        " (element size ",
+        new_element_size,
+        "): one element size must divide the other");
+
   } else if (self_element_size > new_element_size) {
     // Downsizing element size
 

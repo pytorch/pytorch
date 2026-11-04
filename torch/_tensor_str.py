@@ -333,6 +333,11 @@ def _tensor_str(self, indent):
     if self.numel() == 0:
         return "[]"
 
+    if self.dtype == torch.float6_e2m3fn_x4:  # type: ignore[attr-defined]
+        # Like torch.float4_e2m1fn_x2, this packed dtype has no casts, so print
+        # the bytes of each element as a trailing dim of 3 uint8 values.
+        self = self.unsqueeze(-1).view(torch.uint8)
+
     summarize = self.numel() > PRINT_OPTS.threshold
 
     if self._is_zerotensor():

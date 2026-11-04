@@ -35,6 +35,10 @@
 namespace at::native {
 
 Tensor& zero_cuda_(Tensor& self) {
+  if (hasNonPowerOfTwoElementSize(self.scalar_type())) {
+    self.unsqueeze(-1).view(kByte).zero_();
+    return self;
+  }
 #if defined(USE_ROCM) && ROCM_VERSION >= 70000 && ROCM_VERSION < 70100
   // hipMemsetAsync recorded into a HIP graph leaves stale bytes on ROCm
   // [7.0.0, 7.1.0) (runtime bug, fixed in ROCm/clr 3038c4c3). The bug needs
