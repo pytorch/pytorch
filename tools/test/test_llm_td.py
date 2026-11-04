@@ -181,8 +181,13 @@ class TestSelection(unittest.TestCase):
             "test_cmath.py": "from test.test_math import parse_testfile\n",
             "test_fmath.py": "import test.test_math as test_math\n",
             "test_pmath.py": "from test.inductor.ext.triton import device\n",
+            # The CPython tests redirect test.mapping_tests to mapping_tests.
+            "cpython/v3_13/mapping_tests.py": "",
+            "cpython/v3_13/test_dict.py": "from test import mapping_tests\n",
+            "cpython/v3_13/test_userdict.py": "from test import mapping_tests, support\n",
+            "test_weak.py": "# Adapted from cpython/Lib/test/mapping_tests.py\n",
         }
-        candidates = CANDIDATES | {"inductor/test_ext", "onnx/test_onnx", "onnx/test_paren", "test_autograd", "dynamo/test_after_aot", "test_math", "test_cmath", "test_fmath", "test_pmath"}  # fmt: skip
+        candidates = CANDIDATES | {"inductor/test_ext", "onnx/test_onnx", "onnx/test_paren", "test_autograd", "dynamo/test_after_aot", "test_math", "test_cmath", "test_fmath", "test_pmath", "cpython/v3_13/test_dict", "cpython/v3_13/test_userdict", "test_weak"}  # fmt: skip
         for changed, expected in [
             ("test/inductor/ext/triton/device.py", {"inductor/test_ext", "test_pmath"}),
             ("test/onnx/defs/model.py", {"onnx/test_onnx", "onnx/test_paren"}),
@@ -190,14 +195,15 @@ class TestSelection(unittest.TestCase):
             ("test/test_autograd.py", {"test_autograd", "test_nn"}),
             ("test/inductor/custom_inductor_config.py", {"dynamo/test_after_aot"}),
             ("test/test_math.py", {"test_math", "test_cmath", "test_fmath"}),
-        ]:
+            ("test/cpython/v3_13/mapping_tests.py", {"cpython/v3_13/test_dict", "cpython/v3_13/test_userdict"}),
+        ]:  # fmt: skip
             sel = self.select_in_tree(sources, candidates, [changed])
             self.assertEqual(sel.files, expected, changed)
 
     def test_data_file_readers_are_selected(self) -> None:
         sources = {
             "test_public_bindings.py": 'open("allowlist_for_publicAPI.json")\n',
-            "test_ops.py": 'load("cpp_extensions/my_ext.cpp")\n',
+            "test_ops.py": 'load("cpp_extensions/my_ext.cpp")\n    # Reads comment_only.json\nx = 1  # Reads trailing.json\n',
             "test_nn.py": "class TestNN(TestCase):\n",
             "dynamo/test_misc.py": "from test_nn import TestNN\n",
             "test_tensorboard.py": 'class TestTensorBoardSummary(TestCase):\n    path = "TestTensorBoard." + name\n',
@@ -224,12 +230,13 @@ class TestSelection(unittest.TestCase):
             ("test/cpp/api/any.cpp", set()),
             ("test/README.md", set()),
             ("test/cpython/v3_13/test_set.diff", set()),
+            ("test/trailing.json", {"test_ops"}),
         ]:  # fmt: skip
             sel = self.select_in_tree(sources, candidates, [changed])
             self.assertEqual((sel.files, sel.run_all), (expected, False), changed)
-        # Named only by a README, by run_test.py, which no test imports, or by
-        # another edited data file that nothing reads.
-        for changed in ("test/expect/TestGone.test_x.expect", "test/distributed/launcher/bin/unused.py", "test/notes.txt", "test/run_only.json"):  # fmt: skip
+        # Named only by a README, by run_test.py, which no test imports, by a
+        # comment line, or by another edited data file that nothing reads.
+        for changed in ("test/expect/TestGone.test_x.expect", "test/distributed/launcher/bin/unused.py", "test/notes.txt", "test/run_only.json", "test/comment_only.json"):  # fmt: skip
             sel = self.select_in_tree(sources, candidates, ["test/allowlist_for_publicAPI.json", changed])  # fmt: skip
             self.assertEqual((sel.run_all, sel.reason, sel.error), (True, f"nothing found that reads {changed}", None))  # fmt: skip
         sel = self.select_in_tree(sources | {"allowlist_for_publicAPI.json": "b.json\n"}, candidates, ["test/allowlist_for_publicAPI.json", "test/b.json"])  # fmt: skip
