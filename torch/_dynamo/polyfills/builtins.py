@@ -115,8 +115,9 @@ class _SequenceIterator:
             return 0
         # Length slots come from type dictionaries, not metaclass attribute
         # lookup, which can hide __len__ or invoke a descriptor.
-        for cls in type.__dict__["__mro__"].__get__(type(self.iterable)):
-            if "__len__" in type.__dict__["__dict__"].__get__(cls):
+        iterable_type = type(self.iterable)
+        for cls in type.__dict__["__mro__"].__get__(iterable_type, type(iterable_type)):
+            if "__len__" in type.__dict__["__dict__"].__get__(cls, type(cls)):
                 return max(len(self.iterable) - self.index, 0)
         return NotImplemented
 

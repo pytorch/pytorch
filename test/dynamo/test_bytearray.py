@@ -999,15 +999,43 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
                 return str(exc), x + 1
             return result, x + 1
 
-        compiled = torch.compile(f, backend="eager")
+        counter = CompileCounter()
+        compiled = torch.compile(f, backend=counter, fullgraph=True)
         self.assertEqual(
             compiled(Sequence(), torch.ones(1)), f(Sequence(), torch.ones(1))
         )
-        torch._dynamo.reset()
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "Custom metaclass with __getattribute__"
-        ):
-            torch.compile(f, backend="eager", fullgraph=True)(Sequence(), torch.ones(1))
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("consumer", ["extend", "length_hint"])
+    def test_sequence_iterator_with_custom_metaclass(self, consumer):
+        class Meta(type):
+            def __getattribute__(cls, name):
+                return super().__getattribute__(name)
+
+        class Sequence(metaclass=Meta):
+            def __len__(self):
+                return 2
+
+            def __getitem__(self, index):
+                if index >= 2:
+                    raise IndexError(index)
+                return (97, 98)[index]
+
+        def f(seq, x):
+            iterator = iter(seq)
+            if consumer == "extend":
+                result = bytearray()
+                result.extend(iterator)
+            else:
+                result = operator.length_hint(iterator)
+            return result, x + 1
+
+        counter = CompileCounter()
+        compiled = torch.compile(f, backend=counter, fullgraph=True)
+        self.assertEqual(
+            compiled(Sequence(), torch.ones(1)), f(Sequence(), torch.ones(1))
+        )
+        self.assertEqual(counter.frame_count, 1)
 
     def test_reversed_sequence_iterator_length_hint(self):
         class Sequence:
