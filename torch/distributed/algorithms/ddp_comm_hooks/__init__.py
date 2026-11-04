@@ -1,20 +1,13 @@
 # mypy: allow-untyped-defs
 import sys
-from enum import Enum
+
+# To suppress FutureWarning from partial since 3.13
+from enum import Enum, member
 from functools import partial
 
 
-# To suppress FutureWarning from partial since 3.13
-if sys.version_info >= (3, 11):
-    # member was introduced in Python 3.11
-    from enum import member
-
-    def _enum_member(x):
-        return member(x)
-else:
-
-    def _enum_member(x):
-        return x
+def _enum_member(x):
+    return member(x)
 
 
 import torch.distributed as dist
