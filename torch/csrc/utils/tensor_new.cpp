@@ -1986,7 +1986,12 @@ Tensor asarray(
       py::raise_from(
           e,
           PyExc_ValueError,
-          "can't alias the object into a tensor, because reading it through DLPack failed.");
+          c10::str(
+              "can't alias an object of type '",
+              Py_TYPE(obj)->tp_name,
+              "' into a tensor, because reading it through DLPack with copy=False raised a BufferError. "
+              "Pass copy=None or copy=True to allow a copy.")
+              .c_str());
       throw py::error_already_set();
     }
     is_dlpack_import = true;
