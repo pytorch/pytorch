@@ -10,8 +10,9 @@ inputs:
 runs:
   using: composite
   steps:
-    # Drop any selection an unzipped build artifact left; its only source is llm-selector.yml
-    # (added in the PR above).
+    # Defense in depth against a stale or planted selection an unzipped build artifact left, not
+    # the trust boundary: resolve_selection.py decides which .github/workflows/llm-selector.yml
+    # selection, if any, the test jobs get.
     - name: Remove any LLM test selection
       shell: bash
       run: rm -f .additional_ci_files/llm_selection.json
