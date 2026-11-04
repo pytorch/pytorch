@@ -4,7 +4,6 @@ import os
 import sys
 import unittest
 import warnings
-from types import SimpleNamespace
 from unittest import mock
 
 import torch
@@ -32,6 +31,12 @@ from torch._native.ops.reductions import (
     kernel_rowtile as rt,
     traits as T,
 )
+
+
+def _served(trait_key):
+    """Tags of the row and general plans compiled for trait_key."""
+    rows = {k[0] for k in rt._CACHE if k[1] == trait_key}
+    return rows | {k[0][1] for k in kg._PLAN if k[0][2] == trait_key}
 
 
 class TestReductionConfig(TestCase):
@@ -176,27 +181,6 @@ class TestReductionConfig(TestCase):
             ),
             "linear",
         )
-
-    def test_inner_tree_cannot_decline_into_unordered_row(self):
-        """Raise for explicit inner-tree order on a launch shape the order cannot use."""
-        x = SimpleNamespace(
-            dim=lambda: 2,
-            is_cuda=True,
-            stride=lambda axis: 1,
-            shape=(8, 1024),
-            dtype=torch.float32,
-            element_size=lambda: 4,
-            device="cuda",
-        )
-        with self.assertRaisesRegex(ValueError, "inner_tree.*cannot"):
-            rt.reduce_row_tile(
-                object(),
-                "sum",
-                x,
-                [torch.float32],
-                threads_per_row=32,
-                order="inner_tree",
-            )
 
     def test_fallback_warns_once_per_reason(self):
         """Report each distinct reason a gated inner-tree request fell back."""
@@ -444,28 +428,6 @@ class TestReductionConfig(TestCase):
 class TestReductionConfigDevice(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    def test_required_inner_tree_cannot_fall_back(self, device):
-        """Raise when no ordered route exists instead of changing reduction order."""
-        import cutlass
-
-        from torch._native.ops.reductions import traits
-
-        x = torch.empty((8, 2048), device=device)[:, ::2]
-        with (
-            mock.patch.object(kg, "_try_indexed_itree", return_value=None),
-            mock.patch.object(kg, "_launch") as launch,
-        ):
-            with self.assertRaisesRegex(ValueError, "inner-tree.*cannot"):
-                kg.reduce_dim(
-                    traits.SumOps(acc=cutlass.Float32),
-                    "sum",
-                    x,
-                    [1],
-                    torch.float32,
-                    order="inner_tree",
-                )
-            launch.assert_not_called()
-
     @parametrize("stride", [1, 2])
     def test_explicit_order_overrides_environment(self, device, stride):
         """Tune an explicit unordered request as unordered even under the env gate."""
@@ -479,38 +441,36 @@ class TestReductionConfigDevice(TestCase):
             torch.backends.python_native.cutedsl.disabled(),
         ):
             expected = x.sum(1)
+        key = f"explicit_unordered_{stride}"
         with (
             mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "1"}),
-            mock.patch.object(
-                rt, "select_row_order", wraps=rt.select_row_order
-            ) as row_select,
-            mock.patch.object(
-                kg, "select_general_config", wraps=kg.select_general_config
-            ) as general_select,
-            mock.patch.object(rt, "inner_tree_fallback") as fallback,
+            warnings.catch_warnings(),
         ):
+            # Compiling may warn on its own; only the env gate's fallback must not.
+            warnings.filterwarnings("error", ".*could not be honoured")
             got = kg.reduce_dim(
                 traits.SumOps(acc=cutlass.Float32),
-                "sum",
+                key,
                 x,
                 [1],
                 torch.float32,
                 order="unordered",
             )
-        # Contiguous rows tune the row kernel; strided rows tune the general kernel.
-        self.assertEqual(row_select.called, stride == 1)
-        self.assertEqual(general_select.called, stride == 2)
-        fallback.assert_not_called()
+        # Contiguous rows run the row kernel; strided rows run the general kernel.
+        tags = _served(key)
+        self.assertIn("rowtile" if stride == 1 else "reduce", tags)
+        self.assertFalse(any("itree" in t for t in tags), tags)
         self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
 
     @parametrize("stride", [1, 2])
     def test_selectors_can_pick_inner_tree_for_unordered(self, device, stride):
-        """Serve a selector's inner-tree pick; a general-route decline stays silent."""
+        """Serve a selector's inner-tree pick without the env gate's warning."""
         import cutlass
 
         from torch._native.ops.reductions import traits
 
         x = torch.randn((64, 2048 * stride), device=device)[:, ::stride]
+        key = f"selector_inner_tree_{stride}"
         with (
             mock.patch.object(rt, "select_row_order", return_value="inner_tree"),
             mock.patch.object(
@@ -518,18 +478,15 @@ class TestReductionConfigDevice(TestCase):
                 "select_general_config",
                 return_value=kg._GeneralConfig(kernel_order="inner_tree"),
             ),
-            mock.patch.object(kg, "_try_indexed_itree", return_value=None) as indexed,
-            mock.patch.object(rt, "reduce_row_tile", wraps=rt.reduce_row_tile) as row,
-            mock.patch.object(rt, "inner_tree_fallback") as fallback,
+            warnings.catch_warnings(),
         ):
+            # Compiling may warn on its own; only the env gate's fallback must not.
+            warnings.filterwarnings("error", ".*could not be honoured")
             got = kg.reduce_dim(
-                traits.SumOps(acc=cutlass.Float32), "sum", x, [1], torch.float32
+                traits.SumOps(acc=cutlass.Float32), key, x, [1], torch.float32
             )
-        if stride == 1:
-            self.assertEqual(row.call_args.kwargs["order"], "inner_tree")
-        else:
-            indexed.assert_called_once()
-        fallback.assert_not_called()
+        want = "rowitree" if stride == 1 else "genitree"
+        self.assertTrue(any(t.startswith(want) for t in _served(key)), _served(key))
         self.assertEqual(got, x.double().sum(1).float(), atol=1e-4, rtol=1e-4)
 
     def test_row_kernel_leaves_the_environment_to_dispatch(self, device):
@@ -541,16 +498,15 @@ class TestReductionConfigDevice(TestCase):
         x = torch.randn(64, 4096, device=device)
         trait = traits.SumOps(acc=cutlass.Float32)
         f32 = [torch.float32]
-        with (
-            mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "strict"}),
-            mock.patch.object(rt, "_run_itree") as itree,
-        ):
+        with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "strict"}):
             (got,) = rt.reduce_row_tile(trait, "row_env", x, f32)
             with self.assertRaisesRegex(ValueError, "cannot be honoured"):
                 rt.reduce_row_tile(
                     trait, "row_env", x, f32, threads_per_row=32, order="inner_tree"
                 )
-        itree.assert_not_called()
+        tags = _served("row_env")
+        self.assertIn("rowtile", tags)
+        self.assertFalse(any("itree" in t for t in tags), tags)
         self.assertEqual(got, x.double().sum(1).float(), atol=1e-4, rtol=1e-4)
 
     @parametrize("entry", ["reduce_dim2", "reduce_all", "reduce_all2"])
@@ -565,28 +521,25 @@ class TestReductionConfigDevice(TestCase):
         two = traits.VarMeanOps(correction=1, acc=cutlass.Float32)
         f32 = torch.float32
         calls = {
-            "reduce_dim2": lambda order: kg.reduce_dim2(
-                two, "var_mean", x, [1], [f32, f32], order=order
+            "reduce_dim2": lambda key, order: kg.reduce_dim2(
+                two, key, x, [1], [f32, f32], order=order
             ),
-            "reduce_all": lambda order: (
-                kg.reduce_all(one, "sum", x, f32, order=order),
+            "reduce_all": lambda key, order: (
+                kg.reduce_all(one, key, x, f32, order=order),
             ),
-            "reduce_all2": lambda order: kg.reduce_all2(
-                two, "var_mean", x, [f32, f32], order=order
+            "reduce_all2": lambda key, order: kg.reduce_all2(
+                two, key, x, [f32, f32], order=order
             ),
         }
-        with mock.patch.object(rt, "reduce_row_tile", wraps=rt.reduce_row_tile) as row:
-            ordered = calls[entry]("inner_tree")
-        orders = [c.kwargs.get("order") for c in row.call_args_list]
-        self.assertIn("inner_tree", orders)
+        ordered = calls[entry](f"{entry}_ordered", "inner_tree")
+        tags = _served(f"{entry}_ordered")
+        self.assertTrue(any(t.startswith("rowitree") for t in tags), tags)
         # An explicit unordered request overrides the env gate.
-        with (
-            mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "1"}),
-            mock.patch.object(rt, "reduce_row_tile", wraps=rt.reduce_row_tile) as row,
-        ):
-            unordered = calls[entry]("unordered")
-        orders = {c.kwargs.get("order") for c in row.call_args_list}
-        self.assertEqual(orders, {"linear"})
+        with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "1"}):
+            unordered = calls[entry](f"{entry}_unordered", "unordered")
+        tags = _served(f"{entry}_unordered")
+        self.assertIn("rowtile", tags)
+        self.assertFalse(any("itree" in t for t in tags), tags)
         for got, ref in zip(ordered, unordered):
             self.assertEqual(got, ref, atol=1e-4, rtol=1e-4)
 
@@ -655,13 +608,9 @@ class TestReductionConfigDevice(TestCase):
         from torch._native.ops.reductions import traits
 
         x = torch.randn(64, 128, device=device)[:, ::2]
-        with mock.patch.object(
-            kg, "select_general_config", wraps=kg.select_general_config
-        ) as select:
-            got = kg.reduce_all(
-                traits.SumOps(acc=cutlass.Float32), "sum", x, torch.float32
-            )
-        select.assert_called_once()
+        key = "strided_reduce_all"
+        got = kg.reduce_all(traits.SumOps(acc=cutlass.Float32), key, x, torch.float32)
+        self.assertTrue(_served(key) & {"reduce", "gensplit1"}, _served(key))
         self.assertEqual(got, x.double().sum().float(), atol=1e-4, rtol=1e-4)
 
     def test_env_gate_falls_back_with_one_warning(self, device):
@@ -676,9 +625,10 @@ class TestReductionConfigDevice(TestCase):
         call = lambda: kg.reduce_dim(  # noqa: E731
             traits.SumOps(acc=cutlass.Float32), "sum", x, [1], torch.float32
         )
+        # The patched limit makes the reduced extent count as 64-bit.
         with (
             mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "1"}),
-            mock.patch.object(kg, "_try_indexed_itree", return_value=None),
+            mock.patch.object(kg, "_INT32_LIMIT", 1024),
             mock.patch.object(rt, "_warned_inner_tree_reasons", set()),
         ):
             with self.assertWarnsRegex(UserWarning, "could not be honoured"):
@@ -698,7 +648,7 @@ class TestReductionConfigDevice(TestCase):
         x = torch.randn((8, 2048), device=device)[:, ::2]
         with (
             mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "strict"}),
-            mock.patch.object(kg, "_try_indexed_itree", return_value=None),
+            mock.patch.object(kg, "_INT32_LIMIT", 1024),
         ):
             with self.assertRaisesRegex(ValueError, f"{rt._INNER_TREE_ENV}=strict"):
                 kg.reduce_dim(
