@@ -86,6 +86,17 @@ public:
 };
 static TensorAssign tensor_assign;
 
+// Note [Scatter index for fastAtomicAdd]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// The scatter kernels measure each target's offset from self's data pointer,
+// which the host passes in: within a with_32bit_indexing() sub-iterator,
+// iter.data_ptr(0) is already offset into self. FastAtomicAddBounds then turns
+// that offset into the (tensor, index, numel) fastAtomicAdd needs; see
+// Note [fastAtomicAdd bounds for strided tensors].
+template <typename func_t>
+constexpr bool uses_fast_atomic_add =
+    std::is_same_v<func_t, ReduceAdd> || std::is_same_v<func_t, ReduceMean>;
+
 // The kernels are implemented on an opaque,
 // self-aligned type of the correct size,
 // to avoid redundant kernels for different types
@@ -129,13 +140,14 @@ struct _cuda_scatter_gather_internal_kernel {
     TensorIterator& iter,
     int64_t index_size,
     int64_t index_stride,
-    int64_t numel,  // Do not use `const` qualifier here as it may cause issue in cuda 11.6.x. See #75434, #75545
+    char* self_base,
+    FastAtomicAddBounds bounds,  // Do not use `const` qualifier here as it may cause issue in cuda 11.6.x. See #75434, #75545
     const func_t& f
   ) {
     if (!iter.can_use_32bit_indexing()) {
       for (auto& sub_iter : iter.with_32bit_indexing()) {
         _cuda_scatter_gather_internal_kernel<is_scatter_like, scalar_t, index_t>()(
-          sub_iter, index_size, index_stride, numel, f
+          sub_iter, index_size, index_stride, self_base, bounds, f
         );
       }
       return;
@@ -272,10 +284,17 @@ struct _cuda_scatter_gather_internal_kernel {
       CUDA_KERNEL_ASSERT_VERBOSE(idx_dim >= 0 && idx_dim < index_size
         && "scatter gather kernel index out of bounds", "Expected 0 <= idx_dim < index_size (%ld), but got idx_dim = %ld", index_size, idx_dim);
 
+      // See Note [Scatter index for fastAtomicAdd]
+      auto base = (scalar_t*)self_base;
+      int64_t offset = ((scalar_t*)(self_ptr + offsets[0]) - base) +
+          (is_scatter_like ? idx_dim * index_stride : 0);
+      // Functors other than add ignore numel; 0 keeps the call self-consistent.
+      int64_t offset_in_row = uses_fast_atomic_add<func_t> ? bounds.offset_in_row(offset) : 0;
+      int64_t row_numel = uses_fast_atomic_add<func_t> ? bounds.row_numel : 0;
       f(
-        (scalar_t*)(self_ptr + offsets[0]),
-        is_scatter_like ? idx_dim * index_stride : 0,
-        numel,
+        base + offset - offset_in_row,
+        offset_in_row,
+        row_numel,
         (scalar_t*)(src_ptr + offsets[1]) + (is_scatter_like ? 0 : idx_dim * index_stride)
       );
     };
@@ -340,7 +359,7 @@ struct cuda_scatter_gather_base_kernel {
 
         AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
           _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
-            iter, index_size, index_stride, self.numel(), f
+            iter, index_size, index_stride, static_cast<char*>(self.data_ptr()), fast_atomic_add_bounds(self), f
           );
         });
       }
@@ -399,7 +418,7 @@ struct cuda_scatter_gather_base_kernel {
             OpaqueType<sizeof(scalar_t)>, scalar_t>;
         AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
           _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
-            iter, index_size, index_stride, self.numel(), f
+            iter, index_size, index_stride, static_cast<char*>(self.data_ptr()), fast_atomic_add_bounds(self), f
           );
         });
       });
@@ -412,7 +431,7 @@ struct cuda_scatter_gather_base_kernel {
                 OpaqueType<sizeof(scalar_t)>, scalar_t>;
             AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
               _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
-                iter, index_size, index_stride, self.numel(), f
+                iter, index_size, index_stride, static_cast<char*>(self.data_ptr()), fast_atomic_add_bounds(self), f
               );
             });
           }),
@@ -480,7 +499,7 @@ struct cuda_scatter_gather_base_kernel {
 
         AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
           _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
-            iter, index_size, index_stride, self.numel(), f
+            iter, index_size, index_stride, static_cast<char*>(self.data_ptr()), fast_atomic_add_bounds(self), f
           );
         });
       }
@@ -496,13 +515,14 @@ struct _cuda_scatter_fill_internal_kernel {
     scalar_t src_val,
     int64_t index_size,
     int64_t index_stride,
-    int64_t numel,  // Do not use `const` qualifier here as it may cause issue in cuda 11.6.x. See #75434, #75545
+    char* self_base,
+    FastAtomicAddBounds bounds,  // Do not use `const` qualifier here as it may cause issue in cuda 11.6.x. See #75434, #75545
     const func_t& f
   ) {
     if (!iter.can_use_32bit_indexing()) {
       for (auto& sub_iter : iter.with_32bit_indexing()) {
         _cuda_scatter_fill_internal_kernel<scalar_t, index_t>()(
-          sub_iter, src_val, index_size, index_stride, numel, f
+          sub_iter, src_val, index_size, index_stride, self_base, bounds, f
         );
       }
       return;
@@ -519,12 +539,12 @@ struct _cuda_scatter_fill_internal_kernel {
       CUDA_KERNEL_ASSERT_VERBOSE(idx_dim >= 0 && idx_dim < index_size
         && "index out of bounds", "Expected 0 <= idx_dim < index_size (%ld), but got idx_dim = %ld", index_size, idx_dim);
 
-      f(
-        (scalar_t*)(self_ptr + offsets[0]),
-        idx_dim * index_stride,
-        numel,
-        (scalar_t*)&src_val
-      );
+      // See Note [Scatter index for fastAtomicAdd]
+      auto base = (scalar_t*)self_base;
+      int64_t offset = ((scalar_t*)(self_ptr + offsets[0]) - base) + idx_dim * index_stride;
+      int64_t offset_in_row = uses_fast_atomic_add<func_t> ? bounds.offset_in_row(offset) : 0;
+      int64_t row_numel = uses_fast_atomic_add<func_t> ? bounds.row_numel : 0;
+      f(base + offset - offset_in_row, offset_in_row, row_numel, (scalar_t*)&src_val);
     };
 
     _launch_scatter_gather_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
@@ -572,7 +592,7 @@ struct cuda_scatter_fill_base_kernel {
 
         AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_fill_base_kernel_func", [&] () {
           _cuda_scatter_fill_internal_kernel<dtype, index_t>()(
-            iter, src_val, index_size, index_stride, self.numel(), f
+            iter, src_val, index_size, index_stride, static_cast<char*>(self.data_ptr()), fast_atomic_add_bounds(self), f
           );
         });
       }
@@ -613,7 +633,7 @@ struct cuda_scatter_fill_base_kernel {
 
         AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_fill_base_kernel_func", [&] () {
           _cuda_scatter_fill_internal_kernel<dtype, index_t>()(
-            iter, src_val, index_size, index_stride, self.numel(), f
+            iter, src_val, index_size, index_stride, static_cast<char*>(self.data_ptr()), fast_atomic_add_bounds(self), f
           );
         });
       }),
@@ -660,7 +680,7 @@ struct cuda_scatter_fill_base_kernel {
 
         AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_fill_base_kernel_reduce_multiply", [&] () {
           _cuda_scatter_fill_internal_kernel<dtype, index_t>()(
-            iter, src_val, index_size, index_stride, self.numel(), f
+            iter, src_val, index_size, index_stride, static_cast<char*>(self.data_ptr()), fast_atomic_add_bounds(self), f
           );
         });
       }

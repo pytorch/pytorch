@@ -1022,7 +1022,7 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
                                     int srcAddDim,
                                     IndexType innerSize,
                                     int64_t dstAddDimSize,
-                                    int64_t dstNumel,
+                                    FastAtomicAddBounds dstBounds,
                                     const func_t& op,
                                     T alpha) {
   // In order to avoid reloading the index that we are copying, load
@@ -1049,7 +1049,9 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
       srcOffset += srcIndex * src.strides[srcAddDim];
 
       T val = src.data[srcOffset] * alpha;
-      op(dst.data, dstOffset, dstNumel, &val);
+      // See Note [fastAtomicAdd bounds for strided tensors]
+      const IndexType offset_in_row = dstBounds.offset_in_row(dstOffset);
+      op(dst.data + dstOffset - offset_in_row, offset_in_row, dstBounds.row_numel, &val);
     }
 
   }
@@ -1071,7 +1073,7 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
                                     IndexType totalSize,
                                     IndexType innerSize,
                                     int64_t dstAddDimSize,
-                                    int64_t dstNumel,
+                                    FastAtomicAddBounds dstBounds,
                                     const func_t& op,
                                     T alpha) {
   // We stride over the output including the indexed dimension
@@ -1102,7 +1104,9 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
     srcOffset += srcIndex * src.strides[srcAddDim];
 
     T val = src.data[srcOffset] * alpha;
-    op(dst.data, dstOffset, dstNumel, &val);
+    // See Note [fastAtomicAdd bounds for strided tensors]
+    const IndexType offset_in_row = dstBounds.offset_in_row(dstOffset);
+    op(dst.data + dstOffset - offset_in_row, offset_in_row, dstBounds.row_numel, &val);
   }
 }
 
@@ -1174,7 +1178,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   const uint64_t sourceTotalSize = source.numel();
   const uint64_t selfAddDimSize = self_.size(dim);
   const uint64_t numIndex = index.numel();
-  const uint64_t selfNumel = self_.numel();
+  const auto selfBounds = fast_atomic_add_bounds(self_);
 
   if (sliceSize == 0) {
     return;
@@ -1218,7 +1222,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                   \
       selfInfo, sourceInfo, indexInfo,                                                  \
       selfAddDim, sourceAddDim, sliceSize, selfAddDimSize,                              \
-      selfNumel, reduce_add, alpha_value);                                              \
+      selfBounds, reduce_add, alpha_value);                                              \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                        \
@@ -1229,7 +1233,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
       selfInfo, sourceInfo, indexInfo,                                      \
       selfAddDim, sourceAddDim, sourceTotalSize,                            \
       (IDX_IS_MAJOR) ? sliceSize : numIndex,                                \
-      selfAddDimSize, selfNumel, reduce_add, alpha_value);                  \
+      selfAddDimSize, selfBounds, reduce_add, alpha_value);                  \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   uint64_t defaultMaxBlockThreads = getDefaultMaxThreadsPerBlock();
@@ -1378,7 +1382,7 @@ void index_reduce_func_cuda_impl(
   uint64_t sourceTotalSize = source.numel();
   uint64_t selfReduceDimSize = self_.size(dim);
   uint64_t numIndex = index.numel();
-  uint64_t selfNumel = self_.numel();
+  const auto selfBounds = fast_atomic_add_bounds(self_);
 
   if (sliceSize == 0) {
     return;
@@ -1419,7 +1423,7 @@ void index_reduce_func_cuda_impl(
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                                \
       selfInfo, sourceInfo, indexInfo,                                                               \
       selfReduceDim, sourceReduceDim, sliceSize, selfReduceDimSize,                                  \
-      selfNumel, reduce_func, alpha_value);                                                          \
+      selfBounds, reduce_func, alpha_value);                                                          \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                                     \
@@ -1430,7 +1434,7 @@ void index_reduce_func_cuda_impl(
       selfInfo, sourceInfo, indexInfo,                                                   \
       selfReduceDim, sourceReduceDim, sourceTotalSize,                                   \
       (IDX_IS_MAJOR) ? sliceSize : numIndex,                                             \
-      selfReduceDimSize, selfNumel, reduce_func, alpha_value);                           \
+      selfReduceDimSize, selfBounds, reduce_func, alpha_value);                           \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   uint64_t defaultMaxBlockThreads = getDefaultMaxThreadsPerBlock();

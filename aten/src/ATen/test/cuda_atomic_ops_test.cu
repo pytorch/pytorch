@@ -298,9 +298,9 @@ TEST(TestAtomicOps, DISABLED_ON_WINDOWS(TestAtomicReturnValue)) {
 
 namespace {
 
-// What the accessor overload has to get right is the bound it derives: the
-// distance to the last addressable element, which stops matching the element
-// count as soon as the accessor is strided.
+// What the accessor overload has to get right is which neighbours it may pair
+// with: any element of a contiguous tensor, only the same innermost row when
+// rows are padded, and nothing when the innermost dimension is strided.
 //
 // A pairing adds -0.0 to the neighbour, which leaves any non-NaN value
 // unchanged but quiets a signaling NaN, so a buffer seeded with a signaling
@@ -370,7 +370,7 @@ void test_accessor_bounds() {
   constexpr int64_t buf_numel = 16;
   constexpr int64_t offset = 1; // odd 16-bit alignment, as a view would give
 
-  // Contiguous 2x3, strides 3/1: memory_span is 6. At this alignment even
+  // Contiguous 2x3, strides 3/1: numel is 6. At this alignment even
   // offsets pair left and odd ones pair right, so (0,1) at offset 1 pairs and
   // is the positive control, while (1,2) at offset 5 can only look right, past
   // the last element, and must fall back to a scalar atomic.
@@ -391,20 +391,32 @@ void test_accessor_bounds() {
     EXPECT_FALSE(wasWritten(out[buf_numel - 1])) << "wrote past the end";
   }
 
-  // Non-contiguous 2x3, strides 6/2: element count is still 6, but the last
-  // addressable offset is 10, so memory_span is 11. Writing (1, 2) lands there
-  // and pairs left into offset 9, a gap the view steps over. This overload
-  // allows that because its callers own the whole span (see KernelUtils.cuh);
-  // a numel-derived bound of 6 would have refused.
+  // Padded rows 2x3, strides 4/1, starting at an even offset: (0, 1) at
+  // offset 1 pairs left with (0, 0), but (0, 2) at offset 2 could only pair
+  // right with offset 3, the row padding, and must fall back.
+  {
+    const auto out = accessorScatter<scalar_t>(
+        seededBuffer<scalar_t>(buf_numel, 1), 0, 4, 1, 0, 1);
+    EXPECT_EQ(static_cast<float>(out[1]), 1.0f);
+#if !defined(USE_ROCM)
+    EXPECT_TRUE(wasWritten(out[0])) << "declined to pair within the row";
+#endif
+  }
+  {
+    const auto out = accessorScatter<scalar_t>(
+        seededBuffer<scalar_t>(buf_numel, 2), 0, 4, 1, 0, 2);
+    EXPECT_EQ(static_cast<float>(out[2]), 1.0f);
+    EXPECT_FALSE(wasWritten(out[3])) << "paired into the row padding";
+  }
+
+  // Strided 2x3, strides 6/2: no element's neighbour belongs to the view, so
+  // writing (1, 2) at offset 10 must not touch the gap at offset 9 (or 11).
   {
     const auto out = accessorScatter<scalar_t>(
         seededBuffer<scalar_t>(buf_numel, offset + 10), offset, 6, 2, 1, 2);
     EXPECT_EQ(static_cast<float>(out[offset + 10]), 1.0f);
-#if !defined(USE_ROCM)
-    EXPECT_TRUE(wasWritten(out[offset + 9])) << "declined to pair inside the region";
-#endif
+    EXPECT_FALSE(wasWritten(out[offset + 9])) << "paired into a gap";
     EXPECT_FALSE(wasWritten(out[offset + 11])) << "paired past the region";
-    EXPECT_FALSE(wasWritten(out[0])) << "wrote below the start";
   }
 }
 } // namespace

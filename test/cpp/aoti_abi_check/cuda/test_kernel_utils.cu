@@ -164,6 +164,32 @@ void testVectorizedBounds() {
   EXPECT_TRUE(wasWritten(out[offset + 15])) << "index 16 should pair left";
   EXPECT_FALSE(wasWritten(out[0])) << "wrote below the start of the tensor";
   EXPECT_FALSE(wasWritten(out[buf_numel - 1])) << "wrote past the end";
+
+  // numel = 0 declares that no neighbour may be touched.
+  const auto unpaired = scatterAdd<scalar_t>(
+      seededBuffer<scalar_t>(buf_numel, offset, {5, 16}),
+      {5, 16},
+      /*numel=*/int64_t{0},
+      /*fast_atomics=*/true,
+      offset);
+  EXPECT_EQ(static_cast<float>(unpaired[offset + 5]), 1.0f);
+  EXPECT_EQ(static_cast<float>(unpaired[offset + 16]), 1.0f);
+  EXPECT_FALSE(wasWritten(unpaired[offset + 6])) << "numel = 0 paired right";
+  EXPECT_FALSE(wasWritten(unpaired[offset + 15])) << "numel = 0 paired left";
+
+  // Same with an unsigned index type, where numel - 1 would wrap around.
+  const auto unpaired_unsigned = scatterAdd<scalar_t, uint32_t>(
+      seededBuffer<scalar_t>(buf_numel, offset, {5, 16}),
+      {5, 16},
+      /*numel=*/0U,
+      /*fast_atomics=*/true,
+      offset);
+  EXPECT_EQ(static_cast<float>(unpaired_unsigned[offset + 5]), 1.0f);
+  EXPECT_EQ(static_cast<float>(unpaired_unsigned[offset + 16]), 1.0f);
+  EXPECT_FALSE(wasWritten(unpaired_unsigned[offset + 6]))
+      << "unsigned numel = 0 paired right";
+  EXPECT_FALSE(wasWritten(unpaired_unsigned[offset + 15]))
+      << "unsigned numel = 0 paired left";
 }
 
 // A paired neighbour must keep its value, including the sign of -0.0.
