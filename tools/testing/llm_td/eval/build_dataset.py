@@ -467,6 +467,11 @@ def pr_text(pr: int, tries: int = 4) -> tuple[str, str]:
     raise ValueError(f"tries must be positive, got {tries}")
 
 
+def deleted_files(base: str, head: str) -> list[str]:
+    """The files `head` deletes against `base`, counting a moved file's old path, as select_tests passes them to from_model_output."""
+    return git("diff", "--name-only", "--no-renames", "--diff-filter=D", base, head).splitlines()  # fmt: skip
+
+
 def write_sample(
     out: Path,
     sid: str,
@@ -488,7 +493,7 @@ def write_sample(
     diffstat, diff = diffstat_and_diff(merge_base, sha)
     write_json(path, {
         "id": sid, "kind": kind, "sha": sha, "base": base, "merge_base": merge_base, "main_base": main_base, "title": title, "body": body,
-        "diff": diff, "diffstat": diffstat, "changed_files": changed_files(merge_base, sha),
+        "diff": diff, "diffstat": diffstat, "changed_files": changed_files(merge_base, sha), "deleted": deleted_files(merge_base, sha),
         "candidates": candidates_at(main_base, sha, merge_base),
         **extra,
     })  # fmt: skip

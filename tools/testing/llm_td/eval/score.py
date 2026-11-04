@@ -372,11 +372,9 @@ def policy(
     if name == "td25":
         if td is None:
             return None
-        return Choice(
-            Selection(),
-            {c: set(fs) for c, fs in td["top25_cfg"].items()},
-            set(td["top25"]),
-        )
+        cut = {c: set(fs) for c, fs in td["top25_cfg"].items()}
+        # TD runs only its cut, not even the files a selection always covers.
+        return Choice(Selection(), cut, set(td["top25"]), {*cut, ""})
     if name not in ("model", "final", "final-hm") and not HEDGE.fullmatch(name):
         raise ValueError(f"unknown policy {name!r}")
     if unasked(s):
@@ -392,10 +390,10 @@ def policy(
         if td is None:
             return None
         share = float(m.group(1)) / 100 if m.group(1) else LLM_TD_HEDGE
-        if malformed(out, cands):
+        sel = Selection.from_model_output(out, cands, s["changed_files"], grep, s.get("deleted", []))  # fmt: skip
+        if sel.error is not None:
             # Not enforced, so apply_selection keeps TD's split.
             return policy("td25", s, r, td, seconds)
-        sel = Selection.from_model_output(out, cands, s["changed_files"], grep)
         if sel.run_all:
             return Choice(sel)
         times = {
@@ -420,22 +418,13 @@ def policy(
             parse_model_output(out, cands)
             if isinstance(out, dict):
                 out = {**out, "tests": [t for t in out["tests"] if t.get("confidence") in ("high", "medium")]}  # fmt: skip
-    return Choice(Selection.from_model_output(out, cands, s["changed_files"], grep))
+    return Choice(Selection.from_model_output(out, cands, s["changed_files"], grep, s.get("deleted", [])))  # fmt: skip
 
 
 def unasked(s: dict) -> bool:
     """Whether select_tests.select runs everything on `s` without asking the model."""
     changed = s["changed_files"]
     return not changed or needs_run_all(changed) or len(changed) > MAX_CHANGED_FILES
-
-
-def malformed(out: object, cands: set[str]) -> bool:
-    """Whether select_tests.select records `out` as a failed call: missing or malformed."""
-    try:
-        parse_model_output(out, cands)
-    except ValueError:
-        return True
-    return False
 
 
 def replay_inputs(stats: str, times: bytes, sample: bytes) -> str:
@@ -527,7 +516,7 @@ def score(
                     "tag": tag, "policy": pol, "id": sid, "kind": s["kind"], "pairs": len(pairs), "hit": sum(hit),
                     "cpu": cpu, "gpu": gpu, "run_all": choice.sel.run_all, "files": len(choice.files()),
                     "cost_usd": 0.0 if skipped else (r or {}).get("cost_usd") or 0.0,
-                    "error": not skipped and bool(r) and (bool(r["error"]) or malformed(r["out"], cands)),
+                    "error": not skipped and bool(r) and (bool(r["error"]) or Selection.from_model_output(r["out"], cands, []).error is not None),
                     "missed": [p for p, h in zip(pairs, hit) if not h],
                 })  # fmt: skip
         if sid in ungrepped:
