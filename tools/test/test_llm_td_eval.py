@@ -261,17 +261,18 @@ class TestRunEval(unittest.TestCase):
         sample = {"id": "a", "sha": "f" * 40, "title": "t", "body": None, "diffstat": "", "diff": "", "candidates": ["test_a"], "changed_files": ["torch/foo.py"]}  # fmt: skip
         sent = run_eval.prompt_sha(run_eval.sample_prompt(sample, {}))
         result = {"model": "m", "effort": "medium", "agentic": False}
+        r = {"type": "result", "is_error": True, "result": "x"}
         for prompt_sha, schema, refused in ((sent, score.SCHEMA, False), (None, score.SCHEMA, True), (sent, {}, True)):  # fmt: skip
             with tempfile.TemporaryDirectory() as d:
-                data = write_data(d, {"samples/a.json": sample, "test-times.json": {}, "results/t/a.json": {**result, "prompt_sha": prompt_sha}})  # fmt: skip
-                (data / "ids.txt").write_text("a")
+                data = write_data(d, {"samples/a.json": sample, "samples/b.json": sample, "test-times.json": {}, "results/t/a.json": {**result, "prompt_sha": prompt_sha}})  # fmt: skip
+                (data / "ids.txt").write_text("a b")
                 argv = ["run_eval", "--data", d, "--tag", "t", "--model", "m", "--ids", str(data / "ids.txt")]  # fmt: skip
                 with (
                     mock.patch.object(sys, "argv", argv),
                     mock.patch.object(score, "SCHEMA", schema),
                     mock.patch("sys.stderr", io.StringIO()) as err,
                     mock.patch("sys.stdout", io.StringIO()),
-                    mock.patch.object(run_eval, "query_model") as query,
+                    mock.patch.object(run_eval, "query_model", return_value=r) as query,
                 ):
                     try:
                         run_eval.main()
@@ -280,7 +281,8 @@ class TestRunEval(unittest.TestCase):
                         self.assertIn("another prompt", err.getvalue())
                     else:
                         self.assertFalse(refused)
-                query.assert_not_called()
+                # Only the unfinished b is run, and only when a's result is accepted.
+                self.assertEqual(query.call_count, 0 if refused else 1)
 
 
 class TestScore(unittest.TestCase):
@@ -924,7 +926,9 @@ class TestScore(unittest.TestCase):
                 digests += [score.replay_stats(stats), score.replay_stats(stats)]
                 replay.write_text("2")
                 digests.append(score.replay_stats(stats))
-        self.assertEqual(len(set(digests)), 4)
+                with mock.patch.object(score, "NO_TD_ENV", re.compile("macos")):
+                    digests.append(score.replay_stats(stats))
+        self.assertEqual(len(set(digests)), 5)
         self.assertEqual(digests[2], digests[3])
         self.assertIn(Path(score.__file__).with_name("td_replay.py"), score.REPLAY_CODE)
 
@@ -970,9 +974,14 @@ class TestScore(unittest.TestCase):
             (data / "ids.txt").write_text("a")
             replay("--ids", str(data / "ids.txt"))
             self.assertEqual(len(seen), 2)
-            for bad in (["--shard", "2", "2"], ["--stats", d]):
-                with self.assertRaises(SystemExit), mock.patch("sys.stderr", io.StringIO()):  # fmt: skip
-                    replay(*bad)
+            with self.assertRaises(SystemExit), mock.patch("sys.stderr", io.StringIO()):
+                replay("--shard", "2", "2")
+            with self.assertRaisesRegex(SystemExit, "must be a directory named"):
+                replay("--stats", d)
+            empty = Path(d) / "empty" / stats.name
+            empty.mkdir(parents=True)
+            with self.assertRaisesRegex(SystemExit, "lacks"):
+                replay("--stats", str(empty))
 
     def test_td25_per_config(self) -> None:
         cands = ["test_a", "test_b", "test_c", "test_d", "test_e"]

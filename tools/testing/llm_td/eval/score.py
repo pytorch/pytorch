@@ -461,10 +461,13 @@ def replay_inputs(stats: str, times: bytes, sample: bytes) -> str:
 
 
 def replay_stats(stats_dir: Path) -> str:
-    """A hash of the STATS_ARTIFACTS in `stats_dir` and of the code a replay runs: TD_CODE, REPLAY_CODE and this module's functions td_replay calls."""
+    """A hash of the STATS_ARTIFACTS in `stats_dir` and of the code a replay runs: TD_CODE, REPLAY_CODE and this module's functions td_replay calls, with the module constants they read."""
     paths = [stats_dir / a for a in STATS_ARTIFACTS] + sorted(TD_CODE.rglob("*.py")) + REPLAY_CODE  # fmt: skip
     parts = [f"{p.name} {hashlib.sha256(p.read_bytes()).hexdigest()}" for p in paths]
-    parts += [inspect.getsource(f) for f in (test_seconds, job_files, truth_files, truth_jobs, config_of)]  # fmt: skip
+    for f in (test_seconds, job_files, truth_files, truth_jobs, config_of):
+        read = inspect.getclosurevars(inspect.unwrap(f)).globals
+        consts = [f"{k} {v!r}" for k, v in sorted(read.items()) if k.isupper()]
+        parts += [inspect.getsource(f), *consts]
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
@@ -592,7 +595,6 @@ def main() -> None:
     )
     p.add_argument("--data", type=Path, required=True)
     p.add_argument("--ids", type=Path, required=True)
-    p.add_argument("--samples-dir", type=Path, help="default: DATA/samples")
     p.add_argument("--td-dir", type=Path, help="td_replay.py output; default: DATA/td")
     p.add_argument("--stats", type=Path, default=REPO / ADDITIONAL_CI_FILES_FOLDER, help="td_replay.py's --stats")  # fmt: skip
     p.add_argument("--policies", default="model,final,final-hm,final+td20")
@@ -607,10 +609,7 @@ def main() -> None:
     if missing := [a for a in STATS_ARTIFACTS if not (args.stats / a).exists()]:
         p.error(f"{args.stats} lacks {missing}, which td_replay.py read")
     ids = args.ids.read_text().split()
-    samples, td_dir = (
-        args.samples_dir or args.data / "samples",
-        args.td_dir or args.data / "td",
-    )
+    samples, td_dir = args.data / "samples", args.td_dir or args.data / "td"
     rows = score(args.data, ids, args.tags, args.policies.split(","), not args.all_truth, samples, td_dir, replay_stats(args.stats))  # fmt: skip
     for x in summarize(rows):
         print(

@@ -175,7 +175,6 @@ def main() -> None:
     p.add_argument("--data", type=Path, required=True, help="run_eval.py's --data: test-times.json and results/")  # fmt: skip
     p.add_argument("--ids", type=Path, help="samples the fractions come from; default: the report's neutral samples")  # fmt: skip
     p.add_argument("--cost-ids", type=Path, help="samples $/call is averaged over; default: the report's eval samples")  # fmt: skip
-    p.add_argument("--samples-dir", type=Path, help="default: DATA/samples")
     p.add_argument("--td-dir", type=Path, help="td_replay.py output; default: DATA/td")
     p.add_argument("--stats", type=Path, default=REPO / score.ADDITIONAL_CI_FILES_FOLDER, help="td_replay.py's --stats")  # fmt: skip
     p.add_argument("--labeler", type=Path, default=LABELER, help="the labeler config with the ciflow/inductor globs")  # fmt: skip
@@ -189,7 +188,7 @@ def main() -> None:
     ids = (args.ids or IDS / "neutral.txt").read_text().split()
     cost_ids = (args.cost_ids or IDS / "eval.txt").read_text().split()
     d = model(args.data, args.tag, args.policy, overhead=args.overhead, ids=ids, cost_ids=cost_ids,
-              samples=args.samples_dir or args.data / "samples", td_dir=args.td_dir or args.data / "td",
+              samples=args.data / "samples", td_dir=args.td_dir or args.data / "td",
               stats=score.replay_stats(args.stats), labeler=args.labeler)  # fmt: skip
     f, t = d["fractions"], d["total_k_per_month"]
     print(
