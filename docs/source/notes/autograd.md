@@ -422,6 +422,7 @@ class Split(torch.autograd.Function):
         # Accumulate here however you need, e.g. in float32.
         return grad_a + grad_b
 
+a = torch.randn(3, requires_grad=True)
 x = a.sin()
 x1, x2 = Split.apply(x)
 loss = (x1 * 2 + x2 * 3).sum()
