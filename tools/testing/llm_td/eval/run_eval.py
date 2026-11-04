@@ -115,7 +115,7 @@ def main() -> None:
     p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])  # fmt: skip
     p.add_argument("--ids", type=Path, required=True)
     p.add_argument("--jobs", type=int, default=8)
-    p.add_argument("--agentic", action="store_true")
+    p.add_argument("--agentic", action="store_true", help="give the model Read, Grep and Glob with no path limits on untrusted PR text; run it only in a sandbox with no credentials")  # fmt: skip
     args = p.parse_args()
     if args.tag == "td":
         p.error("the tag td holds the TD replay, which score.py scores as td25")
