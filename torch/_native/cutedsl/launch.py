@@ -80,3 +80,11 @@ def stream(device_index: int | None = None) -> cuda.CUstream:
     if device_index is None:
         device_index = torch.cuda.current_device()
     return cuda.CUstream(torch._C._cuda_getCurrentRawStream(device_index))
+
+
+def check_current(index: int) -> None:
+    # Plans compile on the current device, so a plan keyed under another device would be
+    # handed to that device's later calls.
+    current = torch.cuda.current_device()
+    if index != current:
+        raise AssertionError(f"input on cuda:{index}, but cuda:{current} is current")
