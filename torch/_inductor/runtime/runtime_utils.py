@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import json
 import math
 import operator
 from typing import Any, TYPE_CHECKING
@@ -68,6 +69,17 @@ def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
     )
 
 
+def extra_options_to_hashable(extra_options: Any) -> str:
+    """Serialize backend options as sorted JSON; string keys are assumed."""
+    try:
+        return json.dumps(extra_options or {}, sort_keys=True)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(
+            "Triton Config.extra_options cannot be serialized with sorted JSON keys. "
+            "Use JSON-serializable values and string dictionary keys."
+        ) from exc
+
+
 def triton_config_to_hashable(cfg: Config) -> Hashable:
     """
     Convert triton config to a tuple that can uniquely identify it. We can use
@@ -83,6 +95,10 @@ def triton_config_to_hashable(cfg: Config) -> Hashable:
     # discards a capped config as a duplicate of the uncapped one.
     if getattr(cfg, "maxnreg", None) is not None:
         items.append(("maxnreg", cfg.maxnreg))
+    if extra_options := getattr(cfg, "extra_options", None):
+        # Match the cache's JSON representation, including nested options and
+        # tuples that are restored as lists. Dict insertion order is irrelevant.
+        items.append(("extra_options", extra_options_to_hashable(extra_options)))
     return tuple(items)
 
 

@@ -120,7 +120,14 @@ static hipblasStatus_t hipblasSetWorkspace_replacement(hipblasHandle_t handle, v
 #endif
 
 void createCublasHandle(cublasHandle_t *handle) {
-  TORCH_CUDABLAS_CHECK(cublasCreate(handle));
+  auto status = cublasCreate(handle);
+  // flushing cached memory can synchronize, so avoid it during capture.
+  if (status == CUBLAS_STATUS_ALLOC_FAILED &&
+      c10::cuda::currentStreamCaptureStatusMayInitCtx() == c10::cuda::CaptureStatus::None) {
+    c10::cuda::CUDACachingAllocator::emptyCache();
+    status = cublasCreate(handle);
+  }
+  TORCH_CUDABLAS_CHECK(status);
 }
 
 #ifdef USE_ROCM
@@ -1002,8 +1009,8 @@ void releaseCaptureCublasWorkspaces(c10::CaptureId_t capture_id) {
 }
 #endif
 
-cublasLtHandle_t getCurrentCUDABlasLtHandle() {
 #ifdef USE_ROCM
+static cublasLtHandle_t reserveCurrentCUDABlasLtHandle(bool create) {
   c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
@@ -1019,8 +1026,17 @@ cublasLtHandle_t getCurrentCUDABlasLtHandle() {
   // so reserve a handle unique to each (device, stream) pair.
   auto stream = c10::cuda::getCurrentCUDAStream();
   cudaStream_t _stream = stream;
-  auto handle = myPoolWindow->reserve(device, static_cast<void*>(_stream));
-  return handle;
+  return myPoolWindow->reserve(device, static_cast<void*>(_stream), create);
+}
+
+cublasLtHandle_t getCurrentCUDABlasLtHandleIfAvailable() {
+  return reserveCurrentCUDABlasLtHandle(/*create=*/false);
+}
+#endif
+
+cublasLtHandle_t getCurrentCUDABlasLtHandle() {
+#ifdef USE_ROCM
+  return reserveCurrentCUDABlasLtHandle(/*create=*/true);
 #else
   return reinterpret_cast<cublasLtHandle_t>(getCurrentCUDABlasHandle(/*setup=*/false));
 #endif
