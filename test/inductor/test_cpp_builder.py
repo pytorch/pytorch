@@ -378,18 +378,18 @@ class TestCppBuilder(TestCase):
         self.assertEqual(passthrough, [])
 
     @parametrize(
-        "aot_mode,link_libtorch,linked",
+        "aot_mode,link_libtorch,defined",
         [(True, False, False), (True, True, True), (False, False, True)],
     )
-    def test_aoti_libtorch_linked_definition(
-        self, aot_mode: bool, link_libtorch: bool, linked: bool
+    def test_libtorch_provides_shims_macro(
+        self, aot_mode: bool, link_libtorch: bool, defined: bool
     ) -> None:
         # Selects the error check that uses the stable C ABI.
         with mock.patch.object(
             cpp_builder.config.aot_inductor, "link_libtorch", link_libtorch
         ):
-            options = cpp_builder.CppTorchOptions(aot_mode=aot_mode)
-        self.assertEqual("AOTI_LIBTORCH_LINKED" in options.get_definitions(), linked)
+            macros = cpp_builder._get_libtorch_provides_shims_macro(aot_mode)
+        self.assertEqual(macros, ["AOTI_LIBTORCH_PROVIDES_SHIMS"] if defined else [])
 
     @unittest.skipUnless(IS_LINUX, "--as-needed is an ELF linker flag")
     def test_libtorch_free_aot_link_drops_unused_libraries(self) -> None:
