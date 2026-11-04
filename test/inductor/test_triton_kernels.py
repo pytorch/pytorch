@@ -1246,36 +1246,129 @@ def forward(self, x_1, output_1):
 
     @mock.patch.dict(_user_kernel_hops)
     def test_user_kernel_hop_registry(self):
+        info = scale_kernel_hop_info
         scale_mutation = scale_kernel_wrapper_mutation
         scale_functional = scale_kernel_wrapper_functional
         infos = user_kernel_hop_infos()
-        register_user_kernel_hop(scale_kernel_hop_info)
-        self.assertEqual(user_kernel_hop_infos(), [*infos, scale_kernel_hop_info])
+        register_user_kernel_hop(info)
+        # Registering the same object again changes nothing.
+        register_user_kernel_hop(info)
+        self.assertEqual(user_kernel_hop_infos(), [*infos, info])
         for hop in (scale_mutation, scale_functional):
-            self.assertIs(get_user_kernel_hop_info(hop), scale_kernel_hop_info)
+            self.assertIs(get_user_kernel_hop_info(hop), info)
         self.assertIsNone(get_user_kernel_hop_info(torch.ops.higher_order.cond))
+        self.assertIs(get_user_kernel_hop_info(scale_mutation, "mutation"), info)
+        self.assertIs(get_user_kernel_hop_info(scale_functional, "functional"), info)
         self.assertTrue(is_user_kernel_mutation_hop(scale_mutation))
         self.assertFalse(is_user_kernel_mutation_hop(scale_functional))
         self.assertTrue(is_user_kernel_functional_hop(scale_functional))
         self.assertFalse(is_user_kernel_functional_hop(scale_mutation))
+        # Infos compare by identity, so an equal copy is refused.
+        msg = (
+            "scale_kernel_wrapper_mutation is already registered by the scale DSL with "
+            "another UserKernelHOPInfo object; only that object can be registered again"
+        )
+        with self.assertRaisesRegex(RuntimeError, msg):
+            register_user_kernel_hop(dataclasses.replace(info))
+
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_info_with_unhashable_callable(self):
+        # Infos compare by identity, so a DSL can register a callable that cannot be
+        # hashed, such as a functor dataclass, and the passes that list every
+        # registered DSL still work.
+        from torch._inductor.compile_fx import compile_fx_inner
+        from torch._inductor.lowering import lowerings
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        aten = torch.ops.aten
+
+        @dataclasses.dataclass
+        class LayoutConstraint:
+            value: str
+
+            def __call__(self):
+                return self.value
+
+        constraint = LayoutConstraint("needs_fixed_stride_order")
+        info = dataclasses.replace(
+            scale_kernel_hop_info, get_layout_constraint=constraint
+        )
+        register_user_kernel_hop(info)
+        self.assertIs(user_kernel_hop_infos()[-1], info)
+
+        def f(x):
+            kwargs = {"x": x, "out": torch.empty_like(x)}
+            out = scale_kernel_wrapper_functional(
+                scale=2, kwargs=kwargs, tensors_to_clone=["out"]
+            )["out"]
+            return (out,)
+
+        def lower_scale(*, scale, kwargs):
+            value = lowerings[aten.mul.Tensor](kwargs["x"], scale)
+            lowerings[aten.copy_.default](kwargs["out"], value)
+            return {}
+
+        x = torch.randn(4)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        with (
+            mock.patch.dict(lowerings, {scale_kernel_wrapper_mutation: lower_scale}),
+            inductor_config.patch(force_disable_caches=True),
+        ):
+            (out,) = compile_fx_inner(gm, [x])([x])
+        self.assertEqual(out, 2 * x)
 
     @common_utils.parametrize(
-        "field,value,error",
+        "field,value,error,msg",
         [
-            ("mutation", triton_kernel_wrapper_mutation, RuntimeError),
-            ("functional", triton_kernel_wrapper_functional, RuntimeError),
-            ("functional", torch.ops.higher_order.cond, TypeError),
-            ("functional", scale_kernel_wrapper_no_dense, TypeError),
-            ("reinplace_trigger", "USER_KERNEL_OPS", TypeError),
+            (
+                "mutation",
+                triton_kernel_wrapper_mutation,
+                RuntimeError,
+                "triton_kernel_wrapper_mutation is already registered by the triton "
+                "DSL with another UserKernelHOPInfo object",
+            ),
+            (
+                "functional",
+                triton_kernel_wrapper_functional,
+                RuntimeError,
+                "triton_kernel_wrapper_functional is already registered by the triton "
+                "DSL with another UserKernelHOPInfo object",
+            ),
+            (
+                "functional",
+                torch.ops.higher_order.cond,
+                TypeError,
+                "cond is not a UserKernelWrapperHOP",
+            ),
+            (
+                "functional",
+                scale_kernel_wrapper_no_dense,
+                TypeError,
+                "scale_kernel_wrapper_no_dense has no CompositeExplicitAutograd "
+                "py_impl",
+            ),
+            (
+                "functional",
+                scale_kernel_wrapper_mutation,
+                ValueError,
+                "scale_kernel_wrapper_mutation cannot be both the mutation and the "
+                "functional HOP of the scale DSL",
+            ),
+            (
+                "reinplace_trigger",
+                "USER_KERNEL_OPS",
+                TypeError,
+                "'USER_KERNEL_OPS' is not a ReInplaceTrigger",
+            ),
         ],
-        name_fn=lambda field, value, error: f"{field}_{value}",
+        name_fn=lambda field, value, error, msg: f"{field}_{value}",
     )
     @mock.patch.dict(_user_kernel_hops)
-    def test_user_kernel_hop_registration_refused(self, field, value, error):
+    def test_user_kernel_hop_registration_refused(self, field, value, error, msg):
         # A refused registration leaves the registry as it was.
         registry = dict(_user_kernel_hops)
         info = dataclasses.replace(scale_kernel_hop_info, **{field: value})
-        with self.assertRaises(error):
+        with self.assertRaisesRegex(error, msg):
             register_user_kernel_hop(info)
         self.assertEqual(_user_kernel_hops, registry)
 
@@ -1425,13 +1518,11 @@ def forward(self, x_1, output_1):
     @mock.patch.dict(_user_kernel_hops)
     def test_user_kernel_hop_counts_as_user_kernel_wrapper(self):
         # _graph_contains_user_kernel_wrappers, which keeps such graphs out of a
-        # compile subprocess, finds either HOP of any registered DSL.
+        # compile subprocess, finds either HOP of any registered DSL, and only those.
         from torch._inductor.compile_fx_ext import (
             _graph_contains_user_kernel_wrappers as contains,
         )
         from torch.fx.experimental.proxy_tensor import make_fx
-
-        register_user_kernel_hop(scale_kernel_hop_info)
 
         def mutation(x):
             out = torch.empty_like(x)
@@ -1447,7 +1538,12 @@ def forward(self, x_1, output_1):
         def trace(f):
             return make_fx(f, tracing_mode="fake")(torch.randn(4))
 
-        self.assertTrue(contains(trace(mutation)))
+        self.assertFalse(contains(trace(lambda x: x.sin())))
+        # The same graph counts once its HOP's DSL is registered.
+        mutation_gm = trace(mutation)
+        self.assertFalse(contains(mutation_gm))
+        register_user_kernel_hop(scale_kernel_hop_info)
+        self.assertTrue(contains(mutation_gm))
         self.assertTrue(contains(trace(functional)))
 
     @mock.patch.dict(_user_kernel_hops)
@@ -1621,6 +1717,36 @@ def forward(self, x_1, output_1):
         self.assertEqual(calls, [["out"]])
         self.assertEqual(gm(x, out), 2 * x)
         self.assertEqual(out, torch.zeros(4))
+
+    @common_utils.parametrize("name", ["user_kernel_hop", "match"])
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_decomposition_passes_any_kwarg(self, name):
+        # A DSL's own HOP kwarg reaches the functional HOP's py_impl unchanged,
+        # whatever its name, even one the decomposition's handler could use.
+        from torch._inductor.fx_passes.post_grad import (
+            decompose_user_kernel_wrapper_functional,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        register_user_kernel_hop(scale_kernel_hop_info)
+        hop = scale_kernel_wrapper_functional
+        key = DispatchKey.CompositeExplicitAutograd
+        received = []
+
+        def dense(**kwargs):
+            received.append(kwargs.pop(name))
+            return scale_kernel_wrapper_functional_dense(**kwargs)
+
+        def f(x, out):
+            kwargs = {"x": x, "out": out}
+            return hop(scale=2, kwargs=kwargs, tensors_to_clone=["out"])["out"]
+
+        gm = make_fx(f, tracing_mode="fake")(torch.randn(4), torch.zeros(4))
+        (node,) = gm.graph.find_nodes(op="call_function", target=hop)
+        node.kwargs = {**node.kwargs, name: "dsl_arg"}
+        with mock.patch.dict(hop.py_kernels, {key: dense}):
+            decompose_user_kernel_wrapper_functional(gm.graph)
+        self.assertEqual(received, ["dsl_arg"])
 
     @common_utils.parametrize("include", [False, True])
     @mock.patch.dict(_user_kernel_hops)
@@ -1861,6 +1987,24 @@ def forward(self, x_1, output_1):
         msg = "Unknown layout constraint for scale user kernels: unknown"
         with self.assertRaisesRegex(RuntimeError, msg):
             compile_fx_inner(gm, [x])
+
+    @common_utils.parametrize("value", ["needs_fixed_stride_order", "flexible_layout"])
+    def test_triton_layout_constraint_config(self, value):
+        info = get_user_kernel_hop_info(triton_kernel_wrapper_mutation)
+        with inductor_config.patch(triton_kernel_default_layout_constraint=value):
+            self.assertEqual(info.get_layout_constraint(), value)
+
+    def test_triton_layout_constraint_config_checked(self):
+        # The config module does not check values against their Literal type, so
+        # Triton's getter does, and names the setting to fix.
+        info = get_user_kernel_hop_info(triton_kernel_wrapper_mutation)
+        setting = "triton_kernel_default_layout_constraint"
+        msg = f"Unknown {setting}: fixed_stride_order"
+        with (
+            inductor_config.patch(setting, "fixed_stride_order"),
+            self.assertRaisesRegex(RuntimeError, msg),
+        ):
+            info.get_layout_constraint()
 
     @requires_gpu
     def test_triton_kernel_mutation_type(self):
