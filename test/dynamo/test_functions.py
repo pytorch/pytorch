@@ -6976,6 +6976,22 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(opt_fn(x)[1:3], ("Renamed.get", "Renamed.fromkeys"))
 
+    @parametrize("kind", ("getset", "method"))
+    def test_assume_constant_result_tensor_descriptor(self, kind):
+        @torch._dynamo.assume_constant_result
+        def target():
+            if kind == "getset":
+                return torch.Tensor.shape.__get__
+            return torch.Tensor.numel
+
+        def fn(x):
+            return x + 1, target()(x)
+
+        x = torch.ones(2, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x + 2), fn(x + 2))
+
     @parametrize(
         "method", (torch.Tensor.dim, torch.Tensor.is_complex, torch.Tensor.sum)
     )

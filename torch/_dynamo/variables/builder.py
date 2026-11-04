@@ -2308,8 +2308,13 @@ class VariableBuilder:
                     f"expected WrapperDescriptorType, got {type(descriptor)}"
                 )
             obj_source = self.source and AttrSource(self.source, "__self__")
-            if obj_source is not None and isinstance(
-                value.__self__, (types.GetSetDescriptorType, types.MemberDescriptorType)
+            if (
+                obj_source is not None
+                and not is_constant_source(obj_source)
+                and isinstance(
+                    value.__self__,
+                    (types.GetSetDescriptorType, types.MemberDescriptorType),
+                )
             ):
                 self.install_guards(GuardBuilder.TYPE_MATCH)
                 install_guard(
