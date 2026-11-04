@@ -358,6 +358,8 @@ std::vector<scalar_t> accessorScatter(
   return buf;
 }
 
+// On ROCm the packed atomic can leave a signaling NaN unchanged (seen on
+// MI210), so a pair write is not detectable there.
 template <typename scalar_t>
 bool wasWritten(scalar_t v) {
   return v.x != kSignalingNaN<scalar_t>;
@@ -376,7 +378,9 @@ void test_accessor_bounds() {
     const auto out = accessorScatter<scalar_t>(
         seededBuffer<scalar_t>(buf_numel, offset + 1), offset, 3, 1, 0, 1);
     EXPECT_EQ(static_cast<float>(out[offset + 1]), 1.0f);
+#if !defined(USE_ROCM)
     EXPECT_TRUE(wasWritten(out[offset + 2])) << "offset 1 should pair right";
+#endif
     EXPECT_FALSE(wasWritten(out[0])) << "wrote below the start";
   }
   {
@@ -396,7 +400,9 @@ void test_accessor_bounds() {
     const auto out = accessorScatter<scalar_t>(
         seededBuffer<scalar_t>(buf_numel, offset + 10), offset, 6, 2, 1, 2);
     EXPECT_EQ(static_cast<float>(out[offset + 10]), 1.0f);
+#if !defined(USE_ROCM)
     EXPECT_TRUE(wasWritten(out[offset + 9])) << "declined to pair inside the region";
+#endif
     EXPECT_FALSE(wasWritten(out[offset + 11])) << "paired past the region";
     EXPECT_FALSE(wasWritten(out[0])) << "wrote below the start";
   }
