@@ -4,6 +4,7 @@
 # reduced axis provides parallelism; unsplit (65536, 256) took 7830us versus ATen's 15.8us.
 # Ordered column lanes each serve one output, and a block's workers replay the row inner
 # tree's warps, loading rows strided by C; worker 0 merges their roots.
+# Inputs must be on the current device.
 
 from collections.abc import Sequence
 from typing import Any, NamedTuple
