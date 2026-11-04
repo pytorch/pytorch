@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ceil_div.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/Resize.h>
@@ -26,87 +25,6 @@
 
 namespace at::native {
 namespace {
-MPSGraphFFTScalingMode normalization_to_ScalingMode(int64_t normalization) {
-  switch (static_cast<fft_norm_mode>(normalization)) {
-    case fft_norm_mode::none:
-      return MPSGraphFFTScalingModeNone;
-    case fft_norm_mode::by_n:
-      return MPSGraphFFTScalingModeSize;
-    case fft_norm_mode::by_root_n:
-      return MPSGraphFFTScalingModeUnitary;
-    default:
-      break;
-  }
-  TORCH_CHECK(false, "Unsupported normalization type", normalization);
-}
-
-NSArray<NSNumber*>* IntArrayToNSArray(IntArrayRef arr) {
-  auto rc = [NSMutableArray<NSNumber*> arrayWithCapacity:arr.size()];
-  for (const auto idx : c10::irange(arr.size())) {
-    rc[idx] = [NSNumber numberWithInteger:arr[idx]];
-  }
-  return rc;
-}
-
-// MPSGraph FFT can only transform axes within the last four dimensions, so when
-// an axis falls outside that window we permute it into the trailing dims, transform, then invert.
-struct FFTAxisPlan {
-  bool needsTranspose = false;
-  NSArray<NSNumber*>* axes = nil;
-  NSArray<NSNumber*>* permutation = nil;
-  NSArray<NSNumber*>* inversePermutation = nil;
-};
-
-FFTAxisPlan computeFFTAxisPlan(IntArrayRef dim, int64_t ndim) {
-  TORCH_CHECK(static_cast<int64_t>(dim.size()) <= 4,
-              "MPS FFT only supports transforming up to 4 dimensions, but got ",
-              dim.size(),
-              " dimensions");
-  FFTAxisPlan plan;
-  if (std::all_of(dim.begin(), dim.end(), [&](int64_t d) { return d >= ndim - 4; })) {
-    plan.axes = IntArrayToNSArray(dim);
-    return plan;
-  }
-
-  plan.needsTranspose = true;
-  const auto isTransformDim = at::dim_list_to_bitset(dim, ndim);
-  std::vector<int64_t> perm;
-  perm.reserve(ndim);
-  for (const auto i : c10::irange(ndim)) {
-    if (!isTransformDim[i]) {
-      perm.push_back(i);
-    }
-  }
-  perm.insert(perm.end(), dim.begin(), dim.end());
-  std::vector<int64_t> inverse(ndim);
-  for (const auto i : c10::irange(ndim)) {
-    inverse[perm[i]] = i;
-  }
-  std::vector<int64_t> remappedAxes;
-  remappedAxes.reserve(dim.size());
-  for (const auto i : c10::irange(ndim - static_cast<int64_t>(dim.size()), ndim)) {
-    remappedAxes.push_back(i);
-  }
-  plan.axes = IntArrayToNSArray(remappedAxes);
-  plan.permutation = IntArrayToNSArray(perm);
-  plan.inversePermutation = IntArrayToNSArray(inverse);
-  return plan;
-}
-
-MPSGraphTensor* applyFFTInputPlan(MPSGraph* mpsGraph, MPSGraphTensor* input, const FFTAxisPlan& plan) {
-  if (!plan.needsTranspose) {
-    return input;
-  }
-  return [mpsGraph transposeTensor:input permutation:plan.permutation name:nil];
-}
-
-MPSGraphTensor* applyFFTOutputPlan(MPSGraph* mpsGraph, MPSGraphTensor* output, const FFTAxisPlan& plan) {
-  if (!plan.needsTranspose) {
-    return output;
-  }
-  return [mpsGraph transposeTensor:output permutation:plan.inversePermutation name:nil];
-}
-
 using namespace mps;
 
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
@@ -240,6 +158,7 @@ Batch collapse(const Tensor& in, const Tensor& out, int64_t dim) {
 // Per-pass options: four-step mapping and twiddles, Bluestein chirps (zero lengths = n), or one global stage
 struct Pass {
   int64_t n_sig = 0;
+  int64_t n_in = 0;
   int64_t n_out = 0;
   int64_t ld_mul = 1;
   int64_t out_k_mul = 1;
@@ -306,14 +225,17 @@ Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, bool ha
   const auto family = x.global ? "g" + std::to_string(x.global) : fft_has_fixed_kernel(n_u32) ? std::to_string(n) : set;
 
   const auto n_sig = x.n_sig ? x.n_sig : n;
+  const auto n_in = x.n_in ? x.n_in : n;
   const auto n_out = x.n_out ? x.n_out : n;
-  const bool ld = x.cl || n_sig < n * x.ld_mul;
+  const bool ld = x.cl || n_sig < n * x.ld_mul || (x.ld_mul > 1 && in.is_complex() && n_in < n_sig);
   const bool st = x.out_k_mul > 1 || x.cs;
+  const bool pairs = (half || x.global) && !out.is_complex();
   const bool tw4 = x.tt && !x.global;
   const auto flag_if = [](bool on, FFTFlag flag) { return on ? fft_flag_bit(flag) : 0; };
   const uint32_t F = flag_if(inv, FFTFlag::Inverse) | flag_if(half, FFTFlag::PackedLoads) |
       flag_if(tw4, FFTFlag::FourStepTwiddles) | flag_if(st, FFTFlag::ExtendedStores) |
-      flag_if(ld, FFTFlag::ExtendedLoads) | flag_if(x.global, FFTFlag::GlobalStage);
+      flag_if(ld, FFTFlag::ExtendedLoads) | flag_if(x.global, FFTFlag::GlobalStage) |
+      flag_if(pairs, FFTFlag::PackedRealStores);
 
   const int64_t ept = fft_points_per_thread(n_u32, F);
   const int64_t rows = b.dims[0].size;
@@ -330,12 +252,14 @@ Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, bool ha
   FFTParams params{
       .n = n_u32,
       .n_sig = to_u32(n_sig),
+      .n_in = to_u32(n_in),
       .n_out = to_u32(n_out),
       .tgb = to_u32(B),
       .jt = to_u32(J),
       .ndim = to_u32(b.dims.size()),
       .nstages = to_u32(radix.size()),
       .in_stride = to_i32(b.si),
+      .in_unit = to_i32(b.si / x.ld_mul),
       .out_stride = to_i32(b.so),
       .scale = static_cast<float>(x.scale),
       .ld_mul = to_u32(x.ld_mul),
@@ -412,11 +336,12 @@ bool fits_one_pass(const Batch& b, int64_t n, bool chirped) {
   return n <= kMaxPoints && !both;
 }
 
-// n-point transforms of the batch from `in` into `out`: x.n_out outputs
+// n-point transforms of the batch from `in` into `out`: x.n_in inputs (c2r: n/2+1, mirrored), x.n_out outputs
 void fft_batch(const Tensor& in, const Tensor& out, const Batch& b, int64_t n, bool inv, const Pass& x) {
   const auto n_sig = x.n_sig ? x.n_sig : n;
+  const auto n_in = x.n_in ? x.n_in : n;
   const auto n_out = x.n_out ? x.n_out : n;
-  const bool real = !in.is_complex();
+  const bool real = !in.is_complex() || !out.is_complex();
   const int64_t m = real && n % 2 == 0 ? n / 2 : n;
   const bool half = !x.cl && !x.cs && n > 2 && m < n && m <= kMaxPoints;
   const int64_t pass_n = half ? m : n;
@@ -459,49 +384,61 @@ void fft_batch(const Tensor& in, const Tensor& out, const Batch& b, int64_t n, b
   // times W_n^(k1*i0), pass 2 writes k1+n1*k2 (n1 <= 256 if it recurses). Real transforms halve one pass.
   const bool big = plain && b.numel * n >= kLongPoints;
   bool r2c = big && !in.is_complex();
-  const bool nest = !x.cs && n_out == n;
+  bool c2r = big && !out.is_complex();
+  const bool nest = !x.cs && n_out == n && out.is_complex();
 
   // n1: the largest smooth divisor <= sqrt(n) whose cofactor fits a pass; nr: with an even halved real pass
   int64_t n1 = 0;
   int64_t nr = 0;
   for (int64_t d = 1; d * d <= n; d++) {
     const int64_t q = n / d;
+    const int64_t h = r2c ? d : q;
     if (n % d || !is_smooth(d) || !is_smooth(q)) {
       continue;
     }
-    nr = q <= kMaxPoints && d % 2 == 0 && d > 2 && d <= 2 * kMaxPoints ? d : nr;
+    nr = q <= kMaxPoints && h % 2 == 0 && h > 2 && h <= 2 * kMaxPoints ? d : nr;
     n1 = (q <= kMaxPoints || nest) && (!nest || d <= kMaxNestedColumns) ? d : n1;
   }
   r2c = r2c && nr;
-  n1 = r2c ? nr : n1;
+  c2r = c2r && nr;
+  n1 = r2c || c2r ? nr : n1;
   TORCH_CHECK_NOT_IMPLEMENTED(n1 > 0, "MPS FFT does not support transforms of length ", n);
 
   const auto n2 = n / n1;
+  const auto rows = c2r ? n2 / 2 + 1 : n2;
   const auto rl = r2c ? n1 / 2 + 1 : n1;
   const bool inner = b.dims[0].size > 1 && std::abs(b.dims[0].in_stride) < std::abs(b.si);
   const int64_t ninner = inner ? b.dims[0].size : 1;
-  Batch b1{{}, b.numel * n2, b.si * n2, ninner};
+  Batch b1{{}, b.numel * rows, b.si * n2, ninner};
   Batch b2{{}, b.numel * rl, rl * ninner, b.so * n1};
   int64_t t = 1;
   for (int64_t d = 0; d < static_cast<int64_t>(b.dims.size()); d++) {
-    const int64_t ts = d < inner ? t : t * n2 * rl; // The temp's stride of batch dim d
+    const int64_t ts = d < inner ? t : t * rows * rl; // The temp's stride of batch dim d
     b1.dims.push_back({b.dims[d].size, b.dims[d].in_stride, ts});
     b2.dims.push_back({b.dims[d].size, ts, b.dims[d].out_stride});
     t *= b.dims[d].size;
   }
-  b1.dims.insert(b1.dims.begin() + inner, Dim{n2, b.si, rl * ninner});
+  b1.dims.insert(b1.dims.begin() + inner, Dim{rows, b.si, rl * ninner});
   b2.dims.insert(b2.dims.begin() + inner, Dim{rl, ninner, b.so});
 
-  const bool inplace = !r2c && n_out == n && n2 > kMaxRowsForTemp && b.so == ninner && !in.is_alias_of(out) &&
-      std::all_of(
-          b2.dims.begin(), b2.dims.end(), [](const Dim& d) { return d.size == 1 || d.in_stride == d.out_stride; });
-  auto tmp = inplace ? out : at::empty({b.numel * n2 * rl}, out.options());
-  const Pass load{.n_sig = n_sig, .n_out = rl, .ld_mul = n2, .cl = x.cl, .tt = twiddles(n, true), .i0_dim1 = inner};
+  const bool inplace = !r2c && !c2r && n_out == n && out.is_complex() && n2 > kMaxRowsForTemp && b.so == ninner &&
+      !in.is_alias_of(out) && std::all_of(b2.dims.begin(), b2.dims.end(), [](const Dim& d) {
+        return d.size == 1 || d.in_stride == d.out_stride;
+      });
+  auto tmp =
+      inplace ? out : at::empty({b.numel * rows * rl}, out.options().dtype(c10::toComplexType(out.scalar_type())));
+  const Pass load{
+      .n_sig = n_sig, .n_in = n_in, .n_out = rl, .ld_mul = n2, .cl = x.cl, .tt = twiddles(n, true), .i0_dim1 = inner};
   auto first = prepare(in, tmp, r2c ? n1 / 2 : n1, inv, r2c, b1, load);
-  if (r2c || n2 <= kMaxCoalescedPoints || !nest) {
-    const Pass store{
-        .n_sig = n, .n_out = n_out, .out_k_mul = n1, .scale = x.scale, .cs = x.cs, .mirror_out = r2c, .i0_dim1 = inner};
-    run({first, prepare(tmp, out, n2, inv, false, b2, store)});
+  if (r2c || c2r || n2 <= kMaxCoalescedPoints || !nest) {
+    const Pass store{.n_sig = n,
+                     .n_out = c2r ? n2 / 2 : n_out,
+                     .out_k_mul = c2r ? 1 : n1,
+                     .scale = x.scale,
+                     .cs = x.cs,
+                     .mirror_out = r2c,
+                     .i0_dim1 = inner};
+    run({first, prepare(tmp, out, c2r ? n2 / 2 : n2, inv, c2r, b2, store)});
     return;
   }
 
@@ -521,7 +458,7 @@ void fft_pass(const Tensor& in, const Tensor& out, int64_t dim, int64_t n, bool 
   DimVector sizes(in.sizes());
   sizes[dim] = M;
   auto tmp = at::empty(sizes, in.options().dtype(c10::toComplexType(in.scalar_type())));
-  fft_pass(in, tmp, dim, M, false, {.n_sig = n, .scale = x.scale / M, .cl = c, .cs = B});
+  fft_pass(in, tmp, dim, M, false, {.n_sig = n, .n_in = x.n_in ? x.n_in : n, .scale = x.scale / M, .cl = c, .cs = B});
   fft_pass(tmp, out, dim, M, true, {.n_out = x.n_out ? x.n_out : n, .cs = c});
 }
 
@@ -530,7 +467,7 @@ bool needs_fp32(const Tensor& in, const Tensor& out, IntArrayRef dim, int64_t n)
   if (c10::toRealValueType(in.scalar_type()) != kHalf) {
     return false;
   }
-  const bool real = !in.is_complex();
+  const bool real = !in.is_complex() || !out.is_complex();
   const int64_t pass_n = real && n % 2 == 0 && n > 2 ? n / 2 : n;
   return dim.size() > 1 || !is_smooth(n) || !fits_one_pass(collapse(in, out, dim.back()), pass_n, false);
 }
@@ -598,7 +535,6 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
   TORCH_CHECK(self.is_complex(), "Input must be complex");
   TORCH_CHECK(out.scalar_type() == c10::toRealValueType(self.scalar_type()), "Unexpected output type");
   TORCH_CHECK(out.device() == self.device(), "Expected out tensor on ", self.device(), " but got ", out.device());
-  // All public callers resize the input to last_dim_size / 2 + 1; any other size aborts in HermiteanToRealFFT
   TORCH_INTERNAL_ASSERT(self.size(dim.back()) == last_dim_size / 2 + 1,
                         "_fft_c2r: expected ",
                         last_dim_size / 2 + 1,
@@ -614,30 +550,17 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
     return out;
   }
 
-  auto key = __func__ + getTensorsStringKey({self}) + ":" + getArrayRefString(dim) + ":" +
-      std::to_string(normalization) + ":" + std::to_string(last_dim_size);
-  @autoreleasepool {
-    auto cachedGraph = LookUpOrCreateCachedGraph<MPSUnaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-      auto axisPlan = computeFFTAxisPlan(dim, self.dim());
-      auto fftInput = applyFFTInputPlan(mpsGraph, inputTensor, axisPlan);
-      auto descriptor = [MPSGraphFFTDescriptor descriptor];
-      descriptor.scalingMode = normalization_to_ScalingMode(normalization);
-      descriptor.inverse = YES;
-      descriptor.roundToOddHermitean = ((last_dim_size % 2) == 1) ? YES : NO;
-      auto outputTensor = [mpsGraph HermiteanToRealFFTWithTensor:fftInput
-                                                            axes:axisPlan.axes
-                                                      descriptor:descriptor
-                                                            name:nil];
-      outputTensor = applyFFTOutputPlan(mpsGraph, outputTensor, axisPlan);
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
+  if (needs_fp32(self, out, dim, last_dim_size)) {
+    auto wide = at::empty(out.sizes(), out.options().dtype(kFloat));
+    _fft_c2r_mps_out(self.to(kComplexFloat), dim, normalization, last_dim_size, wide);
+    return out.copy_(wide);
   }
+  const auto tmp = dim.size() > 1 ? at::empty(self.sizes(), self.options()) : self;
+  for (const auto i : c10::irange(dim.size() - 1)) {
+    fft_pass(i ? tmp : self, tmp, dim[i], self.size(dim[i]), true);
+  }
+  const Pass x{.n_in = self.size(dim.back()), .n_out = last_dim_size, .scale = norm_scale(normalization, out, dim)};
+  fft_pass(tmp, out, dim.back(), last_dim_size, true, x);
   return out;
 }
 
