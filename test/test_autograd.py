@@ -13402,6 +13402,18 @@ class TestAutogradForwardMode(TestCase):
 class TestAutogradDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @parametrize("shape,dim", [((0,), None), ((3, 0), 1), ((0, 3), 0)])
+    def test_mean_empty_double_backward(self, device, shape, dim):
+        x = torch.empty(shape, device=device, requires_grad=True)
+        y = x.mean() if dim is None else x.mean(dim=dim)
+        grad_output = torch.ones_like(y, requires_grad=True)
+        (grad_input,) = torch.autograd.grad(y, x, grad_output, create_graph=True)
+        self.assertEqual(grad_input, torch.empty_like(x))
+        (grad_grad_output,) = torch.autograd.grad(
+            grad_input, grad_output, torch.ones_like(grad_input)
+        )
+        self.assertEqual(grad_grad_output, torch.zeros_like(grad_output))
+
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
