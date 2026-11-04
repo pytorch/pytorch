@@ -90,8 +90,12 @@ __global__ void upsample_bilinear2d_out_frame(
 // device idle, and the one-thread-per-element kernels below are faster.
 // The cut is tuned per architecture from perf sweeps.
 int64_t plane_kernel_min_pixels_per_sm(const cudaDeviceProp* props) {
-  if (c10::basic_string_view<char>(props->gcnArchName).starts_with("gfx950")) {
+  const c10::basic_string_view<char> arch(props->gcnArchName);
+  if (arch.starts_with("gfx950")) {
     return 512;
+  }
+  if (arch.starts_with("gfx1250")) {
+    return 768;
   }
   return 256;
 }
