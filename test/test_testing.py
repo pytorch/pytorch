@@ -684,12 +684,21 @@ if __name__ == '__main__':
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
     def test_inductor_run_cpu_env_var(self):
         # PYTORCH_TEST_INDUCTOR_RUN_CPU=1 brings back inductor's RUN_CPU test classes
-        # when ONLY_FOR leaves CPU out (CI's nogpu jobs), but not when EXCEPT_FOR
+        # when ONLY_FOR leaves CPU out (CI's nogpu_NO_AVX2 job), but not when EXCEPT_FOR
         # excludes CPU. If this broke, those classes would silently disappear.
         flag = "PYTORCH_TEST_INDUCTOR_RUN_CPU"
         unset = ("CI", PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, flag)
         base_env = {k: v for k, v in os.environ.items() if k not in unset}
-        code = "from torch.testing._internal.inductor_utils import HAS_CPU, RUN_CPU; print(bool(HAS_CPU), bool(RUN_CPU))"
+
+        def query(name, env):
+            code = f"from torch.testing._internal.inductor_utils import {name}; print(bool({name}))"
+            stdout, stderr = TestCase.run_process_no_exception(code, env={**base_env, **env})
+            lines = stdout.decode().strip().splitlines()
+            self.assertIn(lines[-1:], (["True"], ["False"]), msg=stderr.decode())
+            return lines[-1]
+
+        if query("HAS_CPU", {}) != "True":
+            self.skipTest("RUN_CPU also needs a working C++ compiler")
         for env, expected in [
             ({}, "True"),
             ({PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY: "cuda"}, "False"),
@@ -697,13 +706,7 @@ if __name__ == '__main__':
             ({PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY: "cpu", flag: "1"}, "False"),
         ]:
             with self.subTest(env=env):
-                stdout, stderr = TestCase.run_process_no_exception(code, env={**base_env, **env})
-                lines = stdout.decode().strip().splitlines()
-                self.assertTrue(lines, msg=stderr.decode())
-                has_cpu, run_cpu = lines[-1].split()
-                if has_cpu != "True":
-                    raise unittest.SkipTest("RUN_CPU also needs a working C++ compiler")
-                self.assertEqual(run_cpu, expected, msg=stderr.decode())
+                self.assertEqual(query("RUN_CPU", env), expected)
 
 
 # Golden-file tests for the junit XML that CI uploads (tools/stats/upload_test_stats.py).

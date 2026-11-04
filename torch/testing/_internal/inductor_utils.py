@@ -122,8 +122,9 @@ RUN_GPU = HAS_GPU and any(
 
 # PYTORCH_TEST_INDUCTOR_RUN_CPU=1 runs the CPU tests even when
 # PYTORCH_TESTING_DEVICE_ONLY_FOR leaves CPU out (but not when
-# PYTORCH_TESTING_DEVICE_EXCEPT_FOR excludes it). CI sets it for the nogpu_*
-# jobs, which run a CUDA build (so ONLY_FOR=cuda) on machines without a GPU.
+# PYTORCH_TESTING_DEVICE_EXCEPT_FOR excludes it). CI sets it for the
+# nogpu_NO_AVX2 job, which runs a CUDA build (so ONLY_FOR=cuda) on a machine
+# without a GPU.
 # test_cpu_cpp_wrapper keeps its own check, which ignores the flag.
 RUN_CPU = LazyVal(
     lambda: HAS_CPU
