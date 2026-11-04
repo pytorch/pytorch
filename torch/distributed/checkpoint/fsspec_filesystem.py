@@ -1,16 +1,16 @@
 # Mypy will not try inferring the types of any 3rd party libraries installed.
 # mypy: ignore-errors
 
+import collections
 import concurrent.futures
 import io
 import itertools
 import os
 import sys
-import warnings
-from collections.abc import Generator, Sequence
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
@@ -223,6 +223,32 @@ def _load_aliased(buf: bytes | bytearray | memoryview) -> Tensor:
         )
 
 
+_T = TypeVar("_T")
+_R = TypeVar("_R")
+
+
+def _prefetch(
+    executor: concurrent.futures.Executor,
+    fn: Callable[[_T], _R],
+    items: Sequence[_T],
+    depth: int,
+) -> Generator[tuple[_T, _R], None, None]:
+    """Yield ``(item, fn(item))`` in order with up to ``depth`` calls ahead.
+
+    Unstarted calls are cancelled if the consumer stops early.
+    """
+    pending = collections.deque(executor.submit(fn, x) for x in items[:depth])
+    try:
+        for i, x in enumerate(items):
+            if i + depth < len(items):
+                pending.append(executor.submit(fn, items[i + depth]))
+            # Not bound to a local, so the consumer's `del` can free the result.
+            yield x, pending.popleft().result()
+    finally:
+        for fut in pending:
+            fut.cancel()
+
+
 class FsspecReader(FileSystemReader):
     def __init__(
         self,
@@ -231,6 +257,7 @@ class FsspecReader(FileSystemReader):
         max_batch_size: int = 1024,
         max_batch_bytes: int = 256 * 1024 * 1024,
         cpu_workers: int | None = None,
+        io_workers: int = 2,
         **kwargs,
     ) -> None:
         """
@@ -245,11 +272,13 @@ class FsspecReader(FileSystemReader):
                 their files in each of several calls.
             max_batch_bytes: Maximum cumulative byte size requested per batched
                 cat_ranges call. Defaults to 256 MiB. This caps one request, not
-                resident memory: the next two batches are fetched while the current
-                one is still being decoded and copied, so expect a small multiple of
-                this to be live at peak.
+                resident memory: up to io_workers batches are fetched while the
+                current one is still being decoded and copied, so expect a small
+                multiple of this to be live at peak.
             cpu_workers: Number of worker threads for parallel CPU deserialization.
                 Defaults to min(4, max(1, cpu_count // local_world_size)).
+            io_workers: Number of worker threads for concurrent cat_ranges fetches.
+                Defaults to 2.
             **kwargs: Additional storage options passed to fsspec url_to_fs.
         """
         super().__init__(path)
@@ -260,6 +289,7 @@ class FsspecReader(FileSystemReader):
             total_cpus = os.cpu_count() or 4
             cpu_workers = min(4, max(1, total_cpus // local_world_size))
         self.cpu_workers = max(1, cpu_workers)
+        self.io_workers = max(1, io_workers)
         self.fs = _FileSystem()
         self.path = self.fs.init_path(path, **kwargs)
 
@@ -268,7 +298,7 @@ class FsspecReader(FileSystemReader):
         import fsspec.asyn
         from fsspec.implementations.cached import CachingFileSystem
 
-        # read_data runs two cat_ranges calls at once, which only an
+        # read_data may run multiple cat_ranges calls at once, which only an
         # AsyncFileSystem is guaranteed to handle. Wrappers such as
         # DirFileSystem are async even over a sync or caching filesystem, so
         # the innermost filesystem decides.
@@ -323,42 +353,37 @@ class FsspecReader(FileSystemReader):
             starts = [md.offset for md in mds]
             ends = [md.offset + md.length for md in mds]
             chunks = self.fs.fs.cat_ranges(paths, starts, ends, on_error="raise")
-            # A short list means some ranges were dropped (``on_error="omit"``).
-            # Left unchecked, the zip below would silently skip those items and
-            # leave their tensors at whatever the caller initialized them to.
-            if len(chunks) != len(b_reqs):
-                raise RuntimeError(
-                    f"cat_ranges returned {len(chunks)} chunks for {len(b_reqs)} ranges"
-                )
             # ``on_error`` is advisory: fsspec honors it only since 2026.6.0 and
             # other backends may ignore it, returning exceptions in-band.
-            for path, start, end, chunk in zip(paths, starts, ends, chunks):
+            for p, start, end, chunk in zip(paths, starts, ends, chunks, strict=True):
                 if isinstance(chunk, BaseException):
+                    err = f"{type(chunk).__name__}: {chunk}"
                     raise RuntimeError(
-                        f"Failed to read bytes [{start}, {end}) from {path}"
+                        f"Failed to read bytes [{start}, {end}) from {p}: {err}"
                     ) from chunk
                 if len(chunk) != end - start:
                     raise RuntimeError(
-                        f"Read {len(chunk)} bytes for [{start}, {end}) from {path}"
+                        f"Read {len(chunk)} bytes for [{start}, {end}) from {p}"
                     )
             return chunks
 
         def decode(req, chunk):
             if self.storage_data[req.storage_index].transform_descriptors:
-                return self._decode_item(req, io.BytesIO(chunk))
+                return self._load_item(req, io.BytesIO(chunk))
             if req.type == LoadItemType.BYTE_IO:
                 return io.BytesIO(chunk)
             tensor = _load_aliased(chunk)
             return narrow_tensor_by_index(tensor, req.storage_offsets, req.lengths)
 
-        inference_mode = torch.is_inference_mode_enabled()
-
         def _copy(dst: Tensor, src: Tensor) -> None:
-            with torch.inference_mode(inference_mode):
-                dst.copy_(src)
+            # Pool threads run outside inference mode, where detaching an
+            # inference tensor yields a view that accepts in-place copies.
+            dst.detach().copy_(src)
 
-        # Resolving a whole batch before committing any of it is only safe
-        # when resolve_tensor and commit_tensor keep their default behavior.
+        # Resolving a whole batch before committing any of it is only safe when
+        # resolve_tensor and commit_tensor keep their default behavior (e.g., a
+        # custom resolve_tensor reusing one scratch buffer for commit_tensor
+        # would overwrite that buffer across batched resolve_tensor calls).
         planner_cls = type(planner)
         parallel_copy = (
             isinstance(planner, DefaultLoadPlanner)
@@ -367,83 +392,51 @@ class FsspecReader(FileSystemReader):
         )
 
         with (
-            warnings.catch_warnings(),
             concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.cpu_workers, thread_name_prefix="FsspecReader-cpu"
             ) as cpu_executor,
             concurrent.futures.ThreadPoolExecutor(
-                max_workers=2, thread_name_prefix="FsspecReader-io"
+                max_workers=self.io_workers, thread_name_prefix="FsspecReader-io"
             ) as io_executor,
         ):
-            # _load_aliased wraps the read-only fetched bytes without copying.
-            # The filter is process-wide so that it also covers the pool threads.
-            warnings.filterwarnings(
-                "ignore",
-                message=".*The given buffer is not writable.*",
-                category=UserWarning,
-            )
-            # Two fetches run at once, so one batch's slowest streams overlap
-            # the next batch's start instead of idling the connection.
-            inflight = [io_executor.submit(fetch_batch, b) for b in batches[:2]]
+            # Prefetch ahead so one batch's slowest streams overlap the next
+            # batch's start instead of idling the connection.
+            fetched = _prefetch(io_executor, fetch_batch, batches, self.io_workers)
             try:
-                for idx, b_reqs in enumerate(batches):
-                    chunks = inflight.pop(0).result()
-                    if idx + 2 < len(batches):
-                        inflight.append(
-                            io_executor.submit(fetch_batch, batches[idx + 2])
-                        )
-
-                    decoded = [
-                        cpu_executor.submit(decode, req, chunk)
-                        for req, chunk in zip(b_reqs, chunks)
-                    ]
+                for b_reqs, chunks in fetched:
+                    # Executor.map submits the whole batch now and yields results
+                    # in request order, dropping each one once it is consumed.
+                    decoded = cpu_executor.map(decode, b_reqs, chunks)
                     del chunks
 
                     # Every planner hook runs on this thread, so planners need
                     # not be thread safe. Only decoding above and the copies
                     # below go to the pool.
-                    if parallel_copy:
-                        pending: list[tuple[ReadItem, Tensor, Tensor]] = []
-                        for i, req in enumerate(b_reqs):
-                            f = decoded[i]
-                            decoded[i] = None
-                            item = f.result()
-                            if req.type == LoadItemType.BYTE_IO:
-                                planner.load_bytes(req, item)
-                            else:
-                                pending.append(
-                                    (req, self._resolve_item(req, item, planner), item)
-                                )
-
-                        if len(pending) > 1 and _destinations_disjoint(
-                            [dst for _, dst, _ in pending]
-                        ):
-                            copies = [
-                                cpu_executor.submit(_copy, dst, src)
-                                for _, dst, src in pending
-                            ]
-                            for c in copies:
-                                c.result()
-                            for req, dst, _ in pending:
-                                planner.commit_tensor(req, dst)
+                    pending: list[tuple[ReadItem, Tensor, Tensor]] = []
+                    for req, item in zip(b_reqs, decoded, strict=True):
+                        if req.type == LoadItemType.BYTE_IO:
+                            planner.load_bytes(req, item)
+                        elif parallel_copy:
+                            pending.append(
+                                (req, self._resolve_item(req, item, planner), item)
+                            )
                         else:
-                            for req, dst, src in pending:
-                                _copy(dst, src)
-                                planner.commit_tensor(req, dst)
+                            dst = self._resolve_item(req, item, planner)
+                            _copy(dst, item)
+                            planner.commit_tensor(req, dst)
+
+                    dsts = [dst for _, dst, _ in pending]
+                    srcs = [src for _, _, src in pending]
+                    if len(pending) > 1 and _destinations_disjoint(dsts):
+                        # list() waits for every copy and re-raises the first error.
+                        list(cpu_executor.map(_copy, dsts, srcs))
                     else:
-                        for i, req in enumerate(b_reqs):
-                            f = decoded[i]
-                            decoded[i] = None
-                            item = f.result()
-                            if req.type == LoadItemType.BYTE_IO:
-                                planner.load_bytes(req, item)
-                            else:
-                                dst = self._resolve_item(req, item, planner)
-                                _copy(dst, item)
-                                planner.commit_tensor(req, dst)
+                        for dst, src in zip(dsts, srcs):
+                            _copy(dst, src)
+                    for req, dst, _ in pending:
+                        planner.commit_tensor(req, dst)
             finally:
-                for fut in inflight:
-                    fut.cancel()
+                fetched.close()
                 cpu_executor.shutdown(wait=False, cancel_futures=True)
                 io_executor.shutdown(wait=False, cancel_futures=True)
 

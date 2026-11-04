@@ -399,15 +399,18 @@ class TestFileSystem(TestCase):
             max_batch_size=value,
             max_batch_bytes=value,
             cpu_workers=value,
+            io_workers=value,
         )
         self.assertEqual(reader.max_batch_size, expected)
         self.assertEqual(reader.max_batch_bytes, expected)
         self.assertEqual(reader.cpu_workers, expected)
+        self.assertEqual(reader.io_workers, expected)
 
     def test_fsspec_reader_empty_local_world_size_env(self):
         with patch.dict(os.environ, {"LOCAL_WORLD_SIZE": ""}):
             reader = FsspecReader("memory://test_empty_local_world_size")
             self.assertGreaterEqual(reader.cpu_workers, 1)
+            self.assertEqual(reader.io_workers, 2)
 
     def test_fsspec_reader_concurrent_planner_thread_safety(self):
         checkpoint_dir = "memory://test_concurrent_planner_safety"
@@ -586,7 +589,10 @@ class TestFileSystem(TestCase):
         with patch.object(
             reader.fs.fs, "cat_ranges", side_effect=cat_ranges_returning_exception
         ):
-            with self.assertRaisesRegex(CheckpointException, "Failed to read bytes"):
+            with self.assertRaisesRegex(
+                CheckpointException,
+                "Failed to read bytes.*OSError: simulated range failure",
+            ):
                 dcp.load(
                     state_dict=load_dict,
                     storage_reader=reader,
@@ -993,8 +999,8 @@ class TestFileSystem(TestCase):
                 reader, "read_metadata", side_effect=read_metadata_with_transforms
             ),
             patch.object(
-                reader, "_decode_item", wraps=reader._decode_item
-            ) as spy_decode_item,
+                reader, "_load_item", wraps=reader._load_item
+            ) as spy_load_item,
             patch.object(
                 reader.transforms,
                 "transform_load_stream",
@@ -1007,7 +1013,7 @@ class TestFileSystem(TestCase):
                 planner=dcp.DefaultLoadPlanner(),
                 no_dist=True,
             )
-            self.assertEqual(spy_decode_item.call_count, 1)
+            self.assertEqual(spy_load_item.call_count, 1)
         self.assertEqual(state_dict["t1"], load_dict["t1"])
 
     def test_fsspec_reader_cat_ranges_length_mismatch(self):
@@ -1042,10 +1048,17 @@ class TestFileSystem(TestCase):
         )
 
         reader = _async_reader(checkpoint_dir, max_batch_size=2)
+        real_cat_ranges = reader.fs.fs.cat_ranges
+
+        def cat_ranges_dropping_tail(paths, starts, ends, **kwargs):
+            return real_cat_ranges(paths, starts, ends, **kwargs)[:1]
+
         load_dict = {"t1": torch.zeros(10), "t2": torch.zeros(10)}
-        with patch.object(reader.fs.fs, "cat_ranges", return_value=[b"dummy"]):
+        with patch.object(
+            reader.fs.fs, "cat_ranges", side_effect=cat_ranges_dropping_tail
+        ):
             with self.assertRaisesRegex(
-                CheckpointException, "cat_ranges returned 1 chunks for 2 ranges"
+                CheckpointException, r"zip\(\) argument 4 is shorter than argument"
             ):
                 dcp.load(
                     state_dict=load_dict,
