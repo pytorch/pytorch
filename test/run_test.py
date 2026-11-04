@@ -1801,7 +1801,7 @@ def parse_args():
             build_environment=BUILD_ENVIRONMENT,
             workflow=os.environ.get("GITHUB_WORKFLOW", "slow"),
             is_ci=IS_CI,
-            pr_number=get_pr_number(),
+            pr_number=get_pr_number() if IS_CI else None,
             macos=IS_MACOS,
             no_td=strtobool(os.environ.get("NO_TD", "False")),
         ),
