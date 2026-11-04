@@ -269,6 +269,9 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
 
 # How long to wait for another process's download before downloading anyway.
 _CACHE_LOCK_TIMEOUT_S = 3600
+# How often a waiting process tries the lock. filelock's default of 50 ms would
+# mean tens of thousands of attempts (round trips on NFS) during a long download.
+_CACHE_LOCK_POLL_S = 1.0
 # Work directories untouched for this long are left by killed processes. It is
 # well above the lock timeout, so a waiter that gives up doesn't remove the
 # directory of a download that is stalled but still running.
@@ -292,6 +295,15 @@ def _lock_unavailable(lock_path, mode):
         os.close(fd)
         with contextlib.suppress(OSError):
             os.remove(probe)
+        # filelock reports EACCES on an existing lock file (read-only, or an ACL
+        # that denies this user) as a held lock too. The holder may remove it
+        # in the meantime, which leaves the lock available.
+        try:
+            os.close(os.open(lock_path, os.O_RDWR))
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            return e
         return None
 
     import fcntl
@@ -346,8 +358,14 @@ def _cache_lock(path, stacklevel, verbose):
     lock_dir_mode = os.stat(os.path.dirname(lock_path)).st_mode
     mode = 0o664 if lock_dir_mode & stat.S_IWGRP else 0o644
 
+    class _CacheLock(FileLock):
+        # Entered as a context manager for FileLock's wait counters, which
+        # calls acquire() without arguments.
+        def acquire(self, timeout=None, poll_interval=_CACHE_LOCK_POLL_S, **kwargs):
+            return super().acquire(timeout, poll_interval, **kwargs)
+
     def new_lock(timeout):
-        return FileLock(lock_path, timeout=timeout, mode=mode)
+        return _CacheLock(lock_path, timeout=timeout, mode=mode)
 
     stack = contextlib.ExitStack()
     message = None

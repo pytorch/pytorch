@@ -152,17 +152,8 @@ that new lock files get the shared group instead of their creator's primary grou
 If the lock can't be taken (for example on a filesystem without `flock` support, or a lock file
 another user created without giving this user write access) or another process holds it for
 more than an hour, the entry is downloaded without it, as in earlier releases, and a
-`UserWarning` is raised. Checkpoints in the legacy zip format are extracted on every load,
-without the lock.
-`force_reload=True` isn't coordinated this way: every caller that passes it downloads the
-entry again (one at a time, when the lock can be taken) and replaces the copy other processes
-may be using, so avoid passing it from several processes at once.
-Repos are downloaded and extracted in a temporary work directory in the hub directory
-(`.<owner_repo_ref>~` plus 8 characters), so extracted paths are that much longer: on Windows
-without long paths enabled, a repo whose deepest file is close to `MAX_PATH` can fail to
-extract. Work directories that a killed process leaves behind are removed by a later download
-of the same entry once they have been untouched for a day, but only by the user who created
-them, because they are private to that user.
+`UserWarning` is raised. Repos are downloaded and extracted in a temporary work directory in
+the hub directory, whose name starts with `.<owner_repo_ref>~`.
 
 ### Known limitations:
 
@@ -179,3 +170,16 @@ A known limitation that is worth mentioning here: users **CANNOT** load two diff
 the same repo in the **same python process**. It's just like installing two packages with the
 same name in Python, which is not good. Cache might join the party and give you surprises if you
 actually try that. Of course it's totally fine to load them in separate processes.
+
+The lock between processes that share a cache directory has these limitations:
+- `force_reload=True` isn't coordinated: every caller that passes it downloads the entry again
+  (one at a time, when the lock can be taken) and replaces the copy other processes may be
+  using, so avoid passing it from several processes at once.
+- Checkpoints in the legacy zip format are extracted on every load, without the lock.
+- The repo work directory makes extracted paths longer by its name (`.<owner_repo_ref>~` plus 8
+  characters), so on Windows without long paths enabled, a repo whose deepest file is close to
+  `MAX_PATH` can fail to extract.
+- A work directory that a killed process leaves behind is only removed when the same repo is
+  downloaded again (with `force_reload=True`, or after its cached copy is deleted), once it has
+  been untouched for a day, and only by the user who created it. Until then it stays in the hub
+  directory, and it can be deleted by hand.

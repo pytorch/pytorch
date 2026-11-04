@@ -4,6 +4,7 @@ import contextlib
 import errno
 import io
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -479,9 +480,10 @@ class TestHubCache(TestCase):
 
     def _run_concurrently(self, fns):
         # Slow down the download so that, without locking, every worker would
-        # see an empty cache and start its own download. With the short lock
-        # timeout, a lock that is never released makes the workers fall back
-        # within seconds, which _assert_lock_used catches, instead of hanging.
+        # see an empty cache and start its own download. A lock that is never
+        # released makes the workers fall back after the lock timeout, which
+        # _assert_lock_used catches, instead of hanging. The timeout leaves room
+        # for slow runners.
         real_download = hub.download_url_to_file
         count_lock = threading.Lock()
         num_downloads = 0
@@ -501,7 +503,7 @@ class TestHubCache(TestCase):
 
         with (
             self._assert_lock_used(),
-            patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 5),
+            patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 60),
             patch.object(hub, "download_url_to_file", side_effect=slow_download),
             ThreadPoolExecutor(len(fns)) as pool,
         ):
@@ -679,7 +681,7 @@ class TestHubCache(TestCase):
 
         with (
             self._assert_lock_used(),
-            patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 5),
+            patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 60),
             patch("sys.stderr", new=stderr),
             patch.object(hub, "download_url_to_file", side_effect=flaky_download),
             ThreadPoolExecutor(2) as pool,
@@ -1036,21 +1038,33 @@ class TestHubCache(TestCase):
         with patch("tempfile.mkstemp", side_effect=denied):
             self.assertIs(hub._lock_unavailable(lock_path, 0o644), denied)
 
+    @unittest.skipIf(not IS_WINDOWS, "Windows probe")
+    def test_lock_unavailable_reports_unwritable_lock_file(self):
+        lock_path = os.path.join(self.tmpdir.name, "entry.lock")
+        self.assertIsNone(hub._lock_unavailable(lock_path, 0o644))
+        open(lock_path, "w").close()
+        self.assertIsNone(hub._lock_unavailable(lock_path, 0o644))
+        os.chmod(lock_path, stat.S_IREAD)
+        try:
+            error = hub._lock_unavailable(lock_path, 0o644)
+        finally:
+            os.chmod(lock_path, stat.S_IREAD | stat.S_IWRITE)
+        self.assertIsInstance(error, PermissionError)
+
     @skipIfOldFilelock
     @unittest.skipIf(IS_WINDOWS, "Windows deletes lock files on release")
-    def test_lock_file_group_writable_only_in_shared_dir(self):
-        url, _ = self._save_weights()
+    @parametrize("dir_mode,lock_mode", [(0o775, 0o664), (0o755, 0o644)])
+    def test_lock_file_group_writable_only_in_shared_dir(self, dir_mode, lock_mode):
+        url, model_dir = self._save_weights()
         old_umask = os.umask(0o022)
         try:
-            for dir_mode, lock_mode in ((0o775, 0o664), (0o755, 0o644)):
-                model_dir = os.path.join(self.tmpdir.name, oct(dir_mode))
-                os.makedirs(model_dir)
-                os.chmod(model_dir, dir_mode)
-                hub.load_state_dict_from_url(url, model_dir=model_dir, progress=False)
-                mode = os.stat(os.path.join(model_dir, "weights.pt.lock")).st_mode
-                self.assertEqual(mode & 0o777, lock_mode)
+            os.makedirs(model_dir)
+            os.chmod(model_dir, dir_mode)
+            hub.load_state_dict_from_url(url, model_dir=model_dir, progress=False)
         finally:
             os.umask(old_umask)
+        mode = os.stat(os.path.join(model_dir, "weights.pt.lock")).st_mode
+        self.assertEqual(mode & 0o777, lock_mode)
 
     @skipIfOldFilelock
     def test_lock_fallback_warning_points_at_caller(self):
@@ -1073,12 +1087,29 @@ class TestHubCache(TestCase):
             patch.object(FileLock, "__enter__", side_effect=error),
         ):
             for name, call in calls.items():
-                with self.assertWarnsRegex(UserWarning, "Could not lock") as cm:
-                    call()
-                # The line of the API call itself, not of a frame above it.
-                code = call.__code__
-                where = (code.co_filename, code.co_firstlineno)
-                self.assertEqual((cm.filename, cm.lineno), where, name)
+                with self.subTest(api=name):
+                    with self.assertWarnsRegex(UserWarning, "Could not lock") as cm:
+                        call()
+                    # The line of the API call itself, not of a frame above it.
+                    code = call.__code__
+                    where = (code.co_filename, code.co_firstlineno)
+                    self.assertEqual((cm.filename, cm.lineno), where)
+
+    @skipIfOldFilelock
+    def test_cache_lock_waits_between_attempts(self):
+        entry = os.path.join(self.tmpdir.name, "entry")
+        with (
+            FileLock(entry + ".lock"),
+            patch.object(hub, "_CACHE_LOCK_TIMEOUT_S", 2.5),
+            patch("time.sleep", wraps=time.sleep) as sleep,
+            self.assertWarnsRegex(UserWarning, "for more than"),
+        ):
+            with hub._cache_lock(entry, stacklevel=2, verbose=False):
+                pass
+        delays = [c.args[0] for c in sleep.call_args_list]
+        # filelock's default would be about 50 attempts 50 ms apart.
+        self.assertLessEqual(len(delays), 4)
+        self.assertEqual(max(delays), hub._CACHE_LOCK_POLL_S)
 
     def test_warm_cache_does_not_lock(self):
         url, model_dir = self._save_weights()
