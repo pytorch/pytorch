@@ -45,6 +45,9 @@ class TestSelection(unittest.TestCase):
                 {**valid, "candidates": [1]},
                 {**valid, "candidates": None},
                 {**valid, "error": 1},
+                {**valid, "sweeps": ["default"]},
+                {**valid, "files": ["test_ops"]},
+                {**valid, "error": "e"},
             ]
             bad += [
                 {k: v for k, v in valid.items() if k != key}
@@ -65,6 +68,32 @@ class TestSelection(unittest.TestCase):
             sel = Selection({"test_nn"}, candidates={"test_nn", "test_ops"})
             p.write_text(json.dumps(sel.to_json()))
             self.assertEqual(Selection.load(p), sel)
+
+    def test_covers(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be run_all"):
+            Selection()
+        cands = {"test_nn", "test_ops", "test_torch"}
+        sel = Selection({"test_nn"}, {"dynamo_wrapped"}, candidates=cands)
+        # The model was not shown test_openreg, so it always runs.
+        for f, config, covered in [
+            ("test_openreg", "default", True),
+            ("test_nn", "default", True),
+            ("test_ops", "default", False),
+            ("test_ops", "dynamo_wrapped", True),
+            ("test_ops", "crossref", False),
+        ]:
+            self.assertEqual(sel.covers(f, config), covered, (f, config))
+        self.assertTrue(Selection(run_all=True).covers("test_ops", "default"))
+        # The first of TEST_SH_GLOBS a config contains decides its ALWAYS_COVERED.
+        for config, torch, ops in [
+            ("inductor", True, True),
+            ("inductor_amx", True, True),
+            ("inductor_cpp_wrapper", True, False),
+            ("inductor_core", False, False),
+            ("inductor_huggingface", False, False),
+        ]:
+            got = (sel.covers("test_torch", config), sel.covers("test_ops", config))
+            self.assertEqual(got, (torch, ops), config)
 
     def test_run_all_patterns(self) -> None:
         for f in [

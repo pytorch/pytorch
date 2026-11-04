@@ -4,7 +4,6 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any
-from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -78,14 +77,14 @@ class TestHeuristicsUtils(unittest.TestCase):
             macos: bool = False,
             no_td: bool = False,
         ) -> bool:
-            with mock.patch.object(utils, "get_pr_number", return_value=pr):
-                return utils.td_enabled_default(
-                    build_environment=env,
-                    workflow=workflow,
-                    is_ci=is_ci,
-                    macos=macos,
-                    no_td=no_td,
-                )
+            return utils.td_enabled_default(
+                build_environment=env,
+                workflow=workflow,
+                is_ci=is_ci,
+                pr_number=pr,
+                macos=macos,
+                no_td=no_td,
+            )
 
         self.assertTrue(default())
         self.assertFalse(default(is_ci=False))

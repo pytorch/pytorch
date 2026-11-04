@@ -116,7 +116,8 @@ class Selection:
     # rather than only reporting what it would have skipped.
     enforce: bool = False
     # The test files the model chose from. Any other file, such as a C++ test
-    # or test_openreg, is always covered. None covers no extra file.
+    # or test_openreg, is always covered. None covers no extra file, so it
+    # requires run_all.
     candidates: set[str] | None = None
     # Why the selector got no usable answer (git, the model call or its output,
     # or the test times); None for a deliberate run_all.
@@ -141,6 +142,10 @@ class Selection:
             "candidates": None if self.candidates is None else sorted(self.candidates),
             "error": self.error,
         }
+
+    def __post_init__(self) -> None:
+        if self.candidates is None and not self.run_all:
+            raise ValueError("a selection without candidates must be run_all")
 
     @classmethod
     def from_json(cls, d: dict) -> Selection:
@@ -169,8 +174,12 @@ class Selection:
             raise TypeError("run_all and enforce must be booleans")
         if not isinstance(reason, str) or not isinstance(error, (str, type(None))):
             raise TypeError("reason must be a string and error a string or null")
-        if candidates is None and not run_all:
-            raise ValueError("a selection without candidates must be run_all")
+        if unknown := set(sweeps) - set(SWEEPS):
+            raise ValueError(f"unknown sweeps {sorted(unknown)}")
+        if candidates is not None and not set(files) <= set(candidates):
+            raise ValueError("files must be candidates")
+        if error is not None and not run_all:
+            raise ValueError("a selection with an error must be run_all")
         return cls(
             set(files),
             set(sweeps),
