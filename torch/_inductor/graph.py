@@ -1904,8 +1904,8 @@ class GraphLowering(torch.fx.Interpreter):
                 return name is not None and name == new_arg.maybe_get_name()
             return False
 
-        user_kernel_hop = get_user_kernel_hop_info(fx_node.target)
-        if user_kernel_hop is not None and fx_node.target is user_kernel_hop.mutation:
+        user_kernel_hop = get_user_kernel_hop_info(fx_node.target, "mutation")
+        if user_kernel_hop is not None:
             kwargs = fx_node.kwargs["kwargs"]
             if not isinstance(kwargs, dict):
                 raise AssertionError(f"Expected dict, got {type(kwargs)}")
@@ -2101,8 +2101,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             elif (
                 n.op == "call_function"
-                and (info := get_user_kernel_hop_info(n.target)) is not None
-                and n.target is info.mutation
+                and (info := get_user_kernel_hop_info(n.target, "mutation")) is not None
                 and (constraint := info.get_layout_constraint()) != "flexible_layout"
             ):
                 debug("user_defined_kernel_layout_constraints")

@@ -6,8 +6,8 @@ layouts Inductor froze for it, and exported with ``export_to_c``, which writes a
 C header plus a PIC object. The header is spliced into wrapper.cpp; the object,
 the DSL's static CUDA-runtime shim archive and a few linker flags go into the
 link of the model .so, or of the JIT wrapper's module. This module owns those
-artifacts and the C++ that loads and launches them. It does not depend on the IR
-or on the wrapper codegen.
+artifacts and the C++ that loads and launches them; it takes parameter specs, not
+IR nodes (see cpp_wrapper_gpu.cutedsl_param_specs).
 
 The DSL is imported lazily: importing this module never needs cutlass. Do not add
 ``from __future__ import annotations``: the DSL reads annotations at runtime and
@@ -17,6 +17,7 @@ string annotations break its Constexpr detection.
 import functools
 import hashlib
 import inspect
+import logging
 import os
 import re
 import shlex
@@ -25,6 +26,7 @@ import struct
 import tempfile
 import threading
 import types
+import uuid
 import weakref
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -64,9 +66,10 @@ __all__ = [
     "validate_exported_abi",
 ]
 
+log = logging.getLogger(__name__)
+
 # Bump when the artifacts this module produces change for the same inputs.
 _FORMAT_VERSION = 1
-RUNTIME_ARCHIVE = "libcuda_dialect_runtime_static.a"
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _ARCH = re.compile(r"sm_[0-9]+[a-z]?\Z")
 _OBJECT_ADDRESS = re.compile(r" at 0x[0-9A-Fa-f]+")
@@ -195,7 +198,6 @@ class ExportedABI:
 
     prefix: str
     module_ctype: str
-    load_fn: str
     unload_fn: str
     wrapper_fn: str
     wrapper_return_ctype: str
@@ -218,6 +220,38 @@ class CuteDSLExportedKernel:
     abi: ExportedABI
     specs: tuple[ParamSpec, ...] = ()
 
+
+# The export_to_c header's Module_Load (nvidia-cutlass-dsl 4.4.2 leaves ``ret``
+# uninitialized), whose two steps emit_cpp_declarations calls itself: the object's
+# cuda_init loads the CUDA library, and its cuda_load_to_device loads it onto one
+# device. Compared with runs of white space collapsed.
+_MODULE_LOAD = """
+void _mlir_{p}_cuda_init(void **);
+void _mlir_{p}_cuda_load_to_device(void **);
+static inline void {p}_Kernel_Module_Load({p}_Kernel_Module_t *module) {{
+    cudaLibrary_t *libraryPtr = &(module->module);
+    cudaError_t ret{init};
+    struct {{
+        cudaLibrary_t **libraryPtr;
+        cudaError_t *ret;
+    }} initArgs = {{&libraryPtr, &ret}};
+    _mlir_{p}_cuda_init((void **)(&initArgs));
+    CUTE_DSL_CUDA_ERROR_CHECK(ret);
+    int32_t device_id = 0;
+    struct {{
+        cudaLibrary_t **library;
+        int32_t *device_id;
+        cudaError_t *ret;
+    }} loadArgs = {{&libraryPtr, &device_id, &ret}};
+    int32_t device_count;
+    CUTE_DSL_CUDA_ERROR_CHECK(cudaGetDeviceCount(&device_count));
+    for (int32_t i = 0; i < device_count; i++) {{
+        device_id = i;
+        _mlir_{p}_cuda_load_to_device((void **)(&loadArgs));
+        CUTE_DSL_CUDA_ERROR_CHECK(ret);
+    }}
+}}
+"""
 
 _STRUCT_FIELD = re.compile(
     r"(?P<ctype>int32_t|int64_t)\s+(?P<field>dynamic_shapes|dynamic_strides)"
@@ -244,14 +278,15 @@ def parse_exported_header(text: str, prefix: str) -> ExportedABI:
         rf"\s*{p}_Kernel_Module_t\s*;",
         "module struct",
     )
-    load_fn, unload_fn = (
-        f"{prefix}_Kernel_Module_Load",
-        f"{prefix}_Kernel_Module_Unload",
-    )
-    need(
-        rf"\b{p}_Kernel_Module_Load\s*\(\s*{p}_Kernel_Module_t\s*\*",
-        "module load function",
-    )
+    words = " ".join(text.split())
+    if not any(
+        " ".join(_MODULE_LOAD.format(p=prefix, init=init).split()) in words
+        for init in ("", " = cudaSuccess")
+    ):
+        raise CuteDSLExportError(
+            f"export_to_c header for {prefix}: no module load function of the known "
+            "form (see emit_cpp_declarations)"
+        )
     need(
         rf"\b{p}_Kernel_Module_Unload\s*\(\s*{p}_Kernel_Module_t\s*\*",
         "module unload function",
@@ -311,8 +346,7 @@ def parse_exported_header(text: str, prefix: str) -> ExportedABI:
     return ExportedABI(
         prefix=prefix,
         module_ctype=module_ctype,
-        load_fn=load_fn,
-        unload_fn=unload_fn,
+        unload_fn=f"{prefix}_Kernel_Module_Unload",
         wrapper_fn=wrapper_fn,
         wrapper_return_ctype=w.group("ret"),
         tensor_structs=tuple(structs),
@@ -494,8 +528,8 @@ def _stable_repr(value: object, inside: frozenset[int] = frozenset()) -> str:
     repr differs between processes in another way still changes the prefix.
 
     A value inside itself (``inside`` holds the ids of the values being walked) is
-    refused: constant_key does not walk a frozenset, so a cycle through one gets
-    here."""
+    refused with a ValueError, as constant_key refuses one: constant_key does not
+    walk a frozenset, so a cycle through one gets here."""
     from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
     from torch._higher_order_ops.user_kernel_hop import _object_state
 
@@ -503,7 +537,7 @@ def _stable_repr(value: object, inside: frozenset[int] = frozenset()) -> str:
         return repr(value)
     if id(value) in inside:
         what = type(value).__name__
-        raise TypeError(f"a constant kernel argument of type {what} refers to itself")
+        raise ValueError(f"a constant kernel argument of type {what} refers to itself")
     rec = functools.partial(_stable_repr, inside=inside | {id(value)})
     if isinstance(value, (tuple, list)):
         return f"{type(value).__name__}({', '.join(rec(v) for v in value)})"
@@ -550,9 +584,20 @@ def cutedsl_kernel_prefix(
     function and specs and keeps prefixes unique within a library."""
     import cutlass
 
+    from torch._higher_order_ops.cutedsl_kernel_wrap import cutedsl_kernel_name
+
     if not _ARCH.match(arch):
         raise ValueError(f"arch must look like 'sm_90a', got {arch!r}")
     fn = inspect.unwrap(host_fn)
+    spec_keys = []
+    for spec in specs:
+        try:
+            spec_keys.append(_spec_key(spec))
+        except ValueError as e:
+            name = cutedsl_kernel_name(host_fn)
+            raise ValueError(
+                f"CuTeDSL kernel {name}: parameter {spec.name!r}: {e}"
+            ) from None
     h = hashlib.sha256()
     for part in (
         f"format={_FORMAT_VERSION}",
@@ -560,7 +605,7 @@ def cutedsl_kernel_prefix(
         f"arch={arch}",
         f"{fn.__module__}.{fn.__qualname__}",
         *_dsl_function_closure(host_fn),
-        *(_spec_key(s) for s in specs),
+        *spec_keys,
     ):
         h.update(part.encode())
         h.update(b"\0")
@@ -569,24 +614,13 @@ def cutedsl_kernel_prefix(
 
 
 def _cute_dtype(dtype: torch.dtype) -> Any:
-    import cutlass
-
     from torch._native.cutedsl.dtypes import torch2cute
 
-    extra = {
-        torch.int8: cutlass.Int8,
-        torch.uint8: cutlass.Uint8,
-        torch.int16: cutlass.Int16,
-        torch.int64: cutlass.Int64,
-        torch.float8_e4m3fn: cutlass.Float8E4M3FN,
-        torch.float8_e5m2: cutlass.Float8E5M2,
-    }
-    cute_dtype = torch2cute.get(dtype, extra.get(dtype))
-    if cute_dtype is None:
+    if dtype not in torch2cute:
         raise NotImplementedError(
             f"CuTeDSL user kernels: tensor dtype {dtype} is not supported"
         )
-    return cute_dtype
+    return torch2cute[dtype]
 
 
 def _fake_args(specs: Sequence[ParamSpec]) -> list[Any]:
@@ -704,7 +738,7 @@ def export_cutedsl_kernel(
 
     import cutlass.cute as cute
 
-    from torch._inductor.codegen.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
+    from torch._native.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
     from torch._native.cutedsl.export import warm_up_exporter
 
     options = f"--gpu-arch {arch}"
@@ -799,7 +833,10 @@ def export_for_link(
         n += 1
         prefix = f"{base}_{n}"
     os.makedirs(out_root, exist_ok=True)
-    tmp_dir = tempfile.mkdtemp(prefix=f".{prefix}.", dir=out_root)
+    # The umask's mode, not mkdtemp's 0700: it becomes the cache entry, which other
+    # users of a shared cache directory read.
+    tmp_dir = os.path.join(out_root, f".{prefix}.{uuid.uuid4().hex}")
+    os.mkdir(tmp_dir)
     try:
         exported = export_cutedsl_kernel(
             host_fn, specs, out_dir=tmp_dir, prefix=prefix, arch=arch
@@ -830,12 +867,17 @@ def export_for_link(
     return exported
 
 
-def _cpp_str(text: str) -> str:
-    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
 # Standard headers the declarations, launches and CPP_INTEGER_ARG use.
-CPP_HEADERS = ("cstdint", "exception", "iostream", "mutex", "string", "type_traits")
+CPP_HEADERS = (
+    "atomic",
+    "cstdint",
+    "exception",
+    "iostream",
+    "mutex",
+    "string",
+    "type_traits",
+    "vector",
+)
 
 # Defined once per wrapper, before the first export_to_c header (whose own definition
 # is #ifndef-guarded). Those headers print and carry on when a CUDA call fails; this
@@ -880,32 +922,43 @@ To cutedsl_integer_arg(From value, const char* msg) {
 def emit_cpp_declarations(exported: CuteDSLExportedKernel, *, aot: bool) -> list[str]:
     """File-scope C++ for one exported kernel, to emit once per prefix before any
     launch (e.g. into the wrapper header), after CPP_HEADERS and CPP_CUDA_ERROR_CHECK:
-    the export_to_c header, ``<prefix>_module_ref`` and ``<prefix>_module()``, which
-    returns the module.
+    the export_to_c header and ``<prefix>_module_ref``, plus, without ``aot``,
+    ``<prefix>_module(device)``.
 
-    Module_Load loads the library and keeps the kernel handles in globals of the
-    object, so every launch from the library the object is linked into uses one
-    load. ``<prefix>_module_ref`` objects hold it: the first loads it and the last
-    unloads it. With ``aot``, each model instance holds one (a member of
+    The kernel's CUDA library is loaded lazily, as AOTInductor loads a Triton kernel's
+    module at its first launch. ``<prefix>_module_ref::get(device)``, which returns
+    the module a launch passes, takes a reference to the library on its first call
+    (the first reference loads it: the object's cuda_init, which loads it
+    independently of any device) and loads it onto ``device`` on the first call for
+    that device, by any reference, since it was loaded (cuda_load_to_device, which
+    resolves the kernels and sets their attributes for one device); the last
+    reference unloads it. These are the steps of the header's Module_Load
+    (parse_exported_header checks that it runs them as here), which runs the second
+    on every device cudaGetDeviceCount reports: the object's cubin is built for one
+    architecture, so where a visible GPU could not run it, Module_Load would fail even
+    for a model that runs on one that can. The steps pass the device to the CUDA calls
+    they make: neither changes the current device nor creates a CUDA context.
+
+    Once a reference has returned the library for a device (one of the first 64), it
+    returns it for that device without locking, as a Triton launch takes no lock: the
+    library stays loaded onto the device while the reference holds it.
+
+    With ``aot``, each model instance holds a ``<prefix>_module_ref`` (a member of
     AOTInductorModelKernels named ``<prefix>_ref``), so the library is released with
-    the last instance, as their Triton modules are, even when dlclose leaves the
-    model .so mapped. Otherwise (the JIT wrapper) ``<prefix>_module()`` holds one
-    from the first launch until the wrapper is unloaded or the process exits.
+    the last instance that launched the kernel, as their Triton modules are, even
+    when dlclose leaves the model .so mapped. Otherwise (the JIT wrapper)
+    ``<prefix>_module(device)`` holds one from its first launch until the process
+    exits.
 
-    Module_Load resolves the kernels and sets their attributes on every device
-    cudaGetDeviceCount reports, not only on the one the model runs on, passing each
-    device to the CUDA calls it makes: it neither changes the current device nor
-    creates a CUDA context. The object holds a cubin for one architecture (the C++
-    wrapper exports for config.cuda.arch, or for that of the first visible GPU), so
-    where a visible GPU cannot run it, the load fails, and with it the construction
-    of the model (``aot``) or the first launch, even for a model that runs on a GPU
-    that can; hide such GPUs with CUDA_VISIBLE_DEVICES. When the load throws
-    (CPP_CUDA_ERROR_CHECK), ``<prefix>_module_ref`` unloads what it loaded and, as
-    C10_CUDA_CHECK does, clears the CUDA runtime's last error before rethrowing (a
-    failed unload clears it too): where the object's CUDA calls go to PyTorch's
-    libcudart, PyTorch's next kernel launch check would otherwise report it. The
-    next reference (a new model instance, or the next launch) loads again.
+    A step that fails throws (CPP_CUDA_ERROR_CHECK) once the CUDA runtime's last error
+    is cleared, as C10_CUDA_CHECK clears it (a failed unload clears it too): where the
+    object's CUDA calls go to PyTorch's libcudart, PyTorch's next kernel launch check
+    would report it otherwise. A failed cuda_init unloads what it loaded; a failed
+    cuda_load_to_device leaves the library loaded for the devices it is loaded onto.
+    The next launch tries again.
     """
+    from torch._inductor.codegen.cpp_wrapper_gpu import cpp_string_literal
+
     p = exported.prefix
     abi = exported.abi
     header = "\n".join(
@@ -913,7 +966,7 @@ def emit_cpp_declarations(exported: CuteDSLExportedKernel, *, aot: bool) -> list
         for line in exported.header_text.splitlines()
         if line.strip() != "#pragma once"
     )
-    unload_error = _cpp_str(f"Failed to unload CuTeDSL kernel module {p}: ")
+    unload_error = cpp_string_literal(f"Failed to unload CuTeDSL kernel module {p}: ")
     header_name = os.path.basename(exported.header_path)
     return [
         f"// CuTeDSL user kernel {p}: export_to_c header {header_name}",
@@ -924,39 +977,104 @@ def emit_cpp_declarations(exported: CuteDSLExportedKernel, *, aot: bool) -> list
         f"std::mutex {p}_module_mutex;",
         f"int64_t {p}_module_refs = 0;",
         f"{abi.module_ctype} {p}_loaded_module{{}};",
-        f"struct {p}_module_ref {{",
-        f"  {p}_module_ref() {{",
-        f"    std::lock_guard<std::mutex> lock({p}_module_mutex);",
-        f"    if ({p}_module_refs == 0) {{",
-        f"      {p}_loaded_module = {{}};",
-        "      try {",
-        f"        {abi.load_fn}(&{p}_loaded_module);",
-        "      } catch (...) {",
-        f"        if ({p}_loaded_module.module != nullptr) {{",
-        f"          cudaLibraryUnload({p}_loaded_module.module);",
-        "        }",
-        "        (void)cudaGetLastError();",
-        "        throw;",
-        "      }",
+        "// Whether the library is loaded onto each device, since it was loaded.",
+        f"std::vector<bool> {p}_module_devices;",
+        f"void {p}_cuda_init(cudaLibrary_t* library) {{",
+        "  cudaError_t ret = cudaSuccess;",
+        "  struct {",
+        "    cudaLibrary_t** library;",
+        "    cudaError_t* ret;",
+        "  } args = {&library, &ret};",
+        f"  _mlir_{p}_cuda_init((void**)(&args));",
+        "  CUTE_DSL_CUDA_ERROR_CHECK(ret);",
+        "}",
+        f"void {p}_cuda_load_to_device(cudaLibrary_t* library, int32_t device) {{",
+        "  cudaError_t ret = cudaSuccess;",
+        "  struct {",
+        "    cudaLibrary_t** library;",
+        "    int32_t* device;",
+        "    cudaError_t* ret;",
+        "  } args = {&library, &device, &ret};",
+        f"  _mlir_{p}_cuda_load_to_device((void**)(&args));",
+        "  CUTE_DSL_CUDA_ERROR_CHECK(ret);",
+        "}",
+        f"class {p}_module_ref {{",
+        " public:",
+        f"  {p}_module_ref() = default;",
+        f"  {p}_module_ref(const {p}_module_ref&) = delete;",
+        f"  {p}_module_ref& operator=(const {p}_module_ref&) = delete;",
+        f"  {abi.module_ctype}* get(int32_t device) {{",
+        "    const uint64_t bit =",
+        "        static_cast<uint32_t>(device) < 64 ? uint64_t{1} << device : 0;",
+        "    if (devices_.load(std::memory_order_acquire) & bit) {",
+        f"      return &{p}_loaded_module;",
         "    }",
-        f"    ++{p}_module_refs;",
+        f"    std::lock_guard<std::mutex> lock({p}_module_mutex);",
+        "    try {",
+        "      if (!held_) {",
+        f"        if ({p}_module_refs == 0) {{",
+        f"          {p}_loaded_module = {{}};",
+        f"          {p}_module_devices.clear();",
+        "          try {",
+        f"            {p}_cuda_init(&{p}_loaded_module.module);",
+        "          } catch (...) {",
+        f"            if ({p}_loaded_module.module != nullptr) {{",
+        f"              cudaLibraryUnload({p}_loaded_module.module);",
+        f"              {p}_loaded_module = {{}};",
+        "            }",
+        "            throw;",
+        "          }",
+        "        }",
+        f"        ++{p}_module_refs;",
+        "        held_ = true;",
+        "      }",
+        f"      if ({p}_module_devices.size() <= static_cast<size_t>(device)) {{",
+        f"        {p}_module_devices.resize(device + 1);",
+        "      }",
+        f"      if (!{p}_module_devices[device]) {{",
+        f"        {p}_cuda_load_to_device(&{p}_loaded_module.module, device);",
+        f"        {p}_module_devices[device] = true;",
+        "      }",
+        "    } catch (...) {",
+        "      (void)cudaGetLastError();",
+        "      throw;",
+        "    }",
+        "    devices_.fetch_or(bit, std::memory_order_release);",
+        f"    return &{p}_loaded_module;",
         "  }",
         f"  ~{p}_module_ref() {{",
+        "    if (!held_) {",
+        "      return;",
+        "    }",
         "    try {",
         f"      std::lock_guard<std::mutex> lock({p}_module_mutex);",
         f"      if (--{p}_module_refs == 0) {{",
-        f"        {abi.unload_fn}(&{p}_loaded_module);",
+        f"        {abi.module_ctype} module = {p}_loaded_module;",
+        f"        {p}_loaded_module = {{}};",
+        f"        {abi.unload_fn}(&module);",
         "      }",
         "    } catch (const std::exception& e) {",
         f"      std::cerr << {unload_error} << e.what() << '\\n';",
         "      (void)cudaGetLastError();",
         "    }",
         "  }",
+        "",
+        " private:",
+        "  bool held_ = false;",
+        "  // Devices get() has returned the library for: it stays loaded onto them",
+        "  // while this reference holds it.",
+        "  std::atomic<uint64_t> devices_{0};",
         "};",
-        f"{abi.module_ctype}* {p}_module() {{",
-        *([] if aot else [f"  static {p}_module_ref ref;"]),
-        f"  return &{p}_loaded_module;",
-        "}",
+        *(
+            []
+            if aot
+            else [
+                f"{abi.module_ctype}* {p}_module(int32_t device) {{",
+                f"  static {p}_module_ref ref;",
+                "  return ref.get(device);",
+                "}",
+            ]
+        ),
         "}  // namespace",
         f"#endif  // CUTEDSL_DECLARED_{p}",
     ]
@@ -965,6 +1083,7 @@ def emit_cpp_declarations(exported: CuteDSLExportedKernel, *, aot: bool) -> list
 def emit_cpp_launch(
     exported: CuteDSLExportedKernel,
     *,
+    module_expr: str,
     tensor_args: Mapping[str, tuple[str, Sequence[str], Sequence[str]]],
     scalar_args: Mapping[str, str],
     stream_expr: str,
@@ -973,6 +1092,8 @@ def emit_cpp_launch(
     """A C++ block that launches the kernel once; ``emit_cpp_declarations`` must be in
     scope. All arguments are C++ expressions:
 
+    * ``module_expr``: the ``<prefix>_Kernel_Module_t*`` to launch with, which
+      ``<prefix>_module_ref::get`` returns;
     * ``tensor_args[name] = (data_ptr, sizes, strides)``: a pointer convertible to
       ``void*``, then one int64 expression per dynamic size and per dynamic stride,
       in dimension order;
@@ -984,9 +1105,11 @@ def emit_cpp_launch(
 
     The block checks alignment and that every value fits the narrower C type the ABI
     uses (int32 dynamic sizes, Int32 scalars...), fills the tensor structs, launches
-    with ``<prefix>_module()`` and turns a non-zero launch status into an exception,
-    after clearing the CUDA runtime's last error (see emit_cpp_declarations).
+    and turns a non-zero launch status into an exception, after clearing the CUDA
+    runtime's last error (see emit_cpp_declarations).
     """
+    from torch._inductor.codegen.cpp_wrapper_gpu import cpp_string_literal
+
     abi = exported.abi
     p = exported.prefix
     structs = {s.param: s for s in abi.tensor_structs}
@@ -1015,10 +1138,11 @@ def emit_cpp_launch(
 
     def check(cond: str, msg: str) -> None:
         lines.append(
-            f"  AOTI_RUNTIME_CHECK({cond}, {_cpp_str(f'CuTeDSL kernel {p}: {msg}')});"
+            f"  AOTI_RUNTIME_CHECK({cond}, "
+            f"{cpp_string_literal(f'CuTeDSL kernel {p}: {msg}')});"
         )
 
-    call = [f"{p}_module()"]
+    call = [module_expr]
     for i, (ctype, name) in enumerate(abi.params):
         v = f"cutedsl_arg{i}"
         if name in structs:
@@ -1110,7 +1234,7 @@ def emit_cpp_launch(
         f"  const int32_t cutedsl_status = {abi.wrapper_fn}({', '.join(call)});"
     )
     status = "static_cast<cudaError_t>(cutedsl_status)"
-    message = _cpp_str(f"CuTeDSL kernel {p}: launch failed: ")
+    message = cpp_string_literal(f"CuTeDSL kernel {p}: launch failed: ")
     lines += ["  if (cutedsl_status != 0) {", "    (void)cudaGetLastError();", "  }"]
     lines.append(
         f"  AOTI_RUNTIME_CHECK(cutedsl_status == 0, std::string({message}) + "
@@ -1122,40 +1246,21 @@ def emit_cpp_launch(
 
 @functools.cache
 def cutedsl_runtime_archive() -> str:
-    """The DSL's static CUDA-runtime shim archive for the imported cutlass.
-
-    Exported objects call ``_cudaLaunchKernelEx``-style shims defined in it; the
-    shims call cudart. Searched in ``nvidia_cutlass_dsl/cu<N>/lib/``, ``lib/`` and
-    ``nvidia_cutlass_dsl/lib/`` of every ancestor of the cutlass package (as found and
-    with symlinks resolved), N being torch's CUDA major version. From
-    nvidia-cutlass-dsl 4.6.1, wheels (and fbcode pars) ship
-    ``nvidia_cutlass_dsl/cu<N>/lib/libcuda_dialect_runtime_static.a`` for each CUDA
-    version installed. Before, wheels shipped
-    ``nvidia_cutlass_dsl/lib/libcuda_dialect_runtime_static.a``, and fbcode pars put
-    the libs-base archive in ``<root>/lib/`` and the libs-cu13 one, renamed
-    ``libcuda_dialect_cu13_runtime_static.a``, in ``<root>/nvidia_cutlass_dsl/lib/``.
-    The variant matching torch's CUDA major version is preferred.
-    """
+    """The DSL's static CUDA-runtime shim archive, whose ``_cudaLaunchKernelEx``-style
+    shims the exported objects call, for the imported cutlass and torch's CUDA
+    version: torch._native.cutedsl.export.runtime_archive, searched from the
+    ancestors of the cutlass package, as found and with symlinks resolved."""
     import cutlass
 
-    names = [RUNTIME_ARCHIVE]
-    subdirs = ["lib", "nvidia_cutlass_dsl/lib"]
-    if torch.version.cuda:
-        major = torch.version.cuda.split(".")[0]
-        names.insert(0, f"libcuda_dialect_cu{major}_runtime_static.a")
-        subdirs.insert(0, f"nvidia_cutlass_dsl/cu{major}/lib")
-    roots: list[Path] = []
-    for start in (cutlass.__file__, os.path.realpath(cutlass.__file__)):
-        roots.extend(a for a in Path(start).parents if a not in roots)
-    dirs = [root / sub for root in roots for sub in subdirs]
-    for name in names:
-        for d in dirs:
-            if (d / name).is_file():
-                return str(d / name)
-    raise RuntimeError(
-        f"CuTeDSL runtime archive {' or '.join(names)} not found next to "
-        f"{cutlass.__file__}; it ships with the nvidia-cutlass-dsl-libs wheel"
-    )
+    from torch._native.cutedsl.export import runtime_archive
+
+    roots = [
+        str(root)
+        for start in (cutlass.__file__, os.path.realpath(cutlass.__file__))
+        for root in Path(start).parents
+    ]
+    major = int(torch.version.cuda.split(".")[0]) if torch.version.cuda else None
+    return runtime_archive(roots, major, log.warning)
 
 
 def cutedsl_link_inputs(kernels: Iterable[CuteDSLExportedKernel]) -> list[str]:
@@ -1196,11 +1301,10 @@ def cutedsl_link_flags(out_dir: str, prefixes: Iterable[str]) -> list[str]:
         out_dir, f"cutedsl_{hashlib.sha256(script.encode()).hexdigest()[:16]}.ver"
     )
     if not os.path.exists(path) or Path(path).read_text() != script:
-        os.makedirs(out_dir, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=out_dir, suffix=".ver.tmp")
-        with os.fdopen(fd, "w") as f:
-            f.write(script)
-        os.replace(tmp, path)
+        from torch._inductor.codecache import write_atomic
+
+        # The umask's mode, not mkstemp's 0600: other users of the cache read it.
+        write_atomic(path, script, make_dirs=True)
     archive = os.path.basename(cutedsl_runtime_archive())
     return [
         f"-Wl,--exclude-libs,{archive}",

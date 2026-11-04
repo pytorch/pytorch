@@ -2850,7 +2850,7 @@ class TestAOTIUserStreams(InductorTestCase):
             return cuda_name.replace("cuda", "hip", 1)
         return cuda_name
 
-    def _compile_and_run(self, model, inputs, runs=1):
+    def _compile_and_run(self, model, inputs, run_inputs=None):
         from torch._inductor.utils import fresh_cache, run_and_get_cpp_code
 
         with fresh_cache():
@@ -2861,8 +2861,10 @@ class TestAOTIUserStreams(InductorTestCase):
 
             package_path, code = run_and_get_cpp_code(_compile)
             loaded = torch._inductor.aoti_load_package(package_path)
-            results = [loaded(*inputs) for _ in range(runs)]
-        return results[-1], code
+            result = loaded(*inputs)
+            if run_inputs is not None:
+                result = loaded(*run_inputs)
+        return result, code
 
     def test_record_wait_event_basic(self):
         class Model(torch.nn.Module):
@@ -2934,11 +2936,16 @@ class TestAOTIUserStreams(InductorTestCase):
             torch.randn(4096, 4096, device="cuda"),
             torch.eye(4096, device="cuda") * 0.9,
         )
-        expected = model(*inputs)
+        # Checked on a second run, with other inputs: the first run loads the Triton
+        # kernel, which synchronizes the device, and a kernel on the wrong stream
+        # could find the first run's results in the buffers it reads.
+        run_inputs = (
+            torch.randn(4096, 4096, device="cuda"),
+            torch.eye(4096, device="cuda") * 0.8,
+        )
+        expected = model(*run_inputs)
 
-        # The second run's result: the first run loads the Triton kernel, which
-        # synchronizes the device.
-        result, code = self._compile_and_run(model, inputs, runs=2)
+        result, code = self._compile_and_run(model, inputs, run_inputs)
 
         self.assertEqual(result, expected)
         (region,) = set(

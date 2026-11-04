@@ -4289,6 +4289,20 @@ class DynamoTritonHOPifier(TritonHOPifier):
 dynamo_triton_hopifier_singleton = DynamoTritonHOPifier()
 
 
+def specialize_symbolic_variable(arg: VariableTracker) -> VariableTracker:
+    """``arg`` with a symbolic value specialized, for a kernel argument that a
+    user-defined kernel's DSL bakes into the compiled kernel (a Triton tl.constexpr, a
+    CuTeDSL Constexpr or constant).
+
+    See [Note: Specialize tl.constexpr args in user-defined triton kernels]
+    """
+    from .tensor import SymNodeVariable
+
+    if isinstance(arg, SymNodeVariable):
+        return ConstantVariable.create(arg.evaluate_expr())
+    return arg
+
+
 class TritonKernelVariable(VariableTracker):
     grid: "TritonGridType"
     kernel: "TritonKernelType"
@@ -4332,13 +4346,7 @@ class TritonKernelVariable(VariableTracker):
         return dynamo_triton_hopifier_singleton.call_run(self, args, kwargs, tx)  # type: ignore[return-value]
 
     def specialize_symbolic(self, arg: Any) -> Any:
-        from .constant import ConstantVariable
-        from .tensor import SymNodeVariable
-
-        # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
-        if isinstance(arg, SymNodeVariable):
-            return ConstantVariable.create(arg.evaluate_expr())
-        return arg
+        return specialize_symbolic_variable(arg)
 
     tp_methods = {"run": Method(run)}
 

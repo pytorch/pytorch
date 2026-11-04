@@ -262,6 +262,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         *,
         constant_args: dict[str, Any],
         runtime_args: dict[str, Any],
+        device: torch.device,
     ) -> str:
         raise NotImplementedError(
             "User-defined CuTeDSL kernels are not supported by the FX wrapper"

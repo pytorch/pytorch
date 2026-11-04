@@ -3862,7 +3862,8 @@ class TestDslRuntimeArchive(unittest.TestCase):
     has to choose by the build's toolkit rather than take whichever directory it
     finds first. These fixtures are empty files: what is under test is the
     SELECTION, not the archives' contents. It is the one lookup in stage 2 that can
-    fail a build."""
+    fail a build. Stage 2 shares it with Inductor (torch/_native/cutedsl/export.py,
+    loaded by path, as torch does not import here)."""
 
     ARCHIVE = "libcuda_dialect_runtime_static.a"
 
@@ -3905,8 +3906,12 @@ class TestDslRuntimeArchive(unittest.TestCase):
             with contextlib.redirect_stderr(io.StringIO()) as err:
                 got = build_stage2._dsl_runtime_archive()
         self.assertEqual(got, os.path.join(root, "cu12", "lib", self.ARCHIVE))
-        self.assertIn("no dialect runtime for CUDA 13", err.getvalue())
-        self.assertIn("cu13", err.getvalue(), "the warning should name the extra")
+        self.assertIn("no CuTeDSL runtime archive for CUDA 13", err.getvalue())
+        self.assertIn(
+            "'nvidia-cutlass-dsl[cu13]'",
+            err.getvalue(),
+            "the warning should name the extra",
+        )
 
     def test_the_mismatch_fallback_takes_the_highest_major(self):
         # Deterministic, so two builds of one environment link the same file.
@@ -3921,7 +3926,7 @@ class TestDslRuntimeArchive(unittest.TestCase):
         with self._wheel(("cu12", "cu13"), cuda_major="13"):
             with contextlib.redirect_stderr(io.StringIO()) as err:
                 build_stage2._dsl_runtime_archive()
-        self.assertNotIn("no dialect runtime", err.getvalue())
+        self.assertNotIn("no CuTeDSL runtime archive", err.getvalue())
 
     def test_the_cache_answering_skips_the_torch_probe(self):
         # The torch subprocess is the expensive probe and the only one that can fail

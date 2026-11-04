@@ -514,6 +514,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         *,
         constant_args: dict[str, Any],
         runtime_args: dict[str, Any],
+        device: torch.device,
     ) -> str:
         raise NotImplementedError(
             "User-defined CuTeDSL kernels need a CUDA device (CppWrapperGpu)"
@@ -1289,8 +1290,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             kernel_ptr = f"(*{name})"
             signature = kernel.get_signature().replace(name, kernel_ptr)
             self.prefix.writeline(f"    {signature} = torch::aot_inductor::{name};")
-        # Each model instance holds the CUDA library of every CuTeDSL kernel (see
-        # user_kernel_aot.emit_cpp_declarations).
+        # Each model instance holds a reference to the CUDA library of every CuTeDSL
+        # kernel, taken at its first launch (see user_kernel_aot.emit_cpp_declarations).
         for prefix in self.cutedsl_exported_kernels:
             self.prefix.writeline(f"    {prefix}_module_ref {prefix}_ref;")
         self.prefix.writeline("};")

@@ -9144,20 +9144,24 @@ class UserDefinedCuteDSLKernel(UserDefinedKernel):
     Unlike a user Triton kernel, Inductor does not compile or fuse into it: the
     Python wrapper launches the host function on the current stream of the kernel's
     device; the C++ wrapper (AOTInductor or cpp_wrapper) calls the C entry point
-    export_to_c exported for it, on the wrapper's stream. The FX wrapper refuses it.
+    export_to_c exported for it on the stream it launches Triton kernels on: the
+    wrapper's, or inside a user stream region of an AOTInductor model, the region's.
+    The FX wrapper refuses it.
     """
 
     def __init__(
         self,
         *,
         kernel_idx: int,
+        constant_args_idx: int,
         kernel_args: dict[str, Any],
-        mutated_arg_names: Sequence[str],
     ) -> None:
         from torch._higher_order_ops.cutedsl_kernel_wrap import (
             cutedsl_kernel_side_table,
+            cutedsl_kernel_wrapper_mutation,
             get_host_fn_info,
         )
+        from torch._higher_order_ops.user_kernel_hop import get_user_kernel_hop_info
 
         super().__init__(kernel_args)
         self.kernel_idx = kernel_idx
@@ -9166,52 +9170,69 @@ class UserDefinedCuteDSLKernel(UserDefinedKernel):
         self.ordered_kwargs_for_cpp_kernel = [
             name for name in self.host_fn_info.params if name in kernel_args
         ]
-        self.register_mutations([kernel_args[name] for name in mutated_arg_names])
+        # The write set, as graph.py's propagate_mutation reads it for this node.
+        hop = get_user_kernel_hop_info(cutedsl_kernel_wrapper_mutation)
+        if hop is None:
+            raise AssertionError("the CuTeDSL user-kernel HOPs are not registered")
+        mutated = hop.get_mutated_tensors(
+            {"kernel_idx": kernel_idx, "constant_args_idx": constant_args_idx},
+            self._as_tensors(kernel_args),
+        )
+        self.register_mutations([kernel_args[name] for name in mutated])
+
+    @staticmethod
+    def _as_tensors(args: dict[str, Any]) -> dict[str, Any]:
+        """``args`` with an empty meta tensor for each IR node: the CuTeDSL helpers
+        that classify a call's arguments (CuteDSLHostFnInfo.split_args,
+        get_cutedsl_mutated_tensors) only ask whether one is a tensor."""
+        tensor = torch.empty(0, device="meta")
+        return {k: tensor if isinstance(v, IRNode) else v for k, v in args.items()}
 
     def split_args(self) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Kernel arguments passed at launch (tensors and runtime scalars, in
-        signature order) and the constants the generated code binds once (Constexpr
-        arguments, None, objects). Parameters the call left out take a copy of their
-        defaults, made here as the side table copies passed constants. Unlike those,
-        defaults are not guarded by Dynamo: changing one later does not recompile."""
+        """The kernel arguments passed at launch (tensors and runtime scalars, in
+        signature order) and the constants the generated code binds once, split by
+        CuteDSLHostFnInfo.split_args as the eager launch splits a call, with an IR
+        node counting as a tensor. A runtime scalar is a value the generated code can
+        print (see python_scalar; a symbolic one stays as it is). A parameter the call
+        left out takes a copy of its default, as the side table copies passed
+        constants; unlike those, defaults are not guarded by Dynamo: changing one
+        later does not recompile."""
         from torch._higher_order_ops.cutedsl_kernel_wrap import (
             CUTEDSL_CONSTANT_RULES,
             python_scalar,
         )
         from torch._higher_order_ops.user_kernel_hop import _snapshot
 
-        info = self.host_fn_info
-        runtime_args: dict[str, Any] = {}
-        constant_args: dict[str, Any] = {}
-        for name in info.params:
-            if name == info.stream_param:
-                continue
-            if name in self.ordered_kwargs_for_cpp_kernel:
-                value = self.get_kwargs_value(name)
-            else:
-                value = _snapshot(info.defaults[name], CUTEDSL_CONSTANT_RULES)
-            if isinstance(value, IRNode):
-                runtime_args[name] = value
-            elif info.is_runtime_scalar(name, value):
-                # A cutlass Numeric value or an int/float subclass, as a plain Python
-                # value the generated code can print (symbolic values stay as they are).
-                runtime_args[name] = python_scalar(value)
-            else:
-                constant_args[name] = value
+        passed = {
+            name: self.get_kwargs_value(name)
+            for name in self.ordered_kwargs_for_cpp_kernel
+        }
+        runtime, constants = self.host_fn_info.split_args(
+            self.kernel.name, self._as_tensors(passed)
+        )
+        runtime_args = {
+            k: passed[k] if isinstance(passed.get(k), IRNode) else python_scalar(v)
+            for k, v in runtime.items()
+        }
+        constant_args = {
+            k: v if k in passed else _snapshot(v, CUTEDSL_CONSTANT_RULES)
+            for k, v in constants.items()
+        }
         return runtime_args, constant_args
 
     @override
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         runtime_args, constant_args = self.split_args()
+        device = self.get_device_or_error()
         name = wrapper.define_user_defined_cutedsl_kernel(
-            self.kernel, constant_args=constant_args, runtime_args=runtime_args
+            self.kernel,
+            constant_args=constant_args,
+            runtime_args=runtime_args,
+            device=device,
         )
         self.codegen_comment(wrapper, name)
         wrapper.generate_user_defined_cutedsl_kernel_call(
-            name,
-            self.kernel,
-            runtime_args=runtime_args,
-            device=self.get_device_or_error(),
+            name, self.kernel, runtime_args=runtime_args, device=device
         )
 
 
