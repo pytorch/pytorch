@@ -266,7 +266,7 @@ class TunableOp {
           }
           return ResultEntry::Default();
         }
-        {
+        try {
           auto result = FindFastestAmong(
               params, {ResultEntry::Default().GetKey(), borrowed.GetKey()});
           // Always persisted: IsNearestMatchEnabled() is false unless
@@ -275,6 +275,26 @@ class TunableOp {
           // it properly means tuning from a file without these entries.
           mgr.RecordBorrowed(op_sig, concrete_sig, result);
           return result;
+        }
+        catch (const c10::Error& e) {
+          // FindFastestAmong TORCH_CHECKs the calls it makes and allocates
+          // copies, so it can throw. Nothing was measured, so the promise
+          // above -- that RecordBorrowed would cover this shape -- does not
+          // hold, and without this the shape reaches neither file and offline
+          // tuning can never find it. Report it untuned and serve what
+          // runtime will serve: runtime has nearest match off, so it takes
+          // the wildcard tail below, and Null becomes Default.
+          TUNABLE_LOG2(
+              "borrow validation failed for ", op_sig, '(', concrete_sig,
+              "), recording untuned: ", e.what());
+          if (ctx->IsRecordUntunedEnabled()) {
+            mgr.RecordUntuned(
+                ctx->GetUntunedFile(), op_sig, concrete_sig,
+                params->BLASSignature());
+          }
+          return ctx->IsWildcardFallbackEnabled()
+              ? mgr.LookupWildcardFallback(op_sig, concrete_sig)
+              : ResultEntry::Null();
         }
       }
       // Nearest match takes precedence: once it is on, a miss with no usable
