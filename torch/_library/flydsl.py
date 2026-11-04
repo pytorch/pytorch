@@ -81,6 +81,12 @@ def wrap_flydsl(
     arguments that may share memory (the same tensor, or views that may overlap)
     cannot be functionalized: PT2 refuses such a call, which eager runs.
 
+    AOTInductor and the C++ wrapper compile sizes and strides that are dynamic in
+    the graph as dynamic FlyDSL layouts. A launch block derived from one is then not
+    a constant, so FlyDSL knows no block size for the kernel: PT2 compiles it for up
+    to 1024 threads per block (HIP's default) unless the kernel sets
+    ``known_block_size`` or ``value_attrs={"rocdl.flat_work_group_size": ...}``.
+
     Examples:
 
         >>> # xdoctest: +SKIP

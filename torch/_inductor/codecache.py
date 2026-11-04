@@ -2766,6 +2766,34 @@ class CpuTritonKernelCache:
         return cls.cache.keys()
 
 
+def flydsl_user_kernel_link_args(output_dir: str) -> list[str]:
+    """Link arguments for the user FlyDSL kernels the current graph's C++ wrapper
+    exported: their objects (each embeds FlyDSL's AOT runtime), a version script
+    keeping their symbols private and the link flags their metadata ask for (see
+    codegen/flydsl/user_kernel_aot.py). They go through extra_flags, not the object
+    list, whose files are deleted after linking."""
+    kernels = list(
+        getattr(V.graph.wrapper_code, "flydsl_exported_kernels", {}).values()
+    )
+    if not kernels:
+        return []
+    if (
+        config.aot_inductor.package_cpp_only
+        or config.aot_inductor.emit_multi_arch_kernel
+        or config.aot_inductor.cross_target_platform == "windows"
+    ):
+        raise NotImplementedError(
+            "User-defined FlyDSL kernels support neither package_cpp_only, "
+            "emit_multi_arch_kernel nor cross-compiling for Windows"
+        )
+    from torch._inductor.codegen.flydsl.user_kernel_aot import (
+        flydsl_link_flags,
+        flydsl_link_inputs,
+    )
+
+    return [*flydsl_link_inputs(kernels), *flydsl_link_flags(output_dir, kernels)]
+
+
 class AotCodeCompiler:
     """
     Compile AOT Inductor generated code.
@@ -3642,6 +3670,7 @@ end
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
                 use_relative_path=use_relative_path,
+                extra_flags=flydsl_user_kernel_link_args(output_dir),
             )
 
             if gpu_kernels_o and device_type == "xpu":
