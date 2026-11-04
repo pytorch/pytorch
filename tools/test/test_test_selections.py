@@ -4,6 +4,7 @@ import functools
 import io
 import json
 import random
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -785,6 +786,21 @@ class TestSplitTests(unittest.TestCase):
             _, stderr, _ = self.split(sel, td_enabled=td_enabled)
             self.assertEqual(failed_line in stderr, printed, (sel, td_enabled))
 
+    def test_broken_llm_td_keeps_td(self) -> None:
+        sel = Selection(files={"a"}, enforce=True, candidates={"a"})
+        broken = (
+            mock.patch.dict(sys.modules, {"tools.testing.llm_td.selection": None}),
+            mock.patch.object(Selection, "load", side_effect=RuntimeError("bug")),
+        )
+        for patch in broken:
+            with patch:
+                split, stderr, artifacts = self.split(sel)
+            self.assertIsNone(split.llm)
+            self.assertSplit(split, ["p"], ["a"])
+            self.assertTrue(stderr.startswith("::warning::Ignoring the LLM selection"))
+            self.assertTrue(stderr.endswith(self.TD_LINE), stderr)
+            self.assertEqual([x["source"] for x in artifacts], ["td"])
+
     def test_unknown_previous_failures_keep_td(self) -> None:
         sel = Selection(files={"a"}, enforce=True, candidates={"a"})
         split, stderr, artifacts = self.split(sel, prev=None)
@@ -821,6 +837,11 @@ class TestRunTestSplit(unittest.TestCase):
                 record=is_ci,
             )
             self.assertIs(split.call_args.kwargs["previous_failures"], prev)
+
+    def test_runs_without_llm_td(self) -> None:
+        self.assertEqual(test_selections.LLM_TD_SELECTION_FILE, selection.LLM_TD_SELECTION_FILE)  # fmt: skip
+        code = "import sys; sys.modules['tools.testing.llm_td'] = None; import tools.testing.test_selections"  # fmt: skip
+        subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, check=True)
 
     def test_unknown_previous_failures_keep_td(self) -> None:
         tp = TestPrioritizations(["a", "p"], {TestRun("p"): 1})

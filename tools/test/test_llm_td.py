@@ -357,10 +357,15 @@ class TestSelection(unittest.TestCase):
             sel = Selection({"test_nn"}, candidates={"test_nn", "test_ops"})
             p.write_text(json.dumps(sel.to_json()))
             self.assertEqual(Selection.load(p), sel)
-            # A version-1 file from a selector predating enforce_requested.
-            old = {k: v for k, v in sel.to_json().items() if k != "enforce_requested"}
-            p.write_text(json.dumps(old))
-            self.assertEqual(Selection.load(p), sel)
+            # A version-1 file from a selector predating enforce_requested,
+            # where enforce means it was requested.
+            enforced = Selection({"test_nn"}, enforce=True, candidates={"test_nn"})
+            for s in (sel, enforced):
+                old = {k: v for k, v in s.to_json().items() if k != "enforce_requested"}
+                p.write_text(json.dumps(old))
+                loaded = Selection.load(p)
+                self.assertEqual(loaded, s)
+                self.assertEqual(getattr(loaded, "enforce_requested", None), s.enforce)
 
     def test_run_all_patterns(self) -> None:
         for f in [
@@ -638,12 +643,12 @@ class TestApplySelection(unittest.TestCase):
                 previous_failures=prev,
             )
 
-    def metric(self, enforced: bool) -> dict[str, object]:
+    def metric(self, enforced: bool, requested: bool) -> dict[str, object]:
         # p previously failed, and s is hedged within the 200s budget.
         return {
             "list_id": "7916c4091b31",  # sha256 of the sorted test list
             "enforced": enforced,
-            "enforce_requested": False,
+            "enforce_requested": requested,
             "td_enabled": True,
             "run_all": False,
             "selector_error": None,
@@ -678,7 +683,7 @@ class TestApplySelection(unittest.TestCase):
         applied = self.apply(Selection(files={"a"}), prev={"p", "elsewhere"})
         self.assertFalse(applied.enforced)
         self.assertEqual(applied.td_include, {"p", "s"})
-        self.assertEqual(applied.selection_metric, self.metric(enforced=False))
+        self.assertEqual(applied.selection_metric, self.metric(False, False))
         self.assertEqual(
             applied.failure_metric(TestRun("s")),
             {
@@ -701,7 +706,7 @@ class TestApplySelection(unittest.TestCase):
         applied = self.apply(sel, prev={"p", "elsewhere"})
         self.assertEqual([str(x) for x in applied.split.include], ["p", "s", "a"])
         self.assertEqual([str(x) for x in applied.split.exclude], ["big", "rest"])
-        self.assertEqual(applied.selection_metric, self.metric(enforced=True))
+        self.assertEqual(applied.selection_metric, self.metric(True, True))
 
     def test_enforced_log_line(self) -> None:
         stderr = io.StringIO()
@@ -730,7 +735,7 @@ class TestApplySelection(unittest.TestCase):
             "previous_failures_known": False,
             "kept_td": True,
         }
-        self.assertEqual(applied.selection_metric, self.metric(False) | unknown)
+        self.assertEqual(applied.selection_metric, self.metric(False, True) | unknown)
         failure = applied.failure_metric(TestRun("p"))
         keys = ("previous_failure_added", "kept_td", "previous_failures_known")
         self.assertEqual([failure[k] for k in keys], [False, True, False])
@@ -792,7 +797,7 @@ class TestApplySelection(unittest.TestCase):
                     "failure": f,
                     "covered": covered,
                     "enforced": True,
-                    "enforce_requested": False,
+                    "enforce_requested": True,
                     "td_enabled": True,
                     "in_td_include": in_td,
                     "hedged": hedged,
@@ -841,7 +846,7 @@ class TestApplySelection(unittest.TestCase):
             failure = applied.failure_metric(TestRun("a"))
             for metric in (applied.selection_metric, failure):
                 self.assertEqual(metric["selector_error"], error)
-                self.assertEqual(metric["enforce_requested"], sel is requested)
+                self.assertEqual(metric["enforce_requested"], sel is not failed)
 
 
 class TestPrompt(unittest.TestCase):
