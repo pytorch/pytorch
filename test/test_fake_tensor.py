@@ -5473,17 +5473,18 @@ class TestCppFakeTensorModeBindings(TestCase):
         with torch._functorch.config.patch(fake_tensor_allow_meta=False):
             mode, wrapper = self._make_mode(ShapeEnv())
         self.assertFalse(mode.allow_meta)
-        self.assertTrue(mode.allow_unsafe_data_ptr_access)
-        config = torch._functorch.config
-        with config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-            mode, wrapper = self._make_mode()
-        self.assertFalse(mode.allow_unsafe_data_ptr_access)
-        mode.allow_unsafe_data_ptr_access = True
-        self.assertTrue(mode.allow_unsafe_data_ptr_access)
         with self.assertRaisesRegex(RuntimeError, "Expected a FakeTensorConverter"):
             torch._C._CppFakeTensorMode(None, None, self.Wrapper())
         with self.assertRaisesRegex(RuntimeError, "Expected the CppFakeTensorMode"):
             torch._C._CppFakeTensorMode(FakeTensorConverter(), None, None)
+
+    def test_allow_unsafe_data_ptr_access(self):
+        config = torch._functorch.config
+        with config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            mode, _ = self._make_mode()
+        self.assertFalse(mode._allow_unsafe_data_ptr_access)
+        mode._allow_unsafe_data_ptr_access = True
+        self.assertTrue(mode._allow_unsafe_data_ptr_access)
 
     def test_wrapper_weakref(self):
         mode, wrapper = self._make_mode()
@@ -5566,6 +5567,9 @@ class TestCppFakeTensorModeBindings(TestCase):
         fake_subclass = torch.Tensor._make_subclass(DispatchSubclass, meta_fake)
         with self.assertRaisesRegex(RuntimeError, "Expected a plain meta tensor"):
             torch._C._from_meta_and_device(fake_subclass, torch.device("cpu"), mode)
+        functional = torch._to_functional_tensor(torch.empty(2, device="meta"))
+        with self.assertRaisesRegex(RuntimeError, "Expected a plain meta tensor"):
+            torch._C._from_meta_and_device(functional, torch.device("cpu"), mode)
 
         # allow_meta is enforced
         with torch._functorch.config.patch(fake_tensor_allow_meta=False):
@@ -5602,7 +5606,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             fake.data_ptr()
 
         # Reassigning applies to fakes created afterwards
-        mode.allow_unsafe_data_ptr_access = False
+        mode._allow_unsafe_data_ptr_access = False
         with self.assertRaisesRegex(RuntimeError, "data pointer"):
             make_fake(mode).data_ptr()
         with self.assertWarnsOnceRegex(UserWarning, warning):
