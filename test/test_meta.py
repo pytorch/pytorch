@@ -382,10 +382,15 @@ class TestMetaConverter(TestCase):
 
     def test_describe_cpp_fake_dispatches_to_fake(self):
         # A C++ fake's metadata queries still reach the Fake key while it is
-        # described, through the key in its own key set
-        fake_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
+        # described, through the key in its own key set, also inside a wrapper
+        # without the key, unless the caller excluded Fake
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        fake = torch._C.DispatchKey.Fake
+        fake_key = torch._C.DispatchKeySet(fake)
         t = torch.randn(4, 4).to_sparse().to("meta")
         torch._C._set_fake_device(t, torch.device("cpu"))
+        queries = {"sparse_dim", "dense_dim", "is_coalesced"}
         calls = []
 
         def spy(op):
@@ -396,12 +401,22 @@ class TestMetaConverter(TestCase):
 
             return kernel
 
+        describer = MetaTensorDescriber()
         with torch.library._scoped_library("aten", "IMPL") as lib:
-            for op in ("sparse_dim", "dense_dim", "is_coalesced"):
+            for op in queries:
                 lib.impl(op, spy(op), "Fake")
-            with torch._C._IncludeDispatchKeyGuard(torch._C.DispatchKey.Fake):
-                desc = MetaTensorDescriber().describe_tensor(t)
-        self.assertEqual(set(calls), {"sparse_dim", "dense_dim", "is_coalesced"})
+            with torch._C._IncludeDispatchKeyGuard(fake):
+                desc = describer.describe_tensor(t)
+                self.assertEqual(set(calls), queries)
+                for wrapper in (torch._to_functional_tensor(t), TwoTensor(t, t)):
+                    calls.clear()
+                    describer.describe_tensor(wrapper)
+                    self.assertEqual(set(calls), queries)
+                calls.clear()
+                with torch._C._ExcludeDispatchKeyGuard(fake_key):
+                    describer.describe_tensor(t)
+                self.assertEqual(calls, [])
+                self.assertTrue(torch._C._dispatch_tls_is_dispatch_key_included(fake))
         self.assertEqual(desc.sparse_dim, 2)
         self.assertEqual(desc.dense_dim, 0)
         self.assertTrue(desc.is_coalesced)
