@@ -69,7 +69,7 @@ SELECTION_VERSION = 1
 
 # Tests that run the files a change matches although they do not import them:
 # the drivers of the directories discover_tests.py blocklists (except
-# custom_backend, mobile and onnx_caffe2, which have none, and
+# custom_backend and mobile, which have none, and
 # torch_openreg/tests, whose driver test_openreg is never a candidate), and
 # TD's ADDITIONAL_MAPPINGS.
 DRIVER_MAPPINGS = {
@@ -87,10 +87,17 @@ DRIVER_MAPPINGS = {
     "test_cpp_extensions_jit": [r"^test/cpp_extensions/"],
     "test_cpp_extensions_mtia_backend": [r"^test/cpp_extensions/"],
     "test_cpp_extensions_stream_and_event": [r"^test/cpp_extensions/"],
+    "test_dispatch": [r"^test/cpp_extensions/dangling_impl_extension\.cpp$"],
     "test_ao_sparsity": [r"^test/ao/"],
     "test_autograd": [r"^test/autograd/"],
     "test_fx": [r"^test/fx/"],
     "test_jit": [r"^test/jit/"],
+    # They do `from test_jit import *`.
+    **{
+        t: [r"^test/jit/", r"^test/test_jit\.py$"]
+        for t in ("test_jit_profiling", "test_jit_legacy")
+    },
+    "test_jit_fuser_te": [r"^test/jit/test_fuser_common\.py$"],
     "test_package": [r"^test/package/"],
     "test_quantization": [r"^test/quantization/"],
 }
@@ -195,6 +202,8 @@ def parse_model_output(
         raise ValueError(f"unknown sweeps {sorted(unknown)}")
     if not isinstance(out["run_all"], bool):
         raise ValueError("run_all is not a boolean")
+    if not isinstance(out["reason"], str):
+        raise ValueError("reason is not a string")
     names = {t["file"]: normalize_test_name(t["file"], candidates) for t in tests}
     if grep is not None and not all(names.values()):
         # Every file under test/ at the head.
@@ -231,7 +240,8 @@ class Selection:
     # rather than only reporting what it would have skipped.
     enforce: bool = False
     # The test files the model chose from. Any other file, such as a C++ test
-    # or test_openreg, is always covered. None covers no extra file.
+    # or test_openreg, is always covered. None covers no extra file, so it
+    # requires run_all.
     candidates: set[str] | None = None
     # Why the selector got no usable answer (git, the model call or its output,
     # or the test times); None for a deliberate run_all.
@@ -257,8 +267,6 @@ class Selection:
                 reason="no model output; running everything",
                 error="no model output",
             )
-        if needs_run_all(changed_files):
-            return cls(run_all=True, reason="change touches test infrastructure")
         try:
             files, sweeps = parse_model_output(out, candidates, grep)
         except ValueError as e:
@@ -267,6 +275,8 @@ class Selection:
                 reason=f"malformed model output ({e}); running everything",
                 error=f"malformed model output: {e}",
             )
+        if needs_run_all(changed_files):
+            return cls(run_all=True, reason="change touches test infrastructure")
         if not isinstance(out, dict):
             raise AssertionError("parse_model_output accepts only objects")
         edited = edited_tests(changed_files, candidates)
@@ -293,6 +303,10 @@ class Selection:
             "candidates": None if self.candidates is None else sorted(self.candidates),
             "error": self.error,
         }
+
+    def __post_init__(self) -> None:
+        if self.candidates is None and not self.run_all:
+            raise ValueError("a selection without candidates must be run_all")
 
     @classmethod
     def from_json(cls, d: dict) -> Selection:
@@ -321,8 +335,12 @@ class Selection:
             raise TypeError("run_all and enforce must be booleans")
         if not isinstance(reason, str) or not isinstance(error, (str, type(None))):
             raise TypeError("reason must be a string and error a string or null")
-        if candidates is None and not run_all:
-            raise ValueError("a selection without candidates must be run_all")
+        if unknown := set(sweeps) - set(SWEEPS):
+            raise ValueError(f"unknown sweeps {sorted(unknown)}")
+        if candidates is not None and not set(files) <= set(candidates):
+            raise ValueError("files must be candidates")
+        if error is not None and not run_all:
+            raise ValueError("a selection with an error must be run_all")
         return cls(
             set(files),
             set(sweeps),
