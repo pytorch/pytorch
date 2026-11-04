@@ -4,10 +4,10 @@ A selection names test files (paths under test/ without .py), whole test
 directories, and wrapper sweeps (configs such as dynamo_wrapped that re-run
 ordinary test files in a special mode). A test file is covered in a given CI
 config when the selection names the file, names that config as a sweep, or is
-run_all, and so is every test file the model was not shown and every file in a
-WHOLE_CONFIGS config. When run_test.py enforces the selection, it runs the
-covered files, the files that already failed on the PR and that TD runs, and,
-within a hedge budget, TD's top-scored files.
+run_all, and so is every test file the model was not shown and every file that
+ALWAYS_COVERED lists for that config. When run_test.py enforces the selection,
+it runs the covered files, the files that already failed on the PR and that TD
+runs, and, within a hedge budget, TD's top-scored files.
 """
 
 from __future__ import annotations
@@ -41,9 +41,9 @@ if TYPE_CHECKING:
 
 
 SWEEPS = ("dynamo_wrapped", "crossref")
-# test.sh's test_inductor_shard runs its few files with run_test.py --inductor,
+# The files test.sh's test_inductor_shard runs with run_test.py --inductor,
 # which compiles every test, so like a sweep any change can break them.
-WHOLE_CONFIGS = ("inductor",)
+ALWAYS_COVERED = {"inductor": frozenset({"test_modules", "test_ops", "test_ops_gradients", "test_torch"})}  # fmt: skip
 LLM_TD_SELECTION_FILE = "llm_td_selection.json"
 # The selector runs from the default branch and run_test.py from the PR, so
 # bump this whenever an older reader would misread the selection file.
@@ -366,7 +366,7 @@ class Selection:
     # run_test.py handler or a C++ test, is always covered. None covers no extra file.
     candidates: set[str] | None = None
     # Why from_model_output got no usable model answer; not serialized.
-    error: str | None = None
+    error: str | None = field(default=None, compare=False, repr=False)
 
     @classmethod
     def from_model_output(
@@ -382,9 +382,9 @@ class Selection:
         A missing or malformed output, a change to test infrastructure, an
         edited inductor failure list naming an unknown class, too many import
         hops, and with `grep` an edited file under test/ that no test reads
-        (see data_file_readers) all fall back to running everything; only the
-        first two set error. Test files the change
-        edits and their drivers are always selected, and with `grep` so are the
+        (see data_file_readers) all fall back to running everything; only a
+        missing or malformed output sets error. Test files the change edits
+        and their drivers are always selected, and with `grep` so are the
         test files that import them (see importers), those defining the tests
         that an edited failure list names (see failure_list_sources), and those
         reading an edited data file (see data_file_readers), with their importers."""
@@ -424,8 +424,9 @@ class Selection:
     def covers(self, test_file: str, test_config: str) -> bool:
         if self.candidates is not None and test_file not in self.candidates:
             return True
-        whole = self.run_all or test_config in (*self.sweeps, *WHOLE_CONFIGS)
-        return whole or test_file in self.files
+        whole = self.run_all or test_config in self.sweeps
+        always = ALWAYS_COVERED.get(test_config, ())
+        return whole or test_file in self.files or test_file in always
 
     def split(
         self,
