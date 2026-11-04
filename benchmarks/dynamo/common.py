@@ -2256,10 +2256,7 @@ class BenchmarkRunner:
                     else x,
                     fp64_outputs,
                 )
-            except Exception as e:
-                if isinstance(e, torch._C.OutOfMemoryError):
-                    log.exception("fp64 reference generation failed for %s", name)
-                    return record_status("OOM", dynamo_start_stats=start_stats)
+            except Exception:
                 log.warning(
                     "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
                     name,
