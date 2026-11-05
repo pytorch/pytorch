@@ -411,6 +411,10 @@ g () {
             ".github/actions/download-build-artifacts/action.yml",
             ".github/scripts/filter_test_configs.py",
             ".github/scripts/parse_ref.py",
+            ".github/scripts/pytest_cache.py",
+            ".github/scripts/pytest_caching_utils.py",
+            ".github/actions/pytest-cache-download/action.yml",
+            ".github/actions/pytest-cache-upload/action.yml",
             ".github/workflows/pull.yml",
             ".github/workflows/trunk.yml",
             ".github/workflows/periodic.yml",
@@ -438,6 +442,9 @@ g () {
             "torch/testing/_internal/common_dtype.py",
             "torch/testing/_internal/common_cuda.py",
             "torch/testing/_comparison.py",
+            "torch/testing/__init__.py",
+            "torch/testing/_creation.py",
+            "torch/testing/_utils.py",
             "scripts/onnx/test.sh",
             ".ci/docker/triton_version.txt",
             ".ci/docker/triton_xpu_version.txt",
@@ -708,6 +715,8 @@ class TestPrompt(unittest.TestCase):
             self.assertNotIn(flag, cmd)
         self.assertEqual(run.call_args.kwargs["input"], "p")
         self.assertEqual(run.call_args.kwargs["timeout"], 600)
+        self.assertIs(run.call_args.kwargs["capture_output"], True)
+        self.assertIs(run.call_args.kwargs["text"], True)
 
     def test_query_model_failures_are_error_envelopes(self) -> None:
         def completed(stdout: str, code: int = 0) -> mock.Mock:
@@ -872,11 +881,12 @@ class TestMain(unittest.TestCase):
 
     def test_git_readers_refuse_an_option_as_a_rev(self) -> None:
         with mock.patch.object(select_tests.subprocess, "run") as run:
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, "^not a revision: '-Ofalse'$"):
                 select_tests.git_grep("x", "-Ofalse")
-            with self.assertRaises(ValueError):
+            refused = "^not a revision: '--output=x'$"
+            with self.assertRaisesRegex(ValueError, refused):
                 select_tests.changed_files("--output=x", "HEAD")
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, refused):
                 select_tests.changed_files("HEAD", "--output=x")
         run.assert_not_called()
 
@@ -912,6 +922,7 @@ class TestMain(unittest.TestCase):
                 "GIT_AUTHOR_EMAIL": "a@b.c",
                 "GIT_COMMITTER_NAME": "a",
                 "GIT_COMMITTER_EMAIL": "a@b.c",
+                "LC_ALL": "C",
             }
             repo = Path(home) / "repo"
             repo.mkdir()
@@ -944,6 +955,8 @@ class TestMain(unittest.TestCase):
             failed = r"^git grep failed \(128\): fatal: "
             with self.assertRaisesRegex(RuntimeError, failed):
                 select_tests.git_grep("x", "no-such-rev")
+            with self.assertRaises(subprocess.CalledProcessError):
+                select_tests.changed_files("HEAD", "no-such-rev")
 
     def test_non_ascii_paths_are_unquoted(self) -> None:
         name = "test/test_caf\u00e9.py"
