@@ -430,7 +430,7 @@ cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
                        OFF)
 # Builds NCCL-EP if true.
-cmake_dependent_option(USE_NCCL_EP "Build NCCL EP contrib library" OFF
+cmake_dependent_option(USE_NCCL_EP "Build NCCL EP library" OFF
                        "USE_NCCL;USE_CUDA" OFF)
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
@@ -458,9 +458,6 @@ endif()
 
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable" ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable" ON)
-cmake_dependent_option(
-  USE_LITE_AOTI "Include AOTI sources" OFF
-  "BUILD_LITE_INTERPRETER" OFF)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION
        "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)

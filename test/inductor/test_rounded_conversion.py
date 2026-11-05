@@ -113,6 +113,13 @@ class _RoundedConversionTestMixin:
         self.assertSameValues(actual, fn(x))
         return "\n".join(code)
 
+    def _check_e5m3fnu_falls_back(self, device):
+        # Inductor does not support float8_e5m3fnu yet.
+        for mode in MODES:
+            with self.subTest(mode=mode):
+                code = self._check(device, torch.float32, torch.float8_e5m3fnu, mode)
+                self.assertIn(FALLBACK, code)
+
 
 class TestRoundedConversionInductorCPU(_RoundedConversionTestMixin, TestCase):
     hw_classification = HardwareClassification.CPU
@@ -125,6 +132,10 @@ class TestRoundedConversionInductorCPU(_RoundedConversionTestMixin, TestCase):
             with self.subTest(mode=mode):
                 code = self._check("cpu", src, dst, mode)
                 self.assertIn("c10::convert_with_rounding", code)
+
+    @unittest.skipIf(not HAS_CPU, "requires CPU")
+    def test_cpu_e5m3fnu_falls_back(self):
+        self._check_e5m3fnu_falls_back("cpu")
 
 
 @unittest.skipIf(not HAS_CUDA, "requires CUDA")
@@ -141,6 +152,34 @@ class TestRoundedConversionInductorCUDA(_RoundedConversionTestMixin, TestCase):
                     self.assertNotIn(FALLBACK, code)
                 else:
                     self.assertIn(FALLBACK, code)
+
+    def test_cuda_e5m3fnu_falls_back(self):
+        self._check_e5m3fnu_falls_back("cuda")
+
+    def test_cuda_float64_to_dtype_rounds_once(self):
+        # Like eager, rounding to the float32 compute type first must be
+        # avoided: test the neighbors of the midpoints between dst's values.
+        for dst in (
+            torch.float16,
+            torch.bfloat16,
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+        ):
+            int_dtype = torch.int16 if dst.itemsize == 2 else torch.uint8
+            bits = torch.arange(1 << (8 * dst.itemsize), dtype=torch.int32)
+            values = bits.to(int_dtype).view(dst).double()
+            values = values[values.isfinite()].unique()
+            mid = (values[1:] + values[:-1]) / 2
+            near = torch.cat([mid.nextafter(values[1:]), mid.nextafter(values[:-1])])
+            x = torch.cat([near, -near, _inputs(torch.float64)]).cuda()
+
+            def fn(x):
+                return x.to(dst)
+
+            with self.subTest(dst=dst):
+                torch._dynamo.reset()
+                actual = torch.compile(fn, fullgraph=True)(x)
+                self.assertSameValues(actual, fn(x))
 
     def test_cuda_instructions(self):
         cc = _cuda_capability()

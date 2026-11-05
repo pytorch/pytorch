@@ -75,6 +75,7 @@ void RocmActivityProfiler::enableGpuTracing() {
 
   roc_.setMaxEvents(config().maxEvents());
   roc_.setPerThreadBuffers(config().rocprofPerThreadBufferEnabled());
+  roc_.setDispatchRecordWait(config().rocprofDispatchRecordWait());
   roc_.enableActivities(derivedConfig_->profileActivityTypes());
 }
 
@@ -202,6 +203,10 @@ void RocmActivityProfiler::handleRocprofActivity(
     case ROCTRACER_ACTIVITY_DEFAULT:
       handleRuntimeActivity(
           reinterpret_cast<const rocprofRow*>(record), logger);
+      break;
+    case ROCTRACER_ACTIVITY_MEMSET:
+      handleRuntimeActivity(
+          reinterpret_cast<const rocprofMemsetRow*>(record), logger);
       break;
     case ROCTRACER_ACTIVITY_KERNEL:
       handleRuntimeActivity(
