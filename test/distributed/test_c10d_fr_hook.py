@@ -246,7 +246,9 @@ class AbstractFlightRecorderHookTest:
             dist.all_reduce(t)
         # The hook expects NotImplementedError; anything else logs a warning.
         work = dist.all_reduce(t, async_op=True)
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(
+            NotImplementedError, "getFutureResult not implemented"
+        ):
             work.get_future_result()
 
         entries = self._hook_entries()[before:]
