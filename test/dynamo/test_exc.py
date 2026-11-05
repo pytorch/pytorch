@@ -29,6 +29,7 @@ from torch._dynamo.exc import (
 from torch._dynamo.variables.base import SourceLocation
 from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_FBCODE,
     munge_exc,
     skipIfWindows,
@@ -69,6 +70,8 @@ def _format_multiline_source_location() -> str:
 
 
 class ExcTests(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     maxDiff = None
 
     @torch._dynamo.config.patch(suppress_errors=True)
@@ -581,10 +584,9 @@ Failed Source Expressions:
 """,
         )
 
-        if sys.version_info >= (3, 11):
-            self.assertExpectedInline(
-                result,
-                """\
+        self.assertExpectedInline(
+            result,
+            """\
   File "<source_path>", line 1
     value = (
             ~
@@ -595,7 +597,7 @@ Failed Source Expressions:
     )
     ~
 """,
-            )
+        )
 
     def test_user_stack_repeated_frames_are_compacted(self):
         frame = traceback.FrameSummary("recursive.py", 1, "fn", line="return fn()")
