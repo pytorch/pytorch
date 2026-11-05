@@ -257,8 +257,9 @@ struct C10_API FakeTensorMode {
   // When true, real tensor inputs to an op are converted to fakes instead of
   // raising. A non-None fake_tensor_tls.allow_non_fake_inputs_override, a
   // thread-local override used by dynamo's nonstrict_trace, takes precedence,
-  // so read this through PyInterpreterVTable::allow_non_fake_inputs().
-  bool allow_non_fake_inputs_ = false;
+  // so read this through PyInterpreterVTable::allow_non_fake_inputs(). Atomic,
+  // like allow_meta_.
+  std::atomic<bool> allow_non_fake_inputs_{false};
 
   // Whether reading the mutable data pointer of a fake made afterwards only
   // warns (true) or throws (false); a storage's marking is never relaxed.
