@@ -85,7 +85,6 @@ from ..utils import (
     proxy_args_kwargs,
     raise_args_mismatch,
     specialize_symnode,
-    str_methods,
     tensortype_to_dtype,
     unpack_iterable,
 )
@@ -2107,29 +2106,12 @@ class BuiltinVariable(TypeVariable):
             )
         return handler(tx, args, kwargs)  # type: ignore[return-value]
 
-    # object.__new__ is handled by the VariableTracker default (every type
-    # ultimately falls back to it). tuple/set/frozenset each have their own
-    # constructible VariableTracker (TupleVariable/SetVariable/
-    # FrozensetVariable) -- BuiltinVariable is only ever the receiver
-    # `__new__` was found on for them (there's no dedicated
-    # TupleBuiltinVariable/SetBuiltinVariable/FrozensetBuiltinVariable), so
-    # this is a pure lookup table, not construction logic.
-    _tp_new_delegates: dict[Callable[..., Any], type[VariableTracker]] = {
-        tuple: TupleVariable,
-        set: SetVariable,
-        frozenset: FrozensetVariable,
-    }
-
     def tp_new_impl(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        target = self._tp_new_delegates.get(self.fn)
-        if target is not None:
-            # pyrefly: ignore[bad-argument-type]
-            return target.tp_new_impl(self, tx, args, kwargs)
         # T.__new__(T, ...) == T(...) holds for the immutable types with their
         # own TypeVariable subclass, not for the callables still wrapped here.
         return VariableTracker.tp_new_impl(self, tx, args, kwargs)
@@ -2158,110 +2140,6 @@ class BuiltinVariable(TypeVariable):
                 and name_var.is_python_constant()
             ):
                 return obj.method_setattr_standard(tx, name_var, val)
-
-        if (
-            self.fn in (set, frozenset, list, tuple, int, str, float, complex)
-            and name != "__new__"
-        ):
-            if isinstance(args[0], variables.UserDefinedObjectVariable):
-                # int.__eq__(IntEnum.A, x): constant int/float/str subclass
-                # instances fall through to the rich-comparison fold below,
-                # which calls the base slot and ignores subclass overrides.
-                if not (
-                    self.fn in (int, float, str)
-                    and name in _RICH_CMP_DUNDERS
-                    and len(args) == 2
-                    and not kwargs
-                    and all(a.is_python_constant() for a in args)
-                    and isinstance(args[0].as_python_constant(), self.fn)
-                ):
-                    return args[0].call_base_method(tx, name, args[1:], kwargs)
-            else:
-                return args[0].call_method(tx, name, args[1:], kwargs)
-
-        if (
-            name in _RICH_CMP_DUNDERS
-            and len(args) == 2
-            and not kwargs
-            and isinstance(self.fn, type)
-            and args[0].is_python_constant()
-            and args[1].is_python_constant()
-        ):
-            # Unbound rich-comparison dunder, e.g. complex.__eq__(1+1j, 2).
-            # Invoke only the left type's slot on the constants, mirroring
-            # CPython (returns NotImplemented rather than falling back to the
-            # reflected operation when the operands are incompatible).
-            lval = args[0].as_python_constant()
-            if isinstance(lval, self.fn):
-                return ConstantVariable.create(
-                    getattr(self.fn, name)(lval, args[1].as_python_constant())
-                )
-
-        if self.fn is str and len(args) >= 1:
-            resolved_fn = getattr(self.fn, name, None)
-            if resolved_fn in str_methods:
-                # Only delegate to ConstantVariable, not other types that happen to be constants
-                if isinstance(args[0], ConstantVariable):
-                    return args[0].call_method(tx, name, args[1:], kwargs)
-
-        if (
-            self.fn in (int, float, complex)
-            and args
-            and all(isinstance(a, ConstantVariable) for a in args)
-            and all(isinstance(v, ConstantVariable) for v in kwargs.values())
-        ):
-            # Unbound method on constants, e.g. float.__rsub__(3.0, 1). Only
-            # delegate for ConstantVariable, not other types that happen to be
-            # constants.
-            try:
-                res = getattr(self.fn, name)(
-                    *(a.as_python_constant() for a in args),
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                )
-            except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-            return VariableTracker.build(tx, res)
-
-        if name == "__len__" and len(args) == 1 and not kwargs:
-            # type.__len__(instance) → len(instance)
-            # e.g. list.__len__(my_list) → len(my_list)
-            return generic_size(tx, args[0])
-
-        if name == "__str__" and len(args) == 1 and not kwargs:
-            return super().call_method(tx, name, args, kwargs)
-
-        if name == "__repr__" and len(args) == 1 and not kwargs:
-            return super().call_method(tx, name, args, kwargs)
-
-        if name == "__iter__" and len(args) == 1 and not kwargs:
-            # type.__iter__(instance) → iter(instance)
-            # e.g., tuple.__iter__(my_tuple) → iter(my_tuple)
-            # For builtin types called on user-defined subclasses, use the base iterator
-            return generic_getiter(tx, args[0])
-
-        if name == "__neg__" and len(args) == 1 and not kwargs:
-            # type.__neg__(instance) → neg(instance)
-            # e.g., int.__neg__(4) → neg(4)
-            return pynumber_negative(tx, args[0])
-
-        if name == "__pos__" and len(args) == 1 and not kwargs:
-            # type.__pos__(instance) → pos(instance)
-            # e.g., int.__pos__(4) → pos(4)
-            return pynumber_positive(tx, args[0])
-
-        if name == "__abs__" and len(args) == 1 and not kwargs:
-            # type.__abs__(instance) → abs(instance)
-            # e.g., int.__abs__(-4) → abs(-4)
-            return pynumber_absolute(tx, args[0])
-
-        if name == "__invert__" and len(args) == 1 and not kwargs:
-            # type.__invert__(instance) → ~instance
-            # e.g., int.__invert__(4) → ~4
-            return pynumber_invert(tx, args[0])
-
-        if name == "__hash__" and len(args) == 1 and not kwargs:
-            arg = args[0]
-            generic_hash(tx, arg)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -2601,33 +2479,6 @@ class BuiltinVariable(TypeVariable):
             ),
         )
 
-    def call_tuple(
-        self,
-        tx: "InstructionTranslatorBase",
-        *args: VariableTracker,
-        **kwargs: VariableTracker,
-    ) -> VariableTracker | None:
-        # ref: https://github.com/python/cpython/blob/main/Objects/abstract.c#L2004-L2078
-        if kwargs:
-            raise_type_error(
-                tx,
-                f"{self.fn.__name__}() takes no keyword arguments",
-            )
-        if len(args) == 0:
-            return TupleVariable([], mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(
-                tx,
-                f"{self.fn.__name__} expected at most 1 argument, got {len(args)}",
-            )
-
-        obj = args[0]
-        if isinstance(obj, TupleVariable) and obj.python_type() is tuple:
-            return obj
-
-        items = unpack_iterable(tx, args[0])
-        return TupleVariable(items, mutation_type=ValueMutationNew())
-
     def call_callable(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
@@ -2666,74 +2517,6 @@ class BuiltinVariable(TypeVariable):
         if arg.is_python_constant():
             return VariableTracker.build(tx, dir(arg.as_python_constant()))
         return None
-
-    def call_set(
-        self,
-        tx: "InstructionTranslatorBase",
-        *args: VariableTracker,
-        **kwargs: VariableTracker,
-    ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/main/Objects/setobject.c#L2708-L2735
-        # CPython set_init rejects keywords before unpacking positional args, so
-        # set(a=1) and set().__init__(a=1) both raise regardless of arg count.
-        if kwargs:
-            raise_type_error(
-                tx,
-                "set() takes no keyword arguments",
-            )
-        if len(args) == 0:
-            return variables.SetVariable(set(), mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(
-                tx,
-                f"set expected at most 1 argument, got {len(args)}",
-            )
-
-        s = SetVariable([], mutation_type=ValueMutationNew())
-        s.call_method(tx, "update", [args[0]], kwargs)
-        return s
-
-    def call_frozenset(
-        self,
-        tx: "InstructionTranslatorBase",
-        *args: VariableTracker,
-        **kwargs: VariableTracker,
-    ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(
-                tx,
-                "frozenset() takes no keyword arguments",
-            )
-        if len(args) == 0:
-            return variables.FrozensetVariable(set(), mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(
-                tx,
-                f"frozenset expected at most 1 argument, got {len(args)}",
-            )
-
-        if istype(args[0], variables.FrozensetVariable):
-            # CPython: frozenset(existing_frozenset) returns the same object.
-            return args[0]
-
-        # Reuse existing HashableTracker keys from a set/frozenset/dict operand
-        # instead of re-hashing, mirroring CPython's set_update_internal fast
-        # path (do-not-rehash-dict-keys).
-        if isinstance(
-            args[0],
-            (
-                variables.SetVariable,
-                variables.FrozensetVariable,
-                variables.DictKeySetVariable,
-                variables.OrderedSetVariable,
-                variables.ConstDictVariable,
-            ),
-        ):
-            items = list(args[0].items.keys())
-        else:
-            items = unpack_iterable(tx, args[0])
-        fs = FrozensetVariable(items, mutation_type=ValueMutationNew())
-        return fs
 
     def call_zip(
         self,
@@ -4469,6 +4252,141 @@ class BytesBuiltinVariable(TypeVariable):
         if not args and not kwargs:
             return ConstantVariable.create(b"")
         return constant_fold(self._fn, tx, args, kwargs)
+
+
+class TupleBuiltinVariable(TypeVariable):
+    _fn = tuple
+
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # pyrefly: ignore[bad-argument-type]
+        return TupleVariable.tp_new_impl(self, tx, args, kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/main/Objects/abstract.c#L2004-L2078
+        if kwargs:
+            raise_type_error(tx, "tuple() takes no keyword arguments")
+        if len(args) == 0:
+            return TupleVariable([], mutation_type=ValueMutationNew())
+        elif len(args) > 1:
+            raise_type_error(tx, f"tuple expected at most 1 argument, got {len(args)}")
+
+        obj = args[0]
+        if isinstance(obj, TupleVariable) and obj.python_type() is tuple:
+            return obj
+
+        items = unpack_iterable(tx, args[0])
+        return TupleVariable(items, mutation_type=ValueMutationNew())
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__new__" and len(args) == 2 and not kwargs:
+            if isinstance(args[0], TupleBuiltinVariable):
+                init_args = unpack_iterable(tx, args[1])
+                return variables.TupleVariable(
+                    init_args, mutation_type=ValueMutationNew()
+                )
+            return tx.output.side_effects.track_new_user_defined_object(
+                self, args[0], args[1:], tx=tx
+            )
+        return super().call_method(tx, name, args, kwargs)
+
+
+class SetBuiltinVariable(TypeVariable):
+    _fn = set
+
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # pyrefly: ignore[bad-argument-type]
+        return SetVariable.tp_new_impl(self, tx, args, kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/main/Objects/setobject.c#L2708-L2735
+        # CPython set_init rejects keywords before unpacking positional args, so
+        # set(a=1) and set().__init__(a=1) both raise regardless of arg count.
+        if kwargs:
+            raise_type_error(tx, "set() takes no keyword arguments")
+        if len(args) == 0:
+            return variables.SetVariable(set(), mutation_type=ValueMutationNew())
+        elif len(args) > 1:
+            raise_type_error(tx, f"set expected at most 1 argument, got {len(args)}")
+
+        s = SetVariable([], mutation_type=ValueMutationNew())
+        s.call_method(tx, "update", [args[0]], kwargs)
+        return s
+
+
+class FrozenSetBuiltinVariable(TypeVariable):
+    _fn = frozenset
+
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # pyrefly: ignore[bad-argument-type]
+        return FrozensetVariable.tp_new_impl(self, tx, args, kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if kwargs:
+            raise_type_error(tx, "frozenset() takes no keyword arguments")
+        if len(args) == 0:
+            return variables.FrozensetVariable(set(), mutation_type=ValueMutationNew())
+        elif len(args) > 1:
+            raise_type_error(
+                tx, f"frozenset expected at most 1 argument, got {len(args)}"
+            )
+
+        if istype(args[0], variables.FrozensetVariable):
+            # CPython: frozenset(existing_frozenset) returns the same object.
+            return args[0]
+
+        # Reuse existing HashableTracker keys from a set/frozenset/dict operand
+        # instead of re-hashing, mirroring CPython's set_update_internal fast
+        # path (do-not-rehash-dict-keys).
+        if isinstance(
+            args[0],
+            (
+                variables.SetVariable,
+                variables.FrozensetVariable,
+                variables.DictKeySetVariable,
+                variables.OrderedSetVariable,
+                variables.ConstDictVariable,
+            ),
+        ):
+            items = list(args[0].items.keys())
+        else:
+            items = unpack_iterable(tx, args[0])
+        return FrozensetVariable(items, mutation_type=ValueMutationNew())
 
 
 # pyrefly: ignore [deprecated]
