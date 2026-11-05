@@ -456,6 +456,13 @@ g () {
                     (sel.run_all, sel.reason, sel.error),
                     (True, f"grep failed ({error})", error),
                 )
+            # A test infrastructure change runs everything whatever grep does.
+            infra = ["test/run_test.py"]
+            out = answer(tests=[{"file": "jit/test_freezing"}])
+            grep = mock.Mock(side_effect=e)
+            sel = Selection.from_model_output(out, CANDIDATES, infra, grep)
+            self.assertEqual((sel.run_all, sel.error), (True, None))
+            grep.assert_called_once_with("^")
 
     def test_import_forms(self) -> None:
         sources = {
@@ -473,9 +480,12 @@ g () {
             "test_load_dot.py": 'm = load_test_module("dynamo.test_hops")\n',
             "inductor/custom_inductor_config.py": "",
             "dynamo/test_after_aot.py": '    c = importlib.import_module("custom_inductor_config")\n',
+            "dynamo/test_pkg_aot.py": 'importlib.import_module(".custom_inductor_config", "x")\n',
             "test_math.py": "",
             "test_cmath.py": "from test.test_math import parse_testfile\n",
             "test_fmath.py": "import test.test_math as test_math\n",
+            "test_lmath.py": "import os, test_math\n",
+            "test_smath.py": "import os; import test_math\n",
             "test_pmath.py": "from test.inductor.ext.triton import device\n",
             # The CPython tests redirect test.mapping_tests to mapping_tests.
             "cpython/v3_13/mapping_tests.py": "",
@@ -491,9 +501,12 @@ g () {
             "test_load_slash",
             "test_load_dot",
             "dynamo/test_after_aot",
+            "dynamo/test_pkg_aot",
             "test_math",
             "test_cmath",
             "test_fmath",
+            "test_lmath",
+            "test_smath",
             "test_pmath",
             "cpython/v3_13/test_dict",
             "cpython/v3_13/test_userdict",
@@ -505,8 +518,14 @@ g () {
             ("test/pkg/__init__.py", {"dynamo/test_misc"}),
             ("test/test_autograd.py", {"test_autograd", "test_nn"}),
             ("test/dynamo/test_hops.py", {"test_load_slash", "test_load_dot"}),
-            ("test/inductor/custom_inductor_config.py", {"dynamo/test_after_aot"}),
-            ("test/test_math.py", {"test_math", "test_cmath", "test_fmath"}),
+            (
+                "test/inductor/custom_inductor_config.py",
+                {"dynamo/test_after_aot", "dynamo/test_pkg_aot"},
+            ),
+            (
+                "test/test_math.py",
+                {"test_math", "test_cmath", "test_fmath", "test_lmath", "test_smath"},
+            ),
             (
                 "test/cpython/v3_13/mapping_tests.py",
                 {"cpython/v3_13/test_dict", "cpython/v3_13/test_userdict"},
@@ -530,7 +549,7 @@ g () {
             "cpp/api/CMakeLists.txt": "cpp_data.bin\ncpp_shared.bin\n",
             "test_torch.py": 'import random\nopen("cpp_shared.bin")\n',
             "inductor/test_compile.py": 'os.path.join(tmp_dir, "CMakeLists.txt")\n',
-            "typing/fail/random.py": "",
+            "helpers/random.py": "",
             "test_mobile_ops.py": "from mobile.model_test import math_ops\n",
             "custom_operator/test_out_variant.py": "from pointwise import f\n",
             "jit/test_save_load_for_op_version.py": '"/cpp/jit/upgrader_models/test_versioned_div_tensor_v2.ptl"\n',
@@ -563,6 +582,7 @@ g () {
                 "custom_operator/test_out_variant",
                 "test_jit",
                 "test_cpp_api_parity",
+                "test_typing",
             }
             | inductor_lib
         )
@@ -616,6 +636,9 @@ g () {
             ("test/inductor/CMakeLists.txt", inductor_lib | {"inductor/test_compile"}),
             ("test/cpp_api_parity/parity-tracker.md", {"test_cpp_api_parity"}),
             ("test/run_doctests.sh", set()),
+            ("test/forward_backward_compatibility/dump_all_function_schemas.py", set()),
+            ("test/scripts/run_cuda_memcheck.py", set()),
+            ("test/typing/pass/arithmetic_ops.py", {"test_typing"}),
             ("test/trailing.json", {"test_ops"}),
         ]:
             sel = self.select_in_tree(sources, candidates, [changed])
@@ -625,7 +648,7 @@ g () {
         # only by a README, by run_test.py, which no test imports, or by a
         # comment line.
         for changed in (
-            "test/typing/fail/random.py",
+            "test/helpers/random.py",
             "test/expect/TestGone.test_x.expect",
             "test/distributed/launcher/bin/unused.py",
             "test/notes.txt",
@@ -750,7 +773,7 @@ g () {
                 self.assertEqual(sel.files, {f"m{depth}"})
 
     def test_import_chain_hop_limit(self) -> None:
-        reason = "test modules import the change through too many hops; model: why"
+        reason = "test modules import the change through too many hops"
         hops = selection.MAX_IMPORT_HOPS
         # Round k greps for the module found in round k - 1 and finds m<k>.
         for depth, run_all, rounds in [
@@ -841,6 +864,11 @@ g () {
             (
                 "test/dynamo_skips/TestNN.test_x test/dynamo_expected_failures/TestNN.test_x",
                 set(),
+                {"dynamo_wrapped"},
+            ),
+            (
+                "test/dynamo_skips/CPython313-test_set-TestSet.test_x test/dynamo_expected_failures/CPython313-test_set-TestSet.test_x",
+                {"cpython/v3_13/test_set"},
                 {"dynamo_wrapped"},
             ),
             # dynamo_test_failures.py lists only the top of each directory.
@@ -1068,6 +1096,8 @@ g () {
             ".github/workflows/inductor.yml",
             ".github/workflows/inductor-periodic.yml",
             ".github/actions/reuse-old-whl/action.yml",
+            ".github/workflows/target_determination.yml",
+            ".github/workflows/llm_td_retrieval.yml",
             "tools/native_aot/build_stage2.py",
             ".ci/pytorch/generate_ck_config_h.cmake",
             ".github/ci_commit_pins/vision.txt",
@@ -1114,6 +1144,15 @@ g () {
             "test/setup.cfg",
         ]:
             self.assertTrue(needs_run_all([f]), f)
+        # Every caller of a test workflow sets the test matrix of its jobs.
+        for wf in (REPO_ROOT / ".github/workflows").glob("*.yml"):
+            called = [
+                line.split("uses: ./", 1)[1].split()[0]
+                for line in wf.read_text().splitlines()
+                if "uses: ./.github/workflows/_" in line
+            ]
+            if any("-test" in c and needs_run_all([c]) for c in called):
+                self.assertTrue(needs_run_all([f".github/workflows/{wf.name}"]), wf)
         for f in [
             "docs/source/index.rst",
             "test/data/setup.cfg.in",
@@ -1327,6 +1366,14 @@ g () {
         self.assertEqual(
             selection.edited_tests([sh], set(TESTS)), {"distributed/launcher/test_run"}
         )
+        ext = "test/cpp_extensions/libtorch_agn_2_10_extension/csrc/kernel.cpp"
+        self.assertLessEqual(
+            {
+                "cpp_extensions/test_libtorch_agnostic",
+                "cpp_extensions/libtorch_agn_2_10_extension/test_version_compatibility",
+            },
+            selection.edited_tests([ext], set(TESTS)),
+        )
 
 
 class TestPrompt(unittest.TestCase):
@@ -1400,7 +1447,7 @@ class TestPrompt(unittest.TestCase):
             done = subprocess.CompletedProcess([], code, stdout, "e")
             return mock.Mock(return_value=done)
 
-        timeout = subprocess.TimeoutExpired(["claude", "-p", "<prompt>"], 600)
+        timeout = subprocess.TimeoutExpired(["claude", "-p", "<prompt>"], 5)
         missing = FileNotFoundError("claude")
         denied = PermissionError("claude")
         for run, why in [
@@ -1409,7 +1456,7 @@ class TestPrompt(unittest.TestCase):
             (completed("null"), "nulle"),
             (completed("x" * 3000), "x" * 1999 + "e"),
             (completed('{"result": "r"}', code=1), '{"result": "r"}e'),
-            (mock.Mock(side_effect=timeout), "model call timed out after 600s"),
+            (mock.Mock(side_effect=timeout), "model call timed out after 5s"),
             (mock.Mock(side_effect=missing), "FileNotFoundError: claude"),
             (mock.Mock(side_effect=denied), "PermissionError: claude"),
         ]:
@@ -1428,7 +1475,7 @@ class TestPrompt(unittest.TestCase):
     def test_query_model_refuses_a_checkout_with_escaping_symlinks(self) -> None:
         run = mock.Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
         with mock.patch.object(select_tests.subprocess, "run", run):
-            for target in ("/", ".git", ".git/config", "../x"):
+            for target in ("/", ".", ".git", ".git/config", "../x"):
                 with tempfile.TemporaryDirectory() as wt, self.subTest(target=target):
                     (Path(wt) / ".git").mkdir()
                     (Path(wt) / "sub").mkdir()
@@ -1534,26 +1581,37 @@ class TestMain(unittest.TestCase):
         self.assertFalse(cwd.exists())
 
     def test_git_grep_failures_raise(self) -> None:
-        for code, raises in [
-            (0, False),
-            (1, False),
-            (2, True),
-            (128, True),
-            (-9, True),
-        ]:
+        unreadable = b"error: 'HEAD:test/a.py': unable to read 1234\n"
+        for code, err in [
+            (0, b""),
+            (1, b""),
+            (0, unreadable),
+            (1, unreadable),
+            (2, b"fatal: x"),
+            (128, b"fatal: " + b"x" * 600 + b"\n"),
             # A git killed by a signal usually writes nothing to stderr.
-            err = b"" if code < 0 else b"fatal: x"
+            (-9, b""),
+        ]:
             done = subprocess.CompletedProcess([], code, b"", err)
-            with (
-                self.subTest(code=code),
-                mock.patch.object(select_tests.subprocess, "run", return_value=done),
-            ):
-                if raises:
-                    why = f"git grep failed ({code}): {err.decode()}"
+            patch = mock.patch.object(select_tests.subprocess, "run", return_value=done)
+            with self.subTest(code=code, err=err[:20]), patch as run:
+                if code in (0, 1) and not err:
+                    self.assertEqual(select_tests.git_grep("x", "HEAD", timeout=3), [])
+                    self.assertEqual(run.call_args.kwargs["timeout"], 3)
+                else:
+                    why = f"git grep failed ({code}): {err.decode().strip()[-500:]}"
                     with self.assertRaisesRegex(RuntimeError, f"^{re.escape(why)}$"):
                         select_tests.git_grep("x", "HEAD")
-                else:
-                    self.assertEqual(select_tests.git_grep("x", "HEAD"), [])
+
+    def test_git_readers_refuse_an_option_as_a_rev(self) -> None:
+        with mock.patch.object(select_tests.subprocess, "run") as run:
+            with self.assertRaises(ValueError):
+                select_tests.git_grep("x", "-Ofalse")
+            with self.assertRaises(ValueError):
+                select_tests.changed_files("--output=x", "HEAD")
+            with self.assertRaises(ValueError):
+                select_tests.changed_files("HEAD", "--output=x")
+        run.assert_not_called()
 
     def test_run_all_reason_counts_changed_files(self) -> None:
         cap = select_tests.MAX_CHANGED_FILES
@@ -1565,7 +1623,8 @@ class TestMain(unittest.TestCase):
 
     def test_run_all_reason_on_control_characters(self) -> None:
         reason = "a changed path contains a control character"
-        for path in ["test/a\nb/conftest.py", "test/test_x.py\n", "test/a\rb.py"]:
+        paths = ["test/a\nb/conftest.py", "test/test_x.py\n", "test/a\rb.py"]
+        for path in paths + ["test/a\tb.py", "torch/a\x1b.py", "torch/a\x7f.py"]:
             changed = ["torch/a.py", path]
             self.assertEqual(select_tests.run_all_reason(changed), reason, msg=path)
 
@@ -1615,6 +1674,9 @@ class TestMain(unittest.TestCase):
             self.assertEqual(select_tests.git_grep("import", "HEAD~2"), [])
             self.assertEqual(select_tests.git_grep("-v", "HEAD"), [])
             self.assertEqual(select_tests.git_grep("import (y|x)", "HEAD"), moved[1:])
+            failed = r"^git grep failed \(128\): fatal: "
+            with self.assertRaisesRegex(RuntimeError, failed):
+                select_tests.git_grep("x", "no-such-rev")
 
     def test_non_ascii_paths_are_unquoted(self) -> None:
         name = "test/test_caf\u00e9.py"
@@ -1623,9 +1685,10 @@ class TestMain(unittest.TestCase):
             (repo / "test").mkdir()
             (repo / name).write_text("import x\n")
             git("add", "-A")
-            git("commit", "-qm", "add")
+            git("commit", "-qm", "add: x")
             self.assertEqual(select_tests.changed_files("HEAD~1", "HEAD"), [name])
             self.assertEqual(select_tests.git_grep("import", "HEAD"), [name])
+            self.assertEqual(select_tests.git_grep("import", "HEAD^{/d: x}"), [name])
 
     def test_c_quoted_paths_are_read_verbatim(self) -> None:
         # git C-quotes a path with a quote, backslash, tab or newline even when core.quotePath is false.
