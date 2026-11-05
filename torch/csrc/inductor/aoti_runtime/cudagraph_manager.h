@@ -537,8 +537,8 @@ class CudaGraphManager {
   int32_t device_index_;
   CudaGraphOptions options_;
   // Owned, so no other thread enqueues work into a capture.
-  AOTICudaStream capture_stream_;
-  AOTICudaEvent last_replay_;
+  AOTICudaStreamNonBlocking capture_stream_;
+  AOTICudaEventDisableTiming last_replay_;
   // Shared by all graphs, created with the first one.
   std::optional<AOTICudaMemPool> pool_;
   std::mutex mutex_;
