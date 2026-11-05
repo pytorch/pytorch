@@ -265,13 +265,21 @@ struct C10_API FakeTensorMode {
   // like allow_meta_.
   std::atomic<bool> allow_unsafe_data_ptr_access_{true};
 
+  // Same as Python's FakeTensorMode.epoch, read by the fake memo bindings
+  // through a fake's mode. Code that retraces bumps fake_mode.epoch on the
+  // mode's Python wrapper, which must expose epoch as a property forwarding
+  // here. Atomic, like allow_meta_.
+  std::atomic<uint64_t> epoch_{0};
+
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter,
-      bool allow_meta = true)
+      bool allow_meta = true,
+      bool allow_unsafe_data_ptr_access = true)
       : shape_env_(std::move(shape_env)),
         fake_tensor_converter_(std::move(converter)),
-        allow_meta_(allow_meta) {}
+        allow_meta_(allow_meta),
+        allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access) {}
 
   // record the real constant a fake tensor was created from; the constant is
   // stored on the fake's ExtraMeta so it dies with the tensor
@@ -1608,7 +1616,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Records memo as this fake's item memo, set in fake mode epoch `epoch`, or
   // kept across epochs if `epoch` is nullopt. The caller decides which memos
   // are kept (a backed SymFloat, see SymNumberMemoDescriptor); this does not
-  // check. Like set_fake_sym_memo, safe to call concurrently.
+  // check. Like set_fake_sym_memo, safe to call concurrently. memo must not be
+  // or refer to a Tensor (see SafePyObject): the GC does not traverse
+  // ExtraMeta, so such a reference cycle would leak.
   void set_fake_item_memo(
       std::shared_ptr<c10::SafePyObject> memo,
       std::optional<uint64_t> epoch);
@@ -2748,7 +2758,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // should never get called
   int64_t compute_numel() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!has_symbolic_sizes_strides_);
-#if C10_HAS_BUILTIN_OVERFLOW() && !defined(C10_MOBILE)
+#if C10_HAS_BUILTIN_OVERFLOW()
     // Use overflow checks if supported by the compiler
     return safe_compute_numel();
 #else
