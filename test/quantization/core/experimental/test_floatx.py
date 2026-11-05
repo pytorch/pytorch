@@ -221,8 +221,12 @@ def simulate_fp8_precision(input, variant):
 def _round_e8m0_rne(biased_exponent, lsb, g, r, s):
     round_up = False
 
+    if biased_exponent == 0:
+        # float32 subnormals lie between 2**-127 (g set) and 2**-126, round up
+        # from their midpoint (g and r set)
+        round_up = g == 1 and r == 1
     # apply g,r,s rounding rules for RNE rounding
-    if g == 1:
+    elif g == 1:
         if (r == 1) or (s == 1):
             round_up = True
         else:
@@ -335,8 +339,14 @@ class TestFloat8Dtype(TestCase):
                     s = grs & 0b1
                     new_biased_exponent = _round_e8m0_rne(biased_exponent, lsb, g, r, s)
 
-                # create an RNE rounded version of the float
-                fp32_e8m0_fp32_emulated = _int_bits_to_float(new_biased_exponent << 23)
+                # create an RNE rounded version of the float (e8m0 has no zero:
+                # biased exponent 0 is 2**-127)
+                if new_biased_exponent == 0:
+                    fp32_e8m0_fp32_emulated = 2.0**-127
+                else:
+                    fp32_e8m0_fp32_emulated = _int_bits_to_float(
+                        new_biased_exponent << 23
+                    )
 
                 # now, do the same in PyTorch and see if results match
                 fp32_pt_start = torch.full(
@@ -360,6 +370,8 @@ class TestFloat8Dtype(TestCase):
                     expected,
                     actual,
                     lambda msg: f"{msg}\nexpected: {expected}, actual: {actual}",
+                    atol=0,
+                    rtol=0,
                 )
 
     @dtypes(*FLOAT8_DTYPES)

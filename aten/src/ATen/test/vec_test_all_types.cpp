@@ -2330,7 +2330,7 @@ namespace {
         x[i] = generator.get();
       }
       for (const auto i : c10::irange(N)) {
-        ref[i] = static_cast<dst_t>(x[i]);
+        ref[i] = c10::convert<dst_t>(x[i]);
       }
       auto x_vec = vec::loadu(x);
       auto y_vec = at::vec::convert<dst_t>(x_vec);

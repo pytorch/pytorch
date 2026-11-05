@@ -7,6 +7,7 @@
 #include <torch/headeronly/util/Float8_e5m2fnuz.h>
 #include <torch/headeronly/util/Float8_e5m3fnu.h>
 #include <torch/headeronly/util/Float8_e8m0fnu.h>
+#include <torch/headeronly/util/FloatRounding.h>
 #include <torch/headeronly/util/Half.h>
 #include <torch/headeronly/util/complex.h>
 #include <torch/headeronly/util/overflows.h>
@@ -71,6 +72,18 @@ unchecked_cast_to_int(src_t src) {
   return static_cast<dest_t>(src);
 }
 
+namespace detail {
+// Whether converting a double to T would round twice, through the float
+// constructors of T.
+template <typename T>
+inline constexpr bool rounds_through_float =
+    std::is_same_v<T, Half> || std::is_same_v<T, BFloat16> ||
+    std::is_same_v<T, Float8_e4m3fn> || std::is_same_v<T, Float8_e4m3fnuz> ||
+    std::is_same_v<T, Float8_e5m2> || std::is_same_v<T, Float8_e5m2fnuz> ||
+    std::is_same_v<T, Float8_e5m3fnu> || std::is_same_v<T, Float8_e8m0fnu> ||
+    std::is_same_v<T, complex<Half>> || std::is_same_v<T, complex<BFloat16>>;
+} // namespace detail
+
 template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type {
   C10_HOST_DEVICE static inline dest_t apply(src_t src) {
@@ -79,6 +92,10 @@ struct static_cast_with_inter_type {
     if constexpr (
         std::is_integral_v<dest_t> && !std::is_integral_v<decltype(r)>) {
       return unchecked_cast_to_int<dest_t>(r);
+    } else if constexpr (
+        std::is_same_v<decltype(r), double> &&
+        detail::rounds_through_float<dest_t>) {
+      return static_cast<dest_t>(detail::round_to_odd_float(r));
     } else {
       return static_cast<dest_t>(r);
     }
@@ -192,8 +209,9 @@ struct static_cast_with_inter_type<
     c10::complex<double>> {
   C10_HOST_DEVICE static inline c10::complex<c10::Half> apply(
       c10::complex<double> src) {
-    return static_cast<c10::complex<c10::Half>>(
-        static_cast<c10::complex<float>>(src));
+    using part = static_cast_with_inter_type<c10::Half, double>;
+    return c10::complex<c10::Half>(
+        part::apply(src.real()), part::apply(src.imag()));
   }
 };
 
@@ -282,8 +300,9 @@ struct static_cast_with_inter_type<
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
       c10::BFloat16>
   apply(c10::complex<double> src) {
-    return static_cast<c10::complex<c10::BFloat16>>(
-        static_cast<c10::complex<float>>(src));
+    using part = static_cast_with_inter_type<c10::BFloat16, double>;
+    return c10::complex<c10::BFloat16>(
+        part::apply(src.real()), part::apply(src.imag()));
   }
 };
 

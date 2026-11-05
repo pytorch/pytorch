@@ -87,8 +87,12 @@ inline C10_HOST_DEVICE uint8_t fp8e8m0fnu_from_fp32_value(float f) {
   // implement the RNE logic
   bool round_up = false;
 
-  // if g == 0, round down (no-op)
-  if (g == 1) {
+  if (exponent == 0) {
+    // float32 subnormals lie between the two smallest e8m0 values, 2^-127
+    // (g set) and 2^-126: round up from their midpoint (g and r set), with
+    // ties going up as they do for normals
+    round_up = g == 1 && r == 1;
+  } else if (g == 1) {
     if ((r == 1) || (s == 1)) {
       // round up
       round_up = true;
@@ -178,7 +182,7 @@ class numeric_limits<c10::Float8_e8m0fnu> {
   static constexpr bool has_infinity = false;
   static constexpr bool has_quiet_NaN = true;
   static constexpr bool has_signaling_NaN = false;
-  static constexpr auto has_denorm = false;
+  static constexpr auto has_denorm = std::denorm_absent;
   static constexpr auto has_denorm_loss = false;
   static constexpr auto round_style = numeric_limits<float>::round_style;
   static constexpr bool is_iec559 = false;

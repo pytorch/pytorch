@@ -1052,29 +1052,6 @@ inline void convert(const float* src, BFloat16* dst, int64_t n) {
 }
 
 template <>
-inline void convert(const double* src, BFloat16* dst, int64_t n) {
-  auto load_float = [](const double* src) -> __m512 {
-    // Load one float vector from an array of doubles
-    __m256 a = _mm512_cvtpd_ps(_mm512_loadu_pd(src));
-    __m256 b = _mm512_cvtpd_ps(_mm512_loadu_pd(src + 8));
-    return _mm512_insertf32x8(_mm512_castps256_ps512(a), b, 1);
-  };
-
-  int64_t i;
-  for (i = 0; i + Vectorized<BFloat16>::size() <= n;
-       i += Vectorized<BFloat16>::size()) {
-    __m512 a = load_float(&src[i]);
-    __m512 b = load_float(&src[i + 16]);
-
-    __m512i bf = cvtfp32_bf16(a, b);
-    _mm512_storeu_si512(reinterpret_cast<__m512i*>(&dst[i]), bf);
-  }
-  for (; i < n; i++) {
-    dst[i] = c10::convert<BFloat16>(src[i]);
-  }
-}
-
-template <>
 Vectorized<BFloat16> inline fmadd(
     const Vectorized<BFloat16>& a,
     const Vectorized<BFloat16>& b,
@@ -1802,29 +1779,6 @@ inline void convert(const float* src, Half* dst, int64_t n) {
        i += Vectorized<Half>::size()) {
     __m512 a = _mm512_loadu_ps(&src[i]);
     __m512 b = _mm512_loadu_ps(&src[i + 16]);
-
-    __m512i bf = cvtfp32_fp16(a, b);
-    _mm512_storeu_si512(reinterpret_cast<__m512i*>(&dst[i]), bf);
-  }
-  for (; i < n; i++) {
-    dst[i] = c10::convert<Half>(src[i]);
-  }
-}
-
-template <>
-inline void convert(const double* src, Half* dst, int64_t n) {
-  auto load_float = [](const double* src) -> __m512 {
-    // Load one float vector from an array of doubles
-    __m256 a = _mm512_cvtpd_ps(_mm512_loadu_pd(src));
-    __m256 b = _mm512_cvtpd_ps(_mm512_loadu_pd(src + 8));
-    return _mm512_insertf32x8(_mm512_castps256_ps512(a), b, 1);
-  };
-
-  int64_t i;
-  for (i = 0; i + Vectorized<Half>::size() <= n;
-       i += Vectorized<Half>::size()) {
-    __m512 a = load_float(&src[i]);
-    __m512 b = load_float(&src[i + 16]);
 
     __m512i bf = cvtfp32_fp16(a, b);
     _mm512_storeu_si512(reinterpret_cast<__m512i*>(&dst[i]), bf);
