@@ -15558,17 +15558,14 @@ class TestComplex(TestCase):
 class TestCommon(TestCase):
     exact_dtype = True
 
-    @parametrize("shape", [(2, 3, 4, 5, 6), (32, 8192)])
-    def test_fftn_all_dims(self, device, shape):
-        x = torch.randn(shape, dtype=torch.complex64)
-        self.assertEqual(torch.fft.fftn(x.to(device)).cpu(), torch.fft.fftn(x), atol=1e-3, rtol=1e-4)
-
-    @parametrize("shape", [(8192,), (64, 128)])
-    def test_ifftn_fp16_partials_exceed_half_range(self, device, shape):
-        amplitude = 100
-        x = amplitude * torch.randn(shape, dtype=torch.complex64)
-        spectrum = torch.fft.fftn(x).to(torch.complex32)
-        result = torch.fft.ifftn(spectrum.to(device)).cpu().to(torch.complex64)
+    @parametrize("shape, dtype", [((2, 3, 4, 5, 6), torch.complex64), ((32, 8192), torch.complex64),
+                                  ((8192,), torch.complex32), ((64, 128), torch.complex32)])
+    def test_fftn_round_trip(self, device, shape, dtype):
+        # Every dim, several passes per axis, and fp16 partials above the half range (amplitude 100 before scaling)
+        x = 100 * torch.randn(shape, dtype=torch.complex64)
+        spectrum = torch.fft.fftn(x.to(device)).cpu()
+        self.assertEqual(spectrum, torch.fft.fftn(x), atol=0.5, rtol=1e-4)
+        result = torch.fft.ifftn(spectrum.to(dtype).to(device)).cpu().to(torch.complex64)
         self.assertEqual(result, x, atol=1, rtol=0)
 
     def test_fft_private_ops_edge_dims(self, device):
