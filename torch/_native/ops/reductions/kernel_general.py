@@ -4,7 +4,8 @@
 # projection/partial mode, and fold clamps. Inputs must be on the current device.
 
 import math
-from collections.abc import Sequence
+import os
+from collections.abc import Callable, Sequence
 from typing import Any, cast, Literal, NamedTuple
 
 import cutlass.cute as cute
@@ -15,7 +16,7 @@ from torch._tensor_iterator import reduce_op
 
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
-from ...cutedsl.plan_cache import cached_plan
+from ...cutedsl.plan_cache import cached_plan, LRUCache
 from ...utils.device import check_current
 from . import tile
 from .inner_tree_plan import _K_INNER_TREE_THRESHOLD, _K_TWO_KERNEL_THRESHOLD
@@ -115,8 +116,6 @@ class ReduceBlock:
             self.num_o if self.wide_output else None,
             self.red_pairs,
             self.kept_pairs,
-            self.in_base,
-            self.limit,
             self.project_n,
         )
 
@@ -127,7 +126,8 @@ _stream = _L.stream
 _compile = _L.compile_kernel
 
 _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
-_PLAN = {}  # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
+# (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
+_PLAN = LRUCache(1024)
 
 
 def _fakes(
@@ -145,11 +145,6 @@ def _fakes(
         )
         for i, t in enumerate(ts)
     ]
-
-
-def _operands(ts: Sequence[torch.Tensor], read_only: bool = False) -> list[Any]:
-    # Pass real tensors; read_only() prevents COW input materialization during export.
-    return [_L.read_only(t) for t in ts] if read_only else list(ts)
 
 
 def _exts(pairs: Pairs, wide: bool = False) -> list[Any] | None:
@@ -175,8 +170,6 @@ def _geom_args(op: ReduceBlock) -> tuple[Any, ...]:
         _strides(op.red_pairs),
         _exts(op.kept_pairs, op.wide_output or op.wide_kept),
         _strides(op.kept_pairs),
-        Int64(op.in_base),
-        Int64(op.limit),
     )
 
 
@@ -209,6 +202,8 @@ def _launch(
     # Entry points check that this device is current.
     device = ins[0].get_device()
     key = (device,) + key
+    # The input offset is boxed per call so offset views share a plan.
+    bounds = (Int64(op.in_base), Int64(op.limit))
     plan = _PLAN.get((key, op.geom_sig))
     if plan is None:
         fn = cached_plan(
@@ -221,6 +216,7 @@ def _launch(
                 _fakes(ins, int64_extent=True, alignments=alignments),
                 _fakes(outs, int64_extent=op.wide_output),
                 *_geom_args(op),
+                *bounds,
                 _stream(device),
             ),
             op=f"aten::{op_name}",
@@ -228,7 +224,7 @@ def _launch(
         plan = (fn, _geom_args(op))
         _PLAN[(key, op.geom_sig)] = plan
     fn, geom = plan
-    fn(_operands(ins, read_only=True), _operands(outs), *geom, _stream(device))
+    _L.launch(fn, device, list(ins), list(outs), *geom, *bounds)
 
 
 def _ti_pairs(x: torch.Tensor, out: torch.Tensor) -> tuple[Pairs, Pairs]:
@@ -1137,6 +1133,60 @@ def reduce_all2(
     order: Literal["unordered", "inner_tree"] | None = None,
 ) -> tuple[torch.Tensor, ...]:
     return _reduce_all(trait, trait_key, x, list(out_dtypes), 2, order=order)
+
+
+# An eager call with an earlier call's metadata replays that call's launches, skipping the
+# routing and planning that cost 40-85 us of host time per call on B200.
+_REPLAYS = LRUCache(1024)
+_UNRECORDED = object()
+
+
+def replay_reduce(
+    make_trait: Callable[[], Any],
+    trait_key: str,
+    x: torch.Tensor,
+    dims: int | Sequence[int] | None,
+    out_dtype: torch.dtype,
+) -> torch.Tensor:
+    """reduce_dim over `dims`, or reduce_all when None, replaying the launches of an
+    earlier call with the same metadata. x's device must be current. The trait is not
+    keyed: trait_key, with x.dtype and out_dtype, must determine every parameter of the
+    trait make_trait builds."""
+    from . import kernel_rowtile as rt
+
+    check_current(x.get_device())
+    dims = [dims] if isinstance(dims, int) else dims
+
+    def run() -> torch.Tensor:
+        trait = make_trait()
+        if dims is None:
+            return reduce_all(trait, trait_key, x, out_dtype)
+        return reduce_dim(trait, trait_key, x, dims, out_dtype)
+
+    # Routes and compiled kernels assume the pointer's alignment, and a storage base need
+    # not be allocator-aligned (e.g. a sliced UntypedStorage).
+    key = (
+        trait_key,
+        out_dtype,
+        None if dims is None else tuple(dims),
+        x.dtype,
+        x.get_device(),
+        x.shape,
+        x.stride(),
+        x.storage_offset(),
+        x.untyped_storage().nbytes(),
+        _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
+        os.environ.get(rt._INNER_TREE_ENV),
+    )
+    replay = _REPLAYS.get(key, _UNRECORDED)
+    if replay is None:
+        return run()
+    if replay is not _UNRECORDED:
+        return replay(x)[0]
+    with _L.recording(x) as record:
+        out = run()
+    _REPLAYS[key] = record.finish([out])
+    return out
 
 
 def _reduce_all(
