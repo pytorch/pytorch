@@ -3815,10 +3815,37 @@ class _TestCustomPartitionerFn(CustomPartitionerFn):
         return self._uuid
 
 
+@instantiate_parametrized_tests
 class TestFxGraphCacheHashing(TestCase):
     def _fx_graph_cache_key(self, gm, example_inputs):
         details = FxGraphHashDetails(gm, example_inputs, cast(Any, {}), [])
         return FxGraphCachePickler(gm).get_key(details)
+
+    @parametrize("nested", (False, True))
+    @parametrize("complex_constant", (False, True))
+    def test_nan_constant_bits_affect_cache_key(self, nested, complex_constant):
+        bits = torch.tensor(
+            [0x7FF0000000000001, 0x7FF8000000000000, 0x7FFABCDE12345678],
+            dtype=torch.int64,
+        )
+        bits = torch.cat((bits, bits | torch.iinfo(torch.int64).min))
+        keys = []
+        for value in bits.view(torch.float64).tolist():
+            if complex_constant:
+                value = complex(0.0, value)
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            graph.output(graph.call_function(torch.ops.aten.mul.Tensor, (x, value)))
+            gm = torch.fx.GraphModule({}, graph)
+            if nested:
+                outer = torch.fx.Graph()
+                x = outer.placeholder("x")
+                outer.output(outer.call_module("inner", (x,)))
+                gm = torch.fx.GraphModule({"inner": gm}, outer)
+            key = self._fx_graph_cache_key(gm, [])
+            self.assertEqual(key, self._fx_graph_cache_key(gm, []))
+            keys.append(key)
+        self.assertEqual(len(set(keys)), len(keys))
 
     def _no_input_factory_graph(self, device=None):
         graph = torch.fx.Graph()
