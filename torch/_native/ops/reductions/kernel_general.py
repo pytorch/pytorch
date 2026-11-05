@@ -480,14 +480,13 @@ def select_general_config(
     # 0.65x (bf16) of 256; 1-16 MiB were within 12% either way.
     if num_o == 1:
         return _GeneralConfig(block=_K0_ALL_BLOCK, rule="general_one_output")
-    strided_row = (
-        cc == (10, 0)
-        and dtype in _B200_DTYPES
-        and tuple(red_pairs) == ((count, 2),)
+    strided = (
+        tuple(red_pairs) == ((count, 2),)
         and tuple(kept_pairs) == ((num_o, 2 * count),)
         and acc_bits == 32
         and alignment >= 16
     )
+    strided_row = strided and cc == (10, 0) and dtype in _B200_DTYPES
     # Against the default config on B200 (bf16/fp32, 8-8192 outputs; fp16 shares the rules
     # unmeasured), the c256 inner tree ran 1.18-3.8x at every output count. The wider
     # rules ran 0.76-0.95x below 2048 outputs, which keep the default config (a two-stage
@@ -524,6 +523,25 @@ def select_general_config(
         and trait_key in ("sum", "prod", "mean", "amax", "amin")
     ):
         return _GeneralConfig(block=32, rule="b200_strided_one_field")
+    sm107 = cc == (10, 7) and dtype in (torch.float32, torch.bfloat16)
+    if not (sm107 and strided and count == 1024):
+        return _GeneralConfig()
+    size = num_o * count * dtype.itemsize
+    if size not in (16 << 20, 64 << 20, 256 << 20, 2 << 30):
+        return _GeneralConfig()
+    if size >= 256 << 20 and (trait_key, nfields, nouts) == ("sum", 1, 1):
+        return _GeneralConfig(block=64, rule="rubin_strided_sum")
+    if welford_outs == nouts:
+        return _GeneralConfig(kernel_order="inner_tree", rule="rubin_strided_welford")
+    if size >= 64 << 20:
+        if nouts == 1 and nfields == 1 and trait_key in ("sum", "mean", "amax"):
+            return _GeneralConfig(kernel_order="inner_tree", rule="rubin_strided_inner")
+        if (trait_key, nfields, nouts) == ("argmaxi32", 2, 1) and (
+            dtype == torch.bfloat16 or size == 2 << 30
+        ):
+            return _GeneralConfig(
+                kernel_order="inner_tree", rule="rubin_strided_argmax"
+            )
     return _GeneralConfig()
 
 
@@ -617,6 +635,7 @@ def _try_fast_row(
         M,
         nfields=trait.nfields,
         nouts=nouts,
+        welford_outs=welford_outputs(trait),
         acc_bits=acc_bits,
         alignment=alignment,
     )

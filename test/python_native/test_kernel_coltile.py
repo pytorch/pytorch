@@ -849,7 +849,8 @@ class TestOrderedColHost(TestCase):
         table = {(9, 0): {"sum": cfg, "var0": cfg, "amax": measured}}
 
         def select(key="sum", dtype=f32, columns=64, batches=1, **kwargs):
-            contract = dict(nfields=1, acc_bits=32, out_dtypes=(f32,)) | kwargs
+            trait = dict(nfields=1, nouts=1, welford_outs=0)
+            contract = trait | dict(acc_bits=32, out_dtypes=(f32,)) | kwargs
             partials = contract.pop("partials", 2)
             return ct.select_ordered_col_config(
                 (9, 0), dtype, key, columns, batches, partials, **contract
@@ -1340,6 +1341,8 @@ class TestOrderedColDevice(TestCase):
             1,
             plan.split[0],
             nfields=1,
+            nouts=1,
+            welford_outs=0,
             acc_bits=32,
             out_dtypes=tuple(outputs),
             rows=rows,
@@ -1361,6 +1364,42 @@ class TestOrderedColDevice(TestCase):
         ops = [_ordered_fields(k) for k in ct._CACHE if k[:2] == tags]
         mapped = {(f["tile_columns"], f["full_tiles"]) for f in ops}
         self.assertEqual(mapped, {(32, False)})
+
+    @parametrize(
+        "key,dtype,rows,cols,width",
+        [
+            ("var0", torch.float32, 65536, 1024, 16),
+            ("var0", torch.bfloat16, 32768, 256, 16),
+            ("argmaxi32", torch.float32, 65536, 256, 16),
+            ("var0", torch.bfloat16, 8192, 1024, 16),
+            # The 256 MiB anchor of the 2 GiB-class C = 4096 mapping.
+            ("argmaxi32", torch.bfloat16, 32768, 4096, 32),
+        ],
+        name_fn=lambda key, dt, r, c, w: f"{key}_{str(dt)[6:]}_{r}x{c}",
+    )
+    def test_sm107_mappings_match_the_indexed_tree(
+        self, device, key, dtype, rows, cols, width
+    ):
+        """Run SM107's ordered mappings (on B200) bitwise equal to the indexed tree."""
+        if torch.cuda.get_device_capability(device) != (10, 0):
+            self.skipTest("SM107 mappings run on B200, which has its own route")
+        x = torch.randn(rows, cols, device=device).to(dtype)
+        if key == "var0":
+            trait, outputs = T.WelfordOps(correction=0), [dtype]
+        else:
+            trait, outputs = T.ArgMaxOps(), [torch.int64]
+        for k in [k for k in ct._CACHE if k[1:3] == (key, dtype)]:
+            del ct._CACHE[k]
+        got = ct.reduce_ordered_col(trait, key, x, outputs, 1, cc=(10, 7))
+        self.assertIsNotNone(got)
+        ops = [_ordered_fields(k) for k in ct._CACHE if k[1:3] == (key, dtype)]
+        mapped = {(f["workers"], f["tile_columns"], f["full_tiles"]) for f in ops}
+        self.assertEqual(mapped, {(16, width, True)})
+        want = kg._try_indexed_itree(
+            trait, key + "_ref", x, [(rows, cols)], [(cols, 1)], cols, rows, outputs, 1
+        )
+        self.assertIsNotNone(want)
+        self._assert_bitwise(got, want)
 
     @parametrize(
         "op,in_dtype,rows,cols,workers,width,start,split,full,used",
