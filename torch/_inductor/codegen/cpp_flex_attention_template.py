@@ -1304,6 +1304,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.q_block_size = q_block_size
         self.partition_size = partition_size
         self.head_size_v = 0
+        self.q_seq_len = 0
         self.is_decoding = False
         self.use_pv_micro_gemm = False
         self.has_other_buffer = has_other_buffer
@@ -1602,6 +1603,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         # softmax(q @ k.T) @ v uses the micro gemm only for fp16, whose brgemm fallback is slower.
         self.use_pv_micro_gemm = self.input_dtype == torch.float16
         self.head_size_v = value.layout.size[3]
+        self.q_seq_len = query.layout.size[1]
 
         num_threads = parallel_num_threads()
         if not isinstance(self.output_node, ir.IRNode):
@@ -1700,17 +1702,24 @@ class CppFlexAttentionTemplate(CppTemplate):
         from torch._inductor.codegen.cpp_micro_gemm import CppMicroGemmFP32Vec
         from torch._inductor.virtualized import V
 
+        # fp32 with fewer rows per head is measured slower with large blocking
+        q_len = sympy.sympify(self.q_seq_len)
+        small_q = q_len.is_number and int(q_len) < 16
+        qk_blocked = not (self.input_dtype == torch.float32 and small_q)
+        qk_blocking = GemmBlocking(1, 16, 1)
+        if qk_blocked:
+            qk_blocking = self.gemm_blocking(self.kv_block_size)
         micro_gemm_trans = CppMicroGemmFP32Vec(
             kernel_name + "_kernel_micro_gemm_transpose_b",
             self.input_dtype,
             self.input_dtype,
             self.accumulate_dtype,
             self.accumulate_dtype,
-            self.gemm_blocking(self.kv_block_size),
+            qk_blocking,
             1,
             True,
             True,
-            pow2_m_tails=True,
+            pow2_m_tails=qk_blocked,
         )
 
         micro_gemm = CppMicroGemmFP32Vec(
