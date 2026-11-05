@@ -80,6 +80,12 @@ string(REPLACE ";" "," AT_ROCM_CK_SDPA_ARCHS_STR "${AT_ROCM_CK_SDPA_ARCHS}")
 # Alongside the other generated ATen headers (see cmake/Codegen.cmake).
 configure_file(ROCmCKSDPAConfig.h.in "${CMAKE_BINARY_DIR}/aten/src/ATen/ROCmCKSDPAConfig.h" @ONLY)
 
+# CK GEMM allowlist (TORCH_CK_GEMM_ARCH_LIST, top-level CMakeLists.txt) surfaced
+# to Context.cpp and the ck_gemm .hip dispatch, so the runtime check stays in
+# step with the build arch filter (torch_filter_ck_gemm_arches).
+string(REPLACE ";" "," TORCH_CK_GEMM_ARCH_LIST_STR "${TORCH_CK_GEMM_ARCH_LIST}")
+configure_file(ROCmCKGEMMConfig.h.in "${CMAKE_BINARY_DIR}/aten/src/ATen/ROCmCKGEMMConfig.h" @ONLY)
+
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 # TODO: Do not generate CUDAConfig.h for ROCm BUILDS
 # At the moment, `jit_macros.h` include CUDAConfig.h for both CUDA and HIP builds
@@ -673,14 +679,15 @@ if(USE_ROCM)
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
   else()
-    # composable_kernel has no gfx1250 support yet, so its CK GEMM kernels fail to
-    # compile for that arch. Build CK GEMM as a separate library with gfx1250
-    # filtered out of HIP_ARCHITECTURES so every other requested arch still gets
-    # CK GEMM. Remove this filtering once the CK submodule supports gfx1250.
+    # composable_kernel supports CK GEMM only on an allowlist of gfx archs
+    # (torch_filter_ck_gemm_arches in cmake/public/utils.cmake; mirrors the
+    # allowlist in at::Context::ckGemmSupported()). Build CK GEMM as a separate
+    # library restricted to that subset via HIP_ARCHITECTURES so every other
+    # requested arch still builds. Dependencies.cmake turns USE_ROCM_CK_GEMM off
+    # when the subset is empty, so this branch always has at least one arch.
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
-    set(_ck_gemm_hip_arches ${PYTORCH_ROCM_ARCH})
-    list(REMOVE_ITEM _ck_gemm_hip_arches "gfx1250")
+    torch_filter_ck_gemm_arches(_ck_gemm_hip_arches)
     set_source_files_properties(${native_hip_bgemm} ${native_hip_ck} PROPERTIES LANGUAGE HIP)
     add_library(ck_gemm STATIC ${native_hip_bgemm} ${native_hip_ck})
     set_target_properties(ck_gemm PROPERTIES
@@ -957,15 +964,26 @@ if(USE_MPS)
     if(CAN_COMPILE_METAL)
         foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
             cmake_path(GET SHADER STEM TGT_STEM)
-            string(CONCAT TGT_BASIC ${TGT_STEM} "_31.air")
+            string(CONCAT TGT_BASIC ${TGT_STEM} "_32.air")
             list(APPEND AIR_BASIC ${TGT_BASIC})
-            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.1")
+            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.2")
         endforeach()
         air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
         list(APPEND METALLIB_DEPS kernels_basic.metallib)
         if(CAN_COMPILE_METAL_40)
+            # Shaders built for Metal 4.0 as well. BundledShaderLibrary resolves a
+            # kernel to kernels_40 when it defines it and to kernels_basic otherwise,
+            # so every kernel in these shaders runs the 4.0 build on MPP devices and
+            # every other kernel runs the 3.2 build. A shader must be listed when it
+            # has C10_METAL_HAS_MPP kernels (checked at build time below).
+            set(METAL_40_SHADERS Attention Cholesky Convolution GroupedMM LU Matmul Quantized ScaledMM TriangularSolve)
+            set(SHADER_STEMS)
             foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
                 cmake_path(GET SHADER STEM TGT_STEM)
+                list(APPEND SHADER_STEMS ${TGT_STEM})
+                if(NOT TGT_STEM IN_LIST METAL_40_SHADERS)
+                    continue()
+                endif()
                 string(CONCAT TGT_40 ${TGT_STEM} "_40.air")
                 list(APPEND AIR_40 ${TGT_40})
                 # MetalPerformancePrimitives switches the cooperative-tensor ABI on the
@@ -973,8 +991,32 @@ if(USE_MPS)
                 # MPP kernels assume the 26.2+ layout, so pin the target explicitly.
                 metal_to_air(${SHADER} ${TGT_40} "-std=metal4.0;-mmacos-version-min=26.2")
             endforeach()
+            foreach(TGT_STEM ${METAL_40_SHADERS})
+                if(NOT TGT_STEM IN_LIST SHADER_STEMS)
+                    message(FATAL_ERROR "METAL_40_SHADERS lists ${TGT_STEM}, but there is no ${TGT_STEM}.metal")
+                endif()
+            endforeach()
+            set(METAL_40_CHECK ${CMAKE_SOURCE_DIR}/cmake/CheckMetal40Shaders.cmake)
+            add_custom_command(
+                COMMAND ${CMAKE_COMMAND} "-DSHADERS=${native_mps_metal};${native_mps_sparse_metal}" "-DMETAL_40_SHADERS=${METAL_40_SHADERS}" -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -DSTAMP=${CMAKE_CURRENT_BINARY_DIR}/metal_40_shaders.stamp -P ${METAL_40_CHECK}
+                DEPENDS ${native_mps_metal} ${native_mps_sparse_metal} ${METAL_HEADER_DEPS} ${METAL_40_CHECK}
+                OUTPUT metal_40_shaders.stamp
+                COMMENT "Checking METAL_40_SHADERS"
+                VERBATIM)
+            list(APPEND METALLIB_DEPS metal_40_shaders.stamp)
             air_to_metallib(kernels_40.metallib ${AIR_40})
             list(APPEND METALLIB_DEPS kernels_40.metallib)
+        endif()
+        if(CAN_COMPILE_METAL_41)
+            # Shaders with Metal 4.1 kernels (native fp8), which shadow the 4.0 ones on macOS 27+
+            set(METAL_41_SHADERS ScaledMM)
+            foreach(TGT_STEM ${METAL_41_SHADERS})
+                string(CONCAT TGT_41 ${TGT_STEM} "_41.air")
+                list(APPEND AIR_41 ${TGT_41})
+                metal_to_air(${CMAKE_CURRENT_SOURCE_DIR}/native/mps/kernels/${TGT_STEM}.metal ${TGT_41} "-std=metal4.1;-mmacos-version-min=27.0")
+            endforeach()
+            air_to_metallib(kernels_41.metallib ${AIR_41})
+            list(APPEND METALLIB_DEPS kernels_41.metallib)
         endif()
         add_custom_command(
                           COMMAND echo "// $$(date)" > metallib_dummy.cpp
