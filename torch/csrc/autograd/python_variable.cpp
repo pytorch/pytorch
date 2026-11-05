@@ -921,17 +921,12 @@ DEFINE_CACHING_PYTHON_IMPORT_GETTER(
         .attr("TupleStrategy"))
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
-    get_logging_module,
-    py::module_::import("logging"))
-
-DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_logging_debug,
-    get_logging_module().attr("DEBUG"))
+    py::module::import("logging").attr("DEBUG"))
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_dtensor_dispatch_logger,
-    get_logging_module().attr("getLogger")(
-        "torch.distributed.tensor._dispatch"))
+    py::module::import("torch.distributed.tensor._dispatch").attr("logger"))
 
 static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   const auto dtensor_spec_class = get_dtensor_spec_class();

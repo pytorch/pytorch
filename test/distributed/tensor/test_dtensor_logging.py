@@ -1,7 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
 import logging
-from unittest.mock import patch
+import subprocess
+import sys
+import textwrap
 
 import torch
 import torch.distributed as dist
@@ -151,12 +153,69 @@ sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[
         self.assertIn("MISS", log_records[0].getMessage())
         self.assertIn("HIT", log_records[1].getMessage())
 
-        # Also test when the logger returned to C++ has no other Python references,
-        # so any dangling thread_local py::object deallocates it during thread exit
-        # after PyThreadState_DeleteCurrent() has released the GIL (even under -DNDEBUG).
-        with patch.object(logging, "getLogger", side_effect=logging.Logger):
-            hits, _ = run_concurrently(worker, num_threads=1)[0]
-            self.assertGreaterEqual(hits, 1)
+        # Run the worker-thread C++ cache-hit scenario in a fresh subprocess and
+        # drop Python references to the logger before the worker thread exits.
+        # This ensures that if C++ stored the logger in a thread_local py::object
+        # (instead of process-wide immortal storage), its destructor at thread
+        # exit after PyThreadState_DeleteCurrent() releases the GIL would
+        # deallocate the logger and crash the subprocess, without polluting the
+        # parent process's cached logger.
+        script = textwrap.dedent(
+            f"""
+            import logging
+            import torch
+            import torch.distributed as dist
+            import torch.distributed.tensor._dispatch as _dispatch
+            from torch.distributed.tensor import DeviceMesh, DTensor, Shard
+            from torch.testing._internal.common_utils import run_concurrently
+            from torch.testing._internal.distributed.fake_pg import FakeStore
+
+            dist.init_process_group(
+                backend="fake", rank=0, world_size=2, store=FakeStore()
+            )
+            try:
+                logger = logging.Logger("torch.distributed.tensor._dispatch")
+                logger.setLevel(logging.DEBUG)
+                _dispatch.logger = logger
+                logging.Logger.manager.loggerDict[
+                    "torch.distributed.tensor._dispatch"
+                ] = logger
+                del logger
+
+                mesh = DeviceMesh("{self.device_type}", [0, 1])
+                x_dt = DTensor.from_local(
+                    torch.randn(2, 4), mesh, [Shard(0)], run_check=False
+                )
+
+                def worker():
+                    x_dt + x_dt  # miss (populates thread-local C++ cache)
+                    x_dt + x_dt  # hit (invokes log_sharding_prop_cache_hit)
+                    hits, _ = (
+                        torch._C._get_DTensor_sharding_propagator_cache_stats()
+                    )
+                    assert hits >= 1
+                    _dispatch.logger = None
+                    logging.Logger.manager.loggerDict.pop(
+                        "torch.distributed.tensor._dispatch", None
+                    )
+
+                run_concurrently(worker, num_threads=1)
+            finally:
+                dist.destroy_process_group()
+            """
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        self.assertEqual(
+            proc.returncode,
+            0,
+            f"Worker thread exit after C++ cache hit failed:\n{proc.stderr}",
+        )
 
 
 if __name__ == "__main__":
