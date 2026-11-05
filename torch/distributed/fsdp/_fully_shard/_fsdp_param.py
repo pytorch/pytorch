@@ -865,22 +865,6 @@ class FSDPParam:
                 "Both fsdp_pre_all_gather and fsdp_post_all_gather should be defined "
                 f"if using all-gather extensions: {inner_tensor}"
             )
-        shard_dim = self.fsdp_placement.dim
-        shard_world_size = (
-            self.mesh_info.shard_mesh_size
-            if isinstance(self.mesh_info, FSDPMeshInfo)
-            else 1
-        )
-        if (
-            has_fsdp_pre_all_gather
-            and shard_dim != 0
-            and self._orig_size[shard_dim] % shard_world_size != 0
-        ):
-            raise NotImplementedError(
-                f"FSDP does not support uneven sharding on dim {shard_dim} for "
-                f"all-gather extensions: {self._orig_size} (world size: "
-                f"{shard_world_size})"
-            )
         if has_release_all_gather_outputs and not has_fsdp_post_all_gather:
             raise AssertionError(
                 "fsdp_should_release_all_gather_outputs_after_post_all_gather "
@@ -925,8 +909,13 @@ class FSDPParam:
             return  # already initialized
         output_numels = [numel * world_size for numel in all_gather_input_numels]
         shard_dim = self.fsdp_placement.dim
-        if shard_dim != 0 and self._orig_size[shard_dim] % world_size != 0:
-            # The copy-out drops the padding (see _default_all_gather_output_fn)
+        if (
+            shard_dim != 0
+            and self._orig_size[shard_dim] % world_size != 0
+            and not hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather")
+        ):
+            # The copy-out drops the padding (see _default_all_gather_output_fn),
+            # while extensions receive it, as for Shard(0)
             output_numels = [self._orig_size.numel()]
         self.all_gather_outputs = [
             torch.empty(torch.Size([numel]), dtype=dtype, device=device)
