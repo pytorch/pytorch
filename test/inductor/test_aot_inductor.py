@@ -103,6 +103,7 @@ from torch.testing._internal.common_utils import (
     random_matrix_with_scaled_reduction_dim,
     runOnRocm,
     set_cwd,
+    skipIfCachingAllocatorDisabled,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -820,6 +821,20 @@ class AOTInductorTestsTemplate:
             "::run_impl("
         ).check_not(call0).run(code)
 
+    def test_constant_folding_non_dense_view(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.randn(8, 12, device=device)
+
+            def forward(self, x):
+                # Folds to a non-dense view of w with strides (1, 12).
+                return x + self.w[:, :6].t()
+
+        example_inputs = (torch.randn(6, 8, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
     def test_const_graph_no_autotune_at_compile_time(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -916,6 +931,62 @@ class AOTInductorTestsTemplate:
         runner.swap_constant_buffer()
         new_output = runner_call(test_inputs)
         self.assertEqual(expected, new_output)
+
+    @skipIfCachingAllocatorDisabled
+    def test_failed_inactive_constant_folding_keeps_active_constants(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+        if torch.cuda.get_allocator_backend() != "native":
+            raise unittest.SkipTest("needs a memory fraction cap")
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(2048, 4096, device=device))
+                self.b = torch.nn.Parameter(torch.randn(2048, device=device))
+
+            def forward(self, x):
+                return x @ torch.relu(self.w.t()) + self.b
+
+        model = Model(self.device)
+        x = torch.randn(2, 4096, device=self.device)
+        with config.patch(
+            {
+                "always_keep_tensor_constants": True,
+                "aot_inductor.use_runtime_constant_folding": True,
+            }
+        ):
+            so_path = AOTIRunnerUtil.legacy_compile(model, (x,))
+        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, self.device)
+        expected = model(x)
+        self.assertEqual(runner.run([x])[0], expected, atol=1e-3, rtol=1e-3)
+        params = dict(model.named_parameters())
+        new_weights = {
+            name: params[fqn].detach() + 1
+            for name, fqn in runner.get_constant_names_to_original_fqns().items()
+            if fqn in params
+        }
+        runner.update_constant_buffer(new_weights, True, False)
+
+        # Leave too little memory for the 32 MB folded constant. The fold
+        # allocates from a fresh pool, so it can't reuse cached blocks, which
+        # the cap doesn't cover.
+        original_fraction = torch.cuda.get_per_process_memory_fraction()
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        total = torch.cuda.get_device_properties(self.device).total_memory
+        fraction = (torch.cuda.memory_reserved() + (8 << 20)) / total
+        ooms = torch.cuda.memory_stats()["num_ooms"]
+        pool = torch.cuda.MemPool()
+        torch.cuda.set_per_process_memory_fraction(fraction)
+        try:
+            with self.assertRaises(RuntimeError), torch.cuda.use_mem_pool(pool):
+                runner.run_const_fold(True)
+        finally:
+            torch.cuda.empty_cache()
+            torch.cuda.set_per_process_memory_fraction(original_fraction)
+        self.assertGreater(torch.cuda.memory_stats()["num_ooms"], ooms)
+        self.assertEqual(runner.run([x])[0], expected, atol=1e-3, rtol=1e-3)
 
     def test_update_inactive_constant_buffer_with_interleaved_folded_constants(self):
         if self.device == "mps":
@@ -4540,6 +4611,53 @@ class AOTInductorTestsTemplate:
 
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
+
+    def test_return_non_dense_view_constant(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.cst = torch.randn(8, 12, device=device)
+
+            def forward(self, x):
+                # A non-dense view of the constant with strides (1, 12).
+                return (x, self.cst[:, :6].t())
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(5, device=self.device),)
+        self.check_model(model, example_inputs)
+        # The output_handles path copies a returned constant with
+        # aoti_torch_clone_preserve_strides, so the output keeps the eager
+        # strides. The arrayref variants are covered in test_aot_inductor_arrayref.py.
+        if not (self.allow_stack_allocation or self.use_minimal_arrayref_interface):
+            with torch.no_grad():
+                actual = AOTIRunnerUtil.run(model, example_inputs)
+                expected = model(*example_inputs)
+            self.assertFalse(expected[1].is_contiguous())
+            self.assertEqual(actual[1], expected[1])
+            self.assertEqual(actual[1].stride(), expected[1].stride())
+
+    def test_constant_folding_return_non_dense_view(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.randn(8, 12, device=device)
+
+            def forward(self, x):
+                # Folds to a constant; the output is a non-dense view of it.
+                return (x + 1, (self.w * 2)[:, :6].t())
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(5, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(model, example_inputs)
+            # See test_return_non_dense_view_constant.
+            if not (self.allow_stack_allocation or self.use_minimal_arrayref_interface):
+                with torch.no_grad():
+                    actual = AOTIRunnerUtil.run(model, example_inputs)
+                    expected = model(*example_inputs)
+                self.assertFalse(expected[1].is_contiguous())
+                self.assertEqual(actual[1], expected[1])
+                self.assertEqual(actual[1].stride(), expected[1].stride())
 
     def test_profile_benchmark_harness(self):
         batch_size = 32
