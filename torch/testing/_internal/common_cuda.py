@@ -404,12 +404,16 @@ def evaluate_platform_supports_mx_gemm():
 def evaluate_platform_supports_mxfp8_cast():
     if torch.cuda.is_available():
         if torch.version.hip:
-            if ROCM_VERSION >= (7, 0):
-                gcn_name = torch.cuda.get_device_properties(0).gcnArchName
-                return 'gfx950' in gcn_name or ('gfx1250' in gcn_name and ROCM_VERSION >= (7, 14))
+            # TODO(future PR): add ROCm support for hardware natively supporting
+            # mxfp8 gemm. While technically the casts can be added on any
+            # hardware with emulation, we have no plans to do so.
+            return False
         else:
+            # On NVIDIA, we have implementations for CUDA capability 10.0+
             return SM100OrLater
-    # TODO(later): Add XPU support only for devices with hardware (not emulated) MXFP8.
+    # TODO(future PR): XPU, only on hardware which natively supports mxfp8
+    # gemm. While technically the casts can be added on any hardware
+    # with emulation, we have no plans to do so.
     return False
 
 def evaluate_platform_supports_mxfp8_grouped_gemm():
