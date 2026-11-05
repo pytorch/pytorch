@@ -936,7 +936,7 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
         if len(expr.args) != 1:
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
         # pyrefly: ignore [missing-attribute]
-        return f'triton_helpers.rounding_to_int({self._print(expr.args[0])}, {V.kernel.index_dtype}, "{rounding}")'
+        return f"triton_helpers.rounding_to_int({self._print(expr.args[0])}, {V.kernel.index_dtype}, '{rounding}')"
 
     def _print_TruncToInt(self, expr: sympy.Expr) -> str:
         return self._print_rounding_to_int(expr, "trunc")
