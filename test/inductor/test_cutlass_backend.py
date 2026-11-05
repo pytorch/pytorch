@@ -225,17 +225,14 @@ def select_no_algorithm(*args, **kwargs):
     raise NoValidChoicesError
 
 
+@unittest.skipIf(not HAS_GPU, f"{GPU_TYPE} and triton are not available")
+@unittest.skipIf(torch.version.hip, "CUTLASS backend is not supported on HIP")
 @instantiate_parametrized_tests
 class TestCutlassBackend(TestCase):
     # device_type of each test case is necessary for skipCUDAIf decorator.
     device_type = GPU_TYPE
 
     def setUp(self):
-        if not HAS_GPU:
-            self.skipTest(f"{GPU_TYPE} and triton are not available")
-        if torch.version.hip:
-            self.skipTest("CUTLASS backend is not supported on HIP")
-
         # The new inductor cache refresh mechanism
         # introduced with https://github.com/pytorch/pytorch/pull/122661
         # interacts badly with persistent subprocesses during
