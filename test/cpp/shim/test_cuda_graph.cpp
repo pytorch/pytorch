@@ -1,4 +1,5 @@
-// Checks the CUDA graph capture functions of the C shim.
+// Checks the CUDA graph capture functions of the C shim and their RAII
+// wrappers in utils_cuda.h.
 
 #include <gtest/gtest.h>
 
@@ -475,6 +476,12 @@ TEST_F(AOTICudaGraphRAIITest, MakesNonBlockingStreamsAndEvents) {
     known_event.record(at::cuda::getStreamFromExternal(stream.get(), device));
     EXPECT_EQ(cudaEventSynchronize(event.get()), cudaSuccess);
     known_event.synchronize();
+    // The event has no timing data.
+    float ms = 0;
+    EXPECT_EQ(
+        cudaEventElapsedTime(&ms, event.get(), event.get()),
+        cudaErrorInvalidResourceHandle);
+    (void)cudaGetLastError();
   }
 }
 
@@ -539,7 +546,7 @@ TEST_F(AOTICudaGraphRAIITest, EndsTheInvalidatedCaptureItLeftOpen) {
   EXPECT_TRUE(y.equal(at::full({8}, 3.0f, at::kCUDA)));
 }
 
-TEST_F(AOTICudaGraphRAIITest, EndsTheCaptureOnItsDevice) {
+TEST_F(AOTICudaGraphRAIITest, EndsACaptureOnAnotherDevice) {
   if (c10::cuda::device_count() < 2) {
     GTEST_SKIP() << "Needs two GPUs";
   }

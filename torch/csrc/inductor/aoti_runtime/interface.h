@@ -171,16 +171,18 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerRunSingleThreaded(
     AOTIProxyExecutorHandle proxy_executor_handle);
 
 // Like AOTInductorModelContainerRun, but runs the model as CUDA graphs that
-// it captures lazily, while serving calls. On each model instance, a new input
-// layout (shapes and strides) runs eagerly first, is captured on its next call
-// from a thread that has finished an eager call on that instance, and is
-// replayed after that, up to AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS graphs
-// (default 8); past that, new layouts run eagerly. A failed capture fails the
-// call. Replayed outputs are copies; eager calls return the model's own
-// outputs. Once a graph is captured, the container's active constants can't
-// change. The stream must not be capturing. Requires a CUDA model compiled
-// with aot_inductor.cudagraphs=True, which ROCm doesn't support yet, see
-// https://github.com/ROCm/rocm-systems/issues/12677.
+// it captures lazily, while serving calls. On each model instance, a new
+// input layout (shapes and strides) runs eagerly first, is captured on its
+// next call from a thread that has finished an eager call of that layout on
+// that instance, and is replayed after that, up to
+// AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS graphs (default 8); past that, new
+// layouts run eagerly. A failed capture fails the call. Replayed outputs are
+// copies; eager calls return the model's own outputs. Once a graph is
+// captured, the container's active constants can't change. The stream must
+// not be capturing. Requires a CUDA model compiled with
+// aot_inductor.cudagraphs=True, which ROCm doesn't support yet, see
+// https://github.com/ROCm/rocm-systems/issues/12677, and PyTorch's native
+// CUDA caching allocator: under backend:cudaMallocAsync every capture fails.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerRunWithLazyCudaGraphs(
     AOTInductorModelContainerHandle container_handle,
     AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles

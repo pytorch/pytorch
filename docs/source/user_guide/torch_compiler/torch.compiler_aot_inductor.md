@@ -232,7 +232,9 @@ doesn't count as a warm-up.
   Compiling with `aot_inductor.cudagraphs=True` rejects models that can't be
   captured.
 - Capturing needs PyTorch's native CUDA caching allocator: under
-  `PYTORCH_ALLOC_CONF=backend:cudaMallocAsync`, captures fail.
+  `PYTORCH_ALLOC_CONF=backend:cudaMallocAsync`, every capture fails, so
+  `run_with_lazy_cuda_graphs` raises after each layout's first call; call the
+  model as usual instead.
 - Once a graph is captured, the model's active constants can't change, so
   `load_constants` fails; in C++, the inactive buffer can still be updated, but
   not swapped in. Load the model again to use new weights.
