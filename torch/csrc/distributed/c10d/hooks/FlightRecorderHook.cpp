@@ -693,7 +693,7 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
   try {
     result = args.work->getFutureResult();
   } catch (const c10::NotImplementedError&) {
-    // This Work type reports no result (e.g. ucc, mpi, fake). Expected, so not
+    // This Work type reports no result (e.g. ucc, mpi). Expected, so not
     // a warning.
   } catch (const std::exception& e) {
     // Unexpected: retire this op at issue rather than fail the collective. It
