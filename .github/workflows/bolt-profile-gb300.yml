@@ -21,7 +21,7 @@ on:
         required: false
         type: string
       cuda:
-        description: CUDA variant of that build (13_0, 13_2 or 13_4)
+        description: CUDA variant of that build, as in its prebolt-cuda-aarch64-<cuda> artifact
         required: false
         type: string
         default: "13_4"
@@ -45,9 +45,7 @@ permissions:
   actions: read
 
 env:
-  # TODO(janbernloehr): drop the default once #202470 is in a nightly. Until
-  # then only its ciflow/binaries run has the prebolt artifacts.
-  NIGHTLY_RUN_ID: ${{ inputs.nightly-run-id || '40903868087' }}
+  NIGHTLY_RUN_ID: ${{ inputs.nightly-run-id }}
   BOLT_CUDA: ${{ inputs.cuda || '13_4' }}
   BOLT_WORKLOAD_VARIANT: ${{ inputs.workload-variant || 'all' }}
   BOLT_WORKLOAD_STEPS: ${{ inputs.workload-steps || '45000' }}
