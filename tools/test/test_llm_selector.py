@@ -152,6 +152,7 @@ class TestSelection(unittest.TestCase):
             ".github/scripts/parse_ref.py",
             ".github/scripts/pytest_cache.py",
             ".github/scripts/pytest_caching_utils.py",
+            ".github/scripts/file_io_utils.py",
             ".github/actions/pytest-cache-download/action.yml",
             ".github/actions/pytest-cache-upload/action.yml",
             ".github/workflows/pull.yml",
