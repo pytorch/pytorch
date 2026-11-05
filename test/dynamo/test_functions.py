@@ -236,7 +236,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return
 
     def test_script_function_graph_break(self):
-        @torch.jit.script
+        @torch.jit._script.script
         def scripted():
             if torch.jit.is_scripting():
                 return 1

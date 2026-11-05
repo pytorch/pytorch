@@ -382,7 +382,7 @@ class testVariousModelVersions(TestCase):
 
         sample_input = torch.tensor([1])
 
-        script_module = torch.jit.script(MyTestModule())
+        script_module = torch.jit._script.script(MyTestModule())
         script_module(sample_input)
 
         buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())

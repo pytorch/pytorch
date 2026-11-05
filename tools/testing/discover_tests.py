@@ -75,7 +75,6 @@ TESTS = discover_tests(
         "ao",
         "custom_backend",
         "fx",  # executed by test_fx.py
-        "jit",  # executed by test_jit.py
         "mobile",
         "onnx_caffe2",
         "package",  # executed by test_package.py

@@ -629,10 +629,8 @@ class TestFFT(TestCase):
                 else:
                     numpy_fn = getattr(np.fft, fname)
 
-                def fn(t: torch.Tensor, s: list[int] | None, dim: list[int] = (-2, -1), norm: str | None = None):
-                    return torch_fn(t, s, dim, norm)
 
-                torch_fns = (torch_fn, torch.jit.script(fn))
+                torch_fns = (torch_fn,)
 
                 # Once with dim defaulted
                 input_np = input.cpu().numpy()

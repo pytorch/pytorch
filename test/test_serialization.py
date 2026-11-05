@@ -1109,7 +1109,7 @@ class TestSerialization(TestCase, SerializationMixin):
 
     def test_serialization_zipfile_actually_jit(self):
         with tempfile.NamedTemporaryFile() as f:
-            torch.jit.save(torch.jit.script(torch.nn.Linear(3, 4)), f)
+            torch.jit._serialization.save(torch.jit._script.script(torch.nn.Linear(3, 4)), f)
             f.seek(0)
             with self.assertRaisesRegex(
                 RuntimeError,

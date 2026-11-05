@@ -11,7 +11,7 @@ class TwoLayerNet(torch.jit.ScriptModule):
         self.linear1 = torch.nn.Linear(D_in, H)
         self.linear2 = torch.nn.Linear(2 * H, D_out)
 
-    @torch.jit.script_method
+    @torch.jit._script.script_method
     def forward(self, x1, x2):
         h1_relu = self.linear1(x1).clamp(min=0)
         h2_relu = self.linear1(x2).clamp(min=0)

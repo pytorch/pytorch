@@ -165,9 +165,9 @@ def getModuleFromName(model_name):
         module = module.getModule()
 
     if model_name in models_need_trace:
-        module = torch.jit.trace(module, [])
+        module = torch.jit._trace.trace(module, [])
     else:
-        module = torch.jit.script(module)
+        module = torch.jit._script.script(module)
 
     ops = torch.jit.export_opnames(module)
     print(ops)

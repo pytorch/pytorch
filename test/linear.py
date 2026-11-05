@@ -9,4 +9,4 @@ class LinearMod(torch.nn.Linear):
         return torch._C._nn.linear(input, self.weight, self.bias)
 
 
-print(torch.jit.trace(LinearMod(20, 20), torch.rand([20, 20])).graph)
+print(torch.jit._trace.trace(LinearMod(20, 20), torch.rand([20, 20])).graph)

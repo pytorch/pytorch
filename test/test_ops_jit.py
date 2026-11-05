@@ -4,6 +4,7 @@ from functools import partial
 from textwrap import dedent
 
 import torch
+from torch.jit._trace import trace as _trace_fixture
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -17,7 +18,10 @@ from torch.testing._internal.common_jit import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     clone_input_helper,
+    enable_profiling_mode_for_profiling_tests,
     first_sample,
+    freeze_rng_state,
+    is_iterable_of_tensors,
     IS_SANDCASTLE,
     run_tests,
     TestCase,
@@ -26,7 +30,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.jit_metaprogramming_utils import (
     check_alias_annotation,
     create_script_fn,
-    create_traced_fn,
+    partial_apply_nontensors,
 )
 from torch.testing._internal.jit_utils import (
     disable_autodiff_subgraph_inlining,
@@ -45,15 +49,40 @@ _variant_ops = partial(
 #   correctness of JIT specific alias schemas and intended
 #   autodifferentiation behavior.
 # Inherits from JitCommonTestCase instead of TestCase directly to share
-#   functionality with original test_jit.py method operator tests
+#   functionality with native graph/operator tests
 @unMarkDynamoStrictTest
 class TestJit(JitCommonTestCase):
     exact_dtype = True
 
+    def _trace_graph_fixture(self, variant, args, kwargs, requires_grad):
+        def clone_tensor(t):
+            return t.detach().clone().requires_grad_(t.requires_grad and requires_grad)
+
+        trace_args = []
+        for arg in args:
+            if isinstance(arg, torch.Tensor):
+                trace_args.append(clone_tensor(arg))
+            elif is_iterable_of_tensors(arg):
+                trace_args.append([clone_tensor(t) for t in arg])
+            else:
+                trace_args.append(arg)
+
+        with freeze_rng_state(), enable_profiling_mode_for_profiling_tests():
+            fn_tensors, split_inputs = partial_apply_nontensors(
+                variant, trace_args, kwargs
+            )
+            fixture = _trace_fixture(
+                fn_tensors, split_inputs.all_tensors, check_trace=False
+            )
+            self.assertExportImport(fixture.graph, split_inputs.all_tensors)
+            # Match create_traced_fn's forward warmup before requesting its graph.
+            fixture(*split_inputs.all_tensors)
+            return fixture.graph, fixture.graph_for(*split_inputs.all_tensors)
+
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (function, method, inplace)
-    #   and runtimes (eager, traced, scripted).
-    # TODO WARNING: inplace x {traced, scripted} not currently tested
+    #   and runtimes (eager, scripted).
+    # TODO WARNING: inplace scripted variants are not currently tested
     @_variant_ops(op_db)
     def test_variant_consistency_jit(self, device, dtype, op):
         _requires_grad = dtype in op.supported_backward_dtypes(
@@ -92,7 +121,7 @@ class TestJit(JitCommonTestCase):
 
         tested = False
         for sample in samples:
-            # Test traced and scripted consistency
+            # Test scripted consistency and native graph properties
             for func_type, variant in variants.items():
                 if variant is None:
                     continue
@@ -165,23 +194,17 @@ class TestJit(JitCommonTestCase):
                     no_gradgrad=not op.supports_gradgrad,
                 )
 
-            # Check traced forward, grad, and grad grad
-            # TODO: fix tracing here
+            # Traced graphs are fixtures for the native shape/autodiff checks.
             supports_tracing = op.supports_tracing and not has_fake_function
             if op.assert_jit_shape_analysis:
                 self.assertTrue(supports_tracing)
 
-            if supports_tracing:
-                traced_fn = create_traced_fn(self, variant)
-                check_against_reference(
-                    self,
-                    traced_fn,
-                    op.get_op(),
-                    out_fn,
+            if supports_tracing and dtype == torch.float32:
+                traced_graph, last_traced_graph = self._trace_graph_fixture(
+                    variant,
                     (get_sample(),) + sample.args,
                     sample.kwargs,
-                    no_grad=not _requires_grad,
-                    no_gradgrad=not op.supports_gradgrad,
+                    _requires_grad,
                 )
 
             # Check alias annotation schema for correctness (make
@@ -216,7 +239,7 @@ class TestJit(JitCommonTestCase):
                         else:
                             sizes = out.size()
                         self.checkShapeAnalysis(
-                            sizes, traced_fn.graph, op.assert_jit_shape_analysis
+                            sizes, traced_graph, op.assert_jit_shape_analysis
                         )
                         checked_shape_analysis = True
                 if op.assert_jit_shape_analysis:
@@ -237,7 +260,7 @@ class TestJit(JitCommonTestCase):
 
                 if supports_tracing:
                     self.assertAutodiffNode(
-                        traced_fn.last_graph,
+                        last_traced_graph,
                         op.assert_autodiffed,
                         nonfusible_nodes,
                         fusible_nodes,
@@ -280,15 +303,6 @@ class TestJit(JitCommonTestCase):
             + [f"{k}={quote_strs(v)}" for k, v in sample.kwargs.items()]
         )
 
-        # Prepare data for test tracing
-        sample_args_kwargs = ()
-        if len(sample.args) > 0:
-            sample_args_kwargs += (sample.args,)
-        if len(sample.kwargs) > 0:
-            sample_args_kwargs += (sample.kwargs,)
-
-        original_name = op.aten_name
-        original_name_inplace = original_name + "_"
         expected_dtype = op(sample.input, *sample.args, **sample.kwargs).dtype
 
         for a_op in op.aliases:
@@ -303,7 +317,6 @@ class TestJit(JitCommonTestCase):
             # Test scripting:
             for variant in variants:
                 variant_name = variant.__name__
-                op_name = original_name_inplace if variant is inplace else original_name
 
                 if variant in method_or_inplace:
                     fn_template = """
@@ -347,22 +360,6 @@ class TestJit(JitCommonTestCase):
                 inp = clone_input_helper(sample.input)
                 graph = scripted.graph_for(inp)
                 FileCheck().check(op.aten_name).check_not(variant_name).run(graph)
-
-            # Test tracing:
-            for variant in variants:
-                variant_name = variant.__name__
-                op_name = original_name_inplace if variant is inplace else original_name
-
-                def _fn(*sample_args, **sample_kwargs):
-                    return variant(*sample_args, **sample_kwargs)
-
-                inp = (clone_input_helper(sample.input),) + sample_args_kwargs
-                traced = torch.jit.trace(_fn, *inp)
-                inp = (clone_input_helper(sample.input),) + sample_args_kwargs
-                traced(*inp)
-                inp = (clone_input_helper(sample.input),) + sample_args_kwargs
-                graph = traced.graph_for(*inp)
-                FileCheck().check(op_name).check_not(variant_name).run(graph)
 
 
 instantiate_device_type_tests(TestJit, globals())

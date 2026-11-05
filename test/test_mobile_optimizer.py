@@ -101,7 +101,7 @@ class TestOptimizer(TestCase):
         data_shape = (batch_size, input_channels, height, width)
         input_data = torch.normal(1, 20, size=data_shape)
 
-        scripted_model = torch.jit.script(MyTestModule())
+        scripted_model = torch.jit._script.script(MyTestModule())
         scripted_model.eval()
         initial_result = scripted_model(input_data)
         initial_foo_result = scripted_model.foo(input_data)
@@ -147,7 +147,7 @@ class TestOptimizer(TestCase):
 
 
         bn_test_module = BNTestModule()
-        bn_scripted_module = torch.jit.script(bn_test_module)
+        bn_scripted_module = torch.jit._script.script(bn_test_module)
         bn_scripted_module.eval()
 
         self.assertEqual(len(torch.jit.export_opnames(bn_scripted_module)), 11)
@@ -178,7 +178,7 @@ class TestOptimizer(TestCase):
                 return F.relu(o)
 
         mobile_optimized_tag_module = MyMobileOptimizedTagTest()
-        m = torch.jit.script(mobile_optimized_tag_module)
+        m = torch.jit._script.script(mobile_optimized_tag_module)
         m.eval()
         opt_m = optimize_for_mobile(m)
         tag = getattr(opt_m, "mobile_optimized", None)
@@ -199,7 +199,7 @@ class TestOptimizer(TestCase):
                 pass
 
         preserve_method_module = MyPreserveMethodsTest()
-        m = torch.jit.script(preserve_method_module)
+        m = torch.jit._script.script(preserve_method_module)
         m.eval()
         opt_m = optimize_for_mobile(m)
         no_preserveThis = getattr(opt_m, "preserveThis", None)
@@ -222,7 +222,7 @@ class TestOptimizer(TestCase):
                 x = x + torch.ones(1, 100)
                 return F.relu(x)
         input_data = torch.ones(1, 10)
-        m = torch.jit.script(OptimizeNoForwardTest())
+        m = torch.jit._script.script(OptimizeNoForwardTest())
         m.eval()
         initial_result = m.foo(input_data)
 
@@ -248,7 +248,7 @@ class TestOptimizer(TestCase):
                 return x
 
         bn_test_no_forward_module = BNTestNoForwardModule()
-        bn_no_forward_scripted_module = torch.jit.script(bn_test_no_forward_module)
+        bn_no_forward_scripted_module = torch.jit._script.script(bn_test_no_forward_module)
         bn_no_forward_scripted_module.eval()
 
         self.assertEqual(len(torch.jit.export_opnames(bn_no_forward_scripted_module)), 11)
@@ -304,7 +304,7 @@ class TestOptimizer(TestCase):
             torch.ao.quantization.prepare(model, inplace=True)
             model(torch.randn(4, 1, 4, 4))
             torch.ao.quantization.convert(model, inplace=True)
-            model = torch.jit.script(model)
+            model = torch.jit._script.script(model)
             # this line should not have ASAN failures
             optimize_for_mobile(model)
 
@@ -336,21 +336,21 @@ class TestOptimizer(TestCase):
         def get_lint_count_by_type(lint_type, module_lint_List):
             return len([lint_dict for lint_dict in module_lint_List if lint_dict['name'] == lint_type.name])
 
-        test_module = torch.jit.script(MyTestModule())
+        test_module = torch.jit._script.script(MyTestModule())
         test_module_lint_list = generate_mobile_module_lints(test_module)
         self.assertEqual(len(test_module_lint_list), 4)
         self.assertEqual(get_lint_count_by_type(LintCode.BUNDLED_INPUT, test_module_lint_list), 1)
         self.assertEqual(get_lint_count_by_type(LintCode.DROPOUT, test_module_lint_list), 1)
         self.assertEqual(get_lint_count_by_type(LintCode.REQUIRES_GRAD, test_module_lint_list), 2)
 
-        bn_module = torch.jit.script(MyBNModule())
+        bn_module = torch.jit._script.script(MyBNModule())
         bn_module_lint_list = generate_mobile_module_lints(bn_module)
         self.assertEqual(len(bn_module_lint_list), 4)
         self.assertEqual(get_lint_count_by_type(LintCode.BUNDLED_INPUT, bn_module_lint_list), 1)
         self.assertEqual(get_lint_count_by_type(LintCode.BATCHNORM, bn_module_lint_list), 1)
         self.assertEqual(get_lint_count_by_type(LintCode.REQUIRES_GRAD, bn_module_lint_list), 2)
 
-        bi_module = torch.jit.script(MyBundledInputModule())
+        bi_module = torch.jit._script.script(MyBundledInputModule())
         torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
             bi_module, [(torch.tensor([1]),)], [])
         bi_module_lint_list = generate_mobile_module_lints(bi_module)
@@ -370,7 +370,7 @@ class TestOptimizer(TestCase):
             def get_all_bundled_inputs(self):
                 pass
 
-        bi_module = torch.jit.script(MyBundledInputModule())
+        bi_module = torch.jit._script.script(MyBundledInputModule())
         module_optim_bi_not_preserved = optimize_for_mobile(bi_module)
 
         # Expected to be False since no bundled inputs methods were added
@@ -396,7 +396,7 @@ class TestOptimizer(TestCase):
 
         # If not all 3 bundled inputs methods are present in the module,
         # we will not try to preserve them unless specified by the user.
-        incomplete_bi_module = torch.jit.script(MyIncompleteBundledInputModule())
+        incomplete_bi_module = torch.jit._script.script(MyIncompleteBundledInputModule())
         incomplete_bi_module_optim = optimize_for_mobile(incomplete_bi_module)
         self.assertFalse(hasattr(incomplete_bi_module_optim, 'get_all_bundled_inputs'))
 
@@ -467,7 +467,7 @@ class TestOptimizer(TestCase):
                 torch.ao.quantization.prepare(model, inplace=True)
                 model(torch.randn(4, 1, 4, 4))
                 torch.ao.quantization.convert(model, inplace=True)
-                model = torch.jit.script(model)
+                model = torch.jit._script.script(model)
                 model_optim = optimize_for_mobile(model)
                 return model, model_optim
 
@@ -503,7 +503,7 @@ class TestOptimizer(TestCase):
     @unittest.skipUnless(HAS_TORCHVISION, "Needs torchvision")
     def test_mobilenet_optimize_for_mobile(self):
         m = torchvision.models.mobilenet_v3_small()
-        m = torch.jit.script(m)
+        m = torch.jit._script.script(m)
         m = optimize_for_mobile(m)
 
         # run forward 3 times until segfault, see https://github.com/pytorch/pytorch/issues/52463
@@ -560,7 +560,7 @@ class TestOptimizer(TestCase):
             def dummy_method_ref_attr_pqr(self):
                 return self.pqr, self.inner.pqr
 
-        m = torch.jit.script(MyTestModule())
+        m = torch.jit._script.script(MyTestModule())
 
         # Check that the methods exist on the original model.
         self.assertEqual(hasattr(m, "dummy_method_not_cloned"), True)

@@ -133,7 +133,7 @@ def run_python_forward_backward(unit_test_class, test_params):
     # We can do this because we are only interested in transferring
     # the Python module's parameters and buffers to the C++ module.
     module.forward = types.MethodType(lambda self, input: input, module)
-    script_module = torch.jit.trace(module, torch.tensor(0))
+    script_module = torch.jit._trace.trace(module, torch.tensor(0))
 
     # Backward pass
     if python_output.dtype.is_complex:

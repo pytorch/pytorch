@@ -938,7 +938,7 @@ class TestTorchDeviceType(TestCase):
             warnings.filterwarnings("ignore", category=DeprecationWarning)
             # torch.jit.script emits a visible FutureWarning; ignore it too
             warnings.filterwarnings("ignore", category=FutureWarning)
-            scripted_cpp_warn_fn = torch.jit.script(cpp_warn_fn)
+            scripted_cpp_warn_fn = torch.jit._script.script(cpp_warn_fn)
             scripted_cpp_warn_fn()
             warning = w[0]
 
@@ -964,7 +964,7 @@ class TestTorchDeviceType(TestCase):
             warnings.filterwarnings("ignore", category=DeprecationWarning)
             # torch.jit.script emits a visible FutureWarning; ignore it too
             warnings.filterwarnings("ignore", category=FutureWarning)
-            scripted_warn_fn = torch.jit.script(warn_fn)
+            scripted_warn_fn = torch.jit._script.script(warn_fn)
             scripted_warn_fn()
             frameinfo = inspect.getframeinfo(inspect.currentframe())
             warning = w[0]
@@ -9721,10 +9721,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_get_cpu_capability(self):
         # This method is primarily exposed for torchvision's resize
         torch.backends.cpu.get_cpu_capability()
-
-        # We have to ensure that method is torchscriptable as torchvision's resize
-        # should be torchscriptable
-        torch.jit.script(torch.backends.cpu.get_cpu_capability)
 
     @slowTest
     def test_slow_test(self):

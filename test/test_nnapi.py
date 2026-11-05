@@ -71,7 +71,7 @@ class TestNNAPI(TestCase):
             else:
                 args = arg_or_args
             module.eval()
-            traced = torch.jit.trace(module, trace_args or args)
+            traced = torch.jit._trace.trace(module, trace_args or args)
             nnapi_module = self.call_lowering_to_nnapi(traced, convert_args or args)
             if not self.can_run_nnapi:
                 # Only test that the model was converted successfully.

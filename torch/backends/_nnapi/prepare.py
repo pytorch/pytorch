@@ -147,7 +147,7 @@ def convert_model_to_nnapi(
             self.mod = mod
 
     wrapper_model_py = NnapiInterfaceWrapper(nnapi_model)
-    wrapper_model = torch.jit.script(wrapper_model_py)
+    wrapper_model = torch.jit._script.script(wrapper_model_py)
     # TODO: Maybe make these names match the original.
     arg_list = ", ".join(f"arg_{idx}" for idx in range(len(inputs)))
     if retval_count < 0:
@@ -165,7 +165,7 @@ def convert_model_to_nnapi(
 def process_for_nnapi(
     model, inputs, serializer=None, return_shapes=None, use_int16_for_qint16=False
 ):
-    model = torch.jit.freeze(model)
+    model = torch.jit._freeze.freeze(model)
 
     if isinstance(inputs, torch.Tensor):
         inputs = [inputs]
@@ -192,7 +192,7 @@ def process_for_nnapi(
         shapes, based on the shapes of args.  Returns a list of output templates.
         """
 
-    shape_compute_module = torch.jit.script(ShapeComputeModule())
+    shape_compute_module = torch.jit._script.script(ShapeComputeModule())
     real_shape_compute_lines = [
         "def prepare(self, ser_model: torch.Tensor, args: List[torch.Tensor]) -> List[torch.Tensor]:\n",
     ] + [f"    {line}\n" for line in shape_compute_lines]

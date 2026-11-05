@@ -10,7 +10,7 @@ class MobileNetV2Module:
         model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.IMAGENET1K_V1)
         model.eval()
         example = torch.zeros(1, 3, 224, 224)
-        traced_script_module = torch.jit.trace(model, example)
+        traced_script_module = torch.jit._trace.trace(model, example)
         optimized_module = optimize_for_mobile(traced_script_module)
         augment_model_with_bundled_inputs(
             optimized_module,
@@ -27,7 +27,7 @@ class MobileNetV2VulkanModule:
         model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.IMAGENET1K_V1)
         model.eval()
         example = torch.zeros(1, 3, 224, 224)
-        traced_script_module = torch.jit.trace(model, example)
+        traced_script_module = torch.jit._trace.trace(model, example)
         optimized_module = optimize_for_mobile(traced_script_module, backend="vulkan")
         augment_model_with_bundled_inputs(
             optimized_module,
@@ -44,7 +44,7 @@ class Resnet18Module:
         model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
         model.eval()
         example = torch.zeros(1, 3, 224, 224)
-        traced_script_module = torch.jit.trace(model, example)
+        traced_script_module = torch.jit._trace.trace(model, example)
         optimized_module = optimize_for_mobile(traced_script_module)
         augment_model_with_bundled_inputs(
             optimized_module,

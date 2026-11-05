@@ -122,7 +122,7 @@ class TestONNXScriptExport(common_utils.TestCase):
                 super().__init__()
                 self.selu = torch.nn.SELU()
 
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def forward(self, x):
                 y = x
                 for i in range(x.size(3)):
@@ -165,7 +165,7 @@ class TestONNXScriptExport(common_utils.TestCase):
 
         saved_model = io.BytesIO()
         torch.onnx.export(
-            torch.jit.script(model),
+            torch.jit._script.script(model),
             inputs,
             f=saved_model,
             opset_version=15,

@@ -12,15 +12,15 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 def model_size(sm):
     buffer = io.BytesIO()
-    torch.jit.save(sm, buffer)
+    torch.jit._serialization.save(sm, buffer)
     return len(buffer.getvalue())
 
 
 def save_and_load(sm):
     buffer = io.BytesIO()
-    torch.jit.save(sm, buffer)
+    torch.jit._serialization.save(sm, buffer)
     buffer.seek(0)
-    return torch.jit.load(buffer)
+    return torch.jit._serialization.load(buffer)
 
 
 class TestBundledInputs(TestCase):
@@ -29,7 +29,7 @@ class TestBundledInputs(TestCase):
             def forward(self, arg):
                 return arg
 
-        sm = torch.jit.script(SingleTensorModel())
+        sm = torch.jit._script.script(SingleTensorModel())
         original_size = model_size(sm)
         get_expr: list[str] = []
         samples = [
@@ -88,7 +88,7 @@ class TestBundledInputs(TestCase):
             def forward(self, arg):
                 return arg
 
-        sm = torch.jit.script(SingleTensorModel())
+        sm = torch.jit._script.script(SingleTensorModel())
         sample_tensor = torch.randn(1 << 16)
         # We can store tensors with custom inflation functions regardless
         # of size, even if inflation is just the identity.
@@ -108,7 +108,7 @@ class TestBundledInputs(TestCase):
                 def forward(self, arg):
                     return arg
 
-            sm = torch.jit.script(SingleTensorModel())
+            sm = torch.jit._script.script(SingleTensorModel())
             with self.assertRaisesRegex(Exception, "Bundled input argument"):
                 torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
                     sm, [(sample,)]
@@ -128,7 +128,7 @@ class TestBundledInputs(TestCase):
             def forward(self, fmt: str, num: int):
                 return fmt.format(num)
 
-        sm = torch.jit.script(StringAndIntModel())
+        sm = torch.jit._script.script(StringAndIntModel())
         samples = [
             ("first {}", 1),
             ("second {}", 2),
@@ -150,7 +150,7 @@ class TestBundledInputs(TestCase):
             def foo(self, arg):
                 return arg
 
-        mm = torch.jit.script(MultipleMethodModel())
+        mm = torch.jit._script.script(MultipleMethodModel())
         samples = [
             # Tensor with small numel and small storage.
             (torch.tensor([1]),),
@@ -222,7 +222,7 @@ class TestBundledInputs(TestCase):
 
         # inputs defined 2 ways so should fail
         with self.assertRaises(Exception):
-            mm = torch.jit.script(MultipleMethodModel())
+            mm = torch.jit._script.script(MultipleMethodModel())
             definition = textwrap.dedent(
                 """
                 def _generate_bundled_inputs_for_forward(self):
@@ -251,7 +251,7 @@ class TestBundledInputs(TestCase):
 
         # inputs not defined so should fail
         with self.assertRaises(Exception):
-            mm = torch.jit.script(MultipleMethodModel())
+            mm = torch.jit._script.script(MultipleMethodModel())
             mm._generate_bundled_inputs_for_forward()
             torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
                 mm,
@@ -268,7 +268,7 @@ class TestBundledInputs(TestCase):
 
         # Non list for input list
         with self.assertRaises(TypeError):
-            m = torch.jit.script(SingleTensorModel())
+            m = torch.jit._script.script(SingleTensorModel())
             torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
                 m,
                 inputs="foo",  # type: ignore[arg-type]
@@ -276,7 +276,7 @@ class TestBundledInputs(TestCase):
 
         # List of non tuples. Most common error using the api.
         with self.assertRaises(TypeError):
-            m = torch.jit.script(SingleTensorModel())
+            m = torch.jit._script.script(SingleTensorModel())
             torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
                 m,
                 inputs=[torch.ones(1, 2)],  # type: ignore[list-item]
@@ -287,7 +287,7 @@ class TestBundledInputs(TestCase):
             def forward(self, arg):
                 return arg
 
-        m = torch.jit.script(SingleTensorModel())
+        m = torch.jit._script.script(SingleTensorModel())
         torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
             m, inputs=[(torch.ones(1),)]
         )
@@ -303,7 +303,7 @@ class TestBundledInputs(TestCase):
             def forward(self, arg):
                 return arg
 
-        m = torch.jit.script(SingleTensorModel())
+        m = torch.jit._script.script(SingleTensorModel())
         bundled_model = torch.utils.bundled_inputs.bundle_inputs(
             m, inputs=[(torch.ones(1),)]
         )
@@ -317,7 +317,7 @@ class TestBundledInputs(TestCase):
             def forward(self, arg):
                 return arg
 
-        m = torch.jit.script(SingleTensorModel())
+        m = torch.jit._script.script(SingleTensorModel())
         bundled_model = torch.utils.bundled_inputs.bundle_inputs(
             m, inputs={m.forward: [(torch.ones(1),)]}
         )
@@ -401,7 +401,7 @@ class TestBundledInputs(TestCase):
             )
 
         out: list[str] = []
-        sm = torch.jit.script(MyModel())
+        sm = torch.jit._script.script(MyModel())
         original_size = model_size(sm)
         small_inputs = (
             bundle_optional_dict_of_randn(small_sample),

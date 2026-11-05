@@ -163,16 +163,16 @@ class JitCommonTestCase(TestCase):
 
     def getExportImportCopy(self, m, also_test_file=True, map_location=None):
         buffer = io.BytesIO()
-        torch.jit.save(m, buffer)
+        torch.jit._serialization.save(m, buffer)
         buffer.seek(0)
-        imported = torch.jit.load(buffer, map_location=map_location)
+        imported = torch.jit._serialization.load(buffer, map_location=map_location)
 
         if not also_test_file:
             return imported
 
         with TemporaryFileName() as fname:
-            torch.jit.save(imported, fname)
-            return torch.jit.load(fname, map_location=map_location)
+            torch.jit._serialization.save(imported, fname)
+            return torch.jit._serialization.load(fname, map_location=map_location)
 
     def autoDiffErrorMessage(self, should_autodiff_node, nodes_not_in_diff_graph,
                              fusion_nodes_not_found, non_fusible_nodes_being_fused,

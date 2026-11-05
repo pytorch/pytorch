@@ -697,7 +697,7 @@ class TestUtilityFuns(_BaseTestCase):
         model = Module()
         # Export with scripting to keep output as Sequence type.
         # Tracing unpacks the list.
-        script_model = torch.jit.script(model)
+        script_model = torch.jit._script.script(model)
         x = torch.randn(2, 3)
 
         # Case 1: dynamic axis
@@ -781,7 +781,7 @@ class TestUtilityFuns(_BaseTestCase):
         class Outer(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.inner = torch.jit.script(Inner())
+                self.inner = torch.jit._script.script(Inner())
 
             def forward(self, x):
                 return self.inner(x)
@@ -789,9 +789,9 @@ class TestUtilityFuns(_BaseTestCase):
         x = torch.zeros(1)
         # Freezing is only implemented in eval mode. So we need to call eval()
         outer_module = Outer().eval()
-        module = torch.jit.trace_module(outer_module, {"forward": (x)})
+        module = torch.jit._trace.trace_module(outer_module, {"forward": (x)})
         # jit.freeze removes the training attribute in the module
-        module = torch.jit.freeze(module)
+        module = torch.jit._freeze.freeze(module)
 
         torch.onnx.export(
             module, (x,), io.BytesIO(), opset_version=self.opset_version, dynamo=False
@@ -1131,7 +1131,7 @@ class TestUtilityFuns(_BaseTestCase):
             )
 
         graph, _, _ = self._model_to_graph(
-            torch.jit.script(model), (x, y, z), input_names=[], dynamic_axes={}
+            torch.jit._script.script(model), (x, y, z), input_names=[], dynamic_axes={}
         )
         for node in graph.nodes():
             self.assertIn(
@@ -1402,7 +1402,7 @@ class TestUtilityFuns(_BaseTestCase):
     def test_prim_fallthrough(self):
         # Test prim op
         class PrimModule(torch.jit.ScriptModule):
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def forward(self, x):
                 if isinstance(x, list):
                     y = x
@@ -1553,7 +1553,7 @@ class TestUtilityFuns(_BaseTestCase):
                 bn = self.bn(x)
                 return bn
 
-        model = torch.jit.script(MyModule())
+        model = torch.jit._script.script(MyModule())
         x = torch.randn(10, 3, 128, 128)
         GLOBALS.export_onnx_opset_version = self.opset_version
         GLOBALS.operator_export_type = OperatorExportTypes.ONNX
@@ -1617,7 +1617,7 @@ class TestUtilityFuns(_BaseTestCase):
             self.assertNotEqual(node.kind(), "onnx::BatchNormalization")
 
     def test_onnx_function_substitution_pass(self):
-        @torch.jit.script
+        @torch.jit._script.script
         def f(x: torch.Tensor, y: torch.Tensor):
             z = x - y
             return x + z
@@ -1716,7 +1716,7 @@ class TestUtilityFuns(_BaseTestCase):
             self.assertIn(n.name, ref_node_names)
 
         torch.onnx.export(
-            torch.jit.script(module),
+            torch.jit._script.script(module),
             torch.ones(1, 10),
             f,
             output_names=["y"],
@@ -1749,7 +1749,7 @@ class TestUtilityFuns(_BaseTestCase):
                     self.layer3(self.layer2(self.layer1(x))) + self.param1 + self.param2
                 )
 
-        model = torch.jit.script(MyModule()) if torchscript else MyModule()
+        model = torch.jit._script.script(MyModule()) if torchscript else MyModule()
 
         x = torch.randn(3, 3)
         param_name_set = {k for k, _ in model.named_parameters()}

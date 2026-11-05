@@ -112,15 +112,19 @@ class TestSerialization(TestCase):
                 state_dict_file,
                 _use_new_zipfile_serialization=new_zipfile_serialization,
             )
-            torch.jit.save(torch.jit.script(qmodule), scripted_module_file)
-            torch.jit.save(torch.jit.trace(qmodule, input_tensor), traced_module_file)
+            torch.jit._serialization.save(
+                torch.jit._script.script(qmodule), scripted_module_file
+            )
+            torch.jit._serialization.save(
+                torch.jit._trace.trace(qmodule, input_tensor), traced_module_file
+            )
             torch.save(qmodule(input_tensor), expected_file)
 
         input_tensor = torch.load(input_file)
         # weights_only = False as sometimes get ScriptObject here
         qmodule.load_state_dict(torch.load(state_dict_file, weights_only=False))
-        qmodule_scripted = torch.jit.load(scripted_module_file)
-        qmodule_traced = torch.jit.load(traced_module_file)
+        qmodule_scripted = torch.jit._serialization.load(scripted_module_file)
+        qmodule_traced = torch.jit._serialization.load(traced_module_file)
         expected = torch.load(expected_file)
         self.assertEqual(qmodule(input_tensor), expected, atol=prec)
         self.assertEqual(qmodule_scripted(input_tensor), expected, atol=prec)

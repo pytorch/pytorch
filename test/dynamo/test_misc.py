@@ -20909,7 +20909,7 @@ class TestTracer(JitTestCase):
 
             f = Foo()
 
-            return torch.jit.trace(f, (torch.rand(3, 4),))
+            return torch.jit._trace.trace(f, (torch.rand(3, 4),))
 
         fn()
         opt_fn = torch.compile(fn, backend="eager")

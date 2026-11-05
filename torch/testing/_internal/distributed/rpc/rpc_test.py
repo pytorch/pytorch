@@ -394,7 +394,7 @@ def heavy_rpc_sparse(tensor):
     return 0
 
 
-@torch.jit.script
+@torch.jit._script.script
 def heavy_rpc_torchscript(tensor):
     for i in range(1, 100):
         tensor *= i
@@ -402,7 +402,7 @@ def heavy_rpc_torchscript(tensor):
     return 0
 
 
-@torch.jit.script
+@torch.jit._script.script
 def my_script_func(tensor):
     return torch.add(tensor, tensor)
 
@@ -426,7 +426,7 @@ def custom_raise_func():
     raise CustomException(True, "foo")
 
 
-@torch.jit.script
+@torch.jit._script.script
 def raise_func_script(expected_err: str) -> torch.Tensor:
     raise ValueError(expected_err)
 

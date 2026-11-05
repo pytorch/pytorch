@@ -20,10 +20,10 @@ class TestShowPickle(TestCase):
             def forward(self, x):
                 return x * self.weight
 
-        m = torch.jit.script(MyCoolModule(torch.tensor([2.0])))
+        m = torch.jit._script.script(MyCoolModule(torch.tensor([2.0])))
 
         with tempfile.NamedTemporaryFile() as tmp:
-            torch.jit.save(m, tmp)
+            torch.jit._serialization.save(m, tmp)
             tmp.flush()
             buf = io.StringIO()
             torch.utils.show_pickle.main(

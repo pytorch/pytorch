@@ -156,7 +156,7 @@ def forward(self, arg0_1):
         with tempfile.NamedTemporaryFile() as file:
             file.close()
             model.save(file.name)
-            loaded = torch.jit.load(file.name)
+            loaded = torch.jit._serialization.load(file.name)
 
             output = loaded.forward(torch.ones(5))
             self.assertTrue(output.allclose(torch.ones(5) + 1))

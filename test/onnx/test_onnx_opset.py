@@ -126,7 +126,7 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
 
         # test with dynamic k
         class MyModuleDynamic(torch.jit.ScriptModule):
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def forward(self, input, k):
                 return torch.topk(input, k)
 
@@ -260,7 +260,7 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
         class DynamicSliceModel(torch.jit.ScriptModule):
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def forward(self, x):
                 return x[1 : x.size(0)]
 

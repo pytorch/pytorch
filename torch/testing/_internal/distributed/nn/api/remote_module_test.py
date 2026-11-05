@@ -55,7 +55,7 @@ class ModuleCreationMode(enum.Enum):
     MODULE_CTOR = "module_ctor"
 
 
-@torch.jit.interface
+@torch.jit._script.interface
 class MyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
@@ -64,7 +64,7 @@ class MyModuleInterface:
         pass
 
 
-@torch.jit.interface
+@torch.jit._script.interface
 class RemoteMyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
@@ -96,7 +96,7 @@ class BadModule:
 
 def create_scripted_module(first_arg, first_kwarg=-1):
     module = MyModule(first_arg, first_kwarg=first_kwarg)
-    scripted_module = torch.jit.script(module)
+    scripted_module = torch.jit._script.script(module)
     return scripted_module
 
 
@@ -126,7 +126,7 @@ class CommonRemoteModuleTest(RpcAgentTestFixture):
                 kwargs,
                 _module_interface_cls=MyModuleInterface,
             )
-            scripted_remote_module = torch.jit.script(remote_module)
+            scripted_remote_module = torch.jit._script.script(remote_module)
             yield scripted_remote_module
 
 
@@ -175,7 +175,7 @@ class RemoteModuleTest(CommonRemoteModuleTest):
             )
         )
 
-        @torch.jit.script
+        @torch.jit._script.script
         def run_forward_async(scripted_remote_module: RemoteMyModuleInterface):
             ret_fut = scripted_remote_module.forward_async(torch.ones(1), 2, "3")
             ret = ret_fut.wait()
@@ -207,7 +207,7 @@ class RemoteModuleTest(CommonRemoteModuleTest):
             )
         )
 
-        @torch.jit.script
+        @torch.jit._script.script
         def run_forward(scripted_remote_module: MyModuleInterface):
             ret = scripted_remote_module.forward(torch.ones(1), 2, "3")
             return ret
@@ -742,7 +742,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             )
         )
 
-        @torch.jit.script
+        @torch.jit._script.script
         def run_forward(scripted_remote_module: MyModuleInterface):
             ret = scripted_remote_module.forward(torch.ones(1), 2, "3")
             return ret

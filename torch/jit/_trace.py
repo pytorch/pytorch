@@ -341,7 +341,7 @@ def _check_trace(
 
             for name, data in inputs.items():
                 copied_dict[name] = _clone_inputs(data)
-            check_mod = torch.jit.trace_module(
+            check_mod = torch.jit._trace.trace_module(
                 getattr(func, "__self__", func),
                 copied_dict,
                 check_trace=False,
@@ -362,7 +362,7 @@ def _check_trace(
                 inputs = (inputs,)
         else:
             if example_inputs_is_kwarg:
-                check_mod = torch.jit.trace(
+                check_mod = torch.jit._trace.trace(
                     func,
                     check_trace=False,
                     strict=strict,
@@ -372,7 +372,7 @@ def _check_trace(
                     _store_inputs=False,
                 )
             else:
-                check_mod = torch.jit.trace(
+                check_mod = torch.jit._trace.trace(
                     func,
                     _clone_inputs(inputs),
                     check_trace=False,

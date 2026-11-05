@@ -8,7 +8,7 @@ import torch
 # grab modules from test_jit_hooks.cpp
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from jit.test_hooks_modules import (
+from jit_hooks._fixtures import (
     create_forward_tuple_input,
     create_module_forward_multiple_inputs,
     create_module_forward_single_input,
@@ -80,9 +80,9 @@ def main():
     ]
 
     for name, model in tests:
-        m_scripted = torch.jit.script(model)
+        m_scripted = torch.jit._script.script(model)
         filename = save_name + name + ".pt"
-        torch.jit.save(m_scripted, filename)
+        torch.jit._serialization.save(m_scripted, filename)
 
     print("OK: completed saving modules with hooks!")
 

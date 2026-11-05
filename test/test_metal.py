@@ -23,7 +23,7 @@ class TestMetalRewritePass(TestCase):
             prepack_removal=False,
             fuse_clamping_ops=False):
         module_instance = self
-        scripted_model = torch.jit.script(module_instance)
+        scripted_model = torch.jit._script.script(module_instance)
         scripted_model.eval()
         input_data = torch.normal(1, 20, size=data_shape)
         scripted_model(input_data)
@@ -36,9 +36,9 @@ class TestMetalRewritePass(TestCase):
             torch._C._jit_pass_metal_fold_prepacking_ops(scripted_model._c)
 
         buffer = io.BytesIO()
-        torch.jit.save(scripted_model, buffer)
+        torch.jit._serialization.save(scripted_model, buffer)
         buffer.seek(0)
-        deserialized_scripted_model = torch.jit.load(buffer)
+        deserialized_scripted_model = torch.jit._serialization.load(buffer)
         for pattern, v in pattern_count_map.items():
             if (v == 0):
                 FileCheck().check(pattern).run(deserialized_scripted_model.graph)

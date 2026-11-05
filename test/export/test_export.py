@@ -1787,7 +1787,7 @@ graph():
         )
 
     def test_inline_script_function(self):
-        @torch.jit.script
+        @torch.jit._script.script
         def _forward(x: torch.Tensor):
             if torch.jit.is_scripting():
                 return x.cos()
@@ -1902,7 +1902,7 @@ graph():
     def test_inline_script_class_method(self):
         class M(torch.nn.Module):
             @staticmethod
-            @torch.jit.script
+            @torch.jit._script.script
             def _forward(x: torch.Tensor):
                 if torch.jit.is_scripting():
                     return x.cos()
@@ -2038,13 +2038,13 @@ def forward(self, primals, tangents):
         i = 2
         s = "foo"
 
-        @torch.jit.script
+        @torch.jit._script.script
         def _inner(x: torch.Tensor, y: torch.Tensor, f: float, i: int, s_len: int):
             return x * y * f * i * s_len
 
         class M(torch.nn.Module):
             @staticmethod
-            @torch.jit.script
+            @torch.jit._script.script
             def _forward(x: torch.Tensor, y: torch.Tensor, f: float, i: int, s: str):
                 if torch.jit.is_scripting():
                     return _inner(x.cos(), y.cos(), f, i, len(s))
@@ -2068,7 +2068,7 @@ def forward(self, primals, tangents):
 
     def test_inline_script_method(self):
         class M(torch.jit.ScriptModule):
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def _forward(self, x: torch.Tensor):
                 if torch.jit.is_scripting():
                     return x.cos()
@@ -4765,7 +4765,7 @@ graph():
                 return rv + i
 
         foo = Foo()
-        foo_script = torch.jit.script(foo)
+        foo_script = torch.jit._script.script(foo)
         inp = (torch.zeros(3, 4), torch.tensor(7))
 
         with self.assertRaisesRegex(
@@ -19621,7 +19621,7 @@ class TestExportCustomClass(TorchTestCase):
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.add_mod = torch.jit.script(Add())._c
+                self.add_mod = torch.jit._script.script(Add())._c
 
             def forward(self, x, y):
                 return self.add_mod.forward(x, y)

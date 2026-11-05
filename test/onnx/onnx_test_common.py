@@ -154,7 +154,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         )
 
         if self.is_script_test_enabled and self.is_script:
-            script_model = model if is_model_script else torch.jit.script(model)
+            script_model = model if is_model_script else torch.jit._script.script(model)
             _run_test(
                 script_model,
                 scripting_remained_onnx_input_idx,

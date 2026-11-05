@@ -16,7 +16,7 @@ from torch.distributed.nn.jit import instantiator
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-@torch.jit.interface
+@torch.jit._script.interface
 class MyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"

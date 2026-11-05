@@ -5938,7 +5938,7 @@ Done""",
                 return x * 2
 
         x = torch.rand(3, 4)
-        traced_foo = torch.jit.trace(foo, x)
+        traced_foo = torch.jit._trace.trace(foo, x)
 
         def bar(x):
             with record_function("in_bar") as rf:
@@ -5952,7 +5952,7 @@ Done""",
                     y = y * 2
                 return y
 
-        traced_bar = torch.jit.trace(bar, x)
+        traced_bar = torch.jit._trace.trace(bar, x)
 
         with profile(use_kineto=kineto_available()) as p:
             traced_bar(x)
@@ -16506,12 +16506,12 @@ class TestMultithreadAutograd(TestCase):
 
         # Case 1: multiple grad() calls with jit threads, retain_graph=False
         # should throw error in some threads with no retain_graph.
-        @torch.jit.script
+        @torch.jit._script.script
         def train_fn_jit_no_retain(middle, orig_x):
             y = middle + middle**2
             return torch.autograd.grad([y.sum()], [orig_x])
 
-        @torch.jit.script
+        @torch.jit._script.script
         def train_fn_fork_join_calls_no_retain(x):
             y_no_retain = (x + 3) * (x + 4) * 0.5
 
@@ -16526,12 +16526,12 @@ class TestMultithreadAutograd(TestCase):
             self.assertRegex(str(error), "Specify retain_graph=True")
 
         # Case 2: no error with retain_graph=True
-        @torch.jit.script
+        @torch.jit._script.script
         def train_fn_jit_retain(middle, orig_x):
             y = middle + middle**2
             return torch.autograd.grad([y.sum()], [orig_x], retain_graph=True)
 
-        @torch.jit.script
+        @torch.jit._script.script
         def train_fn_fork_join_calls_retain(x):
             y_retain = (x + 3) * (x + 4) * 0.5
             fut1 = torch.jit._fork(train_fn_jit_retain, y_retain, x)

@@ -590,8 +590,8 @@ class TestMkldnn(TestCase):
         x = torch.randn(1, 16, 8, 8)
 
         with TemporaryFileName() as fname:
-            torch.jit.save(conv2d_mkldnn, fname)
-            conv2d_loaded = torch.jit.load(fname)
+            torch.jit._serialization.save(conv2d_mkldnn, fname)
+            conv2d_loaded = torch.jit._serialization.load(fname)
 
             self.assertEqual(conv2d_mkldnn.weight.ndimension(), 5)
             self.assertEqual(conv2d_loaded.weight.ndimension(), 4)
@@ -1414,14 +1414,14 @@ class TestMkldnn(TestCase):
 
     def _test_serialization(self, module, inputs):
         with TemporaryFileName() as fname:
-            torch.jit.save(module, fname)
-            loaded = torch.jit.load(fname)
+            torch.jit._serialization.save(module, fname)
+            loaded = torch.jit._serialization.load(fname)
             self.assertEqual(
                 module(*inputs).to_dense(),
                 loaded(*inputs).to_dense())
 
     def _test_tracing(self, module, inputs):
-        traced = torch.jit.trace(module, inputs)
+        traced = torch.jit._trace.trace(module, inputs)
         self.assertEqual(
             module(*inputs).to_dense(),
             traced(*inputs).to_dense())
@@ -1466,7 +1466,7 @@ class TestMkldnn(TestCase):
 
     def test_is_mkldnn_jit(self):
         class EnsureMkldnn(torch.jit.ScriptModule):
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def forward(self, x):
                 if not x.is_mkldnn:
                     x = x.to_mkldnn()

@@ -175,7 +175,7 @@ class TestFlopCounter(TestCase):
         with FlopCounterMode() as mode:
             foo(T(5, 5))
         unscripted_flops = get_total_flops(mode)
-        ts_foo = torch.jit.script(foo)
+        ts_foo = torch.jit._script.script(foo)
         with mode:
             ts_foo(T(5, 5))
         self.assertEqual(unscripted_flops, get_total_flops(mode))

@@ -96,7 +96,6 @@ jobs:
           { config: "default", shard: 9, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
           { config: "default", shard: 10, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
           { config: "docs_test", shard: 1, num_shards: 1,  runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           { config: "backwards_compat", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           # Use m7i instead of m7a to match the existing (Intel Xeon) numerics. DTensor crossref tests like linalg.multi_dot have tight
           # float32 tolerances sensitive to different FMA/reduction order across CPU vendors.

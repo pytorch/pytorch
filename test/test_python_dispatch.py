@@ -650,7 +650,7 @@ class TestPythonRegistration(TestCase):
             def _op(*args, **kwargs):
                 called[0] += 1
 
-            @torch.jit.script
+            @torch.jit._script.script
             def _test():
                 torch.ops._test_python_registration._op()
 

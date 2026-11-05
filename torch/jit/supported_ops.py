@@ -101,7 +101,7 @@ def _get_nn_functional_ops():
 
         try:
             # compile fn, get schema
-            scripted = torch.jit.script(attr)
+            scripted = torch.jit._script.script(attr)
             scripted_schema = scripted.schema
             functions.append(_emit_schema(name, elem, scripted_schema))
         except:  # noqa: E722

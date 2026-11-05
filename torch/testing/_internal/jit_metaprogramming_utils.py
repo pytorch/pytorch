@@ -464,7 +464,7 @@ def create_traced_fn(self, fn, cache_traced_fn=False):
         # against python function
         fn_tensors, split_inputs = partial_apply_nontensors(fn, inputs, kwargs)
         if not cache_traced_fn or not hasattr(traced_fn, 'traced'):
-            traced = torch.jit.trace(fn_tensors, split_inputs.all_tensors, check_trace=False)
+            traced = torch.jit._trace.trace(fn_tensors, split_inputs.all_tensors, check_trace=False)
             self.assertExportImport(traced.graph, split_inputs.all_tensors)
             output = traced(*split_inputs.all_tensors)
             if cache_traced_fn:

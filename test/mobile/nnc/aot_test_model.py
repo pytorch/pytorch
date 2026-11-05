@@ -8,5 +8,5 @@ class NeuralNetwork(nn.Module):
 
 
 model = NeuralNetwork()
-script = torch.jit.script(model)
-torch.jit.save(script, "aot_test_model.pt")
+script = torch.jit._script.script(model)
+torch.jit._serialization.save(script, "aot_test_model.pt")

@@ -3,7 +3,7 @@ from typing import Any
 import torch
 
 
-@torch.jit.script
+@torch.jit._script.script
 class MyScriptClass:
     """Intended to be scripted."""
 
@@ -14,7 +14,7 @@ class MyScriptClass:
         self.foo = x
 
 
-@torch.jit.script
+@torch.jit._script.script
 def uses_script_class(x):
     """Intended to be scripted."""
     foo = MyScriptClass(x)

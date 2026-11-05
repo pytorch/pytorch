@@ -100,7 +100,7 @@ def build_sparse_tensor(coalesce=False, requires_grad=True, dtype=torch.float32)
     return tensor
 
 
-@torch.jit.script
+@torch.jit._script.script
 def create_torchscript_tensor() -> torch.Tensor:
     return torch.ones((3, 3)).requires_grad_()
 
@@ -118,12 +118,12 @@ def my_rref_add(rref_t1, t2):
     return ret
 
 
-@torch.jit.script
+@torch.jit._script.script
 def my_script_add(t1, t2):
     return torch.add(t1, t2)
 
 
-@torch.jit.script
+@torch.jit._script.script
 def my_script_ref_add(ref_t1: RRef[torch.Tensor], t2: torch.Tensor) -> torch.Tensor:
     t1 = ref_t1.to_here()
     return torch.add(t1, t2)

@@ -23,7 +23,7 @@ class TestLiteScriptModule(TestCase):
                 return p
 
         sample_input = torch.tensor(5)
-        script_module = torch.jit.script(MyTestModule())
+        script_module = torch.jit._script.script(MyTestModule())
         script_module_result = script_module(sample_input).a
 
         buffer = io.BytesIO(
@@ -86,7 +86,7 @@ class TestLiteScriptModule(TestCase):
         #     ((('name', ''), ('type', 'Tensor'), ('default_value', None)),)))))
 
         sample_input = torch.tensor(5)
-        script_module = torch.jit.script(Bar())
+        script_module = torch.jit._script.script(Bar())
 
         script_module_result = script_module(sample_input)
 
@@ -110,7 +110,7 @@ class TestLiteScriptModule(TestCase):
                 return self.foo
 
         sample_input = torch.tensor(5)
-        script_module = torch.jit.script(Bar())
+        script_module = torch.jit._script.script(Bar())
         script_module_result = script_module(sample_input)
 
         buffer_mobile = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
@@ -127,7 +127,7 @@ class TestLiteScriptModule(TestCase):
                 return myNamedTuple(a)
 
         sample_input = torch.Tensor(1)
-        script_module = torch.jit.script(MyTestModule())
+        script_module = torch.jit._script.script(MyTestModule())
         script_module_result = script_module(sample_input)
         buffer_mobile = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
         buffer_mobile.seek(0)
@@ -153,7 +153,7 @@ class TestLiteScriptModule(TestCase):
                 return self.foo
 
         sample_input = torch.tensor(5)
-        script_module = torch.jit.script(Bar())
+        script_module = torch.jit._script.script(Bar())
         script_module_result = script_module(sample_input)
 
         buffer_mobile = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())

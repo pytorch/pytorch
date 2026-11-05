@@ -21,15 +21,15 @@ from torch._jit_internal import (
     is_scripting,
     unused,
 )
-from torch.jit._async import fork, wait
+from torch.jit._async import fork as _fork, wait as _wait
 from torch.jit._await import _awaitable, _awaitable_nowait, _awaitable_wait
 from torch.jit._decomposition_utils import _register_decomposition
-from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
+from torch.jit._freeze import run_frozen_optimizations
 from torch.jit._fuser import (
     fuser,
     last_executed_optimized_graph,
     optimized_execution,
-    set_fusion_strategy,
+    set_fusion_strategy as _set_fusion_strategy,
 )
 from torch.jit._ir_utils import _InsertPoint
 from torch.jit._script import (
@@ -37,19 +37,14 @@ from torch.jit._script import (
     _unwrap_optional,
     Attribute,
     CompilationUnit,
-    interface,
     RecursiveScriptClass,
     RecursiveScriptModule,
-    script,
-    script_method,
     ScriptFunction,
     ScriptModule,
     ScriptWarning,
 )
 from torch.jit._serialization import (
     jit_module_from_flatbuffer,
-    load,
-    save,
     save_jit_module_to_flatbuffer,
 )
 from torch.jit._trace import (
@@ -60,8 +55,6 @@ from torch.jit._trace import (
     is_tracing,
     ONNXTracedModule,
     TopLevelTracedModule,
-    trace,
-    trace_module,
     TracedModule,
     TracerWarning,
     TracingCheckError,
@@ -80,29 +73,13 @@ __all__ = [
     "enable_onednn_fusion",
     "export",
     "export_opnames",
-    "fork",
-    "freeze",
-    "interface",
     "ignore",
     "isinstance",
-    "load",
     "onednn_fusion_enabled",
-    "optimize_for_inference",
-    "save",
-    "script",
     "script_if_tracing",
-    "set_fusion_strategy",
     "strict_fusion",
-    "trace",
-    "trace_module",
     "unused",
-    "wait",
 ]
-
-# For backwards compatibility
-_fork = fork
-_wait = wait
-_set_fusion_strategy = set_fusion_strategy
 
 
 def export_opnames(m):

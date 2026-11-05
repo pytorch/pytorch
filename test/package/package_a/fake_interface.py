@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 
-@torch.jit.interface
+@torch.jit._script.interface
 class ModuleInterface(torch.nn.Module):
     def one(self, inp1: Tensor, inp2: Tensor) -> Tensor:
         pass

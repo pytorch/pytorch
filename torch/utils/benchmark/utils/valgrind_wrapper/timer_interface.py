@@ -474,7 +474,7 @@ class GlobalsBridge:
                 path = os.path.join(self._data_dir, f"{name}.pt")
                 load_lines.append(f"{name} = torch.jit.load({repr(path)})")
                 with open(path, "wb") as f:
-                    torch.jit.save(wrapped_value.value, f)  # type: ignore[no-untyped-call]
+                    torch.jit._serialization.save(wrapped_value.value, f)  # type: ignore[no-untyped-call]
 
             else:
                 raise NotImplementedError(

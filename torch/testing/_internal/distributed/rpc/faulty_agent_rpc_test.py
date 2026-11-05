@@ -21,7 +21,7 @@ def my_sleep_func(seconds=1):
     return torch.mul(torch.tensor(1), torch.tensor(1))
 
 
-@torch.jit.script
+@torch.jit._script.script
 def my_script_func(tensor):
     return torch.add(tensor, tensor)
 

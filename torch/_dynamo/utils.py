@@ -2870,10 +2870,10 @@ def torchscript(model: Any, example_inputs: Any, verbose: bool = False) -> Any:
         return model
 
     try:
-        return torch.jit.trace(model, example_inputs)
+        return torch.jit._trace.trace(model, example_inputs)
     except Exception:
         try:
-            return torch.jit.script(model)
+            return torch.jit._script.script(model)
         except Exception:
             if verbose:
                 log.exception("jit error")

@@ -20,7 +20,7 @@ def save_model(cls):
     def wrapper_save():
         _MODELS.append(cls)
         model = cls()
-        scripted = torch.jit.script(model)
+        scripted = torch.jit._script.script(model)
         buffer = BytesIO(scripted._save_to_buffer_for_lite_interpreter())
         buffer.seek(0)
         mobile_module = _load_for_lite_interpreter(buffer)

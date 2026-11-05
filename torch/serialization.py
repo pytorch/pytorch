@@ -1573,9 +1573,8 @@ def load(
             with _open_zipfile_reader(opened_file) as opened_zipfile:
                 if _is_torchscript_zip(opened_zipfile):
                     warnings.warn(
-                        "'torch.load' received a zip file that looks like a TorchScript archive"
-                        " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
-                        " silence this warning)",
+                        "'torch.load' received a zip file that looks like a TorchScript archive;"
+                        " using the legacy TorchScript compatibility loader",
                         UserWarning,
                         stacklevel=2,
                     )
@@ -1585,7 +1584,9 @@ def load(
                             "``torch.load``. " + UNSAFE_MESSAGE
                         )
                     opened_file.seek(orig_position)
-                    return torch.jit.load(opened_file, map_location=map_location)
+                    return torch.jit._serialization.load(
+                        opened_file, map_location=map_location
+                    )
                 if mmap:
                     if not _is_path(f):
                         raise ValueError(

@@ -190,7 +190,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
                 self._packed_weight = torch.ops.quantized.linear_prepack(w)
 
         with torch._jit_internal._disable_emit_hooks():
-            x = torch.jit.script(Linear(10, 10))
+            x = torch.jit._script.script(Linear(10, 10))
             torch._C._jit_pass_erase_shape_information(x.graph)
 
 

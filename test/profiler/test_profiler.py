@@ -545,11 +545,11 @@ class TestProfiler(TestCase):
         prev_opt = torch._C._get_graph_executor_optimize()
         torch._C._set_graph_executor_optimize(False)
 
-        @torch.jit.script
+        @torch.jit._script.script
         def ts_method_2(x, y):
             return torch.matmul(x, y)
 
-        @torch.jit.script
+        @torch.jit._script.script
         def ts_method_1(x, y, z):
             a = x + z
             w = ts_method_2(x, y) + a
@@ -838,7 +838,7 @@ class TestProfiler(TestCase):
                 return self.A0.forward(x, y) + self.call_b(x)
 
         model = C()
-        model = torch.jit.script(model)
+        model = torch.jit._script.script(model)
         input_a = torch.rand(128, 128)
         input_b = torch.rand(128, 128)
         op_to_module_hierarchy = {}

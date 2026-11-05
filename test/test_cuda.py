@@ -8775,7 +8775,7 @@ class TestCudaAllocator(TestCase):
             torch.cuda.memory.empty_cache()
             torch.cuda.memory._record_memory_history("state", stacks="python")
 
-            @torch.jit.script
+            @torch.jit._script.script
             def foo():
                 return torch.rand(311, 411, device="cuda")
 
@@ -9445,7 +9445,7 @@ print(value, end="")
             try:
                 m.record(True, ctx)
 
-                @torch.jit.script
+                @torch.jit._script.script
                 def the_script_fn():
                     return torch.rand(311, 411, device="cuda")
 
@@ -13997,7 +13997,7 @@ class TestCudaAutocast(TestAutocast):
         # The JIT here doesn't really matter, we just need to call
         # cat via the boxed API
         model = Model()
-        model_jit_script = torch.jit.script(model)
+        model_jit_script = torch.jit._script.script(model)
 
         with torch.autocast("cuda", enabled=True):
             model()

@@ -81,7 +81,7 @@ def create_mlp(ln, sigmoid_layer):
             layers.append(nn.ReLU())
 
     with torch.no_grad():
-        s = torch.jit.script(torch.nn.Sequential(*layers))
+        s = torch.jit._script.script(torch.nn.Sequential(*layers))
     s.eval()
     return s
 
@@ -94,12 +94,12 @@ def elementwise_square_addition(input1, input2):
     return input1 * input1 + input2 * input2
 
 def fork_wait_graph1(input1, input2):
-    fut = torch.jit.fork(elementwise_square_addition, input1, input2)
-    return torch.jit.wait(fut)
+    fut = torch.jit._async.fork(elementwise_square_addition, input1, input2)
+    return torch.jit._async.wait(fut)
 
 def fork_wait_graph2(input1, input2):
-    fut = torch.jit.fork(loop_graph, input1, input2, 5)
-    return torch.jit.wait(fut)
+    fut = torch.jit._async.fork(loop_graph, input1, input2, 5)
+    return torch.jit._async.wait(fut)
 
 """
    graph with multiple fork/wait operations
@@ -109,10 +109,10 @@ def fork_wait_graph2(input1, input2):
 def fork_wait_graph3(input, iters: int):
     futures : list[torch.jit.Future[torch.Tensor]] = []
     for _ in range(iters):
-        futures.append(torch.jit.fork(torch.neg, input))
+        futures.append(torch.jit._async.fork(torch.neg, input))
     results = []
     for future in futures:
-        results.append(torch.jit.wait(future))
+        results.append(torch.jit._async.wait(future))
     return torch.sum(torch.stack(results))
 
 """
@@ -124,18 +124,18 @@ def fork_wait_graph3(input, iters: int):
 def fork_wait_graph4(input, num_forks: int, num_child_forks: int):
     futures : list[torch.jit.Future[torch.Tensor]] = []
     for _ in range(num_forks):
-        futures.append(torch.jit.fork(fork_wait_graph3, input, num_child_forks))
+        futures.append(torch.jit._async.fork(fork_wait_graph3, input, num_child_forks))
     results = []
     for future in futures:
-        results.append(torch.jit.wait(future))
+        results.append(torch.jit._async.wait(future))
     return torch.sum(torch.stack(results))
 
 def add_tensor(input1, input2):
     return input1 + input2
 
 def fork_wait_graph_exception(input1, input2):
-    fut = torch.jit.fork(add_tensor, input1, input2)
-    return torch.jit.wait(fut)
+    fut = torch.jit._async.fork(add_tensor, input1, input2)
+    return torch.jit._async.wait(fut)
 
 def loop_graph(a, b, iters: int):
     c = a + b * 2
@@ -198,7 +198,7 @@ class TestStaticModule(TestCase):
     def test_fork_wait_1(self):
         inp1 = torch.ones(5, 5)
         inp2 = torch.randn(5, 5)
-        torch_graph = torch.jit.script(fork_wait_graph1)
+        torch_graph = torch.jit._script.script(fork_wait_graph1)
         output_ref = torch_graph(inp1, inp2)
         static_runtime_module = StaticModule(torch_graph)
         output_test = static_runtime_module(inp1, inp2)
@@ -211,7 +211,7 @@ class TestStaticModule(TestCase):
     def test_fork_wait_1_async(self):
         inp1 = torch.ones(5, 5)
         inp2 = torch.randn(5, 5)
-        torch_graph = torch.jit.script(fork_wait_graph1)
+        torch_graph = torch.jit._script.script(fork_wait_graph1)
         output_ref = torch_graph(inp1, inp2)
         static_runtime_module = StaticModule(torch_graph)
         output_test = static_runtime_module.runAsync((inp1, inp2), {})
@@ -225,7 +225,7 @@ class TestStaticModule(TestCase):
     def test_fork_wait_2(self):
         inp1 = torch.randn(5, 5)
         inp2 = torch.randn(5, 5)
-        torch_graph = torch.jit.script(fork_wait_graph2)
+        torch_graph = torch.jit._script.script(fork_wait_graph2)
         output_ref = torch_graph(inp1, inp2)
         static_runtime_module = StaticModule(torch_graph)
         output_test = static_runtime_module(inp1, inp2)
@@ -238,7 +238,7 @@ class TestStaticModule(TestCase):
     def test_fork_wait_2_async(self):
         inp1 = torch.randn(5, 5)
         inp2 = torch.randn(5, 5)
-        torch_graph = torch.jit.script(fork_wait_graph2)
+        torch_graph = torch.jit._script.script(fork_wait_graph2)
         output_ref = torch_graph(inp1, inp2)
         static_runtime_module = StaticModule(torch_graph)
         output_test = static_runtime_module.runAsync((inp1, inp2), {})
@@ -252,7 +252,7 @@ class TestStaticModule(TestCase):
     def test_fork_wait_3(self):
         input = torch.ones(3, 3)
         num_forks = 10
-        torch_graph = torch.jit.script(fork_wait_graph3)
+        torch_graph = torch.jit._script.script(fork_wait_graph3)
         output_ref = torch_graph(input, num_forks)
         static_runtime_module = StaticModule(torch_graph)
         output_test = static_runtime_module(input, num_forks)
@@ -265,7 +265,7 @@ class TestStaticModule(TestCase):
     def test_fork_wait_3_async(self):
         input = torch.ones(3, 3)
         num_forks = 10
-        torch_graph = torch.jit.script(fork_wait_graph3)
+        torch_graph = torch.jit._script.script(fork_wait_graph3)
         output_ref = torch_graph(input, num_forks)
         static_runtime_module = StaticModule(torch_graph)
         output_test = static_runtime_module.runAsync((input, num_forks), {})
@@ -281,7 +281,7 @@ class TestStaticModule(TestCase):
         input = torch.ones(3, 3)
         num_forks = 10
         num_child_forks = 10
-        torch_graph = torch.jit.script(fork_wait_graph4)
+        torch_graph = torch.jit._script.script(fork_wait_graph4)
         static_runtime_module = StaticModule(torch_graph)
         output_ref = torch_graph(input, num_forks, num_child_forks)
         output_test = static_runtime_module(input, num_forks, num_child_forks)
@@ -296,7 +296,7 @@ class TestStaticModule(TestCase):
         input = torch.ones(3, 3)
         num_forks = 10
         num_child_forks = 10
-        torch_graph = torch.jit.script(fork_wait_graph4)
+        torch_graph = torch.jit._script.script(fork_wait_graph4)
         static_runtime_module = StaticModule(torch_graph)
         output_ref = torch_graph(input, num_forks, num_child_forks)
         output_test = static_runtime_module.runAsync(
@@ -316,7 +316,7 @@ class TestStaticModule(TestCase):
         # incompatible tensors for add due to shape mismatch
         input1 = torch.randn(4, 7)
         input2 = torch.randn(4, 5)
-        torch_graph = torch.jit.script(fork_wait_graph_exception)
+        torch_graph = torch.jit._script.script(fork_wait_graph_exception)
         try:
             static_runtime_module = StaticModule(torch_graph)
             output_test = static_runtime_module(input1, input2)
@@ -345,7 +345,7 @@ class TestStaticModule(TestCase):
         # incompatible tensors for add due to shape mismatch
         input1 = torch.randn(4, 7)
         input2 = torch.randn(4, 5)
-        torch_graph = torch.jit.script(fork_wait_graph_exception)
+        torch_graph = torch.jit._script.script(fork_wait_graph_exception)
         try:
             static_runtime_module = StaticModule(torch_graph)
             output_test = static_runtime_module.runAsync(
@@ -377,7 +377,7 @@ class TestStaticModule(TestCase):
         src_mask = (src > 0)[:, :, 0].unsqueeze(1).unsqueeze(2).to(device)
 
         attention.eval()
-        attention = torch.jit.script(attention)
+        attention = torch.jit._script.script(attention)
         attention.eval()
         o_ref = attention(src, src, src, src_mask)
 
@@ -405,7 +405,7 @@ class TestStaticModule(TestCase):
         src_mask = (src > 0)[:, :, 0].unsqueeze(1).unsqueeze(2).to(device)
 
         attention.eval()
-        attention = torch.jit.script(attention)
+        attention = torch.jit._script.script(attention)
         attention_a = StaticModule(attention)
 
         attention_a.benchmark([src, src, src, src_mask], {}, 2, 2)
@@ -445,7 +445,7 @@ class TestStaticModule(TestCase):
 
     def test_trivial_graph(self):
         s = torch.full((2, 2), 2)
-        tg = torch.jit.script(trivial_graph)
+        tg = torch.jit._script.script(trivial_graph)
         o_ref = tg(s, s, s)
         tg_a = StaticModule(tg)
         o_test = tg_a(s, s, s)
@@ -453,7 +453,7 @@ class TestStaticModule(TestCase):
 
     def test_leaky_relu(self):
         s = torch.randn(5, 5)
-        tg = torch.jit.script(nn.LeakyReLU(0.1))
+        tg = torch.jit._script.script(nn.LeakyReLU(0.1))
         o_ref = tg(s)
         tg_a = StaticModule(tg)
         o_test = tg_a(s)
@@ -490,7 +490,7 @@ class TestStaticModule(TestCase):
         input = torch.randn(2, 2)
         output_s = m.forward(input)
 
-        ms = torch.jit.script(m)
+        ms = torch.jit._script.script(m)
         sm = StaticModule(ms)
         output_sm = sm(input)
         torch.testing.assert_close(output_s, output_sm)
@@ -502,7 +502,7 @@ class TestStaticModule(TestCase):
     @unittest.skip("Temporarily disabled")
     def test_fusion_trivial_graph(self):
         s = torch.full((2, 2), 2)
-        tg = torch.jit.script(trivial_graph)
+        tg = torch.jit._script.script(trivial_graph)
         o_ref = tg(s, s, s)
         torch._C._fuse_to_static_module(tg.graph)
         if "StaticSubgraph" not in str(tg.graph):
@@ -525,7 +525,7 @@ class TestStaticModule(TestCase):
         src_mask = (src > 0)[:, :, 0].unsqueeze(1).unsqueeze(2).to(device)
 
         attention.eval()
-        attention = torch.jit.script(attention)
+        attention = torch.jit._script.script(attention)
         attention.eval()
         o_ref = attention(src, src, src, src_mask)
 
@@ -540,7 +540,7 @@ class TestStaticModule(TestCase):
         a = torch.randn(5, 5)
         b = torch.randn(5, 5)
         c = 4
-        lg = torch.jit.script(loop_graph)
+        lg = torch.jit._script.script(loop_graph)
         o_ref = lg(a, b, c)
         torch._C._fuse_to_static_module(lg.graph)
         if "StaticSubgraph" not in str(lg.graph):
@@ -553,7 +553,7 @@ class TestStaticModule(TestCase):
         a = torch.randn(2, 2)
         b = torch.randn(2, 2)
         c = 4
-        og = torch.jit.script(output_graph)
+        og = torch.jit._script.script(output_graph)
         o_ref = og(a, b, b, c)
         torch._C._fuse_to_static_module(og.graph)
         if "StaticSubgraph" not in str(og.graph):
@@ -575,11 +575,11 @@ class TestStaticModule(TestCase):
                 foo = Foo(y)
                 return y * foo.x
 
-        mod = torch.jit.script(Mod()).eval()
+        mod = torch.jit._script.script(Mod()).eval()
         y = torch.randn((1, ))
         expected = mod(y)
 
-        static_mod = StaticModule(torch.jit.freeze(mod))
+        static_mod = StaticModule(torch.jit._freeze.freeze(mod))
         actual = static_mod(y)
 
         self.assertEqual(expected, actual)

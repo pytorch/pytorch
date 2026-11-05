@@ -451,7 +451,7 @@ class TestTorchLibrary(common.TestCase):
         self.assertFalse(f(True, False))
         self.assertFalse(f(False, True))
         self.assertFalse(f(False, False))
-        s = torch.jit.script(f)
+        s = torch.jit._script.script(f)
         self.assertTrue(s(True, True))
         self.assertFalse(s(True, False))
         self.assertFalse(s(False, True))

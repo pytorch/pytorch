@@ -267,7 +267,7 @@ def serialize_arg_dict_as_script_module(arg_dict):
             )
         arg_dict_module.register_buffer(arg_name, arg_value)
 
-    return torch.jit.script(arg_dict_module)
+    return torch.jit._script.script(arg_dict_module)
 
 
 # NOTE: any argument symbol used in `cpp_constructor_args` / `cpp_options_args` / `cpp_function_call`

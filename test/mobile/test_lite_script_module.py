@@ -21,7 +21,7 @@ class TestLiteScriptModule(TestCase):
     def getScriptExportImportCopy(
         self, m, save_mobile_debug_info=True, also_test_file=False
     ):
-        m_scripted = torch.jit.script(m)
+        m_scripted = torch.jit._script.script(m)
 
         if not also_test_file:
             buffer = io.BytesIO(
@@ -47,7 +47,7 @@ class TestLiteScriptModule(TestCase):
 
         input = torch.tensor([1])
 
-        script_module = torch.jit.script(MyTestModule())
+        script_module = torch.jit._script.script(MyTestModule())
         script_module_result = script_module(input)
 
         buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
@@ -84,9 +84,9 @@ class TestLiteScriptModule(TestCase):
             y = torch.rand((2, 3))
             z = torch.rand((2, 3))
             if export_method == "trace":
-                trace_module = torch.jit.trace(B(), [x, y, z])
+                trace_module = torch.jit._trace.trace(B(), [x, y, z])
             else:
-                trace_module = torch.jit.script(B())
+                trace_module = torch.jit._script.script(B())
             exported_module = trace_module._save_to_buffer_for_lite_interpreter(
                 _save_mobile_debug_info=True
             )
@@ -123,7 +123,7 @@ class TestLiteScriptModule(TestCase):
 
         input = torch.tensor([3])
 
-        script_module = torch.jit.script(MyTestModule())
+        script_module = torch.jit._script.script(MyTestModule())
         script_module_result = script_module(input)
 
         buffer = io.BytesIO(
@@ -152,7 +152,7 @@ class TestLiteScriptModule(TestCase):
 
         input = (torch.tensor([1]),)
 
-        script_module = torch.jit.script(MyTestModule())
+        script_module = torch.jit._script.script(MyTestModule())
         script_module_result = script_module(*input)
 
         buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
@@ -195,7 +195,7 @@ class TestLiteScriptModule(TestCase):
             def forward(self, x, one: int = 1):
                 return self.A0(x) + one
 
-        script_module = torch.jit.script(B())
+        script_module = torch.jit._script.script(B())
         buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
         mobile_module = _load_for_lite_interpreter(buffer)
 
@@ -231,7 +231,7 @@ class TestLiteScriptModule(TestCase):
                 f = Foo()
                 return f.func(1, 2)
 
-        script_module = torch.jit.script(MyTestModule())
+        script_module = torch.jit._script.script(MyTestModule())
         with self.assertRaisesRegex(
             RuntimeError,
             r"Workaround: instead of using arbitrary class type \(class Foo\(\)\), "
@@ -253,7 +253,7 @@ class TestLiteScriptModule(TestCase):
                 my_list: list[Foo] = [self.foo]
                 return my_list
 
-        script_module = torch.jit.script(MyTestModuleForListWithModuleClass())
+        script_module = torch.jit._script.script(MyTestModuleForListWithModuleClass())
         with self.assertRaisesRegex(
             RuntimeError,
             r"^Returning a list or dictionary with pytorch class type "
@@ -277,7 +277,7 @@ class TestLiteScriptModule(TestCase):
                 my_dict: dict[int, Foo] = {1: self.foo}
                 return my_dict
 
-        script_module = torch.jit.script(MyTestModuleForDictWithModuleClass())
+        script_module = torch.jit._script.script(MyTestModuleForDictWithModuleClass())
         with self.assertRaisesRegex(
             RuntimeError,
             r"^Returning a list or dictionary with pytorch class type "
@@ -315,7 +315,7 @@ class TestLiteScriptModule(TestCase):
                 )
                 return (x1, x2, x3)
 
-        m = torch.jit.script(Foo())
+        m = torch.jit._script.script(Foo())
 
         buffer = io.BytesIO(m._save_to_buffer_for_lite_interpreter())
         buffer.seek(0)
@@ -332,7 +332,7 @@ class TestLiteScriptModule(TestCase):
 
     def test_source_range_simple(self):
         class FooTest(torch.jit.ScriptModule):
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def forward(self, x, w):
                 return torch.mm(x, w.t())
 
@@ -347,7 +347,7 @@ class TestLiteScriptModule(TestCase):
 
     def test_source_range_raise_exception(self):
         class FooTest2(torch.jit.ScriptModule):
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def forward(self):
                 raise RuntimeError("foo")
 
@@ -367,11 +367,11 @@ class TestLiteScriptModule(TestCase):
 
     def test_source_range_function_call(self):
         class FooTest3(torch.jit.ScriptModule):
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def add_method(self, x, w):
                 return x + w
 
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def forward(self, x, y, w):
                 x = x * y
                 x = x + 2
@@ -395,7 +395,7 @@ class TestLiteScriptModule(TestCase):
 
     def test_source_range_no_debug_info(self):
         class FooTest4(torch.jit.ScriptModule):
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def forward(self, x, w):
                 return torch.mm(x, w.t())
 
@@ -414,13 +414,13 @@ class TestLiteScriptModule(TestCase):
                 super().__init__()
                 self.val = val
 
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def add_method(self, val: int, x, w):
                 if val == self.val:
                     raise RuntimeError("self.val and val are same")
                 return x + w
 
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def forward(self, val: int, x, y, w):
                 x = x * y
                 x = x + 2
@@ -445,7 +445,7 @@ class TestLiteScriptModule(TestCase):
         self.assertTrue("self.val and val are same" in error_message)
 
     def test_stacktrace_interface_call(self):
-        @torch.jit.interface
+        @torch.jit._script.interface
         class Forward(torch.nn.Module):
             def forward(self, x) -> torch.Tensor:
                 pass
@@ -474,7 +474,7 @@ class TestLiteScriptModule(TestCase):
                 self.b.forward(torch.ones(1))
                 self.b.forwardError(torch.ones(1))
 
-        a = torch.jit.script(A())
+        a = torch.jit._script.script(A())
         torch._C._enable_mobile_interface_call_export()
         buffer = io.BytesIO(
             a._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
@@ -557,7 +557,7 @@ class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
                 return x
 
         model = Model()
-        script_module = torch.jit.script(model)
+        script_module = torch.jit._script.script(model)
 
         sample_input = {
             script_module.forward: [

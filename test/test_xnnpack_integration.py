@@ -273,8 +273,8 @@ class TestXNNPACKSerDes(TestCase):
             bias = torch.rand(weight_output_dim)
         else:
             bias = None
-        scripted_linear = torch.jit.script(Linear(weight, bias))
-        scripted_linear_clamp_prepacked = torch.jit.script(
+        scripted_linear = torch.jit._script.script(Linear(weight, bias))
+        scripted_linear_clamp_prepacked = torch.jit._script.script(
             LinearPrePacked(weight, bias)
         )
         input_data = torch.rand(data_shape)
@@ -287,13 +287,13 @@ class TestXNNPACKSerDes(TestCase):
         # Serialize the modules and then deserialize
         input_data = torch.rand(data_shape)
         buffer = io.BytesIO()
-        torch.jit.save(scripted_linear, buffer)
+        torch.jit._serialization.save(scripted_linear, buffer)
         buffer.seek(0)
-        deserialized_linear = torch.jit.load(buffer)
+        deserialized_linear = torch.jit._serialization.load(buffer)
         buffer = io.BytesIO()
-        torch.jit.save(scripted_linear_clamp_prepacked, buffer)
+        torch.jit._serialization.save(scripted_linear_clamp_prepacked, buffer)
         buffer.seek(0)
-        deserialized_linear_clamp_prepacked = torch.jit.load(buffer)
+        deserialized_linear_clamp_prepacked = torch.jit._serialization.load(buffer)
         ref_result = deserialized_linear(input_data)
         output_linearprepacked = deserialized_linear_clamp_prepacked(input_data)
         torch.testing.assert_close(
@@ -387,10 +387,10 @@ class TestXNNPACKSerDes(TestCase):
         if use_bias:
             bias = torch.rand(output_channels)
 
-        scripted_conv2d = torch.jit.script(
+        scripted_conv2d = torch.jit._script.script(
             Conv2D(weight, bias, strides, paddings, dilations, groups)
         )
-        scripted_conv2d_clamp_prepacked = torch.jit.script(
+        scripted_conv2d_clamp_prepacked = torch.jit._script.script(
             Conv2DPrePacked(weight, bias, strides, paddings, dilations, groups)
         )
         ref_result = scripted_conv2d(input_data)
@@ -402,13 +402,13 @@ class TestXNNPACKSerDes(TestCase):
         if format is not None:
             input_data = input_data.contiguous(memory_format=format)
         buffer = io.BytesIO()
-        torch.jit.save(scripted_conv2d, buffer)
+        torch.jit._serialization.save(scripted_conv2d, buffer)
         buffer.seek(0)
-        deserialized_conv2d = torch.jit.load(buffer)
+        deserialized_conv2d = torch.jit._serialization.load(buffer)
         buffer = io.BytesIO()
-        torch.jit.save(scripted_conv2d_clamp_prepacked, buffer)
+        torch.jit._serialization.save(scripted_conv2d_clamp_prepacked, buffer)
         buffer.seek(0)
-        deserialized_conv2d_clamp_prepacked = torch.jit.load(buffer)
+        deserialized_conv2d_clamp_prepacked = torch.jit._serialization.load(buffer)
         ref_result = deserialized_conv2d(input_data)
         xnnpack_result = deserialized_conv2d_clamp_prepacked(input_data)
         torch.testing.assert_close(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
@@ -537,10 +537,10 @@ class TestXNNPACKSerDes(TestCase):
         if use_bias:
             bias = torch.rand(output_channels)
 
-        scripted_conv2d = torch.jit.script(
+        scripted_conv2d = torch.jit._script.script(
             Conv2DT(weight, bias, strides, paddings, output_paddings, dilations, groups)
         )
-        scripted_conv2d_clamp_prepacked = torch.jit.script(
+        scripted_conv2d_clamp_prepacked = torch.jit._script.script(
             Conv2DTPrePacked(
                 weight, bias, strides, paddings, output_paddings, dilations, groups
             )
@@ -554,13 +554,13 @@ class TestXNNPACKSerDes(TestCase):
         if format is not None:
             input_data = input_data.contiguous(memory_format=format)
         buffer = io.BytesIO()
-        torch.jit.save(scripted_conv2d, buffer)
+        torch.jit._serialization.save(scripted_conv2d, buffer)
         buffer.seek(0)
-        deserialized_conv2d = torch.jit.load(buffer)
+        deserialized_conv2d = torch.jit._serialization.load(buffer)
         buffer = io.BytesIO()
-        torch.jit.save(scripted_conv2d_clamp_prepacked, buffer)
+        torch.jit._serialization.save(scripted_conv2d_clamp_prepacked, buffer)
         buffer.seek(0)
-        deserialized_conv2d_clamp_prepacked = torch.jit.load(buffer)
+        deserialized_conv2d_clamp_prepacked = torch.jit._serialization.load(buffer)
         ref_result = deserialized_conv2d(input_data)
         xnnpack_result = deserialized_conv2d_clamp_prepacked(input_data)
         torch.testing.assert_close(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
@@ -699,7 +699,7 @@ class TestXNNPACKSerDes(TestCase):
         if use_bias:
             linear_bias = torch.rand(linear_weight_output_dim)
 
-        scripted_m = torch.jit.script(
+        scripted_m = torch.jit._script.script(
             M(
                 conv_weight,
                 conv_bias,
@@ -711,7 +711,7 @@ class TestXNNPACKSerDes(TestCase):
                 groups,
             )
         )
-        scripted_m_prepacked = torch.jit.script(
+        scripted_m_prepacked = torch.jit._script.script(
             MPrePacked(
                 conv_weight,
                 conv_bias,
@@ -731,13 +731,13 @@ class TestXNNPACKSerDes(TestCase):
         input_data = torch.rand((batch_size, input_channels, height, width))
         input_data = input_data.contiguous(memory_format=torch.channels_last)
         buffer = io.BytesIO()
-        torch.jit.save(scripted_m, buffer)
+        torch.jit._serialization.save(scripted_m, buffer)
         buffer.seek(0)
-        deserialized_m = torch.jit.load(buffer)
+        deserialized_m = torch.jit._serialization.load(buffer)
         buffer = io.BytesIO()
-        torch.jit.save(scripted_m_prepacked, buffer)
+        torch.jit._serialization.save(scripted_m_prepacked, buffer)
         buffer.seek(0)
-        deserialized_m_prepacked = torch.jit.load(buffer)
+        deserialized_m_prepacked = torch.jit._serialization.load(buffer)
         ref_result = deserialized_m(input_data)
         xnnpack_result = deserialized_m_prepacked(input_data)
         torch.testing.assert_close(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
@@ -766,9 +766,9 @@ class TestXNNPACKRewritePass(TestCase):
         for jit_method in ["script", "trace"]:
             module_instance = self
             if jit_method == "script":
-                scripted_model = torch.jit.script(module_instance)
+                scripted_model = torch.jit._script.script(module_instance)
             else:
-                scripted_model = torch.jit.trace(module_instance, input_data)
+                scripted_model = torch.jit._trace.trace(module_instance, input_data)
             scripted_model.eval()
             ref_result = scripted_model(input_data)
             torch._C._jit_pass_insert_prepacked_ops(scripted_model._c)
@@ -780,9 +780,9 @@ class TestXNNPACKRewritePass(TestCase):
                 torch._C._jit_pass_fold_prepacking_ops(scripted_model._c)
 
             buffer = io.BytesIO()
-            torch.jit.save(scripted_model, buffer)
+            torch.jit._serialization.save(scripted_model, buffer)
             buffer.seek(0)
-            deserialized_scripted_model = torch.jit.load(buffer)
+            deserialized_scripted_model = torch.jit._serialization.load(buffer)
             for pattern, v in pattern_count_map.items():
                 if v == 0:
                     FileCheck().check(pattern).run(deserialized_scripted_model.graph)
@@ -1249,18 +1249,18 @@ class TestXNNPACKConv1dTransformPass(TestCase):
         for jit_method in ["script", "trace"]:
             module_instance = self
             if jit_method == "script":
-                scripted_model = torch.jit.script(module_instance)
+                scripted_model = torch.jit._script.script(module_instance)
             else:
-                scripted_model = torch.jit.trace(module_instance, input_data)
+                scripted_model = torch.jit._trace.trace(module_instance, input_data)
             scripted_model.eval()
             ref_result = scripted_model(input_data)
             torch._C._jit_pass_transform_conv1d_to_conv2d(scripted_model._c)
             optimized_scripted_model = optimize_for_mobile(scripted_model)
 
             buffer = io.BytesIO()
-            torch.jit.save(scripted_model, buffer)
+            torch.jit._serialization.save(scripted_model, buffer)
             buffer.seek(0)
-            deserialized_scripted_model = torch.jit.load(buffer)
+            deserialized_scripted_model = torch.jit._serialization.load(buffer)
 
             for pattern, v in pattern_count_transformed_map.items():
                 if v == 0:
@@ -1279,9 +1279,11 @@ class TestXNNPACKConv1dTransformPass(TestCase):
             )
 
             optimized_buffer = io.BytesIO()
-            torch.jit.save(optimized_scripted_model, optimized_buffer)
+            torch.jit._serialization.save(optimized_scripted_model, optimized_buffer)
             optimized_buffer.seek(0)
-            deserialized_optimized_scripted_model = torch.jit.load(optimized_buffer)
+            deserialized_optimized_scripted_model = torch.jit._serialization.load(
+                optimized_buffer
+            )
 
             for pattern, v in pattern_count_optimized_map.items():
                 if v == 0:

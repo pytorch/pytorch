@@ -520,7 +520,7 @@ class TestBenchmarkUtils(TestCase):
                 globals={"model": benchmark_utils.CopyIfCallgrind(MyModule())},
             ).collect_callgrind(collect_baseline=False)
 
-        @torch.jit.script
+        @torch.jit._script.script
         def add_one(x):
             return x + 1
 

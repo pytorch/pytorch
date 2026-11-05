@@ -53,7 +53,7 @@ def exportTest(
         )
 
         if self.is_script_test_enabled and opset_version > 11:
-            script_model = torch.jit.script(model)
+            script_model = torch.jit._script.script(model)
             onnx_test_common.run_model_test(
                 self,
                 script_model,

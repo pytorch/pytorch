@@ -228,7 +228,7 @@ class JitTestCase(JitCommonTestCase):
 
                 # save the module to a buffer
                 buffer = io.BytesIO()
-                torch.jit.save(m, buffer)
+                torch.jit._serialization.save(m, buffer)
                 # copy the data in the buffer so we can restore it later. This
                 # is because py2 and py3 have different semantics with zipfile
                 # and it's easier to just work with a fresh copy each time.
@@ -244,11 +244,11 @@ class JitTestCase(JitCommonTestCase):
 
             # import the model again (from the copy we made of the original)
             buffer2 = io.BytesIO(buffer_copy)
-            imported = torch.jit.load(buffer2)
+            imported = torch.jit._serialization.load(buffer2)
 
             # save it again
             saved_module_buffer_2 = io.BytesIO()
-            torch.jit.save(imported, saved_module_buffer_2)
+            torch.jit._serialization.save(imported, saved_module_buffer_2)
 
             saved_module_buffer_2.seek(0)
             code_files_2, _debug_files_2 = extract_files(saved_module_buffer_2)
@@ -273,10 +273,10 @@ class JitTestCase(JitCommonTestCase):
     def getExportImportCopyWithPacking(self, m, also_test_file=True, map_location=None):
         buffer = io.BytesIO()
         m.apply(lambda s: s._pack() if s._c._has_method('_pack') else None)
-        torch.jit.save(m, buffer)
+        torch.jit._serialization.save(m, buffer)
         m.apply(lambda s: s._unpack() if s._c._has_method('_unpack') else None)
         buffer.seek(0)
-        imported = torch.jit.load(buffer, map_location=map_location)
+        imported = torch.jit._serialization.load(buffer, map_location=map_location)
         imported.apply(lambda s: s._unpack() if s._c._has_method('_unpack') else None)
 
         if not also_test_file:
@@ -289,7 +289,7 @@ class JitTestCase(JitCommonTestCase):
             try:
                 f.close()
                 imported.save(f.name)
-                result = torch.jit.load(f.name, map_location=map_location)
+                result = torch.jit._serialization.load(f.name, map_location=map_location)
             finally:
                 os.unlink(f.name)
 
@@ -436,7 +436,7 @@ class JitTestCase(JitCommonTestCase):
             # Python AST frontend
             if not isinstance(script, str):
                 with self.assertRaisesRegex(exception, regex):
-                    ge = torch.jit.script(python_fn)
+                    ge = torch.jit._script.script(python_fn)
                     ge(*inputs)
 
     def checkBailouts(self, model, inputs, expected):
@@ -495,7 +495,7 @@ class JitTestCase(JitCommonTestCase):
                     frames_up=2)
 
                 # Continue checking the Python frontend
-                scripted_fn = torch.jit.script(script, _frames_up=1)
+                scripted_fn = torch.jit._script.script(script, _frames_up=1)
                 python_fn = script
 
             if inputs_requires_grad:
@@ -565,7 +565,7 @@ class JitTestCase(JitCommonTestCase):
         # `check_trace` is set to False because check_trace is run with @no_grad
         # Also, `checkTrace` already does all the checks
         # against python function
-        ge = torch.jit.trace(func, input_tensors, check_tolerance=check_tolerance,
+        ge = torch.jit._trace.trace(func, input_tensors, check_tolerance=check_tolerance,
                              _force_outplace=_force_outplace, check_trace=False)
 
         if export_import:
@@ -632,7 +632,7 @@ class JitTestCase(JitCommonTestCase):
         Check that a nn.Module's results in Script mode match eager and that it
         can be exported
         """
-        sm = torch.jit.script(nn_module)
+        sm = torch.jit._script.script(nn_module)
 
         with freeze_rng_state():
             eager_out = nn_module(*args)
@@ -699,7 +699,7 @@ def _tmp_donotuse_dont_inline_everything(fn):
 # make it easy to quickly define/trace a function for these tests
 def _trace(*args, **kwargs):
     def wrapper(func):
-        return torch.jit.trace(func, args, **kwargs)
+        return torch.jit._trace.trace(func, args, **kwargs)
     return wrapper
 
 

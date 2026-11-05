@@ -117,14 +117,14 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_functional_call_with_jit(self, functional_call):
         module = MockModule()
-        jit_module = torch.jit.script(module)
+        jit_module = torch.jit._script.script(module)
         with self.assertRaisesRegex(
             RuntimeError,
             r'used with Jitted modules'
         ):
             _run_call_with_mock_module(self, jit_module, functional_call)
         x = torch.rand((1, 1))
-        traced_module = torch.jit.trace(module, x)
+        traced_module = torch.jit._trace.trace(module, x)
         with self.assertRaisesRegex(
             RuntimeError,
             r'used with Jitted modules'

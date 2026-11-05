@@ -237,12 +237,12 @@ def _sparse_layer_test_helper(
         # only run during serialization/deserialization tests
         # makes sure script/save/load doesn't malform the sqmodel
         if test_scripting:
-            scripted_sqmodel = torch.jit.script(sqmodel)
+            scripted_sqmodel = torch.jit._script.script(sqmodel)
             scripted_sqmodel.eval()
             buffer = io.BytesIO()
-            torch.jit.save(scripted_sqmodel, buffer)
+            torch.jit._serialization.save(scripted_sqmodel, buffer)
             buffer.seek(0)
-            sqmodel = torch.jit.load(buffer)
+            sqmodel = torch.jit._serialization.load(buffer)
 
         # use correct input dtype
         if is_dynamic:

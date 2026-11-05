@@ -220,7 +220,7 @@ graph(%a : Tensor, %b : Tensor):
             def forward(self, x, y):
                 return x * x + y
 
-        graph = torch.jit.script(TestModule()).graph
+        graph = torch.jit._script.script(TestModule()).graph
 
         # Try compiling the graph as-is. It should fail because it doesn't have
         # shape info.

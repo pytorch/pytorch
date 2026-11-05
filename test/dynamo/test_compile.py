@@ -79,17 +79,6 @@ class InPlaceCompilationTests(TestCase):
             )
             loaded_model(torch.randn(1, 10))
 
-    def test_jit_save(self):
-        torch._dynamo.reset()
-        model = ToyModel()
-        model.compile()
-        model(torch.randn(1, 10))
-        scripted_model = torch.jit.script(model)
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            torch.jit.save(scripted_model, os.path.join(tmpdirname, "model.pt"))
-            loaded_model = torch.jit.load(os.path.join(tmpdirname, "model.pt"))
-            loaded_model(torch.randn(1, 10))
-
     def test_compilation_callback(self):
         torch._dynamo.reset()
 
@@ -202,7 +191,7 @@ class InPlaceCompilationTests(TestCase):
             fn(x)
 
     def test_torch_script_compilation(self):
-        @torch.jit.script
+        @torch.jit._script.script
         def fn(x: torch.Tensor) -> torch.Tensor:
             return x
 
@@ -213,7 +202,7 @@ class InPlaceCompilationTests(TestCase):
     def test_compile_script_module_error(self):
         model = torch.nn.Sequential(torch.nn.Linear(3, 3))
         model.eval()
-        scripted = torch.jit.script(model)
+        scripted = torch.jit._script.script(model)
         with self.assertRaisesRegex(
             RuntimeError, "torch.compile does not support compiling torch.jit.script"
         ):
@@ -222,9 +211,8 @@ class InPlaceCompilationTests(TestCase):
     def test_compile_frozen_module_error(self):
         model = torch.nn.Sequential(torch.nn.Linear(3, 3))
         model.eval()
-        scripted = torch.jit.script(model)
-        with self.assertWarns(FutureWarning):
-            frozen = torch.jit.freeze(scripted)
+        scripted = torch.jit._script.script(model)
+        frozen = torch.jit._freeze.freeze(scripted)
         with self.assertRaisesRegex(
             RuntimeError, "torch.compile does not support compiling torch.jit.script"
         ):
@@ -233,9 +221,8 @@ class InPlaceCompilationTests(TestCase):
     def test_compile_frozen_module_inductor_error(self):
         model = torch.nn.Sequential(torch.nn.Linear(3, 3))
         model.eval()
-        scripted = torch.jit.script(model)
-        with self.assertWarns(FutureWarning):
-            frozen = torch.jit.freeze(scripted)
+        scripted = torch.jit._script.script(model)
+        frozen = torch.jit._freeze.freeze(scripted)
         with self.assertRaisesRegex(
             RuntimeError, "torch.compile does not support compiling torch.jit.script"
         ):
@@ -251,7 +238,7 @@ class InPlaceCompilationTests(TestCase):
                 return self.sub(x)
 
         inner = torch.nn.Linear(3, 3)
-        scripted_inner = torch.jit.script(inner)
+        scripted_inner = torch.jit._script.script(inner)
         outer = OuterModule(scripted_inner)
 
         cnt = torch._dynamo.testing.CompileCounter()

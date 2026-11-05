@@ -96,7 +96,7 @@ def _create_module_with_interface(
 ):
     module = _create_module(module_cls, args, kwargs, device)
     if module_interface_cls is not None:
-        module = torch.jit.script(module)
+        module = torch.jit._script.script(module)
     return rpc.RRef(module, module_interface_cls)
 
 
@@ -738,7 +738,7 @@ def _recursive_script_module_receiver(
 ):
     """Deserializes a RecursiveScriptModule that does not contain a script RemoteModule."""
     f = io.BytesIO(recursive_script_module_serialized)
-    m = torch.jit.load(f)
+    m = torch.jit._serialization.load(f)
     return m
 
 
@@ -751,7 +751,7 @@ def _recursive_script_module_reducer(recursive_script_module):
         )
 
     f = io.BytesIO()
-    torch.jit.save(recursive_script_module, f)
+    torch.jit._serialization.save(recursive_script_module, f)
     return (_recursive_script_module_receiver, (f.getvalue(),))
 
 

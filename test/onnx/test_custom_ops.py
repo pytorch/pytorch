@@ -117,7 +117,7 @@ class TestExportAsContribOps(pytorch_test_common.ExportTestCase):
         register_custom_op_symbolic("::gelu", symbolic_custom_gelu, 1)
 
         x = torch.randn(3, 3, 4, requires_grad=True)
-        model = torch.jit.script(M())
+        model = torch.jit._script.script(M())
         onnx_test_common.run_model_test(self, model, input_args=(x,))
 
 
