@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
 _constant_vt_capture: list[VariableTracker] = []
 
 
-class _StrSubclass(str):
+class _StrSubclass(str):  # noqa: SLOT000
     pass
 
 
