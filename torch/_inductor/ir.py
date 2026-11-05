@@ -7713,7 +7713,7 @@ class ExternKernel(InputsKernel):
             if (
                 isinstance(t, torch.Tensor)
                 and t.is_sparse
-                and not V.graph.cudagraphs_per_partition
+                and not V.graph.partition_handles_cudagraph_unsafe_ops
             ):
                 msg = "sparsity not handled. Please file issue for sparse inference weights."
                 if stack_trace := V.graph.current_node.meta.get("stack_trace", None):

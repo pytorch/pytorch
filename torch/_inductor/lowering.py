@@ -5058,7 +5058,7 @@ def index_put_fallback(self, indices, values, accumulate):
     # Skip when partitioning splits off cudagraph-unsafe ops: it handles this.
     fx_node = V.graph.current_node
     if (
-        not V.graph.cudagraphs_per_partition
+        not V.graph.partition_handles_cudagraph_unsafe_ops
         and fx_node is not None
         and _fx_node_is_input_dependent_cudagraph_unsafe(fx_node)
     ):
@@ -9420,7 +9420,7 @@ def switch(index, branches, operands) -> list[ir.TensorBox | ir.ShapeAsConstantB
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
     # Skip when partitioning splits off cudagraph-unsafe ops: it handles control
     # flow.
-    if not V.graph.cudagraphs_per_partition and any(
+    if not V.graph.partition_handles_cudagraph_unsafe_ops and any(
         isinstance(x, IRNode) and is_triton(x)
         for x in carried_inputs + additional_inputs
     ):
