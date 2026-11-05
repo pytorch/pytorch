@@ -1,6 +1,6 @@
 """The test selection an LLM makes for one change, and how CI applies it.
 
-A selection names test files (paths under test/ without .py), every file of the model's
+A selection names test files (paths under test/ without .py), never test
 directories, and wrapper sweeps (configs such as dynamo_wrapped that re-run
 ordinary test files in a special mode). A test file runs in a given CI config
 when the selection names the file, names that config as a sweep, or is run_all,
@@ -50,7 +50,8 @@ TEST_SH_GLOBS = (
     "inductor",
 )
 # The files the branches of those globs run with run_test.py --inductor, which
-# compiles every test, so like a sweep any change can break them.
+# compiles every test, so like a sweep any change can break them. A config gets
+# the set of the first TEST_SH_GLOBS entry it contains.
 ALWAYS_COVERED = {
     "inductor_cpp_wrapper": frozenset({"test_torch"}),
     "inductor": frozenset(
@@ -58,8 +59,10 @@ ALWAYS_COVERED = {
     ),
 }
 LLM_SELECTION_FILE = "llm_selection.json"
-# The selector runs from the default branch and run_test.py from the PR, so
-# bump this whenever an older reader would misread the selection file.
+# The selector, run by the default branch's workflow, writes this file into
+# ADDITIONAL_CI_FILES_FOLDER, and run_test.py reads it from the PR's checkout.
+# The reader requires exactly its own SELECTION_VERSION and SWEEPS, so a bump
+# or a new sweep turns selection off for unrebased PRs until they rebase.
 SELECTION_VERSION = 1
 
 # Changes to these paths alter how every test is collected or run, so no
@@ -98,7 +101,7 @@ RUN_ALL_PATTERNS = [
     # Installed by .ci/pytorch/common_utils.sh, and torch_tpu by install_torch_tpu.sh, for the test jobs.
     r"^\.github/ci_commit_pins/(audio|vision|spmd_types|torch_tpu)\.txt$",
     # The CI test images: a new package version or toolchain can break any test.
-    r"^\.ci/docker/(build\.sh|requirements-ci\.txt|triton(_xpu)?_version\.txt|common/|ci_commit_pins/|ubuntu(-rocm|-xpu)?/)",
+    r"^\.ci/docker/(build\.sh|requirements-(ci|docs)\.txt|triton(_xpu)?_version\.txt|common/|ci_commit_pins/|java/|ubuntu(-rocm|-xpu)?/)",
 ]
 
 
