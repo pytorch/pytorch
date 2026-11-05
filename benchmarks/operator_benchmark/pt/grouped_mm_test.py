@@ -82,29 +82,53 @@ grouped_mm_configs_long_per_dtype = [
 ]
 
 
-# Primus-Turbo's check_allclose rtol and atol
-TOLERANCES = {torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.float32: 1e-4}
+# (rtol, atol): Primus-Turbo's check_allclose values for 16-bit. fp32 needs a looser atol
+# since a full-K accumulation (no split-K) diverges from hipBLAS's split-K reference.
+TOLERANCES = {
+    torch.bfloat16: (1e-2, 1e-2),
+    torch.float16: (1e-2, 1e-2),
+    torch.float32: (1e-4, 2e-2),
+}
 
 
 def check_correctness(x, w, offs):
     """Primus-Turbo's check: output, dX and dW against per-group matmuls."""
-    x_ref, w_ref = (t.detach().requires_grad_() for t in (x, w))
     x, w = (t.detach().requires_grad_() for t in (x, w))
     with torch.enable_grad():
         out = torch.nn.functional.grouped_mm(x, w.transpose(-2, -1), offs=offs)
-        ends = offs.tolist()
-        groups = zip([0] + ends[:-1], ends)
-        ref = torch.cat([x_ref[s:e] @ w_ref[i].t() for i, (s, e) in enumerate(groups)])
-        grad_out = torch.randn_like(out)
-        out.backward(grad_out)
-        ref.backward(grad_out)
-    tol = TOLERANCES[x.dtype]
-    pairs = {"fwd": (out, ref), "dX": (x.grad, x_ref.grad), "dW": (w.grad, w_ref.grad)}
-    ok = {k: torch.allclose(a, b, rtol=tol, atol=tol) for k, (a, b) in pairs.items()}
+    grad_out = torch.randn_like(out)
+    dx, dw = torch.autograd.grad(out, (x, w), grad_out)
+    ends = offs.tolist()
+    groups = list(enumerate(zip([0] + ends[:-1], ends)))
+    rtol, atol = TOLERANCES[x.dtype]
+
+    def close(a, b):
+        return torch.allclose(a, b, rtol=rtol, atol=atol)
+
+    # Compare one group at a time: full-size references OOM on the largest fp32 shapes.
+    with torch.no_grad():
+        ok = {
+            "fwd": all(close(out[s:e], x[s:e] @ w[i].t()) for i, (s, e) in groups),
+            "dX": all(close(dx[s:e], grad_out[s:e] @ w[i]) for i, (s, e) in groups),
+            "dW": all(close(dw[i], grad_out[s:e].t() @ x[s:e]) for i, (s, e) in groups),
+        }
     status = "PASS" if all(ok.values()) else "FAIL"
     details = ", ".join(f"{k}={v}" for k, v in ok.items())
     shapes = f"x {tuple(x.shape)} w {tuple(w.shape)} {x.dtype}"
     print(f"# Correctness Check: {status} ({details}) {shapes}")
+
+
+class DenseGrad(torch.autograd.Function):
+    """Identity whose backward densifies the gradient: the runner backprops out.mean(), whose
+    stride-0 expanded gradient grouped_mm's backward rejects."""
+
+    @staticmethod
+    def forward(ctx, out):
+        return out.view_as(out)
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad.contiguous()
 
 
 class GroupedMMBenchmark(op_bench.TorchBenchmarkBase):
@@ -124,7 +148,8 @@ class GroupedMMBenchmark(op_bench.TorchBenchmarkBase):
         if not self.checked:
             self.checked = True
             check_correctness(x, w, offs)
-        return torch.nn.functional.grouped_mm(x, w.transpose(-2, -1), offs=offs)
+        out = torch.nn.functional.grouped_mm(x, w.transpose(-2, -1), offs=offs)
+        return DenseGrad.apply(out)
 
     def get_memory_traffic_bytes(self):
         """read x (B*M, K) and w (B, N, K), write out (B*M, N)"""
