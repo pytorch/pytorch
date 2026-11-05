@@ -187,6 +187,105 @@ def fp8e4m3fn_to_float32(x):
 
 
 @triton.jit
+def round_float64_to_odd_float32(x):
+    """
+    Rounds float64 x to float32 by truncating and setting the last bit if
+    inexact ("round to odd"). float32 has more than two extra bits and covers
+    the range of all narrower dtypes, so rounding the result again rounds x
+    correctly. Needs CUDA (PTX).
+    """
+    bits = tl.inline_asm_elementwise(
+        "{ .reg .f32 t; .reg .f64 back; .reg .pred inexact; "
+        "cvt.rz.f32.f64 t, $1; cvt.f64.f32 back, t; "
+        "setp.neu.f64 inexact, back, $1; mov.b32 $0, t; "
+        "@inexact or.b32 $0, $0, 1; }",
+        "=r,d",
+        [x],
+        dtype=tl.int32,
+        is_pure=True,
+        pack=1,
+    )
+    return bits.to(tl.float32, bitcast=True)
+
+
+@triton.jit
+def float32_to_float8_bits(x, MODE: tl.constexpr, E4M3: tl.constexpr):
+    """
+    Converts float32 x to float8_e4m3fn (E4M3) or float8_e5m2 bits, as uint8,
+    with the cvt.rn.satfinite instruction of sm_89+, like the eager CUDA kernel.
+    MODE is as in round_float32_to_bits.
+    """
+    if E4M3:
+        bits = tl.inline_asm_elementwise(
+            "cvt.rn.satfinite.e4m3x2.f32 $0, 0.0, $1;",
+            "=h,f",
+            [x],
+            dtype=tl.uint16,
+            is_pure=True,
+            pack=1,
+        ).to(tl.uint8)
+    else:
+        bits = tl.inline_asm_elementwise(
+            "cvt.rn.satfinite.e5m2x2.f32 $0, 0.0, $1;",
+            "=h,f",
+            [x],
+            dtype=tl.uint16,
+            is_pure=True,
+            pack=1,
+        ).to(tl.uint8)
+    if MODE != 0:
+        # The hardware only rounds to nearest, saturating. Step the result by
+        # one encoding toward x when it is on the wrong side of x. Comparisons
+        # with NaN are false, so NaN is left alone. Consecutive magnitudes have
+        # consecutive encodings, so for e5m2 stepping past the largest finite
+        # value gives infinity; e4m3fn saturates instead.
+        magnitude = (bits & 0x7F).to(tl.uint16)
+        if E4M3:
+            rounded = tl.inline_asm_elementwise(
+                "{ .reg .b32 h2; .reg .b16 lo, hi; cvt.rn.f16x2.e4m3x2 h2, $1; "
+                "mov.b32 {lo, hi}, h2; cvt.f32.f16 $0, lo; }",
+                "=f,h",
+                [magnitude],
+                dtype=tl.float32,
+                is_pure=True,
+                pack=1,
+            )
+        else:
+            rounded = tl.inline_asm_elementwise(
+                "{ .reg .b32 h2; .reg .b16 lo, hi; cvt.rn.f16x2.e5m2x2 h2, $1; "
+                "mov.b32 {lo, hi}, h2; cvt.f32.f16 $0, lo; }",
+                "=f,h",
+                [magnitude],
+                dtype=tl.float32,
+                is_pure=True,
+                pack=1,
+            )
+        down = tl.where(rounded > tl.abs(x), -1, 0)
+        up_cond = rounded < tl.abs(x)
+        if E4M3:
+            up_cond = up_cond & (magnitude != 0x7E)
+        up = tl.where(up_cond, 1, 0)
+        neg = x < 0
+        if MODE == 1:
+            step = down
+        elif MODE == 2:
+            step = tl.where(neg, down, up)
+        else:
+            step = tl.where(neg, up, down)
+        bits = (bits.to(tl.int32) + step).to(tl.uint8)
+    if not E4M3:
+        # e5m2 has infinities, where the hardware saturates: for infinite x,
+        # and when rounding to nearest from halfway between the largest finite
+        # value (57344) and 2^16.
+        if MODE == 0:
+            overflow = tl.abs(x) >= 61440.0
+        else:
+            overflow = tl.abs(x) == float("inf")
+        bits = tl.where(overflow, tl.where(x < 0, 0xFC, 0x7C).to(tl.uint8), bits)
+    return bits
+
+
+@triton.jit
 def round_float32_to_bits(
     x,
     MODE: tl.constexpr,

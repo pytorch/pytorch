@@ -213,7 +213,11 @@ class OpsHandler(Generic[T]):
     ) -> T:
         """
         Convert x to the narrower floating-point dtype with an IEEE 754 rounding
-        direction; see Tensor.to(..., round=...).
+        direction; see torch.round_to. rounding is one of "to_nearest_even",
+        "toward_zero", "toward_positive" and "toward_negative". src_dtype is the
+        dtype of the value x holds, which must be exact in it (x itself may be
+        in the compute type). The result is in the compute type of dtype
+        (upcast_compute_type), like that of to_dtype with use_compute_types.
         """
         raise NotImplementedError
 

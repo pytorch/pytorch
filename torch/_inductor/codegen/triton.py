@@ -1451,17 +1451,19 @@ class TritonOverrides(OpOverrides):
             return f"{x}.to(tl.int16).to(tl.uint8)"
 
         if (
-            use_compute_types
-            and src_dtype == torch.float64
+            src_dtype == torch.float64
             and dtype in (torch.float16, torch.bfloat16, *TRITON_FLOAT8_DTYPES)
+            and (use_compute_types or dtype in (torch.float16, torch.bfloat16))
             and V.graph.get_current_device_or_throw().type == "cuda"
             and torch.version.hip is None
         ):
             # Rounding to float32 first, which is the compute type of float16
-            # and bfloat16, would round twice, unlike eager.
-            return TritonOverrides.to_dtype_rounded(
+            # and bfloat16, would round twice, unlike eager. The result is
+            # exact in dtype, so converting it to the store type is exact.
+            out = TritonOverrides.to_dtype_rounded(
                 x, dtype, torch.float64, "to_nearest_even"
             )
+            return out if use_compute_types else f"{out}.to({triton_store_type(dtype)})"
 
         if use_compute_types:
             out_dtype = triton_compute_type(dtype)
@@ -1501,20 +1503,20 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @override
     def to_dtype_rounded(x, dtype: torch.dtype, src_dtype: torch.dtype, rounding):
-        # Like the CUDA kernel of aten._to_dtype_rounded: hardware conversions
-        # on CUDA where they exist, triton_helpers.round_float32_to_bits
-        # (c10::convert_with_rounding) otherwise.
+        # Like the CUDA kernel of aten.round_to: hardware conversions on CUDA
+        # where they exist, triton_helpers.round_float32_to_bits
+        # (c10::convert_with_rounding) otherwise. The result is a single
+        # expression, without temporaries, so that it also works in the
+        # combine functions of scans.
         device = V.graph.get_current_device_or_throw()
-        cc = (
-            DeviceProperties.create(device).cc
-            if device.type == "cuda" and torch.version.hip is None
-            else None
-        )
+        cc = None
+        if device.type == "cuda" and torch.version.hip is None:
+            cc = DeviceProperties.create(device).cc
+            if config.aot_inductor.emit_multi_arch_kernel and config.cuda.arch:
+                # AOTI also compiles the kernel for this (lower) target.
+                from torch._inductor.codegen.cuda import compile_utils
 
-        def gen(expr: str, dtype: torch.dtype) -> CSEVariable:
-            return V.kernel.cse.generate(
-                V.kernel.compute, expr, dtype=dtype, shape=x.shape
-            )
+                cc = min(cc, compile_utils._cuda_arch_number(str(config.cuda.arch)))
 
         out_type = triton_compute_type(dtype)
         suffix = {
@@ -1543,25 +1545,12 @@ class TritonOverrides(OpOverrides):
                     f"tl.inline_asm_elementwise('{asm}', '=h,d', [{x}], "
                     f"dtype={triton_type(dtype)}, is_pure=True, pack=1).to({out_type})"
                 )
-            # Round to odd through float32: truncate and set the last bit if
-            # inexact. float32 has more than two extra bits and covers the
-            # range of all narrower dtypes, so rounding the result again below
-            # rounds the exact value correctly.
-            asm = (
-                "{ .reg .f32 t; .reg .f64 back; .reg .pred inexact; "
-                "cvt.rz.f32.f64 t, $1; cvt.f64.f32 back, t; "
-                "setp.neu.f64 inexact, back, $1; mov.b32 $0, t; "
-                "@inexact or.b32 $0, $0, 1; }"
-            )
-            odd = gen(
-                f"tl.inline_asm_elementwise('{asm}', '=r,d', [{x}], "
-                "dtype=tl.int32, is_pure=True, pack=1)",
-                torch.int32,
-            )
-            x = gen(f"{odd}.to(tl.float32, bitcast=True)", torch.float32)
+            x = f"triton_helpers.round_float64_to_odd_float32({x})"
         else:
-            # Exact for Half and BFloat16.
-            x = gen(f"{x}.to(tl.float32)", torch.float32)
+            # Exact for Half and BFloat16 inputs. Fused producers of float16 or
+            # bfloat16 values pass their unrounded float32 result, unless
+            # config.emulate_precision_casts is set.
+            x = f"{x}.to(tl.float32)"
 
         if cc is not None:
             # The same instructions as the eager CUDA kernel, as inline PTX
@@ -1581,53 +1570,11 @@ class TritonOverrides(OpOverrides):
                 asm = f"cvt.{suffix}.{ptx_type}.f32 $0, $1;"
                 return f"{asm_call(asm, triton_type(dtype))}.to({out_type})"
             if dtype in (torch.float8_e4m3fn, torch.float8_e5m2) and cc >= 89:
-                ptx_type = "e4m3x2" if dtype == torch.float8_e4m3fn else "e5m2x2"
-                asm = f"cvt.rn.satfinite.{ptx_type}.f32 $0, 0.0, $1;"
-                bits = gen(f"{asm_call(asm, 'tl.uint16')}.to(tl.uint8)", torch.uint8)
-                if rounding != "to_nearest_even":
-                    # The hardware only rounds to nearest, saturating. Step the
-                    # result by one encoding toward x when it is on the wrong
-                    # side of x. Comparisons with NaN are false, so NaN is left
-                    # alone. Consecutive magnitudes have consecutive encodings,
-                    # so for e5m2 stepping past the largest finite value gives
-                    # infinity; e4m3fn saturates instead.
-                    decode = (
-                        "{ .reg .b32 h2; .reg .b16 lo, hi; "
-                        f"cvt.rn.f16x2.{ptx_type} h2, $1; mov.b32 {{lo, hi}}, h2; "
-                        "cvt.f32.f16 $0, lo; }"
-                    )
-                    rounded = gen(
-                        f"tl.inline_asm_elementwise('{decode}', '=f,h', "
-                        f"[({bits} & 0x7F).to(tl.uint16)], dtype=tl.float32, "
-                        "is_pure=True, pack=1)",
-                        torch.float32,
-                    )
-                    down = f"tl.where({rounded} > tl.abs({x}), -1, 0)"
-                    up_cond = f"({rounded} < tl.abs({x}))"
-                    if dtype == torch.float8_e4m3fn:
-                        up_cond += f" & (({bits} & 0x7F) != 0x7E)"
-                    up = f"tl.where({up_cond}, 1, 0)"
-                    neg = f"{x} < 0"
-                    step = {
-                        "toward_zero": down,
-                        "toward_positive": f"tl.where({neg}, {down}, {up})",
-                        "toward_negative": f"tl.where({neg}, {up}, {down})",
-                    }[rounding]
-                    bits = gen(
-                        f"({bits}.to(tl.int32) + {step}).to(tl.uint8)", torch.uint8
-                    )
-                if dtype == torch.float8_e5m2:
-                    # e5m2 has infinities, where the hardware saturates: for
-                    # infinite x, and when rounding to nearest from halfway
-                    # between the largest finite value (57344) and 2^16.
-                    threshold = (
-                        "61440.0" if rounding == "to_nearest_even" else 'float("inf")'
-                    )
-                    inf_bits = f"tl.where({x} < 0, 0xFC, 0x7C).to(tl.uint8)"
-                    bits = gen(
-                        f"tl.where(tl.abs({x}) >= {threshold}, {inf_bits}, {bits})",
-                        torch.uint8,
-                    )
+                e4m3 = dtype == torch.float8_e4m3fn
+                bits = (
+                    f"triton_helpers.float32_to_float8_bits({x}, "
+                    f"{ROUNDING_MODES[rounding]}, {e4m3})"
+                )
                 return f"{bits}.to({triton_type(dtype)}, bitcast=True)"
             if (
                 dtype == torch.float8_e8m0fnu
@@ -1641,10 +1588,7 @@ class TritonOverrides(OpOverrides):
                 return f"{asm_call(asm, 'tl.uint16')}.to(tl.uint8)"
 
         params = ", ".join(map(str, ROUNDING_FORMATS[dtype]))
-        bits = gen(
-            f"triton_helpers.round_float32_to_bits({x}, {ROUNDING_MODES[rounding]}, {params})",
-            torch.int32,
-        )
+        bits = f"triton_helpers.round_float32_to_bits({x}, {ROUNDING_MODES[rounding]}, {params})"
         if dtype == torch.float8_e8m0fnu:
             return f"{bits}.to(tl.uint8)"
         int_type = "tl.int16" if dtype.itemsize == 2 else "tl.int8"

@@ -741,12 +741,19 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def to_dtype_rounded(x, dtype, src_dtype, rounding):
         mode = "".join(word.capitalize() for word in rounding.split("_"))
-        # Half and BFloat16 widen to float exactly.
+        # Half and BFloat16 inputs widen to float exactly. Fused producers of
+        # such values pass their unrounded float result, unless
+        # config.emulate_precision_casts is set.
         wide = "double" if src_dtype == torch.float64 else "float"
-        return (
+        result = (
             f"c10::convert_with_rounding<{DTYPE_TO_CPP[dtype]}>("
             f"static_cast<{wide}>({x}), c10::RoundingMode::{mode})"
         )
+        # Like other ops, Half and BFloat16 results are computed in float (see
+        # DtypePropagationOpsHandler.to_dtype_rounded); they are exact in it.
+        if dtype in DTYPE_LOWP_FP:
+            return f"static_cast<float>({result})"
+        return result
 
     @staticmethod
     # pyrefly: ignore [bad-override]
