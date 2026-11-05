@@ -741,6 +741,37 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
                 self.assertEqual(model(inp), ref_model(inp))
 
     @skip_if_lt_x_gpu(1)
+    def test_single_rank_hsdp_divide_factor(self):
+        self.run_subtests(
+            {
+                "reduce_dtype": [torch.float32, torch.float16],
+                "force_sum": [False, True],
+            },
+            self._test_single_rank_hsdp_divide_factor,
+        )
+
+    def _test_single_rank_hsdp_divide_factor(
+        self, reduce_dtype: torch.dtype, force_sum: bool
+    ):
+        # A size-1 shard dim must not divide again by a factor that the HSDP
+        # pre- and post-divides apply
+        mesh = init_device_mesh(
+            device.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        model = nn.Linear(8, 4, bias=False, device=device)
+        fully_shard(
+            model, mesh=mesh, mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype)
+        )
+        model.set_gradient_divide_factor(3.0)
+        model.set_force_sum_reduction_for_comms(force_sum)
+        model(torch.ones(3, 8, device=device)).sum().backward()
+        # Each rank's gradient is 3, summed over the replicas, then divided by 3
+        expected = torch.full((4, 8), float(self.world_size), device=device)
+        self.assertEqual(model.weight.grad.to_local(), expected, atol=0, rtol=0)
+
+    @skip_if_lt_x_gpu(1)
     def test_copy_fns(self):
         # Records what FSDP passes its copy functions, which delegate to the defaults
         model = nn.Sequential(
@@ -2930,6 +2961,25 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
         self.assertIsNone(comm.buffer)
         for ref_param, param in zip(ref_model.parameters(), model.parameters()):
             self.assertEqual(param.grad.to_local(), ref_param.grad)
+
+    @parametrize(
+        "reduce_dtype,force_sum",
+        [(torch.float32, False), (torch.float32, True), (torch.float16, False)],
+    )
+    def test_singleton_divide_factor(self, reduce_dtype, force_sum):
+        # Sum-only reductions and fp16 split the factor into pre- and post-divides,
+        # which the singleton copy must not repeat
+        model = nn.Linear(8, 4, bias=False, device=device)
+        fully_shard(
+            model,
+            mesh=init_device_mesh(device.type, (1,)),
+            mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype),
+        )
+        model.set_gradient_divide_factor(3.0)
+        model.set_force_sum_reduction_for_comms(force_sum)
+        model(torch.ones(3, 8, device=device)).sum().backward()
+        expected = torch.ones(4, 8, device=device)  # sum of 3 rows of ones, / 3
+        self.assertEqual(model.weight.grad.to_local(), expected, atol=0, rtol=0)
 
     def test_size1_reduceop(self):
         from torch.distributed.distributed_c10d import ReduceOp

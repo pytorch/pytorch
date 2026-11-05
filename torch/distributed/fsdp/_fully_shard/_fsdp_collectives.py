@@ -688,6 +688,13 @@ def foreach_reduce(
         )
     )
 
+    # A single-rank reduce-scatter divides by this in place of reduce_scatter_op,
+    # unless the pre- and post-divides already apply the factor
+    single_rank_factor = (
+        gradient_divide_factor
+        if predivide_factor is None and postdivide_factor is None
+        else None
+    )
     if reduce_scatter_group is None:
         world_size = 1
     else:
@@ -730,13 +737,13 @@ def foreach_reduce(
         if skip_reduce_scatter and all_reduce_group is None:
             # The packed input already is the reduction output
             reduce_output = reduce_scatter_input
-            _div_if_needed(reduce_output, gradient_divide_factor)
+            _div_if_needed(reduce_output, single_rank_factor)
         elif skip_reduce_scatter:
             # HSDP/replicate keeps a separate output, allocated in the RS stream,
             # since its all-reduce and partial accumulation outlive the input
             reduce_output = torch.empty_like(reduce_scatter_input)
-            if gradient_divide_factor is not None and gradient_divide_factor != 1.0:
-                reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
+            if single_rank_factor is not None and single_rank_factor != 1.0:
+                reduce_output.copy_(reduce_scatter_input / single_rank_factor)
             else:
                 reduce_output.copy_(reduce_scatter_input)
         else:
