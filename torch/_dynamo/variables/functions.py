@@ -412,11 +412,6 @@ class BaseUserFunctionVariable(VariableTracker):
     closure: VariableTracker | None = None
     annotations: VariableTracker | None = None
 
-    def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def self_args(self) -> list[VariableTracker]:
         return []
 
@@ -1397,15 +1392,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def python_type(self) -> type:
         return types.GeneratorType
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        # Generators have no tp_richcompare: identity for ==/!=, TypeError for
-        # ordering.
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def pygen_yf(self) -> VariableTracker | None:
         if self.inline_tracer.frame_state == FrameState.FRAME_SUSPENDED_YIELD_FROM:
@@ -2653,11 +2639,6 @@ class SkipFunctionVariable(VariableTracker):
             return None
         return self.value
 
-    def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def as_python_constant(self) -> Any:
         return self.value
 
@@ -2698,6 +2679,13 @@ class SkipFunctionVariable(VariableTracker):
             args=[msg],
             kwargs={"name": ConstantVariable.create(name), "obj": self},
         )
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
     @classmethod
     def create_with_source(cls, value: Any, source: Source) -> "SkipFunctionVariable":
@@ -3104,9 +3092,9 @@ class _WrappedSkipFunctionMethodDescriptorCommonVariable(ContextWrappedFunctionM
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
+        # Wrapped functions are FunctionType, which inherits object's
+        # tp_richcompare; don't pick up SkipFunctionVariable's via the MRO.
+        return VariableTracker.tp_richcompare_impl(self, tx, other, op)
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -3793,11 +3781,6 @@ class FunctoolsPartialVariable(VariableTracker):
         self.keywords = keywords
         # Store cache_hash from the original partial for SAC context_fn caching
         self.original_cache_hash = original_cache_hash
-
-    def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def python_type(self) -> type:
         return functools.partial
