@@ -606,10 +606,13 @@ class GraphLowering(torch.fx.Interpreter):
         self.disable_cudagraphs_reason: str | None = None
         self.kernel_free_cudagraph: bool = False
         # Whether codegen splits this graph into partition functions. Codegen and
-        # post-compile cudagraph wrapping read this instead of
-        # config.graph_partition, which stays at what the user asked for and is
-        # still read by ConstructorMoverPass, the cpp_wrapper setup and the
-        # scheduler's partition-minimizing reorder.
+        # the customized partition wrapper read this instead of
+        # config.graph_partition. It defaults to that config, which is patched off
+        # while lowering under cpp_wrapper/aot_mode (maybe_disable_graph_partition)
+        # and while generating subgraph code. ConstructorMoverPass and the
+        # cpp_wrapper setup still read config.graph_partition; the scheduler's
+        # partition-minimizing reorder reads it together with
+        # cudagraphs_per_partition.
         self.split_into_partitions = (
             config.graph_partition
             if split_into_partitions is None
@@ -617,8 +620,9 @@ class GraphLowering(torch.fx.Interpreter):
         )
         # Whether the partitions are for CUDA Graphs (or a customized partition
         # wrapper): the scheduler then splits off cudagraph-unsafe ops, the
-        # post-lowering cudagraph checks leave those ops to it, and call() leaves
-        # the input asserts to the partition functions.
+        # post-lowering cudagraph checks leave those ops to it, call() leaves
+        # the input asserts to the partition functions, and post_compile captures
+        # the partitions instead of the whole graph.
         if cudagraphs_per_partition is None:
             cudagraphs_per_partition = self.split_into_partitions and (
                 config.triton.cudagraphs
