@@ -159,31 +159,14 @@ OperatorArgsKwargsView::OperatorArgsKwargsView(
     const c10::OperatorHandle& op,
     const std::vector<c10::IValue>& arguments)
     : op_(op), arguments_(arguments) {
-  // Find the split point between kwarg-only and regular.  Since most functions
-  // don't have kwarg-only arguments, it is more efficient to scan from the
-  // right (but ideally, this would just be precomputed in FunctionSchema
-  // itself).  (NB: minus one in the loop is because we're testing if the
-  // *next* argument is kwarg-only before we advance the starting index)
-  const int64_t signed_arguments_size = static_cast<int64_t>(arguments.size());
-  int64_t kwarg_only_start = signed_arguments_size;
-  for (; kwarg_only_start > 0; kwarg_only_start--) {
-    const auto& arg = op.schema().arguments()[kwarg_only_start - 1];
-    if (!arg.kwarg_only()) {
-      break;
-    }
-  }
-
-  // Find the first positional argument that isn't defaulted
-  positional_default_start_ = kwarg_only_start;
-  for (; positional_default_start_ > 0; positional_default_start_--) {
-    if (!is_default(positional_default_start_ - 1)) {
-      break;
-    }
-  }
+  const auto split = splitPythonKernelArgs(
+      op.schema(), [this](size_t i) { return is_default(i); });
+  positional_default_start_ = static_cast<int64_t>(split.num_positional);
 
   // kwargs_iterator will skip default kwargs when incremented, but we
   // need to skip any initial run of default kwargs ourselves.
-  first_non_default_kwarg_ = kwarg_only_start;
+  const int64_t signed_arguments_size = static_cast<int64_t>(arguments.size());
+  first_non_default_kwarg_ = static_cast<int64_t>(split.kwarg_only_start);
   for (; first_non_default_kwarg_ < signed_arguments_size;
        ++first_non_default_kwarg_) {
     if (!is_default(first_non_default_kwarg_)) {
