@@ -98,11 +98,19 @@ def get_with_pytest_shard(
     test_class_times: dict[str, dict[str, float]] | None,
     *,
     allow_pytest_sharding: bool = True,
+    xdist_workers: Callable[[str], int] | None = None,
 ) -> list[ShardedTest]:
+    """Split tests whose estimated wall time exceeds THRESHOLD into pytest shards.
+
+    xdist_workers maps a test file to the number of pytest-xdist workers that
+    run its tests concurrently; the file's estimated wall time is its recorded
+    time divided by that count."""
     sharded_tests: list[ShardedTest] = []
 
     for test in tests:
         duration = get_duration(test, test_file_times, test_class_times or {})
+        if duration is not None and xdist_workers is not None:
+            duration /= xdist_workers(test.test_file)
 
         if allow_pytest_sharding and duration and duration > THRESHOLD:
             num_shards = math.ceil(duration / THRESHOLD)
@@ -220,7 +228,10 @@ def calculate_shards(
     must_serial: Callable[[str], bool] | None = None,
     sort_by_time: bool = True,
     allow_pytest_sharding: bool = True,
+    xdist_workers: Callable[[str], int] | None = None,
 ) -> list[tuple[float, list[ShardedTest]]]:
+    """Assign tests to num_shards shards; see get_with_pytest_shard for
+    xdist_workers."""
     must_serial = must_serial or (lambda x: True)
     test_class_times = test_class_times or {}
 
@@ -239,6 +250,7 @@ def calculate_shards(
                 test_file_times,
                 test_class_times,
                 allow_pytest_sharding=allow_pytest_sharding,
+                xdist_workers=xdist_workers,
             ),
             key=lambda j: j.get_time(),
             reverse=True,
@@ -247,6 +259,7 @@ def calculate_shards(
             test_file_times,
             test_class_times,
             allow_pytest_sharding=allow_pytest_sharding,
+            xdist_workers=xdist_workers,
         )
     else:
         pytest_sharded_tests = get_with_pytest_shard(
@@ -254,6 +267,7 @@ def calculate_shards(
             test_file_times,
             test_class_times,
             allow_pytest_sharding=allow_pytest_sharding,
+            xdist_workers=xdist_workers,
         )
     del tests
 
