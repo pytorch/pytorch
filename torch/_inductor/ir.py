@@ -16,11 +16,14 @@ from functools import partial
 from numbers import Number
 from typing import (
     Any,
+    assert_never,
     cast,
     ClassVar,
     Literal,
+    Never,
     overload,
     Protocol,
+    Self,
     SupportsFloat,
     SupportsInt,
     TYPE_CHECKING,
@@ -28,15 +31,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import (
-    assert_never,
-    Never,
-    override,
-    ParamSpec,
-    Self,
-    TypedDict,
-    TypeIs,
-)
+from typing_extensions import override, ParamSpec, TypedDict, TypeIs
 from unittest.mock import patch
 
 import sympy
@@ -509,6 +504,9 @@ def is_aligned_realized_tensor(x: Buffer | TensorBox, alignment: int) -> bool:
     if (
         not isinstance(x, IRNode)
         or x.maybe_get_stride() is None
+        # FlexibleLayout strides are provisional: the layout can still be frozen in a
+        # different order (e.g. by decide_layout() in ExternKernel.process_kernel).
+        or isinstance(x.maybe_get_layout(), FlexibleLayout)
         or free_unbacked_symbols(x.get_stride())
         or free_unbacked_symbols(x.get_size())
     ):
@@ -11275,7 +11273,10 @@ class StorageBox(MutableBox):
                     return True
             if self.has_large_inner_fn():
                 return True
-            return graph_reuse and self.num_reads() > config.realize_reads_threshold
+            broadcast_reuse = users >= config.realize_broadcast_reuse_threshold
+            return (graph_reuse or broadcast_reuse) and (
+                self.num_reads() > config.realize_reads_threshold
+            )
         return False
 
     def mark_reuse(self, users: int, *, graph_reuse: bool = True) -> None:

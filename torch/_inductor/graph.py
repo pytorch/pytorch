@@ -2984,7 +2984,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         # The JIT wrapper keeps lazy kernel state in function-local statics.
         # Compile a fresh wrapper for each first pass so autotuning always reruns.
-        cpp_source += f"\n// AOTI lazy autotune first pass: {id(self)}\n"
+        # Not id(self): a later graph can reuse a freed graph's id.
+        cpp_source += f"\n// AOTI lazy autotune first pass: {self.post_grad_graph_id}\n"
         for name in kernel_names:
             CudaKernelParamCache.cache.pop(name, None)
 
