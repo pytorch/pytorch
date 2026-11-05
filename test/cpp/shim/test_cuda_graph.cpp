@@ -390,7 +390,7 @@ class AOTICudaGraphRAIITest : public ::testing::Test {
 
 } // namespace
 
-TEST_F(AOTICudaGraphRAIITest, CapturesReplaysAndKeepsShimErrors) {
+TEST_F(AOTICudaGraphRAIITest, CapturesAndReplays) {
   torch::aot_inductor::AOTICudaGraph graph;
   auto x = at::ones({8}, at::kCUDA);
   at::Tensor y;
@@ -405,8 +405,6 @@ TEST_F(AOTICudaGraphRAIITest, CapturesReplaysAndKeepsShimErrors) {
   EXPECT_TRUE(y.equal(at::full({8}, 6.0f, at::kCUDA)));
   auto what = error_of([] { torch::aot_inductor::AOTICudaGraph().replay(); });
   EXPECT_NE(what.find("aoti_torch_cuda_graph_replay("), what.npos) << what;
-  EXPECT_NE(what.find("capture_end() must have been called"), what.npos)
-      << what;
 }
 
 TEST_F(AOTICudaGraphRAIITest, EndsTheCaptureItLeftOpen) {
@@ -441,7 +439,7 @@ TEST_F(AOTICudaGraphRAIITest, EndsTheCaptureOnItsStream) {
 TEST_F(AOTICudaGraphRAIITest, RejectsANegativeDeviceIndex) {
   EXPECT_EQ(
       error_of([] { torch::aot_inductor::AOTICudaMemPool(-1); }),
-      "AOTICudaMemPool: bad device index");
+      "AOTICudaMemPool: device_index must be >= 0, got -1");
 }
 
 TEST_F(AOTICudaGraphRAIITest, EndsOnlyACaptureItBegan) {
@@ -478,6 +476,26 @@ TEST_F(AOTICudaGraphRAIITest, MakesNonBlockingStreamsAndEvents) {
     EXPECT_EQ(cudaEventSynchronize(event.get()), cudaSuccess);
     known_event.synchronize();
   }
+}
+
+TEST_F(AOTICudaGraphRAIITest, LeavesACaptureItFailedToBeginAlone) {
+  auto guard = on_stream();
+  torch::aot_inductor::AOTICudaGraph first;
+  first.capture_begin(*pool_, cudaStreamCaptureModeThreadLocal);
+  auto y = at::ones({8}, at::kCUDA) * 2;
+  {
+    // The shim rejects the mode before it begins a capture.
+    torch::aot_inductor::AOTICudaGraph second;
+    auto what = error_of([&] {
+      second.capture_begin(*pool_, static_cast<cudaStreamCaptureMode>(3));
+    });
+    EXPECT_NE(what.find("aoti_torch_cuda_graph_capture_begin("), what.npos)
+        << what;
+  }
+  EXPECT_TRUE(stream_is_capturing());
+  first.capture_end();
+  first.replay();
+  EXPECT_TRUE(y.equal(at::full({8}, 2.0f, at::kCUDA)));
 }
 
 TEST_F(AOTICudaGraphRAIITest, LeavesALaterCaptureOnTheStreamAlone) {

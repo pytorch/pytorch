@@ -10,6 +10,9 @@
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>
 
+// Built on the CUDA graph shim functions.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
 #include <algorithm>
 #include <atomic>
 #include <iostream>
@@ -39,12 +42,11 @@ struct CudaGraphOptions {
 // Runs a capturable part of a model instance eagerly or as CUDA graphs, one
 // graph per input layout (dtypes, sizes, strides). The graphs share one
 // memory pool, so replays run one at a time; each copies the inputs in and
-// clones the outputs out. After a capture fails, for whatever reason and even
-// if the call then fails eagerly too, keys without a graph run eagerly, until
-// reset(). While other graphs exist, the pool also keeps the failed capture's
-// memory until then. Unlike torch.cuda.graph, a capture doesn't empty the
-// allocator's cache first, so it can run out of memory where an eager call
-// wouldn't, and that too stops capturing.
+// clones the outputs out. As with torch.cuda.graph, a failed capture's error
+// propagates to the caller; the key captures again on its next call. While
+// other graphs exist, the pool keeps the failed capture's memory until
+// reset(). Unlike torch.cuda.graph, a capture doesn't empty the allocator's
+// cache first, so it can run out of memory where an eager call wouldn't.
 class CudaGraphManager {
  public:
   explicit CudaGraphManager(int32_t device_index, CudaGraphOptions options = {})
@@ -78,13 +80,17 @@ class CudaGraphManager {
   // CUDA tensor on the manager's device, and `stream` must not be capturing.
   // Replayed kernels run at default priority, whatever `stream`'s priority. fn
   // borrows `inputs`, writes new references into `outputs`, enqueues all its
-  // GPU work on `stream`, returns only tensors on the manager's device (or
-  // capturing stops), and must not mutate its inputs: a replay would only
+  // GPU work on the stream it is passed (`stream` in eager calls, which isn't
+  // made current, and the manager's own stream, made current, in captures; a
+  // null `stream` means the device's legacy default stream), returns only
+  // tensors on the manager's device (or its capture fails), and must not
+  // mutate its inputs: a replay would only
   // mutate the graph's copies. fn may also see views over the graph's buffers,
-  // at other storage offsets than the caller's inputs. Graphs have no random
+  // at other storage offsets than the caller's inputs, which hold only the
+  // inputs' elements, so fn must not read other parts of its inputs' storage
+  // (aot_inductor.cudagraphs rejects models that would). Graphs have no random
   // number state, since replays would advance the generator without its lock,
-  // so a capture of fn that uses random numbers fails. After a failed capture
-  // fn runs again eagerly in the same call.
+  // so a capture of fn that uses random numbers fails.
   // Each output slot gets its own handle; replayed outputs never alias the
   // inputs, nor each other unless fn wrote the same handle twice, while eager
   // calls return fn's outputs as they are. A graph keeps
@@ -118,9 +124,8 @@ class CudaGraphManager {
     std::unique_lock<std::mutex> lock(mutex_);
     auto it = graphs_.find(key);
     if (it == graphs_.end()) {
-      bool eager = capture_failed_;
-      if (!eager &&
-          graphs_.size() >= static_cast<size_t>(options_.max_graphs)) {
+      bool eager = false;
+      if (graphs_.size() >= static_cast<size_t>(options_.max_graphs)) {
         warn_max_graphs();
         eager = true;
       }
@@ -154,34 +159,8 @@ class CudaGraphManager {
         }
         return;
       }
+      auto graph = capture(fn, inputs, num_inputs, num_outputs, stream);
       warmups_.erase(key);
-      std::unique_ptr<Graph> graph;
-      std::string error;
-      try {
-        graph = capture(fn, inputs, num_inputs, num_outputs, stream);
-      } catch (const std::exception& e) {
-        error = e.what();
-      }
-      if (!graph) {
-        // A failed capture ran nothing, so run eagerly; an error there is the
-        // caller's. Without graphs, the pool only holds the failed capture's
-        // memory.
-        capture_failed_ = true;
-        if (graphs_.empty()) {
-          pool_.reset();
-        }
-        std::string msg =
-            "AOTInductor CUDA graphs: capturing failed, so calls with new "
-            "input layouts (dtypes, sizes or strides) run eagerly until "
-            "reset() (code that uses random numbers, for one, can't be "
-            "captured): " +
-            error.substr(0, error.find('\n'));
-        aoti_torch_warn(
-            __func__, __FILE__, static_cast<uint32_t>(__LINE__), msg.c_str());
-        lock.unlock();
-        run_eagerly(fn, inputs, outputs, num_outputs, stream);
-        return;
-      }
       it = graphs_.emplace(std::move(key), std::move(graph)).first;
     }
     replay(*it->second, inputs, outputs, num_outputs, stream);
@@ -197,7 +176,6 @@ class CudaGraphManager {
     graphs_.clear();
     pool_.reset();
     warmups_.clear();
-    capture_failed_ = false;
     warned_max_graphs_ = false;
   }
 
@@ -249,13 +227,10 @@ class CudaGraphManager {
 
   static TensorLayout layout_of(AtenTensorHandle tensor) {
     TensorLayout layout;
-    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
-        aoti_torch_get_dtype(tensor, &layout.dtype));
-    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
-        aoti_torch_get_dim(tensor, &layout.dim));
-    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
-        aoti_torch_get_sizes(tensor, &layout.sizes));
-    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensor, &layout.dtype));
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dim(tensor, &layout.dim));
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(tensor, &layout.sizes));
+    AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_strides(tensor, &layout.strides));
     return layout;
   }
@@ -295,7 +270,7 @@ class CudaGraphManager {
   static RAIIAtenTensorHandle block_of(AtenTensorHandle input, int64_t extent) {
     int64_t stride = 1;
     AtenTensorHandle block = nullptr;
-    AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+    AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch__reinterpret_tensor(input, 1, &extent, &stride, 0, &block));
     return RAIIAtenTensorHandle(block);
   }
@@ -304,10 +279,10 @@ class CudaGraphManager {
     for (size_t i = 0; i < graph.input_overlaps.size(); ++i) {
       if (graph.input_overlaps[i]) {
         auto block = block_of(inputs[i], graph.input_extents[i]);
-        AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+        AOTI_TORCH_ERROR_CODE_CHECK(
             aoti_torch_copy_(graph.input_buffers[i], block.get(), 0));
       } else {
-        AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+        AOTI_TORCH_ERROR_CODE_CHECK(
             aoti_torch_copy_(graph.static_inputs[i], inputs[i], 0));
       }
     }
@@ -322,9 +297,9 @@ class CudaGraphManager {
           "CudaGraphManager: input " + std::to_string(i) + " is null");
       int32_t device_type = 0;
       int32_t device_index = 0;
-      AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+      AOTI_TORCH_ERROR_CODE_CHECK(
           aoti_torch_get_device_type(inputs[i], &device_type));
-      AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+      AOTI_TORCH_ERROR_CODE_CHECK(
           aoti_torch_get_device_index(inputs[i], &device_index));
       AOTI_RUNTIME_CHECK(
           device_type == aoti_torch_device_type_cuda() &&
@@ -354,7 +329,7 @@ class CudaGraphManager {
     for (size_t i = 1; i < num_outputs; ++i) {
       if (outputs[i] != nullptr &&
           std::find(outputs, outputs + i, outputs[i]) != outputs + i) {
-        AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+        AOTI_TORCH_ERROR_CODE_CHECK(
             aoti_torch_new_tensor_handle(outputs[i], &outputs[i]));
       }
     }
@@ -471,7 +446,7 @@ class CudaGraphManager {
         int64_t extent = storage_extent(layout);
         int64_t stride = 1;
         AtenTensorHandle buffer = nullptr;
-        AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(aoti_torch_empty_strided(
+        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
             1,
             &extent,
             &stride,
@@ -481,7 +456,7 @@ class CudaGraphManager {
             &buffer));
         graph->input_buffers.emplace_back(buffer);
         AtenTensorHandle view = nullptr;
-        AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(aoti_torch__reinterpret_tensor(
+        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor(
             buffer, layout.dim, layout.sizes, layout.strides, 0, &view));
         graph->static_inputs.emplace_back(view);
         graph->input_extents.push_back(extent);
@@ -501,9 +476,9 @@ class CudaGraphManager {
       // Work on another device would run only at capture.
       int32_t device_type = 0;
       int32_t device_index = 0;
-      AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+      AOTI_TORCH_ERROR_CODE_CHECK(
           aoti_torch_get_device_type(output, &device_type));
-      AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+      AOTI_TORCH_ERROR_CODE_CHECK(
           aoti_torch_get_device_index(output, &device_index));
       AOTI_RUNTIME_CHECK(
           device_type == aoti_torch_device_type_cuda() &&
@@ -536,13 +511,13 @@ class CudaGraphManager {
     clones.reserve(graph.static_outputs.size());
     for (auto& output : graph.static_outputs) {
       AtenTensorHandle clone = nullptr;
-      AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(
+      AOTI_TORCH_ERROR_CODE_CHECK(
           aoti_torch_clone_preserve_strides(output, &clone));
       clones.emplace_back(clone);
     }
     for (size_t i = 0; i < num_outputs; ++i) {
       if (graph.output_slots[i] != kNoOutput) {
-        AOTI_TORCH_ERROR_CODE_CHECK_WITH_MESSAGE(aoti_torch_new_tensor_handle(
+        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle(
             clones[graph.output_slots[i]], &outputs[i]));
       }
     }
@@ -560,7 +535,6 @@ class CudaGraphManager {
   std::optional<AOTICudaMemPool> pool_;
   std::mutex mutex_;
   bool warned_max_graphs_ = false;
-  bool capture_failed_ = false;
   // Eager calls of each key not yet captured, and the threads that made them.
   struct Warmup {
     int64_t calls = 0;
@@ -572,4 +546,5 @@ class CudaGraphManager {
 
 } // namespace torch::aot_inductor
 
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 #endif // USE_CUDA
