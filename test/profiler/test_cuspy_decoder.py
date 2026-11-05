@@ -22,7 +22,9 @@ if TEST_CUPTI:
 class TestCuspyDecoderCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + a loaded libcupti >= 13.5")
+    @unittest.skipIf(
+        not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + a loaded libcupti >= 13.5"
+    )
     @unittest.skipIf(not torch.cuda.is_available(), "needs a CUDA context")
     def test_decoder_groups_distinct_layouts(self):
         # The native decode worker keys accumulated columns by (kind, layout) -- the
