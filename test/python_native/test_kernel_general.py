@@ -3,6 +3,7 @@
 # column view and so force the general path. Override OpInfo suites provide full
 # numerical coverage.
 
+import collections
 import pathlib
 import re
 import sys
@@ -300,22 +301,20 @@ class TestKernelGeneral(TestCase):
             expected = torch.tensor([r * strides[0] + q * strides[1]], device="cuda")
             self.assertEqual(out, expected)
 
-    def test_family_has_exactly_one_cute_kernel(self):
-        # Assert every axis still shares one kernel. Glob files and match qualified or
-        # annotated decorators so new drivers and spellings cannot evade the check.
+    def test_family_kernels_are_listed(self):
+        # New kernels must be listed here deliberately: TileReduce is the shared body for every
+        # axis and PartialColumns folds partition-major column partials. Glob files and match
+        # qualified or annotated decorators so new drivers and spellings cannot evade the check.
         # Runtime introspection cannot distinguish @cute.kernel from @cute.jit wrappers.
         root = pathlib.Path(reductions.__file__).parent
         deco = re.compile(r"@(?:\w+\.)*cute\.kernel\b")
-        found = [
-            f"{path.name}:{i}"
-            for path in sorted(root.glob("*.py"))
-            for i, line in enumerate(path.read_text().splitlines(), 1)
+        found = collections.Counter(
+            path.name
+            for path in root.glob("*.py")
+            for line in path.read_text().splitlines()
             if deco.match(line.strip())
-        ]
-        self.assertEqual(
-            len(found), 1, f"expected one kernel in the family, got {found}"
         )
-        self.assertTrue(found[0].startswith("tile.py"), f"the body moved: {found}")
+        self.assertEqual(found, {"tile.py": 1, "kernel_coltile.py": 1})
 
     def test_internal_invariants_raise(self):
         # Each invariant must raise explicitly because python -O strips asserts. Exercise every
