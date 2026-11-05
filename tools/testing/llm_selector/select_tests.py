@@ -235,7 +235,7 @@ def query_model(
             # Its message is mostly the claude argv, prompt included.
             why = f"model call timed out after {e.timeout}s"
             return {"is_error": True, "result": why}
-        except FileNotFoundError as e:
+        except (OSError, UnicodeError) as e:
             return {"is_error": True, "result": f"{type(e).__name__}: {e}"}
     try:
         result = json.loads(p.stdout)

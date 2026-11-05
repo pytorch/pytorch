@@ -308,6 +308,9 @@ g () {
                 {**valid, "files": ["test_ops"]},
                 {**valid, "error": "e"},
             ]
+            # run_all and no candidates leave only the type checks to reject these.
+            r = Selection(run_all=True).to_json()
+            bad += [{**r, "files": "test_nn"}, {**r, "files": [1]}, {**r, "error": 1}]
             bad += [
                 {k: v for k, v in valid.items() if k != key}
                 for key in ("version", "candidates", "enforce", "error")
@@ -358,6 +361,8 @@ g () {
         for f in [
             ".ci/docker/common/install_cuda.sh",
             ".ci/docker/requirements-ci.txt",
+            ".ci/docker/requirements-docs.txt",
+            ".ci/docker/java/jni.h",
             ".ci/docker/build.sh",
             ".ci/docker/ci_commit_pins/triton.txt",
             ".ci/docker/ubuntu/Dockerfile",
@@ -437,6 +442,9 @@ g () {
             "tools/testing/discover_tests.py",
             "tools/stats/import_test_stats.py",
             "tools/stats/upload_metrics.py",
+            "tools/stats/upload_test_stats.py",
+            "tools/stats/upload_stats_lib.py",
+            "tools/stats/test_dashboard.py",
             "test/cpp_extensions/open_registration_extension/torch_openreg/pyproject.toml",
         ]:
             self.assertTrue(needs_run_all([f]), f)
@@ -513,6 +521,20 @@ g () {
             out = answer(dirs=[d])
             sel = Selection.from_model_output(out, candidates | jit | {"test_fx"}, [])
             self.assertEqual((sel.files, sel.error), (expected, None), d)
+        # With grep, the drivers of the files under the directory.
+        paths = [
+            "test/jit/test_fuser_common.py",
+            "test/cpp_extensions/dangling_impl_extension.cpp",
+        ]
+        cands = candidates | jit | {"test_jit_fuser_te", "test_dispatch"}
+        for d, driver in [
+            ("jit", "test_jit_fuser_te"),
+            ("cpp_extensions", "test_dispatch"),
+        ]:
+            sel = Selection.from_model_output(
+                answer(dirs=[d]), cands, [], lambda p: paths
+            )
+            self.assertIn(driver, sel.files, d)
 
     def test_parse_model_output_rejects_malformed_answers(self) -> None:
         malformed: list[Any] = [
@@ -592,6 +614,12 @@ g () {
             self.assertTrue((REPO_ROOT / path).exists(), path)
             self.assertNotIn(f, TESTS)
             self.assertEqual(selection.edited_tests([path], set(TESTS)), drivers, f)
+        # test_run runs bin/test_script.sh too.
+        sh = f"test/{launcher_bin}.sh"
+        self.assertTrue((REPO_ROOT / sh).exists(), sh)
+        self.assertEqual(
+            selection.edited_tests([sh], set(TESTS)), {"distributed/launcher/test_run"}
+        )
 
 
 class TestPrompt(unittest.TestCase):
@@ -667,6 +695,7 @@ class TestPrompt(unittest.TestCase):
 
         timeout = subprocess.TimeoutExpired(["claude", "-p", "<prompt>"], 600)
         missing = FileNotFoundError("claude")
+        denied = PermissionError("claude")
         for run, why in [
             (completed("not json"), "not jsone"),
             (completed("[]"), "[]e"),
@@ -675,10 +704,19 @@ class TestPrompt(unittest.TestCase):
             (completed('{"result": "r"}', code=1), '{"result": "r"}e'),
             (mock.Mock(side_effect=timeout), "model call timed out after 600s"),
             (mock.Mock(side_effect=missing), "FileNotFoundError: claude"),
+            (mock.Mock(side_effect=denied), "PermissionError: claude"),
         ]:
             with mock.patch.object(select_tests.subprocess, "run", run):
                 result = select_tests.query_model("p", "m", "medium")
             self.assertEqual(result, {"is_error": True, "result": why})
+
+    def test_query_model_cannot_encode_a_lone_surrogate(self) -> None:
+        real_run = subprocess.run
+        cat = mock.Mock(side_effect=lambda cmd, **kwargs: real_run(["cat"], **kwargs))
+        with mock.patch.object(select_tests.subprocess, "run", cat):
+            result = select_tests.query_model("p\ud800", "m", "medium")
+        self.assertTrue(result["is_error"])
+        self.assertTrue(result["result"].startswith("UnicodeEncodeError: "))
 
     def test_query_model_refuses_a_checkout_with_escaping_symlinks(self) -> None:
         run = mock.Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
