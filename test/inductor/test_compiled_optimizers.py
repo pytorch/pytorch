@@ -124,7 +124,7 @@ def foreach_map_adam(
         torch._foreach_copy_(steps, updated_steps)
 
         if weight_decay != 0:
-            foreach_map(torch.add, (grads,), alpha=weight_decay)
+            grads = foreach_map(torch.add, grads, params, alpha=weight_decay)
 
         # HOPS cannot have multiple outputs at the moment
         # need to call foreach_map once for each output
