@@ -12342,10 +12342,6 @@ op_db: list[OpInfo] = [
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
 
-               # torch-xpu-ops/issues/4321
-               DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
-                            dtypes=(torch.int64,)),
-
                # MPS arange does not support complex dtypes yet
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
                             dtypes=(torch.complex64, torch.complex128)),
@@ -13180,12 +13176,7 @@ op_db: list[OpInfo] = [
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            supports_out=False,
-           sample_inputs_func=sample_inputs_combinations,
-           skips=(
-               # torch-xpu-ops/issues/5027
-               DecorateInfo(unittest.skip, 'TestInductorOpInfo', 'test_comprehensive',
-                            device_type='xpu', dtypes=(torch.float16,)),
-           )),
+           sample_inputs_func=sample_inputs_combinations),
     OpInfo('cartesian_prod',
            op=torch.cartesian_prod,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -17017,9 +17008,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD',
                             active_if=(not IS_MACOS)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick_core_backward'),
-               # torch-xpu-ops/issues/4108
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
-                            device_type='xpu', dtypes=(torch.float32,)),
            )),
     OpInfo('nn.functional.max_unpool2d',
            variant_test_name='grad',
@@ -19634,9 +19622,6 @@ op_db: list[OpInfo] = [
              skips=(
                  DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=3e-3)}),
                               'TestInductorOpInfo', 'test_comprehensive'),
-                 # Exception: Backward is not reentrant, #2359
-                 DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad', device_type='xpu'),
-                 DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_inplace_gradgrad', device_type='xpu'),
              ),
              supports_out=True,
              sample_inputs_func=sample_inputs_index_reduce,
