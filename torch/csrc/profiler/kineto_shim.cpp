@@ -477,12 +477,13 @@ void prepareTrace(
     extraConfig += '\n';
   }
   // Registration fixes only whether libkineto can trace a GPU; this key says
-  // whether this trace may. A trace that requested no device activity leaves
-  // the GPU tracer alone, since another tool may own it. Any device activity
-  // allows it, not only CUDA or XPU, because libkineto also emits its default
-  // device rows only when it may trace a GPU. The key goes first because
-  // libkineto stops parsing at the first malformed line, and a custom config
-  // can contain one.
+  // whether this trace may trace any device. A trace that requested no device
+  // activity leaves device tracers alone, since another tool may own them.
+  // Any device activity allows it, not only CUDA or XPU: child profilers for
+  // the other devices are expected to honor the key too, and libkineto emits
+  // its default device rows only when it may trace a GPU. The key goes first
+  // because libkineto stops parsing at the first malformed line, and a custom
+  // config can contain one.
   const std::string deviceTracingConfig = has_device_activity
       ? "DEVICE_TRACING_ENABLED=true\n"
       : "DEVICE_TRACING_ENABLED=false\n";

@@ -87,11 +87,11 @@ class Config : public AbstractConfig {
     return rocprofDispatchRecordWait_;
   }
 
-  // Whether this trace may arm GPU tracing. A profiler registered without GPU
-  // support never arms it, whatever this says. Child profilers that drive a
-  // device tracer must honor it too, by returning no session from configure.
-  // The KINETO_CONFIG file is parsed after the client's config string, so it
-  // can override what the client asked for.
+  // Whether this trace may trace any device. It covers the GPU tracer, which
+  // never runs in a profiler registered without GPU support, and every child
+  // profiler that traces a device, which must return no session from
+  // configure when this is false. The KINETO_CONFIG file is parsed after the
+  // client's config string, so it can override what the client asked for.
   [[nodiscard]] bool deviceTracingEnabled() const {
     return deviceTracingEnabled_;
   }
@@ -347,7 +347,7 @@ class Config : public AbstractConfig {
   std::chrono::milliseconds rocprofDispatchRecordWait_{20};
 
   // Lets a client keep a trace that requested no device activity away from
-  // the GPU tracer, which may be shared with other tools.
+  // device tracers, which may be shared with other tools.
   bool deviceTracingEnabled_{true};
   std::set<ActivityType> selectedActivityTypes_;
 

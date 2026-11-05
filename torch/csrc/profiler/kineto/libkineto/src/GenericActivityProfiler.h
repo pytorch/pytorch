@@ -442,8 +442,8 @@ class GenericActivityProfiler {
   void resetTraceData();
 
   // GPU tracing needs GPU support, which is fixed when the profiler is
-  // registered, and a trace config that allows it, which can change with
-  // every trace.
+  // registered, and a trace config that allows device tracing, which can
+  // change with every trace.
   bool shouldTraceGpu() const {
     return !cpuOnly_ && config_ && config_->deviceTracingEnabled();
   }
