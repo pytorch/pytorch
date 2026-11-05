@@ -1633,16 +1633,6 @@ class CallMethodVariable(VariableTracker):  # noqa: RVT001
         except AsPythonConstantNotImplementedError:
             return id(self), True
 
-    def tp_richcompare_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        op: str,
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
@@ -1716,13 +1706,6 @@ class PythonModuleVariable(VariableTracker):
 
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, attr_value, source)
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return python_constant_repr_impl(self, tx)
@@ -2189,13 +2172,6 @@ class ObjectVariable(VariableTracker):
 
     def python_type(self) -> type[object]:
         return object
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
 
 if sys.version_info >= (3, 15):
