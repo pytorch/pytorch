@@ -558,13 +558,16 @@ class TestKernelRowTile(TestCase):
             (torch.float16, 5),  # prefix clamped to n, no full vector group
             (torch.float16, 11),  # rows with and without one full group
             (torch.float64, 1),  # vec 2, no full vector group
+            (torch.float32, 4098),  # even N: residues 0 and 2 only
+            (torch.float16, 4096),  # every row aligned: no edges
         ),
     )
     def test_ragged_vector_edges_and_interior(self, dtype, columns):
         """Combine scalar row edges with aligned vector loads across the interior."""
         # Odd N cycles r * N mod vec through every residue. Integer values make the sum
-        # exact, so a dropped or repeated element shows bitwise; 33 rows leave dead
-        # threads in the last block.
+        # exact, so a dropped or repeated element shows bitwise. 33 rows leave dead
+        # threads in the last block where blocks hold several rows; fp32 4097 and 4098
+        # and fp64 2049 put one row per block.
         x = torch.randint(1, 9, (33, columns), device="cuda").to(dtype)
         out = torch.float64 if dtype == torch.float64 else torch.float32
         acc = cutlass.Float64 if dtype == torch.float64 else cutlass.Float32
@@ -660,8 +663,7 @@ class TestKernelRowTile(TestCase):
                 order="inner_tree",
                 ragged_vector=True,
             )
-        # x is aligned for TMA, so TileReduce is what refuses it.
-        with self.assertRaisesRegex(ValueError, "require a linear row reduction"):
+        with self.assertRaisesRegex(ValueError, "cannot use TMA"):
             rt.reduce_row_tile(
                 trait,
                 "ragged_tma",
@@ -672,20 +674,23 @@ class TestKernelRowTile(TestCase):
             )
 
     @parametrize(
-        "axis,kwargs",
+        "axis,kwargs,msg",
         (
-            ("row", {}),
-            ("row", {"vec": 1}),
-            ("row", {"vec": 6}),
-            ("col", {"vec": 8}),
-            ("row", {"vec": 8, "order": "inner_tree"}),
-            ("row", {"vec": 8, "use_tma": True}),
-            ("row", {"vec": 8, "combine": True}),
+            ("row", {}, r"vec \* itemsize == 16"),
+            ("row", {"vec": 1}, r"vec \* itemsize == 16"),
+            ("row", {"vec": 4}, r"vec \* itemsize == 16"),
+            ("col", {"vec": 8}, "require the row axis"),
+            ("row", {"vec": 8, "order": "inner_tree"}, "require the linear order"),
+            ("row", {"vec": 8, "use_tma": True}, "cannot use TMA"),
+            ("row", {"vec": 8, "combine": True}, "cannot combine partials"),
+        ),
+        name_fn=lambda axis, kwargs, msg: "_".join(
+            [axis] + [f"{k}_{v}" for k, v in kwargs.items()]
         ),
     )
-    def test_ragged_vector_tile_rejects(self, axis, kwargs):
+    def test_ragged_vector_tile_rejects(self, axis, kwargs, msg):
         trait = T.SumOps(acc=cutlass.Float32)
-        with self.assertRaisesRegex(ValueError, "require a linear row reduction"):
+        with self.assertRaisesRegex(ValueError, msg):
             rt.tile.TileReduce(
                 trait, cutlass.Float16, axis, 4095, ragged_vector=True, **kwargs
             )
