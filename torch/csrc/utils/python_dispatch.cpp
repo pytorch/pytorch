@@ -506,6 +506,16 @@ static PyObject* pyobject_dispatch_vectorcall(
     return PyObject_Vectorcall(
         self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
   }
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+  // The C++ Dispatcher records each call for the profiler (RecordFunction in
+  // Dispatcher::callBoxed); let it handle the call while anything listens.
+  // This check doesn't sample callbacks: callBoxed does, and sampling here too
+  // would record a call with probability p^2 instead of p.
+  if (C10_UNLIKELY(at::hasCallbacksForScope(at::RecordScope::FUNCTION))) {
+    return PyObject_Vectorcall(
+        self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
+  }
+#endif
   c10::SmallVector<PyObject*, 64> normalized_args;
   std::vector<py::object> owned_args;
   if (!pyobject_dispatch_try_normalize_args(
