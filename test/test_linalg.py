@@ -572,6 +572,19 @@ class TestLinalg(TestCase):
             b = torch.rand(1, 3, 1, 3, m, dtype=dtype, device=device)
             check_correctness(a, b.unsqueeze(-1))
 
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_linalg_lstsq_broadcast_rank_deficient(self, device, dtype):
+        # The batched GPU path writes one info per broadcast batch element, so
+        # a rank-deficient a[1] is reported at broadcast element 8, which must
+        # be inside infos. CPU reports the input batch index instead.
+        a = torch.randn(2, 1, 4, 4, dtype=dtype, device=device)
+        a[1, 0, :, 3] = 0
+        b = torch.randn(2, 8, 4, 4, dtype=dtype, device=device)
+        with self.assertRaisesRegex(torch.linalg.LinAlgError, "full rank"):
+            torch.linalg.lstsq(a, b, driver="gels")
+
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -2286,18 +2299,18 @@ class TestLinalg(TestCase):
             expected = np.linalg.eig(a.cpu().numpy())
 
             # sort NumPy output
-            ind = np.argsort(expected[0], axis=-1)[::-1]
-            expected = (np.take_along_axis(expected[0], ind, axis=-1), np.take_along_axis(expected[1], ind[:, None], axis=-1))
+            ind = np.flip(np.argsort(expected[0], axis=-1), axis=-1)
+            expected = (np.take_along_axis(expected[0], ind, axis=-1), np.take_along_axis(expected[1], ind[..., None, :], axis=-1))
 
             # sort PyTorch output
             # torch.argsort doesn't work with complex inputs, NumPy sorting on CPU is used instead
             # RuntimeError: _th_sort not supported on CUDAType for ComplexDouble
             # RuntimeError: "sorting_kernel_method_name" not implemented for 'ComplexDouble'
-            ind = np.argsort(actual[0].cpu().numpy(), axis=-1)[::-1]
+            ind = np.flip(np.argsort(actual[0].cpu().numpy(), axis=-1), axis=-1)
             actual_np = [x.cpu().numpy() for x in actual]
             sorted_actual = (
                 np.take_along_axis(actual_np[0], ind, axis=-1),
-                np.take_along_axis(actual_np[1], ind[:, None], axis=-1))
+                np.take_along_axis(actual_np[1], ind[..., None, :], axis=-1))
 
             self.assertEqual(expected[0], sorted_actual[0], exact_dtype=False)
             self.assertEqual(abs(expected[1]), abs(sorted_actual[1]), exact_dtype=False)
@@ -2338,14 +2351,14 @@ class TestLinalg(TestCase):
 
             # check correctness using eigendecomposition identity
             w, v = actual
-            a = a.to(v.dtype)
+            a_for_identity = a.to(v.dtype)
 
             if a.numel() == 0 and v.numel() == 0 and w.numel() == 0:
                 pass
             elif a.numel() == 0 or v.numel() == 0 or w.numel() == 0:
                 raise RuntimeError("eig returned empty tensors unexpectedly")
 
-            self.assertEqual(a @ v, v * w.unsqueeze(-2), atol=atol, rtol=0)
+            self.assertEqual(a_for_identity @ v, v * w.unsqueeze(-2), atol=atol, rtol=0)
 
             # calculate eigenvalues only and check all are returned
             w_only = torch.linalg.eigvals(a)
@@ -2581,14 +2594,14 @@ class TestLinalg(TestCase):
             expected = np.linalg.eigvals(a.cpu().numpy())
 
             # sort NumPy output
-            ind = np.argsort(expected, axis=-1)[::-1]
+            ind = np.flip(np.argsort(expected, axis=-1), axis=-1)
             expected = np.take_along_axis(expected, ind, axis=-1)
 
             # sort PyTorch output
             # torch.argsort doesn't work with complex inputs, NumPy sorting on CPU is used instead
             # RuntimeError: _th_sort not supported on CUDAType for ComplexDouble
             # RuntimeError: "sorting_kernel_method_name" not implemented for 'ComplexDouble'
-            ind = np.argsort(actual.cpu().numpy(), axis=-1)[::-1]
+            ind = np.flip(np.argsort(actual.cpu().numpy(), axis=-1), axis=-1)
             actual_np = actual.cpu().numpy()
             sorted_actual = np.take_along_axis(actual_np, ind, axis=-1)
 
@@ -10612,7 +10625,7 @@ class TestLinalgCudaOnly(TestCase):
         import multiprocessing as mp
 
         with self._tunableop_ctx():
-            os.putenv("PYTORCH_TUNABLEOP_BLAS_LOG", "1")
+            os.environ["PYTORCH_TUNABLEOP_BLAS_LOG"] = "1"
 
             # TunableOp is running in a subprocess
             # online tuning needs filename set through API
@@ -11073,7 +11086,10 @@ class TestLinalgCudaOnly(TestCase):
         # We use the torch profiler to get the call counts on the kernels
 
         # Supported only for: MM, batch MM, and GEMM with bias (linear)
-        from torch.profiler import profile, ProfilerActivity
+        from torch.profiler import profile, ProfilerActivity, supported_activities
+
+        if ProfilerActivity.CUDA not in supported_activities():
+            self.skipTest("CUDA profiling is not supported")
 
         with self._tunableop_ctx():
             # set these to single iterations to keep it short but still exercise the code

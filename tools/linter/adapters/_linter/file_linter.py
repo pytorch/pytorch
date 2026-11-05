@@ -16,7 +16,7 @@ from .python_file import PythonFile
 if TYPE_CHECKING:
     from argparse import Namespace
     from collections.abc import Iterator, Sequence
-    from typing_extensions import Never
+    from typing import Never
 
 
 class ErrorLines:

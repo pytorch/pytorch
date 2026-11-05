@@ -44,12 +44,13 @@ from typing import (
     cast,
     Literal,
     NamedTuple,
+    NotRequired,
     Optional,
     TYPE_CHECKING,
     TypedDict,
     Union,
 )
-from typing_extensions import NotRequired, ParamSpec, TypeVar
+from typing_extensions import ParamSpec, TypeVar
 
 import sympy
 
