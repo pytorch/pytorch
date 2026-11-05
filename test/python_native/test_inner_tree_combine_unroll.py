@@ -103,6 +103,57 @@ class TestInnerTreeCombineUnroll(TestCase):
             candidate._replace(combine_count=0, combine_weights=False), baseline
         )
 
+    @parametrize(
+        "updates",
+        [
+            {"combine_count": 0},
+            {"shape": "split"},
+            {"combine_tile": 0},
+            {"trait": "sum"},
+            {"trait": "fp64"},
+            {"split": (1024, 8192, 8192)},
+            {"split": (0, 8192, 8192, 512, 512)},
+            {"split": (2**25, 8192, 8192, 512, 512)},
+            {"split": (1024, 2**25, 2**25, 512, 512), "combine_count": 2**25},
+            {"split": (1024, 6144, 6144, 512, 512), "combine_count": 6144},
+            {"split": (1024, 4096, 8192, 512, 512)},
+            {"split": (1024, 8192, 8191, 512, 512)},
+        ],
+    )
+    def test_uniform_count_tile_rejects(self, updates):
+        """Reject weights without counts, and counts outside complete FP32 Welford partials."""
+        import cutlass
+
+        from torch._native.ops.reductions import kernel_rowtile as rt, tile, traits as T
+
+        traits = {
+            "welford": T.VarMeanOps(correction=1, acc=cutlass.Float32),
+            "sum": T.SumOps(acc=cutlass.Float32),
+            "fp64": T.VarMeanOps(correction=1, acc=cutlass.Float64),
+        }
+        valid = rt._ItreePlan(
+            "combine",
+            1,
+            0,
+            1,
+            2,
+            (),
+            (),
+            (1024, 8192, 8192, 512, 512),
+            combine_grp=4,
+            combine_tile=512,
+            combine_count=8192,
+            combine_weights=True,
+        )
+        kwargs = dict(nouts=2, order="inner_tree")
+        tile.TileReduce(traits["welford"], None, "general", 0, itree=valid, **kwargs)
+        fields = {"trait": "welford"} | updates
+        trait = traits[fields.pop("trait")]
+        plan = valid._replace(**fields)
+        msg = "FP32 Welford" if plan.combine_count else "weights require uniform"
+        with self.assertRaisesRegex(ValueError, msg):
+            tile.TileReduce(trait, None, "general", 0, itree=plan, **kwargs)
+
 
 @unittest.skipUnless(
     TEST_CUDA and SM90OrLater and TEST_CUTEDSL, "requires CUDA and CuTeDSL"
@@ -192,7 +243,9 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             self.assertEqual(g.view(torch.int32), w.view(torch.int32))
 
     @parametrize("weights", [False, True])
-    def test_uniform_count_bits(self, device, weights):
+    @parametrize("rpb", [1, 4])
+    @parametrize("unroll", [0, 4])
+    def test_uniform_count_bits(self, device, unroll, rpb, weights):
         """Preserve exact bits at uniform-count boundaries where staged tail guards change."""
         import cutlass
 
@@ -202,6 +255,7 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             traits,
         )
 
+        # 33 rows leave the last 4-row block with one live row.
         rows, partials, count = 33, 1024, 8192
         trait = traits.VarMeanOps(correction=1, acc=cutlass.Float32)
         means = torch.randn(rows, partials, device=device).mul_(8).add_(1024)
@@ -217,14 +271,15 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             "combine",
             1,
             0,
-            1,
+            rpb,
             2,
             (),
             (),
             (partials, count, count, 512, 512),
             combine_grp=4,
-            combine_tile=512,
-            combine_unroll=4,
+            # 128-partial tiles keep full unrolling's compile short.
+            combine_tile=512 if unroll else 128,
+            combine_unroll=unroll,
         )
         baseline = [torch.empty(rows, device=device) for _ in range(2)]
         actual = [torch.empty_like(t) for t in baseline]

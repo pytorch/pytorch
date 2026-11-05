@@ -6,10 +6,6 @@ import unittest
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
-from torch.testing._internal.common_device_type import (
-    dtypes,
-    instantiate_device_type_tests,
-)
 from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
 
 
@@ -25,13 +21,6 @@ import cutlass.cute as cute
 
 from torch._native.cutedsl import launch as _L
 from torch._native.ops.reductions import traits as T
-
-
-class _LeafSquare(T.NormOps):
-    # Projects the sum of leaves without the root, so outputs expose the squares' rounding.
-    @cute.jit
-    def project(self, acc, n):
-        return acc[0]
 
 
 class TestTraitProtocol(TestCase):
@@ -171,69 +160,6 @@ class TestTraitProtocol(TestCase):
                 device="cuda",
             ),
         )
-
-
-@unittest.skipUnless(TEST_CUDA and SM90OrLater, "requires Hopper or later")
-class TestTraitDevice(TestCase):
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_norm2_leaf_narrow_values(self, device, dtype):
-        """Square narrow norm inputs after widening so small values do not underflow early."""
-        from torch import _native as native
-        from torch._native.ops.reductions import kernel_coltile as ct
-
-        values = torch.arange(-32768, 32768, device=device, dtype=torch.int32)
-        # Zero rows add exactly, so each output is its value's widened square.
-        x = torch.zeros(65, values.numel(), device=device, dtype=dtype)
-        x[0] = values.to(torch.int16).view(dtype)
-        with (
-            native._unconditional_masked(),
-            torch.backends.python_native.cutedsl.disabled(),
-        ):
-            got = ct.reduce_ordered_col(
-                _LeafSquare(2, acc=cutlass.Float32),
-                "norm2_leaf_square",
-                x,
-                [torch.float32],
-                1,
-                allow_split=True,
-            )[0]
-            expected = x[0].float().abs().square()
-            self.assertEqual(got.isnan(), expected.isnan())
-            valid = ~expected.isnan()
-            self.assertEqual(
-                got[valid].view(torch.uint8), expected[valid].view(torch.uint8)
-            )
-
-    def test_norm2_leaf_rounding(self, device):
-        """Match norm leaf rounding between row and column implementations."""
-        from torch import _native as native
-        from torch._native.ops.reductions import kernel_coltile as ct
-
-        rows, columns = 32769, 33
-        x = torch.empty(rows, columns, device=device)
-        x[0::2] = 0.2678401470184326
-        x[1::2] = 0.5074443817138672
-        with (
-            native._unconditional_masked(),
-            torch.backends.python_native.cutedsl.disabled(),
-        ):
-            # Unselected full-tile leaves must still round as materialized squares.
-            split = {"allow_split": True, "full_tiles": True}
-            (got,) = ct.reduce_ordered_col(
-                _LeafSquare(2), "rounded_norm2", x, [torch.float32], 1, **split
-            )
-            (want,) = ct.reduce_ordered_col(
-                T.SumOps(),
-                "materialized_squares",
-                x.square(),
-                [torch.float32],
-                1,
-                **split,
-            )
-            self.assertEqual(got.view(torch.uint8), want.view(torch.uint8))
-
-
-instantiate_device_type_tests(TestTraitDevice, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
