@@ -454,12 +454,13 @@ def failure_list_sources(
     """The paths under test/ that define the classes named by the edited
     failure-list entries (see FAILURE_LIST_RE, PATCHED_PREFIX_RE), and the
     lists ("dynamo", "inductor", "compiled_autograd", or "dynamo_cpython" for
-    a CPython entry of the other lists, which the dynamo_cpython config runs)
-    naming a class that is not looked up (no `grep`, see importers, or more
-    than MAX_FAILURE_LIST_CLASSES classes) or that `grep` does not find in a
-    .py file. Also the list ("dynamo", "inductor" or "compiled_autograd", and
-    "dynamo_cpython" for a CPython entry of the other lists) holding an entry
-    it does not look up: one in a subdirectory or, for the dynamo and inductor
+    a CPython entry of the dynamo or compiled_autograd lists, which the
+    dynamo_cpython config runs) naming a class that is not looked up (no
+    `grep`, see importers, or more than MAX_FAILURE_LIST_CLASSES classes) or
+    that `grep` does not find in a .py file. Also the list ("dynamo",
+    "inductor" or "compiled_autograd", and "dynamo_cpython" for a CPython
+    entry of the dynamo or compiled_autograd lists) holding an entry it does
+    not look up: one in a subdirectory or, for the dynamo and inductor
     lists, one without exactly one "." (dynamo_test_failures.py rejects both
     at import, except in compiled_autograd_skips) or one edited in both the
     expected failures and the skips (a clash it rejects at import, or a
@@ -692,12 +693,14 @@ class Selection:
                 run_all=True,
                 reason="an edited inductor failure list entry was rejected or not resolved to the file defining its test class",
             )
+        before = len(files), len(sweeps)
         # The dynamo_cpython config runs only the tests under test/cpython/.
         if "dynamo_cpython" in missing:
             files |= {c for c in candidates if c.startswith("cpython/")}
         # dynamo_wrapped also runs with compiled autograd on (see common_utils).
         if missing & {"dynamo", "compiled_autograd"}:
             sweeps.add("dynamo_wrapped")
+        fallback = (len(files), len(sweeps)) != before
         edited = edited_tests(changed_files, candidates)
         files |= edited
         if "doctests" in candidates and edits_doctest(diff):
@@ -731,8 +734,8 @@ class Selection:
                     return cls(run_all=True, reason=f"nothing found that reads {f}")
                 files |= found
         run_all, reason = out["run_all"], str(out["reason"])
-        if missing:
-            reason += f"; unresolved {sorted(missing)} list entries add tests"
+        if fallback:
+            reason = f"{reason} [failure list fallback]".lstrip()
         return cls(files, sweeps, run_all, reason, candidates=set(candidates))
 
     def covers(self, test_file: str, test_config: str) -> bool:
