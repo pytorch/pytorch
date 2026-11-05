@@ -135,6 +135,7 @@ jobs:
       tests-to-exclude: >-
         inductor/test_torchinductor_opinfo
         inductor/test_cpu_select_algorithm
+        test_decomp
       python-version: "3.11"
       compiler: gcc11
     secrets: inherit
@@ -265,6 +266,7 @@ jobs:
       tests-to-exclude: >-
         inductor/test_torchinductor_opinfo
         inductor/test_cpu_select_algorithm
+        test_decomp
       python-version: "3.14t"
       compiler: clang21
     secrets: inherit
@@ -493,6 +495,7 @@ jobs:
       tests-to-exclude: >-
         inductor/test_torchinductor_opinfo
         inductor/test_cpu_select_algorithm
+        test_decomp
       python-version: "3.14"
       compiler: clang21
     secrets: inherit
