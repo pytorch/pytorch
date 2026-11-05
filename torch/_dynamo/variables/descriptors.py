@@ -47,7 +47,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .functions import BaseUserFunctionVariable, UserMethodVariable
-from .object_protocol import object_richcompare, python_constant_repr_impl
+from .object_protocol import python_constant_repr_impl
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -261,18 +261,6 @@ class WrapperDescriptorVariable(DescriptorVariable):
             return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
-
-    def tp_richcompare_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        op: str,
-    ) -> VariableTracker:
-        # PyWrapperDescr_Type leaves tp_richcompare NULL and inherits
-        # object_richcompare from object.
-        # TODO(guilhermeleobas): delete this once #199999 is merged
-
-        return object_richcompare(self, tx, other, op)
 
 
 class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
