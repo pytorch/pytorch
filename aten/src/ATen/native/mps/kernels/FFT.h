@@ -7,13 +7,9 @@ C10_METAL_CONSTEXPR uint32_t kFFTFourStepTwiddles = 1u << 2;
 C10_METAL_CONSTEXPR uint32_t kFFTExtendedStores = 1u << 3;
 C10_METAL_CONSTEXPR uint32_t kFFTExtendedLoads = 1u << 4;
 C10_METAL_CONSTEXPR uint32_t kFFTGlobalStage = 1u << 5;
-
-// Whether a kernel does without four-step, chirp and global-memory handling
-inline constexpr bool fft_is_basic(uint32_t flags) {
-  return (flags &
-          (kFFTFourStepTwiddles | kFFTExtendedStores | kFFTExtendedLoads |
-           kFFTGlobalStage)) == 0;
-}
+// The bits of four-step, chirp and global-memory passes
+C10_METAL_CONSTEXPR uint32_t kFFTMultiPass = kFFTFourStepTwiddles |
+    kFFTExtendedStores | kFFTExtendedLoads | kFFTGlobalStage;
 
 // Metal's threadgroup memory limit, and the complex points that fit in it
 C10_METAL_CONSTEXPR uint32_t kFFTSmemBytes = 32768;
@@ -21,10 +17,10 @@ C10_METAL_CONSTEXPR uint32_t kFFTMaxPoints =
     kFFTSmemBytes / (2 * sizeof(float));
 C10_METAL_CONSTEXPR uint32_t kFFTMaxStages = 16;
 
-// 8 points per thread; 16 only pay for basic 1024-point kernels (one stage
+// 8 points per thread; 16 only pay for plain 1024-point kernels (one stage
 // fewer at full occupancy)
 inline constexpr uint32_t fft_points_per_thread(uint32_t n, uint32_t flags) {
-  return n == 1024 && fft_is_basic(flags) ? 16 : 8;
+  return n == 1024 && !(flags & kFFTMultiPass) ? 16 : 8;
 }
 
 // Spare smem slots: one every 1 << kFFTPadShift slots, none with kFFTNoPadShift
@@ -40,13 +36,6 @@ inline constexpr uint32_t fft_contig_pad_shift(uint32_t n) {
 // Two-level twiddle table: W^b for b < kFFTTwiddleBlock, then
 // W^(kFFTTwiddleBlock a)
 C10_METAL_CONSTEXPR uint32_t kFFTTwiddleBlock = 4096;
-
-// Radices of the dynamic kernel families, one bit per radix. Bit 1 is length 1.
-C10_METAL_CONSTEXPR uint32_t kFFTMaskP2 =
-    (1u << 1) | (1u << 2) | (1u << 4) | (1u << 8) | (1u << 16);
-C10_METAL_CONSTEXPR uint32_t kFFTMaskP235 = kFFTMaskP2 | (1u << 3) | (1u << 5);
-C10_METAL_CONSTEXPR uint32_t kFFTMaskP2357 = kFFTMaskP235 | (1u << 7);
-C10_METAL_CONSTEXPR uint32_t kFFTMaskP16 = (1u << 16) | (1u << 1);
 
 // Global-memory stage radices, largest first: lengths factor in this order
 #define FFT_GLOBAL_RADICES(_) \
