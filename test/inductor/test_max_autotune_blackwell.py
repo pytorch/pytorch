@@ -660,6 +660,54 @@ class TestMaxAutotuneBlackwell(TestCase):
         with self.assertRaisesRegex(RuntimeError, "output out_ptr0 is not"):
             _host_tma_aligned(view, "out_ptr0", is_output=True)
 
+    def test_host_tma_launchers_raise_for_misaligned_output(self):
+        from types import SimpleNamespace
+
+        from torch._inductor.runtime.triton_heuristics import (
+            _host_tma_aligned,
+            CompileResult,
+        )
+
+        # Run the emitted pre-runner code rather than matching its text, so a
+        # rename in either launcher can't silently drop the output check.
+        desc = {"block_shape": [4], "shape": [16], "strides": [1]}
+        aligned = torch.empty(16)
+        misaligned = torch.empty(17)[1:]
+        for is_output in (False, True):
+            stub = SimpleNamespace(
+                inductor_meta={
+                    "host_tma_descriptor_args": {
+                        "in_ptr0": desc,
+                        "out_ptr0": {**desc, "is_output": True} if is_output else desc,
+                    }
+                },
+                config=SimpleNamespace(kwargs={}),
+                compile_meta={"constants": {}},
+                kernel=SimpleNamespace(
+                    tensordesc_meta=None, tensordesc_arg_names=["in_ptr0", "out_ptr0"]
+                ),
+            )
+            args = ["in_ptr0", "out_ptr0"]
+            lines, _ = CompileResult._host_tma_pre_runner_lines(stub, list(args), args)
+            static_lines, _, _ = CompileResult._host_tma_static_pre_runner_lines(
+                stub, list(args), args
+            )
+            for code in (lines, static_lines):
+                scope = {
+                    "_host_tma_aligned": _host_tma_aligned,
+                    "TensorDescriptor": lambda *a: None,
+                    "expand_host_tma_descriptor": lambda *a: (),
+                    "_tma_cache": {},
+                    "_tma_meta": [None, None],
+                    "in_ptr0": aligned,
+                    "out_ptr0": misaligned,
+                }
+                if is_output:
+                    with self.assertRaisesRegex(RuntimeError, "output out_ptr0"):
+                        exec("\n".join(code), scope)
+                else:
+                    exec("\n".join(code), scope)
+
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
