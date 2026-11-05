@@ -29,7 +29,7 @@ from torch.testing._internal.common_utils import (
     IS_CI, IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_CUDA, TEST_WITH_CROSSREF, TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    getRocmVersion, TemporaryFileName, sanitize_pytest_xml,
+    getRocmVersion, TemporaryFileName, sanitize_pytest_xml, set_cwd,
 )
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
@@ -3489,6 +3489,24 @@ class TestHardwareClassifications(TestCase):
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
 instantiate_parametrized_tests(TestImports)
+
+
+@unittest.skipIf(IS_WINDOWS, "dynamo test failures are not looked up on Windows")
+class TestDynamoTestFailuresDir(TestCase):
+    def test_found_from_working_directory(self):
+        # pytest-xdist workers of an installed build have neither a local
+        # torch/../test nor a test file as __main__.
+        from torch.testing._internal import dynamo_test_failures
+
+        test_dir = os.path.dirname(os.path.realpath(__file__))
+        with set_cwd(test_dir), tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.object(
+            dynamo_test_failures, "__file__", os.path.join(tmp, "a", "b", "c", "x.py")
+        ), unittest.mock.patch.dict(
+            sys.modules, {"__main__": unittest.mock.Mock(spec=[])}
+        ):
+            found = dynamo_test_failures.find_test_dir()
+        self.assertIsNotNone(found)
+        self.assertEqual(os.path.realpath(found), test_dir)
 
 
 if __name__ == '__main__':
