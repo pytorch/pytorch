@@ -341,16 +341,17 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
         op: str,
     ) -> "VariableTracker":
         from .constant import ConstantVariable
+        from .object_protocol import object_richcompare
 
         # Try value-based comparison first. CustomClassObjectVariable wraps
         # pybind11 objects (e.g. Placement subclasses) whose C++ operator==
-        # does value comparison. Falling through to object's tp_richcompare would
+        # does value comparison. Falling through to object_richcompare would
         # use identity, returning wrong results (e.g. Shard(0) == Shard(0)
         # would be False instead of True).
         try:
             self_val = self.as_python_constant()
         except NotImplementedError:
-            return VariableTracker.tp_richcompare_impl(self, tx, other, op)
+            return object_richcompare(self, tx, other, op)
         try:
             other_val = other.as_python_constant()
         except NotImplementedError:
