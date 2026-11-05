@@ -320,9 +320,10 @@ struct C10_API FakeTensorMode {
 // through functionalization, or by calling fast_detach directly), but not of
 // other views. Here ExtraMeta's copy constructor copies them, so every shallow
 // copy, such as detach, keeps them, while views, including alias, drop them;
-// matching Python is left to the C++ fake dispatch path and to
-// functionalization, which know the op. Unlike Python, fake.data = other gives
-// the fake other's keys, as set_data replaces the whole ExtraMeta.
+// matching Python is left to the C++ fake dispatch path (later in this stack).
+// Functionalization's alias/detach handling currently covers only a Python
+// FakeTensor. Unlike Python, fake.data = other gives the fake other's keys, as
+// set_data replaces the whole ExtraMeta.
 struct C10_API ExtraMeta {
   std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta_ = nullptr;
   intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;

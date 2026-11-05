@@ -820,6 +820,12 @@ class CppFakeTensorMode:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
+        # Otherwise an exit on another thread would pop this mode's enter state
+        # and take that thread's own fake mode out of its FAKE slot
+        if self not in fake_tensor_tls.entered_cpp_fake_modes:
+            raise RuntimeError(
+                "CppFakeTensorMode exited on a thread that did not enter it"
+            )
         _exit_fake_mode(self, self._uninstall)
 
     # What TorchDispatchMode.__enter__ and __exit__ do for FakeTensorMode, with
@@ -835,10 +841,7 @@ class CppFakeTensorMode:
 
     def _uninstall(self) -> None:
         _set_is_in_torch_dispatch_mode(self.old_dispatch_mode_flags.pop())
-        # Not on this thread's list if it was entered on another thread
-        entered = fake_tensor_tls.entered_cpp_fake_modes
-        if self in entered:
-            entered.remove(self)
+        fake_tensor_tls.entered_cpp_fake_modes.remove(self)
         if torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is None:
             raise RuntimeError(
                 "Attempted to unset FakeTensorMode, but there wasn't one active."
