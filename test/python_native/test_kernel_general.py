@@ -13,7 +13,13 @@ from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_CUTEDSL,
+    TestCase,
+)
 
 
 # Guard before importing cutlass-dependent kernels to avoid collection errors.
@@ -353,26 +359,52 @@ class TestKernelGeneral(TestCase):
         )
         self.assertEqual(found, {"tile.py": 1, "kernel_coltile.py": 2})
 
-    def test_uniform_welford_tree(self):
+    # 4095 over 64 threads leaves leftover subtrees and a masked 63-lane remainder; count ==
+    # block is a single load. Stride and shift are runtime geometry, so they reuse kernels.
+    @parametrize(
+        "count,block,dtype,stride,shift,var_mean",
+        [
+            (1024, 128, torch.float32, 1, False, False),
+            (4095, 64, torch.float32, 1, False, False),
+            (4096, 64, torch.float32, 1, False, False),
+            (128, 128, torch.float32, 1, False, False),
+            (4095, 64, torch.float32, 2, False, False),
+            (4095, 64, torch.float16, 1, False, False),
+            (4095, 64, torch.bfloat16, 2, False, False),
+            (4096, 64, torch.float32, 1, True, False),
+            (1024, 128, torch.float32, 1, False, True),
+        ],
+    )
+    def test_uniform_welford_tree(self, count, block, dtype, stride, shift, var_mean):
         """Equal-count trees must retain Welford accuracy without serial counts."""
         rows = 17
-        # 4095 over 64 threads leaves leftover subtrees and a masked 63-lane remainder.
-        for count, block in ((1024, 128), (4095, 64), (4096, 64)):
-            with self.subTest(count=count, block=block):
-                x = torch.randn(rows, count, device="cuda")
-                out = torch.empty(rows, device="cuda")
-                op = kg.ReduceBlock(
-                    T.WelfordOps(correction=1, acc=cutlass.Float32),
-                    count=count,
-                    num_o=rows,
-                    red_pairs=((count, 1),),
-                    kept_pairs=((rows, count),),
-                    block=block,
-                    tree_count=count,
-                )
-                key = ("test_uniform_welford_tree",) + op.cache_sig
-                kg._launch(op, key, [x.flatten()], [out])
-                self.assertEqual(out, x.var(dim=1), atol=1e-5, rtol=1e-5)
+        base = torch.randn(rows, stride * count, device="cuda", dtype=dtype)
+        if shift:
+            base.mul_(8).add_(1024)
+        x = base[:, ::stride]
+        ops = T.VarMeanOps if var_mean else T.WelfordOps
+        trait = ops(correction=1, acc=cutlass.Float32)
+        outs = [torch.empty(rows, device="cuda") for _ in range(2 if var_mean else 1)]
+        op = kg.ReduceBlock(
+            trait,
+            count=count,
+            num_o=rows,
+            red_pairs=((count, stride),),
+            kept_pairs=((rows, stride * count),),
+            nouts=len(outs),
+            block=block,
+            tree_count=count,
+        )
+        key = ("test_uniform_welford_tree", type(trait).__name__, dtype) + op.cache_sig
+        kg._launch(op, key, [kg._flat(x)], outs)
+        # combine (from_partials) is the only fold dispatched ahead of the uniform tree.
+        self.assertEqual((op.tile.general_tree_count, op.tile.combine), (count, False))
+        self.assertIn((x.get_device(),) + key, kg._COMPILE_CACHE)
+        with torch.backends.python_native.cutedsl.disabled():
+            var, mean = torch.var_mean(x.double(), dim=1)
+        expected = [var.float(), mean.float()][: len(outs)]
+        atol, rtol = (1e-3, 1e-4) if shift else (1e-5, 1e-5)
+        self.assertEqual(outs, expected, atol=atol, rtol=rtol)
 
     def test_internal_invariants_raise(self):
         # Each invariant must raise explicitly because python -O strips asserts. Exercise every
@@ -430,6 +462,26 @@ class TestKernelGeneral(TestCase):
             ).npairs_red,
             0,
         )
+        # The uniform Welford tree needs combine_equal, one reduced run, a decoded (not partial)
+        # fold, and at least one load per thread.
+        tree = dict(
+            trait=T.WelfordOps(acc=cutlass.Float32),
+            count=1024,
+            num_o=1,
+            red_pairs=((1024, 1),),
+            kept_pairs=(),
+            tree_count=1024,
+        )
+        msg = "general tree needs a nonempty Welford thread fold"
+        for bad in (
+            dict(trait=trait),
+            dict(count=64, red_pairs=((64, 1),), tree_count=64),
+            dict(red_pairs=((32, 1), (32, 64))),
+            dict(from_partials=True),
+        ):
+            with self.subTest(bad=bad):
+                with self.assertRaisesRegex(ValueError, msg):
+                    kg.ReduceBlock(**(tree | bad))
         # The reshaping cross-CTA path also requires contiguous CUDA input.
         with self.assertRaisesRegex(AssertionError, "CUDA"):
             xc.reduce_row_xcta(trait, "inv_xcta", xt, torch.float32)
@@ -445,6 +497,8 @@ class TestKernelGeneral(TestCase):
         ]
         self.assertEqual(offenders, [])
 
+
+instantiate_parametrized_tests(TestKernelGeneral)
 
 if __name__ == "__main__":
     run_tests()
