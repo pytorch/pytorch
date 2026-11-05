@@ -57,9 +57,9 @@ from .simd import NodeInfo, prefix_is_reduction, SIMDScheduling
 from .simd_kernel_features import SIMDKernelFeatures
 from .triton import TritonKernel
 from .triton_utils import (
-    config_of,
     equal_1_arg_indices,
     is_unaligned_buffer,
+    set_triton_meta_configs,
     signature_to_meta,
     triton_meta_device_props,
 )
@@ -943,20 +943,21 @@ class ComboKernel(Kernel):
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
-        triton_meta["configs"] = [
-            config_of(
-                signature,
-                # sub-kernel bodies are spliced into this kernel, so their
-                # atomics are this kernel's atomics
-                pointer_range_override=(
-                    ()
-                    if torch.version.hip is not None
-                    and any(k.atomic_add_found for k in self.sub_kernels)
-                    else None
-                ),
-                skip_cpp_wrapper_input_tensor_alignment=True,
-            )
-        ]
+        runtime_divisibility_meta: dict[str, Any] = {}
+        set_triton_meta_configs(
+            triton_meta,
+            runtime_divisibility_meta,
+            signature,
+            # sub-kernel bodies are spliced into this kernel, so their
+            # atomics are this kernel's atomics
+            pointer_range_override=(
+                ()
+                if torch.version.hip is not None
+                and any(k.atomic_add_found for k in self.sub_kernels)
+                else None
+            ),
+            skip_cpp_wrapper_input_tensor_alignment=True,
+        )
 
         mutated_args = self.get_mutated_args_sub_kernels()
         dispatch = self.dispatch_class
@@ -992,6 +993,7 @@ class ComboKernel(Kernel):
             # graphs must keep it to preserve benchmark inputs across retries.
             "optimize_mem": V.graph.is_inference or V.graph.is_backward,
             **self.triton_kernel_cls.inductor_meta_common(),
+            **runtime_divisibility_meta,
         }
         if max_persistent_rblock > 0:
             inductor_meta["max_persistent_rblock"] = max_persistent_rblock

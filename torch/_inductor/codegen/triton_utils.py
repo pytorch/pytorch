@@ -6,6 +6,7 @@ from typing import Any
 import sympy
 
 import torch
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._triton import has_triton_block_ptr
 
@@ -385,13 +386,77 @@ def _is_tensor_within_2gb(arg: TensorArg) -> bool:
         return False
 
 
+def runtime_divisible_by_16_indices(args: list[KernelArgType]) -> tuple[int, ...]:
+    """
+    Indices of symbolic size args whose size hint, but not their expression, is a
+    multiple of 16. The kernel is compiled as if they were, and CachingAutotuner.run
+    checks the runtime values; see config.triton.runtime_divisibility_specialization.
+    """
+    if (
+        not config.triton.divisible_by_16
+        or not config.triton.runtime_divisibility_specialization
+        # the cpp wrapper launches the compiled kernel without going through
+        # CachingAutotuner.run, so nothing would check the runtime values
+        or V.graph.cpp_wrapper
+    ):
+        return ()
+    sizevars = V.graph.sizevars
+    result = []
+    for i, arg in enumerate(args):
+        if (
+            not isinstance(arg, SizeArg)
+            or not isinstance(arg.expr, sympy.Expr)
+            or arg.name.startswith("load_seed_offset")
+        ):
+            continue
+        # see through precomputed sizes (ps0 = u0 * s1) to the symbols they use
+        expr = sizevars.remove_precomputed_replacements(arg.expr)
+        if (
+            not expr.free_symbols
+            # an unbacked hint is a guess, and the first launch may well break it
+            or free_unbacked_symbols(expr)
+            or sizevars.statically_known_multiple_of(expr, 16)
+        ):
+            continue
+        hint = sizevars.optimization_hint(expr, fallback=1)
+        if hint != 0 and hint % 16 == 0:
+            result.append(i)
+    return tuple(result)
+
+
+def set_triton_meta_configs(
+    triton_meta: Any,
+    inductor_meta: dict[str, Any],
+    signature: list[KernelArgType],
+    **kwargs: Any,
+) -> None:
+    """
+    Set triton_meta["configs"] for a kernel launched through CachingAutotuner.run.
+    Size args marked divisible by 16 from their hints alone are listed in
+    inductor_meta["runtime_divisibility_args"], and triton_meta["generic_configs"]
+    holds the configs to fall back to when a launch breaks the assumption.
+    """
+    runtime_divisible = runtime_divisible_by_16_indices(signature)
+    triton_meta["configs"] = [
+        config_of(signature, runtime_divisible_by_16=runtime_divisible, **kwargs)
+    ]
+    if runtime_divisible:
+        triton_meta["generic_configs"] = [config_of(signature, **kwargs)]
+        inductor_meta["runtime_divisibility_args"] = runtime_divisible
+
+
 def config_of(
     args: list[KernelArgType],
     *,
     indices: list[int] | None = None,
     pointer_range_override: tuple[int, ...] | None = None,
     skip_cpp_wrapper_input_tensor_alignment: bool = False,
+    runtime_divisible_by_16: tuple[int, ...] = (),
 ) -> Any:
+    """
+    runtime_divisible_by_16: indices into ``args`` to mark divisible by 16 even
+    though that isn't statically known, see runtime_divisible_by_16_indices.
+    """
     if indices is None:
         indices = list(range(len(args)))
 
@@ -445,8 +510,9 @@ def config_of(
     if config.triton.divisible_by_16:
         divisible_by_16 = tuple(
             i
-            for i, arg in zip(indices, args)
-            if is_aligned(
+            for pos, (i, arg) in enumerate(zip(indices, args))
+            if pos in runtime_divisible_by_16
+            or is_aligned(
                 arg,
                 alignment=16,
                 include_tensor=include_tensor_alignment(arg),
