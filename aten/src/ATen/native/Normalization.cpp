@@ -589,22 +589,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
         0);
   }
 
-  if (running_mean.defined()) {
-    check_dims_match_num_input_features("running_mean", num_features, running_mean.sym_numel());
-  } else if (!training) {
-    TORCH_CHECK(false, "running_mean must be defined in evaluation mode");
-  }
-  if (running_var.defined()) {
-    check_dims_match_num_input_features("running_var", num_features, running_var.sym_numel());
-  } else if (!training) {
-    TORCH_CHECK(false, "running_var must be defined in evaluation mode");
-  }
-  if (weight.defined()) {
-    check_dims_match_num_input_features("weight", num_features, weight.sym_numel());
-  }
-  if (bias.defined()) {
-    check_dims_match_num_input_features("bias", std::move(num_features), bias.sym_numel());
-  }
+  // Validate input dimensions and parameter shapes against channel count
+  check_batch_norm_inputs(input, weight_opt, bias_opt, running_mean_opt, running_var_opt, training);
 
   BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, training, eps);
 
@@ -809,6 +795,10 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
 
 std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
                                                   bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
+
+  // Validate input dimensions and parameter shapes against channel count
+  check_batch_norm_inputs(self, weight_opt, bias_opt, running_mean_opt, running_var_opt, train);
+
   const bool has_running_mean = (running_mean_opt.has_value() && running_mean_opt->defined());
   const bool has_running_var = (running_var_opt.has_value() && running_var_opt->defined());
   TORCH_CHECK_VALUE(has_running_mean == has_running_var,
@@ -857,6 +847,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, con
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
                                                   bool train, double momentum, double eps) {
+
+  // Validate input dimensions and parameter shapes against channel count
+  check_batch_norm_inputs(self, weight_opt, bias_opt, running_mean_opt, running_var_opt, train);
+
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
