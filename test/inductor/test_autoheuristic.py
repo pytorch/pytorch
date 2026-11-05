@@ -34,13 +34,11 @@ class AutoHeuristicTest(TestCase):
         path = cache_dir() + "/autoheuristic/" + device_name + "/" + name + ".txt"
         return path
 
-    @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
     def test_autoheuristic_pad_mm_default(self):
         # this test ensures that data is not collected for pad_mm when autoheuristic config is set to its default value
         self.run_mm()
         self.assertFalse(os.path.exists(self.get_path_to_autoheuristic_log("pad_mm")))
 
-    @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
     @inductor_config.patch("autoheuristic_collect.pad_mm", False)
     def test_autoheuristic_pad_mm_off(self):
         # this test ensures that data is not collected for pad_mm when autoheuristic_collect does not contain "pad_mm"
@@ -57,19 +55,16 @@ class AutoHeuristicTest(TestCase):
         # 1 line for metadata, 1 line for header, 1 line per choice (orig, padded)
         self.assertEqual(num_lines, 4)
 
-    @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
     @inductor_config.patch("autoheuristic_collect.pad_mm", True)
     def test_autoheuristic_pad_mm_collect_data(self):
         # this test ensures that data is collected for pad_mm when autoheuristic_collect.pad_mm=True
         self.assert_autoheuristic_collected_data()
 
-    @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
     @inductor_config.patch("autoheuristic_collect.pad_mm", True)
     def test_autoheuristic_pad_mm_collect_data2(self):
         # this test ensures that data is collected for pad_mm when autoheuristic_collect.pad_mm=True
         self.assert_autoheuristic_collected_data()
 
-    @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
     @patch.dict(os.environ, {"TORCHINDUCTOR_AUTOHEURISTIC_COLLECT": "test"})
     def test_autoheuristic(self):
         # test basic functionality of autoheuristic
@@ -106,7 +101,11 @@ class AutoHeuristicTest(TestCase):
         self.assertEqual(num_lines, 5)
 
         shared_memory = get_gpu_shared_memory()
-        device_capa = list(torch.cuda.get_device_capability())
+        device_capa = (
+            list(torch.cuda.get_device_capability())
+            if torch.cuda.is_available()
+            else [0, 0]
+        )
 
         with open(path) as file:
             lines = file.readlines()
