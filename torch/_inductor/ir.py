@@ -4240,11 +4240,16 @@ class CatUnitDimView(GenericView):
 
     @classmethod
     def try_create(cls, x: IRNode, new_size: Sequence[Expr]) -> CatUnitDimView | None:
-        """The view, or None if ``x``'s layout is settled or the dims disagree."""
+        """The view, or None if ``x`` is not a buffer whose layout is still open.
+
+        That covers an unrealized Pointwise, a ReinterpretView, a frozen layout,
+        and an empty buffer, which the cat has no slot to place.
+        """
         if not (
             isinstance(x, StorageBox)
             and isinstance(x.data, ComputedBuffer)
             and isinstance(x.data.layout, FlexibleLayout)
+            and not V.graph.sizevars.statically_known_equals(x.get_numel(), 0)
         ):
             return None
         old_size = x.get_size()

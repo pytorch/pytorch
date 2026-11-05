@@ -2843,18 +2843,20 @@ def unsqueeze(x, dim):
 
 
 def _cat_is_sole_consumer(node) -> bool:
-    """Whether a cat is all that reads ``node``, and ``node`` all that reads its input.
+    """Whether ``node`` is an unsqueeze a cat alone reads, of a value it alone reads.
 
     An fx-level check: it bounds the views built over the buffer, not the buffer's
     readers. A lowering that returns its input unchanged (expand to the same size)
     leaves other readers, which is fine: they read the buffer where the cat places
-    it, as they would for a plain cat.
+    it, as they would for a plain cat. The target check keeps this to the node being
+    lowered, since other lowerings also reach ``unsqueeze``.
     """
     if node is None or not node.args or len(node.users) != 1:
         return False
     source = node.args[0]
     return (
-        next(iter(node.users)).target is aten.cat.default
+        node.target is aten.unsqueeze.default
+        and next(iter(node.users)).target is aten.cat.default
         and isinstance(source, torch.fx.Node)
         and len(source.users) == 1
     )
