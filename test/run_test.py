@@ -297,7 +297,6 @@ S390X_BLOCKLIST = [
 
 XPU_BLOCKLIST = [
     "test_autograd",
-    "profiler/test_memory_profiler",
 ]
 
 XPU_TEST = [
@@ -566,9 +565,20 @@ def run_test(
         print_to_stderr("SCRIBE_GRAPHQL_ACCESS_TOKEN is NOT set")
 
     env = env or os.environ.copy()
+    if IS_S390X:
+        env["PYTORCH_TEST_SKIP_PROFILER_CAPTURE"] = "Profiler tests disabled on s390x"
+    elif IS_WINDOWS and not options.ignore_win_blocklist:
+        from torch.testing._internal.common_cuda import SM89OrLater
+
+        if SM89OrLater:
+            env["PYTORCH_TEST_SKIP_PROFILER_CAPTURE"] = (
+                "Profiler tests disabled on Windows SM89 and later"
+            )
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_args.copy()
     test_file = test_module.name
+    if options.xpu and test_file == "profiler/test_memory_profiler":
+        env["PYTORCH_TEST_SKIP_MEMORY_ANALYSIS"] = "1"
     # Stable identifier for CI logs, e.g. "test_ops 3/8". Deliberately built
     # from .name rather than str(test_module), which also embeds the pytest
     # filter for partial runs ("test_ops, not (TestA or TestB) 3/8") and would

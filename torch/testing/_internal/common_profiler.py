@@ -1,3 +1,5 @@
+import os
+import unittest
 from contextlib import contextmanager, ExitStack
 from unittest.mock import patch
 
@@ -8,6 +10,16 @@ from torch.profiler import (
     ProfilerActivity,
     supported_activities,
 )
+
+
+def _profiler_test_skip_reason():
+    # Preserve test_profiler.py's runner exclusions when moving its tests.
+    return os.getenv("PYTORCH_TEST_SKIP_PROFILER_CAPTURE")
+
+
+def skipIfProfilerUnsupported(test):
+    reason = _profiler_test_skip_reason()
+    return unittest.skip(reason)(test) if reason else test
 
 
 @contextmanager
