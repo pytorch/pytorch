@@ -46,7 +46,7 @@ from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
-from .variables.lazy import ComputedLazyConstantVariable
+from .variables.lazy import ComputedLazyConstantVariable, LazyConstantVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.script_object import CustomClassObjectVariable
 from .variables.tensor import (
@@ -61,6 +61,7 @@ from .variables.torch_function import TensorWithTFOverrideVariable
 if TYPE_CHECKING:
     from torch._dynamo.variables.builder import GraphArg
 
+    from .side_effects import SideEffects
     from .symbolic_convert import InstructionTranslatorBase
 
 
@@ -81,6 +82,23 @@ def _pregraph_marker_enter_template(is_profiler_enabled, utils_module):
 def _pregraph_marker_exit_template(cm, utils_module):
     if cm is not None:
         utils_module.record_pregraph_bytecode_exit(cm)
+
+
+def _contains_unrealized_lazy_constant(
+    value: VariableTracker, side_effects: "SideEffects"
+) -> bool:
+    found = False
+
+    def check(vt: VariableTracker) -> None:
+        nonlocal found
+        if (
+            isinstance(vt, (LazyConstantVariable, ComputedLazyConstantVariable))
+            and not vt.is_realized()
+        ):
+            found = True
+
+    VariableTracker.visit(check, value, side_effects=side_effects)
+    return found
 
 
 @dataclasses.dataclass
@@ -341,8 +359,12 @@ class PyCodegen:
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())
                 self.add_cache(value)
-        elif value.is_python_constant() and is_safe_constant(
-            value.as_python_constant()
+        elif (
+            # is_python_constant() would realize (and value-guard) lazy constants
+            # that can be reloaded or recomputed instead
+            not _contains_unrealized_lazy_constant(value, self.tx.output.side_effects)
+            and value.is_python_constant()
+            and is_safe_constant(value.as_python_constant())
         ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
