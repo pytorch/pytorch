@@ -25,11 +25,10 @@ PreMulSumFactorT getPreMulSumFactor(const ::c10d::ReduceOp& op) {
       op.supplement_ != nullptr,
       "PREMUL_SUM operation requires a supplement, but none was provided");
   const auto* preMulSupplement =
-      dynamic_cast<const ::c10d::NCCLPreMulSumSupplement*>(
-          op.supplement_.get());
+      dynamic_cast<const ::c10d::PreMulSumSupplement*>(op.supplement_.get());
   TORCH_CHECK(
       preMulSupplement != nullptr,
-      "PREMUL_SUM operation supplement must be of type NCCLPreMulSumSupplement");
+      "PREMUL_SUM operation supplement must be of type PreMulSumSupplement");
   if (preMulSupplement->tensor_factor.defined()) {
     return preMulSupplement->tensor_factor;
   }
@@ -54,6 +53,7 @@ onecclDataType_t getXcclDataTypeInternal(const at::Tensor& tensor) {
       return onecclInt8;
     case at::ScalarType::Byte:
     case at::ScalarType::Bool:
+      // TODO: Add Float8 datatype handling
       return onecclUint8;
     default:
       TORCH_CHECK(false, "Unsupported tensor data type for XCCL");
@@ -75,8 +75,7 @@ void createPreMulSum(
   void* scalar = is_tensor ? tensor.data_ptr() : &scalar_factor;
 
   TORCH_INTERNAL_ASSERT(
-      is_tensor ? dataType == getXcclDataTypeInternal(tensor)
-                : dataType != onecclBfloat16,
+      !is_tensor || dataType == getXcclDataTypeInternal(tensor),
       "PreMulSum factor type must match input data type");
   XCCL_CHECK(
       xccl_api,
@@ -148,7 +147,7 @@ size_t ProcessGroupXCCL::wordSize(onecclDataType_t type) const {
     case onecclFloat64:
       return 8;
     default:
-      return 0;
+      TORCH_CHECK(false, "Unsupported onecclDataType_t in wordSize: ", type);
   }
 }
 
