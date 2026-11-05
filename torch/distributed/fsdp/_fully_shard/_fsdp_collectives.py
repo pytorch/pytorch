@@ -452,9 +452,10 @@ def _get_param_all_gather_inputs(
 # chunk has split_sizes[i] elements for outputs[i], and the ranks' chunks, viewed
 # as (outer_sizes[i], -1), are concatenated along dim 1 of outputs[i] viewed the
 # same way. Outputs with outer_sizes[i] == 1 may be larger and then fill only a
-# prefix. Outputs of unevenly sharded Shard(i), i > 0, parameters are smaller:
-# each of their rows takes the prefix that holds data, which skips the padding
-# of the last nonempty rank's chunk and the chunks of the empty ranks after it.
+# prefix. Outputs of unevenly sharded Shard(i), i > 0, parameters without an
+# all-gather extension are smaller: each of their rows takes the prefix that
+# holds data, which skips the padding of the last nonempty rank's chunk and the
+# chunks of the empty ranks after it.
 # A uint8 all_gather_output has split_sizes in bytes, while outputs keep their
 # dtypes. Of its arguments, fn may only write outputs, whose version counters
 # FSDP preserves, and must keep none. FSDP skips it for a single rank or an
