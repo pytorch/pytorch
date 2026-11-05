@@ -8315,13 +8315,16 @@ def segment_reduce(
     axis = _validate_dim(data, axis)
     segments = offsets if offsets is not None else lengths
     # Fall back for lengths without unsafe=True (eager validates them on the
-    # host), lengths with offsets (meta and eager disagree on which wins),
-    # initial (eager seeds the accumulator with it), and wrappers that cannot
-    # pass the jagged numel. fp16/bf16 accumulate in fp32, unlike eager.
+    # host), lengths with offsets (meta and eager disagree on which wins), and
+    # wrappers that cannot pass the jagged numel. Eager adds initial to the
+    # accumulator first, in the data dtype; max and min apply it afterwards,
+    # which gives the same result, but sum, mean and prod lower only their
+    # identity. fp16/bf16 accumulate in fp32, unlike eager.
+    identity = {"sum": 0, "mean": 0, "prod": 1}.get(reduce)
     if (
         segments is None
         or indices is not None
-        or initial is not None
+        or (initial is not None and identity is not None and initial != identity)
         or (lengths is not None and (offsets is not None or not unsafe))
         or reduce not in ("sum", "mean", "max", "min", "prod")
         or not is_triton(data)
@@ -8354,12 +8357,14 @@ def segment_reduce(
         if offsets is None:
             # Padding first lets the scan inline the pad: one kernel for offsets.
             offsets = cumsum(constant_pad_nd(lengths, [1, 0]), axis)
-        # The bound may only load offsets, so it must not inline a computation.
         offsets.realize()
         j_range = JaggedRange("j")
         if key is not None:
             V.graph.jagged_offsets[key] = (offsets, j_range)
-    offsets_loader = offsets.make_loader()
+    # The bound may only load offsets, so do not inline offsets computed from
+    # constants alone.
+    with ir.ComputedBuffer.force_realize():
+        offsets_loader = offsets.make_loader()
     data_loader = data.make_loader()
     dtype = data.get_dtype()
     size = data.get_size()
@@ -8386,15 +8391,27 @@ def segment_reduce(
         )
     )
     result.realize()
+    result_loader = result.make_loader()
+    if reduce in ("max", "min") and initial is not None:
+        combine = ops.maximum if reduce == "max" else ops.minimum
+
+        def initial_fn(index):
+            return combine(result_loader(index), ops.constant(initial, dtype))
+
+        return Pointwise.create(
+            device=data.get_device(), dtype=dtype, inner_fn=initial_fn, ranges=out_size
+        )
     if reduce != "mean":
         return result
-    sum_loader = result.make_loader()
 
     def mean_fn(index):
-        # An empty segment gives 0 / 0 = nan, as in eager.
+        # An empty segment gives 0 / 0 = nan, or initial = 0 when it is set.
         outer, s = index[:axis], index[axis]
         n = offsets_loader([*outer, s + 1]) - offsets_loader([*outer, s])
-        return ops.truediv(sum_loader(index), ops.to_dtype(n, dtype))
+        n = ops.to_dtype(n, dtype)
+        if initial is not None:
+            n = ops.maximum(n, ops.constant(1, dtype))
+        return ops.truediv(result_loader(index), n)
 
     return Pointwise.create(
         device=data.get_device(), dtype=dtype, inner_fn=mean_fn, ranges=out_size
