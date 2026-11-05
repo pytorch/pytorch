@@ -216,27 +216,51 @@ def fold_decoded(
     return reduce_fn(acc, val, base_r, valid)
 
 
+# Caps the loads fold_uniform_tree unrolls per thread; each adds a load and its merges.
+UNIFORM_TREE_MAX_LOADS = 64
+
+
+def uniform_tree_ok(
+    trait,
+    count,
+    threads_per_block,
+    npairs_red,
+    *,
+    flat_tail=False,
+    ragged_chunk=False,
+):
+    """Whether general-axis threads can fold count values per output as Welford trees."""
+    # The tree indexes one run with Int32 r, which the load cap keeps in range, and ignores
+    # the rb and in_base clamps.
+    return (
+        getattr(trait, "has_combine_equal", False)
+        and npairs_red == 1
+        and not (flat_tail or ragged_chunk)
+        and threads_per_block <= count <= threads_per_block * UNIFORM_TREE_MAX_LOADS
+    )
+
+
 @cute.jit
-def fold_decoded_uniform_tree(
+def fold_uniform_tree(
     trait,
     mX,
     obase,
     rstrides,
     threads_per_block: cutlass.Constexpr,
     tidx,
-    count: cutlass.Constexpr,
+    nloads: cutlass.Constexpr,
+    tail: cutlass.Constexpr,
+    count,
 ):
-    """Fold equal-size Welford leaves without runtime divisions."""
+    """Fold each thread's nloads loads as equal-count Welford trees, then the masked tail
+    load when `tail`. Only nloads and `tail` are compiled: with T = threads_per_block, a
+    tail kernel serves every count strictly between nloads * T and (nloads + 1) * T, and
+    an exact multiple of T gets its own tail-free kernel."""
     tree = []
-    nloads = const_expr(count // threads_per_block)
-    remainder = const_expr(count % threads_per_block)
     stride = rstrides[0]
     for load in cutlass.range_constexpr(nloads):
         r = tidx + Int32(const_expr(load * threads_per_block))
-        carry = trait.leaf(
-            trait.acc(mX[obase + Int64(r) * stride]),
-            r,
-        )
+        carry = trait.leaf(trait.acc(mX[obase + Int64(r) * stride]), r)
         width = 1
         merges = ((load + 1) & -(load + 1)).bit_length() - 1
         for _ in cutlass.range_constexpr(merges):
@@ -246,14 +270,11 @@ def fold_decoded_uniform_tree(
     acc = tree[0]
     for i in cutlass.range_constexpr(1, len(tree)):
         acc = trait.combine(acc, tree[i])
-    if const_expr(remainder):
+    if const_expr(tail):
         r = Int32(const_expr(nloads * threads_per_block)) + tidx
-        valid = tidx < Int32(remainder)
+        valid = r < count
         safe = r if valid else Int32(0)
-        leaf = trait.leaf(
-            trait.acc(mX[obase + Int64(safe) * stride]),
-            safe,
-        )
+        leaf = trait.leaf(trait.acc(mX[obase + Int64(safe) * stride]), safe)
         ident = trait.init()
         acc = trait.combine(
             acc,
@@ -461,37 +482,35 @@ def fold_row_aligned(
     n,
     unroll: cutlass.Constexpr = _ROLL_UNROLL,
 ):
-    """Fold a ragged row with aligned wide interior loads and scalar edges."""
-    reduce_fn = trait.reduce
-    acc_dtype = trait.acc
+    """Fold a ragged row with aligned wide interior loads and scalar edges.
+
+    Requires vec * itemsize == TRANSFER_ALIGNMENT (TileReduce checks it), a 16-byte
+    aligned base, so the logical prefix below matches the pointer's alignment, and
+    nonempty rows, since edge loads are unconditional (reduce_row_tile checks both).
+    """
+    reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
     vec = const_expr(tm.vec)
     threads_per_row = const_expr(tm.threads_per_row)
     rowv = mX[Int64(r), None]
     aligned = rowv.iterator.align(TRANSFER_ALIGNMENT)
+    # `prefix` elements reach `aligned`. It is (-r * n) mod vec, the elements before the
+    # row's first 16-byte boundary, clamped to n for rows that end before it. Equal rows
+    # at different indices can split differently between edges and vectors, fold in a
+    # different order and round apart.
     prefix = Int32((-Int64(r) * Int64(n)) & Int64(vec - 1))
-    prefix = n if prefix > n else prefix  # noqa: FURB136
+    prefix = n if prefix > n else prefix  # noqa: FURB136 -- no DSL builtin min
     groups = (n - prefix) // Int32(vec)
     waves = (groups + Int32(threads_per_row - 1)) // Int32(threads_per_row)
     tail = prefix + groups * Int32(vec)
     for i in cutlass.range_constexpr(vec - 1):
         prefix_valid = (lane == Int32(0)) & (Int32(i) < prefix)
         prefix_index = Int32(i) if prefix_valid else Int32(0)
-        acc = reduce_fn(
-            acc,
-            acc_dtype(rowv[prefix_index]),
-            prefix_index,
-            prefix_valid,
-        )
+        acc = reduce_fn(acc, acc_dt(rowv[prefix_index]), prefix_index, prefix_valid)
         tail_index = tail + Int32(i)
         tail_valid = (lane == Int32(0)) & (tail_index < n)
         safe_tail = tail_index if tail_valid else Int32(0)
-        acc = reduce_fn(
-            acc,
-            acc_dtype(rowv[safe_tail]),
-            safe_tail,
-            tail_valid,
-        )
+        acc = reduce_fn(acc, acc_dt(rowv[safe_tail]), safe_tail, tail_valid)
     frag = cute.make_rmem_tensor(cute.make_layout(vec), mX.element_type)
     for c in cutlass.range(waves, unroll=unroll):
         group = c * Int32(threads_per_row) + lane
@@ -504,12 +523,7 @@ def fold_row_aligned(
         )
         cute.autovec_copy(src, frag)
         for i in cutlass.range_constexpr(vec):
-            acc = reduce_fn(
-                acc,
-                acc_dtype(frag[i]),
-                base + Int32(i),
-                valid,
-            )
+            acc = reduce_fn(acc, acc_dt(frag[i]), base + Int32(i), valid)
     return acc
 
 
@@ -702,33 +716,43 @@ class TileReduce:
         # Duck-typed because its driver-owned type would invert the dependency.
         itree: Any = None,
         ragged_vector=False,
-        general_tree_count: int = 0,
+        # Values per output for the general-axis uniform Welford tree; 0 disables it.
+        uniform_tree_count: int = 0,
     ) -> None:
         if axis not in ("row", "col", "general"):
             raise ValueError(f"axis must be 'row', 'col' or 'general', got {axis!r}")
         if order not in ("linear", "inner_tree"):
             raise ValueError(f"order must be 'linear' or 'inner_tree', got {order!r}")
-        if general_tree_count and (
+        run_flags = dict(flat_tail=flat_tail, ragged_chunk=ragged_chunk)
+        if uniform_tree_count and (
             axis != "general"
             or order != "linear"
             or combine
-            or npairs_red != 1
-            or wide_red
             or gidx_from != "r"
-            or not hasattr(trait, "combine_equal")
-            or general_tree_count < threads_per_block
+            or not uniform_tree_ok(
+                trait, uniform_tree_count, threads_per_block, npairs_red, **run_flags
+            )
         ):
-            raise ValueError("general tree needs a nonempty Welford thread fold")
-        if ragged_vector and (
-            axis != "row"
-            or order != "linear"
-            or vec is None
-            or vec <= 1
-            or vec & (vec - 1)
-            or use_tma
-            or combine
-        ):
-            raise ValueError("ragged vectors require a linear row reduction")
+            max_count = threads_per_block * UNIFORM_TREE_MAX_LOADS
+            raise ValueError(
+                f"the uniform Welford tree needs a linear general-axis fold of one unclamped run of {threads_per_block} to {max_count} values with combine_equal, got {type(trait).__name__} {axis=} {order=} {combine=} {gidx_from=} {npairs_red=} {uniform_tree_count=} {run_flags=}"
+            )
+        itemsize = dtype.width // 8 if dtype is not None else 0
+        if ragged_vector:
+            if axis != "row":
+                raise ValueError(f"ragged vectors require the row axis, got {axis!r}")
+            if order != "linear":
+                raise ValueError("ragged vectors require the linear order")
+            # fold_row_aligned also needs a 16-byte aligned base and nonempty rows,
+            # which only the driver (reduce_row_tile) can check.
+            if vec is None or vec * itemsize != TRANSFER_ALIGNMENT:
+                raise ValueError(
+                    f"ragged vectors require vec * itemsize == {TRANSFER_ALIGNMENT}, got {vec=} {itemsize=}"
+                )
+            if use_tma:
+                raise ValueError("ragged vectors cannot use TMA")
+            if combine:
+                raise ValueError("ragged vectors cannot combine partials")
         if order == "inner_tree":
             if axis not in ("row", "general") or itree is None:
                 raise ValueError(
@@ -784,7 +808,9 @@ class TileReduce:
         self.final = final
         self.unroll = unroll
         self.ragged_vector = ragged_vector
-        self.general_tree_count = general_tree_count
+        # The count compiles as whole loads and whether a tail remains.
+        self.uniform_tree_loads, tail = divmod(uniform_tree_count, threads_per_block)
+        self.uniform_tree_tail = bool(tail)
         self.use_tma = use_tma
         self.combine = combine
         self.batched_col = batched_col
@@ -801,7 +827,6 @@ class TileReduce:
         self.ragged_chunk = ragged_chunk
         self.order = order
         self.itree = itree
-        itemsize = dtype.width // 8 if dtype is not None else 0
         # Runtime row folds map one load; TMA declares static staged depth. Column and
         # general axes choose no tile.
         self.tm = (
@@ -811,7 +836,6 @@ class TileReduce:
                 threads_per_row,
                 N // vec_size(N, itemsize) if use_tma else 1,
                 vec=vec if ragged_vector else None,
-                exact=False if ragged_vector else None,
             )
             if axis == "row" and order == "linear"
             else None
@@ -849,8 +873,9 @@ class TileReduce:
 
     @property
     def cache_sig(self) -> tuple[Any, ...]:
-        # TMA (static box) and ragged vectors (static row edges) key N; other runtime
-        # paths share a vector class.
+        # TMA (static box) and ragged vectors (static row edges) key N, the uniform tree
+        # its whole-load count and a tail flag, and fixed DAGs their N; other paths share
+        # a vector class.
         return (
             self.axis,
             self.vec,
@@ -875,7 +900,8 @@ class TileReduce:
             self.flat_tail,
             self.ragged_chunk,
             self.ragged_vector,
-            self.general_tree_count,
+            self.uniform_tree_loads,
+            self.uniform_tree_tail,
             self.order,
             # Fixed DAGs key on N, requiring one kernel per shape instead of per vec class.
             self.itree.sig if self.itree is not None else None,
@@ -1701,16 +1727,18 @@ class TileReduce:
                         in_base,
                     ),
                 )
-            elif const_expr(self.general_tree_count):
+            elif const_expr(self.uniform_tree_loads):
                 accs = (
-                    fold_decoded_uniform_tree(
+                    fold_uniform_tree(
                         trait,
                         mIns[0],
                         obase,
                         rstrides,
                         const_expr(self.threads_per_block),
                         lane,
-                        const_expr(self.general_tree_count),
+                        const_expr(self.uniform_tree_loads),
+                        const_expr(self.uniform_tree_tail),
+                        rb,
                     ),
                 )
             else:
@@ -1765,6 +1793,8 @@ class TileReduce:
         elif const_expr(self.use_tma):
             accs = (self._fold_tma(mIns[0], tma_atom, bx, tx),)
         elif const_expr(self.ragged_vector):
+            # Baking N ran FP16 4095-wide row sums at 6.75 us against 9.92 us with a
+            # runtime width, and BF16 variance at 32.7 against 36.1 us (B200).
             acc = fold_row_aligned(
                 trait,
                 mIns[0],
