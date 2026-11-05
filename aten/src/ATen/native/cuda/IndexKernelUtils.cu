@@ -13,7 +13,7 @@
 #include <type_traits>
 
 namespace at::native {
-template <int Alignment, typename index_t, bool loop_over_rows>
+template <int Alignment, typename index_t>
 __global__ void vectorized_gather_kernel(char * out, char * inp, index_t * idx, int num_ind, int64_t slice_size, int64_t ind_dim_size, int64_t inp_stride, int64_t out_stride, bool allow_neg_indices) {
     for (auto entry = blockIdx.x * blockDim.y + threadIdx.y; entry < static_cast<unsigned int>(num_ind); entry += gridDim.x * blockDim.y) {
       int64_t ind = idx[entry];
@@ -25,10 +25,6 @@ __global__ void vectorized_gather_kernel(char * out, char * inp, index_t * idx, 
       for (uint32_t off = (blockDim.x * blockIdx.y + threadIdx.x) * Alignment; off < slice_size; off += blockDim.x * gridDim.y * Alignment) {
         auto vec = at::native::memory::ld_vec<Alignment>(inp + ind * inp_stride + off);
         at::native::memory::st_vec<Alignment>(out + entry * (int32_t)out_stride + off, vec);  // out offset is guaranteed to be within int32 limits
-      }
-      // Avoid loop-control overhead on uncapped launches; the tail guard still applies.
-      if constexpr (!loop_over_rows) {
-        break;
       }
     }
 }
@@ -63,10 +59,7 @@ void vectorized_gather_kernel_launch(char * out, char * inp, index_t * idx, int 
   grid_y = std::min(static_cast<int64_t>(grid_y), max_blocks / grid_x);
   dim3 grid = {static_cast<uint32_t>(grid_x), grid_y, 1};
   dim3 block = {static_cast<uint32_t>(num_threads), static_cast<uint32_t>(entries_per_block), 1};
-  auto kernel = row_blocks > grid_x
-      ? vectorized_gather_kernel<Alignment, index_t, true>
-      : vectorized_gather_kernel<Alignment, index_t, false>;
-  kernel<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(out, inp, idx, num_ind, slice_size_in_bytes,
+  vectorized_gather_kernel<Alignment, index_t><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(out, inp, idx, num_ind, slice_size_in_bytes,
   ind_dim_size, inp_stride_bytes, out_stride_bytes, allow_neg_indices);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
