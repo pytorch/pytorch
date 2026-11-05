@@ -5,6 +5,7 @@
 import contextlib
 import functools
 import inspect
+import json
 import logging
 import os
 import subprocess
@@ -2285,6 +2286,27 @@ def forward(self, x_1, output_1):
             kernels[0].kwargs["in_ptr0"].get_name(),
             kernels[0].kwargs["in_ptr1"].get_name(),
         )
+
+    @unittest.skipIf(not has_triton_package(), "requires triton")
+    def test_config_to_dict_keeps_ctas_per_cga(self):
+        import triton
+
+        from torch._inductor.runtime.triton_heuristics import (
+            config_from_dict,
+            config_to_dict,
+        )
+
+        if not hasattr(triton.Config({}), "ctas_per_cga"):
+            raise unittest.SkipTest("this Triton has no ctas_per_cga")
+        config_dict = config_to_dict(
+            triton.Config({"BLOCK": 64}, ctas_per_cga=(2, 1, 1))
+        )
+        # A JSON round trip turns the cluster shape into a list.
+        for d in (config_dict, json.loads(json.dumps(config_dict))):
+            config = config_from_dict(d)
+            self.assertIsInstance(config.ctas_per_cga, tuple)
+            self.assertEqual(config.ctas_per_cga, (2, 1, 1))
+            self.assertEqual(config.kwargs, {"BLOCK": 64})
 
     @requires_gpu
     def test_triton_kernel_strided_input_nonzero_offset(self):

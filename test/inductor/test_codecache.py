@@ -6688,5 +6688,73 @@ class TestAutotuneCacheExtraOptions(TestCase):
         self.assertNotIn("extra_options", saved_data)
 
 
+@instantiate_parametrized_tests
+class TestAutotuneCacheClusterShape(TestCase):
+    @requires_triton()
+    @parametrize("found_by_coordesc", [False, True])
+    def test_cache_hit_keeps_ctas_per_cga(self, found_by_coordesc):
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        if not hasattr(Config({}), "ctas_per_cga"):
+            raise unittest.SkipTest("this Triton has no ctas_per_cga")
+        # The configs differ only in their cluster shape.
+        configs = [
+            Config({"XBLOCK": 128}, num_warps=4, num_stages=1),
+            Config({"XBLOCK": 128}, num_warps=4, num_stages=1, ctas_per_cga=(2, 1, 1)),
+        ]
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "is_fbcode": False,
+            "coordinate_descent_tuning": found_by_coordesc,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            cache = AutotuneCache.create(
+                inductor_meta,
+                os.path.join(directory, "kernel.py"),
+                hash_configs(configs),
+            )
+            self.assertIsNotNone(cache)
+            cache.save(configs[1], 1000, found_by_coordesc=found_by_coordesc)
+            result = cache.read_best(inductor_meta, configs)
+
+        self.assertEqual(result.ctas_per_cga, (2, 1, 1))
+        if not found_by_coordesc:
+            self.assertIs(result, configs[1])
+
+    @requires_triton()
+    def test_configs_differing_in_ctas_per_cga_stay_distinct(self):
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+        from torch._inductor.runtime.triton_heuristics import (
+            hash_configs,
+            unique_configs,
+        )
+
+        if not hasattr(Config({}), "ctas_per_cga"):
+            raise unittest.SkipTest("this Triton has no ctas_per_cga")
+        plain = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        clustered = Config(
+            {"XBLOCK": 128}, num_warps=4, num_stages=1, ctas_per_cga=(2, 1, 1)
+        )
+        self.assertEqual(unique_configs([plain, clustered]), [plain, clustered])
+        self.assertNotEqual(hash_configs([plain]), hash_configs([clustered]))
+        # An entry tuned over the other candidate list is not reused.
+        saved = {
+            "XBLOCK": 128,
+            "num_warps": 4,
+            "num_stages": 1,
+            "ctas_per_cga": [2, 1, 1],
+            "configs_hash": hash_configs([clustered]),
+        }
+        self.assertIsNone(
+            _load_cached_autotuning(saved, hash_configs([plain]), [plain], {})
+        )
+
+
 if __name__ == "__main__":
     run_tests()
