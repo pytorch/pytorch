@@ -206,8 +206,8 @@ jobs:
       compiler: gcc11
     secrets: inherit
 
-  linux-jammy-py3_11-clang21-crossref-build:
-    name: linux-jammy-py3.11-clang21-crossref
+  linux-jammy-py3_11-clang21-build:
+    name: linux-jammy-py3.11-clang21
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -228,17 +228,17 @@ jobs:
       compiler: clang21
     secrets: inherit
 
-  linux-jammy-py3_11-clang21-crossref-test:
-    name: linux-jammy-py3.11-clang21-crossref
+  linux-jammy-py3_11-clang21-test:
+    name: linux-jammy-py3.11-clang21
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-py3_11-clang21-crossref-build
+      - linux-jammy-py3_11-clang21-build
       - target-determination
       - get-label-type
     with:
-      build-environment: ${{ needs.linux-jammy-py3_11-clang21-crossref-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_11-clang21-crossref-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_11-clang21-crossref-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-jammy-py3_11-clang21-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_11-clang21-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_11-clang21-build.outputs.test-matrix }}
       tests-to-exclude: "inductor/test_torchinductor_opinfo"
       python-version: "3.11"
       compiler: clang21
