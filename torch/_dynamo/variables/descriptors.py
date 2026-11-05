@@ -108,21 +108,14 @@ def descr_repr(
 
 
 def _vt_cls_modeling(vt: VariableTracker, py_type: type) -> type | None:
-    # Each class's own python_type, called on vt: the first one returning
-    # py_type is the VT class whose slot impls model py_type. VariableTracker's
-    # python_type is type(vt.as_python_constant()), which models no type.
     for cls in type(vt).__mro__:
-        if cls is VariableTracker:
-            break
-        python_type = cls.__dict__.get("python_type")
-        if python_type is None:
+        cpython_type = cls.__dict__.get("_cpython_type")
+        if cpython_type is None:
             continue
-        try:
-            if python_type(vt) is py_type:
-                return cls
-        except NotImplementedError:
-            continue
-    return None
+        types = cpython_type if isinstance(cpython_type, tuple) else (cpython_type,)
+        if py_type in types:
+            return cls
+    return VariableTracker if py_type is object else None
 
 
 class DescriptorVariable(VariableTracker):
