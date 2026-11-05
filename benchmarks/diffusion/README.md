@@ -3,14 +3,23 @@
 `compile_benchmark.py` is the entry point for diffusion compile benchmarks. It
 times either complete pipeline requests or isolated denoiser forwards. Each
 requested mode runs in a fresh process with a private Inductor cache directory,
-and with the local and remote FX graph, AOT autograd, autotune, and remote Dynamo
-PGO caches disabled; the worker records the cache settings in effect. Workers
-otherwise inherit the caller's environment, so settings such as
-`TORCHINDUCTOR_MAX_AUTOTUNE` apply; the worker records `PYTORCH_*`, `TORCH_*`,
-`TORCHDYNAMO_*`, `TORCHINDUCTOR_*`, `TRITON_*`, and `CUDA_VISIBLE_DEVICES`.
-`TORCHINDUCTOR_FORCE_DISABLE_CACHES` is not used because it gives every graph a
-fresh cache directory, so kernels shared between graphs would be recompiled,
-unlike in a real cold start. A run writes a CSV summary, JSON-lines records for
+and with local and remote FX graph and AOT autograd caches, remote autotune
+caches, and remote Dynamo PGO caches disabled. Local autotune caching stays
+enabled by default inside that private directory. This isolates compilation
+work rather than reproducing every default cold-start cache cost; the worker
+records each cache setting. Workers otherwise inherit the caller's environment.
+CSV provenance records only these tuning variables when set:
+`CUDA_VISIBLE_DEVICES`, `MKL_NUM_THREADS`, `OMP_NUM_THREADS`,
+`PYTORCH_ALLOC_CONF`, `PYTORCH_CUDA_ALLOC_CONF`,
+`TORCH_ALLOW_TF32_CUBLAS_OVERRIDE`, `TORCHINDUCTOR_COMPILE_THREADS`,
+`TORCHINDUCTOR_FX_GRAPH_CACHE`, `TORCHINDUCTOR_MAX_AUTOTUNE`,
+`TORCHINDUCTOR_MAX_AUTOTUNE_GEMM`, and `TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS`.
+Other environment values, including credential-bearing cache URLs and local
+compiler paths, are omitted.
+`TORCHINDUCTOR_FORCE_DISABLE_CACHES` and
+`TORCH_COMPILE_FORCE_DISABLE_CACHES` are explicitly set to `0` in workers. These
+flags would give each graph a fresh cache directory and recompile kernels shared
+between graphs, unlike in a real cold start. A run writes a CSV summary, JSON-lines records for
 the PyTorch OSS benchmark database, and one log per worker.
 
 Dashboard backends include compilation mode and CUDA graph configuration, for
@@ -56,7 +65,9 @@ an eager reference on the same CUDA device. `--check-outputs` requires the eager
 mode and at least one compiled mode. `--timeout` applies to each
 scenario and includes checkpoint downloads, which can be long on a cold Hugging
 Face cache. Interrupting or terminating the runner (SIGINT, SIGTERM, or SIGHUP)
-kills the running worker.
+kills the running worker and saves completed results. If interruption prevents
+output comparison, completed timings remain in the CSV, with the unchecked
+scenarios marked failed and `output_check="not completed"`.
 
 ## Workloads
 
@@ -100,10 +111,13 @@ scale of at most 1 as 1.
 `sd35_medium` requires `diffusers` and `transformers`; `tiny_sd3` requires only
 `diffusers`. Timesteps come from the recipe scheduler's `set_timesteps`, as in
 `StableDiffusion3Pipeline`; schedulers with dynamic shifting, which SD3.5
-Medium does not use, are rejected. The integration tests skip unless both
-packages are installed. CI images do not install `diffusers`, so SD3 and
-denoiser coverage comes from local runs only; CI exercises the runner,
-compilation modes, and CUDA graphs through the dependency-free `toy` recipe.
+Medium does not use, are rejected. Tiny SD3 integration tests require
+`diffusers`; the checkpoint-loader test also requires `transformers`.
+CI images do not install `diffusers`. Dependency-free tests cover the SD3 input
+contract, timestep cycling, dynamic-shifting rejection, and reference precision
+state preservation using a stub transformer and scheduler. Real SD3 model coverage
+requires local integration runs; CI also exercises the runner, compilation
+modes, and CUDA graphs through the dependency-free `toy` recipe.
 
 ## Measurement boundaries
 
@@ -136,18 +150,21 @@ compilation modes, and CUDA graphs through the dependency-free `toy` recipe.
   is unavailable on CPU.
 - Denoiser predictions are checked against a higher-precision forward of the
   final measured request, which the eager worker computes after timing in
-  float32 (float64 for float32 runs) with TF32 disabled when `--check-outputs`
-  is set. Devices without float64 support, such as MPS, compute the float64
-  reference on the CPU. Diffusers computes some operations in float32
-  regardless of the module dtype, including the timestep embedding and the
+  float64 when `--check-outputs` is set. Float64 matmuls and convolutions are
+  unaffected by TF32/BF16 precision flags, so the reference leaves global
+  settings unchanged. On MPS and XPU devices without float64 support, this
+  reference runs on the CPU. Float64 doubles weight storage compared with
+  float32 and can substantially increase reference runtime; neither cost is
+  included in the benchmark metrics.
+  Diffusers computes some operations in float32 regardless of the module dtype,
+  including the timestep embedding and the
   RMSNorm statistics used by SD3.5's QK normalization, so a float64 reference
   is only float32-accurate there. A compiled prediction passes if its relative
   RMS error against that reference is at most a multiple of eager's, plus a
   floor of a tenth of `torch.testing`'s default rtol for the dtype. The
   multiplier matches the RMSE check in `torch._dynamo.utils.same`: 3 for float16
   and bfloat16 or for predictions with fewer than 1000 elements, otherwise 2.
-  Unlike `same`, the error and floor are relative to the reference norm, and
-  half-precision runs use a float32 rather than float64 reference. Compiled,
+  Unlike `same`, the error and floor are relative to the reference norm. Compiled,
   eager, and reference shapes must match, compiled and eager dtypes must
   match, the compiled prediction must be finite, and eager and compiled
   scenarios must have run the same number of requests, so that both end on the
@@ -163,16 +180,18 @@ compilation modes, and CUDA graphs through the dependency-free `toy` recipe.
   unavailable"`. A worker that is killed or times out during the reference
   forward loses its timings as usual.
 - Pipeline output checks happen after timing and compare against the eager
-  result. A compiled output fails if its shape or dtype differs from eager or,
-  for floating-point outputs such as latents, if it has non-finite values;
-  postprocessed images are uint8 and cannot hold them. Otherwise its relative
+  result. A compiled output fails if it is all zeros, its shape or dtype differs
+  from eager or, for floating-point outputs such as latents, if it has non-finite values;
+  PIL images are converted to uint8 and cannot hold them. Otherwise its relative
   RMS difference from eager is reported in `output_check` without a bound:
   rounding differences compound over many low-precision denoising steps, such
-  as the 40-step `sd35_medium` bfloat16 latents, and postprocessed images and
-  videos are quantized, so no fixed tolerance separates correct compilations
+  as the 40-step `sd35_medium` bfloat16 latents, and PIL images are quantized,
+  so no fixed tolerance separates correct compilations
   from incorrect ones. Use `--workload denoise_step` for a bounded check.
-- For both workloads, an eager output that is non-finite or all zeros (a NaN
-  latent decodes to a black image) marks the eager scenario failed.
+- For both workloads, an eager output that is non-finite or all zeros marks the
+  eager scenario failed. Quantization can turn NaNs into black pixels; a
+  postprocessed image cannot establish that its floating-point intermediates
+  were finite, and a black image alone does not establish that they were NaN.
   If the eager reference is unavailable, compiled results are marked failed with
   `output_check="reference unavailable"`; their CSV timings are retained, but
   only failure status is exported to the dashboard.

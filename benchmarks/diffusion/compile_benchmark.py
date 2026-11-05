@@ -25,6 +25,7 @@ import itertools
 import json
 import math
 import os
+import pickle
 import platform
 import signal
 import statistics
@@ -729,6 +730,17 @@ def _load_sd35_medium(
     )
 
 
+def _reference_device(device: str) -> str:
+    import torch
+
+    kind = torch.device(device).type
+    if kind == "mps" or (
+        kind == "xpu" and not torch.xpu.get_device_properties(device).has_fp64
+    ):
+        return "cpu"
+    return device
+
+
 def _sd3_denoise_step(
     transformer: Any,
     scheduler: Any,
@@ -792,21 +804,14 @@ def _sd3_denoise_step(
         return transformer(**kwargs, return_dict=False)[0]
 
     def high_precision_reference() -> Any:
-        high = torch.float64 if dtype == torch.float32 else torch.float32
-        # MPS has no float64, so that reference runs on the CPU.
-        mps = torch.device(device).type == "mps"
-        target = "cpu" if high == torch.float64 and mps else device
+        # Float64 avoids reduced-precision matmuls/convolutions without changing
+        # global precision flags, whose getters do not preserve inheritance.
+        high = torch.float64
+        target = _reference_device(device)
         # ModelMixin.to would log a spurious keep-in-float32 warning per cast.
         torch.nn.Module.to(transformer, device=target, dtype=high)
         kwargs = {name: value.to(target, high) for name, value in latest.items()}
-        # TF32 keeps a 10-bit mantissa, no more precise than a float16 run.
-        matmul_precision = torch.get_float32_matmul_precision()
-        torch.set_float32_matmul_precision("highest")
-        try:
-            with torch.backends.cudnn.flags(enabled=True, allow_tf32=False):
-                return forward(**kwargs)
-        finally:
-            torch.set_float32_matmul_precision(matmul_precision)
+        return forward(**kwargs)
 
     transformer.to(device).eval()
     details.update(
@@ -1235,39 +1240,39 @@ def _hardware_info(device: str) -> dict[str, Any]:
         "system_memory_bytes": system_memory,
         "torch_cpu_capability": torch.backends.cpu.get_cpu_capability(),
     }
-    if torch.device(device).type == "cuda":
-        props = torch.cuda.get_device_properties(device)
+    device_type = torch.device(device).type
+    info["accelerator"] = device_type
+    if device_type in ("cuda", "xpu"):
+        props = getattr(torch, device_type).get_device_properties(device)
+        info.update(accelerator=props.name, accelerator_memory_bytes=props.total_memory)
+    if device_type == "cuda":
         info.update(
             {
-                "accelerator": props.name,
-                "accelerator_memory_bytes": props.total_memory,
                 "compute_capability": f"{props.major}.{props.minor}",
                 "cuda_compiled_version": torch.version.cuda,
                 "hip_compiled_version": torch.version.hip,
             }
         )
-    else:
-        info["accelerator"] = torch.device(device).type
     return info
 
 
 def _relevant_environment() -> dict[str, str]:
+    # Only record known tuning options; compiler-prefixed variables can contain
+    # credentials (for example, a remote cache URL).
     names = (
-        "CPLUS_INCLUDE_PATH",
         "CUDA_VISIBLE_DEVICES",
-        "CXX",
-        "LD_LIBRARY_PATH",
-        "LIBRARY_PATH",
+        "MKL_NUM_THREADS",
         "OMP_NUM_THREADS",
+        "PYTORCH_ALLOC_CONF",
+        "PYTORCH_CUDA_ALLOC_CONF",
+        "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE",
+        "TORCHINDUCTOR_COMPILE_THREADS",
+        "TORCHINDUCTOR_FX_GRAPH_CACHE",
+        "TORCHINDUCTOR_MAX_AUTOTUNE",
+        "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM",
+        "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS",
     )
-    # Workers inherit the caller's environment, which can change compiler and
-    # allocator settings (e.g. TORCHINDUCTOR_MAX_AUTOTUNE, PYTORCH_CUDA_ALLOC_CONF).
-    prefixes = ("PYTORCH_", "TORCH_", "TORCHDYNAMO_", "TORCHINDUCTOR_", "TRITON_")
-    return {
-        name: value
-        for name, value in sorted(os.environ.items())
-        if name in names or name.startswith(prefixes)
-    }
+    return {name: os.environ[name] for name in names if name in os.environ}
 
 
 def _validate_worker_scenario(scenario: Scenario, device: str) -> None:
@@ -1458,11 +1463,14 @@ def execute_scenario(
         "hardware": _hardware_info(device),
         "environment": _relevant_environment(),
         "compiler_caches": {
+            "force_disabled": inductor_config.force_disable_caches,
             "fx_graph": inductor_config.fx_graph_cache,
             "fx_graph_remote": inductor_config.fx_graph_remote_cache,
             "autograd": functorch_config.enable_autograd_cache,
             "autograd_remote": functorch_config.enable_remote_autograd_cache,
+            "autotune_local": inductor_config.autotune_local_cache,
             "autotune_remote": inductor_config.autotune_remote_cache,
+            "bundled_autotune_remote": inductor_config.bundled_autotune_remote_cache,
             "dynamo_pgo_remote": torch._dynamo.config.automatic_dynamic_remote_pgo,
         },
     }
@@ -1662,8 +1670,9 @@ def run_worker_process(
 ) -> dict[str, Any]:
     log = Path(log_path)
     log.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with log.open("w", encoding="utf-8") as log_file:
+    with contextlib.ExitStack() as stack:
+        try:
+            log_file = stack.enter_context(log.open("w", encoding="utf-8"))
             process = subprocess.Popen(
                 command,
                 stdout=log_file,
@@ -1672,23 +1681,27 @@ def run_worker_process(
                 env=env,
                 start_new_session=sys.platform != "win32",
             )
-            timed_out = False
+        except OSError as error:
+            return _failure_result(
+                scenario_id, "failed", f"could not start worker: {error}"
+            )
+        timed_out = False
+        try:
+            process.wait(timeout=timeout_s)
+        except BaseException as error:
             try:
-                process.wait(timeout=timeout_s)
-            except BaseException as error:
                 with contextlib.suppress(ProcessLookupError):
                     if sys.platform == "win32":
                         process.kill()
                     else:
                         os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-                if not isinstance(error, subprocess.TimeoutExpired):
-                    raise
-                timed_out = True
-    except OSError as error:
-        return _failure_result(
-            scenario_id, "failed", f"could not start worker: {error}"
-        )
+                process.wait(timeout=30)
+            except (OSError, subprocess.TimeoutExpired) as cleanup_error:
+                error.add_note(f"could not reap worker {process.pid}: {cleanup_error}")
+                raise error from cleanup_error
+            if not isinstance(error, subprocess.TimeoutExpired):
+                raise
+            timed_out = True
     if timed_out:
         return _failure_result(
             scenario_id,
@@ -1783,6 +1796,8 @@ def _check_pipeline_output(actual: Any, eager: Any) -> str:
         )
     if not actual.isfinite().all():
         raise AssertionError("output contains non-finite values")
+    if not actual.any():
+        raise AssertionError("output is all zeros")
     # Rounding differences compound over many low-precision denoising steps, and
     # postprocessed outputs are quantized, so a fixed tolerance would reject
     # correct compilations. The difference is reported, not bounded.
@@ -1864,11 +1879,21 @@ def _compare_outputs(
         try:
             eager_path = sample_paths[eager.scenario_id]
             reference = torch.load(eager_path, weights_only=True)
+            if not isinstance(reference, torch.Tensor):
+                raise ValueError("eager output is not a tensor")
             if denoiser and reference_error is None:
                 high_precision = torch.load(
                     _reference_path(eager_path), weights_only=True
                 )
-        except (OSError, RuntimeError) as error:
+                if not isinstance(high_precision, torch.Tensor):
+                    raise ValueError("high-precision reference is not a tensor")
+        except (
+            OSError,
+            RuntimeError,
+            EOFError,
+            pickle.UnpicklingError,
+            ValueError,
+        ) as error:
             eager_result["status"] = "failed"
             eager_result["error"] = (
                 f"could not load eager output for comparison: {error}"
@@ -1925,11 +1950,20 @@ def _compare_outputs(
             continue
         try:
             actual = torch.load(sample_paths[scenario.scenario_id], weights_only=True)
+            if not isinstance(actual, torch.Tensor):
+                raise ValueError("compiled output is not a tensor")
             if denoiser:
                 check = _check_prediction(actual, reference, high_precision)
             else:
                 check = _check_pipeline_output(actual, reference)
-        except (AssertionError, OSError, RuntimeError) as error:
+        except (
+            AssertionError,
+            OSError,
+            RuntimeError,
+            EOFError,
+            pickle.UnpicklingError,
+            ValueError,
+        ) as error:
             result["status"] = "failed"
             result["error"] = f"output sanity check failed: {error}"
             result["output_check"] = "failed"
@@ -2219,75 +2253,94 @@ def _selected_modes(values: list[str]) -> tuple[str, ...]:
 def _run_scenarios(
     scenarios: list[Scenario], output: Path, check_outputs: bool
 ) -> tuple[list[dict[str, Any]], list[str]]:
+    import torch
+
     log_dir = output.with_suffix("").with_name(output.stem + "_logs")
     for stale in log_dir.glob("*.log"):
         stale.unlink()
     results = []
     sample_paths: dict[str, Path] = {}
-    with tempfile.TemporaryDirectory(prefix="diffusion-benchmark-") as temporary:
-        root = Path(temporary)
-        for index, scenario in enumerate(scenarios):
-            scenario_dir = root / str(index)
-            scenario_dir.mkdir()
-            result_path = scenario_dir / "result.json"
-            sample_path = scenario_dir / "output.pt"
-            sample_paths[scenario.scenario_id] = sample_path
-            config_path = scenario_dir / "config.json"
-            _write_json(
-                config_path,
-                {
-                    "scenario": _scenario_to_dict(scenario),
-                    "result_path": str(result_path),
-                    "sample_path": str(sample_path) if check_outputs else None,
-                },
-            )
-            cache_dir = scenario_dir / "compiler-cache"
-            env = os.environ.copy()
-            env.update(
-                {
-                    "TORCHINDUCTOR_CACHE_DIR": str(cache_dir),
-                    "TRITON_CACHE_DIR": str(cache_dir / "triton"),
-                    "TORCHINDUCTOR_FX_GRAPH_CACHE": "0",
-                    "TORCHINDUCTOR_AUTOGRAD_CACHE": "0",
-                    "TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE": "0",
-                    "TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE": "0",
-                    "TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE": "0",
-                    "TORCHINDUCTOR_BUNDLED_AUTOTUNE_REMOTE_CACHE": "0",
-                    "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO": "0",
-                }
-            )
-            command = [
-                sys.executable,
-                str(Path(__file__).resolve()),
-                "--worker",
-                str(config_path),
-            ]
-            print(f"Running {scenario.scenario_id} in a fresh worker")
-            log = log_dir / f"{index}-{scenario.mode}.log"
-            result = run_worker_process(
-                scenario.scenario_id,
-                command,
-                result_path,
-                log,
-                scenario.execution.timeout_s,
-                env,
-            )
-            try:
-                _validate_worker_result(result, scenario.scenario_id, scenario)
-            except ValueError as error:
-                message = f"{error}; log: {log}"
-                result = _failure_result(scenario.scenario_id, "malformed", message)
-            device, dtype = _device_and_dtype_names(scenario)
-            result.setdefault("model", dataclasses.asdict(scenario.model))
-            result.setdefault("workload", dataclasses.asdict(scenario.workload))
-            result.setdefault("execution", dataclasses.asdict(scenario.execution))
-            result.setdefault("mode", scenario.mode)
-            result.setdefault("device", device)
-            result.setdefault("dtype", dtype)
-            results.append(result)
-            print(f"{scenario.scenario_id}: {result['status']}")
-        if check_outputs:
-            _compare_outputs(scenarios, results, sample_paths)
+    try:
+        with tempfile.TemporaryDirectory(prefix="diffusion-benchmark-") as temporary:
+            root = Path(temporary)
+            for index, scenario in enumerate(scenarios):
+                scenario_dir = root / str(index)
+                scenario_dir.mkdir()
+                result_path = scenario_dir / "result.json"
+                sample_path = scenario_dir / "output.pt"
+                sample_paths[scenario.scenario_id] = sample_path
+                config_path = scenario_dir / "config.json"
+                _write_json(
+                    config_path,
+                    {
+                        "scenario": _scenario_to_dict(scenario),
+                        "result_path": str(result_path),
+                        "sample_path": str(sample_path) if check_outputs else None,
+                    },
+                )
+                cache_dir = scenario_dir / "compiler-cache"
+                env = os.environ.copy()
+                env.update(
+                    {
+                        "TORCHINDUCTOR_CACHE_DIR": str(cache_dir),
+                        "TORCHINDUCTOR_FORCE_DISABLE_CACHES": "0",
+                        "TORCH_COMPILE_FORCE_DISABLE_CACHES": "0",
+                        "TRITON_CACHE_DIR": str(cache_dir / "triton"),
+                        "TORCHINDUCTOR_FX_GRAPH_CACHE": "0",
+                        "TORCHINDUCTOR_AUTOGRAD_CACHE": "0",
+                        "TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE": "0",
+                        "TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE": "0",
+                        "TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE": "0",
+                        "TORCHINDUCTOR_BUNDLED_AUTOTUNE_REMOTE_CACHE": "0",
+                        "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO": "0",
+                    }
+                )
+                command = [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "--worker",
+                    str(config_path),
+                ]
+                print(f"Running {scenario.scenario_id} in a fresh worker")
+                log = log_dir / f"{index}-{scenario.mode}.log"
+                result = run_worker_process(
+                    scenario.scenario_id,
+                    command,
+                    result_path,
+                    log,
+                    scenario.execution.timeout_s,
+                    env,
+                )
+                try:
+                    _validate_worker_result(result, scenario.scenario_id, scenario)
+                except ValueError as error:
+                    message = f"{error}; log: {log}"
+                    result = _failure_result(scenario.scenario_id, "malformed", message)
+                device, dtype = _device_and_dtype_names(scenario)
+                result.setdefault("model", dataclasses.asdict(scenario.model))
+                result.setdefault("workload", dataclasses.asdict(scenario.workload))
+                result.setdefault("execution", dataclasses.asdict(scenario.execution))
+                result.setdefault("mode", scenario.mode)
+                result.setdefault("device", device)
+                result.setdefault("dtype", dtype)
+                result.setdefault("torch", {"version": torch.__version__})
+                results.append(result)
+                print(f"{scenario.scenario_id}: {result['status']}")
+            if check_outputs:
+                _compare_outputs(scenarios, results, sample_paths)
+    finally:
+        for result in results:
+            if (
+                check_outputs
+                and result["status"] == "success"
+                and result.get("output_check") == "not requested"
+            ):
+                result.update(
+                    status="failed",
+                    error="run interrupted before output comparison completed",
+                    output_check="not completed",
+                )
+        write_outputs(output, results)
     errors = validate_scenario_results(
         [scenario.scenario_id for scenario in scenarios], results
     )
@@ -2364,6 +2417,10 @@ def _exit_on_signal(signum: int, frame: Any) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import torch
+    from torch._dynamo.backends.registry import lookup_backend
+    from torch._dynamo.exc import InvalidBackend
+
     parser = _parser()
     args = parser.parse_args(argv)
     if args.worker:
@@ -2384,10 +2441,16 @@ def main(argv: list[str] | None = None) -> int:
         recipe = recipes[args.model]
         workload = _workload_from_args(args, recipe)
         execution = _execution_from_args(args)
+        device = args.device
+        if device == "auto":
+            device = recipe.model.default_device
+        try:
+            torch.device(device)
+            if any(mode != "eager" for mode in modes):
+                lookup_backend(execution.backend)
+        except (RuntimeError, InvalidBackend) as error:
+            raise ValueError(str(error)) from error
         if execution.cudagraphs:
-            device = args.device
-            if device == "auto":
-                device = recipe.model.default_device
             if modes == ("eager",):
                 raise ValueError("CUDA graphs require at least one compiled mode")
             if execution.backend != "inductor":
@@ -2421,11 +2484,10 @@ def main(argv: list[str] | None = None) -> int:
     signals = [signal.SIGTERM] + ([signal.SIGHUP] if hasattr(signal, "SIGHUP") else [])
     previous = {signum: signal.signal(signum, _exit_on_signal) for signum in signals}
     try:
-        results, errors = _run_scenarios(scenarios, csv_output, args.check_outputs)
+        _, errors = _run_scenarios(scenarios, csv_output, args.check_outputs)
     finally:
         for signum, handler in previous.items():
             signal.signal(signum, handler)
-    write_outputs(csv_output, results)
     print(f"CSV: {args.output}")
     print(f"JSON: {json_output}")
     if errors:
