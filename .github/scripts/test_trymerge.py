@@ -1733,7 +1733,7 @@ class TestGitHubPRGhstackDependencies(TestCase):
             (parent_pr, "rev_parent"),
             (top_pr, "rev_top"),
         ]
-        red = ("inductor / test (inductor, 1, 2)", "https://job", 1)
+        red = ("inductor / test (inductor, 1, 2)", "", 1)
         mock_find_matching_merge_rule.return_value = (None, [], [red], {})
 
         with self.assertRaisesRegex(RuntimeError, "stacked PR #106034") as cm:
@@ -3642,7 +3642,7 @@ class TestStackedPrChecks(NoNetworkTestCase):
 
     def gate(self, ciflow_status: str | None, **kwargs: Any) -> None:
         self.pr.get_checkrun_conclusions.return_value = {
-            name: JobCheckState(name, f"https://{i}", status, None, i, None, None)
+            name: JobCheckState(name, "", status, None, i, None, None)
             for i, (name, status) in enumerate(
                 [(self.MANDATORY, "SUCCESS"), (self.CIFLOW, ciflow_status)]
             )
