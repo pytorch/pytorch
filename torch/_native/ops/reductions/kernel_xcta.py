@@ -18,14 +18,14 @@ import torch
 
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
-from ...cutedsl.plan_cache import cached_plan
+from ...cutedsl.plan_cache import _MISS, cached_plan, LRUCache
 from ...utils.device import check_current
 from . import (  # safe: kernel_general imports us only lazily
     kernel_general as _RB,
     kernel_rowtile as _rt,
     tile,
 )
-from .traits import welford_nouts
+from .traits import welford_outputs
 
 
 _C_MAX = 1 << 22  # cap stage-2 partial count (its combine is a dynamic loop -> cheap)
@@ -39,9 +39,33 @@ _DEFAULT_BLOCK = 256
 
 class _XctaConfig(NamedTuple):
     # Defaults for omitted knobs. _split_C snaps subrow_target to a nearby legal divisor.
-    # Wide accumulators can prefer shorter rows, but no nfields formula avoids regressions.
+    # Wide accumulators can prefer other sub-row lengths, but no nfields formula avoids
+    # regressions, so select_xcta_config keeps measured anchors only.
     block: int = _DEFAULT_BLOCK
     subrow_target: int = _SUBROW_TARGET
+
+
+def select_xcta_config(
+    cc: tuple[int, int],
+    dtype: torch.dtype,
+    N: int,
+    M: int,
+    *,
+    nouts: int,
+    welford_outs: int,
+    acc_bits: int,
+) -> _XctaConfig:
+    # B200 single-row Welford at 256 MiB and 2 GiB takes longer sub-rows.
+    if (
+        cc == (10, 0)
+        and dtype in _RB._B200_DTYPES
+        and M == 1
+        and N * dtype.itemsize in (256 << 20, 2 << 30)
+        and welford_outs == nouts
+        and acc_bits == 32
+    ):
+        return _XctaConfig(subrow_target=16384)
+    return _XctaConfig()
 
 
 def _split_C(
@@ -137,9 +161,11 @@ class FusedTwoStage:
         ).launch(grid=[mOuts[0].shape[0], 1, 1], block=[s2.block, 1, 1], stream=stream)
 
 
-# Cache kernels by vector class/config and geometry, boxed arguments (~6us), and declines by N.
+# _PLAN caches kernels by vector class and config. _GEOM caches each width's geometry and
+# boxed arguments (~6us), or its decline, keeping the 1024 most recently used; only _GEOM
+# is an LRU.
 _PLAN = {}
-_GEOM = {}
+_GEOM = LRUCache(1024)
 
 
 def reduce_row_xcta(
@@ -193,17 +219,15 @@ def _reduce_row_xcta(
     if x.dim() == 1:
         x = x.view(1, -1)
     M, N = x.shape
-    cfg = _XctaConfig()
-    size = N * x.element_size()
-    if (
-        M == 1
-        and _hw.caps(x.device).cc == (10, 0)
-        and x.dtype in (torch.float16, torch.bfloat16, torch.float32)
-        and size in (256 << 20, 2 << 30)
-        and trait.nfields == 3
-        and welford_nouts(trait_key) == nouts
-    ):
-        cfg = _XctaConfig(subrow_target=16384)
+    cfg = select_xcta_config(
+        _hw.caps(x.device).cc,
+        x.dtype,
+        N,
+        M,
+        nouts=nouts,
+        welford_outs=welford_outputs(trait),
+        acc_bits=max(dt.width for dt in trait.fdtypes),
+    )
     block = cfg.block if block is None else block
     subrow_target = cfg.subrow_target if subrow_target is None else subrow_target
 
@@ -220,8 +244,9 @@ def _reduce_row_xcta(
         _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
         device,
     )
-    geom = _GEOM.get(gkey)
-    if geom is None and gkey not in _GEOM:
+    # One lookup: a concurrent insert or eviction must not read as a refusal.
+    geom = _GEOM.get(gkey, _MISS)
+    if geom is _MISS:
         geom = _GEOM[gkey] = _build_geom(
             trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_target
         )
@@ -236,8 +261,10 @@ def _reduce_row_xcta(
         for f in range(trait.nfields)
     ]
     outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes]
-    fn(
-        _L.read_only(sub),
+    _L.launch(
+        fn,
+        device,
+        sub,
         list(parts),
         list(outs),
         rexts,
@@ -248,7 +275,6 @@ def _reduce_row_xcta(
         pn,
         s1nc,
         s1nw,
-        _L.stream(device),
     )
     # resize_ preserves ATen's non-aliasing scalar output; view-ness is observable.
     if flatten and M == 1:

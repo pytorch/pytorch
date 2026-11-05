@@ -48,24 +48,24 @@ class TestFullInnerTreeConfig(TestCase):
             1,
             field_bits=(32,) * fields,
             out_dtypes=(output,) * nouts,
+            welford_outs=nouts if fields == 3 else 0,
             alignment=16,
             contiguous=True,
         )
         welford = fields == 3
-        self.assertEqual(
-            arch,
-            rt._ItreeArch(
-                4,
-                32,
-                16,
-                False,
-                32,
-                2048,
-                unroll,
-                uniform_count=welford,
-                combine_weights=welford,
-            ),
+        want = rt._ItreeArch(
+            split_stage_rows=4,
+            combine_rpb=32,
+            combine_group_bytes=16,
+            stage_rows=False,
+            combine_async=32,
+            combine_max=2048,
+            combine_unroll=unroll,
+            lowp_thread_elems=32,
+            uniform_count=welford,
+            combine_weights=welford,
         )
+        self.assertEqual(arch, want)
 
     @parametrize(
         "updates",
@@ -73,6 +73,11 @@ class TestFullInnerTreeConfig(TestCase):
             {"cc": (10, 0)},
             {"N": (256 << 20) // 4 - 1},
             {"trait_key": "mean"},
+            {"dtype": torch.float16, "N": (256 << 20) // 2},
+            {"M": 2},
+            {"contiguous": False},
+            {"alignment": 8},
+            {"out_dtypes": (torch.bfloat16,)},
         ],
     )
     def test_sm107_full_guards(self, updates):
@@ -87,9 +92,40 @@ class TestFullInnerTreeConfig(TestCase):
             M=1,
             field_bits=(32,),
             out_dtypes=(torch.float32,),
+            welford_outs=0,
             alignment=16,
             contiguous=True,
         )
+        self.assertIsNotNone(rt.select_full_itree_arch(**args))
+        args.update(updates)
+        self.assertIsNone(rt.select_full_itree_arch(**args))
+
+    @parametrize(
+        "updates",
+        [
+            {"field_bits": (64,) * 3},
+            {"welford_outs": 0},
+            {"out_dtypes": (torch.bfloat16,)},
+            {"out_dtypes": (torch.float32,) * 2},
+        ],
+    )
+    def test_sm107_full_welford_guards(self, updates):
+        """Keep Welford calls outside the SM107 Welford contract on the generic path."""
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        args = dict(
+            cc=(10, 7),
+            dtype=torch.float32,
+            trait_key="var1",
+            N=(256 << 20) // 4,
+            M=1,
+            field_bits=(32,) * 3,
+            out_dtypes=(torch.float32,),
+            welford_outs=1,
+            alignment=16,
+            contiguous=True,
+        )
+        self.assertIsNotNone(rt.select_full_itree_arch(**args))
         args.update(updates)
         self.assertIsNone(rt.select_full_itree_arch(**args))
 
