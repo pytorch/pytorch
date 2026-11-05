@@ -1746,14 +1746,21 @@ def CUDAExtension(name, sources, *args, **kwargs):
     dlink_libraries = kwargs.get('dlink_libraries', [])
     dlink = kwargs.get('dlink', False) or dlink_libraries
     if dlink and IS_HIP_EXTENSION:
+        if IS_WINDOWS:
+            raise RuntimeError(
+                "dlink=True is not supported for ROCm extensions on Windows: the MSVC "
+                "linker cannot do the HIP device link.")
         # ROCm has no separate device-link step: compile with relocatable device
         # code and let hipcc do the device link as part of the final host link.
         extra_compile_args = kwargs.get('extra_compile_args', {})
         extra_compile_args['nvcc'] = list(extra_compile_args.get('nvcc', [])) + ['-fgpu-rdc']
         kwargs['extra_compile_args'] = extra_compile_args
+        # The legacy offload driver (default for -fgpu-rdc on ROCm 7.0) device-links only
+        # for the archs on the link line, so pass the same --offload-arch flags as the compile.
         kwargs['extra_link_args'] = (
             list(kwargs.get('extra_link_args', []))
             + ['-fgpu-rdc', '--hip-link']
+            + [f for f in _get_rocm_arch_flags(extra_compile_args['nvcc']) if f.startswith('--offload-arch')]
         )
         kwargs['libraries'] = list(kwargs.get('libraries', [])) + list(dlink_libraries)
     elif dlink:
