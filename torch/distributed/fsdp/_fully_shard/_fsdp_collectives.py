@@ -417,12 +417,16 @@ def foreach_all_gather(
         )
         del param_all_gather_inputs, all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
+    comm_kwargs = {}
+    if layout.comm_type is not None:  # its comm selects the output with the metadata
+        comm_kwargs["output_metadata"] = output_metadata
     with device_handle.stream(all_gather_stream):
         all_gather_work = all_gather_comm(
             output_tensor=all_gather_output,
             input_tensor=all_gather_input,
             group=group,
             async_op=async_op,
+            **comm_kwargs,
         )
         all_gather_event = all_gather_stream.record_event()
     return AllGatherResult(

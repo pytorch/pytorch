@@ -4,8 +4,6 @@ from __future__ import annotations
 import contextlib
 import functools
 import logging
-import threading
-import weakref
 from dataclasses import dataclass
 from typing import Any, Literal, NamedTuple, NoReturn, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
@@ -68,20 +66,6 @@ logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
 _ModuleToHandleDict = dict[nn.Module, RemovableHandle]  # for state dict
 _GradInputs = TypeVarTuple("_GradInputs")
-
-# Parameter groups, for setters that check state shared across groups, such as a
-# comm that another group calls. Weak references without callbacks keep every
-# change to the set under the lock, which covers ranks run as threads.
-_param_group_refs: set[weakref.ref[FSDPParamGroup]] = set()
-_param_group_refs_lock = threading.Lock()
-
-
-def _get_live_param_groups() -> list[FSDPParamGroup]:
-    with _param_group_refs_lock:
-        _param_group_refs.difference_update(
-            [ref for ref in _param_group_refs if ref() is None]
-        )
-        return [group for ref in _param_group_refs if (group := ref()) is not None]
 
 
 """
@@ -351,8 +335,6 @@ class FSDPParamGroup:
         # physical block while this layer's AR or hook is still in flight. See
         # AllReduceState docstring and regression test PR #180900.
         self._all_reduce_state: AllReduceState | None = None
-        with _param_group_refs_lock:
-            _param_group_refs.add(weakref.ref(self))
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
@@ -436,21 +418,25 @@ class FSDPParamGroup:
                 )
             )
 
-    def _check_comm_swap(self, setter: str, comm_type: type) -> None:
-        if self._all_gather_layout.comm is not None:
-            raise RuntimeError(
+    def _check_layout_comm(self, layout: AllGatherLayout, comm_type: type) -> None:
+        if layout.comm_type is not None and not issubclass(comm_type, layout.comm_type):
+            raise ValueError(
                 self._with_fqn(
-                    f"cannot call {setter} while the all-gather layout is bound to "
-                    "its comm; install another layout first"
+                    f"all-gather layout {type(layout).__name__} requires a "
+                    f"{layout.comm_type.__name__} comm, not {comm_type.__name__}; "
+                    "install one with set_custom_all_gather() before the layout"
                 )
             )
+
+    def _check_comm_swap(self, comm_type: type) -> None:
+        self._check_layout_comm(self._all_gather_layout, comm_type)
         if type(self._all_gather_comm) is comm_type:
             return  # FSDP's comms of one type produce the same outputs
         if not isinstance(self._all_gather_layout, DefaultAllGatherLayout):
             self._check_all_gather_replaceable()
 
     def set_symm_mem(self, backend: Literal["NCCL"] = "NCCL") -> None:
-        self._check_comm_swap("set_symm_mem_for_comm()", SymmMemAllGather)
+        self._check_comm_swap(SymmMemAllGather)
         if not isinstance(self._all_gather_comm, (DefaultAllGather | SymmMemAllGather)):
             raise AssertionError(
                 "cannot call set_symm_mem() "
@@ -478,8 +464,7 @@ class FSDPParamGroup:
         the staging buffers for collective comms.
         """
         comm_type = ProcessGroupAllocAllGather if enable else DefaultAllGather
-        setter = "set_allocate_memory_from_process_group_for_comm()"
-        self._check_comm_swap(setter, comm_type)
+        self._check_comm_swap(comm_type)
         if not isinstance(
             self._all_gather_comm, (DefaultAllGather | ProcessGroupAllocAllGather)
         ):
