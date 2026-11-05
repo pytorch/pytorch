@@ -943,6 +943,60 @@ class TestTunableOpPretune(TestCase):
         g.output(node)
         return torch.fx.GraphModule(torch.nn.Module(), g)
 
+    def _conv_gm(self, device, kernel=1, stride=1, groups=1, padding=0):
+        """A one-node conv graph, argument for argument as make_fx emits one."""
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        w = g.placeholder("w")
+        w.meta["val"] = mock.Mock(shape=torch.Size([4, 4, kernel, kernel]))
+        node = g.call_function(
+            torch.ops.aten.convolution.default,
+            # input, weight, bias, stride, padding, dilation, transposed,
+            # output_padding, groups
+            (x, w, None, [stride, stride], [padding, padding], [1, 1],
+             False, [0, 0], groups),
+        )
+        node.meta["val"] = mock.Mock(device=torch.device(device))
+        g.output(node)
+        return torch.fx.GraphModule(torch.nn.Module(), g)
+
+    @parametrize(
+        "kwargs,autotune,expect_bypass",
+        (
+            # A 1x1 conv is lowered to mm/addmm, so it is a routed GEMM that
+            # the graph does not show as one.
+            ({"kernel": 1}, True, True),
+            # Everything the lowering's gate turns away stays cacheable.
+            ({"kernel": 3}, True, False),
+            ({"kernel": 1, "stride": 2}, True, False),
+            ({"kernel": 1, "groups": 2}, True, False),
+            ({"kernel": 1, "padding": 1}, True, False),
+            # The lowering only fires under one of the autotune configs.
+            ({"kernel": 1}, False, False),
+        ),
+    )
+    def test_only_a_1x1_conv_counts_as_a_routable_gemm(
+        self, kwargs, autotune, expect_bypass
+    ):
+        from torch._inductor.codecache import BypassFxGraphCache, FxGraphCache
+
+        gm = self._conv_gm("cuda", **kwargs)
+        with mock.patch("torch.cuda.is_available", return_value=True):
+            with config.patch(
+                {
+                    "cuda.autotune_tunableop_mode": "tune",
+                    "max_autotune": autotune,
+                    "conv_1x1_as_mm": False,
+                }
+            ):
+                try:
+                    FxGraphCache._check_can_cache(gm, require_shape_env=False)
+                except BypassFxGraphCache as e:
+                    bypassed = "TunableOp" in str(e)
+                else:
+                    bypassed = False
+        self.assertEqual(bypassed, expect_bypass)
+
     @parametrize(
         "mode,device,expect_bypass",
         (

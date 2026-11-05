@@ -150,27 +150,101 @@ def graph_has_routable_gemm(gm: Any) -> bool:
     with no GEMM. Keyed on the aten overload packet, the op the choice names
     in _TUNABLEOP_ROUTING_CHOICES lower to.
     """
-    aten = torch.ops.aten
-    # Packets, not overloads: mm_dtype is aten.mm.dtype_out and bias_addmm
-    # lowers from an addmm node, so the packet covers both.
-    routable = {
-        aten.mm,
-        aten.addmm,
-        aten.bmm,
-        aten.baddbmm,
-        aten._scaled_mm,
-        aten._scaled_mm_v2,
-    }
+    routable = _routable_packets()
+    conv = torch.ops.aten.convolution
     for module in gm.modules():
         if not isinstance(module, torch.fx.GraphModule):
             continue
         for node in module.graph.nodes:
-            if getattr(node.target, "overloadpacket", None) not in routable:
+            packet = getattr(node.target, "overloadpacket", None)
+            if packet not in routable:
+                continue
+            # Most convs stay convs. Only the ones the lowering rewrites into
+            # an mm are GEMMs the graph does not show as GEMMs.
+            if packet is conv and not _conv_lowers_to_mm(node):
                 continue
             val = node.meta.get("val")
             if getattr(getattr(val, "device", None), "type", None) == "cuda":
                 return True
     return False
+
+
+def _every(values: Any, expected: int) -> bool:
+    """Whether every element is known to equal `expected`.
+
+    Symbolic elements count as equal: the caller uses this to rule a conv
+    out, and ruling one out wrongly means its tuning silently never happens.
+    Keeping it costs a recompile, which is the cheaper way to be wrong.
+    """
+    try:
+        return all(int(v) == expected for v in values)
+    except (TypeError, ValueError):
+        return True
+
+
+def _conv_lowers_to_mm(node: Any) -> bool:
+    """Whether this aten.convolution node becomes an mm during lowering.
+
+    Mirrors the gate in the convolution lowering (torch/_inductor/kernel/
+    conv.py), which rewrites a 1x1 conv as L[aten.mm] or L[aten.addmm] --
+    choices TunableOp then routes like any other GEMM. Reads the arguments
+    the lowering reads rather than re-deriving them:
+
+        convolution(input, weight, bias, stride, padding, dilation,
+                    transposed, output_padding, groups)
+
+    The lowering's last condition, that the input is non-empty, is left out:
+    it only excludes a degenerate graph, and over-bypassing costs a recompile
+    while under-bypassing tunes nothing and says nothing.
+    """
+    if not (
+        config.conv_1x1_as_mm or config.max_autotune or config.max_autotune_gemm
+    ):
+        return False
+    args = node.args
+    if len(args) < 9:
+        # Not the shape this knows how to rule out; let the bypass stand.
+        return True
+    weight_val = getattr(args[1], "meta", {}).get("val")
+    kernel = getattr(weight_val, "shape", None)
+    return (
+        _every(() if kernel is None else kernel[2:], 1)  # 1x1 spatial extent
+        and _every(args[3], 1)  # stride
+        and _every(args[4], 0)  # padding
+        and _every(args[5], 1)  # dilation
+        and args[6] is not True  # transposed
+        and _every(args[7], 0)  # output_padding
+        and _every((args[8],), 1)  # groups
+    )
+
+
+_ROUTABLE_PACKETS: Any = None
+
+
+def _routable_packets() -> Any:
+    """aten packets whose lowering can put a GEMM in front of the worker.
+
+    Packets, not overloads: mm_dtype is aten.mm.dtype_out and bias_addmm
+    lowers from an addmm node, so the packet covers both. Built once rather
+    than per call, and kept beside _TUNABLEOP_ROUTING_CHOICES, the
+    choice-name set these are the graph-level counterpart of.
+    """
+    global _ROUTABLE_PACKETS
+    if _ROUTABLE_PACKETS is None:
+        aten = torch.ops.aten
+        _ROUTABLE_PACKETS = frozenset(
+            {
+                aten.mm,
+                aten.addmm,
+                aten.bmm,
+                aten.baddbmm,
+                aten._scaled_mm,
+                aten._scaled_mm_v2,
+                # Routable only when _conv_lowers_to_mm says so.
+                aten.convolution,
+            }
+        )
+    return _ROUTABLE_PACKETS
 
 
 def routes_to_worker(choices: list[Any]) -> bool:
