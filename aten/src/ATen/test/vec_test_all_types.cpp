@@ -1,5 +1,6 @@
 #include <ATen/test/vec_test_all_types.h>
 #include <c10/util/irange.h>
+#include <array>
 namespace {
 #if GTEST_HAS_TYPED_TEST
     template <typename T>
@@ -1155,10 +1156,9 @@ namespace {
         EXPECT_EQ(local_fmadd(a, b, c), expected);
 
         const auto result = at::vec::fmadd(vdouble(a), vdouble(b), vdouble(c));
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-        CACHE_ALIGN double actual[vdouble::size()];
-        result.store(actual);
-        for (const auto i : c10::irange(vdouble::size())) {
+        CACHE_ALIGN std::array<double, vdouble::size()> actual;
+        result.store(actual.data());
+        for (const auto i : c10::irange(actual.size())) {
             EXPECT_EQ(actual[i], expected) << "lane=" << i;
         }
     }
