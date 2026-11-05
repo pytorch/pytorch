@@ -78,6 +78,18 @@ def _function(
     return (row.mode_fns or {}).get(mode), row.promotion
 
 
+def _result_spec(
+    row: PointwiseDef, ins: tuple[torch.Tensor, ...], ref: torch.Tensor
+) -> tuple[tuple[int, ...], torch.dtype]:
+    # Singleton dimensions still participate in broadcasting and dtype promotion.
+    shape = (1,) * (max(t.ndim for t in ins) - ref.ndim) + tuple(ref.shape)
+    dtype = ref.dtype
+    for t in ins:
+        if t.ndim != 0 and t.dtype != dtype:
+            dtype = torch.promote_types(dtype, t.dtype)
+    return shape, torch.bool if row.promotion is PromotionKind.ALWAYS_BOOL else dtype
+
+
 def _common_inputs(
     row: PointwiseDef,
     variant: PointwiseVariant,
@@ -88,9 +100,11 @@ def _common_inputs(
     ins = args[: row.nin]
     if any(not isinstance(t, torch.Tensor) or cap.is_traced(t) for t in ins):
         return None
-    if all(t.is_contiguous() for t in ins):
+    if all(t.is_contiguous() for t in ins) and all(t.numel() != 1 for t in ins):
         return None
-    ref = ins[0]
+    ref = next((t for t in ins if t.numel() != 1), None)
+    if ref is None:
+        return None
     target = kwargs.get("out") if variant.out_from == "out_kw" else None
     if variant.out_from == "out_kw" and (
         not isinstance(target, torch.Tensor) or cap.is_traced(target)
@@ -106,10 +120,7 @@ def _layout_cond(
     kwargs: dict[str, Any],
 ) -> bool:
     ins, ref, target = inputs
-    shape = tuple(ref.shape)
-    result_dtype = (
-        torch.bool if row.promotion is PromotionKind.ALWAYS_BOOL else ref.dtype
-    )
+    shape, result_dtype = _result_spec(row, ins, ref)
     dtypes = _SUPPORTED if row.dtypes is None else row.dtypes
     if not K.can_run(ins, shape, result_dtype, target, dtypes=dtypes):
         return False
@@ -252,13 +263,10 @@ def _impl(
     row: PointwiseDef, variant: PointwiseVariant, *args: Any, **kwargs: Any
 ) -> torch.Tensor:
     ins = args[: row.nin]
-    ref = ins[0]
+    ref = next(t for t in ins if t.numel() != 1)
     scalars = _scalars(row, args, kwargs, ref.dtype)
     fn_name, _ = _function(row, args, kwargs)
-    shape = tuple(ref.shape)
-    result_dtype = (
-        torch.bool if row.promotion is PromotionKind.ALWAYS_BOOL else ref.dtype
-    )
+    shape, result_dtype = _result_spec(row, ins, ref)
     out = (
         kwargs["out"]
         if variant.out_from == "out_kw"

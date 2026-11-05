@@ -6,24 +6,32 @@ from typing import NamedTuple
 
 from ._limits import (
     _BARRIER_BYTES,
+    _DEFAULT_VECTOR_EPT,
     _MAX_GRID_YZ,
     _MAX_INDEX,
+    _MAX_VECTOR_BYTES,
+    _MAX_VECTOR_ELEMENTS,
     _MIN_ALIGNMENT,
+    _SM107_MIN_IO_BYTES,
     _SMEM_ALIGNMENT,
     _THREADS_PER_BLOCK,
     _TILES_PER_BLOCK,
     _TMA_ALIGNMENT,
     _TMA_BOX_SIDE,
+    _UNROLLED_EPT,
+    _VECTOR_BYTES,
+    _VECTOR_INPUT_BYTES_PER_THREAD,
 )
 
 
 class _TmaConfig(NamedTuple):
-    # Tensor flags describe orientation relative to output.
-    transposed: tuple[bool, ...]
+    # None denotes a scalar; tensor flags describe orientation relative to output.
+    transposed: tuple[bool | None, ...]
     box: int
     block: int
     input_views: tuple[tuple[tuple[int, ...], tuple[int, ...]], ...]
     output_view: tuple[tuple[int, ...], tuple[int, ...]]
+    ept: int = 0
 
 
 class _OperandLayout(NamedTuple):
@@ -72,6 +80,50 @@ def _contiguous_strides(shape: tuple[int, ...]) -> tuple[int, ...]:
         strides[dim] = stride
         stride *= shape[dim]
     return tuple(strides)
+
+
+def _scalar_vector_config(
+    inputs: tuple[_OperandLayout, ...],
+    shape: tuple[int, ...],
+    output_address: int,
+    cc: tuple[int, int],
+    out_bytes: int,
+) -> _TmaConfig | None:
+    tensors = [t for t in inputs if t.shape]
+    if len(tensors) == len(inputs):
+        return None
+    n = math.prod(shape)
+    input_bytes = sum(t.element_bytes for t in tensors)
+    # Match CUDALoops.cuh: default output vector budget, wider SM107 budget,
+    # pointer-alignment cap, then the 128-input-bytes/thread policy at vec=8.
+    large = cc == (10, 7) and n * (input_bytes + out_bytes) >= _SM107_MIN_IO_BYTES
+    vec = min(_MAX_VECTOR_ELEMENTS, _VECTOR_BYTES // out_bytes)
+    if large:
+        vec = min(
+            _MAX_VECTOR_ELEMENTS,
+            _MAX_VECTOR_BYTES // max(out_bytes, *(t.element_bytes for t in tensors)),
+        )
+    while vec > 1 and (
+        output_address % (vec * out_bytes) != 0
+        or any(t.address_mod % (vec * t.element_bytes) != 0 for t in tensors)
+    ):
+        vec //= 2
+    ept = _UNROLLED_EPT if vec == 1 else _DEFAULT_VECTOR_EPT
+    if large and vec == _MAX_VECTOR_ELEMENTS:
+        rounded_bytes = 1 << (input_bytes - 1).bit_length()
+        candidate = _VECTOR_INPUT_BYTES_PER_THREAD // rounded_bytes
+        if candidate >= _DEFAULT_VECTOR_EPT:
+            ept = candidate
+    # Flat views let the last block handle a scalar tail without padding storage.
+    view = ((n,), (1,))
+    return _TmaConfig(
+        tuple(False if t.shape else None for t in inputs),
+        vec,
+        _THREADS_PER_BLOCK,
+        tuple(view if t.shape else ((1,), (1,)) for t in inputs),
+        view,
+        ept,
+    )
 
 
 def _transpose_split(
@@ -128,6 +180,8 @@ def _tma2d_config(
     # Both have shape (2, 3, 32, 64); their strides are (6144, 32, 1, 96)
     # and (8192, 32, 1, 128). The gap in y is between its dense row groups.
     # The steps below derive the 2-D input views and a (batch, row, col) output.
+    operands = inputs
+    inputs = tuple(t for t in inputs if t.shape)
     # 1. Select 32x32-element boxes, 128 threads, and check pipeline storage.
     geometry = _tma_geometry(inputs[0].element_bytes)
     if geometry is None:
@@ -213,11 +267,12 @@ def _tma2d_config(
         output_batch_stride = (
             output_strides[batch_dims[0]] if batch_dims else shape_b * output_stride_b
         )
+        masks, views = iter(transposed), iter(input_views)
         return _TmaConfig(
-            tuple(transposed),
+            tuple(next(masks) if t.shape else None for t in operands),
             box,
             block,
-            tuple(input_views),
+            tuple(next(views) if t.shape else ((1,), (1,)) for t in operands),
             (
                 (batch, shape_b, shape_a),
                 (output_batch_stride, output_stride_b, output_stride_a),
@@ -232,20 +287,30 @@ def _layout_config(
     output_address: int,
     smem_limit: int,
     output_strides: tuple[int, ...] | None = None,
+    cc: tuple[int, int] = (10, 0),
+    out_bytes: int | None = None,
 ) -> _TmaConfig | None:
     # Batch extents affect views and launch limits, so this decision is not cached.
+    tensors = tuple(t for t in inputs if t.shape)
     if (
-        not inputs
+        not tensors
         or not 0 < math.prod(shape) <= _MAX_INDEX
-        or any(t.shape != shape for t in inputs)
-        or all(t.contiguous for t in inputs)
+        or any(t.shape != shape for t in tensors)
     ):
         return None
-    if len(shape) < 2 or output_address != 0:
+    if all(t.contiguous for t in tensors):
+        return _scalar_vector_config(
+            inputs,
+            shape,
+            output_address,
+            cc,
+            tensors[0].element_bytes if out_bytes is None else out_bytes,
+        )
+    if len(shape) < 2 or output_address % _MIN_ALIGNMENT != 0:
         return None
     if any(
         sum((n - 1) * s for n, s in zip(t.shape, t.strides)) > _MAX_INDEX
-        for t in inputs
+        for t in tensors
     ):
         return None
     return _tma2d_config(inputs, shape, smem_limit, output_strides)
