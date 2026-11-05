@@ -1680,6 +1680,13 @@ CUSTOM_HANDLERS = {
 PYTEST_SKIP_RETRIES = {"test_public_bindings"}
 
 
+def parse_shard_head_start(value: str) -> tuple[int, float]:
+    shard, sep, seconds = value.partition("=")
+    if not sep:
+        raise argparse.ArgumentTypeError(f"expected SHARD=SECONDS, got {value!r}")
+    return int(shard), float(seconds)
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Run the PyTorch unit test suite",
@@ -1916,6 +1923,16 @@ def parse_args():
         help="runs a shard of the tests (taking into account other selections), e.g., "
         "--shard 2 3 will break up the selected tests into 3 shards and run the tests "
         "in the 2nd shard (the first number should not exceed the second)",
+    )
+    parser.add_argument(
+        "--shard-head-start",
+        nargs="+",
+        type=parse_shard_head_start,
+        default=[],
+        metavar="SHARD=SECONDS",
+        help="seconds of work a shard runs outside this invocation (e.g. extra "
+        "test.sh steps), so sharding gives it fewer tests; every shard must pass "
+        "the same values",
     )
     parser.add_argument(
         "--pytest-xdist-workers",
@@ -2396,6 +2413,14 @@ def do_sharding(
 
     uses_xdist = options.pytest_xdist_workers is not None
 
+    head_start = [0.0] * num_shards
+    for shard, seconds in options.shard_head_start:
+        if not 1 <= shard <= num_shards:
+            raise AssertionError(
+                f"--shard-head-start shard {shard} is not in 1..{num_shards}"
+            )
+        head_start[shard - 1] = seconds
+
     # Xdist owns test-level concurrency, while test files run sequentially.
     shards = calculate_shards(
         num_shards,
@@ -2408,6 +2433,7 @@ def do_sharding(
         xdist_workers=lambda file: serial_file_xdist_workers(
             file, options, NUM_PROCS_FOR_SHARDING_CALC
         ),
+        head_start=head_start,
     )
     return shards[which_shard - 1]
 

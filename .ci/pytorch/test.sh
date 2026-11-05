@@ -442,6 +442,15 @@ test_python_legacy_jit() {
   assert_git_not_dirty
 }
 
+# Seconds of extra work the generic multi-shard dispatch at the bottom of this
+# file runs on shards 1 and 2 besides test_python_shard. Measured only on the
+# cuda13.2 L4 default job, so other jobs pass none until calibrated. run_test.py
+# gives those shards fewer tests; every shard must pass the same values.
+DEFAULT_SHARD_HEAD_START=""
+if [[ "$BUILD_ENVIRONMENT" == linux-jammy-cuda13.2-py3.11-gcc11 && "$TEST_CONFIG" == default ]]; then
+  DEFAULT_SHARD_HEAD_START="1=660 2=480"
+fi
+
 test_python_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
@@ -453,7 +462,7 @@ test_python_shard() {
 
   # modify LD_LIBRARY_PATH to ensure it has the conda env.
   # This set of tests has been shown to be buggy without it for the split-build
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests $EXCLUDE_CLAUSE $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests $EXCLUDE_CLAUSE $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" ${PYTHON_SHARD_HEAD_START:+--shard-head-start $PYTHON_SHARD_HEAD_START} --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 
   assert_git_not_dirty
 }
@@ -1980,6 +1989,13 @@ test_distributed() {
   if [[ -n "$multigpu_filter" ]]; then
     filter_arg=(--multigpu-filter "$multigpu_filter")
   fi
+  # Shard 1 also runs the C++ / mpiexec tests below, so run_test.py gives it
+  # fewer Python tests. Measured (~3 min) only on the cuda13.2 T4 distributed
+  # job; other jobs pass none until calibrated. Same values on every shard.
+  local head_start_arg=()
+  if [[ "$multigpu_filter" != "not-multigpu" && "$BUILD_ENVIRONMENT" == linux-jammy-cuda13.2-py3.11-gcc11 && "$TEST_CONFIG" == distributed ]]; then
+    head_start_arg=(--shard-head-start "1=190")
+  fi
   echo "Testing distributed python tests (${multigpu_filter:-all})"
   # Same NVSHMEM team limit as test_b200_symm_mem; test_nvshmem.py runs here too.
   export NVSHMEM_MAX_TEAMS=512
@@ -1988,7 +2004,7 @@ test_distributed() {
     install_flydsl
   fi
   # shellcheck disable=SC2086
-  time python test/run_test.py --distributed-tests "${filter_arg[@]}" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
+  time python test/run_test.py --distributed-tests "${filter_arg[@]}" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" "${head_start_arg[@]}" $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty
 
   # The C++ / mpiexec distributed tests below require multiple GPUs.
@@ -2839,7 +2855,7 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_lazy_tensor_meta_reference_disabled
   test_without_numpy
   install_torchvision
-  test_python_shard 1
+  PYTHON_SHARD_HEAD_START="$DEFAULT_SHARD_HEAD_START" test_python_shard 1
   test_aten
   test_libtorch 1
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
@@ -2850,7 +2866,7 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_distributed_single_gpu
   fi
   install_torchvision
-  test_python_shard 2
+  PYTHON_SHARD_HEAD_START="$DEFAULT_SHARD_HEAD_START" test_python_shard 2
   test_libtorch 2
   test_aot_compilation
   test_custom_script_ops
@@ -2863,7 +2879,7 @@ elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
     test_distributed_single_gpu
   fi
   install_torchvision
-  test_python_shard "$SHARD_NUMBER"
+  PYTHON_SHARD_HEAD_START="$DEFAULT_SHARD_HEAD_START" test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
