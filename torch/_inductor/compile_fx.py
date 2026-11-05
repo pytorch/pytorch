@@ -2987,9 +2987,13 @@ def create_compiler_config_extra(
     # Disabling fwd disables bwd (copying activations isn't profitable),
     # so cudagraphs_bwd_override is only needed for fwd=True / bwd=False.
     if cudagraph_annotation is not None:
+        # cpp_wrapper cannot partition, so get_cpp_wrapper_config turned cudagraphs
+        # off under graph_partition, and the annotation does not turn them back on.
+        cpp_wrapper_refuses = config.cpp_wrapper and config.graph_partition
         if (
             cudagraph_annotation.fwd is not None
             and cudagraph_annotation.fwd != config.triton.cudagraphs
+            and not (cudagraph_annotation.fwd and cpp_wrapper_refuses)
         ):
             top_level_cudagraphs = cudagraph_annotation.fwd
             if cudagraph_annotation.fwd:
