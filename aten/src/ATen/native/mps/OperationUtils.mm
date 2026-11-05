@@ -1501,8 +1501,15 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
                                              static_cast<int>(input.scalar_type()),
                                              static_cast<int>(other.scalar_type()),
                                              static_cast<int>(out.scalar_type())};
-        const auto sizes = dimDividers(iter.shape());
-        mtl_setArgs<3>(computeEncoder, sizes, iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
+        if (iter.ndim() == 0) {
+          // 0-dim iterator has no shape/strides to bind, so describe it as a 1-element 1-D one
+          constexpr std::array<int64_t, 1> one = {1}, zero = {0};
+          ndim_and_types[0] = 1;
+          mtl_setArgs<3>(computeEncoder, dimDividers(one), zero, zero, zero, ndim_and_types);
+        } else {
+          const auto sizes = dimDividers(iter.shape());
+          mtl_setArgs<3>(computeEncoder, sizes, iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
+        }
       } else if (use_scalar_kernel) {
         // Rebind the scalar in case we promoted it above; harmless when we
         // didn't, since this matches what bind_iter_tensors already did.
