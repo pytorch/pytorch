@@ -467,6 +467,25 @@ class _PyLibCupti:
             "cuptiActivityEnableHWTrace",
         )
 
+    def activity_enable_hes(self) -> None:
+        """Turn on HES (hardware event) timestamps process-wide through
+        CUPTI_ACTIVITY_ATTR_ENABLE_HES, the v2 form of cuptiActivityEnableHWTrace. Must be
+        set before any subscriber enables an activity kind. libcupti 13.5 rejects
+        user-defined records (CUPTI_ERROR_NOT_COMPATIBLE) once HES was turned on through
+        cuptiActivityEnableHWTrace, but not through this attribute. Falls back to
+        cuptiActivityEnableHWTrace when the attribute is unavailable or rejected, so an
+        unsupported platform still reports CUPTI_ERROR_NOT_SUPPORTED."""
+        attr = getattr(ActivityAttr, "ENABLE_HES", None)
+        if attr is not None:
+            enabled = ctypes.c_uint8(1)
+            size = ctypes.c_size_t(1)
+            rc = self._lib.cuptiActivitySetAttribute_v2(
+                None, attr, ctypes.byref(size), ctypes.byref(enabled)
+            )
+            if rc == CUPTI_SUCCESS:
+                return
+        self.activity_enable_hw_trace(True)
+
     def finalize(self) -> None:
         """cuptiFinalize -- detach and release ALL of CUPTI process-wide. This is a
         global, heavy reset for explicit *synchronous* teardown: e.g. releasing a
