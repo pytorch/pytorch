@@ -150,7 +150,10 @@ PY
 cat /torch.lock /deps-pinned.lock /deps-floating.lock
 EOF
 
-FROM ${BASE_IMAGE} as official
+# Everything `official` and `dev` share. Neither the nightly build args
+# (PYTORCH_VERSION, TRITON_VERSION) nor anything else that changes every night is
+# declared here, so no RUN below, and none in `dev`, has them in its cache key.
+FROM ${BASE_IMAGE} as official-deps
 ARG TARGETPLATFORM
 ARG CUDA_VERSION
 ARG CUDA_PATH=cu121
@@ -211,18 +214,20 @@ RUN IS_CUDA=$(python3 -c 'import torch ; print(torch.cuda._is_compiled())'); \
         exit 1; \
     fi
 
-# Declared only now. A build arg that is in scope for a RUN can invalidate its
-# cache, and these change on every nightly build.
-ARG PYTORCH_VERSION
-ARG TRITON_VERSION
 ENV NVIDIA_VISIBLE_DEVICES all
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
 ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
-ENV PYTORCH_VERSION ${PYTORCH_VERSION}
 WORKDIR /workspace
 
-FROM official as dev
+FROM official-deps as official
+# Declared only now. A build arg that is in scope for a RUN can invalidate its
+# cache, and these change on every nightly build.
+ARG PYTORCH_VERSION
+ARG TRITON_VERSION
+ENV PYTORCH_VERSION ${PYTORCH_VERSION}
+
+FROM official-deps as dev
 ARG CUDA_VERSION
 ARG BUILD_TYPE
 
@@ -254,3 +259,10 @@ ENV CUDA_HOME=/usr/local/cuda
 COPY --from=python-deps /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=python-deps /usr/local/bin /usr/local/bin
 COPY --from=submodule-update /opt/pytorch /opt/pytorch
+
+# Declared last, for the same reason as in `official`: in scope earlier they
+# would be part of the cache key of the CUDA toolkit install above (4+ GB), which
+# would then be redone, together with the COPYs after it, every night.
+ARG PYTORCH_VERSION
+ARG TRITON_VERSION
+ENV PYTORCH_VERSION ${PYTORCH_VERSION}
