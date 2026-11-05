@@ -739,6 +739,104 @@ class TestCustomOp(CustomOpTestCaseBase):
             self.assertEqual(events[0].input_shapes, [[3]])
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_python_key_matches_cpp(self):
+        # The fast path runs a TorchDispatchMode or a subclass's
+        # __torch_dispatch__ itself. What the handlers see must match the C++
+        # Dispatcher's Python key: the arguments, the dispatch keys excluded
+        # while they run, and the dispatch state enable_reentrant_dispatch
+        # restores (from before g's Autograd kernel).
+        @torch.library.custom_op(f"{self.test_ns}::python_key", mutates_args=())
+        def f(x: Tensor, n: int = 2, *, scale: float = 1.0) -> list[Tensor]:
+            return [x * n * scale]
+
+        @torch.library.custom_op(f"{self.test_ns}::python_key_grad", mutates_args=())
+        def g(x: Tensor) -> Tensor:
+            return x.clone()
+
+        g.register_autograd(lambda ctx, grad: grad)
+        ops = (f._opoverload, g._opoverload)
+        seen = []
+
+        def record(who, func, types, args, kwargs):
+            if func in ops:
+                excluded = str(torch._C._dispatch_tls_local_exclude_set())
+                with torch.overrides.enable_reentrant_dispatch():
+                    reentrant = str(torch._C._dispatch_tls_local_exclude_set())
+                args = pytree.tree_map_only(Tensor, lambda t: type(t).__name__, args)
+                seen.append((who, types, args, kwargs, excluded, reentrant))
+
+        class Mode(torch.utils._python_dispatch.TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                record("mode", func, types, args, kwargs)
+                return func(*args, **(kwargs or {}))
+
+        class Sub(torch.Tensor):
+            @staticmethod
+            def __new__(cls, t):
+                return torch.Tensor._make_wrapper_subclass(cls, t.shape, dtype=t.dtype)
+
+            def __init__(self, t):
+                self.t = t
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                record("subclass", func, types, args, kwargs)
+                args = pytree.tree_map_only(Sub, lambda s: s.t, args)
+                return func(*args, **(kwargs or {}))
+
+        x = torch.randn(3)
+        xg = torch.randn(3, requires_grad=True)
+        calls = {
+            "kwargs": (Mode, lambda: f(x, scale=3.0)),
+            "subclass": (contextlib.nullcontext, lambda: f(Sub(x), 3)),
+            "mode, then subclass": (Mode, lambda: f(Sub(x))),
+            # Below g's Autograd kernel, which the fast path skips for x and
+            # runs for xg.
+            "autograd skipped": (Mode, lambda: g(x)),
+            "autograd": (Mode, lambda: g(xg)),
+        }
+        for name, (ctx, call) in calls.items():
+            results = []
+            for enabled in (True, False):
+                for op in ops:
+                    op._enable_pyobj_dispatch(enabled)
+                seen.clear()
+                with ctx():
+                    out = call()
+                results.append((list(seen), out))
+            self.assertEqual(results[0], results[1], msg=name)
+            if name == "mode, then subclass":
+                order = [who for who, *_ in results[0][0]]
+                self.assertEqual(order, ["mode", "subclass"])
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_python_key_profiler_events(self):
+        # Like the C++ Dispatcher's Python key, the fast path records a
+        # PythonDispatchMode event around the mode's __torch_dispatch__.
+        @torch.library.custom_op(f"{self.test_ns}::python_key_prof", mutates_args=())
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        class Mode(torch.utils._python_dispatch.TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return func(*args, **(kwargs or {}))
+
+        names = ("PythonDispatchMode", f"{self.test_ns}::python_key_prof")
+        x = torch.randn(3)
+        counts = []
+        for enabled in (True, False):
+            f._opoverload._enable_pyobj_dispatch(enabled)
+            with torch.profiler.profile() as prof, Mode():
+                f(x)
+            counts.append(
+                collections.Counter(e.name for e in prof.events() if e.name in names)
+            )
+        self.assertEqual(counts[0], counts[1])
+        self.assertEqual(counts[0]["PythonDispatchMode"], 1)
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     @scoped_load_inline
     def test_pyobject_dispatch_samples_callbacks_once(self, load_inline):
         # A sampled RecordFunction callback sees each call with its sampling

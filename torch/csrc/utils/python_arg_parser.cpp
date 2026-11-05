@@ -296,7 +296,7 @@ static py::object maybe_get_registered_torch_dispatch_rule(
   return result;
 }
 
-static bool is_dtensor(PyObject* obj) {
+bool is_dtensor(PyObject* obj) {
 #ifdef USE_DISTRIBUTED
   const py::handle dtensor = get_dtensor_class();
   if ((PyObject*)Py_TYPE(obj) == dtensor.ptr()) {

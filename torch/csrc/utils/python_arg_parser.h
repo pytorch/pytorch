@@ -1256,6 +1256,10 @@ auto handle_torch_function_no_python_arg_parser(
     TorchFunctionName torch_function_name = TorchFunctionName::TorchFunction)
     -> PyObject*;
 
+// Whether __torch_dispatch__ on obj goes to DTensor's C++ dispatch, which
+// needs opt_op and opt_stack above to avoid rebuilding the call from Python.
+bool is_dtensor(PyObject* obj);
+
 // Used for getters of Tensor properties
 auto handle_torch_function_getter(
     THPVariable* self,
