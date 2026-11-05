@@ -711,6 +711,13 @@ def _get_invoke_subgraph_graph_module(
     return subgraph if isinstance(subgraph, GraphModule) else None
 
 
+def _region_cudagraphs_override(nested_config: Any) -> bool | None:
+    patches = getattr(nested_config, "inductor_config_patches", None)
+    if patches is None or "triton.cudagraphs" not in patches:
+        return None
+    return bool(patches["triton.cudagraphs"])
+
+
 def _iter_subgraph_cudagraph_overrides(
     gm: GraphModule, *, backward: bool = False
 ) -> Generator[bool, None, None]:
@@ -725,15 +732,108 @@ def _iter_subgraph_cudagraph_overrides(
             nested_config = node.meta.get("custom", {}).get("nested_region_config")
             if backward:
                 nested_config = get_backward_nested_region_config(nested_config)
-            patches = getattr(nested_config, "inductor_config_patches", None)
-            if patches is not None and "triton.cudagraphs" in patches:
-                yield bool(patches["triton.cudagraphs"])
+            override = _region_cudagraphs_override(nested_config)
+            if override is not None:
+                yield override
 
 
 def _any_subgraph_enables_cudagraphs(
     gm: GraphModule, *, backward: bool = False
 ) -> bool:
     return any(_iter_subgraph_cudagraph_overrides(gm, backward=backward))
+
+
+def _validate_nested_region_cudagraphs(
+    gm: GraphModule,
+    *,
+    enclosing_forward: bool,
+    enclosing_backward: bool,
+    validate_forward: bool = True,
+    validate_backward: bool = True,
+    region_encloses: Callable[[torch.fx.Node], bool] | None = None,
+) -> None:
+    """Reject a nested region whose triton.cudagraphs differs from its scope.
+
+    Partitioning isolates only first-level regions, so a nested region cannot
+    get its own setting. region_encloses says whether a region opens a scope
+    (default: every region does); the regional_inductor backend compiles the
+    regions inside an uncompiled one on their own.
+    """
+    from torch._higher_order_ops.invoke_subgraph import (
+        get_backward_nested_region_config,
+    )
+
+    visited: OrderedSet[tuple[int, bool, bool, bool]] = OrderedSet()
+
+    def visit(
+        current_gm: GraphModule,
+        enclosing_forward: bool,
+        enclosing_backward: bool,
+        first_level: bool,
+    ) -> None:
+        key = (id(current_gm), enclosing_forward, enclosing_backward, first_level)
+        if key in visited:
+            return
+        visited.add(key)
+        invoke_subgraph_module_ids: OrderedSet[int] = OrderedSet()
+        for node in current_gm.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        ):
+            custom = node.meta.get("custom", {})
+            nested_config = custom.get("nested_region_config")
+            backward_config = get_backward_nested_region_config(nested_config)
+            forward_override = _region_cudagraphs_override(nested_config)
+            backward_override = _region_cudagraphs_override(backward_config)
+            if not first_level:
+                region_name = node.args[1] if len(node.args) > 1 else node.name
+                # A backward graph's regions already carry their backward config;
+                # see _specialize_nested_region_configs_for_backward.
+                inherited = (
+                    " (inherited from its forward; set triton.cudagraphs in "
+                    "bw_inductor_config_patches to override)"
+                    if backward_config is nested_config
+                    and not custom.get("nested_region_config_from_bw_patches")
+                    else ""
+                )
+                for direction, validate, value, enclosing in (
+                    ("forward", validate_forward, forward_override, enclosing_forward),
+                    (
+                        f"backward{inherited}",
+                        validate_backward,
+                        backward_override,
+                        enclosing_backward,
+                    ),
+                ):
+                    if validate and value is not None and value != enclosing:
+                        stack_trace = node.meta.get("stack_trace")
+                        raise ValueError(
+                            f"nested compile region {region_name!r} sets "
+                            f"triton.cudagraphs={value} for its {direction}, but the "
+                            f"region enclosing it resolves to {enclosing}; only "
+                            "first-level regions can set their own cudagraphs"
+                            + (f". Called from:\n{stack_trace}" if stack_trace else "")
+                        )
+
+            subgraph = _get_invoke_subgraph_graph_module(current_gm, node)
+            if subgraph is not None:
+                invoke_subgraph_module_ids.add(id(subgraph))
+                opens_scope = region_encloses is None or region_encloses(node)
+                visit(
+                    subgraph,
+                    enclosing_forward if forward_override is None else forward_override,
+                    (
+                        enclosing_backward
+                        if backward_override is None
+                        else backward_override
+                    ),
+                    first_level and not opens_scope,
+                )
+
+        for child in _iter_graph_referenced_submodules(current_gm):
+            if id(child) not in invoke_subgraph_module_ids:
+                visit(child, enclosing_forward, enclosing_backward, first_level)
+
+    visit(gm, enclosing_forward, enclosing_backward, True)
 
 
 def _any_subgraph_cudagraphs_preference_differs(
@@ -2966,8 +3066,12 @@ class CompilerConfigExtra:
 
 def create_compiler_config_extra(
     gm: GraphModule | GmWrapper,
+    example_inputs: Sequence[InputType] | None = None,
 ) -> CompilerConfigExtra:
-    """Compute state shared by the AOT forward and backward compilers."""
+    """Compute state shared by the AOT forward and backward compilers.
+
+    Without example_inputs, the graph is assumed to have a backward.
+    """
     dynamo_graph_metadata = gm.meta if isinstance(gm, GraphModule) else None
     pre_aot_graph = gm if isinstance(gm, GraphModule) else gm.gm
     cudagraph_annotation = (
@@ -3031,6 +3135,36 @@ def create_compiler_config_extra(
     has_regional_cudagraphs = (
         forward_has_regional_cudagraphs or backward_has_regional_cudagraphs
     )
+    # AOTAutograd builds a backward only if an input or parameter requires grad,
+    # so a backward-only conflict cannot matter otherwise.
+    may_have_backward = example_inputs is None or any(
+        isinstance(x, torch.Tensor) and x.requires_grad
+        for x in itertools.chain(example_inputs, pre_aot_graph.parameters())
+    )
+    # Only an annotation that moves a direction's top-level value conflicts with
+    # a region that differs in that direction; one that restates the ambient
+    # config leaves the region intent unambiguous.
+    if (
+        top_level_cudagraphs != config.triton.cudagraphs
+        and forward_has_regional_cudagraphs
+    ) or (
+        may_have_backward
+        and backward_top_level_cudagraphs != config.triton.cudagraphs
+        and backward_has_regional_cudagraphs
+    ):
+        raise ValueError(
+            "torch._dynamo.override_cudagraphs cannot be combined with a nested "
+            "compile region whose triton.cudagraphs differs from the top level "
+            f"(forward: {top_level_cudagraphs}, backward: "
+            f"{backward_top_level_cudagraphs})"
+        )
+    if has_regional_cudagraphs:
+        _validate_nested_region_cudagraphs(
+            pre_aot_graph,
+            enclosing_forward=top_level_cudagraphs,
+            enclosing_backward=backward_top_level_cudagraphs,
+            validate_backward=may_have_backward,
+        )
 
     forward_cudagraphs_requested = (
         top_level_cudagraphs or _any_subgraph_enables_cudagraphs(pre_aot_graph)
@@ -3633,7 +3767,7 @@ def _compile_fx_main(
 
         num_example_inputs = len(example_inputs_)
 
-        compiler_config_extra = create_compiler_config_extra(model_)
+        compiler_config_extra = create_compiler_config_extra(model_, example_inputs_)
 
         # Load device backends (privateuse1 vendors) before the decomposition
         # table is snapshotted below: _inductor_backend_init may register
@@ -4023,7 +4157,7 @@ def autograd_cache_key(
             "autograd_cache_key does not support nested container inputs"
         )
 
-    compiler_config_extra = create_compiler_config_extra(graph)
+    compiler_config_extra = create_compiler_config_extra(graph, example_inputs)
 
     # These context managers replicate the ones that _compile_fx_main sets up
     # before calling aot_autograd, so that the config snapshot captured by
