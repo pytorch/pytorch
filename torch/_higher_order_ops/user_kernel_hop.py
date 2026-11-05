@@ -676,6 +676,11 @@ class UserKernelHOPInfo:
 
 
 _user_kernel_hops: dict[UserKernelWrapperHOP, UserKernelHOPInfo] = {}
+# DSL modules may register from different threads (import locks only serialize the
+# imports of one module), so a registration holds this lock across its ownership
+# checks and both writes, and every read of the registry takes it too: no reader
+# sees half of a pair, and two conflicting registrations cannot both pass the checks.
+_user_kernel_hops_lock = threading.Lock()
 
 
 def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
@@ -722,19 +727,22 @@ def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
             f"the {info.dsl} DSL"
         )
     hops = (info.mutation, info.functional)
-    for hop in hops:
-        if not isinstance(hop, UserKernelWrapperHOP):
-            raise TypeError(f"{hop} is not a UserKernelWrapperHOP")
-        owner = _user_kernel_hops.get(hop, info)
-        if owner is not info:
-            raise RuntimeError(
-                f"{hop} is already registered by the {owner.dsl} DSL with another "
-                "UserKernelHOPInfo object; only that object can be registered again"
+    with _user_kernel_hops_lock:
+        for hop in hops:
+            if not isinstance(hop, UserKernelWrapperHOP):
+                raise TypeError(f"{hop} is not a UserKernelWrapperHOP")
+            owner = _user_kernel_hops.get(hop, info)
+            if owner is not info:
+                raise RuntimeError(
+                    f"{hop} is already registered by the {owner.dsl} DSL with another "
+                    "UserKernelHOPInfo object; only that object can be registered again"
+                )
+        if DispatchKey.CompositeExplicitAutograd not in info.functional.py_kernels:
+            raise TypeError(
+                f"{info.functional} has no CompositeExplicitAutograd py_impl"
             )
-    if DispatchKey.CompositeExplicitAutograd not in info.functional.py_kernels:
-        raise TypeError(f"{info.functional} has no CompositeExplicitAutograd py_impl")
-    for hop in hops:
-        _user_kernel_hops[hop] = info
+        for hop in hops:
+            _user_kernel_hops[hop] = info
 
 
 def get_user_kernel_hop_info(
@@ -744,7 +752,8 @@ def get_user_kernel_hop_info(
     ``role``, only if ``target`` is the HOP of its pair with that role."""
     if not isinstance(target, UserKernelWrapperHOP):
         return None
-    info = _user_kernel_hops.get(target)
+    with _user_kernel_hops_lock:
+        info = _user_kernel_hops.get(target)
     if info is None or role is None:
         return info
     hop = info.mutation if role == "mutation" else info.functional
@@ -761,7 +770,8 @@ def is_user_kernel_functional_hop(target: object) -> bool:
 
 def user_kernel_hop_infos() -> list[UserKernelHOPInfo]:
     """Every registered DSL, in registration order."""
-    return list(dict.fromkeys(_user_kernel_hops.values()))
+    with _user_kernel_hops_lock:
+        return list(dict.fromkeys(_user_kernel_hops.values()))
 
 
 ###############################################################################
