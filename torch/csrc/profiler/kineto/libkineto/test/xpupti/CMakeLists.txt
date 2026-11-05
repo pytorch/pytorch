@@ -82,6 +82,16 @@ if(WIN32)
 endif()
 add_dependencies(xpupti_compute xpupti_compute_ep)
 
+# XpuptiProfilerTest and XpuptiScopeProfilerTest share an output directory,
+# so copy the library only once.
+add_custom_target(xpupti_compute_copy
+  COMMAND ${CMAKE_COMMAND} -E make_directory
+    "$<TARGET_FILE_DIR:XpuptiProfilerTest>"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${XPUPTI_COMPUTE_LIB}" "$<TARGET_FILE_DIR:XpuptiProfilerTest>"
+  DEPENDS xpupti_compute_ep
+  VERBATIM)
+
 # Runtime tests: host code linking the kernel-only compute library.
 # The library is copied next to each test, where $ORIGIN (Linux)
 # or the executable's directory (Windows) finds it,
@@ -93,9 +103,7 @@ function(add_sycl_test test_file)
     ${LINK_LIBRARIES}
     xpupti_compute)
   set_target_properties(${test_name} PROPERTIES BUILD_RPATH "$ORIGIN")
-  add_custom_command(TARGET ${test_name} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      ${XPUPTI_COMPUTE_LIB} $<TARGET_FILE_DIR:${test_name}>)
+  add_dependencies(${test_name} xpupti_compute_copy)
   gtest_discover_tests(${test_name} ${ARGN})
 endfunction()
 

@@ -38,8 +38,9 @@ static py::object weakref_referent(const c10::SafePyObject& weakref) {
 // references its wrapper; a strong reference would form a cycle through the
 // bound _CppFakeTensorMode object. So fake tensors can outlive the wrapper:
 // once Python drops it, it is collected while the C++ mode lives on through its
-// fakes. An entered wrapper is also kept alive until it exits, by
-// _entered_cpp_fake_modes in torch/_subclasses/fake_tensor.py.
+// fakes. An entered wrapper is also kept alive until it exits on the entering
+// thread, or that thread ends, by fake_tensor_tls.entered_cpp_fake_modes in
+// torch/_subclasses/fake_tensor.py.
 //
 // getCppFakeTensorModePyObj returns the wrapper while it is alive. Otherwise it
 // builds a new CppFakeTensorMode around the same C++ mode, with the classmethod
@@ -51,10 +52,9 @@ static py::object weakref_referent(const c10::SafePyObject& weakref) {
 //
 // A rebuilt wrapper is equivalent for fake dispatch because everything
 // dispatch reads is owned by the C++ mode: the ShapeEnv, the fake tensor
-// converter, the epoch and the mode's flags. It is still a new object: Python
-// identity, attributes set on the old wrapper instance and its creation stack
-// trace are not preserved, and it is always a plain CppFakeTensorMode, so
-// subclasses are not supported.
+// converter, the epoch and the mode's flags. It is still a new object, so
+// Python identity is not preserved, and it is always a plain CppFakeTensorMode,
+// which is final for that reason.
 py::object getCppFakeTensorModePyObj(
     const std::shared_ptr<c10::FakeTensorMode>& mode) {
   if (mode == nullptr) {
