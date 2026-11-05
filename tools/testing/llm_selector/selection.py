@@ -97,6 +97,14 @@ DRIVER_MAPPINGS = {
     "test_cpp_extensions_mtia_backend": [r"^test/cpp_extensions/"],
     "test_cpp_extensions_stream_and_event": [r"^test/cpp_extensions/"],
     "test_dispatch": [r"^test/cpp_extensions/dangling_impl_extension\.cpp$"],
+    # They build these extensions.
+    "cpp_extensions/test_libtorch_agnostic": [r"^test/cpp_extensions/libtorch_agn_"],
+    "cpp_extensions/python_agnostic_extension/test/test_python_agnostic": [
+        r"^test/cpp_extensions/python_agnostic_extension/"
+    ],
+    "cpp_extensions/libtorch_agn_2_10_extension/test_version_compatibility": [
+        r"^test/cpp_extensions/libtorch_agn_2_(9|10)_extension/"
+    ],
     "test_ao_sparsity": [r"^test/ao/"],
     "test_autograd": [r"^test/autograd/"],
     "test_fx": [r"^test/fx/"],
@@ -151,6 +159,8 @@ RUN_ALL_PATTERNS = [
     r"^\.github/workflows/_(linux|win|mac|s390x)-build\.yml$",
     # The workflows that call those test workflows; they set each job's build, image and test matrix.
     r"^\.github/workflows/(pull|trunk(-rocm-sandbox)?|periodic(-strict|-rocm-mi\d+)?|slow(-rocm-mi200)?|unstable|tsan|xpu|mac-mps|native-aot|dtensor|torchtitan|dynamo-unittest|td-holdout-unstable|s390x-periodic|rocm-[\w-]+|inductor[\w-]*|(b200|h100)-[\w-]+|test-(b200|gb300|h100)|better-benchmark-b200|attention_op_microbenchmark|operator_(benchmark|microbenchmark(_compare)?))\.yml$",
+    # pull.yml and trunk.yml call these from the PR; they decide which tests TD drops.
+    r"^\.github/workflows/(target_determination|llm_td_retrieval)\.yml$",
     # setup-linux is left out: the test jobs use it from main, not from the PR.
     r"^\.github/actions/(setup-rocm|setup-win|setup-xpu|filter-test-configs|download-td-artifacts|download-build-artifacts|reuse-old-whl)/",
     r"^\.github/scripts/(filter_test_configs|parse_ref)\.py$",
@@ -267,13 +277,13 @@ def import_pattern(modules: Iterable[str]) -> str:
     end = "([^[:alnum:]_]|$)"
     names_of = rf"import[[:space:]]*(\(|[[:space:]](.*[^[:alnum:]_.])?({bases}){end})"
     forms = [
-        rf"(from|import)[[:space:]]+{names}{end}",
+        rf"(from[[:space:]]+|import[[:space:]]+(.*[^[:alnum:]_.])?){names}{end}",
         rf"from[[:space:]]+(\.+|test)[[:space:]]+{names_of}",
     ]
     if parents:
         forms.append(rf"from[[:space:]]+{dotted(parents)}[[:space:]]+{names_of}")
     quoted = rf"""load_test_module\(["']({paths})["']\)"""
-    quoted += rf"""|import_module\(["']{names}["']\)"""
+    quoted += rf"""|import_module\(["']{names}["'][,)[:space:]]"""
     return rf"^[[:space:]]*({'|'.join(forms)})|{quoted}"
 
 
@@ -418,7 +428,9 @@ class Selection:
                 error=f"malformed model output: {e}",
             )
         except GREP_ERRORS as e:
-            return grep_failure(e)
+            if not needs_run_all(changed_files):
+                return grep_failure(e)
+            files, sweeps = set(), set()
         if needs_run_all(changed_files):
             return cls(run_all=True, reason="change touches test infrastructure")
         # Before any grep, so that a failed one cannot turn it into an error.
