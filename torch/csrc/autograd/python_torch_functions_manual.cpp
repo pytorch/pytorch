@@ -854,6 +854,13 @@ void initTorchFunctions(PyObject* module) {
         if (inner_autograd_meta) {
           dst_.set_requires_grad(src_.requires_grad());
           if (dst_.requires_grad()) {
+            // Copy the grad_dtype override before set_history: the Error node
+            // snapshots it as the gradient's cast target, and afterwards dst_
+            // is a non-leaf, whose grad_dtype can no longer be set.
+            auto dst_autograd_meta = impl::get_autograd_meta(dst_);
+            dst_autograd_meta->grad_dtype_ = inner_autograd_meta->grad_dtype_;
+            dst_autograd_meta->allow_grad_dtype_mismatch_ =
+                inner_autograd_meta->allow_grad_dtype_mismatch_;
             auto new_grad_fn = c10::make_intrusive<torch::autograd::Error>(
                 "Cannot backprop through mirrored meta, file a bug in PyTorch");
             torch::autograd::set_history(dst_, new_grad_fn);

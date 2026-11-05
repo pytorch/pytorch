@@ -1819,6 +1819,23 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsNone(out.grad)
         self.assertEqual(out.shape, x.shape)
 
+    def test_grad_dtype_override_survives_pickle(self):
+        # TENSOR_MATCH rebuilt from the loaded tensor checks grad_dtype, and the
+        # .grad setter checks the float32 grad against it.
+        for grad_dtype in (torch.float32, None):
+            x = torch.ones(4, dtype=torch.bfloat16, requires_grad=True)
+            x.grad_dtype = grad_dtype
+            x.grad = grad = torch.ones(4)
+            buf = io.BytesIO()
+            GuardsStatePickler({id(x): x, id(grad): grad}, {}, {}, {}, buf).dump(x)
+            out = load_guards_state(buf.getvalue())
+            self.assertEqual(out.grad_dtype, grad_dtype)
+            self.assertEqual(out.grad.dtype, torch.float32)
+        x = torch.ones(4, dtype=torch.bfloat16, requires_grad=True)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(x): x}, {}, {}, {}, buf).dump(x)
+        self.assertFalse(load_guards_state(buf.getvalue())._has_grad_dtype_override)
+
     def test_literal_on_a_fake_tensor_owned_name_is_not_a_guard_read(self):
         x = torch.randn(3)
         x._is_param = True

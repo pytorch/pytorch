@@ -3484,10 +3484,8 @@ class VariableBuilder:
             safe_has_grad(value)
             and (grad_value := safe_grad(value)) is not None
             and value.dtype != grad_value.dtype
-            and (
-                not value.is_leaf
-                or value.grad_dtype not in (None, grad_value.dtype)
-            )
+            # a leaf's grad_dtype may allow the mismatch (FSDP2 fp32 grads)
+            and not (value.is_leaf and value.grad_dtype in (None, grad_value.dtype))
         ):
             grad_str = str(grad_value.dtype)
             unimplemented(
@@ -3626,6 +3624,13 @@ class VariableBuilder:
                         GuardBuilder.EQUALS_MATCH
                     )
                 )
+                # TENSOR_MATCH checks grad_dtype, but DTensor skips it
+                if value.requires_grad:
+                    install_guard(
+                        AttrSource(self.source, "grad_dtype").make_guard(
+                            GuardBuilder.EQUALS_MATCH
+                        )
+                    )
             elif is_polymorphic_act:
                 # Guard only on the unwrapped inner tensor (inner_source below).
                 # Installing no type/metadata guard on the ACT wrapper is what
@@ -5561,14 +5566,6 @@ def _wrap_to_fake_tensor_and_record_impl(
         if source is None:
             raise AssertionError("source must not be None for tensor wrapping")
         _coor_check_tensor_device(e, source)
-        if e.requires_grad:
-            install_guard(
-                AttrSource(source, "is_leaf").make_guard(GuardBuilder.CONSTANT_MATCH)
-            )
-            if e.is_leaf:
-                install_guard(
-                    AttrSource(source, "grad_dtype").make_guard(GuardBuilder.CONSTANT_MATCH)
-                )
         static_shapes, _reason = tensor_always_has_static_shape(
             e,
             is_tensor,

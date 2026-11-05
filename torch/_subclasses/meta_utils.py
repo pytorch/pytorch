@@ -307,6 +307,7 @@ class MetaTensorDescriber:
     ) -> MetaTensorDesc[Any]:
         data = _unwrap_python_functional_tensor(t) if self.copy_data else None
         is_leaf = safe_is_leaf(t)
+        has_grad_dtype_override = is_leaf and t._has_grad_dtype_override
         is_view = t._is_view()
         is_sparse = t.is_sparse
         layout = t.layout
@@ -431,7 +432,8 @@ class MetaTensorDescriber:
             is_inference=False if is_inference_mode_disabled else t.is_inference(),
             is_leaf=is_leaf,
             requires_grad=t.requires_grad,
-            grad_dtype=t.grad_dtype if t.requires_grad and is_leaf else t.dtype,
+            has_grad_dtype_override=has_grad_dtype_override,
+            grad_dtype=t.grad_dtype if has_grad_dtype_override else None,
             # NB: ndim should be OK too but there is a disaster at
             # python test/dynamo/test_subclasses.py -k test_user_overridden_property_unsupported
             # Actually, this means that we have a little bit of a problem
@@ -665,7 +667,6 @@ class MetaTensorDesc(Generic[_TensorT]):
     id: MetaTensorId
     ndim: int
     dtype: torch.dtype
-    grad_dtype: torch.dtype | None
     device: torch.device
 
     # NB: Sometimes, size, stride and storage_offset contain SymInt, in which
@@ -688,6 +689,10 @@ class MetaTensorDesc(Generic[_TensorT]):
     is_inference: bool = False
     is_leaf: bool = False
     requires_grad: bool = False
+    # Set for a leaf whose grad_dtype was assigned; otherwise its grad_dtype
+    # follows dtype. grad_dtype=None then means any dtype.
+    has_grad_dtype_override: bool = False
+    grad_dtype: torch.dtype | None = None
     is_sparse: bool = False
     is_mkldnn: bool = False
     is_functorch_wrapped: bool = False
@@ -2267,8 +2272,8 @@ class MetaConverter(Generic[_TensorT]):
                                             t.stride,
                                         )
 
-                # pyrefly: ignore [unbound-name]
-                if t.requires_grad and t.is_leaf and r.is_leaf:
+                # before attaching t.grad, which the setter checks against it
+                if t.has_grad_dtype_override:
                     # pyrefly: ignore [unbound-name]
                     r.grad_dtype = t.grad_dtype
 
