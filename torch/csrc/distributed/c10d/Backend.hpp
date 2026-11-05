@@ -687,8 +687,11 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " is missing implementation of enableCollectivesTiming.");
   }
 
-  // Whether Works issued now report getDuration(). FlightRecorderHook reads
-  // duration_ms only when this is true.
+  // Whether Works constructed after this returns report getDuration() once
+  // complete without throwing. Called on the issuing thread for every op
+  // FlightRecorderHook records, so it must be cheap and safe against a
+  // concurrent enableCollectivesTiming(). When true the hook holds each Work
+  // until its result to read duration_ms.
   virtual bool collectivesTimingEnabled() const {
     return false;
   }
