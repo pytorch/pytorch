@@ -5586,52 +5586,35 @@ class TestCppFakeTensorModeBindings(TestCase):
 
     def test_from_meta_and_device_rejects(self):
         mode, _ = self._make_mode()
-        cpu = torch.device("cpu")
-        # A fake also reads as meta, on the meta device or inside a kernel, but
-        # is rejected
-        fake = torch._C._from_meta_and_device(torch.empty(2, device="meta"), cpu, mode)
-        meta_fake = torch._C._from_meta_and_device(
-            torch.empty(2, device="meta"), torch.device("meta"), mode
-        )
-        with self.assertRaisesRegex(ValueError, "not fake"):
-            torch._C._from_meta_and_device(meta_fake, cpu, mode)
+        meta, cpu = torch.device("meta"), torch.device("cpu")
+        m = torch.empty(2, device="meta")
+        fake = torch._C._from_meta_and_device(m, cpu, mode)
+        not_fake = (ValueError, "not fake")
+        not_meta = (ValueError, "device must be 'meta', got cpu")
+        wrapper = (TypeError, "does not accept tensor subclasses")
+
+        def rejects(x, error, msg, mode=mode, device=cpu):
+            with self.assertRaisesRegex(error, msg):
+                torch._C._from_meta_and_device(x, device, mode)
+            return x
+
+        # A fake also reads as meta, on the meta device or inside a kernel
+        rejects(torch._C._from_meta_and_device(m, meta, mode), *not_fake)
         with torch._C._InKernelInvocation():
             self.assertTrue(fake.is_meta)
-            with self.assertRaisesRegex(ValueError, "not fake"):
-                torch._C._from_meta_and_device(fake, cpu, mode)
-
-        with self.assertRaisesRegex(ValueError, "device must be 'meta', got cpu"):
-            torch._C._from_meta_and_device(fake, cpu, mode)
-        with self.assertRaisesRegex(ValueError, "device must be 'meta', got cpu"):
-            torch._C._from_meta_and_device(torch.empty(2), cpu, mode)
-        meta_subclass = TwoTensor(
-            torch.empty(2, device="meta"), torch.empty(2, device="meta")
-        )
-        with self.assertRaisesRegex(TypeError, "does not accept tensor subclasses"):
-            torch._C._from_meta_and_device(meta_subclass, cpu, mode)
-        # Checked before the device, so a non-meta subclass gets the same error
-        cpu_subclass = TwoTensor(torch.empty(2), torch.empty(2))
-        with self.assertRaisesRegex(TypeError, "does not accept tensor subclasses"):
-            torch._C._from_meta_and_device(cpu_subclass, cpu, mode)
-
-        functional = torch._to_functional_tensor(torch.empty(2, device="meta"))
-        with self.assertRaisesRegex(TypeError, "does not accept tensor subclasses"):
-            torch._C._from_meta_and_device(functional, cpu, mode)
-
-        def check_rejected(x):
-            with self.assertRaisesRegex(TypeError, "does not accept tensor subclasses"):
-                torch._C._from_meta_and_device(x, cpu, mode)
-            return x.sum()
-
-        torch.func.grad(check_rejected)(torch.empty(2, device="meta"))
-        torch.vmap(check_rejected)(torch.empty(2, 3, device="meta"))
-
-        # allow_meta is enforced
+            rejects(fake, *not_fake)
+        rejects(fake, *not_meta)
+        rejects(torch.empty(2), *not_meta)
+        # Wrappers are checked before the device, so a cpu subclass gets the
+        # same error
+        rejects(TwoTensor(m, m.clone()), *wrapper)
+        rejects(TwoTensor(torch.empty(2), torch.empty(2)), *wrapper)
+        rejects(torch._to_functional_tensor(m), *wrapper)
+        torch.func.grad(lambda x: rejects(x, *wrapper).sum())(m)
+        torch.vmap(lambda x: rejects(x, *wrapper).sum())(m.expand(3, 2))
         with torch._functorch.config.patch(fake_tensor_allow_meta=False):
-            strict_mode, _strict_wrapper = self._make_mode()
-        meta = torch.empty(2, device="meta")
-        with self.assertRaisesRegex(RuntimeError, "allow_meta is False"):
-            torch._C._from_meta_and_device(meta, torch.device("meta"), strict_mode)
+            strict_mode, _ = self._make_mode()
+        rejects(m, RuntimeError, "allow_meta is False", strict_mode, meta)
 
     def test_from_meta_and_device_failure_leaves_input_unmarked(self):
         # requires_grad is set before the shared storage is marked, so failing
