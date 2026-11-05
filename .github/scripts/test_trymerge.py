@@ -2066,6 +2066,9 @@ class TestDockerCiGates(TestCase):
                 "docker-builds",
                 "linux-build / build",
                 "docker-builds-nightly / x",
+                ".github/workflows/docker-builds.yml / docker-build (pytorch-linux-jammy)",
+                ".github/workflows/docker-builds.yml",
+                ".github/workflows/docker-builds-experimental.yml / x",
             )
         }
         self.assertEqual(
@@ -2073,6 +2076,8 @@ class TestDockerCiGates(TestCase):
             {
                 "docker-builds / docker-build (pytorch-linux-jammy)",
                 "docker-builds",
+                ".github/workflows/docker-builds.yml / docker-build (pytorch-linux-jammy)",
+                ".github/workflows/docker-builds.yml",
             },
         )
 
