@@ -15887,8 +15887,6 @@ op_db: list[OpInfo] = [
            skips=(
                # AssertionError: Tensor-likes are not close!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
-               # AssertionError: Scalars are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
            )),
     OpInfo(
         "nn.functional.binary_cross_entropy_with_logits",
