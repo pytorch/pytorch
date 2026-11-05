@@ -997,6 +997,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void waitForPendingWorks() override;
 
   void enableCollectivesTiming() override;
+  bool collectivesTimingEnabled() const override {
+    return enableTiming_.load();
+  }
 
   c10::intrusive_ptr<Backend> split(
       const c10::intrusive_ptr<Store>& store,

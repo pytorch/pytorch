@@ -16,7 +16,7 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import Backend as C10DBackend, ReduceOp
+from torch._C._distributed_c10d import Backend as C10DBackend, ReduceOp, WorkResult
 from torch.distributed._watchdog import _get_watchdog, stream_complete, stream_timeout
 
 
@@ -35,9 +35,14 @@ class _NcclWork(dist._Work):
     of ProcessGroupNCCL(nccl2)'s coalesceWorks)
     """
 
-    def __init__(self, events, device, wd_handles=None, is_barrier=False):
+    def __init__(
+        self, events, device, wd_handles=None, is_barrier=False, coalesced=False
+    ):
         super().__init__()
         self._events = list(events)
+        # wait() clears _events; the result future still tracks the kernels.
+        self._kernel_events = tuple(self._events)
+        self._coalesced = coalesced
         self._device = device
         self._wd_handles = list(wd_handles) if wd_handles else []
         self._is_barrier = is_barrier
@@ -55,18 +60,34 @@ class _NcclWork(dist._Work):
         return True
 
     def get_future(self):
-        fut = torch.futures.Future(devices=[self._device])
-        if not self._events:
-            fut.set_result(True)
+        return self._complete_on_events(
+            torch.futures.Future(devices=[self._device]), True, self._events
+        )
+
+    def get_future_result(self):
+        # An op inside a coalescing window has no events; its kernels are only
+        # enqueued by end_coalescing.
+        if self._coalesced:
+            raise NotImplementedError("coalesced op; use the end_coalescing work")
+        # A CPU future: device-aware ones are rejected, since they may complete
+        # at enqueue. Reads SUCCESS once the kernels finish, including kernels
+        # cut short by abort().
+        return self._complete_on_events(
+            torch.futures.Future(), WorkResult.SUCCESS.value, self._kernel_events
+        )
+
+    def _complete_on_events(self, fut, value, events):
+        if not events:
+            fut.set_result(value)
             return fut
-        remaining = [len(self._events)]
+        remaining = [len(events)]
 
         def on_complete():
             remaining[0] -= 1
             if remaining[0] == 0:
-                fut.set_result(True)
+                fut.set_result(value)
 
-        for event in self._events:
+        for event in events:
             stream_complete(on_complete, event=event)
         return fut
 
@@ -170,7 +191,7 @@ class NCCL4PyBackend(C10DBackend):
         # the op used; end_coalescing records the events after group_end.
         if self._coalescing:
             self._coalesced_streams.update(streams)
-            return _NcclWork((), self._device)
+            return _NcclWork((), self._device, coalesced=True)
         events = []
         wd_handles = []
         for stream in streams:
