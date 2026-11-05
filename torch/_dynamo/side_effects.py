@@ -890,7 +890,7 @@ class SideEffects:
             base_cls: Any
             if isinstance(base_cls_vt, variables.BuiltinVariable):
                 base_cls = base_cls_vt.fn
-            elif isinstance(base_cls_vt, variables.BuiltinTypeVariable):
+            elif isinstance(base_cls_vt, variables.TypeVariable):
                 base_cls = base_cls_vt._fn
             elif isinstance(base_cls_vt, variables.UserDefinedClassVariable):
                 base_cls = base_cls_vt.value

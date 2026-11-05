@@ -2569,7 +2569,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             return VariableTracker.build(tx, dir(arg.value))
         if isinstance(arg, BuiltinVariable):
             return VariableTracker.build(tx, dir(arg.fn))
-        if isinstance(arg, BuiltinTypeVariable):
+        if isinstance(arg, TypeVariable):
             return VariableTracker.build(tx, dir(arg._fn))
         # Enable specialized VTs for constants to work with dir()
         if arg.is_python_constant():
@@ -3532,10 +3532,11 @@ class BuiltinVariable(BaseBuiltinVariable):
         return pysequence_contains(tx, a, b)
 
 
-class BuiltinTypeVariable(VariableTracker):
+class TypeVariable(VariableTracker):
     """A builtin ``type`` object such as ``dict`` or ``list``."""
 
     _fn: type
+    _cpython_type = type
 
     def __init__(self, value: Any = None, **kwargs: Any) -> None:
         if value is not None and value is not self._fn:
@@ -3606,7 +3607,7 @@ class BuiltinTypeVariable(VariableTracker):
     }
 
     @classmethod
-    def create_with_source(cls, value: type, source: Source) -> "BuiltinTypeVariable":
+    def create_with_source(cls, value: type, source: Source) -> "TypeVariable":
         install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         return cls(source=source)
 
@@ -3711,7 +3712,7 @@ class BuiltinTypeVariable(VariableTracker):
     ) -> ConstantVariable:
         return VariableTracker.build(tx, hasattr(self._fn, name))  # type: ignore[return-value]
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # PyType_Type inherits object's identity hash. The base hash_impl needs a
         # source to find it and fakes one (id(self)) otherwise, so a sourceless
         # type(x) would not match the same type used as a dict key.
@@ -3728,7 +3729,7 @@ class BuiltinTypeVariable(VariableTracker):
         return python_constant_richcompare_impl(self, tx, other, op)
 
 
-class DictBuiltinVariable(BuiltinTypeVariable):
+class DictBuiltinVariable(TypeVariable):
     """Variable tracker for the `dict` builtin constructor."""
 
     _fn = dict
@@ -4278,7 +4279,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         return None
 
 
-class ListBuiltinVariable(BuiltinTypeVariable):
+class ListBuiltinVariable(TypeVariable):
     """Variable tracker for the `list` builtin constructor."""
 
     _fn = list
@@ -4373,7 +4374,7 @@ def _constant_fold_classmethod(name: str) -> Method:
     that is evaluated at trace time on constant arguments."""
 
     def handler(
-        self: "BuiltinTypeVariable",
+        self: "TypeVariable",
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -4392,7 +4393,7 @@ def _constant_fold_on_unsupported(
 
     @functools.wraps(call_function)
     def wrapper(
-        self: "BuiltinTypeVariable",
+        self: "TypeVariable",
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -4408,7 +4409,7 @@ def _constant_fold_on_unsupported(
     return wrapper
 
 
-class ByteArrayBuiltinVariable(BuiltinTypeVariable):
+class ByteArrayBuiltinVariable(TypeVariable):
     """Variable tracker for the `bytearray` builtin constructor."""
 
     _fn = bytearray
@@ -4484,7 +4485,7 @@ class ByteArrayBuiltinVariable(BuiltinTypeVariable):
         )
 
 
-class IntBuiltinVariable(BuiltinTypeVariable):
+class IntBuiltinVariable(TypeVariable):
     _fn = int
 
     tp_methods = {
@@ -4530,7 +4531,7 @@ class IntBuiltinVariable(BuiltinTypeVariable):
         return res
 
 
-class FloatBuiltinVariable(BuiltinTypeVariable):
+class FloatBuiltinVariable(TypeVariable):
     _fn = float
 
     tp_methods = {"fromhex": _constant_fold_classmethod("fromhex")}
@@ -4553,7 +4554,7 @@ class FloatBuiltinVariable(BuiltinTypeVariable):
         return pynumber_float(tx, args[0])
 
 
-class ComplexBuiltinVariable(BuiltinTypeVariable):
+class ComplexBuiltinVariable(TypeVariable):
     _fn = complex
 
     if sys.version_info >= (3, 14):
@@ -4568,7 +4569,7 @@ class ComplexBuiltinVariable(BuiltinTypeVariable):
         return constant_fold(self._fn, tx, args, kwargs)
 
 
-class BoolBuiltinVariable(BuiltinTypeVariable):
+class BoolBuiltinVariable(TypeVariable):
     _fn = bool
 
     tp_methods = {
