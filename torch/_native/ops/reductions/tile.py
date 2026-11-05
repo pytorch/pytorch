@@ -216,6 +216,75 @@ def fold_decoded(
     return reduce_fn(acc, val, base_r, valid)
 
 
+# Caps the loads fold_uniform_tree unrolls per thread; each adds a load and its merges.
+UNIFORM_TREE_MAX_LOADS = 64
+
+
+def uniform_tree_ok(
+    trait,
+    count,
+    threads_per_block,
+    npairs_red,
+    *,
+    flat_tail=False,
+    ragged_chunk=False,
+):
+    """Whether general-axis threads can fold count values per output as Welford trees."""
+    # The tree indexes one run with Int32 r, which the load cap keeps in range, and ignores
+    # the rb and in_base clamps.
+    return (
+        getattr(trait, "has_combine_equal", False)
+        and npairs_red == 1
+        and not (flat_tail or ragged_chunk)
+        and threads_per_block <= count <= threads_per_block * UNIFORM_TREE_MAX_LOADS
+    )
+
+
+@cute.jit
+def fold_uniform_tree(
+    trait,
+    mX,
+    obase,
+    rstrides,
+    threads_per_block: cutlass.Constexpr,
+    tidx,
+    nloads: cutlass.Constexpr,
+    tail: cutlass.Constexpr,
+    count,
+):
+    """Fold each thread's nloads loads as equal-count Welford trees, then the masked tail
+    load when `tail`. Only nloads and `tail` are compiled: with T = threads_per_block, a
+    tail kernel serves every count strictly between nloads * T and (nloads + 1) * T, and
+    an exact multiple of T gets its own tail-free kernel."""
+    tree = []
+    stride = rstrides[0]
+    for load in cutlass.range_constexpr(nloads):
+        r = tidx + Int32(const_expr(load * threads_per_block))
+        carry = trait.leaf(trait.acc(mX[obase + Int64(r) * stride]), r)
+        width = 1
+        merges = ((load + 1) & -(load + 1)).bit_length() - 1
+        for _ in cutlass.range_constexpr(merges):
+            carry = trait.combine_equal(tree.pop(), carry, const_expr(width))
+            width *= 2
+        tree.append(carry)
+    acc = tree[0]
+    for i in cutlass.range_constexpr(1, len(tree)):
+        acc = trait.combine(acc, tree[i])
+    if const_expr(tail):
+        r = Int32(const_expr(nloads * threads_per_block)) + tidx
+        valid = r < count
+        safe = r if valid else Int32(0)
+        leaf = trait.leaf(trait.acc(mX[obase + Int64(safe) * stride]), safe)
+        ident = trait.init()
+        acc = trait.combine(
+            acc,
+            tuple(
+                leaf[f] if valid else ident[f] for f in range(const_expr(trait.nfields))
+            ),
+        )
+    return acc
+
+
 @cute.jit
 def fold_partials_run(
     trait, mIns, obase, rb, threads_per_block: cutlass.Constexpr, tidx, in_base
@@ -647,11 +716,27 @@ class TileReduce:
         # Duck-typed because its driver-owned type would invert the dependency.
         itree: Any = None,
         ragged_vector=False,
+        # Values per output for the general-axis uniform Welford tree; 0 disables it.
+        uniform_tree_count: int = 0,
     ) -> None:
         if axis not in ("row", "col", "general"):
             raise ValueError(f"axis must be 'row', 'col' or 'general', got {axis!r}")
         if order not in ("linear", "inner_tree"):
             raise ValueError(f"order must be 'linear' or 'inner_tree', got {order!r}")
+        run_flags = dict(flat_tail=flat_tail, ragged_chunk=ragged_chunk)
+        if uniform_tree_count and (
+            axis != "general"
+            or order != "linear"
+            or combine
+            or gidx_from != "r"
+            or not uniform_tree_ok(
+                trait, uniform_tree_count, threads_per_block, npairs_red, **run_flags
+            )
+        ):
+            max_count = threads_per_block * UNIFORM_TREE_MAX_LOADS
+            raise ValueError(
+                f"the uniform Welford tree needs a linear general-axis fold of one unclamped run of {threads_per_block} to {max_count} values with combine_equal, got {type(trait).__name__} {axis=} {order=} {combine=} {gidx_from=} {npairs_red=} {uniform_tree_count=} {run_flags=}"
+            )
         itemsize = dtype.width // 8 if dtype is not None else 0
         if ragged_vector:
             if axis != "row":
@@ -723,6 +808,9 @@ class TileReduce:
         self.final = final
         self.unroll = unroll
         self.ragged_vector = ragged_vector
+        # The count compiles as whole loads and whether a tail remains.
+        self.uniform_tree_loads, tail = divmod(uniform_tree_count, threads_per_block)
+        self.uniform_tree_tail = bool(tail)
         self.use_tma = use_tma
         self.combine = combine
         self.batched_col = batched_col
@@ -785,8 +873,9 @@ class TileReduce:
 
     @property
     def cache_sig(self) -> tuple[Any, ...]:
-        # TMA (static box) and ragged vectors (static row edges) key N; other runtime
-        # paths share a vector class.
+        # TMA (static box) and ragged vectors (static row edges) key N, the uniform tree
+        # its whole-load count and a tail flag, and fixed DAGs their N; other paths share
+        # a vector class.
         return (
             self.axis,
             self.vec,
@@ -811,6 +900,8 @@ class TileReduce:
             self.flat_tail,
             self.ragged_chunk,
             self.ragged_vector,
+            self.uniform_tree_loads,
+            self.uniform_tree_tail,
             self.order,
             # Fixed DAGs key on N, requiring one kernel per shape instead of per vec class.
             self.itree.sig if self.itree is not None else None,
@@ -1634,6 +1725,20 @@ class TileReduce:
                         const_expr(self.threads_per_block),
                         Int64(lane) if const_expr(self.wide_count) else lane,
                         in_base,
+                    ),
+                )
+            elif const_expr(self.uniform_tree_loads):
+                accs = (
+                    fold_uniform_tree(
+                        trait,
+                        mIns[0],
+                        obase,
+                        rstrides,
+                        const_expr(self.threads_per_block),
+                        lane,
+                        const_expr(self.uniform_tree_loads),
+                        const_expr(self.uniform_tree_tail),
+                        rb,
                     ),
                 )
             else:
