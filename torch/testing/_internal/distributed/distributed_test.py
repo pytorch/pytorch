@@ -575,6 +575,15 @@ class TestDistBackend(MultiProcessTestCase):
         # crash a process due to TORCH_NCCL_ASYNC_ERROR_HANDLING.
         self.skip_return_code_checks = [self.test_ddp_has_finalized.__wrapped__]
 
+    @classmethod
+    def mark_statically_skipped(cls):
+        if not IS_SANDCASTLE:
+            for name in unittest.defaultTestLoader.getTestCaseNames(cls):
+                test = getattr(cls, name)
+                reason = getattr(test, "_skipped_reason", None)
+                if reason is not None and not getattr(test, "__unittest_skip__", False):
+                    setattr(cls, name, unittest.skip(reason)(test))
+
     def tearDown(self):
         cleanup_temp_dir()
         super().tearDown()
