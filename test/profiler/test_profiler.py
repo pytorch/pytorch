@@ -358,6 +358,73 @@ with profile(activities=[ProfilerActivity.CUDA]):
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(
+        not torch.version.cuda or int(torch.version.cuda.split(".")[0]) < 13,
+        "CUDA 13+ is required",
+    )
+    @patch.dict(os.environ, {"TEARDOWN_CUPTI": "0"})
+    def test_profiler_cuda_stream_wait_event_correlation(self):
+        producer, consumer = torch.cuda.Stream(), torch.cuda.Stream()
+        tensors = [torch.ones(1, device="cuda") for _ in range(2)]
+        cuda_events = [torch.cuda.Event() for _ in tensors]
+        torch.cuda.synchronize()
+
+        for capture in range(2):
+            with _profile(
+                use_kineto=True,
+                use_device="cuda",
+                experimental_config=_ExperimentalConfig(enable_cuda_sync_events=True),
+            ) as prof:
+                for tensor, event in zip(tensors, cuda_events):
+                    with torch.cuda.stream(producer):
+                        torch.cuda._sleep(1000000)
+                        tensor.add_(1)
+                        event.record()
+                    with torch.cuda.stream(consumer):
+                        consumer.wait_event(event)
+                        tensor.mul_(2)
+                torch.cuda.synchronize()
+
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    trace = json.load(f)
+                    trace_events = trace["traceEvents"]
+
+            trace_events.sort(key=lambda e: e.get("ts", 0))
+            records = [
+                e
+                for e in trace_events
+                if e.get("cat") == "cuda_runtime"
+                and e["name"].startswith("cudaEventRecord")
+            ]
+            waits = [
+                e
+                for e in trace_events
+                if e.get("cat") == "cuda_sync" and e["name"] == "Stream Wait Event"
+            ]
+            kernels = [e for e in trace_events if e.get("cat") == "kernel"]
+            self.assertEqual(len(records), len(cuda_events), msg=f"capture {capture}")
+            self.assertEqual(len(waits), len(cuda_events))
+            self.assertTrue(kernels)
+            producer_stream = kernels[0]["args"]["stream"]
+            for record, wait in zip(records, waits):
+                corr_id = wait["args"]["wait_on_cuda_event_record_corr_id"]
+                self.assertGreater(corr_id, 0)
+                self.assertEqual(corr_id, record["args"]["correlation"])
+                self.assertEqual(wait["args"]["wait_on_stream"], producer_stream)
+
+            timestamps_enabled = (
+                int(trace["cupti_version"]) >= 130400
+                and int(trace["cuda_driver_version"]) >= 13040
+            )
+            self.assertEqual(
+                sum(e.get("cat") == "cuda_event" for e in trace_events),
+                len(cuda_events) if timestamps_enabled else 0,
+            )
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_disable_external_correlation(self):
         cuda_external_id_events = {"cuda_runtime", "gpu_memcpy", "kernel"}
         activities = [ProfilerActivity.CPU, ProfilerActivity.CUDA]
@@ -2578,7 +2645,11 @@ class TestProfilerDevice(TestCase):
                 found_mm = True
             if "gemm" in e.name.lower() or "Cijk" in e.name:
                 found_gemm = True
-            if "memcpy" in e.name.lower() or "__amd_rocclr_copyBuffer" in e.name:
+            # Only a device-side copy counts on CUDA and ROCm; the CPU runtime
+            # call (cudaMemcpyAsync, hipMemcpyWithStream) is named memcpy too.
+            if "memcpy" in e.name.lower() and (
+                device_type == "xpu" or e.device_type != DeviceType.CPU
+            ):
                 found_memcpy = True
         if device_type in ("cuda", "xpu"):
             self.assertTrue(found_gemm)
@@ -3160,6 +3231,8 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
     def test_dynamic_toggle(self, device):
         device_type = device.split(":")[0]
         gpu_activity = getattr(ProfilerActivity, device_type.upper(), None)
+        if gpu_activity not in supported_activities():
+            self.skipTest(f"{device_type.upper()} profiling is not supported")
         activities = get_profiler_activities(device_type)
         with profile(activities=activities) as p:
             with torch.profiler.record_function("test_user_annotation"):
@@ -3322,7 +3395,6 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             y = torch.mm(x, x)
         self.assertEqual(len(p.events()), 0)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180072")
     @skipXPUIf(
         True,
         "XPU kernel args lack stream/grid/block! Refer https://github.com/intel/torch-xpu-ops/issues/5284",
@@ -4651,7 +4723,6 @@ class TestProfilerEventsParityCudaOnly(TestCase):
 
     hw_classification = HardwareClassification.CUDA
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179944")
     def test_structured_metadata_matches_chrome_trace(self):
         # Compare metadata fields between events() and Chrome trace JSON to make sure they stay in parity
         # 1. Run a dummy workload with profiling enabled and collect the json/events() outputs
@@ -5458,6 +5529,7 @@ class TestChromeTraceInlineAnnotations(TestCase):
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+@instantiate_parametrized_tests
 class TestMetadataJsonFormatCUDA(TestCase):
     """Guard the format of ITraceActivity.metadataJson() for kernel events.
 
@@ -5545,6 +5617,140 @@ class TestMetadataJsonFormatCUDA(TestCase):
         for key in ["grid", "block"]:
             self.assertIsInstance(parsed[key], list)
             self.assertEqual(len(parsed[key]), 3)
+
+    def _profile(self, fn):
+        # The first session can miss GPU records while CUPTI initializes (see
+        # _get_kernel_metadata), so one warmup session is always discarded.
+        for _ in range(2):
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
+            ) as prof:
+                fn()
+                torch.cuda.synchronize()
+        return prof
+
+    def _profile_gpu_activities(self, fn, types):
+        return [
+            act
+            for act in self._profile(fn).profiler.kineto_results.trace_activities()
+            if act.type() in types
+        ]
+
+    def _assert_kernel_dims(self, acts):
+        kernels = [act for act in acts if act.type() == "kernel"]
+        self.assertTrue(kernels, "expected at least one kernel event")
+        # ROCm launch API events carry grid/block (global work sizes are
+        # converted to workgroups for hipExtModuleLaunchKernel and
+        # hipHccModuleLaunchKernel); CUPTI runtime events carry neither.
+        launches = {}
+        for act in acts:
+            if act.type() == "cuda_runtime":
+                md = json.loads("{" + act.metadata_json() + "}")
+                if "grid" in md:
+                    launches[act.correlation_id()] = md
+        for act in kernels:
+            parsed = json.loads("{" + act.metadata_json() + "}")
+            launch = launches.get(act.correlation_id())
+            for key in ["grid", "block"]:
+                self.assertIn(key, parsed, f"missing '{key}' for kernel '{act.name()}'")
+                self.assertEqual(len(parsed[key]), 3)
+                self.assertTrue(
+                    all(d > 0 for d in parsed[key]),
+                    f"non-positive {key} {parsed[key]} for kernel '{act.name()}'",
+                )
+                if launch is not None:
+                    self.assertEqual(
+                        parsed[key],
+                        launch[key],
+                        f"{key} of kernel '{act.name()}' differs from its launch",
+                    )
+
+    def test_all_kernel_events_have_dims(self):
+        # Every kernel-typed event must carry launch dimensions, matching the
+        # launch API call when the runtime records them.
+        x = torch.randn(64, 64, device="cuda")
+        self._assert_kernel_dims(
+            self._profile_gpu_activities(
+                lambda: torch.mm(x, x), ("kernel", "cuda_runtime")
+            )
+        )
+
+    def test_graph_kernel_events_have_dims(self):
+        # Graph replays issue no per-kernel launch API records; dims must
+        # still be reported for the kernels they dispatch.
+        x = torch.randn(64, 64, device="cuda")
+        # Warm up so the BLAS handle and workspace are not created during capture.
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            torch.mm(x, x)
+        torch.cuda.current_stream().wait_stream(s)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            _ = torch.mm(x, x)
+        self._assert_kernel_dims(
+            self._profile_gpu_activities(graph.replay, ("kernel", "cuda_runtime"))
+        )
+
+    def test_runtime_internal_dispatches_are_not_kernels(self):
+        # Same-device clone() goes through cudaMemcpyAsync, which the runtime
+        # may implement with an internal copy kernel instead of DMA.  That
+        # dispatch must be reported as the memcpy the user asked for, with
+        # its size, and must not surface as a kernel.
+        x = torch.randn(64, 64, device="cuda")
+        nbytes = x.nbytes
+        gpu_acts = self._profile_gpu_activities(
+            x.clone, ("kernel", "gpu_memcpy", "gpu_memset")
+        )
+        memcpys = [act for act in gpu_acts if act.type() == "gpu_memcpy"]
+        self.assertTrue(memcpys, "expected a gpu_memcpy event for clone()")
+        self.assertIn(
+            "Memcpy DtoD (Device -> Device)",
+            [act.name() for act in memcpys],
+            f"copy events: {[(a.name(), a.metadata_json()) for a in memcpys]}",
+        )
+        sizes = [json.loads("{" + act.metadata_json() + "}") for act in memcpys]
+        self.assertIn(
+            nbytes,
+            [md.get("bytes") for md in sizes],
+            f"no {nbytes}-byte copy in {sizes}",
+        )
+        for act in gpu_acts:
+            if act.type() == "kernel":
+                self.assertNotIn("__amd_rocclr_", act.name())
+
+    @parametrize("numel", [5, 1024])
+    def test_runtime_memsets_are_not_kernels(self, numel):
+        # zero_() on a dense tensor calls cudaMemsetAsync, which ROCm
+        # implements with fill kernels.  They must be reported as memsets that
+        # add up to the requested size, never as kernels.  20 bytes is not a
+        # multiple of 16, which some runtimes split into two dispatches.
+        # (Memset nodes replayed from a graph are still reported as kernels.)
+        x = torch.empty(numel, device="cuda")
+        gpu_acts = self._profile_gpu_activities(x.zero_, ("kernel", "gpu_memset"))
+        memsets = [act for act in gpu_acts if act.type() == "gpu_memset"]
+        self.assertTrue(memsets, f"expected a gpu_memset event, got {gpu_acts}")
+        metadata = [json.loads("{" + act.metadata_json() + "}") for act in memsets]
+        self.assertEqual(sum(md.get("bytes", 0) for md in metadata), x.nbytes)
+        for act in gpu_acts:
+            if act.type() == "kernel":
+                self.assertNotIn("__amd_rocclr_", act.name())
+
+    def test_runtime_memsets_have_flows(self):
+        # The memset API call must start an async CPU->GPU flow that ends on
+        # each of its gpu_memset events.
+        x = torch.empty(1024, device="cuda")
+        with TemporaryFileName(mode="w+") as fname:
+            self._profile(x.zero_).export_chrome_trace(fname)
+            with open(fname) as f:
+                events = json.load(f)["traceEvents"]
+        flows = {(e["ph"], e["id"]) for e in events if e.get("cat") == "ac2g"}
+        memsets = [e for e in events if e.get("cat") == "gpu_memset"]
+        self.assertTrue(memsets, "expected a gpu_memset event")
+        for e in memsets:
+            correlation = e["args"]["correlation"]
+            self.assertIn(("s", correlation), flows)
+            self.assertIn(("f", correlation), flows)
 
     def test_metadata_json_key_value_format(self):
         md = self._get_kernel_metadata()
