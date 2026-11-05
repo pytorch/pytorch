@@ -227,26 +227,17 @@ if HAS_GPU or TRITON_HAS_CPU:
 
 class RoundingToIntTest(TestCase):
     @unittest.skipUnless(HAS_GPU or TRITON_HAS_CPU, "requires a Triton device")
-    def test_integer_and_float_inputs(self) -> None:
-        device = torch.device(GPU_TYPE if HAS_GPU else "cpu")
+    @parametrize("dtype", [torch.int32, torch.int64, torch.float32, torch.float64])
+    @parametrize("rounding_type", ["ceil", "floor", "trunc"])
+    def test_integer_and_float_inputs(self, device, dtype, rounding_type) -> None:
+        rounding_fn = getattr(torch, rounding_type)
         values = [-3.75, -2.0, -1.0, 0.0, 1.0, 2.0, 3.75, 5.5]
-
-        for dtype in (torch.int32, torch.float32):
-            x = torch.tensor(values, dtype=dtype, device=device)
-            for rounding, reference in (
-                ("ceil", torch.ceil),
-                ("floor", torch.floor),
-                ("trunc", torch.trunc),
-            ):
-                with self.subTest(dtype=dtype, rounding=rounding):
-                    result = torch.empty(x.numel(), dtype=torch.int64, device=device)
-                    test_kernel_rounding_to_int[(1,)](
-                        x,
-                        result,
-                        BLOCK_SIZE=x.numel(),
-                        ROUNDING=rounding,
-                    )
-                    self.assertEqual(result, reference(x).to(torch.int64))
+        x = torch.tensor(values, dtype=dtype, device=device)
+        result = torch.empty(x.numel(), dtype=torch.int64, device=device)
+        test_kernel_rounding_to_int[(1,)](
+            x, result, BLOCK_SIZE=x.numel(), ROUNDING=rounding_type
+        )
+        self.assertEqual(result, rounding_fn(x).to(torch.int64))
 
 
 class OnlineSoftmaxCombineTest(TestCase):
@@ -656,6 +647,14 @@ if HAS_GPU:
         OnlineSoftmaxCombineTest, globals(), only_for=GPU_TYPE, allow_xpu=True
     )
     instantiate_device_type_tests(MinimumMaximumTest, globals(), only_for=GPU_TYPE)
+
+if HAS_GPU or TRITON_HAS_CPU:
+    instantiate_device_type_tests(
+        RoundingToIntTest,
+        globals(),
+        only_for=GPU_TYPE if HAS_GPU else "cpu",
+        allow_xpu=True,
+    )
 
 
 if __name__ == "__main__":

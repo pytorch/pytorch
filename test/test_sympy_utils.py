@@ -12,7 +12,6 @@ import sympy
 import torch
 import torch.fx as fx
 from sympy.core.relational import is_ge, is_gt, is_le, is_lt
-from torch.torch_version import TorchVersion
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipIf,
@@ -1148,13 +1147,25 @@ class TestSympySolve(TestCase):
 
 class TestSympyFunctions(TestCase):
     def test_rounding_to_int_safely_canonicalizes_pytorch_integer_functions(self):
-        x = sympy.Symbol("x")
-        integer_exprs = (CeilToInt(x), FloorToInt(x), TruncToInt(x))
+        x, y = sympy.symbols("x y")
+        integer_exprs = (
+            CeilToInt(x),
+            FloorDiv(x, y),
+            FloorToInt(x),
+            TruncToInt(x),
+        )
 
-        for outer in (CeilToInt, FloorToInt):
+        for outer in (CeilToInt, FloorToInt, TruncToInt):
             for inner in integer_exprs:
                 with self.subTest(outer=outer, inner=inner):
                     self.assertIs(outer(inner), inner)
+
+        integer_symbol = sympy.Symbol("integer_symbol", integer=True)
+        for rounding in (CeilToInt, FloorToInt, TruncToInt):
+            with self.subTest(rounding=rounding):
+                result = rounding(integer_symbol)
+                self.assertIs(result.func, rounding)
+                self.assertEqual(result.args, (integer_symbol,))
 
     def test_rounding_to_int_does_not_canonicalise_expressions_with_incorrect_assumptions(
         self,
@@ -1168,15 +1179,12 @@ class TestSympyFunctions(TestCase):
             FloorDiv(s14 * s46, 2016),
         )
 
-        # SymPy 1.14 incorrectly infers that this expression is always integer.
-        if TorchVersion(sympy.__version__) < TorchVersion("1.15.0"):
-            self.assertTrue(incorrectly_assumed_integer.is_integer)
         self.assertEqual(
             incorrectly_assumed_integer.subs({s14: 2016, s37: 1, s46: 1}),
             sympy.Rational(348, 11),
         )
 
-        for rounding in (CeilToInt, FloorToInt):
+        for rounding in (CeilToInt, FloorToInt, TruncToInt):
             with self.subTest(rounding=rounding):
                 result = rounding(incorrectly_assumed_integer)
                 self.assertIs(result.func, rounding)

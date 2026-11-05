@@ -114,10 +114,8 @@ def _is_integer_check_safe(expr: sympy.Basic) -> bool:
     canonicalization.
     """
 
-    return (
-        isinstance(expr, sympy.Integer)
-        or expr.func.__module__ == __name__
-        and expr.func.is_integer is True
+    return isinstance(expr, sympy.Integer) or (
+        expr.func.__module__ == __name__ and expr.func.is_integer is True
     )
 
 
@@ -1329,7 +1327,7 @@ class TruncToInt(sympy.Function):
             return int_oo
         if number in (-sympy.oo, -int_oo):
             return -int_oo
-        if number.is_integer is True:
+        if _is_integer_check_safe(number):
             return number
         if isinstance(number, IntTrueDiv):
             base, divisor = number.args
