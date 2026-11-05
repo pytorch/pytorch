@@ -57,6 +57,8 @@ class _Registration:
     device_id: int
     memory_type: str
     active: bool = True
+    # Set when a transfer times out: Mooncake may still be accessing the memory.
+    pinned: bool = False
 
     def ensure_active(self) -> None:
         if not self.active:

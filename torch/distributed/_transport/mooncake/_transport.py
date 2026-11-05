@@ -25,6 +25,9 @@ from ._memory import (
 from ._work import _live_transports, _MooncakeWork
 
 
+_pinned_registrations: list[tuple[Any, _Registration]] = []
+
+
 if TYPE_CHECKING:
     from .._api import Memory
 
@@ -60,9 +63,11 @@ class MooncakeTransport(Transport):
     raw tensors are rejected rather than allocated or registered implicitly.
 
     There is no per-peer disconnect; ``close`` releases all peers. A failed
-    transfer fails only its Work. Descriptors are not tied to the peer that sent
-    them, so an endpoint serving several peers must authorize each request, for
-    example by checking ``remote_buffer.endpoint``.
+    transfer fails only its Work. A timed-out transfer also pins its local
+    memory, which is never unregistered and rejects further transfers, because
+    Mooncake may still be accessing it. Descriptors are not tied to the peer that
+    sent them, so an endpoint serving several peers must authorize each request,
+    for example by checking ``remote_buffer.endpoint``.
 
     Mooncake has no completion callback or fd yet, so transfers are submitted
     with ``batch_transfer_async`` and a single poller thread per transport checks
@@ -108,7 +113,7 @@ class MooncakeTransport(Transport):
         # In-flight transfers; each entry is pruned by a done callback when its
         # transfer settles (see _submit), so a completed work is never revisited.
         self._pending: dict[int, _MooncakeWork] = {}
-        self._batches: dict[int, _ThreadFuture[None]] = {}
+        self._batches: dict[int, tuple[_ThreadFuture[None], _Registration]] = {}
         self._poll_cv = Condition()
         self._poller: Thread | None = None
         self._poller_stopped = False
@@ -233,7 +238,9 @@ class MooncakeTransport(Transport):
                 raise RuntimeError(
                     "memory has pending transfers; wait before unregistering"
                 )
-            if engine.unregister_memory(registration.address) != 0:
+            if registration.pinned:
+                _pinned_registrations.append((engine, registration))
+            elif engine.unregister_memory(registration.address) != 0:
                 raise RuntimeError("Mooncake memory unregistration failed")
             registration.active = False
             key = next(
@@ -269,6 +276,11 @@ class MooncakeTransport(Transport):
             raise ValueError("local view does not fit in the remote buffer")
         registration = local_buffer._memory._registration
         registration.ensure_active()
+        if registration.pinned:
+            raise RuntimeError(
+                "memory is pinned after a timed-out transfer; Mooncake may still "
+                "be accessing it"
+            )
         if registration.tensor.data_ptr() != registration.address or (
             registration.tensor.numel() * registration.tensor.element_size()
             != registration.length
@@ -316,7 +328,7 @@ class MooncakeTransport(Transport):
         future.add_done_callback(lambda _: self._prune(id(work)))
         _live_transports.add(self)
         with self._poll_cv:
-            self._batches[batch_id] = future
+            self._batches[batch_id] = (future, registration)
             if self._poller is None:
                 self._poller = Thread(target=self._poll, name="mooncake", daemon=True)
                 self._poller.start()
@@ -337,22 +349,30 @@ class MooncakeTransport(Transport):
                     return
                 batches = list(self._batches.items())
             settled = []
-            for batch_id, future in batches:
-                # Each batch holds one request, so 1 and -1 are terminal: every
-                # slice has completed or failed and Mooncake has freed the batch.
-                # -2 (TIMEOUT, only with MC_SLICE_TIMEOUT) leaves slices in
-                # flight, so keep polling.
+            for batch_id, (future, registration) in batches:
+                # Every non-zero status is final: Mooncake frees the batch, so it
+                # must not be polled again. 1 and -1 mean every slice of the one
+                # request has completed or failed. -2 (TIMEOUT, with
+                # MC_SLICE_TIMEOUT) or an unknown status may leave slices in
+                # flight, so the local memory stays pinned.
                 status = engine.transfer_check_status(batch_id)
-                if status in (1, -1):
-                    settled.append((batch_id, future, status))
+                if status != 0:
+                    settled.append((batch_id, future, registration, status))
             with self._poll_cv:
                 for batch_id, *_ in settled:
                     del self._batches[batch_id]
-            for _, future, status in settled:
+            for _, future, registration, status in settled:
                 if status == 1:
                     future.set_result(None)
-                else:
-                    future.set_exception(RuntimeError("Mooncake transfer failed"))
+                    continue
+                message = "Mooncake transfer failed"
+                if status != -1:
+                    registration.pinned = True
+                    message += (
+                        f" with status {status}; it may still be running, so its "
+                        "local memory stays pinned"
+                    )
+                future.set_exception(RuntimeError(message))
             delay = 0.0 if settled else min(max(delay * 2, 1e-6), 1e-3)
 
     def _prune(self, key: int) -> None:
@@ -540,7 +560,10 @@ class MooncakeTransport(Transport):
             self._poll_cv.notify()
         engine = self._engine
         for key, registration in list(self._registrations.items()):
-            engine.unregister_memory(registration.address)
+            if registration.pinned:
+                _pinned_registrations.append((engine, registration))
+            else:
+                engine.unregister_memory(registration.address)
             registration.active = False
             del self._registrations[key]
         self._pending.clear()

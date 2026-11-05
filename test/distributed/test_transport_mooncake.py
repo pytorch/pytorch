@@ -107,6 +107,7 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
     def setUp(self):
         super().setUp()
         register_transport("mooncake", MooncakeTransport, replace=True)
+        self.addCleanup(_mooncake._pinned_registrations.clear)
 
     def make_transport_pair(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):
@@ -297,24 +298,28 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
             first.unregister_memory(source)
         native.assert_called_once_with(source._registration.address)
 
-    def test_timeout_status_keeps_polling(self):
+    def test_timeout_status_pins_memory(self):
         first, second = self.make_transport_pair()
-        source = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        timed_out = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        other = first.register_memory(torch.ones(8, dtype=torch.uint8))
         remote = second.register_memory(
             torch.zeros(8, dtype=torch.uint8)
         ).to_remote_buffer()
-        for final, error in ((1, None), (-1, RuntimeError)):
-            statuses = iter([-2, -2])
-            with patch.object(
-                _Engine, "transfer_check_status", lambda *_: next(statuses, final)
-            ):
-                work = first.write(source.to_view(), remote, async_op=True)
-                if error is None:
-                    work.wait()
-                else:
-                    with self.assertRaises(error):
-                        work.wait()
-            self.assertIsNone(next(statuses, None))
+        with patch.object(_Engine, "transfer_check_status", return_value=-2) as check:
+            with self.assertRaisesRegex(RuntimeError, "stays pinned"):
+                first.write(timed_out.to_view(), remote)
+        check.assert_called_once()
+        with self.assertRaisesRegex(RuntimeError, "pinned after a timed-out"):
+            first.write(timed_out.to_view(), remote)
+        first.write(other.to_view(), remote)
+        engine = first._engine
+        with patch.object(_Engine, "unregister_memory", return_value=0) as native:
+            first.unregister_memory(timed_out)
+            first.close()
+        native.assert_called_once_with(other._registration.address)
+        self.assertEqual(
+            _mooncake._pinned_registrations, [(engine, timed_out._registration)]
+        )
 
     def test_connect_rejects_malformed_peer_url(self):
         first, _ = self.make_transport_pair()
