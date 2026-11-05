@@ -196,16 +196,6 @@ IN_PLACE_DESUGARING_MAP = {
     operator.ixor: operator.xor,
 }
 
-_BUILTIN_CONSTANT_FOLDABLE_METHODS: dict[type, frozenset[str]] = {
-    int: frozenset({"__new__", "from_bytes"}),
-    bool: frozenset({"__new__", "from_bytes"}),
-    float: frozenset({"fromhex", "hex"}),
-}
-if sys.version_info >= (3, 14):
-    _BUILTIN_CONSTANT_FOLDABLE_METHODS[float] |= frozenset({"from_number"})
-    _BUILTIN_CONSTANT_FOLDABLE_METHODS[complex] = frozenset({"from_number"})
-
-
 _HandlerCallback = Callable[
     ["InstructionTranslatorBase", typing.Any, typing.Any], VariableTracker | None
 ]
@@ -2169,24 +2159,6 @@ class BuiltinVariable(TypeVariable):
             ):
                 return obj.method_setattr_standard(tx, name_var, val)
 
-        if name in _BUILTIN_CONSTANT_FOLDABLE_METHODS.get(self.fn, ()):
-            if all(a.is_python_constant() for a in args) and all(
-                v.is_python_constant() for v in kwargs.values()
-            ):
-                try:
-                    fn = getattr(self.fn, name)
-                    res = fn(
-                        *(a.as_python_constant() for a in args),
-                        **{k: v.as_python_constant() for k, v in kwargs.items()},
-                    )
-                    return VariableTracker.build(tx, res)
-                except Exception as e:
-                    raise_observed_exception(
-                        type(e),
-                        tx,
-                        args=list(e.args),
-                    )
-
         if (
             self.fn in (set, frozenset, list, tuple, int, str, float, complex)
             and name != "__new__"
@@ -2293,21 +2265,6 @@ class BuiltinVariable(TypeVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def call_int(
-        self,
-        tx: "InstructionTranslatorBase",
-        arg: VariableTracker,
-        base: VariableTracker | None = None,
-    ) -> VariableTracker | None:
-        if base is None:
-            return pynumber_int(tx, arg)
-        return pylong_from_base(tx, arg, base)
-
-    def call_float(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
-    ) -> VariableTracker | None:
-        return pynumber_float(tx, arg)
-
     def call_bin(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
@@ -2322,12 +2279,6 @@ class BuiltinVariable(TypeVariable):
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
         return pynumber_tobase(tx, arg, 16)
-
-    def call_bool(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
-    ) -> VariableTracker | None:
-        # Emulate PyBool_Type.tp_vectorcall which boils down to PyObject_IsTrue.
-        return generic_is_true(tx, arg)
 
     def call_hash(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
@@ -4289,6 +4240,62 @@ class ListBuiltinVariable(TypeVariable):
         return ListVariable.tp_new_impl(self, tx, args, kwargs)
 
 
+def constant_fold(
+    fn: Callable[..., object],
+    tx: "InstructionTranslatorBase",
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    try:
+        res = fn(
+            *(a.as_python_constant() for a in args),
+            **{k: v.as_python_constant() for k, v in kwargs.items()},
+        )
+    except Exception as e:
+        raise_observed_exception(type(e), tx, args=list(e.args))
+    return VariableTracker.build(tx, res)
+
+
+def _constant_fold_classmethod(name: str) -> Method:
+    """tp_methods entry for a classmethod of a builtin type (e.g. int.from_bytes)
+    that is evaluated at trace time on constant arguments."""
+
+    def handler(
+        self: "TypeVariable",
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return constant_fold(getattr(self._fn, name), tx, args, kwargs)
+
+    return Method(handler)
+
+
+def _constant_fold_on_unsupported(
+    call_function: Callable[..., VariableTracker],
+) -> Callable[..., VariableTracker]:
+    """If the modeled path graph breaks on constant arguments, evaluate the call
+    at trace time instead (e.g. int() of a pybind11 enum, whose C __int__ has no
+    model)."""
+
+    @functools.wraps(call_function)
+    def wrapper(
+        self: "TypeVariable",
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        try:
+            return call_function(self, tx, args, kwargs)
+        except Unsupported as exc:
+            if not check_unspec_or_constant_args(args, kwargs):
+                raise
+            exc.remove_from_stats()
+        return constant_fold(self._fn, tx, args, kwargs)
+
+    return wrapper
+
+
 class ByteArrayBuiltinVariable(TypeVariable):
     """Variable tracker for the `bytearray` builtin constructor."""
 
@@ -4363,6 +4370,113 @@ class ByteArrayBuiltinVariable(TypeVariable):
             explanation="Dynamo cannot trace bytearray() with this argument type.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
+
+
+class IntBuiltinVariable(TypeVariable):
+    _fn = int
+
+    tp_methods = {
+        "from_bytes": _constant_fold_classmethod("from_bytes"),
+    }
+
+    @_constant_fold_on_unsupported
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # int(x=0, /, base=10)
+        base = kwargs.get("base")
+        for name in kwargs:
+            if name != "base":
+                raise_type_error(
+                    tx, f"int() got an unexpected keyword argument '{name}'"
+                )
+        if len(args) > 2:
+            raise_type_error(tx, f"int expected at most 2 arguments, got {len(args)}")
+        if len(args) + (base is not None) > 2:
+            raise_type_error(
+                tx, f"int() takes at most 2 arguments ({len(args) + 1} given)"
+            )
+        if not args:
+            if base is not None:
+                raise_type_error(tx, "int() missing string argument")
+            return ConstantVariable.create(0)
+        if len(args) == 2:
+            base = args[1]
+        if base is None:
+            return pynumber_int(tx, args[0])
+        res = pylong_from_base(tx, args[0], base)
+        if res is None:
+            unimplemented(
+                gb_type="int() with a base on non-constant arguments",
+                context=f"int({args[0]}, {base})",
+                explanation="Dynamo only traces int(x, base) when x and base are constants.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return res
+
+
+class FloatBuiltinVariable(TypeVariable):
+    _fn = float
+
+    tp_methods = {"fromhex": _constant_fold_classmethod("fromhex")}
+    if sys.version_info >= (3, 14):
+        tp_methods["from_number"] = _constant_fold_classmethod("from_number")
+
+    @_constant_fold_on_unsupported
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if kwargs:
+            raise_type_error(tx, "float() takes no keyword arguments")
+        if len(args) > 1:
+            raise_type_error(tx, f"float expected at most 1 argument, got {len(args)}")
+        if not args:
+            return ConstantVariable.create(0.0)
+        return pynumber_float(tx, args[0])
+
+
+class ComplexBuiltinVariable(TypeVariable):
+    _fn = complex
+
+    if sys.version_info >= (3, 14):
+        tp_methods = {"from_number": _constant_fold_classmethod("from_number")}
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return constant_fold(self._fn, tx, args, kwargs)
+
+
+class BoolBuiltinVariable(TypeVariable):
+    _fn = bool
+
+    tp_methods = {
+        "from_bytes": _constant_fold_classmethod("from_bytes"),
+    }
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if kwargs:
+            raise_type_error(tx, "bool() takes no keyword arguments")
+        if len(args) > 1:
+            raise_type_error(tx, f"bool expected at most 1 argument, got {len(args)}")
+        if not args:
+            return ConstantVariable.create(False)
+        # Emulate PyBool_Type.tp_vectorcall which boils down to PyObject_IsTrue.
+        return generic_is_true(tx, args[0])
 
 
 # pyrefly: ignore [deprecated]
