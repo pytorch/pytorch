@@ -3406,12 +3406,6 @@ class TestMPS(TestCaseMPS):
         rev = torch.fft.rfftn(rdata, dim=(3, 0))
         check(lambda y: torch.fft.irfftn(y, s=(rdata.size(3), rdata.size(0)), dim=(3, 0)), rev)
 
-    def test_fftn_too_many_dims(self):
-        # MPSGraph cannot transform more than four dims.
-        x = torch.randn(2, 2, 2, 2, 2, device="mps", dtype=torch.complex64)
-        with self.assertRaisesRegex(RuntimeError, "up to 4 dimensions"):
-            torch.fft.fftn(x, dim=(0, 1, 2, 3, 4))
-
     def test_instance_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, channels_last=False, track_running_stats=True, test_module=False):
 
@@ -15563,6 +15557,37 @@ class TestComplex(TestCase):
 @skipIfSlowGradcheckEnv
 class TestCommon(TestCase):
     exact_dtype = True
+
+    @parametrize("shape, dtype", [((2, 3, 4, 5, 6), torch.complex64), ((32, 8192), torch.complex64),
+                                  ((8192,), torch.complex32), ((64, 128), torch.complex32)])
+    def test_fftn_round_trip(self, device, shape, dtype):
+        # Every dim, several passes per axis, and fp16 partials above the half range (amplitude 100 before scaling)
+        x = 100 * torch.randn(shape, dtype=torch.complex64)
+        spectrum = torch.fft.fftn(x.to(device)).cpu()
+        self.assertEqual(spectrum, torch.fft.fftn(x), atol=0.5, rtol=1e-4)
+        result = torch.fft.ifftn(spectrum.to(dtype).to(device)).cpu().to(torch.complex64)
+        self.assertEqual(result, x, atol=1, rtol=0)
+
+    def test_fft_private_ops_edge_dims(self, device):
+        # The private ops wrap negative dims like the CPU
+        x = torch.randn(3, 16, dtype=torch.complex64, device=device)
+        self.assertEqual(torch._fft_c2c(x, [-1], 0, True), torch.fft.fft(x))
+
+    @dtypes(torch.float32, torch.float16)
+    @parametrize("n", [64, 128, 200, 240, 256, 512, 1024, 2048, 4096, 4099])
+    @parametrize("kind", ["fft", "ifft"])
+    @parametrize("layout", ["contiguous", "transposed", "sliced", "out"])
+    def test_fft_strides(self, device, dtype, n, kind, layout):
+        complex_dtype = torch.complex32 if dtype == torch.float16 else torch.complex64
+        x = torch.randn(5, 2 * n + 3, device=device, dtype=complex_dtype)
+        x = {"sliced": x[:, 3::2], "transposed": x[:, :n].t().contiguous().t()}.get(layout, x[:, :n].contiguous())
+        op = getattr(torch.fft, kind)
+        kwargs = {"norm": "ortho"}
+        reference = op(x.cpu().to(torch.complex128), **kwargs)
+        if layout == "out":
+            kwargs["out"] = torch.empty(5, 2 * reference.size(-1) + 3, device=device, dtype=complex_dtype)[:, 3::2]
+        result, tol = op(x, **kwargs), 2e-3 if dtype == torch.float16 else 2e-5
+        self.assertEqual(result.cpu(), reference.to(result.dtype), atol=tol, rtol=tol)
 
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
     @classmethod
