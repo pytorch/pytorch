@@ -2151,6 +2151,30 @@ class NONE_MATCH : public LeafGuard {
   }
 };
 
+// Checks whether a tensor is a C++ fake. TENSOR_MATCH ignores the Fake key, so
+// that guards built from C++ fakes match real tensors.
+class FAKE_TENSOR_MATCH : public LeafGuard {
+ public:
+  FAKE_TENSOR_MATCH(
+      RootGuardManager* root_guard_manager,
+      bool expected,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _expected(expected) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return THPVariable_Check(value) &&
+        THPVariable_Unpack(value).is_fake() == _expected;
+  }
+
+ private:
+  bool _expected;
+};
+
 class TRUE_MATCH : public LeafGuard {
  public:
   TRUE_MATCH(
@@ -8336,6 +8360,19 @@ PyObject* torch_c_dynamo_guards_init() {
             SKIP_IF_GUARD_ALREADY_PRESENT("NONE_MATCH");
             self.add_leaf_guard(std::make_shared<NONE_MATCH>(
                 self.get_root(),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
+          "add_fake_tensor_match_guard",
+          [](GuardManager& self,
+             bool expected,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("FAKE_TENSOR_MATCH");
+            self.add_leaf_guard(std::make_shared<FAKE_TENSOR_MATCH>(
+                self.get_root(),
+                expected,
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
           })
