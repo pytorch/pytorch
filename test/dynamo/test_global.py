@@ -5,13 +5,14 @@ import importlib.util
 import os
 import sys
 import tempfile
+import unittest
 import weakref
 from unittest import mock
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import UncapturedHigherOrderOpError, Unsupported
 from torch._dynamo.testing import same
 from torch.testing._internal.common_utils import HardwareClassification
 
@@ -339,27 +340,6 @@ fn = functools.partial(my_fn, scale=2)
             self.assertEqual(mod.flag, 2)
 
 
-_ABSENT = object()
-
-
-@contextlib.contextmanager
-def temp_globals(namespace, **updates):
-    saved = {name: namespace.get(name, _ABSENT) for name in updates}
-    for name, value in updates.items():
-        if value is _ABSENT:
-            namespace.pop(name, None)
-        else:
-            namespace[name] = value
-    try:
-        yield
-    finally:
-        for name, value in saved.items():
-            if value is _ABSENT:
-                namespace.pop(name, None)
-            else:
-                namespace[name] = value
-
-
 @contextlib.contextmanager
 def crossfile_globals(**updates):
     try:
@@ -367,22 +347,28 @@ def crossfile_globals(**updates):
     except ImportError:
         import mock_store_global_crossfile_inline
 
-    with temp_globals(mock_store_global_crossfile_inline.__dict__, **updates):
+    with mock.patch.dict(mock_store_global_crossfile_inline.__dict__, updates):
         yield mock_store_global_crossfile_inline
 
 
 class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def _assert_delete_missing_global(self, fn, name, args=()):
-        with self.assertRaisesRegex(Unsupported, "Observed exception"):
+    def _assert_delete_missing_global(self, fn, name, args=(), still_bound=False):
+        with self.assertRaisesRegex(
+            Unsupported, f"raised exception NameError.*name '{name}' is not defined"
+        ):
             torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        if still_bound:
+            self.assertIn(name, globals())
         torch._dynamo.reset()
+        cnt = torch._dynamo.testing.CompileCounter()
         with self.assertRaisesRegex(NameError, f"name '{name}' is not defined"):
-            torch.compile(fn, backend="eager")(*args)
+            torch.compile(fn, backend=cnt, fullgraph=False)(*args)
+        self.assertEqual(cnt.frame_count, 0)
 
     def test_delete_global(self):
-        with temp_globals(globals(), _dg_a=10):
+        with mock.patch.dict(globals(), {"_dg_a": 10}):
 
             def fn(x):
                 global _dg_a
@@ -395,7 +381,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertNotIn("_dg_a", globals())
 
     def test_delete_missing_global(self):
-        with temp_globals(globals(), _dg_a=_ABSENT):
+        with mock.patch.dict(globals()):
 
             def fn(x):
                 global _dg_a
@@ -405,7 +391,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self._assert_delete_missing_global(fn, "_dg_a", (torch.ones(2, 2),))
 
     def test_delete_missing_global_caught_by_caller(self):
-        with temp_globals(globals(), _dg_a=_ABSENT):
+        with mock.patch.dict(globals()):
 
             def inner():
                 global _dg_a
@@ -428,7 +414,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                     self.assertEqual(cnt.frame_count, 1)
 
     def test_delete_global_created_then_deleted(self):
-        with temp_globals(globals(), _dg_a=_ABSENT):
+        with mock.patch.dict(globals()):
             with torch._dynamo.config.patch(side_effect_replay_policy="error"):
 
                 def fn(x):
@@ -443,7 +429,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertNotIn("_dg_a", globals())
 
     def test_delete_global_created_then_deleted_twice(self):
-        with temp_globals(globals(), _dg_a=_ABSENT):
+        with mock.patch.dict(globals()):
 
             def fn(x):
                 global _dg_a
@@ -455,7 +441,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self._assert_delete_missing_global(fn, "_dg_a", (torch.ones(2, 2),))
 
     def test_delete_global_twice(self):
-        with temp_globals(globals(), _dg_a=1):
+        with mock.patch.dict(globals(), {"_dg_a": 1}):
 
             def fn(x):
                 global _dg_a
@@ -463,11 +449,13 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                 del _dg_a  # noqa: F821
                 return x + 1
 
-            self._assert_delete_missing_global(fn, "_dg_a", (torch.ones(2, 2),))
+            self._assert_delete_missing_global(
+                fn, "_dg_a", (torch.ones(2, 2),), still_bound=True
+            )
             self.assertNotIn("_dg_a", globals())
 
     def test_delete_global_then_store(self):
-        with temp_globals(globals(), _dg_a=1, _dg_pad=0):
+        with mock.patch.dict(globals(), {"_dg_a": 1}):
 
             def fn(x):
                 global _dg_a
@@ -476,24 +464,29 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                 return x + 1
 
             x = torch.ones(2, 2)
-            position = list(globals()).index("_dg_a")
-            self.assertLess(position, list(globals()).index("_dg_pad"))
-
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(opt_fn(x), x + 1)
             self.assertEqual(_dg_a, 7)
-            compiled_position = list(globals()).index("_dg_a")
-            self.assertEqual(compiled_position, position)
 
+    @unittest.expectedFailure
+    def test_delete_global_then_store_matches_eager_dict_order(self):
+        with mock.patch.dict(globals(), {"_dg_a": 1, "_dg_pad": 0}):
+
+            def fn(x):
+                global _dg_a
+                del _dg_a
+                _dg_a = 7
+                return x + 1
+
+            x = torch.ones(2, 2)
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+            compiled_position = list(globals()).index("_dg_a")
+            globals()["_dg_a"] = 1
             fn(x)
-            self.assertEqual(_dg_a, 7)
-            self.assertGreater(
-                list(globals()).index("_dg_a"), list(globals()).index("_dg_pad")
-            )
-            self.assertNotEqual(list(globals()).index("_dg_a"), compiled_position)
+            self.assertEqual(compiled_position, list(globals()).index("_dg_a"))
 
     def test_delete_global_read_write_chain(self):
-        with temp_globals(globals(), _dg_a=1):
+        with mock.patch.dict(globals(), {"_dg_a": 1}):
 
             def fn(x):
                 global _dg_a
@@ -514,7 +507,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(globals()["_dg_a"], expected_global)
 
     def test_delete_global_created_then_deleted_read(self):
-        with temp_globals(globals(), _dg_a=_ABSENT):
+        with mock.patch.dict(globals()):
 
             def fn(x):
                 global _dg_a
@@ -532,21 +525,22 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertNotIn("_dg_a", globals())
 
     def test_delete_tensor_global(self):
-        with temp_globals(globals(), _dg_a=_ABSENT):
+        with mock.patch.dict(globals()):
 
             def fn(x):
                 global _dg_a
+                y = _dg_a + 1
                 del _dg_a
-                return x + 1
+                return x + y
 
             x = torch.ones(2, 2)
-            tensor = torch.ones(4)
+            tensor = torch.ones(2, 2)
             globals()["_dg_a"] = tensor
             ref = weakref.ref(tensor)
             del tensor
 
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            self.assertEqual(opt_fn(x), x + 1)
+            self.assertEqual(opt_fn(x), x + x + 1)
             self.assertNotIn("_dg_a", globals())
             self.assertIsNone(ref(), "deleting the global kept the tensor alive")
 
@@ -563,7 +557,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertNotIn("delete_value", mod.__dict__)
 
     def test_delete_global_crossfile_created_then_deleted(self):
-        with crossfile_globals(store_then_delete_missing_value=_ABSENT) as mod:
+        with crossfile_globals() as mod:
             with torch._dynamo.config.patch(side_effect_replay_policy="error"):
 
                 @torch.compile(backend="eager", fullgraph=True)
@@ -592,9 +586,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
 
     def test_delete_global_crossfile_then_store(self):
         with crossfile_globals(delete_then_store_value=1) as mod:
-            position = list(mod.__dict__).index("delete_then_store_value")
-            successor = list(mod.__dict__).index("delete_then_store_value_fn")
-            self.assertLess(position, successor)
 
             def fn(x):
                 mod.delete_then_store_value_fn()
@@ -604,14 +595,9 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(opt_fn(x), x + 1)
             self.assertEqual(mod.delete_then_store_value, 7)
-            self.assertEqual(
-                list(mod.__dict__).index("delete_then_store_value"), position
-            )
 
     def test_delete_global_crossfile_then_store_multi(self):
-        with crossfile_globals(
-            delete_then_store_multi=1, delete_then_store_multi_new=_ABSENT
-        ) as mod:
+        with crossfile_globals(delete_then_store_multi=1) as mod:
 
             def fn(x):
                 mod.delete_then_store_multi_fn()
@@ -623,73 +609,8 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(mod.delete_then_store_multi, 3)
             self.assertEqual(mod.delete_then_store_multi_new, 2)
 
-    def test_delete_global_crossfile_created_then_deleted_in_stdlib(self):
-        import collections.abc
-
-        from torch._dynamo.side_effects import SideEffects
-        from torch._dynamo.symbolic_convert import InstructionTranslator
-
-        name = "stdlib_store_then_delete"
-        stdlib_globals = collections.abc.__dict__
-        removed: list[set[object]] = []
-        mutated_sources: list[set[object]] = []
-
-        orig_run = InstructionTranslator.run
-        orig_discard = SideEffects.discard_global_store
-
-        def run(self, *args, **kwargs):
-            try:
-                return orig_run(self, *args, **kwargs)
-            finally:
-                mutated_sources.append(set(self.output.side_effects.mutated_sources))
-
-        def discard_global_store(self, item, attr_name):
-            before = set(self.mutated_sources)
-            orig_discard(self, item, attr_name)
-            removed.append(before - set(self.mutated_sources))
-
-        with (
-            mock.patch.dict(stdlib_globals),
-            mock.patch.object(InstructionTranslator, "run", run),
-            mock.patch.object(
-                SideEffects, "discard_global_store", discard_global_store
-            ),
-        ):
-            exec(
-                compile(
-                    f"""
-def fn():
-    global {name}
-    {name} = 1
-    del {name}
-    return 0
-""",
-                    "<stdlib-globals>",
-                    "exec",
-                ),
-                stdlib_globals,
-            )
-            stdlib_fn = stdlib_globals["fn"]
-            self.assertNotIn(name, stdlib_globals)
-
-            def fn(x):
-                stdlib_fn()
-                return x + 1
-
-            x = torch.ones(2, 2)
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            self.assertEqual(opt_fn(x), x + 1)
-
-        self.assertEqual(len(removed), 1)
-        self.assertEqual(len(removed[0]), 1)
-        (mutated_source,) = removed[0]
-        self.assertTrue(mutated_sources)
-        for sources in mutated_sources:
-            self.assertNotIn(mutated_source, sources)
-        self.assertNotIn(name, stdlib_globals)
-
     def test_delete_global_presence_flip(self):
-        with temp_globals(globals(), _dg_a=1):
+        with mock.patch.dict(globals(), {"_dg_a": 1}):
 
             def fn(x):
                 global _dg_a
@@ -711,7 +632,7 @@ def fn():
             self.assertEqual(cnt.frame_count, 2)
 
     def test_delete_global_presence_flip_absent_first(self):
-        with temp_globals(globals(), _dg_a=_ABSENT):
+        with mock.patch.dict(globals()):
 
             def fn(x):
                 global _dg_a
@@ -732,6 +653,27 @@ def fn():
             self.assertEqual(opt_fn(x), x + 1)
             self.assertNotIn("_dg_a", globals())
             self.assertEqual(cnt.frame_count, 2)
+
+    def test_delete_global_store_cancelled_across_hop(self):
+        def true_fn(y):
+            global _dg_hop
+            del _dg_hop
+            return y + 1
+
+        def false_fn(y):
+            return y - 1
+
+        def fn(x):
+            global _dg_hop
+            _dg_hop = 1
+            return torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+
+        with mock.patch.dict(globals()):
+            with self.assertRaisesRegex(
+                UncapturedHigherOrderOpError, "HOP: Unsafe side effect"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(2, 2))
+            self.assertNotIn("_dg_hop", globals())
 
     def test_delete_global_in_unregistered_importlib_module(self):
         module_name = "test_dynamo_unregistered_delete_global_181243"

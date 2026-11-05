@@ -2863,23 +2863,24 @@ class <lambda>(torch.nn.Module):
 
         inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
         expected = fn(*inp)
-        self.addCleanup(globals().pop, "_stream_del_global_created", None)
-        self.assertNotIn("_stream_del_global_created", globals())
+        with patch.dict(globals()):
+            self.assertNotIn("_stream_del_global_created", globals())
 
-        (
-            actual,
-            _,
-            fw_graphs,
-            _,
-        ) = extract_graph(fn, *inp)
-        self.assertEqual(len(fw_graphs), 1)
-        self.assertEqual(expected, actual)
-        graph_str = print_graph(fw_graphs[0])
-        self.assertIn("sync_dealloc", graph_str)
-        self.assertIn("record_event", graph_str)
-        self.assertNotIn("_stream_del_global_created", globals())
+            (
+                actual,
+                _,
+                fw_graphs,
+                _,
+            ) = extract_graph(fn, *inp)
+            self.assertEqual(len(fw_graphs), 1)
+            self.assertEqual(expected, actual)
+            graph_str = print_graph(fw_graphs[0])
+            self.assertIn("sync_dealloc", graph_str)
+            self.assertIn("record_event", graph_str)
+            self.assertNotIn("_stream_del_global_created", globals())
 
-    def test_del_global_preexisting_tensor_no_sync_dealloc(self, device):
+    @unittest.expectedFailure
+    def test_del_global_preexisting_tensor_sync_dealloc(self, device):
         def fn(x, y):
             global _stream_del_global_preexisting
             s = torch.Stream(device=device)
@@ -2907,7 +2908,7 @@ class <lambda>(torch.nn.Module):
             self.assertEqual(len(fw_graphs), 1)
             self.assertEqual(expected, actual)
             graph_str = print_graph(fw_graphs[0])
-            self.assertNotIn("sync_dealloc", graph_str)
+            self.assertIn("sync_dealloc", graph_str)
             self.assertNotIn("_stream_del_global_preexisting", globals())
 
     def test_del_global_same_stream_no_sync_dealloc(self, device):

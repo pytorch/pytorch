@@ -2445,6 +2445,14 @@ class InstructionTranslatorBase(
             ],
         )
 
+    def _raise_name_error(self, name: str) -> NoReturn:
+        raise_observed_exception(
+            NameError,
+            self,
+            args=[f"name '{name}' is not defined"],
+            kwargs={"name": ConstantVariable.create(name)},
+        )
+
     def DELETE_FAST(self, inst: Instruction) -> None:
         name = inst.argval
         var = self.symbolic_locals.get(name)
@@ -2594,7 +2602,10 @@ class InstructionTranslatorBase(
         self._install_globals_membership_guard(name, present)
         variable = self._global_mutation_vt(name)
         self._check_global_delete(name, variable, present)
-        self.output.side_effects.delete_global(variable, name, present)
+        if present:
+            self.output.side_effects.record_global_delete(variable, name)
+        else:
+            self.output.side_effects.discard_global_store(variable, name)
 
     def _global_mutation_vt(self, name: str) -> VariableTracker:
         """The variable that keys this global's mutation; one per name.
@@ -2614,13 +2625,7 @@ class InstructionTranslatorBase(
         item: VariableTracker,
         present: bool,
     ) -> None:
-        """Raise what eager raises, and keep a dropped tensor's dealloc sync.
-
-        The name is bound if the real globals hold it, or if a STORE_GLOBAL
-        earlier in this trace created it and no delete removed it again. Whether
-        the delete replays is SideEffects.delete_global's call: only a name in
-        the real globals has to be deleted at replay time.
-        """
+        """Raise what eager raises, and keep a dropped tensor's dealloc sync."""
         side_effects = self.output.side_effects
         pending = side_effects.store_attr_mutations.get(item, {}).get(name)
         if isinstance(pending, variables.DeletedVariable) or (
@@ -2628,35 +2633,32 @@ class InstructionTranslatorBase(
         ):
             # An earlier delete in this trace already removed the name, or
             # nothing ever bound it.
-            raise_observed_exception(
-                NameError,
-                self,
-                args=[f"name '{name}' is not defined"],
-                kwargs={"name": ConstantVariable.create(name)},
-            )
-        if isinstance(pending, TensorVariable):
-            # Dropping `pending` destroys the last reference, the same as
-            # DELETE_FAST dropping a local. It is a store made earlier in this
-            # trace, so it is already materialised and this needs no guard.
-            # A value read out of f_globals would need one (see _load_global),
-            # so pre-existing globals are not covered.
-            self._maybe_emit_sync_dealloc(pending)
+            self._raise_name_error(name)
+        # A pre-existing global's tensor is not covered: syncing its dealloc
+        # would need a guard on the tensor identity, which is not tracked.
+        self._maybe_sync_dealloc_attr(item, name)
 
     @functools.cached_property
     def _globals_dict_source(self) -> Source:
-        # Both replay directions are decided by membership, and GlobalSource(name)
-        # raises for an absent name, so the decision is guarded on the dict
-        # itself. install_global_by_id is the mechanism
-        # get_globals_source_and_value already uses for unnamed scopes.
+        # Whether a DELETE_GLOBAL replays depends on membership, and
+        # GlobalSource(name) raises for an absent name, so membership is guarded
+        # on the dict itself. Root that guard at the module (as
+        # get_globals_source_and_value does) when the dict is a registered
+        # module's, so a loaded artifact can bind it again; a dict that is no
+        # module's has no import source, so fall back to an unnamed-scope key.
+        registered_module = _registered_module_for_globals(
+            self.f_globals.get("__name__"), self.f_globals
+        )
+        if registered_module is not None:
+            module_name, _ = registered_module
+            return AttrSource(self.import_source(module_name), "__dict__")
         return GlobalSource(
             self.output.install_global_by_id(UNNAMED_SCOPE_PREFIX, self.f_globals)
         )
 
     def _install_globals_membership_guard(self, name: str, present: bool) -> None:
-        # DELETE_GLOBAL bakes the trace-time `name in f_globals` decision into
-        # the generated code, so membership itself has to be guarded. Without
-        # it a name that later appears or disappears reuses a stale artifact
-        # and the replayed delete no longer matches the globals.
+        # The trace-time membership is baked into the generated code; if it
+        # flips, the replayed delete no longer matches the globals.
         guard_builder = (
             GuardBuilder.DICT_CONTAINS if present else GuardBuilder.DICT_NOT_CONTAINS
         )
@@ -2825,14 +2827,8 @@ class InstructionTranslatorBase(
     @cache_method
     def load_builtin_from_argval(self, argval: Any) -> VariableTracker:
         if argval not in self.f_builtins:
-            # Name is neither a global nor a builtin: matches CPython raising
-            # NameError with `name` set to the missing identifier.
-            raise_observed_exception(
-                NameError,
-                self,
-                args=[f"name '{argval}' is not defined"],
-                kwargs={"name": ConstantVariable.create(argval)},
-            )
+            # Name is neither a global nor a builtin.
+            self._raise_name_error(argval)
         val = self.f_builtins[argval]
 
         if callable(val):
@@ -6572,7 +6568,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         present = name in self.f_globals
         self._install_globals_membership_guard(name, present)
         self._check_global_delete(name, fglobals_vt, present)
-        self.output.side_effects.delete_global(fglobals_vt, name, present)
+        if present:
+            self.output.side_effects.record_global_delete(fglobals_vt, name)
+        else:
+            self.output.side_effects.discard_global_store(fglobals_vt, name)
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
