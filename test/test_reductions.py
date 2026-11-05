@@ -429,6 +429,8 @@ class TestReductionsDevice(TestCase):
         t = make_tensor((32, 2 ** 16), dtype=dtype, device=device, low=-1, high=1, exclude_zero=True)
         self._test_ref(op, t, dim=1)
 
+    # Serial: the host-memory guard doesn't account for concurrent xdist workers.
+    @serialTest()
     @largeTensorTest("8gb")
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=[torch.float64])
@@ -1408,7 +1410,9 @@ class TestReductionsDevice(TestCase):
     def test_sum_all(self, device, dtype) -> None:
         def check_sum_all(tensor: torch.Tensor) -> None:
             pylist = tensor.reshape(-1).tolist()
-            self.assertEqual(tensor.sum(), sum(pylist))
+            # Dynamo would trace the reference sum over each of up to 200000
+            # Python floats, which takes ~17 min under dynamo_wrapped.
+            self.assertEqual(tensor.sum(), torch._dynamo.disable(sum)(pylist))
 
         if dtype != torch.bool:
             check_sum_all(torch.tensor([1, 2, 3, 4, 5], dtype=dtype, device=device))
