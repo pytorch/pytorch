@@ -116,17 +116,22 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/FFT_metallib.h>
 #endif
 
-#define FFT_SIZE_ENTRY(N) N,
-constexpr auto kFixedSizes = {FFT_FIXED_SIZES(FFT_SIZE_ENTRY)};
-constexpr auto kContigSizes = {FFT_CONTIG_SIZES(FFT_SIZE_ENTRY)};
-#undef FFT_SIZE_ENTRY
+// Stage radices of the threadgroup kernels (the kFFTMaskP2357 set) and of the global-memory passes, largest first
+constexpr auto kRadices = {16, 8, 4, 2, 3, 5, 7};
+#define FFT_RADIX_ENTRY(R) R,
+constexpr auto kGlobalRadices = {FFT_GLOBAL_RADICES(FFT_RADIX_ENTRY)};
+constexpr auto kFixedSizes = {FFT_FIXED_SIZES(FFT_RADIX_ENTRY)};
+constexpr auto kContigSizes = {FFT_CONTIG_SIZES(FFT_RADIX_ENTRY)};
+#undef FFT_RADIX_ENTRY
+// Below this many elements, extra launches cost more than they save
+constexpr int64_t kLongPoints = 1 << 17;
 // Past this length, tiles strided on both sides no longer coalesce
 constexpr int64_t kMaxCoalescedPoints = 1024;
 
-// Radix sequence of n (largest first, the MASK_P2357 set of FFT.metal; {1} for n = 1), empty for other factors
-c10::SmallVector<uint32_t, kFFTMaxStages> radices(int64_t n) {
+// Radix sequence of n over `rs` (largest first; {1} for n = 1), empty when n has other prime factors
+c10::SmallVector<uint32_t, kFFTMaxStages> radices(int64_t n, std::initializer_list<int> rs) {
   c10::SmallVector<uint32_t, kFFTMaxStages> plan(n == 1, 1);
-  for (const auto r : {16, 8, 4, 2, 3, 5, 7}) {
+  for (const auto r : rs) {
     for (; n % r == 0; n /= r) {
       plan.push_back(r);
     }
@@ -135,7 +140,7 @@ c10::SmallVector<uint32_t, kFFTMaxStages> radices(int64_t n) {
 }
 
 bool is_smooth(int64_t n) {
-  return !radices(n).empty();
+  return !radices(n, kRadices).empty();
 }
 
 // Cached MPS tables. W: W_n^k for k < n. W2, for long axes: W_n^b for b < 4096 then W_n^(4096 a). Chirp: Bluestein's
@@ -206,12 +211,14 @@ Batch collapse(const Tensor& in, const Tensor& out, int64_t dim) {
   return b;
 }
 
-// Per-pass options: four-step mapping and twiddles, Bluestein chirps (zero lengths = n)
+// Per-pass options: four-step mapping and twiddles, Bluestein chirps (zero lengths = n), or one global stage
 struct Pass {
   int64_t n_sig = 0;
   int64_t n_out = 0;
   int64_t ld_mul = 1;
   int64_t out_k_mul = 1;
+  int64_t global = 0;
+  int64_t ns = 1;
   double scale = 1;
   std::optional<Tensor> cl;
   std::optional<Tensor> cs;
@@ -222,26 +229,28 @@ struct Pass {
 
 // Encodes n-point transforms of the batch
 void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool inv, const Pass& x) {
-  const auto radix = radices(n);
+  const auto radix = radices(x.global ? x.global : n, x.global ? kGlobalRadices : kRadices);
   const auto to_u32 = [](int64_t v) { return c10::checked_convert<uint32_t>(v, "uint32_t"); };
   const auto to_i32 = [](int64_t v) { return c10::checked_convert<int32_t>(v, "int32_t"); };
   const uint32_t n_u32 = to_u32(n);
 
-  // Kernel family: a fixed length, or the smallest radix set factoring n (p16: lengths 1 and 16)
+  // Kernel family: a global radix, a fixed length, or the smallest radix set factoring n (p16: lengths 1 and 16)
   const auto set = n % 7 == 0 ? "p2357" : n % 3 == 0 || n % 5 == 0 ? "p235" : n == 1 || n == 16 ? "p16" : "p2";
   const auto has = [](const auto& list, int64_t v) { return std::ranges::find(list, v) != list.end(); };
-  const auto family = has(kFixedSizes, n) ? std::to_string(n) : set;
+  const auto family = x.global ? "g" + std::to_string(x.global) : has(kFixedSizes, n) ? std::to_string(n) : set;
 
   const auto n_sig = x.n_sig ? x.n_sig : n;
   const auto n_out = x.n_out ? x.n_out : n;
   const bool ld = x.cl || n_sig < n * x.ld_mul;
   const bool st = x.out_k_mul > 1 || x.cs;
-  const bool tw4 = x.tt.has_value();
-  const uint32_t F = inv * kFFTInverse | tw4 * kFFTFourStepTwiddles | st * kFFTExtendedStores | ld * kFFTExtendedLoads;
+  const bool tw4 = x.tt && !x.global;
+  const uint32_t F = inv * kFFTInverse | tw4 * kFFTFourStepTwiddles | st * kFFTExtendedStores | ld * kFFTExtendedLoads |
+      (x.global > 0) * kFFTGlobalStage;
 
   const int64_t ept = fft_points_per_thread(n_u32, F);
   const int64_t rows = b.dims[0].size;
-  const int64_t J = at::ceil_div(n, ept);
+  // Threads per transform; global passes spread transforms over 64-thread groups
+  const int64_t J = !x.global ? at::ceil_div(n, ept) : 64;
 
   // Transforms per group, within smem: a strided axis tiles rows for 256 threads (4 to 32 rows), a contiguous
   // axis fills 64 threads and adds rows (up to 8) while more than 1 in 20 SIMD lanes would sit idle
@@ -282,7 +291,7 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
       .via_smem = (b.si == 1) != (b.so == 1),
   };
 
-  uint32_t ns = 1;
+  uint32_t ns = to_u32(x.ns);
   for (uint32_t s = 0; s < radix.size(); s++) {
     params.radix[s] = radix[s];
     params.ns[s] = ns;
@@ -301,10 +310,12 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
   const auto name = fmt::format(
       "fft_{}_{}_{}{}_{}", scalarToMetalTypeString(b.in), scalarToMetalTypeString(b.out), family, contig ? "c" : "", F);
   const int64_t ny = b.dims.size() > 1 ? b.dims[1].size : 1;
-  const MTLSize grid = MTLSizeMake(at::ceil_div(rows, B), ny, b.numel / rows / ny);
-  // Single contiguous rows get 1.5x their size (faster above 2048 points); lengths are multiples of 16 bytes
+  const int64_t threads = n / std::max<int64_t>(x.global, 1);
+  const MTLSize grid = x.global ? MTLSizeMake(at::ceil_div(threads, J), rows, b.numel / rows)
+                                : MTLSizeMake(at::ceil_div(rows, B), ny, b.numel / rows / ny);
+  // Single contiguous rows get 1.5x their size (faster above 2048 points); global passes bind the 16-byte minimum
   const int64_t bytes = B * (strided ? n : row) * (strided || B > 1 ? 2 : 3) * sizeof(float);
-  const int64_t smem = std::min<int64_t>(kFFTSmemBytes, at::round_up<int64_t>(bytes, 16));
+  const int64_t smem = x.global ? 16 : std::min<int64_t>(kFFTSmemBytes, at::round_up<int64_t>(bytes, 16));
   const auto pso = lib.getPipelineStateForFunc(name);
   getMPSProfiler().beginProfileKernel(pso, "fft", {b.in, b.out}, getCurrentMPSStream());
   [enc setComputePipelineState:pso];
@@ -343,8 +354,38 @@ void fft_batch(const Batch& b, int64_t n, bool inv, const Pass& x) {
     return;
   }
 
+  // Long non-pow2 lengths: one global-memory stage per radix between two contiguous temps
+  const bool plain = !x.cl && !x.cs && !x.n_sig;
+  const auto gplan = radices(n, kGlobalRadices);
+  if (n >= kLongPoints && (n & (n - 1)) && plain && !gplan.empty()) {
+    const auto tmp = at::empty({2, b.numel * n}, b.out.options().dtype(kComplexFloat));
+    const Tensor temps[] = {tmp[0], tmp[1]};
+    const auto tt = table(Table::W2, n), tw = table(Table::W, n);
+    run([&](auto enc) {
+      int64_t ns = 1;
+      for (size_t s = 0; s < gplan.size(); s++) {
+        const bool first = s == 0;
+        const bool last = s + 1 == gplan.size();
+        Batch bp{{}, {}, {}, b.numel, first ? b.si : 1, last ? b.so : 1};
+        bp.in = first ? b.in : temps[s % 2];
+        bp.out = last ? b.out : temps[(s + 1) % 2];
+        int64_t tstride = n;
+        for (int64_t d = 0; d < static_cast<int64_t>(b.dims.size()); d++) {
+          bp.dims.push_back(
+              {b.dims[d].size, first ? b.dims[d].in_stride : tstride, last ? b.dims[d].out_stride : tstride});
+          tstride *= b.dims[d].size;
+        }
+        const Pass pass{
+            .n_out = last ? n_out : n, .global = gplan[s], .ns = ns, .scale = last ? x.scale : 1, .tt = tt, .tw = tw};
+        launch(enc, bp, n, inv, pass);
+        ns *= gplan[s];
+      }
+    });
+    return;
+  }
+
   // Four-step: n = n1*n2, temp [outer batch][n2][n1][inner batch]; pass 1 transforms strided n1-point columns
-  // times W_n^(k1*i0), pass 2 writes k1+n1*k2 (n1 <= 256 if it recurses)
+  // times W_n^(k1*i0), pass 2 writes k1+n1*k2 (n1 <= 256 if it recurses).
   const bool nest = !x.cs && n_out == n;
 
   // n1: the largest smooth divisor <= sqrt(n) whose cofactor fits a pass
