@@ -7,7 +7,7 @@
 # Inputs must be on the current device.
 
 from collections.abc import Sequence
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 import cutlass
 import cutlass.cute as cute
@@ -21,15 +21,17 @@ from ...cutedsl.plan_cache import cached_plan
 from ...utils.device import check_current
 from . import tile
 from .kernel_general import (
+    _B200_DTYPES,
     _combine_itree_partials,
     _flat,
     _INT32_LIMIT,
     _launch,
+    _ORDERED_COL_CCS,
     _ORDERED_COL_DTYPES,
     ReduceBlock,
 )
 from .kernel_rowtile import trait_itree_plan
-from .traits import WARP
+from .traits import WARP, welford_outputs
 
 
 _compile = _L.compile_kernel
@@ -101,22 +103,50 @@ def select_ordered_col_config(
     batches: int,
     partials: int,
     *,
+    nfields: int,
     acc_bits: int,
     out_dtypes: tuple[torch.dtype, ...],
+    rows: int | None = None,
+    full_tiles: bool = False,
 ) -> OrderedColConfig | None:
-    """Return the measured mapping for an ordered column view, or None: looped plans then
-    take the default mapping and split plans decline.
+    """Return the mapping for an ordered column view, or None: looped plans then take the
+    default mapping and split plans decline.
 
-    Entries are keyed by trait key and apply to unbatched _ORDERED_COL_DTYPES views with
-    32-bit accumulators and, if the entry has out_dtypes, only to those outputs. Views
-    that fill fewer than the entry's min_blocks useful 32-column blocks get None too.
+    Entries are keyed by trait key. Split plans (partials > 1) without an entry take a
+    clamp-free fallback on _ORDERED_COL_CCS, which applies to any outputs. Mappings apply
+    to unbatched _ORDERED_COL_DTYPES views with 32-bit accumulators and, if the mapping
+    has out_dtypes, only to those outputs. full_tiles means a split plan or an exact
+    looped plan; with rows, B200 single-field full-tile views then take measured tile
+    widths, and C 128-257 a band of widths. Views that fill fewer than the mapping's
+    min_blocks useful 32-column blocks get None.
     """
     cfg = _ORDERED_COL_CONFIGS.get(cc, {}).get(trait_key)
+    # Looped exact columns ran within 1% with and without address clamps on B200, so
+    # only split plans take the clamp-free fallback.
+    if (
+        cfg is None
+        and cc in _ORDERED_COL_CCS
+        and dtype in _ORDERED_COL_DTYPES
+        and partials > 1
+    ):
+        cfg = OrderedColConfig(0, tile_columns=WARP, full_tiles=full_tiles)
     if cfg is None or dtype not in _ORDERED_COL_DTYPES or batches != 1:
         return None
     measured = cfg.out_dtypes
     if acc_bits != 32 or measured is not None and tuple(out_dtypes) != measured:
         return None
+    # Measured on routed split views only (one field, B = 1, C >= 128).
+    if cc == (10, 0) and full_tiles and rows is not None and nfields == 1:
+        if rows == 65536 and columns == 1024:
+            cfg = cfg._replace(tile_columns=16)
+        # A band of shapes rather than measured anchors.
+        elif 32768 <= rows <= 131072 and 128 <= columns <= 257:
+            width = WARP if partials >= 16 and columns == 257 else 16
+            cfg = cfg._replace(tile_columns=width)
+        bf16_amax = dtype == torch.bfloat16 and trait_key == "amax"
+        if bf16_amax and rows == 32768 and columns == 4096:
+            cfg = cfg._replace(tile_columns=16)
+    # Count useful column lanes, excluding padding in the last output tile.
     if partials * columns < WARP * cfg.min_blocks:
         return None
     return cfg
@@ -130,21 +160,30 @@ class ColConfig(NamedTuple):
     partial_layout: str
     combine_columns: int = 0
     unroll: int = tile._ROLL_UNROLL
+    kernel_order: Literal["linear", "inner_tree"] = "linear"
     group: int = 1
 
 
 def select_col_config(
+    cc: tuple[int, int],
+    dtype: torch.dtype,
     rows: int,
     columns: int,
     batches: int,
     nfields: int,
+    trait_key: str,
     *,
     itemsize: int,
+    acc_bits: int,
+    nouts: int,
+    welford_outs: int,
     threads_per_block: int | None = None,
     npar: int | None = None,
     vec: int | None = None,
 ) -> ColConfig:
-    """Select column geometry and partial layout; explicit launch arguments override the geometry.
+    """Select the column kernel, geometry, and partial layout. Any explicit
+    threads_per_block, npar or vec overrides the geometry and disables the policy rules.
+    welford_outs is traits.welford_outputs(trait).
 
     Whether a view reaches the column kernel at all is `kernel_general._col_route_ok`'s call.
     """
@@ -165,6 +204,101 @@ def select_col_config(
         auto_vec if vec is None else vec,
         "partition" if batches * columns >= _C_THREAD_STAGE2 else "column",
     )
+    row_bytes = columns * itemsize
+    size = rows * row_bytes
+    # Anchor rows floor-divide the anchor sizes, so a view matches an anchor it falls short
+    # of by less than one row.
+    anchors = (16 << 20, 64 << 20, 256 << 20, 2 << 30)
+    anchor = next((a for a in anchors if a - row_bytes < size <= a), None)
+    if (
+        not explicit
+        and anchor is not None
+        and cc == (10, 0)
+        and dtype in _B200_DTYPES
+        and columns in (257, 4095)
+        and acc_bits == 32
+        and batches == 1
+    ):
+        narrow = dtype in (torch.float16, torch.bfloat16)
+        welford = welford_outs == nouts
+        # Only argmax with int32 indices was measured.
+        index = (trait_key, nfields, nouts) == ("argmaxi32", 2, 1)
+        one_field = (
+            nfields == 1
+            and nouts == 1
+            and trait_key in ("sum", "prod", "mean", "amax", "amin")
+        )
+        if columns == 4095 and anchor == 16 << 20 and (one_field or welford):
+            return cfg._replace(
+                rule="b200_ragged_c4095_ordered",
+                kernel_order="inner_tree",
+            )
+        if columns == 257 and welford:
+            npars = {
+                16 << 20: 512,
+                64 << 20: 512,
+                256 << 20: 1024 if narrow else 512,
+                2 << 30: 4096,
+            }
+            return cfg._replace(
+                rule="b200_ragged_welford_c257",
+                threads_per_block=64,
+                npar=npars[anchor],
+                vec=1,
+                group=16 if narrow else 8,
+            )
+        if columns == 4095 and welford:
+            return cfg._replace(
+                rule="b200_ragged_welford_c4095",
+                threads_per_block=64,
+                npar=1928 if anchor == 2 << 30 else 128,
+                vec=1,
+                group=8,
+            )
+        if columns == 257 and (one_field or index):
+            npars = {
+                16 << 20: 1024,
+                64 << 20: 2048,
+                256 << 20: 4096,
+                2 << 30: 16384 if narrow else 8192,
+            }
+            return cfg._replace(
+                rule="b200_ragged_c257",
+                threads_per_block=64,
+                npar=npars[anchor],
+                vec=1,
+            )
+        if columns == 4095 and one_field:
+            cfg = cfg._replace(
+                rule="b200_ragged_c4095",
+                threads_per_block=64,
+                npar=512 if anchor == 2 << 30 else 256,
+                vec=1,
+            )
+            if narrow and anchor == 256 << 20:
+                return cfg._replace(
+                    npar=512, partial_layout="partition", combine_columns=8, unroll=16
+                )
+            return cfg
+        if columns == 4095 and index and anchor == 16 << 20 and not narrow:
+            return cfg._replace(
+                rule="b200_ragged_argmax_c4095_small",
+                threads_per_block=32,
+                npar=8,
+                vec=1,
+                unroll=64,
+            )
+        if columns == 4095 and index and anchor >= 256 << 20:
+            npars = {
+                256 << 20: 512 if narrow else 128,
+                2 << 30: 1024 if narrow else 512,
+            }
+            return cfg._replace(
+                rule="b200_ragged_argmax_c4095",
+                threads_per_block=64,
+                npar=npars[anchor],
+                vec=1,
+            )
     return cfg
 
 
@@ -643,8 +777,11 @@ def reduce_ordered_col(
             C,
             B,
             plan.split[0] if split else 1,
+            nfields=trait.nfields,
             acc_bits=max(dt.width for dt in trait.fdtypes),
             out_dtypes=tuple(out_dtypes[:nouts]),
+            rows=R,
+            full_tiles=split or plan.tms[0].exact,
         )
         if config is None:
             if split:
@@ -830,16 +967,29 @@ def _reduce_col_tile(
     if B * C >= _INT32_LIMIT:
         raise AssertionError(f"want B * C < 2^31 outputs, got B={B}, C={C}")
     align = _L.supported_alignment(rows, tile.align_bytes(C, x.element_size()))
+    cc = _hw.caps(x.device).cc
     cfg = select_col_config(
+        cc,
+        x.dtype,
         R,
         C,
         B,
         trait.nfields,
+        trait_key,
         itemsize=x.element_size(),
+        acc_bits=max(dt.width for dt in trait.fdtypes),
+        nouts=nouts,
+        welford_outs=welford_outputs(trait),
         threads_per_block=threads_per_block,
         npar=npar,
         vec=vec,
     )
+    if cfg.kernel_order not in ("linear", "inner_tree"):
+        raise ValueError(f"unknown kernel order {cfg.kernel_order!r}")
+    if cfg.kernel_order == "inner_tree":
+        ordered = reduce_ordered_col(trait, trait_key, x, out_dtypes, nouts, cc=cc)
+        if ordered is not None:
+            return ordered
     threads_per_block, npar, vec = cfg.threads_per_block, cfg.npar, cfg.vec
     if vec <= 0:
         raise ValueError(f"vec must be positive, got {vec}")

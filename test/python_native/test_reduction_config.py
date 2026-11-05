@@ -25,7 +25,29 @@ if not TEST_CUTEDSL:
         sys.exit(0)
     raise unittest.SkipTest("CuTeDSL not available")
 
-from torch._native.ops.reductions import kernel_general as kg, kernel_rowtile as rt
+from torch._native.ops.reductions import (
+    kernel_coltile as ct,
+    kernel_general as kg,
+    kernel_rowtile as rt,
+    tile,
+    traits as T,
+)
+
+
+_TRAITS = {
+    "sum": T.SumOps(),
+    "mean": T.MeanOps(),
+    "argmax": T.ArgMaxOps(),
+    "var": T.WelfordOps(),
+    "std": T.WelfordOps(take_sqrt=True),
+    "var_mean": T.VarMeanOps(),
+}
+
+
+def _contract(trait):
+    """Selector keywords for trait's structure."""
+    nouts, welford = getattr(trait, "nouts", 1), T.welford_outputs(trait)
+    return dict(nfields=trait.nfields, nouts=nouts, welford_outs=welford)
 
 
 def _served(trait_key):
@@ -48,6 +70,7 @@ class TestReductionConfig(TestCase):
             kept_pairs=((65536, 2048),),
             nfields=1,
             nouts=1,
+            welford_outs=0,
         )
         args.update(updates)
         return kg.select_general_config(**args)
@@ -75,8 +98,9 @@ class TestReductionConfig(TestCase):
 
     @parametrize("cc", [(9, 0), (10, 0), (10, 3), (11, 0)])
     def test_architecture_isolation(self, cc):
-        """Return the generic defaults until an architecture adds its own rules."""
-        self.assertEqual(self.general(cc=cc), kg._GeneralConfig())
+        """Return generic defaults for a geometry no architecture's rules cover."""
+        strided = dict(count=2048, red_pairs=((2048, 2),), kept_pairs=((65536, 4096),))
+        self.assertEqual(self.general(cc=cc, **strided), kg._GeneralConfig())
         self.assertEqual(
             rt.select_row_order(
                 cc,
@@ -110,6 +134,353 @@ class TestReductionConfig(TestCase):
             with warnings.catch_warnings():
                 warnings.simplefilter("error")
                 rt.inner_tree_fallback("first")
+
+    def test_b200_full_reduction_config(self):
+        """Pin B200 full-reduction launch choices at measured operation and size anchors."""
+        count = (256 << 20) // torch.float16.itemsize
+        args = (torch.float16, "argmaxi32", count)
+        kwargs = dict(nfields=2, nouts=1, acc_bits=32)
+        self.assertEqual(
+            kg.select_all_config((10, 0), *args, **kwargs),
+            kg._AllConfig(block=512, grid_mult=8),
+        )
+        self.assertEqual(kg.select_all_config((9, 0), *args, **kwargs), kg._AllConfig())
+        wide = kwargs | {"acc_bits": 64}
+        self.assertEqual(kg.select_all_config((10, 0), *args, **wide), kg._AllConfig())
+        half = (torch.float16, "argmaxi32", count // 2)
+        self.assertEqual(
+            kg.select_all_config((10, 0), *half, **kwargs), kg._AllConfig()
+        )
+        plain = dict(nfields=1, nouts=1, acc_bits=32)
+        self.assertEqual(
+            kg.select_all_config((10, 0), torch.float16, "sum", count, **plain),
+            kg._AllConfig(),
+        )
+
+    @parametrize(
+        "count,trait_key,trait,expected",
+        [
+            (
+                257,
+                "sum",
+                "sum",
+                kg._GeneralConfig(kernel_order="inner_tree", rule="b200_strided_c256"),
+            ),
+            (
+                257,
+                "var_mean",
+                "var_mean",
+                kg._GeneralConfig(kernel_order="inner_tree", rule="b200_strided_c256"),
+            ),
+            (
+                1024,
+                "argmaxi32",
+                "argmax",
+                kg._GeneralConfig(block=32, rule="b200_strided_index"),
+            ),
+            (
+                4095,
+                "var1",
+                "var",
+                kg._GeneralConfig(
+                    block=64,
+                    rule="b200_strided_welford",
+                    uniform_tree=True,
+                ),
+            ),
+            # Welford-ness is structural, so a two-output key needs no spelling.
+            (
+                4095,
+                "var_mean",
+                "var_mean",
+                kg._GeneralConfig(
+                    block=64,
+                    rule="b200_strided_welford",
+                    uniform_tree=True,
+                ),
+            ),
+            (
+                4096,
+                "mean",
+                "mean",
+                kg._GeneralConfig(block=32, rule="b200_strided_one_field"),
+            ),
+        ],
+        name_fn=lambda count, trait_key, trait, expected: f"{trait_key}_{count}",
+    )
+    def test_b200_strided_config(self, count, trait_key, trait, expected):
+        """Pin B200 general-kernel choices for measured strided geometries."""
+        num_o = 4096
+        pairs = (((count, 2),), ((num_o, 2 * count),))
+        args = ((10, 0), torch.float16, trait_key, count, num_o, *pairs)
+        cfg = kg.select_general_config(*args, **_contract(_TRAITS[trait]))
+        self.assertEqual(cfg, expected)
+
+    def test_welford_outputs_follow_trait_structure(self):
+        """Count variance outputs from the trait, so selectors need no key spelling."""
+        cases = (
+            (T.WelfordOps(), 1),
+            (T.WelfordOps(take_sqrt=True), 1),
+            (T.VarMeanOps(), 2),
+            (T.WelfordOps(return_mean=True), 0),
+            (T.SumOps(), 0),
+            (T.ArgMaxOps(), 0),
+        )
+        for trait, outputs in cases:
+            self.assertEqual(T.welford_outputs(trait), outputs, type(trait).__name__)
+
+    def test_b200_uniform_trees_stay_eligible(self):
+        """_reduce drops uniform_tree for ineligible shapes, so B200's must pass the cap."""
+        num_o = 4096
+        for count in (1024, 4095, 4096):
+            cfg = kg.select_general_config(
+                (10, 0),
+                torch.float32,
+                "var1",
+                count,
+                num_o,
+                ((count, 2),),
+                ((num_o, 2 * count),),
+                nfields=3,
+                nouts=1,
+                welford_outs=1,
+            )
+            self.assertTrue(cfg.uniform_tree)
+            self.assertTrue(tile.uniform_tree_ok(T.WelfordOps(), count, cfg.block, 1))
+
+    @parametrize(
+        "dtype,count,updates,expected",
+        [
+            (
+                torch.float32,
+                1024,
+                {"trait_key": "argmaxi32", "nfields": 2},
+                kg._GeneralConfig(block=64, rule="b200_strided_index"),
+            ),
+            (torch.float16, 258, {}, kg._GeneralConfig()),
+            (
+                torch.float16,
+                1023,
+                {"trait_key": "argmaxi32", "nfields": 2},
+                kg._GeneralConfig(),
+            ),
+            (torch.float16, 4096, {"alignment": 8}, kg._GeneralConfig()),
+            (torch.float16, 4096, {"acc_bits": 64}, kg._GeneralConfig()),
+        ],
+    )
+    def test_b200_strided_boundaries(self, dtype, count, updates, expected):
+        """Pin the fp32 index block and keep off-anchor strided shapes on defaults."""
+        num_o = 4096
+        cfg = self.general(
+            cc=(10, 0),
+            dtype=dtype,
+            count=count,
+            num_o=num_o,
+            red_pairs=((count, 2),),
+            kept_pairs=((num_o, 2 * count),),
+            **updates,
+        )
+        self.assertEqual(cfg, expected)
+
+    @parametrize(
+        "key,trait", [("sum", "sum"), ("argmaxi32", "argmax"), ("var0", "var")]
+    )
+    def test_b200_wide_strided_rules_need_many_outputs(self, key, trait):
+        """Below 2048 outputs only the c256 rule beats the default config."""
+        for count, num_o, rule in ((256, 512, "b200_strided_c256"), (1024, 512, None)):
+            cfg = self.general(
+                cc=(10, 0),
+                trait_key=key,
+                **_contract(_TRAITS[trait]),
+                count=count,
+                num_o=num_o,
+                red_pairs=((count, 2),),
+                kept_pairs=((num_o, 2 * count),),
+            )
+            self.assertEqual(cfg.rule, rule or kg._GeneralConfig().rule)
+
+    @parametrize(
+        "dtype,columns,trait_key,trait,expected_rule",
+        [
+            (torch.float16, 257, "sum", "sum", "b200_ragged_c257"),
+            (torch.float16, 257, "std1", "std", "b200_ragged_welford_c257"),
+            (torch.float16, 257, "var_mean", "var_mean", "b200_ragged_welford_c257"),
+            (
+                torch.float32,
+                4095,
+                "argmaxi32",
+                "argmax",
+                "b200_ragged_argmax_c4095_small",
+            ),
+            (torch.float16, 4095, "mean", "mean", "b200_ragged_c4095_ordered"),
+            (torch.float32, 4095, "var_mean", "var_mean", "b200_ragged_c4095_ordered"),
+        ],
+        name_fn=lambda dtype, columns, key, trait, rule: f"{key}_{columns}",
+    )
+    def test_b200_ragged_column_config(
+        self, dtype, columns, trait_key, trait, expected_rule
+    ):
+        """Pin B200 ragged column choices where tail handling changes the best mapping."""
+        itemsize = dtype.itemsize
+        rows = (16 << 20) // (columns * itemsize)
+        contract = _contract(_TRAITS[trait])
+        nfields = contract.pop("nfields")
+        args = ((10, 0), dtype, rows, columns, 1, nfields, trait_key)
+        cfg = ct.select_col_config(*args, itemsize=itemsize, acc_bits=32, **contract)
+        self.assertEqual(cfg.rule, expected_rule)
+
+    @parametrize(
+        "dtype,trait_key,trait,size,expected",
+        [
+            (
+                torch.bfloat16,
+                "sum",
+                "sum",
+                256 << 20,
+                ct.ColConfig("b200_ragged_c4095", 64, 512, 1, "partition", 8, 16),
+            ),
+            (
+                torch.float32,
+                "argmaxi32",
+                "argmax",
+                16 << 20,
+                ct.ColConfig(
+                    "b200_ragged_argmax_c4095_small", 32, 8, 1, "column", 0, 64
+                ),
+            ),
+            (
+                torch.bfloat16,
+                "argmaxi32",
+                "argmax",
+                2 << 30,
+                ct.ColConfig("b200_ragged_argmax_c4095", 64, 1024, 1, "column"),
+            ),
+            (
+                torch.float16,
+                "mean",
+                "mean",
+                16 << 20,
+                ct.ColConfig(
+                    "b200_ragged_c4095_ordered",
+                    32,
+                    33,
+                    1,
+                    "column",
+                    kernel_order="inner_tree",
+                ),
+            ),
+            (
+                torch.bfloat16,
+                "var0",
+                "var",
+                64 << 20,
+                ct.ColConfig(
+                    "b200_ragged_welford_c4095", 64, 128, 1, "column", group=8
+                ),
+            ),
+            (
+                torch.float32,
+                "var_mean",
+                "var_mean",
+                2 << 30,
+                ct.ColConfig(
+                    "b200_ragged_welford_c4095", 64, 1928, 1, "column", group=8
+                ),
+            ),
+        ],
+        name_fn=lambda dtype, key, trait, size, cfg: f"{cfg.rule}_{size >> 20}mib",
+    )
+    def test_b200_ragged_column_values(self, dtype, trait_key, trait, size, expected):
+        """Pin every field of the B200 ragged column rules, not just their names."""
+        itemsize = dtype.itemsize
+        rows = size // (4095 * itemsize)
+        contract = _contract(_TRAITS[trait])
+        nfields = contract.pop("nfields")
+        args = ((10, 0), dtype, rows, 4095, 1, nfields, trait_key)
+        cfg = ct.select_col_config(*args, itemsize=itemsize, acc_bits=32, **contract)
+        self.assertEqual(cfg, expected)
+
+    @parametrize(
+        "case,updates,expected_rule",
+        [
+            ("anchor", {}, "b200_ragged_c257"),
+            ("explicit_threads", {"threads_per_block": 64}, "explicit"),
+            ("explicit_npar", {"npar": 1024}, "explicit"),
+            ("explicit_vec", {"vec": 1}, "explicit"),
+            ("row_below", {"rows": (16 << 20) // 514 - 1}, "default"),
+            ("row_above", {"rows": (16 << 20) // 514 + 1}, "default"),
+            ("mib_below", {"rows": (15 << 20) // 514 + 1}, "default"),
+            ("sm103", {"cc": (10, 3)}, "default"),
+            ("sm90", {"cc": (9, 0)}, "default"),
+            ("batched", {"batches": 2}, "default"),
+            ("acc64", {"acc_bits": 64}, "default"),
+        ],
+        name_fn=lambda case, updates, expected_rule: case,
+    )
+    def test_b200_ragged_column_boundaries(self, case, updates, expected_rule):
+        """Keep explicit, off-anchor, non-B200, batched and 64-bit views on defaults."""
+        # fp16 C = 257 rows take 514 bytes; the 16 MiB anchor matches only (16 MiB) // 514
+        # rows, not a row more or less, nor sizes elsewhere in the MiB below it.
+        args = dict(
+            cc=(10, 0),
+            dtype=torch.float16,
+            rows=(16 << 20) // 514,
+            columns=257,
+            batches=1,
+            nfields=1,
+            trait_key="sum",
+            itemsize=2,
+            acc_bits=32,
+            nouts=1,
+            welford_outs=0,
+        )
+        cfg = ct.select_col_config(**(args | updates))
+        self.assertEqual(cfg.rule, expected_rule)
+
+    @parametrize(
+        "dtype,N,trait,routed",
+        [
+            (torch.float16, 255, "sum", True),
+            (torch.float16, 253, "sum", False),
+            (torch.float16, 16383, "sum", True),
+            (torch.float16, 16385, "sum", False),
+            (torch.float16, 4096, "sum", False),
+            (torch.float32, 255, "argmax", True),
+            (torch.bfloat16, 255, "argmax", False),
+            (torch.bfloat16, 1025, "argmax", False),
+            (torch.float32, 1025, "argmax", True),
+            (torch.float32, 1023, "var_mean", False),
+            (torch.float32, 1025, "var_mean", True),
+            (torch.float32, 1023, "var", False),
+            (torch.float32, 1025, "var", True),
+        ],
+        name_fn=lambda dtype, N, trait, routed: f"{str(dtype)[6:]}_{N}_{trait}",
+    )
+    def test_b200_ragged_row_gate(self, dtype, N, trait, routed):
+        """Route odd rows to the ragged-vector kernel only inside the measured band."""
+        trait = {
+            "sum": T.SumOps(),
+            "argmax": T.ArgMaxOps(),
+            "var_mean": T.VarMeanOps(),
+            "var": T.WelfordOps(),
+        }[trait]
+        self.assertEqual(kg._ragged_rows_ok((10, 0), dtype, N, 16, trait), routed)
+        self.assertFalse(kg._ragged_rows_ok((9, 0), dtype, N, 16, trait))
+        self.assertFalse(kg._ragged_rows_ok((10, 0), dtype, N, 8, trait))
+        self.assertFalse(kg._ragged_rows_ok((10, 0), dtype, N, 16, trait, 64))
+
+    def test_b200_ragged_rows_start_late_traits_later(self):
+        """Keep absmax, absmin and general-p norms off ragged rows at N = 255, and every
+        Welford trait until N = 1025."""
+        late = (T.AbsMaxOps(), T.AbsMinOps(), T.NormOps(3), T.NormOps(0.5))
+        early = (T.AMaxOps(), T.NormOps(1), T.NormOps(2), T.SumOps())
+        self.assertEqual({kg._ragged_row_min_n(t) for t in late}, {1023})
+        self.assertEqual({kg._ragged_row_min_n(t) for t in early}, {255})
+        self.assertEqual(kg._ragged_row_min_n(T.VarMeanOps(take_sqrt=True)), 1025)
+        self.assertEqual(kg._ragged_row_min_n(T.WelfordOps(take_sqrt=True)), 1025)
+        for N, routed in ((255, False), (1023, True)):
+            ok = kg._ragged_rows_ok((10, 0), torch.float16, N, 16, T.AbsMaxOps())
+            self.assertEqual(ok, routed)
 
 
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "CuTeDSL requires Hopper or later")
@@ -176,6 +547,99 @@ class TestReductionConfigDevice(TestCase):
         want = "rowitree" if stride == 1 else "genitree"
         self.assertTrue(any(t.startswith(want) for t in _served(key)), _served(key))
         self.assertEqual(got, x.double().sum(1).float(), atol=1e-4, rtol=1e-4)
+
+    @parametrize(
+        "op,dtype,N",
+        [
+            ("sum", torch.float32, 255),
+            ("var_mean", torch.bfloat16, 1025),
+            ("var_mean", torch.float16, 16383),
+        ],
+        name_fn=lambda op, dtype, N: f"{op}_{str(dtype)[6:]}_{N}",
+    )
+    def test_b200_ragged_rows_route(self, device, op, dtype, N):
+        """Serve unordered odd rows inside the B200 band with the ragged-vector plan."""
+        import cutlass
+
+        if torch.cuda.get_device_capability(device) != (10, 0):
+            self.skipTest("the ragged-row route is measured on B200 only")
+        x = torch.randn(64, N, device=device, dtype=dtype)
+        key = f"ragged_route_{op}_{str(dtype)[6:]}_{N}"
+        if op == "sum":
+            trait, outs = T.SumOps(acc=cutlass.Float32), [torch.float32]
+            got = (kg.reduce_dim(trait, key, x, [1], outs[0], order="unordered"),)
+        else:
+            trait, outs = T.VarMeanOps(correction=1), [torch.float32] * 2
+            got = kg.reduce_dim2(trait, key, x, [1], outs, order="unordered")
+        routed = {k for k in rt._CACHE if k[:2] == ("rowtile", key)}
+        self.assertEqual(len(routed), 1, routed)
+        # Row keys carry ragged_vector, so an explicit ragged launch reuses the plan.
+        kw = dict(nouts=len(outs), order="linear", ragged_vector=True)
+        rt.reduce_row_tile(trait, key, x, outs, **kw)
+        self.assertEqual({k for k in rt._CACHE if k[:2] == ("rowtile", key)}, routed)
+        with torch.backends.python_native.cutedsl.disabled():
+            xf = x.float()
+            want = (xf.sum(1),) if op == "sum" else torch.var_mean(xf, dim=1)
+        self.assertEqual(got, want, atol=1e-4, rtol=1e-4)
+
+    @parametrize("op", ["argmax", "var"])
+    def test_b200_strided_c256_route(self, device, op):
+        """Serve b200_strided_c256's smallest anchor, 8 outputs, with the indexed tree."""
+        import cutlass
+
+        if torch.cuda.get_device_capability(device) != (10, 0):
+            self.skipTest("the strided rules are measured on B200 only")
+        x = torch.randn(8, 512, device=device)[:, ::2]
+        key = f"{op}_strided_c256"
+        if op == "argmax":
+            trait, out = T.ArgMaxOps(acc=cutlass.Float32), torch.int64
+        else:
+            trait, out = T.WelfordOps(correction=1, acc=cutlass.Float32), torch.float32
+        got = kg.reduce_dim(trait, key, x, [1], out, order="unordered")
+        self.assertEqual(_served(key), {"genitree"})
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.argmax(1) if op == "argmax" else x.var(1)
+        self.assertEqual(got, want, atol=1e-4, rtol=1e-4)
+
+    def test_b200_strided_index_route(self, device):
+        """Run b200_strided_index's fp32 64-thread blocks at its smallest anchor."""
+        import cutlass
+
+        if torch.cuda.get_device_capability(device) != (10, 0):
+            self.skipTest("the strided rules are measured on B200 only")
+        count, num_o = 1024, 2048
+        x = torch.randn(num_o, 2 * count, device=device)[:, ::2]
+        trait, key = T.ArgMaxOps(acc=cutlass.Float32), "argmax_strided_index"
+        got = kg.reduce_dim(trait, key, x, [1], torch.int64, order="unordered")
+        pairs = dict(red_pairs=((count, 2),), kept_pairs=((num_o, 2 * count),))
+        op = kg.ReduceBlock(trait, count=count, num_o=num_o, **pairs, block=64)
+        keys = {k for k in kg._COMPILE_CACHE if k[1:3] == ("reduce", key)}
+        prefix = (x.get_device(), "reduce", key, x.dtype, (torch.int64,))
+        self.assertEqual(keys, {prefix + op.cache_sig})
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.argmax(1)
+        self.assertEqual(got, want)
+
+    def test_b200_strided_welford_route(self, device):
+        """Fold b200_strided_welford's smallest anchor with the uniform Welford tree."""
+        import cutlass
+
+        if torch.cuda.get_device_capability(device) != (10, 0):
+            self.skipTest("the strided rules are measured on B200 only")
+        count, num_o = 1024, 2048
+        x = torch.randn(num_o, 2 * count, device=device)[:, ::2]
+        trait, key = T.WelfordOps(correction=1, acc=cutlass.Float32), "var_strided_tree"
+        got = kg.reduce_dim(trait, key, x, [1], torch.float32, order="unordered")
+        pairs = dict(red_pairs=((count, 2),), kept_pairs=((num_o, 2 * count),))
+        shape = dict(count=count, num_o=num_o, **pairs, block=64)
+        tree = kg.ReduceBlock(trait, **shape, uniform_tree=True)
+        self.assertNotEqual(tree.cache_sig, kg.ReduceBlock(trait, **shape).cache_sig)
+        keys = {k for k in kg._COMPILE_CACHE if k[1:3] == ("reduce", key)}
+        prefix = (x.get_device(), "reduce", key, x.dtype, (torch.float32,))
+        self.assertEqual(keys, {prefix + tree.cache_sig})
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.var(1)
+        self.assertEqual(got, want, atol=1e-4, rtol=1e-4)
 
     def test_row_kernel_leaves_the_environment_to_dispatch(self, device):
         """Follow only the order argument in direct row calls, even under strict."""
