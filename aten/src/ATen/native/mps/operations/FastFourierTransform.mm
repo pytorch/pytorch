@@ -238,10 +238,10 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
   // Transforms per group, within smem
   const bool strided = b.si != 1 || b.so != 1;
   const int64_t padded = n + (n >> kFFTPadShift) + 1; // Contiguous rows get a spare smem slot every 16
-  int64_t B = strided ? std::min<int64_t>({kFFTMaxPoints / n,
-                                           c10::metal::max_threadgroup_size / J,
-                                           std::max<int64_t>(kFFTMinStridedRows, kFFTStridedThreads / J)})
-                      : kFFTContiguousThreads / J;
+  int64_t B = strided
+      ? std::min<int64_t>(
+            {kFFTMaxPoints / n, kFFTMaxThreads / J, std::max<int64_t>(kFFTMinStridedRows, kFFTStridedThreads / J)})
+      : kFFTContiguousThreads / J;
   for (int64_t c = std::max<int64_t>(B, 1); !strided && c <= kFFTMaxContiguousRows && c * padded <= kFFTMaxPoints;
        c++) {
     if ((at::round_up<int64_t>(c * J, c10::metal::simdgroup_size) - c * J) * kFFTIdleLaneDivisor <= c * J) {
@@ -250,8 +250,7 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
     }
   }
   B = std::clamp<int64_t>(B, 1, std::min(rows, kFFTMaxRows));
-  if (strided && rows > B && rows <= B + B / 2 && rows * n <= kFFTMaxPoints &&
-      rows * J <= c10::metal::max_threadgroup_size) {
+  if (strided && rows > B && rows <= B + B / 2 && rows * n <= kFFTMaxPoints && rows * J <= kFFTMaxThreads) {
     B = rows; // A batch up to 1.5x the tile fits one group
   }
   const bool pad = !strided && B * (padded - (B == 1)) <= kFFTMaxPoints;
@@ -305,6 +304,7 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
   const int64_t smem =
       x.global ? kFFTMinSmemBytes : std::min<int64_t>(kFFTSmemBytes, at::round_up(bytes, kFFTMinSmemBytes));
   const auto pso = lib.getPipelineStateForFunc(name);
+  TORCH_INTERNAL_ASSERT(B * J <= static_cast<int64_t>([pso maxTotalThreadsPerThreadgroup]));
   getMPSProfiler().beginProfileKernel(pso, "fft", {b.in, b.out}, getCurrentMPSStream());
   [enc setComputePipelineState:pso];
   mtl_setArgs(enc, b.in, b.out, x.cl, x.cs, x.tt, x.tw, params);
