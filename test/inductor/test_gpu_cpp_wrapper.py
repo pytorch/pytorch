@@ -1116,7 +1116,6 @@ compiled(x)
 class TestCppWrapperStaticInitDeadlock(InductorTestCase):
     device = GPU_TYPE
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184496")
     def test_static_init_dlopen_does_not_deadlock(self):
         """The cpp_wrapper-generated .so must not trigger Triton kernel
         compilation from a static initializer (dlopen-time): doing so
