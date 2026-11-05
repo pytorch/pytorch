@@ -261,6 +261,11 @@ struct C10_API FakeTensorMode {
   // like allow_meta_.
   std::atomic<bool> allow_non_fake_inputs_{false};
 
+  // CppFakeTensorMode.static_shapes, which only Python reads: whether
+  // from_tensor makes fakes with static shapes when not told. Kept here so a
+  // rebuilt wrapper sees it. Atomic, like allow_meta_.
+  std::atomic<bool> static_shapes_{false};
+
   // Whether reading the mutable data pointer of a fake made afterwards only
   // warns (true) or throws (false); a storage's marking is never relaxed.
   // Python's _allow_unsafe_data_ptr_access, exposed under that name. Atomic,
