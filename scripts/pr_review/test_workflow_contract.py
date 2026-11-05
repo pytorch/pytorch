@@ -1483,7 +1483,7 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
     def test_only_named_bots_may_trigger_the_review(self):
         """pytorch-bot applies the label on a maintainer's behalf, and
         meta-codesync pushes a co-dev PR's re-exports; a wildcard would let any
-        bot that can label a pull request start the review.
+        bot that can label or push to a pull request start the review.
         """
         review = strip_comments(job_block(STAGE2.read_text(), "review"))
         for step_id in MODEL_STEP_IDS:

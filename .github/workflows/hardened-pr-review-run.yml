@@ -1037,12 +1037,13 @@ jobs:
         uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507 # Claude Code 2.1.280
         with:
           use_bedrock: "true"
-          # The actor is whoever applied the `in progress` label in Stage 1.
-          # pytorch-bot applies it on `@pytorchbot pre-review accept` once
-          # every assigned reviewer has accepted, and the action rejects bot
-          # actors unless listed here. On a co-dev PR, meta-codesync pushes
-          # each re-export of the internal diff, so it is the actor of that
-          # PR's re-reviews. Name each bot exactly; never "*".
+          # The actor is whoever triggered Stage 1: on `labeled`, whoever
+          # applied `in progress`; on a push, the pusher. The action rejects
+          # bot actors unless listed here. pytorch-bot applies the label on
+          # `@pytorchbot pre-review accept` once every assigned reviewer has
+          # accepted. On a co-dev PR, meta-codesync pushes each re-export of
+          # the internal diff, so it is the actor of the re-reviews those
+          # pushes trigger. Name each bot exactly; never "*".
           allowed_bots: "pytorch-bot[bot],meta-codesync[bot]"
           # On a push, the actor is the pusher, usually the PR author, and most
           # contributors lack write access. Without `github_token` the action
