@@ -43,6 +43,7 @@ import torch.library
 import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.backends.debugging import ExplainWithBackend
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
@@ -5006,6 +5007,136 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x1, x2)
         self.assertEqual(x1.data, x2.data)
         self.assertEqual(y1, y2)
+
+    def test_set_stale_base_not_aliased(self):
+        # https://github.com/pytorch/pytorch/issues/199229
+        def fn(dest, src, storage):
+            dest.set_(src)
+            storage[0] = 10.0
+            return dest[0].clone()
+
+        def fresh():
+            storage = torch.arange(5, dtype=torch.float32)
+            return storage[:3], torch.full((3,), 7.0), storage
+
+        expected = fn(*fresh())
+        for backend in ["eager", "aot_eager", "inductor"]:
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend=backend)(*fresh()), expected)
+
+    def test_stale_base_at_entry_not_merged(self):
+        # The input is already stale when the compiled function is called:
+        # dest.set_(src) runs before compile, so dest._base still points at
+        # `storage` while dest now owns src's storage. Fakification must
+        # describe dest as standalone, otherwise it is merged with `storage`
+        # and the write through dest leaks into it.
+        def fn(dest, storage):
+            dest[0] = 10.0
+            return storage[0].clone()
+
+        for backend in ["eager", "aot_eager", "inductor"]:
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                storage = torch.arange(5, dtype=torch.float32)
+                dest = storage[:3]
+                dest.set_(torch.full((3,), 7.0))  # rebase: dest._base is stale
+                self.assertEqual(
+                    torch.compile(fn, backend=backend)(dest, storage),
+                    torch.tensor(0.0),
+                )
+                self.assertEqual(storage, torch.arange(5, dtype=torch.float32))
+
+    def test_stale_base_at_entry_runtime_base_fallback(self):
+        # dest.set_(src) before compile makes dest share src's storage while
+        # dest._base still points at an unrelated tensor. The synthetic-base
+        # wrapper must not adopt that stale base, or the mutation is applied to
+        # the wrong storage and never reaches src.
+        def fn(dest, src):
+            src[0] = 10.0
+            return dest[0].clone()
+
+        for backend in ["aot_eager", "inductor"]:
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                stale_base = torch.arange(5, dtype=torch.float32)
+                src = torch.full((3,), 7.0)
+                dest = stale_base[:3]
+                dest.set_(src)  # dest aliases src; dest._base is stale
+                self.assertEqual(
+                    torch.compile(fn, backend=backend)(dest, src),
+                    torch.tensor(10.0),
+                )
+                self.assertEqual(src, torch.tensor([10.0, 7.0, 7.0]))
+                self.assertEqual(stale_base, torch.arange(5, dtype=torch.float32))
+
+    def test_synthetic_base_rebound_between_calls_raises(self):
+        def fn(a, b):
+            b[0] = 10.0
+            return a[0].clone()
+
+        x = torch.arange(5, dtype=torch.float32)
+        a = x[:3]
+        b = x
+        compiled = torch.compile(fn, backend="aot_eager", dynamic=False)
+        self.assertEqual(compiled(a, b), torch.tensor(10.0))
+
+        a.set_(torch.full((3,), 7.0))
+        # Static-shape AOT has no storage-identity guard that can recompile here.
+        # Report the whole alias group without attributing the change to one member.
+        with self.assertRaisesRegex(RuntimeError, r"flat input indices \[0, 1\]"):
+            compiled(a, b)
+
+    def test_stale_base_adds_no_base_guard_and_no_recompile(self):
+        # A rebound tensor's _base is not a live view base, so dynamo must not
+        # fakify it or build a symbolic context from it. Before this change both
+        # call sites read e._base directly: a tracked fake showed up under
+        # AttrSource(source, "_base") and _automatic_dynamic unified its size
+        # with unrelated inputs under duck sizing, adding a guard that forced a
+        # recompile.
+        def fn(dest, storage):
+            return dest[0] + storage[0]
+
+        def fresh(n):
+            stale_base = torch.arange(5.0)
+            dest = stale_base[:3]
+            dest.set_(torch.full((3,), 7.0))
+            storage = torch.arange(float(n))
+            return dest, storage
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=cnt, dynamic=True)
+
+        dest, storage = fresh(5)
+        self.assertEqual(opt(dest, storage), storage[0] + 7.0)
+
+        cache_entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(cache_entries), 1)
+        guard_str = str(cache_entries[0].guard_manager)
+
+        # A different storage length must not recompile. A spurious duck-sized
+        # guard on the stale base's size is what would trip this.
+        dest2, storage2 = fresh(6)
+        self.assertEqual(opt(dest2, storage2), storage2[0] + 7.0)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertNotIn("_base", guard_str)
+
+    def test_set_new_base_stays_aliased(self):
+        # After dest.set_(src), dest must alias src, not its old base.
+        def fn(dest, src):
+            dest.set_(src)
+            src[0] = 42.0
+            return dest[0].clone()
+
+        def fresh():
+            storage = torch.arange(5, dtype=torch.float32)
+            return storage[:3], torch.full((3,), 7.0)
+
+        expected = fn(*fresh())
+        for backend in ["eager", "aot_eager", "inductor"]:
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend=backend)(*fresh()), expected)
 
     def test_user_ctor_ctx_manager(self):
         class UserCtxManager:

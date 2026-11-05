@@ -51,6 +51,7 @@ from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.meta_utils import _plain_live_view_base
 from torch.fx.experimental._backward_state import BackwardState
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import IntLikeType
@@ -2079,32 +2080,60 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             args="args",
             artifact_name="synthetic_base_wrapper",
         )
-        buf.bind(torch=torch, _compiled_fn_=compiled_fn)
+        buf.bind(
+            torch=torch,
+            _compiled_fn_=compiled_fn,
+            _plain_live_view_base=_plain_live_view_base,
+        )
 
         with buf.indent():
             buf.writeline(f"_bases = [None] * {num_bases}")
+            buf.writeline("_member_cdata = [None] * len(args)")
             for base_idx in sorted(base_groups):
                 group = base_groups[base_idx]
                 first_orig = group[0]
-                if len(group) == 1:
-                    indices_check = f"args[{first_orig}]._base is not None"
-                    base_expr = f"args[{first_orig}]._base"
-                else:
-                    indices_str = ", ".join(str(i) for i in group)
-                    indices_check = (
-                        f"any(args[_i]._base is not None for _i in [{indices_str}])"
-                    )
-                    base_expr = f"next(args[_i]._base for _i in [{indices_str}] if args[_i]._base is not None)"
-                buf.writeline(f"if {indices_check}:")
+                indices_str = ", ".join(str(i) for i in group)
+                buf.writeline("_b = None")
+                buf.writeline("_b_cdata = None")
+                buf.writeline(f"for _i in [{indices_str}]:")
                 with buf.indent():
-                    buf.writeline(f"_bases[{base_idx}] = {base_expr}")
-                buf.writeline("else:")
+                    buf.writeline(
+                        "_member_cdata[_i] = args[_i].untyped_storage()._cdata"
+                    )
+                buf.writeline(f"for _i in [{indices_str}]:")
+                with buf.indent():
+                    buf.writeline(
+                        "_b = _plain_live_view_base(args[_i], _member_cdata[_i])"
+                    )
+                    buf.writeline("if _b is not None:")
+                    with buf.indent():
+                        buf.writeline("_b_cdata = _member_cdata[_i]")
+                        buf.writeline("break")
+                buf.writeline("if _b is None:")
                 with buf.indent():
                     buf.writeline(
                         f"_b = torch.empty((0,), dtype=args[{first_orig}].dtype, device=args[{first_orig}].device)"
                     )
                     buf.writeline(f"_b.set_(args[{first_orig}].untyped_storage())")
-                    buf.writeline(f"_bases[{base_idx}] = _b")
+                    buf.writeline(f"_b_cdata = _member_cdata[{first_orig}]")
+                # Direct AOT callers have no Dynamo guard/recompile path, and
+                # Dynamo guards need not retain every member's storage identity.
+                # Check this shared runtime boundary rather than silently running
+                # a graph specialized for a different set of aliases. Reuse the
+                # member identity so exempt bases need no outer-storage access.
+                buf.writeline(
+                    f"_bad_indices = [_i for _i in [{indices_str}] "
+                    "if _member_cdata[_i] != _b_cdata]"
+                )
+                buf.writeline("if _bad_indices:")
+                with buf.indent():
+                    buf.writeline(
+                        "raise RuntimeError("
+                        f'"synthetic base group at flat input indices [{indices_str}] '
+                        "no longer shares one storage; input storage aliasing "
+                        'changed after compilation")'
+                    )
+                buf.writeline(f"_bases[{base_idx}] = _b")
 
             other_items = ", ".join(f"args[{orig}]" for orig in other_indices)
             buf.writeline(f"_new_args = _bases + [{other_items}]")
