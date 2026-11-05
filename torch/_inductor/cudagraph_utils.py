@@ -460,8 +460,9 @@ def _draws_random_numbers(node: torch.fx.Node) -> bool:
 def check_aot_cudagraphs(graph: GraphLowering) -> None:
     """Fails an AOTInductor compile with aot_inductor.cudagraphs=True unless
     the graph and the subgraphs of its higher-order ops can be captured into a
-    CUDA graph. AOT mode lowers with graph_partition off, so CPU nodes and
-    partition-gated lowering reasons (e.g. for while_loop) count."""
+    CUDA graph and replayed correctly by AOTI's runtime. AOT mode lowers with
+    graph_partition off, so CPU nodes and partition-gated lowering reasons
+    (e.g. for while_loop) count."""
 
     def with_stack_trace(msg: str, stack_trace: str | None) -> str:
         return f"{msg}. Found from:\n{stack_trace}" if stack_trace else msg
