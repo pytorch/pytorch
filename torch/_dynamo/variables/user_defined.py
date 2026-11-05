@@ -62,7 +62,12 @@ from ..exc import (
     unimplemented,
 )
 from ..graph_bytecode_inputs import get_external_object_by_index
-from ..guards import GuardBuilder, install_guard, install_not_in_instance_dict_guard
+from ..guards import (
+    GuardBuilder,
+    install_guard,
+    install_not_in_instance_dict_guard,
+    is_portable_function_guard,
+)
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
@@ -1176,6 +1181,79 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return variables.LambdaVariable(fake_cross_entropy_loss)
 
+    # tp_new slot inheritance (CPython slot_tp_new): a subtype's __new__
+    # slot is whatever the closest ancestor that actually *declares*
+    # __new__ in its own __dict__ provides -- not necessarily an immediate
+    # base. This finds that ancestor so callers can delegate to its own
+    # tp_new_impl instead of re-deriving per-type arg-handling rules here.
+    _new_slot_owners_with_choke_points: set[type] = {
+        dict,
+        tuple,
+        set,
+        frozenset,
+        list,
+    }
+
+    @staticmethod
+    def new_slot_owner(cls: type) -> type:
+        for klass in cls.__mro__:
+            if "__new__" in klass.__dict__:
+                return klass
+        raise AssertionError(f"no class in the MRO of {cls} declares __new__")
+
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # tp_new_impl is reachable two ways: (1) the explicit `__new__`
+        # branch in call_method below, which already gates on
+        # is_supported_new_method, and (2) the generic TPSLOT/slotdef
+        # dispatch (base.py's SLOTDEFS table maps "__new__" to
+        # tp_new_impl unconditionally for every VariableTracker, e.g. via
+        # `cls.__new__(cls, ...)` resolving to a BoundBuiltinMethodVariable
+        # whose call_function forwards to call_method("__new__", ...)).
+        # Re-check here so unsupported C-level __new__ methods (e.g. a
+        # pybind11 extension type's own __new__) gracefully graph-break
+        # instead of reaching track_new_user_defined_object with a
+        # base_cls whose __new__ get_example_value cannot safely invoke.
+        if not UserDefinedClassVariable.is_supported_new_method(self.value.__new__):
+            unimplemented(
+                gb_type="unsupported __new__ method",
+                context=f"tp_new_impl for {self.value}",
+                explanation=(
+                    f"Dynamo does not know how to construct `{self.value}` "
+                    f"via `{self.value.__new__}`, which is not a supported "
+                    "constructor (not a plain Python __new__, and not one "
+                    "of the recognized C-level __new__ methods)."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if self.value is collections.OrderedDict:
+            return OrderedDictVariable({}, mutation_type=ValueMutationNew())
+        owner = self.new_slot_owner(self.value)
+        if owner in self._new_slot_owners_with_choke_points:
+            # Delegate to the VariableTracker that already implements this
+            # type's real tp_new (arg handling + track_new_user_defined_object
+            # wiring), instead of re-deriving the same rules here.
+            owner_vt = VariableTracker.build(tx, owner)
+            return owner_vt.tp_new_impl(tx, args, kwargs)
+        # Remaining owners have no dedicated choke-point VT. Some C-level
+        # tp_new functions (collections.deque.__new__,
+        # types.SimpleNamespace.__new__) ignore extra args -- only the type
+        # arg matters. Pass init_args=[] for those so reconstruction emits
+        # base_cls.__new__(cls) without unreconstructable args (e.g.
+        # generators). Everything else (object.__new__, BaseException
+        # subclasses, structseq classes) uses the extra args.
+        if owner in (collections.deque, types.SimpleNamespace):
+            init_args: list[VariableTracker] = []
+        else:
+            init_args = list(args[1:])
+        return tx.output.side_effects.track_new_user_defined_object(
+            self, args[0], init_args, tx=tx
+        )
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -1260,34 +1338,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and name == "__enter__"
         ):
             return args[0].enter(tx)
-        elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
-            self.value.__new__
-        ):
-            if self.value is collections.OrderedDict:
-                # Exact OrderedDict: represent as a bare OrderedDictVariable,
-                # mirroring dict.__new__(dict) -> ConstDictVariable.
-                return OrderedDictVariable({}, mutation_type=ValueMutationNew())
-            # Some C-level tp_new functions (dict.__new__, set.__new__) ignore
-            # extra args — only the type arg matters.  Pass init_args=[] for
-            # those so reconstruction emits base_cls.__new__(cls) without
-            # unreconstructable args (e.g. generators).  Other tp_new functions
-            # (tuple.__new__, BaseException.__new__) use the extra args.
-            new_fn = self.value.__new__
-            if new_fn in (
-                dict.__new__,
-                set.__new__,
-                collections.deque.__new__,
-                types.SimpleNamespace.__new__,
-            ):
-                init_args: list[VariableTracker] = []
-            else:
-                init_args = list(args[1:])
-            return tx.output.side_effects.track_new_user_defined_object(
-                self,
-                args[0],
-                init_args,
-                tx=tx,
-            )
         elif name == "__setattr__" and self.ban_mutation:
             unimplemented(
                 gb_type="Class attribute mutation when the __dict__ was already materialized",
@@ -2090,6 +2140,16 @@ def call_random_fn(
     # (currently hypothetical), but I'm not going to poke my hand in
     # this nest for now
     return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
+
+
+def can_guard_class_function_code(tx: "InstructionTranslatorBase", fn: object) -> bool:
+    """Whether a function reached through an instance's class can get its
+    CLOSURE_MATCH. A package must serialize every guard it keeps, and a function
+    whose globals no importable module owns (one exec'd into a plain dict) has
+    no portable form of that guard: under strict_precompile it would fail the
+    compile. Under a package such a function stays unguarded, as it was before
+    this guard existed."""
+    return tx.output.package is None or is_portable_function_guard("CLOSURE_MATCH", fn)
 
 
 class UserDefinedObjectVariable(UserDefinedVariable):
@@ -3193,12 +3253,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         from .. import trace_rules
         from . import UserMethodVariable
         from .builder import VariableBuilder
-        from .constant import ConstantVariable
 
         method = self._maybe_get_baseclass_method(name)
         if method is not None:
             if method is object.__init__:
-                return ConstantVariable.create(None)
+                return VariableTracker.tp_init_impl(self, tx, args, kwargs)
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
@@ -3319,7 +3378,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return super().tp_init_impl(tx, args, kwargs)
         method = self._maybe_get_baseclass_method("__init__")
         if method is object.__init__:
-            return variables.ConstantVariable.create(None)
+            return VariableTracker.tp_init_impl(self, tx, args, kwargs)
         res = self._vectorcall_method(tx, "__init__", args, kwargs)
         if not res.is_constant_none():
             raise_type_error(
@@ -4129,16 +4188,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # the method's closure sourcelessly and SourcelessBuilder fails on
             # a captured tensor (test_modes.py,
             # test_nested_torch_function_mode).
-            fn_source = var_source or (
-                self.source and AttrSource(TypeSource(self.source), name)
-            )
-            return variables.UserMethodVariable(
-                VariableBuilder.create_internal_user_function(
-                    type_attr, source=fn_source
-                ),
-                self,
-                source=source,
-            )
+            # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
+            # off TypeSource is not tag-safe.
+            if var_source is not None and can_guard_class_function_code(tx, type_attr):
+                im_func = variables.UserFunctionVariable.create_with_source(
+                    type_attr, var_source
+                )
+            else:
+                im_func = VariableBuilder.create_internal_user_function(
+                    type_attr,
+                    source=var_source
+                    or (self.source and AttrSource(TypeSource(self.source), name)),
+                )
+            return variables.UserMethodVariable(im_func, self, source=source)
         # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):

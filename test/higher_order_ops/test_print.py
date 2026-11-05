@@ -1,6 +1,5 @@
 # Owner(s): ["module: higher order operators"]
 import io
-import sys
 import unittest
 from unittest.mock import patch
 
@@ -466,6 +465,25 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 1)
         with self.assertRaisesRegex(Exception, "format_str must be a string"):
             opt_f(x, 3, 5)
+
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_symbolic_str_realized_symint_operand(self, backend):
+        # Once n is dynamic, x * k realizes k as a sourceless SymInt. The string
+        # is built before the graph runs, so it must recompute k from n.
+        def f(x, n):
+            k = n + 1
+            msg = "step " + str(k)
+            y = x * k
+            torch._higher_order_ops.print(msg)
+            return y
+
+        cnt = CompileCounterWithBackend(backend)
+        opt_f = torch.compile(f, backend=cnt, fullgraph=True)
+        x = torch.randn(2)
+        for n in [1, 2, 3]:
+            self.assertEqual(self._run_and_capture(opt_f, x, n), f"step {n + 1}")
+            self.assertEqual(opt_f(x, n), f(x, n))
+        self.assertEqual(cnt.frame_count, 2)
 
     @skipIfTorchDynamo("Skipped under Dynamo")
     def test_inductor_python_wrapper_uses_python_print(self):
