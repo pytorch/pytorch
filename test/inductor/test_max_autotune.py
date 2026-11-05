@@ -4495,6 +4495,25 @@ class TestTemplateConfigPruning(TestCase):
                 has_nk32 = any("matrix_instr_nonkdim=32" in d for d in descs)
                 self.assertEqual(has_nk32, arch == "gfx950")
 
+    @unittest.skipIf(not torch.version.hip, "ROCm mm heuristic")
+    def test_rocm_mm_num_stages_autotuned_on_gfx950(self):
+        def stages(arch, m, k, n):
+            out = set()
+            for name, d in self._rocm_mm_choice_descs(arch, m, k, n)[0]:
+                if "persistent" in name:
+                    self.assertIn("num_stages=2", d)
+                    continue
+                bm = int(re.search(r"BLOCK_M=(\d+)", d).group(1))
+                bn = int(re.search(r"BLOCK_N=(\d+)", d).group(1))
+                out.add((int(re.search(r"num_stages=(\d+)", d).group(1)), bm * bn))
+            return out
+
+        # gfx942 keeps the backend default everywhere.
+        self.assertEqual({s for s, _ in stages("gfx942", 1024, 256, 512)}, {2})
+        # gfx950 adds the 1- and 3-stage configs, small and large tiles.
+        for m, k, n in ((1024, 256, 512), (4096, 1024, 4096)):
+            self.assertEqual({s for s, _ in stages("gfx950", m, k, n)}, {1, 2, 3})
+
     def test_scaled_mm_block_k_pruning_excludes_rdna(self):
         import torch._inductor.heuristics.template.triton as triton_heuristics
         from torch._inductor.heuristics.template.triton import (
