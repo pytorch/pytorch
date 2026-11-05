@@ -29,6 +29,25 @@
 namespace torch {
 namespace jit {
 
+TEST(LiteInterpreterTest, PickleRoundTrip) {
+  const auto base = at::arange(12, at::kLong).reshape({3, 4});
+  const auto view = base.slice(0, 1, 3).transpose(0, 1);
+  const auto empty = at::empty({0, 3}, at::kFloat);
+  const IValue value = c10::ivalue::Tuple::create({base, view, empty, 42});
+  const auto loaded =
+      torch::jit::pickle_load(torch::jit::pickle_save(value)).toTuple();
+  const auto& elements = loaded->elements();
+  ASSERT_EQ(4, elements.size());
+  const auto loaded_base = elements[0].toTensor();
+  const auto loaded_view = elements[1].toTensor();
+  EXPECT_TRUE(loaded_base.equal(base));
+  EXPECT_TRUE(loaded_view.equal(view));
+  EXPECT_EQ(view.strides(), loaded_view.strides());
+  EXPECT_EQ(loaded_base.storage().data(), loaded_view.storage().data());
+  EXPECT_TRUE(elements[2].toTensor().equal(empty));
+  EXPECT_EQ(42, elements[3].toInt());
+}
+
 TEST(LiteInterpreterTest, UpsampleNearest2d) {
   Module m("m");
   m.define(R"(
