@@ -504,7 +504,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
             # Keep caller (run_node) frame in a reference cycle so a __del__
             # guard would not be reset on return when cyclic GC is disabled.
             frame = inspect.currentframe()
-            assert frame is not None
+            self.assertIsNotNone(frame)
             cycle: list[object] = [frame.f_back]
             cycle.append(cycle)
             del frame, cycle
