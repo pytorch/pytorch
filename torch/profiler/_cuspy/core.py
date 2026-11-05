@@ -1477,11 +1477,11 @@ def enable_hes_early() -> None:
     if rc != cuda_driver.CUresult.CUDA_SUCCESS:
         raise RuntimeError(f"cuInit failed with rc={rc}")
 
-    # Use the direct libcupti call (self._cupti.activity_enable_hw_trace), not
+    # Use the direct libcupti call (pylibcupti().activity_enable_hes), not
     # cupti-python's activity_enable_hw_trace(): after torch is imported, the
     # latter makes subsequent cuptiActivityRegisterCallbacks() fail with
     # CUPTI_ERROR_MULTIPLE_SUBSCRIBERS_NOT_SUPPORTED, while the direct call works.
-    cupti_python.pylibcupti().activity_enable_hw_trace(True)
+    cupti_python.pylibcupti().activity_enable_hes()
     _hes_enabled = True
 
 

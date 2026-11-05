@@ -3365,6 +3365,53 @@ class TestCuspyCUDA(TestCase):
         self.assertGreater(counts.get(int(ActivityKind.CONCURRENT_KERNEL), 0), 0)
         self.assertGreater(stats["buffers_completed"], 0)
 
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
+    def test_buffer_size_change_between_sessions(self):
+        # The native buffer pool outlives a Cuspy session. A later session with a
+        # larger buffer_size must not get a pooled buffer from the earlier, smaller
+        # one: CUPTI fills it to the new size and corrupts the heap.
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cuspy import core as cuspy_core
+        from torch.profiler._cuspy.core import Cuspy
+        from torch.profiler._cuspy.cupti_python import CuptiError
+        from torch.profiler._cuspy.records import Kernel
+
+        kind = ActivityKind.CONCURRENT_KERNEL
+        want = {kind: {Kernel.START, Kernel.END, Kernel.NAME}}
+
+        def run_session(buffer_size):
+            cuspy_core._reset_for_test()
+            cuspy_core.configure(
+                buffer_size=buffer_size,
+                background_flush_period_s=-1,
+                background_drain_period_s=-1,
+            )
+            m = Cuspy()
+            kernels = [0]
+
+            def cb(cols):
+                if kind in cols:
+                    kernels[0] += len(cols[kind][int(Kernel.START)])
+
+            try:
+                obs = m.register(want, cb)
+            except CuptiError as e:
+                self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
+            try:
+                x = torch.randn(256, 256, device="cuda")
+                for _ in range(20):
+                    x = torch.relu(x @ x)
+                x.sum().item()
+                torch.cuda.synchronize()
+                m.flush(sync=True)
+            finally:
+                m.unregister(obs)
+            return kernels[0]
+
+        self.assertGreater(run_session(1024), 0)
+        self.assertGreater(run_session(4 * 1024 * 1024), 0)
+
 
 def _graph_node_created_key():
     """The ``(domain, cbid)`` the registry tests exercise: RESOURCE / GRAPHNODE_CREATED.
@@ -4057,6 +4104,7 @@ cuspy_core.enable_hes_early()
         self.assertIn("cuspy_region", user_names)
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    @_isolated
     def test_cuspy_observer_registration_failure_is_graceful(self):
         from torch.profiler._cuspy import core as cuspy_core
 
