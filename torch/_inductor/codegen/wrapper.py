@@ -2433,6 +2433,10 @@ class PythonWrapperCodegen(CodeGen):
         if not is_codegen_graph_partition_subgraph(self):
             # See [Note: Removed Graph Partition Arguments]
             self.write_prefix()
+        elif config.size_asserts:
+            # A partition's prefix is written after its kernels, too late to queue
+            # the input asserts that the scheduler emits before each input's first use.
+            self.codegen_input_size_asserts()
 
         self.write_kernel_autotune_defs_header()
 
@@ -2916,16 +2920,20 @@ class PythonWrapperCodegen(CodeGen):
 
             self.codegen_inputs()
 
-            # avoid duplicating asserts for both partition functions and
-            # the call function when using cudagraph partition
-            if not (
+            # Partition functions check the inputs they use. call() still queues
+            # size asserts, which are emitted only before its own (non-cudagraph)
+            # kernels; the other asserts would duplicate the partitions' checks.
+            if (
                 is_using_cudagraph_partition()
-                and (not is_codegen_graph_partition_subgraph(self))
+                and not is_codegen_graph_partition_subgraph(self)
             ):
+                if config.size_asserts:
+                    self.codegen_input_size_asserts()
+            else:
                 self.codegen_input_size_and_nan_asserts()
 
     def codegen_input_size_and_nan_asserts(self) -> None:
-        if config.size_asserts:
+        if config.size_asserts and not is_codegen_graph_partition_subgraph(self):
             self.codegen_input_size_asserts()
         if config.alignment_asserts_inputs:
             self.codegen_input_alignment_asserts()
