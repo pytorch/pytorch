@@ -467,36 +467,42 @@ def _default_all_gather_output_fn(
     outer_sizes: list[int],
     world_size: int,
 ) -> None:
-    """Copy outputs with outer_size > 1 via intermediate buffers, others directly."""
+    """Copy outputs with outer_size > 1 or dropped padding via intermediate
+    buffers, others directly."""
     byte_views = all_gather_output.dtype == torch.uint8
     split_outputs: list[torch.Tensor] = []
-    reassembled: list[tuple[torch.Tensor, torch.Tensor, int]] = []
+    # (intermediate buffer, output, outer size, whether output drops padding)
+    reassembled: list[tuple[torch.Tensor, torch.Tensor, int, bool]] = []
     for output, split_size, outer_size in zip(outputs, split_sizes, outer_sizes):
+        gathered = world_size * split_size  # in all_gather_output's elements
         copy_output = output
-        nbytes = world_size * split_size * all_gather_output.element_size()
-        if outer_size > 1 or output.nbytes < nbytes:
-            # Every rank's chunk, also when output drops their padding
-            copy_output = output.new_empty(nbytes // output.element_size())
-            reassembled.append((copy_output, output, outer_size))
-        if byte_views and copy_output.nbytes == world_size * split_size:
+        if outer_size > 1:
+            numel = gathered // output.element_size() if byte_views else gathered
+            compact = output.numel() < numel
+            copy_output = output.new_empty(numel)
+            reassembled.append((copy_output, output, outer_size, compact))
+        if byte_views and copy_output.nbytes == gathered:
             # View as bytes last: a view of a byte view keeps the byte view alive
             split_outputs.append(copy_output.view(world_size, -1).view(torch.uint8))
             continue
         split_output = copy_output.view(torch.uint8) if byte_views else copy_output
-        if split_output.numel() != world_size * split_size:  # a smaller payload
-            split_output = split_output[: world_size * split_size]
+        if (split_numel := split_output.numel()) > gathered:  # a smaller payload
+            split_output = split_output[:gathered]
+        elif split_numel < gathered:  # an outer-size-1 output that drops padding
+            split_output = split_output.new_empty(gathered)
+            reassembled.append((split_output.view(output.dtype), output, 1, True))
         split_outputs.append(split_output.view(world_size, split_size))
     torch.ops.fsdp.split_with_sizes_copy(
         all_gather_output.view(world_size, -1), split_sizes, dim=1, out=split_outputs
     )
-    for copy_output, output, outer_size in reassembled:
+    for copy_output, output, outer_size, compact in reassembled:
         chunks = copy_output.view(world_size, outer_size, -1)
         rows = output.view(outer_size, -1)
-        chunk_size = chunks.size(2)
-        if rows.size(1) == world_size * chunk_size:
+        if not compact:
             torch.cat(chunks.unbind(0), dim=1, out=rows)
             continue
-        # Uneven: full chunks come first, then a prefix of the next rank's chunk
+        # Full chunks come first, then a prefix of the next rank's chunk
+        chunk_size = chunks.size(2)
         num_full, tail = divmod(rows.size(1), chunk_size)
         full_size = num_full * chunk_size
         rows[:, :full_size].view(outer_size, num_full, chunk_size).copy_(
