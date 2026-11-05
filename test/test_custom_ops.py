@@ -784,6 +784,44 @@ class TestCustomOp(CustomOpTestCaseBase):
             self.assertFalse(f(torch.randn(3)).requires_grad)
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_normalizes_results(self):
+        # What a caller gets back, and any error, must not depend on whether
+        # the op was dispatched through the PyObject fast path.
+        lib = self.lib()
+        x, y = torch.randn(2), torch.randn(2)
+        cases = {
+            "t": ("(Tensor x) -> Tensor", [x, None, 3]),
+            "tt": ("(Tensor x) -> (Tensor, Tensor)", [(x, y), [x, y], (x,), (x, None)]),
+        }
+        returned = {}
+
+        def describe(value):
+            if isinstance(value, torch.Tensor):
+                return ("Tensor", id(value))
+            if isinstance(value, (list, tuple)):
+                return (type(value).__name__, [describe(v) for v in value])
+            return (type(value).__name__, value)
+
+        for name, (schema, values) in cases.items():
+            opname = f"normalize_result_{name}"
+            lib.define(opname + schema)
+            lib.impl(opname, lambda x, name=name: returned[name], "CPU")
+            lib.impl(opname, torch.library.fallthrough_kernel, "Autograd")
+            op = getattr(self.ns(), opname).default
+            for value in values:
+                returned[name] = value
+                results = []
+                for pyobj_dispatch in (False, True):
+                    op._enable_pyobj_dispatch(pyobj_dispatch)
+                    try:
+                        results.append(describe(op(x)))
+                    except Exception as e:
+                        results.append((type(e), str(e).splitlines()[0]))
+                self.assertEqual(
+                    results[0], results[1], msg=f"{schema} returning {value!r}"
+                )
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_custom_op_autograd(self):
         @torch.library.custom_op(
             f"{self.test_ns}::pyobject_dispatch_custom_op_autograd",
