@@ -2377,16 +2377,6 @@
       ]
     }
   ],
-  "GB7866": [
-    {
-      "Gb_type": "hasattr on a class attribute set earlier in the frame",
-      "Context": "hasattr({self.value}, {name}), value {value}",
-      "Explanation": "Dynamo cannot tell whether the lookup raises AttributeError without running the stored value's __get__ or the metaclass __getattribute__.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB1380": [
     {
       "Gb_type": "Illegal __getitem__ invocation in strict mode",
@@ -3283,14 +3273,6 @@
     }
   ],
   "GB9648": [
-    {
-      "Gb_type": "Missing tp_richcompare_impl override",
-      "Context": "tp_richcompare_impl {self} {op}",
-      "Explanation": "{type(self).__name__} wraps {real_type.__name__} which has a non-default tp_richcompare. Add a tp_richcompare_impl override to {type(self).__name__}.",
-      "Hints": [
-        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
-      ]
-    },
     {
       "Gb_type": "Missing tp_richcompare_impl override",
       "Context": "tp_richcompare_impl {self} {op}",
