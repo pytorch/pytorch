@@ -3,11 +3,13 @@
 import contextlib
 import csv
 import dataclasses
+import importlib.util
 import io
 import json
 import os
 import sys
 import tempfile
+import unittest
 import weakref
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -18,6 +20,7 @@ import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.backends import __allow_nonbracketed_mutation as allow_backend_mutation
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     skipCPUIf,
     skipGPUIf,
@@ -44,6 +47,15 @@ try:
 finally:
     sys.path.remove(REPO_ROOT)
 
+HAS_DIFFUSION_DEPS = all(
+    importlib.util.find_spec(name) is not None for name in ("diffusers", "transformers")
+)
+skipIfNoDiffusionDeps = unittest.skipIf(
+    not HAS_DIFFUSION_DEPS, "requires diffusers and transformers"
+)
+skipIfNoDiffusers = unittest.skipIf(
+    importlib.util.find_spec("diffusers") is None, "requires diffusers"
+)
 # The runner compiles and counts graphs itself; wrapping tests in Dynamo makes
 # its steady-state checks see the test's own compilation.
 skipIfWrappedByDynamo = skipIfTorchDynamo("the benchmark runner manages compilation")
@@ -1496,6 +1508,163 @@ runpy.run_path(sys.argv[0], run_name="__main__")
             self.assertIn(message, self._main_error(args))
         run_scenarios.assert_not_called()
 
+    def test_scenario_round_trip(self):
+        recipe = benchmark.RECIPES["denoise_step"]["sd35_medium"]
+        scenario = dataclasses.replace(
+            _denoise_scenario(num_images_per_prompt=2),
+            model=recipe.model,
+            loader=recipe.loader,
+        )
+        self.assertTrue(recipe.model.artifacts[0].allow_patterns)
+        value = json.loads(json.dumps(benchmark._scenario_to_dict(scenario)))
+        self.assertEqual(benchmark._scenario_from_dict(value), scenario)
+        unknown = dataclasses.replace(scenario.workload, name="unknown")
+        with self.assertRaisesRegex(ValueError, "invalid workload"):
+            benchmark._validate_worker_scenario(
+                dataclasses.replace(scenario, workload=unknown), "cpu"
+            )
+
+    def test_workload_is_part_of_result_identity(self):
+        results = []
+        for workload in benchmark.WORKLOADS:
+            recipe = benchmark.RECIPES[workload]["sd35_medium"]
+            scenario = dataclasses.replace(
+                self._toy_scenarios(("full",))[0],
+                model=recipe.model,
+                workload=recipe.workload,
+                loader=recipe.loader,
+            )
+            result = self._success_result(scenario)
+            result["workload_details"] = {
+                "height": 1024,
+                "width": 1024,
+                "requested_batch_size": 1,
+                "effective_batch_size": 2,
+                "conditioning_length": 333,
+                "guidance_scale": 4.5,
+            }
+            results.append(result)
+        pipeline, denoise_step = results
+        self.assertNotEqual(pipeline["scenario_id"], denoise_step["scenario_id"])
+        records = [benchmark.dashboard_records(result)[0] for result in results]
+        self.assertEqual(records[0]["model"]["backend"], records[1]["model"]["backend"])
+        self.assertEqual(
+            [record["model"]["name"] for record in records],
+            ["sd35_medium:pipeline", "sd35_medium:denoise_step"],
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "results.csv"
+            benchmark.write_outputs(output, results)
+            with output.open(newline="") as file:
+                rows = list(csv.DictReader(file))
+        self.assertEqual([row["workload"] for row in rows], list(benchmark.WORKLOADS))
+        self.assertEqual(
+            [row["output_boundary"] for row in rows], ["latent", "denoiser_prediction"]
+        )
+        for row in rows:
+            self.assertEqual(row["checkpoint_revision"], pipeline["model"]["revision"])
+            self.assertEqual(row["cudagraphs"], "False")
+            self.assertEqual(
+                (row["requested_batch_size"], row["effective_batch_size"]), ("1", "2")
+            )
+            self.assertEqual(row["conditioning_length"], "333")
+
+    def test_csv_falls_back_to_workload_parameters(self):
+        recipe = benchmark.RECIPES["pipeline"]["flux"]
+        scenario = dataclasses.replace(
+            self._toy_scenarios(("full",))[0],
+            model=recipe.model,
+            workload=recipe.workload,
+            loader=recipe.loader,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "results.csv"
+            benchmark.write_outputs(output, [self._success_result(scenario)])
+            with output.open(newline="") as file:
+                (row,) = csv.DictReader(file)
+        dimensions = (row["height"], row["width"], row["guidance_scale"])
+        self.assertEqual(dimensions, ("1024", "1024", "3.5"))
+        self.assertEqual(row["effective_batch_size"], "")
+
+    def test_sd35_artifacts_and_gated_access(self):
+        def selected(artifact, filename):
+            ignored = any(fnmatchcase(filename, p) for p in artifact.ignore_patterns)
+            allowed = not artifact.allow_patterns or any(
+                fnmatchcase(filename, p) for p in artifact.allow_patterns
+            )
+            return allowed and not ignored
+
+        (pipeline,) = benchmark.RECIPES["pipeline"]["sd35_medium"].model.artifacts
+        (denoise,) = benchmark.RECIPES["denoise_step"]["sd35_medium"].model.artifacts
+        self.assertEqual(
+            (pipeline.repo_id, pipeline.revision), (denoise.repo_id, denoise.revision)
+        )
+        files = {
+            "transformer/diffusion_pytorch_model.safetensors": (True, True),
+            "transformer/config.json": (True, True),
+            "scheduler/scheduler_config.json": (True, True),
+            "tokenizer/vocab.json": (True, True),
+            "vae/config.json": (True, True),
+            "vae/diffusion_pytorch_model.safetensors": (True, False),
+            "text_encoder_3/model-00001-of-00002.safetensors": (True, False),
+            "text_encoder_3/model.fp16-00001-of-00002.safetensors": (False, False),
+            "text_encoder/model.fp16.safetensors": (False, False),
+            "text_encoders/t5xxl_fp16.safetensors": (False, False),
+            "sd3.5_medium.safetensors": (False, False),
+        }
+        for filename, expected in files.items():
+            actual = (selected(pipeline, filename), selected(denoise, filename))
+            self.assertEqual(actual, expected, filename)
+
+        gated = type("GatedRepoError", (Exception,), {})
+        snapshot = mock.Mock(side_effect=gated("401"))
+        hub = SimpleNamespace(snapshot_download=snapshot, hf_hub_download=mock.Mock())
+        errors = SimpleNamespace(GatedRepoError=gated)
+        with (
+            mock.patch.dict(
+                sys.modules, {"huggingface_hub": hub, "huggingface_hub.utils": errors}
+            ),
+            self.assertRaisesRegex(RuntimeError, "is gated: accept its license"),
+        ):
+            benchmark._prefetch((denoise,))
+        self.assertEqual(
+            snapshot.call_args.kwargs["allow_patterns"], list(denoise.allow_patterns)
+        )
+
+    def test_sd35_pipeline_contract(self):
+        recipe = benchmark.RECIPES["pipeline"]["sd35_medium"]
+        scenario = dataclasses.replace(
+            self._toy_scenarios(("eager",))[0],
+            model=recipe.model,
+            workload=recipe.workload,
+            loader=recipe.loader,
+        )
+        self.assertEqual(
+            recipe.model.repeated_block_classes, ("JointTransformerBlock",)
+        )
+        self.assertEqual(recipe.workload.output_boundary, "latent")
+        self.assertEqual(recipe.workload.parameters["output_type"], "latent")
+        diffusers = SimpleNamespace(StableDiffusion3Pipeline=mock.Mock())
+        pipeline = diffusers.StableDiffusion3Pipeline.from_pretrained.return_value
+        pipeline.tokenizer_max_length = 77
+        (artifact,) = recipe.model.artifacts
+        with (
+            mock.patch.dict(sys.modules, {"diffusers": diffusers}),
+            mock.patch.object(benchmark, "_finish_loading") as finish,
+        ):
+            benchmark._load_sd35_medium(
+                scenario, {artifact.key: "snapshot"}, "cpu", torch.bfloat16
+            )
+        diffusers.StableDiffusion3Pipeline.from_pretrained.assert_called_once_with(
+            "snapshot", torch_dtype=torch.bfloat16
+        )
+        kwargs = finish.call_args.kwargs
+        self.assertEqual(kwargs["output_fields"], ("images",))
+        details = kwargs["workload_details"]
+        self.assertEqual(details["requested_batch_size"], 1)
+        self.assertEqual(details["effective_batch_size"], 2)
+        self.assertEqual(details["conditioning_length"], 77 + 256)
+
     @parametrize("dtype", (torch.bfloat16, torch.float16, torch.float32))
     @parametrize("numel", (512, 4096))
     def test_prediction_check_is_anchored_to_high_precision(self, dtype, numel):
@@ -1548,6 +1717,30 @@ runpy.run_path(sys.argv[0], run_name="__main__")
         self.assertIn(message, results[0]["error"])
         self.assertEqual(results[1]["output_check"], "reference unavailable")
         self.assertIn("successful eager reference", results[1]["error"])
+
+    @parametrize("phase", ("warmups", "repetitions"))
+    def test_prediction_check_requires_matching_requests(self, phase):
+        scenarios = [_denoise_scenario(mode) for mode in ("eager", "full")]
+        compiled = scenarios[1]
+        execution = dataclasses.replace(
+            compiled.execution, **{phase: getattr(compiled.execution, phase) + 1}
+        )
+        scenarios[1] = dataclasses.replace(compiled, execution=execution)
+        results = [self._success_result(scenario) for scenario in scenarios]
+        with tempfile.TemporaryDirectory() as directory:
+            paths = {}
+            for scenario in scenarios:
+                path = Path(directory) / f"{scenario.mode}.pt"
+                torch.save(torch.ones(2), path)
+                paths[scenario.scenario_id] = path
+            reference = benchmark._reference_path(paths[scenarios[0].scenario_id])
+            torch.save(torch.ones(2, dtype=torch.float64), reference)
+            benchmark._compare_outputs(scenarios, results, paths)
+        self.assertEqual(results[0]["output_check"], "reference")
+        self.assertEqual(results[1]["status"], "failed")
+        self.assertEqual(
+            results[1]["error"], "eager and compiled ran different numbers of requests"
+        )
 
     def test_prediction_check_rejects_non_finite_reference(self):
         scenarios = [_denoise_scenario(mode) for mode in ("eager", "full")]
@@ -1695,6 +1888,190 @@ runpy.run_path(sys.argv[0], run_name="__main__")
                 torch.backends.cudnn.deterministic = deterministic
         self.assertEqual(_snapshot_fp32_precision(), original)
 
+    @skipIfNoDiffusers
+    def test_denoise_step_times_one_forward_per_changing_timestep(self):
+        from diffusers import FlowMatchEulerDiscreteScheduler, SD3Transformer2DModel
+
+        scenario = _denoise_scenario("full")
+        loaded = benchmark._load_tiny_sd3_denoise_step(
+            scenario, {}, "cpu", torch.float32
+        )
+        schedule = loaded.workload_details["timesteps"]
+        forward = SD3Transformer2DModel.forward
+        with (
+            mock.patch.object(
+                SD3Transformer2DModel, "forward", autospec=True, side_effect=forward
+            ) as transformer_forward,
+            mock.patch.object(
+                FlowMatchEulerDiscreteScheduler,
+                "step",
+                side_effect=AssertionError("scheduler step inside the forward"),
+            ),
+            torch.inference_mode(),
+        ):
+            for count in range(len(schedule) + 1):
+                _, prediction = benchmark._timed_request(
+                    loaded, "cpu", cudagraphs=False
+                )
+                self.assertEqual(transformer_forward.call_count, count + 1)
+                self.assertEqual(prediction.shape, (2, 4, 8, 8))
+        requests = [call.kwargs for call in transformer_forward.call_args_list]
+        timesteps = [request["timestep"][0].item() for request in requests]
+        self.assertEqual(timesteps, schedule + schedule[:1])
+        for request in requests:
+            self.assertIs(request["hidden_states"], requests[0]["hidden_states"])
+            self.assertEqual(request["timestep"].stride(), (0,))
+
+        result = benchmark.execute_scenario(scenario)
+        self.assertEqual(result["compiler_diagnostics"]["unique_graphs"], 1)
+        self.assertEqual(result["compiled_component"], "transformer")
+        self.assertEqual(result["output_summary"]["shape"], [2, 4, 8, 8])
+
+    @skipIfNoDiffusionDeps
+    def test_sd35_denoise_step_derives_inputs_from_checkpoint(self):
+        import transformers
+        from diffusers import (
+            FlowMatchEulerDiscreteScheduler,
+            SD3Transformer2DModel,
+            StableDiffusion3Pipeline,
+        )
+
+        recipe = benchmark.RECIPES["denoise_step"]["sd35_medium"]
+        parameters = {"height": 64, "width": 96, "max_sequence_length": 4}
+        parameters["num_inference_steps"] = 3
+        workload = dataclasses.replace(
+            recipe.workload, parameters={**recipe.workload.parameters, **parameters}
+        )
+        scenario = dataclasses.replace(
+            _denoise_scenario(),
+            model=recipe.model,
+            workload=workload,
+            loader=recipe.loader,
+        )
+        tiny = benchmark._load_tiny_sd3_denoise_step(
+            _denoise_scenario(), {}, "cpu", torch.float32
+        ).component
+        # SD3.5's dual-attention, plain, and final context_pre_only variants.
+        dual = [block.attn2 is not None for block in tiny.transformer_blocks]
+        pre_only = [block.context_pre_only for block in tiny.transformer_blocks]
+        self.assertEqual(dual, [True, False, False])
+        self.assertEqual(pre_only, [False, False, True])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tiny.save_pretrained(root / "transformer")
+            # The shift and VAE scale factor (4) differ from tiny_sd3's, so they
+            # must come from the checkpoint.
+            FlowMatchEulerDiscreteScheduler(shift=2.0).save_pretrained(
+                root / "scheduler"
+            )
+            (root / "vae").mkdir()
+            vae_config = {"block_out_channels": [8, 16, 32]}
+            (root / "vae" / "config.json").write_text(json.dumps(vae_config))
+            tokenizer = SimpleNamespace(model_max_length=77)
+            (artifact,) = recipe.model.artifacts
+            with (
+                mock.patch.object(
+                    transformers.CLIPTokenizer,
+                    "from_pretrained",
+                    return_value=tokenizer,
+                ),
+                mock.patch.object(
+                    StableDiffusion3Pipeline, "from_pretrained"
+                ) as load_pipeline,
+            ):
+                loaded = benchmark._load_sd35_medium_denoise_step(
+                    scenario, {artifact.key: str(root)}, "cpu", torch.float32
+                )
+                with self.assertRaisesRegex(ValueError, "divisible by 8"):
+                    benchmark._load_sd35_medium_denoise_step(
+                        dataclasses.replace(
+                            scenario,
+                            workload=dataclasses.replace(
+                                workload,
+                                parameters={**workload.parameters, "width": 68},
+                            ),
+                        ),
+                        {artifact.key: str(root)},
+                        "cpu",
+                        torch.float32,
+                    )
+        load_pipeline.assert_not_called()
+        self.assertIsInstance(loaded.component, SD3Transformer2DModel)
+        config = loaded.component.config
+        inputs = loaded.make_request()[1]
+        conditioning_length = 77 + 4
+        self.assertEqual(
+            loaded.workload_details["conditioning_length"], conditioning_length
+        )
+        self.assertEqual(
+            inputs["hidden_states"].shape, (2, config.in_channels, 64 // 4, 96 // 4)
+        )
+        self.assertEqual(
+            inputs["encoder_hidden_states"].shape,
+            (2, conditioning_length, config.joint_attention_dim),
+        )
+        self.assertEqual(
+            inputs["pooled_projections"].shape, (2, config.pooled_projection_dim)
+        )
+        scheduler = FlowMatchEulerDiscreteScheduler(shift=2.0)
+        scheduler.set_timesteps(3)
+        self.assertEqual(
+            loaded.workload_details["timesteps"], scheduler.timesteps.tolist()
+        )
+        classes, count = benchmark._matched_region_classes(
+            loaded.component, recipe.model.repeated_block_classes
+        )
+        self.assertEqual([cls.__name__ for cls in classes], ["JointTransformerBlock"])
+        self.assertEqual(count, config.num_layers)
+
+    @skipIfNoDiffusers
+    def test_denoise_step_fresh_workers_check_outputs(self):
+        scenarios = [_denoise_scenario(mode) for mode in benchmark.MODES]
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "result.csv"
+            results, errors = benchmark._run_scenarios(scenarios, output, True)
+        self.assertEqual(errors, [])
+        self.assertEqual(len({result["pid"] for result in results}), len(scenarios))
+        for result in results:
+            graphs = result["compiler_diagnostics"]["unique_graphs"]
+            self.assertEqual(graphs == 0, result["mode"] == "eager")
+            self.assertEqual(result["workload"]["name"], "denoise_step")
+            self.assertEqual(result["workload_details"]["effective_batch_size"], 2)
+            check = result["output_check"]
+            self.assertTrue(
+                check == "reference"
+                if result["mode"] == "eager"
+                else check.startswith("passed"),
+                check,
+            )
+
+
+def _compiled_denoise_result(device, mode, dtype, cudagraphs):
+    # 128x128 gives 2048 output elements, so float32 gets the strict 2x bound.
+    scenarios = [
+        _denoise_scenario(
+            scenario_mode,
+            device=device,
+            dtype=dtype,
+            backend="inductor",
+            cudagraphs=cudagraphs and scenario_mode != "eager",
+            height=128,
+            width=128,
+        )
+        for scenario_mode in ("eager", mode)
+    ]
+    with tempfile.TemporaryDirectory() as directory:
+        paths = {
+            scenario.scenario_id: Path(directory) / f"{scenario.mode}.pt"
+            for scenario in scenarios
+        }
+        results = [
+            benchmark.execute_scenario(scenario, str(paths[scenario.scenario_id]))
+            for scenario in scenarios
+        ]
+        benchmark._compare_outputs(scenarios, results, paths)
+    return results[1]
+
 
 def _toy_inductor_scenario(mode, device, cudagraphs):
     recipe = benchmark.RECIPES["pipeline"]["toy"]
@@ -1752,6 +2129,16 @@ class TestDiffusionCompileBenchmarkDeviceType(InductorTestCase):
         options = result["effective_compile_options"]["options"]
         self.assertTrue(options["triton.cudagraphs"])
 
+    @skipIfNoDiffusers
+    @parametrize("mode", ("full", "regional", "hierarchical"))
+    def test_cudagraph_prediction_matches_eager(self, device, mode):
+        compiled = _compiled_denoise_result(device, mode, "float32", cudagraphs=True)
+        self.assertEqual(compiled["status"], "success", compiled.get("error"))
+        check = compiled["output_check"]
+        self.assertTrue(check.startswith("passed"), check)
+        diagnostics = compiled["compiler_diagnostics"]
+        self.assertGreater(diagnostics["cudagraph_capture_count"], 0)
+
 
 @skipIfWrappedByDynamo
 class TestInductorScenarioDeviceType(InductorTestCase):
@@ -1784,11 +2171,31 @@ class TestInductorScenarioDeviceType(InductorTestCase):
         self.assertTrue(cache_entries, "the worker did not use its private cache")
 
 
+@skipIfNoDiffusers
+@skipIfWrappedByDynamo
+class TestDenoiseStepNumericsDeviceType(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipCPUIf(not HAS_CPU, "requires a C++ compiler")
+    @skipGPUIf(not HAS_GPU, "requires a GPU with Triton")
+    @dtypes(torch.float32, torch.bfloat16)
+    @parametrize("mode", ("full", "regional", "hierarchical"))
+    def test_compiled_prediction_matches_eager(self, device, mode, dtype):
+        dtype_name = str(dtype).removeprefix("torch.")
+        compiled = _compiled_denoise_result(device, mode, dtype_name, cudagraphs=False)
+        self.assertEqual(compiled["status"], "success", compiled.get("error"))
+        check = compiled["output_check"]
+        self.assertTrue(check.startswith("passed"), check)
+
+
 instantiate_parametrized_tests(TestDiffusionCompileBenchmark)
 instantiate_device_type_tests(
     TestDiffusionCompileBenchmarkDeviceType, globals(), only_for="cuda"
 )
 instantiate_device_type_tests(TestInductorScenarioDeviceType, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestDenoiseStepNumericsDeviceType, globals(), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
