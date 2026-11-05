@@ -5505,6 +5505,11 @@ class TestFakeTensorViewCopy(TestCase):
                     _ = yf.view(-1)
 
 
+# Dynamo would trace these tests with the C++ fakes they make as graph inputs,
+# which it cannot fakify yet
+_CPP_FAKE_DYNAMO_SKIP = "Dynamo does not support C++ fakes as inputs yet"
+
+
 class TestCppFakeTensorModeBindings(TestCase):
     def _make_mode(self, shape_env=None):
         return _make_cpp_mode(shape_env)
@@ -5596,6 +5601,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             for x, y in zip(shared, sparse_parts(sparse_meta)):
                 self.assertEqual(x.untyped_storage()._cdata, y.untyped_storage()._cdata)
 
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_from_meta_and_device_rejects(self):
         mode, _ = self._make_mode()
         meta_device, cpu = torch.device("meta"), torch.device("cpu")
@@ -5640,6 +5646,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             torch._C._from_meta_and_device(inference, torch.device("cpu"), mode)
         inference.data_ptr()
 
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_maybe_get_fake_mode(self):
         mode, wrapper = self._make_mode()
         other_mode, other_wrapper = self._make_mode()
