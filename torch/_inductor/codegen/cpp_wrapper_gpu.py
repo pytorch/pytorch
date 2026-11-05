@@ -6,8 +6,7 @@ import os
 import re
 import sys
 from itertools import count, zip_longest
-from typing import Any, cast, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, cast, Self, TYPE_CHECKING
 
 import sympy
 
