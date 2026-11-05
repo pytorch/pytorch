@@ -711,17 +711,6 @@ static PyObject* THPStorage_newSharedXpu(
       THPUtils_unpackLong(_device), "c10::DeviceIndex");
   at::DeviceGuard device_guard(at::Device(at::kXPU, device));
 
-  struct IpcDeleterContext {
-    std::string ref_counter_handle;
-    ptrdiff_t ref_counter_offset{};
-    c10::DeviceIndex device{-1};
-    torch::XpuIPCReceivedData received_data;
-    // An imported IPC event must outlive the waits enqueued on it; destroying
-    // it early crashes later kernel submissions on the waiting queue.
-    std::optional<c10::xpu::XPUEvent> event;
-  };
-  auto ctx = std::make_unique<IpcDeleterContext>();
-
   if (PyObject_IsTrue(_event_sync_required)) {
 #if SYCL_COMPILER_VERSION >= 20260200
     // Ensure that producer prepared all tensor's data
@@ -729,8 +718,8 @@ static PyObject* THPStorage_newSharedXpu(
         reinterpret_cast<const std::byte*>(PyBytes_AS_STRING(_event_handle));
     sycl::ext::oneapi::experimental::ipc::handle_data_t event_handle(
         data, data + PyBytes_GET_SIZE(_event_handle));
-    ctx->event.emplace(device, event_handle);
-    ctx->event->block(c10::xpu::getCurrentXPUStream(device));
+    c10::xpu::XPUEvent event(device, event_handle);
+    event.block(c10::xpu::getCurrentXPUStream(device));
 #else
     TORCH_CHECK(false, "XPU IPC events require SYCL compiler 2026.2 or later.");
 #endif
@@ -745,6 +734,14 @@ static PyObject* THPStorage_newSharedXpu(
   // devPtr = basePtr + storage_offset
   void* devPtr = static_cast<char*>(basePtr.get()) + storage_offset_bytes;
 
+  struct IpcDeleterContext {
+    std::string ref_counter_handle;
+    ptrdiff_t ref_counter_offset{};
+    c10::DeviceIndex device{-1};
+    torch::XpuIPCReceivedData received_data;
+  };
+
+  auto ctx = std::make_unique<IpcDeleterContext>();
   ctx->ref_counter_handle = PyBytes_AS_STRING(_ref_counter);
   ctx->ref_counter_offset =
       static_cast<ptrdiff_t>(THPUtils_unpackLong(_ref_counter_offset));
