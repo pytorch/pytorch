@@ -2287,6 +2287,8 @@ class CommonTemplate:
         self.common(fn, ())
 
     def test_index_propagation_floordiv(self):
+        if config.avoid_modular_indexing:
+            raise unittest.SkipTest("index arithmetic stays behind an indirect variable")
         def repeat_interleave(x, n):
             # e.g. x=[1, 2, 3], n=2 => returns [1, 1, 2, 2, 3, 3]
             i = torch.arange(x.shape[0] * n, device=x.device)
@@ -2305,6 +2307,8 @@ class CommonTemplate:
         self.assertEqual(actual, repeat_interleave(x, 3))
 
     def test_index_propagation_remainder(self):
+        if config.avoid_modular_indexing:
+            raise unittest.SkipTest("index arithmetic stays behind an indirect variable")
         def repeat(x, n):
             # e.g. x=[1, 2, 3], n=2 => returns [1, 2, 3, 1, 2, 3]
             i = torch.arange(x.shape[0] * n, device=x.device)
@@ -2324,6 +2328,8 @@ class CommonTemplate:
         self.assertEqual(actual, repeat(x, 3))
 
     def test_index_propagation_abs(self):
+        if config.avoid_modular_indexing:
+            raise unittest.SkipTest("index arithmetic stays behind an indirect variable")
         def reflection_pad_left(x, n):
             # e.g. x=[1, 2, 3], n=2 => returns [3, 2, 1, 2, 3]
             i = torch.arange(x.shape[0] + n, device=x.device)

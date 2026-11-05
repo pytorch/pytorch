@@ -6,6 +6,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import math
 import operator
 import textwrap
 import traceback
@@ -131,6 +132,7 @@ from .utils import (
     ir_dataclass,
     is_dynamic,
     is_gpu,
+    is_linear_indexing,
     sympy_dot,
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
@@ -2220,6 +2222,95 @@ class Reduction(Loops):
 
         return wrapper_fn
 
+    @staticmethod
+    def _split_reduction_ranges(
+        reduction_ranges: Sequence[_IntLike], split: _IntLike
+    ) -> tuple[list[Integer], list[Integer]] | None:
+        """
+        Split reduction_ranges into (outer, inner) ranges at a dim boundary,
+        dividing the boundary dim into chunks, so that both layers of the split
+        reduction index the input linearly instead of through a flattened
+        reduction index. Picks the outer numel closest to split, preferring an
+        even division (an uneven one needs a mask). Returns None for symbolic
+        ranges.
+        """
+        if not all(isinstance(r, (int, Integer)) for r in [*reduction_ranges, split]):
+            return None
+        sizes = [int(r) for r in reduction_ranges]
+        best: tuple[float, list[int], list[int]] | None = None
+        prefix = 1
+        for k, size in enumerate(sizes):
+            uneven = min(max(round(int(split) / prefix), 1), size)
+            for candidate in {*sympy.divisors(size), uneven}:
+                # chunks of this size cover the dim with no empty chunk; the
+                # last one is partial (masked) unless d * chunk == size
+                chunk = -(-size // candidate)
+                d = -(-size // chunk)
+                inner = [chunk, *sizes[k + 1 :]]
+                # Reduction.create unrolls tiny reductions into a pointwise,
+                # which would no longer be a split reduction.
+                if (
+                    prefix * d == 1
+                    or math.prod(inner) < config.unroll_reductions_threshold
+                ):
+                    continue
+                uneven_penalty = 0.5 if d * chunk != size else 0.0
+                score = abs(math.log(prefix * d / int(split))) + uneven_penalty
+                if best is None or score < best[0]:
+                    best = (score, [*sizes[:k], d], inner)
+            prefix *= size
+        if best is None:
+            return None
+        return [Integer(s) for s in best[1]], [Integer(s) for s in best[2]]
+
+    @staticmethod
+    def _multilayer_wrap_loader_aligned(
+        loader: Callable[..., OpsValue],
+        num_ranges: int,
+        inner_leading: Integer,
+        chunks: Integer,
+        boundary_size: _IntLike,
+        default: _NumLike | Sequence[_NumLike],
+    ) -> Callable[..., OpsValue]:
+        """
+        Index the original loader from the dim-aligned split: the outer ranges
+        are a prefix of the reduction dims plus a chunk index (chunks of them)
+        of the boundary dim, whose chunks are the leading inner range. When
+        the chunks overshoot the boundary dim the tail is masked, like the
+        flat split masks its tail.
+        """
+        need_mask = not V.graph.sizevars.statically_known_true(
+            sympy.Eq(chunks * inner_leading, boundary_size)
+        )
+
+        def wrapper_fn(
+            index: Sequence[Symbol], reduction_index: Sequence[Symbol]
+        ) -> OpsValue:
+            outer = index[num_ranges:]
+            boundary = inner_leading * outer[-1] + reduction_index[0]
+
+            def body() -> OpsValue:
+                return loader(
+                    index[:num_ranges], [*outer[:-1], boundary, *reduction_index[1:]]
+                )
+
+            if need_mask:
+                index_dtype = dtype_from_size(boundary_size)
+                mask = ops.lt(
+                    ops.index_expr(boundary, index_dtype),
+                    ops.index_expr(boundary_size, index_dtype),
+                )
+                return ops.masked(mask, body, default)
+            return body()
+
+        return wrapper_fn
+
+    @staticmethod
+    def _aligned_boundary_size(
+        reduction_ranges: Sequence[_IntLike], outer_ranges: Sequence[Integer]
+    ) -> _IntLike:
+        return reduction_ranges[len(outer_ranges) - 1]
+
     @classmethod
     def _multilayer_wrap_loader_existing_ranges(
         cls,
@@ -2340,6 +2431,32 @@ class Reduction(Loops):
         Break a large reduction up into multiple smaller reductions
         recursively
         """
+        if config.avoid_modular_indexing and not strict_reduction:
+            aligned = cls._split_reduction_ranges(reduction_ranges, split)
+            if aligned is not None:
+                outer_ranges, inner_ranges = aligned
+                return cls.create_multilayer_helper(
+                    device,
+                    dst_dtype,
+                    src_dtype,
+                    cls._multilayer_wrap_loader_aligned(
+                        inner_fn,
+                        len(ranges),
+                        inner_ranges[0],
+                        outer_ranges[-1],
+                        cls._aligned_boundary_size(reduction_ranges, outer_ranges),
+                        cls.default_value(reduction_type, dst_dtype),
+                    ),
+                    ranges,
+                    reduction_ranges,
+                    [*ranges, *outer_ranges],
+                    inner_ranges,
+                    reduction_type,
+                    sympy_product(outer_ranges),
+                    reduction_hint,
+                    strict_reduction,
+                )
+
         # TODO(jansel): realize the reduction so we can do dynamic indexing
         reduction_numel = sympy_product(reduction_ranges)
         block_size = FloorDiv(reduction_numel + (split - 1), split)
@@ -2710,40 +2827,80 @@ class OnlineSoftmaxReduction(MultiOutputReduction):
         input_node: IRNode | None = None,
     ) -> Sequence[TensorBox]:
         reduction_numel = sympy_product(reduction_ranges)
-        block_size = FloorDiv(reduction_numel + (split - 1), split)
-        dense_index = cls.check_for_split_dense_dim_reindexing(
-            reduction_numel, input_node
+        aligned = (
+            cls._split_reduction_ranges(reduction_ranges, split)
+            if config.avoid_modular_indexing
+            else None
         )
-        reindex = View.dynamic_reshape_indexer(
-            reduction_ranges, [reduction_numel], dense_index
-        )
-        need_mask = not V.graph.sizevars.statically_known_true(
-            sympy.Eq(Mod(reduction_numel, split), 0)
-        )
+        if aligned is not None:
+            outer_ranges, inner_ranges = aligned
+            boundary_size = cls._aligned_boundary_size(reduction_ranges, outer_ranges)
+            aligned_fn = cls._multilayer_wrap_loader_aligned(
+                inner_fn,
+                len(ranges),
+                inner_ranges[0],
+                outer_ranges[-1],
+                boundary_size,
+                float("-inf"),
+            )
+            aligned_weight = cls._multilayer_wrap_loader_aligned(
+                lambda index, reduction_index: ops.constant(1, src_dtype),
+                len(ranges),
+                inner_ranges[0],
+                outer_ranges[-1],
+                boundary_size,
+                0,
+            )
 
-        def wrapper_fn(
-            index: Sequence[Symbol], reduction_index: Sequence[Symbol]
-        ) -> tuple[OpsValue, OpsValue]:
-            (reduction_index,) = reduction_index
-            *new_index, reduction_block = index
-            indices = block_size * reduction_block + reduction_index
-
-            def body() -> OpsValue:
-                return inner_fn(new_index, reindex([indices]))
-
-            one = ops.constant(1, src_dtype)
-            if need_mask:
-                index_dtype = dtype_from_size(reduction_numel)
-                mask = ops.lt(
-                    ops.index_expr(indices, index_dtype),
-                    ops.index_expr(reduction_numel, index_dtype),
-                )
+            def wrapper_fn(
+                index: Sequence[Symbol], reduction_index: Sequence[Symbol]
+            ) -> tuple[OpsValue, OpsValue]:
                 return (
-                    ops.masked(mask, body, float("-inf")),
-                    ops.where(mask, one, ops.constant(0, src_dtype)),
+                    aligned_fn(index, reduction_index),
+                    aligned_weight(index, reduction_index),
                 )
-            else:
-                return body(), one
+
+            new_ranges: list[Expr] = [*ranges, *outer_ranges]
+            new_reduction_ranges: list[Expr] = list(inner_ranges)
+            split = sympy_product(outer_ranges)
+        else:
+            block_size = FloorDiv(reduction_numel + (split - 1), split)
+            dense_index = cls.check_for_split_dense_dim_reindexing(
+                reduction_numel, input_node
+            )
+            reindex = View.dynamic_reshape_indexer(
+                reduction_ranges, [reduction_numel], dense_index
+            )
+            need_mask = not V.graph.sizevars.statically_known_true(
+                sympy.Eq(Mod(reduction_numel, split), 0)
+            )
+
+            def wrapper_fn(
+                index: Sequence[Symbol], reduction_index: Sequence[Symbol]
+            ) -> tuple[OpsValue, OpsValue]:
+                (reduction_index,) = reduction_index
+                *new_index, reduction_block = index
+                indices = block_size * reduction_block + reduction_index
+
+                def body() -> OpsValue:
+                    return inner_fn(new_index, reindex([indices]))
+
+                one = ops.constant(1, src_dtype)
+                if need_mask:
+                    index_dtype = dtype_from_size(reduction_numel)
+                    mask = ops.lt(
+                        ops.index_expr(indices, index_dtype),
+                        ops.index_expr(reduction_numel, index_dtype),
+                    )
+                    return (
+                        ops.masked(mask, body, float("-inf")),
+                        ops.where(mask, one, ops.constant(0, src_dtype)),
+                    )
+                else:
+                    return body(), one
+
+            new_ranges = [*ranges, split]
+            new_reduction_ranges = [block_size]
 
         intermediate_dtype = (
             dst_dtype
@@ -2755,8 +2912,8 @@ class OnlineSoftmaxReduction(MultiOutputReduction):
             intermediate_dtype,
             src_dtype,
             wrapper_fn,
-            [*ranges, split],
-            [block_size],
+            new_ranges,
+            new_reduction_ranges,
             num_output,
             reduction_hint,
         )
@@ -2783,13 +2940,15 @@ class OnlineSoftmaxReduction(MultiOutputReduction):
             intermediate_dtype,
             intermediate_fn,
             ranges,
-            [split],
+            new_ranges[len(ranges) :],
             num_output,
             reduction_hint,
         )
 
 
 class WelfordReduction(MultiOutputReduction):
+    """Reduction producing (mean, m2, weight) with Welford's algorithm."""
+
     @classmethod
     def create(  # type: ignore[override]
         cls,
@@ -2941,9 +3100,22 @@ class WelfordReduction(MultiOutputReduction):
         recursively
         """
         reduction_numel = sympy_product(reduction_ranges)
-        need_mask = not V.graph.sizevars.statically_known_true(
-            sympy.Eq(Mod(reduction_numel, split), 0)
+        aligned = (
+            cls._split_reduction_ranges(reduction_ranges, split)
+            if config.avoid_modular_indexing
+            else None
         )
+        if aligned is None:
+            need_mask = not V.graph.sizevars.statically_known_true(
+                sympy.Eq(Mod(reduction_numel, split), 0)
+            )
+        else:
+            need_mask = not V.graph.sizevars.statically_known_true(
+                sympy.Eq(
+                    aligned[0][-1] * aligned[1][0],
+                    cls._aligned_boundary_size(reduction_ranges, aligned[0]),
+                )
+            )
 
         if need_mask and reduction_type != "welford_combine":
             # If we need mask, then "welford_reduce" doesn't work because
@@ -2969,11 +3141,27 @@ class WelfordReduction(MultiOutputReduction):
                 reduction_hint=reduction_hint,
             )
 
-        block_size = FloorDiv(reduction_numel + (split - 1), split)
-        intermediates = WelfordReduction.create(
-            device,
-            dtype,
-            tuple(
+        if aligned is not None:
+            outer_ranges, new_reduction_ranges = aligned
+            new_ranges: list[Expr] = [*ranges, *outer_ranges]
+            split = sympy_product(outer_ranges)
+            boundary_size = cls._aligned_boundary_size(reduction_ranges, outer_ranges)
+            loaders = tuple(
+                cls._multilayer_wrap_loader_aligned(
+                    loader,
+                    len(ranges),
+                    new_reduction_ranges[0],
+                    outer_ranges[-1],
+                    boundary_size,
+                    0,
+                )
+                for loader in inner_fns
+            )
+        else:
+            block_size = FloorDiv(reduction_numel + (split - 1), split)
+            new_ranges = [*ranges, split]
+            new_reduction_ranges = [block_size]
+            loaders = tuple(
                 cls._multilayer_wrap_loader(
                     loader,
                     reduction_ranges,
@@ -2983,9 +3171,13 @@ class WelfordReduction(MultiOutputReduction):
                     default=0,
                 )
                 for loader in inner_fns
-            ),
-            [*ranges, split],
-            [block_size],
+            )
+        intermediates = WelfordReduction.create(
+            device,
+            dtype,
+            loaders,
+            new_ranges,
+            new_reduction_ranges,
             reduction_type,
             reduction_hint,
         )
@@ -3013,7 +3205,7 @@ class WelfordReduction(MultiOutputReduction):
                 for i in intermediates
             ),
             ranges,
-            [split],
+            new_ranges[len(ranges) :],
             # welford_reduce turns one input into three outputs, which are combined with welford_combine
             "welford_combine",
             reduction_hint,
@@ -3983,15 +4175,24 @@ class View(GenericView):
             nonlocal old_size, new_size
             try:
                 reindex = cls.dynamic_reshape_indexer(old_size, new_size)
-                return cls(data=x, size=list(new_size), reindex=reindex)
             except GuardOnDataDependentSymNode:
                 # dynamic_reshape_indexer cannot handle unbacked SymInts
                 # because guard_or_false can't resolve size comparisons.
                 # https://github.com/pytorch/pytorch/issues/145561
-                x = ExternKernel.require_contiguous(x)
-                return create_reinterpret_view(
-                    x, new_size, FlexibleLayout.contiguous_strides(new_size)
-                )
+                reindex = None
+            if reindex is not None and (
+                not config.avoid_modular_indexing
+                or all(map(is_linear_indexing, reindex(cls._view_symbols(new_size))))
+            ):
+                return cls(data=x, size=list(new_size), reindex=reindex)
+            # Merging dims needs ModularIndexing, and consumers may offset the
+            # index (cat, pad, slice), so even a merge that simplifies over the
+            # view's own range is not safe to inline. Make the input contiguous
+            # (a copy unless its layout is still flexible) and reinterpret it.
+            x = ExternKernel.require_contiguous(x)
+            return create_reinterpret_view(
+                x, new_size, FlexibleLayout.contiguous_strides(new_size)
+            )
 
         if 0 in new_size:
 
@@ -4071,6 +4272,12 @@ class View(GenericView):
         V.graph.sizevars.check_equals(sympy_product(old_size), sympy_product(new_size))
         return old_size, new_size
 
+    @staticmethod
+    def _view_symbols(new_size: Sequence[_IntLike]) -> list[sympy.Symbol]:
+        return [
+            sympy_index_symbol_with_prefix(SymT.VIEW, i) for i in range(len(new_size))
+        ]
+
     @classmethod
     def dynamic_reshape_indexer(
         cls,
@@ -4146,9 +4353,7 @@ class View(GenericView):
 
         # TODO: These symbols may not escape, if they don't assert so and
         # treat them as temporary
-        vars = [
-            sympy_index_symbol_with_prefix(SymT.VIEW, i) for i in range(len(new_size))
-        ]
+        vars = View._view_symbols(new_size)
 
         stack_new = list(zip(vars, new_size))
         stack_old = list(old_size)

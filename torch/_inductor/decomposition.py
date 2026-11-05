@@ -4,7 +4,7 @@ import logging
 import math
 import operator
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, cast, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
@@ -31,13 +31,17 @@ from torch._environment import is_fbcode
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
+    DimsType,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     make_contiguous_strides_for,
     suggest_memory_format,
     type_to_dtype,
 )
-from torch._refs import native_layer_norm as decomp_native_layer_norm
+from torch._refs import (
+    native_layer_norm as decomp_native_layer_norm,
+    roll as decomp_roll,
+)
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     statically_known_true,
@@ -150,6 +154,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten.lerp,
     aten.lerp_,
     aten.special_log_ndtr,  # inductor re-registers with copysign wrapper (#187336)
+    aten.roll.default,  # inductor re-registers to honor avoid_modular_indexing
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -177,6 +182,40 @@ def adaptive_max_pool3d(input, output_size):
         indices, make_contiguous_strides_for(indices.shape)
     )
     return values, indices
+
+
+@register_decomposition([aten.roll.default])
+def roll(a: torch.Tensor, shifts: DimsType, dims: DimsType = ()) -> torch.Tensor:
+    if not config.avoid_modular_indexing:
+        return decomp_roll(a, shifts, dims)
+    # The reference decomposition gathers with (iota + shift) % size, which
+    # becomes ModularIndexing. Rolling via two slices keeps the loads linear.
+    if not isinstance(shifts, Sequence):
+        shifts = (shifts,)
+    if not isinstance(dims, Sequence):
+        dims = (dims,)
+    if a.numel() == 0:
+        return a.clone()
+    if len(dims) == 0:
+        if len(shifts) != 1:
+            raise RuntimeError("`shifts` required")
+        return torch.roll(a.flatten(), shifts, 0).view(a.shape)
+    if len(shifts) != len(dims):
+        raise RuntimeError(
+            f"shifts and dimensions must align. shifts: {len(shifts)}, dims: {len(dims)}"
+        )
+    result = a
+    for shift, dim in zip(shifts, utils.canonicalize_dims(a.ndim, dims)):
+        size = result.shape[dim]
+        start = (size - shift) % size
+        if start == 0:
+            continue
+        result = torch.cat(
+            [result.narrow(dim, start, size - start), result.narrow(dim, 0, start)],
+            dim,
+        )
+    # roll always returns a fresh tensor, even for a no-op shift
+    return result.clone() if result is a else result
 
 
 @register_decomposition([aten.special_log_ndtr])
