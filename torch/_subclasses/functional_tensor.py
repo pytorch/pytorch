@@ -6,8 +6,7 @@ import warnings
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
-from typing import Any, cast, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, cast, Self, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
