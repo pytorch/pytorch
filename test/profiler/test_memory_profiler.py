@@ -1120,8 +1120,8 @@ class TestMemoryProfilerE2E(TestCase):
 
             -- Backward ---------------------------------------------------------------------------------------------
             aten::ones_like                          13 (ACTIVATION)                               -> 14 (ACTIVATION)
-            aten::expand                             14 (ACTIVATION)                               -> 14 (ACTIVATION)
             aten::div.Scalar                         14 (ACTIVATION)                               -> 15 (AUTOGRAD_DETAIL)
+            aten::expand                             15 (AUTOGRAD_DETAIL)                          -> 15 (AUTOGRAD_DETAIL)
             aten::expand                             15 (AUTOGRAD_DETAIL)                          -> 15 (AUTOGRAD_DETAIL)
             aten::pow.Tensor_Scalar                  10 (ACTIVATION)                               -> 16 (TEMPORARY)
             aten::mul.Scalar                         16 (TEMPORARY)                                -> 17 (TEMPORARY)
