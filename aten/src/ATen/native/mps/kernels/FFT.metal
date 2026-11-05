@@ -4,7 +4,8 @@
 using namespace metal;
 using namespace c10::metal;
 
-// Stockham FFT with four-step twiddles and chirps. F holds kFFT* variant bits.
+// Stockham FFT with fused real packing, four-step twiddles and chirps. F holds
+// kFFT* variant bits.
 
 inline float2 mul_i(float2 a) {
   return float2(-a.y, a.x);
@@ -166,6 +167,12 @@ inline float2 wget(Bufs<I, O> b, uint m) {
 template <class I, class O, uint F, bool C>
 inline float2 load_pt(Bufs<I, O> b, Params p, uint e) {
   const int s = C ? 1 : p.in_stride;
+  constexpr bool packed = F & kFFTPackedLoads;
+
+  if (!is_complex_v<I> && packed) {
+    const float2 x = cast_to<float2>(b.in[int(2 * e) * s]);
+    return float2(x.x, cast_to<float2>(b.in[int(2 * e + 1) * s]).x);
+  }
 
   if (!(F & kFFTExtendedLoads)) {
     return cast_to<float2>(b.in[int(e) * s]);
@@ -191,6 +198,38 @@ inline void store_pt(Bufs<I, O> b, Params p, uint k, float2 v, float2 w) {
   if ((F & kFFTGlobalStage) || kf < p.n_out) {
     b.out[int(k) * s] = cast_to<O>(extended && b.cs ? mul(v, b.cs[kf]) : v);
   }
+
+  if (extended && p.mirror_out && b.i0 && b.i0 != p.out_k_mul / 2 &&
+      p.n_sig - kf < p.n_out) {
+    b.out[int(p.n_sig - kf - b.i0) * p.out_strides[p.i0_dim1]] =
+        cast_to<O>(conj(v));
+  }
+}
+
+// Unpack z = (Z[k], Z[n-k]): X[k] = E + T, X[n-k] = conj(E - T), w = W_2n^k
+template <class I, class O, uint F, uint N, bool C>
+inline void unpack(Bufs<I, O> b, Params p, uint k, float2 w, float4 z) {
+  const uint n = N ? N : p.n, os = C ? 1 : p.out_stride;
+  const float2 a = z.xy, c = z.zw;
+  const bool two = n - k != k;
+  const float2 e = 0.5f * (a + conj(c)), t = mul(w, -0.5f * mul_i(a - conj(c)));
+  float2 x = (e + t) * p.scale, y = conj(e - t) * p.scale;
+
+  constexpr bool four_step = F & kFFTFourStepTwiddles;
+  x = four_step ? mul(x, twid(b.tt, k * b.i0)) : x;
+  y = four_step ? mul(y, twid(b.tt, (n - k) * b.i0)) : y;
+
+  b.out[int(k) * os] = cast_to<O>(x);
+  if (two && n - k < p.n_out) {
+    b.out[int(n - k) * os] = cast_to<O>(y);
+  }
+
+  if (p.n_out > n + 1 && k) {
+    b.out[int(2 * n - k) * os] = cast_to<O>(conj(x));
+    if (two) {
+      b.out[int(n + k) * os] = cast_to<O>(conj(y));
+    }
+  }
 }
 
 template <bool P2, bool G>
@@ -210,19 +249,35 @@ inline uint mod_ns(uint j, uint ns, float inv_ns) {
 }
 
 // The radix-R butterflies of stage s (Stockham stride Ns), `butterflies` per
-// thread; smem exchanges stages. global: one global-memory stage.
+// thread; smem exchanges stages and holds the final real unpack. global: one
+// global-memory stage.
 template <uint R, bool P2, class I, class O, uint F, uint N, uint NS, bool C>
 inline void stage(Bufs<I, O> b, Params p, uint s, uint lane, bool valid) {
   constexpr bool global = F & kFFTGlobalStage;
   constexpr bool inverse = F & kFFTInverse;
+  constexpr bool packed = F & kFFTPackedLoads;
   constexpr bool four_step = F & kFFTFourStepTwiddles;
+  constexpr bool unpack_real = !global && !is_complex_v<I> && packed;
   constexpr uint ept = global ? R : fft_points_per_thread(N, F);
   constexpr uint butterflies = (ept + R - 1) / R;
   const uint n = N ? N : p.n, jt = N ? N / ept : p.jt, nR = n / R,
-             Ns = NS ? NS : p.ns[s], twstep = NS ? N / NS / R : p.twstep[s],
+             Ns = NS ? NS : p.ns[s],
+             twstep = NS ? N / NS / R * (packed ? 2 : 1) : p.twstep[s],
              sh = C ? fft_contig_pad_shift(N) : p.padshift;
   const bool first = NS ? NS == 1 : s == 0,
              last = global || (NS ? NS * R == N : s + 1 == p.nstages);
+
+  if IF_CONSTEXPR (global && R == kFFTUnpackRadix) {
+    if (lane < n / 2 + 1) {
+      // The unpack twiddle W_2n^k from sincos, avoiding a large table read.
+      float wr, wi = precise::sincos(-float(lane) * (M_PI_F / float(n)), wr);
+      const float2 a = cast_to<float2>(b.in[int(lane) * p.in_stride]);
+      const float2 c =
+          cast_to<float2>(b.in[int(lane ? n - lane : 0) * p.in_stride]);
+      unpack<I, O, F, N, C>(b, p, lane, float2(wr, wi), float4(a, c));
+    }
+    return;
+  }
 
   // Pow2 plans keep nR, Ns multiples of 16: padded smem slots are affine in r
   const uint nRv = valid ? nR : 0;
@@ -259,11 +314,11 @@ inline void stage(Bufs<I, O> b, Params p, uint s, uint lane, bool valid) {
           v[m][r] = mul(x, inverse ? conj(w) : w);
         }
       }
-      bfly<R, 1>(v[m], inverse, b.tw, nR);
+      bfly<R, 1>(v[m], inverse, b.tw, nR * (packed ? 2 : 1));
     }
   }
 
-  if (last && (C || global || !p.via_smem)) {
+  if (last && !unpack_real && (C || global || !p.via_smem)) {
     // Four-step twiddles W^(k i0) of the outputs k = j + r nR step by W^(nR i0)
     const float2 ws = four_step ? twid(b.tt, nR * b.i0) : 0.0f;
     for (uint m = 0; m < butterflies; m++) {
@@ -367,7 +422,9 @@ template <class I, class O, uint MASK, uint F, uint N = 0, bool C = false>
 #undef STAGE
     }
 
-  if (C || global || !p.via_smem) {
+  constexpr bool unpack_real =
+      !global && !is_complex_v<I> && (F & kFFTPackedLoads);
+  if (!unpack_real && (C || global || !p.via_smem)) {
     return;
   }
 
@@ -387,9 +444,14 @@ template <class I, class O, uint MASK, uint F, uint N = 0, bool C = false>
     return;
   }
 
-  for (uint k = ls; k < n; k += jt) {
-    store_pt<I, O, F, false>(bo, p, k, rb[pad(k, sh) * es], w);
-    w = mul(w, ws);
+  for (uint k = ls; k < (unpack_real ? n / 2 + 1 : n); k += jt) {
+    const float2 a = rb[pad(k, sh) * es], c = rb[pad(k ? n - k : 0, sh) * es];
+    if (unpack_real) {
+      unpack<I, O, F, N, C>(bo, p, k, tw[k], float4(a, c));
+    } else {
+      store_pt<I, O, F, false>(bo, p, k, a, w);
+      w = mul(w, ws);
+    }
   }
 }
 
@@ -416,20 +478,24 @@ template <class I, class O, uint MASK, uint F, uint N = 0, bool C = false>
 // global stage, 64 packed real stores
 #define C_f float2
 #define C_h half2
+#define R_f float
+#define R_h half
 
-#define BASIC(_, X) _(C, C, 0, X) _(C, C, 1, X)
+#define BASIC(_, X) _(C, C, 0, X) _(C, C, 1, X) _(R, C, 2, X)
 #define EXT1(_, X) _(C, C, 4, X) _(C, C, 5, X) _(C, C, 8, X) _(C, C, 9, X)
-#define EXT2(_, X) _(C, C, 20, X) _(C, C, 21, X) _(C, C, 24, X)
-#define EXT(_, X) EXT1(_, X) EXT2(_, X)
+#define EXT2(_, X) _(C, C, 20, X) _(C, C, 21, X) _(C, C, 24, X) _(R, C, 4, X)
+#define EXT3(_, X) _(R, C, 6, X) _(R, C, 20, X) _(R, C, 24, X)
+#define EXT(_, X) EXT1(_, X) EXT2(_, X) EXT3(_, X)
+#define PLAIN(_, X) BASIC(_, X) _(R, C, 0, X)
 
 // The smallest family factoring n (radix branches cost registers); p16 serves
 // lengths 1 and 16, which never take several passes
 #define FAMILY(MASK, NAME) \
-  BASIC(INST, (MASK, NAME, 0, false)) EXT(INST_FP32, (MASK, NAME, 0, false))
+  PLAIN(INST, (MASK, NAME, 0, false)) EXT(INST_FP32, (MASK, NAME, 0, false))
 FAMILY(kFFTMaskP2, "p2_")
 FAMILY(kFFTMaskP235, "p235_")
 FAMILY(kFFTMaskP2357, "p2357_")
-BASIC(INST, (kFFTMaskP16, "p16_", 0, false))
+PLAIN(INST, (kFFTMaskP16, "p16_", 0, false))
 
 #define FIXED_X(N) ((N & (N - 1) ? kFFTMaskP235 : kFFTMaskP2), #N "_", N, false)
 #define FIXED(N) BASIC(INST, FIXED_X(N)) EXT(INST_FP32, FIXED_X(N))
@@ -439,5 +505,9 @@ FFT_FIXED_SIZES(FIXED)
 FFT_CONTIG_SIZES(CONTIG)
 
 #define GLOBAL1(_, X) _(float2, float2, 32, X) _(float2, float2, 33, X)
-#define GLOBAL(R) GLOBAL1(INSTF, ((1u << R), "g" #R "_", 0, false))
+#define GLOBAL2(_, X) _(float, float2, 34, X)
+#define GLOBAL(R)                                   \
+  GLOBAL1(INSTF, ((1u << R), "g" #R "_", 0, false)) \
+  GLOBAL2(INSTF, ((1u << R), "g" #R "_", 0, false))
 FFT_GLOBAL_RADICES(GLOBAL)
+INSTF(float2, float2, 32, ((1u << kFFTUnpackRadix), "g1_", 0, false))
