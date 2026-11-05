@@ -2833,7 +2833,31 @@ def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)
     new_shape = list(x.get_size())
     new_shape.insert(dim, sympy.S.One)
+    if _cat_is_sole_consumer(V.graph.current_node):
+        # Keep the view lazy so the cat can place the buffer instead of copying
+        # it; nothing else sees the view, so freezing it would be premature.
+        data = x.data if isinstance(x, TensorBox) else x
+        if (lazy := ir.CatUnitDimView.create(data, new_shape)) is not None:
+            return TensorBox(lazy)
     return view(x, new_shape)
+
+
+def _cat_is_sole_consumer(node) -> bool:
+    """Whether a cat is all that reads ``node``, and ``node`` all that reads its input.
+
+    An fx-level check: it bounds the views built over the buffer, not the buffer's
+    readers. A lowering that returns its input unchanged (expand to the same size)
+    leaves other readers, which is fine: they read the buffer where the cat places
+    it, as they would for a plain cat.
+    """
+    if node is None or not node.args or len(node.users) != 1:
+        return False
+    source = node.args[0]
+    return (
+        next(iter(node.users)).target is aten.cat.default
+        and isinstance(source, torch.fx.Node)
+        and len(source.users) == 1
+    )
 
 
 @register_lowering(aten.unsqueeze_, type_promotion_kind=None)

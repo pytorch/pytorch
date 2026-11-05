@@ -9689,8 +9689,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             assertGeneratedKernelCountEqual(self, 2)
 
     def test_stack_realized_input_mutated(self):
-        # Functionalization leaves the placed buffer unmutated, so the cat still
-        # aliases it; the mutation lands on a copy.
+        # Functionalization gives the mutated input a second user, so it fails
+        # the single-user gate and is copied; only the other input is placed.
         def fn(x):
             a, b = (sum(x[:, j] * (i + j) for j in range(8)) for i in (1, 2))
             out = torch.stack([a, b], -1)

@@ -3998,9 +3998,6 @@ class View(GenericView):
 
             return cls(data=x, size=list(new_size), reindex=fake_reindex)
 
-        elif (view := StackUnitDimView.try_create(x, old_size, new_size)) is not None:
-            return view
-
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
         elif is_contiguous:
             # Input is contiguous, output can use contiguous strides
@@ -4230,39 +4227,27 @@ class View(GenericView):
 
 
 @ir_dataclass
-class StackUnitDimView(GenericView):
+class CatUnitDimView(GenericView):
     """
-    The size-1 unsqueeze of a stack input, when the cat is the only consumer of
-    the view. A ReinterpretView would freeze the buffer so ConcatKernel could not
-    place it; since only the cat sees this view, it stays lazy (an index remap)
-    and the cat places the buffer in its output slot, as a plain cat would.
+    A size-1 reshape of a buffer whose only consumer is a cat.
+
+    A ReinterpretView would freeze the buffer, so ConcatKernel could no longer
+    place it and would copy it instead. This stays lazy -- an index remap -- so
+    the cat places the buffer in its output slot, as a plain cat of the buffer
+    would. Only valid when nothing else can observe the view, which the caller
+    establishes; see ``lowering.unsqueeze``.
     """
 
     @classmethod
-    def try_create(
-        cls, x: IRNode, old_size: Sequence[Expr], new_size: Sequence[Expr]
-    ) -> StackUnitDimView | None:
+    def create(cls, x: IRNode, new_size: Sequence[Expr]) -> CatUnitDimView | None:
+        """The view, or None if ``x``'s layout is settled or the dims disagree."""
         if not (
             isinstance(x, StorageBox)
             and isinstance(x.data, ComputedBuffer)
             and isinstance(x.data.layout, FlexibleLayout)
         ):
             return None
-        node = V.graph.current_node
-        source = node.args[0] if node is not None and node.args else None
-        # An fx-level check: it bounds the views built over this buffer, not the
-        # buffer's readers. A lowering that returns its input unchanged (expand to
-        # the same size) leaves other readers, which is fine: they read the buffer
-        # where the cat places it, as they would for a plain cat.
-        if not (
-            node is not None
-            and node.target is torch.ops.aten.unsqueeze.default
-            and len(node.users) == 1
-            and next(iter(node.users)).target is torch.ops.aten.cat.default
-            and isinstance(source, torch.fx.Node)
-            and len(source.users) == 1
-        ):
-            return None
+        old_size = x.get_size()
         sizevars = V.graph.sizevars
         is_one = partial(sizevars.statically_known_equals, right=1)
         old_dims = [i for i, s in enumerate(old_size) if not is_one(s)]
@@ -7308,7 +7293,7 @@ class ConcatKernel(NopKernel):
             # unwrap a TensorBox
             return cls.realize_into(src.data, dst, allow_alias)
 
-        if isinstance(src, StackUnitDimView) and allow_alias:
+        if isinstance(src, CatUnitDimView) and allow_alias:
             # place the buffer itself, in the slot with the same size-1 change
             slot = View.create(dst, src.data.get_size())
             return cls.realize_into(src.data, slot, allow_alias)
