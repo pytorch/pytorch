@@ -317,7 +317,7 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from typing_extensions import Self
+    from typing import Self
 
     from torch._dynamo.precompile_package import PrecompileSession
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
