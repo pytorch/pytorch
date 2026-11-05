@@ -374,6 +374,34 @@ CUDAStream getStreamFromExternal(
   return CUDAStreamForId(device_index, reinterpret_cast<int64_t>(ext_stream));
 }
 
+namespace detail {
+bool isStreamFromPool(cudaStream_t stream, DeviceIndex device_index) {
+  if (stream == nullptr || device_index < 0 ||
+      device_index >= C10_COMPILE_TIME_MAX_GPUS) {
+    return false;
+  }
+#if !defined(USE_ROCM)
+  if (!device_flags[device_index].test_once()) {
+    return false;
+  }
+#endif
+  for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
+    for (const auto i : c10::irange(kStreamsPerPool)) {
+#ifdef USE_ROCM
+      // See Note [HIP Lazy Streams]
+      if (!stream_flags[p][device_index][i].test_once()) {
+        continue;
+      }
+#endif
+      if (streams[p][device_index][i] == stream) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+} // namespace detail
+
 CUDAStream getDefaultCUDAStream(DeviceIndex device_index) {
   initCUDAStreamsOnce();
   if (device_index == -1) {

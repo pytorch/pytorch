@@ -11,6 +11,7 @@
 #include <mutex>
 #include <regex>
 #include <shared_mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -21,7 +22,12 @@
 #if defined(USE_ROCM)
 #include <ATen/cuda/MemPool.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Backtrace.h>
+#include <c10/util/Logging.h>
 #include <c10/util/ScopeExit.h>
+#include <c10/util/env.h>
+#include <c10/util/thread_name.h>
 #include <rocblas/rocblas.h>
 #endif
 
@@ -42,6 +48,17 @@
  * Additionally, hipblaslt cannot share a single handle across multiple streams.
  * On ROCm, getCurrentCUDABlasLtHandle returns a handle unique to each (device, stream)
  * pair, rather than just per-device like the cublas handle pool.
+ *
+ * The reason is device state each handle owns: the synchronizer flags that
+ * hipblaslt's single-kernel split-K solutions signal and spin on. Two launches
+ * on one handle that overlap on different streams can leave a workgroup
+ * spinning forever. A thread that exits returns its handles to the pool while
+ * work it queued may still be running, so the pool makes the stream that takes
+ * a handle next wait for that work. It cannot when that work was queued on a
+ * stream c10 does not own (such as a torch.cuda.ExternalStream or an
+ * AOTInductor caller's own stream) or on a capturing stream, or when recording
+ * the event fails; such a handle goes back unordered (see
+ * DeviceThreadHandlePool).
  *
  * The workspace pools are separate for ROCm. When workspace caching is enabled on CUDA,
  * TORCH_CUBLASLT_UNIFIED_WORKSPACE can be used to unify the workspace pools.
@@ -912,6 +929,17 @@ static std::shared_ptr<CuBlasLtPoolType> getCuBlasLtPool() {
   return pool;
 }
 
+static CuBlasLtPoolType::PoolWindow& getCuBlasLtPoolWindow() {
+  // Thread local PoolWindows are lazily-initialized
+  // to avoid initialization issues that caused hangs on Windows.
+  // See: https://github.com/pytorch/pytorch/pull/22405
+  // This thread local unique_ptrs will be destroyed when the thread terminates,
+  // releasing its reserved handles back to the pool.
+  thread_local std::unique_ptr<CuBlasLtPoolType::PoolWindow> myPoolWindow(
+      getCuBlasLtPool()->newPoolWindow());
+  return *myPoolWindow;
+}
+
 void ensureCublasLtHandlesAvailable(size_t n) {
   // Pre-create hipblaslt handles into the shared free list so that a later
   // reserve() from another thread can hand one out without running
@@ -1010,23 +1038,224 @@ void releaseCaptureCublasWorkspaces(c10::CaptureId_t capture_id) {
 #endif
 
 #ifdef USE_ROCM
+namespace {
+
+bool streamIsCapturing(cudaStream_t stream) {
+  cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
+  if (cudaStreamIsCapturing(stream, &status) != cudaSuccess) {
+    (void)cudaGetLastError();
+    return true;
+  }
+  return status != cudaStreamCaptureStatusNone;
+}
+
+enum class LtStreamCheck { Off, Warn, Fence };
+
+LtStreamCheck ltStreamCheckMode() {
+  static const LtStreamCheck mode = [] {
+    const auto value =
+        c10::utils::get_env("TORCH_HIPBLASLT_CHECK_HANDLE_STREAMS");
+    if (!value.has_value() || value->empty() || *value == "0") {
+      return LtStreamCheck::Off;
+    }
+    return *value == "fence" ? LtStreamCheck::Fence : LtStreamCheck::Warn;
+  }();
+  return mode;
+}
+
+struct LtLastLaunch {
+  cudaStream_t stream = nullptr;
+  c10::DeviceIndex device = 0;
+  // Expires when the thread that made the launch exits.
+  std::weak_ptr<char> thread;
+  std::thread::id thread_id;
+  std::string thread_name;
+  cudaEvent_t fence = nullptr;
+  c10::DeviceIndex fence_device = 0;
+};
+
+struct LtLaunchHistory {
+  std::mutex mutex;
+  std::unordered_map<cublasLtHandle_t, LtLastLaunch> last;
+  // Each kind of report has its own budget: handovers that the pool ordered
+  // cannot use up the reports of unordered sharing, and sharing cannot use up
+  // the reports of fences that failed to order a launch.
+  int64_t handover_reports = 0;
+  int64_t sharing_reports = 0;
+  int64_t fence_failure_reports = 0;
+};
+
+LtLaunchHistory& ltLaunchHistory() {
+  static auto& history = *new LtLaunchHistory();
+  return history;
+}
+
+constexpr int64_t kMaxLtStreamReports = 20;
+
+// Held by a launching thread until it exits. Unlike a thread id, it is never
+// reused, so a launch history can tell that its thread has exited.
+const std::shared_ptr<char>& launcherToken() {
+  // Made after this thread's pool window, so it is destroyed first: the token
+  // expires before the pool can hand this thread's handles to another thread.
+  (void)getCuBlasLtPoolWindow();
+  thread_local const auto token = std::make_shared<char>();
+  return token;
+}
+
+// False for a capturing stream, whose capture a query would invalidate.
+bool streamHasQueuedWork(cudaStream_t stream, c10::DeviceIndex device) {
+  c10::cuda::CUDAGuard device_guard(device);
+  if (streamIsCapturing(stream)) {
+    return false;
+  }
+  // Keep another thread's capture from forbidding the query.
+  c10::cuda::CUDAStreamCaptureModeGuard mode_guard(
+      cudaStreamCaptureModeRelaxed);
+  const auto status = cudaStreamQuery(stream);
+  if (status != cudaSuccess) {
+    (void)cudaGetLastError();
+  }
+  return status == cudaErrorNotReady;
+}
+
+// Makes `stream`, on the current device, wait for the work queued so far on
+// the stream of `last`, which may be on another device.
+cudaError_t waitForLastLaunch(LtLastLaunch& last, cudaStream_t stream) {
+  {
+    // Records the event on the device of `last.stream`, which must also be the
+    // device the event was created on.
+    c10::cuda::CUDAGuard device_guard(last.device);
+    if (last.fence != nullptr && last.fence_device != last.device) {
+      if (cudaEventDestroy(last.fence) != cudaSuccess) {
+        (void)cudaGetLastError();
+      }
+      last.fence = nullptr;
+    }
+    if (last.fence == nullptr) {
+      const auto status =
+          cudaEventCreateWithFlags(&last.fence, cudaEventDisableTiming);
+      if (status != cudaSuccess) {
+        last.fence = nullptr;
+        return status;
+      }
+      last.fence_device = last.device;
+    }
+    const auto status = cudaEventRecord(last.fence, last.stream);
+    if (status != cudaSuccess) {
+      return status;
+    }
+  }
+  // Waits from the current device, where a default `stream` resolves to that
+  // device's default stream.
+  return cudaStreamWaitEvent(stream, last.fence, 0);
+}
+
+} // namespace
+
+// The check must not fail the launch it checks, so it clears the CUDA errors
+// it hits and reports them instead of throwing.
+void checkCublasLtHandleStream(cublasLtHandle_t handle, cudaStream_t stream) {
+  const auto mode = ltStreamCheckMode();
+  if (mode == LtStreamCheck::Off) {
+    return;
+  }
+  c10::DeviceIndex device = 0;
+  if (c10::cuda::GetDevice(&device) != cudaSuccess) {
+    (void)cudaGetLastError();
+    return;
+  }
+  // The pool holds the handle for the current stream. An SM carveout launch
+  // runs on another stream, which waits for the current one before the launch
+  // and which the current one waits for after, so the check tracks the current
+  // stream and orders the launch stream.
+  const cudaStream_t handle_stream = c10::cuda::getCurrentCUDAStream(device);
+  const auto& token = launcherToken();
+  std::string report;
+  {
+    auto& history = ltLaunchHistory();
+    std::lock_guard<std::mutex> lock(history.mutex);
+    auto [it, first_launch] = history.last.try_emplace(handle);
+    auto& last = it->second;
+    // A captured launch runs only when its graph is replayed. A stream c10
+    // does not own may have been destroyed, and HIP crashes on one.
+    if (!first_launch &&
+        (last.stream != handle_stream || last.device != device) &&
+        !streamIsCapturing(stream) &&
+        CuBlasLtPoolType::streamOutlivesThreads(last.stream, last.device) &&
+        streamHasQueuedWork(last.stream, last.device)) {
+      // The pool moves a handle to another thread only after its owner exits,
+      // and the new owner holds it for its own stream. The pool orders that
+      // stream after the owner's work only if it could fence the handle.
+      auto& window = getCuBlasLtPoolWindow();
+      const bool handed_over =
+          last.thread.expired() && window.find(device, handle_stream) == handle;
+      const bool ordered =
+          handed_over && window.tookFenced(device, handle_stream);
+      const bool fence = mode == LtStreamCheck::Fence && !ordered;
+      const auto fence_status =
+          fence ? waitForLastLaunch(last, stream) : cudaSuccess;
+      if (fence_status != cudaSuccess) {
+        (void)cudaGetLastError();
+      }
+      auto& reports = fence_status != cudaSuccess
+          ? history.fence_failure_reports
+          : (ordered ? history.handover_reports : history.sharing_reports);
+      if (reports++ < kMaxLtStreamReports) {
+        std::ostringstream message;
+        message << "hipBLASLt handle " << handle << " launched on stream "
+                << handle_stream << " (device " << static_cast<int>(device)
+                << ") by thread " << std::this_thread::get_id() << " ("
+                << c10::getThreadName() << ") while stream " << last.stream
+                << " (device " << static_cast<int>(last.device)
+                << "), where thread " << last.thread_id << " ("
+                << last.thread_name << (handed_over ? ", exited" : "")
+                << ") last launched it, still has queued work. ";
+        if (ordered) {
+          message << "The pool handed the handle over when that thread exited "
+                     "and orders this stream after that work.";
+        } else if (handed_over) {
+          message << "The pool handed the handle over when that thread exited "
+                     "but could not order this stream after that work; "
+                     "overlapping launches on one handle can hang hipBLASLt "
+                     "split-K GEMMs.";
+        } else {
+          message << "No pool handover explains this; overlapping launches on "
+                     "one handle can hang hipBLASLt split-K GEMMs.";
+        }
+        if (fence && fence_status == cudaSuccess) {
+          message << " Ordered this launch after that work.";
+        } else if (fence) {
+          message << " Could not order this launch after that work: "
+                  << cudaGetErrorString(fence_status) << ".";
+        }
+        report = message.str();
+      }
+    }
+    if (last.thread.lock() != token) {
+      last.thread = token;
+      last.thread_id = std::this_thread::get_id();
+      last.thread_name = c10::getThreadName();
+    }
+    last.stream = handle_stream;
+    last.device = device;
+  }
+  if (!report.empty()) {
+    LOG(WARNING) << report << "\n" << c10::get_backtrace();
+  }
+}
+#endif
+
+#ifdef USE_ROCM
 static cublasLtHandle_t reserveCurrentCUDABlasLtHandle(bool create) {
   c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
-
-  // Thread local PoolWindows are lazily-initialized
-  // to avoid initialization issues that caused hangs on Windows.
-  // See: https://github.com/pytorch/pytorch/pull/22405
-  // This thread local unique_ptrs will be destroyed when the thread terminates,
-  // releasing its reserved handles back to the pool.
-  thread_local std::unique_ptr<CuBlasLtPoolType::PoolWindow> myPoolWindow(
-      getCuBlasLtPool()->newPoolWindow());
 
   // hipblaslt cannot share a single handle across multiple streams,
   // so reserve a handle unique to each (device, stream) pair.
   auto stream = c10::cuda::getCurrentCUDAStream();
   cudaStream_t _stream = stream;
-  return myPoolWindow->reserve(device, static_cast<void*>(_stream), create);
+  return getCuBlasLtPoolWindow().reserve(
+      device, static_cast<void*>(_stream), create);
 }
 
 cublasLtHandle_t getCurrentCUDABlasLtHandleIfAvailable() {

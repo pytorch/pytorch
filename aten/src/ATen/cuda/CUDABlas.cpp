@@ -421,6 +421,9 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
   }
   else {
+#ifdef USE_ROCM
+    at::cuda::checkCublasLtHandleStream(ltHandle, stream);
+#endif
     cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
@@ -1743,6 +1746,9 @@ bool gemm_and_bias(
     cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
   }
   else {
+#ifdef USE_ROCM
+    at::cuda::checkCublasLtHandleStream(ltHandle, stream);
+#endif
     cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
@@ -2158,6 +2164,9 @@ void scaled_gemm(
     TORCH_CHECK(found, "could not find valid hipblaslt solution");
 #endif // ifndef USE_ROCM
   }
+#ifdef USE_ROCM
+  at::cuda::checkCublasLtHandleStream(ltHandle, stream);
+#endif
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
@@ -2282,6 +2291,9 @@ void int8_gemm(
   }
 #endif
 
+#ifdef USE_ROCM
+  at::cuda::checkCublasLtHandleStream(ltHandle, stream);
+#endif
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),

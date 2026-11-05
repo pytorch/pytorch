@@ -135,6 +135,16 @@ TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandleIfAvailable();
 // while stream capture is active. Pre-stock the shared free list so other
 // threads (e.g. autograd workers) can reserve one mid-capture.
 TORCH_CUDA_CPP_API void ensureCublasLtHandlesAvailable(size_t n);
+// Debug check, enabled by TORCH_HIPBLASLT_CHECK_HANDLE_STREAMS: call right
+// before each launch on `handle`, the current stream's handle, with `stream`
+// the stream of the launch: the current stream, or an SM carveout stream that
+// is ordered with it before and after the launch. If the handle's previous
+// launch was for another stream that still has queued work, logs both threads
+// and a backtrace (see Note [hipblaslt handles]); with the value `fence`, also
+// makes `stream` wait for that work.
+TORCH_CUDA_CPP_API void checkCublasLtHandleStream(
+    cublasLtHandle_t handle,
+    cudaStream_t stream);
 // Under capture, getCurrentCUDABlasHandle() returns a capture handle: one per
 // (thread, device), with no rocBLAS arena, shared by every stream the thread
 // uses in the capture. Each request points it at the current stream and binds
