@@ -386,7 +386,6 @@
   "test/inductor/test_cpp_wrapper_asserts.py",
   "test/inductor/test_cpp_wrapper_custom_ops.py",
   "test/inductor/test_cpp_wrapper_hipify.py",
-  "test/inductor/test_cpu_repro.py",
   "test/inductor/test_cuda_repro.py",
   "test/inductor/test_cudacodecache.py",
   "test/inductor/test_cudagraph_trees.py",
