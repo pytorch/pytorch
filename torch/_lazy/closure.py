@@ -97,7 +97,7 @@ def add_step_closure(
 @overload
 def add_step_closure(
     closure: Callable[[Unpack[_Ts]], object],
-    args: tuple[Unpack[_Ts]],
+    args: tuple[*_Ts],
     run_async: bool = False,
 ) -> None: ...
 def add_step_closure(

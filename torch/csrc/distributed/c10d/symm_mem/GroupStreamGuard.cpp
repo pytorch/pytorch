@@ -8,23 +8,30 @@
 #include <c10/util/hash.h>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/logging.h>
 
 #include <unordered_map>
 #include <utility>
 
 namespace c10d::symmetric_memory {
 
+// The last guarded operation of one capture context: the event recorded
+// after its launch and the stream it launched on. A wait binds to the most
+// recent record, so one event per context suffices.
+struct GroupStreamGuard::LastOp {
+  c10::cuda::CUDAEvent done;
+  std::optional<c10::cuda::CUDAStream> stream;
+};
+
 struct GroupStreamGuard::State {
   std::mutex mu;
-  // Recorded at the end of each guarded operation on that operation's
-  // stream. A wait binds to the most recent record, so one event suffices.
-  c10::cuda::CUDAEvent done;
-  // Stream of the previous guarded operation.
-  std::optional<c10::cuda::CUDAStream> last_stream;
-  // Capture `done` was recorded in, or nullopt outside any capture. A wait
-  // is only valid from the same capture.
-  std::optional<c10::cuda::CaptureId_t> done_capture;
+  // An event can only be waited on from the capture context it was recorded
+  // in, so eager operations and the current capture each keep their own last
+  // operation. One capture is tracked at a time: a new capture id takes over
+  // the capture slot, so captures interleaved from several threads are not
+  // ordered within themselves.
+  LastOp eager;
+  std::optional<c10::CaptureId_t> capture_id;
+  LastOp capture;
   // Owning group, for liveness only.
   std::optional<c10::weak_intrusive_ptr<c10d::ProcessGroup>> pg;
 };
@@ -80,52 +87,36 @@ std::shared_ptr<GroupStreamGuard::State> get_group_stream_state(
 
 } // namespace
 
-void GroupStreamGuard::init_(
-    const std::string& group_name,
-    const c10::intrusive_ptr<c10d::ProcessGroup>& pg) {
+GroupStreamGuard::GroupStreamGuard(const std::string& group_name) {
+  const auto pg = c10d::resolve_process_group(group_name);
   TORCH_CHECK(pg != nullptr, "GroupStreamGuard: null ProcessGroup");
   const auto cur = c10::cuda::getCurrentCUDAStream();
   state_ = get_group_stream_state(pg, cur.device_index());
   lock_ = std::unique_lock<std::mutex>(state_->mu);
-  stream_ = cur;
 
-  auto& last = state_->last_stream;
-  if (last.has_value() && *last != cur) {
-    if (c10::cuda::captureIdMayInitCtx(cur.stream()) != state_->done_capture) {
-      // The previous event belongs to a different capture context, so
-      // waiting on it is invalid. Warming up on one stream and capturing on
-      // another reaches this on the first captured operation, which is the
-      // normal pattern and leaves the caller nothing to act on, so this is a
-      // debug log rather than a warning.
-      C10D_DEBUG(
-          "symm_mem: signal-pad operation for group \"{}\" switched to a "
-          "stream in a different CUDA graph capture context than the previous "
-          "operation; the cross-stream dependency is not inserted for this "
-          "switch.",
-          group_name);
-    } else {
-      // Waits for the previous pad operation only: the event was recorded
-      // just after its launch.
-      state_->done.block(cur);
+  const auto capture = c10::cuda::captureIdMayInitCtx(cur.stream());
+  last_ = &state_->eager;
+  if (capture.has_value()) {
+    if (state_->capture_id != capture) {
+      // A new capture: the previous capture's event cannot be waited on from
+      // here, so its slot starts over.
+      state_->capture_id = capture;
+      state_->capture.stream.reset();
     }
+    last_ = &state_->capture;
   }
-  last = cur;
-}
-
-GroupStreamGuard::GroupStreamGuard(const std::string& group_name) {
-  init_(group_name, c10d::resolve_process_group(group_name));
-}
-
-GroupStreamGuard::GroupStreamGuard(
-    const std::string& group_name,
-    const c10::intrusive_ptr<c10d::ProcessGroup>& pg) {
-  init_(group_name, pg);
+  if (last_->stream.has_value() && *last_->stream != cur) {
+    // Waits for the previous pad operation of this context only: the event
+    // was recorded just after its launch.
+    last_->done.block(cur);
+  }
+  last_->stream = cur;
 }
 
 GroupStreamGuard::~GroupStreamGuard() {
   // Still under state_->mu, so the next guard's wait cannot be enqueued
   // before this record. Unconditional: the next stream is unknown here.
-  if (!state_ || !stream_.has_value()) {
+  if (last_ == nullptr || !last_->stream.has_value()) {
     return;
   }
   // record() throws on a stream carrying an earlier launch error, which in a
@@ -134,10 +125,7 @@ GroupStreamGuard::~GroupStreamGuard() {
   // clears a non-sticky error, so this warning is its only report.
   bool recorded = false;
   try {
-    // Read before the record so the event and its context cannot disagree.
-    const auto capture = c10::cuda::captureIdMayInitCtx(stream_->stream());
-    state_->done.record(*stream_);
-    state_->done_capture = capture;
+    last_->done.record(*last_->stream);
     recorded = true;
   } catch (const std::exception& e) {
     TORCH_WARN(
@@ -149,10 +137,9 @@ GroupStreamGuard::~GroupStreamGuard() {
         "event");
   }
   if (!recorded) {
-    // No event to wait on: the next operation runs unordered against this
-    // one.
-    state_->last_stream.reset();
-    state_->done_capture.reset();
+    // No event to wait on: the next operation of this context runs unordered
+    // against this one.
+    last_->stream.reset();
   }
 }
 
