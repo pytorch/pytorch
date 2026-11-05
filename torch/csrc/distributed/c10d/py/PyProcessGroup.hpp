@@ -147,6 +147,10 @@ class PyProcessGroup : public ProcessGroup {
       return work_->getFutureResult();
     }
 
+    bool hasFutureResult() const override {
+      return work_->hasFutureResult();
+    }
+
     float getDuration() const override {
       return work_->getDuration();
     }
