@@ -687,23 +687,25 @@ void prepareProfiler(
 static void toggleTorchOpCollectionDynamic(bool enable) {
   std::shared_ptr<ProfilerStateBase> global_state =
       ProfilerStateBase::getGlobal();
+  ProfilerStateBase* state =
+      global_state ? global_state.get() : ProfilerStateBase::getTLS();
+  TORCH_CHECK(state);
+  if (!enable) {
+    state->removeCallback();
+    return;
+  }
+  // Only a session that collects CPU has scopes to turn back on.
+  const auto state_info = profilerStateInfo();
+  if (!state_info) {
+    LOG(WARNING)
+        << "Dynamic toggle skipped CPU activity, which this profiler does not collect";
+    return;
+  }
   if (global_state) {
-    if (enable) {
-      auto scopes = profilerStateInfo()->scopes;
-      // Mid-session re-arm on the same RecordQueue: do not bump the generation.
-      pushGlobalProfilingCallbacks(scopes, /*new_session=*/false);
-    } else {
-      global_state->removeCallback();
-    }
+    // Mid-session re-arm on the same RecordQueue: do not bump the generation.
+    pushGlobalProfilingCallbacks(state_info->scopes, /*new_session=*/false);
   } else {
-    ProfilerStateBase* tls_state = ProfilerStateBase::getTLS();
-    TORCH_CHECK(tls_state);
-    if (enable) {
-      auto scopes = profilerStateInfo()->scopes;
-      pushTLSProfilingCallbacks(scopes);
-    } else {
-      tls_state->removeCallback();
-    }
+    pushTLSProfilingCallbacks(state_info->scopes);
   }
 }
 
@@ -746,10 +748,6 @@ static void toggleCPUCollectionDynamic(bool enable) {
 void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities) {
-  TORCH_CHECK(
-      !activities.contains(torch::autograd::profiler::ActivityType::CPU) ||
-          profilerStateInfo() != nullptr,
-      "Cannot toggle CPU activity: no running profiler session collects it.");
   if (activities.contains(torch::autograd::profiler::ActivityType::CPU) &&
       (!activities.contains(torch::autograd::profiler::ActivityType::CUDA) ||
        !activities.contains(torch::autograd::profiler::ActivityType::XPU))) {

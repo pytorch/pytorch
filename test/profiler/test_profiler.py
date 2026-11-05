@@ -475,14 +475,15 @@ if not any(e.device_type == DeviceType.CUDA for e in prof.events()):
         self.assertGreater(len(p.events()), 0)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_toggle_cpu_without_cpu_raises(self):
-        # The legacy profiler forwards the toggle straight to C++, which used to
-        # crash when the session had no CPU collection.
+    def test_toggle_cpu_without_cpu_is_noop(self):
+        # Turning CPU back on in a session without CPU collection used to crash.
         with torch.autograd.profiler.profile(
             use_cpu=False, use_device="cuda", use_kineto=True
         ) as p:
-            with self.assertRaisesRegex(RuntimeError, "no running profiler session"):
-                p.toggle_collection_dynamic(True, [ProfilerActivity.CPU])
+            p.toggle_collection_dynamic(False, [ProfilerActivity.CPU])
+            p.toggle_collection_dynamic(True, [ProfilerActivity.CPU])
+            torch.ones(1, device="cuda").add_(1)
+        self.assertFalse(any(e.name.startswith("aten::") for e in p.function_events))
 
     @unittest.skipIf(TEST_WITH_ROCM, "not supported on ROCm")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
@@ -2498,44 +2499,6 @@ with open(sys.argv[1], "w") as f:
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
             p.stop()
-
-    def test_toggle_uncollected_activity_raises(self):
-        # The check doesn't depend on whether the profiler has started.
-        p = profile(activities=[ProfilerActivity.CPU])
-        with self.assertRaisesRegex(ValueError, "Cannot toggle CUDA"):
-            p.toggle_collection_dynamic(False, [ProfilerActivity.CUDA])
-
-        with profile(activities=[ProfilerActivity.CPU]) as p:
-            with self.assertRaisesRegex(ValueError, "Cannot toggle CUDA"):
-                p.toggle_collection_dynamic(False, [ProfilerActivity.CUDA])
-            p.toggle_collection_dynamic(False, [ProfilerActivity.CPU])
-            p.toggle_collection_dynamic(True, [ProfilerActivity.CPU])
-
-        # Each GPU session may toggle only its own GPU. The inner profiler is
-        # stubbed so this runs without either device.
-        cuda, xpu = ProfilerActivity.CUDA, ProfilerActivity.XPU
-        for collected, other in [(cuda, xpu), (xpu, cuda)]:
-            p = profile(activities=[ProfilerActivity.CPU, collected])
-            p.profiler = MagicMock()
-            with self.assertRaisesRegex(ValueError, f"Cannot toggle {other.name}"):
-                p.toggle_collection_dynamic(False, [other])
-            p.toggle_collection_dynamic(False, [collected])
-            p.profiler.toggle_collection_dynamic.assert_called_once_with(
-                False, {collected}
-            )
-
-    def test_toggle_cpu_when_not_running_raises(self):
-        # A scheduled profiler is created in warmup but runs only while recording.
-        cpu = [ProfilerActivity.CPU]
-        warmup_then_record = torch.profiler.schedule(wait=0, warmup=1, active=1)
-        with profile(activities=cpu, schedule=warmup_then_record) as p:
-            with self.assertRaisesRegex(RuntimeError, "no running profiler session"):
-                p.toggle_collection_dynamic(False, cpu)
-            p.step()
-            p.toggle_collection_dynamic(False, cpu)
-            p.toggle_collection_dynamic(True, cpu)
-        with self.assertRaisesRegex(RuntimeError, "no running profiler session"):
-            p.toggle_collection_dynamic(False, cpu)
 
     def test_init_for_cuda_graphs_traces_cuda(self):
         from torch.profiler._utils import _init_for_cuda_graphs

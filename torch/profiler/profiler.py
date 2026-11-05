@@ -793,14 +793,11 @@ class _KinetoProfile:
         self, enable: bool, activities: Iterable[ProfilerActivity]
     ) -> None:
         """Toggle collection of activities on/off at any point of collection. Currently supports toggling Torch Ops
-        (CPU) and CUDA or XPU activity supported in Kineto
+        (CPU) and CUDA activity supported in Kineto
 
         Args:
             activities (iterable): list of activity groups to use in profiling, supported values:
-                ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``,
-                ``torch.profiler.ProfilerActivity.XPU``
-        Raises:
-            ValueError: if ``activities`` includes an activity this profiler does not collect.
+                ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``
         Examples:
 
         .. code-block:: python
@@ -824,13 +821,6 @@ class _KinetoProfile:
                 code_to_profile_2()
             print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
         """
-        activities = set(activities)
-        if missing := activities - self.activities:
-            names = ", ".join(sorted(activity.name for activity in missing))
-            collected = ", ".join(sorted(activity.name for activity in self.activities))
-            raise ValueError(
-                f"Cannot toggle {names}: this profiler collects only {collected}."
-            )
         if self.profiler is None:
             return
         self.profiler.toggle_collection_dynamic(enable, activities)
