@@ -109,19 +109,21 @@ class TORCH_API FlightRecorderHook
     std::string name{"c10d"};
     FlightRecorder<c10::Event>* recorder = nullptr;
     std::chrono::milliseconds timeout{kBackendDefaultTimeout};
+    // Owned by pg_; only read from hook calls, which the group makes.
+    Backend* backend = nullptr;
   };
 
-  // A recorded op whose collective the hook is still waiting on. work is null
-  // between the pre-hook and the post-hook, and stays null if the backend
-  // threw in between -- such an entry is never retired, which is the honest
-  // report: it was issued and never seen to finish. Until the first Work
-  // refuses getDuration() it is held until the op's result is published, so
-  // the duration can be read after the caller drops the handle, and is then
-  // parked in released_works_.
+  // A recorded op whose collective the hook is still waiting on. If the
+  // backend threw between the pre-hook and the post-hook it is never retired,
+  // which is the honest report: it was issued and never seen to finish. work
+  // is null unless the backend timed the op; then it is held until the op's
+  // result is published, so the duration can be read after the caller drops
+  // the handle, and is then parked in released_works_.
   struct InflightOp {
     FlightRecorder<c10::Event>::TraceIdentifier trace_id;
     FlightRecorder<c10::Event>* recorder = nullptr;
     HookOpName name = HookOpName::UNKNOWN;
+    bool timed = false;
     c10::intrusive_ptr<Work> work;
   };
 
@@ -145,8 +147,6 @@ class TORCH_API FlightRecorderHook
   // Claims the entry of an op out of inflight_, so exactly one caller retires
   // it. The caller drops the Work it holds, outside mutex_.
   std::optional<InflightOp> takeInflightLocked(int64_t op_id);
-  // The backend's own measurement, or nullopt if it cannot time collectives.
-  std::optional<float> workDuration(const Work& work);
   // Dumps the trace to disk, at most once per process. Deliberately takes no
   // hook lock; see the definition.
   void onAbort();
@@ -184,14 +184,12 @@ class TORCH_API FlightRecorderHook
   // Ordered by op_id, which is monotonic per process group, so the front is the
   // oldest op still awaited and eviction is in issue order.
   std::map<int64_t, InflightOp> inflight_;
-  // Cleared the first time a Work refuses getDuration(): timing is a property
-  // of the backend, so later ops neither ask nor keep their Work for it.
-  // Collectives timing enabled after that is not picked up.
-  std::atomic<bool> work_can_time_{true};
   // Works of ops whose result was published, released by the next onPost or
-  // remove() so the last reference is never dropped on a backend thread; see
-  // onResult.
+  // remove() so the last reference is normally not dropped on a backend
+  // thread; see onResult.
   std::vector<c10::intrusive_ptr<Work>> released_works_;
+  // getFutureResult() failed unexpectedly; warn only once.
+  std::atomic<bool> warned_future_result_{false};
 };
 
 } // namespace c10d

@@ -105,6 +105,8 @@ WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
       auto& state = work_queue.front().state;
       state->checkStatus();
       state->setTerminalStatus(forced);
+      // If it did not just complete, nothing else returns its timeout.
+      state->releaseEphemeralTimeout();
       finished.push_back(state);
     }
   }

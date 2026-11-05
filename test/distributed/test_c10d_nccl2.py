@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import weakref
@@ -388,6 +389,15 @@ instantiate_device_type_tests(
 )
 
 
+def _wait_done(fut: torch.futures.Future, timeout: float = 60.0):
+    # Future.wait() is unbounded; a done callback doesn't poll the work.
+    done = threading.Event()
+    fut.add_done_callback(lambda _: done.set())
+    if not done.wait(timeout):
+        raise TimeoutError("future not completed")
+    return fut.value()
+
+
 class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
@@ -488,17 +498,30 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     def test_result_callback_issues_collective(self) -> None:
         # Results are published with no queue lock held, so a result callback
         # may issue an op on the same group.
+        store = dist.distributed_c10d._get_default_store()
         issued = []
+        threads = []
 
         def issue(fut: torch.futures.Future) -> None:
+            threads.append(threading.get_ident())
             t = torch.ones(4, device=self.device)
             issued.append(dist.all_reduce(t, async_op=True))
 
-        t = torch.ones(1024 * 1024, device=self.device)
+        # Connect the ring first: the first collective blocks until peers join.
+        dist.all_reduce(torch.ones(1, device=self.device))
+        t = torch.ones(4, device=self.device)
+        if self.rank != 0:
+            store.wait(["result_callback_go"], timedelta(seconds=60))
         # The work itself is not waited on: its wait() would publish the result
         # on this thread rather than the watchdog's.
-        dist.all_reduce(t, async_op=True).get_future_result().then(issue).wait()
-        issued[0].wait()
+        fut = dist.all_reduce(t, async_op=True).get_future_result().then(issue)
+        if self.rank == 0:
+            # Rank 0's op can't complete before the callback is attached.
+            store.set("result_callback_go", "1")
+        _wait_done(fut)
+        self.assertEqual(issued[0].wait(timedelta(seconds=60)), True)
+        if self.rank == 0:
+            self.assertNotEqual(threads[0], threading.get_ident())
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -654,6 +677,17 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
                 self.assertEqual(
                     outputs[r], torch.full((s,), float(r), device=self.device)
                 )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_barrier_async_block_current_stream(self) -> None:
+        # Catches #202500 where barrier ignored async_op and defaulted to host-blocking,
+        # deadlocking when block_current_stream was called.
+        for _ in range(5):
+            work = dist.barrier(async_op=True, device_ids=[self.rank])
+            work.block_current_stream()
+            torch.cuda.synchronize(self.device)
+            self.assertTrue(work.is_completed())
 
 
 class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
@@ -1774,9 +1808,36 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
             dist.set_timeout(timedelta(hours=1), group=pg)
             queued = dist.all_reduce(t, group=pg, async_op=True).get_future_result()
             # Only the watchdog can complete this before shutdown.
-            self.assertEqual(WorkResult(hung.wait()), WorkResult.TIMEOUT)
+            self.assertEqual(WorkResult(_wait_done(hung)), WorkResult.TIMEOUT)
             backend.shutdown()
             self.assertTrue(queued.done())
+            self.assertEqual(WorkResult(queued.wait()), WorkResult.TIMEOUT)
+
+        self._wait_for_rank_zero(pg)
+        self._abort_timed_out_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_shutdown_drain_timeout_resolves_queued(self) -> None:
+        # Shutdown stops the watchdog first, so finalize() itself finds the
+        # timeout while the communicator is still healthy; the work queued
+        # behind it must report the timeout, not a communicator error.
+        env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "0"}
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup(timeout=timedelta(seconds=5))
+        backend = pg._get_backend(self.device)
+        self._check_all_reduce(pg)
+
+        if self.rank == 0:
+            t = torch.ones(1024, device=self.device)
+            hung = dist.all_reduce(t, group=pg, async_op=True).get_future_result()
+            dist.set_timeout(timedelta(hours=1), group=pg)
+            queued = dist.all_reduce(t, group=pg, async_op=True).get_future_result()
+            backend.shutdown()
+            self.assertTrue(hung.done())
+            self.assertTrue(queued.done())
+            self.assertEqual(WorkResult(hung.wait()), WorkResult.TIMEOUT)
             self.assertEqual(WorkResult(queued.wait()), WorkResult.TIMEOUT)
 
         self._wait_for_rank_zero(pg)

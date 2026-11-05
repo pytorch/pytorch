@@ -210,6 +210,13 @@ bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {
   return true;
 }
 
+void WorkNCCL::State::releaseEphemeralTimeout() {
+  if (ownedEphemeralTimeout.count() > 0 &&
+      !ephemeralTimeoutReleased.exchange(true)) {
+    comm->releaseEphemeralTimeout(ownedEphemeralTimeout);
+  }
+}
+
 void WorkNCCL::State::publishResult() {
   // Exactly once, by whichever of the watchdog and a caller of the Work's own
   // status methods gets here first. The future's callbacks run inline and may
@@ -345,10 +352,8 @@ WorkNCCL::WorkStatus WorkNCCL::State::checkStatus(
   if (status() == WorkStatus::INPROGRESS) {
     try {
       if (events->end->query()) {
-        if (setTerminalStatus(WorkStatus::COMPLETED) &&
-            ownedEphemeralTimeout.count() > 0 &&
-            !ephemeralTimeoutReleased.exchange(true)) {
-          comm->releaseEphemeralTimeout(ownedEphemeralTimeout);
+        if (setTerminalStatus(WorkStatus::COMPLETED)) {
+          releaseEphemeralTimeout();
         }
         return status();
       }

@@ -687,6 +687,12 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " is missing implementation of enableCollectivesTiming.");
   }
 
+  // Whether Works issued now report getDuration(). FlightRecorderHook reads
+  // duration_ms only when this is true.
+  virtual bool collectivesTimingEnabled() const {
+    return false;
+  }
+
   // The caller namespaces each child's rendezvous keys, but the Store may use
   // the parent's live connection. Implementations that block while holding or
   // mutate connection-global state, such as the timeout, must clone it first.

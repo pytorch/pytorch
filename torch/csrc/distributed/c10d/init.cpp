@@ -5478,7 +5478,11 @@ Attach a FlightRecorder hook to a process group. Collectives issued through
 the group are recorded into the generic flight recorder ring buffer (dump
 with _dump_fr_trace / _dump_fr_trace_json), regardless of whether the
 backend has native FlightRecorder support. The hook detaches when remove()
-is called or the returned handle is garbage collected.
+is called or the returned handle is garbage collected. If the backend times
+collectives the hook holds each Work (and its output tensors) until its
+result and the group's next collective; call remove() rather than dropping
+the handle, so pending result callbacks don't destroy it, with those Works,
+on a backend thread.
 
 global_ranks maps the group's ranks to world ranks; it names the per-rank
 dump file and is published as the group's membership. Leave it empty only

@@ -145,6 +145,8 @@ class WorkNCCL : public c10d::Work {
     WorkStatus status() const;
     std::exception_ptr exception() const;
     bool setTerminalStatus(WorkStatus status);
+    // Returns ownedEphemeralTimeout to the comm, at most once.
+    void releaseEphemeralTimeout();
     WorkStatus checkStatus(
         std::optional<std::chrono::milliseconds> timeout = std::nullopt);
     // Completes futureWorkResult once status() is terminal. checkStatus()

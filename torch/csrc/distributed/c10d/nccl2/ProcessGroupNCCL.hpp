@@ -386,7 +386,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   }
   // Underlying host ncclComm_t as an opaque integer pointer.
   int64_t getCommPtr() const;
-  bool collectivesTimingEnabled() const {
+  bool collectivesTimingEnabled() const override {
     return event_pool_->timingEnabled();
   }
   const std::shared_ptr<NCCLEventPool>& getEventPool() const {

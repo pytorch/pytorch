@@ -259,6 +259,7 @@ FlightRecorderHook::FlightRecorderHook(
     if (auto options = tryGetOptions(backend)) {
       target.timeout = options->timeout;
     }
+    target.backend = backend.get();
     return target;
   };
 
@@ -432,33 +433,28 @@ void FlightRecorderHook::onResult(int64_t op_id, bool success) {
   // A failed or timed-out op stays un-retired, so a dump keeps saying it was
   // never seen to finish.
   if (success) {
+    std::optional<float> duration;
+    if (op->work) {
+      try {
+        duration = op->work->getDuration();
+      } catch (const std::exception&) {
+        // E.g. timing was enabled after the op was issued.
+      }
+    }
     op->recorder->retire_completed(
-        op->trace_id.id,
-        op->trace_id.reset_epoch,
-        op->work ? workDuration(*op->work) : std::nullopt);
+        op->trace_id.id, op->trace_id.reset_epoch, duration);
   }
-  if (op->work) {
-    // The caller may have dropped its handle, making this the last reference,
-    // and this may be the backend's watchdog: destroying a Work's outputs there
-    // can need the GIL or autograd state (stock ProcessGroupNCCL keeps outputs_
-    // off its watchdog for the same reason). onPost releases it instead.
-    std::lock_guard<std::mutex> lock(mutex_);
-    released_works_.push_back(std::move(op->work));
+  if (!op->work) {
+    return;
   }
-}
-
-std::optional<float> FlightRecorderHook::workDuration(const Work& work) {
-  if (!work_can_time_.load(std::memory_order_relaxed)) {
-    return std::nullopt;
-  }
-  try {
-    return work.getDuration();
-  } catch (const std::exception&) {
-    // Refused because the backend does not time collectives, which is a
-    // property of the backend and not of the op -- so ask no further op.
-    work_can_time_.store(false, std::memory_order_relaxed);
-    return std::nullopt;
-  }
+  // The caller may have dropped its handle, making this the last reference,
+  // and this may be the backend's watchdog: destroying a Work's outputs there
+  // can need the GIL or autograd state (stock ProcessGroupNCCL keeps outputs_
+  // off its watchdog for the same reason). onPost releases it instead. If
+  // remove() ran meanwhile it is released with the hook, possibly on this
+  // thread.
+  std::lock_guard<std::mutex> lock(mutex_);
+  released_works_.push_back(std::move(op->work));
 }
 
 void FlightRecorderHook::onPre(const PreHookArgs& args) {
@@ -492,6 +488,7 @@ void FlightRecorderHook::onPre(const PreHookArgs& args) {
   InflightOp op;
   op.recorder = recorder;
   op.name = args.name;
+  op.timed = target.backend && target.backend->collectivesTimingEnabled();
 
   const bool is_p2p = isP2POp(args.name);
   size_t collective_seq = 0;
@@ -548,7 +545,7 @@ void FlightRecorderHook::onPre(const PreHookArgs& args) {
     // more; the entry stays un-retired.
     return;
   }
-  inflight_[args.op_id] = op;
+  inflight_[args.op_id] = std::move(op);
   // An op whose work never completes -- a real hang -- must not grow this
   // without bound, and there is nothing to gain from waiting on an op whose
   // entry the ring buffer has already overwritten (retire_completed would no-op
@@ -686,7 +683,7 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
     // The op is only *issued* at this point, so the entry stays un-retired
     // until the Work's result says it finished. The Work is kept only to read
     // its duration then.
-    if (work_can_time_.load(std::memory_order_relaxed)) {
+    if (it->second.timed) {
       it->second.work = args.work;
     }
   }
@@ -701,8 +698,7 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
   } catch (const std::exception& e) {
     // Unexpected: retire this op at issue rather than fail the collective. It
     // will likely fail for every op, so warn once.
-    static std::atomic<bool> warned{false};
-    if (!warned.exchange(true)) {
+    if (!warned_future_result_.exchange(true)) {
       const auto* err = dynamic_cast<const c10::Error*>(&e);
       LOG(WARNING) << "FlightRecorderHook: getFutureResult failed: "
                    << (err ? err->what_without_backtrace() : e.what());
@@ -745,9 +741,14 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
               (!future.value().isInt() ||
                future.value().toInt() ==
                    static_cast<int64_t>(WorkResult::SUCCESS)));
+    } catch (const c10::Error& e) {
+      LOG(ERROR) << "FlightRecorderHook: cannot retire op " << op_id << ": "
+                 << e.what_without_backtrace();
     } catch (const std::exception& e) {
       LOG(ERROR) << "FlightRecorderHook: cannot retire op " << op_id << ": "
                  << e.what();
+    } catch (...) {
+      LOG(ERROR) << "FlightRecorderHook: cannot retire op " << op_id;
     }
   });
 }

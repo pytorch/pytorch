@@ -113,6 +113,10 @@ class LazyBackend : public Backend {
     return primary_->endCoalescing();
   }
 
+  bool collectivesTimingEnabled() const override {
+    return primary_->collectivesTimingEnabled();
+  }
+
   bool supportsTimeEstimation() const override {
     return primary_->supportsTimeEstimation();
   }

@@ -163,6 +163,20 @@ class AbstractFlightRecorderHookTest:
             return hook
         return FlightRecorderHook.attach(pg, dist.get_process_group_ranks(pg))
 
+    def _issue_after_callback(self, issue, key):
+        # A callback added to an already completed future runs at once, maybe
+        # while the hook's still runs on the thread that completed it. Rank 1
+        # issues only after rank 0 added its callback, so on rank 0 it runs
+        # after the hook's. Needs an initialized comm, or rank 0's issue blocks.
+        store = dist.distributed_c10d._get_default_store()
+        if self.rank != 0:
+            store.wait([key], timedelta(seconds=60))
+        work = issue()
+        done = work.get_future_result().then(lambda fut: fut.value())
+        if self.rank == 0:
+            store.set(key, "1")
+        return work, done
+
     def test_records_and_retires_collectives(self):
         pg = self._init_pg()
         hook = self._fr_hook(pg)
@@ -308,23 +322,23 @@ class AbstractFlightRecorderHookTest:
             big = torch.ones(4 * 1024 * 1024, device=self.device)
             nbytes = big.numel() * big.element_size()
             before = len(self._hook_entries())
-            work = dist.all_reduce(big, async_op=True)
-            # Callbacks run in the order they were added, so this one runs after
-            # the hook's.
-            done = work.get_future_result().then(lambda fut: fut.value())
+            work, done = self._issue_after_callback(
+                lambda b=big: dist.all_reduce(b, async_op=True), "timed_work"
+            )
             for _ in range(3):
                 dist.all_reduce(t)
             done.wait()
             # The hook did hold the Work: it read the duration.
             e = self._hook_entries()[before]
-            self.assertIn("duration_ms", e, msg=str(e))
             # wait() drops the backend's own stash of the input.
             work.wait()
             del work, big, done
             # The next collective releases what the hook held.
             dist.all_reduce(t)
             torch.cuda.synchronize()
-            self.assertLess(torch.cuda.memory_allocated(self.device), base + nbytes)
+            if self.rank == 0:
+                self.assertIn("duration_ms", e, msg=str(e))
+                self.assertLess(torch.cuda.memory_allocated(self.device), base + nbytes)
         finally:
             hook.remove()
 
@@ -565,6 +579,7 @@ class AbstractFlightRecorderHookTest:
             self.skipTest("nccl2 coalesced p2p sentinel")
         pg = self._init_pg()
         hook = self._fr_hook(pg)
+        dist.all_reduce(torch.ones(4, device=self.device))
         before = len(self._hook_entries())
 
         peer = 1 - self.rank
@@ -576,10 +591,13 @@ class AbstractFlightRecorderHookTest:
         ]
         for work in dist.batch_isend_irecv(ops):
             work.wait()
-        dist.all_reduce(torch.ones(4, device=self.device))
-        torch.cuda.synchronize()
+        _, done = self._issue_after_callback(
+            lambda: dist.all_reduce(torch.ones(4, device=self.device), async_op=True),
+            "mixed_result_future_types",
+        )
+        done.wait()
 
-        entries = self._await_retired()[before:]
+        entries = self._hook_entries()[before:]
         p2p = [e for e in entries if e["is_p2p"]]
         coll = [e for e in entries if e["profiling_name"] == self._name("all_reduce")]
         self.assertEqual(len(p2p), 2, msg=str(entries))
@@ -589,7 +607,8 @@ class AbstractFlightRecorderHookTest:
             self.assertEqual(e["time_discovered_completed_ns"], 0, msg=str(e))
             self.assertNotIn("duration_ms", e, msg=str(e))
         self.assertEqual(len(coll), 1, msg=str(entries))
-        self.assertEqual(coll[0]["state"], "completed", msg=str(coll[0]))
+        if self.rank == 0:
+            self.assertEqual(coll[0]["state"], "completed", msg=str(coll[0]))
         hook.remove()
 
     def test_p2p_and_collective_seq_ids(self):
@@ -1071,6 +1090,15 @@ class AbstractFlightRecorderHookTest:
         # The backend's own measurement is kept, not recomputed or dropped.
         self.assertIn("duration_ms", e, msg=str(e))
         self.assertGreater(e["duration_ms"], 0.0, msg=str(e))
+        # Retired out of order, the sentinel stays the last completed op.
+        trace = json.loads(
+            torch._C._distributed_c10d._dump_fr_trace_json(backend=self.backend_name)
+        )
+        sentinel = entries[1]
+        status = trace["pg_status"][str(sentinel["pg_id"])]
+        self.assertEqual(
+            int(status["last_completed_collective"]), sentinel["op_id"], msg=str(status)
+        )
         hook.remove()
 
     def test_no_recording_during_cuda_graph_capture(self):
@@ -1384,6 +1412,70 @@ class FlightRecorderHookMixedBackendTest(MultiProcessTestCase):
         }
         self.assertEqual(len(pg_ids), 2)
         fake_hook.remove()
+
+
+@unittest.skipIf(
+    not TEST_CUDA or torch.cuda.device_count() < 2,
+    "nccl-lazy tests require at least 2 GPUs",
+)
+@unittest.skipIf(
+    not dist.is_backend_available("nccl-lazy"), "nccl-lazy backend is not available"
+)
+class FlightRecorderHookLazyTest(MultiProcessTestCase):
+    """nccl-lazy wraps nccl2; the hook asks the wrapper whether ops are timed."""
+
+    @property
+    def world_size(self):
+        return 2
+
+    def setUp(self):
+        super().setUp()
+        os.environ["TORCH_FR_BUFFER_SIZE"] = "2000"
+        os.environ["TORCH_NCCL_ENABLE_TIMING"] = "1"
+        self._spawn_processes()
+
+    def tearDown(self):
+        os.environ.pop("TORCH_NCCL_ENABLE_TIMING", None)
+        if dist.is_initialized():
+            dist.destroy_process_group()
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def test_duration_ms_from_primary_timing(self):
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl-lazy",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            timeout=timedelta(seconds=60),
+        )
+        backend = dist.group.WORLD._get_backend(device)
+
+        # Initializes the comm, so rank 0's gated issue below doesn't block.
+        dist.all_reduce(torch.ones(1024, device=device))
+        # Rank 0 adds its callback before rank 1 issues, so it runs after the
+        # hook's.
+        if self.rank != 0:
+            store.wait(["primary_timing"], timedelta(seconds=60))
+        work = dist.all_reduce(torch.ones(1024, device=device), async_op=True)
+        done = work.get_future_result().then(lambda fut: fut.value())
+        if self.rank == 0:
+            store.set("primary_timing", "1")
+        done.wait()
+        if self.rank != 0:
+            return
+        trace = json.loads(
+            torch._C._distributed_c10d._dump_fr_trace_json(backend=backend.name())
+        )
+        e = trace["entries"][-1]
+        self.assertEqual(e["profiling_name"], "nccl-lazy:all_reduce", msg=str(e))
+        self.assertGreater(e.get("duration_ms", 0.0), 0.0, msg=str(e))
 
 
 @unittest.skipIf(

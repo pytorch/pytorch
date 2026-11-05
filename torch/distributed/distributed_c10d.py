@@ -2958,8 +2958,8 @@ def _maybe_attach_flight_recorder(
 
 def _remove_flight_recorder_hook(pg: ProcessGroup) -> None:
     # remove() rather than drop the handle: the hook may hold Works, and once
-    # dropped it can be destroyed by the last result callback, on the backend's
-    # watchdog.
+    # dropped it can be destroyed by a running result callback, on the
+    # backend's watchdog.
     hook = _world.pg_flight_recorder_hooks.pop(pg, None)
     if hook is not None:
         hook.remove()
