@@ -1561,6 +1561,15 @@ static PyObject* len_torch_function_stack(
   END_HANDLE_TH_ERRORS
 }
 
+// A Python FakeTensorMode and a C++ one each read as the FAKE mode, so at most
+// one of them may be installed
+static void check_no_cpp_fake_mode(c10::impl::TorchDispatchModeKey mode_key) {
+  TORCH_CHECK(
+      mode_key != c10::impl::TorchDispatchModeKey::FAKE ||
+          c10::impl::FakeTensorModeTLS::get_state() == nullptr,
+      "trying to set a Python FakeTensorMode while a C++ FakeTensorMode is set");
+}
+
 static PyObject* push_on_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* arg) {
@@ -1574,6 +1583,7 @@ static PyObject* push_on_torch_dispatch_stack(
         PyObject_FastGetAttrString(arg, "_mode_key");
     if (maybe_mode_key_obj) {
       mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj);
+      check_no_cpp_fake_mode(mode_key.value());
       c10::impl::TorchDispatchModeTLS::set_mode(
           std::make_shared<c10::impl::PyObject_TorchDispatchMode>(
               arg, getPyInterpreter()),
@@ -1655,11 +1665,19 @@ static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
 
   py::object cpp_mode_obj = PyObject_FastGetAttrString(mode, "_cpp_mode");
   if (cpp_mode_obj) {
+    auto cpp_mode =
+        py::cast<std::shared_ptr<c10::FakeTensorMode>>(cpp_mode_obj);
+    TORCH_CHECK(
+        cpp_mode != nullptr,
+        "set_dispatch_mode() called with a mode whose _cpp_mode is None");
+    TORCH_CHECK(
+        !c10::impl::TorchDispatchModeTLS::get_mode(
+             c10::impl::TorchDispatchModeKey::FAKE)
+             .has_value(),
+        "trying to set a C++ FakeTensorMode while a Python FakeTensorMode is set");
     TORCH_CHECK(
         c10::impl::FakeTensorModeTLS::get_state() == nullptr,
         "trying to set the current C++ FakeTensorMode, but one already exists");
-    auto cpp_mode =
-        py::cast<std::shared_ptr<c10::FakeTensorMode>>(cpp_mode_obj);
     c10::impl::FakeTensorModeTLS::set_state(std::move(cpp_mode));
     Py_RETURN_NONE;
   }
@@ -1669,6 +1687,7 @@ static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
       maybe_mode_key_obj,
       "set_dispatch_mode() called with a mode that has no _cpp_mode or _mode_key attribute!");
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj);
+  check_no_cpp_fake_mode(mode_key);
 
   Py_INCREF(mode);
   c10::impl::TorchDispatchModeTLS::set_mode(
