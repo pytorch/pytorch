@@ -348,6 +348,8 @@ class TestDiffusionCompileBenchmark(TestCase):
             subtest((("--num-threads", "0"), "--num-threads must"), name="num_threads"),
             subtest((("--mode", "all"), "cannot be combined"), name="all"),
             subtest((("--mode", "full"), "only once"), name="duplicate"),
+            subtest((("--backend", "inducter"), "Invalid backend"), name="backend"),
+            subtest((("--device", "not_a_device"), "device"), name="device"),
             subtest((("--check-outputs",), "--check-outputs requires"), name="check"),
         ),
     )
@@ -422,6 +424,7 @@ from torch._inductor import config
 from torch._inductor.runtime.cache_dir_utils import cache_dir, triton_cache_dir
 
 if any(value is not False for value in (
+    config.force_disable_caches,
     config.fx_graph_cache,
     config.fx_graph_remote_cache,
     config.autotune_remote_cache,
@@ -455,6 +458,8 @@ runpy.run_path(sys.argv[0], run_name="__main__")
             stale_log.touch()
             inherited = {
                 "TRITON_CACHE_DIR": str(Path(directory) / "shared"),
+                "TORCHINDUCTOR_FORCE_DISABLE_CACHES": "1",
+                "TORCH_COMPILE_FORCE_DISABLE_CACHES": "1",
                 "TORCHINDUCTOR_FX_GRAPH_CACHE": "1",
                 "TORCHINDUCTOR_AUTOGRAD_CACHE": "1",
                 "TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE": "1",
@@ -479,7 +484,9 @@ runpy.run_path(sys.argv[0], run_name="__main__")
             graphs = result["compiler_diagnostics"]["unique_graphs"]
             self.assertEqual(graphs > 0, result["mode"] != "eager")
             self.assertEqual(result["compile_time_s"] > 0, result["mode"] != "eager")
-            self.assertEqual(set(result["compiler_caches"].values()), {False})
+            caches = dict(result["compiler_caches"])
+            self.assertTrue(caches.pop("autotune_local"))
+            self.assertEqual(set(caches.values()), {False})
             environment = result["environment"]
             self.assertEqual(environment["TORCHINDUCTOR_FX_GRAPH_CACHE"], "0")
             self.assertEqual(result["workload"]["output_boundary"], "latent")
@@ -603,11 +610,12 @@ runpy.run_path(sys.argv[0], run_name="__main__")
                 "failed": report + "raise SystemExit(1)",
                 "timed_out": "import time; time.sleep(10)",
                 "killed": kill.format("SIGKILL"),
-                "crashed": kill.format("SIGABRT"),
+                # A fatal signal without a core dump avoids host crash collectors.
+                "crashed": kill.format("SIGUSR1"),
                 "reported_then_killed": report + kill.format("SIGKILL"),
                 "missing": "pass",
             }[failure]
-            timeout = 0.05 if failure == "timed_out" else 10
+            timeout = 0.05 if failure == "timed_out" else 60
             failed = benchmark.run_worker_process(
                 failure,
                 [sys.executable, "-c", code],
@@ -737,6 +745,8 @@ runpy.run_path(sys.argv[0], run_name="__main__")
         ]
         self.assertEqual(len(failures), 1)
         self.assertEqual(failures[0]["benchmark"]["dtype"], "float32")
+        version = failures[0]["benchmark"]["extra_info"]["torch_version"]
+        self.assertEqual(version, torch.__version__)
         self.assertEqual(
             failures[0]["metric"]["extra_info"]["benchmark_values"], ["malformed"]
         )
@@ -746,7 +756,7 @@ runpy.run_path(sys.argv[0], run_name="__main__")
         processes = []
 
         def interrupt_wait(process, timeout=None):
-            if timeout is not None:
+            if not processes:
                 processes.append(process)
                 raise KeyboardInterrupt("cancelled worker")
             return wait(process, timeout)
@@ -768,7 +778,7 @@ runpy.run_path(sys.argv[0], run_name="__main__")
                 self.assertEqual(len(processes), 1)
                 # The worker sleeps for 60s, so only a kill ends it this early.
                 if IS_WINDOWS:
-                    self.assertIsNotNone(processes[0].returncode)
+                    self.assertNotEqual(processes[0].returncode, 0)
                 else:
                     self.assertEqual(processes[0].returncode, -benchmark.signal.SIGKILL)
         finally:
@@ -894,7 +904,7 @@ runpy.run_path(sys.argv[0], run_name="__main__")
             with self.assertRaisesRegex(AssertionError, message):
                 benchmark._check_pipeline_output(actual, eager)
 
-    @parametrize("case", ("eager_nan", "eager_zeros", "compiled_nan"))
+    @parametrize("case", ("eager_nan", "eager_zeros", "compiled_nan", "compiled_zeros"))
     def test_output_check_rejects_unusable_outputs(self, case):
         scenarios = self._toy_scenarios(("eager", "full"))
         results = [self._success_result(scenario) for scenario in scenarios]
@@ -902,20 +912,23 @@ runpy.run_path(sys.argv[0], run_name="__main__")
             "eager_nan": (float("nan"), 1.0),
             "eager_zeros": (0.0, 1.0),
             "compiled_nan": (1.0, float("nan")),
+            "compiled_zeros": (1, 0),
         }[case]
         with tempfile.TemporaryDirectory() as directory:
             paths = {}
             for scenario, value in zip(scenarios, values):
                 path = Path(directory) / f"{scenario.mode}.pt"
-                torch.save(torch.tensor([value]), path)
+                dtype = torch.uint8 if case == "compiled_zeros" else torch.float32
+                torch.save(torch.tensor([value], dtype=dtype), path)
                 paths[scenario.scenario_id] = path
             benchmark._compare_outputs(scenarios, results, paths)
         eager, compiled = results
         self.assertEqual(compiled["status"], "failed")
-        if case == "compiled_nan":
+        if case.startswith("compiled"):
             self.assertEqual(eager["output_check"], "reference")
             self.assertEqual(compiled["output_check"], "failed")
-            self.assertIn("non-finite", compiled["error"])
+            problem = "non-finite" if case == "compiled_nan" else "all zeros"
+            self.assertIn(problem, compiled["error"])
         else:
             self.assertEqual(eager["status"], "failed")
             problem = "non-finite" if case == "eager_nan" else "all zeros"
@@ -1103,6 +1116,118 @@ runpy.run_path(sys.argv[0], run_name="__main__")
         self.assertEqual(second.size, (720, 544))
         self.assertEqual(second.getpixel((0, 0)), (255, 0, 0))
 
+    @parametrize("check_outputs", (False, True))
+    @parametrize("interrupt", (KeyboardInterrupt, SystemExit))
+    def test_interruption_preserves_finished_results(self, check_outputs, interrupt):
+        scenarios = self._toy_scenarios(("eager", "full", "hierarchical"))
+        completed = [self._success_result(scenario) for scenario in scenarios[:2]]
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(
+                benchmark,
+                "run_worker_process",
+                side_effect=[*completed, interrupt("stopped")],
+            ),
+        ):
+            output = Path(directory) / "results.csv"
+            with self.assertRaisesRegex(interrupt, "stopped"):
+                benchmark._run_scenarios(scenarios, output, check_outputs)
+            with output.open(newline="") as file:
+                rows = list(csv.DictReader(file))
+            records = [
+                json.loads(line)
+                for line in output.with_suffix(".json").read_text().splitlines()
+            ]
+        self.assertEqual([row["mode"] for row in rows], ["eager", "full"])
+        expected = "failed" if check_outputs else "success"
+        self.assertEqual([row["status"] for row in rows], [expected, expected])
+        samples = [json.loads(row["steady_state_samples_s"]) for row in rows]
+        self.assertEqual(samples, [[0.3], [0.3]])
+        if check_outputs:
+            self.assertEqual(
+                [record["metric"]["name"] for record in records],
+                ["scenario_status"] * 2,
+            )
+            self.assertTrue(all("output comparison" in row["error"] for row in rows))
+
+    def test_failed_worker_cleanup_preserves_interrupt(self):
+        process = mock.Mock(pid=123)
+        process.wait.side_effect = KeyboardInterrupt("stopped")
+        process.kill.side_effect = PermissionError("cannot kill")
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(benchmark.subprocess, "Popen", return_value=process),
+            mock.patch.object(
+                benchmark.os,
+                "killpg",
+                side_effect=PermissionError("cannot kill"),
+                create=True,
+            ),
+            self.assertRaisesRegex(KeyboardInterrupt, "stopped") as caught,
+        ):
+            root = Path(directory)
+            benchmark.run_worker_process(
+                "interrupted", [], root / "result.json", root / "worker.log", 30
+            )
+        self.assertIsInstance(caught.exception.__cause__, PermissionError)
+        process.wait.assert_called_once_with(timeout=30)
+
+    def test_provenance_excludes_credentials_and_paths(self):
+        environment = {
+            "OMP_NUM_THREADS": "2",
+            "TORCHINDUCTOR_MAX_AUTOTUNE": "1",
+            "TORCHINDUCTOR_REDIS_URL": "redis://user:secret@cache.invalid/0",
+            "TRITON_API_KEY": "secret",
+            "TORCH_UNKNOWN_TOKEN": "secret",
+            "CXX": "/private/compiler",
+        }
+        with mock.patch.dict(os.environ, environment, clear=True):
+            recorded = benchmark._relevant_environment()
+        expected = {"OMP_NUM_THREADS": "2", "TORCHINDUCTOR_MAX_AUTOTUNE": "1"}
+        self.assertEqual(recorded, expected)
+        result = self._success_result(self._toy_scenarios(("eager",))[0])
+        result["environment"] = recorded
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "result.csv"
+            benchmark.write_outputs(output, [result])
+            self.assertNotIn("secret", output.read_text())
+            self.assertNotIn("/private/compiler", output.read_text())
+
+    @parametrize("corrupt_mode", ("eager", "full"))
+    @parametrize("payload", ("empty", "invalid_pickle", "non_tensor"))
+    def test_corrupt_output_preserves_other_results(self, corrupt_mode, payload):
+        scenarios = self._toy_scenarios(("eager", "full", "regional"))
+
+        def run_worker(scenario_id, command, result_path, log_path, timeout_s, env):
+            config = json.loads(Path(command[-1]).read_text())
+            scenario = benchmark._scenario_from_dict(config["scenario"])
+            sample = Path(config["sample_path"])
+            if scenario.mode == corrupt_mode:
+                if payload == "non_tensor":
+                    torch.save({}, sample)
+                else:
+                    data = b"" if payload == "empty" else b"not a checkpoint"
+                    sample.write_bytes(data)
+            else:
+                torch.save(torch.ones(2), sample)
+            return self._success_result(scenario)
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(benchmark, "run_worker_process", side_effect=run_worker),
+        ):
+            output = Path(directory) / "results.csv"
+            results, errors = benchmark._run_scenarios(scenarios, output, True)
+            with output.open(newline="") as file:
+                rows = list(csv.DictReader(file))
+        self.assertTrue(errors)
+        expected = ["success", "failed", "success"]
+        if corrupt_mode == "eager":
+            expected = ["failed"] * 3
+        self.assertEqual([result["status"] for result in results], expected)
+        self.assertEqual([row["status"] for row in rows], expected)
+        self.assertEqual(len(rows), 3)
+
 
 def _toy_inductor_scenario(mode, device, cudagraphs):
     recipe = benchmark.BENCHMARKS["toy"]
@@ -1130,7 +1255,10 @@ class TestDiffusionCompileBenchmarkDeviceType(InductorTestCase):
             return value + 1
 
         compiled = torch.compile(
-            denoise, fullgraph=True, options={"triton.cudagraphs": True}
+            denoise,
+            backend="inductor",
+            fullgraph=True,
+            options={"triton.cudagraphs": True},
         )
         value = torch.ones(8, device=device)
         other = torch.full_like(value, 2)
@@ -1193,7 +1321,7 @@ instantiate_parametrized_tests(TestDiffusionCompileBenchmark)
 instantiate_device_type_tests(
     TestDiffusionCompileBenchmarkDeviceType, globals(), only_for="cuda"
 )
-instantiate_device_type_tests(TestInductorScenarioDeviceType, globals())
+instantiate_device_type_tests(TestInductorScenarioDeviceType, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
