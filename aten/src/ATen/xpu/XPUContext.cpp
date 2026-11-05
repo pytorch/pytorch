@@ -60,8 +60,7 @@ DeviceProp* getDeviceProperties(DeviceIndex device) {
 }
 
 // Return the SYCL index of a XPU device, i.e. its index within its SYCL
-// platform (sycl_ext_oneapi_platform_device_index). It equals the XPU device
-// index as long as the XPU devices are the first devices of their platform.
+// platform (sycl_ext_oneapi_platform_device_index).
 int32_t getGlobalIdxFromDevice(DeviceIndex device) {
   initXPUContextVectors();
   if (device == -1)
