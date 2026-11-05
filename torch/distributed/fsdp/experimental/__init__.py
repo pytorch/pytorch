@@ -27,10 +27,10 @@ parameter. Existing hooks returning tensors remain supported.
 from collections.abc import Callable
 
 import torch
+import torch.nn.functional as F
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_all_gather_output_fn,
-    _reorder_by_rank,
 )
 
 
@@ -102,7 +102,7 @@ def reduce_scatter_input_fn_with_native_copy(
 
     Contiguous nonzero-dimension shards copy directly into the collective buffer,
     which zero-pads uneven ones. Noncontiguous gradients sharded on a nonzero dim
-    use the existing chunk-and-concatenate reorder.
+    are zero-padded if uneven and use the existing chunk-and-concatenate reorder.
     """
     num_leading_dims = [0] * len(unsharded_grads)
     if world_size > 1:
@@ -112,8 +112,11 @@ def reduce_scatter_input_fn_with_native_copy(
             grad = unsharded_grads[i]
             if grad.is_contiguous():
                 num_leading_dims[i] = shard_dim
-            else:
-                unsharded_grads[i] = _reorder_by_rank(grad, shard_dim, world_size)
+                continue
+            if pad := -grad.shape[shard_dim] % world_size:
+                grad = F.pad(grad, (0, 0) * (grad.ndim - 1 - shard_dim) + (0, pad))
+            chunks = torch.chunk(grad, world_size, dim=shard_dim)
+            unsharded_grads[i] = torch.cat(chunks, dim=0)
 
     def copy_in(output: torch.Tensor) -> None:
         torch.ops.fsdp.chunk_cat_mixed_dtype(
