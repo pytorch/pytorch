@@ -7,7 +7,7 @@
 #   "expecttest==0.3.0",
 #   "pyrefly==0.58.0",
 #   "sympy==1.13.3",
-#   "spmd_types==0.2.1",
+#   "spmd_types==0.3.1",
 #   "types-requests==2.27.25",
 #   "types-pyyaml==6.0.2",
 #   "types-tabulate==0.9.0",
@@ -29,7 +29,7 @@
 #
 # [tool.uv]
 # dependency-metadata = [
-#   { name = "spmd-types", version = "0.2.1", requires-dist = [] },
+#   { name = "spmd-types", version = "0.3.1", requires-dist = [] },
 # ]
 # ///
 from __future__ import annotations
