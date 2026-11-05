@@ -7,6 +7,7 @@
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/NestedIntSymNodeImpl.h>
+#include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/dispatch/ObservedOperators.h>
 
@@ -14,6 +15,7 @@
 #include <torch/library.h>
 
 #include <c10/core/SafePyObject.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/SmallVector.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
@@ -40,6 +42,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <type_traits>
 #include <utility>
 
 namespace py = pybind11;
@@ -1085,7 +1088,8 @@ static bool pyobject_dispatch_result_ok(
 static PyObject* pyobject_dispatch_normalize_result(
     const c10::OperatorHandle& op,
     const PyObjectDispatchSchema& info,
-    PyObject* result) {
+    PyObject* result,
+    const char* source = "PythonKernelHolder") {
   if (C10_LIKELY(info.returns_one_tensor && THPVariable_Check(result))) {
     return result;
   }
@@ -1118,7 +1122,7 @@ static PyObject* pyobject_dispatch_normalize_result(
     }
   }
   torch::jit::Stack stack;
-  pushPyOutToStack(op, &stack, std::move(owned), "PythonKernelHolder");
+  pushPyOutToStack(op, &stack, std::move(owned), source);
   return torch::jit::createPyObjectForStack(std::move(stack)).release().ptr();
 }
 
@@ -1173,6 +1177,131 @@ static PyObject* pyobject_dispatch_call_cpp(
   return torch::jit::createPyObjectForStack(std::move(stack)).release().ptr();
 }
 
+// The keys above the Python key, which pythonFallback excludes while
+// __torch_dispatch__ runs (after_Python_keyset in PythonFallbackKernel.cpp).
+constexpr c10::DispatchKeySet kKeysAbovePython =
+    c10::DispatchKeySet(c10::DispatchKeySet::FULL) ^
+    (c10::DispatchKeySet(
+         c10::DispatchKeySet::FULL_AFTER,
+         c10::DispatchKey::Python) |
+     c10::DispatchKeySet(c10::DispatchKey::Python));
+
+// Adds arg's Tensors with the Python key to overloaded_args, as
+// PyInterpreter's dispatch does for an argument. Returns false for a DTensor,
+// whose C++ dispatch needs the call as IValues.
+static bool pyobject_dispatch_collect_python_tensors(
+    PyObject* arg,
+    std::vector<PyObject*>& overloaded_args) {
+  if (THPVariable_Check(arg)) {
+    if (THPVariable_Unpack(arg).unsafeGetTensorImpl()->key_set().has(
+            c10::DispatchKey::Python)) {
+      if (torch::is_dtensor(arg)) {
+        return false;
+      }
+      torch::append_overloaded_tensor(&overloaded_args, arg);
+    }
+  } else if (PyList_CheckExact(arg) || PyTuple_CheckExact(arg)) {
+    const Py_ssize_t len = PySequence_Fast_GET_SIZE(arg);
+    PyObject** items = PySequence_Fast_ITEMS(arg);
+    for (const auto i : c10::irange(len)) {
+      if (THPVariable_Check(items[i]) &&
+          !pyobject_dispatch_collect_python_tensors(
+              items[i], overloaded_args)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+// The Python key's kernel for a top-level call: pythonFallback and
+// PyInterpreter's dispatch, but on the call's PyObjects instead of IValues.
+// call_args are in the form those pass to __torch_dispatch__
+// (parseIValuesToPyArgsKwargs). Returns nullptr without an error if the C++
+// Dispatcher should take the call instead.
+static PyObject* pyobject_dispatch_python_key(
+    PyObjectDispatchFunc* self,
+    PyObject* const* all_args,
+    PyObject* const* call_args,
+    Py_ssize_t call_nargs,
+    PyObject* call_kwnames) {
+  const auto& info = *self->schema_info;
+  std::vector<PyObject*> overloaded_args;
+  for (const auto i : c10::irange(info.args.size())) {
+    if (!pyobject_dispatch_collect_python_tensors(
+            all_args[i], overloaded_args)) {
+      return nullptr;
+    }
+  }
+  // With no mode and no Tensor to dispatch on, pythonFallback redispatches
+  // without the Python key.
+  if (overloaded_args.empty() &&
+      c10::impl::TorchDispatchModeTLS::stack_len() == 0) {
+    return nullptr;
+  }
+  PyObject* op_overload = nullptr;
+  TORCH_CHECK_PYTHON(
+      PyWeakref_GetRef(self->op_overload_ref, &op_overload) >= 0);
+  if (op_overload == nullptr) {
+    return nullptr;
+  }
+  auto func = py::reinterpret_steal<py::object>(op_overload);
+
+  at::impl::MaybeSetTLSOnEntryGuard tls_guard;
+  c10::impl::ExcludeDispatchKeyGuard exclude_guard(kKeysAbovePython);
+  // RecordFunction keeps a reference to its inputs until it ends.
+  torch::jit::Stack record_inputs;
+  std::optional<at::RecordFunction> record;
+  if (auto step_callbacks =
+          at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION)) {
+    record.emplace(std::move(*step_callbacks));
+    const char* name = c10::impl::TorchDispatchModeTLS::stack_len() > 0
+        ? "PythonDispatchMode"
+        : "PythonSubclass";
+    if (record->needsInputs()) {
+      const auto& schema = self->handle->schema();
+      record_inputs.reserve(info.args.size());
+      for (const auto i : c10::irange(info.args.size())) {
+        record_inputs.push_back(
+            torch::jit::argumentToIValue(schema, i, all_args[i]));
+      }
+      record->before(
+          name,
+          c10::ArrayRef<const c10::IValue>(
+              record_inputs.data(), record_inputs.size()));
+    } else {
+      record->before(name);
+    }
+  }
+
+  auto py_args = py::reinterpret_steal<py::object>(PyTuple_New(call_nargs));
+  TORCH_CHECK_PYTHON(py_args);
+  for (const auto i : c10::irange(call_nargs)) {
+    PyTuple_SET_ITEM(py_args.ptr(), i, Py_NewRef(call_args[i]));
+  }
+  py::dict py_kwargs;
+  if (call_kwnames != nullptr) {
+    for (const auto i : c10::irange(PyTuple_GET_SIZE(call_kwnames))) {
+      TORCH_CHECK_PYTHON(
+          PyDict_SetItem(
+              py_kwargs.ptr(),
+              PyTuple_GET_ITEM(call_kwnames, i),
+              call_args[call_nargs + i]) >= 0);
+    }
+  }
+  PyObject* result = handle_torch_function_no_python_arg_parser(
+      overloaded_args,
+      py_args.ptr(),
+      py_kwargs.ptr(),
+      /*func_name=*/nullptr,
+      func.ptr(),
+      /*module_name=*/nullptr,
+      TorchFunctionName::TorchDispatch);
+  TORCH_CHECK_PYTHON(result != nullptr);
+  return pyobject_dispatch_normalize_result(
+      *self->handle, info, result, "__torch_dispatch__");
+}
+
 template <typename Func>
 static PyObject* pyobject_dispatch_with_keyset(
     Func* self,
@@ -1185,17 +1314,53 @@ static PyObject* pyobject_dispatch_with_keyset(
     // For a top-level dispatch: every argument in schema order.
     PyObject* const* all_args = nullptr) {
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
-  // TODO(#187974): Figure out why we need a special case to send the Python
-  // key back to the C++ Dispatcher.
   if (C10_UNLIKELY(key_set.has(c10::DispatchKey::Python))) {
-    return pyobject_dispatch_call_redispatch_cpp(
-        self->cpp_redispatch_fn,
-        key_set,
-        args,
-        nargs,
-        nkwargs,
-        kwnames,
-        op_args_start);
+    bool run_kernel = false;
+    // Only top-level calls have their arguments in the form __torch_dispatch__
+    // gets; see pyobject_dispatch_python_key.
+    if constexpr (std::is_same_v<Func, PyObjectDispatchFunc>) {
+      if (all_args != nullptr && !skip_torch_function) {
+        switch (key_set.highestPriorityTypeId()) {
+          case c10::DispatchKey::PythonTLSSnapshot: {
+            // pythonTLSSnapshotFallback: keep the dispatch TLS on entry for
+            // __torch_dispatch__ (torch.overrides.enable_reentrant_dispatch),
+            // before the keys above Python change it.
+            at::impl::MaybeSetTLSOnEntryGuard guard;
+            return pyobject_dispatch_with_keyset(
+                self,
+                key_set &
+                    c10::DispatchKeySet(
+                        c10::DispatchKeySet::FULL_AFTER,
+                        c10::DispatchKey::PythonTLSSnapshot),
+                skip_torch_function,
+                args,
+                nargs,
+                kwnames,
+                op_args_start,
+                all_args);
+          }
+          case c10::DispatchKey::Python:
+            if (PyObject* result = pyobject_dispatch_python_key(
+                    self, all_args, args, nargs, kwnames)) {
+              return result;
+            }
+            break;
+          default:
+            // The kernels of the keys above Python run as usual below.
+            run_kernel = true;
+        }
+      }
+    }
+    if (!run_kernel) {
+      return pyobject_dispatch_call_redispatch_cpp(
+          self->cpp_redispatch_fn,
+          key_set,
+          args,
+          nargs,
+          nkwargs,
+          kwnames,
+          op_args_start);
+    }
   }
   const auto& kernel_function = self->handle->lookup(key_set);
   // If there's no Python kernel, call back to the C++ Dispatcher
