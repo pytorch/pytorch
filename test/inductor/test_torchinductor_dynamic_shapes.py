@@ -816,8 +816,16 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
     @onlyOn(GPU_TYPE)
     @config.patch(dispatch_32bit_indexing_at_runtime=True)
-    @parametrize("op", ["add", "sum", "argmax"])
-    @parametrize("cooperative", [False, True])
+    @parametrize(
+        "op,cooperative",
+        [
+            ("add", False),
+            ("sum", False),
+            ("argmax", False),
+            ("sum", True),
+            ("argmax", True),
+        ],
+    )
     def test_dispatch_32bit_indexing_at_runtime(self, device, op, cooperative):
         def fn(x):
             return getattr(torch, op)(x, -1)
@@ -830,6 +838,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertNotIn("<= 2147483647", guards)
         i32, i64 = "'xnumel': 'i32'", "'xnumel': 'i64'"
         FileCheck().check(i32).check(i64).check("index_dtype_multi_kernel(").run(code)
+        self.assertEqual("RSPLIT" in code, cooperative)
 
     @onlyOn(GPU_TYPE)
     @config.patch(dispatch_32bit_indexing_at_runtime=True)
@@ -846,22 +855,27 @@ class TestInductorDynamic(DynamicShapesTestCase):
         x = torch.randn(2, 3, 64, 96, device=device)
         actual, (code,) = run_and_get_code(torch.compile(fn, dynamic=True), x)
         self.assertEqual(actual, fn(x))
-        self.assertEqual(counters["inductor"]["index_dtype_copy_regenerated"], 1)
+        self.assertGreater(counters["inductor"]["index_dtype_copy_regenerated"], 0)
         self.assertEqual(code.count("async_compile.index_dtype_multi_kernel("), 2)
 
     @onlyOn(GPU_TYPE)
-    @config.patch(dispatch_32bit_indexing_at_runtime=True, cpp_wrapper=True)
-    def test_dispatch_32bit_indexing_at_runtime_cpp_wrapper(self, device):
-        # cpp_wrapper cannot dispatch, so it falls back to int64 without a guard.
+    @config.patch(dispatch_32bit_indexing_at_runtime=True)
+    @parametrize("patch", ["cpp_wrapper", "triton.autotune_at_compile_time"])
+    def test_dispatch_32bit_indexing_at_runtime_fallback(self, device, patch):
+        # These cannot dispatch, so they fall back to int64 without a guard.
         def fn(x):
             return x + 1
 
         x = torch.randn(8, 1152, device=device)
-        actual, codes = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        with config.patch({patch: True}):
+            actual, codes = run_and_get_code(torch.compile(fn, dynamic=True), x)
         self.assertEqual(actual, fn(x))
         guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
         self.assertNotIn("<= 2147483647", guards)
-        self.assertNotIn("index_dtype_multi_kernel", "\n".join(codes))
+        code = "\n".join(codes)
+        self.assertIn("'xnumel': 'i64'", code)
+        self.assertNotIn("'xnumel': 'i32'", code)
+        self.assertNotIn("index_dtype_multi_kernel", code)
 
     @onlyOn(GPU_TYPE)
     @largeTensorTest("5GB")

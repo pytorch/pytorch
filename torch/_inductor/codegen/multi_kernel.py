@@ -274,9 +274,6 @@ class MultiKernel:
             self.kernels[0].add_numel_to_call_args(kernel_name, call_args, arg_types)
             multi_call_args = call_args
             multi_call_arg_types = arg_types
-        for arg in self.trailing_call_args():
-            multi_call_args.append(arg)
-            multi_call_arg_types.append(type(arg))
 
         for ws in self.kernels[0].args.workspace_args:
             V.graph.wrapper_code.generate_workspace_allocation(ws)
@@ -290,8 +287,11 @@ class MultiKernel:
                 kernel_name, call_args, arg_types=arg_types
             )
         else:
+            trailing = self.trailing_call_args()
             V.graph.wrapper_code.generate_kernel_call(
-                kernel_name, multi_call_args, arg_types=multi_call_arg_types
+                kernel_name,
+                [*multi_call_args, *trailing],
+                arg_types=[*multi_call_arg_types, *map(type, trailing)],
             )
 
         for ws in reversed(self.kernels[0].args.workspace_args):
