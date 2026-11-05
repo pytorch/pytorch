@@ -303,8 +303,6 @@ void TuningResultsManager::AddAndMaybePersist(const std::string& op_signature,
   // ---- mutate maps under results lock ----
   {
     std::scoped_lock l{lock_};
-    // A new entry can be the donor a memoized failure was told did not exist.
-    ForgetBorrowFailuresLocked(op_signature);
     auto& km = results_[op_signature];  // creates if missing
     is_new = (!km.contains(params_signature));
     AddImpl(op_signature, params_signature, std::move(best), km);
@@ -382,34 +380,6 @@ void TuningResultsManager::RecordBorrowed(const std::string& op_signature,
   AddAndMaybePersist(op_signature, params_signature, std::move(entry), /*force_persist=*/true);
 }
 
-namespace {
-std::string BorrowKey(const std::string& params_signature, bool wildcard_enabled) {
-  // '\0' rather than a printable separator: a signature can contain anything
-  // the backend emits, and the flag must not be mistaken for part of it.
-  return params_signature + '\0' + (wildcard_enabled ? '1' : '0');
-}
-}  // namespace
-
-void TuningResultsManager::MarkBorrowUnavailable(const std::string& op_signature,
-    const std::string& params_signature, bool wildcard_enabled) {
-  std::scoped_lock l{lock_};
-  borrow_unavailable_[op_signature].insert(
-      BorrowKey(params_signature, wildcard_enabled));
-}
-
-bool TuningResultsManager::BorrowUnavailable(const std::string& op_signature,
-    const std::string& params_signature, bool wildcard_enabled) {
-  std::scoped_lock l{lock_};
-  auto it = borrow_unavailable_.find(op_signature);
-  return it != borrow_unavailable_.end() &&
-      it->second.count(BorrowKey(params_signature, wildcard_enabled)) != 0;
-}
-
-void TuningResultsManager::ForgetBorrowFailuresLocked(
-    const std::string& op_signature) {
-  borrow_unavailable_.erase(op_signature);
-}
-
 void TuningResultsManager::ClearUntuned() {
   std::scoped_lock l{lock_};
   untuned_results_.clear();
@@ -419,7 +389,6 @@ void TuningResultsManager::ClearAll() {
   std::scoped_lock l{lock_};
   results_.clear();
   untuned_results_.clear();
-  borrow_unavailable_.clear();
 }
 
 void TuningResultsManager::InitRealtimeAppend(const std::string& filename, const std::unordered_map<std::string, std::string>& validators) {
@@ -514,9 +483,6 @@ void TuningResultsManager::DisjointMergeImpl(
     const std::string& op_signature,
     const KernelMap& kernel_map,
     /*out*/ std::unordered_map<std::string, KernelMap>& results) {
-  // Reading a results file is a source of donors like any other, so a shape
-  // memoized as unborrowable before the read must be scanned again after it.
-  ForgetBorrowFailuresLocked(op_signature);
   auto it = results.find(op_signature);
   if (it == results.end()) {
     for (const auto& [param_sig, kernel_id] : kernel_map) {

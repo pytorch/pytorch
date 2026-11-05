@@ -151,7 +151,7 @@ def graph_has_routable_gemm(gm: Any) -> bool:
     in _TUNABLEOP_ROUTING_CHOICES lower to.
     """
     routable = _routable_packets()
-    conv = torch.ops.aten.convolution
+    convs = _conv_packets()
     for module in gm.modules():
         if not isinstance(module, torch.fx.GraphModule):
             continue
@@ -161,7 +161,7 @@ def graph_has_routable_gemm(gm: Any) -> bool:
                 continue
             # Most convs stay convs. Only the ones the lowering rewrites into
             # an mm are GEMMs the graph does not show as GEMMs.
-            if packet is conv and not _conv_lowers_to_mm(node):
+            if packet in convs and not _conv_lowers_to_mm(node):
                 continue
             val = node.meta.get("val")
             if getattr(getattr(val, "device", None), "type", None) == "cuda":
@@ -187,8 +187,10 @@ def _conv_lowers_to_mm(node: Any) -> bool:
 
     Mirrors the gate in the convolution lowering (torch/_inductor/kernel/
     conv.py), which rewrites a 1x1 conv as L[aten.mm] or L[aten.addmm] --
-    choices TunableOp then routes like any other GEMM. Reads the arguments
-    the lowering reads rather than re-deriving them:
+    choices TunableOp then routes like any other GEMM. _convolution shares
+    it: its lowering just calls convolution(), and its first nine arguments
+    are in the same positions. Reads the arguments the lowering reads rather
+    than re-deriving them:
 
         convolution(input, weight, bias, stride, padding, dilation,
                     transposed, output_padding, groups)
@@ -242,9 +244,27 @@ def _routable_packets() -> Any:
                 aten._scaled_mm_v2,
                 # Routable only when _conv_lowers_to_mm says so.
                 aten.convolution,
+                aten._convolution,
             }
         )
     return _ROUTABLE_PACKETS
+
+
+_CONV_PACKETS: Any = None
+
+
+def _conv_packets() -> Any:
+    """Conv packets a 1x1 can be rewritten out of.
+
+    _convolution is CompositeExplicitAutograd and untagged, so nothing
+    decomposes it: a direct torch._convolution call reaches the validator
+    as itself rather than as aten.convolution.
+    """
+    global _CONV_PACKETS
+    if _CONV_PACKETS is None:
+        aten = torch.ops.aten
+        _CONV_PACKETS = frozenset({aten.convolution, aten._convolution})
+    return _CONV_PACKETS
 
 
 def routes_to_worker(choices: list[Any]) -> bool:

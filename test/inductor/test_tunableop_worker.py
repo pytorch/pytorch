@@ -960,24 +960,43 @@ class ExternRoutingTest(TestCase):
 
         return sa.ExternKernelCaller.benchmark(caller, out=out)
 
-    def _assert_inline_ran_with_tuning_off(self, tunable):
+    def _assert_inline_ran_with_tuning_off(self, order, timings=1):
         # The gates below decide only whether the worker is used. Whatever
-        # they decide, an inline timing taken while a mode is set must have
-        # tuning off, or hipBLASLt tunes in the compiling process -- the abort
-        # or hang routing exists to contain -- and be restored afterwards.
+        # they decide, an inline timing taken while a mode is set must happen
+        # with tuning off -- or hipBLASLt tunes in the compiling process, the
+        # abort or hang routing exists to contain -- and the caller's settings
+        # must come back afterwards.
+        #
+        # The whole sequence, not just the calls: asserting only that
+        # enable(False) happened would pass even if the benchmark ran after
+        # the restore, and _live_tunable's two getters differ so a finally
+        # that restored a hard-coded True/True cannot pass either.
         self.assertEqual(
-            [c.args for c in tunable.enable.call_args_list], [(False,), (True,)]
-        )
-        self.assertEqual(
-            [c.args for c in tunable.tuning_enable.call_args_list],
-            [(False,), (True,)],
+            order,
+            [
+                ("enable", False),
+                ("tuning", False),
+                "benchmark",
+                ("enable", False),
+                ("tuning", True),
+            ]
+            * timings,
         )
 
     @staticmethod
-    def _live_tunable():
+    def _live_tunable(caller, order):
         tunable = mock.Mock()
-        tunable.is_enabled.return_value = True
+        # Deliberately different from each other and from the off values.
+        tunable.is_enabled.return_value = False
         tunable.tuning_is_enabled.return_value = True
+        tunable.enable.side_effect = lambda v: order.append(("enable", v))
+        tunable.tuning_enable.side_effect = lambda v: order.append(("tuning", v))
+
+        def _bench(*args, **kwargs):
+            order.append("benchmark")
+            return 2.0
+
+        caller.bmreq.benchmark.side_effect = _bench
         return tunable
 
     def test_gemm_candidate_is_submitted_with_flags(self):
@@ -1037,7 +1056,8 @@ class ExternRoutingTest(TestCase):
         # exactly that -- a guaranteed kill for a candidate the inline path
         # handles, since inline passes a real out.
         caller, out = _extern_caller("mm", metas=False)
-        tunable = self._live_tunable()
+        order: list = []
+        tunable = self._live_tunable(caller, order)
         with (
             mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
             mock.patch(
@@ -1047,7 +1067,7 @@ class ExternRoutingTest(TestCase):
             mock.patch("torch.cuda.tunable", tunable),
         ):
             self.assertEqual(self._benchmark(caller, out), 2.0)
-        self._assert_inline_ran_with_tuning_off(tunable)
+        self._assert_inline_ran_with_tuning_off(order)
 
     def test_verify_mode_stays_inline(self):
         # VERIFY benchmarks choices[0] for its output, not its time. The
@@ -1056,7 +1076,8 @@ class ExternRoutingTest(TestCase):
         from torch._inductor import select_algorithm as sa
 
         caller, out = _extern_caller("mm")
-        tunable = self._live_tunable()
+        order: list = []
+        tunable = self._live_tunable(caller, order)
         with (
             mock.patch.object(sa, "VERIFY", {"atol": 1e-2}),
             mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
@@ -1067,7 +1088,7 @@ class ExternRoutingTest(TestCase):
             mock.patch("torch.cuda.tunable", tunable),
         ):
             self.assertEqual(self._benchmark(caller, out), 2.0)
-        self._assert_inline_ran_with_tuning_off(tunable)
+        self._assert_inline_ran_with_tuning_off(order)
 
     def test_routing_gives_up_after_three_consecutive_faults(self):
         from torch._inductor import tunableop as _top
@@ -1078,25 +1099,25 @@ class ExternRoutingTest(TestCase):
             calls.append(job)
             return _top.Outcome(None, "crash")
 
-        tunable = self._live_tunable()
+        order: list = []
+        callers = [_extern_caller("mm") for _ in range(5)]
+        tunable = self._live_tunable(callers[0][0], order)
+        for caller, _ in callers[1:]:
+            self._live_tunable(caller, order)
         with (
             mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
             mock.patch("torch._inductor.tunableop.submit", side_effect=_fake_submit),
             mock.patch("torch.cuda.tunable", tunable),
         ):
-            for _ in range(5):
-                caller, out = _extern_caller("mm")
+            for caller, out in callers:
                 self.assertEqual(self._benchmark(caller, out), 2.0)
         # Three faults trip it; the fourth and fifth never reach the worker.
         self.assertEqual(len(calls), _top._TUNABLEOP_MAX_ROUTING_FAULTS)
         self.assertFalse(_top.routing_is_open())
-        # Five inline timings, every one of them with tuning off. The two
-        # after the trip are the regression: giving up on the worker must not
-        # also give up on keeping hipBLASLt out of this process.
-        self.assertEqual(
-            [c.args for c in tunable.tuning_enable.call_args_list],
-            [(False,), (True,)] * 5,
-        )
+        # Five inline timings, every one inside its own tuning-off window.
+        # The two after the trip are the regression: giving up on the worker
+        # must not also give up on keeping hipBLASLt out of this process.
+        self._assert_inline_ran_with_tuning_off(order, timings=5)
 
     def test_a_routing_success_clears_the_fault_count(self):
         # Consecutive, not cumulative: an isolated fault between successes

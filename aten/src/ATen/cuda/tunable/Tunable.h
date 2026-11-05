@@ -158,28 +158,6 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
       const std::string& params_signature, const std::string& blas_signature);
     void ClearUntuned();
 
-    // Signatures this pass has already failed to borrow for, either because
-    // no donor was usable or because validating one threw. A failure records
-    // nothing, so without this every later call of the same shape repeats
-    // LookupNearest -- which copies the op's whole map under the lock and
-    // parses every signature -- and, where validation threw, repeats the
-    // allocation it threw out of. Memory only; nothing reaches the file.
-    //
-    // Keyed on the wildcard-fallback flag as well: the wildcard lookup sits
-    // inside the same scan, so a miss recorded with the flag off says nothing
-    // about what the scan would find with it on. The worker re-applies that
-    // flag per job, so both states occur in one process.
-    //
-    // Dropped for one op whenever that op gains an entry, from any source --
-    // Add, RecordBorrowed, or a results file read -- since a new entry can be
-    // the donor the next scan would find. Per op, not the whole map: one
-    // shape's borrow must not resurrect another shape's failed validation,
-    // which is what makes the throw at most one per signature per pass.
-    void MarkBorrowUnavailable(const std::string& op_signature,
-        const std::string& params_signature, bool wildcard_enabled);
-    bool BorrowUnavailable(const std::string& op_signature,
-        const std::string& params_signature, bool wildcard_enabled);
-
     void ClearAll();
 
     void InitRealtimeAppend(
@@ -199,14 +177,6 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
         const std::string& params_signature,
         ResultEntry best,
         bool force_persist);
-
-    // Caller must hold lock_. See MarkBorrowUnavailable.
-    void ForgetBorrowFailuresLocked(const std::string& op_signature);
-
-    // op_signature -> {params_signature + '\0' + wildcard flag}, shaped like
-    // UntunedMap so one op's entries can be dropped on their own.
-    std::unordered_map<std::string, std::unordered_set<std::string>>
-        borrow_unavailable_;
 
     std::mutex lock_;
     std::mutex realtime_file_mutex_;

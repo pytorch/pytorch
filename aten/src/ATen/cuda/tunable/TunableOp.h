@@ -216,13 +216,10 @@ class TunableOp {
       TuningContext* ctx = getTuningContext();
 
       auto borrowed = ResultEntry::Null();
-      // Skipped once this shape is known to have nothing to borrow: the scan
-      // below copies the op's map and parses every signature, and nothing
-      // records the miss, so otherwise every call of this shape repeats it.
+      // Read once and reused below: the scan and the fallback have to agree
+      // on whether the wildcard is in play.
       const bool wildcard_enabled = ctx->IsWildcardFallbackEnabled();
-      const bool may_borrow = ctx->IsNearestMatchEnabled() &&
-          !mgr.BorrowUnavailable(op_sig, concrete_sig, wildcard_enabled);
-      if (may_borrow) {
+      if (ctx->IsNearestMatchEnabled()) {
         borrowed = mgr.LookupNearest(op_sig, concrete_sig);
         if (borrowed != ResultEntry::Null() && !DonorIsUsable(borrowed, params)) {
           borrowed = ResultEntry::Null();
@@ -231,7 +228,7 @@ class TunableOp {
         // the worker measures Default while runtime runs the wildcard and
         // autotune ranks a kernel that never runs. Validated like any borrow;
         // Default wildcards skipped, as profiling the fallback twice is moot.
-        if (borrowed == ResultEntry::Null() && ctx->IsWildcardFallbackEnabled()) {
+        if (borrowed == ResultEntry::Null() && wildcard_enabled) {
           auto wildcard = mgr.LookupWildcardFallback(op_sig, concrete_sig);
           if (wildcard != ResultEntry::Null() &&
               wildcard != ResultEntry::Default() &&
@@ -241,9 +238,6 @@ class TunableOp {
         }
       }
       const bool will_validate = (borrowed != ResultEntry::Null());
-      if (may_borrow && !will_validate) {
-        mgr.MarkBorrowUnavailable(op_sig, concrete_sig, wildcard_enabled);
-      }
 
       // Only a validated donor persists this shape, leaving offline tuning
       // nothing to find. Report unless a persisted verdict is coming; every
@@ -312,16 +306,10 @@ class TunableOp {
           // hold, and without this the shape reaches neither file and offline
           // tuning can never find it. Report it untuned and return Default,
           // the same answer the capture branch and the tail give: while the
-          // pass is on, a donor that was not measured is never served. That
-          // is also what lets the memo below skip the scan on a later call
-          // of this shape without changing what it resolves to.
+          // pass is on, a donor that was not measured is never served.
           TUNABLE_LOG2(
               "borrow validation failed for ", op_sig, '(', concrete_sig,
               "), recording untuned: ", e.what());
-          // The donor is registered but will not run this shape, which no
-          // later call changes: without this the throw repeats, and with it
-          // the allocation it threw out of leaks only once per signature.
-          mgr.MarkBorrowUnavailable(op_sig, concrete_sig, wildcard_enabled);
           report_untuned();
           return ResultEntry::Default();
         }
@@ -330,14 +318,13 @@ class TunableOp {
       // donor of either kind (nearest or wildcard) is a miss rather than a
       // reason to return an unvalidated wildcard hint. One rule for every
       // exit that measures no donor -- no usable donor, stream capture, a
-      // failed validation -- so the memo can skip the scan without changing
-      // the answer. Runtime runs with nearest match off and does take the
-      // wildcard below; that is the difference between the two, not a split
-      // between these branches.
+      // failed validation. Runtime runs with nearest match off and does
+      // take the wildcard below; that is the difference between the pass and
+      // runtime, not a split between these branches.
       if (ctx->IsNearestMatchEnabled()) {
         return ResultEntry::Default();
       }
-      if (ctx->IsWildcardFallbackEnabled()) {
+      if (wildcard_enabled) {
         return mgr.LookupWildcardFallback(op_sig, concrete_sig);
       }
       return ResultEntry::Null();

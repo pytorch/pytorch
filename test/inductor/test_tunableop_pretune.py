@@ -35,7 +35,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, IS_BIG_GPU
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -961,33 +961,40 @@ class TestTunableOpPretune(TestCase):
         return torch.fx.GraphModule(torch.nn.Module(), g)
 
     @parametrize(
-        "kwargs,autotune,expect_bypass",
+        "kwargs,gates,expect_bypass",
         (
-            # A 1x1 conv is lowered to mm/addmm, so it is a routed GEMM that
-            # the graph does not show as one.
-            ({"kernel": 1}, True, True),
+            # A 1x1 conv is lowered to mm/addmm, so it is a routed GEMM the
+            # graph does not show as one. Each term of the lowering's gate
+            # reaches it on its own.
+            ({"kernel": 1}, {"max_autotune": True}, True),
+            ({"kernel": 1}, {"max_autotune_gemm": True}, True),
+            ({"kernel": 1}, {"conv_1x1_as_mm": True}, True),
             # Everything the lowering's gate turns away stays cacheable.
-            ({"kernel": 3}, True, False),
-            ({"kernel": 1, "stride": 2}, True, False),
-            ({"kernel": 1, "groups": 2}, True, False),
-            ({"kernel": 1, "padding": 1}, True, False),
-            # The lowering only fires under one of the autotune configs.
-            ({"kernel": 1}, False, False),
+            ({"kernel": 3}, {"max_autotune": True}, False),
+            ({"kernel": 1, "stride": 2}, {"max_autotune": True}, False),
+            ({"kernel": 1, "groups": 2}, {"max_autotune": True}, False),
+            ({"kernel": 1, "padding": 1}, {"max_autotune": True}, False),
+            # No gate set at all: the lowering never rewrites it.
+            ({"kernel": 1}, {}, False),
         ),
     )
     def test_only_a_1x1_conv_counts_as_a_routable_gemm(
-        self, kwargs, autotune, expect_bypass
+        self, kwargs, gates, expect_bypass
     ):
         from torch._inductor.codecache import BypassFxGraphCache, FxGraphCache
 
         gm = self._conv_gm("cuda", **kwargs)
+        # Every term pinned: max_autotune_gemm defaults from an environment
+        # variable, so leaving it alone makes the no-gate row depend on the
+        # runner rather than on the code.
+        gate_off = {
+            "max_autotune": False,
+            "max_autotune_gemm": False,
+            "conv_1x1_as_mm": False,
+        }
         with mock.patch("torch.cuda.is_available", return_value=True):
             with config.patch(
-                {
-                    "cuda.autotune_tunableop_mode": "tune",
-                    "max_autotune": autotune,
-                    "conv_1x1_as_mm": False,
-                }
+                {"cuda.autotune_tunableop_mode": "tune", **gate_off, **gates}
             ):
                 try:
                     FxGraphCache._check_can_cache(gm, require_shape_env=False)
@@ -1101,6 +1108,11 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
 
     @parametrize("bundled", (False, True))
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    # Below the SM threshold tuned_mm offers no Triton template, so autotune
+    # takes the single-choice exit without benchmarking and nothing is
+    # routed -- a skip rather than a failure, since the bypass is untestable
+    # where no choice reaches the worker in the first place.
+    @unittest.skipIf(not IS_BIG_GPU, "requires a GPU that gets Triton choices")
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_a_warm_rerun_still_lowers_the_gemm(self, bundled):
         """The bypass, end to end: a second compile must still reach the worker.
