@@ -14,6 +14,7 @@ import os
 import copy
 import gc
 import threading
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9370,6 +9371,74 @@ class TestMPS(TestCaseMPS):
         end_event.record()
         with self.assertRaisesRegex(RuntimeError, "must be recorded"):
             start_event.elapsed_time(end_event)
+
+    def test_mps_event_elapsed_time_excludes_host_time(self):
+        # A timing event marks a point in the stream, so host time spent
+        # between two records is not GPU time between them.
+        start_event = torch.mps.Event(enable_timing=True)
+        end_event = torch.mps.Event(enable_timing=True)
+        start_event.record()
+        time.sleep(0.05)
+        torch.ones(1, device="mps") + 1
+        end_event.record()
+        self.assertLess(start_event.elapsed_time(end_event), 25.0)
+
+    def test_mps_event_record_follows_committed_work(self):
+        # A record must not be timestamped before work committed earlier on
+        # the stream has finished, even though Metal may run a later command
+        # buffer alongside an earlier one (as it does after a blit fill).
+        buf = torch.empty(256 << 20, dtype=torch.uint8, device="mps")
+        for _ in range(4):  # the first fills of fresh memory run slow
+            buf.zero_()
+        torch.mps.synchronize()
+        t0 = time.perf_counter()
+        for _ in range(8):
+            buf.zero_()
+        torch.mps.synchronize()
+        fill_ms = (time.perf_counter() - t0) * 1e3 / 8
+        for _ in range(20):
+            before = torch.mps.Event(enable_timing=True)
+            after = torch.mps.Event(enable_timing=True)
+            before.record()
+            buf.zero_()
+            torch.mps.Event().record()  # a non-timing record commits
+            after.record()
+            self.assertGreater(before.elapsed_time(after), 0.5 * fill_ms)
+
+    def test_mps_event_many_timing_records_in_flight(self):
+        # More records in flight than one GPU timestamp sample buffer holds:
+        # records do not commit, so all of these share one command buffer.
+        events = [torch.mps.Event(enable_timing=True) for _ in range(5000)]
+        for event in events:
+            event.record()
+        torch.mps.synchronize()
+        for start, end in zip(events[:-1:500], events[1::500]):
+            self.assertGreaterEqual(start.elapsed_time(end), 0.0)
+
+    def test_mps_event_query_completes_without_sync(self):
+        event = torch.mps.Event(enable_timing=True)
+        torch.ones(1024, device="mps") + 1
+        event.record()
+        deadline = time.monotonic() + 10
+        while not event.query():
+            self.assertLess(time.monotonic(), deadline, "timing event never completed")
+        self.assertTrue(event.query())
+
+    def test_mps_timing_event_wait_on_other_stream(self):
+        producer = torch.mps.Stream()
+        consumer = torch.mps.Stream()
+        for i in range(10):
+            with torch.mps.stream(producer):
+                x = torch.full((200_000,), float(i), device="mps")
+                for _ in range(10):
+                    x = x + 1
+            event = torch.mps.Event(enable_timing=True)
+            event.record(producer)
+            with torch.mps.stream(consumer):
+                event.wait(consumer)
+                y = x + 1
+            consumer.synchronize()
+            self.assertEqual(y.cpu(), torch.full((200_000,), float(i) + 11))
 
     def test_generic_event(self):
         startEvent = torch.Event('mps', enable_timing=True)

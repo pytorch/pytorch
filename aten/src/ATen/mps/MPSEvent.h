@@ -56,6 +56,8 @@ class MPSEvent {
   bool m_enable_timing;
   // Tracks whether this event has been recorded since it was last acquired.
   std::atomic<bool> m_recorded{false};
+  // Set while the latest record's signal is encoded but not yet committed.
+  mutable std::atomic<bool> m_pending_commit{false};
   // Tracks the latest value encoded for the Metal shared event.
   std::atomic<uint64_t> m_signalCounter{0};
   // Stream on which this event is recorded.
@@ -80,6 +82,8 @@ class MPSEvent {
   void recordLocked(bool syncEvent, MPSStream* stream);
   bool waitLocked(bool syncEvent, MPSStream* stream);
   void notifyCpuSync(uint64_t timingGeneration, double completionTime);
+  // commits the stream holding the latest record's signal, if still pending
+  void commitPendingRecord(bool waitForCommit = true) const;
   // assumes timing is enabled and waits for the latest recording's timestamp
   double waitForTiming();
 
