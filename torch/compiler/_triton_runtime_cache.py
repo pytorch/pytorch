@@ -363,6 +363,8 @@ def _decode(
             members = record["members"]
             if record.get("group_format", "paths") not in ("paths", "filenames"):
                 raise RuntimeError("Invalid Triton runtime-cache group format")
+            if not isinstance(members, list):
+                raise RuntimeError("Invalid Triton runtime-cache kernel members")
             if group not in members or len(members) != len(set(members)):
                 raise RuntimeError("Incomplete Triton runtime-cache kernel group")
             if not any(name.endswith(_BINARY_SUFFIXES) for name in members):
