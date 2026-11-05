@@ -19,16 +19,17 @@ if Version(cutlass.__version__) >= Version("4.8.0"):
 else:
     from cutlass.utils import SmemAllocator
 
+from .blockscaled_tma_plan import (
+    _QUANT_ORIENTATION_DIM_K,
+    _QUANT_ORIENTATION_DIM_KM,
+    _QUANT_ORIENTATION_DIM_M,
+)
 from .utils import (
     _blockscaled_quantize_group,
     _store_swizzled_scale_groups_as_uint,
     _store_unswizzled_scale_groups_as_uint,
 )
 
-
-_QUANT_ORIENTATION_DIM_K = 0
-_QUANT_ORIENTATION_DIM_M = 1
-_QUANT_ORIENTATION_DIM_KM = 2
 
 _DIM_K_TILE_M_SIZE_128 = 128
 _MIN_CTA_WARPS_4 = 4
