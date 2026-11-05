@@ -157,7 +157,7 @@ c10::intrusive_ptr<c10::ivalue::Future> Work::getFuture(){
     TORCH_CHECK(false, "Work::getFuture not implemented.")}
 
 c10::intrusive_ptr<c10::ivalue::Future> Work::getFutureResult() {
-  TORCH_CHECK(false, "Work::getFutureResult not implemented.")
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "Work::getFutureResult not implemented.")
 }
 
 void Work::finish(std::exception_ptr exception) {
@@ -195,10 +195,6 @@ uint64_t Work::getSequencenumber() const {
 
 std::chrono::milliseconds Work::getTimeout() const {
   TORCH_CHECK(false, "This Backend doesn't support getTimeout.");
-}
-
-uint64_t Work::getCompletionKey() const {
-  return reinterpret_cast<uintptr_t>(this);
 }
 
 class FutureWrappingWork : public Work {
