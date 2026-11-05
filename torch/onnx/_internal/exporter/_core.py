@@ -1513,7 +1513,7 @@ def export(
         )
     except Exception as e:
         export_status.decomposition = False
-        verbose_print("Run decompositions... ❌")
+        verbose_print("Run decompositions... [FAIL]")
         profile_result = _maybe_stop_profiler_and_get_result(profiler)
 
         if report:
@@ -1543,7 +1543,7 @@ def export(
         ) from e
     else:
         export_status.decomposition = True
-        verbose_print("Run decompositions... ✅")
+        verbose_print("Run decompositions... [OK]")
 
     # Step 3: Translate the decomposed program to ONNX and produce ONNXProgram
     verbose_print("Translate the graph into ONNX...")
@@ -1564,10 +1564,10 @@ def export(
         onnx_program._capture_strategy = capture_strategy
 
         export_status.onnx_translation = True
-        verbose_print("Translate the graph into ONNX... ✅")
+        verbose_print("Translate the graph into ONNX... [OK]")
     except Exception as e:
         export_status.onnx_translation = False
-        verbose_print("Translate the graph into ONNX... ❌")
+        verbose_print("Translate the graph into ONNX... [FAIL]")
         profile_result = _maybe_stop_profiler_and_get_result(profiler)
 
         if report:
@@ -1619,7 +1619,7 @@ def export(
     if optimize:
         verbose_print("Optimize the ONNX graph...")
         onnx_program.optimize()
-        verbose_print("Optimize the ONNX graph... ✅")
+        verbose_print("Optimize the ONNX graph... [OK]")
 
     # Run the ONNX passes
     if input_names:
@@ -1665,10 +1665,10 @@ def export(
         verbose_print("Check the ONNX model...")
         onnxscript_apis.check_model(onnx_program.model)
         export_status.onnx_checker = True
-        verbose_print("Check the ONNX model... ✅")
+        verbose_print("Check the ONNX model... [OK]")
     except Exception as e:
         export_status.onnx_checker = False
-        verbose_print("Check the ONNX model... ❌")
+        verbose_print("Check the ONNX model... [FAIL]")
         if report:
             try:
                 if pre_decomp_unique_ops is None:
@@ -1706,11 +1706,11 @@ def export(
     try:
         verbose_print("Execute the model with ONNX Runtime...")
         verification_results = _verification.verify_onnx_program(onnx_program)
-        verbose_print("Execute the model with ONNX Runtime... ✅")
+        verbose_print("Execute the model with ONNX Runtime... [OK]")
         export_status.onnx_runtime = True
         onnx_runtime_error_message = None
     except Exception as e:
-        verbose_print("Execute the model with ONNX Runtime... ❌")
+        verbose_print("Execute the model with ONNX Runtime... [FAIL]")
         export_status.onnx_runtime = False
         onnx_runtime_error_message = _format_exception(e)
         verification_message = None
@@ -1736,9 +1736,9 @@ def export(
                 )
                 export_status.output_accuracy = False
         if export_status.output_accuracy:
-            verbose_print("Verify output accuracy... ✅")
+            verbose_print("Verify output accuracy... [OK]")
         else:
-            verbose_print("Verify output accuracy... ❌")
+            verbose_print("Verify output accuracy... [FAIL]")
         verification_message = _reporting.format_verification_infos(
             verification_results
         )

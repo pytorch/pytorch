@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
+#include <c10/util/irange.h>
 
 namespace c10d::nccl_extension {
 
@@ -44,7 +45,7 @@ __device__ inline void copy_bytes_vec16(
         if (misalign != 0) {
             size_t to_align = min(nbytes, 16 - misalign);
             if (tid == 0) {
-                for (size_t i = 0; i < to_align; ++i) {
+                for (const auto i : c10::irange(to_align)) {
                     dst_base[i] = src_base[i];
                 }
             }
@@ -392,6 +393,7 @@ void nccl_put_signal(at::Tensor& tensor, const c10::intrusive_ptr<SymmetricMemor
 
   // Get window etc
   auto nccl_hdl = dynamic_cast<NCCLSymmetricMemory*>(hdl.get());
+  TORCH_CHECK(nccl_hdl != nullptr, "nccl_put_signal requires an NCCL handle");
   auto window = nccl_hdl->get_window();
   TORCH_CHECK(window != nullptr, "window is nullptr");
   auto offset = nccl_hdl->get_window_offset();
@@ -426,6 +428,7 @@ void nccl_wait_signal(const c10::intrusive_ptr<SymmetricMemory>& hdl, int64_t pe
 
   // Get the NCCL handle
   auto nccl_hdl = dynamic_cast<NCCLSymmetricMemory*>(hdl.get());
+  TORCH_CHECK(nccl_hdl != nullptr, "nccl_wait_signal requires an NCCL handle");
   // Get the NCCL communicator
   auto& manager = NCCLDevCommManager::get(device);
   ncclComm_t comm = manager.get_comm(nccl_hdl->get_group_name());

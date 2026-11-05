@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace torch::profiler::impl {
@@ -247,6 +248,9 @@ struct PftraceGpuCounter {
 //
 // compression_level is the gzip level applied to the serialized trace (0-9;
 // 1 = fast, the default). Invalid levels fall back to uncompressed bytes.
+//
+// metadata holds the JSON export's top-level fields as (name, JSON value)
+// pairs, emitted as ChromeMetadata entries.
 TORCH_API std::string cuspyEncodePftrace(
     int64_t base_ns,
     const std::vector<PftraceTrack>& tracks,
@@ -257,6 +261,7 @@ TORCH_API std::string cuspyEncodePftrace(
     const std::vector<PftraceGfxContext>& gfx_contexts,
     const PftraceRenderStages& stages,
     const PftraceGpuCounter& counters,
-    int compression_level);
+    int compression_level,
+    const std::vector<std::pair<std::string, std::string>>& metadata = {});
 
 } // namespace torch::profiler::impl
