@@ -131,9 +131,9 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // Callbacks run on the thread that completes the future (e.g. a backend
   // watchdog or a wait()/isCompleted() caller), or inline in addCallback if
   // already complete. Backends should complete it with no locks held, so a
-  // callback may call back into the Work or issue another op; not all do (legacy
-  // NCCL, nccl2 reconfigure), and such a callback can deadlock there. Throws
-  // c10::NotImplementedError if unsupported.
+  // callback may call back into the Work or issue another op; not all do
+  // (legacy NCCL, nccl2 reconfigure), and such a callback can deadlock there.
+  // Throws c10::NotImplementedError if unsupported.
   virtual c10::intrusive_ptr<c10::ivalue::Future> getFutureResult();
 
   virtual float getDuration() const;
