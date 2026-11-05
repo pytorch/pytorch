@@ -31,7 +31,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
-    expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -645,10 +644,8 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
     def test_get_compile_args_real_tracing_returns_concrete(self):
         """_get_compile_args returns original args for real-mode tracing.
 
-        make_fx with tracing_mode='real' produces FakeTensors in placeholder
-        metadata, but from different FakeTensorModes.  Extracting these would
-        cause a FakeTensorMode mismatch in Inductor.  _get_compile_args must
-        detect this and return concrete args instead.
+        Real-mode placeholder FakeTensors provide metadata. Static compilation
+        uses the original inputs.
         """
 
         def f(x, y):
@@ -696,14 +693,9 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         result = compiled(list(concrete_args))
         self.assertEqual(result[0].shape, torch.Size([N]))
 
-    def test_get_compile_args_e2e_real_no_fake_mode_mismatch(self):
-        """E2E: compile_fx_inner fails when given FakeTensors from
-        real-mode traced graph placeholder metadata but succeeds with
-        _get_compile_args which returns concrete args for real-mode tracing.
-
-        This is the minimal repro for the FakeTensorMode mismatch
-        AssertionError that affected 85/126 graphs in the model extractor.
-        """
+    def test_get_compile_args_e2e_real(self):
+        """Real-mode placeholder metadata shares a mode and compilation uses real args."""
+        from torch._guards import detect_fake_mode
         from torch._inductor.compile_fx import compile_fx_inner
 
         def f(x, y):
@@ -722,21 +714,15 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
             )
         )
 
-        # BUG: manually extracting FakeTensors causes mode mismatch
         fake_args = [n.meta["val"] for n in placeholders]
-        error_message = expectedIfCppFakeTensor(
-            "Mixing fake modes", "fake mode.*doesn't match"
-        )
-        with self.assertRaisesRegex(Exception, error_message):
-            compile_fx_inner(gm, fake_args)
+        self.assertIsNotNone(detect_fake_mode(fake_args))
 
-        # FIX: _get_compile_args returns concrete args for real mode
         compile_args = _get_compile_args(gm, args)
         self.assertIs(compile_args, args)
         compiled = compile_fx_inner(gm, compile_args)
         self.assertNotIsInstance(compiled, str)
         result = compiled(list(args))
-        self.assertEqual(result[0].shape, torch.Size([4]))
+        self.assertEqual(result, f(*args))
 
     def test_symint_expr_serialized(self):
         """InputWriter serializes symbolic expressions alongside hint values,

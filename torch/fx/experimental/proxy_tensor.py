@@ -723,8 +723,13 @@ def extract_val(
     val: _ExtractValType,
     include_real: bool = False,
     *,
-    metadata_tracer: PythonKeyTracer | None = None,
+    metadata_fake_mode: Callable[[], FakeTensorMode] | None = None,
 ) -> _ExtractValType:
+    """Snapshot a value for FX node metadata.
+
+    If no fake mode is active, metadata_fake_mode can lazily supply a mode
+    shared by the caller's tracer.
+    """
     if is_fake(val):
         return snapshot_fake(val, include_real=include_real)
     elif isinstance(val, py_sym_types):
@@ -737,27 +742,25 @@ def extract_val(
         return val
     elif isinstance(val, (list, tuple)):
         return val.__class__(
-            [extract_val(x, metadata_tracer=metadata_tracer) for x in val]
+            [extract_val(x, metadata_fake_mode=metadata_fake_mode) for x in val]
         )
     elif isinstance(val, dict):
         return {
-            k: extract_val(v, metadata_tracer=metadata_tracer) for k, v in val.items()
+            k: extract_val(v, metadata_fake_mode=metadata_fake_mode) for k, v in val.items()
         }
     elif isinstance(val, Tensor):
         if not val.is_sparse:
             # NB: Kinda hacky, but we should try to get val as the metadata
             # everywhere
-            # TODO: This doesn't properly track storages.  A more robust
-            # approach would be to maintain a per-trace FakeTensorMode and
-            # from_real_tensor to create fake values (don't forget to
-            # snapshot_fake)
+            # TODO: Preserve storage relationships with from_real_tensor and
+            # snapshot_fake. Sharing a mode does not preserve storage aliasing.
             from torch._guards import detect_fake_mode
 
             fake_tensor_mode = detect_fake_mode(val)
             if not fake_tensor_mode:
                 fake_tensor_mode = (
-                    metadata_tracer._get_metadata_fake_mode()
-                    if metadata_tracer is not None
+                    metadata_fake_mode()
+                    if metadata_fake_mode is not None
                     else FakeTensorMode(allow_fallback_kernels=True)
                 )
             with fake_tensor_mode:
@@ -835,15 +838,14 @@ def maybe_enable_thunkify() -> Generator[None, None, None]:
 # grad_fn, _base (_base actually may be set due to recursive call to
 # ADInplaceOrView, but you shouldn't rely on it.)
 def set_meta(proxy: Proxy, val: _ExtractValType) -> Proxy:
+    tracer = typing.cast(_ProxyTracer, proxy.tracer)
     proxy.node.meta["val"] = extract_val(
         val,
         include_real=(proxy.node.op == "placeholder"),
-        metadata_tracer=proxy.tracer
-        if isinstance(proxy.tracer, PythonKeyTracer)
-        else None,
+        metadata_fake_mode=tracer._get_metadata_fake_mode,
     )
 
-    with _enable_thunkify(proxy.tracer):  # type: ignore[arg-type]
+    with _enable_thunkify(tracer):
         # Best effort tensor_meta setting; prefer using val!
         if is_fake(val):
             proxy.node.meta["tensor_meta"] = _extract_tensor_metadata(val)
@@ -1659,6 +1661,13 @@ def _init_proxy_trackers(tracer: PythonKeyTracer | _GraphAppendingTracerEx) -> N
     # distinguish between different calls to the same torch function.
     tracer.torch_fn_counts = {}
     tracer.enable_thunkify = False
+    tracer._metadata_fake_mode = None
+
+
+def _get_metadata_fake_mode(tracer: _ProxyTracer) -> FakeTensorMode:
+    if tracer._metadata_fake_mode is None:
+        tracer._metadata_fake_mode = FakeTensorMode(allow_fallback_kernels=True)
+    return tracer._metadata_fake_mode
 
 
 class PythonKeyTracer(Tracer):
@@ -1682,16 +1691,12 @@ class PythonKeyTracer(Tracer):
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
+    _metadata_fake_mode: FakeTensorMode | None
+    _get_metadata_fake_mode = _get_metadata_fake_mode
 
     def __init__(self, *, autowrap_modules: tuple[types.ModuleType, ...] = ()) -> None:
         super().__init__(autowrap_modules=autowrap_modules)
         _init_proxy_trackers(self)
-        self._metadata_fake_mode: FakeTensorMode | None = None
-
-    def _get_metadata_fake_mode(self) -> FakeTensorMode:
-        if self._metadata_fake_mode is None:
-            self._metadata_fake_mode = FakeTensorMode(allow_fallback_kernels=True)
-        return self._metadata_fake_mode
 
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
@@ -1834,7 +1839,9 @@ class PythonKeyTracer(Tracer):
             attr = getattr(self.root, target)
             if isinstance(attr, torch.Tensor):
                 with disable_proxy_modes_tracing():
-                    node.meta["val"] = extract_val(attr, metadata_tracer=self)
+                    node.meta["val"] = extract_val(
+                        attr, metadata_fake_mode=self._get_metadata_fake_mode
+                    )
 
         def map_fn(v: Any) -> _ExtractValType | None:
             if not isinstance(v, torch.fx.Node) or "val" not in v.meta:
@@ -2424,6 +2431,8 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
+    _metadata_fake_mode: FakeTensorMode | None
+    _get_metadata_fake_mode = _get_metadata_fake_mode
 
     def __init__(self, graph: fx.graph.Graph) -> None:
         super().__init__(graph)

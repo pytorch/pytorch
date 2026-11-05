@@ -1304,11 +1304,9 @@ def _get_compile_args(mod: torch.fx.GraphModule, args: Sequence[Any]) -> Sequenc
     compile_fx_inner needs these (not the concrete args) so that Inductor
     generates proper symbolic-size bindings in the output code.
 
-    For tracing_mode='real', concrete args are fine — we must NOT extract
-    FakeTensor metadata because different nodes may have FakeTensors from
-    different FakeTensorModes, causing a FakeTensorMode mismatch assertion
-    in Inductor.  We detect symbolic tracing by checking for SymInt values,
-    which only exist when tracing_mode='symbolic'.
+    For tracing_mode='real', pass the original concrete args. Placeholder
+    FakeTensors describe metadata and are not needed for static compilation.
+    Detect symbolic tracing by checking for SymInt placeholder values.
     """
     placeholders = [n for n in mod.graph.nodes if n.op == "placeholder"]
     if not placeholders:
