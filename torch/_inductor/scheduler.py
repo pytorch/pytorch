@@ -6105,6 +6105,9 @@ class Scheduler:
             ]
         )
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
+        # During codegen, the nodes on the current stream whose kernels may
+        # still be running under PDL, maintained in _codegen; None means they
+        # are unknown, so the next kernel waits before its first access.
         self.previous_nodes: list[BaseSchedulerNode] | None = None
         self.current_node: BaseSchedulerNode | None = None
         self.update_zero_dim_cpu_tensor()
@@ -12879,11 +12882,12 @@ class Scheduler:
             for n in node.get_nodes():
                 if not isinstance(n, SchedulerNode):
                     return False
-                sizes, reduction_sizes = n.get_ranges()
-                # Reduction sizes count too, since a split scan takes its grid
-                # from the scan length; for other kernels a zero reduction size
-                # alone does not skip the launch.
-                if not all(map(is_known_nonzero, (*sizes, *reduction_sizes))):
+                # A zero reduction size empties neither the grid nor the waits,
+                # which are hoisted out of the reduction loop. A split scan
+                # takes its grid from the scan length, but its workspace drops
+                # the list below anyway.
+                sizes, _ = n.get_ranges()
+                if not all(map(is_known_nonzero, sizes)):
                     return False
             return True
 
@@ -13046,6 +13050,9 @@ class Scheduler:
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 # pyrefly: ignore [unbound-name]
                 kernel = self.get_backend(device).codegen_node(node)
+                # SIMD backends return None only when every op was folded into
+                # another kernel (CppScheduling always does, but PDL is
+                # CUDA-only)
                 launched = kernel is not None
             else:
                 if not isinstance(node, NopKernelSchedulerNode):
@@ -13082,6 +13089,11 @@ class Scheduler:
                 from .codegen.triton import TritonKernel
 
                 waited = isinstance(kernel, TritonKernel) and kernel._pdl_has_wait
+                # A node starts a new list only if it launches a non-empty grid
+                # and has waited for the kernels that may still run (or none
+                # are recorded). Otherwise it joins the current list or, when
+                # there is none, is left out, so the next kernel still sees
+                # None and waits before its first access.
                 if (
                     launched
                     and (self.previous_nodes is None or waited)

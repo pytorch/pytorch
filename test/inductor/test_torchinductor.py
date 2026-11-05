@@ -20799,6 +20799,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             # reduces over v.size(0) // 4, which Dynamo guards to be nonzero
             return v.unflatten(0, (-1, 4)).sum(1).sum(0)
 
+        def nonzero_sum(m):
+            # reduces u0 rows into one element, so it launches whatever u0 is
+            return torch.nonzero(m).float().sum(0)
+
         m = torch.zeros(16, device=GPU_TYPE, dtype=torch.bool)
         v = torch.randn(64, device=GPU_TYPE)
         u = torch.randn(8, device=GPU_TYPE)
@@ -20810,6 +20814,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (nonzero_plus_one_exp, (m,), "def triton_poi_fused__to_copy_cat_exp"),
             (guarded_difference_exp, (v, u), "def triton_poi_fused_exp_slice"),
             (guarded_floordiv_sum, (v2d,), "def triton_red_fused_sum_view"),
+            (nonzero_sum, (m,), "def triton_red_fused__to_copy_sum"),
         ]:
             with self.subTest(middle.__name__):
                 code = _pdl_last_kernel_code(self, middle, *args)
@@ -20826,8 +20831,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     )
     @config.patch({"triton.enable_pdl": True})
     def test_pdl_kernel_after_folded_reduction_waits(self):
-        if not config.triton.mix_order_reduction or is_dynamic_shape_enabled():
-            # dynamic shapes do not fold b's final reduction here
+        if not config.triton.mix_order_reduction:
             raise unittest.SkipTest("needs a mix order reduction")
 
         def f(x, y, w, m=None, k=None):
@@ -20851,7 +20855,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for name, args in [("no_extern", (x, y, w)), ("empty_mm", (x, y, w, m, k))]:
             with self.subTest(name):
                 torch._inductor.metrics.reset()
-                act, (code,) = run_and_get_code(torch.compile(f), *args)
+                # dynamic shapes also compile the backward up front
+                act, (code, *_) = run_and_get_code(torch.compile(f), *args)
                 self.assertTrue(same(f(*args), act, tol=1e-3))
                 self.assertEqual(1, torch._inductor.metrics.codegen_mix_order_reduction)
                 # b's final reduction emits no launch, so the last kernel's

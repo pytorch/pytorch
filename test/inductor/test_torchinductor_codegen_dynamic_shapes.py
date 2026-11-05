@@ -121,6 +121,10 @@ test_failures = {
     #
     "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    # dynamic shapes do not fold the final reduction into a mix order reduction
+    "test_pdl_kernel_after_folded_reduction_waits_dynamic_shapes": TestFailure(
+        ("cuda",)
+    ),
     #
     # A symbolic rnumel defeats should_use_persistent_reduction for BOTH halves
     # of the model, so the parent stops emitting triton_per_ and the
