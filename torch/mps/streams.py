@@ -4,13 +4,8 @@ import torch
 from torch._utils import _dummy_type
 
 
-__all__ = [
-    "Stream",
-    "stream",
-    "current_stream",
-    "default_stream",
-    "set_stream",
-]
+# APIs defined in this file are public directly under `torch.mps`
+__all__: list[str] = []
 
 if not hasattr(torch._C, "_MPSStreamBase"):
     torch._C.__dict__["_MPSStreamBase"] = _dummy_type("_MPSStreamBase")
@@ -82,7 +77,6 @@ def set_stream(stream: Stream | None) -> None:
     torch._C._mps_setStream(stream)
 
 
-for _name in __all__:
-    # APIs defined in this file are public directly under torch.mps
-    globals()[_name].__module__ = "torch.mps"
-del _name
+for _obj in (Stream, stream, current_stream, default_stream, set_stream):
+    _obj.__module__ = "torch.mps"
+del _obj
