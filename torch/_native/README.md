@@ -370,3 +370,32 @@ OPINFO_RESTRICT_TO_DSL=triton pytest -sv test/test_binary_ufuncs.py
 ```
 
 This will test all triton-based binary operators.
+
+
+### Pointwise TMA kernels
+
+On compute capability 10.x devices, pointwise CuTeDSL overrides serve eligible
+transposed and outer-strided CUDA inputs. These cases are significantly
+accelerated compared to ATen's legacy unrolled kernel. Fully contiguous calls
+retain ATen's CUDA vectorized kernels.
+
+The TMA path accepts matching-shape, matching-dtype float16, bfloat16 and
+float32 operands, plus Boolean comparison outputs. It supports aligned row
+pitches and aligned nonzero-offset views. Higher-rank permutations are supported
+when their dense dimension groups collapse to a 2-D transpose, optionally with
+an outer batch group, with complete TMA tiles. Inner strides greater than one, broadcasting, in-place
+operations, and unsupported layouts or output buffers fall back to ATen. No
+CuTeDSL vector, conversion, fill/range, or RNG kernel is included. The registry
+scalar-coercion fix is retained so calls with Python-number operands can still
+fall back to ATen correctly.
+
+The initial pointwise AOT declarations export `add`, `sub`, `mul`,
+`div.Tensor`, `neg` and `gt.Tensor` using the `sm_100f` target, for the 10.x
+architecture family. They reuse the TMA executor with dynamic sizes and aligned
+outer pitches for 2-D inputs and dense outputs (including transposed outputs
+allocated by ATen meta). The structured AOT hook returns false for contiguous
+calls, partial tiles, broadcasting, inner strides, aliasing outputs and
+unsupported instantiations, retaining ATen's CUDA kernel. No CuTeDSL vectorized
+or unrolled fallback kernel is registered. The architecture-family exporter
+selects `sm_100f` for compatible build architectures, including `10.0` and
+`10.7`.
