@@ -684,10 +684,12 @@ class ShardedTensor(ShardedTensorBase):
         copy_tensor = kwargs.get("copy", False)
         non_blocking = kwargs.get("non_blocking", False)
         memory_format = kwargs.get("memory_format", torch.preserve_format)
+        rounding = kwargs.get("round")
         process_group = kwargs.get("process_group")
 
         if (
             not copy_tensor
+            and rounding is None
             and dtype_to == current_dtype
             and device_to == current_device
         ):
@@ -704,6 +706,7 @@ class ShardedTensor(ShardedTensorBase):
                 non_blocking=non_blocking,
                 copy=copy_tensor,
                 memory_format=memory_format,
+                round=rounding,
             )
             metadata = copy.deepcopy(shard.metadata)
             if metadata.placement is not None:

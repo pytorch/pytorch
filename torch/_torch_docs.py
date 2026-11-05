@@ -9956,7 +9956,7 @@ Example::
 add_docstr(
     torch.round_to,
     r"""
-round_to(input, dtype, mode, *, memory_format=torch.preserve_format) -> Tensor
+round_to(input, dtype, mode, *, memory_format=torch.preserve_format, out=None) -> Tensor
 
 Converts :attr:`input` to the narrower floating-point :attr:`dtype`, rounding
 values that it cannot represent in the given direction. ``input.to(dtype,
@@ -9974,15 +9974,20 @@ otherwise. The modes are the IEEE 754 rounding directions:
 * ``"toward_negative"``: to the nearest value that is not larger.
 
 The exact value is rounded once, even for ``float64`` inputs. On overflow,
-values rounded toward zero become the largest finite value; the others become
-infinity, or, for dtypes without infinity, the value that :meth:`~Tensor.to`
-produces (the largest finite value for ``torch.float8_e4m3fn`` and
+values whose magnitude is rounded down (toward zero) become the largest finite
+value of their sign, e.g. ``"toward_negative"`` turns ``1e6`` into ``65504`` in
+``torch.float16``; the others become infinity, or, for dtypes without infinity,
+the value that :meth:`~Tensor.to` produces (the largest finite value for ``torch.float8_e4m3fn`` and
 ``torch.float8_e5m3fnu``, NaN for the ``fnuz`` dtypes and
 ``torch.float8_e8m0fnu``). The unsigned dtypes ``torch.float8_e8m0fnu`` and
 ``torch.float8_e5m3fnu`` round the magnitude of the input, so
 ``"toward_negative"`` behaves like ``"toward_zero"``. ``torch.float8_e8m0fnu``
 only has powers of two: values below :math:`2^{{-127}}` become
 :math:`2^{{-127}}`, and ties of ``"to_nearest_even"`` round up.
+
+The result is always a new tensor. Like a plain dtype conversion, its gradient
+is the identity (cast back to the dtype of :attr:`input`), unlike that of
+:func:`torch.round`, which is zero.
 
 Args:
     {input}
@@ -9992,6 +9997,7 @@ Args:
 
 Keyword args:
     {memory_format}
+    {out}
 
 Example::
 

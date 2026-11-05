@@ -118,6 +118,12 @@ if(INTERN_BUILD_ATEN_OPS)
             list(APPEND _file_compile_flags "-gencode;arch=compute_103f,code=sm_103f")
           endif()
         endif()
+        # We need to gate against CUDA version, because sm_107f is available on CUDA 13.4+
+        if("${_arch}" STREQUAL "107f" AND CUDA_VERSION VERSION_GREATER_EQUAL 13.4)
+          if(_existing_arch_flags MATCHES ".*compute_100.*")
+            list(APPEND _file_compile_flags "-gencode;arch=compute_107f,code=sm_107f")
+          endif()
+        endif()
         # We need to gate against CUDA version, because sm_110a is available on CUDA 13.0+
         if("${_arch}" STREQUAL "110a" AND CUDA_VERSION VERSION_GREATER_EQUAL 13.0)
           if(_existing_arch_flags MATCHES ".*compute_110.*")
@@ -127,12 +133,6 @@ if(INTERN_BUILD_ATEN_OPS)
         if("${_arch}" STREQUAL "120a")
           if(_existing_arch_flags MATCHES ".*compute_120.*")
             list(APPEND _file_compile_flags "-gencode;arch=compute_120a,code=sm_120a")
-          endif()
-        endif()
-        # sm_107f needs CUDA 13.4+ (PTX ISA 9.4)
-        if("${_arch}" STREQUAL "107f" AND CUDA_VERSION VERSION_GREATER_EQUAL 13.4)
-          if(_existing_arch_flags MATCHES ".*compute_100.*")
-            list(APPEND _file_compile_flags "-gencode;arch=compute_107f,code=sm_107f")
           endif()
         endif()
         # We will need to gate against CUDA version, sm_121a was introduced in CUDA 12.9
@@ -160,7 +160,7 @@ if(INTERN_BUILD_ATEN_OPS)
     # which are only emitted for arch-specific targets, and the
     # cvt.*.ue5m3x2.f32 ones, which only sm_107f and similar targets have.
     _BUILD_FOR_ADDITIONAL_ARCHS(
-      "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RoundedConversion.cu"
+      "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RoundedConversionArchSpecific.cu"
       "100a;103a;107f;110a;120a;121a")
 
   endif()

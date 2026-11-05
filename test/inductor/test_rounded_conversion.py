@@ -4,15 +4,17 @@ import math
 import unittest
 
 import torch
-from torch._inductor import config
+from torch._higher_order_ops.associative_scan import associative_scan
+from torch._inductor.cpu_vec_isa import valid_vec_isa_list
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_triton_fp8_dtype_supported, run_and_get_code
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    instantiate_parametrized_tests,
-    parametrize,
+from torch.testing._internal.common_device_type import (
+    expectedFailureIfRocm,
+    expectedFailureXPU,
+    instantiate_device_type_tests,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.common_utils import HardwareClassification, parametrize
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 MODES = ("to_nearest_even", "toward_zero", "toward_positive", "toward_negative")
@@ -39,12 +41,26 @@ PAIRS = [
 ]
 
 HAS_CUDA = HAS_GPU and GPU_TYPE == "cuda" and torch.version.hip is None
-FALLBACK = "= torch.ops.aten._to_dtype_rounded.default("
+FALLBACK = "= torch.ops.aten.round_to.default("
 
 
 def _pair_name(pair):
     src, dst = pair
     return f"{str(src).removeprefix('torch.')}_to_{str(dst).removeprefix('torch.')}"
+
+
+def _lowered(device, src, dst):
+    """Whether Inductor generates code for round_to rather than falling back."""
+    device = torch.device(device)
+    # Inductor does not support float8_e5m3fnu yet.
+    if dst == torch.float8_e5m3fnu:
+        return False
+    if device.type == "cpu":
+        return True
+    # Triton reduces float64 to float32 with PTX.
+    if src == torch.float64 and (device.type != "cuda" or torch.version.hip):
+        return False
+    return is_triton_fp8_dtype_supported(dst, device)
 
 
 def _cuda_capability():
@@ -113,14 +129,33 @@ class _RoundedConversionTestMixin:
         self.assertSameValues(actual, fn(x))
         return "\n".join(code)
 
-    def _check_e5m3fnu_falls_back(self, device):
-        # Inductor does not support float8_e5m3fnu yet.
+
+class TestRoundedConversionInductor(_RoundedConversionTestMixin, TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("pair", PAIRS, name_fn=_pair_name)
+    def test_matches_eager(self, device, pair):
+        src, dst = pair
+        for mode in MODES:
+            with self.subTest(mode=mode):
+                code = self._check(device, src, dst, mode)
+                if _lowered(device, src, dst):
+                    self.assertNotIn(FALLBACK, code)
+                else:
+                    self.assertIn(FALLBACK, code)
+                if torch.device(device).type == "cpu":
+                    self.assertIn("c10::convert_with_rounding", code)
+
+    def test_e5m3fnu_falls_back(self, device):
         for mode in MODES:
             with self.subTest(mode=mode):
                 code = self._check(device, torch.float32, torch.float8_e5m3fnu, mode)
                 self.assertIn(FALLBACK, code)
 
-    def _check_float64_to_dtype_rounds_once(self, device):
+    # Triton reduces float64 with PTX, so elsewhere it still rounds twice.
+    @expectedFailureIfRocm
+    @expectedFailureXPU
+    def test_float64_to_dtype_rounds_once(self, device):
         # Like eager, rounding to float32 first (the compute type of Triton, or
         # through float constructors in C++) must be avoided: test the
         # neighbors of the midpoints between dst's values.
@@ -130,6 +165,9 @@ class _RoundedConversionTestMixin:
             torch.float8_e4m3fn,
             torch.float8_e5m2,
         ):
+            if not is_triton_fp8_dtype_supported(dst, device):
+                # The conversion falls back to eager.
+                continue
             int_dtype = torch.int16 if dst.itemsize == 2 else torch.uint8
             bits = torch.arange(1 << (8 * dst.itemsize), dtype=torch.int32)
             values = bits.to(int_dtype).view(dst).double()
@@ -143,51 +181,24 @@ class _RoundedConversionTestMixin:
 
             with self.subTest(dst=dst):
                 torch._dynamo.reset()
-                actual = torch.compile(fn, fullgraph=True)(x)
+                actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
                 self.assertSameValues(actual, fn(x))
-
-
-class TestRoundedConversionInductorCPU(_RoundedConversionTestMixin, TestCase):
-    hw_classification = HardwareClassification.CPU
-
-    @unittest.skipIf(not HAS_CPU, "requires CPU")
-    @parametrize("pair", PAIRS, name_fn=_pair_name)
-    def test_cpu_matches_eager(self, pair):
-        src, dst = pair
-        for mode in MODES:
-            with self.subTest(mode=mode):
-                code = self._check("cpu", src, dst, mode)
-                self.assertIn("c10::convert_with_rounding", code)
-
-    @unittest.skipIf(not HAS_CPU, "requires CPU")
-    def test_cpu_e5m3fnu_falls_back(self):
-        self._check_e5m3fnu_falls_back("cpu")
-
-    @unittest.skipIf(not HAS_CPU, "requires CPU")
-    def test_cpu_float64_to_dtype_rounds_once(self):
-        self._check_float64_to_dtype_rounds_once("cpu")
+                code = "\n".join(code)
+                if torch.device(device).type == "cpu":
+                    # The vectorized loop uses VecConvert, the tail c10::convert.
+                    if valid_vec_isa_list():
+                        self.assertIn("at::vec::convert", code)
+                else:
+                    self.assertTrue(
+                        "cvt.rn.f16.f64" in code
+                        or "cvt.rn.bf16.f64" in code
+                        or "round_float64_to_odd_float32" in code
+                    )
 
 
 @unittest.skipIf(not HAS_CUDA, "requires CUDA")
 class TestRoundedConversionInductorCUDA(_RoundedConversionTestMixin, TestCase):
     hw_classification = HardwareClassification.CUDA
-
-    @parametrize("pair", PAIRS, name_fn=_pair_name)
-    def test_cuda_matches_eager(self, pair):
-        src, dst = pair
-        for mode in MODES:
-            with self.subTest(mode=mode):
-                code = self._check("cuda", src, dst, mode)
-                if is_triton_fp8_dtype_supported(dst, "cuda"):
-                    self.assertNotIn(FALLBACK, code)
-                else:
-                    self.assertIn(FALLBACK, code)
-
-    def test_cuda_e5m3fnu_falls_back(self):
-        self._check_e5m3fnu_falls_back("cuda")
-
-    def test_cuda_float64_to_dtype_rounds_once(self):
-        self._check_float64_to_dtype_rounds_once("cuda")
 
     def test_cuda_instructions(self):
         cc = _cuda_capability()
@@ -210,7 +221,7 @@ class TestRoundedConversionInductorCUDA(_RoundedConversionTestMixin, TestCase):
             (f64, f32, "toward_positive", "cvt.rp.f32.f64"),
             (f64, f16, "toward_zero", "cvt.rz.f16.f64"),
             # Round to odd through float32.
-            (f64, e4m3, "toward_zero", "cvt.rz.f32.f64"),
+            (f64, e5m2, "toward_zero", "round_float64_to_odd_float32"),
             (f32, e8m0, "to_nearest_even", "round_float32_to_bits"),
         ]
         if cc >= 80:
@@ -219,22 +230,22 @@ class TestRoundedConversionInductorCUDA(_RoundedConversionTestMixin, TestCase):
                 (f32, bf16, "toward_zero", "cvt.rz.bf16.f32"),
             ]
         if cc >= 89:
+            # Round to nearest, then step toward x in the directed modes.
             expectations += [
-                (f32, e4m3, "to_nearest_even", "cvt.rn.satfinite.e4m3x2.f32"),
-                (f32, e5m2, "to_nearest_even", "cvt.rn.satfinite.e5m2x2.f32"),
-                # Round to nearest, then step toward x after decoding.
-                (f32, e4m3, "toward_zero", "cvt.rn.f16x2.e4m3x2"),
-                (f32, e5m2, "toward_positive", "cvt.rn.f16x2.e5m2x2"),
+                (f32, e4m3, "to_nearest_even", "float32_to_float8_bits"),
+                (f32, e5m2, "toward_positive", "float32_to_float8_bits"),
             ]
         else:
-            expectations.append((f32, e4m3, "toward_zero", "round_float32_to_bits"))
+            expectations.append((f32, e5m2, "toward_zero", "round_float32_to_bits"))
         if cc >= 90:
             expectations += [
                 (f32, bf16, "toward_negative", "cvt.rm.bf16.f32"),
                 (f64, bf16, "toward_positive", "cvt.rp.bf16.f64"),
             ]
         else:
-            expectations.append((f64, bf16, "toward_zero", "cvt.rz.f32.f64"))
+            expectations.append(
+                (f64, bf16, "toward_zero", "round_float64_to_odd_float32")
+            )
         if cc >= 100:
             expectations += [
                 (f32, e8m0, "toward_positive", "cvt.rp.ue8m0x2.f32"),
@@ -242,6 +253,8 @@ class TestRoundedConversionInductorCUDA(_RoundedConversionTestMixin, TestCase):
                 (f32, e8m0, "toward_negative", "cvt.rz.ue8m0x2.f32"),
             ]
         for src, dst, mode, snippet in expectations:
+            if not is_triton_fp8_dtype_supported(dst, "cuda"):
+                continue
             with self.subTest(src=src, dst=dst, mode=mode):
                 code = self._check("cuda", src, dst, mode)
                 self.assertIn(snippet, code)
@@ -264,10 +277,16 @@ class TestRoundedConversionInductorCUDA(_RoundedConversionTestMixin, TestCase):
         self.assertSameValues(actual, fn(x))
 
     def test_fusion(self):
+        # Before sm_89, Triton has no float8_e4m3fn.
+        if is_triton_fp8_dtype_supported(torch.float8_e4m3fn, "cuda"):
+            q_dtype = torch.float8_e4m3fn
+        else:
+            q_dtype = torch.float8_e5m2
+
         def fn(x, y):
             scale = x.abs().amax(dim=-1, keepdim=True) / 448
             e8m0 = scale.to(torch.float8_e8m0fnu, round="toward_positive")
-            q = (x / e8m0.float()).to(torch.float8_e4m3fn, round="toward_zero")
+            q = (x / e8m0.float()).to(q_dtype, round="toward_zero")
             return q, e8m0, (y * 2).to(torch.bfloat16, round="toward_negative") + 1
 
         x = torch.randn(64, 32, device="cuda")
@@ -278,7 +297,29 @@ class TestRoundedConversionInductorCUDA(_RoundedConversionTestMixin, TestCase):
         self.assertNotIn("extern_kernels", code)
         self.assertNotIn(FALLBACK, code)
 
-    @config.patch(force_disable_caches=True)
+    def test_scan_combine_fn(self):
+        # Scans lift their combine function into a separate Triton function,
+        # so the conversions must not write to the kernel. This combine
+        # function is associative, as the rounding is monotonic and idempotent.
+        for dtype, round in (
+            (torch.float32, "toward_zero"),
+            (torch.float64, None),
+            (torch.float64, "toward_positive"),
+        ):
+
+            def combine(a, b):
+                return torch.maximum(a, b.to(torch.float8_e5m2, round=round).to(dtype))
+
+            def fn(x):
+                return associative_scan(combine, x, 1, combine_mode="pointwise")
+
+            x = torch.randn(4, 64, device="cuda", dtype=dtype) * 100
+            with self.subTest(dtype=dtype, round=round):
+                torch._dynamo.reset()
+                actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+                self.assertIn("_triton_helper_fn", code)
+                self.assertEqual(actual, fn(x), atol=0, rtol=0)
+
     def test_software_helper(self):
         # Exercise the Triton software path for every format and mode, even
         # where Inductor would emit a hardware instruction.
@@ -324,8 +365,9 @@ class TestRoundedConversionInductorCUDA(_RoundedConversionTestMixin, TestCase):
                     self.assertSameValues(actual, x.cpu().to(dst, round=mode))
 
 
-instantiate_parametrized_tests(TestRoundedConversionInductorCPU)
-instantiate_parametrized_tests(TestRoundedConversionInductorCUDA)
+instantiate_device_type_tests(
+    TestRoundedConversionInductor, globals(), except_for=("mps",)
+)
 
 if __name__ == "__main__":
     run_tests()
