@@ -167,7 +167,7 @@ def signature_of(
             # signatures match Triton's eager specialization.
             if (
                 use_fp64_for_python_float
-                and config._use_fp64_for_unbacked_floats
+                and (config._use_fp64_for_unbacked_floats or config.strict_pointwise)
                 and device_supports_fp64(V.graph.current_device)
             ):
                 return "fp64"
@@ -179,7 +179,7 @@ def signature_of(
             # follow the same eager-vs-Inductor signature policy as literals.
             if (
                 use_fp64_for_python_float
-                and config._use_fp64_for_unbacked_floats
+                and (config._use_fp64_for_unbacked_floats or config.strict_pointwise)
                 and device_supports_fp64(V.graph.current_device)
             ):
                 return "fp64"
