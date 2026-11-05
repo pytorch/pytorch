@@ -407,7 +407,7 @@ def _get_param_all_gather_inputs(
             fsdp_param.param_dtype is not None
             and not fsdp_param.offload_to_cpu
             and not hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
-            and not fsdp_param.pads_all_gather_input
+            and not fsdp_param.needs_nonzero_dim_padding
         )
 
     param_all_gather_inputs: list[list[torch.Tensor]] = [[] for _ in fsdp_params]
@@ -871,7 +871,7 @@ def _cast_and_view_sharded_grads(
         group_output = new_output
         group_offset = group_output.storage_offset()
         for fsdp_param, padded_sharded_numel in param_group:
-            if fsdp_param.pads_all_gather_input:
+            if fsdp_param.needs_nonzero_dim_padding:
                 # Padded like the all-gather input: copy out this rank's rows
                 start = group_offset - group_output.storage_offset()
                 padded = group_output[start : start + padded_sharded_numel].view(
