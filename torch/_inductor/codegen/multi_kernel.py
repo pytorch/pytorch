@@ -6,9 +6,13 @@ import os
 import pathlib
 from typing import Any
 
+import sympy
+
+import torch
 from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Max
 
 from .. import config
 from ..codecache import code_hash, CodeCacheFuture, get_path, write_atomic
@@ -142,6 +146,19 @@ class MultiKernelState:
 
         return multi_kernel_name
 
+    def define_index_dtype_kernel(self, kernels: list[Any]) -> str:
+        """Define the IndexDtypeMultiKernelCall for kernels = [int32 copy, int64 copy]."""
+        kernel_names = tuple(k.kernel_name for k in kernels)
+        key = ("index_dtype", *kernel_names)
+        if key not in self.subkernel_to_kernel_name:
+            name = f"multi_kernel_{self._root._num_names}"
+            self._root._num_names += 1
+            self.subkernel_to_kernel_name[key] = name
+            self.kernel_defs.writeline(
+                f"{name} = async_compile.index_dtype_multi_kernel({', '.join(kernel_names)})"
+            )
+        return self.subkernel_to_kernel_name[key]
+
 
 class MultiKernel:
     """
@@ -270,12 +287,19 @@ class MultiKernel:
                 kernel_name, call_args, arg_types=arg_types
             )
         else:
+            trailing = self.trailing_call_args()
             V.graph.wrapper_code.generate_kernel_call(
-                kernel_name, multi_call_args, arg_types=multi_call_arg_types
+                kernel_name,
+                [*multi_call_args, *trailing],
+                arg_types=[*multi_call_arg_types, *map(type, trailing)],
             )
 
         for ws in reversed(self.kernels[0].args.workspace_args):
             V.graph.wrapper_code.generate_workspace_deallocation(ws)
+
+    def trailing_call_args(self) -> list[sympy.Expr]:
+        """Launch args after the subkernels' own, read and stripped by the runtime call."""
+        return []
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
@@ -315,6 +339,46 @@ class MultiKernel:
 
     def warn_mix_layout(self, kernel_name: str):
         pass
+
+
+class IndexDtypeMultiKernel(MultiKernel):
+    """
+    An int32- and an int64-indexed copy of one kernel (config.dispatch_32bit_indexing_at_runtime).
+
+    The launch passes max(bounds) as a trailing argument, and IndexDtypeMultiKernelCall
+    runs the int32 copy when it fits in int32, so the choice needs no guard.
+    """
+
+    def __init__(self, kernels, bounds: list[sympy.Expr]):
+        if len(kernels) != 2:
+            raise AssertionError(f"expected 2 kernels, got {len(kernels)}")
+        self.kernels = kernels
+        self.bounds = bounds
+        self.kernel_name = (
+            V.graph.wrapper_code.multi_kernel_state.define_index_dtype_kernel(kernels)
+        )
+        self.args = object()
+
+    def trailing_call_args(self) -> list[sympy.Expr]:
+        return [Max(*self.bounds)]
+
+
+# Hoisted out of IndexDtypeMultiKernelCall.run, which is on the launch path.
+_INT32_MAX = torch.iinfo(torch.int32).max
+
+
+class IndexDtypeMultiKernelCall:
+    """Runtime half of IndexDtypeMultiKernel; the last argument picks the kernel."""
+
+    def __init__(self, int32_kernel, int64_kernel):
+        self._kernels = [int32_kernel, int64_kernel]
+
+    def run(self, *args, **kwargs):
+        index = 0 if args[-1] <= _INT32_MAX else 1
+        kernel = self._kernels[index]
+        if isinstance(kernel, CodeCacheFuture):
+            kernel = self._kernels[index] = kernel.result()
+        kernel.run(*args[:-1], **kwargs)
 
 
 class MultiKernelCall:
