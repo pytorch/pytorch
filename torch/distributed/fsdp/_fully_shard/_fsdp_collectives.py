@@ -573,24 +573,17 @@ def _default_reduce_scatter_input_fn(
     shard_dims: list[int],
     world_size: int,
 ) -> Callable[[torch.Tensor], None]:
-    """Reorder gradients sharded on a nonzero dim by rank and return their copy-in."""
+    """Reorder gradients sharded on a nonzero dim by rank, zero-padding that dim
+    to the padded sharded size, and return their copy-in."""
     if world_size > 1:
         for i, shard_dim in enumerate(shard_dims):
             if shard_dim != 0:
-                unsharded_grads[i] = _reorder_by_rank(
-                    unsharded_grads[i], shard_dim, world_size
-                )
+                grad = unsharded_grads[i]
+                if pad := -grad.shape[shard_dim] % world_size:
+                    grad = F.pad(grad, (0, 0) * (grad.ndim - 1 - shard_dim) + (0, pad))
+                chunks = torch.chunk(grad, world_size, dim=shard_dim)
+                unsharded_grads[i] = torch.cat(chunks, dim=0)
     return lambda out: foreach_reduce_scatter_copy_in(unsharded_grads, out, world_size)
-
-
-def _reorder_by_rank(
-    grad: torch.Tensor, shard_dim: int, world_size: int
-) -> torch.Tensor:
-    """Concatenate grad's chunks on shard_dim along dim 0, zero-padding them to
-    the padded sharded size if world_size does not divide that dim."""
-    if pad := -grad.size(shard_dim) % world_size:
-        grad = F.pad(grad, (0, 0) * (grad.ndim - 1 - shard_dim) + (0, pad))
-    return torch.cat(torch.chunk(grad, world_size, dim=shard_dim), dim=0)
 
 
 @torch.no_grad()
