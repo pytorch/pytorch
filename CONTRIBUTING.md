@@ -32,6 +32,7 @@ aspects of contributing to PyTorch.
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
   - [Skip CI while iterating](#skip-ci-while-iterating)
+  - [Keep PR stacks small](#keep-pr-stacks-small)
 - [Merging your Change](#merging-your-change)
 - [GreenLight](#greenlight)
 - [Writing documentation](#writing-documentation)
@@ -164,6 +165,8 @@ Rectangles are states. Rounded boxes are processes that move an item between sta
 | Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
 
 The `in progress` and `ready for review` labels are managed by bots: authors should not add them by hand.
+
+The labels are the source of truth for where your PR is in the process. For what to do next, check the first pytorchbot comment, which displays status, CI results, doc previews, among other fun details.
 
 **When does my PR become `ready for review`?** The bot replaces `in progress` with `ready for review` once all of the following hold:
 
@@ -363,6 +366,9 @@ To install the nightly binaries built with ROCm, you can pass in the flag `--roc
 ./tools/nightly.py checkout -b my-nightly-branch --rocm
 source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
+
+Pass `--rocm preview` to opt into the moving ROCm preview channel. Bare
+`--rocm` continues to select the latest supported numeric ROCm version.
 
 You can also use this tool to pull the nightly commits into the current branch:
 
@@ -657,6 +663,17 @@ preserve it, so you do not need to repeat the prefix on each update.
 `ghstack -u` replaces the PR title from the commit subject, so keep the prefix
 there too if you use that option. This is separate from GitHub's `[no ci]`
 commit-message directive, which applies only to the commit that contains it.
+
+### Keep PR stacks small
+
+Stacks of pull requests must have fewer than 10 PRs. Every PR in a stack runs
+CI on each push, so large stacks use up shared CI resources. Land the bottom of
+a stack before adding more on top, and use
+[`[no-ci]`](#skip-ci-while-iterating) on PRs that don't need CI yet.
+
+For `ghstack` stacks, the automated review requests changes on a PR that is
+10th or higher from the bottom, and CI fails on a PR with 10 or more PRs below
+it unless the PR has the `ciflow/trunk` label.
 
 ## Merging your Change
 The labels described in the [PR lifecycle](#pr-lifecycle) and the pytorchbot comment on your PR represent the status of your PR, including what the next step is and who is expected to take it.
