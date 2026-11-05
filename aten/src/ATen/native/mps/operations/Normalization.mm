@@ -518,7 +518,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
         auto pso = lib.getPipelineStateForFunc(fmt::format("layer_norm_backward_{}_{}", variant, type_str));
         [enc setComputePipelineState:pso];
         mtl_setArgs(enc, *dOut, *X, mean_c, rstd_c, grad_input, row_size, gamma);
-        [enc dispatchThreadgroups:MTLSizeMake(rows, 1, 1) threadsPerThreadgroup:MTLSizeMake(threads, 1, 1)];
+        [enc dispatchThreadgroups:MTLSizeMake(1, rows, 1) threadsPerThreadgroup:MTLSizeMake(threads, 1, 1)];
       }
       if (has_affine_grads) {
         auto pso = lib.getPipelineStateForFunc(fmt::format("layer_norm_backward_affine_{}", type_str));
