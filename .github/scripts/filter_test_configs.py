@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import re
-import shlex
 import subprocess
 import sys
 import warnings
@@ -659,23 +658,6 @@ def enforce_lf_allowlist(
     return test_matrix
 
 
-def validate_periodic_test_matrix(
-    workflow: str | None, test_matrix: dict[str, list[Any]]
-) -> None:
-    if workflow != "periodic-strict":
-        return
-    for entry in test_matrix.get("include", []):
-        if entry.get("config") != "periodic":
-            continue
-        flags = shlex.split(entry.get("extra_flags") or "")
-        if not any(re.fullmatch(r"--periodic-filter=\S+", flag) for flag in flags):
-            raise ValueError(
-                "periodic-strict requires extra_flags containing "
-                "--periodic-filter=<marker> for every periodic entry "
-                f"(runner={entry.get('runner')}, shard={entry.get('shard')})"
-            )
-
-
 def main() -> None:
     args = parse_args()
     # Load the original test matrix set by the workflow. Its format, however,
@@ -688,8 +670,6 @@ def main() -> None:
         # We handle invalid test matrix gracefully by marking it as empty
         set_output("is-test-matrix-empty", True)
         sys.exit(0)
-
-    validate_periodic_test_matrix(args.workflow, test_matrix)
 
     pr_number = args.pr_number
     tag = args.tag

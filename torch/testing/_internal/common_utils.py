@@ -1923,7 +1923,7 @@ TEST_CONFIG: str | None = TestEnvironment.def_setting(
 TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
     "TEST_WITH_PERIODIC",
     env_var="PYTORCH_TEST_WITH_PERIODIC",
-    implied_by_fn=lambda: TEST_CONFIG == "periodic",
+    implied_by_fn=lambda: TEST_CONFIG in ("periodic", "periodic_daily"),
 )
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
@@ -3051,13 +3051,17 @@ def periodic(fn=None, *, hours=4):
     """Marks a test that CI runs only in periodic test mode.
 
     In periodic-strict, plain @periodic runs every four hours and
-    @periodic(hours=24) runs daily. These use the mutually exclusive periodic
-    and periodic_daily pytest markers. Both reuse PYTORCH_TEST_WITH_PERIODIC
-    to enable tests in periodic mode.
+    @periodic(hours=24) runs daily. They select the periodic and periodic_daily
+    pytest markers, respectively. Whenever effective markers combine,
+    including through class/method decoration, stacking or inheritance,
+    periodic_daily takes precedence over periodic. Both reuse
+    PYTORCH_TEST_WITH_PERIODIC to enable tests in periodic mode.
 
-    The periodic test configuration selects the corresponding pytest marker
-    and sets PYTORCH_TEST_WITH_PERIODIC. Other periodic jobs can also run the
-    @periodic tests in their own files by setting PYTORCH_TEST_WITH_PERIODIC.
+    The periodic and periodic_daily test configurations select the matching
+    marker and set PYTORCH_TEST_WITH_PERIODIC. Other periodic jobs setting
+    that flag without a marker filter run both groups on their own cadence;
+    hours does not enforce timing in those jobs. Non-scheduled periodic-strict
+    runs cover both groups by default; manual dispatch can select either.
     Tests in files outside the default Python test sweep (e.g. distributed or
     quantization) never run in CI unless such a job runs those files.
 
@@ -3069,6 +3073,8 @@ def periodic(fn=None, *, hours=4):
     while the periodic gate keeps a test marked both out of the slow shards.
     Such a test runs only in jobs that set both flags, like periodic-strict.
     """
+    if fn is not None and not callable(fn):
+        raise TypeError("periodic expects a test or @periodic(hours=24); pass hours by keyword")
     if hours not in (4, 24):
         raise ValueError("periodic supports only hours=4 or hours=24")
     if fn is None:

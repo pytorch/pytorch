@@ -178,7 +178,7 @@ if [[ -n $TESTS_TO_INCLUDE ]]; then
   INCLUDE_CLAUSE="--include $TESTS_TO_INCLUDE"
 fi
 
-if [[ "$TEST_CONFIG" == 'periodic' ]]; then
+if [[ "$TEST_CONFIG" == 'periodic' || "$TEST_CONFIG" == 'periodic_daily' ]]; then
   # These custom run_test.py targets cannot be filtered cleanly by -m periodic:
   # doctests and autoload bypass pytest; AOT builds extensions before pytest;
   # CI sanity expects its unmarked test to fail.
@@ -244,9 +244,8 @@ if [[ "$TEST_CONFIG" == 'slow' ]]; then
   export PYTORCH_TEST_SKIP_FAST=1
 fi
 
-if [[ "$TEST_CONFIG" == 'periodic' ]]; then
+if [[ "$TEST_CONFIG" == 'periodic' || "$TEST_CONFIG" == 'periodic_daily' ]]; then
   export PYTORCH_TEST_WITH_PERIODIC=1
-  PYTHON_TEST_EXTRA_OPTION="${PYTHON_TEST_EXTRA_OPTION:-} ${EXTRA_FLAGS:-}"
   # Allows @periodic tests that are also marked slow (@slowTest or
   # slow-tests.json) to run.
   export PYTORCH_TEST_WITH_SLOW=1
@@ -2817,7 +2816,7 @@ elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_aten
   fi
-elif [[ "${TEST_CONFIG}" == periodic ]]; then
+elif [[ "${TEST_CONFIG}" == periodic || "${TEST_CONFIG}" == periodic_daily ]]; then
   # Sweeps the default test files; run_test.py selects the @periodic tests.
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
