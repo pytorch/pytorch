@@ -16,10 +16,15 @@ constant float W16[] = { // W_16^m for m < 10, as (re, im) pairs
     -0.382683432f, -0.923879533f, -0.707106781f, -0.707106781f, -0.923879533f,
     -0.382683432f, -1.0f,         0.0f,          -0.923879533f, 0.382683432f};
 
-// Radix-R butterfly over v[0], v[S], ... in place; radices 8 and 16 are 4 x R2
-// composites whose X[k1 + 4 k2] lands at v[(k2 + R2 k1) S]
+template <uint R> // First factor of a composite radix; 1 if prime
+constexpr uint comp_r1() {
+  return R > 7 && R % 4 == 0 ? 4 : R > 7 && R % 3 == 0 ? 3 : R == 25 ? 5 : 1;
+}
+
+// Radix-R butterfly over v[0], v[S], ... in place (composite R1 R2: X[k1 + R1
+// k2] lands at v[(k2 + R2 k1) S]); tw holds W_R at stride ts
 template <uint R, uint S>
-inline void bfly(thread float2* v, bool inv) {
+inline void bfly(thread float2* v, bool inv, constant float2* tw, uint ts) {
   if (R == 2) {
     const float2 a = v[0], b = v[S];
     v[0] = a + b;
@@ -77,36 +82,37 @@ inline void bfly(thread float2* v, bool inv) {
     v[5 * S] = t2 - u2;
     v[3 * S] = t3 + u3;
     v[4 * S] = t3 - u3;
-  } else if (R >= 8) {
-    constexpr uint R2 = R / 4;
+  } else if (comp_r1<R>() > 1) {
+    constexpr uint R1 = comp_r1<R>(), R2 = R / R1;
 
     for (uint n2 = 0; n2 < R2; n2++) {
-      bfly<4, S * R2>(v + n2 * S, inv);
+      bfly<R1, S * R2>(v + n2 * S, inv, tw, ts);
     }
 
     for (uint n2 = 1; n2 < R2; n2++) {
-      for (uint k1 = 1; k1 < 4; k1++) {
+      for (uint k1 = 1; k1 < R1; k1++) {
         // W_R^m = W_16^(16 m / R), and W16 holds two floats per root
-        const uint i = 32 / R * n2 * k1;
-        const float2 w = float2(W16[i], W16[i + 1]);
+        const uint m = n2 * k1, i = 32 / R * m;
+        const float2 w = R % 8 == 0 ? float2(W16[i], W16[i + 1]) : tw[m * ts];
         v[(n2 + R2 * k1) * S] = mul(v[(n2 + R2 * k1) * S], inv ? conj(w) : w);
       }
     }
 
-    for (uint k1 = 0; k1 < 4; k1++) {
-      bfly<R2, S>(v + R2 * k1 * S, inv);
+    for (uint k1 = 0; k1 < R1; k1++) {
+      bfly<R2, S>(v + R2 * k1 * S, inv, tw, ts);
     }
   }
 }
 
-template <uint R> // Composite butterflies leave X[k1 + 4 k2] at k2 + R2 k1
+template <uint R> // Composite butterflies leave X[k1 + R1 k2] at k2 + R2 k1
 inline uint opos(uint r) {
-  return R < 8 ? r : (r % 4) * (R / 4) + r / 4;
+  constexpr uint R1 = comp_r1<R>();
+  return R1 == 1 ? r : (r % R1) * (R / R1) + r / R1;
 }
 
-inline int2 batch_off(constant FFTParams& p, uint y, uint z) {
-  int2 off = int(y) * int2(p.in_strides[1], p.out_strides[1]);
-  for (uint d = 2; d < p.ndim; z /= p.sizes[d++]) {
+inline int2 batch_off(constant FFTParams& p, uint y, uint z, uint d0) {
+  int2 off = int(y) * int2(p.in_strides[d0], p.out_strides[d0]);
+  for (uint d = d0 + 1; d < p.ndim; z /= p.sizes[d++]) {
     off += int(z % p.sizes[d]) * int2(p.in_strides[d], p.out_strides[d]);
   }
   return off;
@@ -134,6 +140,11 @@ struct Bufs {
 
 typedef constant FFTParams& Params;
 
+template <bool G, class I, class O> // Stage twiddle W^m (two-level table if G)
+inline float2 wget(Bufs<I, O> b, uint m) {
+  return G ? twid(b.tt, m) : b.tw[m];
+}
+
 template <class I, class O, uint F, bool C>
 inline float2 load_pt(Bufs<I, O> b, Params p, uint e) {
   const int s = C ? 1 : p.in_stride;
@@ -159,35 +170,41 @@ inline void store_pt(Bufs<I, O> b, Params p, uint k, float2 v, float2 w) {
 
   v = (F & kFFTFourStepTwiddles) ? mul(v, (F & kFFTInverse) ? conj(w) : w) : v;
   const uint kf = extended && p.out_k_mul > 1 ? k * p.out_k_mul + b.i0 : k;
-  if (kf < p.n_out) {
+  if ((F & kFFTGlobalStage) || kf < p.n_out) {
     b.out[int(k) * s] = cast_to<O>(extended && b.cs ? mul(v, b.cs[kf]) : v);
   }
 }
 
-template <bool P2> // j % ns: j stays below 2^13, exact in float
+template <bool P2, bool G>
 inline uint mod_ns(uint j, uint ns, float inv_ns) {
   if (P2) {
     return j & (ns - 1);
   }
 
   int k = int(j) - int(ns) * int(float(j) * inv_ns);
+  // Global stages reach j = 2^31, past float's exact integers: a second step
+  // on the small remainder makes it exact
+  if (G) {
+    k -= int(ns) * int(float(k) * inv_ns);
+  }
   k = k < 0 ? k + int(ns) : k;
   return k >= int(ns) ? k - ns : k;
 }
 
 // M radix-R butterflies per thread for stage s (Stockham stride Ns); smem
-// exchanges stages
+// exchanges stages. G: one global-memory stage.
 template <uint R, bool P2, class I, class O, uint F, uint N, uint NS, bool C>
 inline void stage(Bufs<I, O> b, Params p, uint s, uint lane, bool valid) {
+  constexpr bool G = F & kFFTGlobalStage;
   constexpr bool INV = F & kFFTInverse;
   constexpr bool four_step = F & kFFTFourStepTwiddles;
-  constexpr uint EPT = fft_points_per_thread(N, F);
+  constexpr uint EPT = G ? R : fft_points_per_thread(N, F);
   constexpr uint M = (EPT + R - 1) / R;
   const uint n = N ? N : p.n, J = N ? N / EPT : p.jt, nR = n / R,
              Ns = NS ? NS : p.ns[s], twstep = NS ? N / NS / R : p.twstep[s],
              sh = C ? fft_contig_pad_shift(N) : p.padshift;
   const bool first = NS ? NS == 1 : s == 0,
-             last = NS ? NS * R == N : s + 1 == p.nstages;
+             last = G || (NS ? NS * R == N : s + 1 == p.nstages);
 
   // Pow2 plans keep nR, Ns multiples of 16: padded smem slots are affine in r
   const uint nRv = valid ? nR : 0;
@@ -199,42 +216,46 @@ inline void stage(Bufs<I, O> b, Params p, uint s, uint lane, bool valid) {
   for (uint m = 0; m < M; m++) {
     const uint j = lane + m * J;
     if (j < nR) {
-      const uint k = mod_ns<P2>(j, Ns, inv_ns);
-      if (first) {
+      const uint k = mod_ns<P2, G>(j, Ns, inv_ns);
+      if (first && !G) {
         for (uint r = 0; r < R; r++) {
           v[m][r] = load_pt<I, O, F, C>(b, p, j + r * nR);
         }
       } else {
         const uint bj = pad(j, sh) * es;
-        v[m][0] = b.buf[bj];
+        v[m][0] = G ? load_pt<I, O, F, C>(b, p, j) : b.buf[bj];
         // W^(r k) from gathered W^1, W^4, W^8 and W^4 steps: gathers cost more
-        const float2 w1 = b.tw[k * twstep];
+        const float2 w1 = wget<G>(b, k * twstep);
         float2 wa = 0.0f, wb = 0.0f;
         for (uint r = 1; r < R; r++) {
-          wb = r == 4 || r == 8 ? b.tw[r * k * twstep]
-              : (r & 3)         ? wb
-                                : mul(wb, b.tw[4 * k * twstep]);
+          wb = r == 4 || (r == 8 && !G) ? wget<G>(b, r * k * twstep)
+              : (r & 3)                 ? wb
+                                        : mul(wb, wget<G>(b, 4 * k * twstep));
           wa = (r & 3) == 0  ? float2(1.0f, 0.0f)
               : (r & 3) == 1 ? w1
                              : mul(wa, w1);
           const float2 w = r < 4 ? wa : (r & 3) ? mul(wa, wb) : wb;
-          const float2 x = b.buf[P2 ? bj + r * rs : pad(j + r * nR, sh) * es];
+          const float2 x = G
+              ? load_pt<I, O, F, C>(b, p, j + r * nR)
+              : b.buf[P2 ? bj + r * rs : pad(j + r * nR, sh) * es];
           v[m][r] = mul(x, INV ? conj(w) : w);
         }
       }
-      bfly<R, 1>(v[m], INV);
+      bfly<R, 1>(v[m], INV, b.tw, nR);
     }
   }
 
-  if (last && (C || !p.via_smem)) {
+  if (last && (C || G || !p.via_smem)) {
     // Four-step twiddles W^(k i0) of the outputs k = j + r nR step by W^(nR i0)
     const float2 ws = four_step ? twid(b.tt, nR * b.i0) : 0.0f;
     for (uint m = 0; m < M; m++) {
       const uint j = lane + m * J;
       if (j < nRv) {
         float2 w = four_step ? twid(b.tt, j * b.i0) : 0.0f;
+        const uint k = G ? mod_ns<P2, G>(j, Ns, inv_ns) : 0;
+        const uint base = G ? (j - k) * R + k : j, step = G ? Ns : nR;
         for (uint r = 0; r < R; r++) {
-          store_pt<I, O, F, C>(b, p, j + r * nR, v[m][opos<R>(r)], w);
+          store_pt<I, O, F, C>(b, p, base + r * step, v[m][opos<R>(r)], w);
           w = mul(w, ws);
         }
       }
@@ -249,7 +270,7 @@ inline void stage(Bufs<I, O> b, Params p, uint s, uint lane, bool valid) {
   for (uint m = 0; m < M; m++) {
     const uint j = lane + m * J;
     if (j < nR) {
-      const uint k = mod_ns<P2>(j, Ns, inv_ns);
+      const uint k = mod_ns<P2, G>(j, Ns, inv_ns);
       const uint base = (j - k) * R + k, bb = pad(base, sh) * es;
       for (uint r = 0; r < R; r++) {
         b.buf[P2 ? bb + r * ws : pad(base + r * Ns, sh) * es] =
@@ -285,21 +306,28 @@ kernel void fft_kernel(
     threadgroup float2* buf [[threadgroup(0)]],
     uint tid [[thread_index_in_threadgroup]],
     uint3 tg [[threadgroup_position_in_grid]]) {
-  constexpr bool P2 = MASK && (MASK & ~MASK_P2) == 0;
+  constexpr bool G = F & kFFTGlobalStage;
+  constexpr bool P2 = !G && MASK && (MASK & ~MASK_P2) == 0;
   constexpr bool four_step = F & kFFTFourStepTwiddles;
   constexpr uint EPT = fft_points_per_thread(N, F);
-  const uint n = N ? N : p.n, B = C ? 1 : p.tgb, J = N ? N / EPT : p.jt;
-  const uint first_b = tg.x * B, nb = min(B, p.sizes[0] - first_b);
+  const uint n = N ? N : p.n, B = C || G ? 1 : p.tgb, J = N ? N / EPT : p.jt;
+  const uint first_b = G ? 0 : tg.x * B, nb = min(B, p.sizes[0] - first_b);
 
   const bool nfast = C || p.in_stride == 1;
-  const uint b = nfast ? tid / J : tid % B, lane = nfast ? tid % J : tid / B;
-  const int2 off = batch_off(p, tg.y, tg.z);
-  const bool valid = b < nb;
+  const uint b = G ? 0 : nfast ? tid / J : tid % B;
+  const uint lane = G ? tg.x * J + tid : nfast ? tid % J : tid / B;
+  const int2 off = batch_off(p, tg.y, tg.z, G ? 0 : 1);
+  const bool valid = G || b < nb;
   const uint r0 = first_b + (valid ? b : 0), i0 = p.i0_dim1 ? tg.y : r0;
 
   device const I* ib = in + off.x + int(r0) * p.in_strides[0];
   device O* ob = out + off.y + int(r0) * p.out_strides[0];
   const Bufs<I, O> bufs{ib, ob, cl, cs, tt, tw, buf + b * p.row, i0};
+
+  if IF_CONSTEXPR (G) {
+    stage<__builtin_ctz(MASK), P2, I, O, F, 0, 0, C>(bufs, p, 0, lane, valid);
+    return;
+  }
 
   if IF_CONSTEXPR (N) {
     constexpr uint r0 = first_radix(N), r1 = first_radix(N / r0),
@@ -317,13 +345,14 @@ kernel void fft_kernel(
       stage<RR, P2, I, O, F, 0, 0, C>(bufs, p, s, lane, valid); \
     }                                                           \
     break;
-      switch (p.radix[s]) { // Descending: ascending compiles 3% slower
-        STAGE(1) STAGE(16) STAGE(8) STAGE(7) STAGE(5) STAGE(4) STAGE(3) STAGE(2)
-      }
+#define RADICES(_) _(1) FFT_GLOBAL_RADICES(_)
+      switch (p.radix[s]) {
+        RADICES(STAGE)
+      } // Ascending cases compile 3% slower
 #undef STAGE
     }
 
-  if (C || !p.via_smem) {
+  if (C || G || !p.via_smem) {
     return;
   }
 
@@ -366,8 +395,9 @@ kernel void fft_kernel(
 #define INST_FP32(IK, OK, F, X) INSTF(IK##_f, OK##_f, F, X)
 
 // Lists of (input kind, output kind, F) the planner requests, F as the literal
-// sum of the kFFT* bits (FFT.h) since #F ends the kernel name: 1 inverse, 4
-// four-step twiddles, 8 extended stores, 16 extended loads
+// sum of the kFFT* bits (FFT.h) since #F ends the kernel name: 1 inverse, 2
+// packed loads, 4 four-step twiddles, 8 extended stores, 16 extended loads, 32
+// global stage, 64 packed real stores
 #define C_f float2
 #define C_h half2
 
@@ -390,3 +420,7 @@ FFT_FIXED_SIZES(FIXED)
 
 #define CONTIG(N) BASIC(INST, (MASK_P2, #N "c_", N, true))
 FFT_CONTIG_SIZES(CONTIG)
+
+#define GLOBAL1(_, X) _(float2, float2, 32, X) _(float2, float2, 33, X)
+#define GLOBAL(R) GLOBAL1(INSTF, ((1u << R), "g" #R "_", 0, false))
+FFT_GLOBAL_RADICES(GLOBAL)
