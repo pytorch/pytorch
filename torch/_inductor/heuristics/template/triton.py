@@ -1727,6 +1727,9 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 # ROCm archs keep the original behavior (one workgroup per CU, shared pool).
 _ROCM_PERSISTENT_MM_NUM_XCDS = {"gfx950": 8}
 
+# Archs that also get 32x32-MFMA mm configs.
+_ROCM_WIDE_MFMA_MM_ARCHS = OrderedSet(["gfx950"])
+
 
 def _rocm_lds_bytes_per_cu() -> int:
     """LDS available to the workgroups resident on one CU.
@@ -1821,6 +1824,48 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             ROCmGemmConfig(256, 128, 32, self.default_num_stages, 4, group_m=4),
             ROCmGemmConfig(256, 128, 64, self.default_num_stages, 8, group_m=4),
             ROCmGemmConfig(256, 256, 64, self.default_num_stages, 8, group_m=4),
+        ]
+
+        # Extra choices for _ROCM_WIDE_MFMA_MM_ARCHS on top of mm_configs and
+        # rocm_persistent_mm_configs: large tiles with the 32x32 MFMA, which reads
+        # half as much LDS per flop as the 16x16 one, including the 256x256 4-warp
+        # tile as a persistent kernel.
+        self._rocm_mm_configs = self.mm_configs
+        self.wide_mfma_mm_configs: list[BaseConfig] = [
+            ROCmGemmConfig(
+                block_m,
+                block_n,
+                block_k,
+                self.default_num_stages,
+                num_warps,
+                group_m=group_m,
+                matrix_instr_nonkdim=32,
+            )
+            for block_m, block_n, block_k, num_warps, group_m in [
+                (128, 128, 64, 4, 16),
+                (128, 128, 64, 8, 8),
+                (128, 256, 32, 4, 16),
+                (128, 256, 64, 8, 4),
+                (256, 128, 32, 4, 4),
+                (256, 128, 64, 8, 4),
+            ]
+        ]
+        self.wide_mfma_persistent_mm_configs: list[BaseConfig] = [
+            ROCmGemmConfig(
+                block_m,
+                block_n,
+                block_k,
+                self.default_num_stages,
+                num_warps,
+                group_m=group_m,
+                matrix_instr_nonkdim=32,
+            )
+            for block_m, block_n, block_k, num_warps, group_m in [
+                (128, 128, 64, 4, 16),
+                (128, 256, 32, 4, 16),
+                (256, 128, 32, 4, 4),
+                (256, 256, 32, 4, 4),
+            ]
         ]
 
         # Exhaustive search for mm configs. num_stages is deliberately not an axis
@@ -2113,6 +2158,16 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         for c in configs:
             c.num_stages = self.default_num_stages
         return super()._filter_configs(configs)
+
+    def get_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
+        if rocm_gfx_arch() not in _ROCM_WIDE_MFMA_MM_ARCHS:
+            return super().get_mm_configs()
+        if self.mm_configs is self._rocm_mm_configs:
+            return partial(
+                self.preprocess_mm_configs,
+                configs=self.mm_configs + self.wide_mfma_mm_configs,
+            )
+        return super().get_mm_configs()
 
     def _finalize_mm_configs(
         self,
@@ -3559,9 +3614,10 @@ class PersistentMMTemplateConfigHeuristic(
             rocm_gfx_arch() in _ROCM_PERSISTENT_MM_NUM_XCDS
             and self.mm_configs is self.persistent_mm_configs
         ):
-            return partial(
-                self.preprocess_mm_configs, configs=self.rocm_persistent_mm_configs
-            )
+            configs = self.rocm_persistent_mm_configs
+            if rocm_gfx_arch() in _ROCM_WIDE_MFMA_MM_ARCHS:
+                configs = configs + self.wide_mfma_persistent_mm_configs
+            return partial(self.preprocess_mm_configs, configs=configs)
         return super().get_mm_configs()
 
     def _get_template_configs_impl(

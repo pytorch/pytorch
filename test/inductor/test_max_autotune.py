@@ -4485,6 +4485,16 @@ class TestTemplateConfigPruning(TestCase):
         self.assertIn("NUM_XCDS : tl.constexpr = 8", code)
         self.assertNotIn("XCD_N", code)
 
+    @unittest.skipIf(not torch.version.hip, "ROCm mm heuristic")
+    def test_rocm_wide_mfma_mm_configs_gated_to_gfx950(self):
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                descs = [
+                    d for _, d in self._rocm_mm_choice_descs(arch, 4096, 256, 4096)[0]
+                ]
+                has_nk32 = any("matrix_instr_nonkdim=32" in d for d in descs)
+                self.assertEqual(has_nk32, arch == "gfx950")
+
     def test_scaled_mm_block_k_pruning_excludes_rdna(self):
         import torch._inductor.heuristics.template.triton as triton_heuristics
         from torch._inductor.heuristics.template.triton import (
