@@ -5,7 +5,10 @@ import math
 import numpy as np
 
 import torch
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
@@ -231,12 +234,8 @@ class TestRoundedConversion(TestCase):
         expected = _expected(x.double(), dst, "to_nearest_even")
         self.assertSameValues(x.to(device).to(dst), expected, x)
 
-    def test_double_rounding(self, device):
-        for dtype in (torch.float16, torch.bfloat16):
-            with self.subTest(dtype=dtype):
-                self._check_double_rounding(device, dtype)
-
-    def _check_double_rounding(self, device, dtype):
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_double_rounding(self, device, dtype):
         # Just above the midpoint between 1 and the next value of dtype, but
         # rounding to float32 first would land exactly on the midpoint.
         # (bfloat16 catches direct static_casts from double on every platform:
@@ -252,8 +251,9 @@ class TestRoundedConversion(TestCase):
         for n in (1, 2):
             y = torch.full((n,), v, dtype=dtype, device=device)
             self.assertEqual(y.tolist(), [1 + eps] * n)
-        out = torch.empty(1, dtype=dtype, device=device)
+        out = torch.zeros(1, dtype=dtype, device=device)
         self.assertEqual(torch.add(x, 0, out=out).item(), 1 + eps)
+        out.zero_()
         torch.special.chebyshev_polynomial_t(x, 1, out=out)
         self.assertEqual(out.item(), 1 + eps)
 

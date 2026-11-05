@@ -22,13 +22,19 @@ TEST(TestCast, TestConvert) {
 }
 
 TEST(TestCast, TestConvertRoundsDoubleOnce) {
+  using torch::headeronly::BFloat16;
   using torch::headeronly::convert;
   using torch::headeronly::Half;
 
-  // Rounding to float first would land exactly on the midpoint, which then
-  // ties to even (1.0).
-  const double x = 1.0 + 0x1p-11 + 0x1p-40;
-  EXPECT_EQ(static_cast<float>(convert<Half>(x)), 1.0f + 0x1p-10f);
+  // Just above the midpoint between 1 and the next value. Rounding to float
+  // first would land exactly on the midpoint, which then ties to even (1.0).
+  // BFloat16 also covers aarch64, where Half converts from double natively.
+  EXPECT_EQ(
+      static_cast<float>(convert<Half>(1.0 + 0x1p-11 + 0x1p-40)),
+      1.0f + 0x1p-10f);
+  EXPECT_EQ(
+      static_cast<float>(convert<BFloat16>(1.0 + 0x1p-8 + 0x1p-40)),
+      1.0f + 0x1p-7f);
 }
 
 TEST(TestCast, TestCheckedConvert) {
