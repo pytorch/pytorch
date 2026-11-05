@@ -404,8 +404,9 @@ def _clamp_nan_fill(x: torch.Tensor, value: torch.types.Number | None) -> torch.
     if value is None or x.dtype == torch.bfloat16:
         return torch.full_like(x, float("nan"))
     if isinstance(value, torch.SymFloat):
-        one = torch.scalar_tensor(1.0, dtype=torch.float64, device=x.device)
-        bits = (one * value).view(torch.int64)
+        bits = torch.scalar_tensor(value, dtype=torch.float64, device=x.device).view(
+            torch.int64
+        )
     else:
         value_bits = int.from_bytes(struct.pack("<d", value), "little", signed=True)
         bits = torch.scalar_tensor(value_bits, dtype=torch.int64, device=x.device)
