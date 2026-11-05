@@ -24,14 +24,16 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/tensor_new.h>
 
 #include <c10/util/Synchronized.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 #include <torch/csrc/utils/python_raii.h>
 
-#include <c10/util/irange.h>
+#include <array>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -1293,6 +1295,72 @@ static py::tuple make_pyobj_dispatch_fns(
       std::move(dispatch), make_redispatch(false), make_redispatch(true));
 }
 
+// _AutoDispatchBelowAutograd, as a plain extension type: it's entered on hot
+// paths (custom op and higher-order op autograd), and a pybind11 class costs
+// several times as much to create, enter and exit. Like the
+// py_context_manager_DEPRECATED binding it replaces, it takes the guard when
+// created and releases it on __exit__ or when destroyed.
+using AutoDispatchBelowAutogradGuard =
+    std::optional<at::AutoDispatchBelowAutograd>;
+
+struct PyAutoDispatchBelowAutograd {
+  PyObject_HEAD
+  // Constructed in auto_dispatch_below_autograd_new; tp_alloc doesn't run C++
+  // constructors.
+  AutoDispatchBelowAutogradGuard guard;
+};
+
+static PyObject* auto_dispatch_below_autograd_new(
+    PyTypeObject* type,
+    PyObject* args,
+    PyObject* kwargs) {
+  if (PyTuple_GET_SIZE(args) != 0 ||
+      (kwargs != nullptr && PyDict_GET_SIZE(kwargs) != 0)) {
+    PyErr_SetString(
+        PyExc_TypeError, "_AutoDispatchBelowAutograd() takes no arguments");
+    return nullptr;
+  }
+  PyObject* self = type->tp_alloc(type, 0);
+  if (self != nullptr) {
+    new (&reinterpret_cast<PyAutoDispatchBelowAutograd*>(self)->guard)
+        AutoDispatchBelowAutogradGuard(std::in_place);
+  }
+  return self;
+}
+
+static void auto_dispatch_below_autograd_dealloc(PyObject* self) {
+  reinterpret_cast<PyAutoDispatchBelowAutograd*>(self)
+      ->guard.~AutoDispatchBelowAutogradGuard();
+  Py_TYPE(self)->tp_free(self);
+}
+
+static PyObject* auto_dispatch_below_autograd_enter(
+    PyObject* /*self*/,
+    PyObject* /*unused*/) {
+  Py_RETURN_NONE;
+}
+
+static PyObject* auto_dispatch_below_autograd_exit(
+    PyObject* self,
+    PyObject* const* /*args*/,
+    Py_ssize_t /*nargs*/) {
+  reinterpret_cast<PyAutoDispatchBelowAutograd*>(self)->guard.reset();
+  Py_RETURN_NONE;
+}
+
+static std::array<PyMethodDef, 3> auto_dispatch_below_autograd_methods = {{
+    {"__enter__", auto_dispatch_below_autograd_enter, METH_NOARGS, nullptr},
+    {"__exit__",
+     castPyCFunctionFast(auto_dispatch_below_autograd_exit),
+     METH_FASTCALL,
+     nullptr},
+    {nullptr, nullptr, 0, nullptr},
+}};
+
+static PyTypeObject PyAutoDispatchBelowAutogradType = {
+    PyVarObject_HEAD_INIT(nullptr, 0)
+};
+
 // A small RAII guard that lets you explicitly *remove* a key from the TLS
 // exclude set.
 class SetExcludeDispatchKeyGuard {
@@ -1348,6 +1416,23 @@ void initDispatchBindings(PyObject* module) {
   PyObjectRedispatchFuncType.tp_vectorcall_offset =
       offsetof(PyObjectRedispatchFunc, vectorcall);
   TORCH_CHECK_PYTHON(PyType_Ready(&PyObjectRedispatchFuncType) >= 0);
+
+  PyAutoDispatchBelowAutogradType.tp_name =
+      "torch._C._AutoDispatchBelowAutograd";
+  PyAutoDispatchBelowAutogradType.tp_basicsize =
+      sizeof(PyAutoDispatchBelowAutograd);
+  PyAutoDispatchBelowAutogradType.tp_flags = Py_TPFLAGS_DEFAULT;
+  PyAutoDispatchBelowAutogradType.tp_new = auto_dispatch_below_autograd_new;
+  PyAutoDispatchBelowAutogradType.tp_dealloc =
+      auto_dispatch_below_autograd_dealloc;
+  PyAutoDispatchBelowAutogradType.tp_methods =
+      auto_dispatch_below_autograd_methods.data();
+  TORCH_CHECK_PYTHON(PyType_Ready(&PyAutoDispatchBelowAutogradType) >= 0);
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObjectRef(
+          module,
+          "_AutoDispatchBelowAutograd",
+          reinterpret_cast<PyObject*>(&PyAutoDispatchBelowAutogradType)) >= 0);
 
   py::class_<c10::OperatorHandle>(m, "_DispatchOperatorHandle")
       .def("schema", &c10::OperatorHandle::schema)
@@ -2033,8 +2118,6 @@ void initDispatchBindings(PyObject* module) {
   py_context_manager<SetExcludeDispatchKeyGuard, c10::DispatchKey, bool>(
       m, "_SetExcludeDispatchKeyGuard");
 
-  py_context_manager_DEPRECATED<at::AutoDispatchBelowAutograd>(
-      m, "_AutoDispatchBelowAutograd");
   py_context_manager<at::AutoDispatchBelowADInplaceOrView>(
       m, "_AutoDispatchBelowADInplaceOrView");
 
