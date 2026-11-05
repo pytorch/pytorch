@@ -58,7 +58,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     preserves_device_selection,
-    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
@@ -4413,7 +4412,6 @@ class TestOpaqueGeneratorDevice(TestCase):
     setUpClass = classmethod(preserves_device_selection(TestCase.setUpClass.__func__))
 
     @onlyAccelerator
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5200")
     def test_make_fx_with_generator(self, device):
         """make_fx should trace through Generator inputs as opaque values."""
         from torch._prims.rng_prims import graphsafe_run_with_rng_state

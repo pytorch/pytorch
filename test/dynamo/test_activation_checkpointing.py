@@ -50,6 +50,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfXpu,
     TEST_CUDA,
+    TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import HAS_TRITON, requires_triton
 from torch.testing._internal.two_tensor import TwoTensor
@@ -319,6 +320,40 @@ class ActivationCheckpointingViaTagsTestBase(torch._dynamo.test_case.TestCase):
                 return runtime_wrapper
 
             run(export_compiler)
+
+    def _check_dropout_graph_capture(self, device, backend, graph_cls):
+        def gn(x):
+            return torch.nn.functional.dropout(x, p=0.5, training=True)
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(gn, x, use_reentrant=False)
+
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.ones(1024, device=device, requires_grad=True)
+        device_mod = torch.get_device_module(device)
+        stream = device_mod.Stream()
+        stream.wait_stream(device_mod.current_stream())
+        with device_mod.stream(stream):
+            for _ in range(3):
+                x.grad = None
+                compiled(x).sum().backward()
+        device_mod.current_stream().wait_stream(stream)
+
+        x.grad = None
+        graph = graph_cls()
+        with device_mod.graph(graph, stream=stream):
+            out = compiled(x)
+            out.sum().backward()
+        device_mod.current_stream().wait_stream(stream)
+
+        outs = []
+        for _ in range(2):
+            graph.replay()
+            device_mod.synchronize()
+            # x is all ones, so both out and x.grad are the replayed mask times 2.
+            self.assertEqual(x.grad, out)
+            outs.append(out.clone())
+        self.assertNotEqual(outs[0], outs[1])
 
 
 class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase):
@@ -2955,6 +2990,29 @@ class ActivationCheckpointingViaTagsCUDAOnlyTests(
         torch._dynamo.reset()
         recompute = torch.compile(build(0.0), backend="aot_eager", fullgraph=True)
         self.assertEqual(get_act_mem(lambda: recompute(x)), 0)
+
+    @requires_triton()
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_checkpointed_dropout_graph_capture(self, backend):
+        self._check_dropout_graph_capture("cuda", backend, torch.cuda.CUDAGraph)
+
+
+instantiate_parametrized_tests(ActivationCheckpointingViaTagsCUDAOnlyTests)
+
+
+@unittest.skipIf(not TEST_XPU, "requires XPU")
+class ActivationCheckpointingViaTagsXPUOnlyTests(
+    ActivationCheckpointingViaTagsTestBase
+):
+    hw_classification = HardwareClassification.XPU
+
+    @requires_triton()
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_checkpointed_dropout_graph_capture(self, backend):
+        self._check_dropout_graph_capture("xpu", backend, torch.xpu.XPUGraph)
+
+
+instantiate_parametrized_tests(ActivationCheckpointingViaTagsXPUOnlyTests)
 
 
 class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase):
