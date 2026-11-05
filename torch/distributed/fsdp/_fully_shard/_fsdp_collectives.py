@@ -640,15 +640,23 @@ def foreach_reduce(
 
     with device_handle.stream(reduce_scatter_stream):
         _div_if_needed(reduce_scatter_input, predivide_factor)
+        # A skipped reduce-scatter must still apply a divide factor folded into
+        # its op, but not one applied outside the op as pre/post-divide factors.
+        divide_in_op = predivide_factor is None and postdivide_factor is None
         if skip_reduce_scatter and all_reduce_group is None:
             # The packed input already is the reduction output
             reduce_output = reduce_scatter_input
-            _div_if_needed(reduce_output, gradient_divide_factor)
+            if divide_in_op:
+                _div_if_needed(reduce_output, gradient_divide_factor)
         elif skip_reduce_scatter:
             # HSDP/replicate keeps a separate output, allocated in the RS stream,
             # since its all-reduce and partial accumulation outlive the input
             reduce_output = torch.empty_like(reduce_scatter_input)
-            if gradient_divide_factor is not None and gradient_divide_factor != 1.0:
+            if (
+                divide_in_op
+                and gradient_divide_factor is not None
+                and gradient_divide_factor != 1.0
+            ):
                 reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
             else:
                 reduce_output.copy_(reduce_scatter_input)
