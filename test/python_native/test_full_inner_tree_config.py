@@ -5,6 +5,7 @@ from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -98,8 +99,9 @@ class TestFullInnerTreeConfig(TestCase):
 class TestFullInnerTreeDevice(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    def test_sm107_profile_reaches_every_plan(self):
-        """Thread the SM107 profile through the split, re-plan, and combine builders."""
+    @parametrize("key", ["sum", "var1"])
+    def test_sm107_profile_reaches_every_plan(self, device, key):
+        """Thread the SM107 profile through the split and combine builders."""
         import cutlass
 
         from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
@@ -110,7 +112,7 @@ class TestFullInnerTreeDevice(TestCase):
             rt.itree_combine_plan,
         )
         sm107 = mock.Mock(cc=(10, 7))
-        profiles, archs = [], []
+        profiles, archs, plans = [], [], []
 
         def full_arch(*args):
             with mock.patch.object(rt._hw, "caps", return_value=sm107):
@@ -120,31 +122,41 @@ class TestFullInnerTreeDevice(TestCase):
         def recorded(real):
             def plan(*args, **kwargs):
                 archs.append(kwargs.get("arch"))
-                return real(*args, **kwargs)
+                plans.append(real(*args, **kwargs))
+                return plans[-1]
 
             return plan
 
-        x = torch.randn(1, (256 << 20) // 4, device="cuda")
+        welford = key == "var1"
+        trait = (T.WelfordOps if welford else T.SumOps)(acc=cutlass.Float32)
+        x = torch.randn(1, (256 << 20) // 4, device=device)
         with (
             mock.patch.object(rt, "_full_itree_arch", full_arch),
             mock.patch.object(rt, "itree_plan", recorded(real_plan)),
             mock.patch.object(rt, "itree_combine_plan", recorded(real_combine)),
         ):
             (got,) = rt.reduce_row_tile(
-                T.SumOps(acc=cutlass.Float32),
-                "sum",
-                x,
-                [torch.float32],
-                order="inner_tree",
+                trait, key, x, [torch.float32], order="inner_tree"
             )
         self.assertIsNotNone(profiles[0])
-        self.assertEqual(profiles[0].split_stage_rows, 4)
-        self.assertGreaterEqual(len(archs), 2)
         self.assertTrue(all(arch is profiles[0] for arch in archs))
-        self.assertEqual(got, x.double().sum(dim=1).float(), atol=1e-1, rtol=1e-5)
+        split, c = plans
+        staged = (split.shape, split.rows_per_block, split.stage_e)
+        self.assertEqual(staged, ("split", 4, 32))
+        folded = (c.combine_tile, c.combine_unroll, c.combine_count, c.combine_weights)
+        # Welford partials come from uniform 8192-element batches, so they are weighted.
+        want = (2048, 64, 8192, True) if welford else (2048, 128, 0, False)
+        self.assertEqual(folded, want)
+        # Each stage's cache key ends with its plan's sig.
+        for tag, plan in (("rowitree1", split), ("rowitree2", c)):
+            self.assertIn(plan.sig, {k[-1] for k in rt._CACHE if k[:2] == (tag, key)})
+        ref = x.double().var(dim=1) if welford else x.double().sum(dim=1)
+        tol = 1e-4 if welford else 1e-1
+        self.assertEqual(got, ref.float(), atol=tol, rtol=1e-5)
 
 
 instantiate_parametrized_tests(TestFullInnerTreeConfig)
+instantiate_device_type_tests(TestFullInnerTreeDevice, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
