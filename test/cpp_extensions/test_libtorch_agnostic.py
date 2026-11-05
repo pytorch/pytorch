@@ -2779,7 +2779,9 @@ instantiate_device_type_tests(
     TestLibtorchAgnosticMetal, globals(), allow_mps=True, only_for="mps"
 )
 
-instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None, allow_xpu=True)
+instantiate_device_type_tests(
+    TestLibtorchAgnostic, globals(), except_for=None, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
