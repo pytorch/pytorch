@@ -36,8 +36,7 @@ void MPSGuardImpl::record(void** event,
     mps_event_id = at::mps::getMPSEventPool()->acquireEvent(enable_timing);
     *event = (__bridge void*)(intptr_t)(mps_event_id);
   }
-  at::mps::getMPSEventPool()->resetEvent(mps_event_id, getStreamByID(stream.id()), enable_timing);
-  at::mps::getMPSEventPool()->recordEvent(mps_event_id, true);
+  at::mps::getMPSEventPool()->recordEvent(mps_event_id, getStreamByID(stream.id()));
 }
 
 void MPSGuardImpl::block(void* event, const Stream& stream) const {

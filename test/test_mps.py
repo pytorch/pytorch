@@ -14,6 +14,7 @@ import os
 import copy
 import gc
 import threading
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -82,6 +83,7 @@ if not torch.backends.mps.is_available():
     NNTestCase = NoTest
 
 MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble]
+HAS_STAGE_TIMING = torch.backends.mps.is_available() and torch._C._mps_has_stage_boundary_timing()
 MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES] + [torch.float8_e4m3fn]
 
 # Determine whether to enable MPS memory leak check (uses same code as CUDA).
@@ -9370,6 +9372,77 @@ class TestMPS(TestCaseMPS):
         end_event.record()
         with self.assertRaisesRegex(RuntimeError, "must be recorded"):
             start_event.elapsed_time(end_event)
+
+    @parametrize("generic", [False, True])
+    @xfailIf(not HAS_STAGE_TIMING)
+    def test_mps_event_elapsed_time_excludes_host_time(self, generic):
+        event_type = torch.Event if generic else torch.mps.Event
+        event_kwargs = {"device": "mps"} if generic else {}
+        start_event = event_type(enable_timing=True, **event_kwargs)
+        end_event = event_type(enable_timing=True, **event_kwargs)
+        torch.mps.synchronize()
+        start_event.record()
+        time.sleep(0.05)
+        torch.ones(1, device="mps") + 1
+        end_event.record()
+        elapsed_ms = start_event.elapsed_time(end_event)
+        self.assertGreater(elapsed_ms, 0.0)
+        self.assertLess(elapsed_ms, 25.0)
+
+    def test_mps_event_many_timing_records_in_flight(self):
+        events = [torch.mps.Event(enable_timing=True) for _ in range(5000)]
+        for event in events:
+            event.record()
+        torch.mps.synchronize()
+        for start, end in zip(events[:-1:500], events[1::500]):
+            self.assertGreaterEqual(start.elapsed_time(end), 0.0)
+
+    def test_mps_timing_event_wait_on_other_stream(self):
+        producer = torch.mps.Stream()
+        consumer = torch.mps.Stream()
+        for i in range(10):
+            with torch.mps.stream(producer):
+                x = torch.full((200_000,), float(i), device="mps")
+                for _ in range(10):
+                    x = x + 1
+            event = torch.mps.Event(enable_timing=True)
+            event.record(producer)
+            with torch.mps.stream(consumer):
+                event.wait(consumer)
+                y = x + 1
+            consumer.synchronize()
+            self.assertEqual(y.cpu(), torch.full((200_000,), float(i) + 11))
+
+    @parametrize("generic", [False, True])
+    def test_mps_event_elapsed_time_includes_gpu_idle(self, generic):
+        event_type = torch.Event if generic else torch.mps.Event
+        event_kwargs = {"device": "mps"} if generic else {}
+        start_event = event_type(enable_timing=True, **event_kwargs)
+        end_event = event_type(enable_timing=True, **event_kwargs)
+        torch.mps.synchronize()
+        host_start = time.monotonic()
+        start_event.record()
+        start_event.synchronize()
+        time.sleep(0.05)
+        end_event.record()
+        end_event.synchronize()
+        host_ms = (time.monotonic() - host_start) * 1e3
+        elapsed_ms = start_event.elapsed_time(end_event)
+        self.assertGreaterEqual(elapsed_ms, 40.0)
+        self.assertLessEqual(elapsed_ms, host_ms + 20.0)
+
+    @parametrize("generic", [False, True])
+    @parametrize("enable_timing", [False, True])
+    def test_mps_event_query_completes_without_sync(self, generic, enable_timing):
+        event_type = torch.Event if generic else torch.mps.Event
+        event_kwargs = {"device": "mps"} if generic else {}
+        event = event_type(enable_timing=enable_timing, **event_kwargs)
+        event.record()
+        deadline = time.monotonic() + 10
+        while not event.query():
+            self.assertLess(time.monotonic(), deadline, "event never completed")
+            time.sleep(0.001)
+        self.assertTrue(event.query())
 
     def test_generic_event(self):
         startEvent = torch.Event('mps', enable_timing=True)

@@ -15,6 +15,7 @@
 
 #ifdef USE_MPS
 #include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSEvent.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <torch/csrc/mps/Stream.h>
@@ -621,6 +622,7 @@ void initModule(PyObject* module) {
   m.def("_mps_get_core_count", []() {
     return at::mps::MPSDevice::getInstance()->getCoreCount();
   });
+  m.def("_mps_has_stage_boundary_timing", &at::mps::hasStageBoundaryTiming);
   m.def("_mps_host_alias_storage", [](py::object py_storage) -> py::object {
     PyObject* obj = py_storage.ptr();
     TORCH_CHECK_TYPE(

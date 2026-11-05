@@ -14260,6 +14260,13 @@ Event.record(stream=None) -> None
 Record the event in a given stream. The stream's device must match the event's device.
 This function is equivalent to ``stream.record_event(self)``.
 
+.. note::
+    On MPS devices with stage-boundary timestamp sampling, timing events defer
+    submission of the recorded work. :meth:`~torch.Event.synchronize` and
+    :meth:`~torch.Event.elapsed_time` submit the work and wait for completion;
+    :meth:`~torch.Event.query` requests submission without blocking. A wait
+    from another stream also requests submission of the recorded work.
+
 Arguments:
     stream (:class:`torch.Stream`, optional): A stream to be recorded.
         If not given, the current stream will be used.

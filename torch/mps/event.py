@@ -30,6 +30,13 @@ class Event:
     def record(self, stream: Stream | None = None) -> None:
         r"""Records the event in a given stream.
 
+        .. note::
+            On devices with stage-boundary timestamp sampling, timing events
+            defer submission of the recorded work. :meth:`synchronize` and
+            :meth:`elapsed_time` submit the work and wait for completion;
+            :meth:`query` requests submission without blocking. A wait from
+            another stream also requests submission of the recorded work.
+
         Args:
             stream (torch.mps.Stream, torch.Stream, optional): Uses ``torch.mps.current_stream()`` if no stream is specified.
         """

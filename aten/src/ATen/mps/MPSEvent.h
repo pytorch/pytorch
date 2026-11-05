@@ -18,6 +18,7 @@ class MPSEvent {
 
   // records an event on the stream. If `stream` is null, records on the
   // stream this event was last recorded or reset on.
+  // syncEvent commits the signal to the GPU queue before returning.
   void record(
       bool needsLock,
       bool syncEvent = false,
@@ -56,6 +57,8 @@ class MPSEvent {
   bool m_enable_timing;
   // Tracks whether this event has been recorded since it was last acquired.
   std::atomic<bool> m_recorded{false};
+  // Set when the latest record may still need stream submission.
+  mutable std::atomic<bool> m_pending_commit{false};
   // Tracks the latest value encoded for the Metal shared event.
   std::atomic<uint64_t> m_signalCounter{0};
   // Stream on which this event is recorded.
@@ -80,6 +83,8 @@ class MPSEvent {
   void recordLocked(bool syncEvent, MPSStream* stream);
   bool waitLocked(bool syncEvent, MPSStream* stream);
   void notifyCpuSync(uint64_t timingGeneration, double completionTime);
+  // commits the stream holding the latest record's signal, if still pending
+  void commitPendingRecord(bool waitForCommit = true) const;
   // assumes timing is enabled and waits for the latest recording's timestamp
   double waitForTiming();
 
@@ -132,9 +137,8 @@ class MPSEventPool {
   // these are mainly used for MPSHooks and torch.mps.Event() bindings
   id_t acquireEvent(bool enable_timing);
   void releaseEvent(id_t event_id);
-  // rebinds an already-acquired event to `stream`
-  void resetEvent(id_t event_id, MPSStream* stream, bool enable_timing);
-  void recordEvent(id_t event_id, bool syncEvent, MPSStream* stream = nullptr);
+  // Public records defer timing events and commit non-timing events.
+  void recordEvent(id_t event_id, MPSStream* stream = nullptr);
   void waitForEvent(id_t event_id, bool syncEvent, MPSStream* stream = nullptr);
   void synchronizeEvent(id_t event_id);
   bool queryEvent(id_t event_id);
@@ -159,5 +163,8 @@ class MPSEventPool {
 
 // shared_ptr is used to get MPSEventPool destroyed after dependent instances
 std::shared_ptr<MPSEventPool> getMPSEventPool();
+
+// Reports stage timestamp support without initializing timing resources.
+TORCH_API bool hasStageBoundaryTiming();
 
 } // namespace at::mps
