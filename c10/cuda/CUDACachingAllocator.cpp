@@ -3358,7 +3358,7 @@ class DeviceCachingAllocator {
       MempoolId_t id, std::shared_ptr<CUDAAllocator> allocator) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 #ifdef USE_ROCM
-    TORCH_CHECK(false, "explicit drain reuse is CUDA-only in this private v0");
+    TORCH_CHECK(false, "explicit drain reuse is only supported on CUDA");
 #endif
     // Validate before registering a pool: a throwing MemPool constructor has
     // no destructor to undo a prior createOrIncrefPool call.
@@ -3550,8 +3550,7 @@ class DeviceCachingAllocator {
     auto uc = --(pp->use_count);
     TORCH_INTERNAL_ASSERT(uc >= 0);
     if (uc == 0 && pp->reuse.enabled) {
-      // Private v0: retain the whole strict pool until runtime teardown. This
-      // deliberately does NOT implement TE's release-before-PG-destruction.
+      // Retain the whole explicit-drain pool until runtime teardown.
       return;
     }
     if (uc == 0) {

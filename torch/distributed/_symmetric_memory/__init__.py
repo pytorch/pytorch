@@ -2517,7 +2517,7 @@ def get_mem_pool(
         raise ValueError("unknown symmetric pool reuse policy")
     strict = reuse_policy == "explicit_drain"
     if strict and (torch.device(device).type != "cuda" or torch.version.hip is not None):
-        raise RuntimeError("explicit_drain is CUDA native CCA only in this private v0")
+        raise RuntimeError("explicit_drain requires the CUDA native caching allocator")
     if device in _symm_mem_pools:
         pool = _symm_mem_pools[device]
         if reuse_policy is not None and bool(getattr(pool, "explicit_drain", False)) != strict:

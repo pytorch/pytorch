@@ -1711,7 +1711,7 @@ class MemPool(_MemPool):
         no_split: bool = False,
         explicit_drain: bool = False,
     ):
-        # Private v0: long-lived pools only. drain_reuse may hold the device
+        # Explicit-drain reuse supports long-lived pools only. drain_reuse may hold the device
         # allocator mutex; retired pools retain segments until runtime teardown.
         # pyrefly: ignore [bad-argument-count]
         super().__init__(allocator, True, use_on_oom, no_split, explicit_drain)
