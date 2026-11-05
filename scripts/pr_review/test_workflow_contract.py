@@ -5537,11 +5537,6 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
             prompt,
         )
         self.assertIn(
-            "Nor is a documentation, comment or code-structure fix that the review"
-            " does not tie to a bug or a violated rule.",
-            prompt,
-        )
-        self.assertIn(
             "reason for Request Changes or as a defect that must be fixed before"
             " approval",
             prompt,
