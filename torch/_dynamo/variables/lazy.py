@@ -57,7 +57,7 @@ class LazyCache:
             self.vt.set_name_hint(self.name_hint)
 
         if self.source_location is not None and self.vt.source_location is None:
-            self.vt.set_source_location(self.source_location)
+            self.vt = self.vt.with_source_location(self.source_location)
 
         del self.value
         del self.source
@@ -106,20 +106,31 @@ class ComputedLazyCache:
             if isinstance(lazy_var.realize(), SymNodeVariable):
                 any_symbolic = True
 
-        if any_symbolic:
+        if any_symbolic and self.op is str:
+            # SymNodeVariable has no tp_repr_impl; specialize instead
+            (arg,) = (arg.realize() for arg in self.args)
+            value = (
+                arg.evaluate_expr()
+                if isinstance(arg, SymNodeVariable)
+                else arg.as_python_constant()
+            )
+            self.vt = ConstantVariable.create(self.op(value))
+        elif any_symbolic:
             # The precomputed constant is stale; recompute symbolically
-            from .builtin import BuiltinVariable
+            from .builder import SourcelessBuilder
 
             tx = InstructionTranslator.current_tx()
             realized_args = [arg.realize() for arg in self.args]
-            self.vt = BuiltinVariable(self.op).call_function(tx, realized_args, {})
+            self.vt = SourcelessBuilder.create_internal_builtin(self.op).call_function(
+                tx, realized_args, {}
+            )
         else:
             self.vt = ConstantVariable.create(self.value)
 
         if self.name_hint is not None:
             self.vt.set_name_hint(self.name_hint)
         if self.source_location is not None and self.vt.source_location is None:
-            self.vt.set_source_location(self.source_location)
+            self.vt = self.vt.with_source_location(self.source_location)
 
 
 class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
@@ -223,12 +234,13 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         else:
             self._cache.name_hint = name
 
-    def set_source_location(self, source_location: SourceLocation) -> None:
+    def with_source_location(self, source_location: SourceLocation) -> VariableTracker:
         self.source_location = source_location
         if self.is_realized():
-            self._cache.vt.set_source_location(source_location)  # type: ignore[union-attr]
+            self._cache.vt = self._cache.vt.with_source_location(source_location)  # type: ignore[union-attr]
         else:
             self._cache.source_location = source_location
+        return self
 
     def __str__(self) -> str:
         variable_info = "LazyVariableTracker("
@@ -607,6 +619,17 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         # min/max return an operand; mixed types make the result type value-dependent
         if op in (min, max) and len({type(v) for v in values}) > 1:
             return None
+        if op in (operator.truediv, operator.floordiv, operator.mod):
+            # an int dividend can overflow when converted to float
+            kinds = [{bool: int, int: int, float: float}.get(type(v)) for v in values]
+            if None in kinds or (
+                kinds[0] is int and (kinds[1] is float or op is operator.truediv)
+            ):
+                return None
+            # an unguarded divisor could become zero on a later call
+            divisor = args[1]
+            if isinstance(divisor, LazyVariableTracker) and not divisor.is_realized():
+                return None
         if not ConstantVariable.is_base_literal(value):
             return None
         if not lazy_vars:

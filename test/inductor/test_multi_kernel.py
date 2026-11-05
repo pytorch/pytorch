@@ -180,6 +180,27 @@ class MultiKernelTest(TestCase):
 
         self.assertEqual(events, ["lock_enter", "lock_exit"])
 
+    @requires_triton()
+    @config.patch("triton.multi_kernel", 1)
+    def test_subgraph_multi_kernel_names_unique(self):
+        def f(pred, x, z):
+            branch = torch.cond(
+                pred, lambda x: x.sum(-1), lambda x: (x * 3).sum(-1), (x,)
+            )
+            return (z.relu() * 2).sum(-1), branch
+
+        x = torch.randn(1024, 256, device=GPU_TYPE)
+        z = torch.randn(4096, 256, device=GPU_TYPE)
+        pred = torch.tensor(True, device=GPU_TYPE)
+        expected = f(pred, x, z)
+        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), pred, x, z)
+        self.assertEqual(expected, actual)
+        # Subgraph wrappers are emitted into the parent's module, so a name
+        # defined by both would shadow the parent's definition.
+        names = re.findall(r"^(multi_kernel_\d+) = ", code, re.MULTILINE)
+        self.assertGreater(len(names), 1)
+        self.assertEqual(len(names), len(set(names)), names)
+
     def test_softmax(self, expect_multi_kernel=True):
         x = torch.rand(2, 1024).to(GPU_TYPE)
         ref = torch.softmax(x, -1)
@@ -298,6 +319,12 @@ class MultiKernelTest(TestCase):
     test_softmax_cpp_wrapper = make_cpp_wrapper_test(
         test_softmax, expect_multi_kernel=True
     )
+    test_softmax_autotune_at_compile_time = config.patch(
+        "triton.autotune_at_compile_time", True
+    )(test_softmax)
+    test_triton_gemm_autotune_at_compile_time = config.patch(
+        "triton.autotune_at_compile_time", True
+    )(test_triton_gemm)
 
     def test_layernorm(self):
         ln = nn.LayerNorm(1024).to(GPU_TYPE)

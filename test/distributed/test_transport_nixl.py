@@ -6,6 +6,7 @@ import json
 import threading
 import weakref
 from dataclasses import dataclass, replace
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -652,6 +653,96 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertEqual(agent.registrations, [])
         self.assertEqual(calls, 3)
 
+    @parametrize("state,length", [("DONE", None), ("ERR", None), ("DONE", 0)])
+    def test_completed_work_does_not_require_transport_lock(self, state, length):
+        first, second, source, remote = self.registered_pair()
+        with patch.object(first._agent, "transfer_state", state):
+            work = first.write(source.to_view(length=length), remote, async_op=True)
+            self.assertTrue(work.is_completed())
+        future = work.get_future()
+        error = work.exception()
+        locked, release = threading.Event(), threading.Event()
+
+        def hold_lock():
+            with first._operation_lock:
+                locked.set()
+                release.wait(5)
+
+        thread = threading.Thread(target=hold_lock)
+        thread.start()
+        try:
+            self.assertTrue(locked.wait(5))
+            self.assertTrue(work.is_completed())
+            self.assertEqual(work.is_success(), state == "DONE")
+            self.assertIs(work.exception(), error)
+            self.assertIs(work.get_future(), future)
+            self.assertTrue(future.done())
+            if state == "DONE":
+                self.assertTrue(work.wait(timedelta(milliseconds=1)))
+                self.assertEqual(future.wait(), [])
+            else:
+                with self.assertRaisesRegex(RuntimeError, "NIXL transfer failed: ERR"):
+                    work.wait(timedelta(milliseconds=1))
+                with self.assertRaisesRegex(RuntimeError, "NIXL transfer failed: ERR"):
+                    future.wait()
+            self.assertEqual(first._pending, {})
+            self.assertEqual(first._transfers, {})
+            self.assertEqual(first._agent.released, int(length != 0))
+        finally:
+            release.set()
+            thread.join(5)
+        self.assertFalse(thread.is_alive())
+
+    @parametrize("state", ["DONE", "ERR"])
+    def test_completion_publication_waits_for_pending_cleanup(self, state):
+        first, second, source, remote = self.registered_pair()
+        entered, release = threading.Event(), threading.Event()
+        results, errors = [], []
+
+        class PausedPending(dict):
+            def pop(self, key):
+                entered.set()
+                if not release.wait(5):
+                    raise TimeoutError("pending cleanup was not released")
+                return super().pop(key)
+
+        with patch.object(first, "_pending", PausedPending()):
+            with patch.object(first._agent, "transfer_state", state):
+                work = first.write(source.to_view(), remote, async_op=True)
+
+            def complete():
+                try:
+                    results.append(work.is_completed())
+                except BaseException as error:
+                    errors.append(error)
+
+            thread = threading.Thread(target=complete)
+            thread.start()
+            try:
+                self.assertTrue(entered.wait(5))
+                self.assertIn(id(work), first._pending)
+                self.assertEqual(first._agent.released, 1)
+                self.assertFalse(work.is_completed())
+                self.assertFalse(work._future.done())
+            finally:
+                release.set()
+                thread.join(5)
+                self.assertFalse(thread.is_alive())
+
+            self.assertEqual(errors, [])
+            self.assertEqual(results, [True])
+            self.assertTrue(work.is_completed())
+            future = work.get_future()
+            self.assertTrue(future.done())
+            if state == "DONE":
+                self.assertEqual(future.wait(), [])
+            else:
+                with self.assertRaisesRegex(RuntimeError, "NIXL transfer failed: ERR"):
+                    future.wait()
+            self.assertEqual(first._pending, {})
+            self.assertEqual(first._transfers, {})
+            self.assertEqual(first._agent.released, 1)
+
     def test_async_poll_does_not_block_on_native_lock(self):
         first, second, source, remote = self.registered_pair()
         work = first.write(source.to_view(), remote, async_op=True)
@@ -728,10 +819,76 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertEqual(first._agent.released, 2)
         self.assertFalse(first._transfers)
 
+    def test_remote_slice_ranges(self):
+        _, _, _, remote = self.registered_pair()
+        part = remote.slice(2, 4).slice(1, 2)
+        self.assertEqual((part.address, part.length), (remote.address + 3, 2))
+        self.assertEqual(part.metadata, remote.metadata)
+        self.assertEqual(remote.slice(remote.length).length, 0)
+
+    def test_slice_unregistered_view(self):
+        first, _, source, _ = self.registered_pair()
+        view = source.to_view()
+        first.unregister_memory(source)
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            view.slice(1)
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            view[1:]
+
+    def connect_peers(self):
+        first, second = self.make_transport_pair()
+        with patch.object(_nixl, "_load_backend", return_value=self.backend()):
+            third, fourth = (
+                new_transport("nixl", agent_name=name, plugin=self.plugin, timeout=5)
+                for name in ("third", "fourth")
+            )
+        self.addCleanup(fourth.close)
+        self.addCleanup(third.close)
+        self.assertEqual(first.connect(third.bind()), 0)
+        source = first.register_memory(torch.arange(8, dtype=torch.uint8))
+        targets = [torch.zeros(8, dtype=torch.uint8) for _ in range(3)]
+        remotes = [
+            peer.register_memory(target).to_remote_buffer()
+            for peer, target in zip((second, third, fourth), targets)
+        ]
+        return first, source, targets, remotes
+
+    def test_connects_multiple_peers(self):
+        first, source, targets, remotes = self.connect_peers()
+        with patch.object(_Agent, "transfer_state", "PROC"):
+            work = first.write(source.to_view(), remotes[0], async_op=True)
+            other = first.write(source.to_view(), remotes[1], async_op=True)
+        work.wait()
+        other.wait()
+        self.assertEqual(first._peers, {"second", "third"})
+        self.assertTrue(first.connected())
+        self.assertEqual(first.connect(json.dumps(["third", []]).encode()), 0)
+        self.assertEqual(first._peers, {"second", "third"})
+        for remote in remotes[:2]:
+            first.write(source.to_view(), remote)
+        self.assertEqual(targets[0], torch.arange(8, dtype=torch.uint8))
+        self.assertEqual(targets[1], targets[0])
+        with self.assertRaisesRegex(ValueError, "connected peer"):
+            first.write(source.to_view(), remotes[2])
+        agent = first._agent
+        first.close()
+        self.assertFalse(agent.remote_metadata)
+
+    def test_mismatched_metadata_keeps_other_peer(self):
+        first, source, targets, remotes = self.connect_peers()
+        with patch.object(_Agent, "transfer_state", "PROC"):
+            work = first.write(source.to_view(), remotes[0], async_op=True)
+            wrong = replace(remotes[1], metadata=remotes[0].metadata)
+            with self.assertRaisesRegex(ValueError, "different agent"):
+                first.write(source.to_view(), wrong)
+            self.assertIn("second", first._agent.remote_metadata)
+            self.assertIn("second", first._remote_agents)
+        work.wait()
+        first.write(source.to_view(), remotes[0])
+        self.assertEqual(targets[0], torch.arange(8, dtype=torch.uint8))
+
     def test_peer_validation(self):
         first, second, source, remote = self.registered_pair()
-        with self.assertRaisesRegex(RuntimeError, "already connected"):
-            first.connect(second.bind())
         with self.assertRaisesRegex(ValueError, "connected peer"):
             first.write(source.to_view(), replace(remote, agent_name="other"))
         with self.assertRaisesRegex(ValueError, "different agent"):
