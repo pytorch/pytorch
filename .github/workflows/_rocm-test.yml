@@ -369,7 +369,9 @@ jobs:
           if-no-files-found: error
           path: |
             test/test-reports/pin-scalar-controls/**/*
-            test/debug/pin-scalar-controls/**/*
+            test/debug/pin-scalar-controls/**/*.py
+            test/debug/pin-scalar-controls/**/*.json
+            test/debug/pin-scalar-controls/**/*.amdgcn
 
       - name: Collect backtraces from coredumps (if any)
         if: always()

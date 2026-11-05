@@ -34,11 +34,18 @@ def child():
     values = []
     with config.patch(emulate_precision_casts=True):
         for dtype in (torch.float32, torch.float16, torch.bfloat16):
-            for tensor_other in (False, True):
+            for other_kind in ("python", "tensor", "cpu_scalar", "gpu_scalar"):
                 for dynamic in (False, True):
                     for inplace in (False, True):
                         a = torch.full((256,), 2, dtype=dtype, device="cuda")
-                        other = torch.full_like(a, 1 / 3) if tensor_other else 1 / 3
+                        if other_kind == "tensor":
+                            other = torch.full_like(a, 1 / 3)
+                        elif other_kind == "cpu_scalar":
+                            other = torch.tensor(1 / 3, dtype=torch.float64)
+                        elif other_kind == "gpu_scalar":
+                            other = torch.tensor(1 / 3, dtype=dtype, device="cuda")
+                        else:
+                            other = 1 / 3
 
                         def fn(a, other):
                             return a.sub_(other, alpha=6) if inplace else a.sub(other, alpha=6)
@@ -46,9 +53,9 @@ def child():
                         expected = fn(a.clone(), other)
                         torch._dynamo.reset()
                         actual, codes = run_and_get_code(torch.compile(fn, dynamic=dynamic), a, other)
-                        name = f"{dtype}-{tensor_other}-{dynamic}-{inplace}"
+                        name = f"{dtype}-{other_kind}-{dynamic}-{inplace}"
                         (phase / (name + ".py")).write_text("\n".join(codes))
-                        item = {"dtype": str(dtype), "tensor_other": tensor_other,
+                        item = {"dtype": str(dtype), "other_kind": other_kind,
                                 "dynamic": dynamic, "inplace": inplace,
                                 "eager": expected[0].item(), "compiled": actual[0].item(),
                                 "mismatches": torch.count_nonzero(actual != expected).item(),
@@ -58,7 +65,9 @@ def child():
     (phase / "values.json").write_text(json.dumps(values, indent=2) + "\n")
     if os.environ["PIN_SCALAR_MODE"] == "patched":
         assert all(item["mismatches"] == 0 for item in values), values
-        assert all(item["explicit_fma"] == item["tensor_other"] for item in values)
+        for item in values:
+            non_fused_scalar = item["dtype"] in ("torch.float16", "torch.bfloat16") and item["other_kind"] in ("python", "cpu_scalar")
+            assert item["explicit_fma"] != non_fused_scalar, item
     sys.path.insert(0, str(ROOT / "test"))
     import pytest
 
@@ -74,25 +83,19 @@ if len(sys.argv) > 1 and sys.argv[1] == "child":
 REPORT.mkdir(parents=True, exist_ok=True)
 DEBUG.mkdir(parents=True, exist_ok=True)
 source = (ROOT / "torch/_inductor/lowering.py").read_text()
-original_line = "                    out = ops.fma(inputs_loaded[1], alpha_expr, inputs_loaded[0])\n"
-assert source.count(original_line) == 1
-patched = source.replace(original_line, """                    if torch.version.hip and 1 in opmath_scalar_indices:
-                        out = ops.add(
-                            inputs_loaded[0], ops.mul(inputs_loaded[1], alpha_expr)
-                        )
-                    else:
-                        out = ops.fma(inputs_loaded[1], alpha_expr, inputs_loaded[0])
-""")
+assert hashlib.sha256(source.encode()).hexdigest() == "5879976a41b8029b19ef9ff2a1b0b9559de1b6ab058d18ede2c09b993298d981"
 tests = (ROOT / "test/inductor/test_torchinductor_opinfo_properties.py").read_text()
-begin = tests.index("    def test_alpha_fma_scalar_precision(")
-end = tests.index("    @skipIfTorchDynamo", begin)
-scalar_test = tests[begin:end]
-assert scalar_test.count('        self.assertIn("tl.fma", code)') == 1
-corrected_test = scalar_test.replace('        self.assertIn("tl.fma", code)', """        if torch.version.hip and not other_is_tensor:
-            self.assertNotIn("tl.fma", code)
-        else:
-            self.assertIn("tl.fma", code)""")
-patched_tests = tests[:begin] + corrected_test + tests[end:]
+scratch = DEBUG / "patched-source"
+for name in ("torch/_inductor/lowering.py", "test/inductor/test_torchinductor_opinfo_properties.py"):
+    target = scratch / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes((ROOT / name).read_bytes())
+patch = ROOT / ".ci/pytorch/triton_pin_scalar_fix.patch"
+prefix = str(scratch.relative_to(ROOT))
+subprocess.run(["git", "apply", "--check", "--directory=" + prefix, str(patch)], cwd=ROOT, check=True)
+subprocess.run(["git", "apply", "--directory=" + prefix, str(patch)], cwd=ROOT, check=True)
+patched = (scratch / "torch/_inductor/lowering.py").read_text()
+patched_tests = (scratch / "test/inductor/test_torchinductor_opinfo_properties.py").read_text()
 wheels = list((ROOT / "build/pin-scalar-native-packages").rglob("*.whl"))
 results = []
 for label, short in PINS.items():
@@ -147,6 +150,7 @@ for label, short in PINS.items():
                     "TORCH_CUSTOM_PYTHONPATH": os.pathsep.join((str(site), str(overlay))),
                     "PIN_TRITON_SHORT": short, "PIN_TRITON_SITE": str(site),
                     "PIN_SCALAR_MODE": mode, "PIN_SCALAR_PHASE_DIR": str(phase),
+                    "TORCHINDUCTOR_FORCE_DISABLE_CACHES": "1",
                     "TRITON_CACHE_DIR": str(phase / "triton-cache"),
                     "TORCHINDUCTOR_CACHE_DIR": str(phase / "inductor-cache")})
         log = REPORT / f"{label}-{mode}.log"
