@@ -164,8 +164,9 @@ inline float2 wget(Bufs<I, O> b, uint m) {
   return G ? twid(b.tt, m) : b.tw[m];
 }
 
-template <class I, class O, uint F, bool C>
+template <class I, class O, uint F, uint N, bool C>
 inline float2 load_pt(Bufs<I, O> b, Params p, uint e) {
+  const uint n = N ? N : p.n;
   const int s = C ? 1 : p.in_stride;
   constexpr bool packed = F & kFFTPackedLoads;
 
@@ -174,8 +175,20 @@ inline float2 load_pt(Bufs<I, O> b, Params p, uint e) {
     return float2(x.x, cast_to<float2>(b.in[int(2 * e + 1) * s]).x);
   }
 
+  if (is_complex_v<I> && packed) {
+    float2 a = cast_to<float2>(b.in[int(e) * s]),
+           c = cast_to<float2>(b.in[int(n - e) * s]);
+    // DC and Nyquist are real; discard imaginary parts like pocketfft.
+    a.y = e ? a.y : 0.0f;
+    c.y = e ? c.y : 0.0f;
+    return (a + conj(c)) + mul_i(mul(a - conj(c), conj(b.tw[e])));
+  }
+
   if (!(F & kFFTExtendedLoads)) {
-    return cast_to<float2>(b.in[int(e) * s]);
+    const bool mirror =
+        !(F & kFFTGlobalStage) && is_complex_v<I> && e >= p.n_in;
+    const float2 x = cast_to<float2>(b.in[int(mirror ? n - e : e) * s]);
+    return mirror ? conj(x) : x;
   }
 
   const uint i0e = p.ld_mul > 1 ? b.i0 : 0, f = e * p.ld_mul + i0e;
@@ -183,15 +196,30 @@ inline float2 load_pt(Bufs<I, O> b, Params p, uint e) {
     return 0.0f;
   }
 
-  const float2 x = cast_to<float2>(b.in[int(e) * s]);
+  const float2 x = is_complex_v<I> && p.n_in < p.n_sig && f >= p.n_in
+      ? conj(cast_to<float2>(b.in[int(p.n_sig - f - i0e) * p.in_unit]))
+      : cast_to<float2>(b.in[int(e) * s]);
   return b.cl ? mul(x, b.cl[f]) : x;
 }
+
+template <typename T>
+using packed2 = conditional_t<is_same_v<T, half>, packed_half2, packed_float2>;
 
 template <class I, class O, uint F, bool C>
 inline void store_pt(Bufs<I, O> b, Params p, uint k, float2 v, float2 w) {
   constexpr bool extended = F & kFFTExtendedStores;
   v *= p.scale;
   const int s = C ? 1 : p.out_stride;
+
+  if (F & kFFTPackedRealStores) {
+    if (s == 1) {
+      reinterpret_cast<device packed2<O>*>(b.out)[k] = packed2<O>(v);
+    } else {
+      b.out[int(2 * k) * s] = O(v.x);
+      b.out[int(2 * k + 1) * s] = O(v.y);
+    }
+    return;
+  }
 
   v = (F & kFFTFourStepTwiddles) ? mul(v, (F & kFFTInverse) ? conj(w) : w) : v;
   const uint kf = extended && p.out_k_mul > 1 ? k * p.out_k_mul + b.i0 : k;
@@ -292,11 +320,11 @@ inline void stage(Bufs<I, O> b, Params p, uint s, uint lane, bool valid) {
       const uint k = mod_ns<P2, global>(j, Ns, inv_ns);
       if (first && !global) {
         for (uint r = 0; r < R; r++) {
-          v[m][r] = load_pt<I, O, F, C>(b, p, j + r * nR);
+          v[m][r] = load_pt<I, O, F, N, C>(b, p, j + r * nR);
         }
       } else {
         const uint bj = pad(j, sh) * es;
-        v[m][0] = global ? load_pt<I, O, F, C>(b, p, j) : b.buf[bj];
+        v[m][0] = global ? load_pt<I, O, F, N, C>(b, p, j) : b.buf[bj];
         // W^(r k) from gathered W^1, W^4, W^8 and W^4 steps: gathers cost more
         const float2 w1 = wget<global>(b, k * twstep);
         float2 wa = 0.0f, wb = 0.0f;
@@ -309,7 +337,7 @@ inline void stage(Bufs<I, O> b, Params p, uint s, uint lane, bool valid) {
                              : mul(wa, w1);
           const float2 w = r < 4 ? wa : (r & 3) ? mul(wa, wb) : wb;
           const float2 x = global
-              ? load_pt<I, O, F, C>(b, p, j + r * nR)
+              ? load_pt<I, O, F, N, C>(b, p, j + r * nR)
               : b.buf[P2 ? bj + r * rs : pad(j + r * nR, sh) * es];
           v[m][r] = mul(x, inverse ? conj(w) : w);
         }
@@ -481,12 +509,18 @@ template <class I, class O, uint MASK, uint F, uint N = 0, bool C = false>
 #define R_f float
 #define R_h half
 
-#define BASIC(_, X) _(C, C, 0, X) _(C, C, 1, X) _(R, C, 2, X)
+#define BASIC(_, X) \
+  _(C, C, 0, X)     \
+  _(C, C, 1, X) _(R, C, 2, X) _(C, R, 67, X)
 #define EXT1(_, X) _(C, C, 4, X) _(C, C, 5, X) _(C, C, 8, X) _(C, C, 9, X)
-#define EXT2(_, X) _(C, C, 20, X) _(C, C, 21, X) _(C, C, 24, X) _(R, C, 4, X)
-#define EXT3(_, X) _(R, C, 6, X) _(R, C, 20, X) _(R, C, 24, X)
+#define EXT2(_, X) \
+  _(C, C, 20, X)   \
+  _(C, C, 21, X) _(C, C, 24, X) _(R, C, 4, X)
+#define EXT3(_, X) \
+  _(R, C, 6, X)    \
+  _(R, C, 20, X) _(R, C, 24, X) _(C, R, 9, X)
 #define EXT(_, X) EXT1(_, X) EXT2(_, X) EXT3(_, X)
-#define PLAIN(_, X) BASIC(_, X) _(R, C, 0, X)
+#define PLAIN(_, X) BASIC(_, X) _(R, C, 0, X) _(C, R, 1, X)
 
 // The smallest family factoring n (radix branches cost registers); p16 serves
 // lengths 1 and 16, which never take several passes
@@ -505,9 +539,10 @@ FFT_FIXED_SIZES(FIXED)
 FFT_CONTIG_SIZES(CONTIG)
 
 #define GLOBAL1(_, X) _(float2, float2, 32, X) _(float2, float2, 33, X)
-#define GLOBAL2(_, X) _(float, float2, 34, X)
+#define GLOBAL2(_, X) _(float, float2, 34, X) _(float2, float2, 35, X)
 #define GLOBAL(R)                                   \
   GLOBAL1(INSTF, ((1u << R), "g" #R "_", 0, false)) \
-  GLOBAL2(INSTF, ((1u << R), "g" #R "_", 0, false))
+  GLOBAL2(INSTF, ((1u << R), "g" #R "_", 0, false)) \
+  INSTF(float2, float, 97, ((1u << R), "g" #R "_", 0, false))
 FFT_GLOBAL_RADICES(GLOBAL)
 INSTF(float2, float2, 32, ((1u << kFFTUnpackRadix), "g1_", 0, false))
