@@ -1117,7 +1117,11 @@ class TestSerialization(TestCase, SerializationMixin):
             ):
                 torch.load(f, weights_only=True)
             f.seek(0)
-            torch.load(f, weights_only=False)
+            with patch("torch.serialization._torchscript_load_warned", False):
+                with self.assertWarnsRegex(
+                    FutureWarning, r"Loading TorchScript archives through torch\.load is deprecated"
+                ):
+                    torch.load(f, weights_only=False)
 
     # Ensure large zip64 serialization works properly
     @serialTest()
