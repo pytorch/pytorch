@@ -1134,6 +1134,22 @@ class WrapperLine:
 
 
 @dataclasses.dataclass
+class ProfilerMarkerLine(WrapperLine):
+    marker: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        # No `_is_profiler_enabled` guard: that Python flag stays False for
+        # on-demand (Kineto daemon) sessions, while _RecordFunctionFast checks
+        # the native profiler state and does nothing when no profiler is active.
+        code.writeline(
+            f"with torch._C._profiler._RecordFunctionFast({self.marker!r}): pass"
+        )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_profiler_marker
+
+
+@dataclasses.dataclass
 class EnterSubgraphLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     graph: GraphLowering
@@ -3355,6 +3371,7 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(ExternKernelAllocLine(self, node))
         if isinstance(node.layout, ir.Layout):
             node.codegen_size_asserts(self)
+        self.codegen_free_unused_outputs(node)
 
     def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):
         # If it's a NoneLayout then the extern_kernel should essentially be
@@ -6033,6 +6050,10 @@ class PythonWrapperCodegen(CodeGen):
     def make_free_by_names(self, names_to_del: list[str]):
         return f"del {', '.join(name for name in names_to_del)}"
 
+    def codegen_free_unused_outputs(self, node: ir.ExternKernelAlloc) -> None:
+        # The Python wrapper drops unused outputs when it deletes the result tuple.
+        pass
+
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
 
@@ -6042,9 +6063,15 @@ class PythonWrapperCodegen(CodeGen):
         debug_handle: int | None = None,
     ):
         if debug_handle is not None:
-            self.writeline(
+            self.make_comment(
                 f"{self.comment} [Provenance debug handles] {kernel_name}:{debug_handle}"
             )
+            if config.trace.provenance_profiler_markers and not V.graph.cpp_wrapper:
+                self.writeline(
+                    ProfilerMarkerLine(
+                        f"inductor_provenance:{kernel_name}:{debug_handle}"
+                    )
+                )
 
     def make_buffer_reuse(self, old: BufferLike, new: BufferLike, delete_old: bool):
         if old.get_dtype() != new.get_dtype():
