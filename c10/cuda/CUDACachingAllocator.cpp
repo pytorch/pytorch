@@ -320,17 +320,6 @@ struct SegmentRange {
   SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
 };
 
-// Expandable segments have no ROCm fabric handle path, so ROCm keeps POSIX fds
-// even on devices where get_fabric_access() is true for symmetric memory.
-bool use_fabric_handles(c10::DeviceIndex device) {
-#ifdef USE_ROCM
-  (void)device;
-  return false;
-#else
-  return cuda::get_fabric_access(device);
-#endif
-}
-
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || \
     defined(USE_ROCM)
 
@@ -602,7 +591,7 @@ struct ExpandableSegment {
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       if (ipcEnabled()) {
-        if (use_fabric_handles(device_)) {
+        if (cuda::get_fabric_access(device_)) {
 #ifndef USE_ROCM
           prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
 #endif
@@ -708,7 +697,7 @@ struct ExpandableSegment {
     header.pid = get_self_pid();
     header.segment_size = segment_size_;
     header.num_handles = end - begin;
-    header.handle_type = use_fabric_handles(device_)
+    header.handle_type = cuda::get_fabric_access(device_)
         ? Expandable_Segments_Handle_Type::FABRIC_HANDLE
         : Expandable_Segments_Handle_Type::POSIX_FD;
 
@@ -764,7 +753,7 @@ struct ExpandableSegment {
         header.handle_type == Expandable_Segments_Handle_Type::POSIX_FD ||
             (header.handle_type ==
                  Expandable_Segments_Handle_Type::FABRIC_HANDLE &&
-             use_fabric_handles(device)),
+             cuda::get_fabric_access(device)),
         "Unsupported expandable_segments IPC handle type ",
         static_cast<int>(header.handle_type),
         " on device ",
@@ -900,7 +889,7 @@ struct ExpandableSegment {
     if (!ipcEnabled()) {
       return Expandable_Segments_Handle_Type::UNSPECIFIED;
     }
-    return use_fabric_handles(device_)
+    return cuda::get_fabric_access(device_)
         ? Expandable_Segments_Handle_Type::FABRIC_HANDLE
         : Expandable_Segments_Handle_Type::POSIX_FD;
   }
@@ -1878,6 +1867,8 @@ class DeviceCachingAllocator {
     const auto allocation_context = has_active_captures
         ? capture_tracker_.allocationContext(stream)
         : CUDAGraphMemory::AllocationContext{};
+    const cudaStream_t block_reuse_stream =
+        has_active_captures ? capture_tracker_.reuseStream(stream) : stream;
     prepare_for_malloc(context, stream, has_active_captures);
 
     size_t size = round_size(orig_size);
@@ -1891,7 +1882,7 @@ class DeviceCachingAllocator {
     AllocParams params(
         device_id,
         size,
-        stream,
+        block_reuse_stream,
         &pool,
         alloc_size,
         is_expandable_segments_active);
@@ -2192,13 +2183,15 @@ class DeviceCachingAllocator {
     prepare_for_malloc(context, stream, has_active_captures);
 
     const size_t size = round_size(orig_size);
+    const cudaStream_t block_reuse_stream =
+        has_active_captures ? capture_tracker_.reuseStream(stream) : stream;
 
     // The same block pool is used for both prefix block and requested block.
     // Prefix block may have a significantly larger size than requested block
     // when multiple small blocks coalesced into a large prefix block.
     auto& pool = get_pool(size, stream);
     Block* containing_block =
-        get_free_block_containing_address(pool, size, stream, addr);
+        get_free_block_containing_address(pool, size, block_reuse_stream, addr);
     if (!containing_block) {
       return nullptr;
     }
@@ -2225,7 +2218,7 @@ class DeviceCachingAllocator {
       AllocParams prefix_params(
           device_id,
           prefix_size,
-          stream,
+          block_reuse_stream,
           &pool,
           get_allocation_size(prefix_size),
           is_expandable_segments_active);
@@ -2245,7 +2238,7 @@ class DeviceCachingAllocator {
     AllocParams requested_params(
         device_id,
         size,
-        stream,
+        block_reuse_stream,
         &pool,
         get_allocation_size(size),
         is_expandable_segments_active);
@@ -2747,6 +2740,13 @@ class DeviceCachingAllocator {
       // ignore uses on the allocation stream, since those don't require any
       // special synchronization
       return;
+    }
+    if (C10_UNLIKELY(capture_tracker_.hasActiveCaptures())) {
+      if (capture_tracker_.reuseStream(stream.stream()) == block->stream) {
+        // Ignore uses in the allocation's reuse domain, since they don't
+        // require separate stream-lifetime tracking.
+        return;
+      }
     }
     block->stream_uses.insert(stream);
     if (C10_UNLIKELY(is_capture_context())) {
@@ -3635,7 +3635,7 @@ class DeviceCachingAllocator {
     }
     if (handle_type == Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
       TORCH_CHECK(
-          use_fabric_handles(device_id),
+          cuda::get_fabric_access(device_id),
           "the expandable segment at ",
           address,
           " was saved with fabric handles, but device ",

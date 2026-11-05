@@ -459,7 +459,7 @@ if(USE_SOURCE_DEBUG_ON_MOBILE)
   if(BUILD_LITE_INTERPRETER)
     set_source_files_properties(
       ${TORCH_SRC_DIR}/csrc/jit/serialization/pickle.cpp
-      PROPERTIES COMPILE_DEFINITIONS "C10_MOBILE;FEATURE_TORCH_MOBILE")
+      PROPERTIES COMPILE_DEFINITIONS "FEATURE_TORCH_MOBILE")
   endif()
 endif()
 
