@@ -183,6 +183,9 @@ if [[ "$TEST_CONFIG" == 'periodic' ]]; then
   # doctests and autoload bypass pytest; AOT builds extensions before pytest;
   # CI sanity expects its unmarked test to fail.
   TESTS_TO_EXCLUDE="$TESTS_TO_EXCLUDE doctests test_cpp_extensions_aot_ninja test_cpp_extensions_aot_no_ninja test_autoload_enable test_autoload_disable test_ci_sanity_check_fail"
+elif [[ "$TEST_CONFIG" == 'crossref' ]]; then
+  # Set here rather than via tests-to-exclude because crossref shares its job with the periodic config.
+  TESTS_TO_EXCLUDE="$TESTS_TO_EXCLUDE inductor/test_torchinductor_opinfo"
 fi
 
 # Exclude tests from run_test.py (symmetric to TESTS_TO_INCLUDE).
