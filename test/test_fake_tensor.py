@@ -173,6 +173,14 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertIs(torch._C._get_dispatch_mode(mode_key), mode)
         self.assertIsNone(torch._C._get_dispatch_mode(mode_key))
 
+    def test_data_ptr_warning(self):
+        # The advice also holds for a C++ fake, which is a plain Tensor
+        mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        fake = mode.from_tensor(torch.empty(2))
+        warning = r"Accessing the data pointer of FakeTensor.*is_fake_tensor\(tensor\)"
+        with self.assertWarnsOnceRegex(UserWarning, warning):
+            fake.data_ptr()
+
     def fake_with_unbacked_batch(self, *tensors):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
@@ -5477,6 +5485,16 @@ class TestCppFakeTensorModeBindings(TestCase):
             torch._C._CppFakeTensorMode(None, None, self.Wrapper())
         with self.assertRaisesRegex(RuntimeError, "Expected the CppFakeTensorMode"):
             torch._C._CppFakeTensorMode(FakeTensorConverter(), None, None)
+
+    def test_allow_unsafe_data_ptr_access(self):
+        mode, _ = self._make_mode()
+        self.assertTrue(mode._allow_unsafe_data_ptr_access)
+        mode._allow_unsafe_data_ptr_access = False
+        self.assertFalse(mode._allow_unsafe_data_ptr_access)
+        config = torch._functorch.config
+        with config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            mode, _ = self._make_mode()
+        self.assertFalse(mode._allow_unsafe_data_ptr_access)
 
     def test_wrapper_weakref(self):
         mode, wrapper = self._make_mode()

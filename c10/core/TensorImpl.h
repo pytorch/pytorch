@@ -259,13 +259,21 @@ struct C10_API FakeTensorMode {
   // so read this through PyInterpreterVTable::allow_non_fake_inputs().
   bool allow_non_fake_inputs_ = false;
 
+  // Whether reading the mutable data pointer of a fake made afterwards only
+  // warns (true) or throws (false); a storage's marking is never relaxed.
+  // Python's _allow_unsafe_data_ptr_access, exposed under that name. Atomic,
+  // like allow_meta_.
+  std::atomic<bool> allow_unsafe_data_ptr_access_{true};
+
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter,
-      bool allow_meta = true)
+      bool allow_meta = true,
+      bool allow_unsafe_data_ptr_access = true)
       : shape_env_(std::move(shape_env)),
         fake_tensor_converter_(std::move(converter)),
-        allow_meta_(allow_meta) {}
+        allow_meta_(allow_meta),
+        allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access) {}
 
   // record the real constant a fake tensor was created from; the constant is
   // stored on the fake's ExtraMeta so it dies with the tensor
