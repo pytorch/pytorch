@@ -547,6 +547,11 @@ class CPUReproTests(TestCase):
 
     @requires_vectorization
     def test_nn_fold_permuted_input(self):
+        if config.avoid_modular_indexing:
+            raise unittest.SkipTest(
+                "asserts the kernel count or codegen of inlined modular indexing"
+            )
+
         # Fix https://github.com/pytorch/pytorch/issues/191837
         def fn(x):
             x = x.permute(0, 1, 4, 3, 2)
@@ -2722,10 +2727,18 @@ class CPUReproTests(TestCase):
 
     @requires_vectorization
     def test_tile2d_store_channel_shuffle_cl_quant_output_uint8(self):
+        if config.avoid_modular_indexing:
+            raise unittest.SkipTest(
+                "asserts the kernel count or codegen of inlined modular indexing"
+            )
         self._test_tile2d_store_channel_shuffle_cl_quant_output_helper(torch.uint8)
 
     @requires_vectorization
     def test_tile2d_store_channel_shuffle_cl_quant_output_int8(self):
+        if config.avoid_modular_indexing:
+            raise unittest.SkipTest(
+                "asserts the kernel count or codegen of inlined modular indexing"
+            )
         self._test_tile2d_store_channel_shuffle_cl_quant_output_helper(torch.int8)
 
     @requires_vectorization
@@ -4785,6 +4798,10 @@ class CPUReproTests(TestCase):
     @xfailIfS390X
     @requires_vectorization
     def test_channel_shuffle_cl_output(self):
+        if config.avoid_modular_indexing:
+            raise unittest.SkipTest(
+                "asserts the kernel count or codegen of inlined modular indexing"
+            )
         """code and shape extracted from shufflenet_v2_x1_0"""
 
         def channel_shuffle(x, groups):
@@ -5786,6 +5803,11 @@ class CPUReproTests(TestCase):
         self.assertEqual(compiled.shape, eager.shape)
 
     def test_group_norm_vec(self):
+        if config.avoid_modular_indexing:
+            raise unittest.SkipTest(
+                "asserts the kernel count or codegen of inlined modular indexing"
+            )
+
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -6825,6 +6847,11 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(1)
 
     def test_masked_handle_scalar_var(self):
+        if config.avoid_modular_indexing:
+            raise unittest.SkipTest(
+                "asserts the kernel count or codegen of inlined modular indexing"
+            )
+
         def fn():
             # Simplified reproducer of https://github.com/pytorch/pytorch/issues/173626
             window_size = 7

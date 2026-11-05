@@ -2288,7 +2288,10 @@ class CommonTemplate:
 
     def test_index_propagation_floordiv(self):
         if config.avoid_modular_indexing:
-            raise unittest.SkipTest("index arithmetic stays behind an indirect variable")
+            raise unittest.SkipTest(
+                "index arithmetic stays behind an indirect variable"
+            )
+
         def repeat_interleave(x, n):
             # e.g. x=[1, 2, 3], n=2 => returns [1, 1, 2, 2, 3, 3]
             i = torch.arange(x.shape[0] * n, device=x.device)
@@ -2308,7 +2311,10 @@ class CommonTemplate:
 
     def test_index_propagation_remainder(self):
         if config.avoid_modular_indexing:
-            raise unittest.SkipTest("index arithmetic stays behind an indirect variable")
+            raise unittest.SkipTest(
+                "index arithmetic stays behind an indirect variable"
+            )
+
         def repeat(x, n):
             # e.g. x=[1, 2, 3], n=2 => returns [1, 2, 3, 1, 2, 3]
             i = torch.arange(x.shape[0] * n, device=x.device)
@@ -2329,7 +2335,10 @@ class CommonTemplate:
 
     def test_index_propagation_abs(self):
         if config.avoid_modular_indexing:
-            raise unittest.SkipTest("index arithmetic stays behind an indirect variable")
+            raise unittest.SkipTest(
+                "index arithmetic stays behind an indirect variable"
+            )
+
         def reflection_pad_left(x, n):
             # e.g. x=[1, 2, 3], n=2 => returns [3, 2, 1, 2, 3]
             i = torch.arange(x.shape[0] + n, device=x.device)
@@ -2365,6 +2374,9 @@ class CommonTemplate:
     @config.patch(debug_index_asserts=False)
     @config.patch("cpp.enable_tiling_heuristics", False)
     def test_neg_index(self):
+        if config.avoid_modular_indexing:
+            raise unittest.SkipTest("asserts the codegen of inlined index wrapping")
+
         def test(
             fn, inps, has_assert: bool, has_wrapping: bool, vectorize: bool = True
         ):
@@ -6066,6 +6078,10 @@ for dtype in (torch.int32, torch.int64):
         if self.device != "cpu":
             raise unittest.SkipTest(
                 "only the native CPU kernel preserves the input memory format"
+            )
+        if config.avoid_modular_indexing and is_halide_backend(self.device):
+            raise unittest.SkipTest(
+                "Halide cannot reorder the RVars of the dim-aligned split reduction"
             )
 
         def fn(p, i):
@@ -16204,6 +16220,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @expectedFailureCodegenDynamic
     @skip_if_gpu_halide  # accuracy error
     def test_AllenaiLongformerBase_repro(self):
+        if config.avoid_modular_indexing:
+            raise unittest.SkipTest("asserts the C++ codegen of an inlined merged view")
+
         def fn(query, scores, window_overlap):
             batch_size, seq_len, num_heads, _ = query.size()
             chunks_count = torch.div(seq_len, window_overlap, rounding_mode="trunc") - 1

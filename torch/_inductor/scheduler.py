@@ -304,13 +304,39 @@ class MixOrderReduction:
 
     @staticmethod
     def is_split_reduction(node: BaseSchedulerNode) -> bool:
-        return node.is_reduction() and all(
-            subnode.node._split_size is not None
-            for subnode in node.get_nodes()
-            if isinstance(subnode, SchedulerNode)
-            and subnode.is_reduction()
-            and isinstance(subnode.node, ComputedBuffer)
-        )
+        """
+        Whether node is (a fusion of) the first stage of split reductions
+        that can be re-derived from one original reduction. First stages of
+        reductions with different original shapes can still be fused when
+        their split loops coincide (a per-channel and a per-sample reduction
+        both split along the spatial dims); such a node is not one.
+        """
+        if not node.is_reduction():
+            return False
+        originals: OrderedSet[tuple[sympy.Expr, sympy.Expr]] = OrderedSet()
+        for subnode in node.get_nodes():
+            if not (
+                isinstance(subnode, SchedulerNode)
+                and subnode.is_reduction()
+                and isinstance(subnode.node, ComputedBuffer)
+            ):
+                continue
+            buf = subnode.node
+            if (
+                buf._split_size is None
+                or buf._original_ranges is None
+                or buf._original_reduction_ranges is None
+            ):
+                return False
+            originals.add(
+                (
+                    V.graph.sizevars.simplify(sympy_product(buf._original_ranges)),
+                    V.graph.sizevars.simplify(
+                        sympy_product(buf._original_reduction_ranges)
+                    ),
+                )
+            )
+        return len(originals) <= 1
 
     @staticmethod
     def supports_noncontiguous_reductions(node: BaseSchedulerNode) -> bool:
