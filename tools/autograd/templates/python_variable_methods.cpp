@@ -416,6 +416,25 @@ static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, 
   return self.to(device, dtype, non_blocking, copy, optional_memory_format);
 }
 
+// Tensor.to(..., round=...): round_to converts, and a device change is a separate
+// transfer, ordered so that the conversion runs on the accelerator.
+static Tensor dispatch_to_rounded(const Tensor & self, std::optional<Device> device, std::optional<ScalarType> dtype, bool non_blocking, std::optional<c10::MemoryFormat> optional_memory_format, std::string_view mode) {
+  pybind11::gil_scoped_release no_gil;
+  const auto convert = [&](const Tensor& t) {
+    return t.round_to(dtype.value_or(t.scalar_type()), mode, optional_memory_format);
+  };
+  if (!device.has_value()) {
+    return convert(self);
+  }
+  const auto move = [&](const Tensor& t) {
+    return t.to(t.options().device(*device), non_blocking);
+  };
+  if (device->is_cpu() && !self.is_cpu()) {
+    return move(convert(self));
+  }
+  return convert(move(self));
+}
+
 static PyObject * THPVariable_cpu(PyObject* self, PyObject* args, PyObject* kwargs)
 {
    HANDLE_TH_ERRORS
@@ -971,24 +990,27 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "to(Device device=None, ScalarType dtype=None, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
-    "to(ScalarType dtype, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
-    "to(Tensor tensor, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
+    "to(Device device=None, ScalarType dtype=None, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None, c10::string_view? round=None)",
+    "to(ScalarType dtype, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None, c10::string_view? round=None)",
+    "to(Tensor tensor, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None, c10::string_view? round=None)",
   });
-  ParsedArgs<5> parsed_args;
+  ParsedArgs<6> parsed_args;
   auto r = parser.parse(self, args, kwargs, parsed_args);
   if (r.has_torch_function()) {
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
   }
-  auto parsed = parse_to_conversion(r, /*allow_copy*/ true);
+  auto parsed = parse_to_conversion(r, /*allow_copy*/ true, /*allow_round*/ true);
   auto& device = std::get<0>(parsed);
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);
   auto copy = std::get<3>(parsed);
   auto opt_memory_format = std::get<4>(parsed);
+  auto round = std::get<5>(parsed);
   auto& self_ = THPVariable_Unpack(self);
   torch::utils::maybe_initialize_device(device);
-  if (!device && !scalarType && !copy && !opt_memory_format.has_value()) {
+  if (round.has_value()) {
+    return THPVariable_Wrap(dispatch_to_rounded(self_, device, scalarType, non_blocking, opt_memory_format, *round));
+  } else if (!device && !scalarType && !copy && !opt_memory_format.has_value()) {
     Py_INCREF(self);
     return self;
   } else if (!device && !scalarType) {

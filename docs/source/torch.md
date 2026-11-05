@@ -558,6 +558,7 @@ False
     remainder
     round
     round_
+    round_to
     rsqrt
     rsqrt_
     sigmoid

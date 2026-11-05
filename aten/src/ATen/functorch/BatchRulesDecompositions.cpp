@@ -228,6 +228,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(resolve_conj);
   OP_DECOMPOSE(resolve_neg);
   m.impl("rms_norm", native::rms_norm_symint);
+  OP_DECOMPOSE(round_to);
   OP_DECOMPOSE(row_stack);
   OP_DECOMPOSE(rrelu);
   OP_DECOMPOSE(rrelu_);

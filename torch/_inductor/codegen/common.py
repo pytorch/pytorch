@@ -1374,6 +1374,13 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             f"{type(self).__name__}: dot only implemented for Triton backend"
         )
 
+    def to_dtype_rounded(
+        self, x: OpVarT, dtype: torch.dtype, src_dtype: torch.dtype, rounding: str
+    ) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: to_dtype_rounded is only implemented for the Triton and C++ backends"
+        )
+
     def inline_asm_elementwise(
         self,
         *inputs: OpVarT,

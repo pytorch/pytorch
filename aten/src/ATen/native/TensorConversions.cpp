@@ -24,6 +24,8 @@
 #include <ATen/ops/_to_copy_native.h>
 #include <ATen/ops/_to_cpu_native.h>
 #include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/_to_dtype_rounded.h>
+#include <ATen/ops/_to_dtype_rounded_native.h>
 #include <ATen/ops/_to_sparse_bsc_native.h>
 #include <ATen/ops/_to_sparse_bsr_native.h>
 #include <ATen/ops/_to_sparse_csc_native.h>
@@ -35,6 +37,7 @@
 #include <ATen/ops/empty_quantized.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/empty_strided_native.h>
+#include <ATen/ops/round_to_native.h>
 #include <ATen/ops/to_dense_backward_native.h>
 #include <ATen/ops/to_dense_native.h>
 #include <ATen/ops/to_mkldnn_backward_native.h>
@@ -226,6 +229,32 @@ static inline std::optional<Device> ensure_has_index(
   return ensure_has_index(device.value());
 }
 
+// Allocates the result of converting the strided, non-quantized tensor self to
+// options: with self's strides for MemoryFormat::Preserve when possible,
+// otherwise in the given or suggested memory format.
+static Tensor empty_for_conversion(
+    const Tensor& self,
+    const TensorOptions& options,
+    MemoryFormat memory_format) {
+  if (memory_format == MemoryFormat::Preserve) {
+    if (options.device().supports_as_strided()) {
+      if (self.is_non_overlapping_and_dense()) {
+        return at::empty_strided(self.sizes(), self.strides(), options);
+      }
+      if (self.layout() == kStrided) {
+        return at::empty_strided(
+            self.sizes(),
+            infer_dense_strides(self.sizes(), self.strides()),
+            options);
+      }
+    }
+    memory_format = self.suggest_memory_format();
+  }
+  // See Note [Explicit nullopt MemoryFormat argument]
+  return at::empty_symint(
+      self.sym_sizes(), options.memory_format(memory_format), std::nullopt);
+}
+
 Tensor _to_copy(
     const Tensor& self,
     std::optional<ScalarType> dtype,
@@ -344,50 +373,58 @@ Tensor _to_copy(
        at::accelerator::isAcceleratorExcluded(self.device().type(), at::kMPS) &&
        options.device().is_cpu() && (options.layout() == c10::kStrided));
 
-  if (memory_format == MemoryFormat::Preserve) {
-    if (options.device().supports_as_strided()) {
-      if (self.is_non_overlapping_and_dense()) {
-        Tensor r;
-        if (self.is_quantized()) {
-          r = at::empty_quantized(self.sizes(), self, options);
-          at::QuantizerPtr quantizer = r.quantizer();
-          r.copy_(self, non_blocking);
-          set_quantizer_(r, quantizer);
-        } else {
-          r = at::empty_strided(
-              self.sizes(), self.strides(), options.pinned_memory(pin_out));
-          r.copy_(self, non_blocking);
-        }
-        return r;
-      } else if (!self.is_quantized() && self.layout() == kStrided) {
-        Tensor r;
-        auto strides = infer_dense_strides(self.sizes(), self.strides());
-        r = at::empty_strided(
-            self.sizes(), strides, options.pinned_memory(pin_out));
-        r.copy_(self, non_blocking);
-        return r;
-      } else {
-        memory_format = self.suggest_memory_format();
-      }
-    } else {
+  if (self.is_quantized()) {
+    if (memory_format == MemoryFormat::Preserve &&
+        options.device().supports_as_strided() &&
+        self.is_non_overlapping_and_dense()) {
+      auto r = at::empty_quantized(self.sizes(), self, options);
+      at::QuantizerPtr quantizer = r.quantizer();
+      r.copy_(self, non_blocking);
+      set_quantizer_(r, quantizer);
+      return r;
+    }
+    if (memory_format == MemoryFormat::Preserve) {
       memory_format = self.suggest_memory_format();
     }
+    // TODO: empty_quantized does not work here. It raises an exception in
+    // CheckMemoryFormat.h prior to
+    // empty_affine_quantized/_empty_per_channel_affine_quantized calls
+    // at::empty also does not work here because there is no proper at::empty
+    // support for quantized tensors as it would return a quantized tensor with
+    // an UnknownQuantizer
+    auto r = at::empty_like(self, memory_format);
+    r.copy_(self, non_blocking);
+    return r;
   }
-  // See Note [Explicit nullopt MemoryFormat argument]
-  // TODO: empty_quantized does not work here. It raises an exception in
-  // CheckMemoryFormat.h prior to
-  // empty_affine_quantized/_empty_per_channel_affine_quantized calls
-  // at::empty also does not work here because there is no proper at::empty
-  // support for quantized tensors as it would return a quantized tensor with an
-  // UnknownQuantizer
-  auto r = self.is_quantized()
-      ? at::empty_like(self, memory_format)
-      : at::empty_symint(
-            self.sym_sizes(),
-            options.memory_format(memory_format).pinned_memory(pin_out),
-            std::nullopt);
+  auto r =
+      empty_for_conversion(self, options.pinned_memory(pin_out), memory_format);
   r.copy_(self, non_blocking);
   return r;
+}
+
+Tensor _to_dtype_rounded(
+    const Tensor& self,
+    ScalarType dtype,
+    std::string_view round,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      self.layout() == kStrided,
+      "rounding is only supported for strided tensors, but got ",
+      self.layout());
+  auto result = empty_for_conversion(
+      self,
+      self.options().dtype(dtype),
+      optional_memory_format.value_or(MemoryFormat::Preserve));
+  return at::_to_dtype_rounded_out(
+      result, self, dtype, round, optional_memory_format);
+}
+
+Tensor round_to(
+    const Tensor& self,
+    ScalarType dtype,
+    std::string_view mode,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
+  return at::_to_dtype_rounded(self, dtype, mode, optional_memory_format);
 }
 
 template <typename T>

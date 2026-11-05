@@ -208,6 +208,15 @@ class OpsHandler(Generic[T]):
         """
         raise NotImplementedError
 
+    def to_dtype_rounded(
+        self, x: T, dtype: torch.dtype, src_dtype: torch.dtype, rounding: str
+    ) -> T:
+        """
+        Convert x to the narrower floating-point dtype with an IEEE 754 rounding
+        direction; see Tensor.to(..., round=...).
+        """
+        raise NotImplementedError
+
     def to_dtype_bitcast(self, x: T, dtype: torch.dtype, src_dtype: torch.dtype) -> T:
         """
         Reinterpret cast x to dtype (reinterpreting the bits in memory as another dtype.)
