@@ -28,7 +28,6 @@ from torch.testing._internal.common_utils import (
     isRocmArchAnyOf,
     MI200_ARCH,
     recover_orig_fp32_precision,
-    skipIfXpu,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
@@ -2244,7 +2243,9 @@ class TestAttentionFusionDeviceRouting(TestCase):
             matmul.fp32_precision = saved
 
 
-instantiate_device_type_tests(TestAttentionFusionDeviceRouting, globals())
+instantiate_device_type_tests(
+    TestAttentionFusionDeviceRouting, globals(), allow_xpu=True
+)
 
 
 if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENTION):
@@ -2326,7 +2327,7 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
             test_sdpa_rewriter_16_fp32_mask_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16_fp32_mask
             )
-        elif GPU_TYPE == "cuda":
+        elif GPU_TYPE in ("cuda", "xpu"):
             test_sdpa_rewriter_16_inference_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16,
                 check_train=False,
@@ -2382,7 +2383,6 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_27
             )
 
-        @skipIfXpu(msg="FIXME: ENable for XPU")
         def test_skip_non_tf32(self):
             try:
                 orig = torch.backends.cuda.matmul.fp32_precision
@@ -2407,9 +2407,9 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
                         t5 = t4.matmul(v)
                         return t5
 
-                func = Model().to("cuda")
-                x1 = torch.randn(1, 16, 64, 64, device="cuda")
-                attn_mask = torch.zeros(1, 1, 16, 16, device="cuda")
+                func = Model().to(self.device)
+                x1 = torch.randn(1, 16, 64, 64, device=self.device)
+                attn_mask = torch.zeros(1, 1, 16, 16, device=self.device)
                 test_inputs = [x1, attn_mask]
 
                 out, code = run_and_get_code(torch.compile(func), *test_inputs)
