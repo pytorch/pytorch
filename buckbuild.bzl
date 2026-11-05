@@ -194,8 +194,8 @@ THIRD_PARTY_LIBS = {
     "glog": ["//third-party/glog:glog", "//third_party:glog"],
     "gmock": ["//third-party/googletest:gmock_main", "//third_party:gmock"],
     "gtest": ["//third-party/googletest:gtest_main", "//third_party:gtest"],
-    "kineto": ["//xplat/kineto/libkineto:libkineto", "//third_party:libkineto"],
-    "libkineto_headers": ["//xplat/kineto/libkineto:libkineto_headers", "//third_party:libkineto_headers"],
+    "kineto": ["//xplat/caffe2/torch/csrc/profiler/kineto/libkineto:libkineto", "//torch/csrc/profiler/kineto/libkineto:libkineto"],
+    "libkineto_headers": ["//xplat/caffe2/torch/csrc/profiler/kineto/libkineto:libkineto_headers", "//torch/csrc/profiler/kineto/libkineto:libkineto_headers"],
     "omp": ["//xplat/third-party/linker_lib:omp", "//third_party:no-op"],
     "pocketfft": ["//third-party/pocket_fft:pocketfft", "//third_party:pocketfft_header"],
     "psimd": ["//xplat/third-party/psimd:psimd", "//third_party:psimd"],
@@ -418,6 +418,7 @@ def get_aten_generated_files(enabled_backends):
         "core/TensorMethods.cpp",
         "core/aten_interned_strings.h",
         "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
+        "torch/csrc/inductor/aoti_torch/generated/c_shim_aten.cpp",
     ] + get_aten_derived_type_srcs(enabled_backends)
 
     # This is tiresome.  A better strategy would be to unconditionally

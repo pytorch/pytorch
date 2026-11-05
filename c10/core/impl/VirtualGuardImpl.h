@@ -92,6 +92,12 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   bool isStreamCapturing(const Stream& stream) const override {
     return impl_->isStreamCapturing(stream);
   }
+  uint64_t getStreamCaptureId(const Stream& stream) const override {
+    return impl_->getStreamCaptureId(stream);
+  }
+  void waitStream(const Stream& stream, const Stream& source) const override {
+    impl_->waitStream(stream, source);
+  }
 
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
       const override {

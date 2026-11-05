@@ -63,7 +63,7 @@ printf '%s\\n' "$@" >> "$DOCKER_LOG"
         builders = (
             (
                 REPO_ROOT / ".ci/docker/build.sh",
-                "pytorch-linux-noble-rocm-preview-py3.12",
+                "pytorch-linux-noble-rocm-preview-py3.11",
             ),
             (
                 REPO_ROOT / ".ci/docker/manywheel/build.sh",

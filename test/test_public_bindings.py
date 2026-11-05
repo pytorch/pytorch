@@ -381,6 +381,7 @@ class TestPublicBindings(TestCase):
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_buffer_ops",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_gemm_utils",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_grouped_gemm_gfx950",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_wgrad_gfx950",  # depends on flydsl
             "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",
@@ -436,12 +437,12 @@ class TestPublicBindings(TestCase):
                 "torch._native.ops.linear_cross_entropy.fused_grad_logits_kernel",
                 "torch._native.ops.norm.rmsnorm_kernels",
                 "torch._native.ops.polar.",
-                "torch._native.ops.reductions.inner_tree_kernel",
                 "torch._native.ops.reductions.kernel_general",
                 "torch._native.ops.reductions.kernel_rowtile",
                 "torch._native.ops.reductions.tile",
                 "torch._native.ops.reductions.kernel_xcta",
                 "torch._native.ops.reductions.kernel_coltile",
+                "torch._native.ops.reductions.ordered",
                 "torch._native.ops.scatter_add.",
                 "torch._native.ops.topk.",
                 "torch._inductor.kernel.flex_gemm.quack_ops.",
