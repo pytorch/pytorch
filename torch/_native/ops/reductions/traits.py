@@ -13,13 +13,6 @@ from cutlass.cutlass_dsl import dsl_user_op, T as _T
 
 WARP = 32
 
-
-def welford_nouts(key: str) -> int:
-    if key.startswith(("varmean", "stdmean")):
-        return 2
-    return int(key.startswith(("var", "std")))
-
-
 # Arg-reduction "no winner" sentinel. Use Int32 to reduce partial traffic unless the
 # extent requires Int64.
 _INT32_MAX = (1 << 31) - 1
@@ -171,6 +164,8 @@ class WelfordOps:
     # acc = (mean, m2, nf). `reduce` is the ONLINE Welford update and `combine` the PARALLEL Chan
     # merge -- deliberately different formulas. project divides m2 by the clamped dof.
     nfields = 3
+    has_combine_equal = True
+    has_combine_uniform = True
 
     def __init__(self, correction=1, take_sqrt=False, return_mean=False, acc=Float32):
         self.correction = float(correction)
@@ -218,7 +213,12 @@ class WelfordOps:
 
     @cute.jit
     def combine_uniform(self, a, b, index, count: cutlass.Constexpr, weight=None):
-        # Preserve Chan's arithmetic; derive exact counts outside the accumulator chain.
+        """Fold partial `b` into `a` with `combine`'s arithmetic, deriving counts.
+
+        `index` is the number of partials already folded into `a`, and every partial holds
+        exactly `count` values, so `index * count` must be exact in the accumulator (fp32).
+        `a[2]` and `b[2]` are ignored. `weight`, if given, replaces `count / ((index + 1) * count)`.
+        """
         ma, m2a, _ = a
         mb, m2b, _ = b
         na, nb = self.acc(index) * self.acc(count), self.acc(count)
@@ -231,7 +231,10 @@ class WelfordOps:
 
     @cute.jit
     def combine_equal(self, a, b, count: cutlass.Constexpr):
-        """Combine two nonempty states containing the same number of values."""
+        """Combine two nonempty states that each hold `count` values.
+
+        a's and b's count fields are not read.
+        """
         ma, m2a, _ = a
         mb, m2b, _ = b
         delta = mb - ma
@@ -793,6 +796,13 @@ class VarMeanOps(WelfordOps):
         var = m2 / _welford_denom(self.acc, nf, self.correction)
         result = cute.math.sqrt(var) if const_expr(self.take_sqrt) else var
         return (result, mean)
+
+
+def welford_outputs(trait) -> int:
+    """Outputs of a variance-returning Welford trait, or 0 for any other trait."""
+    if not isinstance(trait, WelfordOps) or trait.return_mean:
+        return 0
+    return getattr(trait, "nouts", 1)
 
 
 class MaxDimOps(ArgMaxOps):
