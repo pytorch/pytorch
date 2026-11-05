@@ -11019,7 +11019,9 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
         joint = {}
 
         def f(carry, x):
-            joint["gm"] = create_hop_joint_graph(body, (carry, x), True).joint_gm
+            joint["gm"] = create_hop_joint_graph(
+                body, (carry, x), functionalize=True
+            ).joint_gm
             return carry.clone()
 
         carry = torch.randn(4, requires_grad=True)
