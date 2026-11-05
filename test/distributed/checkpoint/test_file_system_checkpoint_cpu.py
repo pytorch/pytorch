@@ -225,52 +225,76 @@ class TestDistributedStateDictSaveLoadZStandard(TestCase):
 
 
 class TestFileSystemWriterFlushBehavior(TestCase):
-    @parametrize("use_zstd", [False, True])
+    @parametrize("thread_count", _THREAD_COUNTS)
     @parametrize("sync_files", [True, False])
-    def test_no_per_item_flush(self, sync_files: bool, use_zstd: bool) -> None:
+    @parametrize("use_zstd", [False, True])
+    def test_no_per_item_flush(
+        self, thread_count: int, sync_files: bool, use_zstd: bool
+    ) -> None:
         """
-        The shard stream is flushed once before os.fsync (only if sync_files)
-        and once on close, never once per write item. ZStandard's close()
-        cascades into NoCloseWriter.close(), covering the extension path.
+        Each shard stream is flushed once before os.fsync (only if sync_files)
+        and once on close, never once per write item. With use_zstd, the
+        `zstandard` backend cascades close() into NoCloseWriter.close(); the
+        `pyzstd` backend (used in CI) does not, so there NoCloseWriter.close()
+        runs when the wrapper is released at the end of _write_item.
         """
         if use_zstd and not ZStandard.is_available():
             self.skipTest("zstandard/pyzstd is not installed")
 
-        shard_flushes: list[int] = []
+        flush_counts: dict[str, int] = {}
 
-        class FlushTrackingFileSystem(FileSystem):
+        class FlushCountingFileSystem(FileSystem):
             @contextmanager
             def create_stream(self, path, mode):
                 with super().create_stream(path, mode) as stream:
-                    if str(path).endswith(".distcp"):
-                        shard_flushes.append(0)
+                    key = str(path)
+                    if key.endswith(".distcp"):
+                        flush_counts[key] = 0
                         orig_flush = stream.flush
 
-                        def tracking_flush():
-                            shard_flushes[-1] += 1
+                        def counting_flush():
+                            flush_counts[key] += 1
                             return orig_flush()
 
-                        stream.flush = tracking_flush  # type: ignore[method-assign]
+                        stream.flush = counting_flush  # type: ignore[method-assign]
                     yield stream
 
         with tempfile.TemporaryDirectory() as path:
-            state_dict_to_save = {
-                f"tensor_{i}": torch.ones(5, 5) * i for i in range(10)
-            }
+            state_dict_to_save = MyTestModule().state_dict()
+            state_dict_to_save["test_blob"] = BlobState(b"SomeBlobForTesting")
 
             fs_writer = FileSystemWriter(
                 path=path,
+                thread_count=thread_count,
                 sync_files=sync_files,
                 _extensions=[ZStandard()] if use_zstd else None,
             )
-            fs_writer.fs = FlushTrackingFileSystem()
-            save(state_dict=state_dict_to_save, storage_writer=fs_writer)
+            fs_writer.fs = FlushCountingFileSystem()
+            save(
+                state_dict=state_dict_to_save,
+                storage_writer=fs_writer,
+            )
 
-            self.assertEqual(shard_flushes, [2 if sync_files else 1])
+            # One shard file per thread, each flushed a constant number of times
+            # regardless of how many items it holds.
+            expected_flushes = 2 if sync_files else 1
+            self.assertEqual(
+                sorted(flush_counts.values()), [expected_flushes] * thread_count
+            )
 
-            state_dict_to_load = {f"tensor_{i}": torch.zeros(5, 5) for i in range(10)}
-            load(state_dict=state_dict_to_load, storage_reader=FileSystemReader(path))
-            assert_state_dict_equal(self, state_dict_to_load, state_dict_to_save)
+            state_dict_to_load_to = MyTestModule().state_dict()
+            state_dict_to_load_to["test_blob"] = BlobState(b"")
+
+            with self.assertRaises(AssertionError):
+                assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+            fs_reader = FileSystemReader(path=path)
+            load(
+                state_dict=state_dict_to_load_to,
+                storage_reader=fs_reader,
+            )
+
+            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
 
 class TestDistributedStateDictSaveLoadWithSharedTensor(MultiProcContinuousTest):
