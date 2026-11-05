@@ -516,12 +516,15 @@ class FSDPParamGroup:
             # directly initialize unsharded parameters from sharded parameters
 
             for fsdp_param in self.fsdp_params:
-                all_gather_inputs = fsdp_param.all_gather_inputs
+                # The copy below casts to param_dtype, which saves a cast
+                all_gather_inputs, dtypes = fsdp_param.get_all_gather_inputs(
+                    cast_to_param_dtype=False
+                )
                 # Avoids building the lists once the outputs exist
                 if not fsdp_param.all_gather_outputs:
                     fsdp_param.init_all_gather_outputs(
                         [t.numel() for t in all_gather_inputs],
-                        [t.dtype for t in all_gather_inputs],
+                        dtypes,
                         world_size,
                         self.device,
                     )

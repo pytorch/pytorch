@@ -979,6 +979,52 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         self.assertEqual(record_copy_ins(), [None, None])
 
 
+class _RecordFuncs(TorchDispatchMode):
+    """Records the ops that run under it and returns their list on entry."""
+
+    def __enter__(self) -> list[torch._ops.OpOverload]:
+        super().__enter__()
+        self.funcs: list[torch._ops.OpOverload] = []
+        return self.funcs
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        self.funcs.append(func)
+        return func(*args, **(kwargs or {}))
+
+
+class TestFullyShardSingleRank(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _shard_mesh(self) -> DeviceMesh:
+        # A size-1 shard group inside a world of 2
+        return init_device_mesh(
+            device.type, (self.world_size, 1), mesh_dim_names=("replicate", "shard")
+        )["shard"]
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_unshard_casts_once(self):
+        # Unsharding casts the shards straight into the unsharded parameters
+        model = fully_shard(
+            nn.Linear(16, 33, device=device),
+            mesh=self._shard_mesh(),
+            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+        )
+        with _RecordFuncs() as funcs:
+            model.unshard()
+        # One copy for each of the weight and bias, and no separate casts
+        copies = [f for f in funcs if f._schema.is_mutable or "copy" in f.name()]
+        self.assertEqual(copies, [torch.ops.aten.copy_.default] * 2)
+        for fsdp_param in model._get_fsdp_state()._fsdp_param_group.fsdp_params:
+            self.assertEqual(
+                fsdp_param.unsharded_param,
+                fsdp_param.sharded_param.to_local().to(torch.bfloat16),
+                atol=0,
+                rtol=0,
+            )
+
+
 class TestFullyShardCustomAllocation(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:

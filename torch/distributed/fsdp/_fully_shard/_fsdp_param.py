@@ -1189,6 +1189,16 @@ class FSDPParam:
 
     @property
     def all_gather_inputs(self) -> list[torch.Tensor]:  # 1D
+        return self.get_all_gather_inputs()[0]
+
+    def get_all_gather_inputs(
+        self, cast_to_param_dtype: bool = True
+    ) -> tuple[list[torch.Tensor], list[torch.dtype]]:
+        """
+        Returns the 1D all-gather inputs and the dtypes of their all-gather
+        outputs. With ``cast_to_param_dtype=False``, a default input keeps the
+        sharded dtype, for a copy into its output that casts it.
+        """
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
             if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
@@ -1232,9 +1242,10 @@ class FSDPParam:
                     )
                 # Only the 5-argument hook gets outer_size to pad with (#137005), so
                 # only its Tensor inputs are checked for the padded sharded size
-                return self._get_extension_all_gather_inputs(
+                inputs = self._get_extension_all_gather_inputs(
                     all_gather_inputs, check_padding=num_fn_params == 5
                 )
+                return inputs, [t.dtype for t in inputs]
             sharded_param_data = self._sharded_param_data
             if self.offload_to_cpu:
                 sharded_param_data = sharded_param_data.to(
@@ -1248,20 +1259,23 @@ class FSDPParam:
                 padded.narrow(dim, 0, self.sharded_size[dim]).copy_(
                     sharded_param_data.view(self.sharded_size)
                 )
-                return [padded.view(-1)]
-            return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
+                return [padded.view(-1)], [padded.dtype]
+            dtype = self.param_dtype or sharded_param_data.dtype
+            if cast_to_param_dtype:
+                sharded_param_data = _to_dtype_if_needed(sharded_param_data, dtype)
+            return [sharded_param_data], [dtype]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
                 raise NotImplementedError(
                     f"All-gathering the post-forward shard of {self._display_name} is "
                     "not supported for all-gather extensions yet"
                 )
-            all_gather_input = _to_dtype_if_needed(
-                cast(torch.Tensor, self._sharded_post_forward_param_data),
-                self.param_dtype,
-            )
-            return [all_gather_input]
-        return [torch.empty(0)]  # mypy
+            all_gather_input = cast(torch.Tensor, self._sharded_post_forward_param_data)
+            dtype = self.param_dtype or all_gather_input.dtype
+            if cast_to_param_dtype:
+                all_gather_input = _to_dtype_if_needed(all_gather_input, dtype)
+            return [all_gather_input], [dtype]
+        return [], []  # mypy
 
     def _get_extension_all_gather_inputs(
         self, inputs: Sequence[torch.Tensor | AllGatherInput], *, check_padding: bool
