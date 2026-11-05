@@ -16928,9 +16928,6 @@ op_db: list[OpInfo] = [
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
-           dtypesIfMPS=floating_types_and(
-               torch.bfloat16, torch.float16, torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8, torch.bool
-           ),
            sample_inputs_func=sample_inputs_max_pool,
            skips=(
                # We've defined a custom op here, and we don't handle the case where we receive an out kwarg
