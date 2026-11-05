@@ -229,26 +229,6 @@ struct Pass {
   bool i0_dim1 = false;
 };
 
-// Transforms per group, within smem. A strided axis tiles rows for 256 threads (4 to 32 rows), stretched to the
-// whole batch when that is at most 1.5x the tile; a contiguous axis fills 64 threads, then adds rows (up to 8)
-// while more than 1 in 20 SIMD lanes would sit idle
-int64_t transforms_per_group(int64_t n, int64_t padded, int64_t J, int64_t rows, bool strided) {
-  constexpr int64_t simd = c10::metal::simdgroup_size, threads = c10::metal::max_threadgroup_size;
-  if (strided) {
-    const int64_t tile = std::min<int64_t>({kFFTMaxPoints / n, threads / J, std::max<int64_t>(4, 256 / J)});
-    const int64_t B = std::clamp<int64_t>(tile, 1, std::min<int64_t>(rows, 32));
-    const bool stretch = rows > B && rows <= B + B / 2 && rows * n <= kFFTMaxPoints && rows * J <= threads;
-    return stretch ? rows : B;
-  }
-  const auto fits = [&](int64_t c) { return c <= 8 && c * padded <= kFFTMaxPoints; };
-  const int64_t base = std::max<int64_t>(64 / J, 1);
-  int64_t c = base;
-  while (fits(c) && (at::round_up(c * J, simd) - c * J) * 20 > c * J) {
-    c++;
-  }
-  return std::clamp<int64_t>(fits(c) ? c : base, 1, std::min<int64_t>(rows, 32));
-}
-
 // Encodes n-point transforms of the batch (half: packed real pairs)
 void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool inv, bool half, const Pass& x) {
   const auto radix = radices(x.global ? x.global : n, x.global ? kGlobalRadices : kRadices);
@@ -274,10 +254,22 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
   // Threads per transform; global passes spread transforms over 64-thread groups, the unpack pass over 256
   const int64_t J = !x.global ? at::ceil_div(n, ept) : x.global == kFFTUnpackRadix ? 256 : 64;
 
-  // Pad contiguous rows (a spare slot every 16), interleave strided tiles
+  // Transforms per group, within smem: a strided axis tiles rows for 256 threads (4 to 32 rows), a contiguous
+  // axis fills 64 threads and adds rows (up to 8) while more than 1 in 20 SIMD lanes would sit idle
+  constexpr int64_t simd = c10::metal::simdgroup_size, max_threads = c10::metal::max_threadgroup_size;
   const bool strided = b.si != 1 || b.so != 1;
-  const int64_t padded = n + (n >> kFFTPadShift) + 1;
-  const int64_t B = transforms_per_group(n, padded, J, rows, strided);
+  const int64_t padded = n + (n >> kFFTPadShift) + 1; // Contiguous rows get a spare smem slot every 16
+  int64_t B = strided ? std::min<int64_t>({kFFTMaxPoints / n, max_threads / J, std::max<int64_t>(4, 256 / J)}) : 64 / J;
+  for (int64_t c = std::max<int64_t>(B, 1); !strided && c <= 8 && c * padded <= kFFTMaxPoints; c++) {
+    if ((at::round_up(c * J, simd) - c * J) * 20 <= c * J) {
+      B = c;
+      break;
+    }
+  }
+  B = std::clamp<int64_t>(B, 1, std::min<int64_t>(rows, 32));
+  if (strided && rows > B && rows <= B + B / 2 && rows * n <= kFFTMaxPoints && rows * J <= max_threads) {
+    B = rows; // A batch up to 1.5x the tile fits one group
+  }
   const bool pad = !strided && B * (padded - (B == 1)) <= kFFTMaxPoints;
   const int64_t row = strided ? 1 : pad ? padded - (B == 1) : n + (B > 1);
 
@@ -317,7 +309,7 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
     params.out_strides[d] = to_i32(b.dims[d].out_stride);
   }
 
-  const bool contig = !strided && B == 1 && has(kContigSizes, n) && fft_is_basic(F);
+  const bool contig = !strided && B == 1 && has(kContigSizes, n) && !(F & kFFTMultiPass);
   const auto name = fmt::format(
       "fft_{}_{}_{}{}_{}", scalarToMetalTypeString(b.in), scalarToMetalTypeString(b.out), family, contig ? "c" : "", F);
   const int64_t ny = b.dims.size() > 1 ? b.dims[1].size : 1;
