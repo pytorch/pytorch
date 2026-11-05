@@ -140,6 +140,14 @@ def remove_no_ops(
             return isinstance(arg, (int, float))
 
         def replace_no_op(node, replace_input_index):
+            value = node.meta["val"]
+            if (
+                config.strict_pointwise
+                and isinstance(value, torch.Tensor)
+                and (value.is_floating_point() or value.is_complex())
+            ):
+                # Floating identities can change signed zeros or quiet NaNs.
+                return
             replacement = node.args[replace_input_index]
 
             # https://github.com/pytorch/pytorch/issues/86128 causes
