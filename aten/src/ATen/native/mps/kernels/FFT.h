@@ -6,10 +6,9 @@ C10_METAL_CONSTEXPR uint32_t kFFTInverse = 1u << 0;
 C10_METAL_CONSTEXPR uint32_t kFFTFourStepTwiddles = 1u << 2;
 C10_METAL_CONSTEXPR uint32_t kFFTExtendedStores = 1u << 3;
 C10_METAL_CONSTEXPR uint32_t kFFTExtendedLoads = 1u << 4;
-C10_METAL_CONSTEXPR uint32_t kFFTGlobalStage = 1u << 5;
-// The bits of four-step, chirp and global-memory passes
-C10_METAL_CONSTEXPR uint32_t kFFTMultiPass = kFFTFourStepTwiddles |
-    kFFTExtendedStores | kFFTExtendedLoads | kFFTGlobalStage;
+// The bits of four-step and chirp passes
+C10_METAL_CONSTEXPR uint32_t kFFTMultiPass =
+    kFFTFourStepTwiddles | kFFTExtendedStores | kFFTExtendedLoads;
 
 // Metal's threadgroup memory limit, and the complex points that fit in it
 C10_METAL_CONSTEXPR uint32_t kFFTSmemBytes = 32768;
@@ -36,10 +35,6 @@ inline constexpr uint32_t fft_contig_pad_shift(uint32_t n) {
 // Two-level twiddle table: W^b for b < kFFTTwiddleBlock, then
 // W^(kFFTTwiddleBlock a)
 C10_METAL_CONSTEXPR uint32_t kFFTTwiddleBlock = 4096;
-
-// Global-memory stage radices, largest first: lengths factor in this order
-#define FFT_GLOBAL_RADICES(_) \
-  _(28) _(25) _(21) _(16) _(15) _(12) _(9) _(8) _(7) _(5) _(4) _(3) _(2)
 
 #define FFT_FIXED_SIZES(_) \
   _(64) _(128) _(200) _(240) _(256) _(512) _(1024) _(2048) _(4096)
