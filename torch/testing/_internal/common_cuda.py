@@ -87,7 +87,7 @@ def _rocm_major_minor():
 ROCM_VERSION = LazyVal(_rocm_major_minor)
 
 # Cuspy needs both the cupti-python bindings and the build-generated
-# _cupti_stubs catalogs (emitted only on CUDA >= 13.3 builds where the field-id codegen
+# _cupti_stubs catalogs (emitted only on CUPTI >= 13.5 builds where the field-id codegen
 # ran); the module hard-imports the latter, so guard on both to skip (not error) where
 # the stubs were not generated.
 TEST_CUPTI = (
@@ -106,7 +106,11 @@ def _cupti_version():
         return 0
 
 
-TEST_CUPTI_V13_3 = LazyVal(lambda: TEST_CUPTI and _cupti_version() >= 130300)
+# Also gate on the build's CUDA: the cupti-python wheel pulls in its own (newer) libcupti,
+# so a CUDA 13.2 runner can still load a libcupti >= 13.5.
+TEST_CUPTI_V13_5 = LazyVal(
+    lambda: TEST_CUPTI and _get_torch_cuda_version() >= (13, 5) and _cupti_version() >= 130500
+)
 
 
 def _cuda_graph_tools_id_available():
