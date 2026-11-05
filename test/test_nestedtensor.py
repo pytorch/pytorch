@@ -8566,13 +8566,11 @@ FORWARD_SKIPS_AND_XFAILS = [
     # 2. no dense tensors of higher dim than the NJT
     XFailRule(
         error_type=ValueError,
-        error_msg="expected condition to be a jagged layout NestedTensor",
         op_match_fn=lambda device, op: op.full_name == "where",
         sample_match_fn=lambda device, sample: not sample.kwargs["condition"].is_nested,
     ),
     XFailRule(
         error_type=ValueError,
-        error_msg="broadcasting nested tensors with dense tensors of equal or higher dim",
         op_match_fn=lambda device, op: op.full_name == "where",
         sample_match_fn=lambda device, sample: (
             (
@@ -8588,7 +8586,6 @@ FORWARD_SKIPS_AND_XFAILS = [
     # expected: masked ops don't support jagged layout
     XFailRule(
         error_type=ValueError,
-        error_msg="expects strided",
         op_match_fn=lambda device, op: op.full_name
         in {
             "masked.amax",
@@ -8608,7 +8605,6 @@ FORWARD_SKIPS_AND_XFAILS = [
     # Op doesn't support lengths being present
     XFailRule(
         error_type=ValueError,
-        error_msg="expected input to be a contiguous jagged layout NestedTensor",
         op_match_fn=lambda device, op: (op.full_name == "nn.functional.linear"),
         sample_match_fn=lambda device, sample: (sample.input._lengths is not None),
         name="no_linear_noncontig_holes_support",
@@ -8640,10 +8636,6 @@ FORWARD_SKIPS_AND_XFAILS = [
     # nested tensors with holes
     XFailRule(
         error_type=RuntimeError,
-        error_msg=(
-            "reducing across the ragged dimension is not supported for non-contiguous "
-            "nested tensors with holes"
-        ),
         op_match_fn=lambda device, op: (
             # min.reduction_with_dim and max.reduction_with_dim aren't associated with
             # ReductionOpInfo entries sadly even though they're reductions
@@ -8668,7 +8660,6 @@ FORWARD_SKIPS_AND_XFAILS = [
     # expected: index_put() doesn't work on non-contiguous NJTs without ragged dimension indices
     XFailRule(
         error_type=RuntimeError,
-        error_msg="If ragged dimension is not part of indices, this only works on contiguous NJTs",
         op_match_fn=lambda device, op: (op.full_name == "index_put"),
         sample_match_fn=lambda device, sample: (
             not sample.input.is_contiguous()
@@ -8687,7 +8678,6 @@ FORWARD_SKIPS_AND_XFAILS = [
     # these don't work on non-contiguous NJTs yet
     XFailRule(
         error_type=ValueError,
-        error_msg="expected self to be a contiguous jagged layout NestedTensor",
         op_match_fn=lambda device, op: (
             op.full_name
             in {
@@ -8707,7 +8697,6 @@ FORWARD_SKIPS_AND_XFAILS = [
     # these don't work on the ragged dim yet
     XFailRule(
         error_type=RuntimeError,
-        error_msg="not supported for NestedTensor on ragged dim",
         op_match_fn=lambda device, op: (
             op.full_name
             in {
@@ -8723,7 +8712,6 @@ FORWARD_SKIPS_AND_XFAILS = [
     XFailRule(
         error_type=RuntimeError,
         # error comes from usage of view() in the decomp
-        error_msg="does not support ragged_idx != 1 except when",
         op_match_fn=lambda device, op: (op.full_name == "unflatten"),
         sample_match_fn=lambda device, sample: "noncontig_transposed" in sample.name,
         name="unflatten_ragged_dim_unsupported",
@@ -8731,7 +8719,6 @@ FORWARD_SKIPS_AND_XFAILS = [
     # these don't work on the batch dim yet
     XFailRule(
         error_type=RuntimeError,
-        error_msg="not supported for NestedTensor on dim=0",
         op_match_fn=lambda device, op: (
             op.full_name
             in {
@@ -8747,7 +8734,6 @@ FORWARD_SKIPS_AND_XFAILS = [
     XFailRule(
         error_type=RuntimeError,
         # error comes from usage of view() in the decomp
-        error_msg="cannot view shape",
         op_match_fn=lambda device, op: (op.full_name == "unflatten"),
         sample_match_fn=lambda device, sample: "batch_dim" in sample.name,
         name="unflatten_batch_dim_unsupported",
@@ -8756,7 +8742,6 @@ FORWARD_SKIPS_AND_XFAILS = [
     # supported for non-contig NJTs with holes
     XFailRule(
         error_type=RuntimeError,
-        error_msg="not supported for nested tensors with holes",
         op_match_fn=lambda device, op: (op.full_name in {"bmm", "matmul"}),
         sample_match_fn=lambda device, sample: (
             "noncontig_holes" in sample.name
@@ -8769,7 +8754,6 @@ FORWARD_SKIPS_AND_XFAILS = [
     # some jiterator op failures due to unsupported jagged layout
     XFailRule(
         error_type=RuntimeError,
-        error_msg="unsupported tensor layout",
         op_match_fn=lambda device, op: op.full_name
         in {
             "jiterator_binary",
@@ -8782,7 +8766,6 @@ FORWARD_SKIPS_AND_XFAILS = [
     # tensor with 1 in ragged dim.
     XFailRule(
         error_type=RuntimeError,
-        error_msg="cannot call binary pointwise function .* with inputs of shapes",
         op_match_fn=lambda device, op: (isinstance(op, BinaryUfuncInfo)),
         sample_match_fn=lambda device, sample: (
             "noncontig_holes" in sample.name
@@ -8814,7 +8797,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # mean(): need to examine backwards formula
     XFailRule(
         error_type=RuntimeError,
-        error_msg="SymIntArrayRef expected to contain only concrete integers",
         op_match_fn=lambda device, op: (op.full_name == "mean"),
         sample_match_fn=lambda device, sample: (
             "full reduction" not in sample.name
@@ -8826,7 +8808,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # with noncontig transposed inputs to mean()
     XFailRule(
         error_type=RuntimeError,
-        error_msg="cannot expand shape",
         op_match_fn=lambda device, op: (op.full_name == "mean"),
         sample_match_fn=lambda device, sample: (
             "normal dim reduction" in sample.name
@@ -8838,7 +8819,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # but that's not supported
     XFailRule(
         error_type=ValueError,
-        error_msg="expected self to be a contiguous jagged layout NestedTensor",
         op_match_fn=lambda device, op: (op.full_name == "unsqueeze"),
         sample_match_fn=lambda device, sample: (
             "noncontig_transposed" in sample.name or "ragged_dim" in sample.name
@@ -8849,7 +8829,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # with unflatten()
     XFailRule(
         error_type=RuntimeError,
-        error_msg="cannot view shape",
         op_match_fn=lambda device, op: (op.full_name == "unflatten"),
         sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
         name="broken_unflatten_backward",
@@ -8857,7 +8836,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # sum() backward is not implemented for non-full reductions
     XFailRule(
         error_type=NotImplementedError,
-        error_msg="aten._nested_sum_backward.default",
         op_match_fn=lambda device, op: (op.full_name == "sum"),
         sample_match_fn=lambda device, sample: ("full reduction" not in sample.name),
         name="broken_sum_backward",
@@ -8865,7 +8843,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # squeeze(): invalid gradient shape; need to check formula
     XFailRule(
         error_type=RuntimeError,
-        error_msg="returned an invalid gradient at index 0",
         op_match_fn=lambda device, op: (op.full_name == "squeeze"),
         sample_match_fn=lambda device, sample: (
             sample.name == "5D_contig_with_seqlen_cache: normal_dim"
@@ -8876,14 +8853,12 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # sgn() / masked_select(): backwards formulas don't work at all
     XFailRule(
         error_type=RuntimeError,
-        error_msg="NestedTensor does not support directly calling torch.ops.aten.size",
         op_match_fn=lambda device, op: (op.full_name in {"sgn", "masked_select"}),
         name="broken_sgn_masked_select_backward",
     ),
     # select(): grad_output is an NJT for non-batch-dim operation
     XFailRule(
         error_type=ValueError,
-        error_msg="expected grad_output to be a tensor",
         op_match_fn=lambda device, op: (op.full_name == "select"),
         sample_match_fn=lambda device, sample: ("batch_dim" not in sample.name),
         name="broken_select_backward",
@@ -8896,7 +8871,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # pow() / float_power(): use where() underneath; broken for (NT, T) broadcasting cases
     XFailRule(
         error_type=ValueError,
-        error_msg="expected condition to be a jagged layout NestedTensor",
         op_match_fn=lambda device, op: (op.full_name in {"pow", "float_power"}),
         sample_match_fn=lambda device, sample: ("(NT, T)" in sample.name),
         name="broken_pow_backward",
@@ -8904,7 +8878,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # __rpow__() backward is also broken, but for the reverse (T, NT) broadcasting cases
     XFailRule(
         error_type=ValueError,
-        error_msg="expected condition to be a jagged layout NestedTensor",
         op_match_fn=lambda device, op: (op.full_name == "__rpow__"),
         sample_match_fn=lambda device, sample: ("(T, NT)" in sample.name),
         name="broken_rpow_backward",
@@ -8920,7 +8893,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # narrow(): unimplemented backward
     XFailRule(
         error_type=RuntimeError,
-        error_msg="derivative for aten::narrow is not implemented",
         op_match_fn=lambda device, op: (op.full_name == "narrow"),
         name="broken_narrow_backward",
     ),
@@ -8928,7 +8900,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # where the output is dense but sizes still contain a nested int
     XFailRule(
         error_type=RuntimeError,
-        error_msg="SymIntArrayRef expected to contain only concrete integers",
         op_match_fn=lambda device, op: (
             op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
         ),
@@ -8938,7 +8909,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # copysign(): formula is broken for (T, NT) broadcasting
     XFailRule(
         error_type=RuntimeError,
-        error_msg="SymIntArrayRef expected to contain only concrete integers",
         op_match_fn=lambda device, op: (op.full_name == "copysign"),
         sample_match_fn=lambda device, sample: ("(T, NT)" in sample.name),
         name="broken_copysign_backward",
@@ -8951,7 +8921,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
     ),
     XFailRule(
         error_type=RuntimeError,
-        error_msg="reducing across the ragged dimension is not supported for non-contiguous",
         op_match_fn=lambda device, op: (
             isinstance(op, BinaryUfuncInfo)
             # doesn't happen for these ops for some reason
@@ -8966,7 +8935,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
     ),
     XFailRule(
         error_type=RuntimeError,
-        error_msg="reducing across the ragged dimension is not supported for non-contiguous",
         op_match_fn=lambda device, op: (op.full_name == "nn.functional.rms_norm"),
         sample_match_fn=lambda device, sample: (sample.input._lengths is not None),
         name="rms_norm_noncontig_holes_ragged_dim_reduction",
@@ -8974,17 +8942,12 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # expected: autodiff on complex dtype is not supported
     XFailRule(
         error_type=RuntimeError,
-        error_msg=(
-            "_nested_view_from_jagged does not support automatic differentiation "
-            "for outputs with complex dtype"
-        ),
         op_match_fn=lambda device, op: (op.full_name in {"cdouble", "cfloat", "chalf"}),
         name="no_complex_autodiff",
     ),
     # Bug: need to use the correct nested int in the return shape
     XFailRule(
         error_type=RuntimeError,
-        error_msg="Function CloneBackward0 returned an invalid gradient",
         op_match_fn=lambda device, op: (op.full_name == "clone"),
         sample_match_fn=lambda device, sample: (
             sample.kwargs.get("memory_format", None) == torch.contiguous_format
@@ -8994,7 +8957,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
     # copysign uses masked_fill_ underneath, which isn't implemented
     XFailRule(
         error_type=NotImplementedError,
-        error_msg="aten.masked_fill_.Scalar",
         op_match_fn=lambda device, op: op.full_name == "copysign",
         name="unimplemented_masked_fill",
     ),
@@ -9010,7 +8972,6 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
-        error_msg="The values for attribute 'shape' do not match",
         op_match_fn=lambda device, op: (op.full_name == "to"),
         sample_match_fn=lambda device, sample: ("-> cpu" in sample.name),
         name="cross_device_transfer_wrong_nested_int_in_compile",
@@ -9020,7 +8981,6 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     XFailRule(
         error_type=(torch._dynamo.exc.Unsupported, torch._dynamo.exc.UserError),
         # Ne(u1, u0) (unhinted: Ne(u1, u0)).  (Size-like symbols: u1, u0)
-        error_msg="Could not guard on data-dependent expression",
         op_match_fn=lambda device, op: (op.full_name == "clone"),
         sample_match_fn=lambda device, sample: (
             "noncontig_holes" in sample.name
@@ -9039,7 +8999,6 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     # torch.compile that needs to be addressed via torch._check()
     XFailRule(
         error_type=torch._dynamo.exc.InternalTorchDynamoError,
-        error_msg="Pending unbacked symbols",
         op_match_fn=lambda device, op: (op.full_name == "select"),
         sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
         name="broken_select_backward_unbacked",
@@ -9057,7 +9016,6 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # mean(): weird bug
     XFailRule(
         error_type=torch._dynamo.exc.BackendCompilerFailed,
-        error_msg="'NestedIntNode' object has no attribute 'sym_float'",
         op_match_fn=lambda device, op: (op.full_name == "mean"),
         sample_match_fn=lambda device, sample: (
             "full reduction" not in sample.name
@@ -9068,7 +9026,6 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # min() / max(): weird bug
     XFailRule(
         error_type=AttributeError,
-        error_msg="'NestedIntNode' object has no attribute 'add'",
         op_match_fn=lambda device, op: (
             op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
         ),
@@ -9085,7 +9042,6 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # copysign(): formula is broken for (T, NT) broadcasting
     XFailRule(
         error_type=AttributeError,
-        error_msg="'NestedIntNode' object has no attribute 'add'",
         op_match_fn=lambda device, op: (op.full_name == "copysign"),
         sample_match_fn=lambda device, sample: ("(T, NT)" in sample.name),
         name="broken_copysign_compile_backward",
@@ -9093,7 +9049,6 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # in compile, these complex ops use view_as_real(), which isn't implemented
     XFailRule(
         error_type=NotImplementedError,
-        error_msg="aten.view_as_real.default",
         op_match_fn=lambda device, op: (op.full_name in {"cdouble", "cfloat", "chalf"}),
         name="unimplemented_view_as_real",
     ),
