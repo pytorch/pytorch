@@ -218,13 +218,22 @@ def hardtanh_backward(
     return torch.where((self <= min_val) | (self >= max_val), 0.0, grad_output)
 
 
-@register_decomposition(aten._clamp_backward_tensor)
-def _clamp_backward_tensor(
+@register_decomposition(aten._clamp_tensor_backward)
+@out_wrapper("grad_input")
+def _clamp_tensor_backward(
     grad_output: Tensor, self: Tensor, min: Tensor, max: Tensor
 ) -> Tensor:
+    _, dtype = utils.elementwise_dtypes(
+        grad_output,
+        self,
+        min,
+        max,
+        type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+    grad_output, self, min, max = (t.to(dtype) for t in (grad_output, self, min, max))
     tie = ((self == min) | (self == max)) & (min < max)
     inactive = (self < min) | (self > max)
-    return torch.where(inactive, 0, torch.where(tie, grad_output / 2, grad_output))
+    return torch.where(tie, grad_output / 2, grad_output).masked_fill(inactive, 0)
 
 
 @register_decomposition(aten.hardswish)

@@ -34,6 +34,7 @@ DECLARE_DISPATCH(mode_fn, mode_stub)
 
 using clamp_tensor_fn = void (*)(TensorIteratorBase&);
 DECLARE_DISPATCH(clamp_tensor_fn, clamp_stub)
+DECLARE_DISPATCH(clamp_tensor_fn, clamp_tensor_backward_stub)
 
 namespace detail {
 enum class ClampLimits { Min, Max, MinMax };

@@ -1446,7 +1446,9 @@ Tensor clamp_backward(
     const Tensor& min,
     const Tensor& max) {
   if (max.defined() && min.defined()) {
-    return at::_clamp_backward_tensor(grad, self, min, max);
+    // The same strict losing-side mask handles ordered, equal, and reversed
+    // finite bounds.
+    return at::_clamp_tensor_backward(grad, self, min, max);
   } else if (min.defined()) {
     return masked_fill_inplace_if_safe(
         where(self == min, grad / 2, grad), self < min, 0);

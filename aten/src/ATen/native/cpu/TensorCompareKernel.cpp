@@ -14,6 +14,7 @@
 #include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/irange.h>
@@ -389,6 +390,21 @@ void clamp_kernel_impl(TensorIteratorBase& iter) {
   }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf);
 }
 
+void clamp_tensor_backward_kernel_impl(TensorIteratorBase& iter) {
+  AT_DISPATCH_V2(iter.common_dtype(), "clamp_tensor_backward_cpu", AT_WRAP([&]() {
+    using opmath_t = at::opmath_type<scalar_t>;
+    cpu_kernel(iter, [](scalar_t grad, scalar_t v, scalar_t min, scalar_t max) -> scalar_t {
+      if (v < min || v > max) {
+        return scalar_t(0);
+      }
+      if ((v == min || v == max) && min < max) {
+        return static_cast<scalar_t>(static_cast<opmath_t>(grad) / opmath_t(2));
+      }
+      return grad;
+    });
+  }), AT_EXPAND(AT_FLOATING_TYPES), kBFloat16, kHalf);
+}
+
 void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, const Scalar& max_) {
   AT_DISPATCH_V2(iter.common_dtype(), "clamp_scalar_cpu", AT_WRAP([&]() {
     const auto min = min_.to<scalar_t>();
@@ -459,6 +475,7 @@ REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl)
 REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl)
 REGISTER_DISPATCH(mode_stub, &mode_kernel_impl)
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl)
+REGISTER_DISPATCH(clamp_tensor_backward_stub, &clamp_tensor_backward_kernel_impl)
 REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl)
 REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl)
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl)
