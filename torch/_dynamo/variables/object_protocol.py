@@ -2277,12 +2277,13 @@ def guard_mro_absent(
     klass_source: Source,
     name: str,
     stop: int,
+    start: int = 0,
 ) -> None:
-    """Guard that *name* stays out of the ``__dict__`` of ``klass.__mro__[:stop]``."""
+    """Guard that *name* stays out of the ``__dict__`` of ``klass.__mro__[start:stop]``."""
     guards_context = tx.output.tracing_context.guards_context
     if guards_context.skip_install or is_from_skip_guard_source(klass_source):
         return
-    for idx in range(stop):
+    for idx in range(start, stop):
         absent_key = (id(klass), idx, name)
         if absent_key in tx.output.guarded_mro_absent_keys:
             continue
