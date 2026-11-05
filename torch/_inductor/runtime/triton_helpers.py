@@ -230,7 +230,7 @@ def is_floating(x):
 # at Triton compile time, so bypass libdevice for those inputs.
 @triton.jit
 def rounding_to_int(x, index_dtype: tl.constexpr, rounding: tl.constexpr):
-    x = promote_to_tensor(x)
+    x = tl.to_tensor(x)
     if x.dtype.is_int():
         return x.to(index_dtype)
     else:
@@ -238,8 +238,10 @@ def rounding_to_int(x, index_dtype: tl.constexpr, rounding: tl.constexpr):
             return libdevice.ceil(x).to(index_dtype)
         elif rounding == "floor":
             return libdevice.floor(x).to(index_dtype)
-        else:
+        elif rounding == "trunc":
             return libdevice.trunc(x).to(index_dtype)
+        else:
+            tl.static_assert(False, "unsupported rounding mode")
 
 
 @triton.jit

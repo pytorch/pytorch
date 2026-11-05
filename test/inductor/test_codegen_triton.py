@@ -33,7 +33,6 @@ from torch._inductor.codegen.triton import (
     TritonKernelOverrides,
     TritonScheduling,
     TritonSymbols,
-    texpr,
 )
 from torch._inductor.codegen.wrapper import (
     _escape_triton_kernel_source_for_wrapper,
