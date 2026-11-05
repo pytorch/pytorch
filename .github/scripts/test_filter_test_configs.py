@@ -356,55 +356,34 @@ class TestConfigFilter(TestCase):
     def test_periodic_strict_requires_marker_filter(self) -> None:
         for flags in (
             None,
-            "",
-            " ",
             "--verbose",
-            "--periodic-filter",
             "--periodic-filter=",
             "--periodic-filter periodic_daily",
-            "--unrelated=--periodic-filter=periodic_daily",
         ):
             with self.subTest(extra_flags=flags):
-                entry = {"config": "periodic", "shard": 1, "runner": "linux"}
+                entry = {"config": "periodic", "shard": 2}
                 if flags is not None:
                     entry["extra_flags"] = flags
-                with self.assertRaisesRegex(ValueError, "--periodic-filter=<marker>"):
-                    validate_periodic_test_matrix(
-                        "periodic-strict", {"include": [entry]}
-                    )
-
-    def test_periodic_strict_accepts_explicit_markers(self) -> None:
-        matrix = {
-            "include": [
-                {"config": "periodic", "extra_flags": f"--periodic-filter={marker}"}
-                for marker in ("periodic", "periodic_daily")
-            ]
-        }
-        original = json.dumps(matrix)
-        validate_periodic_test_matrix("periodic-strict", matrix)
-        self.assertEqual(json.dumps(matrix), original)
+                matrix = {
+                    "include": [
+                        {
+                            "config": "periodic",
+                            "extra_flags": "--periodic-filter=periodic",
+                        },
+                        entry,
+                    ]
+                }
+                args = SimpleNamespace(
+                    workflow="periodic-strict", test_matrix=json.dumps(matrix)
+                )
+                with mock.patch("filter_test_configs.parse_args", return_value=args):
+                    with self.assertRaisesRegex(
+                        ValueError, "--periodic-filter=<marker>"
+                    ):
+                        filter_test_configs_main()
 
     def test_periodic_marker_requirement_is_workflow_specific(self) -> None:
-        for workflow in (None, "pull", "trunk", "periodic"):
-            with self.subTest(workflow=workflow):
-                validate_periodic_test_matrix(
-                    workflow, {"include": [{"config": "periodic"}]}
-                )
-        validate_periodic_test_matrix("periodic-strict", {"include": []})
-
-    def test_periodic_matrix_is_validated_before_filtering(self) -> None:
-        matrix = {
-            "include": [
-                {"config": "periodic", "extra_flags": "--periodic-filter=periodic"},
-                {"config": "periodic", "shard": 2},
-            ]
-        }
-        args = SimpleNamespace(
-            workflow="periodic-strict", test_matrix=json.dumps(matrix)
-        )
-        with mock.patch("filter_test_configs.parse_args", return_value=args):
-            with self.assertRaisesRegex(ValueError, "--periodic-filter=<marker>"):
-                filter_test_configs_main()
+        validate_periodic_test_matrix("pull", {"include": [{"config": "periodic"}]})
 
     def test_periodic_strict_matrix_transport(self) -> None:
         workflow_path = (

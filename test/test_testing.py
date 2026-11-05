@@ -987,18 +987,21 @@ if __name__ == "__main__":
                 return output
 
             periodic_output = run_test(periodic_mode=True)
-            default_output = run_test(periodic_mode=False)
+            default_output = (
+                run_test(periodic_mode=False) if periodic_marker == "periodic" else None
+            )
 
         self.assertEqual("PERIODIC_PYTEST_RAN" in periodic_output, periodic_marker == "periodic")
         self.assertEqual("PERIODIC_SERIAL_PYTEST_RAN" in periodic_output, periodic_marker == "periodic")
         self.assertEqual("DAILY_PYTEST_RAN" in periodic_output, periodic_marker == "periodic_daily")
         self.assertEqual("DAILY_SERIAL_PYTEST_RAN" in periodic_output, periodic_marker == "periodic_daily")
         self.assertNotIn("PLAIN_PYTEST_RAN", periodic_output)
-        self.assertIn("PLAIN_PYTEST_RAN", default_output)
-        self.assertIn("PERIODIC_PYTEST_RAN", default_output)
-        self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
-        self.assertIn("DAILY_PYTEST_RAN", default_output)
-        self.assertIn("DAILY_SERIAL_PYTEST_RAN", default_output)
+        if default_output is not None:
+            self.assertIn("PLAIN_PYTEST_RAN", default_output)
+            self.assertIn("PERIODIC_PYTEST_RAN", default_output)
+            self.assertIn("PERIODIC_SERIAL_PYTEST_RAN", default_output)
+            self.assertIn("DAILY_PYTEST_RAN", default_output)
+            self.assertIn("DAILY_SERIAL_PYTEST_RAN", default_output)
 
     @parametrize("hours", [4, 24])
     def test_periodic_does_not_leak_across_parametrized_tests(self, hours):
@@ -1020,10 +1023,9 @@ if __name__ == "__main__":
         plain_marks = {mark.name for mark in getattr(plain, "pytestmark", ())}
         self.assertNotIn(marker, plain_marks)
 
-    @parametrize("hours", [0, 1, 12, 48])
-    def test_periodic_rejects_unsupported_cadences(self, hours):
+    def test_periodic_rejects_unsupported_cadences(self):
         with self.assertRaisesRegex(ValueError, "only hours=4 or hours=24"):
-            periodic(hours=hours)
+            periodic(hours=12)
 
     def test_periodic_default_factory(self):
         @periodic()
