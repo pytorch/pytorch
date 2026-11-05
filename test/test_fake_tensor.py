@@ -5506,6 +5506,11 @@ class TestFakeTensorViewCopy(TestCase):
                     _ = yf.view(-1)
 
 
+# Dynamo would trace these tests with the C++ fakes they make as graph inputs,
+# which it cannot fakify yet
+_CPP_FAKE_DYNAMO_SKIP = "Dynamo does not support C++ fakes as inputs yet"
+
+
 class TestCppFakeTensorModeBindings(TestCase):
     def _make_mode(self, shape_env=None):
         return _make_cpp_mode(shape_env)
@@ -5603,6 +5608,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             for x, y in zip(shared, sparse_parts(sparse_meta)):
                 self.assertEqual(x.untyped_storage()._cdata, y.untyped_storage()._cdata)
 
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_from_meta_and_device_rejects(self):
         mode, _ = self._make_mode()
         meta_device, cpu = torch.device("meta"), torch.device("cpu")
@@ -5647,6 +5653,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             torch._C._from_meta_and_device(inference, torch.device("cpu"), mode)
         inference.data_ptr()
 
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_maybe_get_fake_mode(self):
         from torch._subclasses.fake_tensor import CppFakeTensorMode
 
@@ -5713,6 +5720,17 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(self._installed(), (None, False))
         with self.assertRaisesRegex(RuntimeError, "no _cpp_mode or _mode_key"):
             torch._C._set_dispatch_mode(object())
+
+        class NullCppMode:
+            _cpp_mode = None
+
+        with self.assertRaisesRegex(RuntimeError, "_cpp_mode is None"):
+            torch._C._set_dispatch_mode(NullCppMode())
+        # A C++ mode and a Python FakeTensorMode cannot both be installed
+        python_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        with python_mode:
+            with self.assertRaisesRegex(RuntimeError, "Python FakeTensorMode is set"):
+                torch._C._set_dispatch_mode(wrapper)
         self.assertEqual(self._installed(), (None, False))
         torch._C._set_dispatch_mode(wrapper)
         try:
@@ -5720,6 +5738,13 @@ class TestCppFakeTensorModeBindings(TestCase):
             _, other_wrapper = self._make_mode()
             with self.assertRaisesRegex(RuntimeError, "one already exists"):
                 torch._C._set_dispatch_mode(other_wrapper)
+            msg = r"C\+\+ FakeTensorMode is set"
+            for install in (
+                torch._C._set_dispatch_mode,
+                torch._C._push_on_torch_dispatch_stack,
+            ):
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    install(python_mode)
             self.assertEqual(self._installed(), (wrapper, True))
             # Only the FAKE key sees it, and the mode stack does not
             proxy = torch._C._TorchDispatchModeKey.PROXY
@@ -5841,13 +5866,20 @@ class TestCppFakeTensorModeBindings(TestCase):
             torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
         self.assertEqual(self._installed(), (None, False))
 
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_item_memo(self):
         mode, _ = self._make_mode()
-        get_memo, set_memo = torch._C._get_fake_item_memo, torch._C._set_fake_item_memo
+        get_memo = torch._C._get_fake_item_memo
+
+        def set_memo(fake, memo, keep):
+            torch._C._set_fake_item_memo(fake, memo, keep_across_epochs=keep)
 
         def make_fake():
             meta = torch.empty((), device="meta")
             return torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+
+        def bump_version(t):
+            torch._C._autograd._unsafe_set_version_counter((t,), (t._version + 1,))
 
         class IntSubclass(int):
             pass
@@ -5864,18 +5896,24 @@ class TestCppFakeTensorModeBindings(TestCase):
             set_memo(fake, good, False)
             self.assertIs(get_memo(fake), good)
 
-        # Dropped once read in another epoch, unless kept across epochs
+        # Reading keeps the memo; it is dropped once read in another epoch, and
+        # stays dropped back in the first, unless kept across epochs
         set_memo(fake, 2, False)
+        self.assertEqual(get_memo(fake), 2)
+        self.assertEqual(get_memo(fake), 2)
         mode.epoch += 1
         self.assertIsNone(get_memo(fake))
         mode.epoch -= 1
         self.assertIsNone(get_memo(fake))
         set_memo(fake, 3, True)
-        mode.epoch += 1
-        self.assertEqual(get_memo(fake), 3)
-        # Dropped once the tensor is mutated, even if kept across epochs
-        torch._C._autograd._unsafe_set_version_counter((fake,), (fake._version + 1,))
-        self.assertIsNone(get_memo(fake))
+        for _ in range(2):
+            mode.epoch += 1
+            self.assertEqual(get_memo(fake), 3)
+        # Dropped once the tensor is mutated, whether or not kept across epochs
+        for keep in (False, True):
+            set_memo(fake, 4, keep)
+            bump_version(fake)
+            self.assertIsNone(get_memo(fake))
 
         # An inference fake has no version counter, but epochs still apply
         with torch.inference_mode():
@@ -5884,11 +5922,16 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(get_memo(inference), 2)
         mode.epoch += 1
         self.assertIsNone(get_memo(inference))
+        set_memo(inference, 3, True)
+        for _ in range(2):
+            mode.epoch += 1
+            self.assertEqual(get_memo(inference), 3)
 
         # set_data drops the destination's memo and does not copy the source's
         dst, src = make_fake(), make_fake()
         set_memo(dst, 2, True)
         set_memo(src, 3, True)
+        self.assertEqual((get_memo(dst), get_memo(src)), (2, 3))
         dst.data = src
         self.assertIsNone(get_memo(dst))
         # Once set_data disables the version counter, setting fails and leaves
@@ -5900,11 +5943,17 @@ class TestCppFakeTensorModeBindings(TestCase):
             set_memo(disabled, 2, False)
         self.assertIsNone(get_memo(disabled))
 
-        # A fake without a mode stores no memo; a real tensor has none and is
-        # rejected by the setters
+        # A fake without a mode stores no memo (the getter would return None
+        # anyway, so check the memo is not kept alive); a real tensor has none
+        # and is rejected by the setters
         no_mode = torch.empty((), device="meta")
         torch._C._set_fake_device(no_mode, torch.device("cpu"))
-        set_memo(no_mode, 2, True)
+        unstored = env.create_unbacked_symfloat()
+        ref = weakref.ref(unstored)
+        set_memo(no_mode, unstored, True)
+        del unstored
+        gc.collect()
+        self.assertIsNone(ref())
         self.assertIsNone(get_memo(no_mode))
         real = torch.empty(())
         with self.assertRaisesRegex(RuntimeError, "Expected a fake tensor"):
@@ -5914,6 +5963,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIsNone(get_memo(real))
         self.assertIsNone(torch._C._get_fake_sym_memo(real, "nonzero_memo"))
 
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_memo_helpers(self):
         # The helpers reach a C++ fake's memos, and, like SymNumberMemoDescriptor,
         # keep only a backed SymFloat item memo across epochs
@@ -5938,13 +5988,26 @@ class TestCppFakeTensorModeBindings(TestCase):
 
         maybe_set_sym_memo(fake, "nonzero_memo", backed_int)
         self.assertIs(maybe_get_sym_memo(fake, "nonzero_memo").node, backed_int.node)
+        mode.epoch += 1
+        self.assertIsNone(maybe_get_sym_memo(fake, "nonzero_memo"))
         for memo in (backed_int, unbacked_float, backed_float):
             maybe_set_item_memo(fake, memo)
             self.assertIs(maybe_get_item_memo(fake), memo)
             mode.epoch += 1
             kept = memo is backed_float
             self.assertIs(maybe_get_item_memo(fake), memo if kept else None)
+        mode.epoch += 1
+        self.assertIs(maybe_get_item_memo(fake), backed_float)
 
+        # A fake without a mode has no memos
+        no_mode = torch.empty((), device="meta")
+        torch._C._set_fake_device(no_mode, torch.device("cpu"))
+        maybe_set_sym_memo(no_mode, "nonzero_memo", backed_int)
+        maybe_set_item_memo(no_mode, backed_float)
+        self.assertIsNone(maybe_get_sym_memo(no_mode, "nonzero_memo"))
+        self.assertIsNone(maybe_get_item_memo(no_mode))
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_set_get_fake_dispatch_keys(self):
         mode, _ = self._make_mode()
         meta = torch.empty(2, device="meta")
@@ -5987,8 +6050,8 @@ class TestCppFakeTensorModeBindings(TestCase):
         dst.data = src
         self.assertEqual(maybe_get_fake_dispatch_keys(dst), keys)
         # Guards serialize the recorded keys, or the fake's own without them,
-        # and a loaded guard (a Python fake) carries them, as tested for Python
-        # fakes in test_guard_serialization.py
+        # and a loaded guard carries them, as tested for Python fakes in
+        # test_guard_serialization.py
         from torch._dynamo.guards import GuardsStatePickler
         from torch._dynamo.package import load_guards_state
 
@@ -6001,6 +6064,9 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertFalse(torch._C._is_fake_tensor(template))
             self.assertEqual(keys_raw, expected.raw_repr())
             pickler.dump({"t": fake})
+            # Neither the C++ mode (_CppFakeTensorMode) nor its wrapper is pickled
+            for name in (b"FakeTensorMode", b"_CppModeWrapper"):
+                self.assertNotIn(name, buf.getvalue())
             out = load_guards_state(buf.getvalue())["t"]
             self.assertEqual(maybe_get_fake_dispatch_keys(out), expected)
 
@@ -6025,6 +6091,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode._cpp_mode)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), mode)
 
+    @skipIfTorchDynamo("Dynamo keeps references that stop the wrapper being collected")
     def test_cpp_fake_tensor_mode_rebuild(self):
         from torch._subclasses.fake_tensor import CppFakeTensorMode
 
@@ -6079,6 +6146,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             outer = torch._C._maybe_get_fake_mode(fake)
         return fake, outer, inner[0]
 
+    @skipIfTorchDynamo("Dynamo keeps references that stop the wrapper being collected")
     def test_cpp_fake_tensor_mode_rebuild_race_alive(self):
         # A wrapper another lookup cached while _from_cpp_mode ran is returned
         # rather than replaced, and stays cached
@@ -6086,6 +6154,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIs(outer, inner)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), inner)
 
+    @skipIfTorchDynamo("Dynamo keeps references that stop the wrapper being collected")
     def test_cpp_fake_tensor_mode_rebuild_race_dropped(self):
         # If the wrapper the other lookup cached is already gone, the lookup
         # caches and returns its own
