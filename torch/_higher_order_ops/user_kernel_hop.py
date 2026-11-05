@@ -291,7 +291,7 @@ class KernelSideTable(Generic[KernelT]):
         self.constant_args: dict[int, dict[str, object]] = {}
         self.lock = threading.Lock()
         # With constant_rules, equal constant args (see constant_key) share one index,
-        # so a table that is never reset grows only with distinct constant args, and
+        # so a table that is never reset does not grow with every eager launch, and
         # each entry is a snapshot of the args it was added with. A constant keyed by
         # identity (see _object_state) still adds an entry per object, which such a
         # table keeps, with the object, for the life of the process: each capture adds
@@ -301,7 +301,7 @@ class KernelSideTable(Generic[KernelT]):
         self._constant_args_index: dict[object, int] | None = (
             {} if constant_rules is not None else None
         )
-        # index -> {name: constant_key of the arg}.
+        # index -> {name: constant_key of the arg}, for a launch to reuse.
         self._constant_args_keys: dict[int, dict[str, object]] = {}
 
     # Returns index on the table
@@ -644,7 +644,7 @@ class UserKernelHOPInfo:
     (FxGraphHashDetails, and the has_user_defined_triton_kernels flag computed from
     it), so a DSL whose HOPs are cacheable must extend the cache key first. HOPs are
     not cacheable by default, and the cache bypasses every graph that contains an
-    uncacheable HOP.
+    uncacheable HOP, such as CuTeDSL's (cacheable=False).
     """
 
     dsl: str
