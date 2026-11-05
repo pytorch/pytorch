@@ -65,37 +65,29 @@ bool is_smooth(int64_t n) {
   return !radices(n, kRadices).empty();
 }
 
-// W_n^k for k < n, or (two_level, for inter-pass twiddles of a long axis) W_n^b for b < 4096 then W_n^(4096 a)
-Tensor twiddles(int64_t n, bool two_level = false) {
-  static std::mutex mutex;
-  static std::map<std::pair<int64_t, bool>, Tensor> cache;
-  std::lock_guard<std::mutex> guard(mutex);
-  auto& t = cache[{n, two_level}];
-  if (!t.defined()) {
-    const auto k = two_level
-        ? at::cat({at::arange(kFFTTwiddleBlock, at::kDouble), at::arange(0, n, kFFTTwiddleBlock, at::kDouble)})
-        : at::arange(n, at::kDouble);
-    t = at::polar(at::ones_like(k), k.mul(-2 * M_PI / n)).to(at::device(kMPS).dtype(kComplexFloat));
-  }
-  return t;
-}
+// Cached MPS tables. W: W_n^k for k < n. W2, for long axes: W_n^b for b < 4096 then W_n^(4096 a). Chirp: Bluestein's
+// exp(-+ i pi k^2 / n), and ChirpFFT: the M-point FFT of its conjugate wrapped around zero, M a power of two >= 2n - 1
+enum class Table { W, W2, Chirp, ChirpFFT };
 
-// Bluestein chirp exp(-+ i pi k^2 / n) for k < n, and the M-point FFT of its conjugate wrapped around zero
-const std::pair<Tensor, Tensor>& chirp_tables(int64_t n, bool inverse) {
+Tensor table(Table kind, int64_t n, bool inverse = false) {
   static std::mutex mutex;
-  static std::map<std::pair<int64_t, bool>, std::pair<Tensor, Tensor>> cache;
+  static std::map<std::tuple<Table, int64_t, bool>, Tensor> cache;
   std::lock_guard<std::mutex> guard(mutex);
-  auto& t = cache[{n, inverse}];
-  if (!t.first.defined()) {
-    const auto k = at::arange(n, at::kLong);
-    const auto angle = k.mul(k).remainder(2 * n).to(at::kDouble).mul((inverse ? 1 : -1) * M_PI / n);
-    const auto c = at::polar(at::ones_like(angle), angle);
-    const auto M = static_cast<int64_t>(std::bit_ceil<uint64_t>(2 * n - 1));
-    const auto b = at::cat({c.conj(), at::zeros({M - 2 * n + 1}, c.options()), c.narrow(0, 1, n - 1).conj().flip(0)});
-    const auto opts = at::device(kMPS).dtype(kComplexFloat);
-    t = {c.to(opts), at::fft_fft(b).to(opts)};
+  auto& t = cache[{kind, n, inverse}];
+  if (t.defined()) {
+    return t;
   }
-  return t;
+  const bool chirp = kind == Table::Chirp || kind == Table::ChirpFFT;
+  const auto k = kind == Table::W2
+      ? at::cat({at::arange(kFFTTwiddleBlock, at::kDouble), at::arange(0, n, kFFTTwiddleBlock, at::kDouble)})
+      : at::arange(n, at::kDouble);
+  const auto angle = chirp ? k.mul(k).remainder(2 * n).mul((inverse ? 1 : -1) * M_PI / n) : k.mul(-2 * M_PI / n);
+  const auto c = at::polar(at::ones_like(angle), angle);
+  const auto M = static_cast<int64_t>(std::bit_ceil<uint64_t>(2 * n - 1));
+  const auto b = kind == Table::ChirpFFT
+      ? at::fft_fft(at::cat({c.conj(), at::zeros({M - 2 * n + 1}, c.options()), c.narrow(0, 1, n - 1).conj().flip(0)}))
+      : c;
+  return t = b.to(at::device(kMPS).dtype(kComplexFloat));
 }
 
 struct Dim {
@@ -105,6 +97,8 @@ struct Dim {
 };
 
 struct Batch {
+  Tensor in;
+  Tensor out;
   c10::SmallVector<Dim, c10::metal::max_ndim> dims; // Innermost first
   // Transforms, and the element strides along the axis
   int64_t numel = 1;
@@ -125,7 +119,7 @@ Batch collapse(const Tensor& in, const Tensor& out, int64_t dim) {
         std::make_pair(std::abs(in.stride(b)), std::abs(out.stride(b)));
   });
 
-  Batch b{{}, 1, in.stride(dim), out.stride(dim)};
+  Batch b{in, out, {}, 1, in.stride(dim), out.stride(dim)};
   for (const auto d : dims) {
     b.numel *= in.size(d);
     const auto last = b.dims.empty() ? Dim{0, 0, 0} : b.dims.back();
@@ -152,22 +146,9 @@ struct Pass {
   std::optional<Tensor> cl;
   std::optional<Tensor> cs;
   std::optional<Tensor> tt;
+  Tensor tw; // W_n, or W_2n for packed real loads
   bool mirror_out = false;
   bool i0_dim1 = false;
-};
-
-struct Launch {
-  Tensor in;
-  Tensor out;
-  Tensor tw;
-  std::optional<Tensor> cl;
-  std::optional<Tensor> cs;
-  std::optional<Tensor> tt;
-  FFTParams params;
-  MTLComputePipelineState_t pso;
-  MTLSize grid;
-  MTLSize group;
-  NSUInteger smem;
 };
 
 // Transforms per group, within smem. A strided axis tiles rows for 256 threads (4 to 32 rows), stretched to the
@@ -190,7 +171,8 @@ int64_t transforms_per_group(int64_t n, int64_t padded, int64_t J, int64_t rows,
   return std::clamp<int64_t>(fits(c) ? c : base, 1, std::min<int64_t>(rows, 32));
 }
 
-Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, bool half, const Batch& b, const Pass& x) {
+// Encodes n-point transforms of the batch (half: packed real pairs)
+void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool inv, bool half, const Pass& x) {
   const auto radix = radices(x.global ? x.global : n, x.global ? kGlobalRadices : kRadices);
   const auto to_u32 = [](int64_t v) { return c10::checked_convert<uint32_t>(v, "uint32_t"); };
   const auto to_i32 = [](int64_t v) { return c10::checked_convert<int32_t>(v, "int32_t"); };
@@ -204,9 +186,9 @@ Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, bool ha
   const auto n_sig = x.n_sig ? x.n_sig : n;
   const auto n_in = x.n_in ? x.n_in : n;
   const auto n_out = x.n_out ? x.n_out : n;
-  const bool ld = x.cl || n_sig < n * x.ld_mul || (x.ld_mul > 1 && in.is_complex() && n_in < n_sig);
+  const bool ld = x.cl || n_sig < n * x.ld_mul || (x.ld_mul > 1 && b.in.is_complex() && n_in < n_sig);
   const bool st = x.out_k_mul > 1 || x.cs;
-  const bool pairs = (half || x.global) && !out.is_complex();
+  const bool pairs = (half || x.global) && !b.out.is_complex();
   const bool tw4 = x.tt && !x.global;
   const uint32_t F = inv * kFFTInverse | half * kFFTPackedLoads | tw4 * kFFTFourStepTwiddles | st * kFFTExtendedStores |
       ld * kFFTExtendedLoads | (x.global > 0) * kFFTGlobalStage | pairs * kFFTPackedRealStores;
@@ -263,7 +245,7 @@ Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, bool ha
 
   const bool contig = !strided && B == 1 && has(kContigSizes, n) && fft_is_basic(F);
   const auto name = fmt::format(
-      "fft_{}_{}_{}{}_{}", scalarToMetalTypeString(in), scalarToMetalTypeString(out), family, contig ? "c" : "", F);
+      "fft_{}_{}_{}{}_{}", scalarToMetalTypeString(b.in), scalarToMetalTypeString(b.out), family, contig ? "c" : "", F);
   const int64_t ny = b.dims.size() > 1 ? b.dims[1].size : 1;
   const int64_t threads = x.global == kFFTUnpackRadix ? n / 2 + 1 : n / std::max<int64_t>(x.global, 1);
   const MTLSize grid = x.global ? MTLSizeMake(at::ceil_div(threads, J), rows, b.numel / rows)
@@ -271,34 +253,22 @@ Launch prepare(const Tensor& in, const Tensor& out, int64_t n, bool inv, bool ha
   // Single contiguous rows get 1.5x their size (faster above 2048 points); global passes bind the 16-byte minimum
   const int64_t bytes = B * (strided ? n : row) * (strided || B > 1 ? 2 : 3) * sizeof(float);
   const int64_t smem = x.global ? 16 : std::min<int64_t>(kFFTSmemBytes, at::round_up<int64_t>(bytes, 16));
-  return {
-      .in = in,
-      .out = out,
-      .tw = twiddles(half ? 2 * n : n),
-      .cl = x.cl,
-      .cs = x.cs,
-      .tt = x.tt,
-      .params = params,
-      .pso = lib.getPipelineStateForFunc(name),
-      .grid = grid,
-      .group = MTLSizeMake(B * J, 1, 1),
-      .smem = static_cast<NSUInteger>(smem),
-  };
+  const auto pso = lib.getPipelineStateForFunc(name);
+  getMPSProfiler().beginProfileKernel(pso, "fft", {b.in, b.out}, getCurrentMPSStream());
+  [enc setComputePipelineState:pso];
+  mtl_setArgs(enc, b.in, b.out, x.cl, x.cs, x.tt, x.tw, params);
+  [enc setThreadgroupMemoryLength:static_cast<NSUInteger>(smem) atIndex:0];
+  [enc dispatchThreadgroups:grid threadsPerThreadgroup:MTLSizeMake(B * J, 1, 1)];
+  getMPSProfiler().endProfileKernel(pso, getCurrentMPSStream());
 }
 
-void run(const std::vector<Launch>& launches) {
+// Encodes the launches of `encode` on the stream; tables and temps are made first, as ATen ops wait on its queue
+template <class F>
+void run(F encode) {
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      auto encoder = stream->commandEncoder();
-      for (const auto& l : launches) {
-        getMPSProfiler().beginProfileKernel(l.pso, "fft", {l.in, l.out}, stream);
-        [encoder setComputePipelineState:l.pso];
-        mtl_setArgs(encoder, l.in, l.out, l.cl, l.cs, l.tt, l.tw, l.params);
-        [encoder setThreadgroupMemoryLength:l.smem atIndex:0];
-        [encoder dispatchThreadgroups:l.grid threadsPerThreadgroup:l.group];
-        getMPSProfiler().endProfileKernel(l.pso, stream);
-      }
+      encode(stream->commandEncoder());
     }
   });
 }
@@ -310,17 +280,19 @@ bool fits_one_pass(const Batch& b, int64_t n, bool chirped) {
   return n <= kFFTMaxPoints && !both;
 }
 
-// n-point transforms of the batch from `in` into `out`: x.n_in inputs (c2r: n/2+1, mirrored), x.n_out outputs
-void fft_batch(const Tensor& in, const Tensor& out, const Batch& b, int64_t n, bool inv, const Pass& x) {
+// n-point transforms of the batch: x.n_in inputs (c2r: n/2+1, mirrored), x.n_out outputs
+void fft_batch(const Batch& b, int64_t n, bool inv, const Pass& x) {
   const auto n_sig = x.n_sig ? x.n_sig : n;
   const auto n_in = x.n_in ? x.n_in : n;
   const auto n_out = x.n_out ? x.n_out : n;
-  const bool real = !in.is_complex() || !out.is_complex();
+  const bool real = !b.in.is_complex() || !b.out.is_complex();
   const int64_t m = real && n % 2 == 0 ? n / 2 : n;
   const bool half = !x.cl && !x.cs && n > 2 && m < n && m <= kFFTMaxPoints;
   const int64_t pass_n = half ? m : n;
   if (fits_one_pass(b, pass_n, x.cs.has_value())) {
-    run({prepare(in, out, pass_n, inv, half, b, x)});
+    Pass p = x;
+    p.tw = table(Table::W, n);
+    run([&](auto enc) { launch(enc, b, pass_n, inv, half, p); });
     return;
   }
 
@@ -329,37 +301,42 @@ void fft_batch(const Tensor& in, const Tensor& out, const Batch& b, int64_t n, b
   const bool packs = !real || n % 2 == 0;
   auto gplan = radices(m, kGlobalRadices);
   if (n >= kLongPoints && (n & (n - 1)) && plain && packs && !gplan.empty()) {
-    gplan.resize(gplan.size() + !in.is_complex(), kFFTUnpackRadix);
-    const auto tmp = at::empty({2, b.numel * m}, out.options().dtype(kComplexFloat));
-    const auto tt = twiddles(m, true);
-    std::vector<Launch> launches;
-    size_t ns = 1;
-    for (size_t s = 0; s < gplan.size(); s++) {
-      const bool first = s == 0;
-      const bool last = s + 1 == gplan.size();
-      Batch bp{{}, b.numel, first ? b.si : 1, last ? b.so : 1};
-      int64_t tstride = m;
-      for (int64_t d = 0; d < static_cast<int64_t>(b.dims.size()); d++) {
-        bp.dims.push_back(
-            {b.dims[d].size, first ? b.dims[d].in_stride : tstride, last ? b.dims[d].out_stride : tstride});
-        tstride *= b.dims[d].size;
+    gplan.resize(gplan.size() + !b.in.is_complex(), kFFTUnpackRadix);
+    const auto tmp = at::empty({2, b.numel * m}, b.out.options().dtype(kComplexFloat));
+    const Tensor temps[] = {tmp[0], tmp[1]};
+    const auto tt = table(Table::W2, m);
+    const auto tw1 = table(Table::W, m), tw2 = real ? table(Table::W, 2 * m) : tw1;
+    run([&](auto enc) {
+      int64_t ns = 1;
+      for (size_t s = 0; s < gplan.size(); s++) {
+        const bool first = s == 0;
+        const bool last = s + 1 == gplan.size();
+        Batch bp{{}, {}, {}, b.numel, first ? b.si : 1, last ? b.so : 1};
+        bp.in = first ? b.in : temps[s % 2];
+        bp.out = last ? b.out : temps[(s + 1) % 2];
+        int64_t tstride = m;
+        for (int64_t d = 0; d < static_cast<int64_t>(b.dims.size()); d++) {
+          bp.dims.push_back(
+              {b.dims[d].size, first ? b.dims[d].in_stride : tstride, last ? b.dims[d].out_stride : tstride});
+          tstride *= b.dims[d].size;
+        }
+        const bool packed = first && real;
+        const Tensor& tw = packed ? tw2 : tw1;
+        const Pass pass{
+            .n_out = last ? n_out : m, .global = gplan[s], .ns = ns, .scale = last ? x.scale : 1, .tt = tt, .tw = tw};
+        launch(enc, bp, m, inv, packed, pass);
+        ns *= gplan[s];
       }
-      const Pass pass{
-          .n_out = last ? n_out : m, .global = gplan[s], .ns = int64_t(ns), .scale = last ? x.scale : 1, .tt = tt};
-      launches.push_back(
-          prepare(first ? in : tmp[s % 2], last ? out : tmp[(s + 1) % 2], m, inv, first && real, bp, pass));
-      ns *= gplan[s];
-    }
-    run(launches);
+    });
     return;
   }
 
   // Four-step: n = n1*n2, temp [outer batch][n2][n1][inner batch]; pass 1 transforms strided n1-point columns
   // times W_n^(k1*i0), pass 2 writes k1+n1*k2 (n1 <= 256 if it recurses). Real transforms halve one pass.
   const bool big = plain && b.numel * n >= kLongPoints;
-  bool r2c = big && !in.is_complex();
-  bool c2r = big && !out.is_complex();
-  const bool nest = !x.cs && n_out == n && out.is_complex();
+  bool r2c = big && !b.in.is_complex();
+  bool c2r = big && !b.out.is_complex();
+  const bool nest = !x.cs && n_out == n && b.out.is_complex();
 
   // n1: the largest smooth divisor <= sqrt(n) whose cofactor fits a pass; nr: with an even halved real pass
   int64_t n1 = 0;
@@ -383,8 +360,8 @@ void fft_batch(const Tensor& in, const Tensor& out, const Batch& b, int64_t n, b
   const auto rl = r2c ? n1 / 2 + 1 : n1;
   const bool inner = b.dims[0].size > 1 && std::abs(b.dims[0].in_stride) < std::abs(b.si);
   const int64_t ninner = inner ? b.dims[0].size : 1;
-  Batch b1{{}, b.numel * rows, b.si * n2, ninner};
-  Batch b2{{}, b.numel * rl, rl * ninner, b.so * n1};
+  Batch b1{b.in, {}, {}, b.numel * rows, b.si * n2, ninner};
+  Batch b2{{}, b.out, {}, b.numel * rl, rl * ninner, b.so * n1};
   int64_t t = 1;
   for (int64_t d = 0; d < static_cast<int64_t>(b.dims.size()); d++) {
     const int64_t ts = d < inner ? t : t * rows * rl; // The temp's stride of batch dim d
@@ -395,28 +372,33 @@ void fft_batch(const Tensor& in, const Tensor& out, const Batch& b, int64_t n, b
   b1.dims.insert(b1.dims.begin() + inner, Dim{rows, b.si, rl * ninner});
   b2.dims.insert(b2.dims.begin() + inner, Dim{rl, ninner, b.so});
 
-  const bool inplace = !r2c && !c2r && n_out == n && out.is_complex() && b.so == ninner && !in.is_alias_of(out) &&
+  const bool inplace = !r2c && !c2r && n_out == n && b.out.is_complex() && b.so == ninner && !b.in.is_alias_of(b.out) &&
       std::all_of(
           b2.dims.begin(), b2.dims.end(), [](const Dim& d) { return d.size == 1 || d.in_stride == d.out_stride; });
-  auto tmp =
-      inplace ? out : at::empty({b.numel * rows * rl}, out.options().dtype(c10::toComplexType(out.scalar_type())));
+  const auto tmp = inplace ? b.out : at::empty({b.numel * rows * rl}, b.out.options().dtype(kComplexFloat));
+  b1.out = b2.in = tmp;
+  const bool two = r2c || c2r || n2 <= kMaxCoalescedPoints || !nest;
+  const auto tt = table(Table::W2, n), tw1 = table(Table::W, n1), tw2 = two ? table(Table::W, n2) : Tensor();
   const Pass load{
-      .n_sig = n_sig, .n_in = n_in, .n_out = rl, .ld_mul = n2, .cl = x.cl, .tt = twiddles(n, true), .i0_dim1 = inner};
-  auto first = prepare(in, tmp, r2c ? n1 / 2 : n1, inv, r2c, b1, load);
-  if (r2c || c2r || n2 <= kMaxCoalescedPoints || !nest) {
+      .n_sig = n_sig, .n_in = n_in, .n_out = rl, .ld_mul = n2, .cl = x.cl, .tt = tt, .tw = tw1, .i0_dim1 = inner};
+  if (two) {
     const Pass store{.n_sig = n,
                      .n_out = c2r ? n2 / 2 : n_out,
                      .out_k_mul = c2r ? 1 : n1,
                      .scale = x.scale,
                      .cs = x.cs,
+                     .tw = tw2,
                      .mirror_out = r2c,
                      .i0_dim1 = inner};
-    run({first, prepare(tmp, out, c2r ? n2 / 2 : n2, inv, c2r, b2, store)});
+    run([&](auto enc) {
+      launch(enc, b1, r2c ? n1 / 2 : n1, inv, r2c, load);
+      launch(enc, b2, c2r ? n2 / 2 : n2, inv, c2r, store);
+    });
     return;
   }
 
-  run({first});
-  fft_batch(tmp, out, b2, n2, inv, {.scale = x.scale});
+  run([&](auto enc) { launch(enc, b1, n1, inv, false, load); });
+  fft_batch(b2, n2, inv, {.scale = x.scale});
 }
 
 // n-point transforms along `dim`; lengths with other prime factors use Bluestein's algorithm
@@ -435,17 +417,17 @@ void fft_pass(const Tensor& in, const Tensor& out, int64_t dim, int64_t n, bool 
     return fft_pass(in.narrow(d, h, in.size(d) - h), out.narrow(d, h, in.size(d) - h), dim, n, inv, x);
   }
   if (is_smooth(n)) {
-    return fft_batch(in, out, collapse(in, out, dim), n, inv, x);
+    return fft_batch(collapse(in, out, dim), n, inv, x);
   }
 
   // Bluestein: X = c * IFFT_M(FFT_M(x * c) * B)[:n], M a power of two >= 2n - 1 (at most two tile passes, 2^24),
   // chirps folded into the kernels
   TORCH_CHECK_NOT_IMPLEMENTED(n <= 1 << 23, "MPS FFT: lengths with prime factors above 7 are limited to 2^23");
-  const auto& [c, B] = chirp_tables(n, inv);
+  const auto c = table(Table::Chirp, n, inv), B = table(Table::ChirpFFT, n, inv);
   const auto M = B.numel();
   DimVector sizes(in.sizes());
   sizes[dim] = M;
-  auto tmp = at::empty(sizes, in.options().dtype(c10::toComplexType(in.scalar_type())));
+  auto tmp = at::empty(sizes, in.options().dtype(kComplexFloat)); // Several passes always run in fp32
   fft_pass(in, tmp, dim, M, false, {.n_sig = n, .n_in = x.n_in ? x.n_in : n, .scale = x.scale / M, .cl = c, .cs = B});
   fft_pass(tmp, out, dim, M, true, {.n_out = x.n_out ? x.n_out : n, .cs = c});
 }
