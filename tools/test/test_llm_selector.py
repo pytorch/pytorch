@@ -415,6 +415,8 @@ g () {
             ".github/workflows/inductor.yml",
             ".github/workflows/inductor-periodic.yml",
             ".github/actions/reuse-old-whl/action.yml",
+            ".github/workflows/target_determination.yml",
+            ".github/workflows/llm_td_retrieval.yml",
             "tools/native_aot/build_stage2.py",
             ".ci/pytorch/generate_ck_config_h.cmake",
             ".github/ci_commit_pins/vision.txt",
@@ -461,6 +463,15 @@ g () {
             "test/setup.cfg",
         ]:
             self.assertTrue(needs_run_all([f]), f)
+        # Every caller of a test workflow sets the test matrix of its jobs.
+        for wf in (REPO_ROOT / ".github/workflows").glob("*.yml"):
+            called = [
+                line.split("uses: ./", 1)[1].split()[0]
+                for line in wf.read_text().splitlines()
+                if "uses: ./.github/workflows/_" in line
+            ]
+            if any("-test" in c and needs_run_all([c]) for c in called):
+                self.assertTrue(needs_run_all([f".github/workflows/{wf.name}"]), wf)
         for f in [
             "docs/source/index.rst",
             "test/data/setup.cfg.in",
@@ -585,6 +596,14 @@ g () {
         self.assertTrue((REPO_ROOT / sh).exists(), sh)
         self.assertEqual(
             selection.edited_tests([sh], set(TESTS)), {"distributed/launcher/test_run"}
+        )
+        ext = "test/cpp_extensions/libtorch_agn_2_10_extension/csrc/kernel.cpp"
+        self.assertLessEqual(
+            {
+                "cpp_extensions/test_libtorch_agnostic",
+                "cpp_extensions/libtorch_agn_2_10_extension/test_version_compatibility",
+            },
+            selection.edited_tests([ext], set(TESTS)),
         )
 
 
