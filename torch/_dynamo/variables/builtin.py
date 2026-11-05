@@ -58,7 +58,6 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
-    DictGetItemSource,
     GetItemSource,
     GlobalSource,
     is_constant_source,
@@ -420,67 +419,154 @@ def populate_builtin_to_tensor_fn_map() -> None:
                     BUILTIN_TO_TENSOR_RFN_MAP[op] = most_recent_func
 
 
-class BaseBuiltinVariable(VariableTracker):
-    """
-    Common base class for all builtin variable trackers (BuiltinVariable,
-    DictBuiltinVariable, IterBuiltinVariable, and future specialized builtins).
+class TypeVariable(VariableTracker):
+    """A builtin ``type`` object such as ``dict`` or ``list``, mirroring
+    PyType_Type: type_getattro, the type_getsets / type_members tables,
+    __instancecheck__ / __subclasscheck__, nb_or, type_init and the identity
+    hash.
 
-    Provides shared implementations for guard installation, hasattr tracing,
-    and Python-level hashability/equality.
-
-    Specialized subclasses (e.g. DictBuiltinVariable) set `_fn` as a class
-    attribute. BuiltinVariable stores the callable on the instance as `self.fn`
-    and overrides as_python_constant / reconstruct / tp_getattro_impl accordingly.
+    A subclass modeling one type (e.g. DictBuiltinVariable) sets `_fn` as a
+    class attribute. BuiltinVariable wraps the types without a subclass yet
+    and the builtin functions, stores the callable as `self.fn`, and overrides
+    the slots a function needs.
     """
 
     _fn: Any = None
+    _cpython_type = type
 
-    # Type attribute readers shared by BaseBuiltinVariable and BuiltinVariable.
-    # Each reader declines (returns None) when the wrapped callable is not a type,
-    # letting getattro_impl fall through to its dynamic getattr handling.
+    def __init__(self, value: Any = None, **kwargs: Any) -> None:
+        if value is not None and value is not self._fn:
+            raise AssertionError(
+                f"{type(self).__name__} value must be {self._fn}, got {value}"
+            )
+        super().__init__(**kwargs)
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}()"
+
+    def as_proxy(self) -> Any:
+        DTYPE = {bool: torch.bool, int: torch.int64, float: torch.float64}
+        fn = self.as_python_constant()
+        if fn in DTYPE:
+            return DTYPE[fn]
+        return super().as_proxy()
+
+    # type_methods[] type___instancecheck__ / type___subclasscheck__
+    def _type_instancecheck(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        check_positional(tx, "__instancecheck__", len(args), 1, 1)
+        fn = self.as_python_constant()
+        return VariableTracker.build(tx, issubclass(args[0].python_type(), fn))
+
+    def _type_subclasscheck(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        check_positional(tx, "__subclasscheck__", len(args), 1, 1)
+        cls = args[0].as_python_constant()
+        return VariableTracker.build(tx, issubclass(cls, self.as_python_constant()))
+
+    tp_methods = {
+        "__instancecheck__": Method(_type_instancecheck),
+        "__subclasscheck__": Method(_type_subclasscheck),
+    }
+
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        fn = self.as_python_constant()
+        if not args:
+            raise_type_error(tx, f"{fn.__name__}.__new__(): not enough arguments")
+        # Immutable builtin types have no tp_init work, so T.__new__(T, ...)
+        # equals T(...). A subtype wraps that value. Mutable types override this.
+        cls = args[0].as_python_constant()
+        if cls is fn:
+            return self.call_function(tx, args[1:], kwargs)
+        # tp_new_wrapper: cls's nearest builtin base must use this tp_new.
+        base = next(t for t in cls.__mro__ if not t.__flags__ & Py_TPFLAGS_HEAPTYPE)
+        if base.__new__ is not fn.__new__:
+            raise_type_error(
+                tx,
+                f"{fn.__name__}.__new__({cls.__name__}) is not safe, "
+                f"use {base.__name__}.__new__()",
+            )
+        return tx.output.side_effects.track_new_user_defined_object(
+            self, args[0], args[1:], tx=tx
+        )
+
+    # type_as_number.nb_or = _Py_union_type_or, e.g. list | tuple
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        try:
+            other_val = other.as_python_constant()
+        except NotImplementedError:
+            return VariableTracker.build(tx, NotImplemented)
+        return VariableTracker.build(
+            tx, type.__or__(self.as_python_constant(), other_val)
+        )
+
     # CPython classification (Objects/typeobject.c):
     #   __bases__ -> type_getsets[] type_get_bases (getset)
     #   __base__  -> type_members[] {T_OBJECT, offsetof(tp_base), Py_READONLY}
     #   __flags__ -> type_members[] {T_ULONG, offsetof(tp_flags), Py_READONLY}
-    def _type_get_bases(
-        self: "BaseBuiltinVariable", tx: "InstructionTranslatorBase"
-    ) -> "VariableTracker | None":
-        fn = self.as_python_constant()
-        if not isinstance(fn, type):
-            return None
+    def _type_get_bases(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         source = self.source and AttrSource(self.source, "__bases__")
         items = [
             VariableTracker.build(tx, b, source and GetItemSource(source, i))
-            for i, b in enumerate(fn.__bases__)
+            for i, b in enumerate(self.as_python_constant().__bases__)
         ]
         return variables.TupleVariable(items, source=source)
 
-    def _type_get_base(
-        self: "BaseBuiltinVariable", tx: "InstructionTranslatorBase"
-    ) -> "VariableTracker | None":
-        fn = self.as_python_constant()
-        if not isinstance(fn, type):
-            return None
+    def _type_get_base(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         source = self.source and AttrSource(self.source, "__base__")
-        return VariableTracker.build(tx, fn.__base__, source)
+        return VariableTracker.build(tx, self.as_python_constant().__base__, source)
 
-    def _type_get_flags(
-        self: "BaseBuiltinVariable", tx: "InstructionTranslatorBase"
-    ) -> "VariableTracker | None":
-        fn = self.as_python_constant()
-        if not isinstance(fn, type):
-            return None
+    def _type_get_flags(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         source = self.source and AttrSource(self.source, "__flags__")
-        return VariableTracker.build(tx, fn.__flags__, source)
+        return VariableTracker.build(tx, self.as_python_constant().__flags__, source)
 
-    tp_getset = {"__bases__": GetSet(_type_get_bases, unmodeled_setter)}
+    # type_getsets[] type_get_mro (getset)
+    def _type_get_mro(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        source = self.source and TypeMROSource(self.source)
+        items = [
+            VariableTracker.build(tx, cls, source and GetItemSource(source, i))
+            for i, cls in enumerate(self.as_python_constant().__mro__)
+        ]
+        return variables.TupleVariable(items, source=source)
+
+    # type_getsets[] type_dict (getset). Each read allocates a fresh mappingproxy
+    # over the same tp_dict, so build the dict once and wrap it every time.
+    def _type_get_dict(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        tp_dict = gc.get_referents(self.as_python_constant().__dict__)[0]
+        tp_dict_source = self.source and TypeDictSource(self.source)
+        tp_dict_vt = VariableTracker.build(tx, tp_dict, tp_dict_source)
+        return variables.MappingProxyVariable(tp_dict_vt)
+
+    tp_getset = {
+        "__bases__": GetSet(_type_get_bases, unmodeled_setter),
+        "__mro__": GetSet(_type_get_mro, unmodeled_setter),
+        "__dict__": GetSet(_type_get_dict, unmodeled_setter),
+    }
     tp_members = {
         "__base__": Member(_type_get_base, readonly_setter),
         "__flags__": Member(_type_get_flags, readonly_setter),
     }
 
     @classmethod
-    def create_with_source(cls, value: Any, source: Source) -> "BaseBuiltinVariable":
+    def create_with_source(cls, value: Any, source: Source) -> "TypeVariable":
         install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         return cls(source=source)
 
@@ -493,14 +579,12 @@ class BaseBuiltinVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # A builtin class is an instance of type, so its tp_init is type_init.
-        if not isinstance(self.as_python_constant(), type):
-            return super().tp_init_impl(tx, args, kwargs)
+        # A builtin type is an instance of type, so its tp_init is type_init.
         return type_init(tx, args, kwargs)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # A builtin type or function reprs to a fixed string, e.g. "<class 'int'>". type_repr / func_repr:
-        return VariableTracker.build(tx, repr(self.as_python_constant()))
+        # type_repr, e.g. "<class 'int'>"
+        return VariableTracker.build(tx, type.__repr__(self.as_python_constant()))
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         name = self.as_python_constant().__name__
@@ -511,42 +595,50 @@ class BaseBuiltinVariable(VariableTracker):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        # Declarative type-attribute dispatch, mirroring the consultation at the
-        # top of VariableTracker.getattro_impl. Inlined here because this
-        # override keeps its own GetAttrVariable fallback instead of delegating
-        # to super().
         fn = self.as_python_constant()
         source = self.source and AttrSource(self.source, name)
         try:
             attr = getattr(fn, name)
         except AttributeError as e:
             raise_observed_exception(AttributeError, tx, args=list(e.args))
-        if name == "__dict__":
-            # Each access allocates a fresh mappingproxy. Keep sources on its
-            # immutable builtin-type entries, not on the allocation itself.
-            dict_source = self.source and TypeDictSource(self.source)
-            items: dict[VariableTracker, VariableTracker] = {}
-            for key, value in attr.items():
-                value_source = dict_source and DictGetItemSource(dict_source, key)
-                value_vt = (
-                    variables.LazyVariableTracker.create(value, value_source, tx=tx)
-                    if value_source
-                    else VariableTracker.build(tx, value)
-                )
-                items[ConstantVariable.create(key)] = value_vt
-            return variables.MappingProxyVariable(variables.ConstDictVariable(items))
-        if isinstance(attr, types.MethodDescriptorType) and not is_torch_class(fn):
-            # Unbound C method read off a builtin type, e.g. list.count. Torch
-            # types keep their trace-rule path through GetAttrVariable.
-            from .builder import VariableBuilder
-
-            owner: VariableTracker = self
-            if attr.__objclass__ is not fn:
-                owner = VariableTracker.build(tx, attr.__objclass__)
-            return VariableBuilder.create_internal_method_descriptor(
-                attr, owner=owner, source=source
+        if is_torch_class(fn):
+            # Torch types keep their trace-rule path through GetAttrVariable.
+            return variables.GetAttrVariable(
+                self, name, py_type=type(attr), source=source
             )
-        return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
+        # CPython type_getattro: a metatype data descriptor wins, then the type's
+        # own MRO with __get__(None, T), then a metatype descriptor with
+        # __get__(T, type(T)). tp_getset / tp_members model the metatype data
+        # descriptors (type_getsets / type_members); the rest are literals.
+        getset = self.lookup_tp_getset_member(name)
+        if getset is not None:
+            result = getset.getter(self, tx)
+            if result is not None:
+                return result
+        meta_attr = mro_lookup(type(fn), name)
+        if is_data_descriptor(meta_attr):
+            if ConstantVariable.is_literal(attr):
+                return VariableTracker.build(tx, attr, source)
+            return variables.GetAttrVariable(
+                self, name, py_type=type(attr), source=source
+            )
+        cls_attr = mro_lookup(fn, name)
+        if isinstance(cls_attr, staticmethod):
+            # A builtin staticmethod, e.g. str.maketrans, is modeled by tp_methods
+            if self.lookup_tp_method(name):
+                return variables.GetAttrVariable(
+                    self, name, py_type=type(attr), source=source
+                )
+            # staticmethod.__get__ returns the wrapped C function
+            return VariableTracker.build(tx, attr, source)
+        if cls_attr is not NO_SUCH_SUBOBJ:
+            none_vt = ConstantVariable.create(None)
+            result = _resolve_descriptor_get(tx, cls_attr, none_vt, self, source, name)
+        else:
+            metacls_source = self.source and TypeSource(self.source)
+            metacls = VariableTracker.build(tx, type(fn), metacls_source)
+            result = _resolve_descriptor_get(tx, meta_attr, self, metacls, source, name)
+        return result or VariableTracker.build(tx, attr, source)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -554,7 +646,9 @@ class BaseBuiltinVariable(VariableTracker):
         return VariableTracker.build(tx, hasattr(self.as_python_constant(), name))  # type: ignore[return-value]
 
     def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        # CPython meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
+        # PyType_Type inherits object's identity hash. The base hash_impl needs a
+        # source to find it and fakes one (id(self)) otherwise, so a sourceless
+        # type(x) would not match the same type used as a dict key.
         return hash(self.as_python_constant()), False
 
     def tp_richcompare_impl(
@@ -727,7 +821,7 @@ def _uses_custom_classinfo_check(
     return False
 
 
-class BuiltinVariable(BaseBuiltinVariable):
+class BuiltinVariable(TypeVariable):
     """
     A VariableTracker that represents a built-in value (functions and operators).
     A lot of the code here assumes it will be a function object.
@@ -745,7 +839,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     }
 
     # __name__ -> type_getsets[] type_get_name (getset). Unlike the type-attribute
-    # readers on BaseBuiltinVariable, BuiltinVariable exposes __name__ for any
+    # readers on TypeVariable, BuiltinVariable exposes __name__ for any
     # wrapped callable (not just types), so it never declines.
     def _builtin_type_get_name(
         self: "BuiltinVariable", tx: "InstructionTranslatorBase"
@@ -1196,13 +1290,46 @@ class BuiltinVariable(BaseBuiltinVariable):
     )
 
     def __init__(self, fn: Any, **kwargs: Any) -> None:
-        if fn in self.MUST_USE_SPECIALIZED:
+        if type(self) is BuiltinVariable and fn in self.MUST_USE_SPECIALIZED:
             raise AssertionError(
                 f"Use the specialized VT class for {fn!r}, not BuiltinVariable. "
                 f"E.g. DictBuiltinVariable for dict."
             )
         super().__init__(**kwargs)
         self.fn = fn
+
+    # Builtin functions (builtin_function_or_method) are wrapped here too. The
+    # slots below take the function path for one and defer to TypeVariable
+    # for a type.
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if isinstance(self.fn, type):
+            return super().tp_getattro_impl(tx, name)
+        # PyObject_GenericGetAttr on a builtin function: meth_getsets and
+        # meth_members (__name__, __doc__, __module__, ...) are literals.
+        source = self.source and AttrSource(self.source, name)
+        try:
+            attr = getattr(self.fn, name)
+        except AttributeError as e:
+            raise_observed_exception(AttributeError, tx, args=list(e.args))
+        if ConstantVariable.is_literal(attr):
+            return VariableTracker.build(tx, attr, source)
+        return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if isinstance(self.fn, type):
+            return super().tp_init_impl(tx, args, kwargs)
+        return VariableTracker.tp_init_impl(self, tx, args, kwargs)
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # meth_repr for a function, type_repr for a type: both a fixed string.
+        return VariableTracker.build(tx, repr(self.fn))
 
     def __repr__(self) -> str:
         if self.fn is None:
@@ -1978,6 +2105,16 @@ class BuiltinVariable(BaseBuiltinVariable):
                 f"No handler found for {self.fn} with args {[type(x) for x in args]}"
             )
         return handler(tx, args, kwargs)  # type: ignore[return-value]
+
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # T.__new__(T, ...) == T(...) holds for the immutable types with their
+        # own TypeVariable subclass, not for the callables still wrapped here.
+        return VariableTracker.tp_new_impl(self, tx, args, kwargs)
 
     def call_method(
         self,
@@ -2819,43 +2956,6 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         return variables.FilterVariable.create(tx, fn, seq)
 
-    def tp_getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        # Mirror CPython getattr on a builtin function/type: raise AttributeError
-        # for a missing attribute, resolve literal introspection attributes
-        # (__doc__, __module__, __qualname__, __type_params__) to real guarded
-        # values so they are usable during tracing, and defer everything else
-        # (callables, complex objects) to a GetAttrVariable.
-        if name == "__dict__":
-            return super().tp_getattro_impl(tx, name)
-        source = self.source and AttrSource(self.source, name)
-        try:
-            value = getattr(self.fn, name)
-        except AttributeError as exc:
-            raise_observed_exception(AttributeError, tx, args=list(exc.args))
-        if self.fn is object and not callable(value):
-            return VariableTracker.build(tx, value, source)
-        if ConstantVariable.is_literal(value):
-            return VariableTracker.build(tx, value, source)
-        if self.fn in (object, type) and isinstance(
-            value, (types.WrapperDescriptorType, types.MethodDescriptorType)
-        ):
-            # Unbound slot wrapper or method read off object / type, e.g.
-            # object.__eq__: bind it to its owner so a call runs that slot on args[0].
-            from .builder import VariableBuilder
-
-            owner = self
-            if value.__objclass__ is not self.fn:
-                owner = VariableTracker.build(tx, value.__objclass__)
-            create: Callable[..., VariableTracker] = (
-                VariableBuilder.create_internal_wrapper_descriptor
-                if isinstance(value, types.WrapperDescriptorType)
-                else VariableBuilder.create_internal_method_descriptor
-            )
-            return create(value, owner=owner, source=source)
-        return variables.GetAttrVariable(self, name, py_type=type(value), source=source)
-
     def call_delattr(
         self,
         tx: "InstructionTranslatorBase",
@@ -3269,203 +3369,6 @@ class BuiltinVariable(BaseBuiltinVariable):
         return pysequence_contains(tx, a, b)
 
 
-class TypeVariable(VariableTracker):
-    """A builtin ``type`` object such as ``dict`` or ``list``."""
-
-    _fn: type
-    _cpython_type = type
-
-    def __init__(self, value: Any = None, **kwargs: Any) -> None:
-        if value is not None and value is not self._fn:
-            raise AssertionError(
-                f"{type(self).__name__} value must be {self._fn}, got {value}"
-            )
-        super().__init__(**kwargs)
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}()"
-
-    def as_proxy(self) -> Any:
-        DTYPE = {bool: torch.bool, int: torch.int64, float: torch.float64}
-        if self._fn in DTYPE:
-            return DTYPE[self._fn]
-        return super().as_proxy()
-
-    # type_methods[] type___instancecheck__ / type___subclasscheck__
-    def _type_instancecheck(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        check_positional(tx, "__instancecheck__", len(args), 1, 1)
-        return VariableTracker.build(tx, issubclass(args[0].python_type(), self._fn))
-
-    def _type_subclasscheck(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        check_positional(tx, "__subclasscheck__", len(args), 1, 1)
-        cls = args[0].as_python_constant()
-        return VariableTracker.build(tx, issubclass(cls, self._fn))
-
-    tp_methods = {
-        "__instancecheck__": Method(_type_instancecheck),
-        "__subclasscheck__": Method(_type_subclasscheck),
-    }
-
-    # type_getsets[] type_get_mro (getset)
-    def _type_get_mro(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        source = self.source and TypeMROSource(self.source)
-        items = [
-            VariableTracker.build(tx, cls, source and GetItemSource(source, i))
-            for i, cls in enumerate(self._fn.__mro__)
-        ]
-        return variables.TupleVariable(items, source=source)
-
-    # type_getsets[] type_dict (getset). Each read allocates a fresh mappingproxy
-    # over the same tp_dict, so build the dict once and wrap it every time.
-    def _type_get_dict(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        tp_dict = gc.get_referents(self._fn.__dict__)[0]
-        tp_dict_source = self.source and TypeDictSource(self.source)
-        tp_dict_vt = VariableTracker.build(tx, tp_dict, tp_dict_source)
-        return variables.MappingProxyVariable(tp_dict_vt)
-
-    tp_getset = {
-        "__bases__": BaseBuiltinVariable.tp_getset["__bases__"],
-        "__mro__": GetSet(_type_get_mro, unmodeled_setter),
-        "__dict__": GetSet(_type_get_dict, unmodeled_setter),
-    }
-    tp_members = {
-        "__base__": BaseBuiltinVariable.tp_members["__base__"],
-        "__flags__": BaseBuiltinVariable.tp_members["__flags__"],
-    }
-
-    @classmethod
-    def create_with_source(cls, value: type, source: Source) -> "TypeVariable":
-        install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
-        return cls(source=source)
-
-    def as_python_constant(self) -> type:
-        return self._fn
-
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return VariableTracker.build(tx, type.__repr__(self.as_python_constant()))
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.append_output(codegen.create_load_global(self._fn.__name__, add=True))
-
-    def tp_getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        fn = self._fn
-        source = self.source and AttrSource(self.source, name)
-        try:
-            attr = getattr(fn, name)
-        except AttributeError as e:
-            raise_observed_exception(AttributeError, tx, args=list(e.args))
-        if is_torch_class(fn):
-            # Torch types keep their trace-rule path through GetAttrVariable.
-            return variables.GetAttrVariable(
-                self, name, py_type=type(attr), source=source
-            )
-        # CPython type_getattro: a metatype data descriptor wins, then the type's
-        # own MRO with __get__(None, T), then a metatype descriptor with
-        # __get__(T, type(T)).
-        meta_attr = mro_lookup(type(fn), name)
-        if is_data_descriptor(meta_attr):
-            return super().tp_getattro_impl(tx, name)
-        cls_attr = mro_lookup(fn, name)
-        if isinstance(cls_attr, staticmethod):
-            # A builtin staticmethod, e.g. str.maketrans, is modeled by tp_methods
-            if self.lookup_tp_method(name):
-                return variables.GetAttrVariable(
-                    self, name, py_type=type(attr), source=source
-                )
-            # staticmethod.__get__ returns the wrapped C function
-            return VariableTracker.build(tx, attr, source)
-        if cls_attr is not NO_SUCH_SUBOBJ:
-            none_vt = ConstantVariable.create(None)
-            result = _resolve_descriptor_get(tx, cls_attr, none_vt, self, source, name)
-        else:
-            # The base class would return a CallMethodVariable here, because this
-            # class overrides call_method.
-            metacls_source = self.source and TypeSource(self.source)
-            metacls = VariableTracker.build(tx, type(fn), metacls_source)
-            result = _resolve_descriptor_get(tx, meta_attr, self, metacls, source, name)
-        return result or VariableTracker.build(tx, attr, source)
-
-    def tp_new_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if not args:
-            raise_type_error(tx, f"{self._fn.__name__}.__new__(): not enough arguments")
-        # Immutable builtin types have no tp_init work, so T.__new__(T, ...)
-        # equals T(...). A subtype wraps that value. Mutable types override this.
-        cls = args[0].as_python_constant()
-        if cls is self._fn:
-            return self.call_function(tx, args[1:], kwargs)
-        # tp_new_wrapper: cls's nearest builtin base must use this tp_new.
-        base = next(t for t in cls.__mro__ if not t.__flags__ & Py_TPFLAGS_HEAPTYPE)
-        if base.__new__ is not self._fn.__new__:
-            raise_type_error(
-                tx,
-                f"{self._fn.__name__}.__new__({cls.__name__}) is not safe, "
-                f"use {base.__name__}.__new__()",
-            )
-        return tx.output.side_effects.track_new_user_defined_object(
-            self, args[0], args[1:], tx=tx
-        )
-
-    def tp_init_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # A builtin type is an instance of type, so its tp_init is type_init.
-        return type_init(tx, args, kwargs)
-
-    # type_as_number.nb_or = _Py_union_type_or, e.g. list | tuple
-    def nb_or_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        try:
-            other_val = other.as_python_constant()
-        except NotImplementedError:
-            return VariableTracker.build(tx, NotImplemented)
-        return VariableTracker.build(tx, type.__or__(self._fn, other_val))
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(self._fn, name))  # type: ignore[return-value]
-
-    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        # PyType_Type inherits object's identity hash. The base hash_impl needs a
-        # source to find it and fakes one (id(self)) otherwise, so a sourceless
-        # type(x) would not match the same type used as a dict key.
-        return hash(self._fn), False
-
-    # tp_richcompare comes from object
-    # remove this once https://github.com/pytorch/pytorch/pull/199999 is merged
-    def tp_richcompare_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        op: str,
-    ) -> VariableTracker:
-        return python_constant_richcompare_impl(self, tx, other, op)
-
-
 class DictBuiltinVariable(TypeVariable):
     """Variable tracker for the `dict` builtin constructor."""
 
@@ -3576,15 +3479,13 @@ class DictBuiltinVariable(TypeVariable):
         )
 
 
-class IterBuiltinVariable(BaseBuiltinVariable):
+class IterBuiltinVariable(BuiltinVariable):
     """Variable tracker for the `iter` builtin."""
-
-    _fn = iter
 
     def __init__(self, value: Any = iter, **kwargs: Any) -> None:
         if value is not iter:
             raise AssertionError(f"IterBuiltinVariable value must be iter, got {value}")
-        super().__init__(**kwargs)
+        super().__init__(value, **kwargs)
 
     def __repr__(self) -> str:
         return "IterBuiltinVariable()"
@@ -3614,17 +3515,15 @@ class IterBuiltinVariable(BaseBuiltinVariable):
             ).call_function(tx, args, kwargs)
 
 
-class GetAttrBuiltinVariable(BaseBuiltinVariable):
+class GetAttrBuiltinVariable(BuiltinVariable):
     """Variable tracker for the `getattr` builtin."""
-
-    _fn = getattr
 
     def __init__(self, value: Any = getattr, **kwargs: Any) -> None:
         if value is not getattr:
             raise AssertionError(
                 f"GetAttrBuiltinVariable value must be getattr, got {value}"
             )
-        super().__init__(**kwargs)
+        super().__init__(value, **kwargs)
 
     def __repr__(self) -> str:
         return "GetAttrBuiltinVariable()"
@@ -3693,17 +3592,15 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
         return generic_getattr(tx, obj, name, default)
 
 
-class HasAttrBuiltinVariable(BaseBuiltinVariable):
+class HasAttrBuiltinVariable(BuiltinVariable):
     """Variable tracker for the `hasattr` builtin."""
-
-    _fn = hasattr
 
     def __init__(self, value: Any = hasattr, **kwargs: Any) -> None:
         if value is not hasattr:
             raise AssertionError(
                 f"HasAttrBuiltinVariable value must be hasattr, got {value}"
             )
-        super().__init__(**kwargs)
+        super().__init__(value, **kwargs)
 
     def __repr__(self) -> str:
         return "HasAttrBuiltinVariable()"
@@ -3741,17 +3638,15 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
         return result
 
 
-class SetAttrBuiltinVariable(BaseBuiltinVariable):
+class SetAttrBuiltinVariable(BuiltinVariable):
     """Variable tracker for the `setattr` builtin."""
-
-    _fn = setattr
 
     def __init__(self, value: Any = setattr, **kwargs: Any) -> None:
         if value is not setattr:
             raise AssertionError(
                 f"SetAttrBuiltinVariable value must be setattr, got {value}"
             )
-        super().__init__(**kwargs)
+        super().__init__(value, **kwargs)
 
     def __repr__(self) -> str:
         return "SetAttrBuiltinVariable()"
