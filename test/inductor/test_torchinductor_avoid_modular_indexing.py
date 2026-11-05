@@ -25,13 +25,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
-test_failures: dict[str, TestFailure] = {
-    # checks a golden count of index casts in the C++ code; the realized copy
-    # changes the generated kernels
-    "test_AllenaiLongformerBase_repro_avoid_modular_indexing": TestFailure(
-        ("cpu",), is_skip=True
-    ),
-}
+test_failures: dict[str, TestFailure] = {}
 
 
 AvoidModularIndexingCommonTemplate = make_test_cls_with_patches(

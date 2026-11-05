@@ -994,7 +994,7 @@ strict_output_strides = False
 # ModularIndexing), False forces inlining.
 # [DO NOT LAND] forced on (strict affine indexing on every backend) so CI
 # exercises the avoid_modular_indexing paths in every test suite.
-avoid_modular_indexing: bool | None = {"0": False, "1": True}.get(
+avoid_modular_indexing: bool | None = {"0": False, "1": True, "auto": None}.get(
     os.environ.get("TORCHINDUCTOR_AVOID_MODULAR_INDEXING", ""), True
 )
 
