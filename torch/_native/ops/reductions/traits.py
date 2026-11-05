@@ -164,6 +164,7 @@ class WelfordOps:
     # acc = (mean, m2, nf). `reduce` is the ONLINE Welford update and `combine` the PARALLEL Chan
     # merge -- deliberately different formulas. project divides m2 by the clamped dof.
     nfields = 3
+    has_combine_equal = True
 
     def __init__(self, correction=1, take_sqrt=False, return_mean=False, acc=Float32):
         self.correction = float(correction)
@@ -211,7 +212,10 @@ class WelfordOps:
 
     @cute.jit
     def combine_equal(self, a, b, count: cutlass.Constexpr):
-        """Combine two nonempty states containing the same number of values."""
+        """Combine two nonempty states that each hold `count` values.
+
+        a's and b's count fields are not read.
+        """
         ma, m2a, _ = a
         mb, m2b, _ = b
         delta = mb - ma
