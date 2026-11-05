@@ -416,6 +416,8 @@ g () {
             ".github/workflows/inductor.yml",
             ".github/workflows/inductor-periodic.yml",
             ".github/actions/reuse-old-whl/action.yml",
+            ".github/workflows/target_determination.yml",
+            ".github/workflows/llm_td_retrieval.yml",
             "tools/native_aot/build_stage2.py",
             ".ci/pytorch/generate_ck_config_h.cmake",
             ".github/ci_commit_pins/vision.txt",
@@ -462,6 +464,15 @@ g () {
             "test/setup.cfg",
         ]:
             self.assertTrue(needs_run_all([f]), f)
+        # Every caller of a test workflow sets the test matrix of its jobs.
+        for wf in (REPO_ROOT / ".github/workflows").glob("*.yml"):
+            called = [
+                line.split("uses: ./", 1)[1].split()[0]
+                for line in wf.read_text().splitlines()
+                if "uses: ./.github/workflows/_" in line
+            ]
+            if any("-test" in c and needs_run_all([c]) for c in called):
+                self.assertTrue(needs_run_all([f".github/workflows/{wf.name}"]), wf)
         for f in [
             "docs/source/index.rst",
             "test/data/setup.cfg.in",
@@ -620,6 +631,14 @@ g () {
         self.assertEqual(
             selection.edited_tests([sh], set(TESTS)), {"distributed/launcher/test_run"}
         )
+        ext = "test/cpp_extensions/libtorch_agn_2_10_extension/csrc/kernel.cpp"
+        self.assertLessEqual(
+            {
+                "cpp_extensions/test_libtorch_agnostic",
+                "cpp_extensions/libtorch_agn_2_10_extension/test_version_compatibility",
+            },
+            selection.edited_tests([ext], set(TESTS)),
+        )
 
 
 class TestPrompt(unittest.TestCase):
@@ -693,7 +712,7 @@ class TestPrompt(unittest.TestCase):
             done = subprocess.CompletedProcess([], code, stdout, "e")
             return mock.Mock(return_value=done)
 
-        timeout = subprocess.TimeoutExpired(["claude", "-p", "<prompt>"], 600)
+        timeout = subprocess.TimeoutExpired(["claude", "-p", "<prompt>"], 5)
         missing = FileNotFoundError("claude")
         denied = PermissionError("claude")
         for run, why in [
@@ -702,7 +721,7 @@ class TestPrompt(unittest.TestCase):
             (completed("null"), "nulle"),
             (completed("x" * 3000), "x" * 1999 + "e"),
             (completed('{"result": "r"}', code=1), '{"result": "r"}e'),
-            (mock.Mock(side_effect=timeout), "model call timed out after 600s"),
+            (mock.Mock(side_effect=timeout), "model call timed out after 5s"),
             (mock.Mock(side_effect=missing), "FileNotFoundError: claude"),
             (mock.Mock(side_effect=denied), "PermissionError: claude"),
         ]:
@@ -721,7 +740,7 @@ class TestPrompt(unittest.TestCase):
     def test_query_model_refuses_a_checkout_with_escaping_symlinks(self) -> None:
         run = mock.Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
         with mock.patch.object(select_tests.subprocess, "run", run):
-            for target in ("/", ".git", ".git/config", "../x"):
+            for target in ("/", ".", ".git", ".git/config", "../x"):
                 with tempfile.TemporaryDirectory() as wt, self.subTest(target=target):
                     (Path(wt) / ".git").mkdir()
                     (Path(wt) / "sub").mkdir()
