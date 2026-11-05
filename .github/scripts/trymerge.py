@@ -523,6 +523,10 @@ REVIEW_PAGE_LIMIT = 10
 # #190927 / #186302 land race).
 DOCKER_CI_PATH = ".ci/docker"
 DOCKER_BUILDS_WORKFLOW_NAME = "docker-builds"
+# GitHub's GraphQL API can report a workflow by its file path instead of its
+# `name:` (for example after a run of the workflow file failed to start), which
+# prefixes its check names with the path.
+DOCKER_BUILDS_WORKFLOW_PATH = ".github/workflows/docker-builds.yml"
 
 
 def iter_issue_timeline_until_comment(
@@ -652,11 +656,14 @@ def is_docker_affecting_files(files: Iterable[str]) -> bool:
 
 def get_docker_build_checks(checks: JobNameToStateDict) -> JobNameToStateDict:
     """Return the subset of checks that belong to the docker-builds workflow."""
+    workflow_names = (DOCKER_BUILDS_WORKFLOW_NAME, DOCKER_BUILDS_WORKFLOW_PATH)
     return {
         name: check
         for name, check in checks.items()
-        if name == DOCKER_BUILDS_WORKFLOW_NAME
-        or name.startswith(f"{DOCKER_BUILDS_WORKFLOW_NAME} / ")
+        if any(
+            name == workflow_name or name.startswith(f"{workflow_name} / ")
+            for workflow_name in workflow_names
+        )
     }
 
 
@@ -1800,11 +1807,25 @@ class GitHubPR:
         ignore_current_checks: set[tuple[int, str]] | None = None,
     ) -> list[GitHubPR]:
         """
+        Commits the PR, or the open PRs of its ghstack stack up to and including it,
+        onto `branch` (the default branch when None) in `repo`, without pushing them.
+
+        First fetches `branch` from the remote, which needs network access, and
+        force-resets the local `branch` to `<remote>/<branch>`, discarding any local
+        commits on it. merge() retries on the same repo, so this keeps the commits of
+        an attempt that failed before its push from landing again.
+
         :param skip_all_rule_checks: If true, skips all rule checks on ghstack PRs, useful for dry-running merge locally
         """
         branch_to_merge_into = self.default_branch() if branch is None else branch
-        if repo.current_branch() != branch_to_merge_into:
-            repo.checkout(branch_to_merge_into)
+        remote_tip = f"refs/remotes/{repo.remote}/{branch_to_merge_into}"
+        try:
+            repo.fetch(f"+refs/heads/{branch_to_merge_into}", remote_tip)
+        except RuntimeError as e:
+            raise RuntimeError(
+                f"Could not fetch {branch_to_merge_into} from {repo.remote}: {e}"
+            ) from e
+        repo._run_git("checkout", "-B", branch_to_merge_into, remote_tip)
 
         # It's okay to skip the commit SHA check for ghstack PRs since
         # authoring requires write access to the repo.
