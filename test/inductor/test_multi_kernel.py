@@ -10,7 +10,11 @@ import torch
 from torch import nn
 from torch._dynamo.testing import reset_rng_state
 from torch._inductor import config, test_operators
-from torch._inductor.codegen.multi_kernel import MultiKernelCall
+from torch._inductor.codecache import LambdaFuture
+from torch._inductor.codegen.multi_kernel import (
+    IndexDtypeMultiKernelCall,
+    MultiKernelCall,
+)
 from torch._inductor.runtime.benchmarking import set_gpu_benchmark_lock_context
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
@@ -95,6 +99,21 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
 )
 @instantiate_parametrized_tests
 class MultiKernelTest(TestCase):
+    def test_index_dtype_multi_kernel_call(self):
+        calls = []
+
+        def stub(name):
+            def run(*args, **kwargs):
+                calls.append((name, args))
+
+            return SimpleNamespace(run=run)
+
+        call = IndexDtypeMultiKernelCall(stub("i32"), LambdaFuture(lambda: stub("i64")))
+        int32_max = torch.iinfo(torch.int32).max
+        call.run("buf0", 7, int32_max, stream=0)
+        call.run("buf0", 7, int32_max + 1, stream=0)
+        self.assertEqual(calls, [("i32", ("buf0", 7)), ("i64", ("buf0", 7))])
+
     @staticmethod
     def _benchmark_lock_call(events):
         def kernel(index):

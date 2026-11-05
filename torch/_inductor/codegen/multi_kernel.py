@@ -274,6 +274,9 @@ class MultiKernel:
             self.kernels[0].add_numel_to_call_args(kernel_name, call_args, arg_types)
             multi_call_args = call_args
             multi_call_arg_types = arg_types
+        for arg in self.trailing_call_args():
+            multi_call_args.append(arg)
+            multi_call_arg_types.append(type(arg))
 
         for ws in self.kernels[0].args.workspace_args:
             V.graph.wrapper_code.generate_workspace_allocation(ws)
@@ -293,6 +296,10 @@ class MultiKernel:
 
         for ws in reversed(self.kernels[0].args.workspace_args):
             V.graph.wrapper_code.generate_workspace_deallocation(ws)
+
+    def trailing_call_args(self) -> list[sympy.Expr]:
+        """Launch args after the subkernels' own, read and stripped by the runtime call."""
+        return []
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
@@ -352,26 +359,11 @@ class IndexDtypeMultiKernel(MultiKernel):
         )
         self.args = object()
 
-    def call_kernel(self, kernel_name):
-        wrapper = V.graph.wrapper_code
-        wrapper.write_triton_header_once()
-        int32_kernel, int64_kernel = self.kernels
-        _, call_args, _, arg_types = int32_kernel.args.python_argdefs()
-        _, other_call_args, _, other_arg_types = int64_kernel.args.python_argdefs()
-        if (call_args, arg_types) != (other_call_args, other_arg_types):
-            raise AssertionError((call_args, other_call_args))
-        int32_kernel.add_numel_to_call_args(kernel_name, call_args, arg_types)
-        bound = Max(*self.bounds)
-        call_args.append(bound)
-        arg_types.append(type(bound))
-
-        for ws in int32_kernel.args.workspace_args:
-            wrapper.generate_workspace_allocation(ws)
-        wrapper.generate_kernel_call(kernel_name, call_args, arg_types=arg_types)
-        for ws in reversed(int32_kernel.args.workspace_args):
-            wrapper.generate_workspace_deallocation(ws)
+    def trailing_call_args(self) -> list[sympy.Expr]:
+        return [Max(*self.bounds)]
 
 
+# Hoisted out of IndexDtypeMultiKernelCall.run, which is on the launch path.
 _INT32_MAX = torch.iinfo(torch.int32).max
 
 

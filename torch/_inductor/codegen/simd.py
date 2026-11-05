@@ -4812,20 +4812,27 @@ class SIMDScheduling(BaseScheduling):
             self.codegen_node_schedule_with_kernel(node_schedule, copy)
             return copy
 
-        def call_args(k: SIMDKernel) -> tuple[list[Any], list[Any]]:
-            _, args, _, arg_types = k.args.python_argdefs()
-            return args, arg_types
+        def same_args(a: SIMDKernel, b: SIMDKernel) -> bool:
+            # Each codegen allocates its own workspaces; a pair launches with one.
+            MultiKernel.merge_workspaces_inplace([a, b])
+            _, a_args, _, a_types = a.args.python_argdefs()
+            _, b_args, _, b_types = b.args.python_argdefs()
+            return (a_args, a_types) == (b_args, b_types)
 
+        kernel_count = metrics.generated_kernel_count
         int32_kernel = codegen(override_index_dtype=torch.int32)
-        if call_args(int32_kernel) == call_args(kernel):
+        if same_args(int32_kernel, kernel):
             return [int32_kernel, kernel]
         # The first codegen of a schedule can register a precomputed size (ps0 for a
         # composite s0 expression) that later codegens substitute where the first used
         # the raw symbols, so regenerate the int64 kernel from the same state.
+        counters["inductor"]["index_dtype_copy_regenerated"] += 1
         int64_kernel = codegen()
-        if call_args(int32_kernel) == call_args(int64_kernel):
-            return [int32_kernel, int64_kernel]
-        return None
+        same = same_args(int32_kernel, int64_kernel)
+        # Only the int32 copy of a usable pair adds a kernel to the output.
+        # pyrefly: ignore [bad-assignment]
+        metrics.generated_kernel_count = kernel_count + int(same)
+        return [int32_kernel, int64_kernel] if same else None
 
     def _launch_kernel_and_cleanup(
         self,

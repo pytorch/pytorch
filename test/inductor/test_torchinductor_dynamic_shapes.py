@@ -817,12 +817,14 @@ class TestInductorDynamic(DynamicShapesTestCase):
     @onlyOn(GPU_TYPE)
     @config.patch(dispatch_32bit_indexing_at_runtime=True)
     @parametrize("op", ["add", "sum", "argmax"])
-    def test_dispatch_32bit_indexing_at_runtime(self, device, op):
+    @parametrize("cooperative", [False, True])
+    def test_dispatch_32bit_indexing_at_runtime(self, device, op, cooperative):
         def fn(x):
             return getattr(torch, op)(x, -1)
 
         x = torch.randn(8, 1152, device=device)
-        actual, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        with config.patch({"triton.force_cooperative_reductions": cooperative}):
+            actual, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), x)
         self.assertEqual(actual, fn(x))
         guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
         self.assertNotIn("<= 2147483647", guards)
@@ -840,10 +842,26 @@ class TestInductorDynamic(DynamicShapesTestCase):
         def fn(x):
             return torch.max_pool2d(torch.relu(torch.conv2d(x, w, b, 4, 2)), 3, 2)
 
+        counters.clear()
         x = torch.randn(2, 3, 64, 96, device=device)
         actual, (code,) = run_and_get_code(torch.compile(fn, dynamic=True), x)
         self.assertEqual(actual, fn(x))
+        self.assertEqual(counters["inductor"]["index_dtype_copy_regenerated"], 1)
         self.assertEqual(code.count("async_compile.index_dtype_multi_kernel("), 2)
+
+    @onlyOn(GPU_TYPE)
+    @config.patch(dispatch_32bit_indexing_at_runtime=True, cpp_wrapper=True)
+    def test_dispatch_32bit_indexing_at_runtime_cpp_wrapper(self, device):
+        # cpp_wrapper cannot dispatch, so it falls back to int64 without a guard.
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(8, 1152, device=device)
+        actual, codes = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        self.assertEqual(actual, fn(x))
+        guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
+        self.assertNotIn("<= 2147483647", guards)
+        self.assertNotIn("index_dtype_multi_kernel", "\n".join(codes))
 
     @onlyOn(GPU_TYPE)
     @largeTensorTest("5GB")
