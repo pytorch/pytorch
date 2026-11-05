@@ -325,7 +325,9 @@ class LoadPlanner:
         This is called once per non-tensor value in state_dict.
 
     5) resolve_tensor and commit_tensor - called multiple times on each rank
-        They are called in pair for each Tensor value in state_dict.
+        They are called in pair for each Tensor value in state_dict. When
+        ``supports_batched_resolve`` is ``True``, a reader may resolve a batch
+        of tensors before copying and committing them.
 
     Users are recommended to extend DefaultLoadPlanner instead of this interface directly as
     most changes can be expressed by changes in a single method.
@@ -374,6 +376,8 @@ class LoadPlanner:
     >>>     def commit_tensor(self, read_item, tensor):
     >>>         self.state_dict[read_item.dest_index.fqn] = tensor
     """
+
+    supports_batched_resolve: bool = False
 
     @abc.abstractmethod
     def set_up_planner(

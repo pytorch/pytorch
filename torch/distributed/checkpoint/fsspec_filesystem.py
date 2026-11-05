@@ -17,7 +17,6 @@ import torch._weights_only_unpickler as _weights_only_unpickler
 from torch import Tensor
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint._extension import StreamTransformExtension
-from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from torch.distributed.checkpoint.filesystem import (
     FileSystemBase,
     FileSystemReader,
@@ -301,13 +300,15 @@ class FsspecReader(FileSystemReader):
         # read_data may run multiple cat_ranges calls at once, which only an
         # AsyncFileSystem is guaranteed to handle. Wrappers such as
         # DirFileSystem are async even over a sync or caching filesystem, so
-        # the innermost filesystem decides.
-        curr_fs = self.fs.fs
+        # every wrapped layer must also be async and uncached.
+        curr_fs = getattr(self.fs, "fs", None)
         if not isinstance(curr_fs, fsspec.asyn.AsyncFileSystem):
             return False
         seen: set[int] = set()
         while True:
-            if isinstance(curr_fs, CachingFileSystem):
+            if isinstance(curr_fs, CachingFileSystem) or not getattr(
+                curr_fs, "async_impl", True
+            ):
                 return False
             seen.add(id(curr_fs))
             inner = getattr(curr_fs, "fs", None)
@@ -316,7 +317,7 @@ class FsspecReader(FileSystemReader):
             if id(inner) in seen:
                 return False
             curr_fs = inner
-        return bool(getattr(curr_fs, "async_impl", True))
+        return True
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         if not plan.items or not self._supports_batched_cat_ranges():
@@ -367,7 +368,7 @@ class FsspecReader(FileSystemReader):
                     )
             return chunks
 
-        def decode(req, chunk):
+        def load_item(req, chunk):
             if self.storage_data[req.storage_index].transform_descriptors:
                 return self._load_item(req, io.BytesIO(chunk))
             if req.type == LoadItemType.BYTE_IO:
@@ -381,15 +382,10 @@ class FsspecReader(FileSystemReader):
             dst.detach().copy_(src)
 
         # Resolving a whole batch before committing any of it is only safe when
-        # resolve_tensor and commit_tensor keep their default behavior (e.g., a
-        # custom resolve_tensor reusing one scratch buffer for commit_tensor
-        # would overwrite that buffer across batched resolve_tensor calls).
-        planner_cls = type(planner)
-        parallel_copy = (
-            isinstance(planner, DefaultLoadPlanner)
-            and planner_cls.resolve_tensor is DefaultLoadPlanner.resolve_tensor
-            and planner_cls.commit_tensor is DefaultLoadPlanner.commit_tensor
-        )
+        # the planner supports batched resolve_tensor calls (e.g., a custom
+        # resolve_tensor reusing one scratch buffer for commit_tensor would
+        # overwrite that buffer across batched resolve_tensor calls).
+        parallel_copy = bool(getattr(planner, "supports_batched_resolve", False))
 
         with (
             concurrent.futures.ThreadPoolExecutor(
@@ -406,14 +402,14 @@ class FsspecReader(FileSystemReader):
                 for b_reqs, chunks in fetched:
                     # Executor.map submits the whole batch now and yields results
                     # in request order, dropping each one once it is consumed.
-                    decoded = cpu_executor.map(decode, b_reqs, chunks)
+                    loaded = cpu_executor.map(load_item, b_reqs, chunks)
                     del chunks
 
                     # Every planner hook runs on this thread, so planners need
-                    # not be thread safe. Only decoding above and the copies
+                    # not be thread safe. Only loading above and the copies
                     # below go to the pool.
                     pending: list[tuple[ReadItem, Tensor, Tensor]] = []
-                    for req, item in zip(b_reqs, decoded, strict=True):
+                    for req, item in zip(b_reqs, loaded, strict=True):
                         if req.type == LoadItemType.BYTE_IO:
                             planner.load_bytes(req, item)
                         elif parallel_copy:

@@ -775,6 +775,20 @@ class TestFileSystem(TestCase):
                 self.active_resolve = False
                 super().commit_tensor(read_item, tensor)
 
+        class ExplicitOptInPlanner(dcp.DefaultLoadPlanner):
+            supports_batched_resolve = True
+
+            def resolve_tensor(self, read_item):
+                return super().resolve_tensor(read_item)
+
+        self.assertFalse(dcp.LoadPlanner.supports_batched_resolve)
+        self.assertTrue(dcp.DefaultLoadPlanner.supports_batched_resolve)
+        self.assertFalse(StrictPairingPlanner.supports_batched_resolve)
+        self.assertTrue(ExplicitOptInPlanner.supports_batched_resolve)
+        self.assertTrue(
+            dcp.default_planner._EmptyStateDictLoadPlanner.supports_batched_resolve
+        )
+
         load_dict = {f"t_{i}": torch.zeros(10) for i in range(4)}
         reader = _async_reader(checkpoint_dir, max_batch_size=4)
         dcp.load(
@@ -895,6 +909,28 @@ class TestFileSystem(TestCase):
         reader_nested_sync = FsspecReader("memory://test_nested_sync")
         reader_nested_sync.fs.fs = nested_sync
         self.assertFalse(reader_nested_sync._supports_batched_cat_ranges())
+
+        # An outer AsyncFileSystem with async_impl = False wrapping an async
+        # child must also be rejected, since cat_ranges runs on the outer FS.
+        class SyncOuterAsyncWrapper(fsspec.asyn.AsyncFileSystem):
+            async_impl = False
+
+            def __init__(self, inner_fs):
+                super().__init__(skip_instance_cache=True)
+                self.fs = inner_fs
+
+            def cat_ranges(self, *args, **kwargs):
+                return []
+
+        reader_sync_outer = FsspecReader("memory://test_sync_outer")
+        reader_sync_outer.fs.fs = SyncOuterAsyncWrapper(dummy)
+        self.assertFalse(reader_sync_outer._supports_batched_cat_ranges())
+
+        # If self.fs lacks a .fs attribute, _supports_batched_cat_ranges returns
+        # False gracefully instead of raising AttributeError.
+        reader_no_fs = FsspecReader("memory://test_no_fs")
+        del reader_no_fs.fs.fs
+        self.assertFalse(reader_no_fs._supports_batched_cat_ranges())
 
         # A self-referential .fs, or a synthesized non-filesystem .fs such as a
         # MagicMock attribute, must terminate instead of looping forever.
