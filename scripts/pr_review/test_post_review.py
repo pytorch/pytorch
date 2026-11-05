@@ -6,6 +6,7 @@ Run: python3 -m unittest discover -s scripts/pr_review -t .
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import re
@@ -85,8 +86,10 @@ class FakeGitHub(GitHub):
         reviews=(),
         refuse_inline=False,
         comments=None,
+        files=(),
     ):
         super().__init__("token", "o/r")
+        self.files = list(files)
         self.head = head
         self.labels = [{"name": n} for n in labels]
         self.reviews = list(reviews)
@@ -115,6 +118,8 @@ class FakeGitHub(GitHub):
             return {}
         if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments"):
             return [dict(c) for c in self.comments] if page(path) == 1 else []
+        if method == "GET" and path.startswith("/repos/o/r/pulls/1/files"):
+            return self.files if page(path) == 1 else []
         if method == "DELETE" and path.startswith("/repos/o/r/pulls/comments/"):
             cid = int(path.split("/")[-1])
             if not any(c["id"] == cid for c in self.comments):
@@ -294,6 +299,85 @@ class TestWhatIsPosted(unittest.TestCase):
         (c,) = body["comments"]
         self.assertEqual((c["path"], c["line"], c["side"]), ("torch/x.py", 3, "RIGHT"))
         self.assertIn("Off by one.", c["body"])
+
+    def test_a_finding_on_a_deleted_file_is_posted_on_the_left_side(self):
+        findings = [
+            {"path": "gone.py", "line": 7, "severity": "major", "message": "Used."},
+            {"path": "torch/x.py", "line": 3, "severity": "major", "message": "Off."},
+            {"path": "gone.py", "line": 9, "severity": "minor", "message": "Nit."},
+        ]
+        files = [
+            {"filename": "gone.py", "status": "removed"},
+            {"filename": "torch/x.py", "status": "modified"},
+        ]
+        gh = FakeGitHub(files=files)
+        go(gh, row(findings=findings))
+        (body,) = gh.posted()
+        sides = {(c["path"], c["line"]): c["side"] for c in body["comments"]}
+        self.assertEqual(sides, {("gone.py", 7): "LEFT", ("torch/x.py", 3): "RIGHT"})
+        # The folded one links the diff line: the file has no blob at the head.
+        digest = hashlib.sha256(b"gone.py").hexdigest()
+        link = f"https://github.com/o/r/pull/1/files#diff-{digest}L9"
+        self.assertIn(link, body["body"])
+        self.assertNotIn(f"/blob/{SHA}/gone.py", body["body"])
+
+    def test_a_deleted_file_is_matched_and_linked_by_its_real_name(self):
+        # Findings carry neutralize_path's escaped form; GitHub knows the real one.
+        real = "torch/_inductor/@x.py"
+        finding = {
+            "path": neutralize_path(real),
+            "line": 4,
+            "severity": "major",
+            "message": "Used.",
+        }
+        self.assertNotEqual(finding["path"], real)
+        gh = FakeGitHub(files=[{"filename": real, "status": "removed"}])
+        go(gh, row(findings=[finding]))
+        (body,) = gh.posted()
+        (c,) = body["comments"]
+        self.assertEqual((c["path"], c["side"]), (real, "LEFT"))
+        digest = hashlib.sha256(real.encode()).hexdigest()
+        self.assertEqual(
+            post_review.permalink(
+                "o/r", SHA, post_review.with_removed(gh, 1, [finding])[0]
+            ),
+            f"https://github.com/o/r/pull/1/files#diff-{digest}L4",
+        )
+
+    def test_running_out_of_time_listing_files_stops_the_step(self):
+        class SlowFiles(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/files"):
+                    raise post_review.OutOfTime()
+                return super().request(method, path, body)
+
+        gh = SlowFiles()
+        with self.assertRaises(post_review.OutOfTime):
+            post_review.with_removed(gh, 1, [{"path": "a.py", "line": 1}])
+
+    def test_a_discussion_on_the_other_side_is_not_this_finding(self):
+        # A replied-to LEFT thread from when the file was deleted says nothing
+        # about a RIGHT finding at the same number once the file is back.
+        left = {**comment(50, 5, line=3), "side": "LEFT"}
+        gh = FakeGitHub(
+            reviews=[old_review(5)],
+            comments=[left, comment(51, 9, author="t", reply_to=50)],
+        )
+        go(gh)
+        (c,) = gh.posted()[0]["comments"]
+        self.assertEqual((c["line"], c["side"]), (3, "RIGHT"))
+
+    def test_an_unlisted_file_set_posts_on_the_right_as_before(self):
+        class NoFiles(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/files"):
+                    raise GitHubError(403, "forbidden")
+                return super().request(method, path, body)
+
+        gh = NoFiles(files=[{"filename": "torch/x.py", "status": "removed"}])
+        go(gh)
+        (c,) = gh.posted()[0]["comments"]
+        self.assertEqual(c["side"], "RIGHT")
 
     def test_inline_path_is_the_real_file_name(self):
         path = neutralize_path("node_modules/@babel/x_y.py")
@@ -623,6 +707,132 @@ class TestNothingIsPosted(unittest.TestCase):
         gh = FakeGitHub(labels=("No Automated Review",))
         go(gh)
         self.assertEqual(gh.writes(), [])
+
+
+TOO_LARGE = {"status": "skipped_too_large"}
+LIMITS = (100, 400_000)
+NOTICE = post_review.too_large_body("no automated review", LIMITS)
+
+
+def decline(gh, limits=LIMITS):
+    return run(gh, TOO_LARGE, 1, SHA, "no automated review", AUTHOR, limits)
+
+
+class TestATooLargePrGetsANotice(unittest.TestCase):
+    def test_one_comment_says_why_and_how_to_proceed(self):
+        gh = FakeGitHub(reviews=[old_review(5)])
+        self.assertEqual(decline(gh), 0)
+        [posted] = gh.posted()
+        self.assertEqual(posted["event"], "COMMENT")
+        self.assertEqual(posted["commit_id"], SHA)
+        body = posted["body"]
+        self.assertTrue(body.startswith(f"{MARKER}\n{post_review.TOO_LARGE_TAG}\n"))
+        self.assertIn("100 changed files or 400 KB of diff", body)
+        self.assertIn("split it into smaller PRs", body)
+        self.assertIn('`@pytorchbot label "no automated review"`', body)
+        # It replaces the earlier review like any other.
+        self.assertEqual(minimized(gh), ["N5"])
+
+    def test_without_limits_it_still_posts(self):
+        gh = FakeGitHub()
+        decline(gh, limits=None)
+        self.assertIn("over the automated review's size limit.", gh.posted()[0]["body"])
+
+    def test_the_notice_carries_no_command_pytorch_bot_would_run(self):
+        """pytorch-bot runs `^ *@pytorch(merge|)bot .+$` from review bodies."""
+        for label in ("no automated review", "x\n@pytorchbot merge -f y"):
+            body = post_review.too_large_body(label, LIMITS)
+            self.assertIsNone(re.search(r"(?m)^ *@pytorch(merge|)bot .+$", body))
+            self.assertEqual(len(re.findall(r"(?i)@pytorch", body)), 1, label)
+            self.assertIn('label "no automated review"', body)
+
+    def test_it_is_not_posted_again_while_it_is_the_newest(self):
+        gh = FakeGitHub(reviews=[old_review(5), old_review(6, body=NOTICE)])
+        decline(gh)
+        self.assertEqual(gh.posted(), [])
+        self.assertEqual((folds(gh), minimized(gh)), ([], []))
+
+    def test_nothing_is_posted_when_the_head_moved_or_the_pr_opted_out(self):
+        for gh in (
+            FakeGitHub(head="b" * 40, reviews=[old_review(5)]),
+            FakeGitHub(labels=("no automated review",), reviews=[old_review(5)]),
+        ):
+            decline(gh)
+            self.assertEqual(gh.writes(), [])
+
+    def test_a_standing_change_request_is_neither_dismissed_nor_hidden(self):
+        gh = FakeGitHub(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        decline(gh)
+        self.assertEqual(len(gh.posted()), 1)
+        self.assertEqual(dismissed(gh), [])
+        self.assertEqual(minimized(gh), [])
+
+    def test_a_failed_post_warns_and_does_not_fail_the_step(self):
+        gh = FakeGitHub(reviews=[old_review(5)])
+        real = gh.request
+
+        def refuse(method, path, body=None, idempotent=None):
+            if method == "POST" and path.endswith("/reviews"):
+                raise GitHubError(500, "boom")
+            return real(method, path, body, idempotent)
+
+        gh.request = refuse
+        with redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(decline(gh), 0)
+        self.assertIn("::warning::too-large notice not posted", out.getvalue())
+        self.assertEqual(minimized(gh), [])
+
+    def test_a_marked_notice_gets_its_body_back_instead_of_a_repost(self):
+        """On the diff-size path `announce` marks the notice before `review`
+        finds the PR too large again: no new notice, no defused command."""
+        gh = FakeGitHub(reviews=[old_review(5, body=NOTICE)])
+        post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
+        self.assertEqual(post_review.pending_run(gh.reviews[0]["body"]), "77")
+        decline(gh)
+        self.assertEqual(gh.posted(), [])
+        self.assertEqual(gh.reviews[0]["body"], NOTICE)
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(gh.reviews[0]["body"], NOTICE)
+
+    def test_a_marked_verdict_is_replaced_not_overwritten(self):
+        gh = FakeGitHub(reviews=[old_review(5)])
+        post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
+        decline(gh)
+        self.assertEqual([p["body"] for p in gh.posted()], [NOTICE])
+        self.assertEqual(minimized(gh), ["N5"])
+        writes = len(gh.writes())
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(len(gh.writes()), writes)
+
+    def test_a_notice_that_cannot_be_put_back_is_replaced(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=NOTICE)])
+        post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
+        real, refused = gh.request, []
+
+        def refuse_once(method, path, body=None, idempotent=None):
+            if method == "PUT" and path.endswith("/reviews/5") and not refused:
+                refused.append(path)
+                raise GitHubError(500, "boom")
+            return real(method, path, body, idempotent)
+
+        gh.request = refuse_once
+        with redirect_stdout(io.StringIO()):
+            decline(gh)
+        self.assertEqual([p["body"] for p in gh.posted()], [NOTICE])
+        writes = len(gh.writes())
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(len(gh.writes()), writes)
+
+    def test_a_notice_put_back_defused_is_replaced(self):
+        """A smaller commit's failed review puts the notice back defused; once
+        the PR is too large again, a working notice replaces it."""
+        gh = FakeGitHub(reviews=[old_review(5, body=NOTICE)])
+        post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertIn("@ pytorchbot", gh.reviews[0]["body"])
+        decline(gh)
+        self.assertEqual([p["body"] for p in gh.posted()], [NOTICE])
+        self.assertEqual(minimized(gh), ["N5"])
 
 
 class TestContained(unittest.TestCase):
@@ -1292,6 +1502,24 @@ class TestADiscussedFindingIsNotRepeatedOnTheLine(unittest.TestCase):
         # The discussion stays.
         self.assertEqual(deleted(gh), [])
 
+    def test_a_deleted_files_finding_joins_its_left_side_discussion(self):
+        # A re-review of a delete-only PR, after the author replied on the left.
+        root = {**comment(50, 5, line=3, path="gone.py"), "side": "LEFT"}
+        finding = {"path": "gone.py", "line": 3, "severity": "major", "message": "U."}
+        gh = FakeGitHub(
+            reviews=[old_review(5)],
+            comments=[root, comment(51, 8, author="tristan", reply_to=50)],
+            files=[{"filename": "gone.py", "status": "removed"}],
+        )
+        go(gh, row(findings=[finding]))
+        body = gh.posted()[0]
+        self.assertNotIn("comments", body)
+        self.assertIn(
+            "An earlier comment near this line has replies: "
+            "https://github.com/o/r/pull/1#discussion_r50",  # @lint-ignore
+            body["body"],
+        )
+
     def test_other_findings_stay_inline_and_are_counted(self):
         findings = [
             {"path": "torch/x.py", "line": 3, "severity": "major", "message": "A."},
@@ -1788,7 +2016,56 @@ class TestPendingModesReadTheirInputs(unittest.TestCase):
                     self.assertIn("::warning::automated review not", out)
 
 
+class TestTooLargeModeReadsItsInputs(unittest.TestCase):
+    ENV = {
+        "GH_TOKEN": "t",
+        "REPO": "o/r",
+        "PR_NUMBER": "1",
+        "REVIEWED_SHA": SHA,
+        "OPT_OUT_LABEL": "skip me",
+        "MAX_CHANGED_FILES": "100",
+        "MAX_DIFF_BYTES": "400000",
+    }
+
+    def main(self, flag, env):
+        with (
+            mock.patch.dict(post_review.os.environ, env, clear=True),
+            mock.patch.object(sys, "argv", ["post_review.py", *flag]),
+            mock.patch.object(post_review, "decline", return_value=0) as decline_,
+            redirect_stdout(io.StringIO()),
+        ):
+            rc = post_review.main()
+        return rc, decline_
+
+    def test_it_passes_the_pr_the_label_and_the_limits(self):
+        rc, decline_ = self.main(["--too-large"], self.ENV)
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            decline_.call_args.args[1:], (1, SHA, AUTHOR, "skip me", (100, 400_000))
+        )
+
+    def test_the_row_path_passes_the_limits_too(self):
+        with mock.patch.object(Path, "read_text", return_value='{"status": "x"}'):
+            with mock.patch.object(post_review, "run", return_value=0) as run_:
+                self.main(["--row-file", "terminal.json"], self.ENV)
+        self.assertEqual(run_.call_args.args[-1], (100, 400_000))
+
+    def test_a_bad_limit_drops_the_numbers_not_the_notice(self):
+        _, decline_ = self.main(["--too-large"], {**self.ENV, "MAX_DIFF_BYTES": "4e5"})
+        self.assertIsNone(decline_.call_args.args[-1])
+
+
 class TestWorkflowWiring(unittest.TestCase):
+    def test_announce_runs_the_too_large_mode_with_a_write_token(self):
+        text = WORKFLOW.read_text()
+        announce = text.split("\n  announce:\n", 1)[1].split("\n  review:\n", 1)[0]
+        step = announce.split("- name: Say the PR is too large to review", 1)[1]
+        self.assertIn("python3 scripts/pr_review/post_review.py --too-large", step)
+        self.assertIn("pull-requests: write", announce.split("steps:", 1)[0])
+        header = text.split("\njobs:", 1)[0]
+        for var in ("MAX_CHANGED_FILES", "MAX_DIFF_BYTES"):
+            self.assertRegex(header, rf"(?m)^  {var}: \d+$")
+
     def test_publish_job_runs_the_script_on_the_row_with_a_write_token(self):
         text = WORKFLOW.read_text()
         publish = text.split("\n  publish:\n", 1)[1]
