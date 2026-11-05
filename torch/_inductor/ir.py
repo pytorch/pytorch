@@ -7998,6 +7998,9 @@ class ExternKernel(InputsKernel):
                 and sizevars.statically_known_geq(x.get_size()[i], 2)
             ]
 
+            if expanded_dims and not isinstance(x, TensorBox):
+                x = TensorBox(x)
+
             for dim in expanded_dims:
                 x = torch._inductor.lowering.slice_(x, dim, 0, 1)
 
