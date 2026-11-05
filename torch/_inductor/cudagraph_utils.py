@@ -523,6 +523,16 @@ def check_aot_cudagraphs(graph: GraphLowering) -> None:
             for gm in gms:
                 if reason := check(gm):
                     return reason
+        # After the checks above, which name the cause when, e.g., a
+        # data-dependent index lowers to an as_strided.
+        for g in graphs:
+            # The runtime copies only each input's own elements.
+            if node := g.input_as_strided_node:
+                return reason_at(
+                    "it reads a graph input through as_strided, which may reach "
+                    "outside the input's own elements",
+                    node,
+                )
         device_node_mapping: dict[torch.device, torch.fx.Node] = {}
         for g in graphs:
             for device, node in g.device_node_mapping.items():
