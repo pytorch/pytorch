@@ -165,6 +165,7 @@ class WelfordOps:
     # merge -- deliberately different formulas. project divides m2 by the clamped dof.
     nfields = 3
     has_combine_equal = True
+    has_combine_uniform = True
 
     def __init__(self, correction=1, take_sqrt=False, return_mean=False, acc=Float32):
         self.correction = float(correction)
@@ -208,6 +209,24 @@ class WelfordOps:
             delta = mb - ma
             mean = ma + delta * nb_over_n
             m2 = m2a + m2b + delta * delta * na * nb_over_n
+        return (mean, m2, nn)
+
+    @cute.jit
+    def combine_uniform(self, a, b, index, count: cutlass.Constexpr, weight=None):
+        """Fold partial `b` into `a` with `combine`'s arithmetic, deriving counts.
+
+        `index` is the number of partials already folded into `a`, and every partial holds
+        exactly `count` values, so `index * count` must be exact in the accumulator (fp32).
+        `a[2]` and `b[2]` are ignored. `weight`, if given, replaces `count / ((index + 1) * count)`.
+        """
+        ma, m2a, _ = a
+        mb, m2b, _ = b
+        na, nb = self.acc(index) * self.acc(count), self.acc(count)
+        nn = na + nb
+        nb_over_n = nb / nn if const_expr(weight is None) else weight
+        delta = mb - ma
+        mean = ma + delta * nb_over_n
+        m2 = m2a + m2b + delta * delta * na * nb_over_n
         return (mean, m2, nn)
 
     @cute.jit

@@ -128,6 +128,12 @@ class _ItreeArch(NamedTuple):
     # Per-thread width for ragged 16-bit sum-like rows wider than _ITREE_LOWP_MIN_N;
     # 0 keeps _ITREE_THREAD_ELEMS.
     lowp_thread_elems: int = 0
+    # Derive Welford partial counts from the plan where tile.uniform_combine_ok holds, and
+    # skip staging the count field.
+    uniform_count: bool = False
+    # With uniform_count, stage each partial's precomputed Chan weight in one row shared
+    # by the block; weights depend only on the partial index.
+    combine_weights: bool = False
 
 
 # Performance tuning is keyed by full compute capability. Each measured GPU has
@@ -275,6 +281,12 @@ class _ItreePlan(NamedTuple):
     # global. Also bit-neutral -- staging moves where the operand is read from, not the chain.
     combine_tile: int = 0
     combine_unroll: int = 0
+    # Staged COMBINE only: the count every partial holds (tile.uniform_combine_ok), or 0. The
+    # fold derives counts from it, so the count field is not staged.
+    combine_count: int = 0
+    # With combine_count, the third staged field holds partial j's weight 1 / (j + 1) in one
+    # row shared by the block, instead of the count.
+    combine_weights: bool = False
 
     @property
     def sig(self) -> tuple[Any, ...]:
@@ -294,6 +306,8 @@ class _ItreePlan(NamedTuple):
             self.combine_grp,
             self.combine_tile,
             self.combine_unroll,
+            self.combine_count,
+            self.combine_weights,
         )
 
 
@@ -509,13 +523,20 @@ def itree_combine_plan(
     device: torch.device | int | str | None = None,
     nfields: int = 1,
     nrows: int | None = None,
+    *,
+    trait: Any = None,
+    arch: _ItreeArch | None = None,
 ) -> _ItreePlan:
     """Plan the architecture-tuned, bit-neutral fold of each row's split partials.
 
     `itemsize` is the widest partial field's size, so each field's copy group stays within
-    `combine_group_bytes` and `nfields * itemsize` bounds the staged footprint.
+    `combine_group_bytes` and each staged field's footprint is bounded by it. Uniform
+    counts stage one field fewer per row, and their weights add one row shared by the
+    block. A given `trait` supplies nfields and may enable uniform counts.
     """
-    arch = _itree_arch(device)
+    if trait is not None:
+        nfields = trait.nfields
+    arch = _itree_arch(device) if arch is None else arch
     if arch.combine_unroll < 0:
         raise ValueError("combine_unroll must be nonnegative")
     if arch.combine_async and arch.combine_rpb > WARP:
@@ -530,6 +551,10 @@ def itree_combine_plan(
         rpb = 1 << (live - 1).bit_length()
     grp = arch.combine_group_bytes // itemsize
     g = max(1, math.gcd(nbatch, grp)) if grp else 1
+    uniform = arch.uniform_count and tile.uniform_combine_ok(trait, itree.split)
+    weights = uniform and arch.combine_weights
+    # Uniform counts stage no count field; weights stage one row shared by the block.
+    row_fields = nfields - 1 if uniform else nfields
     # A staged tile must DIVIDE the batch count -- a ragged last tile would need predication --
     # so a wide tile does not apply to every nbatch and the walk falls back to narrower ones.
     # Bounded by ELEMENTS, not by copy count: capping on k gave fp64 a 256-element tile where
@@ -542,7 +567,8 @@ def itree_combine_plan(
             and g > 1
             and k * WARP * g <= arch.combine_max
             and nbatch % (k * WARP * g) == 0
-            and rpb * (k * WARP * g + g) * itemsize * nfields
+            and (rpb * row_fields * (k * WARP * g + g) + weights * k * WARP * g)
+            * itemsize
             <= caps.smem_per_block_optin
         ),
         0,
@@ -550,6 +576,7 @@ def itree_combine_plan(
     if not tile_n:
         # Narrow blocks pay off only for the staged combine; the global-memory chain keeps 128.
         rpb = _MULTIROW_ROWS_PER_BLOCK
+    count = itree.split[1] if uniform and tile_n else 0
     return _ItreePlan(
         "combine",
         1,
@@ -562,6 +589,8 @@ def itree_combine_plan(
         combine_grp=g,
         combine_tile=tile_n,
         combine_unroll=min(arch.combine_unroll, tile_n),
+        combine_count=count,
+        combine_weights=bool(count and weights),
     )
 
 
@@ -803,8 +832,8 @@ def _run_itree(
             itree,
             max(p.element_size() for p in parts),
             x.device,
-            nfields=trait.nfields,
             nrows=M,
+            trait=trait,
         ),
         dt,
         (

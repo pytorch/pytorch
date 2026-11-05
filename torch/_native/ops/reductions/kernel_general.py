@@ -709,8 +709,8 @@ def _combine_itree_partials(
         plan,
         max(p.element_size() for p in parts),
         parts[0].device,
-        nfields=trait.nfields,
         nrows=num_o,
+        trait=trait,
     )
     s2 = ReduceBlock(
         trait,
