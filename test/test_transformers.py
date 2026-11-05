@@ -6276,8 +6276,7 @@ class TestSDPAAccelerator(NNTestCase):
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("scale", [None, "l1"])
-    @parametrize("enable_gqa", [True, False])
-    @parametrize("n_heads", [[16, 8], [10, 2]])
+    @parametrize("enable_gqa,n_heads", [(True, [16, 8]), (True, [10, 2]), (False, [4, 4])])
     @parametrize("sdpa_backend", ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"])
     @tf32_enabled()
     @skipIfXpu(msg="Flash backend variants (aotriton/ck) and head_dim>=192 paths not supported on XPU; tracked in torch-xpu-ops")
@@ -6444,7 +6443,6 @@ class TestSDPAAccelerator(NNTestCase):
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0, 0.22])
     @parametrize("dtype", [torch.float16])
-    @parametrize("scale", [None, "l1"])
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
     @tf32_enabled()
     def test_fused_attention_vs_math_ref_grads_cudagraph(self, device, batch_size: int,
@@ -6453,7 +6451,6 @@ class TestSDPAAccelerator(NNTestCase):
                                                          is_causal: bool,
                                                          dropout_p: float,
                                                          dtype: torch.dtype,
-                                                         scale: str,
                                                          fused_kernel: SDPBackend):
         def _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len, dropout_p, seed, offset, device=device):
             mask = torch.empty((batch_size, n_heads, q_len, kv_len), device=device, dtype=torch.float32)
