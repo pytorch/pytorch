@@ -7463,7 +7463,7 @@ for dtype in (torch.int32, torch.int64):
     @parametrize(
         "padding, ceil_mode",
         [
-            subtest((0, False), name="no_padding"),
+            subtest(([0, 0, 0], False), name="no_padding"),
             subtest(([1, 1, 0], True), name="padding_ceil_mode"),
         ],
     )
