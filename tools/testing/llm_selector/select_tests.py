@@ -263,10 +263,10 @@ def git_paths(command: str, *args: str) -> list[str]:
 
 def git_grep(pattern: str, rev: str, *, timeout: float | None = None) -> list[str]:
     """The paths under test/ at the commit `rev` with a line matching the extended regex `pattern`.
-    RuntimeError if git grep fails or reports an error, TimeoutExpired if it outlives `timeout`,
+    RuntimeError if git grep fails or writes anything to stderr, TimeoutExpired if it outlives `timeout`,
     ValueError if git would read `rev` as an option."""
     if rev.startswith("-"):
-        raise ValueError(f"not a revision: {rev}")
+        raise ValueError(f"not a revision: {rev!r}")
     p = subprocess.run(
         ["git", "grep", "--no-color", "-lzE", "-e", pattern, rev, "--", "test/"],
         cwd=REPO_ROOT,
@@ -285,11 +285,12 @@ def git_grep(pattern: str, rev: str, *, timeout: float | None = None) -> list[st
 def changed_files(merge_base: str, head: str) -> list[str]:
     """The paths changed between the commits `merge_base` and `head`.
     CalledProcessError if git fails, ValueError if it would read a rev as an option."""
-    if merge_base.startswith("-") or head.startswith("-"):
-        raise ValueError(f"not a revision pair: {merge_base} {head}")
+    for rev in (merge_base, head):
+        if rev.startswith("-"):
+            raise ValueError(f"not a revision: {rev!r}")
     # Without renames a moved file is listed at both paths, and its new path is
     # an added file.
-    return git_paths("diff", "--name-only", "--no-renames", merge_base, head)
+    return git_paths("diff", "--name-only", "--no-renames", merge_base, head, "--")
 
 
 def run_all_reason(changed: list[str]) -> str | None:
