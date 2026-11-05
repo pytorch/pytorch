@@ -1097,6 +1097,47 @@ print(torch.xpu.is_initialized())
         self.assertEqual(torch.accelerator.max_memory_allocated(), prev_max_allocated)
         self.assertEqual(torch.accelerator.max_memory_reserved(), prev_max_reserved)
 
+    def test_memory_stats_event_counters(self):
+        # The scalar event counters are tracked by the caching allocator,
+        # reported by memory_stats() and cleared by
+        # reset_accumulated_memory_stats().
+        event_counters = (
+            "num_sync_all_streams",
+            "num_device_alloc",
+            "num_device_free",
+            "num_alloc_retries",
+        )
+
+        # Start from a cleared cache so that the allocation below cannot be
+        # served by a cached block and must reach the device allocator.
+        torch.xpu.synchronize()
+        torch.xpu.empty_cache()
+        torch.xpu.reset_accumulated_memory_stats()
+
+        stats = torch.xpu.memory_stats()
+        for key in event_counters:
+            self.assertIn(key, stats)
+            self.assertEqual(stats[key], 0, msg=key)
+
+        a = torch.empty(1024, device="xpu")
+        stats = torch.xpu.memory_stats()
+        self.assertGreaterEqual(stats["num_device_alloc"], 1)
+
+        del a
+        gc.collect()
+        # empty_cache() synchronizes the outstanding events and then releases
+        # the cached blocks, so both counters must move.
+        torch.xpu.empty_cache()
+        stats = torch.xpu.memory_stats()
+        self.assertGreaterEqual(stats["num_sync_all_streams"], 1)
+        self.assertGreaterEqual(stats["num_device_free"], 1)
+        self.assertGreaterEqual(stats["num_device_alloc"], 1)
+
+        torch.xpu.reset_accumulated_memory_stats()
+        stats = torch.xpu.memory_stats()
+        for key in event_counters:
+            self.assertEqual(stats[key], 0, msg=key)
+
     def test_mem_get_info(self):
         torch.xpu.synchronize()
         torch.xpu.empty_cache()

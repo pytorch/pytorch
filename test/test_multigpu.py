@@ -1182,7 +1182,6 @@ t2.start()
         assert_change(0, reset_peak=True)
 
     @skipCUDAIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5642")
     @serialTest()
     def test_memory_stats(self, device):
         gc.collect()
@@ -1193,7 +1192,6 @@ t2.start()
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/129860")
     @skipCUDAIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5642")
     @deviceCountAtLeast(2)
     def test_memory_stats_multigpu(self, devices):
         device_module = torch.get_device_module(devices[0])

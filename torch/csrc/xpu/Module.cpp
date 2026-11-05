@@ -230,6 +230,10 @@ static PyObject* THXPModule_memoryStats(PyObject* self, PyObject* arg) {
       c10::xpu::XPUCachingAllocator::getDeviceStats(device_index);
 
   py::dict result;
+  result["num_alloc_retries"] = stats.num_alloc_retries;
+  result["num_sync_all_streams"] = stats.num_sync_all_streams;
+  result["num_device_alloc"] = stats.num_device_alloc;
+  result["num_device_free"] = stats.num_device_free;
   result["allocation"] = statArrayToDict(stats.allocation);
   result["segment"] = statArrayToDict(stats.segment);
   result["active"] = statArrayToDict(stats.active);
