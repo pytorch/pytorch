@@ -365,7 +365,7 @@ TEST(CudaGraphManagerAsyncTest, FailsToCaptureUnderCudaMallocAsync) {
 }
 
 TEST_F(CudaGraphManagerTest, FailedCallsAreRethrownAndDontCount) {
-  // Not a capture error, so the key warms up and is captured once fixed.
+  // A failed eager call doesn't count as warm-up.
   for (int64_t warmups : {2, 1}) {
     CudaGraphOptions options;
     options.warmup_calls = warmups;
@@ -473,7 +473,8 @@ TEST_F(CudaGraphManagerTest, HostOutputsFailToCapture) {
     return at::empty(x.sizes(), host).copy_(x, /*non_blocking=*/true);
   });
   auto x = at::randn({16}, at::kCUDA);
-  expect_error([&] { run(manager, region, x); }, "not on the manager's device");
+  expect_error([&] { run(manager, region, x); }, "an output of fn is not");
+  EXPECT_EQ(region.calls, 1);
   EXPECT_EQ(manager.num_graphs(), 0);
 }
 
@@ -562,7 +563,7 @@ TEST_F(CudaGraphManagerTest, CapturesAnFnThatLeavesAnotherStreamCurrent) {
     return result;
   };
   EXPECT_TRUE(call().equal(affine(x)));
-  at::cuda::setCurrentCUDAStream(original);
+  EXPECT_EQ(at::cuda::getCurrentCUDAStream(), original);
   EXPECT_EQ(manager.num_graphs(), 1);
   x.normal_();
   EXPECT_TRUE(call().equal(affine(x)));

@@ -43,10 +43,12 @@ struct CudaGraphOptions {
 // graph per input layout (dtypes, sizes, strides). The graphs share one
 // memory pool, so replays run one at a time; each copies the inputs in and
 // clones the outputs out. As with torch.cuda.graph, a failed capture's error
-// propagates to the caller; the key captures again on its next call. While
-// other graphs exist, the pool keeps the failed capture's memory until
-// reset(). Unlike torch.cuda.graph, a capture doesn't empty the allocator's
-// cache first, so it can run out of memory where an eager call wouldn't.
+// propagates to the caller; the key captures again on its next call. A
+// failed capture's memory stays in the pool until reset(), or until the next
+// capture if no graph exists. Unlike torch.cuda.graph, a capture doesn't
+// empty the allocator's cache first, so it can run out of memory where an
+// eager call wouldn't. Under PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync,
+// which the shim's memory pools don't support, every capture fails.
 class CudaGraphManager {
  public:
   explicit CudaGraphManager(int32_t device_index, CudaGraphOptions options = {})
@@ -101,7 +103,8 @@ class CudaGraphManager {
   // while the calling thread has a capture open, or while any thread has a
   // global-mode capture open. Eager calls don't hold the manager's lock, so fn
   // must be safe to call from several threads at once, including while another
-  // thread captures it. On success the caller owns every non-null slot; a
+  // thread captures it; captures do hold it, so fn must not call back into the
+  // manager. On success the caller owns every non-null slot; a
   // failed call leaves every slot null, deleting any handle fn wrote.
   template <typename Fn>
   void run(
@@ -366,8 +369,10 @@ class CudaGraphManager {
         std::to_string(options_.max_graphs) +
         ", so calls with new input layouts (dtypes, sizes or strides) run "
         "eagerly";
+#ifndef DISABLE_WARN
     aoti_torch_warn(
         __func__, __FILE__, static_cast<uint32_t>(__LINE__), msg.c_str());
+#endif
   }
 
   // std::thread::id values are reused once a thread exits, so a new thread
@@ -502,7 +507,10 @@ class CudaGraphManager {
     AOTICudaStreamGuard stream_guard(stream, device_index_);
     AOTI_RUNTIME_CUDA_CHECK(cudaStreamWaitEvent(stream, last_replay_.get(), 0));
     // Later calls wait for whatever this one enqueued, even if it fails.
-    OnExit record([&] { (void)cudaEventRecord(last_replay_.get(), stream); });
+    OnExit record([&] {
+      log_cuda_error(
+          cudaEventRecord(last_replay_.get(), stream), "cudaEventRecord");
+    });
     OnExit cleanup([&] { delete_outputs(outputs, num_outputs); });
     copy_inputs(graph, inputs);
     graph.graph.replay();
