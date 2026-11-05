@@ -1297,6 +1297,26 @@ class TestCustomOp(CustomOpTestCaseBase):
         with TorchRefsMode():
             self.assertEqual(torch._refs.abs(x), expected)
 
+    @requires_compile
+    def test_custom_op_call_compiles_to_the_op(self):
+        # CustomOpDef.__call__ has no Python body to trace; Dynamo must still
+        # trace a call to it as a call to the op, with the arguments as passed.
+        import torch._dynamo.testing
+
+        @torch.library.custom_op(f"{self.test_ns}::call_compiles", mutates_args=())
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            return x + y
+
+        f.register_fake(lambda x, y: torch.empty_like(x))
+        x, y = torch.randn(3), torch.randn(3)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        fn = torch.compile(lambda a, b: f(a, y=b) * 2, backend=backend, fullgraph=True)
+        self.assertEqual(fn(x, y), (x + y) * 2)
+        graph = backend.graphs[0].graph
+        (node,) = [n for n in graph.nodes if n.target is f._opoverload]
+        self.assertEqual(len(node.args), 1)
+        self.assertEqual(list(node.kwargs), ["y"])
+
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_mutated_version_bumps(self):
         # Each mutated Tensor's version is bumped once, whether or not the op

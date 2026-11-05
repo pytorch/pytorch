@@ -2,11 +2,12 @@
 import collections
 import inspect
 import logging
+import operator
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, overload, TypeAlias, Union
+from typing import Any, overload, TYPE_CHECKING, TypeAlias, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -909,8 +910,17 @@ class CustomOpDef:
 
         self._lib.impl(self._name, backend_select, "BackendSelect", with_keyset=True)
 
-    def __call__(self, *args, **kwargs):
-        return self._opoverload(*args, **kwargs)
+    if TYPE_CHECKING:
+
+        def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    else:
+        # Python looks up __call__ on the type. With a C getter, calling a
+        # CustomOpDef calls the OpOverload's _op (the PyObject dispatch fast
+        # path) with the caller's arguments, without a Python frame.
+        # OpOverload.__call__ only calls _op. Dynamo traces the call as a call
+        # to the OpOverload (see UserDefinedObjectVariable.call_function).
+        __call__ = property(operator.attrgetter("_opoverload._op"))
 
     def register_vmap(
         self,
