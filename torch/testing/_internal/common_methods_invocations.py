@@ -3842,6 +3842,13 @@ class _TestParamsMaxPool2d(_TestParamsMaxPoolBase):
 
         self.shapes.append([5])  # odd, so the first sample has a partial ceil_mode window in W
 
+class _TestParamsMaxPool2dBackward(_TestParamsMaxPool2d):
+
+    def __init__(self) -> None:
+        super().__init__()
+        # max_pool2d_backward always computes indices, so return_indices=False would be a duplicate
+        self.kwargs['return_indices'] = [True]
+
 class _TestParamsMaxPool3d(_TestParamsMaxPoolBase):
 
     def __init__(self) -> None:
@@ -3861,14 +3868,11 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
         'nn.functional.max_pool1d': _TestParamsMaxPool1d,
         'nn.functional.max_pool2d': _TestParamsMaxPool2d,
         'nn.functional.max_pool3d': _TestParamsMaxPool3d,
-        'max_pool2d_with_indices_backward': _TestParamsMaxPool2d,
+        'max_pool2d_with_indices_backward': _TestParamsMaxPool2dBackward,
     }
 
     params_generator = params_generator_type_dict[op_info.name]()
     for (shape, memory_format), kwargs in params_generator.gen_input_params():
-        # max_pool2d_backward always computes indices, so return_indices=False would be a duplicate
-        if op_info.name == 'max_pool2d_with_indices_backward' and not kwargs['return_indices']:
-            continue
         arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
         yield SampleInput(arg, kwargs=kwargs)
 
@@ -10461,7 +10465,7 @@ def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwargs):
     samples = list(sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs))
-    smallest_size = min(s.kwargs['output_size'][2] for s in samples)
+    smallest_size = min((math.prod(s.kwargs['output_size'][2:]) for s in samples), default=None)
     for sample in samples:
         # The samples for max_unpool are generated with max_pool.
         # It could be that a single element from the max_pool's
@@ -10482,7 +10486,7 @@ def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwarg
         # windows (stride=None, i.e. stride == kernel_size) always give unique indices.
         # gradcheck is expensive, so only the smallest max_pool input is kept;
         # output_size is that input's shape (sample.input is the pooled output).
-        if sample.kwargs['stride'] is None and sample.kwargs['output_size'][2] == smallest_size:
+        if sample.kwargs['stride'] is None and math.prod(sample.kwargs['output_size'][2:]) == smallest_size:
             yield sample
 
 def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_grad, **kwargs):
