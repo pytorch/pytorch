@@ -21,8 +21,6 @@ void init_THPCaches() {}
 
 #else
 
-#if IS_PYTHON_3_11_PLUS
-
 // Rename opcode table/metadata symbols to avoid multiple definition conflict
 // with the identical definitions in libpython at link time.
 #define _PyOpcode_Caches _torch_PyOpcode_Caches
@@ -236,7 +234,7 @@ static void THP_take_ownership(PyFrameObject* f, _PyInterpreterFrame* frame) {
 
 #endif
 
-#if IS_PYTHON_3_11_PLUS && !IS_PYTHON_3_13_PLUS
+#if !IS_PYTHON_3_13_PLUS
 // From
 // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/frame.c#L120
 void THP_PyFrame_Clear(_PyInterpreterFrame* frame) {
@@ -384,15 +382,11 @@ void THP_PyThreadState_PopFrame(
 }
 #endif // !IS_PYTHON_3_13_PLUS
 
-#endif
-
 const uint8_t* THP_PyOpcode_Caches = NULL;
 int THP_PyOpcode_Caches_size = 0;
 void init_THPCaches() {
-#if IS_PYTHON_3_11_PLUS
   THP_PyOpcode_Caches = _torch_PyOpcode_Caches;
   THP_PyOpcode_Caches_size = sizeof(_torch_PyOpcode_Caches) / sizeof(uint8_t);
-#endif
 }
 
 #endif // IS_PYTHON_3_15_PLUS

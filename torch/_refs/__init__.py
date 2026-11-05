@@ -2320,12 +2320,10 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
         kwargs.pop("copy", None)
 
         def convert(t):
-            return torch._to_dtype_rounded(
-                t, dtype, rounding, memory_format=memory_format
-            )
+            return torch.round_to(t, dtype, rounding, memory_format=memory_format)
 
-        # Like aten, convert on the accelerator, before copying to the CPU or
-        # after copying from it.
+        # Like Tensor.to, convert on the accelerator, before copying to the CPU
+        # or after copying from it.
         device = kwargs.get("device")
         if device is not None and torch.device(device).type == "cpu":
             return to(convert(a), **kwargs)
@@ -6776,7 +6774,6 @@ def exponential(self, rate=1, generator=None):
 def geometric(self, p, generator=None):
     if generator is not None:
         raise AssertionError("generator is not supported in refs")
-    # TODO: fix inductor rand_like for integer, bool dtypes
     torch._check(
         not utils.is_complex_dtype(self.dtype)
         and not utils.is_boolean_dtype(self.dtype),
@@ -6786,7 +6783,9 @@ def geometric(self, p, generator=None):
         0 < p and p < 1,
         lambda: f"geometric_ expects p to be in (0, 1), but got p={p}",
     )
-    return torch.floor(torch.log1p(-torch.rand_like(self)) / math.log1p(-p)) + 1
+    rand_dtype = self.dtype if utils.is_float_dtype(self.dtype) else torch.float32
+    u = torch.rand_like(self, dtype=rand_dtype)
+    return torch.floor(torch.log1p(-u) / math.log1p(-p)) + 1
 
 
 @register_decomposition(aten.log_normal)
