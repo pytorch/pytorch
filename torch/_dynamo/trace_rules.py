@@ -65,6 +65,7 @@ from .variables import (
     ComplexBuiltinVariable,
     DictBuiltinVariable,
     FloatBuiltinVariable,
+    FrozenSetBuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     GetAttrBuiltinVariable,
@@ -81,10 +82,12 @@ from .variables import (
     PyTreeTreeIsLeafFunctionVariable,
     ReparametrizeModuleCallVariable,
     SetAttrBuiltinVariable,
+    SetBuiltinVariable,
     SkipFunctionVariable,
     SparseTensorCreationSkipVariable,
     StrBuiltinVariable,
     TorchInGraphFunctionVariable,
+    TupleBuiltinVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -4142,13 +4145,16 @@ BUILTIN_CALLABLES = {
     complex: ComplexBuiltinVariable,
     dict: DictBuiltinVariable,
     float: FloatBuiltinVariable,
+    frozenset: FrozenSetBuiltinVariable,
     getattr: GetAttrBuiltinVariable,
     hasattr: HasAttrBuiltinVariable,
     int: IntBuiltinVariable,
     iter: IterBuiltinVariable,
     list: ListBuiltinVariable,
+    set: SetBuiltinVariable,
     setattr: SetAttrBuiltinVariable,
     str: StrBuiltinVariable,
+    tuple: TupleBuiltinVariable,
 }
 
 
