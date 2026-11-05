@@ -325,9 +325,10 @@ def _impl_graphsafe_rng(op, *args, rng_state=None, **kwargs):
     current_state = generator.graphsafe_get_state()
 
     generator.graphsafe_set_state(rng_state)
-    out = op(*args, **kwargs)
-    generator.graphsafe_set_state(current_state)
-    return out
+    try:
+        return op(*args, **kwargs)
+    finally:
+        generator.graphsafe_set_state(current_state)
 
 
 def register_graphsafe_run_with_rng_state_op():
