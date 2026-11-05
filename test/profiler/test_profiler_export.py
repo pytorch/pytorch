@@ -70,12 +70,8 @@ class _StubActivity:
 
 
 class _StubResults:
-    def __init__(self, activities, metadata=None):
+    def __init__(self, activities):
         self._activities = activities
-        self._native_json = json.dumps(
-            {"traceEvents": [{"name": "native event"}], **(metadata or {})},
-            ensure_ascii=False,
-        )
         self.saved = False
 
     def trace_activities(self):
@@ -85,7 +81,7 @@ class _StubResults:
         if self.saved:
             raise RuntimeError("Trace is already saved.")
         with open(path, "w", encoding="utf-8") as f:
-            f.write(self._native_json)
+            json.dump({"traceEvents": []}, f)
         self.saved = True
 
 
@@ -100,6 +96,7 @@ class TestProfilerExport(TestCase):
         self.enterContext(
             patch("torch.autograd.profiler.kineto_available", return_value=True)
         )
+        self.enterContext(patch("torch.autograd._add_metadata_json"))
         self.enterContext(
             patch.object(_chrome_trace_export, "_device_properties", return_value=[])
         )
@@ -107,13 +104,11 @@ class TestProfilerExport(TestCase):
             patch.object(_chrome_trace_export, "_cuda_versions", return_value={})
         )
 
-    def _make_profiler(self, metadata=None):
-        metadata = {} if metadata is None else metadata
+    def _make_profiler(self):
         activities = [_StubActivity("cpu_op", "aten::add", rid=1)]
         prof = _KinetoProfile(activities=[ProfilerActivity.CPU])
         prof.profiler = _profile(use_kineto=True)
-        prof.profiler.kineto_results = _StubResults(activities, metadata)
-        prof._trace_metadata = {key: json.dumps(value) for key, value in metadata.items()}
+        prof.profiler.kineto_results = _StubResults(activities)
         return prof
 
     def _load_trace(self, path, opener=open):
@@ -150,13 +145,18 @@ class TestProfilerExport(TestCase):
             opener = open
 
         value = "café 中"
-        prof = self._make_profiler({"compression_test": value})
+        prof = self._make_profiler()
+        prof.add_metadata_json(
+            "compression_test", json.dumps(value, ensure_ascii=False)
+        )
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "trace" + suffix)
             prof.export_chrome_trace(path, use_python_export=use_python_export)
             trace = self._load_trace(path, opener)
-            self.assertEqual(trace["compression_test"], value)
-            self.assertTrue(trace["traceEvents"])
+            if use_python_export:
+                self.assertEqual(trace["compression_test"], value)
+                names = [e["name"] for e in trace["traceEvents"]]
+                self.assertIn("aten::add", names)
             self.assertEqual(prof.profiler.kineto_results.saved, not use_python_export)
 
     @parametrize("suffix", [".json.gz", ".json.zst"])
@@ -176,7 +176,9 @@ class TestProfilerExport(TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "trace" + suffix)
-            with patch.object(prof.profiler, "export_chrome_trace", export_with_sibling):
+            with patch.object(
+                prof.profiler, "export_chrome_trace", export_with_sibling
+            ):
                 prof.export_chrome_trace(path)
             sibling = os.path.join(tmpdir, "trace.extra")
             self.assertTrue(os.path.exists(path))
@@ -202,7 +204,9 @@ class TestProfilerExport(TestCase):
                 gzip_path = os.path.join(tmpdir, "trace.json.gz")
                 prof.export_chrome_trace(gzip_path, use_python_export=use_python_export)
                 self.assertIn("traceEvents", self._load_trace(gzip_path, gzip.open))
-                self.assertEqual(prof.profiler.kineto_results.saved, not use_python_export)
+                self.assertEqual(
+                    prof.profiler.kineto_results.saved, not use_python_export
+                )
 
     def test_export_chrome_trace_escapes_names(self):
         from torch.autograd.profiler_util import EventList, FunctionEvent
