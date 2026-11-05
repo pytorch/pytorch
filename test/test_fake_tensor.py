@@ -5577,18 +5577,30 @@ class TestCppFakeTensorModeBindings(TestCase):
         no_grad_meta = torch.empty(2, device="meta")
         no_grad = torch._C._from_meta_and_device(no_grad_meta, cpu, mode)
         self.assertFalse(no_grad.requires_grad)
-        for sparse, layout in zip(sparse_fakes, layouts):
+
+        def sparse_parts(t):
+            if t.layout == torch.sparse_coo:
+                return t._indices(), t._values()
+            return t.crow_indices(), t.col_indices(), t.values()
+
+        fake_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
+        for sparse_meta, sparse, layout in zip(sparse_metas, sparse_fakes, layouts):
             self.assertTrue(torch._C._is_fake_tensor(sparse))
             self.assertEqual(sparse.layout, layout)
             self.assertEqual(sparse.device, cpu)
             self.assertEqual(sparse.shape, (2, 2))
             self.assertEqual(sparse.dtype, torch.float32)
+            # It shares the input's indices and values (read with Fake excluded)
+            with torch._C._ExcludeDispatchKeyGuard(fake_key):
+                shared = sparse_parts(sparse)
+            for x, y in zip(shared, sparse_parts(sparse_meta)):
+                self.assertEqual(x.untyped_storage()._cdata, y.untyped_storage()._cdata)
 
     def test_from_meta_and_device_rejects(self):
         mode, _ = self._make_mode()
-        meta, cpu = torch.device("meta"), torch.device("cpu")
-        m = torch.empty(2, device="meta")
-        fake = torch._C._from_meta_and_device(m, cpu, mode)
+        meta_device, cpu = torch.device("meta"), torch.device("cpu")
+        meta = torch.empty(2, device="meta")
+        fake = torch._C._from_meta_and_device(meta, cpu, mode)
         not_fake = (ValueError, "not fake")
         not_meta = (ValueError, "device must be 'meta', got cpu")
         wrapper = (TypeError, "does not accept tensor subclasses")
@@ -5599,7 +5611,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             return x
 
         # A fake also reads as meta, on the meta device or inside a kernel
-        rejects(torch._C._from_meta_and_device(m, meta, mode), *not_fake)
+        rejects(torch._C._from_meta_and_device(meta, meta_device, mode), *not_fake)
         with torch._C._InKernelInvocation():
             self.assertTrue(fake.is_meta)
             rejects(fake, *not_fake)
@@ -5607,14 +5619,15 @@ class TestCppFakeTensorModeBindings(TestCase):
         rejects(torch.empty(2), *not_meta)
         # Wrappers are checked before the device, so a cpu subclass gets the
         # same error
-        rejects(TwoTensor(m, m.clone()), *wrapper)
+        rejects(TwoTensor(meta, meta.clone()), *wrapper)
         rejects(TwoTensor(torch.empty(2), torch.empty(2)), *wrapper)
-        rejects(torch._to_functional_tensor(m), *wrapper)
-        torch.func.grad(lambda x: rejects(x, *wrapper).sum())(m)
-        torch.vmap(lambda x: rejects(x, *wrapper).sum())(m.expand(3, 2))
+        rejects(torch._to_functional_tensor(meta), *wrapper)
+        torch.func.grad(lambda x: rejects(x, *wrapper).sum())(meta)
+        torch.vmap(lambda x: rejects(x, *wrapper).sum())(meta.expand(3, 2))
         with torch._functorch.config.patch(fake_tensor_allow_meta=False):
             strict_mode, _ = self._make_mode()
-        rejects(m, RuntimeError, "allow_meta is False", strict_mode, meta)
+        msg = "allow_meta is False"
+        rejects(meta, RuntimeError, msg, mode=strict_mode, device=meta_device)
 
     def test_from_meta_and_device_failure_leaves_input_unmarked(self):
         # requires_grad is set before the shared storage is marked, so failing
