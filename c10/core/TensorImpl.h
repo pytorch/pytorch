@@ -265,13 +265,21 @@ struct C10_API FakeTensorMode {
   // like allow_meta_.
   std::atomic<bool> allow_unsafe_data_ptr_access_{true};
 
+  // Same as Python's FakeTensorMode.epoch, read by the fake memo bindings
+  // through a fake's mode. Code that retraces bumps fake_mode.epoch on the
+  // mode's Python wrapper, which must expose epoch as a property forwarding
+  // here. Atomic, like allow_meta_.
+  std::atomic<uint64_t> epoch_{0};
+
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter,
-      bool allow_meta = true)
+      bool allow_meta = true,
+      bool allow_unsafe_data_ptr_access = true)
       : shape_env_(std::move(shape_env)),
         fake_tensor_converter_(std::move(converter)),
-        allow_meta_(allow_meta) {}
+        allow_meta_(allow_meta),
+        allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access) {}
 
   // record the real constant a fake tensor was created from; the constant is
   // stored on the fake's ExtraMeta so it dies with the tensor
@@ -300,6 +308,20 @@ struct C10_API FakeTensorMode {
       constant_storage_mapping_;
 };
 
+// Note [C++ fake dispatch keys]
+// A fake can record the dispatch keys of the real tensor it stands for
+// (ExtraMeta::fake_dispatch_keys_, Python's FakeTensor.dispatch_keys), so that
+// guards built from the fake check the real tensor's keys rather than the
+// fake's own. Python also derives is_mkldnn and layout from them; here only
+// guards read them, so a fake recorded with an mkldnn tensor's keys still
+// reports its own layout.
+// Python keeps them on the output of a top-level alias or detach (dispatched,
+// through functionalization, or by calling fast_detach directly), but not of
+// other views. Here ExtraMeta's copy constructor copies them, so every shallow
+// copy, such as detach, keeps them, while views, including alias, drop them;
+// matching Python is left to the C++ fake dispatch path and to
+// functionalization, which know the op. Unlike Python, fake.data = other gives
+// the fake other's keys, as set_data replaces the whole ExtraMeta.
 struct C10_API ExtraMeta {
   std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta_ = nullptr;
   intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
@@ -309,14 +331,7 @@ struct C10_API ExtraMeta {
   std::shared_ptr<FakeTensorMode> fake_tensor_mode_ = nullptr;
   // The real tensor this fake shadows, when propagate_real_tensors is on.
   c10::intrusive_ptr<c10::TensorImpl> real_tensor_ = nullptr;
-  // The dispatch keys of the real tensor this fake stands for, when recorded
-  // (Python FakeTensor.dispatch_keys); guards are built from these. Python
-  // keeps them only on the output of a dispatched aten.alias or aten.detach.
-  // Here the copy constructor copies them, so every shallow copy, such as
-  // detach, keeps them, while views, including a top-level alias, drop them;
-  // matching Python is left to the C++ fake dispatch path, which knows the
-  // dispatched op. Unlike Python, fake.data = other gives the fake other's
-  // keys, as set_data replaces the whole ExtraMeta.
+  // See Note [C++ fake dispatch keys]
   std::optional<c10::DispatchKeySet> fake_dispatch_keys_ = std::nullopt;
   // The real constant this fake was created from (via
   // FakeTensorMode::set_constant), or null.
@@ -1627,7 +1642,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Records memo as this fake's item memo, set in fake mode epoch `epoch`, or
   // kept across epochs if `epoch` is nullopt. The caller decides which memos
   // are kept (a backed SymFloat, see SymNumberMemoDescriptor); this does not
-  // check. Like set_fake_sym_memo, safe to call concurrently.
+  // check. Like set_fake_sym_memo, safe to call concurrently. memo must not be
+  // or refer to a Tensor (see SafePyObject): the GC does not traverse
+  // ExtraMeta, so such a reference cycle would leak.
   void set_fake_item_memo(
       std::shared_ptr<c10::SafePyObject> memo,
       std::optional<uint64_t> epoch);
@@ -2767,7 +2784,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // should never get called
   int64_t compute_numel() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!has_symbolic_sizes_strides_);
-#if C10_HAS_BUILTIN_OVERFLOW() && !defined(C10_MOBILE)
+#if C10_HAS_BUILTIN_OVERFLOW()
     // Use overflow checks if supported by the compiler
     return safe_compute_numel();
 #else
