@@ -263,6 +263,9 @@ def _specialize_nested_region_configs_for_backward(
                 node.meta["custom"] = {
                     **custom,
                     "nested_region_config": backward_config,
+                    # Tells a check of this backward graph that the config was
+                    # set for the backward rather than inherited from the forward.
+                    "nested_region_config_from_bw_patches": True,
                 }
         retargeted = False
         for target, child in child_modules(module).items():
