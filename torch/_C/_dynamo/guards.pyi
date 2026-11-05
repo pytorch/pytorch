@@ -274,6 +274,12 @@ class GuardManager:
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
+    def add_fake_tensor_match_guard(
+        self,
+        expected: bool,
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
     def add_true_match_guard(
         self,
         verbose_code_parts: list[str],
