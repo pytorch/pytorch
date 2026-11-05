@@ -244,7 +244,7 @@ class AbstractFlightRecorderHookTest:
         t = torch.ones(8, device=self.device)
         for _ in range(2):
             dist.all_reduce(t)
-        # The hook expects NotImplementedError; anything else logs a warning.
+        # Its Work reports no result future.
         work = dist.all_reduce(t, async_op=True)
         with self.assertRaisesRegex(
             NotImplementedError, "getFutureResult not implemented"

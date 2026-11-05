@@ -1609,6 +1609,23 @@ class ProcessGroupNCCL2TimingTest(_ProcessGroupNCCL2OptionsTest):
         # lengthens the last op's wait for its peer, not the gap before it.
         self.assertGreater(window._get_duration() - last_work._get_duration(), 50)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_result_callback_issues_collective(self) -> None:
+        # With timing on, FlightRecorderHook holds the Work until its result,
+        # and the callback's op releases it on the watchdog.
+        ProcessGroupNCCL2Test.test_result_callback_issues_collective(self)
+        if self.rank != 0:
+            return
+        backend = dist.group.WORLD._get_backend(self.device)
+        trace = json.loads(
+            torch._C._distributed_c10d._dump_fr_trace_json(backend=backend.name())
+        )
+        # The hook held the op whose callback issued the last one, for its
+        # duration.
+        e = trace["entries"][-2]
+        self.assertGreater(e.get("duration_ms", 0.0), 0.0, msg=str(e))
+
 
 class ProcessGroupNCCLLazyTimingTest(ProcessGroupNCCL2TimingTest):
     @classmethod
