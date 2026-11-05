@@ -890,6 +890,15 @@ def eager_unary_nan(x, result):
 
 
 @triton.jit
+def eager_neg(x):
+    width: tl.constexpr = x.dtype.primitive_bitwidth
+    idtype = tl.core.get_int_dtype(bitwidth=width, signed=True)
+    sign = tl.full((), -1 << (width - 1), idtype)
+    result = (x.to(idtype, bitcast=True) ^ sign).to(x.dtype, bitcast=True)
+    return eager_unary_nan(x, result)
+
+
+@triton.jit
 def frexp(x):
     # Decompose the IEEE-754 bit pattern with integer ops rather than calling
     # libdevice.ilogb/ldexp: CUDA compiles libdevice with FTZ, which flushes
