@@ -49,6 +49,9 @@ class TestSelection(unittest.TestCase):
                 {**valid, "files": ["test_ops"]},
                 {**valid, "error": "e"},
             ]
+            # run_all and no candidates leave only the type checks to reject these.
+            r = Selection(run_all=True).to_json()
+            bad += [{**r, "files": "test_nn"}, {**r, "files": [1]}, {**r, "error": 1}]
             bad += [
                 {k: v for k, v in valid.items() if k != key}
                 for key in ("version", "candidates", "enforce", "error")
@@ -99,6 +102,8 @@ class TestSelection(unittest.TestCase):
         for f in [
             ".ci/docker/common/install_cuda.sh",
             ".ci/docker/requirements-ci.txt",
+            ".ci/docker/requirements-docs.txt",
+            ".ci/docker/java/jni.h",
             ".ci/docker/build.sh",
             ".ci/docker/ci_commit_pins/triton.txt",
             ".ci/docker/ubuntu/Dockerfile",
@@ -178,6 +183,9 @@ class TestSelection(unittest.TestCase):
             "tools/testing/discover_tests.py",
             "tools/stats/import_test_stats.py",
             "tools/stats/upload_metrics.py",
+            "tools/stats/upload_test_stats.py",
+            "tools/stats/upload_stats_lib.py",
+            "tools/stats/test_dashboard.py",
             "test/cpp_extensions/open_registration_extension/torch_openreg/pyproject.toml",
         ]:
             self.assertTrue(needs_run_all([f]), f)
