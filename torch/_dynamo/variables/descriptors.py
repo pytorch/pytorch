@@ -31,6 +31,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, TypeMROSource, TypeSource
 from ..utils import is_tensor_base_attr_getter, is_torch_class
 from .base import (
+    _compute_slotdefs,
     AsPythonConstantNotImplementedError,
     GetSet,
     getset_build,
@@ -46,7 +47,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .functions import BaseUserFunctionVariable, UserMethodVariable
-from .object_protocol import python_constant_repr_impl
+from .object_protocol import object_richcompare, python_constant_repr_impl
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -104,6 +105,24 @@ def descr_repr(
     return VariableTracker.build(
         tx, f"<{kind} '{name}' of '{get_type_tp_name(objclass)}' objects>"
     )
+
+
+def _vt_cls_modeling(vt: VariableTracker, py_type: type) -> type | None:
+    # Each class's own python_type, called on vt: the first one returning
+    # py_type is the VT class whose slot impls model py_type. VariableTracker's
+    # python_type is type(vt.as_python_constant()), which models no type.
+    for cls in type(vt).__mro__:
+        if cls is VariableTracker:
+            break
+        python_type = cls.__dict__.get("python_type")
+        if python_type is None:
+            continue
+        try:
+            if python_type(vt) is py_type:
+                return cls
+        except NotImplementedError:
+            continue
+    return None
 
 
 class DescriptorVariable(VariableTracker):
@@ -205,11 +224,25 @@ class WrapperDescriptorVariable(DescriptorVariable):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
-        _check_descriptor_obj_type(tx, self.descriptor, obj)
+        name, objclass = self.descriptor.__name__, self.descriptor.__objclass__
+        if not issubclass(obj.python_type(), objclass):
+            raise_type_error(
+                tx,
+                f"descriptor '{name}' requires a '{objclass.__name__}' object "
+                f"but received a '{obj.python_type_name()}'",
+            )
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses. Routing through the class
         # mirrors CPython's wrapperdescr_call which invokes the C slot directly.
+        obj = obj.realize()
+        # The VT class modeling objclass, e.g. ConstDictVariable for
+        # dict.__eq__ on an OrderedDict: its impl, not the subclass VT's.
+        vt_cls = _vt_cls_modeling(obj, objclass)
+        sd = _compute_slotdefs(objclass).get(name)
+        if sd is not None:
+            impl = getattr(vt_cls, sd.impl)
+            return sd.wrapper(obj, tx, impl, rest, kwargs)
         return self.owner.call_method(
             tx, self.descriptor.__name__, [obj, *rest], kwargs
         )
@@ -228,6 +261,18 @@ class WrapperDescriptorVariable(DescriptorVariable):
             return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
+
+    def tp_richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        # PyWrapperDescr_Type leaves tp_richcompare NULL and inherits
+        # object_richcompare from object.
+        # TODO(guilhermeleobas): delete this once #199999 is merged
+
+        return object_richcompare(self, tx, other, op)
 
 
 class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
@@ -330,13 +375,13 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         try:
             # CPython wrapper_hash:
             # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1347
             return hash(self.as_python_constant()), False
         except NotImplementedError:
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
@@ -419,7 +464,7 @@ class MethodDescriptorVariable(DescriptorVariable):
             result = method(obj, tx, name, rest, kwargs)
             if result is not None:
                 return result
-        return self.owner.call_method(tx, name, [obj, *rest], kwargs)
+        return obj.call_method(tx, name, rest, kwargs)
 
     def tp_descr_get_impl(
         self,
@@ -436,18 +481,6 @@ class MethodDescriptorVariable(DescriptorVariable):
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         # PyCFunction_NewEx creates a fresh object; see ClassMethodDescriptorVariable.
         return BoundBuiltinMethodVariable(self.descriptor, obj)
-
-    def tp_richcompare_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        op: str,
-    ) -> VariableTracker:
-        # PyMethodDescr_Type leaves tp_richcompare NULL and inherits
-        # object_richcompare from object.
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
 
 @functools.cache
@@ -575,7 +608,7 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
     def python_type(self) -> type:
         return types.BuiltinMethodType
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         # It hashes m_self by identity, so only a guarded runtime method has a
         # real hash; a method bound during tracing gets a compile-time-only one.

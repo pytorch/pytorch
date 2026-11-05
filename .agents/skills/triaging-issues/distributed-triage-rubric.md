@@ -1,6 +1,6 @@
 # Distributed Triage Rubric
 
-Detailed guidance for sub-triaging issues in the `oncall: distributed` queue. Use this rubric alongside [distributed-labels.json](distributed-labels.json) when classifying issues.
+Detailed guidance for routing distributed issues to a sub-queue and module labels (SKILL.md Step 3.1). Use only labels from [labels.json](labels.json).
 
 ---
 
@@ -133,29 +133,14 @@ For each module label, here are the signals to look for:
 
 ## 3. Confidence Calibration
 
-### HIGH Confidence Examples
-
-- Issue title: "FSDP2 crashes with `fully_shard` when using `MixedPrecision`" → `module: fsdp` (explicit API mention)
-- Code snippet: `model = DDP(model, device_ids=[rank])` and it hangs → `module: ddp`
-- Error: `ncclSystemError: Connection refused` during `all_reduce` → `module: nccl` + `module: c10d`
-
-### MEDIUM Confidence Examples
-
-- "My distributed training hangs after 100 steps" — no code, but mentions using multiple GPUs → could be DDP, FSDP, or a c10d issue. Best guess based on any other clues.
-- "Error when loading checkpoint across different number of GPUs" — likely distributed checkpointing but could be FSDP state dict.
-- Issue mentions both DTensor and FSDP2 — probably `module: fsdp` + `module: dtensor` but uncertain which is the root cause.
-
-### LOW Confidence Examples
-
-- "My model doesn't converge on multiple GPUs" — no code, no error, no mention of which distributed API.
-- "torch.distributed doesn't work" — too vague.
-- Issue in a language you can't parse or with no technical details.
+Use API usage, code, and stack traces to identify the affected module. If the module remains
+unclear, use `triage_review` as described in SKILL.md Step 3.1; do not guess from multi-GPU usage alone.
 
 ---
 
 ## 4. Common Mislabel Traps
 
-### NOT distributed issues (flag as mislabeled)
+### Distinguish distributed ownership from context
 
 - **NCCL import error on single GPU**: `undefined symbol: ncclAlltoAll` at `import torch` is a packaging/build issue (`module: binaries`), not distributed.
 - **CUDA errors on a single GPU**: `CUDA out of memory` or `CUDA error: device-side assert` without any distributed code.
@@ -174,7 +159,7 @@ For each module label, here are the signals to look for:
 
 When an issue involves BOTH `torch.compile` and distributed:
 
-- If the error is in the **compiler** (dynamo trace, inductor codegen, AOTAutograd) when compiling distributed ops → primarily `oncall: pt2`, but also add the relevant distributed `module:` label for visibility.
+- If the error is in the **compiler** (dynamo trace, inductor codegen, AOTAutograd) when compiling distributed ops, keep `oncall: pt2` and choose a distributed sub-queue with module labels using SKILL.md Step 3.1.
 - If the error is in the **distributed runtime** but triggered after compilation → primarily distributed, still keep `oncall: pt2` if present.
-- **Never remove `oncall: pt2`** if it was already applied by the PT-level bot. Add distributed labels alongside it.
-- Common pattern: "torch.compile breaks FSDP" → likely needs both `oncall: pt2` + `module: fsdp`.
+- **Keep `oncall: pt2`** and add the distributed labels alongside it.
+- Common pattern: "torch.compile breaks FSDP" needs `oncall: pt2` plus the distributed sub-queue and module labels from SKILL.md Step 3.1.
