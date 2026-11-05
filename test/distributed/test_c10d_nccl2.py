@@ -485,6 +485,23 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_result_callback_issues_collective(self) -> None:
+        # Results are published with no queue lock held, so a result callback
+        # may issue an op on the same group.
+        issued = []
+
+        def issue(fut: torch.futures.Future) -> None:
+            t = torch.ones(4, device=self.device)
+            issued.append(dist.all_reduce(t, async_op=True))
+
+        t = torch.ones(1024 * 1024, device=self.device)
+        # The work itself is not waited on: its wait() would publish the result
+        # on this thread rather than the watchdog's.
+        dist.all_reduce(t, async_op=True).get_future_result().then(issue).wait()
+        issued[0].wait()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_coalescing_window_future_result(self) -> None:
         pg = dist.distributed_c10d._get_default_group()
         tensors = [torch.ones(4, device=self.device) for _ in range(2)]
@@ -1739,10 +1756,9 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_timeout_publishes_results(self) -> None:
-        # finalize() resolves a work queued behind a timed-out one, which
-        # inherits the timeout, so its result future does not hang. Shutdown
-        # stops the watchdog first, so finalize()'s drain finds the timeout
-        # once the group's 5s elapses. Futures are only waited on:
+        # The watchdog publishes a timeout, and finalize() resolves a work
+        # queued behind the timed-out one, which inherits the timeout, so
+        # neither result future hangs. Futures are only waited on:
         # getFutureResult() and Work.wait() poll the work and could resolve it
         # themselves.
         env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "0"}
@@ -1757,10 +1773,10 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
             # Long enough that only finalize() can end it.
             dist.set_timeout(timedelta(hours=1), group=pg)
             queued = dist.all_reduce(t, group=pg, async_op=True).get_future_result()
-            backend.shutdown()
-            self.assertTrue(hung.done())
-            self.assertTrue(queued.done())
+            # Only the watchdog can complete this before shutdown.
             self.assertEqual(WorkResult(hung.wait()), WorkResult.TIMEOUT)
+            backend.shutdown()
+            self.assertTrue(queued.done())
             self.assertEqual(WorkResult(queued.wait()), WorkResult.TIMEOUT)
 
         self._wait_for_rank_zero(pg)

@@ -5,7 +5,6 @@
 #include <c10/core/Stream.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Type.h>
 
 #include <algorithm>
 #include <atomic>
@@ -665,7 +664,6 @@ void FlightRecorderHook::onAbort() {
 }
 
 void FlightRecorderHook::onPost(const PostHookArgs& args) {
-  bool has_result_future = true;
   // Destroyed after the lock is released; see released_works_.
   std::vector<c10::intrusive_ptr<Work>> released;
   {
@@ -691,28 +689,23 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
     if (work_can_time_.load(std::memory_order_relaxed)) {
       it->second.work = args.work;
     }
-    const Work& work = *args.work;
-    has_result_future = !no_result_future_types_.count(typeid(work));
   }
   // With the lock dropped: both calls go into the backend, and the callback
   // runs inline if the op has already finished -- see the lock-order note.
   c10::intrusive_ptr<c10::ivalue::Future> result;
-  if (has_result_future) {
-    try {
-      result = args.work->getFutureResult();
-    } catch (const c10::NotImplementedError& e) {
-      // This Work type reports no result (e.g. ucc, mpi, nccl2's coalesced p2p
-      // sentinel). Not a warning: the default nccl2 path hits it.
-      const Work& work = *args.work;
-      VLOG(1) << "FlightRecorderHook: " << c10::demangle(typeid(work).name())
-              << " has no result future, so its ops retire at issue: "
-              << e.what();
-      std::lock_guard<std::mutex> lock(mutex_);
-      no_result_future_types_.insert(typeid(work));
-    } catch (const std::exception& e) {
-      // Unexpected: retire this op at issue rather than fail the collective.
-      LOG(WARNING) << "FlightRecorderHook: getFutureResult failed for op "
-                   << args.op_id << ": " << e.what();
+  try {
+    result = args.work->getFutureResult();
+  } catch (const c10::NotImplementedError&) {
+    // This Work type reports no result (e.g. ucc, mpi, nccl2's coalesced p2p
+    // sentinel). Not a warning: the default nccl2 path hits it.
+  } catch (const std::exception& e) {
+    // Unexpected: retire this op at issue rather than fail the collective. It
+    // will likely fail for every op, so warn once.
+    static std::atomic<bool> warned{false};
+    if (!warned.exchange(true)) {
+      const auto* err = dynamic_cast<const c10::Error*>(&e);
+      LOG(WARNING) << "FlightRecorderHook: getFutureResult failed: "
+                   << (err ? err->what_without_backtrace() : e.what());
     }
   }
   if (!result) {
@@ -735,7 +728,9 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
   }
   result->addCallback([weak = weak_from_this(),
                        op_id = args.op_id](c10::ivalue::Future& future) {
-    // Not the last reference: a hook is only destroyed with no ops in flight.
+    // Fails once the hook is destroyed. Owners remove() it before dropping it,
+    // so if this becomes the last reference the hook holds no Works, except
+    // one whose result was being published during remove().
     auto self = weak.lock();
     if (!self) {
       return;

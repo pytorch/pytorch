@@ -22,12 +22,12 @@
 // at once, so a fast collective that finished before the post-hook is retired
 // too.
 //
-// Backends whose Work has no result future fall back to retiring in the
-// post-hook, i.e. at issue. Such an entry carries no duration and never reads
-// "completed", only "scheduled" and retired -- degraded, but honest, because
-// there is genuinely no moment at which this hook learns the op finished.
-// Leaving those entries un-retired instead would make every healthy op look
-// hung.
+// A Work with no result future (getFutureResult() throws) falls back to
+// retiring in the post-hook, i.e. at issue. Such an entry carries no duration
+// and never reads "completed", only "scheduled" and retired -- degraded, but
+// honest, because there is genuinely no moment at which this hook learns the op
+// finished. Leaving those entries un-retired instead would make every healthy
+// op look hung.
 //
 // The hook owns no device events. One it recorded itself could only say whether
 // the *caller's* stream reached the op, which for an async_op collective is not
@@ -64,9 +64,6 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#include <typeindex>
-#include <typeinfo>
-#include <unordered_set>
 #include <vector>
 
 #include <c10/core/Event.h>
@@ -178,23 +175,15 @@ class TORCH_API FlightRecorderHook
   // held it while waiting for the GIL would deadlock the process with no
   // timeout. That is why onPre() calls the recorder, which gathers a traceback
   // under the GIL, outside the lock, and why no Work is released under it: a
-  // Work's destructor may take the GIL (PyWorkHolder). It also outranks the
-  // backend's own hook lock: remove() takes it and then unregisters, so a
-  // backend must never invoke a hook while holding the lock that guards its
-  // hook table.
+  // Work's destructor may take the GIL (PyWorkHolder). Nor does remove()
+  // unregister under it: a hook may be blocked on it while the backend holds
+  // the lock that guards its own hook table.
   std::mutex mutex_;
   size_t collective_seq_{0};
   size_t p2p_seq_{0};
   // Ordered by op_id, which is monotonic per process group, so the front is the
   // oldest op still awaited and eviction is in issue order.
   std::map<int64_t, InflightOp> inflight_;
-  // Work types whose getFutureResult() threw. The refusal is a property of the
-  // type, not of the op, and throwing is costly, so each type is asked once.
-  // Keyed by type rather than backend: a backend can return a sentinel Work
-  // (nccl2 does inside a coalescing window) next to Works that do report. A
-  // type forwarding to Works of mixed kinds (PyWorkHolder) falls back to
-  // retiring at issue for all its ops after the first refusal.
-  std::unordered_set<std::type_index> no_result_future_types_;
   // Cleared the first time a Work refuses getDuration(): timing is a property
   // of the backend, so later ops neither ask nor keep their Work for it.
   // Collectives timing enabled after that is not picked up.

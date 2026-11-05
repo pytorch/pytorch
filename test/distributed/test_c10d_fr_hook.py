@@ -228,8 +228,12 @@ class AbstractFlightRecorderHookTest:
         before = len(self._hook_entries())
 
         t = torch.ones(8, device=self.device)
-        for _ in range(3):
+        for _ in range(2):
             dist.all_reduce(t)
+        # The hook expects NotImplementedError; anything else logs a warning.
+        work = dist.all_reduce(t, async_op=True)
+        with self.assertRaises(NotImplementedError):
+            work.get_future_result()
 
         entries = self._hook_entries()[before:]
         self.assertEqual(len(entries), 3)
@@ -295,32 +299,34 @@ class AbstractFlightRecorderHookTest:
             self.skipTest("backend cannot time collectives")
         pg._enable_collectives_timing()
         hook = self._fr_hook(pg)
-        t = torch.ones(1024, device=self.device)
-        dist.all_reduce(t)
-        torch.cuda.synchronize()
-        base = torch.cuda.memory_allocated(self.device)
-
-        big = torch.ones(4 * 1024 * 1024, device=self.device)
-        nbytes = big.numel() * big.element_size()
-        before = len(self._hook_entries())
-        work = dist.all_reduce(big, async_op=True)
-        # Callbacks run in the order they were added, so this one runs after
-        # the hook's.
-        done = work.get_future_result().then(lambda fut: fut.value())
-        for _ in range(3):
+        try:
+            t = torch.ones(1024, device=self.device)
             dist.all_reduce(t)
-        done.wait()
-        # The hook did hold the Work: it read the duration.
-        e = self._hook_entries()[before]
-        self.assertIn("duration_ms", e, msg=str(e))
-        # wait() drops the backend's own stash of the input.
-        work.wait()
-        del work, big, done
-        # The next collective releases what the hook held.
-        dist.all_reduce(t)
-        torch.cuda.synchronize()
-        self.assertLess(torch.cuda.memory_allocated(self.device), base + nbytes)
-        hook.remove()
+            torch.cuda.synchronize()
+            base = torch.cuda.memory_allocated(self.device)
+
+            big = torch.ones(4 * 1024 * 1024, device=self.device)
+            nbytes = big.numel() * big.element_size()
+            before = len(self._hook_entries())
+            work = dist.all_reduce(big, async_op=True)
+            # Callbacks run in the order they were added, so this one runs after
+            # the hook's.
+            done = work.get_future_result().then(lambda fut: fut.value())
+            for _ in range(3):
+                dist.all_reduce(t)
+            done.wait()
+            # The hook did hold the Work: it read the duration.
+            e = self._hook_entries()[before]
+            self.assertIn("duration_ms", e, msg=str(e))
+            # wait() drops the backend's own stash of the input.
+            work.wait()
+            del work, big, done
+            # The next collective releases what the hook held.
+            dist.all_reduce(t)
+            torch.cuda.synchronize()
+            self.assertLess(torch.cuda.memory_allocated(self.device), base + nbytes)
+        finally:
+            hook.remove()
 
     def test_hung_collective_reads_not_completed(self):
         # The property the whole design exists for: a dump taken while a
@@ -558,7 +564,7 @@ class AbstractFlightRecorderHookTest:
         if self.backend_name != "nccl2":
             self.skipTest("nccl2 coalesced p2p sentinel")
         pg = self._init_pg()
-        self._fr_hook(pg)
+        hook = self._fr_hook(pg)
         before = len(self._hook_entries())
 
         peer = 1 - self.rank
@@ -578,9 +584,13 @@ class AbstractFlightRecorderHookTest:
         coll = [e for e in entries if e["profiling_name"] == self._name("all_reduce")]
         self.assertEqual(len(p2p), 2, msg=str(entries))
         for e in p2p:
+            self.assertTrue(e["retired"], msg=str(e))
             self.assertEqual(e["state"], "scheduled", msg=str(e))
+            self.assertEqual(e["time_discovered_completed_ns"], 0, msg=str(e))
+            self.assertNotIn("duration_ms", e, msg=str(e))
         self.assertEqual(len(coll), 1, msg=str(entries))
         self.assertEqual(coll[0]["state"], "completed", msg=str(coll[0]))
+        hook.remove()
 
     def test_p2p_and_collective_seq_ids(self):
         pg = self._init_pg()

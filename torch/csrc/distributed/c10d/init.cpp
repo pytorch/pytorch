@@ -5076,8 +5076,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                 Also, users can use ``fut.then(call_back_func)`` to register a callback function to be called
                 when the work is completed, without blocking the current thread.
 
-            .. warning ::
-                ``get_future_result`` API supports NCCL
+            Raises ``NotImplementedError`` if the backend's work does not support it.
            )")
           .def(
               "get_future",

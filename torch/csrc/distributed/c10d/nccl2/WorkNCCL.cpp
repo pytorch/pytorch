@@ -212,8 +212,9 @@ bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {
 
 void WorkNCCL::State::publishResult() {
   // Exactly once, by whichever of the watchdog and a caller of the Work's own
-  // status methods gets here first. Never with a lock held: the future's
-  // callbacks run inline and may take locks of their own, including the GIL.
+  // status methods gets here first. The future's callbacks run inline and may
+  // take locks of their own, including the GIL, so callers hold no lock --
+  // except reconfigure, which holds reconfigure_mutex_ and revoke_mutex_.
   if (resultPublished.exchange(true, std::memory_order_acq_rel)) {
     return;
   }
