@@ -594,7 +594,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
       q_params.scale, q_params.zero_point, input_dims, 1.0, 0, num_threads, /*accum scale*/1.0, /*accum zero point*/0);
   c10::call_once(*cache_initialized_flag, [&](){
       LinearParams params;
-      ideep::matmul_forward::prepare</*is_dynamic=*/true>(
+      at::native::mkldnn::matmul_forward_prepare</*is_dynamic=*/true>(
           params, x, w, b, y,
           src_scales, weights_scales, std::vector<float>(),
           src_zero_point, std::vector<int32_t>(), 1.0f, 1.0f, op_attr,
@@ -604,9 +604,9 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   });
   if (get_cache().hit_dynamic(cache_key)) {
     LinearParams& params = get_cache().get_param();
-    ideep::matmul_forward::compute(params, x, w, b, y, src_scales, src_zero_point);
+    at::native::mkldnn::matmul_forward_compute(params, x, w, b, y, src_scales, src_zero_point);
   } else {
-    ideep::matmul_forward::compute(x, w, b, y,
+    at::native::mkldnn::matmul_forward_compute(x, w, b, y,
                                    src_scales, weights_scales, std::vector<float>(),
                                    src_zero_point, std::vector<int32_t>(),
                                    1.0f, 1.0f, op_attr);
