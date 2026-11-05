@@ -3112,8 +3112,9 @@ Call this whenever a new thread is created in order to propagate values from
         // Like Python's FakeTensor(mode, meta, device), which goes through
         // _make_subclass: a new detached fake sharing meta's storage (or, for a
         // sparse meta, its indices and values). meta keeps its own device and
-        // autograd state; as in Python, the storage it shares is marked as a
-        // fake's.
+        // autograd state. As in Python, the shared storage is marked as a
+        // fake's; a sparse meta has no storage to mark, and the indices and
+        // values it shares stay non-fake.
         c10::intrusive_ptr<c10::TensorImpl> out_impl;
         {
           // As in no_dispatch(). Otherwise an active dispatch mode would run
@@ -3136,7 +3137,8 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("mode").none(false));
 
   // The Python wrapper of a C++ fake's mode, or None for any other tensor,
-  // including a Python FakeTensor (maybe_get_fake_mode handles those). Unlike
+  // including a Python FakeTensor (maybe_get_fake_mode handles those) and a
+  // tensor with the Fake key but no mode (see _set_fake_device). Unlike
   // maybe_get_fake_mode, it does not look inside functional, functorch or
   // traceable wrapper tensors. If the wrapper has been collected,
   // getCppFakeTensorModePyObj rebuilds it (see Note [C++ FakeTensorMode Python
