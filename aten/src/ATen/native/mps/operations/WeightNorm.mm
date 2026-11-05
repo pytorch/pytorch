@@ -65,9 +65,8 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
     grad_g.zero_();
     return {std::move(grad_v), std::move(grad_g)};
   }
-  const auto numel = c10::checked_convert<uint32_t>(saved_v.numel(), "uint32_t");
   const auto slices = c10::checked_convert<uint32_t>(saved_v.size(dim), "uint32_t");
-  const auto len = numel / slices;
+  const auto len = c10::checked_convert<uint32_t>(saved_v.numel() / saved_v.size(dim), "uint32_t");
   const auto dtype = scalarToMetalTypeString(saved_v);
   constexpr auto simd = c10::metal::simdgroup_size;
   const auto col_groups = at::ceil_div(slices, simd);
@@ -92,7 +91,7 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
         const auto threads = std::min(at::ceil_div(len, ilp), c10::metal::max_threadgroup_size);
         const auto variant = threads * ilp < len ? "looped"sv : "single_row"sv;
         run(fmt::format("weight_norm_backward_{}_{}", variant, dtype),
-            MTLSizeMake(slices * threads, 1, 1),
+            MTLSizeMake(threads, slices, 1),
             MTLSizeMake(threads, 1, 1),
             grad_w,
             saved_v,
@@ -118,7 +117,7 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
             std::array<uint32_t, 2>{splits, slices});
         // Every thread of a tile writes simd rows of one contiguous block, so reads and writes stay close in memory.
         constexpr auto rows_per_tile = simd * simd;
-        run(fmt::format("weight_norm_backward_cols_{}", dtype),
+        run(fmt::format("weight_norm_backward_cols_{}{}", dtype, mtlIdxSuffix(offsetsFitIn<uint32_t>(saved_v))),
             MTLSizeMake(slices, at::ceil_div(len, rows_per_tile) * simd, 1),
             tile,
             grad_w,
