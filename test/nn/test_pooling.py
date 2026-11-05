@@ -1986,7 +1986,6 @@ torch.{device_type}.synchronize()
     @onlyAccelerator
     @largeTensorTest("18GB")
     @largeTensorTest("180GB", "cpu")
-    @expectedFailureMPS
     def test_pool3d_large_size_int64(self, device):
         # See https://github.com/pytorch/pytorch/issues/52822
         x = torch.randn(
@@ -2408,7 +2407,6 @@ torch.{device_type}.synchronize()
                 self.assertEqual(x.shape[2], res.shape[2])
 
     @onlyAccelerator
-    @expectedFailureMPS  # Not implemented
     @largeTensorTest("6GB")
     def test_pooling_large(self, device):
         def helper(pool):
@@ -2421,7 +2419,8 @@ torch.{device_type}.synchronize()
 
         helper(nn.MaxPool2d(4, 4))
         helper(nn.AvgPool2d(4, 4))
-        helper(nn.FractionalMaxPool2d(4, 4))
+        if self.device_type != "mps":
+            helper(nn.FractionalMaxPool2d(4, 4))
         helper(nn.AdaptiveMaxPool2d((2**6, 2**6)))
         helper(nn.AdaptiveAvgPool2d((2**6, 2**6)))
 
