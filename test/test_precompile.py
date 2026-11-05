@@ -6622,10 +6622,14 @@ class TestTritonRuntimeCacheTransport(TestCase):
             return export_runtime_cache(context=self.CONTEXT, **kwargs), key, native
 
     @parametrize("consumer_exists", (False, True))
-    def test_roundtrip_hydrates_a_fresh_cache(self, consumer_exists):
+    @parametrize("group_format", ("paths", "filenames"))
+    def test_roundtrip_hydrates_a_fresh_cache(self, consumer_exists, group_format):
         from triton.runtime.cache import get_cache_manager
 
-        from torch.compiler._triton_runtime_cache import import_runtime_cache
+        from torch.compiler._triton_runtime_cache import (
+            export_runtime_cache,
+            import_runtime_cache,
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             producer = pathlib.Path(tmp, "producer")
@@ -6640,8 +6644,19 @@ class TestTritonRuntimeCacheTransport(TestCase):
                 mode = stat.S_IMODE(probe.stat().st_mode)
             # Triton writes group paths with the directory as spelled.
             spelled = f"{tmp}//producer"
-            bundle, key, native = self._bundle(spelled)
             with _triton_cache_namespace(spelled):
+                key, native = _write_triton_runtime_entries()
+                # Preserve filename order as well as the producer's format.
+                members = ["kernel.json", "kernel.cubin"]
+                children = (
+                    members
+                    if group_format == "filenames"
+                    else {name: f"{spelled}/{key}/{name}" for name in members}
+                )
+                group = producer / key / "__grp__kernel.json"
+                native_children = json.loads(group.read_text())["child_paths"]
+                group.write_text(json.dumps({"child_paths": children}))
+                bundle = export_runtime_cache(context=self.CONTEXT)
                 import_runtime_cache(bundle, context=self.CONTEXT)
             inode = consumer.stat().st_ino if consumer_exists else None
             with _triton_cache_namespace(consumer):
@@ -6655,13 +6670,24 @@ class TestTritonRuntimeCacheTransport(TestCase):
                         (consumer / key / name).read_bytes(),
                         (producer / key / name).read_bytes(),
                     )
-                self.assertEqual(
-                    get_cache_manager("ab" * 32).get_group("kernel.json"),
-                    {
-                        name: str(consumer / key / name)
-                        for name in ("kernel.json", "kernel.cubin")
-                    },
+                imported_group = consumer / key / group.name
+                expected_children = (
+                    members
+                    if group_format == "filenames"
+                    else {name: str(consumer / key / name) for name in members}
                 )
+                self.assertEqual(
+                    json.loads(imported_group.read_text()),
+                    {"child_paths": expected_children},
+                )
+                if group_format == "filenames":
+                    self.assertEqual(imported_group.read_bytes(), group.read_bytes())
+                # Older Triton cannot read a filename-list fixture itself.
+                if group_format == "paths" or isinstance(native_children, list):
+                    self.assertEqual(
+                        get_cache_manager("ab" * 32).get_group("kernel.json"),
+                        {name: str(consumer / key / name) for name in members},
+                    )
 
     def test_import_accepts_a_legacy_kernel_record(self):
         from triton.runtime.cache import get_cache_manager
@@ -6734,6 +6760,7 @@ class TestTritonRuntimeCacheTransport(TestCase):
             "member_path",
             "group_member",
             "group_format",
+            "group_members_mapping",
             "native_suffix",
             "no_binary",
             "incomplete_group",
@@ -6753,6 +6780,7 @@ class TestTritonRuntimeCacheTransport(TestCase):
             "member_path": "Invalid Triton runtime-cache member name",
             "group_member": "Invalid Triton runtime-cache member name",
             "group_format": "Invalid Triton runtime-cache group format",
+            "group_members_mapping": "Invalid Triton runtime-cache kernel members",
             "native_suffix": "Invalid Triton runtime-cache native member",
             "no_binary": "has no binary",
             "incomplete_group": "Incomplete or unreferenced",
@@ -6788,6 +6816,10 @@ class TestTritonRuntimeCacheTransport(TestCase):
                     h, "kernel.autotune.json", "__grp__kernel.autotune.json"
                 ),
                 "group_format": lambda h: kernel(h).update(group_format="unknown"),
+                "group_members_mapping": lambda h: kernel(h).update(
+                    group_format="filenames",
+                    members=dict.fromkeys(kernel(h)["members"]),
+                ),
                 "native_suffix": lambda h: rename(h, native, "launcher.txt"),
                 "no_binary": lambda h: kernel(h)["members"].remove("kernel.cubin"),
                 "incomplete_group": lambda h: kernel(h)["members"].append("kernel.ptx"),
