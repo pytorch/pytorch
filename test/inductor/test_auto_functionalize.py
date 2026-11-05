@@ -1221,9 +1221,20 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 opt_f(x, y, inductor_base[3:])
                 self.assertEqual(inductor_base, eager_base)
 
-            # The same writes through byte views of the float32 input, so the
-            # views' offsets count bytes while the input's own offset counts
-            # floats.
+            # The same writes through an int32 view of the float32 input. A
+            # same-width dtype view stays a lazy view of the input, so this
+            # also exercises adding back the input's own offset.
+            def f_int32(x, y, buf):
+                nx, ny = x.shape[0], y.shape[0]
+                b32 = buf.view(torch.int32)
+                torch.ops.mylib.write_into(b32[: nx * 4].view(nx, 4), x)
+                torch.ops.mylib.write_into(b32[nx * 4 :].view(ny, 4), y)
+                return buf
+
+            # And through a uint8 view. Changing the element size lowers the
+            # view.dtype to a fallback that aliases the input, and both the
+            # regenerated view's base and its offset are relative to that
+            # fallback's output, so the offsets count bytes from it.
             def f_bytes(x, y, buf):
                 nx, ny = x.shape[0], y.shape[0]
                 b8 = buf.view(torch.uint8)
@@ -1231,17 +1242,21 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 torch.ops.mylib.write_into(b8[nx * 16 :].view(ny, 16), y)
                 return buf
 
-            opt_f_bytes = torch.compile(
-                f_bytes, fullgraph=True, dynamic=True, backend="inductor"
-            )
-            for nx, ny in ((6, 3), (2, 7)):
-                x = torch.ones(nx, 16, dtype=torch.uint8)
-                y = torch.full((ny, 16), 2, dtype=torch.uint8)
-                eager_base = torch.zeros(3 + (nx + ny) * 4)
-                inductor_base = eager_base.clone()
-                f_bytes(x, y, eager_base[3:])
-                opt_f_bytes(x, y, inductor_base[3:])
-                self.assertEqual(inductor_base, eager_base)
+            for fn, dtype, width in (
+                (f_int32, torch.int32, 4),
+                (f_bytes, torch.uint8, 16),
+            ):
+                opt_fn = torch.compile(
+                    fn, fullgraph=True, dynamic=True, backend="inductor"
+                )
+                for nx, ny in ((6, 3), (2, 7)):
+                    x = torch.ones(nx, width, dtype=dtype)
+                    y = torch.full((ny, width), 2, dtype=dtype)
+                    eager_base = torch.zeros(3 + (nx + ny) * 4)
+                    inductor_base = eager_base.clone()
+                    fn(x, y, eager_base[3:])
+                    opt_fn(x, y, inductor_base[3:])
+                    self.assertEqual(inductor_base, eager_base)
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_alias(self, _dynamic=False):
