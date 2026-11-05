@@ -59,8 +59,11 @@ def _check_frontend_version(module_path: str) -> None:
     package = importlib.import_module(module_path.partition(".")[0])
     found = getattr(package, "__version__", None)
     try:
-        ok = Version(found).release >= Version(_MIN_FRONTEND_VERSION).release
-    except (InvalidVersion, TypeError):
+        ok = (
+            isinstance(found, str)
+            and Version(found).release >= Version(_MIN_FRONTEND_VERSION).release
+        )
+    except InvalidVersion:
         ok = False
     if not ok:
         raise RuntimeError(
