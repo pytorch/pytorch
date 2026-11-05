@@ -191,7 +191,9 @@ class TestProfilerSchedule(TestCase):
             # current_action (RECORD)
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD)
-            self.assertEqual(p.actions, ["prepare", "start", "stop", "prepare", "start"])
+            self.assertEqual(
+                p.actions, ["prepare", "start", "stop", "prepare", "start"]
+            )
             p.stop()
 
     def test_device_stopped_exits_via_wait_phase(self):
@@ -239,7 +241,9 @@ class TestProfilerSchedule(TestCase):
             # step 7 -> 8: RECORD (cycle 2 active begins)
             p.step()
             self.assertEqual(p.current_action, ProfilerAction.RECORD)
-            self.assertEqual(p.actions, ["prepare", "start", "stop", "prepare", "start"])
+            self.assertEqual(
+                p.actions, ["prepare", "start", "stop", "prepare", "start"]
+            )
             p.stop()
 
     def test_device_stopped_persists_through_multistep_warmup(self):
@@ -349,7 +353,9 @@ class TestProfilerSchedule(TestCase):
         with patch(self.PATCH_TARGET, return_value=False):
             p.start()
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
-            self.assertEqual(p.actions, ["prepare", "start", "stop", "prepare", "start"])
+            self.assertEqual(
+                p.actions, ["prepare", "start", "stop", "prepare", "start"]
+            )
             p.stop()
         # (R&S, None) fires _trace_ready -> callback_count increments.
         self.assertEqual(
