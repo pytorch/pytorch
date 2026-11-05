@@ -106,6 +106,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     outs_and_grads,
     parametrize,
+    periodic,
     run_tests,
     skipIfCppFakeTensor,
     TEST_MKL,
@@ -13316,6 +13317,7 @@ symbolic_aot_autograd_module_failures = {
 }
 
 
+@periodic
 class TestEagerFusionModuleInfo(AOTTestCase):
     hw_classification = HardwareClassification.GENERIC
 
