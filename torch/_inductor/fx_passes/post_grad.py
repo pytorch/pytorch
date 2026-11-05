@@ -822,7 +822,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
         from torch._higher_order_ops.scan import _extract_carry_and_out
 
         reverse = kwargs.get("reverse", False)
-        if set(kwargs) - {"reverse"}:
+        if OrderedSet(kwargs) - OrderedSet(["reverse"]):
             raise AssertionError(
                 "kwargs of scan are not merged into args before entering decompose_scan_to_while_loop_pass"
             )
