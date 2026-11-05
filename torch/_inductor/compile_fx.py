@@ -1998,11 +1998,11 @@ class _InProcessFxCompile(FxCompile):
                     # Collect and dump collective-op schedule for external diagnostics
                     torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
 
-                    # When graph_partition is enabled, skip this check - partitioning handles dynamic shapes
+                    # Skip when partitioning splits off cudagraph-unsafe ops: it handles dynamic shapes
                     if (
                         cudagraphs
                         and config.triton.cudagraph_skip_dynamic_graphs
-                        and not config.graph_partition
+                        and not V.graph.cudagraphs_per_partition
                         and not V.graph.disable_cudagraphs_reason
                         and torch._inductor.utils.any_is_symbolic(*example_inputs)
                     ):
@@ -2027,11 +2027,11 @@ class _InProcessFxCompile(FxCompile):
                         V.graph.disable_cudagraphs_reason = disable
 
                     # pyrefly: ignore [unbound-name]
-                    # When graph_partition is enabled, skip this check - partitioning handles incompatible ops
+                    # Skip when partitioning splits off cudagraph-unsafe ops: it handles incompatible ops
                     if (
                         cudagraphs
                         # pyrefly: ignore [unbound-name]
-                        and not config.graph_partition
+                        and not V.graph.cudagraphs_per_partition
                         # pyrefly: ignore [unbound-name]
                         and not V.graph.disable_cudagraphs_reason
                     ):
@@ -2070,7 +2070,11 @@ class _InProcessFxCompile(FxCompile):
                         V.graph.disable_cudagraphs_reason = (
                             check_lowering_disable_cudagraph(
                                 # pyrefly: ignore [unbound-name]
-                                V.graph.device_node_mapping
+                                V.graph.device_node_mapping,
+                                cpu_nodes_partitioned_out=(
+                                    # pyrefly: ignore [unbound-name]
+                                    V.graph.cudagraphs_per_partition
+                                ),
                             )
                         )
 
@@ -2597,7 +2601,10 @@ def fw_compiler_freezing(
         if tracing_context.fw_metadata:
             static_input_idxs = tracing_context.fw_metadata.static_input_indices
 
-    with allow_non_fake_inputs_temporarily(fake_mode):
+    with (
+        allow_non_fake_inputs_temporarily(fake_mode),
+        cudagraph_annotation_context(compiler_config_extra.cudagraphs),
+    ):
         optimized_function = inner_compile(
             opt_model,
             aot_example_inputs,
@@ -2789,7 +2796,14 @@ def create_compiler_config_extra(
         and (annotation := dynamo_graph_metadata.get("cudagraph_annotation"))
         is not None
     ):
-        if annotation.fwd is not None and annotation.fwd != config.triton.cudagraphs:
+        # cpp_wrapper cannot partition, so get_cpp_wrapper_config turned cudagraphs
+        # off under graph_partition, and the annotation does not turn them back on.
+        cpp_wrapper_refuses = config.cpp_wrapper and config.graph_partition
+        if (
+            annotation.fwd is not None
+            and annotation.fwd != config.triton.cudagraphs
+            and not (annotation.fwd and cpp_wrapper_refuses)
+        ):
             cudagraphs = BoxedBool(annotation.fwd)
             if annotation.fwd:
                 cudagraphs_log.info(

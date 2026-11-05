@@ -78,7 +78,6 @@ from .runtime.hints import DeviceProperties, ReductionHint
 from .runtime.runtime_utils import green_text, is_power_of_2, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
-    _unstable_customized_partition_wrapper,
     cache_on_self,
     cache_on_self_and_args,
     cmp,
@@ -6314,6 +6313,7 @@ class Scheduler:
         if (
             # pyrefly: ignore[unbound-name]
             config.graph_partition
+            and V.graph.cudagraphs_per_partition
             # pyrefly: ignore[unbound-name]
             and config.triton.cudagraphs
             # pyrefly: ignore[unbound-name]
@@ -12012,10 +12012,7 @@ class Scheduler:
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings
         # benefit to cudagraph
-        if (
-            not torch._inductor.config.triton.cudagraphs
-            and _unstable_customized_partition_wrapper.wrapper is None
-        ):
+        if not V.graph.cudagraphs_per_partition:
             return "partition includes all ops when cudagraphs is disabled"
 
         if isinstance(node, FusedSchedulerNode):
@@ -12648,7 +12645,7 @@ class Scheduler:
             try:
                 return (
                     self._codegen_partitions()
-                    if torch._inductor.config.graph_partition
+                    if V.graph.split_into_partitions
                     else self._codegen(self.nodes)
                 )
             finally:
