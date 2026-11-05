@@ -41,6 +41,7 @@ from torch.testing._internal.common_device_type import tol, toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
+    IS_WINDOWS,
     skipIfMPS,
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
@@ -866,7 +867,7 @@ def optim_error_inputs_func_asgd(device, dtype):
 
 
 def optim_inputs_func_lbfgs(device, dtype=None):
-    return [
+    inputs = [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
         OptimizerInput(
@@ -885,10 +886,18 @@ def optim_inputs_func_lbfgs(device, dtype=None):
             kwargs={"maximize": True},
             desc="maximize",
         ),
-        # There is no maximize + strong_wolfe input: the shared tests maximize an
-        # unbounded convex loss, which it diverges on to inf or nan depending on
-        # rounding. See test_lbfgs_maximize_strong_wolfe.
     ]
+    # Maximizes an unbounded loss, so it can end in nan depending on rounding, which
+    # it does on Windows with MKL 2026.2: https://github.com/pytorch/pytorch/issues/203670
+    if not IS_WINDOWS:
+        inputs.append(
+            OptimizerInput(
+                params=None,
+                kwargs={"maximize": True, "line_search_fn": "strong_wolfe"},
+                desc="maximize_strong_wolfe",
+            )
+        )
+    return inputs
 
 
 def optim_error_inputs_func_lbfgs(device, dtype):

@@ -2877,27 +2877,6 @@ class TestOptimRenewed(TestCase):
         optimizer.step(functools.partial(fwd_bwd, optimizer, model, input))
         self.assertEqual(counter, 6)
 
-    @parametrize("line_search_fn", [None, "strong_wolfe"])
-    def test_lbfgs_maximize_strong_wolfe(self, device, line_search_fn):
-        weight = Parameter(torch.randn(10, 5, device=device))
-        input = torch.randn(5, device=device)
-        optimizer = torch.optim.LBFGS(
-            [weight], maximize=True, line_search_fn=line_search_fn
-        )
-
-        def closure():
-            optimizer.zero_grad()
-            loss = -weight.mv(input).pow(2).sum()
-            loss.backward()
-            return loss
-
-        initial_value = closure().item()
-        for _ in range(5):
-            optimizer.step(closure)
-        final_value = closure().item()
-        self.assertTrue(math.isfinite(final_value))
-        self.assertGreater(final_value, initial_value)
-
     @dtypes(torch.float32, torch.bfloat16)
     @parametrize("nesterov", [False, True])
     def test_muon_orthogonalization_does_not_alias_momentum_buffer(
