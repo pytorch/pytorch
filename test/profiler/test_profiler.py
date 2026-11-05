@@ -3762,6 +3762,7 @@ class TestProfilerDeviceStopped(TestCase):
     PATCH_TARGET = "torch.autograd._is_kineto_stopped"
 
     def test_device_stopped_during_warmup_and_restart(self, device):
+        r"""Check live Kineto finalizes warmup once and records work after restart."""
         traces: list[set[str]] = []
 
         def handler(prof):
@@ -3796,7 +3797,11 @@ class TestProfilerDeviceStopped(TestCase):
         self.assertIn("restarted_workload", traces[1])
         self.assertIn("aten::add", traces[1])
 
-    def test_device_stopped_recovers_without_warmup(self, device):
+    def test_device_stopped_recovers_without_warmup_real_kineto(self, device):
+        r"""Check live Kineto saves a partial trace and resumes without warmup.
+
+        The recovered trace must exclude work performed in DEVICE_STOPPED.
+        """
         traces: list[set[str]] = []
 
         def handler(prof):

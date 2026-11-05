@@ -446,7 +446,11 @@ class TestProfilerSchedule(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.WARMUP)
             p.stop()
 
-    @parametrize("prev", [ProfilerAction.WARMUP, ProfilerAction.RECORD])
+    @parametrize(
+        "prev",
+        [ProfilerAction.WARMUP, ProfilerAction.RECORD],
+        name_fn=lambda action: action.name.lower(),
+    )
     def test_skips_device_stopped_when_already_stopping(self, prev):
         p = _RecordingProfile(
             schedule=lambda step: prev if step == 0 else ProfilerAction.NONE
@@ -466,6 +470,7 @@ class TestProfilerSchedule(TestCase):
     @parametrize(
         "prev",
         [ProfilerAction.NONE, ProfilerAction.RECORD_AND_SAVE],
+        name_fn=lambda action: action.name.lower(),
     )
     def test_unreachable_transition_raises(self, prev):
         """Transitions into DEVICE_STOPPED that step() / start() / __init__
