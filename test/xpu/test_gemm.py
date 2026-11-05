@@ -1422,45 +1422,9 @@ class TestBasicGEMM(TestCase):
     @parametrize("q_group", [32, 64, 128])
     @parametrize("act_dtype", [torch.bfloat16, torch.float16])
     @parametrize("scale_dtype_fp32", [True, False])
-    def test__int4_mm(self, device, m, k, n, q_group, act_dtype, scale_dtype_fp32):
-        inner_k_tiles = 2
-        torch.manual_seed(1)
-        a_fp32 = torch.rand((m, k), dtype=torch.float32, device=device)
-        b_fp32 = torch.rand((k, n), dtype=torch.float32, device=device)
-
-        def convert_weight_to_int4pack(b):
-            b_uint8, scales, zeros = self._group_quantize_tensor(
-                b, n_bit=4, q_group_size=q_group
-            )
-            b_int4pack = torch._convert_weight_to_int4pack(b_uint8, inner_k_tiles)
-            return b_int4pack, scales, zeros
-
-        def weight_int4pack_mm(a, b_int4pack, qscale, qzeros):
-            return torch._weight_int4pack_mm_with_scales_and_zeros(
-                a, b_int4pack, q_group, qscale, qzeros
-            )
-
-        b_int4pack, b_scales, zeros_int8 = convert_weight_to_int4pack(b_fp32)
-
-        a = a_fp32.to(dtype=act_dtype)
-        b = b_fp32.to(dtype=act_dtype)
-        scale_dtype = torch.float32 if scale_dtype_fp32 else act_dtype
-        scales = b_scales.to(dtype=scale_dtype)
-        ref = torch.mm(a, b)
-
-        res = weight_int4pack_mm(a, b_int4pack, scales, zeros_int8)
-
-        mean_err = ((res - ref).abs() / ref).mean()
-        self.assertTrue(mean_err < 0.05)
-
-    @parametrize("m", [1, 128])
-    @parametrize("k", [512, 1024])
-    @parametrize("n", [512, 1024])
-    @parametrize("q_group", [32, 64, 128])
-    @parametrize("act_dtype", [torch.bfloat16, torch.float16])
-    @parametrize("scale_dtype_fp32", [True, False])
-    def test__int4_mm_non_contiguous_a(
-        self, device, m, k, n, q_group, act_dtype, scale_dtype_fp32
+    @parametrize("a_col_major", [False, True])
+    def test__int4_mm(
+        self, device, m, k, n, q_group, act_dtype, scale_dtype_fp32, a_col_major
     ):
         inner_k_tiles = 2
         torch.manual_seed(1)
@@ -1481,15 +1445,16 @@ class TestBasicGEMM(TestCase):
 
         b_int4pack, b_scales, zeros_int8 = convert_weight_to_int4pack(b_fp32)
 
+        a = a_fp32.to(dtype=act_dtype)
+        if a_col_major:
+            # Column-major (non-contiguous) A with stride (1, m), like the
+            # transposed emb_norm that transformers gemma-3n feeds to
+            # embedding_projection.
+            a = a.t().contiguous().t()
+            self.assertFalse(a.is_contiguous())
         b = b_fp32.to(dtype=act_dtype)
         scale_dtype = torch.float32 if scale_dtype_fp32 else act_dtype
         scales = b_scales.to(dtype=scale_dtype)
-        # Column-major (non-contiguous) A with stride (1, m), like the
-        # transposed emb_norm that transformers gemma-3n feeds to
-        # embedding_projection.
-        a = a_fp32.to(dtype=act_dtype).t().contiguous().t()
-        if m > 1:
-            self.assertFalse(a.is_contiguous())
         ref = torch.mm(a, b)
 
         res = weight_int4pack_mm(a, b_int4pack, scales, zeros_int8)
