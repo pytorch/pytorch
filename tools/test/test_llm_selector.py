@@ -706,10 +706,16 @@ g () {
             ["test/dynamo_skips/CPython313-test_set-TestSet.test_x"],
         )
         self.assertEqual((sel.run_all, sel.files, sel.sweeps), cpython)
+        self.assertEqual(sel.reason, "[failure list fallback]")
+        # The model already chose dynamo_wrapped, so the fallback adds nothing.
+        gone = ["test/dynamo_skips/TestGone.test_x"]
+        out = answer(sweeps=["dynamo_wrapped"])
+        sel = Selection.from_model_output(out, CANDIDATES, gone)
+        self.assertEqual((sel.sweeps, sel.reason), ({"dynamo_wrapped"}, ""))
         # dynamo_cpython runs with compiled autograd, so it reads its skips too.
         ca = "test/compiled_autograd_skips/CPython313-test_set-TestSet.test_x"
         sel = Selection.from_model_output(answer(), CANDIDATES, [ca])
-        self.assertIn("cpython/v3_13/test_set", sel.files)
+        self.assertEqual((sel.run_all, sel.files, sel.sweeps), cpython)
         # The files defining a class are selected with their importers.
         importer = sources | {"test_ops.py": "from test_nn import *\n"}
         sel = self.select_in_tree(
