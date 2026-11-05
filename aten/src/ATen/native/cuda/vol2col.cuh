@@ -47,23 +47,27 @@ __global__ void vol2col_kernel(
     auto t_in = t_out * stride_t - pad_t;
     auto h_in = h_out * stride_h - pad_h;
     auto w_in = w_out * stride_w - pad_w;
-    data_col +=
+    // Index from the base pointers: with padding, the window origin lies
+    // before data_vol, and forming such a pointer is undefined behavior.
+    auto col_offset =
         ((channel_out * depth_col + t_out) * height_col + h_out) * width_col +
         w_out;
-    data_vol += ((channel_in * depth + t_in) * height + h_in) * width + w_in;
+    auto vol_offset =
+        ((channel_in * depth + t_in) * height + h_in) * width + w_in;
     for (int i = 0; i < ksize_t; ++i) {
       for (int j = 0; j < ksize_h; ++j) {
         for (int k = 0; k < ksize_w; ++k) {
           auto t = t_in + i * dilation_t;
           auto h = h_in + j * dilation_h;
           auto w = w_in + k * dilation_w;
-          *data_col = (t >= 0 && h >= 0 && w >= 0 && t < depth && h < height &&
-                       w < width)
+          data_col[col_offset] =
+              (t >= 0 && h >= 0 && w >= 0 && t < depth && h < height &&
+               w < width)
               ? data_vol
-                    [i * dilation_t * height * width + j * dilation_h * width +
-                     k * dilation_w]
+                    [vol_offset + i * dilation_t * height * width +
+                     j * dilation_h * width + k * dilation_w]
               : static_cast<T>(0);
-          data_col += depth_col * height_col * width_col;
+          col_offset += depth_col * height_col * width_col;
         }
       }
     }
