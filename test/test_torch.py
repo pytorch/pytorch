@@ -10,6 +10,7 @@ import contextlib
 import gc
 import io
 import inspect
+import os
 import itertools
 import math
 import random
@@ -2142,6 +2143,25 @@ class TestTorchDeviceType(TestCase):
         # don't test CPU, that would be a long test
         x = torch.empty(50000000, device=device, dtype=dtype).exponential_()
         self.assertTrue(x.min() > 0)
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.bfloat16)
+    def test_exponential_tails(self, device, dtype):
+        # n_small catches q = -log(u) with u rounded near 1 to fp32's 2^-24 grid, which never produces q < 2^-24
+        # (skewing torch.multinomial for probabilities below ~1e-7); q_max catches building 1 - u on that grid
+        # instead, which caps q at -ln(2^-25) ~ 17.3.
+        gen = torch.Generator(device=device).manual_seed(0)
+        n_small, q_max = 0, 0.0
+        for _ in range(16):
+            q = torch.empty(2**26, device=device, dtype=dtype).exponential_(generator=gen)
+            n_small += int((q <= 5.4e-8).sum())
+            q_max = max(q_max, q.max().item())
+        # Over 2^30 draws n_small ~ Poisson(58), and P(q_max <= 17.5) = exp(-2^30 * exp(-17.5)) ~ 2e-12.
+        # The largest finite sample is -ln(2^-33) ~ 22.9.
+        self.assertGreater(n_small, 20)
+        self.assertLess(n_small, 100)
+        self.assertGreater(q_max, 17.5)
+        self.assertLess(q_max, 23)
 
     def _generate_correlation_tensors(self, device, dtype):
         yield make_tensor((0, 0), dtype=dtype, device=device)
@@ -11984,6 +12004,10 @@ instantiate_device_type_tests(TestTorchCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu', allow_xpu=True)
 instantiate_device_type_tests(TestTorchCPU, globals(), only_for="cpu")
 instantiate_parametrized_tests(TestTorch)
+
+# pytest-xdist workers import this file instead of running it as __main__.
+if "PYTEST_XDIST_WORKER" in os.environ:
+    TestCase._default_dtype_check_enabled = True
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
