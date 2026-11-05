@@ -372,6 +372,7 @@ XDIST_SERIAL_LIST = [
 # per-worker share, so these files mark their large CPU tests @serialTest.
 XDIST_SERIAL_CPU_LIST = [
     "test_nn",
+    "test_reductions",
 ]
 XDIST_SERIAL_FILES = XDIST_SERIAL_LIST + XDIST_SERIAL_CPU_LIST
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
