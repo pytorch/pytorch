@@ -108,14 +108,26 @@ class TestReductionConfig(TestCase):
         "dtype,width,mib,key,fields,nouts,expected",
         [
             (torch.float32, 256, 64, "mean", 1, 1, "inner_tree"),
+            (torch.float32, 256, 16, "mean", 1, 1, "linear"),
+            (torch.float32, 256, 64, "argmaxi32", 2, 1, "linear"),
+            (torch.float32, 256, 256, "argmaxi32", 2, 1, "inner_tree"),
             (torch.bfloat16, 256, 16, "sum", 1, 1, "inner_tree"),
+            (torch.bfloat16, 256, 16, "argmaxi32", 2, 1, "linear"),
             (torch.bfloat16, 256, 64, "sum", 1, 1, "linear"),
+            (torch.float32, 1024, 64, "var0", 3, 1, "inner_tree"),
+            (torch.float32, 1024, 64, "var0", 3, 2, "linear"),
+            (torch.float32, 1024, 256, "argmaxi32", 2, 1, "linear"),
             (torch.bfloat16, 1024, 64, "argmaxi32", 2, 1, "inner_tree"),
             (torch.float32, 4096, 16, "varmean0", 3, 2, "inner_tree"),
+            (torch.bfloat16, 4096, 16, "argmaxi32", 2, 1, "inner_tree"),
+            (torch.float32, 4096, 16, "mean", 1, 1, "inner_tree"),
+            (torch.float32, 4096, 64, "sum", 1, 1, "linear"),
+            (torch.float32, 4096, 256, "sum", 1, 1, "inner_tree"),
+            (torch.bfloat16, 4096, 2048, "mean", 1, 1, "linear"),
         ],
     )
     def test_sm107_row_profiles(self, dtype, width, mib, key, fields, nouts, expected):
-        """Pin one representative from every SM107 row-policy branch."""
+        """Pin each arm of the SM107 row policy."""
         rows = (mib << 20) // (width * dtype.itemsize)
         self.assertEqual(
             rt.select_row_order(
@@ -134,9 +146,16 @@ class TestReductionConfig(TestCase):
         "dtype,mib,key,fields,rule",
         [
             (torch.float32, 256, "sum", 1, "rubin_strided_sum"),
+            (torch.bfloat16, 2048, "sum", 1, "rubin_strided_sum"),
             (torch.bfloat16, 16, "var0", 3, "rubin_strided_welford"),
+            (torch.float32, 256, "var0", 3, "rubin_strided_welford"),
             (torch.float32, 64, "mean", 1, "rubin_strided_inner"),
+            (torch.float32, 64, "sum", 1, "rubin_strided_inner"),
+            (torch.float32, 16, "sum", 1, "general_default"),
             (torch.bfloat16, 64, "argmaxi32", 2, "rubin_strided_argmax"),
+            (torch.float32, 2048, "argmaxi32", 2, "rubin_strided_argmax"),
+            (torch.float32, 256, "argmaxi32", 2, "general_default"),
+            (torch.float32, 64, "argmaxi32", 2, "general_default"),
         ],
     )
     def test_sm107_general_profiles(self, dtype, mib, key, fields, rule):
@@ -154,20 +173,46 @@ class TestReductionConfig(TestCase):
             nouts=1,
         )
         self.assertEqual(cfg.rule, rule)
-        self.assertEqual(cfg.block, 64 if key == "sum" else 128)
-        self.assertEqual(cfg.kernel_order, "linear" if key == "sum" else "inner_tree")
+        self.assertEqual(cfg.block, 64 if rule == "rubin_strided_sum" else kg._K0_BLOCK)
+        linear = rule in ("rubin_strided_sum", "general_default")
+        self.assertEqual(cfg.kernel_order, "linear" if linear else "inner_tree")
 
-    def test_sm107_config_guards(self):
-        """Keep calls outside SM107 policy contracts on generic policies."""
-        self.assertEqual(
-            self.general(
-                cc=(10, 7),
-                count=1023,
-                red_pairs=((1023, 2),),
-                kept_pairs=((65536, 2046),),
+    @parametrize(
+        "base,updates",
+        [
+            (
+                {},
+                {
+                    "count": 2048,
+                    "num_o": 32768,
+                    "red_pairs": ((2048, 2),),
+                    "kept_pairs": ((32768, 4096),),
+                },
             ),
-            kg._GeneralConfig(),
-        )
+            ({}, {"num_o": 65535, "kept_pairs": ((65535, 2048),)}),
+            ({}, {"red_pairs": ((1024, 4),)}),
+            ({}, {"kept_pairs": ((65536, 4096),)}),
+            ({}, {"acc_bits": 64}),
+            ({}, {"alignment": 8}),
+            (
+                {
+                    "dtype": torch.bfloat16,
+                    "num_o": 131072,
+                    "kept_pairs": ((131072, 2048),),
+                },
+                {"dtype": torch.float16},
+            ),
+        ],
+    )
+    def test_sm107_general_guards(self, base, updates):
+        """Keep a 256 MiB strided anchor that breaks one guard on the generic policy."""
+        selected = dict(base, cc=(10, 7))
+        self.assertEqual(self.general(**selected).rule, "rubin_strided_sum")
+        self.assertEqual(self.general(**dict(selected, **updates)), kg._GeneralConfig())
+
+    @parametrize("alignment,expected", [(16, "inner_tree"), (8, "linear")])
+    def test_sm107_row_alignment_guard(self, alignment, expected):
+        """Keep underaligned SM107 row anchors on the linear order."""
         self.assertEqual(
             rt.select_row_order(
                 (10, 7),
@@ -177,9 +222,9 @@ class TestReductionConfig(TestCase):
                 M=65536,
                 nfields=3,
                 nouts=1,
-                alignment=8,
+                alignment=alignment,
             ),
-            "linear",
+            expected,
         )
 
     def test_fallback_warns_once_per_reason(self):
@@ -390,6 +435,43 @@ class TestReductionConfig(TestCase):
         self.assertEqual(cfg, expected)
 
     @parametrize(
+        "case,updates,expected_rule",
+        [
+            ("anchor", {}, "b200_ragged_c257"),
+            ("explicit_threads", {"threads_per_block": 64}, "explicit"),
+            ("explicit_npar", {"npar": 1024}, "explicit"),
+            ("explicit_vec", {"vec": 1}, "explicit"),
+            ("below_band", {"rows": (15 << 20) // 514}, "default"),
+            ("band_floor", {"rows": (15 << 20) // 514 + 1}, "b200_ragged_c257"),
+            ("above_band", {"rows": (16 << 20) // 514 + 1}, "default"),
+            ("sm103", {"cc": (10, 3)}, "default"),
+            ("sm90", {"cc": (9, 0)}, "default"),
+            ("batched", {"batches": 2}, "default"),
+            ("acc64", {"acc_bits": 64}, "default"),
+        ],
+        name_fn=lambda case, updates, expected_rule: case,
+    )
+    def test_b200_ragged_column_boundaries(self, case, updates, expected_rule):
+        """Keep explicit, off-band, non-B200, batched and 64-bit views on defaults."""
+        # fp16 C = 257 rows take 514 bytes; the 16 MiB anchor admits (15 MiB, 16 MiB].
+        args = dict(
+            cc=(10, 0),
+            dtype=torch.float16,
+            rows=(16 << 20) // 514,
+            columns=257,
+            batches=1,
+            nfields=1,
+            trait_key="sum",
+            itemsize=2,
+            acc_bits=32,
+            nouts=1,
+            alignment=16,
+            contiguous=True,
+        )
+        cfg = ct.select_col_config(**(args | updates))
+        self.assertEqual(cfg.rule, expected_rule)
+
+    @parametrize(
         "dtype,N,nfields,routed",
         [
             (torch.float16, 255, 1, True),
@@ -488,6 +570,40 @@ class TestReductionConfigDevice(TestCase):
         want = "rowitree" if stride == 1 else "genitree"
         self.assertTrue(any(t.startswith(want) for t in _served(key)), _served(key))
         self.assertEqual(got, x.double().sum(1).float(), atol=1e-4, rtol=1e-4)
+
+    @parametrize(
+        "op,dtype,N",
+        [
+            ("sum", torch.float32, 255),
+            ("var_mean", torch.bfloat16, 1025),
+            ("var_mean", torch.float16, 16383),
+        ],
+        name_fn=lambda op, dtype, N: f"{op}_{str(dtype)[6:]}_{N}",
+    )
+    def test_b200_ragged_rows_route(self, device, op, dtype, N):
+        """Serve unordered odd rows inside the B200 band with the ragged-vector plan."""
+        import cutlass
+
+        if torch.cuda.get_device_capability(device) != (10, 0):
+            self.skipTest("the ragged-row route is measured on B200 only")
+        x = torch.randn(64, N, device=device, dtype=dtype)
+        key = f"ragged_route_{op}_{str(dtype)[6:]}_{N}"
+        if op == "sum":
+            trait, outs = T.SumOps(acc=cutlass.Float32), [torch.float32]
+            got = (kg.reduce_dim(trait, key, x, [1], outs[0], order="unordered"),)
+        else:
+            trait, outs = T.VarMeanOps(correction=1), [torch.float32] * 2
+            got = kg.reduce_dim2(trait, key, x, [1], outs, order="unordered")
+        routed = {k for k in rt._CACHE if k[:2] == ("rowtile", key)}
+        self.assertEqual(len(routed), 1, routed)
+        # Row keys carry ragged_vector, so an explicit ragged launch reuses the plan.
+        kw = dict(nouts=len(outs), order="linear", ragged_vector=True)
+        rt.reduce_row_tile(trait, key, x, outs, **kw)
+        self.assertEqual({k for k in rt._CACHE if k[:2] == ("rowtile", key)}, routed)
+        with torch.backends.python_native.cutedsl.disabled():
+            xf = x.float()
+            want = (xf.sum(1),) if op == "sum" else torch.var_mean(xf, dim=1)
+        self.assertEqual(got, want, atol=1e-4, rtol=1e-4)
 
     def test_row_kernel_leaves_the_environment_to_dispatch(self, device):
         """Follow only the order argument in direct row calls, even under strict."""
