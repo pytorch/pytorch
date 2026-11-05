@@ -5547,6 +5547,12 @@ class TestCppFakeTensorModeBindings(TestCase):
         no_grad_meta = torch.empty(2, device="meta")
         no_grad = torch._C._from_meta_and_device(no_grad_meta, fake.device, mode)
         self.assertFalse(no_grad.requires_grad)
+        for layout in (torch.sparse_coo, torch.sparse_csr):
+            sparse_meta = torch.empty(2, 2, layout=layout, device="meta")
+            sparse = torch._C._from_meta_and_device(sparse_meta, fake.device, mode)
+            self.assertTrue(torch._C._is_fake_tensor(sparse))
+            self.assertEqual(sparse.layout, layout)
+            self.assertEqual(sparse.device, torch.device("cpu"))
 
         # A fake also reads as meta, on the meta device or inside a kernel, but
         # is rejected
@@ -5591,6 +5597,8 @@ class TestCppFakeTensorModeBindings(TestCase):
         inference.data_ptr()
 
     def test_maybe_get_fake_mode(self):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
         mode, wrapper = self._make_mode()
         other_mode, other_wrapper = self._make_mode()
         meta = torch.empty(2, device="meta")
@@ -5606,6 +5614,15 @@ class TestCppFakeTensorModeBindings(TestCase):
         # The functional wrapper copies the fake's mode but drops the Fake key
         functional = torch._to_functional_tensor(fake)
         self.assertIsNone(torch._C._maybe_get_fake_mode(functional))
+        self.assertIsNone(torch._C._maybe_get_fake_mode(TwoTensor(fake, fake)))
+        self.assertIsNone(torch._C._maybe_get_fake_mode(_add_batch_dim(fake, 0, 1)))
+        python_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        python_fake = python_mode.from_tensor(torch.empty(2))
+        self.assertIsNone(torch._C._maybe_get_fake_mode(python_fake))
+
+        del wrapper
+        gc.collect()
+        self.assertIsInstance(torch._C._maybe_get_fake_mode(fake), CppFakeTensorMode)
 
     def test_unsafe_data_ptr_access(self):
         def make_fake(mode):
@@ -5937,6 +5954,16 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(self._installed(), (None, False))
         gc.collect()
         self.assertIsNone(ref())
+
+        # The placeholder meta indices and values that the sparse impls' copies
+        # allocate do not reach the active mode, which would reject them
+        with torch._functorch.config.patch(fake_tensor_allow_meta=False):
+            strict_mode = CppFakeTensorMode()
+        cpu = torch.device("cpu")
+        for layout in (torch.sparse_coo, torch.sparse_csr):
+            sparse_meta = torch.empty(2, 2, layout=layout, device="meta")
+            with strict_mode:
+                torch._C._from_meta_and_device(sparse_meta, cpu, strict_mode._cpp_mode)
 
 
 if __name__ == "__main__":
