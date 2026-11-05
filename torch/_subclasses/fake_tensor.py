@@ -41,6 +41,7 @@ from torch.overrides import TorchFunctionMode
 from torch.types import IntLikeType, py_sym_types
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
+    _set_is_in_torch_dispatch_mode,
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
     TraceableWrapperSubclass,
@@ -218,10 +219,17 @@ class FakeTensorTLS(threading.local):
     allow_non_fake_inputs_override: bool | None
     # Keys are the fake tensors to check for leaks; values are unused.
     non_strict_export_fake_tensor_tracker: WeakIdKeyDictionary
+    # The CppFakeTensorModes entered through __enter__ on this thread and not
+    # yet exited. The FAKE slot holds only the C++ mode, which refers to its
+    # wrapper by weakref, unlike a Python FakeTensorMode, which the slot holds
+    # strongly; so this keeps an entered wrapper, and its enter_stack, alive
+    # until __exit__ on this thread, or until this thread ends.
+    entered_cpp_fake_modes: list[CppFakeTensorMode]
 
     def __init__(self) -> None:
         self.allow_non_fake_inputs_override = None
         self.non_strict_export_fake_tensor_tracker = WeakIdKeyDictionary()
+        self.entered_cpp_fake_modes = []
 
 
 fake_tensor_tls = FakeTensorTLS()
@@ -245,7 +253,9 @@ def ordered_set(*items: T) -> dict[T, Literal[True]]:
 
 
 @contextlib.contextmanager
-def unset_fake_temporarily() -> Generator[TorchDispatchMode | None, None, None]:
+def unset_fake_temporarily() -> Generator[
+    TorchDispatchMode | CppFakeTensorMode | None, None, None
+]:
     old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
     try:
         yield old
@@ -357,6 +367,9 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
     elif isinstance(t, Tensor) and is_functorch_wrapped_tensor(t):
         unwrapped = torch._C._functorch.get_unwrapped(t)
         return maybe_get_fake_mode(unwrapped)
+    elif isinstance(t, Tensor):
+        # TODO: annotate the CppFakeTensorMode this can return, with the callers
+        return torch._C._maybe_get_fake_mode(t)
     return None
 
 
@@ -379,13 +392,14 @@ def maybe_set_real_tensor(x: object, real: Tensor | None) -> None:
             torch._C._set_real_tensor(x, real)
 
 
+# The item memo of a fake. A C++ fake keeps it on the C++ tensor, which like
+# SymNumberMemoDescriptor drops it once the tensor is mutated or fake_mode's
+# epoch changes, except that a backed SymFloat is kept across epochs.
 def maybe_get_item_memo(x: object) -> _ItemMemo | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.item_memo
     if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
-        fake_mode = maybe_get_fake_mode(x)
-        if fake_mode is not None:
-            return cast(Any, fake_mode).get_item_memo(x)
+        return torch._C._get_fake_item_memo(x)
     return None
 
 
@@ -393,9 +407,11 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         x.item_memo = memo
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
-        fake_mode = maybe_get_fake_mode(x)
-        if fake_mode is not None:
-            cast(Any, fake_mode).set_item_memo(x, memo)
+        # Like SymNumberMemoDescriptor, a backed SymFloat survives an epoch
+        # change. A SymFloat's hint is never filled in later, so this can be
+        # decided now.
+        backed = isinstance(memo, SymFloat) and memo.node.hint is not None
+        torch._C._set_fake_item_memo(x, memo, keep_across_epochs=backed)
 
 
 # The SymInt memos of a fake (nonzero_memo, unique_memo,
@@ -423,10 +439,7 @@ def maybe_get_sym_memo(x: object, name: str) -> SymInt | int | None:
     if not (isinstance(x, Tensor) and torch._C._is_fake_tensor(x)):
         return None
     _check_sym_memo_name(name)
-    fake_mode = maybe_get_fake_mode(x)
-    if fake_mode is None:
-        return None
-    return torch._C._get_fake_sym_memo(x, name, fake_mode.epoch)
+    return torch._C._get_fake_sym_memo(x, name)
 
 
 def maybe_set_sym_memo(x: object, name: str, value: SymInt | int) -> None:
@@ -434,10 +447,7 @@ def maybe_set_sym_memo(x: object, name: str, value: SymInt | int) -> None:
         setattr(x, name, value)
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         _check_sym_memo_name(name)
-        fake_mode = maybe_get_fake_mode(x)
-        if fake_mode is None:
-            return
-        torch._C._set_fake_sym_memo(x, name, value, fake_mode.epoch)
+        torch._C._set_fake_sym_memo(x, name, value)
 
 
 def maybe_get_fake_device(x: object) -> torch.device | None:
@@ -476,9 +486,11 @@ def maybe_clear_fake_constant(x: object) -> None:
 
 
 def maybe_get_fake_dispatch_keys(x: object) -> torch.DispatchKeySet | None:
-    # The real tensor's dispatch keys recorded on a fake.
+    # The real tensor's dispatch keys recorded on a Python or C++ fake.
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.dispatch_keys
+    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        return torch._C._get_fake_dispatch_keys(x)
     return None
 
 
@@ -682,6 +694,188 @@ def infer_fake_from_real_out(fake_mode: Any, func: Any, real: RealOpResult) -> A
     fake_out = inferred_fake_kernel_from_real_out(fake_mode, func, real.real_out)
     dtrace_structured("missing_fake_kernel", metadata_fn=lambda: {"op": str(func)})
     return fake_out
+
+
+def _avoid_device_init() -> bool:
+    if torch.xpu._is_compiled():
+        if torch.cuda._is_compiled():
+            raise AssertionError("Cannot have both xpu and cuda compiled")
+        return not torch.xpu.is_available()
+
+    return not (
+        torch.cuda.is_available()
+        or (hasattr(torch, "hpu") and torch.hpu.is_available())
+        or _is_privateuse1_backend_available()
+    )
+
+
+# The bodies of FakeTensorMode.__enter__ and __exit__, shared with
+# CppFakeTensorMode. install() puts mode in the FAKE dispatch mode slot, which
+# is empty at that point, and uninstall() takes it out.
+def _enter_fake_mode(
+    mode: FakeTensorMode | CppFakeTensorMode, install: Callable[[], object], /
+) -> None:
+    import torch.nested._internal.nested_tensor
+
+    prev_only_lift_cpu_tensors = None
+    if mode.avoid_device_init:
+        # See NOTE: [torch.tensor, lift_fresh, and device movement]
+        prev_only_lift_cpu_tensors = torch._C._only_lift_cpu_tensors()
+        torch._C._set_only_lift_cpu_tensors(True)
+
+        # In the case of CPU-only build or cuda device unavailable,
+        # we patch the cuda device guard to use NoOpDeviceGuardImpl.
+        # This enables us to trace over cuda kernels under FakeTensorMode.
+        torch._C._ensureCUDADeviceGuardSet()
+
+    maybe_prev_fake_mode = torch._C._unset_dispatch_mode(
+        torch._C._TorchDispatchModeKey.FAKE
+    )
+    if mode is not maybe_prev_fake_mode:
+        mode.enter_stack.append(
+            (True, maybe_prev_fake_mode, prev_only_lift_cpu_tensors)
+        )
+        install()
+    else:
+        # no-op (still need to re-set the fake mode though since we unset it)
+        torch._C._set_dispatch_mode(mode)
+        mode.enter_stack.append((False, None, prev_only_lift_cpu_tensors))
+
+
+def _exit_fake_mode(
+    mode: FakeTensorMode | CppFakeTensorMode,
+    uninstall: Callable[..., object],
+    /,
+    *args: object,
+) -> None:
+    (live, maybe_prev_fake_mode, maybe_prev_only_lift_cpu_tensors) = (
+        mode.enter_stack.pop()
+    )
+    if live:
+        uninstall(*args)
+
+        # Re-enable the previous fake mode, if there was one.
+        if maybe_prev_fake_mode is not None:
+            torch._C._set_dispatch_mode(maybe_prev_fake_mode)
+        if maybe_prev_only_lift_cpu_tensors is not None:
+            torch._C._set_only_lift_cpu_tensors(maybe_prev_only_lift_cpu_tensors)
+
+
+@typing.final
+class CppFakeTensorMode:
+    # The Python wrapper of a C++ FakeTensorMode (torch._C._CppFakeTensorMode),
+    # which the Python parts of fake dispatch run against. The mode's state
+    # lives on the C++ mode, so a wrapper rebuilt by _from_cpp_mode is
+    # equivalent, except for the enter state (enter_stack,
+    # old_dispatch_mode_flags) and the stack it was created at. The enter
+    # state is why an entered wrapper is kept in
+    # fake_tensor_tls.entered_cpp_fake_modes. See
+    # Note [C++ FakeTensorMode Python wrapper lifetime] in
+    # torch/csrc/FakeTensorMode.cpp.
+    __slots__ = (
+        "_cpp_mode",
+        "enter_stack",
+        "old_dispatch_mode_flags",
+        "_stack_trace",
+        "__weakref__",
+    )
+
+    def __init__(
+        self, *, shape_env: ShapeEnv | None = None, allow_non_fake_inputs: bool = False
+    ) -> None:
+        import torch._functorch.config
+
+        self.enter_stack: list[_FakeModeEnterRecord] = []
+        # Like TorchDispatchMode.old_dispatch_mode_flags, a stack of earlier
+        # is_in_torch_dispatch_mode() values
+        self.old_dispatch_mode_flags: list[bool] = []
+        self._stack_trace: traceback.StackSummary | None = traceback.extract_stack()
+        copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
+        converter = FakeTensorConverter(copy_data=copy_data)
+        self._cpp_mode = torch._C._CppFakeTensorMode(converter, shape_env, self)
+        self.allow_non_fake_inputs = allow_non_fake_inputs
+
+    @classmethod
+    def _from_cpp_mode(cls, cpp_mode: torch._C._CppFakeTensorMode) -> Self:
+        # Rebuilds a collected wrapper around the same C++ mode, for
+        # getCppFakeTensorModePyObj.
+        self = cls.__new__(cls)
+        self.enter_stack = []
+        self.old_dispatch_mode_flags = []
+        self._stack_trace = None
+        self._cpp_mode = cpp_mode
+        return self
+
+    @property
+    def fake_tensor_converter(self) -> FakeTensorConverter:
+        return self._cpp_mode.fake_tensor_converter
+
+    @property
+    def shape_env(self) -> ShapeEnv | None:
+        return self._cpp_mode.shape_env
+
+    # Like FakeTensorMode.stack, where the mode was created, except that a
+    # rebuilt wrapper does not know it
+    @property
+    def stack(self) -> str:
+        if self._stack_trace is None:
+            return "<unknown: the original wrapper was collected and rebuilt>\n"
+        return "".join(traceback.format_list(self._stack_trace))
+
+    @property
+    def epoch(self) -> int:
+        return self._cpp_mode.epoch
+
+    @epoch.setter
+    def epoch(self, value: int) -> None:
+        self._cpp_mode.epoch = value
+
+    @property
+    def allow_non_fake_inputs(self) -> bool:
+        return self._cpp_mode.allow_non_fake_inputs
+
+    @allow_non_fake_inputs.setter
+    def allow_non_fake_inputs(self, value: bool) -> None:
+        self._cpp_mode.allow_non_fake_inputs = value
+
+    # Same as FakeTensorMode.avoid_device_init
+    @property
+    def avoid_device_init(self) -> bool:
+        return _avoid_device_init()
+
+    def __enter__(self) -> Self:
+        _enter_fake_mode(self, self._install)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        _exit_fake_mode(self, self._uninstall)
+
+    # What TorchDispatchMode.__enter__ and __exit__ do for FakeTensorMode, with
+    # this mode taking the FAKE dispatch mode slot (see _set_dispatch_mode in
+    # torch/csrc/autograd/init.cpp). Of the flags they save and restore, only
+    # is_in_torch_dispatch_mode() changes for FakeTensorMode: the other two only
+    # change for a mode that is not an infra mode or does not ignore compile
+    # internals, and FakeTensorMode is an infra mode, which ignores them.
+    def _install(self) -> None:
+        fake_tensor_tls.entered_cpp_fake_modes.append(self)
+        self.old_dispatch_mode_flags.append(_set_is_in_torch_dispatch_mode(True))
+        torch._C._set_dispatch_mode(self)
+
+    def _uninstall(self) -> None:
+        _set_is_in_torch_dispatch_mode(self.old_dispatch_mode_flags.pop())
+        # Not on this thread's list if it was entered on another thread
+        entered = fake_tensor_tls.entered_cpp_fake_modes
+        if self in entered:
+            entered.remove(self)
+        if torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is None:
+            raise RuntimeError(
+                "Attempted to unset FakeTensorMode, but there wasn't one active."
+            )
 
 
 @functools.cache
@@ -1029,7 +1223,7 @@ class FakeTensorConverter:
         # NB: meta_converter set the memo
         return out
 
-    # If you specify the device, it MUST be a meta tensor.
+    # If you specify the device, it MUST be a meta tensor that is not fake.
     def from_meta_and_device(
         self,
         fake_mode: FakeTensorMode,
@@ -1041,6 +1235,13 @@ class FakeTensorConverter:
         if t.device.type != "meta":
             raise AssertionError(
                 f"tensor's device must be `meta`, got {t.device.type} instead"
+            )
+        # A fake also reports meta on the meta device or inside a kernel
+        if is_fake_tensor(t):
+            raise AssertionError(
+                "expected a plain meta tensor that is not fake; use an existing "
+                "fake directly, or make a new meta tensor outside the fake mode, "
+                "e.g. under torch._subclasses.fake_tensor.unset_fake_temporarily()"
             )
         # This is a bit abusive (this is not the "real" tensor) but whatever,
         # the meta tensor should be fresh so there's no way to get it wrong
@@ -1071,7 +1272,7 @@ def init_gpu_context(device: torch.device) -> None:
 # property (it has no deleter). Save and restore the value instead.
 @contextlib.contextmanager
 def allow_non_fake_inputs_temporarily(
-    fake_mode: FakeTensorMode | None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None,
 ) -> Generator[None, None, None]:
     if fake_mode is None:
         yield
@@ -1868,6 +2069,12 @@ class _DispatchCacheBypassEntry:
 
 if TYPE_CHECKING:
     _DispatchCacheEntry = _DispatchCacheValidEntry | _DispatchCacheBypassEntry
+    # An enter_stack entry of FakeTensorMode or CppFakeTensorMode: whether the
+    # enter installed the mode, the fake mode it suspended, and the previous
+    # only_lift_cpu_tensors
+    _FakeModeEnterRecord = tuple[
+        bool, TorchDispatchMode | CppFakeTensorMode | None, bool | None
+    ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -1999,7 +2206,7 @@ class FakeTensorMode(TorchDispatchMode):
         # in_kernel_invocation
         # If another fake mode was already active when we enter, we also stash it here.
         # That way when we exit, we know to re-enable the previous fake mode.
-        self.enter_stack: list[tuple[bool, TorchDispatchMode | None, bool | None]] = []
+        self.enter_stack: list[_FakeModeEnterRecord] = []
 
         self.shape_env = shape_env
 
@@ -2050,16 +2257,7 @@ class FakeTensorMode(TorchDispatchMode):
     #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
     @property
     def avoid_device_init(self) -> bool:
-        if torch.xpu._is_compiled():
-            if torch.cuda._is_compiled():
-                raise AssertionError("Cannot have both xpu and cuda compiled")
-            return not torch.xpu.is_available()
-
-        return not (
-            torch.cuda.is_available()
-            or (hasattr(torch, "hpu") and torch.hpu.is_available())
-            or _is_privateuse1_backend_available()
-        )
+        return _avoid_device_init()
 
     @property
     def stack(self) -> str:
@@ -2089,30 +2287,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     # No-op if FakeTensorMode is already in use
     def __enter__(self) -> Self:
-        import torch.nested._internal.nested_tensor
-
-        prev_only_lift_cpu_tensors = None
-        if self.avoid_device_init:
-            # See NOTE: [torch.tensor, lift_fresh, and device movement]
-            prev_only_lift_cpu_tensors = torch._C._only_lift_cpu_tensors()
-            torch._C._set_only_lift_cpu_tensors(True)
-
-            # In the case of CPU-only build or cuda device unavailable,
-            # we patch the cuda device guard to use NoOpDeviceGuardImpl.
-            # This enables us to trace over cuda kernels under FakeTensorMode.
-            torch._C._ensureCUDADeviceGuardSet()
-
-        maybe_prev_fake_mode = torch._C._unset_dispatch_mode(self._mode_key)
-        if self is not maybe_prev_fake_mode:
-            self.enter_stack.append(
-                (True, maybe_prev_fake_mode, prev_only_lift_cpu_tensors)
-            )
-            return super().__enter__()
-        else:
-            # no-op (still need to re-set the fake mode though since we unset it)
-            torch._C._set_dispatch_mode(self)
-            self.enter_stack.append((False, None, prev_only_lift_cpu_tensors))
-
+        _enter_fake_mode(self, super().__enter__)
         return self
 
     def __exit__(
@@ -2121,17 +2296,7 @@ class FakeTensorMode(TorchDispatchMode):
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        (live, maybe_prev_fake_mode, maybe_prev_only_lift_cpu_tensors) = (
-            self.enter_stack.pop()
-        )
-        if live:
-            super().__exit__(exc_type, exc_val, exc_tb)
-
-            # Re-enable the previous fake mode, if there was one.
-            if maybe_prev_fake_mode is not None:
-                torch._C._set_dispatch_mode(maybe_prev_fake_mode)
-            if maybe_prev_only_lift_cpu_tensors is not None:
-                torch._C._set_only_lift_cpu_tensors(maybe_prev_only_lift_cpu_tensors)
+        _exit_fake_mode(self, super().__exit__, exc_type, exc_val, exc_tb)
 
     @classmethod
     def is_infra_mode(cls) -> bool:
