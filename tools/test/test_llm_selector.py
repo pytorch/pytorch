@@ -307,6 +307,9 @@ g () {
                 {**valid, "files": ["test_ops"]},
                 {**valid, "error": "e"},
             ]
+            # run_all and no candidates leave only the type checks to reject these.
+            r = Selection(run_all=True).to_json()
+            bad += [{**r, "files": "test_nn"}, {**r, "files": [1]}, {**r, "error": 1}]
             bad += [
                 {k: v for k, v in valid.items() if k != key}
                 for key in ("version", "candidates", "enforce", "error")
@@ -357,6 +360,8 @@ g () {
         for f in [
             ".ci/docker/common/install_cuda.sh",
             ".ci/docker/requirements-ci.txt",
+            ".ci/docker/requirements-docs.txt",
+            ".ci/docker/java/jni.h",
             ".ci/docker/build.sh",
             ".ci/docker/ci_commit_pins/triton.txt",
             ".ci/docker/ubuntu/Dockerfile",
@@ -436,6 +441,9 @@ g () {
             "tools/testing/discover_tests.py",
             "tools/stats/import_test_stats.py",
             "tools/stats/upload_metrics.py",
+            "tools/stats/upload_test_stats.py",
+            "tools/stats/upload_stats_lib.py",
+            "tools/stats/test_dashboard.py",
             "test/cpp_extensions/open_registration_extension/torch_openreg/pyproject.toml",
         ]:
             self.assertTrue(needs_run_all([f]), f)
@@ -479,6 +487,20 @@ g () {
             out = answer(dirs=[d])
             sel = Selection.from_model_output(out, candidates | jit | {"test_fx"}, [])
             self.assertEqual((sel.files, sel.error), (expected, None), d)
+        # With grep, the drivers of the files under the directory.
+        paths = [
+            "test/jit/test_fuser_common.py",
+            "test/cpp_extensions/dangling_impl_extension.cpp",
+        ]
+        cands = candidates | jit | {"test_jit_fuser_te", "test_dispatch"}
+        for d, driver in [
+            ("jit", "test_jit_fuser_te"),
+            ("cpp_extensions", "test_dispatch"),
+        ]:
+            sel = Selection.from_model_output(
+                answer(dirs=[d]), cands, [], lambda p: paths
+            )
+            self.assertIn(driver, sel.files, d)
 
     def test_parse_model_output_rejects_malformed_answers(self) -> None:
         malformed: list[Any] = [
@@ -558,6 +580,12 @@ g () {
             self.assertTrue((REPO_ROOT / path).exists(), path)
             self.assertNotIn(f, TESTS)
             self.assertEqual(selection.edited_tests([path], set(TESTS)), drivers, f)
+        # test_run runs bin/test_script.sh too.
+        sh = f"test/{launcher_bin}.sh"
+        self.assertTrue((REPO_ROOT / sh).exists(), sh)
+        self.assertEqual(
+            selection.edited_tests([sh], set(TESTS)), {"distributed/launcher/test_run"}
+        )
 
 
 if __name__ == "__main__":
