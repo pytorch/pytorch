@@ -711,6 +711,45 @@ class LazyConstantVariableTests(TestCase):
         self.assertEqual(eager6[2], compiled6[2])
         self.assertEqual(counter_multi.frame_count, 1)
 
+    def test_lazy_constant_before_tensor_in_container_no_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            (lambda t, c: (c, t.sin()), "abc"),
+            (lambda t, c: (t.sin(), (c, 1)), "abc"),
+            (lambda t, c: [c, t.sin()], "abc"),
+            (lambda t, c: {"k": c, "t": t.sin()}, "abc"),
+            (lambda t, c: ((c, 1), t.sin()), [3, 4, 5]),
+        ]
+        for i, (fn, values) in enumerate(cases):
+            with self.subTest(case=i):
+                torch._dynamo.reset()
+                arg_sets = [(t, v) for v in values]
+                self._assert_compile_count(fn, arg_sets, expected_frames=1)
+
+    def test_lazy_constant_in_reconstructed_container_no_recompile(self):
+        t = torch.ones(2)
+
+        def fn_graph_break(t, c):
+            pair = (c, t.sin())
+            torch._dynamo.graph_break()
+            return pair, t.cos()
+
+        # One graph on each side of the break
+        arg_sets = [(t, c) for c in "abc"]
+        self._assert_compile_count(fn_graph_break, arg_sets, expected_frames=2)
+
+        def fn_mutation(t, lst, c):
+            lst.extend([c, t.sin()])
+            return t.cos()
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn_mutation, backend=counter, fullgraph=True)
+        for c in "abc":
+            lst = []
+            self.assertEqual(opt_fn(t, lst, c), t.cos())
+            self.assertEqual(lst, [c, t.sin()])
+        self.assertEqual(counter.frame_count, 1)
+
 
 class ComputedLazyConstantTests(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -1151,6 +1190,36 @@ class ComputedLazyConstantTests(TestCase):
                 torch._dynamo.reset()
                 arg_sets = [(t, v) for v in values]
                 self._check(fn, arg_sets, expected_frames=1, fullgraph=True)
+
+    def test_unused_computed_before_tensor_in_container_does_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            (lambda t, a: ("p" + a, t.sin()), "abc"),
+            (lambda t, a: (t.sin(), ("p" + a, 1)), "abc"),
+            (lambda t, a: ["p" + a, t.sin()], "abc"),
+            (lambda t, a: {"k": "p" + a, "t": t.sin()}, "abc"),
+            (lambda t, a: ((a + 1, 1), t.sin()), [3, 4, 5]),
+        ]
+        for i, (fn, values) in enumerate(cases):
+            with self.subTest(case=i):
+                torch._dynamo.reset()
+                arg_sets = [(t, v) for v in values]
+                self._check(fn, arg_sets, expected_frames=1, fullgraph=True)
+
+    def test_unused_computed_in_returned_closure_does_not_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            b = "p" + a
+            return (lambda: (a, b)), t.sin()
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        for a in "abc":
+            g, out = opt_fn(t, a)
+            self.assertEqual(g(), (a, "p" + a))
+            self.assertEqual(out, t.sin())
+        self.assertEqual(counter.frame_count, 1)
 
     def test_computed_constant_in_branch_recompiles(self):
         t = torch.ones(2)
