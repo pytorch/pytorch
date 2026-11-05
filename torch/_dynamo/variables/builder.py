@@ -1174,6 +1174,22 @@ class VariableBuilder:
                     self.source.make_guard(GuardBuilder.ID_MATCH),
                     result.source.make_guard(GuardBuilder.ID_MATCH),
                 )
+            elif (
+                result.source is not None
+                and not is_constant_source(self.source)
+                and not is_constant_source(result.source)
+            ):
+                # A local aliasing a global: DUPLICATE_INPUT can't relate the
+                # two scopes, but the epilogue IDENTITY_COMPARE guard can.
+                install_guard(
+                    self.source.make_guard(
+                        functools.partial(
+                            GuardBuilder.IDENTITY_COMPARE,
+                            source_b=result.source,
+                            is_same=True,
+                        )
+                    )
+                )
 
         if (
             isinstance(value, torch.nn.Module)

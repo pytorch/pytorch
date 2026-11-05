@@ -351,6 +351,19 @@ def _try_computed_lazy_constant(
     return ComputedLazyConstantVariable.create(fn, args)
 
 
+def _sources_identity_matches(
+    tx: "InstructionTranslatorBase", a: Source, b: Source, is_same: bool
+) -> bool:
+    # Some VTs (tuples, partials, slices, ...) rebuild their backed value, so
+    # a fold can disagree with the frame. A guard on such a fold would fail on
+    # the frame that created it, so only guard folds the frame agrees with.
+    try:
+        resolve = tx.output.resolve_source_value
+        return (resolve(a) is resolve(b)) == is_same
+    except Exception:
+        return False
+
+
 def populate_builtin_to_tensor_fn_map() -> None:
     global BUILTIN_TO_TENSOR_FN_MAP
     if len(BUILTIN_TO_TENSOR_FN_MAP) > 0:
@@ -1165,10 +1178,13 @@ class BuiltinVariable(BaseBuiltinVariable):
                         a is not b
                         and a.source
                         and b.source
+                        and not is_constant_source(a.source)
+                        and not is_constant_source(b.source)
                         and not isinstance(a, ConstantVariable)
                         and not isinstance(b, ConstantVariable)
                         and a.get_real_python_backed_value() is not NO_SUCH_SUBOBJ
                         and b.get_real_python_backed_value() is not NO_SUCH_SUBOBJ
+                        and _sources_identity_matches(tx, a.source, b.source, is_same)
                     ):
                         relation_guard = (
                             make_dupe_guard(a.source, b.source) if is_same else None

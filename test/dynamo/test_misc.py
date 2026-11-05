@@ -250,6 +250,13 @@ def _load_pybind11_enum_mod(*, load_inline):
 _IS_TEST_SENTINEL = object()
 
 
+class _IsTestMissing:
+    pass
+
+
+_IS_TEST_TRACKED_SENTINEL = _IsTestMissing()
+
+
 class MiscTests(torch._inductor.test_case.TestCase):
     def test_storage_offset_scalar_output(self):
         def fn(x):
@@ -3238,6 +3245,39 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         for arg in [(), (object(),), (), (_IS_TEST_SENTINEL,), (object(),)]:
             self.assertEqual(opt_fn(x, *arg), fn(x, *arg))
 
+    def test_is_guard_against_global_is_global_for_filters(self):
+        # Filters like skip_guard_on_globals_unsafe and aot_compile's default
+        # drop global guards. A relation guard reads its second source too.
+        def fn(x, opt):
+            return x + 1 if opt is _IS_TEST_SENTINEL else x - 1
+
+        entries = []
+
+        def guard_filter_fn(guard_entries):
+            entries.extend(guard_entries)
+            return [True] * len(guard_entries)
+
+        opt_fn = torch.compile(
+            fn, backend="eager", options={"guard_filter_fn": guard_filter_fn}
+        )
+        opt_fn(torch.ones(2), object())
+        relation = [e for e in entries if e.guard_type == "IDENTITY_COMPARE"]
+        self.assertEqual(len(relation), 1)
+        self.assertTrue(relation[0].is_global)
+
+    def test_is_guards_local_against_tracked_global_sentinel(self):
+        # A user-class instance is tracked, so the local and the global share
+        # one VT and `opt is _IS_TEST_TRACKED_SENTINEL` folds to True.
+        def fn(x, opt=_IS_TEST_TRACKED_SENTINEL):
+            if opt is _IS_TEST_TRACKED_SENTINEL:
+                return x + 1
+            return x - 1
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager")
+        for arg in [(), (_IsTestMissing(),), (), (_IsTestMissing(),)]:
+            self.assertEqual(opt_fn(x, *arg), fn(x, *arg))
+
     def test_identity_guards_only_from_is(self):
         # `in` and dict lookups also compare by identity internally, but only
         # an explicit `is` should add a relation guard.
@@ -3255,9 +3295,53 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         args = (x, [Key(), Key()], {Key(): 0, Key(): 1}, Key())
         self.assertEqual(opt_fn(*args), fn(*args))
         relation_guards = {"IDENTITY_COMPARE", "DUPLICATE_INPUT"}
-        self.assertFalse(
-            [g for g in guards if g.create_fn_name() in relation_guards]
-        )
+        self.assertFalse([g for g in guards if g.create_fn_name() in relation_guards])
+
+    def test_is_guards_reuse_cache_per_relation(self):
+        def fn(x, a, b, c):
+            if c is None:
+                x = x * 2
+            return x + 1 if a is b else x - 1
+
+        x = torch.ones(2)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        for _ in range(6):
+            o = object()
+            self.assertEqual(opt_fn(x, o, o, None), fn(x, o, o, None))
+            a, b = object(), object()
+            self.assertEqual(opt_fn(x, a, b, None), fn(x, a, b, None))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_is_on_rebuilt_values_compiles(self):
+        # Tuples and partials are rebuilt from their VTs, so the fold says
+        # `t is t` is False. A guard on that fold would fail on its own frame.
+        def fn(x, a, b):
+            return x + 1 if a is b else x - 1
+
+        x = torch.ones(2)
+        for v in [(1, 2), functools.partial(int, base=2), slice(1, 2)]:
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager")
+            opt_fn(x, v, v)
+
+    def test_is_on_assume_constant_result(self):
+        sentinel = object()
+
+        @torch._dynamo.assume_constant_result
+        def get_sentinel():
+            return sentinel
+
+        def fn(x, opt):
+            if get_sentinel() is opt:
+                x = x + 1
+            if opt is get_sentinel():
+                x = x + 1
+            return x
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(opt_fn(x, sentinel), fn(x, sentinel))
 
     def test_is_floating_point(self):
         def fn(a, b):
