@@ -129,6 +129,10 @@ default branch:
   create a new branch; commit directly onto the current detached HEAD.
 - If you are on an actual branch (including `main`), follow the default
   guidance and branch first before committing.
+- **PR status and next steps.** A PR's labels are the source of truth for its
+  stage in the PR lifecycle (see CONTRIBUTING.md): `gh pr view <PR> --json labels,isDraft`.
+  For next steps, CI results and other details, read the first `pytorch-bot[bot]` comment:
+  `gh api repos/pytorch/pytorch/issues/<PR>/comments --jq '[.[] | select(.user.login == "pytorch-bot[bot]")][0].body'`
 - **Pulling CI status.** A PR has hundreds of check-runs, so a single
   `check-runs?per_page=100` call silently truncates and makes red look green.
   Use `gh pr checks <PR> --json name,state,workflow,link,bucket,completedAt`
@@ -191,6 +195,10 @@ Rules for working with ghstack:
   body, since `ghstack` rewrites `ghstack-source-id` on every push and a
   stale trailer will clobber HEAD's current one. If you modified the commit
   message, run `ghstack -u` afterwards to push the updated PR description.
+- **Keep stacks under 10 PRs.** Follow
+  [Keep PR stacks small](CONTRIBUTING.md#keep-pr-stacks-small): land the
+  bottom of a stack before adding more on top, and use `[no-ci]` on PRs that
+  don't need CI yet (see the `ghstack-ci` skill).
 - **Never push directly.** Do not `git push` to branches, and never directly
   modify the `gh/USERNAME/N` branches — ghstack manages those.
 - **Finding the PR.** If the user asks to pull CI results or code review for a
