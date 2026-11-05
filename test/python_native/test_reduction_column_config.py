@@ -102,14 +102,16 @@ class TestColumnConfig(TestCase):
             (torch.float32, "sum", 131072, 257, 16, True, (0, 32)),
             (torch.bfloat16, "amax", 32768, 4096, 4, True, (0, 16)),
             (torch.bfloat16, "amax", 262144, 4096, 32, True, (0, 32)),
+            (torch.bfloat16, "amin", 32768, 4096, 4, True, (0, 32)),
         ],
     )
     def test_b200_ordered_column_mappings(
         self, dtype, key, rows, columns, partials, full_tiles, expected
     ):
         """Pin B200 ordered column widths."""
-        # Single-field float outputs may be the input dtype or fp32.
-        for output in {dtype, dtype if key == "amax" else torch.float32}:
+        # amax and amin store the input dtype; other single fields may store fp32 too.
+        same_dtype = key in ("amax", "amin")
+        for output in {dtype, torch.float32}:
             with self.subTest(output=output):
                 cfg = ct.select_ordered_col_config(
                     (10, 0),
@@ -123,7 +125,7 @@ class TestColumnConfig(TestCase):
                     rows=rows,
                     full_tiles=full_tiles,
                 )
-                if expected is None:
+                if expected is None or same_dtype and output != dtype:
                     self.assertIsNone(cfg)
                     continue
                 min_blocks, tile_columns = expected
