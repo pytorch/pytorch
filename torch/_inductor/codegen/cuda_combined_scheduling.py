@@ -37,7 +37,8 @@ if TYPE_CHECKING:
 
     from torch.utils._ordered_set import OrderedSet
 
-    from .common import BackendFeature
+    from .common import BackendFeature, Kernel
+    from .multi_kernel import MultiKernel
 
     _IntLike: TypeAlias = int | Expr
 
@@ -258,7 +259,9 @@ class CUDACombinedScheduling(BaseScheduling):
     def codegen_staged_reduction(self, node):
         return self._triton_scheduling.codegen_staged_reduction(node)
 
-    def codegen_node(self, node: FusedSchedulerNode | SchedulerNode) -> None:
+    def codegen_node(
+        self, node: FusedSchedulerNode | SchedulerNode
+    ) -> Kernel[Any] | MultiKernel | None:
         return self._triton_scheduling.codegen_node(node)
 
     def codegen_sync(self) -> None:
@@ -277,12 +280,14 @@ class CUDACombinedScheduling(BaseScheduling):
 
     def benchmark_codegened_module(self, module, input_overrides=None):
         if getattr(module, "is_nvgemm", False):
-            return self._benchmark_nvgemm_module(module)
+            return self._benchmark_nvgemm_module(module, input_overrides)
         return self._triton_scheduling.benchmark_codegened_module(
             module, input_overrides=input_overrides
         )
 
-    def _benchmark_nvgemm_module(self, module) -> tuple[float, str]:
+    def _benchmark_nvgemm_module(
+        self, module, input_overrides=None
+    ) -> tuple[float, str]:
         from torch._dynamo.utils import preserve_rng_state
         from torch._inductor.runtime.benchmarking import benchmarker
         from torch._inductor.utils import get_interface_for_device
@@ -296,6 +301,11 @@ class CUDACombinedScheduling(BaseScheduling):
         ):
             try:
                 args = module.get_args()
+                if input_overrides:
+                    # Copy in place: args may be views of one shared storage
+                    for name, arg in zip(module.arg_buffer_names, args, strict=True):
+                        if name in input_overrides:
+                            arg.copy_(input_overrides[name])
                 call = module.call
                 call(args)
             except Exception as e:

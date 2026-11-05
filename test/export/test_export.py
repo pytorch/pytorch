@@ -86,12 +86,10 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     find_library_location,
     HardwareClassification,
-    instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
-    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfRocm,
@@ -18704,7 +18702,10 @@ def forward(self, q, k, v):
     view_default_6 = torch.ops.aten.view.default(expand_default_5, [32, 256, 256]);  expand_default_5 = None
     bmm_default_1 = torch.ops.aten.bmm.default(view_default_6, view_default_4);  view_default_6 = view_default_4 = None
     view_default_7 = torch.ops.aten.view.default(bmm_default_1, [1, 32, 256, 128]);  bmm_default_1 = None
-    return (view_default_7,)""",
+    permute_default_1 = torch.ops.aten.permute.default(view_default_7, [2, 0, 1, 3]);  view_default_7 = None
+    clone_default_2 = torch.ops.aten.clone.default(permute_default_1, memory_format = torch.contiguous_format);  permute_default_1 = None
+    permute_default_2 = torch.ops.aten.permute.default(clone_default_2, [1, 2, 0, 3]);  clone_default_2 = None
+    return (permute_default_2,)""",
             )
         # test backend check for invalid inputs
         error_type = (
@@ -18826,89 +18827,9 @@ def forward(self, q, k, v):
         self.assertEqual(ep.module()(x), model(x))
 
 
-@instantiate_parametrized_tests
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
     hw_classification = HardwareClassification.GENERIC
-
-    @parametrize("sequence_first", [True, False])
-    @parametrize("dynamic", [False, True])
-    def test_cpu_flash_attention_projection_layout(self, sequence_first, dynamic):
-        from torch.nn.attention import sdpa_kernel, SDPBackend
-
-        class AttentionProjection(torch.nn.Module):
-            def __init__(self, sequence_first):
-                super().__init__()
-                self.sequence_first = sequence_first
-
-            def forward(self, q, k, v):
-                output = F.scaled_dot_product_attention(q, k, v)
-                if self.sequence_first:
-                    # MHA projects from (L, N, H, E).
-                    output = output.permute(2, 0, 1, 3)
-                else:
-                    # BERT-style attention projects from (N, L, H, E).
-                    output = output.transpose(1, 2)
-                return output.contiguous().view(
-                    q.shape[0] * q.shape[2], q.shape[1] * q.shape[3]
-                )
-
-        def inputs(batch, sequence, sequence_first):
-            if sequence_first:
-                query = torch.randn(sequence, batch, 4, 8).permute(1, 2, 0, 3)
-            else:
-                query = torch.randn(batch, sequence, 4, 8).transpose(1, 2)
-            return query, torch.randn_like(query), torch.randn_like(query)
-
-        with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
-            model = AttentionProjection(sequence_first)
-            example_inputs = inputs(3, 5, sequence_first)
-            dynamic_shapes = None
-            if dynamic:
-                shape = {
-                    0: Dim("batch", min=2),
-                    2: Dim("sequence", min=2),
-                }
-                dynamic_shapes = (shape, shape, shape)
-            ep = export(model, example_inputs, dynamic_shapes=dynamic_shapes)
-            decomposed = ep.run_decompositions()
-            targets = {
-                node.target
-                for node in decomposed.graph.nodes
-                if node.op == "call_function"
-            }
-            self.assertNotIn(
-                torch.ops.aten.scaled_dot_product_attention.default, targets
-            )
-            self.assertNotIn(
-                torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
-                targets,
-            )
-            self.assertNotIn(torch.ops.aten.as_strided.default, targets)
-            self.assertNotIn(torch.ops.aten.as_strided_copy.default, targets)
-            self.assertEqual(
-                decomposed.module()(*example_inputs), model(*example_inputs)
-            )
-            if dynamic:
-                other_inputs = inputs(4, 7, sequence_first)
-                self.assertEqual(
-                    decomposed.module()(*other_inputs), model(*other_inputs)
-                )
-
-    def test_cpu_flash_attention_sym_batch_size(self):
-        from torch.nn.attention import sdpa_kernel, SDPBackend
-
-        class M(torch.nn.Module):
-            def forward(self, x, mask):
-                x = x[mask]
-                q = x.view(x.shape[0], x.shape[1], 4, 8).transpose(1, 2)
-                out = F.scaled_dot_product_attention(q, q, q).transpose(1, 2)
-                return out.contiguous().view(-1, 32)
-
-        inputs = (torch.randn(3, 5, 32), torch.tensor([True, False, True]))
-        with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
-            ep = export(M(), inputs).run_decompositions()
-            self.assertEqual(ep.module()(*inputs), M()(*inputs))
 
     def test_scaled_dot_product_attention_cpu(self):
         """

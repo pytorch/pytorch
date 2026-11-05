@@ -427,16 +427,7 @@ if HAS_GPU_AND_TRITON:
                 self._check_tma_store_view_epilogue_fuses()
             self.assertTrue(tma_store_choices)
 
-        @unittest.skipIf(not SM90OrLater, "Triton grouped MM template needs SM90+")
-        @fresh_cache()
-        @config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-                "test_configs.autotune_choice_name_regex": r"^triton_grouped_mm",
-            }
-        )
-        def test_grouped_mm_epilogue_fusion_benchmarked(self):
+        def _grouped_mm_benchmark_offs(self):
             def f(a, b, offs, bias):
                 return torch.relu(
                     torch._grouped_mm(a, b.transpose(-2, -1), offs=offs) + bias
@@ -474,9 +465,36 @@ if HAS_GPU_AND_TRITON:
                 out = torch.compile(f)(a, b, offs, bias)
 
             self.assertEqual(out, f(a, b, offs, bias), atol=1e-1, rtol=1e-2)
+            return benchmark_offs, M
+
+        @unittest.skipIf(not SM90OrLater, "Triton grouped MM template needs SM90+")
+        @fresh_cache()
+        @config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": r"^triton_grouped_mm",
+            }
+        )
+        def test_grouped_mm_epilogue_fusion_benchmarked(self):
+            benchmark_offs, M = self._grouped_mm_benchmark_offs()
             self.assertTrue(benchmark_offs)
             for t in benchmark_offs:
                 self.assertEqual(t[-1].item(), M)
+
+        @unittest.skipIf(not SM90OrLater, "Triton grouped MM template needs SM90+")
+        @fresh_cache()
+        @config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": r"^triton_grouped_mm",
+                "multi_kernel_hints": [64],
+            }
+        )
+        def test_grouped_mm_multi_kernel_hints_not_fusion_benchmarked(self):
+            benchmark_offs, _ = self._grouped_mm_benchmark_offs()
+            self.assertFalse(benchmark_offs)
 
 
 if HAS_CPU and not torch.backends.mps.is_available():
