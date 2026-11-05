@@ -18,7 +18,7 @@ import json
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING
 
 from tools.testing.target_determination.heuristics.edited_by_pr import (
@@ -72,10 +72,11 @@ ALWAYS_COVERED = {
     ),
 }
 LLM_SELECTION_FILE = "llm_selection.json"
-# The selector, run by the default branch's workflow, writes this file into
-# ADDITIONAL_CI_FILES_FOLDER, and run_test.py reads it from the PR's checkout.
-# The reader requires exactly its own SELECTION_VERSION and SWEEPS, so a bump
-# or a new sweep turns selection off for unrebased PRs until they rebase.
+# The selector, run by the default branch's workflow, will write this file into
+# ADDITIONAL_CI_FILES_FOLDER, and run_test.py will read it from the PR's checkout.
+# The reader rejects any other SELECTION_VERSION, unknown keys and unknown
+# sweeps, so a bump, a new field or a new sweep turns selection off for
+# unrebased PRs until they rebase.
 SELECTION_VERSION = 1
 # Modules per import_pattern that importers() greps for: Linux caps one
 # argument, such as the pattern git grep gets, at 128 KiB.
@@ -471,11 +472,11 @@ def failure_list_sources(
     """The paths under test/ that define the classes named by the edited
     failure-list entries (see FAILURE_LIST_RE, PATCHED_PREFIX_RE), and the
     lists ("dynamo", "inductor", "compiled_autograd", or "dynamo_cpython" for
-    a CPython entry of the dynamo lists, which the dynamo_cpython config runs)
+    a CPython entry of the other lists, which the dynamo_cpython config runs)
     naming a class that is not looked up (no `grep`, see importers, or more
     than MAX_FAILURE_LIST_CLASSES classes) or that `grep` does not find in a
     .py file. Also the list ("dynamo", "inductor" or "compiled_autograd", and
-    "dynamo_cpython" for a CPython entry of the dynamo lists) holding an entry
+    "dynamo_cpython" for a CPython entry of the other lists) holding an entry
     it does not look up: one in a subdirectory or, for the dynamo and inductor
     lists, one without exactly one "." (dynamo_test_failures.py rejects both
     at import, except in compiled_autograd_skips) or one edited in both the
@@ -488,7 +489,7 @@ def failure_list_sources(
             continue
         name = f[d.end() :]
         both = {f"test/{d[1]}_{k}/{name}" for k in ("expected_failures", "skips")}
-        cpython = d[1] == "dynamo" and re.match(r"CPython\d+-", name)
+        cpython = d[1] != "inductor" and re.match(r"CPython\d+-", name)
         if "/" in name or (
             d[1] != "compiled_autograd"
             and (name.count(".") != 1 or both <= set(changed_files))
@@ -625,9 +626,8 @@ def grep_failure(e: Exception) -> Selection:
 class Selection:
     files: set[str] = field(default_factory=set)
     sweeps: set[str] = field(default_factory=set)
-    # The model's own run_all, a fallback of from_model_output (see its
-    # docstring), or one of select_tests.select() and main(), which set it
-    # without asking the model or when the selector fails.
+    # The model's own run_all, or a fallback when the selector fails or does
+    # not ask the model.
     run_all: bool = False
     reason: str = ""
     # Whether run_test.py should replace TD's split with Selection.split rather
@@ -761,6 +761,8 @@ class Selection:
                     return cls(run_all=True, reason=f"nothing found that reads {f}")
                 files |= found
         run_all, reason = out["run_all"], str(out["reason"])
+        if missing:
+            reason += f"; unresolved {sorted(missing)} list entries add tests"
         return cls(files, sweeps, run_all, reason, candidates=set(candidates))
 
     def covers(self, test_file: str, test_config: str) -> bool:
@@ -832,14 +834,16 @@ class Selection:
     @classmethod
     def from_json(cls, d: dict) -> Selection:
         """The selection in `d`; ValueError, KeyError or TypeError unless `d`
-        is a selection file of SELECTION_VERSION. Without candidates it covers
-        only the files it names, so it must be run_all."""
+        is a selection file of SELECTION_VERSION. Without candidates it would
+        skip every file it does not name, so it must be run_all."""
         if (
             not isinstance(d, dict)
             or type(d.get("version")) is not int
             or d["version"] != SELECTION_VERSION
         ):
             raise ValueError(f"not a selection file of version {SELECTION_VERSION}")
+        if unknown := set(d) - {"version", *(f.name for f in fields(cls))}:
+            raise ValueError(f"unknown keys {sorted(unknown)}")
         files, sweeps, candidates = d["files"], d["sweeps"], d["candidates"]
         run_all, enforce, reason, error = (
             d["run_all"],
