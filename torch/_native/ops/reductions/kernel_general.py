@@ -18,7 +18,7 @@ from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from ...utils.device import check_current
 from . import tile
-from .traits import WARP
+from .traits import NormOps, WARP
 
 
 # (extent, element-stride) pairs from TensorIterator, fastest dim first.
@@ -344,6 +344,47 @@ def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
     return C >= _BATCHED_COL_MIN_C and (
         nouts == 1 or B * C >= _BATCHED_COL_2OUT_MIN_OUTPUTS
     )
+
+
+# B200 CUDA-graph timings against _try_indexed_itree (sum fp32/bf16/fp16, argmax and
+# var_mean fp32/fp16; R 20-20000, B * C 32-524288; bitwise equal): ordered columns win
+# 1.1-11x once B * C fills the GPU, but one 32-output block per tile leaves SMs idle
+# below that (0.16-0.6x), and wider traits need more outputs. At 1-16x those output
+# minimums and R = 128-8192, every other routed trait in fp32/bf16/fp16 (mean, prod,
+# nansum, norm1/2, amax, amin, absmax, absmin, all, any, count_nonzero, argmin,
+# max.dim, min.dim, aminmax, var and std) runs 1.0-13x. General-p norms (an exp/log
+# leaf; p = 3 measured) run 0.34-2.3x below 16384 outputs and 1.1-2.6x from there.
+# The route starts at the shortest measured win, R = 128 (reduce_ordered_col declines
+# the multirow plans of rows up to 32 for fp32 and 64 for 16-bit inputs anyway). Rows
+# compile once per R:
+# single-field rows replay every lane statically, taking 0.35 s at R = 2048, 1.5 s at
+# R = 8192 and 4.3 s at R = 24576 (fp32/bf16, C = 2048), and multi-field rows 1.3 s at
+# R = 8192 and 2.5-3.1 s at R = 8193-16384 (fp32), against 0.3-0.75 s for the indexed
+# tree. reduce_ordered_col declines replays past tile.MAX_UNROLL leaves, so the route
+# stops at R = 8192.
+_ORDERED_COL_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
+_ORDERED_COL_CCS = ((10, 0),)
+_ORDERED_COL_MIN_R = 128
+_ORDERED_COL_MAX_R = 8192
+_ORDERED_COL_MIN_OUTPUTS = {1: 2048, 2: 16384, 3: 32768}
+_ORDERED_COL_GENERAL_NORM_MIN_OUTPUTS = 16384
+
+
+def _general_norm(trait: Any) -> bool:
+    return isinstance(trait, NormOps) and trait.p not in (1.0, 2.0)
+
+
+def _ordered_col_route_ok(view: torch.Tensor, trait: Any) -> bool:
+    """Whether the ordered column kernel beats the indexed tree at this view's shape and
+    output count. Callers check _ORDERED_COL_CCS and _ORDERED_COL_DTYPES."""
+    B, R, C = (1, *view.shape) if view.dim() == 2 else view.shape
+    # reduce_ordered_col tiles WARP columns, so narrower views decline anyway.
+    if C < WARP:
+        return False
+    min_outputs = _ORDERED_COL_MIN_OUTPUTS[min(trait.nfields, 3)]
+    if _general_norm(trait):
+        min_outputs = _ORDERED_COL_GENERAL_NORM_MIN_OUTPUTS
+    return _ORDERED_COL_MIN_R <= R <= _ORDERED_COL_MAX_R and B * C >= min_outputs
 
 
 # Largest one-block register-loaded row; only merging uses smem. Larger uses multi-CTA.
@@ -716,17 +757,34 @@ def _reduce(
                     order="inner_tree",
                 )
             else:
-                ordered = _try_indexed_itree(
-                    trait,
-                    trait_key,
-                    x,
-                    red_pairs,
-                    kept_pairs,
-                    num_o,
-                    count,
-                    out_dtypes,
-                    nouts,
-                )
+                col_view = None
+                cc = _hw.caps(x.device).cc
+                if cc in _ORDERED_COL_CCS and x.dtype in _ORDERED_COL_DTYPES:
+                    col_view = _physical_col_view(
+                        x, red_axes, red_pairs, kept_pairs, count, num_o
+                    )
+                if col_view is not None and _ordered_col_route_ok(col_view, trait):
+                    from . import kernel_coltile as ct
+
+                    ordered = ct.reduce_ordered_col(
+                        trait,
+                        trait_key,
+                        col_view,
+                        out_dtypes,
+                        nouts,
+                    )
+                if ordered is None:
+                    ordered = _try_indexed_itree(
+                        trait,
+                        trait_key,
+                        x,
+                        red_pairs,
+                        kept_pairs,
+                        num_o,
+                        count,
+                        out_dtypes,
+                        nouts,
+                    )
         if ordered is not None:
             return tuple(_as_shape(o, out_shape) for o in ordered)
         if explicit:
