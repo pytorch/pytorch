@@ -133,7 +133,7 @@ C10_HOST_DEVICE inline T exponential(T val, T lambda) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
       // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/16706
       // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
-      // we need log to be not 0, and not underflow when converted to half
+      // on CUDA/ROCm only double gets here; see standard_exponential in native/cuda/DistributionTemplates.h
       // fast __logf approximation can underflow, so set log to -epsilon/2 for 1 or close to 1 args
   auto log = val >= static_cast<T>(1.) - std::numeric_limits<T>::epsilon() / 2
       ? -std::numeric_limits<T>::epsilon() / 2
