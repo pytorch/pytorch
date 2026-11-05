@@ -1029,7 +1029,7 @@ class FakeTensorConverter:
         # NB: meta_converter set the memo
         return out
 
-    # If you specify the device, it MUST be a meta tensor.
+    # If you specify the device, it MUST be a meta tensor that is not fake.
     def from_meta_and_device(
         self,
         fake_mode: FakeTensorMode,
@@ -1044,7 +1044,11 @@ class FakeTensorConverter:
             )
         # A fake also reports meta on the meta device or inside a kernel
         if is_fake_tensor(t):
-            raise AssertionError("expected a meta tensor that is not fake")
+            raise AssertionError(
+                "expected a plain meta tensor that is not fake; use an existing "
+                "fake directly, or make a new meta tensor outside the fake mode, "
+                "e.g. under torch._subclasses.fake_tensor.unset_fake_temporarily()"
+            )
         # This is a bit abusive (this is not the "real" tensor) but whatever,
         # the meta tensor should be fresh so there's no way to get it wrong
         maybe_memo = self._get_memo(t)
