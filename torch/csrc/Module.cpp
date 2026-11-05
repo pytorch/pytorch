@@ -3115,7 +3115,9 @@ Call this whenever a new thread is created in order to propagate values from
   // Python's raises AssertionError. Unlike Python's, it also rejects every
   // tensor subclass with __torch_dispatch__ (Python's accepts one whose
   // dispatched detach returns a plain tensor) and functional and functorch
-  // wrappers, and it takes device as a torch.device, not a string.
+  // wrappers, and it takes device as a torch.device, not a string. It also
+  // does not initialize a CUDA or XPU context for such a device, as Python's
+  // FakeTensor.__new__ does (init_gpu_context).
   py_module.def(
       "_from_meta_and_device",
       [](const at::Tensor& meta,
