@@ -1565,6 +1565,12 @@ class StrictNumericsCompileTest(TestCase):
     def test_compile_options_enable_eager_division(self, device, numerics):
         x = torch.full((1024,), 11.0, device=device)
         y = torch.full((1024,), 7.0, device=device)
+        tiny = torch.finfo(x.dtype).tiny
+        subnormal = tiny * torch.finfo(x.dtype).eps
+        x[:6] = torch.tensor(
+            [1.0, tiny, subnormal, subnormal, -0.0, -subnormal], device=device
+        )
+        y[:6] = torch.tensor([tiny, subnormal, 1.0, 2.0, 1.0, 1.0], device=device)
 
         result, codes = run_and_get_code(
             torch.compile(
