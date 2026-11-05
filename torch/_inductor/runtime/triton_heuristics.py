@@ -798,7 +798,9 @@ class CachingAutotuner(KernelInterface):
 
         # Cached launcher for fast path — bypasses all preamble after first
         # successful steady-state launch.  Set to None until populated.
+        # _cached_profiler_kwargs is read only while _cached_launcher is set.
         self._cached_launcher: LauncherType | None = None
+        self._cached_profiler_kwargs: dict[str, Any] = {}
         # Pre-compute static eligibility for launcher caching.  These flags
         # are set once in __init__ and never change, so we avoid re-checking
         # them on every kernel launch.
@@ -2632,8 +2634,8 @@ class CachingAutotuner(KernelInterface):
         # After the first successful launch in steady state, cache the launcher
         # and skip all preamble on subsequent calls (~2µs savings).
         # Conditions here deliberately differ from the cache-population block
-        # below: we re-check dynamic conditions (profiler, debug mode) every
-        # call so enabling them at runtime falls back to the slow path.
+        # below: we re-check debug mode every call so enabling it at runtime
+        # falls back to the slow path; an active profiler only adds a per-launch record.
         # Static conditions (interpret, dump flags, launcher count) were
         # already validated when the cache was populated.
         # `not kwargs` is checked here but not at population time because
@@ -2644,10 +2646,16 @@ class CachingAutotuner(KernelInterface):
             fast is not None
             and not benchmark_run
             and not kwargs
-            and not autograd_profiler._is_profiler_enabled
             and not get_active_debug_mode()
         ):
-            return fast(*args, stream=stream)
+            if not autograd_profiler._is_profiler_enabled:
+                return fast(*args, stream=stream)
+            with torch._C._profiler._RecordFunctionFast(
+                self.inductor_meta.get("kernel_name", "triton kernel"),
+                args,
+                {**self._cached_profiler_kwargs, "stream": stream},
+            ):
+                return fast(*args, stream=stream)
 
         debug_mode = get_active_debug_mode()
         if debug_mode:
@@ -2754,13 +2762,13 @@ class CachingAutotuner(KernelInterface):
             and self._cache_eligible
             and not benchmark_run
             and not debug_mode
-            and not autograd_profiler._is_profiler_enabled
             and len(self.launchers) == 1
             # The fast path skips save_gpu_kernel. A later AOTI compile that reuses
             # this kernel must save its params again, because CudaKernelParamCache
             # is keyed by kernel name and shared by every compile in the process.
             and not launcher.store_cubin
         ):
+            self._cached_profiler_kwargs = self.get_profiler_kwargs(None, launcher)
             self._cached_launcher = self._build_fast_launcher(launcher) or launcher
         return result
 
