@@ -4202,14 +4202,14 @@ class SubgraphTracer(fx.Tracer):
                 trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
                 self.prev_inst = cur_inst
 
-        # update reference to original meta if we're tracing a new code object
-        is_retracing = False
+        # update reference to original meta if we're tracing a new code object;
+        # rebuilding it on every proxy is quadratic in the retraced graph's size
         if tx.f_code is not self._cur_code:
+            self._cur_code = tx.f_code
             orig_graphmodule_maybe = code_context.get_context(tx.f_code).get(
                 "orig_graphmodule", lambda: None
             )()
             if isinstance(orig_graphmodule_maybe, torch.fx.GraphModule):
-                is_retracing = True
                 self._orig_gm_meta = [
                     nd.meta for nd in orig_graphmodule_maybe.graph.nodes
                 ]
@@ -4221,6 +4221,7 @@ class SubgraphTracer(fx.Tracer):
                 self._orig_gm_meta = None
                 self._orig_gm_lineno_map = None
                 self._orig_gm_firstlineno = None
+        is_retracing = self._orig_gm_meta is not None
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
