@@ -108,6 +108,10 @@ def descr_repr(
 
 
 def _vt_cls_modeling(vt: VariableTracker, py_type: type) -> type | None:
+    if py_type is type:
+        return variables.TypeVariable
+    if py_type is object:
+        return variables.VariableTracker
     for cls in type(vt).__mro__:
         cpython_type = cls.__dict__.get("_cpython_type")
         if cpython_type is None:
