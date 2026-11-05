@@ -2621,6 +2621,23 @@ class TestSDPAFailureModes(NNTestCase):
         # before the fix, all rows past 2**32 // seq_len were garbage
         self.assertEqual(out, ref, atol=5e-3, rtol=5e-3)
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
+    @unittest.skipIf(TEST_WITH_ROCM, "The stride check is in the CUDA CUTLASS backward")
+    @parametrize("name", ["query", "key", "value"])
+    def test_mem_eff_attention_backward_rejects_int32_overflowing_stride(self, name):
+        # The backward kernel takes 32-bit row strides; larger ones used to
+        # wrap and read out of bounds. A length-1 sequence keeps the stride
+        # without the storage.
+        make_tensor = partial(torch.randn, 1, 1, 1, 64, device="cuda")
+        inputs = {"query": make_tensor(), "key": make_tensor(), "value": make_tensor()}
+        out, lse, seed, offset, _, _ = torch.ops.aten._efficient_attention_forward(*inputs.values(), None, None, None, 1, 1, 0.0, 0, True)
+        inputs[name] = inputs[name].as_strided((1, 1, 1, 64), (0, 2**31, 64, 1))
+        with self.assertRaisesRegex(RuntimeError, f"{name}.stride\\(1\\) overflows int32"):
+            torch.ops.aten._efficient_attention_backward(
+                torch.randn_like(out), *inputs.values(), None, out, None, None, 1, 1, lse, 0.0, seed, offset, 0, False
+            )
+
 
 def _get_block_size_n(device, head_dim, is_dropout, is_causal):
     # This should match the block sizes in the CUDA kernel
@@ -6184,6 +6201,44 @@ class TestSDPAAccelerator(NNTestCase):
             lambda _m: f"{_m}\nCK GQA seqlen_q==1 produced Inf ({msg})",
         )
         self.assertEqual(out, ref.to(out.dtype), atol=2e-2, rtol=2e-2)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support SDPA or pre-SM80 hardware",
+    )
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CK_SDPA,
+        "Regression is specific to the ROCm CK SDPA backend",
+    )
+    @setSdpaBackendsToDefaultFinally
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("head_dim", [64, 96, 128])
+    @parametrize("n_heads", [[8, 8], [8, 2]])
+    @parametrize("seqlen_k", [64, 1000])
+    def test_flash_attention_ck_backward_seqlen_q_1(self, device, dtype: torch.dtype, head_dim: int,
+                                                    n_heads: list[int], seqlen_k: int):
+        # On gfx950 the aiter asm backward kernel for head dims 65..128 returned
+        # wrong dq/dk/dv (or NaN, or faulted) when seqlen_q == 1.
+        torch.backends.cuda.preferred_rocm_fa_library("ck")
+        if torch.backends.cuda.preferred_rocm_fa_library() != torch._C._ROCmFABackend.Ck:
+            self.skipTest("CK SDPA backend not available")
+        num_heads_q, num_heads_kv = n_heads
+        q = torch.randn(2, num_heads_q, 1, head_dim, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(2, num_heads_kv, seqlen_k, head_dim, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(2, num_heads_kv, seqlen_k, head_dim, device=device, dtype=dtype, requires_grad=True)
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            out = F.scaled_dot_product_attention(q, k, v, enable_gqa=True)
+        grad_out = torch.randn_like(out)
+        grads = torch.autograd.grad(out, (q, k, v), grad_out)
+
+        q_ref, k_ref, v_ref = (t.detach().float().requires_grad_() for t in (q, k, v))
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            out_ref = F.scaled_dot_product_attention(q_ref, k_ref, v_ref, enable_gqa=True)
+        grads_ref = torch.autograd.grad(out_ref, (q_ref, k_ref, v_ref), grad_out.float())
+
+        tol = 2e-2 if dtype == torch.float16 else 6e-2
+        for name, actual, expected in zip(("out", "dq", "dk", "dv"), (out, *grads), (out_ref, *grads_ref)):
+            self.assertEqual(actual.float(), expected, atol=tol * expected.abs().max().item(), rtol=0, msg=name)
 
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(

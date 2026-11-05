@@ -36,6 +36,7 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
     TEST_MULTIGPU,
     tf32_on_and_off,
+    with_tf32_off,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -351,12 +352,9 @@ class CudaReproTests(TestCase):
                 biases.extend(node.args[3] for node in nodes)
 
             torch._dynamo.reset()
-            with (
-                config.patch(
-                    numerics="strict" if strict else "default",
-                    joint_custom_post_pass=capture_bias,
-                ),
-                sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+            with config.patch(
+                numerics="strict" if strict else "default",
+                joint_custom_post_pass=capture_bias,
             ):
                 compiled = torch.compile(fn, fullgraph=True)
                 actual = compiled(*args)
@@ -377,9 +375,13 @@ class CudaReproTests(TestCase):
         # Only compiler-proven zero masks may be removed; a runtime mask must
         # remain an FX input because its contents can change between calls.
         def runtime_mask_fn(query, key, value, attention_mask):
-            return F.scaled_dot_product_attention(
-                query, key, value, attn_mask=attention_mask
-            )
+            return aten._scaled_dot_product_efficient_attention.default(
+                query,
+                key,
+                value,
+                attention_mask.expand(batch_size, num_heads, seq_len, seq_len),
+                False,
+            )[0]
 
         padding_mask = torch.zeros(
             batch_size,
@@ -398,11 +400,10 @@ class CudaReproTests(TestCase):
 
         # Reuse the same compiled graph with different mask contents.
         padding_mask.zero_()
-        with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
-            self.assertEqual(
-                compiled_runtime_mask_fn(query, key, value, padding_mask),
-                runtime_mask_fn(query, key, value, padding_mask),
-            )
+        self.assertEqual(
+            compiled_runtime_mask_fn(query, key, value, padding_mask),
+            runtime_mask_fn(query, key, value, padding_mask),
+        )
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -2185,6 +2186,10 @@ class CudaReproTests(TestCase):
         emulate_precision_casts=False,
         emulate_precision_casts_on_saved_tensors=True,
     )
+    # With TF32 convs, the compiled and eager input grads differ by ~1e-3 on
+    # some GPUs (an A100 MIG slice), far outside the 1e-5 tolerance this fp32
+    # numerics check needs.
+    @with_tf32_off
     def test_conv_bias_no_extra_cast_for_fp32(self):
         # fp32 conv output is not low precision: no cast, unchanged numerics.
         conv, x = _make_conv()
@@ -3180,6 +3185,25 @@ def foo(x):
     return x + 1
 
 # somehow gives different results.. still, check that it doesn't error
+foo(torch.rand([256], device=\"{device_type}\"))
+"""
+
+        subprocess.run([sys.executable, "-c", script], check=True)
+
+    @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
+    def test_triton_interpret_pdl(self):
+        import subprocess
+
+        script = f"""
+import os
+os.environ["TRITON_INTERPRET"] = "1"
+os.environ["TORCHINDUCTOR_ENABLE_PDL"] = "1"
+import torch
+
+@torch.compile()
+def foo(x):
+    return x + 1
+
 foo(torch.rand([256], device=\"{device_type}\"))
 """
 
