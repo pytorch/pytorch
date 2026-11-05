@@ -3910,8 +3910,6 @@ make_fallback(aten.miopen_rnn, require_dense)
 make_fallback(aten.miopen_rnn_backward, require_contiguous)
 
 # Haven't checked but sound difficult / impossible
-make_fallback(aten._embedding_bag, require_contiguous)
-make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._embedding_bag_backward)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -8418,6 +8416,231 @@ def segment_reduce(
     return Pointwise.create(
         device=data.get_device(), dtype=dtype, inner_fn=mean_fn, ranges=out_size
     )
+
+
+fallback_embedding_bag = fallback_handler(
+    aten._embedding_bag.default, add_to_fallback_set=False
+)
+fallback_embedding_bag_forward_only = fallback_handler(
+    aten._embedding_bag_forward_only.default, add_to_fallback_set=False
+)
+
+
+def _embedding_bag(
+    fallback,
+    weight,
+    indices,
+    offsets,
+    scale_grad_by_freq=False,
+    mode=0,
+    sparse=False,
+    per_sample_weights=None,
+    include_last_offset=False,
+    padding_idx=-1,
+):
+    """Lower embedding_bag sum (mode 0) and mean (mode 1) to jagged reductions.
+
+    Bag b covers indices[offsets[b]:offsets[b + 1]]. Without
+    include_last_offset, offsets gets len(indices) appended first.
+    Returns (output, offset2bag, bag_size, max_indices) like the CUDA kernel;
+    the ATen backward reads the last three.
+    """
+    args = (
+        weight,
+        indices,
+        offsets,
+        scale_grad_by_freq,
+        mode,
+        sparse,
+        per_sample_weights,
+        include_last_offset,
+        padding_idx,
+    )
+    index_dtype = indices.get_dtype()
+    # Fall back for max (eager ignores NaN unless it comes first), for inputs
+    # the CUDA kernel promotes or rejects, and for no bags or no indices.
+    if (
+        mode not in (0, 1)
+        or not is_triton(weight)
+        or V.graph.cpp_wrapper
+        or V.graph.fx_wrapper
+        or len(weight.get_size()) != 2
+        or len(indices.get_size()) != 1
+        or len(offsets.get_size()) != 1
+        or index_dtype not in (torch.int32, torch.int64)
+        or offsets.get_dtype() != index_dtype
+        or (
+            per_sample_weights is not None
+            and per_sample_weights.get_dtype() != weight.get_dtype()
+        )
+        or V.graph.sizevars.statically_known_equals(
+            indices.get_size()[0] * (offsets.get_size()[0] - include_last_offset), 0
+        )
+    ):
+        # The CUDA kernel assumes contiguous inputs.
+        args, _ = require_contiguous(None, *args)
+        return fallback(*args)
+
+    device = weight.get_device()
+    dtype = weight.get_dtype()
+    acc_dtype = get_computation_dtype(dtype)
+    num_weights, dim = weight.get_size()
+    num_indices = indices.get_size()[0]
+    num_bags = offsets.get_size()[0] - int(include_last_offset)
+
+    # Calls over the same offsets share one JaggedRange, so they can fuse.
+    key = None
+    if isinstance(offsets.data, ir.StorageBox):
+        offsets.realize()
+        key = ("embedding_bag", offsets.get_name(), include_last_offset, num_indices)
+    if key in V.graph.jagged_offsets:
+        offsets, j_range = V.graph.jagged_offsets[key]
+    else:
+        if not include_last_offset:
+            offsets = constant_pad_nd(offsets, [0, 1], fill_value=num_indices)
+        offsets.realize()
+        j_range = JaggedRange("j")
+        if key is not None:
+            V.graph.jagged_offsets[key] = (offsets, j_range)
+
+    # The bound may only load offsets, so do not inline offsets computed from
+    # constants alone (e.g. arange for 2-D input).
+    with ir.ComputedBuffer.force_realize():
+        offsets_loader = offsets.make_loader()
+    indices_loader = indices.make_loader()
+    weight_loader = weight.make_loader()
+
+    def bag_bounds(b):
+        return offsets_loader([b]), offsets_loader([b + 1])
+
+    # for b in range(num_bags):
+    #     for d in range(D):
+    #         summed[b, d] = 0
+    #         for p in range(start[b], end[b]):  # jagged
+    #             if indices[p] != padding_idx:
+    #                 summed[b, d] += weight[indices[p], d] * per_sample_weights[p]
+    def summed_fn(index, rindex):
+        b, d = index
+        start, end = bag_bounds(b)
+        ops.register_jagged_range(end - start, j_range)
+        p = start + ops.index_expr(rindex[0], torch.int64)
+        p = ops.indirect_indexing(p, num_indices, wrap_neg=False)
+        word = indices_loader([p])
+        value = weight_loader([ops.indirect_indexing(word, num_weights), d])
+        value = ops.to_dtype(value, acc_dtype)
+        if per_sample_weights is not None:
+            scale = per_sample_weights.make_loader()([p])
+            value = value * ops.to_dtype(scale, acc_dtype)
+        if padding_idx >= 0:
+            is_padding = ops.eq(word, ops.constant(padding_idx, index_dtype))
+            value = ops.where(is_padding, ops.constant(0, acc_dtype), value)
+        return value
+
+    summed = TensorBox.create(
+        Reduction(
+            device=device,
+            dtype=acc_dtype,
+            inner_fn=summed_fn,
+            ranges=[num_bags, dim],
+            reduction_ranges=[j_range],
+            reduction_type="sum",
+            src_dtype=acc_dtype,
+            reduction_hint=ir.ReductionHint.DEFAULT,
+        )
+    )
+    summed.realize()
+
+    # for b in range(num_bags):
+    #     bag_size[b] = 0
+    #     for p in range(start[b], end[b]):  # jagged
+    #         bag_size[b] += indices[p] != padding_idx
+    if padding_idx >= 0:
+
+        def non_padding_fn(index, rindex):
+            start, end = bag_bounds(index[0])
+            ops.register_jagged_range(end - start, j_range)
+            p = start + ops.index_expr(rindex[0], torch.int64)
+            word = indices_loader([ops.indirect_indexing(p, num_indices)])
+            is_word = ops.ne(word, ops.constant(padding_idx, index_dtype))
+            return ops.to_dtype(is_word, index_dtype)
+
+        bag_size = TensorBox.create(
+            Reduction(
+                device=device,
+                dtype=index_dtype,
+                inner_fn=non_padding_fn,
+                ranges=[num_bags],
+                reduction_ranges=[j_range],
+                reduction_type="sum",
+                src_dtype=index_dtype,
+                reduction_hint=ir.ReductionHint.DEFAULT,
+            )
+        )
+        bag_size.realize()
+    else:
+        # Without padding, bag_size[b] = end[b] - start[b].
+        def length_fn(index):
+            start, end = bag_bounds(index[0])
+            return end - start
+
+        bag_size = Pointwise.create(
+            device=device, dtype=index_dtype, inner_fn=length_fn, ranges=[num_bags]
+        )
+
+    # for b in range(num_bags):
+    #     for d in range(D):
+    #         output[b, d] = summed[b, d] / max(bag_size[b], 1) if mean else summed[b, d]
+    if mode == 1 or acc_dtype != dtype:
+        summed_loader = summed.make_loader()
+        bag_size_loader = bag_size.make_loader()
+
+        def output_fn(index):
+            value = summed_loader(index)
+            if mode == 1:
+                n = ops.to_dtype(bag_size_loader([index[0]]), acc_dtype)
+                value = value / ops.maximum(n, ops.constant(1, acc_dtype))
+            return ops.to_dtype(value, dtype)
+
+        output = Pointwise.create(
+            device=device, dtype=dtype, inner_fn=output_fn, ranges=[num_bags, dim]
+        )
+    else:
+        output = summed
+
+    if include_last_offset:
+        # Eager leaves this trailing element uninitialized.
+        bag_size = constant_pad_nd(bag_size, [0, 1])
+
+    # for p in range(len(indices)):
+    #     offset2bag[p] = b such that start[b] <= p < end[b]
+    #                   = number of bag starts offsets[1:num_bags] that are <= p
+    offset2bag = bucketize(
+        iota(
+            num_indices,
+            start=0,
+            step=1,
+            dtype=index_dtype,
+            device=device,
+            requires_grad=False,
+        ),
+        slice_(offsets, 0, 1, num_bags),
+        out_int32=index_dtype == torch.int32,
+        right=True,
+    )
+
+    # max_indices is only filled for mode="max".
+    max_indices = empty_strided([0], [1], dtype=index_dtype, device=device)
+    return output, offset2bag, bag_size, max_indices
+
+
+@register_lowering(aten._embedding_bag.default, type_promotion_kind=None)
+def embedding_bag(*args, **kwargs):
+    return _embedding_bag(fallback_embedding_bag, *args, **kwargs)
+
+
+@register_lowering(aten._embedding_bag_forward_only.default, type_promotion_kind=None)
+def embedding_bag_forward_only(*args, **kwargs):
+    return _embedding_bag(fallback_embedding_bag_forward_only, *args, **kwargs)
 
 
 @register_lowering(aten.prod)
