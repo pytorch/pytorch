@@ -871,10 +871,11 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_basics_invalid_out_dtype(self, device) -> None:
+        # Only cuBLAS rejects an e5m2 output. Other backends compute it and the exact comparison fails.
         with self.assertRaises(
             TypeError if "mps" in device
-            else AssertionError if (torch.version.hip or "xpu" in device or "cpu" in device)
-            else RuntimeError
+            else RuntimeError if "cuda" in device and not torch.version.hip
+            else AssertionError
         ):
             self._test_tautological_mm(device, out_dtype=e5m2_type)
 
@@ -1747,10 +1748,10 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         scale_a = torch.tensor(1.0, device=device)
         scale_b = torch.tensor(1.0, device=device)
         bias = torch.full((m,), 4.0, device=device, dtype=torch.bfloat16)
-        # XPU and CPU supports the case when out_dtype is fp32 + bias. So we just test it with normal run.
-        if "xpu" not in device and "cpu" not in device:
+        # Only the CUDA and MPS kernels reject a bias with float32 output.
+        if "cuda" in device or "mps" in device:
             self.assertRaisesRegex(
-                ValueError if torch.cuda.is_available() or "mps" in device else RuntimeError,
+                ValueError,
                 "Bias is not supported when out_dtype is set to Float32",
                 lambda: scaled_mm_wrap(x, y, scale_a, scale_b, bias=bias, out_dtype=torch.float32),
             )
