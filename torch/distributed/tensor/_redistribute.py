@@ -482,6 +482,7 @@ def _optimize_transform_infos(
           - "too_few_transforms": Less than 2 transforms provided
           - "no_flattened_mesh": No flattened mesh exists for the required dimensions
           - "uneven_tensor_shape": For reduce_scatter, tensor dim not evenly divisible
+          - "non_ascending_mesh_dims": Transform or mesh layout order prevents flattening
         """
         if len(infos) < 2:
             return None, "too_few_transforms"
@@ -513,6 +514,12 @@ def _optimize_transform_infos(
             # descending order, the shard order isn't ascending and we can't flatten.
             if mesh_dims != sorted_mesh_dims[::-1]:
                 return None, "non_ascending_mesh_dims"
+        # Local mesh dim order may differ from root order after mesh composition.
+        # Check the layout before the DeviceMesh lookup, which rejects such slices.
+        mesh_layout = _MeshLayout([device_mesh._layout[d] for d in sorted_mesh_dims])
+        if not mesh_layout.collapse().check_sorted():
+            return None, "non_ascending_mesh_dims"
+
         # Use sorted dims for mesh lookup (required by DeviceMesh API)
         flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, sorted_mesh_dims)
         if flattened_mesh is None:
