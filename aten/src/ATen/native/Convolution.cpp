@@ -544,6 +544,10 @@ struct ConvParams {
          (input.scalar_type() == at::kHalf && mkldnn_fp16_device_check()))) {
       return true;
     }
+    // Without ACL, oneDNN runs dense and transposed convolutions via gemm, which is slower than Slow2d
+    if (mkldnn_lacks_aarch64_kernels() && !input.is_mkldnn() && (groups == 1 || transposed)) {
+      return false;
+    }
     return (input.is_mkldnn()) || // input is mkldnn Tensor
       (input.device().is_cpu() &&
        input.scalar_type() == kFloat && // only on CPU Float Tensors
@@ -884,6 +888,18 @@ static void check_input_same_type_as_parameters(
     const Tensor& input,
     const Tensor& weight) {
   check_input_same_type_as_parameters(input, weight, /*bias=*/ Tensor());
+}
+
+static void check_input_same_device_as_parameters(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias) {
+  TORCH_CHECK(input.device() == weight.device(),
+      "Expected all tensors to be on the same device, but got weight is on ", weight.device(),
+      ", different from other tensors on ", input.device());
+  TORCH_CHECK(!bias.defined() || input.device() == bias.device(),
+      "Expected all tensors to be on the same device, but got bias is on ", bias.device(),
+      ", different from other tensors on ", input.device());
 }
 
 #if AT_MKLDNN_ENABLED()
@@ -1344,6 +1360,12 @@ static ConvBackend _select_conv_backend(
     } else {
       return ConvBackend::Miopen;
     }
+#if AT_MKLDNN_ENABLED()
+  } else if (mkldnn_lacks_aarch64_kernels() && !need_backward && !input.is_mkldnn() &&
+             params.use_cpu_depthwise3x3_winograd(input, weight, bias)) {
+    // Faster than oneDNN's gemm-based convolution when oneDNN lacks optimized kernels
+    return ConvBackend::Winograd3x3Depthwise;
+#endif
   } else if (params.use_mkldnn(input, weight)) {
     if (params.transposed) {
       return ConvBackend::MkldnnTranspose;
@@ -1591,6 +1613,8 @@ at::Tensor _convolution(
 
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
   TORCH_CHECK(groups_ > 0, "non-positive groups is not supported");
+
+  check_input_same_device_as_parameters(input, weight, bias);
 
   ConvParams<int64_t> params;
   params.stride = expand_param_if_needed(stride_, "stride", dim);
