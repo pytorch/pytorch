@@ -2831,14 +2831,13 @@ def unfold(x, dimension, size, step):
 @register_lowering(aten.unsqueeze, type_promotion_kind=None)
 def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)
-    new_shape = list(x.get_size())
-    new_shape.insert(dim, sympy.S.One)
     if _cat_is_sole_consumer(V.graph.current_node):
         # Keep the view lazy so the cat can place the buffer instead of copying
         # it; nothing else sees the view, so freezing it would be premature.
-        data = x.data if isinstance(x, TensorBox) else x
-        if (lazy := ir.CatUnitDimView.try_create(data, new_shape)) is not None:
+        if (lazy := ir.CatUnsqueezeView.try_create(x, dim)) is not None:
             return TensorBox(lazy)
+    new_shape = list(x.get_size())
+    new_shape.insert(dim, sympy.S.One)
     return view(x, new_shape)
 
 

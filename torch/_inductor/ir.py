@@ -4227,24 +4227,31 @@ class View(GenericView):
 
 
 @ir_dataclass
-class CatUnitDimView(GenericView):
+class CatUnsqueezeView(GenericView):
     """
-    A size-1 reshape of a buffer whose only consumer is a cat.
+    A lazy unsqueeze of a buffer whose only consumer is a cat.
 
-    A ReinterpretView would freeze the buffer, so ConcatKernel could no longer
-    place it and would copy it instead. This stays lazy -- an index remap -- so
-    the cat places the buffer in its output slot, as a plain cat of the buffer
-    would. Only valid when nothing else can observe the view, which the caller
-    establishes; see ``lowering.unsqueeze``.
+    ``View.create`` would build a ReinterpretView and freeze the buffer, so
+    ConcatKernel could no longer place it and would copy it instead. This stays
+    lazy, so the cat places the buffer in its output slot, as a plain cat of the
+    buffer would. Only valid when nothing else can observe the view, which the
+    caller establishes; see ``lowering.unsqueeze``.
     """
+
+    dim: int
 
     @classmethod
-    def try_create(cls, x: IRNode, new_size: Sequence[Expr]) -> CatUnitDimView | None:
-        """The view, or None if ``x`` is not a buffer whose layout is still open.
+    def try_create(cls, x: IRNode, dim: int) -> CatUnsqueezeView | None:
+        """The view, or None if ``x`` is not a buffer the cat could place.
 
         That covers an unrealized Pointwise, a ReinterpretView, a frozen layout,
-        and an empty buffer, which the cat has no slot to place.
+        and an empty buffer, for which the cat has no slot.
         """
+        if isinstance(x, TensorBox):
+            return cls.try_create(x.data, dim)
+        # _validate_dim resolves through the shape env, so this can be a sympy
+        # Integer; SqueezeView.create requires a plain int.
+        dim = int(dim)
         if not (
             isinstance(x, StorageBox)
             and isinstance(x.data, ComputedBuffer)
@@ -4252,23 +4259,13 @@ class CatUnitDimView(GenericView):
             and not V.graph.sizevars.statically_known_equals(x.get_numel(), 0)
         ):
             return None
-        old_size = x.get_size()
-        sizevars = V.graph.sizevars
-        is_one = partial(sizevars.statically_known_equals, right=1)
-        old_dims = [i for i, s in enumerate(old_size) if not is_one(s)]
-        new_dims = [i for i, s in enumerate(new_size) if not is_one(s)]
-        if not sizevars.statically_known_list_equals(
-            [old_size[i] for i in old_dims], [new_size[i] for i in new_dims]
-        ):
-            return None
+        size = [*x.get_size()]
+        size.insert(dim, sympy.S.One)
 
         def reindex(index: Sequence[Expr]) -> Sequence[Expr]:
-            result: list[Expr] = [sympy.S.Zero] * len(old_size)
-            for old, new in zip(old_dims, new_dims):
-                result[old] = index[new]
-            return result
+            return [*index[:dim], *index[dim + 1 :]]
 
-        return cls(data=x, size=list(new_size), reindex=reindex)
+        return cls(data=x, size=size, reindex=reindex, dim=dim)
 
 
 @ir_dataclass
@@ -7298,9 +7295,9 @@ class ConcatKernel(NopKernel):
             # unwrap a TensorBox
             return cls.realize_into(src.data, dst, allow_alias)
 
-        if isinstance(src, CatUnitDimView) and allow_alias:
-            # place the buffer itself, in the slot with the same size-1 change
-            slot = View.create(dst, src.data.get_size())
+        if isinstance(src, CatUnsqueezeView) and allow_alias:
+            # place the buffer itself, in the slot with the size-1 dim dropped
+            slot = SqueezeView.create(dst, dim=src.dim)
             return cls.realize_into(src.data, slot, allow_alias)
 
         if isinstance(src, StorageBox) and allow_alias:

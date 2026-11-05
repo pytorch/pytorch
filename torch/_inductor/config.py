@@ -1176,7 +1176,7 @@ force_pointwise_cat = False
 # TODO: map out profitability and turn this on. It wins on inner-dimension cats
 # into a padded-row destination, and loses when it splits many narrow tail copies
 # into their own kernels, or when the cat is small enough to be launch-bound.
-# Stacks no longer need it: their size-1 views stay lazy (CatUnitDimView), so the
+# Stacks no longer need it: their size-1 views stay lazy (CatUnsqueezeView), so the
 # cat places those buffers with no copy to fuse.
 cat_fuse_computed_input_copies = False
 
