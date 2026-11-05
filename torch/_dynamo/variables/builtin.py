@@ -4338,7 +4338,7 @@ class ListBuiltinVariable(TypeVariable):
 
 
 def constant_fold(
-    fn: Callable,
+    fn: Callable[..., object],
     tx: "InstructionTranslatorBase",
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
