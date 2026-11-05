@@ -67,7 +67,6 @@ quantized_decomposed = torch.ops.quantized_decomposed
 
 inductor_decompositions = get_decompositions(
     [
-        aten._adaptive_avg_pool2d_backward,
         aten.adaptive_max_pool2d,
         aten.adaptive_max_pool3d.out,
         aten.index_select,
