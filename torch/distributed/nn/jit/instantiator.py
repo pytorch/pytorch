@@ -148,7 +148,7 @@ def instantiate_scriptable_remote_module_template(
         arrow_and_future_return_type=arrow_and_future_return_type_str,
         args=args_str,
         kwargs=kwargs_str,
-        jit_script_decorator="@torch.jit.script",
+        jit_script_decorator="@torch.jit._script.script",
     )
     return _do_instantiate_remote_module_template(
         generated_module_name, str_dict, enable_moving_cpu_tensors_to_cuda

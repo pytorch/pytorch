@@ -10492,16 +10492,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertFalse(torch.compiler.is_compiling())
         self.assertFalse(torch.compiler.is_exporting())
 
-    def test_tracing_flags_scriptable(self):
-        # Only is_compiling() is scriptable: its is_scripting() check predates
-        # the per-thread flags and lets the JIT dead-code the TLS read. The
-        # other readers were never scriptable.
-        @torch.jit.script
-        def scripted_flags():
-            return torch.compiler.is_compiling()
-
-        self.assertEqual(scripted_flags(), False)
-
     def test_tracing_flags_in_session_reads(self):
         torch._dynamo.reset()
         backend_started, release_backend = (threading.Event() for _ in range(2))

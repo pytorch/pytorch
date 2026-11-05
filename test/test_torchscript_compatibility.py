@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: jit"]
 
 import io
+import threading
 import unittest
 import warnings
 
@@ -95,6 +96,23 @@ class TestTorchScriptCompatibility(TestCase):
             warnings.simplefilter("ignore", UserWarning)
             loaded = torch.load(archive, weights_only=False)
         self.assertEqual(loaded(torch.tensor([2.0])), torch.tensor([3.0]))
+
+    def test_thread_safe_error_stacks(self):
+        callstacks = []
+
+        def callstack_creator():
+            factory = torch._C._jit_tree_views.SourceRangeFactory(
+                "source code", "a.py", 1, 0
+            )
+            callstack = torch._C.CallStack("a", factory.make_range(1, 0, 1))
+            callstacks.append(callstack)
+
+        thread = threading.Thread(target=callstack_creator)
+        thread.start()
+        thread.join()
+        self.assertEqual(len(callstacks), 1)
+        del callstacks[0]
+        self.assertEqual(callstacks, [])
 
     def test_ordinary_checkpoint_does_not_warn(self):
         archive = io.BytesIO()

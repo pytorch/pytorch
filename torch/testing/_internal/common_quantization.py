@@ -863,11 +863,11 @@ class QuantizationTestCase(TestCase):
                 )
 
     def checkScriptable(self, orig_mod, calib_data, check_save_load=False):
-        scripted = torch.jit.script(orig_mod)
+        scripted = torch.jit._script.script(orig_mod)
         self._checkScriptable(orig_mod, scripted, calib_data, check_save_load)
 
         # Use first calib_data entry as trace input
-        traced = torch.jit.trace(orig_mod, calib_data[0])
+        traced = torch.jit._trace.trace(orig_mod, calib_data[0])
         self._checkScriptable(orig_mod, traced, calib_data, check_save_load)
 
     # Call this twice: once for a scripted module and once for a traced module
@@ -876,10 +876,10 @@ class QuantizationTestCase(TestCase):
 
         # Test save/load
         buffer = io.BytesIO()
-        torch.jit.save(script_mod, buffer)
+        torch.jit._serialization.save(script_mod, buffer)
 
         buffer.seek(0)
-        loaded_mod = torch.jit.load(buffer)
+        loaded_mod = torch.jit._serialization.load(buffer)
         # Pending __get_state_ and __set_state__ support
         # See tracking task https://github.com/pytorch/pytorch/issues/23984
         if check_save_load:
@@ -1385,7 +1385,7 @@ class QuantizationLiteTestCase(QuantizationTestCase):
         # Compares the numerical outputs for script and lite modules
         qengine = "qnnpack"
         with override_quantized_engine(qengine):
-            script_module = torch.jit.script(model)
+            script_module = torch.jit._script.script(model)
             script_module_result = script_module(input)
 
             max_retry = 5
