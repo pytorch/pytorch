@@ -690,18 +690,21 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
   // With the lock dropped: both calls go into the backend, and the callback
   // runs inline if the op has already finished -- see the lock-order note.
   c10::intrusive_ptr<c10::ivalue::Future> result;
-  try {
-    result = args.work->getFutureResult();
-  } catch (const c10::NotImplementedError&) {
-    // This Work type reports no result (e.g. ucc, mpi, nccl2's coalesced p2p
-    // sentinel). Not a warning: the default nccl2 path hits it.
-  } catch (const std::exception& e) {
-    // Unexpected: retire this op at issue rather than fail the collective. It
-    // will likely fail for every op, so warn once.
-    if (!warned_future_result_.exchange(true)) {
-      const auto* err = dynamic_cast<const c10::Error*>(&e);
-      LOG(WARNING) << "FlightRecorderHook: getFutureResult failed: "
-                   << (err ? err->what_without_backtrace() : e.what());
+  // Asked first: Work types with no result future (e.g. ucc, mpi, nccl2's
+  // coalesced p2p sentinel) would otherwise throw for every op.
+  if (args.work->hasFutureResult()) {
+    try {
+      result = args.work->getFutureResult();
+    } catch (const c10::NotImplementedError&) {
+      // The Work found it has none after all. Expected, so not a warning.
+    } catch (const std::exception& e) {
+      // Unexpected: retire this op at issue rather than fail the collective.
+      // It will likely fail for every op, so warn once.
+      if (!warned_future_result_.exchange(true)) {
+        const auto* err = dynamic_cast<const c10::Error*>(&e);
+        LOG(WARNING) << "FlightRecorderHook: getFutureResult failed: "
+                     << (err ? err->what_without_backtrace() : e.what());
+      }
     }
   }
   if (!result) {
