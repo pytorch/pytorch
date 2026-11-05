@@ -1578,7 +1578,9 @@ Returns:
 The operation a pre/post hook is firing for. Values mostly follow the
 dispatcher ops, so e.g. ``ALLGATHER_BASE`` (``all_gather_into_tensor``) is
 distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
-``recv`` from any source reports ``RECV``.)")
+``recv`` from any source reports ``RECV``. ``SPLIT``, ``NEW_WINDOW`` and
+``RECONFIGURE`` fire with no tensors; the post-hook ``work`` is ``None`` for
+``SPLIT`` and ``NEW_WINDOW``.)")
       .value("SEND", ::c10d::HookOpName::SEND)
       .value("RECV", ::c10d::HookOpName::RECV)
       .value("BROADCAST", ::c10d::HookOpName::BROADCAST)
@@ -1603,6 +1605,7 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
           "REDUCE_SCATTER_TENSOR_COALESCED",
           ::c10d::HookOpName::REDUCE_SCATTER_TENSOR_COALESCED)
       .value("ALLTOALL_BASE", ::c10d::HookOpName::ALLTOALL_BASE)
+      .value("RECONFIGURE", ::c10d::HookOpName::RECONFIGURE)
       .value("UNKNOWN", ::c10d::HookOpName::UNKNOWN);
 
   py::class_<::c10d::PreHookArgs>(
@@ -1651,7 +1654,8 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
       .def_readwrite(
           "work",
           &::c10d::PostHookArgs::work,
-          "``Work`` handle of the issued operation; may be ``None``.")
+          "``Work`` handle of the issued operation; ``None`` for ``SPLIT`` and "
+          "``NEW_WINDOW`` and may be ``None`` for synchronous operations.")
       .def_readwrite(
           "op_id",
           &::c10d::PostHookArgs::op_id,
@@ -3387,10 +3391,6 @@ Args:
               &::c10d::ProcessGroup::unregisterAbortHook,
               py::arg("hook_id"),
               "Remove the abort hook registered with ``hook_id``.")
-          .def_property_readonly(
-              "supports_completion_hooks",
-              &::c10d::ProcessGroup::supportsCompletionHooks,
-              "Whether the default backend reports operation completion to completion hooks, which can only be registered from C++.")
           .def(
               "register_pre_hook",
               &::c10d::ProcessGroup::registerPreHook,
@@ -3422,7 +3422,8 @@ Args:
 Register ``hook`` to be called with a ``PostHookArgs`` after each operation
 issued through this process group is issued, not when it completes; wait on
 ``PostHookArgs.work`` to observe completion. If a hook raises, the operation
-has already been issued but its ``Work`` is not returned to the caller.
+has already been issued but its result (``Work``, new group or window) is not
+returned to the caller.
 Otherwise behaves like ``register_pre_hook``.
 
 Args:
@@ -3624,10 +3625,6 @@ Args:
               &::c10d::Backend::unregisterAbortHook,
               py::arg("hook_id"),
               "Remove the abort hook registered with ``hook_id``.")
-          .def_property_readonly(
-              "supports_completion_hooks",
-              &::c10d::Backend::supportsCompletionHooks,
-              "Whether the backend reports operation completion to completion hooks, which can only be registered from C++.")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -5084,8 +5081,22 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                 Also, users can use ``fut.then(call_back_func)`` to register a callback function to be called
                 when the work is completed, without blocking the current thread.
 
-            .. warning ::
-                ``get_future_result`` API supports NCCL
+            Raises ``NotImplementedError`` if the backend's work does not support it.
+
+            Gloo send/recv works complete the future only in ``wait()``; it stays
+            pending until the work is waited on.
+
+            Python ``Work`` subclasses may override this to return a CPU future of
+            a ``WorkResult`` or its int value (not ``bool``); other values read
+            as ``COMM_ERROR``. If it is not overridden, the result is derived from
+            an overridden CPU ``get_future``: ``SUCCESS``, or ``COMM_ERROR`` if it fails.
+            Returning ``None`` or a device-aware future, or raising
+            ``NotImplementedError``, means not implemented; any other
+            non-``Future`` return raises ``TypeError``; other exceptions from
+            the override propagate. Calling an overridden ``get_future_result``
+            directly from Python skips these checks.
+            FlightRecorder calls it once per op as the op is issued, so
+            overrides must be cheap and must not block.
            )")
           .def(
               "get_future",
@@ -5487,7 +5498,11 @@ Attach a FlightRecorder hook to a process group. Collectives issued through
 the group are recorded into the generic flight recorder ring buffer (dump
 with _dump_fr_trace / _dump_fr_trace_json), regardless of whether the
 backend has native FlightRecorder support. The hook detaches when remove()
-is called or the returned handle is garbage collected.
+is called or the returned handle is garbage collected. If the backend times
+collectives the hook holds each Work (and its output tensors) until its
+result and the group's next collective; call remove() rather than dropping
+the handle, so pending result callbacks don't destroy it, with those Works,
+on a backend thread.
 
 global_ranks maps the group's ranks to world ranks; it names the per-rank
 dump file and is published as the group's membership. Leave it empty only

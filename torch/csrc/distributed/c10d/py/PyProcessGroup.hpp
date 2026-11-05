@@ -64,6 +64,120 @@ class PyProcessGroup : public ProcessGroup {
 
       return Work::getFuture();
     }
+
+    // Uses get_future_result if overridden, else derives the result from an
+    // overridden get_future: SUCCESS, or COMM_ERROR if it fails. Throws
+    // NotImplementedError if neither is overridden, the override returns None
+    // or raises NotImplementedError, or the future is device-aware (it may
+    // complete at enqueue).
+    c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override {
+      pybind11::gil_scoped_acquire gil;
+      auto override = pybind11::get_override(
+          static_cast<const Work*>(this), "get_future_result");
+      bool derived = !override;
+      if (derived) {
+        override = pybind11::get_override(
+            static_cast<const Work*>(this), "get_future");
+      }
+      if (!override) {
+        return Work::getFutureResult();
+      }
+      py::object o;
+      try {
+        o = override();
+      } catch (py::error_already_set& e) {
+        if (e.matches(PyExc_NotImplementedError)) {
+          // e.what() would format the Python traceback FR discards.
+          TORCH_CHECK_NOT_IMPLEMENTED(
+              false,
+              "getFutureResult not implemented: ",
+              py::str(e.value()).cast<std::string>());
+        }
+        throw;
+      }
+      TORCH_CHECK_NOT_IMPLEMENTED(
+          !o.is_none(), "getFutureResult not implemented: future is None");
+      TORCH_CHECK_TYPE(
+          py::isinstance<torch::jit::PythonFutureWrapper>(o),
+          derived ? "get_future" : "get_future_result",
+          " must return a torch.futures.Future, got ",
+          py::str(py::type::of(o)).cast<std::string>());
+      auto pyFut = o.cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>();
+      TORCH_CHECK_NOT_IMPLEMENTED(
+          pyFut->fut->devices().empty(),
+          "getFutureResult not implemented: future is device-aware");
+      auto result =
+          c10::make_intrusive<c10::ivalue::Future>(c10::AnyEnumType::get());
+      // May run without the GIL, e.g. when a backend thread completes the
+      // future. pyFut is held weakly so a future that never completes doesn't
+      // keep itself alive through its own callback, unless it already unwraps
+      // its value (collect_all), which must survive until the callback runs.
+      std::weak_ptr<torch::jit::PythonFutureWrapper> weakFut = pyFut;
+      auto unwrapFut = pyFut->unwrap_func ? pyFut : nullptr;
+      pyFut->fut->addCallback(
+          [result, weakFut, unwrapFut, derived](c10::ivalue::Future& f) {
+            result->markCompleted(c10::IValue(static_cast<uint8_t>(
+                toWorkResult(f, weakFut.lock(), derived))));
+          });
+      return result;
+    }
+
+   private:
+    static WorkResult toWorkResult(
+        c10::ivalue::Future& f,
+        const std::shared_ptr<torch::jit::PythonFutureWrapper>& pyFut,
+        bool derived) {
+      if (f.hasError()) {
+        return WorkResult::COMM_ERROR;
+      }
+      // Future.set_exception and collect_all raise from value(), not as a
+      // future error. set_exception holds pyFut while the callbacks run, so
+      // an expired pyFut has no unwrap_func.
+      bool unwrap = pyFut && pyFut->unwrap_func;
+      if (!unwrap) {
+        if (derived) {
+          return WorkResult::SUCCESS;
+        }
+        if (f.value().isInt()) {
+          return checkedWorkResult(f.value().toInt());
+        }
+      }
+      pybind11::gil_scoped_acquire gil;
+      try {
+        py::object v =
+            unwrap ? pyFut->value() : torch::jit::toPyObject(f.value());
+        if (derived) {
+          return WorkResult::SUCCESS;
+        }
+        // bool is an int subclass but not a WorkResult. WorkResult itself
+        // converts via __index__; floats are rejected rather than truncated.
+        if (PyBool_Check(v.ptr()) || !PyIndex_Check(v.ptr())) {
+          return WorkResult::COMM_ERROR;
+        }
+        auto i = py::reinterpret_steal<py::object>(PyNumber_Index(v.ptr()));
+        if (!i) {
+          PyErr_Clear();
+          return WorkResult::COMM_ERROR;
+        }
+        return checkedWorkResult(i.cast<int64_t>());
+      } catch (...) {
+        return WorkResult::COMM_ERROR;
+      }
+    }
+
+    // Values outside WorkResult read as COMM_ERROR. Keep in sync with
+    // WorkResult (Work.hpp).
+    static WorkResult checkedWorkResult(int64_t v) {
+      switch (v) {
+        case static_cast<int64_t>(WorkResult::SUCCESS):
+        case static_cast<int64_t>(WorkResult::TIMEOUT):
+        case static_cast<int64_t>(WorkResult::COMM_ERROR):
+        case static_cast<int64_t>(WorkResult::UNKNOWN):
+          return static_cast<WorkResult>(v);
+        default:
+          return WorkResult::COMM_ERROR;
+      }
+    }
   };
 
 #define WORK_OVERRIDE(cname, name, ...)                                       \
@@ -157,10 +271,6 @@ class PyProcessGroup : public ProcessGroup {
 
     std::chrono::milliseconds getTimeout() const override {
       return work_->getTimeout();
-    }
-
-    uint64_t getCompletionKey() const override {
-      return work_->getCompletionKey();
     }
 
    private:

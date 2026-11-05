@@ -5,6 +5,7 @@ import gc
 import inspect
 import os
 import types
+import unittest
 import weakref
 from datetime import timedelta
 
@@ -15,6 +16,7 @@ from torch._C._distributed_c10d import (
     ErrorType,
     FakeStore,
     ReconfigureOptions,
+    WorkResult,
 )
 from torch.distributed.distributed_c10d import (
     _coalescing_manager,
@@ -30,6 +32,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_CUDA,
     TestCase,
 )
 
@@ -695,6 +698,241 @@ class TestPyBackend(TestCase):
         work.synchronize()
         work.block_current_stream()
         self.assertEqual(calls, ["synchronize", "block_current_stream"])
+
+    def test_work_future_result(self) -> None:
+        backend = RecordingBackend(0, 1)
+        group = create_process_group(backend)
+
+        # Derived from get_future.
+        work = group.allreduce([torch.zeros(2)])
+        self.assertEqual(
+            WorkResult(work.get_future_result().wait()), WorkResult.SUCCESS
+        )
+
+        class FailedWork(RecordingWork):
+            def get_future(self):
+                fut = torch.futures.Future()
+                fut.set_exception(RuntimeError("failed"))
+                return fut
+
+        backend._new_work = lambda result=None: FailedWork(result, backend)
+        work = group.allreduce([torch.zeros(2)])
+        self.assertEqual(
+            WorkResult(work.get_future_result().wait()), WorkResult.COMM_ERROR
+        )
+
+        class ResultWork(RecordingWork):
+            def get_future_result(self):
+                fut = torch.futures.Future()
+                fut.set_result(int(WorkResult.TIMEOUT))
+                return fut
+
+        backend._new_work = lambda result=None: ResultWork(result, backend)
+        work = group.allreduce([torch.zeros(2)])
+        self.assertEqual(
+            WorkResult(work.get_future_result().wait()), WorkResult.TIMEOUT
+        )
+
+        # Completed after get_future_result returns, so the result is read by
+        # the completion callback.
+        class PendingWork(RecordingWork):
+            def get_future(self):
+                return pending
+
+        class PendingResultWork(RecordingWork):
+            def get_future_result(self):
+                return pending
+
+        def raise_error(_):
+            raise RuntimeError("failed")
+
+        class CollectWork(RecordingWork):
+            def get_future(self):
+                return torch.futures.collect_all([pending])
+
+        class ThenWork(RecordingWork):
+            def get_future(self):
+                return pending.then(lambda f: None)
+
+        class ThenResultWork(RecordingWork):
+            def get_future_result(self):
+                return pending.then(lambda f: int(WorkResult.TIMEOUT))
+
+        class BadIndex:
+            def __index__(self):
+                raise ValueError("bad index")
+
+        # Errors as a future error, not via set_exception.
+        class ErroredWork(RecordingWork):
+            def get_future(self):
+                return pending.then(raise_error)
+
+        cases = [
+            (PendingWork, lambda: pending.set_result(None), WorkResult.SUCCESS),
+            (
+                PendingWork,
+                lambda: pending.set_exception(RuntimeError("failed")),
+                WorkResult.COMM_ERROR,
+            ),
+            (
+                PendingResultWork,
+                lambda: pending.set_result(int(WorkResult.TIMEOUT)),
+                WorkResult.TIMEOUT,
+            ),
+            (ErroredWork, lambda: pending.set_result(None), WorkResult.COMM_ERROR),
+            # Unreferenced futures completed from C++ after get_future_result
+            # returns.
+            (
+                CollectWork,
+                lambda: pending.set_exception(RuntimeError("failed")),
+                WorkResult.COMM_ERROR,
+            ),
+            (CollectWork, lambda: pending.set_result(None), WorkResult.SUCCESS),
+            (ThenWork, lambda: pending.set_result(None), WorkResult.SUCCESS),
+            (ThenResultWork, lambda: pending.set_result(None), WorkResult.TIMEOUT),
+            (
+                PendingResultWork,
+                lambda: pending.set_exception(RuntimeError("failed")),
+                WorkResult.COMM_ERROR,
+            ),
+            (
+                PendingResultWork,
+                lambda: pending.set_result(int(WorkResult.UNKNOWN)),
+                WorkResult.UNKNOWN,
+            ),
+            (
+                PendingResultWork,
+                lambda: pending.set_result(int(WorkResult.COMM_ERROR)),
+                WorkResult.COMM_ERROR,
+            ),
+            (
+                PendingResultWork,
+                lambda: pending.set_result(WorkResult.TIMEOUT),
+                WorkResult.TIMEOUT,
+            ),
+            (PendingResultWork, lambda: pending.set_result(7), WorkResult.COMM_ERROR),
+            (
+                PendingResultWork,
+                lambda: pending.set_result(1.0),
+                WorkResult.COMM_ERROR,
+            ),
+            (
+                PendingResultWork,
+                lambda: pending.set_result(None),
+                WorkResult.COMM_ERROR,
+            ),
+            (
+                PendingResultWork,
+                lambda: pending.set_result(True),
+                WorkResult.COMM_ERROR,
+            ),
+            (
+                PendingResultWork,
+                lambda: pending.set_result(BadIndex()),
+                WorkResult.COMM_ERROR,
+            ),
+        ]
+        for i, (cls, complete, expected) in enumerate(cases):
+            with self.subTest(i=i):
+                pending = torch.futures.Future()
+                backend._new_work = lambda result=None, cls=cls: cls(result, backend)
+                result = group.allreduce([torch.zeros(2)]).get_future_result()
+                self.assertFalse(result.done())
+                complete()
+                self.assertTrue(result.done())
+                self.assertEqual(WorkResult(result.wait()), expected)
+
+        # A C++ int result, already completed, is read inline.
+        class CppResultWork(RecordingWork):
+            def get_future_result(self):
+                return torch._C._distributed_c10d.FakeWork().get_future_result()
+
+        backend._new_work = lambda result=None: CppResultWork(result, backend)
+        work = group.allreduce([torch.zeros(2)])
+        self.assertEqual(
+            WorkResult(work.get_future_result().wait()), WorkResult.SUCCESS
+        )
+
+        class NoFutureWork(dist.Work):
+            def wait(self, timeout=timedelta(0)):
+                return True
+
+        class NoneFutureWork(NoFutureWork):
+            def get_future(self):
+                return None
+
+        for cls in (NoFutureWork, NoneFutureWork):
+            backend._new_work = lambda result=None, cls=cls: cls()
+            work = group.allreduce([torch.zeros(2)])
+            with self.assertRaisesRegex(
+                NotImplementedError, "getFutureResult not implemented"
+            ):
+                work.get_future_result()
+
+        # Translated to a C++ NotImplementedError, which FlightRecorder expects.
+        class RaisingFutureWork(NoFutureWork):
+            def get_future_result(self):
+                raise NotImplementedError("custom")
+
+        backend._new_work = lambda result=None: RaisingFutureWork()
+        work = group.allreduce([torch.zeros(2)])
+        with self.assertRaisesRegex(
+            NotImplementedError, "getFutureResult not implemented: custom"
+        ):
+            work.get_future_result()
+
+        # Other exceptions propagate.
+        class SuperFutureWork(NoFutureWork):
+            def get_future(self):
+                return super().get_future()
+
+        backend._new_work = lambda result=None: SuperFutureWork()
+        work = group.allreduce([torch.zeros(2)])
+        with self.assertRaisesRegex(
+            RuntimeError, "Work::getFuture not implemented"
+        ) as cm:
+            work.get_future_result()
+        self.assertNotIsInstance(cm.exception, NotImplementedError)
+
+        class IntWork(NoFutureWork):
+            def get_future_result(self):
+                return int(WorkResult.SUCCESS)
+
+        class IntFutureWork(NoFutureWork):
+            def get_future(self):
+                return 1
+
+        for cls, name in (
+            (IntWork, "get_future_result"),
+            (IntFutureWork, "get_future"),
+        ):
+            backend._new_work = lambda result=None, cls=cls: cls()
+            work = group.allreduce([torch.zeros(2)])
+            with self.assertRaisesRegex(
+                TypeError, f"{name} must return a torch.futures.Future"
+            ):
+                work.get_future_result()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    def test_work_future_result_device_aware(self) -> None:
+        # A device-aware future may complete at enqueue, so it says nothing
+        # about when the op finished.
+        backend = RecordingBackend(0, 1)
+        group = create_process_group(backend)
+
+        class DeviceWork(RecordingWork):
+            def get_future(self):
+                return torch.futures.Future(devices=[torch.device("cuda", 0)])
+
+        class DeviceResultWork(RecordingWork):
+            def get_future_result(self):
+                return torch.futures.Future(devices=[torch.device("cuda", 0)])
+
+        for cls in (DeviceWork, DeviceResultWork):
+            backend._new_work = lambda result=None, cls=cls: cls(result, backend)
+            work = group.allreduce([torch.zeros(2)])
+            with self.assertRaisesRegex(NotImplementedError, "device-aware"):
+                work.get_future_result()
 
     def test_collective_returns_none(self) -> None:
         backend = RecordingBackend(0, 1)

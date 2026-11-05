@@ -3,9 +3,11 @@
 import os
 import unittest
 from datetime import timedelta
+from unittest import mock
 
 import torch
 import torch.distributed as dist
+from torch._C._distributed_c10d import WorkResult
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
@@ -275,9 +277,18 @@ class TestNCCL4PyBackendCollectives(MultiProcContinuousTest):
         t1 = torch.ones(4, device=device) * (self.rank + 1)
         t2 = torch.ones(4, device=device) * (self.rank + 1) * 10
         backend.start_coalescing()
-        backend.allreduce([t1], dist.AllreduceOptions())
+        coalesced = backend.allreduce([t1], dist.AllreduceOptions())
         backend.allreduce([t2], dist.AllreduceOptions())
         work = backend.end_coalescing()
+        with self.assertRaisesRegex(NotImplementedError, "coalesced op"):
+            coalesced.get_future_result()
+        # Through PyWork, as FlightRecorderHook calls it.
+        with self.assertRaisesRegex(
+            NotImplementedError, "getFutureResult not implemented: coalesced op"
+        ):
+            dist.Work.get_future_result(coalesced)
+        result = dist.Work.get_future_result(work)
+        self.assertEqual(WorkResult(result.wait()), WorkResult.SUCCESS)
         work.wait()
         torch.cuda.synchronize(device)
         self.assertEqual(t1, torch.full((4,), 3.0, device=device))
@@ -293,6 +304,26 @@ class TestNCCL4PyBackendCollectives(MultiProcContinuousTest):
         torch.cuda.synchronize(device)
         expected = torch.full((4,), 3.0, device=device)
         self.assertEqual(t, expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_get_future_result(self):
+        device = torch.device(f"cuda:{self.rank}")
+        t = torch.ones(4, device=device) * (self.rank + 1)
+        work = dist.all_reduce(t, async_op=True)
+        result = work.get_future_result().wait()
+        self.assertEqual(WorkResult(result), WorkResult.SUCCESS)
+        self.assertEqual(t, torch.full((4,), 3.0, device=device))
+
+        # wait() clears the events; the result still tracks the kernels.
+        work = dist.all_reduce(t, async_op=True)
+        work.wait()
+        backend_mod = torch.distributed._nccl4py.backend
+        with mock.patch.object(
+            backend_mod, "stream_complete", wraps=backend_mod.stream_complete
+        ) as monitor:
+            result = dist.Work.get_future_result(work)
+        self.assertEqual(monitor.call_count, 1)
+        self.assertEqual(WorkResult(result.wait()), WorkResult.SUCCESS)
 
 
 @skip_unless_nccl4py

@@ -18,6 +18,7 @@ if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
+from torch._C._distributed_c10d import HookOpName
 from torch.distributed.distributed_c10d import (
     PutOptions,
     SignalOptions,
@@ -240,6 +241,30 @@ class AbstractWindowTest:
     def test_new_window_with_tensor(self):
         self._init_backend()
         self._window_ring_put(1024, torch.float, False, True)
+
+    def test_new_window_fires_hooks(self):
+        self._init_backend()
+        pg = dist.group.WORLD
+        pre = []
+        post = []
+        pg.register_pre_hook(
+            0,
+            lambda args: pre.append((args.name, args.op_id, args.root, args.async_op)),
+        )
+        pg.register_post_hook(
+            0, lambda args: post.append((args.name, args.op_id, args.work is None))
+        )
+        try:
+            dist._new_window()
+        finally:
+            pg.unregister_pre_hook(0)
+            pg.unregister_post_hook(0)
+
+        self.assertEqual(len(pre), 1)
+        name, op_id, root, async_op = pre[0]
+        self.assertEqual(name, HookOpName.NEW_WINDOW)
+        self.assertEqual((root, async_op), (-1, False))
+        self.assertEqual(post, [(HookOpName.NEW_WINDOW, op_id, True)])
 
     def test_map_remote_tensor_local(self):
         self._init_backend()
