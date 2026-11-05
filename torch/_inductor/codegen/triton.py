@@ -135,10 +135,10 @@ from .simd import (
 )
 from .simd_kernel_features import tiling_scores_suggest_inner_reduction
 from .triton_utils import (
-    config_of,
     equal_1_arg_indices,
     is_unaligned_buffer_name,
     select_tile_hint,
+    set_triton_meta_configs,
     should_unwrap_unspec_arg,
     signature_to_meta,
     triton_meta_device_props,
@@ -8246,13 +8246,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._filter_pdl(self.body)
 
         # Computed after codegen_body() so self.atomic_add_found is accurate.
-        triton_meta["configs"] = [
-            config_of(
-                signature,
-                skip_cpp_wrapper_input_tensor_alignment=True,
-                pointer_range_override=self.pointer_range_override(),
-            )
-        ]
+        set_triton_meta_configs(
+            triton_meta,
+            inductor_meta,
+            signature,
+            skip_cpp_wrapper_input_tensor_alignment=True,
+            pointer_range_override=self.pointer_range_override(),
+        )
 
         for helper in self.helper_functions:
             code.writeline("")
