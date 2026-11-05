@@ -1,4 +1,15 @@
-"""Diffusion benchmark components and the legacy pipeline command line."""
+"""Repeatable torch.compile benchmarks for pretrained diffusion pipelines.
+
+Each requested scenario runs in a fresh worker with an isolated compiler cache.
+The parent process writes one CSV summary and a JSON-lines artifact compatible
+with the PyTorch OSS benchmark database.
+
+Examples:
+    python compile_benchmark.py --model auraflow --mode full --cudagraphs
+    python compile_benchmark.py --model flux --mode full --backend eager
+    python compile_benchmark.py --model tiny_stable_diffusion --mode all \
+        --check-outputs --output results.csv
+"""
 
 from __future__ import annotations
 
@@ -17,12 +28,11 @@ import signal
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
-
-import torch
 
 
 if TYPE_CHECKING:
@@ -1683,192 +1693,256 @@ def write_outputs(csv_path: str | Path, results: list[dict[str, Any]]) -> Path:
     return json_output
 
 
-def compile_model(model, mode, block_types, backend="inductor"):
-    from torch._higher_order_ops.invoke_subgraph import mark_compile_region
-
-    if mode == "full":
-        model.compile(backend=backend, fullgraph=True, mode="reduce-overhead")
-    elif mode == "regional":
-        for submod in model.modules():
-            if isinstance(submod, block_types):
-                print("Compiling", submod.__class__)
-                submod.compile(backend=backend, fullgraph=True)
-    elif mode == "hierarchical":
-        for submod in model.modules():
-            if isinstance(submod, block_types):
-                submod.__class__.forward = mark_compile_region(submod.__class__.forward)
-        model.compile(backend=backend, fullgraph=True)
-
-
-def bench(run_fn, warmup_steps=1, bench_steps=50):
-    run_fn(warmup_steps)
-    t0 = time.perf_counter()
-    run_fn(bench_steps)
-    t1 = time.perf_counter()
-    print(f"{t1 - t0:.3f}s")
-
-
-def auraflow_benchmark(mode, backend="inductor"):
-    import diffusers
-    from diffusers import (
-        AuraFlowPipeline,
-        AuraFlowTransformer2DModel,
-        GGUFQuantizationConfig,
+def _execution_from_args(args: argparse.Namespace) -> ExecutionConfig:
+    if args.warmups < 0:
+        raise ValueError("--warmups must be non-negative")
+    if args.repetitions < 1:
+        raise ValueError("--repetitions must be positive")
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        raise ValueError("--timeout must be finite and positive")
+    if args.num_threads is not None and args.num_threads < 1:
+        raise ValueError("--num-threads must be positive")
+    return ExecutionConfig(
+        backend=args.backend,
+        cudagraphs=args.cudagraphs,
+        warmups=args.warmups,
+        repetitions=args.repetitions,
+        timeout_s=args.timeout,
+        device=args.device,
+        dtype=args.dtype,
+        num_threads=args.num_threads,
     )
 
-    transformer = AuraFlowTransformer2DModel.from_single_file(
-        "https://huggingface.co/city96/AuraFlow-v0.3-gguf/blob/main/aura_flow_0.3-Q2_K.gguf",
-        quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16),
-        torch_dtype=torch.bfloat16,
+
+def _selected_modes(values: list[str]) -> tuple[str, ...]:
+    if "all" in values and len(values) != 1:
+        raise ValueError("--mode all cannot be combined with another --mode")
+    modes = MODES if "all" in values else tuple(values)
+    if len(modes) != len(set(modes)):
+        raise ValueError("each mode may be requested only once")
+    return modes
+
+
+def _run_scenarios(
+    scenarios: list[Scenario], output: Path, check_outputs: bool
+) -> tuple[list[dict[str, Any]], list[str]]:
+    import torch
+
+    log_dir = output.with_suffix("").with_name(output.stem + "_logs")
+    for stale in log_dir.glob("*.log"):
+        stale.unlink()
+    results = []
+    sample_paths: dict[str, Path] = {}
+    try:
+        with tempfile.TemporaryDirectory(prefix="diffusion-benchmark-") as temporary:
+            root = Path(temporary)
+            for index, scenario in enumerate(scenarios):
+                scenario_dir = root / str(index)
+                scenario_dir.mkdir()
+                result_path = scenario_dir / "result.json"
+                sample_path = scenario_dir / "output.pt"
+                sample_paths[scenario.scenario_id] = sample_path
+                config_path = scenario_dir / "config.json"
+                _write_json(
+                    config_path,
+                    {
+                        "scenario": _scenario_to_dict(scenario),
+                        "result_path": str(result_path),
+                        "sample_path": str(sample_path) if check_outputs else None,
+                    },
+                )
+                cache_dir = scenario_dir / "compiler-cache"
+                env = os.environ.copy()
+                env.update(
+                    {
+                        "TORCHINDUCTOR_CACHE_DIR": str(cache_dir),
+                        "TORCHINDUCTOR_FORCE_DISABLE_CACHES": "0",
+                        "TORCH_COMPILE_FORCE_DISABLE_CACHES": "0",
+                        "TRITON_CACHE_DIR": str(cache_dir / "triton"),
+                        "TORCHINDUCTOR_FX_GRAPH_CACHE": "0",
+                        "TORCHINDUCTOR_AUTOGRAD_CACHE": "0",
+                        "TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE": "0",
+                        "TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE": "0",
+                        "TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE": "0",
+                        "TORCHINDUCTOR_BUNDLED_AUTOTUNE_REMOTE_CACHE": "0",
+                        "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO": "0",
+                    }
+                )
+                command = [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "--worker",
+                    str(config_path),
+                ]
+                print(f"Running {scenario.scenario_id} in a fresh worker")
+                log = log_dir / f"{index}-{scenario.mode}.log"
+                result = run_worker_process(
+                    scenario.scenario_id,
+                    command,
+                    result_path,
+                    log,
+                    scenario.execution.timeout_s,
+                    env,
+                )
+                try:
+                    _validate_worker_result(result, scenario.scenario_id, scenario)
+                except ValueError as error:
+                    message = f"{error}; log: {log}"
+                    result = _failure_result(scenario.scenario_id, "malformed", message)
+                device, dtype = _device_and_dtype_names(scenario)
+                result.setdefault("model", dataclasses.asdict(scenario.model))
+                result.setdefault("workload", dataclasses.asdict(scenario.workload))
+                result.setdefault("execution", dataclasses.asdict(scenario.execution))
+                result.setdefault("mode", scenario.mode)
+                result.setdefault("device", device)
+                result.setdefault("dtype", dtype)
+                result.setdefault("torch", {"version": torch.__version__})
+                results.append(result)
+                print(f"{scenario.scenario_id}: {result['status']}")
+            if check_outputs:
+                _compare_outputs(scenarios, results, sample_paths)
+    finally:
+        for result in results:
+            if (
+                check_outputs
+                and result["status"] == "success"
+                and result.get("output_check") == "not requested"
+            ):
+                result.update(
+                    status="failed",
+                    error="run interrupted before output comparison completed",
+                    output_check="not completed",
+                )
+        write_outputs(output, results)
+    errors = validate_scenario_results(
+        [scenario.scenario_id for scenario in scenarios], results
     )
-    pipe = AuraFlowPipeline.from_pretrained(
-        "fal/AuraFlow-v0.3",
-        torch_dtype=torch.bfloat16,
-        transformer=transformer,
-    ).to("cuda")
+    return results, errors
 
-    block_types = (
-        diffusers.models.transformers.auraflow_transformer_2d.AuraFlowSingleTransformerBlock,
-        diffusers.models.transformers.auraflow_transformer_2d.AuraFlowJointTransformerBlock,
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    compile_model(pipe.transformer, mode, block_types, backend)
-
-    def run(steps):
-        pipe("A cute pony", width=512, height=512, num_inference_steps=steps)
-
-    bench(run)
-
-
-def wan_benchmark(mode, backend="inductor"):
-    import diffusers
-    import numpy as np
-    from diffusers import AutoencoderKLWan, WanImageToVideoPipeline
-    from diffusers.utils import load_image
-    from transformers import CLIPVisionModel
-
-    model_id = "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
-    image_encoder = CLIPVisionModel.from_pretrained(
-        model_id, subfolder="image_encoder", torch_dtype=torch.float32
+    parser.add_argument("--model", choices=BENCHMARKS)
+    parser.add_argument(
+        "--mode",
+        choices=(*MODES, "all"),
+        action="append",
+        help="compilation strategy; repeat to run several, or pass all alone",
     )
-    vae = AutoencoderKLWan.from_pretrained(
-        model_id, subfolder="vae", torch_dtype=torch.float32
+    parser.add_argument("--backend", default="inductor", help="torch.compile backend")
+    parser.add_argument(
+        "--cudagraphs",
+        action="store_true",
+        help="enable CUDA graphs in compiled modes; needs inductor, CUDA, a warmup",
     )
-    pipe = WanImageToVideoPipeline.from_pretrained(
-        model_id, vae=vae, image_encoder=image_encoder, torch_dtype=torch.bfloat16
-    ).to("cuda")
-
-    image = load_image(
-        "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/astronaut.jpg"
+    parser.add_argument("--warmups", type=int, default=1)
+    parser.add_argument("--repetitions", type=int, default=5)
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=3600.0,
+        help="seconds per scenario, including checkpoint downloads",
     )
-    max_area = 480 * 832
-    aspect_ratio = image.height / image.width
-    mod_value = pipe.vae_scale_factor_spatial * pipe.transformer.config.patch_size[1]
-    height = round(np.sqrt(max_area * aspect_ratio)) // mod_value * mod_value
-    width = round(np.sqrt(max_area / aspect_ratio)) // mod_value * mod_value
-    image = image.resize((width, height))
-
-    prompt = (
-        "An astronaut hatching from an egg, on the surface of the moon, the darkness and depth of space realised in "
-        "the background. High quality, ultrarealistic detail and breath-taking movie-like camera shot."
+    parser.add_argument(
+        "--device", default="auto", help="auto uses the recipe default device"
     )
-    negative_prompt = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
-
-    block_types = (diffusers.models.transformers.transformer_wan.WanTransformerBlock,)
-    compile_model(pipe.transformer, mode, block_types, backend)
-
-    def run(steps):
-        pipe(
-            image=image,
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            height=height,
-            width=width,
-            num_frames=33,
-            num_inference_steps=steps,
-            guidance_scale=5.0,
-        )
-
-    bench(run)
-
-
-def ltx_benchmark(mode, backend="inductor"):
-    import diffusers
-    from diffusers import LTXConditionPipeline
-
-    pipe = LTXConditionPipeline.from_pretrained(
-        "Lightricks/LTX-Video-0.9.7-dev", torch_dtype=torch.bfloat16
-    ).to("cuda")
-    pipe.vae.enable_tiling()
-
-    height = 512 - (512 % pipe.vae_spatial_compression_ratio)
-    width = 704 - (704 % pipe.vae_spatial_compression_ratio)
-
-    prompt = "The video depicts a winding mountain road covered in snow, with a single vehicle traveling along it. The road is flanked by steep, rocky cliffs and sparse vegetation. The landscape is characterized by rugged terrain and a river visible in the distance. The scene captures the solitude and beauty of a winter drive through a mountainous region."
-    negative_prompt = "worst quality, inconsistent motion, blurry, jittery, distorted"
-
-    block_types = (
-        diffusers.models.transformers.transformer_ltx.LTXVideoTransformerBlock,
+    parser.add_argument(
+        "--dtype", choices=("auto", "float32", "float16", "bfloat16"), default="auto"
     )
-    compile_model(pipe.transformer, mode, block_types, backend)
-
-    def run(steps):
-        pipe(
-            conditions=None,
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            width=width,
-            height=height,
-            num_frames=121,
-            num_inference_steps=steps,
-            generator=torch.Generator().manual_seed(0),
-            output_type="latent",
-        )
-
-    bench(run)
-
-
-def flux_benchmark(mode, backend="inductor"):
-    import diffusers
-    from diffusers import FluxPipeline
-
-    pipe = FluxPipeline.from_pretrained(
-        "black-forest-labs/FLUX.1-dev",
-        torch_dtype=torch.bfloat16,
-    ).to("cuda")
-
-    prompt = "A cat holding a sign that says hello world"
-
-    block_types = (
-        diffusers.models.transformers.transformer_flux.FluxTransformerBlock,
-        diffusers.models.transformers.transformer_flux.FluxSingleTransformerBlock,
+    parser.add_argument("--num-threads", type=int)
+    parser.add_argument(
+        "--check-outputs", action="store_true", help="compare compiled with eager"
     )
-    compile_model(pipe.transformer, mode, block_types, backend)
-
-    def run(steps):
-        pipe(
-            prompt,
-            height=1024,
-            width=1024,
-            guidance_scale=3.5,
-            num_inference_steps=steps,
-            max_sequence_length=512,
-        )
-
-    bench(run)
+    parser.add_argument(
+        "--output",
+        default=DEFAULT_OUTPUT,
+        help="CSV summary path; JSON records use the same stem with a .json suffix",
+    )
+    parser.add_argument("--worker", help=argparse.SUPPRESS)
+    return parser
 
 
-LEGACY_BENCHMARKS = {
-    "auraflow": auraflow_benchmark,
-    "wan": wan_benchmark,
-    "ltx": ltx_benchmark,
-    "flux": flux_benchmark,
-}
+def _exit_on_signal(signum: int, frame: Any) -> None:
+    # The default handler would end this process without killing workers, which
+    # run in their own sessions; raising lets run_worker_process reap them.
+    raise SystemExit(128 + signum)
+
+
+def main(argv: list[str] | None = None) -> int:
+    import torch
+    from torch._dynamo.backends.registry import lookup_backend
+    from torch._dynamo.exc import InvalidBackend
+
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.worker:
+        return _worker_main(args.worker)
+    if args.model is None or args.mode is None:
+        parser.error("--model and --mode are required")
+    try:
+        csv_output, json_output = _output_paths(args.output)
+        modes = _selected_modes(args.mode)
+        if args.check_outputs and "eager" not in modes:
+            raise ValueError("--check-outputs requires --mode eager or --mode all")
+        recipe = BENCHMARKS[args.model]
+        execution = _execution_from_args(args)
+        device = args.device
+        if device == "auto":
+            device = recipe.model.default_device
+        try:
+            torch.device(device)
+            if any(mode != "eager" for mode in modes):
+                lookup_backend(execution.backend)
+        except (RuntimeError, InvalidBackend) as error:
+            raise ValueError(str(error)) from error
+        if execution.cudagraphs:
+            if modes == ("eager",):
+                raise ValueError("CUDA graphs require at least one compiled mode")
+            if execution.backend != "inductor":
+                raise ValueError("--cudagraphs requires --backend inductor")
+            if not device.startswith("cuda"):
+                raise ValueError(f"--cudagraphs requires a CUDA device, got {device}")
+            if execution.warmups < 1:
+                raise ValueError("--cudagraphs requires at least one warmup request")
+        # Fail before the first worker rather than losing every result at the end.
+        try:
+            csv_output.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise ValueError(f"cannot create {csv_output.parent}: {error}") from error
+        for path in (csv_output, json_output):
+            target = path if path.exists() else path.parent
+            if path.is_dir() or not os.access(target, os.W_OK):
+                raise ValueError(f"cannot write {path}")
+        eager_execution = dataclasses.replace(execution, cudagraphs=False)
+        scenarios = [
+            Scenario(
+                recipe.model,
+                recipe.workload,
+                eager_execution if mode == "eager" else execution,
+                mode,
+                recipe.loader,
+            )
+            for mode in modes
+        ]
+    except ValueError as error:
+        parser.error(str(error))
+    signals = [signal.SIGTERM] + ([signal.SIGHUP] if hasattr(signal, "SIGHUP") else [])
+    previous = {signum: signal.signal(signum, _exit_on_signal) for signum in signals}
+    try:
+        _, errors = _run_scenarios(scenarios, csv_output, args.check_outputs)
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+    print(f"CSV: {args.output}")
+    print(f"JSON: {json_output}")
+    if errors:
+        for error in errors:
+            print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", choices=LEGACY_BENCHMARKS, required=True)
-    parser.add_argument("--mode", choices=MODES, required=True)
-    parser.add_argument("--backend", default="inductor")
-    args = parser.parse_args()
-    LEGACY_BENCHMARKS[args.model](args.mode, args.backend)
+    raise SystemExit(main())
