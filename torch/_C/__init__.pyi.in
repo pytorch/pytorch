@@ -2307,6 +2307,7 @@ def _fake_tensor_to_list(t: Tensor) -> Any: ...
 class _CppFakeTensorMode:
     allow_meta: _bool
     _allow_unsafe_data_ptr_access: _bool
+    allow_non_fake_inputs: _bool
     epoch: _int
     @property
     def fake_tensor_converter(self) -> FakeTensorConverter: ...
