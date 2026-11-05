@@ -3374,8 +3374,7 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(freq_cpu, freq_mps)
 
     def test_fft_transform_dims_outside_last_four(self):
-        # MPSGraph FFT only handles the last four dims; the backend transposes
-        # outer transform dims into that window. See https://github.com/pytorch/pytorch/issues/124096
+        # Transforms over outer dims, see https://github.com/pytorch/pytorch/issues/124096
         def check(fn, x_cpu, **kwargs):
             x_mps = x_cpu.detach().to("mps")
             self.assertEqual(fn(x_cpu, **kwargs), fn(x_mps, **kwargs).cpu())
@@ -14741,7 +14740,7 @@ class TestConsistency(TestCaseMPS):
             return (7e-4, 2e-3)
         if op.name == "native_layer_norm":
             return (1e-4, 1.3e-5)
-        if op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
+        if op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.hfft', 'fft.fft', 'fft.fftn', 'fft.rfft']:
             # TODO: Investigate why this is needed
             # See https://github.com/pytorch/pytorch/issues/120237
             return (3e-5, 3e-5)
@@ -15572,6 +15571,7 @@ class TestCommon(TestCase):
         # The private ops wrap negative dims and transform empty axes like the CPU
         x = torch.randn(3, 16, dtype=torch.complex64, device=device)
         self.assertEqual(torch._fft_c2c(x, [-1], 0, True), torch.fft.fft(x))
+        self.assertEqual(torch._fft_c2r(x[:, :9], [-1], 2, 16), torch.fft.irfft(x[:, :9], n=16))
         self.assertEqual(torch._fft_r2c(x.real[:, :0], [-1], 0, True), torch.zeros(3, 1, dtype=x.dtype, device=device))
 
     @parametrize("n", [176400, 1 << 25])  # global-memory passes; real lengths beyond two tile passes
@@ -15579,21 +15579,24 @@ class TestCommon(TestCase):
         x = torch.randn(2, n)
         y = torch.fft.rfft(x.to(device)).cpu()
         self.assertEqual(y, torch.fft.rfft(x), atol=5e-2, rtol=1e-4)
+        self.assertEqual(torch.fft.irfft(y.to(device), n=n).cpu(), x, atol=1e-4, rtol=1e-4)
 
     @dtypes(torch.float32, torch.float16)
     @parametrize("n", [64, 128, 200, 240, 256, 512, 1024, 2048, 4096, 4099])
-    @parametrize("kind", ["fft", "ifft", "rfft"])
+    @parametrize("kind", ["fft", "ifft", "rfft", "irfft"])
     @parametrize("layout", ["contiguous", "transposed", "sliced", "out"])
     def test_fft_strides(self, device, dtype, n, kind, layout):
         complex_dtype = torch.complex32 if dtype == torch.float16 else torch.complex64
-        length = 2 * n if kind == "rfft" else n
+        length = 2 * n if kind == "rfft" else n + 1 if kind == "irfft" else n
         x = torch.randn(5, 2 * length + 3, device=device, dtype=dtype if kind == "rfft" else complex_dtype)
         x = {"sliced": x[:, 3::2], "transposed": x[:, :length].t().contiguous().t()}.get(layout, x[:, :length].contiguous())
         op = torch._fft_r2c if kind == "rfft" else getattr(torch.fft, kind)
         kwargs = {"dim": [1], "normalization": 1, "onesided": True} if kind == "rfft" else {"norm": "ortho"}
+        kwargs.update({"n": 2 * n} if kind == "irfft" else {})
         reference = op(x.cpu().to(torch.complex128 if x.is_complex() else torch.float64), **kwargs)
         if layout == "out":
-            kwargs["out"] = torch.empty(5, 2 * reference.size(-1) + 3, device=device, dtype=complex_dtype)[:, 3::2]
+            out_dtype = dtype if kind == "irfft" else complex_dtype
+            kwargs["out"] = torch.empty(5, 2 * reference.size(-1) + 3, device=device, dtype=out_dtype)[:, 3::2]
         result, tol = op(x, **kwargs), 2e-3 if dtype == torch.float16 else 2e-5
         self.assertEqual(result.cpu(), reference.to(result.dtype), atol=tol, rtol=tol)
 
