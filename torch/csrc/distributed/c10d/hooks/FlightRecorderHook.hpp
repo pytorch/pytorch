@@ -130,8 +130,8 @@ class TORCH_API FlightRecorderHook
   FlightRecorderHook(
       c10::intrusive_ptr<ProcessGroup> pg,
       std::vector<uint64_t> global_ranks);
-  // The target serving an op, or the group's default backend for ops the
-  // dispatcher gives us no tensors for (barrier).
+  // The target serving an op, or the group's default backend for an op that
+  // names no device.
   const BackendTarget& targetFor(std::optional<c10::Device> device) const;
   // Whether a graph capture is active on the stream the op would be issued on.
   // nullopt when that cannot be established, which onPre reads as "capturing":

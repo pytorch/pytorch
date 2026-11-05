@@ -1122,7 +1122,6 @@ def run_gloo_test(test_module, test_directory, options):
         (
             "ProcessGroupGlooTest",
             "ProcessGroupGlooLazyInitTest",
-            "ProcessGroupGlooFRTest",
             "DistributedDataParallelTest",
         ),
     )

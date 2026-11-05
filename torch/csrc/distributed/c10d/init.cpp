@@ -1636,7 +1636,11 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
       .def_readwrite(
           "op_id",
           &::c10d::PreHookArgs::op_id,
-          "Identifies the operation; the matching post-hook gets the same ``op_id``.");
+          "Identifies the operation; the matching post-hook gets the same ``op_id``.")
+      .def_readwrite(
+          "device",
+          &::c10d::PreHookArgs::device,
+          "Device type (index unset) the operation was dispatched for, set only for ``barrier``; ``None`` otherwise, including tensorless lifecycle ops.");
 
   py::class_<::c10d::PostHookArgs>(
       module,
@@ -5569,7 +5573,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
         Arguments:
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo", the instance ProcessGroupGloo records into.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo".
         Returns:
                 Stringified json work traces.
                 Default settings return everything.
@@ -5595,7 +5599,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Each hooked backend has its own, so there is one dump per backend and no merging. Default is "gloo", the instance ProcessGroupGloo records into.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Each hooked backend has its own, so there is one dump per backend and no merging. Default is "gloo".
             Returns:
                 Stringified pickle work traces.
                 Default settings return everything.

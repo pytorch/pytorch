@@ -45,9 +45,14 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         post_ops: list[HookOpName] = []
         pre_op_ids: list[int] = []
         post_op_ids: list[int] = []
+        pre_devices: list[torch.device | None] = []
         pg.register_pre_hook(
             0,
-            lambda args: (pre_ops.append(args.name), pre_op_ids.append(args.op_id)),
+            lambda args: (
+                pre_ops.append(args.name),
+                pre_op_ids.append(args.op_id),
+                pre_devices.append(args.device),
+            ),
         )
         pg.register_post_hook(
             0,
@@ -114,6 +119,11 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         # each post correlates with its pre via op_id.
         self.assertEqual(len(pre_ops), len(post_ops))
         self.assertEqual(pre_op_ids, post_op_ids)
+
+        # Only barrier carries the device it was dispatched for.
+        for op, device in zip(pre_ops, pre_devices):
+            expected_device = torch.device("cpu") if op == HookOpName.BARRIER else None
+            self.assertEqual(device, expected_device, msg=str(op))
 
         # After unregistering, no further hooks fire.
         pg.unregister_pre_hook(0)
