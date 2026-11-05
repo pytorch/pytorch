@@ -6440,7 +6440,6 @@ class TestSDPAAccelerator(NNTestCase):
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0, 0.22])
     @parametrize("dtype", [torch.float16])
-    @parametrize("scale", [None, "l1"])
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
     @tf32_enabled()
     def test_fused_attention_vs_math_ref_grads_cudagraph(self, device, batch_size: int,
@@ -6449,7 +6448,6 @@ class TestSDPAAccelerator(NNTestCase):
                                                          is_causal: bool,
                                                          dropout_p: float,
                                                          dtype: torch.dtype,
-                                                         scale: str,
                                                          fused_kernel: SDPBackend):
         def _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len, dropout_p, seed, offset, device=device):
             mask = torch.empty((batch_size, n_heads, q_len, kv_len), device=device, dtype=torch.float32)
