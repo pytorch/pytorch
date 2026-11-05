@@ -5510,6 +5510,11 @@ class TestFakeTensorViewCopy(TestCase):
                     _ = yf.view(-1)
 
 
+# Dynamo would trace these tests with the C++ fakes they make as graph inputs,
+# which it cannot fakify yet
+_CPP_FAKE_DYNAMO_SKIP = "Dynamo does not support C++ fakes as inputs yet"
+
+
 class TestCppFakeTensorModeBindings(TestCase):
     def _make_mode(self, shape_env=None):
         return _make_cpp_mode(shape_env)
@@ -5607,6 +5612,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             for x, y in zip(shared, sparse_parts(sparse_meta)):
                 self.assertEqual(x.untyped_storage()._cdata, y.untyped_storage()._cdata)
 
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_from_meta_and_device_rejects(self):
         mode, _ = self._make_mode()
         meta_device, cpu = torch.device("meta"), torch.device("cpu")
@@ -5651,6 +5657,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             torch._C._from_meta_and_device(inference, torch.device("cpu"), mode)
         inference.data_ptr()
 
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_maybe_get_fake_mode(self):
         mode, wrapper = self._make_mode()
         other_mode, other_wrapper = self._make_mode()
@@ -5715,6 +5722,17 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(self._installed(), (None, False))
         with self.assertRaisesRegex(RuntimeError, "no _cpp_mode or _mode_key"):
             torch._C._set_dispatch_mode(object())
+
+        class NullCppMode:
+            _cpp_mode = None
+
+        with self.assertRaisesRegex(RuntimeError, "_cpp_mode is None"):
+            torch._C._set_dispatch_mode(NullCppMode())
+        # A C++ mode and a Python FakeTensorMode cannot both be installed
+        python_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        with python_mode:
+            with self.assertRaisesRegex(RuntimeError, "Python FakeTensorMode is set"):
+                torch._C._set_dispatch_mode(wrapper)
         self.assertEqual(self._installed(), (None, False))
         torch._C._set_dispatch_mode(wrapper)
         try:
@@ -5722,6 +5740,13 @@ class TestCppFakeTensorModeBindings(TestCase):
             _, other_wrapper = self._make_mode()
             with self.assertRaisesRegex(RuntimeError, "one already exists"):
                 torch._C._set_dispatch_mode(other_wrapper)
+            msg = r"C\+\+ FakeTensorMode is set"
+            for install in (
+                torch._C._set_dispatch_mode,
+                torch._C._push_on_torch_dispatch_stack,
+            ):
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    install(python_mode)
             self.assertEqual(self._installed(), (wrapper, True))
             # Only the FAKE key sees it, and the mode stack does not
             proxy = torch._C._TorchDispatchModeKey.PROXY
