@@ -42,6 +42,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     get_gcc_major_version,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_CPU_EXT_SVE_SUPPORTED,
@@ -153,9 +154,13 @@ class LstmModule(torch.nn.Module):
 
 # Not a module-level skip: other test files import this one, including on GPU
 # jobs (test_gpu_select_algorithm, through test_cpu_select_algorithm).
-@unittest.skipIf(not RUN_CPU, "requires RUN_CPU")
+@unittest.skipIf(
+    not RUN_CPU,
+    "CPU tests not selected: no C++ compiler, or the device filter excludes cpu",
+)
 @instantiate_parametrized_tests
 class CPUReproTests(TestCase):
+    hw_classification = HardwareClassification.CPU
     common = check_model
 
     @torch._dynamo.config.patch(prefer_deferred_runtime_asserts_over_guards=True)
