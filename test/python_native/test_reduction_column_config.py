@@ -95,6 +95,7 @@ class TestColumnConfig(TestCase):
                 2,
                 "rubin_argmax_c4096_tree",
             ),
+            (torch.float32, 2048, 4096, "argmaxi32", 2, "rubin_argmax_c4096_tiled"),
         ],
     )
     def test_sm107_unordered_profiles(self, dtype, size, columns, key, fields, rule):
@@ -105,6 +106,7 @@ class TestColumnConfig(TestCase):
             "rubin_mean_c4096_tiled": (256, 8, "partition", 16, "linear"),
             "rubin_var_c4096": (2048, 8, "column", 0, "inner_tree"),
             "rubin_argmax_c4096_tree": (2048, 4, "partition", 8, "inner_tree"),
+            "rubin_argmax_c4096_tiled": (1024, 4, "partition", 8, "linear"),
         }
         cfg = self.select(
             dtype,
@@ -167,6 +169,14 @@ class TestColumnConfig(TestCase):
             (torch.float32, "var0", 65536, 256, 8, 3, (torch.float32,), (0, 16)),
             (torch.bfloat16, "sum", 131072, 256, 16, 1, (torch.float32,), (8, 16)),
             (torch.float32, "mean", 524288, 1024, 64, 1, (torch.float32,), (32, 32)),
+            # The 65536 x 1024 rule skips argmax; Welford anchors; full_column_anchor's
+            # 2 GiB and bf16 64 MiB arms.
+            (torch.float32, "argmaxi32", 65536, 1024, 8, 2, (torch.int64,), (64, 32)),
+            (torch.bfloat16, "var0", 8192, 4096, 4, 3, (torch.bfloat16,), (0, 32)),
+            (torch.bfloat16, "var0", 8192, 1024, 2, 3, (torch.bfloat16,), (0, 16)),
+            (torch.float32, "mean", 2097152, 256, 64, 1, (torch.float32,), (32, 32)),
+            (torch.bfloat16, "amax", 131072, 256, 16, 1, (torch.bfloat16,), (32, 32)),
+            (torch.bfloat16, "mean", 32768, 1024, 4, 1, (torch.float32,), (32, 32)),
         ],
     )
     def test_sm107_ordered_profiles(
@@ -206,23 +216,41 @@ class TestColumnConfig(TestCase):
         )
         self.assertEqual(cfg.kernel_order, order)
 
-    def test_sm107_column_guards(self):
-        """Keep incompatible SM107 calls on generic policies."""
-        self.assertEqual(self.select(cc=(10, 7), size=255).rule, "default")
-        self.assertIsNone(
-            ct.select_ordered_col_config(
-                (10, 7),
-                torch.bfloat16,
-                "mean",
-                4096,
-                1,
-                32,
-                field_bits=(64,),
-                out_dtypes=(torch.float32,),
-                rows=262144,
-                full_tiles=True,
-            )
+    @parametrize(
+        "updates",
+        [
+            {"size": 255},
+            {"dtype": torch.float16},
+            {"acc_bits": 64},
+            {"nouts": 2},
+            {"nfields": 2},
+            {"batches": 2},
+            {"contiguous": False},
+            {"alignment": 8},
+        ],
+    )
+    def test_sm107_column_guards(self, updates):
+        """Keep a 256 MiB SM107 anchor that breaks one guard on generic policies."""
+        self.assertEqual(self.select(cc=(10, 7)).rule, "rubin_sum_c4096_tiled")
+        self.assertEqual(self.select(cc=(10, 7), **updates), self.select(**updates))
+
+    @parametrize("bits", [32, 64])
+    def test_sm107_ordered_field_guard(self, bits):
+        """Decline SM107 ordered mappings for 64-bit fields."""
+        cfg = ct.select_ordered_col_config(
+            (10, 7),
+            torch.bfloat16,
+            "mean",
+            4096,
+            1,
+            32,
+            field_bits=(bits,),
+            out_dtypes=(torch.float32,),
+            rows=262144,
+            full_tiles=True,
         )
+        selected = ct.OrderedColConfig(32, full_tiles=True)
+        self.assertEqual(cfg, selected if bits == 32 else None)
 
     @parametrize("kwargs", [{"threads_per_block": 128}, {"npar": 7}, {"vec": 2}])
     def test_explicit_geometry_disables_policy(self, kwargs):
@@ -246,14 +274,16 @@ class TestColumnConfig(TestCase):
             (torch.float32, "sum", 131072, 257, 16, True, (0, 32)),
             (torch.bfloat16, "amax", 32768, 4096, 4, True, (0, 16)),
             (torch.bfloat16, "amax", 262144, 4096, 32, True, (0, 32)),
+            (torch.bfloat16, "amin", 32768, 4096, 4, True, (0, 32)),
         ],
     )
     def test_b200_ordered_column_mappings(
         self, dtype, key, rows, columns, partials, full_tiles, expected
     ):
         """Pin B200 ordered column widths, independent of SM107 guards."""
-        # Single-field float outputs may be the input dtype or fp32.
-        for output in {dtype, dtype if key == "amax" else torch.float32}:
+        # amax and amin store the input dtype; other single fields may store fp32 too.
+        same_dtype = key in ("amax", "amin")
+        for output in {dtype, torch.float32}:
             with self.subTest(output=output):
                 cfg = ct.select_ordered_col_config(
                     (10, 0),
@@ -267,7 +297,7 @@ class TestColumnConfig(TestCase):
                     rows=rows,
                     full_tiles=full_tiles,
                 )
-                if expected is None:
+                if expected is None or same_dtype and output != dtype:
                     self.assertIsNone(cfg)
                     continue
                 min_blocks, tile_columns = expected
