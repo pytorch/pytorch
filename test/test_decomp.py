@@ -702,8 +702,8 @@ class TestDecomp(TestCase):
 
     @suppress_warnings
     @tf32_off()
-    # only tests RNNs since we have py dispsatcher decomps for them
     @periodic
+    # only tests RNNs since we have py dispsatcher decomps for them
     @modules(
         filter(
             lambda m: m.module_cls in (torch.nn.RNN, torch.nn.LSTM, torch.nn.GRU),
