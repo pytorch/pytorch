@@ -101,7 +101,8 @@ def _transpose_split(
             return None
         return a_end, b_end
     # Row-padded inputs have one common dense-run break separating columns
-    # from rows. It must occur at the same boundary in every input.
+    # from rows. With no break, AOT inputs already match the dense output
+    # orientation; use the innermost dimension as the column group.
     breaks = {
         i
         for stride in strides
@@ -109,13 +110,14 @@ def _transpose_split(
         if shape[output_order[i - 1]] * stride[output_order[i - 1]]
         != stride[output_order[i]]
     }
-    return (breaks.pop(), None) if len(breaks) == 1 else None
+    return (next(iter(breaks), 1), None) if len(breaks) <= 1 else None
 
 
 def _tma2d_config(
     inputs: tuple[_OperandLayout, ...],
     shape: tuple[int, ...],
     smem_limit: int,
+    output_strides: tuple[int, ...] | None = None,
 ) -> _TmaConfig | None:
     # Accept higher-order permutations that collapse to one 2-D transpose, plus
     # a batch group. Physical orders identify the swapped groups directly.
@@ -136,10 +138,14 @@ def _tma2d_config(
     if smem_bytes + _TILES_PER_BLOCK * _BARRIER_BYTES > smem_limit:
         return None
     # 2. Output strides are (6144, 2048, 64, 1), giving physical order
-    # (3, 2, 1, 0), fastest first.
-    output_strides = _contiguous_strides(shape)
+    # (3, 2, 1, 0), fastest first. AOT may instead supply a dense transpose.
+    explicit_output = output_strides is not None
+    if output_strides is None:
+        output_strides = _contiguous_strides(shape)
     output_order = _physical_dim_order(output_strides)
-    if output_order is None:
+    if output_order is None or (
+        explicit_output and not _dense_run(shape, output_strides, output_order)
+    ):
         return None
     # 3. Both inputs have physical order (2, 1, 3, 0). In output-order
     # positions this is (1, 2, 0, 3): swap groups A=(3,) and B=(2, 1).
@@ -225,6 +231,7 @@ def _layout_config(
     shape: tuple[int, ...],
     output_address: int,
     smem_limit: int,
+    output_strides: tuple[int, ...] | None = None,
 ) -> _TmaConfig | None:
     # Batch extents affect views and launch limits, so this decision is not cached.
     if (
@@ -241,4 +248,4 @@ def _layout_config(
         for t in inputs
     ):
         return None
-    return _tma2d_config(inputs, shape, smem_limit)
+    return _tma2d_config(inputs, shape, smem_limit, output_strides)
