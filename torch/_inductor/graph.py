@@ -601,6 +601,10 @@ class GraphLowering(torch.fx.Interpreter):
         ] = []  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: str | None = None
+        # An as_strided of a graph input that may read outside the input's own
+        # elements. AOTI's CUDA graphs copy only those, so
+        # aot_inductor.cudagraphs rejects such graphs.
+        self.input_as_strided_node: torch.fx.Node | None = None
         self.kernel_free_cudagraph: bool = False
 
         # only keeping one node per device for stack trace purposes
