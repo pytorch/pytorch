@@ -178,8 +178,11 @@ class TestSelection(unittest.TestCase):
             selection.TEST_SH_GLOBS,
             "update selection.TEST_SH_GLOBS to match test.sh's dispatch",
         )
-        # An exact branch such as inductor_avx2 runs no --inductor function (checked
-        # below), so the ALWAYS_COVERED set of a glob it contains only over-covers it.
+        # These run no --inductor files, so the ALWAYS_COVERED set of a glob they
+        # contain only over-covers them.
+        exact = {b for b in branches if not b.startswith("*") and "inductor" in b}
+        msg = "a new exact inductor branch must run no --inductor files"
+        self.assertEqual(exact, {"inductor_avx2", "inductor_cpp_wrapper_cpu"}, msg)
         # Each function that runs files with --inductor is called by exactly one branch of the chain, on a glob.
         includes = inductor_includes(sh)
         callers: dict[str, set[str]] = {f: set() for f in includes}
@@ -198,6 +201,7 @@ class TestSelection(unittest.TestCase):
             m = dispatch.match(next(iter(callers[f])))
             self.assertTrue(m and m.group(1).startswith("*"), callers[f])
             glob = m.group(1).strip("*")
+            self.assertIn(glob, selection.TEST_SH_GLOBS, "extend it past *inductor*")
             runs[glob] = runs.get(glob, set()) | tests
         self.assertEqual(
             runs,
@@ -287,6 +291,13 @@ g () {
                 Selection(candidates={"test_nn"}),
                 Selection(run_all=True),
                 Selection(run_all=True, error="e"),
+                Selection(
+                    {"test_nn"},
+                    {"dynamo_wrapped", "crossref"},
+                    reason="r",
+                    enforce=True,
+                    candidates={"test_nn", "test_ops"},
+                ),
             ):
                 p.write_text(json.dumps(sel.to_json()))
                 self.assertEqual(Selection.load(p), sel)
@@ -306,13 +317,15 @@ g () {
                 {**valid, "sweeps": ["default"]},
                 {**valid, "files": ["test_ops"]},
                 {**valid, "error": "e"},
+                {**valid, "extra": 1},
             ]
             # run_all and no candidates leave only the type checks to reject these.
             r = Selection(run_all=True).to_json()
             bad += [{**r, "files": "test_nn"}, {**r, "files": [1]}, {**r, "error": 1}]
             bad += [
                 {k: v for k, v in valid.items() if k != key}
-                for key in ("version", "candidates", "enforce", "error")
+                for key in ("version", "files", "sweeps", "run_all", "reason")
+                + ("enforce", "candidates", "error")
             ]
             for text in (
                 "{",
@@ -492,6 +505,8 @@ g () {
             ".github/ci_commit_pins/vllm.txt",
         ]:
             self.assertFalse(needs_run_all([f]), f)
+        self.assertTrue(needs_run_all(["docs/source/index.rst", "test/run_test.py"]))
+        self.assertFalse(needs_run_all([]))
 
     def test_malformed_output_runs_all(self) -> None:
         malformed: list[Any] = [
@@ -564,13 +579,16 @@ g () {
             answer(tests=[{"file": 3}]),
             answer(dirs="dynamo"),
             answer(sweeps=[1]),
+            answer(dirs=None),
+            answer(sweeps=None),
+            answer(dirs=[1]),
             answer(sweeps=["default"]),
             answer(run_all=0),
             answer(reason=None),
             answer(reason=["r"]),
             answer(dirs=["nn"]),
             # An empty prefix must not match every candidate.
-            *(answer(dirs=[d]) for d in ("", "*", "test/")),
+            *(answer(dirs=[d]) for d in ("", "/", "/*")),
         ]
         for out in malformed:
             with self.assertRaises(ValueError, msg=repr(out)):
