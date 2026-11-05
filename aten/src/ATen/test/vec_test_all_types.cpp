@@ -1145,6 +1145,24 @@ namespace {
             test_case,
             RESOLVE_OVERLOAD(filter_fmadd));
     }
+#if defined(CPU_CAPABILITY_VSX)
+    TEST(BitwiseFloatsAdditional, DoubleFmaddSingleRounding) {
+        // Separate rounding loses the product's -2^-54 residual.
+        const double a = 1.0 + 0x1p-27;
+        const double b = 1.0 - 0x1p-27;
+        constexpr double c = -1.0;
+        constexpr double expected = -0x1p-54;
+        EXPECT_EQ(local_fmadd(a, b, c), expected);
+
+        const auto result = at::vec::fmadd(vdouble(a), vdouble(b), vdouble(c));
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN double actual[vdouble::size()];
+        result.store(actual);
+        for (const auto i : c10::irange(vdouble::size())) {
+            EXPECT_EQ(actual[i], expected) << "lane=" << i;
+        }
+    }
+#endif
     TYPED_TEST(BitwiseFloatsAdditional, Fmsub) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
