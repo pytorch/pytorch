@@ -4,6 +4,7 @@ import inspect
 import unittest
 from collections import defaultdict
 from contextlib import contextmanager
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -17,6 +18,12 @@ from torch.testing._internal.common_device_type import (
     precisionOverride,
     PrivateUse1TestBase,
     requires_capabilities,
+)
+from torch.testing._internal.common_modules import (
+    FunctionInput,
+    ModuleInfo,
+    ModuleInput,
+    modules,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo
@@ -144,11 +151,10 @@ class TestDeviceTypeOpenReg(TestCase):
     @ops([op_normal])
     def test_op_narrow_ops(self, device, dtype, op):
         """Verify that having extra entries in op_overrides that are NOT present in
-        the @ops list does not raise a KeyError (safety check in _apply_op_overrides).
+        the @ops list does not raise a KeyError (safety check in _apply_class_overrides).
 
-        op_overrides includes op_skip and PrivateUse1TestBase.op_overrides also
-        lists op_skip; here @ops only exposes op_normal.  The safety check
-        introduced in _apply_op_overrides must silently ignore the missing keys.
+        op_overrides lists op_skip, but @ops only exposes op_normal; the missing
+        keys must be silently ignored.
         """
         # If we reach here without a KeyError the safety check worked.
 
@@ -378,6 +384,284 @@ class TestCapabilityGating(TestCase):
 
 
 instantiate_device_type_tests(TestCapabilityGating, globals(), only_for="openreg")
+
+
+def _dummy_module_inputs(module_info, device, dtype, requires_grad, training, **kwargs):
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(),
+            forward_input=FunctionInput(
+                torch.randn(4, device=device, dtype=dtype, requires_grad=requires_grad)
+            ),
+        )
+    ]
+
+
+def _make_dummy_module(name, dtypes=(torch.float32,), **kwargs):
+    module_cls = type(name, (torch.nn.Identity,), {})
+    return ModuleInfo(
+        module_cls,
+        module_inputs_func=_dummy_module_inputs,
+        dtypes=dtypes,
+        **kwargs,
+    )
+
+
+module_normal = _make_dummy_module("module_normal")
+module_skip = _make_dummy_module("module_skip")
+module_skip_f32 = _make_dummy_module(
+    "module_skip_f32", dtypes={torch.float32, torch.float64}
+)
+module_xfail = _make_dummy_module("module_xfail")
+
+# Dummy modules for testing combined module_allowlist + module_overrides
+module_combined_supported = _make_dummy_module("module_combined_supported")
+module_combined_skip = _make_dummy_module("module_combined_skip")
+module_combined_unsupported = _make_dummy_module("module_combined_unsupported")
+
+
+class TestModuleTypeOpenReg(TestCase):
+    _executed: dict = defaultdict(int)
+
+    @classmethod
+    def tearDownClass(cls):
+        should_run = ("module_normal",)
+        should_not_run = ("module_skip", "module_xfail")
+        for module_name in should_run:
+            if cls._executed[module_name] == 0:
+                raise AssertionError(f"{module_name} tests should have run")
+        for module_name in should_not_run:
+            if cls._executed[module_name] != 0:
+                raise AssertionError(f"{module_name} test body should never run")
+        if cls._executed["module_skip_f32"] != 1:
+            raise AssertionError(
+                "module_skip_f32 should have run exactly once, "
+                f"but ran {cls._executed['module_skip_f32']} times"
+            )
+        super().tearDownClass()
+
+    @modules([module_normal, module_skip, module_skip_f32, module_xfail])
+    def test_module(self, device, dtype, module_info, training):
+        if module_info.name in ("module_skip", "module_xfail"):
+            self.fail(f"{module_info.name} deliberately fails")
+        type(self)._executed[module_info.name] += 1
+
+    @modules([module_normal])
+    def test_module_narrow_modules(self, device, dtype, module_info, training):
+        """Verify that having extra entries in module_overrides that are NOT present
+        in the @modules list does not raise a KeyError (safety check in _apply_class_overrides).
+
+        module_overrides lists module_skip, but @modules only exposes module_normal;
+        the missing keys must be silently ignored.
+        """
+        # If we reach here without a KeyError the safety check worked.
+
+
+class TestModuleAllowlistWithOverrides(TestCase):
+    """Verify that module_allowlist filtering works together with module_overrides.
+
+    module_allowlist filters which modules generate variants.
+    module_overrides adds decorators to those modules that pass the filter.
+    """
+
+    _executed_combined: dict = defaultdict(int)
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._executed_combined["module_combined_supported"] == 0:
+            raise AssertionError("module_combined_supported should have run")
+        if cls._executed_combined["module_combined_skip"] != 0:
+            raise AssertionError(
+                "module_combined_skip should be skipped by module_overrides"
+            )
+        if cls._executed_combined["module_combined_unsupported"] != 0:
+            raise AssertionError(
+                "module_combined_unsupported should not run (not in module_allowlist)"
+            )
+        super().tearDownClass()
+
+    @modules(
+        [module_combined_supported, module_combined_skip, module_combined_unsupported]
+    )
+    def test_combined_filter(self, device, dtype, module_info, training):
+        type(self)._executed_combined[module_info.name] += 1
+
+
+OPENREG_MODULE_OVERRIDES = {
+    "module_skip": [DecorateInfo(unittest.skip("skip module_skip"))],
+    "module_skip_f32": [
+        DecorateInfo(unittest.skip("skip module_skip_f32"), dtypes=(torch.float32,))
+    ],
+    "module_xfail": [DecorateInfo(unittest.expectedFailure)],
+}
+with _temp_test_configs(PrivateUse1TestBase, module_overrides=OPENREG_MODULE_OVERRIDES):
+    instantiate_device_type_tests(
+        TestModuleTypeOpenReg, globals(), only_for=("openreg",)
+    )
+
+with _temp_test_configs(
+    PrivateUse1TestBase,
+    module_overrides={
+        "module_combined_skip": [
+            DecorateInfo(unittest.skip("skip via module_overrides"))
+        ],
+    },
+    module_allowlist=("module_combined_supported", "module_combined_skip"),
+):
+    instantiate_device_type_tests(
+        TestModuleAllowlistWithOverrides, globals(), only_for=("openreg",)
+    )
+
+
+class TestInstantiationErrors(TestCase):
+    """Verify the edge cases and errors hit while instantiating @ops / @modules tests.
+
+    The test classes are defined locally so the test runner never collects them.
+    """
+
+    def _instantiate(self, test_cls, **configs):
+        scope = {test_cls.__name__: test_cls}
+        with _temp_test_configs(PrivateUse1TestBase, **configs):
+            instantiate_device_type_tests(test_cls, scope, only_for="openreg")
+        return scope
+
+    def test_empty_modules_list_raises(self):
+        class TestEmpty(TestCase):
+            @modules([])
+            def test_empty(self, device, dtype, module_info, training):
+                pass
+
+        with self.assertRaisesRegex(ValueError, "test_empty: An empty"):
+            self._instantiate(TestEmpty)
+
+    def test_allowlist_emptying_modules_list_generates_no_tests(self):
+        class TestNarrowed(TestCase):
+            @modules([module_normal])
+            def test_narrowed(self, device, dtype, module_info, training):
+                pass
+
+        allowlist = ("module_combined_supported",)
+        scope = self._instantiate(TestNarrowed, module_allowlist=allowlist)
+        (device_cls,) = scope.values()
+        generated = [n for n in dir(device_cls) if n.startswith("test_narrowed")]
+        self.assertEqual(generated, [])
+
+    def test_allowlist_emptying_ops_list_generates_no_tests(self):
+        class TestNarrowed(TestCase):
+            @ops([op_normal])
+            def test_narrowed(self, device, dtype, op):
+                pass
+
+        allowlist = ("op_combined_supported",)
+        scope = self._instantiate(TestNarrowed, op_allowlist=allowlist)
+        (device_cls,) = scope.values()
+        generated = [n for n in dir(device_cls) if n.startswith("test_narrowed")]
+        self.assertEqual(generated, [])
+
+    def test_empty_ops_list_raises(self):
+        class TestEmpty(TestCase):
+            @ops([])
+            def test_empty(self, device, dtype, op):
+                pass
+
+        with self.assertRaisesRegex(ValueError, "test_empty: An empty op_list"):
+            self._instantiate(TestEmpty)
+
+    def test_duplicate_module_names_raise_with_overrides(self):
+        class TestDuplicateModules(TestCase):
+            @modules([module_normal, module_normal])
+            def test_duplicate(self, device, dtype, module_info, training):
+                pass
+
+        overrides = {"module_normal": [DecorateInfo(unittest.skip("skip"))]}
+        with self.assertRaisesRegex(AssertionError, "Duplicate module names"):
+            self._instantiate(TestDuplicateModules, module_overrides=overrides)
+
+    def test_duplicate_op_names_raise_with_overrides(self):
+        class TestDuplicateOps(TestCase):
+            @ops([op_normal, op_normal])
+            def test_duplicate(self, device, dtype, op):
+                pass
+
+        overrides = {"op_normal": [DecorateInfo(unittest.skip("skip"))]}
+        with self.assertRaisesRegex(AssertionError, "Duplicate op full_names"):
+            self._instantiate(TestDuplicateOps, op_overrides=overrides)
+
+    def test_module_override_applies_to_first_variant(self):
+        class TestFirstVariant(TestCase):
+            @modules([module_normal])
+            def test_first(self, device, dtype, module_info, training):
+                pass
+
+        overrides = {"module_normal": [DecorateInfo(unittest.skip("skip"))]}
+        # Back to the state before the first setUpClass(), when device_type is
+        # still "privateuse1" while the first variant is being parametrized.
+        with mock.patch.object(PrivateUse1TestBase, "device_type", "privateuse1"):
+            scope = self._instantiate(TestFirstVariant, module_overrides=overrides)
+        (device_cls,) = scope.values()
+        (name,) = [n for n in dir(device_cls) if n.startswith("test_first")]
+        self.assertTrue(getattr(getattr(device_cls, name), "__unittest_skip__", False))
+
+    def test_op_override_applies_to_first_variant(self):
+        class TestFirstVariant(TestCase):
+            @ops([op_normal], allowed_dtypes=(torch.float32,))
+            def test_first(self, device, dtype, op):
+                pass
+
+        overrides = {"op_normal": [DecorateInfo(unittest.skip("skip"))]}
+        with mock.patch.object(PrivateUse1TestBase, "device_type", "privateuse1"):
+            scope = self._instantiate(TestFirstVariant, op_overrides=overrides)
+        (device_cls,) = scope.values()
+        (name,) = [n for n in dir(device_cls) if n.startswith("test_first")]
+        self.assertTrue(getattr(getattr(device_cls, name), "__unittest_skip__", False))
+
+    def _assert_configs_do_not_leak(self, make_cls, configs, num_variants):
+        # instantiate_device_type_tests() deletes the generic tests, so build two
+        # classes sharing one @ops/@modules instance: the one instantiated without
+        # configs must still get every variant, none carrying the overrides.
+        self._instantiate(make_cls(), **configs)
+        (device_cls,) = self._instantiate(make_cls()).values()
+        names = [n for n in dir(device_cls) if n.startswith("test_reused")]
+        self.assertEqual(len(names), num_variants)
+        for name in names:
+            test_fn = getattr(device_cls, name)
+            self.assertFalse(getattr(test_fn, "__unittest_skip__", False))
+
+    def test_op_configs_do_not_leak_into_later_instantiations(self):
+        op_list = [op_normal, op_combined_unsupported]
+        decorator = ops(op_list, allowed_dtypes=(torch.float32,))
+
+        def make_cls():
+            class TestReused(TestCase):
+                @decorator
+                def test_reused(self, device, dtype, op):
+                    pass
+
+            return TestReused
+
+        overrides = {"op_normal": [DecorateInfo(unittest.skip("skip"))]}
+        allowlist = ("op_normal",)
+        configs = {"op_allowlist": allowlist, "op_overrides": overrides}
+        self._assert_configs_do_not_leak(make_cls, configs, num_variants=2)
+        self.assertEqual(decorator.op_list, op_list)
+
+    def test_module_configs_do_not_leak_into_later_instantiations(self):
+        module_info_list = [module_normal, module_combined_unsupported]
+        decorator = modules(module_info_list)
+
+        def make_cls():
+            class TestReused(TestCase):
+                @decorator
+                def test_reused(self, device, dtype, module_info, training):
+                    pass
+
+            return TestReused
+
+        overrides = {"module_normal": [DecorateInfo(unittest.skip("skip"))]}
+        allowlist = ("module_normal",)
+        configs = {"module_allowlist": allowlist, "module_overrides": overrides}
+        self._assert_configs_do_not_leak(make_cls, configs, num_variants=2)
+        self.assertEqual(decorator.module_info_list, module_info_list)
 
 
 @unittest.skipIf(not dist.is_available(), "Distributed not available, skipping tests")
