@@ -978,14 +978,30 @@ keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == 
 # their stride order. Exact matching can introduce additional copy kernels.
 strict_output_strides = False
 
-# Keep load/store indices affine in the loop variables (no ModularIndexing,
-# FloorDiv, Min/Max/Abs of loop variables). Views that cannot be expressed with
-# strides are realized into a separate kernel instead of being inlined, split
-# reductions split at a dim boundary, repeat/roll are lowered without modular
-# arithmetic, and non-affine index arithmetic (%, //, abs, clamp) stays a value
-# computation behind an indirect variable. Helps backends with restricted
-# memory addressing at the cost of extra kernels.
-avoid_modular_indexing = os.environ.get("TORCHINDUCTOR_AVOID_MODULAR_INDEXING") == "1"
+# Whether load/store indices may contain ModularIndexing/FloorDiv of loop
+# variables (views that merge dims, flat split reductions, repeat, roll,
+# strided slice_scatter and %, // index arithmetic) or must stay affine
+# (realize the view into its own kernel, split the reduction at a dim
+# boundary, keep the index arithmetic behind an indirect variable). None
+# decides per backend: those declaring BackendFeature.PREFER_AFFINE_INDEXING
+# (MTIA, Pallas) always keep indices affine (except index arithmetic on a
+# backend without indirect indexing, which has no affine form), Triton GPU
+# backends follow the per-construct heuristic in
+# InductorChoices.use_modular_indexing (overridable like every choice),
+# the rest inline. True forces affine indices wherever a lowering has an
+# affine form (split reductions over symbolic ranges and a strided
+# slice_scatter whose dim is not provably a multiple of the step still use
+# ModularIndexing), False forces inlining.
+avoid_modular_indexing: bool | None = {"0": False, "1": True}.get(
+    os.environ.get("TORCHINDUCTOR_AVOID_MODULAR_INDEXING", "")
+)
+
+# In the automatic mode above, a dim-merging view of unrealized compute whose
+# inlined loads would need ModularIndexing is realized into its own kernel
+# instead when it has at least this many elements (Triton GPU backends only).
+# Measured on CUDA: realizing such views of 25M+ elements was 4-5% faster at
+# the model level, realizing 3M-12M element views was neutral to 7% slower.
+realize_modular_view_min_numel = 2**24
 
 # Enabling this will let compiler print warning messages if a generated triton
 # kernel has inputs with mixed layouts.  This is helpful for perf debugging

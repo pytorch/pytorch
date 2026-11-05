@@ -55,6 +55,7 @@ from .utils import (
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
 )
+from .virtualized import V
 
 
 _T = TypeVar("_T")
@@ -186,7 +187,7 @@ def adaptive_max_pool3d(input, output_size):
 
 @register_decomposition([aten.roll.default])
 def roll(a: torch.Tensor, shifts: DimsType, dims: DimsType = ()) -> torch.Tensor:
-    if not config.avoid_modular_indexing:
+    if V.choices.use_modular_indexing(a.device, a.numel(), "roll"):
         return decomp_roll(a, shifts, dims)
     # The reference decomposition gathers with (iota + shift) % size, which
     # becomes ModularIndexing. Rolling via two slices keeps the loads linear.

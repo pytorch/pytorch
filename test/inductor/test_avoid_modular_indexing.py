@@ -6,9 +6,12 @@ import sympy
 import torch
 import torch.nn.functional as F
 from torch._inductor import config, ir, metrics
+from torch._inductor.choices import InductorChoices
 from torch._inductor.exc import NonLinearIndexingError
+from torch._inductor.ir import is_triton
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_linear_indexing
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -52,6 +55,87 @@ class LinearIndexingPredicateTest(TestCase):
 
 
 instantiate_parametrized_tests(LinearIndexingPredicateTest)
+
+
+class ModularIndexingDecisionTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_config_overrides_backend(self):
+        with config.patch(avoid_modular_indexing=True):
+            self.assertFalse(V.choices.use_modular_indexing("cpu", 8, "view"))
+        with config.patch(avoid_modular_indexing=False):
+            self.assertTrue(V.choices.use_modular_indexing("mtia", 8, "view"))
+
+    @parametrize("kind", ["view", "reduction", "slice_scatter", "repeat"])
+    @config.patch(avoid_modular_indexing=None)
+    def test_cpp_backend_inlines(self, kind):
+        self.assertTrue(V.choices.use_modular_indexing("cpu", 2**30, kind))
+
+    @config.patch(avoid_modular_indexing=None)
+    def test_affine_backends(self):
+        # backends declaring PREFER_AFFINE_INDEXING keep load/store indices
+        # affine; a third-party scheduling that declares nothing inlines
+        self.assertFalse(V.choices.use_modular_indexing("mtia", 8, "view"))
+        self.assertFalse(V.choices.use_modular_indexing("mtia", 8, "view_linear"))
+        self.assertFalse(V.choices.use_modular_indexing("mtia", 8, "index"))
+        with config.patch(cpu_backend="pallas"):
+            self.assertFalse(V.choices.use_modular_indexing("cpu", 8, "reduction"))
+            # index arithmetic can only move behind an indirect variable where
+            # the backend supports indirect indexing
+            self.assertTrue(V.choices.use_modular_indexing("cpu", 8, "index"))
+
+    @parametrize("kind", ["reduction", "slice_scatter"])
+    @config.patch(avoid_modular_indexing=None)
+    def test_triton_gpu_avoids(self, kind):
+        self.assertFalse(V.choices.use_modular_indexing("cuda", 8, kind))
+
+    @parametrize("kind", ["repeat", "roll", "index", "view_linear", "view_copy"])
+    @config.patch(avoid_modular_indexing=None)
+    def test_triton_gpu_inlines(self, kind):
+        self.assertTrue(V.choices.use_modular_indexing("cuda", 2**30, kind))
+
+    @config.patch(avoid_modular_indexing=None, realize_modular_view_min_numel=1024)
+    def test_triton_gpu_view_threshold(self):
+        self.assertTrue(V.choices.use_modular_indexing("cuda", 1023, "view"))
+        self.assertFalse(V.choices.use_modular_indexing("cuda", 1024, "view"))
+        self.assertTrue(V.choices.use_modular_indexing("cuda", None, "view"))
+        self.assertFalse(V.choices.use_modular_indexing("cuda", 1024, lambda: "view"))
+
+    @config.patch(avoid_modular_indexing=None)
+    def test_unknown_device_inlines(self):
+        # no Inductor backend or no device: inline as before
+        self.assertTrue(V.choices.use_modular_indexing("meta", 8, "reduction"))
+        self.assertTrue(V.choices.use_modular_indexing(None, 8, "reduction"))
+
+    def test_view_classification_is_lazy(self):
+        def classify():
+            raise AssertionError("classified where the answer does not need it")
+
+        with config.patch(avoid_modular_indexing=None):
+            self.assertTrue(V.choices.use_modular_indexing("cpu", 2**30, classify))
+            self.assertFalse(V.choices.use_modular_indexing("mtia", 2**30, classify))
+            # below the realization threshold every view kind inlines
+            with config.patch(realize_modular_view_min_numel=1024):
+                self.assertTrue(V.choices.use_modular_indexing("cuda", 1023, classify))
+        with config.patch(avoid_modular_indexing=True):
+            self.assertFalse(V.choices.use_modular_indexing("cuda", 2**30, classify))
+        with config.patch(avoid_modular_indexing=False):
+            self.assertTrue(V.choices.use_modular_indexing("cuda", 2**30, classify))
+
+    def test_choices_override(self):
+        # a backend can replace the whole decision, config check included
+        class AlwaysAffine(InductorChoices):
+            def use_modular_indexing(self, device, numel=None, kind="view"):
+                return False
+
+        with (
+            V.set_choices_handler(AlwaysAffine()),
+            config.patch(avoid_modular_indexing=False),
+        ):
+            self.assertFalse(V.choices.use_modular_indexing("cpu", 8, "view"))
+
+
+instantiate_parametrized_tests(ModularIndexingDecisionTest)
 
 
 class AvoidModularIndexingTest(TestCase):
@@ -237,6 +321,12 @@ class AvoidModularIndexingTest(TestCase):
         x = torch.randn(4, 12, device=device)
         src = torch.randn(4, 3, device=device)
         self.check(fn, x, src)
+        # Triton GPU backends take the split-space lowering by default too,
+        # and the realized split result keeps the consumer's index affine
+        if is_triton(torch.device(device)):
+            torch._dynamo.reset()
+            with config.patch(avoid_modular_indexing=None):
+                self.check(fn, x, src)
 
     def test_strided_slice_backward(self, device):
         # gpt-j rotate_every_two: the backward is a slice_scatter with step 2
@@ -287,6 +377,139 @@ class AvoidModularIndexingTest(TestCase):
         expected = torch.autograd.grad(fn(x), x)
         actual = torch.autograd.grad(torch.compile(fn)(x), x)
         self.assertEqual(actual, expected)
+
+    def test_auto_mode_inlines_small_merge(self, device):
+        # with the default (per-backend) decision, CPU and GPU inline a small
+        # merge into the cat instead of realizing it, so there is no extra
+        # kernel
+        def fn(x, cls_tok, w, b):
+            y = (x + b.view(1, -1, 1, 1)).flatten(2).transpose(1, 2)
+            y = torch.cat((cls_tok.expand(x.shape[0], -1, -1), y), dim=1)
+            return torch.nn.functional.layer_norm(y, (y.shape[-1],), w, None)
+
+        x = torch.randn(2, 8, 4, 4, device=device)
+        cls_tok = torch.randn(1, 1, 8, device=device)
+        w = torch.randn(8, device=device)
+        b = torch.randn(8, device=device)
+        with config.patch(
+            {
+                "avoid_modular_indexing": None,
+                "test_configs.raise_on_modular_indexing": False,
+            }
+        ):
+            self.check(fn, x, cls_tok, w, b, kernel_count=1)
+
+    def test_auto_mode_view_threshold(self, device):
+        # a merge of fresh compute with modular loads is realized on Triton
+        # GPU backends once it reaches realize_modular_view_min_numel; below
+        # that (and on other backends) it is inlined
+        def fn(a, b):
+            return (a.permute(0, 2, 1) + b).reshape(a.shape[0], -1) * 2
+
+        a = torch.randn(4, 8, 16, device=device)
+        b = torch.randn(4, 16, 8, device=device)
+        with config.patch(
+            {
+                "avoid_modular_indexing": None,
+                "test_configs.raise_on_modular_indexing": True,
+            }
+        ):
+            with config.patch(realize_modular_view_min_numel=1024):
+                with self.assertRaisesRegex(Exception, "NonLinearIndexingError"):
+                    torch.compile(fn)(a, b)
+            torch._dynamo.reset()
+            with config.patch(realize_modular_view_min_numel=512):
+                if is_triton(torch.device(device)):
+                    self.check(fn, a, b, kernel_count=1)
+                else:
+                    with self.assertRaisesRegex(Exception, "NonLinearIndexingError"):
+                        torch.compile(fn)(a, b)
+
+    def test_auto_mode_keeps_cast_merge_inlined(self, device):
+        # the HF causal-LM loss: logits.float().view(-1, V) is a row-major
+        # merge of a cast, so inlining needs no ModularIndexing and realizing
+        # it would write a float32 copy of the logits
+        def fn(logits):
+            return torch.log_softmax(logits.float().view(-1, logits.shape[-1]), -1)
+
+        logits = torch.randn(2, 8, 64, device=device, dtype=torch.bfloat16)
+        with config.patch(
+            {
+                "avoid_modular_indexing": None,
+                "test_configs.raise_on_modular_indexing": True,
+                "realize_modular_view_min_numel": 1,
+            }
+        ):
+            metrics.reset()
+            torch.compile(fn)(logits)
+            kernels = metrics.generated_kernel_count
+            nodes = metrics.ir_nodes_pre_fusion
+        torch._dynamo.reset()
+        with config.patch(avoid_modular_indexing=False):
+            metrics.reset()
+            torch.compile(fn)(logits)
+            self.assertEqual(kernels, metrics.generated_kernel_count)
+            self.assertEqual(nodes, metrics.ir_nodes_pre_fusion)
+
+    def test_choices_override_realizes_merge(self, device):
+        class AlwaysAffine(InductorChoices):
+            def use_modular_indexing(self, device, numel=None, kind="view"):
+                return False
+
+        def fn(a, b):
+            return (a.permute(0, 2, 1) + b).reshape(a.shape[0], -1) * 2
+
+        a = torch.randn(4, 8, 16, device=device)
+        b = torch.randn(4, 16, 8, device=device)
+        with (
+            V.set_choices_handler(AlwaysAffine()),
+            config.patch(
+                {
+                    "avoid_modular_indexing": False,
+                    "test_configs.raise_on_modular_indexing": True,
+                }
+            ),
+        ):
+            self.check(fn, a, b, kernel_count=1)
+
+    def test_auto_mode_keeps_broadcast_merge_inlined(self, device):
+        # the only modular load is the table broadcast over the batch (the
+        # labels in the causal-LM loss backward, position embeddings): its
+        # index arithmetic is negligible next to the affine traffic, so the
+        # merge is inlined even above the size threshold
+        def fn(a, p):
+            return (a + p[None]).view(-1, a.shape[-1]) * 2
+
+        a = torch.randn(8, 8, 16, device=device)
+        p = torch.randn(8, 16, device=device)
+        with config.patch(
+            {
+                "avoid_modular_indexing": None,
+                "test_configs.raise_on_modular_indexing": False,
+                "realize_modular_view_min_numel": 1,
+            }
+        ):
+            self.check(fn, a, p, kernel_count=1)
+            self.assertEqual(metrics.ir_nodes_pre_fusion, 1)
+
+    def test_auto_mode_keeps_row_major_merge_inlined(self, device):
+        # a row-major merge of fresh compute: the loads are affine once
+        # inlined, so there is nothing to gain from realizing it even above
+        # the size threshold
+        def fn(a, b):
+            return torch.nn.functional.gelu(a + b).view(-1, a.shape[-1]) * 2
+
+        a = torch.randn(4, 8, 16, device=device)
+        b = torch.randn(4, 8, 16, device=device)
+        with config.patch(
+            {
+                "avoid_modular_indexing": None,
+                "test_configs.raise_on_modular_indexing": True,
+                "realize_modular_view_min_numel": 1,
+            }
+        ):
+            self.check(fn, a, b, kernel_count=1)
+            self.assertEqual(metrics.ir_nodes_pre_fusion, 1)
 
     def test_avg_pool2d_backward_with_padding(self, device):
         # the window bounds are FloorDiv/Min of the output index and reach the

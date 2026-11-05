@@ -32,10 +32,9 @@ from torch._prims_common import dtype_to_type, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, Max, Min, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
-from . import config
 from .ops_handler import DefaultHandler
 from .sizevars import statically_known_true
-from .utils import generate_assert, is_linear_indexing
+from .utils import generate_assert, is_linear_indexing, sympy_product
 from .virtualized import V
 
 
@@ -224,6 +223,7 @@ class IndexPropagation(DefaultHandler):
     ) -> None:
         self._inner = inner
         self.shape_env = V.graph.sizevars.shape_env
+        self.iter_ranges = iter_ranges
 
         var_to_range = {
             k: ValueRanges(0, upper_bound(v) - 1) for k, v in iter_ranges.items()
@@ -384,7 +384,11 @@ class IndexPropagation(DefaultHandler):
             can_prove_upper = self.statically_true(expr < size)
             if wrap_neg:
                 expr = wrap_expr(expr)
-            if not config.avoid_modular_indexing or is_linear_indexing(expr):
+            if is_linear_indexing(expr) or V.choices.use_modular_indexing(
+                V.graph.current_device,
+                sympy_product(self.iter_ranges.values()),
+                "index",
+            ):
                 if generate_assert(check):
                     self.fallback(
                         "check_bounds",
