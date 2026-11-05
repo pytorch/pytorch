@@ -1,7 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
 import contextlib
+import copy
 import re
+import unittest
 from dataclasses import FrozenInstanceError
 from unittest import mock
 
@@ -23,6 +25,14 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, IS_BIG_GPU
 from torch.testing._internal.triton_utils import (
     requires_cuda_and_triton,
     requires_gpu_and_triton,
+)
+
+
+# TORCHINDUCTOR_FORCE_DISABLE_CACHES is env_name_force, so a test that needs a
+# warm cache cannot patch its way out of it.
+skip_if_caches_force_disabled = unittest.skipIf(
+    torch._inductor.config.force_disable_caches,
+    "needs caching; caches are force-disabled for this process",
 )
 
 
@@ -87,6 +97,43 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
 
         with mock.patch("torch._inductor.compile_fx.cudagraphify", record):
             yield captures
+
+    def _run_fw_bw_and_compare(self, fn, *inputs, backend="inductor", **kwargs):
+        """Compile fn, run it forward and backward on copies of inputs, and
+        compare the output and the input grads with eager. Returns the code."""
+
+        def copy_inputs():
+            return [x.detach().clone().requires_grad_(x.requires_grad) for x in inputs]
+
+        compiled_inputs, eager_inputs = copy_inputs(), copy_inputs()
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True, **kwargs)
+        result, codes = run_fw_bw_and_get_code(lambda: compiled_fn(*compiled_inputs))
+        expected = fn(*eager_inputs)
+        expected.sum().backward()
+        self.assertEqual(result, expected)
+        self.assertEqual(
+            [x.grad for x in compiled_inputs], [x.grad for x in eager_inputs]
+        )
+        return codes
+
+    def _assert_opt_out_captures(self, codes, captures):
+        """Both directions capture their partitions, none of which calls the
+        opted-out region."""
+        self.assertEqual(len(codes), 2)
+        partitions = [self._partition_bodies(code) for code in codes]
+        self.assertEqual(
+            sorted(c["is_backward"] for c in captures),
+            [False] * len(partitions[0]) + [True] * len(partitions[1]),
+        )
+        for code, code_partitions, subgraph_name in zip(
+            codes,
+            partitions,
+            ("partitioned_fw_subgraph_0_0(", "partitioned_bw_subgraph_0_0("),
+        ):
+            self.assertIn(subgraph_name, code)
+            self.assertGreater(len(code_partitions), 0)
+            for partition in code_partitions:
+                self.assertNotIn(subgraph_name, partition)
 
     @staticmethod
     def _empty_graph_module():
@@ -185,7 +232,18 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             )
 
     @parametrize("direction", ("forward", "backward"))
-    def test_unsupported_nested_region_inductor_config(self, direction):
+    @parametrize(
+        "config_key,config_value",
+        (
+            ("triton.cudagraph_min_partition_size", 1),
+            ("triton.cudagraph_skip_dynamic_graphs", True),
+            ("triton.cudagraph_trees", True),
+            ("triton.persistent_reductions", False),
+        ),
+    )
+    def test_unsupported_nested_region_inductor_config(
+        self, direction, config_key, config_value
+    ):
         config_arg = (
             "fw_inductor_config_patches"
             if direction == "forward"
@@ -193,11 +251,10 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         )
         with self.assertRaisesRegex(
             ValueError,
-            "Inductor config key 'triton.persistent_reductions' "
-            f"is not supported in {direction}",
+            f"Inductor config key '{config_key}' is not supported in {direction}",
         ):
             get_invoke_subgraph_compile_options(
-                **{config_arg: {"triton.persistent_reductions": False}}
+                **{config_arg: {config_key: config_value}}
             )
 
     def test_nested_region_options_validate_direct_construction(self):
@@ -458,6 +515,394 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         captured = num_calls == 2
         self.assertEqual(len(self._partition_bodies(code)), int(captured))
         self.assertEqual(len(captures), int(captured))
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": False,
+            "triton.cudagraphs": True,
+        }
+    )
+    def test_region_partition_is_forced_on_the_graph_not_the_config(self):
+        """Forcing partitioning for a region must not move the ambient config.
+
+        Passes that merely assume "partitioning will split this off" -- such as
+        ConstructorMoverPass moving CPU inputs/outputs to GPU -- read
+        config.graph_partition, and must keep seeing what the user asked for.
+        """
+        import torch._inductor.fx_passes.post_grad as post_grad
+
+        options = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": False}
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return torch.cos(region(x + 1))
+
+        seen_allow_inputs_outputs = []
+        constructor_mover_pass = post_grad.ConstructorMoverPass
+
+        class RecordingConstructorMoverPass(constructor_mover_pass):
+            def __init__(
+                self, target, *, allow_inputs=False, allow_outputs=False, **kwargs
+            ):
+                seen_allow_inputs_outputs.append((allow_inputs, allow_outputs))
+                super().__init__(
+                    target,
+                    allow_inputs=allow_inputs,
+                    allow_outputs=allow_outputs,
+                    **kwargs,
+                )
+
+        x = torch.randn(16, 16, device=GPU_TYPE)
+        with mock.patch.object(
+            post_grad, "ConstructorMoverPass", RecordingConstructorMoverPass
+        ):
+            result, codes = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), x
+            )
+
+        self.assertEqual(result, fn(x))
+        # The region really was carved out...
+        self.assertIn("def partition_0(args):", codes[0])
+        # ...without telling the rest of the compile that partitioning is on.
+        self.assertTrue(seen_allow_inputs_outputs)
+        self.assertEqual(set(seen_allow_inputs_outputs), {(False, False)})
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": False,
+            "triton.cudagraphs": True,
+        }
+    )
+    def test_region_opt_out_keeps_enclosing_cpu_op_disable(self):
+        """An opt-out must not widen capture: graph_partition is still off here.
+
+        Forcing partitioning for the region would otherwise let the enclosing
+        graph split around its CPU op and capture what graph_partition=False
+        says must stay uncaptured -- including the backward, which shares the
+        forward's box.
+        """
+        options = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": False}
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x):
+            return torch.sin(x)
+
+        def fn(x, weight):
+            y = (x @ weight).cpu().to(GPU_TYPE)
+            return (region(y) + torch.cos(y)).sum()
+
+        x = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+        weight = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+        with self._record_captures() as captures:
+            codes = self._run_fw_bw_and_compare(fn, x, weight)
+
+        self.assertEqual(captures, [])
+        # Positive control: the region really is still a region, so the opt-out
+        # had something to act on.
+        self.assertEqual(len(codes), 2)
+        for code, subgraph_name in zip(
+            codes, ("partitioned_fw_subgraph_0_0(", "partitioned_bw_subgraph_0_0(")
+        ):
+            self.assertIn(subgraph_name, code)
+        # The forward lost capture before the backward was compiled, so there is
+        # nothing left to carve the region out of.
+        self.assertEqual(self._partition_bodies(codes[1]), [])
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": False,
+            "triton.cudagraphs": True,
+        }
+    )
+    def test_region_opt_out_in_module_training(self):
+        """Training stays correct across steps, and saved activations are not
+        static inputs of the captured partitions."""
+        options = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": False}
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x, weight, bias):
+            return torch.relu(torch.nn.functional.linear(x, weight, bias))
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = torch.nn.Linear(16, 16)
+                self.block = torch.nn.Linear(16, 16)
+                self.head = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                h = region(self.inner(x), self.block.weight, self.block.bias)
+                return self.head(h)
+
+        model = Model().to(GPU_TYPE)
+        compiled_model = torch.compile(
+            copy.deepcopy(model), backend="inductor", fullgraph=True
+        )
+        with self._record_captures() as captures:
+            for step in range(3):
+                # Churn the allocator, so a stale or uninitialized buffer shows up
+                # as a wrong value.
+                garbage = [torch.randn(n, device=GPU_TYPE) for n in (64, 4096, 1 << 18)]
+                del garbage
+                x = torch.randn(8, 16, device=GPU_TYPE)
+                torch.compiler.cudagraph_mark_step_begin()
+                if step == 0:
+                    result, codes = run_fw_bw_and_get_code(lambda: compiled_model(x))
+                else:
+                    result = compiled_model(x)
+                    result.sum().backward()
+                expected = model(x)
+                expected.sum().backward()
+                self.assertEqual(result, expected)
+                self.assertEqual(
+                    [p.grad for p in compiled_model.parameters()],
+                    [p.grad for p in model.parameters()],
+                )
+                model.zero_grad()
+                compiled_model.zero_grad()
+
+        self._assert_opt_out_captures(codes, captures)
+        for is_backward in (False, True):
+            static_names = [
+                {c["placeholders"][i].name for i in c["static_input_idxs"]}
+                for c in captures
+                if c["is_backward"] == is_backward
+            ]
+            self.assertTrue(any(static_names))
+            for names in static_names:
+                self.assertTrue(all(n.startswith("primals_") for n in names), names)
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "triton.cudagraphs": True,
+        }
+    )
+    @parametrize("graph_partition", (False, True))
+    def test_region_opt_out_follows_compile_options_graph_partition(
+        self, graph_partition
+    ):
+        """The lazily compiled backward runs outside torch.compile(options=...)
+        until inner_compile re-applies them, so its partitioning decision has to
+        be made under them, like the forward's."""
+        options = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": False}
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x):
+            return torch.sin(x) * 2
+
+        def fn(x):
+            return torch.cos(region(x + 1)) * 3
+
+        x = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+        with (
+            torch._inductor.config.patch(graph_partition=graph_partition),
+            self._record_captures() as captures,
+        ):
+            codes = self._run_fw_bw_and_compare(
+                fn, x, options={"graph_partition": not graph_partition}
+            )
+
+        self._assert_opt_out_captures(codes, captures)
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "graph_partition": False,
+            "triton.cudagraphs": True,
+        }
+    )
+    @skip_if_caches_force_disabled
+    def test_region_opt_out_warm_start(self):
+        """A cache hit still leaves the opted-out region out of every capture."""
+        from torch._dynamo.utils import counters
+
+        options = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": False}
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x):
+            return torch.sin(x) * 2
+
+        def fn(x):
+            return torch.cos(region(x + 1)) * 3
+
+        x = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+        for _ in range(2):
+            torch._dynamo.reset()
+            counters.clear()
+            with self._record_captures() as captures:
+                codes = self._run_fw_bw_and_compare(fn, x)
+            self._assert_opt_out_captures(codes, captures)
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": True,
+            "triton.cudagraphs": True,
+        }
+    )
+    def test_redundant_cudagraph_config_does_not_split_partition(self):
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": True}
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def region(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return torch.cos(region(x + 1))
+
+        x = torch.randn(16, 16, device=GPU_TYPE)
+        result, codes = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), x
+        )
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(codes[0].count("def partition_"), 1)
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": True,
+            "triton.cudagraphs": True,
+        }
+    )
+    def test_redundant_disabled_cudagraph_config_does_not_partition(self):
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": False}
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def region(x):
+            return torch.sin(x)
+
+        @torch._dynamo.override_cudagraphs(fwd=False)
+        def fn(x):
+            return torch.cos(region(x + 1))
+
+        x = torch.randn(16, 16, device=GPU_TYPE)
+        result, codes = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), x
+        )
+
+        self.assertEqual(result, fn(x))
+        self.assertNotIn("def partition_0(args):", codes[0])
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": False,
+        }
+    )
+    @parametrize("region_opts_in", (False,))
+    def test_cpp_wrapper_cannot_isolate_regional_cudagraphs(self, region_opts_in):
+        """cpp_wrapper cannot partition, so a region cannot be isolated.
+
+        An opt-out keeps the enclosing capture: losing every CUDA graph in the
+        model is further from the request than failing to exclude one region.
+        """
+        from torch._dynamo.utils import counters
+
+        options = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": region_opts_in}
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return torch.cos(region(x + 1))
+
+        x = torch.randn(16, 16, device=GPU_TYPE)
+        with (
+            torch._inductor.config.patch("triton.cudagraphs", not region_opts_in),
+            self._record_captures() as captures,
+        ):
+            compiled_fn = torch.compile(
+                fn, backend="inductor", fullgraph=True, options={"cpp_wrapper": True}
+            )
+            result, (code,) = run_and_get_code(compiled_fn, x)
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(len(captures), 0 if region_opts_in else 1)
+        # Only a dropped opt-in is a skip; an opt-out keeps the whole-graph capture.
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], int(region_opts_in))
+        self.assertNotIn("partition_0", code)
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(fx_graph_cache=False, fx_graph_remote_cache=False)
+    @parametrize("region_cudagraphs", (False, True))
+    def test_aot_inductor_regional_cudagraphs_smoke(self, region_cudagraphs):
+        options = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": region_cudagraphs}
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x):
+            return torch.sin(x)
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.cos(region(x + 1))
+
+        x = torch.randn(16, 16, device=GPU_TYPE)
+        exported = torch.export.export(Model(), (x,))
+        (node,) = exported.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        )
+        nested_config = node.meta["custom"]["nested_region_config"]
+        self.assertEqual(
+            nested_config.inductor_config_patches["triton.cudagraphs"],
+            region_cudagraphs,
+        )
+        with torch._inductor.config.patch("triton.cudagraphs", not region_cudagraphs):
+            package_path = torch._inductor.aoti_compile_and_package(exported)
+        result = torch._inductor.aoti_load_package(package_path)(x)
+        self.assertEqual(result, Model()(x))
 
 
 if __name__ == "__main__":
