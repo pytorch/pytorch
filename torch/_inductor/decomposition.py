@@ -570,12 +570,13 @@ def _strict_pointwise_inputs(
     if not is_strict_cuda_triton(self.device):
         return None
     dtype = torch.result_type(grad_output, self) if dtype is None else dtype
-    if dtype not in (torch.float16, torch.bfloat16, torch.float32):
+    if dtype not in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
         return None
+    compute_dtype = utils.get_computation_dtype(dtype)
     # CUDA loads operands in the kernel dtype before converting to opmath.
     return (
-        _cuda_tensor_iterator_cast(grad_output, dtype).float(),
-        _cuda_tensor_iterator_cast(self, dtype).float(),
+        _cuda_tensor_iterator_cast(grad_output, dtype).to(compute_dtype),
+        _cuda_tensor_iterator_cast(self, dtype).to(compute_dtype),
         dtype,
     )
 
@@ -611,7 +612,8 @@ def gelu_backward(
     one = torch.ones((), dtype=self.dtype, device=self.device)
     tanh_derivative = torch.addcmul(one, -t, t)
     # CUDA rounds 3 * kKappa in opmath precision before multiplying by x_sq.
-    inner_derivative = k_beta * torch.add(one, x_sq, alpha=0.13414499163627625)
+    alpha = 3 * 0.044715 if self.dtype == torch.float64 else 0.13414499163627625
+    inner_derivative = k_beta * torch.add(one, x_sq, alpha=alpha)
     right_derivative = (0.5 * self) * tanh_derivative * inner_derivative
     return (grad_output * (0.5 * (1 + t) + right_derivative)).to(dtype)
 
@@ -653,7 +655,10 @@ def silu_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch.Tensor
     grad_output, self, dtype = inputs
     s = torch.sigmoid(self)
     one = torch.ones((), dtype=self.dtype, device=self.device)
-    return (grad_output * s * torch.addcmul(one, self, 1 - s)).to(dtype)
+    factor = torch.addcmul(one, self, 1 - s)
+    product = grad_output * s
+    # CUDA float64 gives the final derivative factor priority over an upstream NaN.
+    return (factor * product if dtype == torch.float64 else product * factor).to(dtype)
 
 
 @register_decomposition(aten.tanh_backward.default)
@@ -679,8 +684,8 @@ def sigmoid_backward(grad_output: torch.Tensor, output: torch.Tensor) -> torch.T
     grad_output, output, dtype = inputs
     # CUDA associates left and rounds each operation to the tensor dtype.
     delta = (1 - output).to(dtype)
-    product = (grad_output * delta.float()).to(dtype)
-    return (product.float() * output).to(dtype)
+    product = (grad_output * delta.to(grad_output.dtype)).to(dtype)
+    return (product.to(grad_output.dtype) * output).to(dtype)
 
 
 @register_decomposition([aten.full])
