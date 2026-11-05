@@ -5345,10 +5345,13 @@ def interpolate(  # noqa: F811
             raise AssertionError("align_corners is unexpectedly None")
         # Two levels are necessary to prevent TorchScript from touching
         # are_deterministic_algorithms_enabled.
+        # Use the slow decomp for HIP and other backends; CPU, MPS, and NVIDIA CUDA have native kernels.
         if not torch.jit.is_scripting():
             if (
                 input.device.type not in ("cpu", "mps")
-            ) and torch.are_deterministic_algorithms_enabled():
+                and not (input.device.type == "cuda" and torch.version.hip is None)
+                and torch.are_deterministic_algorithms_enabled()
+            ):
                 # Use slow decomp whose backward will be in terms of index_put
                 # importlib is required because the import cannot be top level
                 # (cycle) and cannot be nested (TS doesn't support)
