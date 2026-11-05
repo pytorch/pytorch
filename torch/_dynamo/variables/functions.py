@@ -465,11 +465,6 @@ def _set_qualname(
 
 
 class BaseUserFunctionVariable(VariableTracker):
-    def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def self_args(self) -> list[VariableTracker]:
         return []
 
@@ -1379,15 +1374,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def python_type(self) -> type:
         return types.GeneratorType
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        # Generators have no tp_richcompare: identity for ==/!=, TypeError for
-        # ordering.
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def pygen_yf(self) -> VariableTracker | None:
         if self.inline_tracer.frame_state == FrameState.FRAME_SUSPENDED_YIELD_FROM:
             if sys.version_info >= (3, 15):
@@ -1897,7 +1883,7 @@ class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RVT001
         fn_vt = self.im_func
         return isinstance(fn_vt, UserFunctionVariable) and fn_vt.is_constant
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython method_hash: hash(self) ^ hash(func)
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/classobject.c#L304
         if self.source:
@@ -2819,11 +2805,6 @@ class SkipFunctionVariable(VariableTracker):
         self.value = value
         self.reason = reason
 
-    def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def as_python_constant(self) -> Any:
         return self.value
 
@@ -2864,6 +2845,13 @@ class SkipFunctionVariable(VariableTracker):
             args=[msg],
             kwargs={"name": ConstantVariable.create(name), "obj": self},
         )
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
     @classmethod
     def create_with_source(cls, value: Any, source: Source) -> "SkipFunctionVariable":
@@ -3274,9 +3262,9 @@ class _WrappedSkipFunctionMethodDescriptorCommonVariable(ContextWrappedFunctionM
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
+        # Wrapped functions are FunctionType, which inherits object's
+        # tp_richcompare; don't pick up SkipFunctionVariable's via the MRO.
+        return VariableTracker.tp_richcompare_impl(self, tx, other, op)
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -3999,11 +3987,6 @@ class FunctoolsPartialVariable(VariableTracker):
         # Store cache_hash from the original partial for SAC context_fn caching
         self.original_cache_hash = original_cache_hash
 
-    def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def python_type(self) -> type:
         return functools.partial
 
@@ -4236,12 +4219,12 @@ class PolyfilledFunctionVariable(VariableTracker):
 
         return python_constant_richcompare_impl(self, tx, other, op)
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         try:
             # CPython wrapper_hash
             return hash(self.as_python_constant()), False
         except NotImplementedError:
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
 
     def as_python_constant(self) -> Any:
         return self.fn

@@ -553,7 +553,7 @@ class BaseBuiltinVariable(VariableTracker):
     ) -> ConstantVariable:
         return VariableTracker.build(tx, hasattr(self.as_python_constant(), name))  # type: ignore[return-value]
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         return hash(self.as_python_constant()), False
 
@@ -2487,11 +2487,17 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
 
-        # Call arg.__round__()
+        # builtin_round: call arg.__round__(), passing ndigits positionally
+        # and only when it is not None.
         round_method = SourcelessBuilder.create(tx, getattr).call_function(
             tx, [arg, VariableTracker.build(tx, "__round__")], {}
         )
-        return round_method.call_function(tx, list(args), kwargs)
+        if len(args) + len(kwargs) > 1 or kwargs.keys() - {"ndigits"}:
+            actual = f"{len(args) + 1} args, kwargs {list(kwargs)}"
+            raise_args_mismatch(tx, "round", "number, ndigits=None", actual)
+        ndigits = args[0] if args else kwargs.get("ndigits")
+        round_args = [] if ndigits is None or ndigits.is_constant_none() else [ndigits]
+        return round_method.call_function(tx, round_args, {})
 
     def call_range(
         self,
@@ -3722,6 +3728,11 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             # if all args are python constants, evaluate getattr() directly rather
             # than propagating a graph break from tp_getattro_impl.
             if not check_unspec_or_constant_args(args, kwargs):
+                raise
+            obj = args[0]
+            if isinstance(
+                obj, variables.UserDefinedClassVariable
+            ) and obj.getattr_needs_tracing(tx, args[1].as_python_constant()):
                 raise
             try:
                 result = getattr(*[a.as_python_constant() for a in args])

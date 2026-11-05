@@ -161,13 +161,6 @@ class TracebackVariable(VariableTracker):
         "tb_lasti": Member(_get_tb_lasti, readonly_setter),
     }
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
 
 class ExceptionVariable(VariableTracker):
     # _PyExc_BaseException: https://github.com/python/cpython/blob/v3.13.0/Objects/exceptions.c
@@ -250,13 +243,6 @@ class ExceptionVariable(VariableTracker):
 
     def python_type(self) -> type:
         return self.exc_type
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
