@@ -26,6 +26,7 @@ from torch._inductor.codegen.triton import (
     FixedTritonConfig,
     get_triton_reduction_function,
     IndexingOptions,
+    texpr,
     TMACompatibilityChecker,
     TritonCSEVariable,
     TritonKernel,
