@@ -528,7 +528,7 @@ def check_for_setting(labels: set[str], body: str, setting: str) -> bool:
 # Number of stacked PRs the current PR can sit on top of before we refuse
 # to run CI on it. Top-of-stack PRs in tall ghstacks rarely need full CI
 # until the lower entries land; the filter step fails so the author has to
-# rebase (or add ciflow/trunk) to get fresh signal before merging.
+# rebase to get fresh signal before merging.
 GHSTACK_BELOW_SKIP_THRESHOLD = 10
 # Matches a single ghstack stack-list entry, e.g. "* #12345" or
 # "* __->__ #12345" (the marker for the current PR).
@@ -741,16 +741,11 @@ def main() -> None:
     # full CI now is wasted work. We fail rather than emit an empty matrix so
     # that the missing signal is visible and pytorchbot won't merge the PR
     # against stale CI results -- the author must rebase to re-trigger CI.
-    if (
-        pr_number
-        and "ciflow/trunk" not in labels
-        and get_ghstack_below_count(pr_body) >= GHSTACK_BELOW_SKIP_THRESHOLD
-    ):
+    if pr_number and get_ghstack_below_count(pr_body) >= GHSTACK_BELOW_SKIP_THRESHOLD:
         print(
             f"PR #{pr_number} sits on top of "
             f">={GHSTACK_BELOW_SKIP_THRESHOLD} ghstack entries; refusing to "
-            "run CI. Rebase once the lower PRs land, or add the ciflow/trunk "
-            "label to force CI on this PR.",
+            "run CI. Rebase once the lower PRs land.",
             file=sys.stderr,
         )
         sys.exit(1)
