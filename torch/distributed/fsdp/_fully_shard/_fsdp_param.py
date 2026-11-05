@@ -374,10 +374,10 @@ class FSDPParam:
             ),
         )
         # Pre-pad the sharded parameter to avoid padding before all-gather. For
-        # uneven Shard(i), i > 0, padding would sit between the rows of the dims
-        # before i, so keep the shard compact and pad it in all_gather_inputs.
+        # Shard(i), i > 0, padding would sit between the rows of the dims before
+        # i, so keep the shard itself and pad it in all_gather_inputs if uneven.
         padded_sharded_param = param_data.new_zeros(
-            self.sharded_size if self._uneven_nonzero_dim else padded_sharded_size
+            padded_sharded_size if shard_dim == 0 else self.sharded_size
         )
         if sharded_param.numel() > 0:
             padded_sharded_param.narrow(
@@ -1507,15 +1507,14 @@ class FSDPParam:
         padded_sharded_size = self.padded_sharded_param_size
         shard_dim = self.fsdp_placement.dim
         length = local_tensor.size(shard_dim) if local_tensor.numel() > 0 else 0
-        stored_size = (
-            self.sharded_size if self._uneven_nonzero_dim else padded_sharded_size
-        )
-        if local_tensor.size() != stored_size and not same_local_tensor:
-            if shard_dim != 0:
+        if shard_dim != 0:
+            # Shard(i), i > 0, keeps the shard itself, without padding
+            if local_tensor.size() != self.sharded_size and not same_local_tensor:
                 raise AssertionError(
-                    f"Shard({shard_dim}) expects local tensor size {stored_size}: "
+                    f"Shard({shard_dim}) expects local tensor size {self.sharded_size}: "
                     f"{local_tensor.size()=}"
                 )
+        elif local_tensor.size() != padded_sharded_size and not same_local_tensor:
             padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
             padded_local_tensor.narrow(dim=shard_dim, start=0, length=length).copy_(
                 local_tensor
