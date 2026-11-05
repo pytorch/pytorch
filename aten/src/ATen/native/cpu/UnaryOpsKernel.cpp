@@ -147,8 +147,36 @@ bool LogitMKLEnabled<float>() {
 #endif
 
 static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kBFloat16, kHalf, iter.common_dtype(), "logit_cpu", [&]() {
+  if (at::isReducedFloatingType(iter.common_dtype())) {
+    // Compute in float like the CUDA kernel. Rounding 1 - x and x / (1 - x)
+    // to half or bfloat16 loses most digits near x = 0.5.
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.common_dtype(), "logit_cpu_reduced_float", [&]() {
+      const float eps = eps_scalar.to<float>();
+      const float inf = std::numeric_limits<float>::infinity();
+      const float lo = eps < 0.f ? -inf : eps;
+      const float hi = eps < 0.f ? inf : 1.f - eps;
+      using fVec = Vectorized<float>;
+      const fVec lo_vec(lo), hi_vec(hi), one_vec(1.f);
+      cpu_kernel_vec(
+          iter,
+          [lo, hi, inf](scalar_t a) -> scalar_t {
+            float x = static_cast<float>(a);
+            x = x < lo ? lo : (x > hi ? hi : x);
+            return x == 1.f ? inf : std::log(x / (1.f - x));
+          },
+          [lo_vec, hi_vec, one_vec](Vectorized<scalar_t> a) {
+            auto [x0, x1] = convert_to_float<scalar_t>(a);
+            // Apply lo last so it wins when eps > 1 - eps, like the scalar path.
+            x0 = fVec::blendv(fVec::blendv(x0, hi_vec, x0 > hi_vec), lo_vec, x0 < lo_vec);
+            x1 = fVec::blendv(fVec::blendv(x1, hi_vec, x1 > hi_vec), lo_vec, x1 < lo_vec);
+            return convert_from_float<scalar_t>(
+                (x0 / (one_vec - x0)).log(), (x1 / (one_vec - x1)).log());
+          });
+    });
+    return;
+  }
+  AT_DISPATCH_FLOATING_TYPES(
+      iter.common_dtype(), "logit_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
         if (LogitMKLEnabled<scalar_t>() && at::hasMKL() && iter.is_contiguous()) {
           LogitMKLKernel<scalar_t>(eps, &iter);

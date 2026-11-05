@@ -1905,6 +1905,17 @@ class TestUnaryUfuncs(TestCase):
         expected = torch.from_numpy(scipy.special.erfinv(x.cpu().numpy()))
         self.assertEqual(torch.special.erfinv(x), expected, atol=0, rtol=4 * torch.finfo(dtype).eps)
 
+    # https://github.com/pytorch/pytorch/issues/199867
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("eps", [None, 1e-3])
+    def test_logit_reduced_precision(self, device, dtype, eps):
+        # Every value of the dtype in (0, 1) should round once from the float result.
+        x = torch.arange(-(2**15), 2**15, dtype=torch.int32).to(torch.int16).view(dtype)
+        x = x[(x > 0) & (x < 1)].to(device)
+        expected = torch.special.logit(x.float(), eps=eps).to(dtype)
+        actual = torch.special.logit(x, eps=eps)
+        self.assertEqual(actual, expected, atol=0, rtol=torch.finfo(dtype).eps)
+
 
 class TestUnaryUfuncsCpuOnly(TestCase):
     hw_classification = HardwareClassification.CPU
