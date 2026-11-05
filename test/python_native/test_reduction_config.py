@@ -312,6 +312,43 @@ class TestReductionConfig(TestCase):
         self.assertEqual(cfg, expected)
 
     @parametrize(
+        "case,updates,expected_rule",
+        [
+            ("anchor", {}, "b200_ragged_c257"),
+            ("explicit_threads", {"threads_per_block": 64}, "explicit"),
+            ("explicit_npar", {"npar": 1024}, "explicit"),
+            ("explicit_vec", {"vec": 1}, "explicit"),
+            ("below_band", {"rows": (15 << 20) // 514}, "default"),
+            ("band_floor", {"rows": (15 << 20) // 514 + 1}, "b200_ragged_c257"),
+            ("above_band", {"rows": (16 << 20) // 514 + 1}, "default"),
+            ("sm103", {"cc": (10, 3)}, "default"),
+            ("sm90", {"cc": (9, 0)}, "default"),
+            ("batched", {"batches": 2}, "default"),
+            ("acc64", {"acc_bits": 64}, "default"),
+        ],
+        name_fn=lambda case, updates, expected_rule: case,
+    )
+    def test_b200_ragged_column_boundaries(self, case, updates, expected_rule):
+        """Keep explicit, off-band, non-B200, batched and 64-bit views on defaults."""
+        # fp16 C = 257 rows take 514 bytes; the 16 MiB anchor admits (15 MiB, 16 MiB].
+        args = dict(
+            cc=(10, 0),
+            dtype=torch.float16,
+            rows=(16 << 20) // 514,
+            columns=257,
+            batches=1,
+            nfields=1,
+            trait_key="sum",
+            itemsize=2,
+            acc_bits=32,
+            nouts=1,
+            alignment=16,
+            contiguous=True,
+        )
+        cfg = ct.select_col_config(**(args | updates))
+        self.assertEqual(cfg.rule, expected_rule)
+
+    @parametrize(
         "dtype,N,nfields,routed",
         [
             (torch.float16, 255, 1, True),
@@ -410,6 +447,40 @@ class TestReductionConfigDevice(TestCase):
         want = "rowitree" if stride == 1 else "genitree"
         self.assertTrue(any(t.startswith(want) for t in _served(key)), _served(key))
         self.assertEqual(got, x.double().sum(1).float(), atol=1e-4, rtol=1e-4)
+
+    @parametrize(
+        "op,dtype,N",
+        [
+            ("sum", torch.float32, 255),
+            ("var_mean", torch.bfloat16, 1025),
+            ("var_mean", torch.float16, 16383),
+        ],
+        name_fn=lambda op, dtype, N: f"{op}_{str(dtype)[6:]}_{N}",
+    )
+    def test_b200_ragged_rows_route(self, device, op, dtype, N):
+        """Serve unordered odd rows inside the B200 band with the ragged-vector plan."""
+        import cutlass
+
+        if torch.cuda.get_device_capability(device) != (10, 0):
+            self.skipTest("the ragged-row route is measured on B200 only")
+        x = torch.randn(64, N, device=device, dtype=dtype)
+        key = f"ragged_route_{op}_{str(dtype)[6:]}_{N}"
+        if op == "sum":
+            trait, outs = T.SumOps(acc=cutlass.Float32), [torch.float32]
+            got = (kg.reduce_dim(trait, key, x, [1], outs[0], order="unordered"),)
+        else:
+            trait, outs = T.VarMeanOps(correction=1), [torch.float32] * 2
+            got = kg.reduce_dim2(trait, key, x, [1], outs, order="unordered")
+        routed = {k for k in rt._CACHE if k[:2] == ("rowtile", key)}
+        self.assertEqual(len(routed), 1, routed)
+        # Row keys carry ragged_vector, so an explicit ragged launch reuses the plan.
+        kw = dict(nouts=len(outs), order="linear", ragged_vector=True)
+        rt.reduce_row_tile(trait, key, x, outs, **kw)
+        self.assertEqual({k for k in rt._CACHE if k[:2] == ("rowtile", key)}, routed)
+        with torch.backends.python_native.cutedsl.disabled():
+            xf = x.float()
+            want = (xf.sum(1),) if op == "sum" else torch.var_mean(xf, dim=1)
+        self.assertEqual(got, want, atol=1e-4, rtol=1e-4)
 
     def test_row_kernel_leaves_the_environment_to_dispatch(self, device):
         """Follow only the order argument in direct row calls, even under strict."""
