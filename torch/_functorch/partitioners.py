@@ -90,6 +90,7 @@ from ._aot_autograd.utils import (
     get_default_generator,
     get_device_rng_state,
     supports_graphsafe_rng,
+    supports_graphsafe_rng_functionalization,
 )
 from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
@@ -2165,7 +2166,7 @@ def functionalize_rng_ops(
 
         for candidate in candidates:
             if isinstance(candidate, torch.Tensor):
-                if supports_graphsafe_rng(candidate.device):
+                if supports_graphsafe_rng_functionalization(candidate.device):
                     return candidate.device
 
         return torch.device("cpu")
