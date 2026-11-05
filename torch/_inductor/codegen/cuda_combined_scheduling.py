@@ -278,12 +278,16 @@ class CUDACombinedScheduling(BaseScheduling):
     ) -> tuple[float, str]:
         return self._triton_scheduling.benchmark_fused_nodes(nodes)
 
-    def benchmark_codegened_module(self, module):
+    def benchmark_codegened_module(self, module, input_overrides=None):
         if getattr(module, "is_nvgemm", False):
-            return self._benchmark_nvgemm_module(module)
-        return self._triton_scheduling.benchmark_codegened_module(module)
+            return self._benchmark_nvgemm_module(module, input_overrides)
+        return self._triton_scheduling.benchmark_codegened_module(
+            module, input_overrides=input_overrides
+        )
 
-    def _benchmark_nvgemm_module(self, module) -> tuple[float, str]:
+    def _benchmark_nvgemm_module(
+        self, module, input_overrides=None
+    ) -> tuple[float, str]:
         from torch._dynamo.utils import preserve_rng_state
         from torch._inductor.runtime.benchmarking import benchmarker
         from torch._inductor.utils import get_interface_for_device
@@ -297,6 +301,11 @@ class CUDACombinedScheduling(BaseScheduling):
         ):
             try:
                 args = module.get_args()
+                if input_overrides:
+                    # Copy in place: args may be views of one shared storage
+                    for name, arg in zip(module.arg_buffer_names, args, strict=True):
+                        if name in input_overrides:
+                            arg.copy_(input_overrides[name])
                 call = module.call
                 call(args)
             except Exception as e:
