@@ -7383,6 +7383,14 @@ class ShapeEnvReplacementCacheTest(TestCase):
         # Previously, the symbolic op memo returned the PythonMod.
         self.assertIsInstance((a % b).node.expr, Mod)
 
+    def test_mod_not_memoized(self):
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint()
+        b = shape_env.create_unbacked_symint()
+        _ = a % b
+        _ = a % b
+        self.assertFalse(any(k[0] == "mod" for k in shape_env._symop_cache))
+
     def test_range_change_refreshes_symop_memo(self):
         shape_env = ShapeEnv()
         a, b, c, d = self._chain_rejected_by_range(shape_env)
