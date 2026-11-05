@@ -305,7 +305,6 @@ from .misc import (
     LoggingLoggerVariable,
     NumpyDTypeVariable,
     NumpyVariable,
-    ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
@@ -2724,7 +2723,7 @@ class VariableBuilder:
                 raise RuntimeError(f"Undefined dynamism {value.dynamism}")
         elif istype(value, object):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return ObjectVariable(value, source=self.source)
+            return VariableTracker(value=value, source=self.source)
         elif (
             sys.version_info >= (3, 15)
             and type(value) is builtins.sentinel  # pyrefly: ignore [missing-attribute]
@@ -5982,7 +5981,7 @@ class SourcelessBuilder:
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         elif istype(value, object):
-            return ObjectVariable(value)
+            return VariableTracker(value=value)
         elif (
             sys.version_info >= (3, 15)
             and type(value) is builtins.sentinel  # pyrefly: ignore [missing-attribute]
