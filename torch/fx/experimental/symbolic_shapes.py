@@ -4910,7 +4910,7 @@ class ShapeEnv:
             self.frozen = old_frozen
             self._error_on_new_guards = old_error
 
-    def _get_key(self) -> tuple[int, int, int, int, int]:
+    def _get_key(self) -> tuple[int, int, int, int, int, int]:
         """
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
@@ -4920,6 +4920,7 @@ class ShapeEnv:
             len(self.divisible),
             self.num_deferred_runtime_asserts,
             len(self.real_tensor_prop_unbacked_vals),
+            len(self.axioms),
             self._var_to_range_version_counter,
         )
 
@@ -7571,6 +7572,8 @@ class ShapeEnv:
                 if k.has(FloorDiv):
                     new_items.update({self.simplify(k): v})
             axioms.update(new_items)
+            if new_items and axioms is self.axioms:
+                self._update_version_counter()
 
         # Pattern matching
         if axioms is None:
@@ -9159,6 +9162,7 @@ class ShapeEnv:
                     )
                     self.guards.append(guard)
                     self.axioms.update(dict(self.get_implications(self.simplify(g))))
+                    self._update_version_counter()
             else:
                 self._log_guard("eval [guard suppressed]", g, forcing_spec=forcing_spec)
 
