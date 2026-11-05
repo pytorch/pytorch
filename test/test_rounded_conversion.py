@@ -11,12 +11,15 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
     run_tests,
+    serialTest,
+    slowTest,
     TestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -219,9 +222,10 @@ def _all_inputs(src, dst):
 class TestRoundedConversion(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def assertSameValues(self, actual, expected, inputs):
-        actual = actual.cpu().double()
-        expected = expected.cpu()
+    def assertSameValues(self, actual, expected, inputs, dtype=torch.float64):
+        # dtype must represent all values of actual and expected exactly.
+        actual = actual.cpu().to(dtype)
+        expected = expected.cpu().to(dtype)
         nan = expected.isnan()
         self.assertEqual(actual.isnan(), nan)
         bad = ~nan & (
@@ -571,6 +575,36 @@ class TestRoundedConversion(TestCase):
 
         x = torch.randn(4, device=device)
         self.assertEqual(torch.jit.script(fn)(x), fn(x), atol=0, rtol=0)
+
+    @onlyAccelerator
+    @slowTest
+    @serialTest()
+    @largeTensorTest("6GB", device="cpu")
+    def test_exhaustive_float32(self, device):
+        # Every float32 input, comparing the accelerator (which uses hardware
+        # instructions where available) with the CPU's software conversion.
+        # Without those instructions (e.g. on ROCm, or float8 before sm_89),
+        # this compares the software conversion on both.
+        chunk = 1 << 28
+        for start in range(-(1 << 31), 1 << 31, chunk):
+            x = torch.arange(chunk, dtype=torch.int32).add_(start).view(torch.float32)
+            x_dev = x.to(device)
+            for dst in (
+                torch.float16,
+                torch.bfloat16,
+                torch.float8_e4m3fn,
+                torch.float8_e5m2,
+                torch.float8_e8m0fnu,
+                torch.float8_e5m3fnu,
+            ):
+                for mode in MODES:
+                    with self.subTest(dst=dst, mode=mode):
+                        self.assertSameValues(
+                            x_dev.to(dst, round=mode),
+                            x.to(dst, round=mode),
+                            x,
+                            dtype=torch.float32,
+                        )
 
     @onlyAccelerator
     def test_cross_device(self, device):

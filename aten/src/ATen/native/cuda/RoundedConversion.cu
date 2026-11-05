@@ -1,34 +1,18 @@
 #define TORCH_ASSERT_NO_OPERATORS
-#include <ATen/native/RoundedConversion.h>
+#include <ATen/native/cuda/RoundedConversion.cuh>
 
 #include <ATen/Dispatch_v2.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cuda/Loops.cuh>
 
 namespace at::native {
 namespace {
 
-// Pairs rejected by check_rounded_conversion are not instantiated, which needs
-// a template: AT_DISPATCH's lambdas are not.
-template <typename src_t, typename dst_t>
-void to_dtype_rounded_loop(TensorIteratorBase& iter, c10::RoundingMode mode) {
-  if constexpr (
-      !std::is_same_v<src_t, dst_t> &&
-      (std::is_same_v<src_t, double> || !std::is_same_v<dst_t, float>)) {
-    // Half and BFloat16 widen to float exactly.
-    using wide_t =
-        std::conditional_t<std::is_same_v<src_t, double>, double, float>;
-    gpu_kernel_nocast(iter, [mode] GPU_LAMBDA(src_t x) -> dst_t {
-      return c10::convert_with_rounding<dst_t>(static_cast<wide_t>(x), mode);
-    });
-  } else {
-    TORCH_INTERNAL_ASSERT(false, "unsupported rounded conversion");
-  }
-}
-
 void to_dtype_rounded_kernel_cuda(
     TensorIteratorBase& iter,
     c10::RoundingMode mode) {
+  if (iter.dtype() == kFloat8_e8m0fnu || iter.dtype() == kFloat8_e5m3fnu) {
+    to_dtype_rounded_kernel_cuda_arch_specific(iter, mode);
+    return;
+  }
   AT_DISPATCH_V2(
       iter.input_dtype(),
       "to_dtype_rounded_cuda",
@@ -41,7 +25,10 @@ void to_dtype_rounded_kernel_cuda(
             kFloat,
             kHalf,
             kBFloat16,
-            AT_EXPAND(AT_FLOAT8_TYPES));
+            kFloat8_e4m3fn,
+            kFloat8_e5m2,
+            kFloat8_e4m3fnuz,
+            kFloat8_e5m2fnuz);
       }),
       kDouble,
       kFloat,
