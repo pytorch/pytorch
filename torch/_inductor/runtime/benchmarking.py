@@ -568,6 +568,24 @@ class TritonBenchmarker(Benchmarker):
             raise
 
 
+# AMD Infinity Cache (MALL) size by gfx target; torch's device properties do not
+# report it. Unknown archs get Triton's 256 MB flush size.
+_ROCM_MALL_SIZE = {
+    "gfx908": 0,  # MI100
+    "gfx90a": 0,  # MI200
+    "gfx942": 256 * 1024 * 1024,  # MI300X
+    "gfx950": 256 * 1024 * 1024,  # MI350X
+}
+
+
+@functools.cache
+def _rocm_mall_size() -> int:
+    """MALL bytes of the current ROCm device."""
+    props = torch.cuda.get_device_properties(torch.cuda.current_device())
+    arch = getattr(props, "gcnArchName", "").split(":", 1)[0]
+    return _ROCM_MALL_SIZE.get(arch, 256 * 1024 * 1024)
+
+
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     def __init__(self: Self) -> None:
         super().__init__()
@@ -598,6 +616,21 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             if cache_size:
                 return cache_size
         return 256 * 1024 * 1024
+
+    def get_flush_size(
+        self: Self, device_type: str | torch.device | None = None
+    ) -> int:
+        """Bytes to flush between timed runs so each starts with cold caches.
+
+        On ROCm, L2_cache_size is the per-XCD L2 (4 MB on MI300X/MI350X) and the
+        Infinity Cache (MALL) behind it is not in torch's device properties, so add
+        it. Flushing only the L2 leaves operands warm in the MALL, which misranks
+        autotune choices.
+        """
+        cache_size = self.get_device_cache_size(device_type)
+        if not torch.version.hip:
+            return cache_size
+        return cache_size + _rocm_mall_size()
 
     def get_event_pairs(
         self: Self, iters: int, device_type: str | torch.device | None = None
@@ -732,12 +765,17 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         device_interface.synchronize()
 
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
+        # (CUDA). On ROCm, flush by reading the buffer instead: zero_() leaves it
+        # dirty in the L2 / Infinity Cache and the timed call then pays the
+        # write-back. Read a float32 buffer, since summing int32 first writes an
+        # int64 copy.
         buffer = torch.empty(
-            self.get_device_cache_size(device_type) // 4,
-            dtype=torch.int,
+            self.get_flush_size(device_type) // 4,
+            dtype=torch.float32 if torch.version.hip else torch.int,
             device=device_type,
         )
         buffer.zero_()
+        flush = buffer.sum if torch.version.hip else buffer.zero_
 
         # estimate the runtime of `_callable`
         event_pairs = self.get_event_pairs(estimation_iters, device_type=device_type)
@@ -746,7 +784,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             if grad_to_none is not None:
                 for x in grad_to_none:
                     x.grad = None
-            buffer.zero_()
+            flush()
             start_event.record()
             _callable()
             end_event.record()
@@ -761,7 +799,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):
-            buffer.zero_()
+            flush()
 
         # benchmark `_callable`
         event_pairs = self.get_event_pairs(benchmark_iters, device_type=device_type)
@@ -770,7 +808,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             if grad_to_none is not None:
                 for x in grad_to_none:
                     x.grad = None
-            buffer.zero_()
+            flush()
             start_event.record()
             _callable()
             end_event.record()
