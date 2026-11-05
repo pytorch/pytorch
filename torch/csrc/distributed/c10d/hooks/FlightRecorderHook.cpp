@@ -438,7 +438,7 @@ void FlightRecorderHook::onResult(int64_t op_id, bool success) {
       try {
         duration = op->work->getDuration();
       } catch (const std::exception&) {
-        // E.g. timing was enabled after the op was issued.
+        // The backend's collectivesTimingEnabled() disagreed with its Work.
       }
     }
     op->recorder->retire_completed(
