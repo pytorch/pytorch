@@ -3011,11 +3011,13 @@ class CppBuilder:
                         get_filename_component(KERNEL_DIR "${{PTX_FILE}}" DIRECTORY)
                         get_filename_component(KERNEL_STEM "${{PTX_FILE}}" NAME_WE)
                         set(FATBIN_INPUT "${{KERNEL_DIR}}/${{KERNEL_STEM}}.fatbin")
-                        add_custom_command(
-                            OUTPUT ${{FATBIN_FILE}}
-                            COMMAND ${{CMAKE_COMMAND}} -E copy_if_different ${{FATBIN_INPUT}} ${{FATBIN_FILE}}
-                            DEPENDS ${{FATBIN_INPUT}}
-                        )
+                        if(NOT "${{FATBIN_INPUT}}" STREQUAL "${{FATBIN_FILE}}")
+                            add_custom_command(
+                                OUTPUT ${{FATBIN_FILE}}
+                                COMMAND ${{CMAKE_COMMAND}} -E copy_if_different ${{FATBIN_INPUT}} ${{FATBIN_FILE}}
+                                DEPENDS ${{FATBIN_INPUT}}
+                            )
+                        endif()
                     endif()
 
                     # --- FATBIN to Object File (.o) Command ---
