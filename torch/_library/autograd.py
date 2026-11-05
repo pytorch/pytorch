@@ -32,6 +32,19 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         utils.is_tensorlist_like_type(a.type)
         for a in (*schema.arguments, *schema.returns)
     )
+    # What utils.fill_defaults would add, computed once: schema.arguments
+    # builds new Argument objects on every access. A list default is mutable,
+    # so each call must get its own, and schemas with one use fill_defaults.
+    positional_defaults = tuple(
+        a.default_value for a in schema.arguments if not a.kwarg_only
+    )
+    kwarg_only_defaults = {
+        a.name: a.default_value for a in schema.arguments if a.kwarg_only
+    }
+    has_list_default = any(
+        isinstance(d, list)
+        for d in (*positional_defaults, *kwarg_only_defaults.values())
+    )
 
     @dataclass
     class Metadata:
@@ -62,7 +75,11 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
                 # adds a new default arg, then they must update
                 # their setup_context (along with the rest of their operator
                 # registrations)
-                args, kwargs = utils.fill_defaults(op._schema, args, kwargs)
+                if has_list_default:
+                    args, kwargs = utils.fill_defaults(op._schema, args, kwargs)
+                else:
+                    args = (*args, *positional_defaults[len(args) :])
+                    kwargs = {**kwarg_only_defaults, **kwargs}
 
                 if has_kwarg_only_args:
                     info._setup_context_fn(
