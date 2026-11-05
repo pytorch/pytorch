@@ -94,7 +94,11 @@ jobs:
       build-environment: ${{ needs.linux-jammy-py3_11-gcc11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_11-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_11-gcc11-build.outputs.test-matrix }}
-      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      # test_cpu_select_algorithm runs in inductor_amx (inductor-unittest.yml, on main
+      # pushes and ciflow/inductor); PRs touching only oneDNN code get it post-merge.
+      tests-to-exclude: >-
+        inductor/test_torchinductor_opinfo
+        inductor/test_cpu_select_algorithm
       force-keep-going: true
       force-no-td: true
       soft-fail-tests: true
@@ -136,7 +140,11 @@ jobs:
       build-environment: ${{ needs.linux-jammy-py3_11-clang21-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_11-clang21-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_11-clang21-build.outputs.test-matrix }}
-      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      # test_cpu_select_algorithm runs in inductor_amx (inductor-unittest.yml, on main
+      # pushes and ciflow/inductor); PRs touching only oneDNN code get it post-merge.
+      tests-to-exclude: >-
+        inductor/test_torchinductor_opinfo
+        inductor/test_cpu_select_algorithm
       force-keep-going: true
       force-no-td: true
       soft-fail-tests: true
