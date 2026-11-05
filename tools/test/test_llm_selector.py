@@ -481,11 +481,14 @@ g () {
             "test_smath.py": "import os; import test_math\n",
             "test_tmath.py": "from os import path; import test_math\n",
             "test_ymath.py": "try: import test_math\n",
+            "test_umath.py": "if TYPE_CHECKING: from test_math import x\n",
+            "test_vmath.py": "import os; from . import test_math\n",
             "test_pmath.py": "from test.inductor.ext.triton import device\n",
             # The CPython tests redirect test.mapping_tests to mapping_tests.
             "cpython/v3_13/mapping_tests.py": "",
             "cpython/v3_13/test_dict.py": "from test import mapping_tests\n",
             "cpython/v3_13/test_userdict.py": "from test import mapping_tests, support\n",
+            "cpython/v3_13/test_odict.py": "try: from test import mapping_tests\n",
             "test_weak.py": "# from test import mapping_tests\n",
         }
         candidates = CANDIDATES | {
@@ -504,9 +507,12 @@ g () {
             "test_smath",
             "test_tmath",
             "test_ymath",
+            "test_umath",
+            "test_vmath",
             "test_pmath",
             "cpython/v3_13/test_dict",
             "cpython/v3_13/test_userdict",
+            "cpython/v3_13/test_odict",
             "test_weak",
         }
         for changed, expected in [
@@ -529,11 +535,17 @@ g () {
                     "test_smath",
                     "test_tmath",
                     "test_ymath",
+                    "test_umath",
+                    "test_vmath",
                 },
             ),
             (
                 "test/cpython/v3_13/mapping_tests.py",
-                {"cpython/v3_13/test_dict", "cpython/v3_13/test_userdict"},
+                {
+                    "cpython/v3_13/test_dict",
+                    "cpython/v3_13/test_userdict",
+                    "cpython/v3_13/test_odict",
+                },
             ),
         ]:
             sel = self.select_in_tree(sources, candidates, [changed])
@@ -715,6 +727,7 @@ g () {
             ".github/scripts/parse_ref.py",
             ".github/scripts/pytest_cache.py",
             ".github/scripts/pytest_caching_utils.py",
+            ".github/scripts/file_io_utils.py",
             ".github/actions/pytest-cache-download/action.yml",
             ".github/actions/pytest-cache-upload/action.yml",
             ".github/workflows/pull.yml",
@@ -1259,6 +1272,9 @@ class TestMain(unittest.TestCase):
                 select_tests.git_grep("x", "no-such-rev")
             with self.assertRaises(subprocess.CalledProcessError):
                 select_tests.changed_files("HEAD", "no-such-rev")
+            # Without the "--", git reads the path "test" as a pathspec.
+            with self.assertRaises(subprocess.CalledProcessError):
+                select_tests.changed_files("HEAD~1", "test")
 
     def test_non_ascii_paths_are_unquoted(self) -> None:
         name = "test/test_caf\u00e9.py"
