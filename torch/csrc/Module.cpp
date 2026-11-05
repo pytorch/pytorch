@@ -2882,6 +2882,26 @@ Call this whenever a new thread is created in order to propagate values from
     fake.unsafeGetTensorImpl()->set_real_tensor(nullptr);
   });
 
+  // See Note [C++ fake dispatch keys]
+  py_module.def(
+      "_set_fake_dispatch_keys",
+      [](const at::Tensor& fake, std::optional<c10::DispatchKeySet> keys) {
+        TORCH_CHECK(fake.defined(), "Expected a defined tensor");
+        TORCH_CHECK(fake.is_fake(), "Expected a fake tensor");
+        fake.unsafeGetTensorImpl()->set_fake_dispatch_keys(keys);
+      },
+      py::arg("fake"),
+      py::arg("keys"));
+
+  py_module.def(
+      "_get_fake_dispatch_keys",
+      [](const at::Tensor& fake) {
+        TORCH_CHECK(fake.defined(), "Expected a defined tensor");
+        TORCH_CHECK(fake.is_fake(), "Expected a fake tensor");
+        return fake.unsafeGetTensorImpl()->fake_dispatch_keys();
+      },
+      py::arg("fake"));
+
   // The memo bindings read the epoch from the fake's mode, so callers need not
   // reach its Python wrapper. They take a C++ fake: the setters raise for any
   // other tensor and the getters return None. A fake without a mode has no

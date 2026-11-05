@@ -25,10 +25,17 @@ TORCH_API void set_and_normalize_fake_device(
 //
 // impl must read as meta: a meta tensor, or, inside a kernel, a fake. The
 // latter is how the fake fallback (later in this stack) makes a new fake of a
-// kernel's output that inherited a fake input's Fake key and ExtraMeta, such as
-// a view op's output; its fake device and mode are replaced. A rejected impl is
-// left unchanged, unless another thread sets allow_meta to False during the
-// call.
+// kernel output that inherited fake state from an input. A view made through
+// maybe_copy_fake_tensor_metadata (as_strided, alias) has the input's fake
+// device and mode, while a view that builds its own TensorImpl (view_as_real,
+// view_as_complex, view.dtype) inherits only the Fake key. A shallow copy, such
+// as detach's output, has a copy of the input's ExtraMeta (see ExtraMeta's copy
+// constructor for what is kept), including the real tensor and recorded
+// dispatch keys (see Note [C++ fake dispatch keys]). init_cpp_fake itself
+// replaces only the fake device and mode and keeps the rest of the ExtraMeta;
+// the fallback then sets the real tensor and dispatch keys as Python does for
+// an op's output. A rejected impl is left unchanged, unless another thread sets
+// allow_meta to False during the call.
 TORCH_API void init_cpp_fake(
     c10::TensorImpl* impl,
     c10::Device device,
