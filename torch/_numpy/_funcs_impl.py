@@ -368,8 +368,8 @@ def geomspace(
     )
     if dtype is None:
         dtype = comp_dtype
-    start = start.to(comp_dtype)
-    stop = stop.to(comp_dtype)
+    start = _util.cast_if_needed(start, comp_dtype)
+    stop = _util.cast_if_needed(stop, comp_dtype)
     out_sign = torch.sgn(start)
     start = start / out_sign
     stop = stop / out_sign
@@ -380,13 +380,14 @@ def geomspace(
         num,
         base=10.0,
         dtype=comp_dtype,
+        device=start.device,
     )
     # Overwrite the endpoints to avoid log/pow round-off, as NumPy does.
     if num > 0:
         res[0] = start
         if num > 1:
             res[-1] = stop
-    return (res * out_sign).to(dtype)
+    return _util.cast_if_needed(res * out_sign, dtype)
 
 
 def logspace(
