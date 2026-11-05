@@ -661,6 +661,11 @@ class AOTInductorModelContainer {
     AOTI_RUNTIME_CHECK(
         !(allow_h2d_copy && user_managed),
         "update_constant_buffer: allow_h2d_copy is not supported with user_managed");
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
+    AOTI_RUNTIME_CHECK(
+        user_managed,
+        "update_constant_buffer: MTIA supports only user_managed constant updates");
+#endif
 
     int32_t cpu_device_type = aoti_torch_device_type_cpu();
     auto num_constants = model.num_constants();

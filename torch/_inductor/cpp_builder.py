@@ -2362,6 +2362,9 @@ def get_cpp_torch_device_options(
         if _IS_MACOS and aot_mode and not link_libtorch:
             ldflags.append("Wl,-dead_strip_dylibs")
 
+    if device_type == "mtia":
+        definitions.append(" USE_MTIA")
+
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
 
