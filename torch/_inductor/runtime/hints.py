@@ -404,6 +404,7 @@ class InductorMeta(typing.TypedDict, total=False):
     extra_launcher_args: typing.Any
     fixed_grid: typing.Any
     precomputed_grids: typing.Any
+    declared_constexpr_names: list[str]
     config_args: typing.Any
     use_fast_triton_launcher: bool
 
