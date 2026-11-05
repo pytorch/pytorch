@@ -49,10 +49,8 @@ jobs:
         include: [
           { name: "manylinux2_28-builder",          tag: "cuda13.4",          runner: "${{ needs.select-runner.outputs.x86 }}" },
           { name: "manylinux2_28-builder",          tag: "cuda13.2",          runner: "${{ needs.select-runner.outputs.x86 }}" },
-          { name: "manylinux2_28-builder",          tag: "cuda13.0",          runner: "${{ needs.select-runner.outputs.x86 }}" },
           { name: "manylinuxaarch64-builder",       tag: "cuda13.4",          runner: "${{ needs.select-runner.outputs.arm64 }}" },
           { name: "manylinuxaarch64-builder",       tag: "cuda13.2",          runner: "${{ needs.select-runner.outputs.arm64 }}" },
-          { name: "manylinuxaarch64-builder",       tag: "cuda13.0",          runner: "${{ needs.select-runner.outputs.arm64 }}" },
           { name: "manylinux2_28-builder",          tag: "rocm10.0",          runner: "${{ needs.select-runner.outputs.x86 }}" },
           { name: "manylinux2_28-builder",          tag: "rocm10.1",          runner: "${{ needs.select-runner.outputs.x86 }}" },
           { name: "manylinux2_28-builder",          tag: "rocm-preview",      runner: "${{ needs.select-runner.outputs.x86 }}" },
@@ -70,3 +68,32 @@ jobs:
           docker-build-dir: manywheel
           DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
           DOCKER_ID: ${{ secrets.DOCKER_ID }}
+
+  # Pin-bump PRs get ciflow/docker but skip preview tests, so catch an unmirrored
+  # rocm-preview pin before merge; the fix is a test-infra admin running
+  # update-s3-dependencies with torch_rocm.
+  rocm-preview-mirror-check:
+    # Releases never run preview lanes, and their pin ages off the nightly index.
+    if: github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/heads/release/') && !startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 1
+          submodules: false
+          show-progress: false
+      - name: Check rocm pin is mirrored to the preview index
+        shell: bash
+        run: |
+          set -euo pipefail
+          pin=$(tr -d '[:space:]' < .ci/docker/ci_commit_pins/rocm-preview.txt)
+          index="https://download.pytorch.org/whl/nightly/rocm-preview/rocm/"
+          page=$(curl -fsS --retry 3 --retry-all-errors "${index}")
+          if [[ "${page}" != *"rocm-${pin}"[.-]* ]]; then
+            echo "::error::rocm==${pin} is not on ${index}; a test-infra admin must run update-s3-dependencies with package=torch_rocm."
+            exit 1
+          fi
+          echo "rocm==${pin} is mirrored at ${index}"
