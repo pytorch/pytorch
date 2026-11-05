@@ -21,6 +21,7 @@
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/xpu/XPUFunctions.h>
 #include <c10/xpu/XPUStream.h>
 #include <torch/csrc/inductor/static_launcher/common.h>
 #include <torch/csrc/inductor/static_launcher/xpu.h>
@@ -336,20 +337,22 @@ std::unique_ptr<sycl::kernel> loadKernel(
     uint32_t sharedMemBytes,
     uint32_t* nSpillsPtr,
     int device_idx) {
-  // Launching with more SLM than the device has hangs the GPU; fail the way
-  // cuda.cpp does so autotune drops the config.
-    const auto slmLimit =
+  const auto deviceCount = static_cast<int>(c10::xpu::device_count());
+  TORCH_CHECK(
+      device_idx >= 0 && device_idx < deviceCount,
+      "The device index is out of range. It must be in [0, ",
+      deviceCount,
+      "), but got ",
+      device_idx,
+      ".");
+  const auto slmLimit =
       at::xpu::getDeviceLocalMemSize(static_cast<c10::DeviceIndex>(device_idx));
-  TORCH_CHECK_WITH(
-      OutOfMemoryError,
-      sharedMemBytes < slmLimit,
-      "out of resource: ",
-      funcName,
-      " Required: ",
-      sharedMemBytes,
-      " Hardware limit:",
-      slmLimit,
-      " Reducing block sizes or `num_stages` may help.");
+  // Reject SLM overuse before module creation so autotune can drop the config;
+  // local_mem_size is inclusive, so allow sharedMemBytes == slmLimit.
+  if (sharedMemBytes > slmLimit) {
+    torch::inductor::static_launcher::throwOutOfResourceError(
+        funcName, sharedMemBytes, slmLimit);
+  }
 
   std::ifstream IFS(filePath, std::ios::binary);
   std::ostringstream OSS;

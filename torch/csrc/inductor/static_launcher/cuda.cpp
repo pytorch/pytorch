@@ -211,28 +211,17 @@ std::pair<CUmodule, CUfunction> loadKernel(
 
   // TODO: Unify the CUDA and ROCm shared memory checks. Currently using <= for
   // ROCm and < for CUDA because ROCm hits the boundary case more often.
+  const auto sharedOptinLimit = static_cast<uint32_t>(shared_optin);
 #if defined(USE_ROCM)
-  TORCH_CHECK_WITH(
-      OutOfMemoryError,
-      sharedMemBytes <= static_cast<uint32_t>(shared_optin),
-      "out of resource: ",
-      funcName,
-      " Required: ",
-      sharedMemBytes,
-      " Hardware limit:",
-      shared_optin,
-      " Reducing block sizes or `num_stages` may help.");
+  if (sharedMemBytes > sharedOptinLimit) {
+    torch::inductor::static_launcher::throwOutOfResourceError(
+        funcName.c_str(), sharedMemBytes, sharedOptinLimit);
+  }
 #else
-  TORCH_CHECK_WITH(
-      OutOfMemoryError,
-      sharedMemBytes < static_cast<uint32_t>(shared_optin),
-      "out of resource: ",
-      funcName,
-      " Required: ",
-      sharedMemBytes,
-      " Hardware limit:",
-      shared_optin,
-      " Reducing block sizes or `num_stages` may help.");
+  if (sharedMemBytes >= sharedOptinLimit) {
+    torch::inductor::static_launcher::throwOutOfResourceError(
+        funcName.c_str(), sharedMemBytes, sharedOptinLimit);
+  }
 #endif
 
   if (sharedMemBytes > SHARED_MEM_STATIC_MAX &&
