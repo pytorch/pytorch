@@ -195,6 +195,10 @@ Rules for working with ghstack:
   body, since `ghstack` rewrites `ghstack-source-id` on every push and a
   stale trailer will clobber HEAD's current one. If you modified the commit
   message, run `ghstack -u` afterwards to push the updated PR description.
+- **Keep stacks under 10 PRs.** Follow
+  [Keep PR stacks small](CONTRIBUTING.md#keep-pr-stacks-small): land the
+  bottom of a stack before adding more on top, and use `[no-ci]` on PRs that
+  don't need CI yet (see the `ghstack-ci` skill).
 - **Never push directly.** Do not `git push` to branches, and never directly
   modify the `gh/USERNAME/N` branches — ghstack manages those.
 - **Finding the PR.** If the user asks to pull CI results or code review for a
