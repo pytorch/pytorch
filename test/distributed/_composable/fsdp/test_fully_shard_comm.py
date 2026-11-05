@@ -3385,21 +3385,22 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         model[1].set_custom_all_gather(comm)
         self.assertIs(groups[1]._all_gather_comm, comm)
         model[1].reshard()
-        # With a custom layout, replacing the comm waits for pending work and reshard
+        # Replacing a custom layout waits for pending work and reshard, while the
+        # comm, which owns no outputs, can be replaced at any time
         model[0].set_all_gather_layout(rank_major, recurse=False)
         handle = model[0].unshard(async_op=True)
         with self.assertRaisesRegex(RuntimeError, "cannot replace"):
-            model[0].set_custom_all_gather(comm)
+            model[0].set_all_gather_layout(native, recurse=False)
+        model[0].set_custom_all_gather(comm)  # the pending all-gather keeps its comm
+        self.assertIs(groups[0]._all_gather_comm, comm)
         handle.wait()
         with self.assertRaisesRegex(RuntimeError, "cannot replace"):
-            model[0].set_custom_all_gather(comm)
-        with self.assertRaisesRegex(RuntimeError, "cannot replace"):
-            model[0].set_allocate_memory_from_process_group_for_comm(True)
-        with self.assertRaisesRegex(RuntimeError, "cannot replace"):
-            model[0].set_symm_mem_for_comm()
+            model[0].set_all_gather_layout(native, recurse=False)
+        model[0].set_allocate_memory_from_process_group_for_comm(True)
+        self.assertIsNot(groups[0]._all_gather_comm, comm)
         model[0].reshard()
-        model[0].set_custom_all_gather(comm)
-        self.assertIs(groups[0]._all_gather_comm, comm)
+        model[0].set_all_gather_layout(native, recurse=False)
+        self.assertIs(groups[0]._all_gather_layout, native)
 
         # FSDP adopts nothing from a rejected result, so another layout can follow
         class ShortLayout(AllGatherLayout):
@@ -3595,7 +3596,7 @@ def _check_layout_training(test, device, mode, reshard, async_op, mixed, keep):
     if mode == "custom":
         for block, layout in zip(model, layouts):
             test.assertGreater(layout.single_copy_refills, 0)
-            block.set_custom_all_gather(comm)  # the installed comm stays allowed
+            block.set_custom_all_gather(_ParamContiguousAllGather())  # any time
             block.set_all_gather_layout(layout, recurse=False)  # a no-op
             with test.assertRaisesRegex(RuntimeError, "cannot replace"):
                 block.set_all_gather_layout(DefaultAllGatherLayout())

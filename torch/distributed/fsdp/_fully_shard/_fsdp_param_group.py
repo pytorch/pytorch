@@ -25,7 +25,6 @@ from ._all_gather_layout import (
     _PersistentBuffers,
     AllGatherLayout,
     DEFAULT_ALL_GATHER_LAYOUT,
-    DefaultAllGatherLayout,
 )
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
@@ -400,21 +399,21 @@ class FSDPParamGroup:
         self._register_state_dict_hooks()
 
     def _check_all_gather_replaceable(self) -> None:
-        # Pending results and unsharded parameters depend on the current backend's
-        # outputs, and outputs that view a custom layout's buffers keep their owner
+        # Only the layout that created a group's outputs can refill them, and a
+        # pending first all-gather adopts its layout's outputs when it completes
         if self._all_gather_result is not None or self.is_unsharded:
             raise RuntimeError(
                 self._with_fqn(
-                    "cannot replace the all-gather comm or layout while an "
-                    "all-gather is pending or parameters are unsharded; reshard, "
-                    "or call reset_iter_state() after a failed unshard"
+                    "cannot replace the all-gather layout while an all-gather is "
+                    "pending or parameters are unsharded; reshard, or call "
+                    "reset_iter_state() after a failed unshard"
                 )
             )
         if any(p._keep_all_gather_output_storage for p in self.fsdp_params):
             raise RuntimeError(
                 self._with_fqn(
-                    "cannot replace the all-gather comm or layout after parameters "
-                    "adopted outputs from the installed custom layout"
+                    "cannot replace the all-gather layout after parameters adopted "
+                    "outputs from the installed custom layout"
                 )
             )
 
@@ -429,11 +428,9 @@ class FSDPParamGroup:
             )
 
     def _check_comm_swap(self, comm_type: type) -> None:
+        # Comms keep no per-call state and own no outputs, so only the layout's
+        # comm type limits a swap
         self._check_layout_comm(self._all_gather_layout, comm_type)
-        if type(self._all_gather_comm) is comm_type:
-            return  # FSDP's comms of one type produce the same outputs
-        if not isinstance(self._all_gather_layout, DefaultAllGatherLayout):
-            self._check_all_gather_replaceable()
 
     def set_symm_mem(self, backend: Literal["NCCL"] = "NCCL") -> None:
         self._check_comm_swap(SymmMemAllGather)

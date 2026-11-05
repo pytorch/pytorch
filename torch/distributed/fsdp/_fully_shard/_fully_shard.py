@@ -781,9 +781,8 @@ class FSDPModule:
         layout whose ``comm_type`` is set requires a comm of that type, which
         FSDP passes each call's layout metadata: install the comm with this
         method before the layout, and while the layout is installed, comms of
-        other types are rejected. With a custom layout installed, replacing the
-        comm is also rejected while an all-gather is pending, while parameters
-        are unsharded, or after they adopt output storage from the layout.
+        other types are rejected. Otherwise the comm can be replaced at any time,
+        since the layout, not the comm, owns the parameters' outputs.
 
         Args:
             comm (AllGather): Custom all-gather communication.
@@ -798,10 +797,6 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             layout = fsdp_param_group._all_gather_layout
             fsdp_param_group._check_layout_comm(layout, type(comm))
-            # The default layout's outputs do not depend on the comm
-            replaced = comm is not fsdp_param_group._all_gather_comm
-            if replaced and not isinstance(layout, DefaultAllGatherLayout):
-                fsdp_param_group._check_all_gather_replaceable()
             fsdp_param_group._all_gather_comm = comm
 
     def set_custom_reduce_scatter(self, comm: ReduceScatter) -> None:
@@ -934,10 +929,11 @@ class FSDPModule:
         passes each call's layout metadata: install the comm first with
         :meth:`set_custom_all_gather`. Replacing a layout keeps the installed
         comm. A layout that keeps no per-call state can serve any number of
-        modules. Set custom layouts and their comms before the first unshard:
-        neither can be replaced while an all-gather is pending, while
-        parameters are unsharded, or after they adopt outputs from a custom
-        layout. FSDP checks every group before changing any.
+        modules. Set custom layouts before the first unshard: since only the
+        layout that created the parameters' outputs can refill them, a custom
+        layout cannot be installed or replaced while an all-gather is pending,
+        while parameters are unsharded, or after they adopt outputs from a
+        custom layout. FSDP checks every group before changing any.
 
         Args:
             layout (AllGatherLayout): Layout to install; pass
@@ -1150,10 +1146,7 @@ class FSDPModule:
         :meth:`set_custom_reduce_scatter` as those APIs allow for
         finer-grained control over each communication, and this method cannot
         determine their staging buffer allocation strategy. It is rejected under
-        a layout whose ``comm_type`` the resulting comm does not match and, under
-        any other custom layout, when it changes the setting while an all-gather
-        is pending, while parameters are unsharded, or after they adopt outputs
-        from the layout.
+        a layout whose ``comm_type`` the resulting comm does not match.
 
         Args:
             enable (bool): Whether to turn on ProcessGroup allocation.
