@@ -13,6 +13,7 @@ in ``torch.cuda`` so the call sites did not have to change.
 """
 
 import ctypes
+import os
 import sys
 import threading
 
@@ -71,13 +72,26 @@ def _load() -> ctypes.CDLL:
     global _lib
     if _lib is not None:
         return _lib
+    if sys.platform == "win32":
+        program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+        nvsmi = os.path.join(program_files, "NVIDIA Corporation", "NVSMI", "nvml.dll")
+        # nvml.dll is normally on the default search path (installed with the
+        # driver); some older/DCH installs only ship it under NVSMI, which pynvml
+        # also falls back to.
+        candidates = ["nvml.dll", nvsmi]
+    else:
+        candidates = ["libnvidia-ml.so.1"]
+    last_err: OSError | None = None
     with _lib_lock:
         if _lib is None:
-            name = "nvml.dll" if sys.platform == "win32" else "libnvidia-ml.so.1"
-            try:
-                _lib = ctypes.CDLL(name)
-            except OSError as err:
-                raise NVMLError_DriverNotLoaded(NVML_ERROR_DRIVER_NOT_LOADED) from err
+            for name in candidates:
+                try:
+                    _lib = ctypes.CDLL(name)
+                    break
+                except OSError as err:
+                    last_err = err
+    if _lib is None:
+        raise NVMLError_DriverNotLoaded(NVML_ERROR_DRIVER_NOT_LOADED) from last_err
     return _lib
 
 
