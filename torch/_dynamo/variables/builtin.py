@@ -2618,7 +2618,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             return VariableTracker.build(tx, dir(arg.value))
         if isinstance(arg, BuiltinVariable):
             return VariableTracker.build(tx, dir(arg.fn))
-        if isinstance(arg, BuiltinTypeVariable):
+        if isinstance(arg, TypeVariable):
             return VariableTracker.build(tx, dir(arg._fn))
         # Enable specialized VTs for constants to work with dir()
         if arg.is_python_constant():
@@ -3581,10 +3581,11 @@ class BuiltinVariable(BaseBuiltinVariable):
         return pysequence_contains(tx, a, b)
 
 
-class BuiltinTypeVariable(VariableTracker):
+class TypeVariable(VariableTracker):
     """A builtin ``type`` object such as ``dict`` or ``list``."""
 
     _fn: type
+    _cpython_type = type
 
     def __init__(self, value: Any = None, **kwargs: Any) -> None:
         if value is not None and value is not self._fn:
@@ -3655,7 +3656,7 @@ class BuiltinTypeVariable(VariableTracker):
     }
 
     @classmethod
-    def create_with_source(cls, value: type, source: Source) -> "BuiltinTypeVariable":
+    def create_with_source(cls, value: type, source: Source) -> "TypeVariable":
         install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         return cls(source=source)
 
@@ -3760,7 +3761,7 @@ class BuiltinTypeVariable(VariableTracker):
     ) -> ConstantVariable:
         return VariableTracker.build(tx, hasattr(self._fn, name))  # type: ignore[return-value]
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # PyType_Type inherits object's identity hash. The base hash_impl needs a
         # source to find it and fakes one (id(self)) otherwise, so a sourceless
         # type(x) would not match the same type used as a dict key.
@@ -3777,7 +3778,7 @@ class BuiltinTypeVariable(VariableTracker):
         return python_constant_richcompare_impl(self, tx, other, op)
 
 
-class DictBuiltinVariable(BuiltinTypeVariable):
+class DictBuiltinVariable(TypeVariable):
     """Variable tracker for the `dict` builtin constructor."""
 
     _fn = dict
@@ -4327,7 +4328,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         return None
 
 
-class ListBuiltinVariable(BuiltinTypeVariable):
+class ListBuiltinVariable(TypeVariable):
     """Variable tracker for the `list` builtin constructor."""
 
     _fn = list
@@ -4401,7 +4402,7 @@ class ListBuiltinVariable(BuiltinTypeVariable):
         return ListVariable.tp_new_impl(self, tx, args, kwargs)
 
 
-class ByteArrayBuiltinVariable(BuiltinTypeVariable):
+class ByteArrayBuiltinVariable(TypeVariable):
     """Variable tracker for the `bytearray` builtin constructor."""
 
     _fn = bytearray
