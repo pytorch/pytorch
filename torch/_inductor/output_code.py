@@ -83,7 +83,7 @@ if TYPE_CHECKING:
     _BoxedCallable: TypeAlias = Callable[[Sequence[InputType]], object]
 
     class CompiledFnRunner(Protocol):
-        """Runner emitted by the Python wrapper when graph_partition is on.
+        """Runner emitted by the Python wrapper for a split_into_partitions graph.
 
         codegen writes a Runner class (see codegen/wrapper.py) whose partitions
         hold the per-partition callables and whose recursively_apply_fns rewrites
@@ -570,6 +570,7 @@ class CompiledFxGraph(OutputCode):
     cudagraph_info: CudagraphCachedInfo | None
     partition_maps: list[GraphPartitionMap] | None
     split_into_partitions: bool
+    cudagraphs_per_partition: bool
     has_uncaptured_partition: bool
     compile_region_name: str | None
     fx_kwargs: _CompileFxKwargs
@@ -671,6 +672,7 @@ class CompiledFxGraph(OutputCode):
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
         self.split_into_partitions = graph.split_into_partitions
+        self.cudagraphs_per_partition = graph.cudagraphs_per_partition
         self.has_uncaptured_partition = graph.has_uncaptured_partition
         self._defers_input_alignment = getattr(graph, "_defers_input_alignment", False)
         storage_mutation_info = get_input_storage_mutation_info(gm)
@@ -974,9 +976,9 @@ class CompiledFxGraph(OutputCode):
                         "boxed_forward_device_index", None
                     )
 
-                if self.split_into_partitions and policy is None:
-                    # For a partitioned graph, we skip some cudagraph checks
-                    # if it's supported with partition, so we use
+                if self.cudagraphs_per_partition and policy is None:
+                    # When the partitions are for CUDA Graphs, we skip some
+                    # cudagraph checks if it's supported with partition, so we use
                     # cudagraph_partition_post_compile.  When a CUDAGraphPolicy
                     # is active, we use cudagraph_post_compile instead so the
                     # policy controls wrapping via policy.cudagraphify().
