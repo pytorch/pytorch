@@ -1420,8 +1420,7 @@ class graph:
                     f"{reason} could not register CUPTI node-creation callbacks. "
                     "This requires cupti-python, CUDA >= 13.5, CUPTI >= 13.5, and a CUPTI "
                     "subscription not already held by another profiler (e.g. Kineto or Nsight "
-                    "Systems). "
-                    + fallback
+                    "Systems). " + fallback
                 )
 
         # Scope annotation recording to this capture: the capture-root stamp and
