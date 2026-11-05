@@ -50,6 +50,9 @@ class FakeWork : public Work {
     fut->markCompleted(at::IValue(static_cast<uint8_t>(WorkResult::SUCCESS)));
     return fut;
   }
+  bool hasFutureResult() const override {
+    return true;
+  }
 
  private:
   std::vector<at::Tensor> result_;

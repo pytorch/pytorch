@@ -1213,7 +1213,7 @@ class FlightRecorderHookNoResultFutureTest(TestCase):
         t = torch.ones(8)
         for _ in range(2):
             pg.allreduce(t)
-        # The hook expects NotImplementedError; anything else logs a warning.
+        # Its Work reports no result future.
         work = pg.allreduce(t)
         with self.assertRaisesRegex(
             NotImplementedError, "getFutureResult not implemented"
