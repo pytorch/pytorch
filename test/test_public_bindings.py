@@ -381,6 +381,7 @@ class TestPublicBindings(TestCase):
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_buffer_ops",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_gemm_utils",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_grouped_gemm_gfx950",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_wgrad_gfx950",  # depends on flydsl
             "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",
