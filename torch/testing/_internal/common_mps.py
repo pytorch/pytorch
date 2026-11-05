@@ -23,7 +23,6 @@ if torch.backends.mps.is_available():
         # ops below are xfailed for complex32/complex64. Drill this list down as
         # complex support is added.
         UNSUPPORTED_COMPLEX_OPS = {
-            "addr",
             "cholesky_inverse",
             "float_power",
             "geqrf",
@@ -315,15 +314,6 @@ if torch.backends.mps.is_available():
                 torch.float16,
                 torch.bfloat16,
             ],
-            # CPU Errors:
-            "addr": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],  # "addmv_impl_cpu" not implemented for 'Half'
             "as_stridedpartial_views": None,  # cpu result off, showing random values
             # random results
             # mps vs cpu:
