@@ -814,6 +814,16 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual("'xnumel': 'i64'" in code, avoid_guards)
 
     @onlyOn(GPU_TYPE)
+    @config.patch(avoid_32bit_indexing_guards=True)
+    def test_split_scan_int64_indexing(self, device):
+        # A split scan of 32-bit values with int64 indexing used to fail to compile.
+        def fn(x):
+            return torch.cumsum(x, -1)
+
+        x = torch.ones(10 * 3 * 352 * 352, device=device)
+        self.assertEqual(torch.compile(fn, dynamic=True)(x), fn(x))
+
+    @onlyOn(GPU_TYPE)
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
