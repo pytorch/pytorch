@@ -21,6 +21,8 @@ class _RecordingProfile(profile):
         **kwargs,
     ):
         self.actions: list[str] = []
+        # The default CUDA activity exercises the use_device is not None guard
+        # in step(), without requiring hardware.
         super().__init__(activities=activities, **kwargs)
 
     def prepare_trace(self):
@@ -40,7 +42,6 @@ class TestProfilerSchedule(TestCase):
 
     def setUp(self):
         super().setUp()
-        # CUDA selects the device-state branch without requiring hardware.
         # Fail if a test accidentally uses a real capture instead of the fake.
         for operation in ("_prepare_profiler", "_enable_profiler", "_disable_profiler"):
             self.enterContext(
@@ -327,10 +328,8 @@ class TestProfilerSchedule(TestCase):
             p.stop()
 
     def test_start_after_stop_in_device_stopped(self):
-        """A user may call start() after a stop() that left current_action
-        in DEVICE_STOPPED. The second start() must re-derive state from
-        the schedule (not trust the stale DS), so a real (NONE, X)
-        transition fires prepare_trace and the second run actually records."""
+        """Stopping in DEVICE_STOPPED must restore the scheduled action so a later
+        start() issues prepare/start again."""
         callback_count = [0]
 
         def handler(prof):
@@ -351,10 +350,8 @@ class TestProfilerSchedule(TestCase):
         # (W, DS) fired _trace_ready during run 1.
         self.assertEqual(callback_count[0], 1)
 
-        # Run 2: must actually profile, not be a silent no-op. step_num is
-        # carried over, so schedule(step_num=1) is the active step (R&S).
-        # start() re-derives current_action from the schedule, so we get
-        # (NONE, R&S) -> prepare_trace + start_trace.
+        # stop() restored R&S from the raw schedule at step 1, so the next
+        # start() must issue prepare_trace + start_trace again.
         with patch(self.PATCH_TARGET, return_value=False):
             p.start()
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
@@ -366,7 +363,7 @@ class TestProfilerSchedule(TestCase):
         self.assertEqual(
             callback_count[0],
             2,
-            "second run must produce a trace, not silently no-op",
+            "second run must fire the trace-ready callback",
         )
 
     def test_user_schedule_returning_device_stopped_raises_at_init(self):
@@ -396,10 +393,8 @@ class TestProfilerSchedule(TestCase):
         # Profiler state must be unchanged so stop() can finalize cleanly.
         self.assertEqual(p.step_num, step_num_before)
         self.assertEqual(p.current_action, current_action_before)
-        # step_rec_fn was exited at the top of step() before the raise; it
-        # must have been cleared so stop() doesn't double-exit it.
+        # step() has already exited the step annotation before raising.
         self.assertIsNone(p.step_rec_fn)
-        # stop() runs without re-exiting an already-exited record_function.
         p.stop()
 
     def test_device_stopped_recovers_across_infinite_cycles(self):
@@ -447,31 +442,31 @@ class TestProfilerSchedule(TestCase):
             p.stop()
 
     def test_skips_device_stopped_when_prev_is_none(self):
-        p = self._make_profiler(wait=2, warmup=1, active=1)
+        p = self._make_profiler(wait=1, warmup=1, active=1)
         with patch(self.PATCH_TARGET, return_value=True):
             p.start()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
-            # prev_action is NONE so the entry guard for DEVICE_STOPPED does not
-            # fire.
+            # NONE -> WARMUP satisfies every entry condition except prev_action.
             p.step()
-            self.assertEqual(p.current_action, ProfilerAction.NONE)
-            p.stop()
-
-    def test_skips_device_stopped_when_already_stopping(self):
-        p = self._make_profiler(wait=0, warmup=1, active=1, repeat=1)
-        with patch(self.PATCH_TARGET, return_value=False):
-            p.start()
             self.assertEqual(p.current_action, ProfilerAction.WARMUP)
-            p.step()
-            self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
+            p.stop()
 
+    @parametrize("prev", [ProfilerAction.WARMUP, ProfilerAction.RECORD])
+    def test_skips_device_stopped_when_already_stopping(self, prev):
+        p = _RecordingProfile(
+            schedule=lambda step: prev if step == 0 else ProfilerAction.NONE
+        )
+        p.start()
+        self.assertEqual(p.current_action, prev)
         with patch(self.PATCH_TARGET, return_value=True):
-            # step 1 -> 2: RECORD_AND_SAVE -> NONE. _is_kineto_stopped is True,
-            # but the schedule already transitions to NONE, so the entry guard
-            # for DEVICE_STOPPED does not fire (current_action != NONE).
-            p.step()
+            # The previous action permits entry; only current_action blocks it.
+            with self.assertWarnsRegex(
+                UserWarning, f"Incorrect schedule: {prev.name} followed by NONE"
+            ):
+                p.step()
             self.assertEqual(p.current_action, ProfilerAction.NONE)
             p.stop()
+        self.assertEqual(p.actions, ["prepare", "start", "stop"])
 
     @parametrize(
         "prev",
@@ -510,8 +505,37 @@ class TestProfilerSchedule(TestCase):
             self.assertEqual(p.current_action, ProfilerAction.RECORD_AND_SAVE)
             p.stop()
 
+    def test_default_skip_first_wait(self):
+        test_schedule = torch.profiler.schedule(
+            skip_first=3, wait=2, warmup=1, active=4, repeat=2
+        )
+        test_schedule_expected_outputs = [
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.WARMUP,
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD_AND_SAVE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.WARMUP,
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD_AND_SAVE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+        ]
+        for step in range(len(test_schedule_expected_outputs)):
+            self.assertEqual(test_schedule(step), test_schedule_expected_outputs[step])
+
     def test_skip_first_wait(self):
-        # Other tests test when skip_first_wait is false (default) so just test the true case
         test_schedule = torch.profiler.schedule(
             skip_first=3, wait=5, warmup=1, active=2, repeat=2, skip_first_wait=1
         )
