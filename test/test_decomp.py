@@ -639,9 +639,9 @@ class TestDecomp(TestCase):
             self.assertEqual(ref, res)
 
             # .periodic overload, explicit periodic flag
-            for periodic in (True, False):
-                ref = torch.hann_window(n, periodic, device=device)
-                res = hann_window_periodic(n, periodic, device=device)
+            for is_periodic in (True, False):
+                ref = torch.hann_window(n, is_periodic, device=device)
+                res = hann_window_periodic(n, is_periodic, device=device)
                 self.assertEqual(ref, res)
 
         # dtype forwarding
