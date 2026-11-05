@@ -4034,8 +4034,7 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
-        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False):
-            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = []
@@ -4058,8 +4057,7 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
-        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False):
-            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = []
