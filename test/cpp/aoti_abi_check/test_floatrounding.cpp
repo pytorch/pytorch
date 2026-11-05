@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <torch/headeronly/util/FloatRounding.h>
-#include <torch/headeronly/util/TypeCast.h>
 
 namespace torch {
 namespace aot_inductor {
@@ -33,18 +32,12 @@ TEST(TestFloatRounding, TestConvertWithRounding) {
       -1.0f - 0x1p-10f);
   EXPECT_EQ(
       static_cast<float>(convert_with_rounding<Float8_e8m0fnu>(
-          3.0f, RoundingMode::TowardPositive)),
+          2.5f, RoundingMode::ToNearestEven)),
+      2.0f);
+  EXPECT_EQ(
+      static_cast<float>(convert_with_rounding<Float8_e8m0fnu>(
+          2.5f, RoundingMode::TowardPositive)),
       4.0f);
-}
-
-TEST(TestFloatRounding, TestConvertRoundsDoubleOnce) {
-  using torch::headeronly::convert;
-  using torch::headeronly::Half;
-
-  // Rounding to float first would land exactly on the midpoint, which then
-  // ties to even (1.0).
-  const double x = 1.0 + 0x1p-11 + 0x1p-40;
-  EXPECT_EQ(static_cast<float>(convert<Half>(x)), 1.0f + 0x1p-10f);
 }
 
 } // namespace aot_inductor

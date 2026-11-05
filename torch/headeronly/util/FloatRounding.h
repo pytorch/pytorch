@@ -26,6 +26,7 @@
 #include <torch/headeronly/util/Float8_e5m3fnu.h>
 #include <torch/headeronly/util/Float8_e8m0fnu.h>
 #include <torch/headeronly/util/Half.h>
+#include <torch/headeronly/util/floating_point_utils.h>
 
 #include <cstdint>
 #include <cstring>
@@ -100,13 +101,13 @@ constexpr T overflow_value() {
 C10_HOST_DEVICE inline float round_to_odd_float(double x) {
   const auto f = static_cast<float>(x);
   const auto back = static_cast<double>(f);
-  auto bits = bit_copy<uint32_t>(f);
+  auto bits = fp32_to_bits(f);
   // A round-to-nearest result that is inexact (false for NaN) with an even
   // last bit is stepped one ulp toward x, without branches.
   const uint32_t step = (back != x) & (x == x) & ~bits & 1u;
   const uint32_t up = (back < 0 ? -back : back) < (x < 0 ? -x : x);
   bits += step * (2 * up - 1);
-  return bit_copy<float>(bits);
+  return fp32_from_bits(bits);
 }
 
 // Requires x != 0.
