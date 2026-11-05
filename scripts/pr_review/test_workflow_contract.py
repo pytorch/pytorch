@@ -5281,11 +5281,12 @@ class TestPublishMovesNoLabels(unittest.TestCase):
 
 
 class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
-    """`announce` edits one review body with GITHUB_TOKEN and nothing else.
+    """`announce` touches only automated reviews, with GITHUB_TOKEN and nothing else.
 
     It runs beside the review job, so it must not become a second publisher: no
     environment (the publisher role trusts the `bedrock` one), no AWS step, no
-    direct API call, and only post_review.py's `--mark-pending` mode.
+    direct API call, and only post_review.py's `--mark-pending` mode, or its
+    `--too-large` mode on a run `review` and `publish` sit out.
     """
 
     def setUp(self):
@@ -5296,10 +5297,14 @@ class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
         self.assertNotIn("configure-aws-credentials", self.job)
         self.assertNotIn("id-token", self.job)
 
-    def test_it_only_marks_the_previous_review(self):
+    def test_it_only_marks_the_previous_review_or_says_too_large(self):
         runs = re.findall(r"(?m)^\s*run:\s*(.*)$", self.job)
         self.assertEqual(
-            runs, ["python3 scripts/pr_review/post_review.py --mark-pending"]
+            runs,
+            [
+                "python3 scripts/pr_review/post_review.py --mark-pending",
+                "python3 scripts/pr_review/post_review.py --too-large",
+            ],
         )
         for needle in ("gh api", "gh pr", "/labels"):
             self.assertNotIn(needle, self.job)
@@ -5317,6 +5322,11 @@ class TestAnnounceHoldsOnlyTheToken(unittest.TestCase):
                 "PR_NUMBER": pr,
                 "REVIEWED_SHA": sha,
                 "RUN_ID": run_id,
+                "OPT_OUT_LABEL": label,
+            },
+            ("announce", "Say the PR is too large to review"): {
+                "PR_NUMBER": pr,
+                "REVIEWED_SHA": sha,
                 "OPT_OUT_LABEL": label,
             },
             ("publish", "Post the automated review on the PR"): {
@@ -6327,10 +6337,34 @@ class TestTheSizeGateShortCircuitsBeforeTheRunner(unittest.TestCase):
             f"the workflow-level MAX_CHANGED_FILES is {caps[0]!r}, not a count",
         )
 
+    def test_announce_says_too_large_instead_of_marking(self):
+        """Marking would leave a review in progress that no run replaces; the
+        notice is the only thing the author sees on this path."""
+        block = strip_comments(job_block(self.text, "announce"))
+        self.assertEqual(job_if(block), "needs.prepare.outputs.fresh == 'true'")
+        gates = {}
+        for name in (
+            "Mark the previous automated review in progress",
+            "Say the PR is too large to review",
+        ):
+            step = block.split(f"- name: {name}", 1)[1]
+            step = re.split(r"\n      - ", step, maxsplit=1)[0]
+            gates[name] = re.findall(r"(?m)^\s*if:\s*(.*)$", step)
+        self.assertEqual(
+            gates,
+            {
+                "Mark the previous automated review in progress": [
+                    "needs.prepare.outputs.too_large != 'true'"
+                ],
+                "Say the PR is too large to review": [
+                    "needs.prepare.outputs.too_large == 'true'"
+                ],
+            },
+        )
+
     def test_both_downstream_jobs_stand_down_when_prepare_says_too_large(self):
-        """`publish` too: it is `always()`, so skipping `review` is not enough.
-        `announce` too: it would mark a review no run will replace."""
-        for job in ("announce", "review", "publish"):
+        """`publish` too: it is `always()`, so skipping `review` is not enough."""
+        for job in ("review", "publish"):
             # `job_if`, not `block.split("runs-on:")[0]`. YAML mappings are
             # unordered, so moving an unchanged `runs-on:` above `if:` emptied
             # that region and red the test — the identical defect already found
