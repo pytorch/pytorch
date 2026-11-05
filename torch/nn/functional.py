@@ -3558,6 +3558,9 @@ def cross_entropy(
           :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`.
           If :attr:`dim` is given, the shape is that of the input with dimension :attr:`dim` removed.
           If containing class probabilities, same shape as the input and each value should be between :math:`[0, 1]`.
+        - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
+          in the case of K-dimensional loss, depending on the shape of the input, or the shape of the input with
+          dimension :attr:`dim` removed if :attr:`dim` is given. Otherwise, scalar.
 
         where:
 
@@ -3637,6 +3640,12 @@ def cross_entropy(
             # the class dim, this doesn't copy a contiguous input.
             shape = input.shape[:dim] + input.shape[dim + 1 :]
             if target.shape != input.shape and target.shape != shape:
+                # As aten::cross_entropy_loss with the classes at dim 1: a ValueError for a
+                # batch size mismatch, a RuntimeError for any other.
+                if target.dim() > 0 and target.shape[0] != shape[0]:
+                    raise ValueError(
+                        f"Expected input batch_size ({shape[0]}) to match target batch_size ({target.shape[0]})."
+                    )
                 raise RuntimeError(
                     f"Expected target size {list(shape)}, got {list(target.shape)}"
                 )

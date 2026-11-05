@@ -12536,8 +12536,14 @@ class TestNNDeviceType(NNTestCase):
     def test_cross_entropy_loss_dim_errors(self, device):
         input = torch.randn(2, 3, 5, device=device)
         target = torch.randint(5, (2, 3), device=device)
-        with self.assertRaisesRegex(RuntimeError, r"Expected target size \[2, 3\], got \[3, 2\]"):
-            F.cross_entropy(input, target.t(), dim=-1)
+        # The errors ATen raises for the same tensors with the classes at dim 1.
+        for x, dim in ((input, -1), (input.movedim(-1, 0), 0)):
+            with self.assertRaisesRegex(ValueError, r"Expected input batch_size \(2\) to match target batch_size \(3\)"):
+                F.cross_entropy(x, target.t(), dim=dim)
+            with self.assertRaisesRegex(RuntimeError, r"Expected target size \[2, 3\], got \[2, 4\]"):
+                F.cross_entropy(x, torch.randint(5, (2, 4), device=device), dim=dim)
+            with self.assertRaisesRegex(RuntimeError, r"Expected target size \[2, 3\], got \[\]"):
+                F.cross_entropy(x, target[0, 0], dim=dim)
         with self.assertRaisesRegex(RuntimeError, r"Expected target size \[2, 3\], got \[2, 5, 3\]"):
             F.cross_entropy(input, input.transpose(1, 2).softmax(1), dim=-1)
         for dim in (3, -4):
