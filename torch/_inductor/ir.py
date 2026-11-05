@@ -4239,7 +4239,7 @@ class CatUnitDimView(GenericView):
     """
 
     @classmethod
-    def create(cls, x: IRNode, new_size: Sequence[Expr]) -> CatUnitDimView | None:
+    def try_create(cls, x: IRNode, new_size: Sequence[Expr]) -> CatUnitDimView | None:
         """The view, or None if ``x``'s layout is settled or the dims disagree."""
         if not (
             isinstance(x, StorageBox)

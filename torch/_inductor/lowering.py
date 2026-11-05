@@ -2837,7 +2837,7 @@ def unsqueeze(x, dim):
         # Keep the view lazy so the cat can place the buffer instead of copying
         # it; nothing else sees the view, so freezing it would be premature.
         data = x.data if isinstance(x, TensorBox) else x
-        if (lazy := ir.CatUnitDimView.create(data, new_shape)) is not None:
+        if (lazy := ir.CatUnitDimView.try_create(data, new_shape)) is not None:
             return TensorBox(lazy)
     return view(x, new_shape)
 
