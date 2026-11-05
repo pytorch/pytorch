@@ -67,6 +67,20 @@ if [[ "$(uname)" == 'Darwin' ]]; then
 else
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
 fi
+# Keep stable HUD names while recording the exact preview pin in wheel metadata.
+if [[ "$DESIRED_CUDA" == "rocmpreview" ]]; then
+  ROCM_PREVIEW_PIN=$(tr -d '[:space:]' < "${PYTORCH_ROOT}/.ci/docker/ci_commit_pins/rocm-preview.txt")
+  export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+rocm${ROCM_PREVIEW_PIN}"
+  # The generated matrix leaves the preview rocm requirement unpinned.
+  if [[ -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
+    export PYTORCH_EXTRA_INSTALL_REQUIREMENTS=$(sed -E \
+      "s/(^|\| *)(rocm\[[^]]*\])( *(\||$))/\1\2==${ROCM_PREVIEW_PIN}\3/" <<< "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS}")
+    if [[ "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS}" != *"]==${ROCM_PREVIEW_PIN}"* ]]; then
+      echo "ERROR: could not pin rocm==${ROCM_PREVIEW_PIN} in: ${PYTORCH_EXTRA_INSTALL_REQUIREMENTS}" >&2
+      exit 1
+    fi
+  fi
+fi
 
 export PYTORCH_BUILD_NUMBER=1
 
