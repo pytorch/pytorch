@@ -2796,7 +2796,14 @@ def create_compiler_config_extra(
         and (annotation := dynamo_graph_metadata.get("cudagraph_annotation"))
         is not None
     ):
-        if annotation.fwd is not None and annotation.fwd != config.triton.cudagraphs:
+        # cpp_wrapper cannot partition, so get_cpp_wrapper_config turned cudagraphs
+        # off under graph_partition, and the annotation does not turn them back on.
+        cpp_wrapper_refuses = config.cpp_wrapper and config.graph_partition
+        if (
+            annotation.fwd is not None
+            and annotation.fwd != config.triton.cudagraphs
+            and not (annotation.fwd and cpp_wrapper_refuses)
+        ):
             cudagraphs = BoxedBool(annotation.fwd)
             if annotation.fwd:
                 cudagraphs_log.info(
