@@ -600,7 +600,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.min_xblock: int | None = None
         self.min_rblock: int | None = None
         self.saved_partial_accumulate: list[PartialAccumulate] = []
-        self._index_dtype = override_index_dtype or self.features.select_index_dtype()
+        self._index_dtype = (
+            override_index_dtype
+            if override_index_dtype is not None
+            else self.features.select_index_dtype()
+        )
 
     def codegen_template_body(
         self,
@@ -4808,8 +4812,9 @@ class SIMDScheduling(BaseScheduling):
             self.codegen_node_schedule_with_kernel(node_schedule, copy)
             return copy
 
-        def call_args(k: SIMDKernel) -> list[Any]:
-            return k.args.python_argdefs()[1]
+        def call_args(k: SIMDKernel) -> tuple[list[Any], list[Any]]:
+            _, args, _, arg_types = k.args.python_argdefs()
+            return args, arg_types
 
         int32_kernel = codegen(override_index_dtype=torch.int32)
         if call_args(int32_kernel) == call_args(kernel):

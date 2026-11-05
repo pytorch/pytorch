@@ -815,23 +815,47 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual("'xnumel': 'i64'" in code, avoid_guards)
 
     @onlyOn(GPU_TYPE)
-    @largeTensorTest("5GB", inductor=True)
     @config.patch(dispatch_32bit_indexing_at_runtime=True)
-    def test_dispatch_32bit_indexing_at_runtime(self, device):
+    @parametrize("op", ["add", "sum", "argmax"])
+    def test_dispatch_32bit_indexing_at_runtime(self, device, op):
+        def fn(x):
+            return getattr(torch, op)(x, -1)
+
+        x = torch.randn(8, 1152, device=device)
+        actual, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        self.assertEqual(actual, fn(x))
+        guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
+        self.assertNotIn("<= 2147483647", guards)
+        i32, i64 = "'xnumel': 'i32'", "'xnumel': 'i64'"
+        FileCheck().check(i32).check(i64).check("index_dtype_multi_kernel(").run(code)
+
+    @onlyOn(GPU_TYPE)
+    @config.patch(dispatch_32bit_indexing_at_runtime=True)
+    def test_dispatch_32bit_indexing_after_precomputed_size(self, device):
+        # Generating the int64 kernel registers a precomputed size that the int32 copy
+        # then substitutes, so the copies only share call args once the int64 one is redone.
+        w = torch.randn(64, 3, 11, 11, device=device)
+        b = torch.randn(64, device=device)
+
+        def fn(x):
+            return torch.max_pool2d(torch.relu(torch.conv2d(x, w, b, 4, 2)), 3, 2)
+
+        x = torch.randn(2, 3, 64, 96, device=device)
+        actual, (code,) = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        self.assertEqual(actual, fn(x))
+        self.assertEqual(code.count("async_compile.index_dtype_multi_kernel("), 2)
+
+    @onlyOn(GPU_TYPE)
+    @largeTensorTest("5GB")
+    @config.patch(dispatch_32bit_indexing_at_runtime=True)
+    def test_dispatch_32bit_indexing_at_runtime_large_input(self, device):
         def fn(x):
             return x + 1
 
         cnt = CompileCounterWithBackend("inductor")
         compiled = torch.compile(fn, dynamic=True, backend=cnt)
         small = torch.zeros(8, 1152, dtype=torch.int8, device=device)
-        actual, (code, *_) = run_and_get_code(compiled, small)
-        self.assertEqual(actual, fn(small))
-        guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
-        self.assertNotIn("<= 2147483647", guards)
-        FileCheck().check("'xnumel': 'i32'").check("'xnumel': 'i64'").check(
-            "async_compile.index_dtype_multi_kernel"
-        ).run(code)
-
+        self.assertEqual(compiled(small), fn(small))
         # Past INT32_MAX elements the same compile has to launch the int64 copy.
         big = torch.zeros(2**31 // 1152 + 1, 1152, dtype=torch.int8, device=device)
         out = compiled(big)

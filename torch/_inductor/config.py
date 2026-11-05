@@ -1925,9 +1925,12 @@ avoid_32bit_indexing_guards: bool = False
 # Like avoid_32bit_indexing_guards, an unprovable size installs no guard, but instead of
 # only a 64-bit variant, each Triton pointwise/reduction kernel it affects is compiled with
 # both 32-bit and 64-bit indexing, and the wrapper launches the 32-bit copy whenever the
-# runtime sizes fit. That roughly doubles the compile time of those kernels. Kernels that
-# cannot dispatch this way (templates, combo kernels, multi-kernel reductions, cpp_wrapper)
-# get 64-bit indexing, as with avoid_32bit_indexing_guards.
+# runtime sizes fit. That roughly doubles the compile time of those kernels. Everything
+# else that would have read a size hint gets 64-bit indexing, as with
+# avoid_32bit_indexing_guards: templates, combo kernels, multi-kernel reductions, the
+# cpp_wrapper/AOTI and FX wrappers, autotune_at_compile_time, and the size args of
+# user-defined Triton kernels. This implies avoid_32bit_indexing_guards;
+# assume_32bit_indexing takes precedence over both.
 dispatch_32bit_indexing_at_runtime: bool = False
 
 # For the user-written Triton kernels compiled with the model, ignore the unsupported

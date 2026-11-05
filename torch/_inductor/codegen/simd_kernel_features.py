@@ -210,6 +210,7 @@ class SIMDKernelFeatures:
         return mutations
 
     def _indexed_numel_and_buffers(self) -> tuple[sympy.Expr, list[Any]]:
+        # Gather all used buffer names
         buffer_names: OrderedSet[str] = OrderedSet()
         for node in self.indexing_scheduler_nodes():
             buffer_names.update(node.get_buffer_names())
@@ -238,7 +239,8 @@ class SIMDKernelFeatures:
         """Sizes that must all fit in int32 at run time for an int32 copy of this kernel.
 
         None unless config.dispatch_32bit_indexing_at_runtime made select_index_dtype pick
-        int64 only because some size could not be proven to fit.
+        int64 only because some size could not be proven to fit. A size hint past INT32_MAX
+        still gets the int32 copy, for later inputs that fit.
         """
         from .. import config
         from .simd import SIMDScheduling

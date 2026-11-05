@@ -8,6 +8,7 @@ from typing import Any
 
 import sympy
 
+import torch
 from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
@@ -148,14 +149,15 @@ class MultiKernelState:
     def define_index_dtype_kernel(self, kernels: list[Any]) -> str:
         """Define the IndexDtypeMultiKernelCall for kernels = [int32 copy, int64 copy]."""
         kernel_names = tuple(k.kernel_name for k in kernels)
-        if kernel_names not in self.subkernel_to_kernel_name:
+        key = ("index_dtype", *kernel_names)
+        if key not in self.subkernel_to_kernel_name:
             name = f"multi_kernel_{self._root._num_names}"
             self._root._num_names += 1
-            self.subkernel_to_kernel_name[kernel_names] = name
+            self.subkernel_to_kernel_name[key] = name
             self.kernel_defs.writeline(
                 f"{name} = async_compile.index_dtype_multi_kernel({', '.join(kernel_names)})"
             )
-        return self.subkernel_to_kernel_name[kernel_names]
+        return self.subkernel_to_kernel_name[key]
 
 
 class MultiKernel:
@@ -370,7 +372,7 @@ class IndexDtypeMultiKernel(MultiKernel):
             wrapper.generate_workspace_deallocation(ws)
 
 
-_INT32_MAX = 2**31 - 1
+_INT32_MAX = torch.iinfo(torch.int32).max
 
 
 class IndexDtypeMultiKernelCall:
