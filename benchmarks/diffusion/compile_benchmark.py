@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import csv
 import dataclasses
 import hashlib
 import importlib.metadata
+import json
 import math
 import os
+import pickle
 import platform
+import signal
 import statistics
+import subprocess
+import sys
 import time
+import traceback
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -1109,6 +1116,571 @@ def _scenario_from_dict(value: dict[str, Any]) -> Scenario:
         mode=value["mode"],
         loader=value["loader"],
     )
+
+
+def _write_json(path: str | Path, value: Any) -> None:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_suffix(output.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8") as file:
+        json.dump(value, file, indent=2)
+    temporary.replace(output)
+
+
+def _worker_main(config_path: str) -> int:
+    config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    scenario = _scenario_from_dict(config["scenario"])
+    device, dtype = _device_and_dtype_names(scenario)
+    result_path = config["result_path"]
+    try:
+        result = execute_scenario(scenario, config.get("sample_path"))
+    except BaseException as error:
+        result = {
+            "scenario_id": scenario.scenario_id,
+            "status": "failed",
+            "error": f"{type(error).__name__}: {error}",
+            "traceback": traceback.format_exc(),
+            "model": dataclasses.asdict(scenario.model),
+            "workload": dataclasses.asdict(scenario.workload),
+            "execution": dataclasses.asdict(scenario.execution),
+            "mode": scenario.mode,
+            "device": device,
+            "dtype": dtype,
+            "pid": os.getpid(),
+        }
+        _write_json(result_path, result)
+        traceback.print_exc()
+        return 1
+    _write_json(result_path, result)
+    return 0
+
+
+def _failure_result(scenario_id: str, status: str, error: str) -> dict[str, Any]:
+    return {"scenario_id": scenario_id, "status": status, "error": error}
+
+
+def _validate_worker_result(
+    result: Any, scenario_id: str, scenario: Scenario | None = None
+) -> None:
+    if not isinstance(result, dict) or result.get("scenario_id") != scenario_id:
+        raise ValueError("worker result has the wrong scenario id")
+    status = result.get("status")
+    if status not in STATUS_VALUES:
+        raise ValueError(f"malformed status: {status!r}")
+    for name in (
+        "model",
+        "workload",
+        "execution",
+        "compiler_diagnostics",
+        "setup_device_peak",
+        "request_device_peak",
+        "output_summary",
+    ):
+        if (status == "success" or name in result) and not isinstance(
+            result.get(name), dict
+        ):
+            raise ValueError(f"malformed {name}: expected an object")
+    if status != "success":
+        if not isinstance(result.get("error"), str):
+            raise ValueError("failed worker result is missing an error message")
+        return
+
+    if result.get("mode") not in MODES:
+        raise ValueError(f"malformed mode: {result.get('mode')!r}")
+    for name, value in (
+        ("model.name", result["model"].get("name")),
+        ("execution.backend", result["execution"].get("backend")),
+        ("execution.dtype", result["execution"].get("dtype")),
+        ("dtype", result.get("dtype")),
+        ("device", result.get("device")),
+    ):
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"malformed {name}: expected a nonempty string")
+    if result["workload"].get("output_boundary") not in OUTPUT_BOUNDARIES:
+        raise ValueError("malformed output boundary")
+    targets = result.get("compiled_targets", [])
+    if not isinstance(targets, list) or any(
+        not isinstance(target, str) for target in targets
+    ):
+        raise ValueError("malformed compiled targets")
+    if result["mode"] != "eager" and not targets:
+        raise ValueError("missing compiled targets")
+    graphs = result["compiler_diagnostics"].get("unique_graphs")
+    eager = result["mode"] == "eager"
+    if type(graphs) is not int or graphs < 0 or (graphs == 0) != eager:
+        raise ValueError("missing or inconsistent compiled graph count")
+    summary = result["output_summary"]
+    if (
+        not isinstance(summary.get("shape"), list)
+        or not isinstance(summary.get("dtype"), str)
+        or not isinstance(summary.get("sha256"), str)
+    ):
+        raise ValueError("missing output summary fields")
+    if scenario is not None:
+        declared = _scenario_to_dict(scenario)
+        for name in ("model", "workload", "execution", "mode"):
+            actual = json.dumps(result.get(name), sort_keys=True)
+            if actual != json.dumps(declared[name], sort_keys=True):
+                raise ValueError(f"worker result does not match requested {name}")
+        expected = dict(zip(("device", "dtype"), _device_and_dtype_names(scenario)))
+        for name, value in expected.items():
+            if result[name] != value:
+                raise ValueError(f"worker result has unexpected {name}: {result[name]}")
+
+    timings = {
+        name: [result.get(name)]
+        for name in (
+            "model_setup_s",
+            "compile_wrapper_setup_s",
+            "compile_time_s",
+            "first_request_s",
+            "steady_state_median_s",
+            "steady_state_mad_s",
+        )
+    }
+    samples = result.get("steady_state_samples_s")
+    repetitions = result["execution"].get("repetitions")
+    if (
+        type(repetitions) is not int
+        or repetitions < 1
+        or not isinstance(samples, list)
+        or len(samples) != repetitions
+    ):
+        raise ValueError("missing or wrong number of steady-state samples")
+    timings["steady_state_samples_s"] = samples
+    compiler_times = result["compiler_diagnostics"].get("compiler_times_s")
+    if not isinstance(compiler_times, dict):
+        raise ValueError("malformed compiler_times_s: expected an object")
+    timings.update(
+        {f"compiler_times_s.{name}": values for name, values in compiler_times.items()}
+    )
+    for name, values in timings.items():
+        if not isinstance(values, list) or any(
+            type(value) not in (int, float)
+            or value < 0
+            or (isinstance(value, float) and not math.isfinite(value))
+            for value in values
+        ):
+            raise ValueError(f"malformed {name}: expected finite non-negative values")
+    for phase in ("setup", "request"):
+        memory = result[f"{phase}_device_peak"]
+        for kind in ("allocated_bytes", "reserved_bytes"):
+            if kind not in memory:
+                raise ValueError(f"missing {phase} {kind}")
+            value = memory[kind]
+            if value is not None and (type(value) is not int or value < 0):
+                raise ValueError(f"malformed {phase} {kind}: {value!r}")
+
+
+def run_worker_process(
+    scenario_id: str,
+    command: list[str],
+    result_path: str | Path,
+    log_path: str | Path,
+    timeout_s: float,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    log = Path(log_path)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with contextlib.ExitStack() as stack:
+        try:
+            log_file = stack.enter_context(log.open("w", encoding="utf-8"))
+            process = subprocess.Popen(
+                command,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env=env,
+                start_new_session=sys.platform != "win32",
+            )
+        except OSError as error:
+            return _failure_result(
+                scenario_id, "failed", f"could not start worker: {error}"
+            )
+        timed_out = False
+        try:
+            process.wait(timeout=timeout_s)
+        except BaseException as error:
+            try:
+                with contextlib.suppress(ProcessLookupError):
+                    if sys.platform == "win32":
+                        process.kill()
+                    else:
+                        os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=30)
+            except (OSError, subprocess.TimeoutExpired) as cleanup_error:
+                error.add_note(f"could not reap worker {process.pid}: {cleanup_error}")
+                raise error from cleanup_error
+            if not isinstance(error, subprocess.TimeoutExpired):
+                raise
+            timed_out = True
+    if timed_out:
+        return _failure_result(
+            scenario_id,
+            "timed_out",
+            f"worker exceeded {timeout_s:g}s; log: {log}",
+        )
+    result_file = Path(result_path)
+    # A worker that wrote its own result reports it, even if it then crashed.
+    if not result_file.exists() and process.returncode < 0:
+        signum = -process.returncode
+        status = "killed" if signum in (signal.SIGKILL, signal.SIGTERM) else "failed"
+        return _failure_result(
+            scenario_id,
+            status,
+            f"worker terminated by signal {signum}; log: {log}",
+        )
+    if not result_file.exists():
+        return _failure_result(
+            scenario_id,
+            "missing",
+            f"worker exited {process.returncode} without a result; log: {log}",
+        )
+    try:
+        result = json.loads(result_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return _failure_result(
+            scenario_id,
+            "malformed",
+            f"could not read worker result: {error}; log: {log}",
+        )
+    try:
+        _validate_worker_result(result, scenario_id)
+    except ValueError as error:
+        return _failure_result(
+            scenario_id,
+            "malformed",
+            f"{error}; log: {log}",
+        )
+    if process.returncode and result.get("status") == "success":
+        return _failure_result(
+            scenario_id,
+            "malformed",
+            f"worker exited {process.returncode} but reported success; log: {log}",
+        )
+    return result
+
+
+def validate_scenario_results(
+    declared_scenario_ids: list[str], results: list[dict[str, Any]]
+) -> list[str]:
+    errors = []
+    if len(declared_scenario_ids) != len(set(declared_scenario_ids)):
+        errors.append("declared scenario ids contain duplicates")
+    by_id: dict[str, list[dict[str, Any]]] = {}
+    for result in results:
+        scenario_id = result.get("scenario_id") if isinstance(result, dict) else None
+        if not isinstance(scenario_id, str):
+            errors.append("malformed result without a string scenario_id")
+            continue
+        by_id.setdefault(scenario_id, []).append(result)
+    for scenario_id in declared_scenario_ids:
+        matches = by_id.get(scenario_id, [])
+        if not matches:
+            errors.append(f"missing result for {scenario_id}")
+            continue
+        if len(matches) > 1:
+            errors.append(f"duplicate results for {scenario_id}")
+            continue
+        result = matches[0]
+        try:
+            _validate_worker_result(result, scenario_id)
+        except ValueError as error:
+            errors.append(f"malformed result for {scenario_id}: {error}")
+            continue
+        status = result["status"]
+        if status != "success":
+            errors.append(
+                f"{scenario_id} {status}: {result.get('error', 'unknown error')}"
+            )
+            continue
+    unexpected = set(by_id) - set(declared_scenario_ids)
+    for scenario_id in sorted(unexpected):
+        errors.append(f"unexpected result for {scenario_id}")
+    return errors
+
+
+def _check_pipeline_output(actual: Any, eager: Any) -> str:
+    if actual.shape != eager.shape or actual.dtype != eager.dtype:
+        raise AssertionError(
+            f"output {actual.dtype}{list(actual.shape)} does not match "
+            f"eager {eager.dtype}{list(eager.shape)}"
+        )
+    if not actual.isfinite().all():
+        raise AssertionError("output contains non-finite values")
+    if not actual.any():
+        raise AssertionError("output is all zeros")
+    # Rounding differences compound over many low-precision denoising steps, and
+    # postprocessed outputs are quantized, so a fixed tolerance would reject
+    # correct compilations. The difference is reported, not bounded.
+    expected = eager.double()
+    difference = ((actual.double() - expected).norm() / expected.norm()).item()
+    return f"unbounded: relative RMS difference vs eager {difference:.3g}"
+
+
+def _compare_outputs(
+    scenarios: list[Scenario],
+    results: list[dict[str, Any]],
+    sample_paths: dict[str, Path],
+) -> None:
+    import torch
+
+    eager = next((scenario for scenario in scenarios if scenario.mode == "eager"), None)
+    if eager is None:
+        raise ValueError("--check-outputs requires an eager scenario")
+    eager_result = next(
+        result for result in results if result["scenario_id"] == eager.scenario_id
+    )
+    reference = None
+    if eager_result.get("status") == "success":
+        try:
+            reference = torch.load(sample_paths[eager.scenario_id], weights_only=True)
+            if not isinstance(reference, torch.Tensor):
+                raise ValueError("eager output is not a tensor")
+        except (
+            OSError,
+            RuntimeError,
+            EOFError,
+            pickle.UnpicklingError,
+            ValueError,
+        ) as error:
+            eager_result["status"] = "failed"
+            eager_result["error"] = (
+                f"could not load eager output for comparison: {error}"
+            )
+            eager_result["output_check"] = "failed"
+        else:
+            # A NaN-filled latent decodes to an all-zero image, so both mark a
+            # broken eager run rather than a usable reference.
+            if not reference.isfinite().all():
+                problem = "eager output contains non-finite values"
+            elif not reference.any():
+                problem = "eager output is all zeros"
+            else:
+                problem = None
+            if problem is None:
+                eager_result["output_check"] = "reference"
+            else:
+                eager_result.update(status="failed", error=problem)
+                eager_result["output_check"] = "failed"
+    unavailable = None
+    if eager_result.get("status") != "success":
+        unavailable = "output comparison requires a successful eager reference"
+    for scenario in scenarios:
+        if scenario.mode == "eager":
+            continue
+        result = next(
+            result
+            for result in results
+            if result["scenario_id"] == scenario.scenario_id
+        )
+        if result.get("status") != "success":
+            continue
+        if unavailable is not None:
+            result.update(
+                status="failed", error=unavailable, output_check="reference unavailable"
+            )
+            continue
+        try:
+            actual = torch.load(sample_paths[scenario.scenario_id], weights_only=True)
+            if not isinstance(actual, torch.Tensor):
+                raise ValueError("compiled output is not a tensor")
+            check = _check_pipeline_output(actual, reference)
+        except (
+            AssertionError,
+            OSError,
+            RuntimeError,
+            EOFError,
+            pickle.UnpicklingError,
+            ValueError,
+        ) as error:
+            result["status"] = "failed"
+            result["error"] = f"output sanity check failed: {error}"
+            result["output_check"] = "failed"
+        else:
+            result["output_check"] = check
+
+
+def _provenance(result: dict[str, Any]) -> dict[str, Any]:
+    excluded = {
+        "status",
+        "error",
+        "model_setup_s",
+        "compile_wrapper_setup_s",
+        "compile_time_s",
+        "first_request_s",
+        "steady_state_samples_s",
+        "steady_state_median_s",
+        "steady_state_mad_s",
+        "setup_device_peak",
+        "request_device_peak",
+    }
+    return {name: value for name, value in result.items() if name not in excluded}
+
+
+def _dashboard_backend(result: dict[str, Any]) -> str:
+    execution = result.get("execution", {})
+    mode = result.get("mode", "unknown")
+    if mode == "eager":
+        return "eager"
+    graphs = "cudagraphs" if execution.get("cudagraphs") else "no_cudagraphs"
+    return f"{execution.get('backend', 'unknown')}_{mode}_{graphs}"
+
+
+def dashboard_records(result: dict[str, Any]) -> list[dict[str, Any]]:
+    model = result.get("model", {})
+    # Records are published, so they carry identifying scalars only; full
+    # provenance, including local paths and errors, stays in the CSV and logs.
+    extra_info = {
+        "device": result.get("device"),
+        "mode": result.get("mode"),
+        "cudagraphs": result.get("execution", {}).get("cudagraphs"),
+        "output_boundary": result.get("workload", {}).get("output_boundary"),
+        "checkpoint_revision": model.get("revision"),
+        "torch_version": result.get("torch", {}).get("version"),
+    }
+    benchmark = {
+        "name": BENCHMARK_NAME,
+        "mode": "inference",
+        "dtype": result.get("dtype", "unknown"),
+        "extra_info": extra_info,
+    }
+    model_record = {
+        "name": model.get("name", result["scenario_id"].split(":", 1)[0]),
+        "type": "micro-benchmark" if model.get("name") == "toy" else "OSS model",
+        "backend": _dashboard_backend(result),
+        "origins": ["pytorch"] if model.get("name") == "toy" else ["huggingface"],
+    }
+    if result.get("status") != "success":
+        status = result.get("status", "malformed")
+        return [
+            {
+                "benchmark": benchmark,
+                "model": model_record,
+                "metric": {
+                    "name": "scenario_status",
+                    "extra_info": {"benchmark_values": [status]},
+                },
+            }
+        ]
+
+    # Per-phase compiler timings are keyed by internal function names, so only
+    # their total is published; the CSV keeps the breakdown.
+    metrics: list[tuple[str, list[float]]] = [
+        ("model_setup_s", [result["model_setup_s"]]),
+        ("compile_wrapper_setup_s", [result["compile_wrapper_setup_s"]]),
+        ("compile_time_s", [result["compile_time_s"]]),
+        ("first_request_s", [result["first_request_s"]]),
+        ("steady_state_latency_s", result["steady_state_samples_s"]),
+        ("steady_state_median_s", [result["steady_state_median_s"]]),
+        ("steady_state_mad_s", [result["steady_state_mad_s"]]),
+    ]
+    for phase in ("setup", "request"):
+        memory = result[f"{phase}_device_peak"]
+        for kind in ("allocated_bytes", "reserved_bytes"):
+            if memory[kind] is not None:
+                metrics.append((f"{phase}_peak_{kind}", [memory[kind]]))
+    return [
+        {
+            "benchmark": benchmark,
+            "model": model_record,
+            "metric": {"name": name, "benchmark_values": values},
+        }
+        for name, values in metrics
+    ]
+
+
+def _csv_value(value: Any) -> Any:
+    return f"{value:.6f}" if isinstance(value, float) else value
+
+
+def _output_paths(csv_path: str | Path) -> tuple[Path, Path]:
+    csv_output = Path(csv_path)
+    json_output = csv_output.with_suffix(".json")
+    if csv_output.suffix.lower() == ".json":
+        raise ValueError("CSV output path must not end in .json")
+    return csv_output, json_output
+
+
+def write_outputs(csv_path: str | Path, results: list[dict[str, Any]]) -> Path:
+    csv_output, json_output = _output_paths(csv_path)
+    csv_output.parent.mkdir(parents=True, exist_ok=True)
+    headers = [
+        "scenario_id",
+        "status",
+        "error",
+        "model",
+        "mode",
+        "backend",
+        "device",
+        "dtype",
+        "output_boundary",
+        "compiled_component",
+        "compiled_targets",
+        "model_setup_s",
+        "compile_wrapper_setup_s",
+        "compile_time_s",
+        "first_request_s",
+        "steady_state_median_s",
+        "steady_state_mad_s",
+        "steady_state_samples_s",
+        "setup_peak_allocated_bytes",
+        "setup_peak_reserved_bytes",
+        "request_peak_allocated_bytes",
+        "request_peak_reserved_bytes",
+        "compiler_times_s",
+        "provenance",
+    ]
+    with csv_output.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=headers, lineterminator="\n")
+        writer.writeheader()
+        for result in results:
+            model = result.get("model", {})
+            workload = result.get("workload", {})
+            setup_memory = result.get("setup_device_peak", {})
+            request_memory = result.get("request_device_peak", {})
+            compiler = result.get("compiler_diagnostics", {})
+            writer.writerow(
+                {
+                    "scenario_id": result.get("scenario_id"),
+                    "status": result.get("status"),
+                    "error": result.get("error"),
+                    "model": model.get("name"),
+                    "mode": result.get("mode"),
+                    "backend": _dashboard_backend(result),
+                    "device": result.get("device"),
+                    "dtype": result.get("dtype"),
+                    "output_boundary": workload.get("output_boundary"),
+                    "compiled_component": result.get("compiled_component"),
+                    "compiled_targets": json.dumps(result.get("compiled_targets")),
+                    "model_setup_s": _csv_value(result.get("model_setup_s")),
+                    "compile_wrapper_setup_s": _csv_value(
+                        result.get("compile_wrapper_setup_s")
+                    ),
+                    "compile_time_s": _csv_value(result.get("compile_time_s")),
+                    "first_request_s": _csv_value(result.get("first_request_s")),
+                    "steady_state_median_s": _csv_value(
+                        result.get("steady_state_median_s")
+                    ),
+                    "steady_state_mad_s": _csv_value(result.get("steady_state_mad_s")),
+                    "steady_state_samples_s": json.dumps(
+                        result.get("steady_state_samples_s")
+                    ),
+                    "setup_peak_allocated_bytes": setup_memory.get("allocated_bytes"),
+                    "setup_peak_reserved_bytes": setup_memory.get("reserved_bytes"),
+                    "request_peak_allocated_bytes": request_memory.get(
+                        "allocated_bytes"
+                    ),
+                    "request_peak_reserved_bytes": request_memory.get("reserved_bytes"),
+                    "compiler_times_s": json.dumps(compiler.get("compiler_times_s")),
+                    "provenance": json.dumps(_provenance(result)),
+                }
+            )
+    with json_output.open("w", encoding="utf-8") as file:
+        for result in results:
+            for record in dashboard_records(result):
+                print(json.dumps(record), file=file)
+    return json_output
 
 
 def compile_model(model, mode, block_types, backend="inductor"):

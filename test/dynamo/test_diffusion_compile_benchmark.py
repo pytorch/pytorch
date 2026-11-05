@@ -1,8 +1,11 @@
 # Owner(s): ["module: dynamo"]
 
+import csv
 import dataclasses
 import json
+import os
 import sys
+import tempfile
 import weakref
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -13,6 +16,7 @@ import torch
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
@@ -274,6 +278,172 @@ class TestDiffusionCompileBenchmark(TestCase):
                 self.assertIs(result, output)
                 self.assertEqual(mark.call_count, int(cudagraphs))
 
+    @parametrize("backend", ("eager", "inductor"))
+    def test_dashboard_distinguishes_compilation_modes(self, backend):
+        scenarios = self._toy_scenarios(benchmark.MODES)
+        scenarios += [
+            dataclasses.replace(
+                scenario,
+                execution=dataclasses.replace(scenario.execution, cudagraphs=True),
+            )
+            for scenario in scenarios
+            if scenario.mode != "eager"
+        ]
+        backends = []
+        for scenario in scenarios:
+            scenario = dataclasses.replace(
+                scenario,
+                execution=dataclasses.replace(scenario.execution, backend=backend),
+            )
+            records = benchmark.dashboard_records(self._success_result(scenario))
+            backends.append(records[0]["model"]["backend"])
+        self.assertEqual(len(set(backends)), len(scenarios))
+
+    @parametrize("filename", ("results", "results.csv", "results.txt"))
+    def test_result_schema_and_scenario_accounting(self, filename):
+        scenarios = self._toy_scenarios(("eager",))
+        scenario_id = scenarios[0].scenario_id
+        result = self._success_result(scenarios[0])
+        self.assertEqual(
+            benchmark.validate_scenario_results([scenario_id], [result]), []
+        )
+        accounting_errors = benchmark.validate_scenario_results(
+            [scenario_id, "missing"], [result, result, {"status": "success"}]
+        )
+        self.assertTrue(any("duplicate" in error for error in accounting_errors))
+        self.assertTrue(any("missing result" in error for error in accounting_errors))
+        self.assertTrue(
+            any("without a string scenario_id" in error for error in accounting_errors)
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            csv_path = Path(directory) / filename
+            json_path = benchmark.write_outputs(csv_path, [result])
+            self.assertNotEqual(csv_path, json_path)
+            with csv_path.open(newline="") as file:
+                rows = list(csv.DictReader(file))
+            records = [
+                json.loads(line)
+                for line in json_path.read_text(encoding="utf-8").splitlines()
+            ]
+        self.assertEqual(rows[0]["scenario_id"], scenario_id)
+        self.assertEqual(rows[0]["backend"], records[0]["model"]["backend"])
+        self.assertEqual(records[0]["benchmark"]["name"], benchmark.BENCHMARK_NAME)
+        self.assertIn("benchmark_values", records[0]["metric"])
+        metrics = {record["metric"]["name"] for record in records}
+        self.assertIn("compile_time_s", metrics)
+        self.assertFalse(any(name.startswith("compiler_") for name in metrics))
+        extra_info = records[0]["benchmark"]["extra_info"]
+        self.assertEqual(extra_info["device"], "cpu")
+        self.assertTrue(all(not isinstance(v, dict) for v in extra_info.values()))
+        failure_record = benchmark.dashboard_records(
+            {"scenario_id": "failed", "status": "failed", "error": "boom /home/user"}
+        )[0]
+        self.assertNotIn("benchmark_values", failure_record["metric"])
+        self.assertEqual(
+            failure_record["metric"]["extra_info"], {"benchmark_values": ["failed"]}
+        )
+
+    @parametrize(
+        "failure",
+        ("failed", "timed_out", "killed", "crashed", "reported_then_killed", "missing"),
+    )
+    def test_worker_failure_stays_visible_alongside_success(self, failure):
+        signals = ("killed", "crashed", "reported_then_killed")
+        if failure in signals and sys.platform == "win32":
+            self.skipTest("POSIX signals are unavailable on Windows")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            success_path = root / "success.json"
+            success_value = self._success_result(self._toy_scenarios(("eager",))[0])
+            success_value["scenario_id"] = "success"
+            success_code = (
+                "from pathlib import Path; "
+                f"Path({str(success_path)!r}).write_text({json.dumps(success_value)!r})"
+            )
+            success = benchmark.run_worker_process(
+                "success",
+                [sys.executable, "-c", success_code],
+                success_path,
+                root / "success.log",
+                10,
+            )
+
+            failure_path = root / "failure.json"
+            failure_value = {
+                "scenario_id": failure,
+                "status": "failed",
+                "error": "intentional failure",
+            }
+            report = (
+                "from pathlib import Path; "
+                f"Path({str(failure_path)!r}).write_text({json.dumps(failure_value)!r}); "
+            )
+            kill = "import os, signal; os.kill(os.getpid(), signal.{})"
+            code = {
+                "failed": report + "raise SystemExit(1)",
+                "timed_out": "import time; time.sleep(10)",
+                "killed": kill.format("SIGKILL"),
+                # A fatal signal without a core dump avoids host crash collectors.
+                "crashed": kill.format("SIGUSR1"),
+                "reported_then_killed": report + kill.format("SIGKILL"),
+                "missing": "pass",
+            }[failure]
+            timeout = 0.05 if failure == "timed_out" else 60
+            failed = benchmark.run_worker_process(
+                failure,
+                [sys.executable, "-c", code],
+                failure_path,
+                root / f"{failure}.log",
+                timeout,
+            )
+        self.assertEqual(success["status"], "success")
+        # Only an external kill is "killed"; a crash or a worker's own report is not.
+        crashed = failure in ("crashed", "reported_then_killed")
+        self.assertEqual(failed["status"], "failed" if crashed else failure)
+        if failure == "reported_then_killed":
+            self.assertEqual(failed["error"], "intentional failure")
+        errors = benchmark.validate_scenario_results(
+            ["success", failure], [success, failed]
+        )
+        self.assertTrue(any(failure in error for error in errors))
+        self.assertEqual(len(errors), 1)
+
+    def test_interruption_reaps_worker(self):
+        wait = benchmark.subprocess.Popen.wait
+        processes = []
+
+        def interrupt_wait(process, timeout=None):
+            if not processes:
+                processes.append(process)
+                raise KeyboardInterrupt("cancelled worker")
+            return wait(process, timeout)
+
+        try:
+            with (
+                tempfile.TemporaryDirectory() as directory,
+                mock.patch.object(benchmark.subprocess.Popen, "wait", interrupt_wait),
+            ):
+                root = Path(directory)
+                with self.assertRaisesRegex(KeyboardInterrupt, "cancelled worker"):
+                    benchmark.run_worker_process(
+                        "interrupted",
+                        [sys.executable, "-c", "import time; time.sleep(60)"],
+                        root / "result.json",
+                        root / "worker.log",
+                        30,
+                    )
+                self.assertEqual(len(processes), 1)
+                # The worker sleeps for 60s, so only a kill ends it this early.
+                if IS_WINDOWS:
+                    self.assertNotEqual(processes[0].returncode, 0)
+                else:
+                    self.assertEqual(processes[0].returncode, -benchmark.signal.SIGKILL)
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+                    wait(process)
+
     def test_measured_outputs_are_released_between_requests(self):
         scenario = self._toy_scenarios(("eager",))[0]
         scenario = dataclasses.replace(
@@ -378,6 +548,74 @@ class TestDiffusionCompileBenchmark(TestCase):
         self.assertEqual(stacked, torch.ones(2, 3))
         with self.assertRaisesRegex(TypeError, "cannot extract a tensor"):
             benchmark._extract_tensor(object(), fields)
+
+    def test_pipeline_output_check(self):
+        eager = torch.tensor([3.0, 4.0])
+        check = benchmark._check_pipeline_output(torch.tensor([3.0, 4.5]), eager)
+        self.assertEqual(check, "unbounded: relative RMS difference vs eager 0.1")
+        for actual, message in (
+            (eager.reshape(2, 1), "does not match eager"),
+            (eager.double(), "does not match eager"),
+            (torch.tensor([3.0, float("inf")]), "non-finite"),
+        ):
+            with self.assertRaisesRegex(AssertionError, message):
+                benchmark._check_pipeline_output(actual, eager)
+
+    @parametrize("case", ("eager_nan", "eager_zeros", "compiled_nan", "compiled_zeros"))
+    def test_output_check_rejects_unusable_outputs(self, case):
+        scenarios = self._toy_scenarios(("eager", "full"))
+        results = [self._success_result(scenario) for scenario in scenarios]
+        values = {
+            "eager_nan": (float("nan"), 1.0),
+            "eager_zeros": (0.0, 1.0),
+            "compiled_nan": (1.0, float("nan")),
+            "compiled_zeros": (1, 0),
+        }[case]
+        with tempfile.TemporaryDirectory() as directory:
+            paths = {}
+            for scenario, value in zip(scenarios, values):
+                path = Path(directory) / f"{scenario.mode}.pt"
+                dtype = torch.uint8 if case == "compiled_zeros" else torch.float32
+                torch.save(torch.tensor([value], dtype=dtype), path)
+                paths[scenario.scenario_id] = path
+            benchmark._compare_outputs(scenarios, results, paths)
+        eager, compiled = results
+        self.assertEqual(compiled["status"], "failed")
+        if case.startswith("compiled"):
+            self.assertEqual(eager["output_check"], "reference")
+            self.assertEqual(compiled["output_check"], "failed")
+            problem = "non-finite" if case == "compiled_nan" else "all zeros"
+            self.assertIn(problem, compiled["error"])
+        else:
+            self.assertEqual(eager["status"], "failed")
+            problem = "non-finite" if case == "eager_nan" else "all zeros"
+            self.assertIn(problem, eager["error"])
+            self.assertEqual(compiled["output_check"], "reference unavailable")
+
+    @parametrize("failure", ("worker_failed", "missing_sample"))
+    def test_output_check_requires_eager_reference(self, failure):
+        scenarios = self._toy_scenarios(("eager", "full"))
+        results = [self._success_result(scenario) for scenario in scenarios]
+        if failure == "worker_failed":
+            results[0].update(status="failed", error="eager worker failed")
+        with tempfile.TemporaryDirectory() as directory:
+            paths = {
+                scenario.scenario_id: Path(directory) / f"{scenario.mode}.pt"
+                for scenario in scenarios
+            }
+            benchmark._compare_outputs(scenarios, results, paths)
+            output = Path(directory) / "results.csv"
+            benchmark.write_outputs(output, results)
+            with output.open(newline="") as file:
+                rows = list(csv.DictReader(file))
+        compiled = results[1]
+        self.assertEqual(compiled["status"], "failed")
+        self.assertEqual(compiled["output_check"], "reference unavailable")
+        self.assertEqual(json.loads(rows[1]["steady_state_samples_s"]), [0.3])
+        records = benchmark.dashboard_records(compiled)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["metric"]["name"], "scenario_status")
+        self.assertNotIn("benchmark_values", records[0]["metric"])
 
     # File names from the pinned revisions; "unused" files must not be downloaded.
     @parametrize(
@@ -534,6 +772,49 @@ class TestDiffusionCompileBenchmark(TestCase):
         second = image_factory()
         self.assertEqual(second.size, (720, 544))
         self.assertEqual(second.getpixel((0, 0)), (255, 0, 0))
+
+    def test_failed_worker_cleanup_preserves_interrupt(self):
+        process = mock.Mock(pid=123)
+        process.wait.side_effect = KeyboardInterrupt("stopped")
+        process.kill.side_effect = PermissionError("cannot kill")
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(benchmark.subprocess, "Popen", return_value=process),
+            mock.patch.object(
+                benchmark.os,
+                "killpg",
+                side_effect=PermissionError("cannot kill"),
+                create=True,
+            ),
+            self.assertRaisesRegex(KeyboardInterrupt, "stopped") as caught,
+        ):
+            root = Path(directory)
+            benchmark.run_worker_process(
+                "interrupted", [], root / "result.json", root / "worker.log", 30
+            )
+        self.assertIsInstance(caught.exception.__cause__, PermissionError)
+        process.wait.assert_called_once_with(timeout=30)
+
+    def test_provenance_excludes_credentials_and_paths(self):
+        environment = {
+            "OMP_NUM_THREADS": "2",
+            "TORCHINDUCTOR_MAX_AUTOTUNE": "1",
+            "TORCHINDUCTOR_REDIS_URL": "redis://user:secret@cache.invalid/0",
+            "TRITON_API_KEY": "secret",
+            "TORCH_UNKNOWN_TOKEN": "secret",
+            "CXX": "/private/compiler",
+        }
+        with mock.patch.dict(os.environ, environment, clear=True):
+            recorded = benchmark._relevant_environment()
+        expected = {"OMP_NUM_THREADS": "2", "TORCHINDUCTOR_MAX_AUTOTUNE": "1"}
+        self.assertEqual(recorded, expected)
+        result = self._success_result(self._toy_scenarios(("eager",))[0])
+        result["environment"] = recorded
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "result.csv"
+            benchmark.write_outputs(output, [result])
+            self.assertNotIn("secret", output.read_text())
+            self.assertNotIn("/private/compiler", output.read_text())
 
 
 instantiate_parametrized_tests(TestDiffusionCompileBenchmark)
