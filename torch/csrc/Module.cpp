@@ -2948,6 +2948,7 @@ Call this whenever a new thread is created in order to propagate values from
       },
       py::arg("fake"),
       py::arg("memo"),
+      py::kw_only(),
       py::arg("keep_across_epochs"));
 
   py_module.def(
