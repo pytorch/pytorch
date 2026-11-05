@@ -2968,6 +2968,7 @@ Call this whenever a new thread is created in order to propagate values from
       },
       py::arg("fake"),
       py::arg("memo"),
+      py::kw_only(),
       py::arg("keep_across_epochs"));
 
   py_module.def(
@@ -3095,6 +3096,19 @@ Call this whenever a new thread is created in order to propagate values from
           [](const c10::FakeTensorMode& mode) { return mode.epoch_.load(); },
           [](c10::FakeTensorMode& mode, uint64_t value) {
             mode.epoch_.store(value);
+          })
+      .def_property(
+          "_stack_trace",
+          [](const c10::FakeTensorMode& mode) -> py::object {
+            if (!mode.stack_trace_) {
+              return py::none();
+            }
+            return py::reinterpret_borrow<py::object>(
+                mode.stack_trace_->ptr(getPyInterpreter()));
+          },
+          [](c10::FakeTensorMode& mode, const py::object& value) {
+            mode.stack_trace_ = std::make_shared<c10::SafePyObject>(
+                value.inc_ref().ptr(), getPyInterpreter());
           })
       .def_property_readonly(
           "fake_tensor_converter",
