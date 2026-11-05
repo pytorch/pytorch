@@ -10949,6 +10949,11 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return self.streams[0](x)
 
+        class InBoundsAsStrided(torch.nn.Module):
+            def forward(self, x):
+                # Within the input's 16 elements, at an explicit offset.
+                return x.as_strided((2, 2), (4, 1), 1) * 2
+
         x = torch.randn(4, 4, device=self.device)
         q = torch.randn(1, 2, 16, 64, device=self.device)
         for model, inputs in (
@@ -10957,10 +10962,13 @@ class AOTInductorTestsTemplate:
             (NestedRegion(), (x,)),
             (UnusedInput(), (x, torch.randn(3, device=self.device))),
             (StreamsAttribute().to(self.device), (x,)),
+            (InBoundsAsStrided(), (x,)),
             # Different attention backends.
             (Attention(), (q,)),
             (Attention(), (q.bfloat16(),)),
         ):
+            # The C API PR later in the stack captures and replays each of
+            # these through run_with_lazy_cuda_graphs.
             with self.subTest(type(model).__name__):
                 self.check_model(
                     model, inputs, options={"aot_inductor.cudagraphs": True}
@@ -11056,6 +11064,11 @@ class AOTInductorTestsTemplate:
                 # Checks for errors with an effectful op.
                 return torch.linalg.inv(x)
 
+        class InputAsStrided(torch.nn.Module):
+            def forward(self, x):
+                # Past the end of a (4, 4) input.
+                return x.as_strided((4, 4), (4, 1), 1) * 2
+
         class WhileLoop(torch.nn.Module):
             def forward(self, x):
                 return torch._higher_order_ops.while_loop(
@@ -11079,6 +11092,7 @@ class AOTInductorTestsTemplate:
             (SideStream(), "it uses a side stream", {}),
             (Effectful(), "_linalg_check_errors.* has side effects", {}),
             (WhileLoop(), "control flow operator: torch.while_loop", {}),
+            (InputAsStrided(), "reads a graph input through as_strided", {}),
         ):
             with (
                 self.subTest(type(model).__name__, **configs),
@@ -11109,6 +11123,29 @@ class AOTInductorTestsTemplate:
                 (x, torch.randn(4, 4, device=self.device)),
                 inductor_configs={"aot_inductor.cudagraphs": True},
             )
+
+        class ReadsPastSlice(torch.nn.Module):
+            def forward(self, x):
+                # The slice's storage reaches further than its elements.
+                return x.as_strided((4, 8), (8, 1)) * 2
+
+        class ReadsSliceGaps(torch.nn.Module):
+            def forward(self, x):
+                # As many elements as the slice has, but through its gaps.
+                return x.as_strided((2, 8), (8, 1)) * 2
+
+        for model in (ReadsPastSlice(), ReadsSliceGaps()):
+            with (
+                self.subTest(type(model).__name__),
+                self.assertRaisesRegex(
+                    Exception, "CUDA graph: .*reads a graph input through as_strided"
+                ),
+            ):
+                AOTIRunnerUtil.compile(
+                    model,
+                    (torch.randn(4, 8, device=self.device)[:, :4],),
+                    inductor_configs={"aot_inductor.cudagraphs": True},
+                )
         devices = ["cpu"]
         if torch.cuda.device_count() >= 2:
             devices.append(f"{GPU_TYPE}:1")
