@@ -7464,14 +7464,20 @@ for dtype in (torch.int32, torch.int64):
         "padding, ceil_mode",
         [
             subtest(([0, 0, 0], False), name="no_padding"),
-            subtest(([1, 1, 0], True), name="padding_ceil_mode"),
+            # Halide can't schedule the masked argmax reduction ("can't reorder RVars")
+            subtest(
+                ([1, 1, 0], True), name="padding_ceil_mode", decorators=[skip_if_halide]
+            ),
         ],
     )
     def test_max_pool3d_large_kernel(self, padding, ceil_mode: bool):
         # Window > 25 skips the low-memory decomposition for the non-unrolled reduction lowering
+        kernel = [3, 3, 3]
+        self.assertTrue(lowering.should_fallback_max_pool_with_indices(kernel, n_dim=3))
+
         def fn(x):
             return aten.max_pool3d_with_indices(
-                x, [3, 3, 3], [1, 2, 3], padding, 1, ceil_mode
+                x, kernel, [1, 2, 3], padding, [1, 1, 1], ceil_mode
             )
 
         self.common(fn, (torch.randn([2, 4, 6, 7, 8]),))
