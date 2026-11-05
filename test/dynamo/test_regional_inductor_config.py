@@ -2,6 +2,7 @@
 
 import contextlib
 import copy
+import gc
 import importlib
 import re
 import unittest
@@ -79,6 +80,14 @@ def _count_positive(x: torch.Tensor) -> int:
 @_count_positive.register_fake
 def _(x):
     return torch.library.get_ctx().new_dynamic_size()
+
+
+def _regional_inductor_backend(gm, example_inputs):
+    from torch.fx.passes.regional_inductor_invoke_subgraph import (
+        regional_inductor_invoke_subgraph,
+    )
+
+    return regional_inductor_invoke_subgraph(gm, *example_inputs)
 
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
@@ -2570,6 +2579,782 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             region_in_partitions,
         )
         self.assertEqual(sorted(c["is_backward"] for c in recorded), captures)
+
+    @staticmethod
+    def _live_cudagraph_state_keys():
+        from torch._higher_order_ops.invoke_subgraph import (
+            _invoke_subgraph_cudagraph_states,
+        )
+
+        return set(_invoke_subgraph_cudagraph_states.keys())
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+    )
+    def test_regional_inductor_backend_cudagraph_state_does_not_leak(self):
+        from torch._dynamo.backends.common import aot_autograd
+
+        @torch.compiler.nested_compile_region(
+            options=get_invoke_subgraph_compile_options()
+        )
+        def region(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return torch.cos(region(x))
+
+        initial_keys = self._live_cudagraph_state_keys()
+        compiled_fn = torch.compile(
+            fn,
+            backend=aot_autograd(
+                fw_compiler=_regional_inductor_backend,
+                bw_compiler=_regional_inductor_backend,
+            ),
+            fullgraph=True,
+        )
+        compiled_fn(torch.randn(8, requires_grad=True)).sum().backward()
+        self.assertEqual(len(self._live_cudagraph_state_keys() - initial_keys), 1)
+
+        del compiled_fn
+        torch._dynamo.reset()
+        gc.collect()
+        self.assertEqual(self._live_cudagraph_state_keys() - initial_keys, set())
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+    )
+    def test_regional_inductor_backend_pairs_region_per_enclosing_region(self):
+        """A region nested in two uncompiled regions compiles once per enclosing
+        body under one identifier; each compile keeps its own pairing state."""
+        from torch._dynamo.backends.common import aot_autograd
+
+        @torch.compiler.nested_compile_region(
+            options=get_invoke_subgraph_compile_options()
+        )
+        def region(x):
+            return torch.sin(x) * 2
+
+        @torch.compiler.nested_compile_region
+        def enclosing_a(x):
+            return torch.cos(region(x))
+
+        @torch.compiler.nested_compile_region
+        def enclosing_b(x):
+            return torch.tanh(region(x))
+
+        def fn(x):
+            return enclosing_a(x) + enclosing_b(x)
+
+        initial_keys = self._live_cudagraph_state_keys()
+        backend = aot_autograd(
+            fw_compiler=_regional_inductor_backend,
+            bw_compiler=_regional_inductor_backend,
+        )
+        self._run_fw_bw_and_compare(
+            fn, torch.randn(8, requires_grad=True), backend=backend
+        )
+
+        self.assertEqual(len(self._live_cudagraph_state_keys() - initial_keys), 2)
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "triton.cudagraphs": False,
+        }
+    )
+    @parametrize(
+        "forward_cudagraphs,backward_cudagraphs",
+        ((False, False), (False, True), (True, False), (True, True)),
+    )
+    def test_regional_inductor_backend_runs_cudagraphs(
+        self, forward_cudagraphs, backward_cudagraphs
+    ):
+        from torch._dynamo.backends.common import aot_autograd
+
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": forward_cudagraphs},
+            bw_inductor_config_patches={"triton.cudagraphs": backward_cudagraphs},
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def region(x):
+            return torch.sin(x)
+
+        def fn(x):
+            detached = region(x).detach()
+            return torch.cos(region(x)).sum() + detached.sum()
+
+        compiled_fn = torch.compile(
+            fn,
+            backend=aot_autograd(
+                fw_compiler=_regional_inductor_backend,
+                bw_compiler=_regional_inductor_backend,
+            ),
+            fullgraph=True,
+        )
+        with self._record_captures() as captures:
+            for _ in range(3):
+                x = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+                expected_x = x.detach().clone().requires_grad_()
+                torch.compiler.cudagraph_mark_step_begin()
+                result = compiled_fn(x)
+                result.backward()
+                expected = fn(expected_x)
+                expected.backward()
+                self.assertEqual(result, expected)
+                self.assertEqual(x.grad, expected_x.grad)
+
+        self.assertEqual(
+            sorted(c["is_backward"] for c in captures),
+            [False] * forward_cudagraphs + [True] * backward_cudagraphs,
+        )
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    @parametrize(
+        "global_cudagraphs,regional_cudagraphs",
+        ((False, False), (False, True), (True, False), (True, True)),
+    )
+    def test_regional_inductor_backend_inference_uses_forward_cudagraphs(
+        self, global_cudagraphs, regional_cudagraphs
+    ):
+        from torch._dynamo.backends.common import aot_autograd
+
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": regional_cudagraphs},
+            bw_inductor_config_patches={"triton.cudagraphs": False},
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def region(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return torch.cos(region(x))
+
+        with (
+            torch._inductor.config.patch("triton.cudagraphs", global_cudagraphs),
+            self._record_captures() as captures,
+        ):
+            compiled_fn = torch.compile(
+                fn,
+                backend=aot_autograd(
+                    fw_compiler=_regional_inductor_backend,
+                    inference_compiler=_regional_inductor_backend,
+                ),
+                fullgraph=True,
+            )
+            for _ in range(3):
+                x = torch.randn(16, 16, device=GPU_TYPE)
+                torch.compiler.cudagraph_mark_step_begin()
+                self.assertEqual(compiled_fn(x), fn(x))
+
+        self.assertEqual(len(captures), int(regional_cudagraphs))
+        for capture in captures:
+            self.assertFalse(capture["is_backward"])
+            self.assertTrue(capture["is_inference"])
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch("triton.cudagraphs", False)
+    @parametrize("direction", ("forward", "backward", "inherited_backward"))
+    def test_regional_inductor_backend_rejects_nested_cudagraph_conflict(
+        self, direction
+    ):
+        from torch._dynamo.backends.common import aot_autograd
+
+        backward = direction != "forward"
+        inherited = direction == "inherited_backward"
+        if backward:
+            # The regions in the backward graph already carry their backward
+            # config, but the error still tells a set value from an inherited one.
+            inner_options = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True},
+                bw_inductor_config_patches=(
+                    None if inherited else {"triton.cudagraphs": True}
+                ),
+            )
+            outer_options = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True},
+                bw_inductor_config_patches={"triton.cudagraphs": False},
+            )
+        else:
+            inner_options = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": False}
+            )
+            outer_options = get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": True}
+            )
+
+        @torch.compiler.nested_compile_region(options=inner_options)
+        def inner_region(x):
+            return torch.sin(x)
+
+        @torch.compiler.nested_compile_region(options=outer_options)
+        def outer_region(x):
+            return torch.cos(inner_region(x))
+
+        compiled_fn = torch.compile(
+            outer_region,
+            backend=aot_autograd(
+                fw_compiler=_regional_inductor_backend,
+                bw_compiler=_regional_inductor_backend,
+                inference_compiler=_regional_inductor_backend,
+            ),
+            fullgraph=True,
+        )
+        expected_direction = "backward" if backward else "forward"
+        if inherited:
+            expected_direction += re.escape(
+                " (inherited from its forward; set triton.cudagraphs in "
+                "bw_inductor_config_patches to override)"
+            )
+        # The lazily compiled backward raises outside the Dynamo backend call.
+        with self.assertRaisesRegex(
+            ValueError if backward else BackendCompilerFailed,
+            f"nested compile region '.*' sets triton.cudagraphs={backward} for its "
+            f"{expected_direction}, but the region enclosing it resolves to "
+            f"{not backward}",
+        ):
+            result = compiled_fn(torch.randn(4, requires_grad=backward))
+            if backward:
+                result.sum().backward()
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "triton.cudagraphs": False,
+        }
+    )
+    @parametrize(
+        "forward_cudagraphs,backward_cudagraphs",
+        ((False, True), (True, False)),
+    )
+    def test_regional_inductor_backend_accepts_nested_directional_config(
+        self, forward_cudagraphs, backward_cudagraphs
+    ):
+        from torch._dynamo.backends.common import aot_autograd
+
+        options = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": forward_cudagraphs},
+            bw_inductor_config_patches={"triton.cudagraphs": backward_cudagraphs},
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def inner_region(x):
+            return torch.sin(x)
+
+        @torch.compiler.nested_compile_region(options=options)
+        def outer_region(x):
+            return torch.cos(inner_region(x))
+
+        x = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+        self._run_fw_bw_and_compare(
+            outer_region,
+            x,
+            backend=aot_autograd(
+                fw_compiler=_regional_inductor_backend,
+                bw_compiler=_regional_inductor_backend,
+            ),
+        )
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": True,
+            "triton.cudagraphs": False,
+        }
+    )
+    @parametrize("enclosing", ("none", "plain_region", "options_without_compiler"))
+    @parametrize("forward_loses_capture", (False, True))
+    @parametrize("dynamic", (False, True))
+    def test_regional_inductor_backend_pairs_region_cudagraphs(
+        self, enclosing, forward_loses_capture, dynamic
+    ):
+        """An opted-in region is captured both ways, also when it is nested in a
+        region the backend does not compile, and its backward cannot bring back
+        a capture its forward lost. With dynamic shapes the backward compiles
+        right after the forward instead of lazily."""
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._inductor.decomposition import select_decomp_table
+
+        decompositions = select_decomp_table()
+        options = get_invoke_subgraph_compile_options(
+            {"triton.cudagraphs": True}, decompositions=decompositions
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x, y):
+            return x @ y
+
+        enclosing_options = (
+            NestedCompileRegionOptions(decompositions=decompositions)
+            if enclosing == "options_without_compiler"
+            else None
+        )
+
+        @torch.compiler.nested_compile_region(options=enclosing_options)
+        def uncompiled_region(x, y):
+            return torch.sin(region(x, y))
+
+        def fn(x, y):
+            if enclosing == "none":
+                return torch.sin(region(x, y))
+            return uncompiled_region(x, y)
+
+        backend = aot_autograd(
+            fw_compiler=_regional_inductor_backend,
+            bw_compiler=_regional_inductor_backend,
+            decompositions=decompositions,
+        )
+        inputs = [
+            torch.randn(16, 16, device=GPU_TYPE, requires_grad=True) for _ in range(2)
+        ]
+        # Too small for the one-matmul forward, not for the two-matmul backward.
+        min_partition_size = 2 if forward_loses_capture else 0
+        with (
+            torch._inductor.config.patch(
+                "triton.cudagraph_min_partition_size", min_partition_size
+            ),
+            self._record_captures() as captures,
+        ):
+            self._run_fw_bw_and_compare(fn, *inputs, backend=backend, dynamic=dynamic)
+
+        self.assertEqual(
+            [c["is_backward"] for c in captures],
+            [] if forward_loses_capture else [False, True],
+        )
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": True,
+            "triton.cudagraphs": False,
+        }
+    )
+    def test_regional_inductor_backend_keeps_live_compiles_apart(self):
+        """Two live compiles of one function each pair their own region: the
+        backward of the compile whose forward lost capture stays uncaptured,
+        while the other compile's backward is captured."""
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._inductor.decomposition import select_decomp_table
+
+        decompositions = select_decomp_table()
+        options = get_invoke_subgraph_compile_options(
+            {"triton.cudagraphs": True}, decompositions=decompositions
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x, y):
+            return x @ y
+
+        def fn(x, y):
+            return torch.sin(region(x, y))
+
+        backend = aot_autograd(
+            fw_compiler=_regional_inductor_backend,
+            bw_compiler=_regional_inductor_backend,
+            decompositions=decompositions,
+        )
+        results = []
+        with self._record_captures() as captures:
+            # Too small for the one-matmul forward, not for the two-matmul
+            # backward; both backwards compile lazily with the default size.
+            for min_partition_size in (2, 0):
+                torch._dynamo.reset()
+                inputs = [
+                    torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+                    for _ in range(2)
+                ]
+                with torch._inductor.config.patch(
+                    "triton.cudagraph_min_partition_size", min_partition_size
+                ):
+                    compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+                    results.append((compiled_fn(*inputs), inputs))
+            for result, inputs in results:
+                result.sum().backward()
+                expected_inputs = [x.detach().clone().requires_grad_() for x in inputs]
+                fn(*expected_inputs).sum().backward()
+                self.assertEqual(
+                    [x.grad for x in inputs], [x.grad for x in expected_inputs]
+                )
+
+        self.assertEqual([c["is_backward"] for c in captures], [False, True])
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+    )
+    def test_regional_inductor_backend_compiles_regions_in_uncompiled_recompute(
+        self,
+    ):
+        """A forward recomputed in the backward runs under the backward
+        compiler; when its region has none, the regions nested in it are still
+        compiled."""
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._higher_order_ops.invoke_subgraph import (
+            invoke_subgraph_inductor_compile,
+        )
+
+        compiled_regions = []
+
+        def recording_compiler(name):
+            def compiler(gm, example_inputs):
+                compiled_regions.append(name)
+                return invoke_subgraph_inductor_compile(gm, example_inputs)
+
+            return compiler
+
+        inner_options = NestedCompileRegionOptions(
+            fw_compiler=recording_compiler("inner_fw"),
+            bw_compiler=recording_compiler("inner_bw"),
+        )
+        outer_options = NestedCompileRegionOptions(
+            fw_compiler=recording_compiler("outer_fw")
+        )
+
+        @torch.compiler.nested_compile_region(options=inner_options)
+        def inner(x):
+            return torch.sin(x) * 2
+
+        @torch.compiler.nested_compile_region(options=outer_options)
+        def outer(x):
+            return torch.cos(inner(x))
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(outer, x, use_reentrant=False)
+
+        backend = aot_autograd(
+            fw_compiler=_regional_inductor_backend,
+            bw_compiler=_regional_inductor_backend,
+        )
+        self._run_fw_bw_and_compare(
+            fn, torch.randn(8, requires_grad=True), backend=backend
+        )
+
+        # The forward graph compiles outer as a whole. The backward graph
+        # leaves the recomputed outer and outer's backward uncompiled, and
+        # compiles inner in both with the backward compiler.
+        self.assertEqual(compiled_regions, ["outer_fw", "inner_bw", "inner_bw"])
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(
+        inline_single_use_invoke_subgraph=False, trace_autograd_ops=True
+    )
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "triton.cudagraphs": False,
+        }
+    )
+    @parametrize(
+        "forward_cudagraphs,backward_cudagraphs", ((False, True), (True, False))
+    )
+    def test_regional_inductor_backend_traced_autograd_grad_uses_backward_config(
+        self, forward_cudagraphs, backward_cudagraphs
+    ):
+        """A traced torch.autograd.grad puts the region's backward into an
+        inference graph, where it still follows the backward config."""
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._inductor.decomposition import select_decomp_table
+
+        decompositions = select_decomp_table()
+        options = get_invoke_subgraph_compile_options(
+            {"triton.cudagraphs": forward_cudagraphs},
+            bw_inductor_config_patches={"triton.cudagraphs": backward_cudagraphs},
+            decompositions=decompositions,
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x, weight):
+            return torch.sin(x @ weight)
+
+        def fn(x, weight):
+            y = region(x, weight)
+            (grad,) = torch.autograd.grad(y.sum(), weight)
+            return y.detach(), grad
+
+        compiled_fn = torch.compile(
+            fn,
+            backend=aot_autograd(
+                fw_compiler=_regional_inductor_backend,
+                inference_compiler=_regional_inductor_backend,
+                decompositions=decompositions,
+            ),
+            fullgraph=True,
+        )
+        x = torch.randn(16, 16, device=GPU_TYPE)
+        weight = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+        with self._record_captures() as captures:
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                self.assertEqual(compiled_fn(x, weight), fn(x, weight))
+
+        (capture,) = captures
+        self.assertTrue(capture["is_inference"])
+        self.assertFalse(capture["is_backward"])
+        # Only the region's backward takes the incoming gradient.
+        self.assertEqual(
+            any("tangents" in p.name for p in capture["placeholders"]),
+            backward_cudagraphs,
+        )
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(
+        inline_single_use_invoke_subgraph=False, trace_autograd_ops=True
+    )
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": True,
+            "triton.cudagraphs": False,
+        }
+    )
+    @parametrize(
+        "forward_cudagraphs,backward_cudagraphs,forward_loses_capture",
+        ((True, False, False), (False, True, False), (True, True, True)),
+    )
+    def test_regional_inductor_backend_autograd_grad_in_training_graph(
+        self, forward_cudagraphs, backward_cudagraphs, forward_loses_capture
+    ):
+        """A backward region traced into a training forward graph compiles as
+        part of that forward under the backward config, unpaired: it neither
+        depends on nor follows the forward region's capture."""
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._inductor.decomposition import select_decomp_table
+
+        decompositions = select_decomp_table()
+        options = get_invoke_subgraph_compile_options(
+            {"triton.cudagraphs": forward_cudagraphs},
+            bw_inductor_config_patches={"triton.cudagraphs": backward_cudagraphs},
+            decompositions=decompositions,
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x, weight):
+            return x @ weight
+
+        def fn(x, weight, scale):
+            y = region(x, weight)
+            (grad,) = torch.autograd.grad(y.sum(), weight)
+            return y.detach() * scale + grad.sum()
+
+        backend = aot_autograd(
+            fw_compiler=_regional_inductor_backend,
+            bw_compiler=_regional_inductor_backend,
+            decompositions=decompositions,
+        )
+        x = torch.randn(16, 16, device=GPU_TYPE)
+        weight = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+        scale = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+        # Too small for the one-matmul forward region, not for the backward one.
+        min_partition_size = 2 if forward_loses_capture else 0
+        with (
+            torch._inductor.config.patch(
+                "triton.cudagraph_min_partition_size", min_partition_size
+            ),
+            self._record_captures() as captures,
+        ):
+            self._run_fw_bw_and_compare(fn, x, weight, scale, backend=backend)
+
+        # Every region lives in the forward graph; only the backward region
+        # takes the incoming gradient.
+        self.assertEqual(
+            sorted(
+                (c["is_backward"], any("tangents" in p.name for p in c["placeholders"]))
+                for c in captures
+            ),
+            [(False, False)] * (forward_cudagraphs and not forward_loses_capture)
+            + [(False, True)] * backward_cudagraphs,
+        )
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "triton.cudagraphs": False,
+        }
+    )
+    @parametrize(
+        "forward_cudagraphs,backward_cudagraphs", ((True, False), (False, True))
+    )
+    def test_regional_inductor_backend_checkpointed_region_uses_backward_config(
+        self, forward_cudagraphs, backward_cudagraphs
+    ):
+        """A forward call recomputed in the backward runs under the backward
+        config, next to the region's backward."""
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._inductor.decomposition import select_decomp_table
+
+        decompositions = select_decomp_table()
+        options = get_invoke_subgraph_compile_options(
+            {"triton.cudagraphs": forward_cudagraphs},
+            bw_inductor_config_patches={"triton.cudagraphs": backward_cudagraphs},
+            decompositions=decompositions,
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x):
+            return torch.sin(x) * 2
+
+        def block(x, weight):
+            return torch.cos(region(x)) * weight
+
+        def fn(x, weight):
+            return torch.utils.checkpoint.checkpoint(
+                block, x, weight, use_reentrant=False
+            )
+
+        backend = aot_autograd(
+            fw_compiler=_regional_inductor_backend,
+            bw_compiler=_regional_inductor_backend,
+            decompositions=decompositions,
+        )
+        inputs = [
+            torch.randn(16, 16, device=GPU_TYPE, requires_grad=True) for _ in range(2)
+        ]
+        with self._record_captures() as captures:
+            self._run_fw_bw_and_compare(fn, *inputs, backend=backend)
+
+        self.assertEqual(
+            sorted(c["is_backward"] for c in captures),
+            [False] * forward_cudagraphs + [True, True] * backward_cudagraphs,
+        )
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "triton.cudagraphs": False,
+        }
+    )
+    @parametrize("regional_backend", (False, True))
+    def test_uncaptured_backward_lets_captured_forward_replay(self, regional_backend):
+        """Without cudagraph_mark_step_begin, the next step's forward can only
+        replay its CUDA graph once the uncaptured backward has told the tree
+        that the pending backward ran."""
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._inductor.cudagraph_trees import CUDAGraphTreeManager, get_manager
+        from torch._inductor.decomposition import select_decomp_table
+
+        decompositions = select_decomp_table()
+        options = get_invoke_subgraph_compile_options(
+            {"triton.cudagraphs": True},
+            bw_inductor_config_patches={"triton.cudagraphs": False},
+            decompositions=decompositions,
+        )
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x):
+            return torch.sin(x) * 2
+
+        def fn(x, weight):
+            return region(x * weight)
+
+        backend = (
+            aot_autograd(
+                fw_compiler=_regional_inductor_backend,
+                bw_compiler=_regional_inductor_backend,
+                decompositions=decompositions,
+            )
+            if regional_backend
+            else "inductor"
+        )
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        with mock.patch.object(
+            CUDAGraphTreeManager,
+            "record_function",
+            autospec=True,
+            side_effect=CUDAGraphTreeManager.record_function,
+        ) as record_function:
+            for _ in range(6):
+                inputs = [
+                    torch.randn(64, 64, device=GPU_TYPE, requires_grad=True)
+                    for _ in range(2)
+                ]
+                expected_inputs = [x.detach().clone().requires_grad_() for x in inputs]
+                result = compiled_fn(*inputs)
+                result.sum().backward()
+                expected = fn(*expected_inputs)
+                expected.sum().backward()
+                self.assertEqual(result, expected)
+                self.assertEqual(
+                    [x.grad for x in inputs], [x.grad for x in expected_inputs]
+                )
+
+        self.assertEqual(record_function.call_count, 1)
+        manager = get_manager(torch.cuda.current_device(), create_if_none_exists=False)
+        self.assertFalse(manager.running_forwards_with_pending_backwards)
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+    )
+    @parametrize("training", (False, True))
+    def test_regional_inductor_backend_keeps_custom_compiler_call(self, training):
+        """A custom region compiler is still called with (gm, example_inputs)."""
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._higher_order_ops.invoke_subgraph import (
+            invoke_subgraph_inductor_compile,
+        )
+
+        compiled_regions = []
+
+        def compiler(gm, example_inputs):
+            compiled_regions.append(gm)
+            return invoke_subgraph_inductor_compile(gm, example_inputs)
+
+        options = NestedCompileRegionOptions(fw_compiler=compiler, bw_compiler=compiler)
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return torch.cos(region(x))
+
+        backend = _regional_inductor_backend
+        compiled_fn = torch.compile(
+            fn,
+            backend=aot_autograd(
+                fw_compiler=backend, bw_compiler=backend, inference_compiler=backend
+            ),
+            fullgraph=True,
+        )
+        x = torch.randn(8, requires_grad=training)
+        expected_x = x.detach().clone().requires_grad_(training)
+        result, expected = compiled_fn(x), fn(expected_x)
+        self.assertEqual(result, expected)
+        if training:
+            result.sum().backward()
+            expected.sum().backward()
+            self.assertEqual(x.grad, expected_x.grad)
+        self.assertEqual(len(compiled_regions), 2 if training else 1)
 
 
 if __name__ == "__main__":
