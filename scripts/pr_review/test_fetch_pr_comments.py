@@ -685,14 +685,21 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         import post_review
 
         notice = post_review.too_large_body("no automated review", (100, 400_000))
+        reviewed, skipped = "1" * 40, "2" * 40
         api = FakeApi(
             reviews=[
-                ours(rid=50, body=fpc.MARKER + "\nverdict"),
-                ours(rid=51, body=notice),
+                {
+                    **ours(rid=50, body=fpc.MARKER + "\nverdict"),
+                    "commit_id": reviewed,
+                },
+                {**ours(rid=51, body=notice), "commit_id": skipped},
             ]
         )
-        (item,) = fpc.collect(api, REPO, PR)["items"]
+        out = fpc.collect(api, REPO, PR)
+        (item,) = out["items"]
         self.assertEqual(item["id"], 50)
+        # The notice reviewed nothing, so the interdiff starts from the verdict's commit.
+        self.assertEqual(out["previous_review_sha"], reviewed)
 
     def test_no_finding_is_kept_while_a_persons_comment_is_left_out(self):
         issue = [
