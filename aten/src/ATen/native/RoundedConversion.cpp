@@ -23,7 +23,7 @@ c10::RoundingMode parse_rounding_mode(std::string_view round) {
   }
   TORCH_CHECK_VALUE(
       false,
-      "round must be one of 'to_nearest_even', 'toward_zero', ",
+      "the rounding mode must be one of 'to_nearest_even', 'toward_zero', ",
       "'toward_positive' or 'toward_negative', but got '",
       round,
       "'");
@@ -47,7 +47,7 @@ void check_rounded_conversion(ScalarType src, ScalarType dst) {
   };
   TORCH_CHECK(
       is_narrowing(),
-      "round is only supported when converting a float64, float32, float16 or ",
+      "rounding is only supported when converting a float64, float32, float16 or ",
       "bfloat16 tensor to a narrower floating-point dtype (one that cannot ",
       "represent all its values exactly), but got a conversion from ",
       src,
