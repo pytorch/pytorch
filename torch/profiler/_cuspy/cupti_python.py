@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
 
-# libcupti soname for the supported CUDA major (Cuspy's floor is 13.3). Loaded
+# libcupti soname for the supported CUDA major (Cuspy's floor is 13.5). Loaded
 # by name so dlopen returns the copy already mapped into the process: torch front-loads
 # the nvidia-cuda-cupti wheel (torch._preload_cuda_deps) and cupti-python / kineto load
 # it otherwise, so every consumer shares one CUPTI -- a second instance would collide
@@ -65,9 +65,12 @@ CUPTI_ACTIVITY_FLAG_FLUSH_FORCED = 1
 # header) rather than hardcoded ints -- they are renumbered vs cupti-python's own enum.
 
 # Minimum libcupti Cuspy supports. The v2 user-defined-record API arrived in
-# 13.2, but only 13.3 populates pBufferCompleteInfo->ppRecordLayouts (CUPTI's own
-# per-kind record layout) that Cuspy decodes against, so 13.3 is the floor.
-LIBCUPTI_MIN_VERSION = 130300
+# 13.2 and 13.3 first populates pBufferCompleteInfo->ppRecordLayouts (CUPTI's own
+# per-kind record layout) that Cuspy decodes against; Cuspy is only supported on 13.5+.
+LIBCUPTI_MIN_VERSION = 130500
+
+# Minimum CUDA version PyTorch must be built with (torch.version.cuda) for Cuspy.
+CUDA_MIN_VERSION = (13, 5)
 
 # CUPTI overhead-kind codes (CUpti_ActivityOverheadKind in cupti_activity.h).
 # cupti-python does not surface these as an enum, so the code -> name mapping is

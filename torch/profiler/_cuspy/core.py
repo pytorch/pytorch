@@ -433,6 +433,13 @@ class Cuspy:
         """
         if self._subscriber is not None:
             return self._subscriber
+        cuda = torch.version.cuda
+        min_cuda = cupti_python.CUDA_MIN_VERSION
+        if cuda is None or tuple(int(x) for x in cuda.split(".")[:2]) < min_cuda:
+            raise RuntimeError(
+                "Cuspy requires a PyTorch build with CUDA >= "
+                f"{min_cuda[0]}.{min_cuda[1]}; this build reports CUDA {cuda}"
+            )
         version = self._cupti.get_version()
         if version < cupti_python.LIBCUPTI_MIN_VERSION:
             raise RuntimeError(

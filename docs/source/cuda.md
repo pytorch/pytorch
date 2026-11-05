@@ -251,8 +251,8 @@ can equally be saved next to a trace and joined offline.
 To capture Python launch stacks as well, set
 ``annotation_config={"record_py_stacks": True}`` with ``enable_annotations=True``.
 Recording uses Cuspy's CUPTI node-creation callbacks, even when no profiler
-session is running. It requires `cupti-python`, CUPTI >= 13.3, and a CUPTI
-subscription not already held by Kineto, Nsight Systems, or another profiler.
+session is running. It requires `cupti-python`, a CUDA >= 13.5 build, CUPTI >= 13.5,
+and a CUPTI subscription not already held by Kineto, Nsight Systems, or another profiler.
 Use Cuspy for subsequent GPU profiling in the same process. Disable autograd
 multithreading during both warmup and capture.
 
