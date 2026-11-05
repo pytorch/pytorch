@@ -93,7 +93,7 @@ def _prepare_blockscaled_tma_launch(
             )
         else:
             scale_k = torch.empty(
-                spec.B_product * spec.M * (spec.K // 32),
+                spec.B_product * spec.M * (spec.K // spec.quant_block_size[1]),
                 dtype=torch.uint8,
                 device=input.device,
             )
@@ -151,7 +151,7 @@ def _format_blockscaled_tma_output(
         if spec.is_scale_swizzled:
             scale_k_shape = (1, spec.s_num_row_blk_k * spec.s_num_col_blk_k * 32 * 16)
         else:
-            scale_k_shape = (spec.M, spec.K // 32)
+            scale_k_shape = (spec.M, spec.K // spec.quant_block_size[1])
         scale_k = scale_k.view(
             (spec.B_product, *scale_k_shape) if spec.is_batched else scale_k_shape
         )
@@ -187,15 +187,22 @@ def _blockscaled_tma_impl_on_current_device(
     is_scale_swizzled: bool,
     *,
     dual: bool,
+    quant_block_size: tuple[int, int],
 ) -> _BlockscaledTmaOutput:
     layout = _plan_matrix_input(
-        input, dim, is_square_scaling, is_scale_swizzled, dual=dual
+        input,
+        dim,
+        is_square_scaling,
+        is_scale_swizzled,
+        dual=dual,
+        quant_block_size=quant_block_size,
     )
     spec = _build_blockscaled_tma_spec(
         layout,
         dual=dual,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
+        quant_block_size=quant_block_size,
     )
     plan = _plan_blockscaled_tma_launch(input, layout, spec)
     input = _canonicalize_matrix_input(input, layout)
@@ -220,6 +227,7 @@ def _blockscaled_tma_impl_on_current_device(
         spec.is_square_scaling,
         spec.is_scale_swizzled,
         spec.is_batched,
+        spec.quant_block_size,
     )
     output_k, output_m = launch.output_k, launch.output_m
     tma_input = input
@@ -257,6 +265,7 @@ def _run_blockscaled_tma(
     is_scale_swizzled: bool,
     *,
     dual: bool,
+    quant_block_size: tuple[int, int],
     **kwargs: object,
 ) -> _BlockscaledTmaOutput:
     if kwargs:
@@ -282,6 +291,7 @@ def _run_blockscaled_tma(
             is_square_scaling=is_square_scaling,
             is_scale_swizzled=is_scale_swizzled,
             dual=dual,
+            quant_block_size=quant_block_size,
         )
 
     if device == torch.cuda.current_device():
@@ -295,11 +305,16 @@ def _blockscaled_tma_impl(
     dim: _SingleQuantDim,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
+    *,
+    quant_block_size: tuple[int, int] = (1, 32),
     **kwargs: object,
 ) -> _TwoTensorOutput:
-    r"""_blockscaled_tma_impl(input, dim, is_square_scaling, is_scale_swizzled, **kwargs) -> tuple[Tensor, Tensor]
+    r"""_blockscaled_tma_impl(input, dim, is_square_scaling, is_scale_swizzled, *, quant_block_size=(1, 32), **kwargs) -> tuple[Tensor, Tensor]
 
     Quantize an N-D tensor to MXFP8 with block scaling along ``dim[-1]``.
+
+    Only ``quant_block_size=(1, 32)`` is supported. The block sizes and scale
+    shapes described below refer to this configuration.
 
     ``dim`` defines a logical 2D matrix plane; all other axes are batch axes.
     Layouts admitting a 2D or 4D TMA view can avoid copying. Other layouts,
@@ -327,6 +342,9 @@ def _blockscaled_tma_impl(
             Requires swizzled scales and both selected axes divisible by 32.
         is_scale_swizzled (bool): Return swizzled scales if ``True``; compact
             scales otherwise.
+        quant_block_size (tuple[int, int], optional): Keyword-only base
+            quantization block dimensions. Only ``(1, 32)`` is supported.
+            Default: ``(1, 32)``.
         **kwargs: No additional keyword arguments are accepted.
 
     Returns:
@@ -353,7 +371,13 @@ def _blockscaled_tma_impl(
     return cast(
         _TwoTensorOutput,
         _run_blockscaled_tma(
-            input, dim, is_square_scaling, is_scale_swizzled, dual=False, **kwargs
+            input,
+            dim,
+            is_square_scaling,
+            is_scale_swizzled,
+            dual=False,
+            quant_block_size=quant_block_size,
+            **kwargs,
         ),
     )
 
@@ -362,12 +386,15 @@ def _blockscaled_tma_impl_dual(
     input: torch.Tensor,
     *,
     dim: _SingleQuantDim = (-2, -1),
+    quant_block_size: tuple[int, int] = (1, 32),
 ) -> _FourTensorOutput:
-    r"""_blockscaled_tma_impl_dual(input, *, dim=(-2, -1)) -> tuple[Tensor, Tensor, Tensor, Tensor]
+    r"""_blockscaled_tma_impl_dual(input, *, dim=(-2, -1), quant_block_size=(1, 32)) -> tuple[Tensor, Tensor, Tensor, Tensor]
 
     Quantize both matrix axes of an N-D tensor in one kernel launch.
 
-    Uses 1x32 scaling blocks and swizzled scales.
+    Only ``quant_block_size=(1, 32)`` is supported, giving 1x32 scaling blocks
+    and swizzled scales. The scale shapes described below refer to this
+    configuration.
 
     Args:
         input (Tensor): CUDA tensor with the layout and dtypes described by
@@ -377,6 +404,8 @@ def _blockscaled_tma_impl_dual(
         dim (tuple[int, int], optional): Ordered matrix-axis pair. Both this
             pair and its reverse are quantized. All other axes are batch axes.
             Default: ``(-2, -1)``.
+        quant_block_size (tuple[int, int], optional): Base quantization block
+            dimensions. Only ``(1, 32)`` is supported. Default: ``(1, 32)``.
 
     Returns:
         tuple[Tensor, Tensor, Tensor, Tensor]: ``(q_first, s_first, q_reverse,
@@ -399,5 +428,6 @@ def _blockscaled_tma_impl_dual(
             False,
             True,
             dual=True,
+            quant_block_size=quant_block_size,
         ),
     )
