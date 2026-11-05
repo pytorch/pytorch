@@ -1621,6 +1621,7 @@ ownership:
     section: infra_test
     paths:
       - /test/benchmark_utils/
+      - /test/hw_classification_testdata/
       - /test/junit_xml_testdata/
       - /test/scripts/
       - /test/spincli/
