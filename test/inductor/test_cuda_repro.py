@@ -2186,9 +2186,9 @@ class CudaReproTests(TestCase):
         emulate_precision_casts=False,
         emulate_precision_casts_on_saved_tensors=True,
     )
-    # With TF32 convs, the compiled and eager input grads differ by ~1e-3 on
-    # some GPUs (an A100 MIG slice), far outside the 1e-5 tolerance this fp32
-    # numerics check needs.
+    # With TF32 convs on CUDA, the compiled and eager input grads differ
+    # by ~1e-3 on some GPUs (an A100 MIG slice), far outside the 1e-5
+    # tolerances used for CUDA in this fp32 numerics check.
     @with_tf32_off
     def test_conv_bias_no_extra_cast_for_fp32(self):
         # fp32 conv output is not low precision: no cast, unchanged numerics.
@@ -2215,12 +2215,13 @@ class CudaReproTests(TestCase):
         eager_out, eager_grad = run(f, False)
         out_tol = grad_tol = {"atol": 1e-5, "rtol": 1e-5}
         if device_type == "xpu":
-            # Eager oneDNN fuses the bias add, Inductor peels it into a separate
-            # add, so the two round differently. bias -1000 puts the conv output
-            # near 1000, where one fp32 ulp is 6.1e-5, so the paths disagree in
-            # whole ulps: 1.8e-4 (3 ulps) on the output, 7.3e-5 on t.grad via
-            # log_softmax and conv backward. 6 ulps leaves room for one more
-            # rounding on another SKU; a bf16/fp16 cast would be ~4 or ~0.5.
+            # Eager oneDNN fuses the bias add; Inductor adds bias separately.
+            # With bias -1000, rounding differences affect log_softmax and its
+            # backward. On BMG / Data Center GPU with oneDNN 3.13.3, the max
+            # absolute differences were 1.831e-4 / 1.259e-4 for the log_softmax
+            # output and 7.337e-5 / 6.175e-5 for the input gradient.
+            # The atols leave about 2.2x output and 2.7x gradient headroom over
+            # the measured maxima to allow for variation across XPU devices.
             out_tol = {"atol": 4e-4, "rtol": 1e-5}
             grad_tol = {"atol": 2e-4, "rtol": 1e-5}
         self.assertEqual(f1_out, eager_out, **out_tol)
