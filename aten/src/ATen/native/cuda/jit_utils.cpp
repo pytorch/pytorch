@@ -455,6 +455,8 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
     return __uint_as_float(bits);
   }
 
+  // Mirrors detail::rounds_through_float in TypeCast.h, limited to the types
+  // the jiterator supports.
   template <typename T>
   constexpr bool rounds_through_float = std::is_same<T, at::Half>::value ||
       std::is_same<T, at::BFloat16>::value ||

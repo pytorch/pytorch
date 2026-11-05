@@ -5155,7 +5155,7 @@ Here are the ways to call ``to``:
     Args:
         {memory_format}
         round (str, optional): if given, converts with
-        :func:`torch.round_to` in this rounding mode.
+            :func:`torch.round_to` in this rounding mode.
 
 .. note::
 
@@ -5179,6 +5179,8 @@ Here are the ways to call ``to``:
 
     Args:
         {memory_format}
+        round (str, optional): if given, converts with
+            :func:`torch.round_to` in this rounding mode.
 
 .. method:: to(other, non_blocking=False, copy=False, *, round=None) -> Tensor
    :noindex:
@@ -5192,6 +5194,10 @@ Here are the ways to call ``to``:
     `tutorial on good usage of non_blocking and pin_memory <https://pytorch.org/tutorials/intermediate/pinmem_nonblock.html>`__.
     When :attr:`copy` is set, a new Tensor is created even when the Tensor
     already matches the desired conversion.
+
+    Args:
+        round (str, optional): if given, converts with
+            :func:`torch.round_to` in this rounding mode.
 
 .. note::
 

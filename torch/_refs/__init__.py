@@ -2322,10 +2322,19 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
         def convert(t):
             return torch.round_to(t, dtype, rounding, memory_format=memory_format)
 
-        # Like Tensor.to, convert on the accelerator, before copying to the CPU
-        # or after copying from it.
+        def has_kernel(device):
+            key = torch._C._dispatch_key_for_device(device.type)
+            return torch._C._dispatch_has_kernel_for_dispatch_key(
+                "aten::round_to.out", key
+            )
+
+        # Like Tensor.to: convert on a device with a kernel, preferring an
+        # accelerator and, between two, the source.
         device = kwargs.get("device")
-        if device is not None and torch.device(device).type == "cpu":
+        if device is None:
+            return to(convert(a), **kwargs)
+        device = torch.device(device)
+        if has_kernel(a.device) and (a.device.type != "cpu" or not has_kernel(device)):
             return to(convert(a), **kwargs)
         return convert(to(a, **kwargs))
 

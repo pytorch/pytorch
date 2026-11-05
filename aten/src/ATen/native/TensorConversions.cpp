@@ -24,8 +24,6 @@
 #include <ATen/ops/_to_copy_native.h>
 #include <ATen/ops/_to_cpu_native.h>
 #include <ATen/ops/_to_dense_native.h>
-#include <ATen/ops/_to_dtype_rounded.h>
-#include <ATen/ops/_to_dtype_rounded_native.h>
 #include <ATen/ops/_to_sparse_bsc_native.h>
 #include <ATen/ops/_to_sparse_bsr_native.h>
 #include <ATen/ops/_to_sparse_csc_native.h>
@@ -37,6 +35,7 @@
 #include <ATen/ops/empty_quantized.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/empty_strided_native.h>
+#include <ATen/ops/round_to.h>
 #include <ATen/ops/round_to_native.h>
 #include <ATen/ops/to_dense_backward_native.h>
 #include <ATen/ops/to_dense_native.h>
@@ -55,6 +54,7 @@
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
+#include <ATen/native/RoundedConversion.h>
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/TensorConversions.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
@@ -402,29 +402,17 @@ Tensor _to_copy(
   return r;
 }
 
-Tensor _to_dtype_rounded(
-    const Tensor& self,
-    ScalarType dtype,
-    std::string_view round,
-    std::optional<c10::MemoryFormat> optional_memory_format) {
-  TORCH_CHECK(
-      self.layout() == kStrided,
-      "rounding is only supported for strided tensors, but got ",
-      self.layout());
-  auto result = empty_for_conversion(
-      self,
-      self.options().dtype(dtype),
-      optional_memory_format.value_or(MemoryFormat::Preserve));
-  return at::_to_dtype_rounded_out(
-      result, self, dtype, round, optional_memory_format);
-}
-
 Tensor round_to(
     const Tensor& self,
     ScalarType dtype,
     std::string_view mode,
     std::optional<c10::MemoryFormat> optional_memory_format) {
-  return at::_to_dtype_rounded(self, dtype, mode, optional_memory_format);
+  check_round_to(self, dtype, mode);
+  auto result = empty_for_conversion(
+      self,
+      self.options().dtype(dtype),
+      optional_memory_format.value_or(MemoryFormat::Preserve));
+  return at::round_to_out(result, self, dtype, mode, optional_memory_format);
 }
 
 template <typename T>
