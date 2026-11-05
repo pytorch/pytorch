@@ -119,6 +119,15 @@ def memory_stats(device: Device = None) -> dict[str, Any]:
     - ``allocated``: historical total increase in this metric.
     - ``freed``: historical total decrease in this metric.
 
+    In addition to the core statistics, we also provide some simple event
+    counters:
+
+    - ``"num_sync_all_streams"``: number of ``synchronize_and_free_events`` calls.
+    - ``"num_device_alloc"``: number of XPU allocation calls. This includes both
+      expandable segment mapping and ``sycl::aligned_alloc_device``.
+    - ``"num_device_free"``: number of XPU free calls. This includes both
+      expandable segment unmapping and ``sycl::free``.
+
     Args:
         device (torch.device or int or str, optional): selected device. Returns
             statistics for the current device, given by :func:`~torch.xpu.current_device`,
