@@ -72,14 +72,17 @@ unchecked_cast_to_int(src_t src) {
   return static_cast<dest_t>(src);
 }
 
-// The constructors of these types take a float, so converting a double through
-// them would round twice.
+namespace detail {
+// Whether converting a double to T would round twice, through the float
+// constructors of T.
 template <typename T>
-constexpr bool converts_from_float = std::is_same_v<T, Half> ||
-    std::is_same_v<T, BFloat16> || std::is_same_v<T, Float8_e4m3fn> ||
-    std::is_same_v<T, Float8_e4m3fnuz> || std::is_same_v<T, Float8_e5m2> ||
-    std::is_same_v<T, Float8_e5m2fnuz> || std::is_same_v<T, Float8_e5m3fnu> ||
-    std::is_same_v<T, Float8_e8m0fnu>;
+inline constexpr bool rounds_through_float =
+    std::is_same_v<T, Half> || std::is_same_v<T, BFloat16> ||
+    std::is_same_v<T, Float8_e4m3fn> || std::is_same_v<T, Float8_e4m3fnuz> ||
+    std::is_same_v<T, Float8_e5m2> || std::is_same_v<T, Float8_e5m2fnuz> ||
+    std::is_same_v<T, Float8_e5m3fnu> || std::is_same_v<T, Float8_e8m0fnu> ||
+    std::is_same_v<T, complex<Half>> || std::is_same_v<T, complex<BFloat16>>;
+} // namespace detail
 
 template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type {
@@ -90,7 +93,8 @@ struct static_cast_with_inter_type {
         std::is_integral_v<dest_t> && !std::is_integral_v<decltype(r)>) {
       return unchecked_cast_to_int<dest_t>(r);
     } else if constexpr (
-        std::is_same_v<decltype(r), double> && converts_from_float<dest_t>) {
+        std::is_same_v<decltype(r), double> &&
+        detail::rounds_through_float<dest_t>) {
       return static_cast<dest_t>(detail::round_to_odd_float(r));
     } else {
       return static_cast<dest_t>(r);
