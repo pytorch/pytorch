@@ -227,7 +227,6 @@ class TpReprTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), compiled(x))
 
-    @unittest.expectedFailure
     def test_type_dunder_repr_on_class(self):
         class Meta(type):
             def __repr__(cls):
