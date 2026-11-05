@@ -197,10 +197,10 @@ def _store_scale_bytes_as_uint(
     col: cutlass.Int64,
     count: cutlass.Constexpr,
 ) -> None:
-    """Store adjacent one-byte scale values with one naturally sized integer write.
+    r"""Store adjacent one-byte scale values with one naturally sized integer write.
 
     Args:
-        mScaleLogical: Global scale tensor with the logical-to-blocked layout.
+        mScaleLogical: Global scale tensor with the logical-to-storage layout.
         rScale: Register tensor holding the E8M0 byte values.
         row: Logical destination row.
         col: First logical destination column, aligned to ``count``.
@@ -232,46 +232,6 @@ def _store_scale_bytes_as_uint(
 
 
 @cute.jit
-def _store_unswizzled_scale_groups_as_uint(
-    mScale: cute.Tensor,
-    rScale: cute.Tensor,
-    row: cutlass.Int64,
-    scale_col: cutlass.Int64,
-    row_stride: cutlass.Int64,
-    group_count: cutlass.Constexpr,
-) -> None:
-    """Store adjacent bytes into a compact row-major scale tensor.
-
-    The explicit flat offset keeps address calculation independent of the
-    tensor's dynamic 2-D layout while retaining 16- or 32-bit global stores.
-    Callers must ensure each destination is naturally aligned.
-    """
-    flat = cutlass.Int64(row) * cutlass.Int64(row_stride) + cutlass.Int64(scale_col)
-    if cutlass.const_expr(group_count == 1):
-        mScale[flat] = rScale[0]
-    elif cutlass.const_expr(group_count == 2):
-        mScalePacked = cute.make_tensor(
-            cute.recast_ptr(mScale.iterator, dtype=cutlass.Uint16),
-            cute.make_layout(cute.size(mScale) // 2),
-        )
-        rScalePacked = cute.recast_tensor(rScale, dtype=cutlass.Uint16)
-        mScalePacked[flat // 2] = rScalePacked[0]
-    else:
-        if cutlass.const_expr(group_count % 4 != 0):
-            raise AssertionError(f"expected group_count % 4 == 0, got {group_count}")
-        mScalePacked = cute.make_tensor(
-            cute.recast_ptr(mScale.iterator, dtype=cutlass.Uint32),
-            cute.make_layout(cute.size(mScale) // 4),
-        )
-        rScalePacks = cute.tiled_divide(rScale, (4,))
-        for pack_idx in cutlass.range_constexpr(group_count // 4):
-            rScalePacked = cute.recast_tensor(
-                rScalePacks[(None, pack_idx)], dtype=cutlass.Uint32
-            )
-            mScalePacked[flat // 4 + pack_idx] = rScalePacked[0]
-
-
-@cute.jit
 def _blockscaled_quantize_group(
     values: cute.TensorSSA,
     value_count: cutlass.Constexpr,
@@ -293,7 +253,7 @@ def _blockscaled_quantize_group(
 
 
 @cute.jit
-def _store_swizzled_scale_groups_as_uint(
+def _store_scale_groups_as_uint(
     mScaleLogical: cute.Tensor,
     rScale: cute.Tensor,
     row,
