@@ -1319,6 +1319,13 @@ if NEXTAFTER_IN_RANGE:
         @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
         @skipXPUIf(not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler not found")
         def test_nextafter(self, device, dtype, noncontiguous):
+            if torch.device(device).type == "xpu" and dtype in (
+                torch.float32,
+                torch.float64,
+            ):
+                raise unittest.SkipTest(
+                    "https://github.com/intel/torch-xpu-ops/issues/6011"
+                )
             int_dtype = NEXTAFTER_DTYPE_CONFIG[dtype][0]
             int_min = torch.iinfo(int_dtype).min
             subnormals = torch.tensor(
