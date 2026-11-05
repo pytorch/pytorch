@@ -17,6 +17,8 @@ C10_METAL_CONSTEXPR uint32_t kFFTMultiPass = kFFTFourStepTwiddles |
 C10_METAL_CONSTEXPR uint32_t kFFTSmemBytes = 32768;
 C10_METAL_CONSTEXPR uint32_t kFFTMaxPoints =
     kFFTSmemBytes / (2 * sizeof(float));
+// Stages of one plan: radix 2 over 4096 points takes 12, the global radices
+// below factor any length under 2^31 in fewer
 C10_METAL_CONSTEXPR uint32_t kFFTMaxStages = 16;
 
 // 8 points per thread; 16 only pay for plain 1024-point kernels (one stage
