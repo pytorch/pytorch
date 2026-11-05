@@ -3605,8 +3605,9 @@ def cross_entropy(
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     out_shape: list[int] | None = None
     if dim is not None:
-        if isinstance(dim, bool) or not isinstance(dim, (int, torch.SymInt)):
-            raise TypeError(f"dim must be an int or None, got {type(dim)}")
+        if not torch.jit.is_scripting():
+            if isinstance(dim, bool) or not _is_integer(dim):
+                raise TypeError(f"dim must be an int or None, got {type(dim)}")
         ndim = input.dim()
         # As in maybe_wrap_dim, a 0-d input takes the dims of a 1-d one.
         wrap_ndim = max(ndim, 1)
@@ -3626,9 +3627,13 @@ def cross_entropy(
                     f"Expected target size {list(shape)}, got {list(target.shape)}"
                 )
             if dim == 0:
-                input, target = input.unsqueeze(0), target.unsqueeze(0)
-            else:
-                input, target = input.flatten(0, dim - 1), target.flatten(0, dim - 1)
+                # On CUDA, log_softmax over dim 1 of a (1, C, ...) view is several times
+                # slower than copying the input with the classes last, so move them there.
+                input = input.movedim(0, -1)
+                if target.dim() == ndim:
+                    target = target.movedim(0, -1)
+                dim = ndim - 1
+            input, target = input.flatten(0, dim - 1), target.flatten(0, dim - 1)
             # pyrefly: ignore [bad-assignment]
             out_shape = shape
     loss = torch._C._nn.cross_entropy_loss(

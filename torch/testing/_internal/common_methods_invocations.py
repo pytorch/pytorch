@@ -15300,10 +15300,13 @@ op_db: list[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        decorators=(
+            # As for the base op, the scripted weighted samples differ from eager by more than the
+            # default tolerance.
+            DecorateInfo(toleranceOverride({torch.float32: tol(atol=3e-3, rtol=1e-3)}),
+                         "TestJit", "test_variant_consistency_jit"),
+        ),
         skips=(
-            # The alias annotation check needs the inputs of aten::cross_entropy_loss to be graph
-            # inputs, but with dim they are reshaped in Python first.
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
             DecorateInfo(unittest.skip("FP16 cross_entropy cases have not been enabled on MPS yet"),
                          dtypes=(torch.half,), device_type="mps"),
         ),

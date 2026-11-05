@@ -1411,6 +1411,9 @@ class CrossEntropyLoss(_WeightedLoss):
         *,
         dim: int | None = None,
     ) -> None:
+        # Python ints only, as in nn.Softmax: dim is a TorchScript constant.
+        if dim is not None and (not isinstance(dim, int) or isinstance(dim, bool)):
+            raise TypeError(f"dim must be an int or None, got {type(dim)}")
         super().__init__(weight, size_average, reduce, reduction)
         self.ignore_index = ignore_index
         self.label_smoothing = label_smoothing

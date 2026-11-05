@@ -190,7 +190,10 @@ class TestJit(JitCommonTestCase):
             #   so running it on all dtypes is would be excessive
             if dtype == torch.float32:
                 # TODO: no reason why we can't run this with tracing graph
-                if support_script and op.name != "rsub":
+                # The check needs the aten op's inputs to be graph inputs, but cross_entropy
+                # with dim reshapes them first.
+                reshapes_inputs = op.full_name == "nn.functional.cross_entropy.dim"
+                if support_script and op.name != "rsub" and not reshapes_inputs:
                     check_alias_annotation(
                         name,
                         (get_sample(),) + sample.args,

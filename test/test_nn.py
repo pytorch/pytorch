@@ -23,6 +23,7 @@ from unittest import mock, SkipTest
 import torch
 from torch import inf, nan
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.utils._python_dispatch import TorchDispatchMode
 import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
@@ -5527,6 +5528,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(scripted_fn(input, target, dim), expected)
             scripted_module = torch.jit.script(nn.CrossEntropyLoss(reduction="none", dim=dim))
             self.assertEqual(scripted_module(input, target), expected)
+
+    @unittest.skipUnless(TEST_NUMPY, "requires numpy")
+    def test_cross_entropy_loss_dim_integer_types(self):
+        # The integer types ATen takes for a dim.
+        input, target = torch.randn(2, 4, 5), torch.randint(5, (2, 4))
+        expected = F.cross_entropy(input, target, dim=-1)
+        for dim in (np.int64(-1), np.int32(2), torch.tensor(-1)):
+            self.assertEqual(F.cross_entropy(input, target, dim=dim), expected)
 
     def test_linear_cross_entropy_options_aspect_ratio_chunk_size(self):
         """Pin the aspect_ratio heuristic's chunk size for representative shapes.
@@ -12532,6 +12541,34 @@ class TestNNDeviceType(NNTestCase):
         for dim in (True, 1.0, 2.0):
             with self.assertRaisesRegex(TypeError, "dim must be an int or None"):
                 F.cross_entropy(input, target, dim=dim)
+            with self.assertRaisesRegex(TypeError, "dim must be an int or None"):
+                nn.CrossEntropyLoss(dim=dim)
+
+    def test_cross_entropy_loss_dim_log_softmax_input(self, device):
+        class LogSoftmaxInput(TorchDispatchMode):
+            def __init__(self):
+                super().__init__()
+                self.input = None
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func is torch.ops.aten._log_softmax.default:
+                    self.input = args[0]
+                return func(*args, **(kwargs or {}))
+
+        # Only the dims before the classes are folded into the batch dim, so log_softmax reads
+        # the input's own memory.
+        for shape, dim in (((2, 3, 5), -1), ((2, 3, 5, 4), 2)):
+            input = torch.randn(shape, device=device)
+            target = torch.randint(5, input.select(dim, 0).shape, device=device)
+            with LogSoftmaxInput() as mode:
+                F.cross_entropy(input, target, dim=dim)
+            self.assertEqual(mode.input.data_ptr(), input.data_ptr())
+            self.assertTrue(mode.input.is_contiguous())
+
+        # Except for dim=0, which moves the classes last.
+        with LogSoftmaxInput() as mode:
+            F.cross_entropy(torch.randn(5, 3, device=device), torch.randint(5, (3,), device=device), dim=0)
+        self.assertEqual(mode.input.shape, (3, 5))
 
     # Ref: https://github.com/pytorch/pytorch/issues/85005
     @onlyAccelerator
