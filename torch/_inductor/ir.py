@@ -4244,8 +4244,8 @@ class CatUnsqueezeView(GenericView):
     def try_create(cls, x: IRNode, dim: int) -> CatUnsqueezeView | None:
         """The view, or None if ``x`` is not a buffer the cat could place.
 
-        That covers an unrealized Pointwise, a ReinterpretView, a frozen layout,
-        and an empty buffer, for which the cat has no slot.
+        That covers an unrealized Pointwise, a ReinterpretView and a frozen
+        layout. Empty buffers are declined too: there is no copy to save.
         """
         if isinstance(x, TensorBox):
             return cls.try_create(x.data, dim)

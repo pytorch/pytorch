@@ -2831,7 +2831,7 @@ def unfold(x, dimension, size, step):
 @register_lowering(aten.unsqueeze, type_promotion_kind=None)
 def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)
-    if _cat_is_sole_consumer(V.graph.current_node):
+    if _unsqueeze_only_read_by_cat(V.graph.current_node):
         # Keep the view lazy so the cat can place the buffer instead of copying
         # it; nothing else sees the view, so freezing it would be premature.
         if (lazy := ir.CatUnsqueezeView.try_create(x, dim)) is not None:
@@ -2841,20 +2841,20 @@ def unsqueeze(x, dim):
     return view(x, new_shape)
 
 
-def _cat_is_sole_consumer(node) -> bool:
+def _unsqueeze_only_read_by_cat(node) -> bool:
     """Whether ``node`` is an unsqueeze a cat alone reads, of a value it alone reads.
 
-    An fx-level check: it bounds the views built over the buffer, not the buffer's
-    readers. A lowering that returns its input unchanged (expand to the same size)
-    leaves other readers, which is fine: they read the buffer where the cat places
-    it, as they would for a plain cat. The target check keeps this to the node being
-    lowered, since other lowerings also reach ``unsqueeze``.
+    The target check keeps this to the node being lowered, since other lowerings
+    also reach ``unsqueeze``. Requiring the source to have one user is a
+    profitability choice, not a correctness one: placing a buffer that others read
+    is just as correct, but it makes their reads strided, so we leave those on the
+    copy path (``test_stack_realized_input_twice``).
     """
-    if node is None or not node.args or len(node.users) != 1:
+    if node is None or node.target is not aten.unsqueeze.default or not node.args:
         return False
     source = node.args[0]
     return (
-        node.target is aten.unsqueeze.default
+        len(node.users) == 1
         and next(iter(node.users)).target is aten.cat.default
         and isinstance(source, torch.fx.Node)
         and len(source.users) == 1
