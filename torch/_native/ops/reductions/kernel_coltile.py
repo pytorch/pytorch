@@ -295,6 +295,8 @@ def select_col_config(
         and batches == 1
     ):
         narrow = dtype in (torch.float16, torch.bfloat16)
+        # The core overrides route only sum, mean, prod, amax and amin; index and Welford
+        # keys come from direct kernel calls, which today are tests.
         welford = welford_outs == nouts
         # Only argmax with int32 indices was measured.
         index = (trait_key, nfields, nouts) == ("argmaxi32", 2, 1)

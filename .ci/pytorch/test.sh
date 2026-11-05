@@ -493,6 +493,7 @@ PYTHON_NATIVE_CUTEDSL_SUITES=(
   python_native/test_traits
   python_native/test_instrumentation
   python_native/test_tile_datapath
+  python_native/test_reductions_cutedsl
 )
 
 test_python_smoke() {
@@ -616,6 +617,11 @@ test_python_smoke_b200() {
   # calibrated tolerances. It runs in every CUDA job, but only here is the DSL
   # installed, so only here does it measure the override rather than eager.
   time python test/run_test.py --include test_nn -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # The CuTeDSL sum, mean, amax, amin and prod overrides serve only where the runtime is
+  # installed, as it is here. Of these NumPy reference checks, test_ref_small_input,
+  # test_ref_duplicate_values and fp32 test_ref_extremal_values reach them; scalar
+  # inputs decline and fp64 inputs stay on ATen.
+  time python test/run_test.py --include test_reductions -k "test_ref_ and not large_input and (_sum_ or _mean_ or _amax_ or _amin_ or _prod_)" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 
   time python test/run_test.py --include test_linalg -k "mm or addmv" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # Dynamically discover the DSL override tests so new ones are picked up. This
