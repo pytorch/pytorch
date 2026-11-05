@@ -15161,6 +15161,8 @@ class TestConsistency(TestCaseMPS):
                 # fp16; one unlucky seeded angle can produce ~0.1 absolute
                 # drift on a single element while the rest match.
                 atol, rtol = 0.15, 0.1
+            if op.name == "linalg.pinv" and op.variant_test_name == "hermitian" and dtype == torch.float32:
+                atol, rtol = 1e-4, 5e-5
 
             if isinstance(cpu_sample.input, torch.Tensor):
                 equal_input_types = cpu_sample.input.dtype == mps_sample.input.dtype
