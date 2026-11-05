@@ -1735,8 +1735,9 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         opts = {"guard_filter_fn": torch.compiler.keep_tensor_guards_unsafe}
         compiled = torch.compile(fn, fullgraph=True, backend="eager", options=opts)
         compiled = compiled.aot_compile(((torch.randn(3),), {}))
-        # The TENSOR_MATCH guard on x is rebuilt with from_meta_and_device,
-        # which rejects a fake of the active mode
+        # The TENSOR_MATCH guard on x is rebuilt with from_meta_and_device, which
+        # rejects fakes; unpickling the meta template under the active mode
+        # would make one
         with FakeTensorMode() as mode:
             guards_state = load_guards_state(compiled._artifacts.guards_state)
             fake_key = torch._C._TorchDispatchModeKey.FAKE
