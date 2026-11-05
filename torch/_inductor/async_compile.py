@@ -716,6 +716,11 @@ class AsyncCompile:
 
         return SizeHintMultiKernelCall(*args, **kwargs)
 
+    def index_dtype_multi_kernel(self, *args, **kwargs) -> Any:
+        from torch._inductor.codegen.multi_kernel import IndexDtypeMultiKernelCall
+
+        return IndexDtypeMultiKernelCall(*args, **kwargs)
+
     def cpp(self, source_code: str):
         kernel_code_log.info("CPP Kernel:\n%s", source_code)
         if get_compile_threads() <= 1:

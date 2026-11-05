@@ -24,6 +24,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCPU,
     onlyOn,
 )
@@ -812,6 +813,86 @@ class TestInductorDynamic(DynamicShapesTestCase):
         guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
         self.assertEqual("<= 2147483647" in guards, not avoid_guards)
         self.assertEqual("'xnumel': 'i64'" in code, avoid_guards)
+
+    @onlyOn(GPU_TYPE)
+    @config.patch(dispatch_32bit_indexing_at_runtime=True)
+    @parametrize(
+        "op,cooperative",
+        [
+            ("add", False),
+            ("sum", False),
+            ("argmax", False),
+            ("sum", True),
+            ("argmax", True),
+        ],
+    )
+    def test_dispatch_32bit_indexing_at_runtime(self, device, op, cooperative):
+        def fn(x):
+            return getattr(torch, op)(x, -1)
+
+        x = torch.randn(8, 1152, device=device)
+        with config.patch({"triton.force_cooperative_reductions": cooperative}):
+            actual, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        self.assertEqual(actual, fn(x))
+        guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
+        self.assertNotIn("<= 2147483647", guards)
+        i32, i64 = "'xnumel': 'i32'", "'xnumel': 'i64'"
+        FileCheck().check(i32).check(i64).check("index_dtype_multi_kernel(").run(code)
+        self.assertEqual("RSPLIT" in code, cooperative)
+
+    @onlyOn(GPU_TYPE)
+    @config.patch(dispatch_32bit_indexing_at_runtime=True)
+    def test_dispatch_32bit_indexing_after_precomputed_size(self, device):
+        # Generating the int64 kernel registers a precomputed size that the int32 copy
+        # then substitutes, so the copies only share call args once the int64 one is redone.
+        w = torch.randn(64, 3, 11, 11, device=device)
+        b = torch.randn(64, device=device)
+
+        def fn(x):
+            return torch.max_pool2d(torch.relu(torch.conv2d(x, w, b, 4, 2)), 3, 2)
+
+        counters.clear()
+        x = torch.randn(2, 3, 64, 96, device=device)
+        actual, (code,) = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        self.assertEqual(actual, fn(x))
+        self.assertGreater(counters["inductor"]["index_dtype_copy_regenerated"], 0)
+        self.assertEqual(code.count("async_compile.index_dtype_multi_kernel("), 2)
+
+    @onlyOn(GPU_TYPE)
+    @config.patch(dispatch_32bit_indexing_at_runtime=True)
+    @parametrize("patch", ["cpp_wrapper", "triton.autotune_at_compile_time"])
+    def test_dispatch_32bit_indexing_at_runtime_fallback(self, device, patch):
+        # These cannot dispatch, so they fall back to int64 without a guard.
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(8, 1152, device=device)
+        with config.patch({patch: True}):
+            actual, codes = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        self.assertEqual(actual, fn(x))
+        guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
+        self.assertNotIn("<= 2147483647", guards)
+        code = "\n".join(codes)
+        self.assertIn("'xnumel': 'i64'", code)
+        self.assertNotIn("'xnumel': 'i32'", code)
+        self.assertNotIn("index_dtype_multi_kernel", code)
+
+    @onlyOn(GPU_TYPE)
+    @largeTensorTest("5GB")
+    @config.patch(dispatch_32bit_indexing_at_runtime=True)
+    def test_dispatch_32bit_indexing_at_runtime_large_input(self, device):
+        def fn(x):
+            return x + 1
+
+        cnt = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, dynamic=True, backend=cnt)
+        small = torch.zeros(8, 1152, dtype=torch.int8, device=device)
+        self.assertEqual(compiled(small), fn(small))
+        # Past INT32_MAX elements the same compile has to launch the int64 copy.
+        big = torch.zeros(2**31 // 1152 + 1, 1152, dtype=torch.int8, device=device)
+        out = compiled(big)
+        self.assertEqual((out.min().item(), out.max().item()), (1, 1))
+        self.assertEqual(cnt.frame_count, 1)
 
     @onlyOn(GPU_TYPE)
     @config.patch(avoid_32bit_indexing_guards=True)

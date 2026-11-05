@@ -209,8 +209,7 @@ class SIMDKernelFeatures:
                 mutations.update(buf.get_mutations())
         return mutations
 
-    @cache_on_self
-    def select_index_dtype(self) -> torch.dtype:
+    def _indexed_numel_and_buffers(self) -> tuple[sympy.Expr, list[Any]]:
         # Gather all used buffer names
         buffer_names: OrderedSet[str] = OrderedSet()
         for node in self.indexing_scheduler_nodes():
@@ -221,17 +220,47 @@ class SIMDKernelFeatures:
         # In theory we can separately check xnumel and rnumel are <= int_max
         # but some indexers do use the full linear index so we need to be
         # conservative here.
-        total_numel = self.numel * self.reduction_numel
+        return self.numel * self.reduction_numel, buffers
 
+    @cache_on_self
+    def select_index_dtype(self) -> torch.dtype:
         from .simd import SIMDScheduling
 
-        if SIMDScheduling.can_use_32bit_indexing(total_numel, buffers):
+        if SIMDScheduling.can_use_32bit_indexing(*self._indexed_numel_and_buffers()):
             # Fused address expressions can overflow int32 even when
             # numel/storage_size are within range, so check them directly.
             if self.any_index_expr_overflows_int32():
                 return torch.int64
             return torch.int32
         return torch.int64
+
+    @cache_on_self
+    def runtime_32bit_indexing_bounds(self) -> list[sympy.Expr] | None:
+        """Sizes that must all fit in int32 at run time for an int32 copy of this kernel.
+
+        None unless config.dispatch_32bit_indexing_at_runtime made select_index_dtype pick
+        int64 only because some size could not be proven to fit. A size hint past INT32_MAX
+        still gets the int32 copy, for later inputs that fit.
+        """
+        from .. import config
+        from .simd import SIMDScheduling
+
+        if (
+            not config.dispatch_32bit_indexing_at_runtime
+            or self.select_index_dtype() == torch.int32
+            or self.any_index_expr_overflows_int32()
+        ):
+            return None
+        int_max = torch.iinfo(torch.int32).max
+        sizevars = V.graph.sizevars
+        bounds = OrderedSet(
+            size
+            for size in SIMDScheduling.index_bounds(*self._indexed_numel_and_buffers())
+            if not sizevars.statically_known_leq(size, int_max)
+        )
+        if not bounds or any(sizevars.statically_known_gt(b, int_max) for b in bounds):
+            return None
+        return list(bounds)
 
     @cache_on_self
     def any_index_expr_overflows_int32(self) -> bool:
