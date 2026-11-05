@@ -232,9 +232,9 @@ def query_model(
         for d, dirs, files in os.walk(root):
             links = [p for n in dirs + files if os.path.islink(p := os.path.join(d, n))]
             for path in links:
-                top = os.path.relpath(os.path.realpath(path), root).split(os.sep)[0]
-                if top in ("..", ".git"):
-                    why = f"{path} links outside the checkout or into its .git"
+                rel = os.path.relpath(os.path.realpath(path), root)
+                if rel == "." or rel.split(os.sep)[0] in ("..", ".git"):
+                    why = f"{path} links outside the checkout, to its root or into .git"
                     return {"is_error": True, "result": why}
             dirs[:] = [n for n in dirs if n != ".git"]
         allowed, denied = f"Read(/{checkout}/**)", f"Read(/{checkout}/.git/**)"
@@ -283,7 +283,10 @@ def git_paths(command: str, *args: str) -> list[str]:
 
 def git_grep(pattern: str, rev: str, *, timeout: float | None = None) -> list[str]:
     """The paths under test/ at the commit `rev` with a line matching the extended regex `pattern`.
-    RuntimeError if git grep fails, TimeoutExpired if it outlives `timeout`."""
+    RuntimeError if git grep fails or reports an error, TimeoutExpired if it outlives `timeout`,
+    ValueError if git would read `rev` as an option."""
+    if rev.startswith("-"):
+        raise ValueError(f"not a revision: {rev}")
     p = subprocess.run(
         ["git", "grep", "--no-color", "-lzE", "-e", pattern, rev, "--", "test/"],
         cwd=REPO_ROOT,
@@ -291,14 +294,19 @@ def git_grep(pattern: str, rev: str, *, timeout: float | None = None) -> list[st
         timeout=timeout,
     )
     out, err = os.fsdecode(p.stdout), os.fsdecode(p.stderr)
-    # 1 is no match; a signal kill is negative.
-    if p.returncode not in (0, 1):
+    # 1 is no match; a signal kill is negative. An unreadable blob is only an
+    # error on stderr, and its file a non-match.
+    if p.returncode not in (0, 1) or err.strip():
         raise RuntimeError(f"git grep failed ({p.returncode}): {err.strip()[-500:]}")
     # Each line is `<rev>:<path>`, and `rev` may hold a colon.
     return [line[len(rev) + 1 :] for line in out.split("\0")[:-1]]
 
 
 def changed_files(merge_base: str, head: str) -> list[str]:
+    """The paths changed between the commits `merge_base` and `head`.
+    CalledProcessError if git fails, ValueError if it would read a rev as an option."""
+    if merge_base.startswith("-") or head.startswith("-"):
+        raise ValueError(f"not a revision pair: {merge_base} {head}")
     # Without renames a moved file is listed at both paths, and its new path is
     # an added file.
     return git_paths("diff", "--name-only", "--no-renames", merge_base, head)
