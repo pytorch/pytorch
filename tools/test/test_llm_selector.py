@@ -409,6 +409,10 @@ g () {
             ".github/actions/download-build-artifacts/action.yml",
             ".github/scripts/filter_test_configs.py",
             ".github/scripts/parse_ref.py",
+            ".github/scripts/pytest_cache.py",
+            ".github/scripts/pytest_caching_utils.py",
+            ".github/actions/pytest-cache-download/action.yml",
+            ".github/actions/pytest-cache-upload/action.yml",
             ".github/workflows/pull.yml",
             ".github/workflows/trunk.yml",
             ".github/workflows/periodic.yml",
@@ -436,6 +440,9 @@ g () {
             "torch/testing/_internal/common_dtype.py",
             "torch/testing/_internal/common_cuda.py",
             "torch/testing/_comparison.py",
+            "torch/testing/__init__.py",
+            "torch/testing/_creation.py",
+            "torch/testing/_utils.py",
             "scripts/onnx/test.sh",
             ".ci/docker/triton_version.txt",
             ".ci/docker/triton_xpu_version.txt",
@@ -706,6 +713,8 @@ class TestPrompt(unittest.TestCase):
             self.assertNotIn(flag, cmd)
         self.assertEqual(run.call_args.kwargs["input"], "p")
         self.assertEqual(run.call_args.kwargs["timeout"], 600)
+        self.assertIs(run.call_args.kwargs["capture_output"], True)
+        self.assertIs(run.call_args.kwargs["text"], True)
 
     def test_query_model_failures_are_error_envelopes(self) -> None:
         def completed(stdout: str, code: int = 0) -> mock.Mock:
