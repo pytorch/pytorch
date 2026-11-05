@@ -885,11 +885,9 @@ def optim_inputs_func_lbfgs(device, dtype=None):
             kwargs={"maximize": True},
             desc="maximize",
         ),
-        OptimizerInput(
-            params=None,
-            kwargs={"maximize": True, "line_search_fn": "strong_wolfe"},
-            desc="maximize_strong_wolfe",
-        ),
+        # There is no maximize + strong_wolfe input: the shared tests maximize an
+        # unbounded convex loss, which it diverges on to inf or nan depending on
+        # rounding. See test_lbfgs_maximize_strong_wolfe.
     ]
 
 
