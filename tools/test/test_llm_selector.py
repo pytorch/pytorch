@@ -413,6 +413,7 @@ g () {
             ".github/scripts/parse_ref.py",
             ".github/scripts/pytest_cache.py",
             ".github/scripts/pytest_caching_utils.py",
+            ".github/scripts/file_io_utils.py",
             ".github/actions/pytest-cache-download/action.yml",
             ".github/actions/pytest-cache-upload/action.yml",
             ".github/workflows/pull.yml",
@@ -957,6 +958,9 @@ class TestMain(unittest.TestCase):
                 select_tests.git_grep("x", "no-such-rev")
             with self.assertRaises(subprocess.CalledProcessError):
                 select_tests.changed_files("HEAD", "no-such-rev")
+            # Without the "--", git reads the path "test" as a pathspec.
+            with self.assertRaises(subprocess.CalledProcessError):
+                select_tests.changed_files("HEAD~1", "test")
 
     def test_non_ascii_paths_are_unquoted(self) -> None:
         name = "test/test_caf\u00e9.py"
