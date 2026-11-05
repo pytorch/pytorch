@@ -133,6 +133,8 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // already complete. Backends should complete it with no locks held, so a
   // callback may call back into the Work or issue another op; not all do
   // (legacy NCCL, nccl2 reconfigure), and such a callback can deadlock there.
+  // Gloo p2p works complete it only in wait(), so it stays pending until the
+  // work is waited on.
   // Throws c10::NotImplementedError if unsupported.
   virtual c10::intrusive_ptr<c10::ivalue::Future> getFutureResult();
 
