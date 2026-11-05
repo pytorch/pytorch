@@ -7,6 +7,7 @@
 #include <optional>
 
 #include <array>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <string_view>
@@ -545,8 +546,28 @@ struct TORCH_API RecordFunction {
 
 TORCH_API StepCallbacks getStepCallbacks(RecordScope scope);
 
-TORCH_API std::optional<StepCallbacks> getStepCallbacksUnlessEmpty(
+namespace detail {
+// Global callbacks plus one per thread that has thread-local callbacks. Zero
+// means no thread can have active callbacks. May overcount (e.g. disabled
+// callbacks), never undercounts.
+extern TORCH_API std::atomic<int64_t> num_callback_sources;
+
+TORCH_API std::optional<StepCallbacks> getStepCallbacksUnlessEmptySlow(
     RecordScope scope);
+} // namespace detail
+
+// Called for every operator call, so check for the common case of no
+// callbacks at all inline, without a call or thread-local lookup.
+inline std::optional<StepCallbacks> getStepCallbacksUnlessEmpty(
+    RecordScope scope) {
+  // Relaxed: a callback registered on another thread is picked up on a later
+  // call, as with the version check behind the slow path.
+  if (C10_LIKELY(
+          detail::num_callback_sources.load(std::memory_order_relaxed) == 0)) {
+    return std::nullopt;
+  }
+  return detail::getStepCallbacksUnlessEmptySlow(scope);
+}
 
 namespace detail {
 template <typename Inputs, typename... Args>
