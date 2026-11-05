@@ -119,7 +119,7 @@ at::Tensor gds_io_async(
 }
 } // namespace
 
-void gds_load_storage(
+ssize_t gds_load_storage(
     int64_t handle,
     const at::Storage& storage,
     off_t offset) {
@@ -134,9 +134,10 @@ void gds_load_storage(
   // Read the binary file
   ssize_t ret = cuFileRead(cf_handle, dataPtr, nbytes, offset, 0);
   TORCH_CHECK(ret >= 0, "cuFileRead failed: ", cuGDSFileGetErrorString(ret));
+  return ret;
 }
 
-void gds_save_storage(
+ssize_t gds_save_storage(
     int64_t handle,
     const at::Storage& storage,
     off_t offset) {
@@ -151,6 +152,7 @@ void gds_save_storage(
   // Write device memory contents to the file
   ssize_t ret = cuFileWrite(cf_handle, dataPtr, nbytes, offset, 0);
   TORCH_CHECK(ret >= 0, "cuFileWrite failed: ", cuGDSFileGetErrorString(ret));
+  return ret;
 }
 
 at::Tensor gds_load_storage_async(

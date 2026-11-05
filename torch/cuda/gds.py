@@ -135,11 +135,15 @@ class GdsFile:
         >>> src2 = torch.randn(2, 1024, device="cuda")
         >>> file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
         >>> file.save_storage(src1.untyped_storage(), offset=0)
+        4096
         >>> file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
+        8192
         >>> dest1 = torch.empty(1024, device="cuda")
         >>> dest2 = torch.empty(2, 1024, device="cuda")
         >>> file.load_storage(dest1.untyped_storage(), offset=0)
+        4096
         >>> file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
+        8192
         >>> torch.equal(src1, dest1)
         True
         >>> torch.equal(src2, dest2)
@@ -210,7 +214,7 @@ class GdsFile:
         self._check_not_capturing(storage, fn_name)
         torch.cuda.current_stream(storage.device).synchronize()
 
-    def load_storage(self, storage: Storage, offset: int = 0) -> None:
+    def load_storage(self, storage: Storage, offset: int = 0) -> int:
         """Loads data from the file into the storage.
 
         This is a wrapper around ``cuFileRead`` (CUDA) / ``hipFileRead`` (ROCm).
@@ -233,11 +237,16 @@ class GdsFile:
         Args:
             storage (Storage): Storage to load data into.
             offset (int, optional): Offset into the file to start loading from. (Default: 0)
+
+        Returns:
+            int: The number of bytes read. A value less than ``storage.nbytes()``
+            means the end of the file was reached, and the bytes of the storage
+            past that count were not written. A short read does not raise.
         """
         self._wait_for_current_stream(storage, "load_storage")
         if self.handle is None:
             raise AssertionError("Cannot load data from a file that is not registered.")
-        torch._C._gds_load_storage(self.handle, storage, offset)
+        return torch._C._gds_load_storage(self.handle, storage, offset)
 
     def load_storage_async(self, storage: Storage, offset: int = 0) -> torch.Tensor:
         """Loads data from the file into the storage, ordered on the current stream.
@@ -296,13 +305,14 @@ class GdsFile:
         finally:
             self._record_async_io(storage)
 
-    def save_storage(self, storage: Storage, offset: int = 0) -> None:
+    def save_storage(self, storage: Storage, offset: int = 0) -> int:
         """Saves data from the storage into the file.
 
         This is a wrapper around ``cuFileWrite`` (CUDA) / ``hipFileWrite`` (ROCm).
-        All bytes of the storage will be written to the file at ``offset``.
-        On ROCm, a storage larger than ``2**31`` bytes minus the page size
-        raises a ``RuntimeError`` (see :ref:`rocm-gds`).
+        The bytes of the storage are written to the file at ``offset``; check
+        the returned count to confirm all of them were. On ROCm, a storage
+        larger than ``2**31`` bytes minus the page size raises a
+        ``RuntimeError`` (see :ref:`rocm-gds`).
 
         ``cuFileWrite`` is not ordered with respect to any stream, so this first
         waits for the work already enqueued on the current stream of
@@ -319,11 +329,16 @@ class GdsFile:
         Args:
             storage (Storage): Storage to save data from.
             offset (int, optional): Offset into the file to start saving to. (Default: 0)
+
+        Returns:
+            int: The number of bytes written. A value less than
+            ``storage.nbytes()`` means the bytes of the storage past that count
+            were not written. A short write does not raise.
         """
         self._wait_for_current_stream(storage, "save_storage")
         if self.handle is None:
             raise AssertionError("Cannot save data to a file that is not registered.")
-        torch._C._gds_save_storage(self.handle, storage, offset)
+        return torch._C._gds_save_storage(self.handle, storage, offset)
 
     def save_storage_async(self, storage: Storage, offset: int = 0) -> torch.Tensor:
         """Saves data from the storage into the file, ordered on the current stream.

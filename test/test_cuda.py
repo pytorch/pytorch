@@ -12894,7 +12894,8 @@ class TestGDS(TestCase):
                 if "HandleRegister failed" not in str(e):
                     raise
                 self.skipTest(f"cuFile requires compat mode on this filesystem: {e}")
-            file.save_storage(torch.empty(1, device="cuda").untyped_storage())
+            src = torch.empty(1, device="cuda")
+            self.assertEqual(file.save_storage(src.untyped_storage()), src.nbytes)
 
     def test_gds_is_available(self):
         # is_available() must be callable and return a bool even when GDS is off.
@@ -12905,22 +12906,24 @@ class TestGDS(TestCase):
         self._require_gds()
         src1 = torch.randn(1024, device="cuda")
         src2 = torch.randn(2, 1024, device="cuda")
-        torch.cuda.gds.gds_register_buffer(src1.untyped_storage())
-        torch.cuda.gds.gds_register_buffer(src2.untyped_storage())
+        s1, s2 = src1.untyped_storage(), src2.untyped_storage()
+        torch.cuda.gds.gds_register_buffer(s1)
+        torch.cuda.gds.gds_register_buffer(s2)
         dest1 = torch.empty(1024, device="cuda")
         dest2 = torch.empty(2, 1024, device="cuda")
+        d1, d2 = dest1.untyped_storage(), dest2.untyped_storage()
         try:
             with TemporaryFileName() as f:
                 file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
-                file.save_storage(src1.untyped_storage(), offset=0)
-                file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
-                file.load_storage(dest1.untyped_storage(), offset=0)
-                file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
+                self.assertEqual(file.save_storage(s1, offset=0), s1.nbytes())
+                self.assertEqual(file.save_storage(s2, offset=s1.nbytes()), s2.nbytes())
+                self.assertEqual(file.load_storage(d1, offset=0), d1.nbytes())
+                self.assertEqual(file.load_storage(d2, offset=s1.nbytes()), d2.nbytes())
             self.assertEqual(src1, dest1)
             self.assertEqual(src2, dest2)
         finally:
-            torch.cuda.gds.gds_deregister_buffer(src1.untyped_storage())
-            torch.cuda.gds.gds_deregister_buffer(src2.untyped_storage())
+            torch.cuda.gds.gds_deregister_buffer(s1)
+            torch.cuda.gds.gds_deregister_buffer(s2)
 
     def test_gds_read_write_without_register_buffer(self):
         # gds_register_buffer is a performance optimization, not required for I/O.
@@ -12929,8 +12932,8 @@ class TestGDS(TestCase):
         dest = torch.empty_like(src)
         with TemporaryFileName() as f:
             file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
-            file.save_storage(src.untyped_storage())
-            file.load_storage(dest.untyped_storage())
+            self.assertEqual(file.save_storage(src.untyped_storage()), src.nbytes)
+            self.assertEqual(file.load_storage(dest.untyped_storage()), dest.nbytes)
         self.assertEqual(src, dest)
 
     def test_gds_stream_ordered(self):
@@ -12947,10 +12950,10 @@ class TestGDS(TestCase):
             # its loaded data overwritten by dest.zero_().
             torch.cuda._sleep(int(100 * get_cycles_per_ms()))
             src.normal_()
-            file.save_storage(src.untyped_storage())
+            self.assertEqual(file.save_storage(src.untyped_storage()), src.nbytes)
             torch.cuda._sleep(int(100 * get_cycles_per_ms()))
             dest.zero_()
-            file.load_storage(dest.untyped_storage())
+            self.assertEqual(file.load_storage(dest.untyped_storage()), dest.nbytes)
             self.assertEqual(src, dest)
 
     def test_gds_graph_capture_unsupported(self):
@@ -12993,8 +12996,8 @@ class TestGDS(TestCase):
         try:
             with TemporaryFileName() as f:
                 file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
-                file.save_storage(src.untyped_storage())
-                file.load_storage(dest.untyped_storage())
+                self.assertEqual(file.save_storage(src.untyped_storage()), src.nbytes)
+                self.assertEqual(file.load_storage(dest.untyped_storage()), dest.nbytes)
             self.assertEqual(src, dest)
         finally:
             torch.cuda.gds.gds_deregister_buffer(src.untyped_storage())
@@ -13037,7 +13040,7 @@ class TestGDS(TestCase):
             # Re-registering restores usability.
             file.register_handle()
             self.assertIsNotNone(file.handle)
-            file.save_storage(storage)
+            self.assertEqual(file.save_storage(storage), storage.nbytes())
 
     @unittest.skipIf(not TEST_WITH_ROCM, "hipFile transfer size limit")
     @largeTensorTest("3GB", "cuda")
@@ -13095,7 +13098,7 @@ class TestGDS(TestCase):
             # Deregistering the handle should wait for pending async I/O.
             self.assertTrue(torch.cuda.current_stream().query())
             file.register_handle()
-            file.load_storage(dest.untyped_storage())
+            self.assertEqual(file.load_storage(dest.untyped_storage()), dest.nbytes)
             self.assertEqual(src, dest)
             # Deleting the file deregisters the handle, so it waits too.
             torch.cuda._sleep(int(100 * get_cycles_per_ms()))
