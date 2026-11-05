@@ -366,6 +366,13 @@ class ROCmGemmConfig(GemmConfig):
 
 
 @dataclasses.dataclass
+class ROCmPinnedStagesGemmConfig(ROCmGemmConfig):
+    """
+    ROCm GEMM config whose num_stages is kept rather than reset to the backend default
+    """
+
+
+@dataclasses.dataclass
 class ROCmConvConfig(ConvConfig):
     """
     ROCm subclass for Conv, with AMD backend specific tuneable kernargs
@@ -1727,7 +1734,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 # ROCm archs keep the original behavior (one workgroup per CU, shared pool).
 _ROCM_PERSISTENT_MM_NUM_XCDS = {"gfx950": 8}
 
-# Archs that also get 32x32-MFMA mm configs.
+# Archs that also get 32x32-MFMA mm configs and configs with other num_stages.
 _ROCM_WIDE_MFMA_MM_ARCHS = OrderedSet(["gfx950"])
 
 
@@ -1865,6 +1872,34 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 (128, 256, 32, 4, 16),
                 (256, 128, 32, 4, 4),
                 (256, 256, 32, 4, 4),
+            ]
+        ]
+        # Configs for _ROCM_WIDE_MFMA_MM_ARCHS that keep a non-default pipeline
+        # depth: 3 stages on large tiles for long K loops and on small tiles for
+        # tiny GEMMs, and 1 stage on two small tiles for tiny GEMMs. They go into
+        # the mm/addmm/bmm pool, not the persistent one.
+        self.pipelined_mm_configs: list[BaseConfig] = [
+            ROCmPinnedStagesGemmConfig(
+                block_m,
+                block_n,
+                block_k,
+                num_stages,
+                num_warps,
+                group_m=group_m,
+                matrix_instr_nonkdim=nonkdim,
+                waves_per_eu=waves_per_eu,
+            )
+            for block_m, block_n, block_k, num_stages, num_warps, group_m, nonkdim, waves_per_eu in [
+                (256, 128, 64, 3, 8, 4, 16, 0),
+                (128, 256, 64, 3, 8, 4, 16, 0),
+                (128, 256, 32, 3, 4, 16, 32, 0),
+                (256, 128, 32, 3, 4, 4, 32, 0),
+                (128, 128, 64, 3, 8, 8, 32, 0),
+                (256, 64, 64, 3, 8, 4, 16, 0),
+                (64, 32, 64, 3, 8, 8, 16, 0),
+                (32, 32, 128, 3, 4, 8, 16, 0),
+                (64, 16, 128, 1, 4, 8, 16, 2),
+                (32, 64, 64, 1, 4, 8, 16, 0),
             ]
         ]
 
@@ -2156,7 +2191,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         ROCm specific filtering
         """
         for c in configs:
-            c.num_stages = self.default_num_stages
+            if not isinstance(c, ROCmPinnedStagesGemmConfig):
+                c.num_stages = self.default_num_stages
         return super()._filter_configs(configs)
 
     def get_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
@@ -2165,7 +2201,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         if self.mm_configs is self._rocm_mm_configs:
             return partial(
                 self.preprocess_mm_configs,
-                configs=self.mm_configs + self.wide_mfma_mm_configs,
+                configs=self.mm_configs
+                + self.wide_mfma_mm_configs
+                + self.pipelined_mm_configs,
             )
         return super().get_mm_configs()
 
