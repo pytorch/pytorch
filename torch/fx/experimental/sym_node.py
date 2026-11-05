@@ -99,6 +99,10 @@ class SymNode:
     # The flag describes the unresolved _expr. A replacement can turn expr into something
     # that is no longer such a sum (s0 + s1 becomes 2*s1 after s0 -> s1), so only trust the
     # flag together with expr when expr is _expr.
+    #
+    # The symbolic op memo replays a result's flag to every node whose operands resolve to
+    # the same expressions. That is sound only because _optimized_add is the sole place that
+    # sets the flag to True, and only for a result that is such a sum; keep it that way.
 
     # The unfortunate reason we have this here is because sympy sets  __slots__ = () for add expression,
     # so we cannot add the attribute directly to the sympy expression. Furthermore, we cannot use it as
