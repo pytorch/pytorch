@@ -23074,13 +23074,7 @@ if "cutedsl" in dsl_ops_by_dsl:
             "nn.functional.linear_cross_entropy",
             variant_test_name="cutedsl",
             sample_inputs_func=sample_inputs_cutedsl_linear_cross_entropy,
-            skips=_cutedsl_lce_skips + (
-                # nll_loss2d decomposition mismatch on total_weight, as on the
-                # "chunked" variant.
-                DecorateInfo(
-                    unittest.skip("nll_loss2d_forward decomposition mismatch on total_weight"),
-                    "TestDecomp", "test_comprehensive", device_type="cuda"),
-            ),
+            skips=_cutedsl_lce_skips,
             **_cutedsl_lce_kwargs,
         ),
         OpInfo(
@@ -23093,9 +23087,9 @@ if "cutedsl" in dsl_ops_by_dsl:
             check_batched_grad=False,
             check_batched_gradgrad=False,
             skips=_cutedsl_lce_skips + (
-                DecorateInfo(
-                    unittest.skip("nll_loss2d_forward decomposition mismatch on total_weight"),
-                    "TestDecomp", "test_comprehensive"),
+                # As on the "chunked_none" variant.
+                DecorateInfo(unittest.skip("dot.default decomposition precision mismatch"),
+                             "TestDecomp", "test_comprehensive", dtypes=(torch.bfloat16,)),
                 # Recompute-in-backward is not vmap-over-grad compatible, as on
                 # the "chunked_none" variant.
                 DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice",
