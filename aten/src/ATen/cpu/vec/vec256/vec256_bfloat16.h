@@ -225,6 +225,29 @@ inline void convert(const float* src, BFloat16* dst, int64_t n) {
 }
 
 template <>
+inline void convert(const double* src, BFloat16* dst, int64_t n) {
+  auto load_float = [](const double* src) -> __m256 {
+    // Load one float vector from an array of doubles, rounding to odd
+    __m128 a = cvtpd_ps_round_to_odd(_mm256_loadu_pd(src));
+    __m128 b = cvtpd_ps_round_to_odd(_mm256_loadu_pd(src + 4));
+    return _mm256_insertf128_ps(_mm256_castps128_ps256(a), b, 1);
+  };
+
+  int64_t i;
+  for (i = 0; i + Vectorized<BFloat16>::size() <= n;
+       i += Vectorized<BFloat16>::size()) {
+    __m256 a = load_float(&src[i]);
+    __m256 b = load_float(&src[i + 8]);
+
+    __m256i bf = cvtfp32_bf16(a, b);
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>(&dst[i]), bf);
+  }
+  for (; i < n; i++) {
+    dst[i] = c10::convert<BFloat16>(src[i]);
+  }
+}
+
+template <>
 Vectorized<BFloat16> inline fmadd(
     const Vectorized<BFloat16>& a,
     const Vectorized<BFloat16>& b,
