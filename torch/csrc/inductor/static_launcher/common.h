@@ -8,6 +8,7 @@
 
 namespace torch::inductor::static_launcher {
 
+// Parsed by _log_autotune_exceptions in select_algorithm.py; keep this format.
 [[noreturn]] inline void throwOutOfResourceError(
     const char* funcName,
     uint64_t required,

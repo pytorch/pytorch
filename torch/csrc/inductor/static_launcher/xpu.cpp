@@ -338,6 +338,7 @@ std::unique_ptr<sycl::kernel> loadKernel(
     uint32_t* nSpillsPtr,
     int device_idx) {
   const auto deviceCount = static_cast<int>(c10::xpu::device_count());
+  // Check the full int; narrowing DeviceIndex (int8_t) would wrap 256 to 0.
   TORCH_CHECK(
       device_idx >= 0 && device_idx < deviceCount,
       "The device index is out of range. It must be in [0, ",
@@ -347,10 +348,9 @@ std::unique_ptr<sycl::kernel> loadKernel(
       ".");
   const auto slmLimit =
       at::xpu::getDeviceLocalMemSize(static_cast<c10::DeviceIndex>(device_idx));
-  // Launching with more SLM than the device has hangs the GPU; fail the way
-  // cuda.cpp does so autotune drops the config.
-  // Reject SLM overuse before module creation so autotune can drop the config;
-  // local_mem_size is inclusive, so allow sharedMemBytes == slmLimit.
+  // Launching with more SLM than the device has hangs the GPU. Raise OOM so
+  // autotune drops the config. Follow ROCm's inclusive bound, since
+  // local_mem_size is the inclusive maximum.
   if (sharedMemBytes > slmLimit) {
     torch::inductor::static_launcher::throwOutOfResourceError(
         funcName, sharedMemBytes, slmLimit);

@@ -209,9 +209,10 @@ std::pair<CUmodule, CUfunction> loadKernel(
   // the static shared memory and total max shared memory allowed on the device.
   // This prevents us from setting shared memory above the maximum
 
-  // TODO: Unify the CUDA and ROCm shared memory checks. Currently using <= for
-  // ROCm and < for CUDA because ROCm hits the boundary case more often.
   const auto sharedOptinLimit = static_cast<uint32_t>(shared_optin);
+  // TODO: Unify the shared memory checks across CUDA, ROCm, and XPU. CUDA
+  // rejects sharedMemBytes >= limit; ROCm and XPU reject only > limit, since
+  // ROCm hits the boundary case more often.
 #if defined(USE_ROCM)
   if (sharedMemBytes > sharedOptinLimit) {
     torch::inductor::static_launcher::throwOutOfResourceError(

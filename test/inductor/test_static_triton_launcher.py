@@ -948,6 +948,27 @@ class TestStaticTritonLauncher(TestCase):
             )
 
     @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_load_kernel_invalid_device_raises(self):
+        @triton.jit
+        def simple_kernel(arg0):
+            tl.store(arg0, 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        cubin_file = self.write_cubin_to_tmp(compiled_kernel)
+        from torch._C import _StaticXpuLauncher
+
+        # 256 wraps to device 0 if narrowed before the range check.
+        for invalid_device in (-1, 256):
+            with self.subTest(device=invalid_device):
+                with self.assertRaisesRegex(
+                    RuntimeError, "device index is out of range"
+                ):
+                    _StaticXpuLauncher._load_kernel(
+                        cubin_file, "simple_kernel", 99999999, invalid_device
+                    )
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
     def test_xpu_shared_mem_limit(self):
         @triton.jit
         def simple_kernel(arg0):
@@ -968,12 +989,6 @@ class TestStaticTritonLauncher(TestCase):
             _StaticXpuLauncher._load_kernel(
                 cubin_file, "simple_kernel", limit + 1, device
             )
-
-        for invalid_device in (-1, 255):
-            with self.assertRaisesRegex(RuntimeError, "device index is out of range"):
-                _StaticXpuLauncher._load_kernel(
-                    cubin_file, "simple_kernel", 99999999, invalid_device
-                )
 
     def test_too_high_shared_mem(self):
         @triton.jit
