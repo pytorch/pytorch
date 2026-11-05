@@ -60,8 +60,9 @@ def all_gather_output_fn_with_native_copy(
     copy_outputs = outputs
     if all_gather_output.dtype == torch.uint8:
         copy_outputs = [output.view(torch.uint8) for output in outputs]
-    numels = [split_size * world_size for split_size in split_sizes]
-    if any(output.numel() > numel for output, numel in zip(copy_outputs, numels)):
+    numels = [output.numel() for output in copy_outputs]
+    gathered = [split_size * world_size for split_size in split_sizes]
+    if any(numel > n for numel, n in zip(numels, gathered)):
         _default_all_gather_output_fn(
             all_gather_output,
             outputs,
@@ -71,12 +72,11 @@ def all_gather_output_fn_with_native_copy(
         )
         return
     output_inner_sizes = None
-    if any(output.numel() < numel for output, numel in zip(copy_outputs, numels)):
+    if numels != gathered:
         # Outputs of unevenly sharded Shard(i), i > 0, parameters drop the
         # padding in each of their rows
         output_inner_sizes = [
-            output.numel() // outer_size
-            for output, outer_size in zip(copy_outputs, outer_sizes)
+            numel // outer_size for numel, outer_size in zip(numels, outer_sizes)
         ]
     torch.ops.fsdp._all_gather_copy_out_(
         copy_outputs,

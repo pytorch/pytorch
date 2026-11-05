@@ -203,6 +203,8 @@ class FSDPParam:
     padded_sharded_param_size: torch.Size  # ND
     # Shard(i), i > 0, whose dim size the shard world size does not divide
     _uneven_nonzero_dim: bool
+    # Whether this rank's shard is shorter than the padded shard on a nonzero dim
+    pads_all_gather_input: bool
     sharded_post_forward_size: torch.Size  # ND
     contiguous_sharded_post_forward_stride: tuple[int, ...]
     _sharded_param_data: torch.Tensor  # 1D
@@ -363,6 +365,9 @@ class FSDPParam:
         self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
         padded_sharded_size = chunks[0].size()  # 0th always padded
         self.padded_sharded_param_size = padded_sharded_size
+        self.pads_all_gather_input = (
+            self._uneven_nonzero_dim and self.sharded_size != padded_sharded_size
+        )
         self._default_all_gather_output_layouts = (
             _get_all_gather_output_layout(
                 padded_sharded_size, shard_dim, shard_world_size
@@ -921,14 +926,6 @@ class FSDPParam:
             torch.empty(torch.Size([numel]), dtype=dtype, device=device)
             for numel, dtype in zip(output_numels, all_gather_input_dtypes)
         ]
-
-    @property
-    def pads_all_gather_input(self) -> bool:
-        """Whether this rank's shard is shorter than the padded shard on a nonzero dim."""
-        return (
-            self._uneven_nonzero_dim
-            and self.sharded_size != self.padded_sharded_param_size
-        )
 
     def init_unsharded_param(self):
         if hasattr(self, "_unsharded_param"):  # after the 1st all-gather
