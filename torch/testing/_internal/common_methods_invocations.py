@@ -3847,8 +3847,8 @@ class _TestParamsMaxPool3d(_TestParamsMaxPoolBase):
     def __init__(self) -> None:
         super().__init__()
         self.kwargs['kernel_size'] = [(3, 2, 3)]
-        # Per-dim stride values differ: H tiles and D, W overlap (all overlap with dilation)
-        self.kwargs['stride'] = [(2, 2, 1), None]
+        # Per-dim stride values all differ: D overlaps and H, W tile (H overlaps too with dilation)
+        self.kwargs['stride'] = [(1, 2, 3), None]
         self.kwargs['dilation'] = [1, (1, 2, 1)]
 
         self.shapes.append([6])

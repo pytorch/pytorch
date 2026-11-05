@@ -7459,6 +7459,13 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([2, 2, 3, 6]),),
         )
 
+    def test_max_pool3d_large_kernel(self):
+        # Window > 25 skips the low-memory decomposition for the looped-reduction lowering
+        def fn(x):
+            return aten.max_pool3d_with_indices(x, [3, 3, 3], [1, 2, 3])
+
+        self.common(fn, (torch.randn([2, 4, 6, 7, 8]),))
+
     # same as test_adaptive_max_pool2d_transposed_indices: halide/mps take the
     # non-logical-index path in _pool_argmax_inner_fn and still return physical
     # window offsets.
