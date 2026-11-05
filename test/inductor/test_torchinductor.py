@@ -7459,7 +7459,7 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([2, 2, 3, 6]),),
         )
 
-    # padding [1, 1, 0] keeps ceil_mode from being a no-op: it adds a partial window in W
+    # D/H padding exercises the masked load; W stays unpadded so ceil_mode adds a partial window there
     @parametrize(
         "padding, ceil_mode",
         [
