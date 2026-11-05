@@ -3621,7 +3621,42 @@ def constrain_to_fake_tensor(arg, fake_arg):
     return arg
 
 
+# Note [Constrain storage inputs before views]
+# A stride requirement on an unrealized StorageBox goes through copy_input, so an
+# op that takes one pointwise result as two arguments gets one copy per argument.
+# A view constrained first also realizes its base with a default layout, which can
+# force a conversion even where the base and the view could share storage. So the
+# constraint helpers first realize and constrain the arguments that are storage
+# TensorBoxes themselves, then constrain every argument; views then see their
+# base's final layout. A base reached only through a view is not realized early.
+def _constrain_storage_inputs_first(arg, fake_arg, constrain):
+    if isinstance(fake_arg, torch.fx.Node):
+        fake_arg = fake_arg.meta.get("val")
+    if (
+        isinstance(arg, TensorBox)
+        and isinstance(arg.data, ir.StorageBox)
+        and isinstance(fake_arg, torch.Tensor)
+    ):
+        arg.realize()
+        return constrain(arg, fake_arg)
+    if isinstance(arg, dict) and isinstance(fake_arg, dict):
+        return {
+            k: _constrain_storage_inputs_first(v, fake_arg[k], constrain)
+            for k, v in arg.items()
+        }
+    if isinstance(arg, (tuple, list)) and isinstance(fake_arg, (tuple, list)):
+        return type(arg)(
+            _constrain_storage_inputs_first(a, f_a, constrain)
+            for a, f_a in zip(arg, fake_arg)
+        )
+    return arg
+
+
 def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
+    # See Note [Constrain storage inputs before views]
+    args, kwargs = _constrain_storage_inputs_first(
+        (args, kwargs), (fake_args, fake_kwargs), constrain_to_fake_tensor
+    )
     args = tuple(
         constrain_to_fake_tensor(arg, fake_arg)
         for arg, fake_arg in zip(args, fake_args)
@@ -3636,15 +3671,16 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
             return fx_arg.meta.get("val")
         return fx_arg
 
+    def require_fake_stride_order(arg, fake_val):
+        stride_order = ir.get_stride_order(fake_val.stride(), V.graph.sizevars.shape_env)
+        return ir.ExternKernel.require_stride_order(arg, stride_order)
+
     def apply_constraint(arg, fx_arg):
         fake_val = get_fake_val(fx_arg)
         if _is_tensor_irnode(arg):
             if not isinstance(fake_val, torch.Tensor):
                 return arg
-            stride_order = ir.get_stride_order(
-                fake_val.stride(), V.graph.sizevars.shape_env
-            )
-            return ir.ExternKernel.require_stride_order(arg, stride_order)
+            return require_fake_stride_order(arg, fake_val)
         if isinstance(arg, dict):
             if not isinstance(fake_val, dict):
                 return arg
@@ -3657,6 +3693,10 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
             )
         return arg
 
+    # See Note [Constrain storage inputs before views]
+    args, kwargs = _constrain_storage_inputs_first(
+        (args, kwargs), (fx_node.args, fx_node.kwargs), require_fake_stride_order
+    )
     args = tuple(
         apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)
     )
