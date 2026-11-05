@@ -24,7 +24,6 @@ import ast
 import builtins
 import contextlib
 import functools
-import gc
 import inspect
 import itertools
 import logging
@@ -65,7 +64,6 @@ from ..source import (
     LocalSource,
     Source,
     TypeDictSource,
-    TypeMROSource,
     TypeSource,
 )
 from ..utils import (
@@ -86,6 +84,7 @@ from ..utils import (
     proxy_args_kwargs,
     raise_args_mismatch,
     specialize_symnode,
+    str_methods,
     tensortype_to_dtype,
     unpack_iterable,
 )
@@ -111,7 +110,6 @@ from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleV
 from .misc import CellVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
     _NO_DEFAULT,
-    _resolve_descriptor_get,
     binary_iop,
     binary_op,
     generic_delitem,
@@ -127,8 +125,6 @@ from .object_protocol import (
     generic_size,
     generic_str,
     maybe_get_python_type,
-    mro_lookup,
-    Py_TPFLAGS_HEAPTYPE,
     pycallable_check,
     pyiter_check,
     pylong_as_ssize_t,
@@ -165,11 +161,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import (
-    is_data_descriptor,
-    UserDefinedObjectVariable,
-    UserDefinedVariable,
-)
+from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 
 if TYPE_CHECKING:
@@ -195,6 +187,16 @@ IN_PLACE_DESUGARING_MAP = {
     operator.ior: operator.or_,
     operator.ixor: operator.xor,
 }
+
+_BUILTIN_CONSTANT_FOLDABLE_METHODS: dict[type, frozenset[str]] = {
+    int: frozenset({"__new__", "from_bytes"}),
+    bool: frozenset({"__new__", "from_bytes"}),
+    float: frozenset({"fromhex", "hex"}),
+}
+if sys.version_info >= (3, 14):
+    _BUILTIN_CONSTANT_FOLDABLE_METHODS[float] |= frozenset({"from_number"})
+    _BUILTIN_CONSTANT_FOLDABLE_METHODS[complex] = frozenset({"from_number"})
+
 
 _HandlerCallback = Callable[
     ["InstructionTranslatorBase", typing.Any, typing.Any], VariableTracker | None
@@ -1979,6 +1981,31 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
         return handler(tx, args, kwargs)  # type: ignore[return-value]
 
+    # object.__new__ is handled by the VariableTracker default (every type
+    # ultimately falls back to it). tuple/set/frozenset each have their own
+    # constructible VariableTracker (TupleVariable/SetVariable/
+    # FrozensetVariable) -- BuiltinVariable is only ever the receiver
+    # `__new__` was found on for them (there's no dedicated
+    # TupleBuiltinVariable/SetBuiltinVariable/FrozensetBuiltinVariable), so
+    # this is a pure lookup table, not construction logic.
+    _tp_new_delegates: dict[Callable[..., Any], type[VariableTracker]] = {
+        tuple: TupleVariable,
+        set: SetVariable,
+        frozenset: FrozensetVariable,
+    }
+
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        target = self._tp_new_delegates.get(self.fn)
+        if target is not None:
+            # pyrefly: ignore[bad-argument-type]
+            return target.tp_new_impl(self, tx, args, kwargs)
+        return super().tp_new_impl(tx, args, kwargs)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -2004,7 +2031,144 @@ class BuiltinVariable(BaseBuiltinVariable):
             ):
                 return obj.method_setattr_standard(tx, name_var, val)
 
+        if name in _BUILTIN_CONSTANT_FOLDABLE_METHODS.get(self.fn, ()):
+            if all(a.is_python_constant() for a in args) and all(
+                v.is_python_constant() for v in kwargs.values()
+            ):
+                try:
+                    fn = getattr(self.fn, name)
+                    res = fn(
+                        *(a.as_python_constant() for a in args),
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    )
+                    return VariableTracker.build(tx, res)
+                except Exception as e:
+                    raise_observed_exception(
+                        type(e),
+                        tx,
+                        args=list(e.args),
+                    )
+
+        if (
+            self.fn in (set, frozenset, list, tuple, int, str, float, complex)
+            and name != "__new__"
+        ):
+            if isinstance(args[0], variables.UserDefinedObjectVariable):
+                # int.__eq__(IntEnum.A, x): constant int/float/str subclass
+                # instances fall through to the rich-comparison fold below,
+                # which calls the base slot and ignores subclass overrides.
+                if not (
+                    self.fn in (int, float, str)
+                    and name in _RICH_CMP_DUNDERS
+                    and len(args) == 2
+                    and not kwargs
+                    and all(a.is_python_constant() for a in args)
+                    and isinstance(args[0].as_python_constant(), self.fn)
+                ):
+                    return args[0].call_base_method(tx, name, args[1:], kwargs)
+            else:
+                return args[0].call_method(tx, name, args[1:], kwargs)
+
+        if (
+            name in _RICH_CMP_DUNDERS
+            and len(args) == 2
+            and not kwargs
+            and isinstance(self.fn, type)
+            and args[0].is_python_constant()
+            and args[1].is_python_constant()
+        ):
+            # Unbound rich-comparison dunder, e.g. complex.__eq__(1+1j, 2).
+            # Invoke only the left type's slot on the constants, mirroring
+            # CPython (returns NotImplemented rather than falling back to the
+            # reflected operation when the operands are incompatible).
+            lval = args[0].as_python_constant()
+            if isinstance(lval, self.fn):
+                return ConstantVariable.create(
+                    getattr(self.fn, name)(lval, args[1].as_python_constant())
+                )
+
+        if self.fn is str and len(args) >= 1:
+            resolved_fn = getattr(self.fn, name, None)
+            if resolved_fn in str_methods:
+                # Only delegate to ConstantVariable, not other types that happen to be constants
+                if isinstance(args[0], ConstantVariable):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
+
+        if (
+            self.fn in (int, float, complex)
+            and args
+            and all(isinstance(a, ConstantVariable) for a in args)
+            and all(isinstance(v, ConstantVariable) for v in kwargs.values())
+        ):
+            # Unbound method on constants, e.g. float.__rsub__(3.0, 1). Only
+            # delegate for ConstantVariable, not other types that happen to be
+            # constants.
+            try:
+                res = getattr(self.fn, name)(
+                    *(a.as_python_constant() for a in args),
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            return VariableTracker.build(tx, res)
+
+        if name == "__len__" and len(args) == 1 and not kwargs:
+            # type.__len__(instance) → len(instance)
+            # e.g. list.__len__(my_list) → len(my_list)
+            return generic_size(tx, args[0])
+
+        if name == "__str__" and len(args) == 1 and not kwargs:
+            return super().call_method(tx, name, args, kwargs)
+
+        if name == "__repr__" and len(args) == 1 and not kwargs:
+            return super().call_method(tx, name, args, kwargs)
+
+        if name == "__iter__" and len(args) == 1 and not kwargs:
+            # type.__iter__(instance) → iter(instance)
+            # e.g., tuple.__iter__(my_tuple) → iter(my_tuple)
+            # For builtin types called on user-defined subclasses, use the base iterator
+            return generic_getiter(tx, args[0])
+
+        if name == "__neg__" and len(args) == 1 and not kwargs:
+            # type.__neg__(instance) → neg(instance)
+            # e.g., int.__neg__(4) → neg(4)
+            return pynumber_negative(tx, args[0])
+
+        if name == "__pos__" and len(args) == 1 and not kwargs:
+            # type.__pos__(instance) → pos(instance)
+            # e.g., int.__pos__(4) → pos(4)
+            return pynumber_positive(tx, args[0])
+
+        if name == "__abs__" and len(args) == 1 and not kwargs:
+            # type.__abs__(instance) → abs(instance)
+            # e.g., int.__abs__(-4) → abs(-4)
+            return pynumber_absolute(tx, args[0])
+
+        if name == "__invert__" and len(args) == 1 and not kwargs:
+            # type.__invert__(instance) → ~instance
+            # e.g., int.__invert__(4) → ~4
+            return pynumber_invert(tx, args[0])
+
+        if name == "__hash__" and len(args) == 1 and not kwargs:
+            arg = args[0]
+            generic_hash(tx, arg)
+
         return super().call_method(tx, name, args, kwargs)
+
+    def call_int(
+        self,
+        tx: "InstructionTranslatorBase",
+        arg: VariableTracker,
+        base: VariableTracker | None = None,
+    ) -> VariableTracker | None:
+        if base is None:
+            return pynumber_int(tx, arg)
+        return pylong_from_base(tx, arg, base)
+
+    def call_float(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker | None:
+        return pynumber_float(tx, arg)
 
     def call_bin(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
@@ -2021,6 +2185,12 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker | None:
         return pynumber_tobase(tx, arg, 16)
 
+    def call_bool(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker | None:
+        # Emulate PyBool_Type.tp_vectorcall which boils down to PyObject_IsTrue.
+        return generic_is_true(tx, arg)
+
     def call_hash(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
@@ -2030,6 +2200,44 @@ class BuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
         return generic_repr(tx, arg)
+
+    def call_str(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker | None:
+        return generic_str(tx, arg)
+
+    def call_bytes(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if not args and not kwargs:
+            return variables.ConstantVariable.create(b"")
+        if all(a.is_python_constant() for a in args) and all(
+            v.is_python_constant() for v in kwargs.values()
+        ):
+            try:
+                res = bytes(
+                    *(a.as_python_constant() for a in args),
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+                return VariableTracker.build(tx, res)
+            except (TypeError, ValueError) as e:
+                raise_observed_exception(
+                    type(e),
+                    tx,
+                    args=list(e.args),
+                )
+        unimplemented(
+            gb_type="bytes() with non-constant arguments",
+            context=f"bytes(*{args}, **{kwargs})",
+            explanation="Attempted to call bytes() with non-constant args.",
+            hints=[
+                "Ensure that the args to bytes() are constant (int, str, etc.).",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def call___build_class__(self, tx, *args, **kwargs):
         def fail(args, kwargs) -> NoReturn:
@@ -2342,6 +2550,33 @@ class BuiltinVariable(BaseBuiltinVariable):
             ),
         )
 
+    def call_tuple(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        # ref: https://github.com/python/cpython/blob/main/Objects/abstract.c#L2004-L2078
+        if kwargs:
+            raise_type_error(
+                tx,
+                f"{self.fn.__name__}() takes no keyword arguments",
+            )
+        if len(args) == 0:
+            return TupleVariable([], mutation_type=ValueMutationNew())
+        elif len(args) > 1:
+            raise_type_error(
+                tx,
+                f"{self.fn.__name__} expected at most 1 argument, got {len(args)}",
+            )
+
+        obj = args[0]
+        if isinstance(obj, TupleVariable) and obj.python_type() is tuple:
+            return obj
+
+        items = unpack_iterable(tx, args[0])
+        return TupleVariable(items, mutation_type=ValueMutationNew())
+
     def call_callable(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
@@ -2374,12 +2609,78 @@ class BuiltinVariable(BaseBuiltinVariable):
             return VariableTracker.build(tx, dir(arg.value))
         if isinstance(arg, BuiltinVariable):
             return VariableTracker.build(tx, dir(arg.fn))
-        if isinstance(arg, TypeVariable):
-            return VariableTracker.build(tx, dir(arg._fn))
         # Enable specialized VTs for constants to work with dir()
         if arg.is_python_constant():
             return VariableTracker.build(tx, dir(arg.as_python_constant()))
         return None
+
+    def call_set(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/main/Objects/setobject.c#L2708-L2735
+        # CPython set_init rejects keywords before unpacking positional args, so
+        # set(a=1) and set().__init__(a=1) both raise regardless of arg count.
+        if kwargs:
+            raise_type_error(
+                tx,
+                "set() takes no keyword arguments",
+            )
+        if len(args) == 0:
+            return variables.SetVariable(set(), mutation_type=ValueMutationNew())
+        elif len(args) > 1:
+            raise_type_error(
+                tx,
+                f"set expected at most 1 argument, got {len(args)}",
+            )
+
+        s = SetVariable([], mutation_type=ValueMutationNew())
+        s.call_method(tx, "update", [args[0]], kwargs)
+        return s
+
+    def call_frozenset(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        if kwargs:
+            raise_type_error(
+                tx,
+                "frozenset() takes no keyword arguments",
+            )
+        if len(args) == 0:
+            return variables.FrozensetVariable(set(), mutation_type=ValueMutationNew())
+        elif len(args) > 1:
+            raise_type_error(
+                tx,
+                f"frozenset expected at most 1 argument, got {len(args)}",
+            )
+
+        if istype(args[0], variables.FrozensetVariable):
+            # CPython: frozenset(existing_frozenset) returns the same object.
+            return args[0]
+
+        # Reuse existing HashableTracker keys from a set/frozenset/dict operand
+        # instead of re-hashing, mirroring CPython's set_update_internal fast
+        # path (do-not-rehash-dict-keys).
+        if isinstance(
+            args[0],
+            (
+                variables.SetVariable,
+                variables.FrozensetVariable,
+                variables.DictKeySetVariable,
+                variables.OrderedSetVariable,
+                variables.ConstDictVariable,
+            ),
+        ):
+            items = list(args[0].items.keys())
+        else:
+            items = unpack_iterable(tx, args[0])
+        fs = FrozensetVariable(items, mutation_type=ValueMutationNew())
+        return fs
 
     def call_zip(
         self,
@@ -3269,204 +3570,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         return pysequence_contains(tx, a, b)
 
 
-class TypeVariable(VariableTracker):
-    """A builtin ``type`` object such as ``dict`` or ``list``."""
-
-    _fn: type
-    _cpython_type = type
-
-    def __init__(self, value: Any = None, **kwargs: Any) -> None:
-        if value is not None and value is not self._fn:
-            raise AssertionError(
-                f"{type(self).__name__} value must be {self._fn}, got {value}"
-            )
-        super().__init__(**kwargs)
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}()"
-
-    def as_proxy(self) -> Any:
-        DTYPE = {bool: torch.bool, int: torch.int64, float: torch.float64}
-        if self._fn in DTYPE:
-            return DTYPE[self._fn]
-        return super().as_proxy()
-
-    # type_methods[] type___instancecheck__ / type___subclasscheck__
-    def _type_instancecheck(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        check_positional(tx, "__instancecheck__", len(args), 1, 1)
-        return VariableTracker.build(tx, issubclass(args[0].python_type(), self._fn))
-
-    def _type_subclasscheck(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        check_positional(tx, "__subclasscheck__", len(args), 1, 1)
-        cls = args[0].as_python_constant()
-        return VariableTracker.build(tx, issubclass(cls, self._fn))
-
-    tp_methods = {
-        "__instancecheck__": Method(_type_instancecheck),
-        "__subclasscheck__": Method(_type_subclasscheck),
-    }
-
-    # type_getsets[] type_get_mro (getset)
-    def _type_get_mro(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        source = self.source and TypeMROSource(self.source)
-        items = [
-            VariableTracker.build(tx, cls, source and GetItemSource(source, i))
-            for i, cls in enumerate(self._fn.__mro__)
-        ]
-        return variables.TupleVariable(items, source=source)
-
-    # type_getsets[] type_dict (getset). Each read allocates a fresh mappingproxy
-    # over the same tp_dict, so build the dict once and wrap it every time.
-    def _type_get_dict(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        tp_dict = gc.get_referents(self._fn.__dict__)[0]
-        tp_dict_source = self.source and TypeDictSource(self.source)
-        tp_dict_vt = VariableTracker.build(tx, tp_dict, tp_dict_source)
-        return variables.MappingProxyVariable(tp_dict_vt)
-
-    tp_getset = {
-        "__bases__": BaseBuiltinVariable.tp_getset["__bases__"],
-        "__mro__": GetSet(_type_get_mro, unmodeled_setter),
-        "__dict__": GetSet(_type_get_dict, unmodeled_setter),
-    }
-    tp_members = {
-        "__base__": BaseBuiltinVariable.tp_members["__base__"],
-        "__flags__": BaseBuiltinVariable.tp_members["__flags__"],
-    }
-
-    @classmethod
-    def create_with_source(cls, value: type, source: Source) -> "TypeVariable":
-        install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
-        return cls(source=source)
-
-    def as_python_constant(self) -> type:
-        return self._fn
-
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return VariableTracker.build(tx, type.__repr__(self.as_python_constant()))
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.append_output(codegen.create_load_global(self._fn.__name__, add=True))
-
-    def tp_getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        fn = self._fn
-        source = self.source and AttrSource(self.source, name)
-        try:
-            attr = getattr(fn, name)
-        except AttributeError as e:
-            raise_observed_exception(AttributeError, tx, args=list(e.args))
-        if is_torch_class(fn):
-            # Torch types keep their trace-rule path through GetAttrVariable.
-            return variables.GetAttrVariable(
-                self, name, py_type=type(attr), source=source
-            )
-        # CPython type_getattro: a metatype data descriptor wins, then the type's
-        # own MRO with __get__(None, T), then a metatype descriptor with
-        # __get__(T, type(T)).
-        meta_attr = mro_lookup(type(fn), name)
-        if is_data_descriptor(meta_attr):
-            return super().tp_getattro_impl(tx, name)
-        cls_attr = mro_lookup(fn, name)
-        if isinstance(cls_attr, staticmethod):
-            # A builtin staticmethod, e.g. str.maketrans, is modeled by tp_methods
-            if self.lookup_tp_method(name):
-                return variables.GetAttrVariable(
-                    self, name, py_type=type(attr), source=source
-                )
-            # staticmethod.__get__ returns the wrapped C function
-            return VariableTracker.build(tx, attr, source)
-        if cls_attr is not NO_SUCH_SUBOBJ:
-            none_vt = ConstantVariable.create(None)
-            result = _resolve_descriptor_get(tx, cls_attr, none_vt, self, source, name)
-        else:
-            # The base class would return a CallMethodVariable here, because this
-            # class overrides call_method.
-            metacls_source = self.source and TypeSource(self.source)
-            metacls = VariableTracker.build(tx, type(fn), metacls_source)
-            result = _resolve_descriptor_get(tx, meta_attr, self, metacls, source, name)
-        return result or VariableTracker.build(tx, attr, source)
-
-    def tp_new_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if not args:
-            raise_type_error(tx, f"{self._fn.__name__}.__new__(): not enough arguments")
-        # Immutable builtin types have no tp_init work, so T.__new__(T, ...)
-        # equals T(...). A subtype wraps that value. Mutable types override this.
-        cls = args[0].as_python_constant()
-        if cls is self._fn:
-            return self.call_function(tx, args[1:], kwargs)
-        # tp_new_wrapper: cls's nearest builtin base must use this tp_new.
-        base = next(t for t in cls.__mro__ if not t.__flags__ & Py_TPFLAGS_HEAPTYPE)
-        if base.__new__ is not self._fn.__new__:
-            raise_type_error(
-                tx,
-                f"{self._fn.__name__}.__new__({cls.__name__}) is not safe, "
-                f"use {base.__name__}.__new__()",
-            )
-        return tx.output.side_effects.track_new_user_defined_object(
-            self, args[0], args[1:], tx=tx
-        )
-
-    def tp_init_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # A builtin type is an instance of type, so its tp_init is type_init.
-        return type_init(tx, args, kwargs)
-
-    # type_as_number.nb_or = _Py_union_type_or, e.g. list | tuple
-    def nb_or_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        try:
-            other_val = other.as_python_constant()
-        except NotImplementedError:
-            return VariableTracker.build(tx, NotImplemented)
-        return VariableTracker.build(tx, type.__or__(self._fn, other_val))
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(self._fn, name))  # type: ignore[return-value]
-
-    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        # PyType_Type inherits object's identity hash. The base hash_impl needs a
-        # source to find it and fakes one (id(self)) otherwise, so a sourceless
-        # type(x) would not match the same type used as a dict key.
-        return hash(self._fn), False
-
-    # tp_richcompare comes from object
-    # remove this once https://github.com/pytorch/pytorch/pull/199999 is merged
-    def tp_richcompare_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        op: str,
-    ) -> VariableTracker:
-        return python_constant_richcompare_impl(self, tx, other, op)
-
-
-class DictBuiltinVariable(TypeVariable):
+class DictBuiltinVariable(BaseBuiltinVariable):
     """Variable tracker for the `dict` builtin constructor."""
 
     _fn = dict
@@ -4016,7 +4120,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         return None
 
 
-class ListBuiltinVariable(TypeVariable):
+class ListBuiltinVariable(BaseBuiltinVariable):
     """Variable tracker for the `list` builtin constructor."""
 
     _fn = list
@@ -4090,70 +4194,7 @@ class ListBuiltinVariable(TypeVariable):
         return ListVariable.tp_new_impl(self, tx, args, kwargs)
 
 
-def constant_fold(
-    fn: Callable[..., object],
-    tx: "InstructionTranslatorBase",
-    args: list[VariableTracker],
-    kwargs: dict[str, VariableTracker],
-) -> VariableTracker:
-    if not check_unspec_or_constant_args(args, kwargs):
-        unimplemented(
-            gb_type="constant_fold on non-constant arguments",
-            context=f"{fn.__name__}(*{args}, **{kwargs})",
-            explanation=f"Dynamo only evaluates {fn.__name__}() at trace time when all arguments are constants.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
-    try:
-        res = fn(
-            *(a.as_python_constant() for a in args),
-            **{k: v.as_python_constant() for k, v in kwargs.items()},
-        )
-    except Exception as e:
-        raise_observed_exception(type(e), tx, args=list(e.args))
-    return VariableTracker.build(tx, res)
-
-
-def _constant_fold_classmethod(name: str) -> Method:
-    """tp_methods entry for a classmethod of a builtin type (e.g. int.from_bytes)
-    that is evaluated at trace time on constant arguments."""
-
-    def handler(
-        self: "TypeVariable",
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        return constant_fold(getattr(self._fn, name), tx, args, kwargs)
-
-    return Method(handler)
-
-
-def _constant_fold_on_unsupported(
-    call_function: Callable[..., VariableTracker],
-) -> Callable[..., VariableTracker]:
-    """If the modeled path graph breaks on constant arguments, evaluate the call
-    at trace time instead (e.g. int() of a pybind11 enum, whose C __int__ has no
-    model)."""
-
-    @functools.wraps(call_function)
-    def wrapper(
-        self: "TypeVariable",
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        try:
-            return call_function(self, tx, args, kwargs)
-        except Unsupported as exc:
-            if not check_unspec_or_constant_args(args, kwargs):
-                raise
-            exc.remove_from_stats()
-        return constant_fold(self._fn, tx, args, kwargs)
-
-    return wrapper
-
-
-class ByteArrayBuiltinVariable(TypeVariable):
+class ByteArrayBuiltinVariable(BaseBuiltinVariable):
     """Variable tracker for the `bytearray` builtin constructor."""
 
     _fn = bytearray
@@ -4165,17 +4206,24 @@ class ByteArrayBuiltinVariable(TypeVariable):
             )
         super().__init__(**kwargs)
 
-    def tp_new_impl(
+    def __repr__(self) -> str:
+        return "ByteArrayBuiltinVariable()"
+
+    def _constant_fold_constructor(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # bytearray is mutable: __new__ is not the constructor.
-        return VariableTracker.tp_new_impl(self, tx, args, kwargs)
-
-    def __repr__(self) -> str:
-        return "ByteArrayBuiltinVariable()"
+        all_args = [a.as_python_constant() for a in args]
+        all_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        try:
+            result = bytearray(*all_args, **all_kwargs)
+        except TypeError as e:
+            raise_type_error(tx, str(e))
+        except ValueError as e:
+            raise_observed_exception(ValueError, tx, args=list(e.args))
+        return VariableTracker.build(tx, result)
 
     def call_function(
         self,
@@ -4191,12 +4239,12 @@ class ByteArrayBuiltinVariable(TypeVariable):
                 v.is_python_constant() for v in kwargs.values()
             ):
                 raise_type_error(tx, "bytearray() takes only constant arguments")
-            return constant_fold(self._fn, tx, args, kwargs)
+            return self._constant_fold_constructor(tx, args, kwargs)
 
         arg = args[0]
 
         if arg.is_python_constant():
-            return constant_fold(self._fn, tx, args, kwargs)
+            return self._constant_fold_constructor(tx, args, kwargs)
 
         try:
             unpacked = arg.unpack_var_sequence(tx)
@@ -4211,287 +4259,6 @@ class ByteArrayBuiltinVariable(TypeVariable):
             explanation="Dynamo cannot trace bytearray() with this argument type.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
-
-
-class IntBuiltinVariable(TypeVariable):
-    _fn = int
-
-    tp_methods = {
-        "from_bytes": _constant_fold_classmethod("from_bytes"),
-    }
-
-    @_constant_fold_on_unsupported
-    def call_function(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # int(x=0, /, base=10)
-        base = kwargs.get("base")
-        for name in kwargs:
-            if name != "base":
-                raise_type_error(
-                    tx, f"int() got an unexpected keyword argument '{name}'"
-                )
-        if len(args) > 2:
-            raise_type_error(tx, f"int expected at most 2 arguments, got {len(args)}")
-        if len(args) + (base is not None) > 2:
-            raise_type_error(
-                tx, f"int() takes at most 2 arguments ({len(args) + 1} given)"
-            )
-        if not args:
-            if base is not None:
-                raise_type_error(tx, "int() missing string argument")
-            return ConstantVariable.create(0)
-        if len(args) == 2:
-            base = args[1]
-        if base is None:
-            return pynumber_int(tx, args[0])
-        res = pylong_from_base(tx, args[0], base)
-        if res is None:
-            unimplemented(
-                gb_type="int() with a base on non-constant arguments",
-                context=f"int({args[0]}, {base})",
-                explanation="Dynamo only traces int(x, base) when x and base are constants.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return res
-
-
-class FloatBuiltinVariable(TypeVariable):
-    _fn = float
-
-    tp_methods = {"fromhex": _constant_fold_classmethod("fromhex")}
-    if sys.version_info >= (3, 14):
-        tp_methods["from_number"] = _constant_fold_classmethod("from_number")
-
-    @_constant_fold_on_unsupported
-    def call_function(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "float() takes no keyword arguments")
-        if len(args) > 1:
-            raise_type_error(tx, f"float expected at most 1 argument, got {len(args)}")
-        if not args:
-            return ConstantVariable.create(0.0)
-        return pynumber_float(tx, args[0])
-
-
-class ComplexBuiltinVariable(TypeVariable):
-    _fn = complex
-
-    if sys.version_info >= (3, 14):
-        tp_methods = {"from_number": _constant_fold_classmethod("from_number")}
-
-    def call_function(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        return constant_fold(self._fn, tx, args, kwargs)
-
-
-class BoolBuiltinVariable(TypeVariable):
-    _fn = bool
-
-    tp_methods = {
-        "from_bytes": _constant_fold_classmethod("from_bytes"),
-    }
-
-    def call_function(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "bool() takes no keyword arguments")
-        if len(args) > 1:
-            raise_type_error(tx, f"bool expected at most 1 argument, got {len(args)}")
-        if not args:
-            return ConstantVariable.create(False)
-        # Emulate PyBool_Type.tp_vectorcall which boils down to PyObject_IsTrue.
-        return generic_is_true(tx, args[0])
-
-
-class StrBuiltinVariable(TypeVariable):
-    _fn = str
-
-    tp_methods = {
-        "maketrans": _constant_fold_classmethod("maketrans"),
-    }
-
-    @_constant_fold_on_unsupported
-    def call_function(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if not args and not kwargs:
-            return ConstantVariable.create("")
-        if len(args) == 1 and not kwargs:
-            return generic_str(tx, args[0])
-        return constant_fold(self._fn, tx, args, kwargs)
-
-
-class BytesBuiltinVariable(TypeVariable):
-    _fn = bytes
-
-    tp_methods = {
-        "fromhex": _constant_fold_classmethod("fromhex"),
-    }
-
-    def call_function(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if not args and not kwargs:
-            return ConstantVariable.create(b"")
-        return constant_fold(self._fn, tx, args, kwargs)
-
-
-class TupleBuiltinVariable(TypeVariable):
-    _fn = tuple
-
-    def tp_new_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # pyrefly: ignore[bad-argument-type]
-        return TupleVariable.tp_new_impl(self, tx, args, kwargs)
-
-    def call_function(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/main/Objects/abstract.c#L2004-L2078
-        if kwargs:
-            raise_type_error(tx, "tuple() takes no keyword arguments")
-        if len(args) == 0:
-            return TupleVariable([], mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(tx, f"tuple expected at most 1 argument, got {len(args)}")
-
-        obj = args[0]
-        if isinstance(obj, TupleVariable) and obj.python_type() is tuple:
-            return obj
-
-        items = unpack_iterable(tx, args[0])
-        return TupleVariable(items, mutation_type=ValueMutationNew())
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__new__" and len(args) == 2 and not kwargs:
-            if isinstance(args[0], TupleBuiltinVariable):
-                init_args = unpack_iterable(tx, args[1])
-                return variables.TupleVariable(
-                    init_args, mutation_type=ValueMutationNew()
-                )
-            return tx.output.side_effects.track_new_user_defined_object(
-                self, args[0], args[1:], tx=tx
-            )
-        return super().call_method(tx, name, args, kwargs)
-
-
-class SetBuiltinVariable(TypeVariable):
-    _fn = set
-
-    def tp_new_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # pyrefly: ignore[bad-argument-type]
-        return SetVariable.tp_new_impl(self, tx, args, kwargs)
-
-    def call_function(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/main/Objects/setobject.c#L2708-L2735
-        # CPython set_init rejects keywords before unpacking positional args, so
-        # set(a=1) and set().__init__(a=1) both raise regardless of arg count.
-        if kwargs:
-            raise_type_error(tx, "set() takes no keyword arguments")
-        if len(args) == 0:
-            return variables.SetVariable(set(), mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(tx, f"set expected at most 1 argument, got {len(args)}")
-
-        s = SetVariable([], mutation_type=ValueMutationNew())
-        s.call_method(tx, "update", [args[0]], kwargs)
-        return s
-
-
-class FrozenSetBuiltinVariable(TypeVariable):
-    _fn = frozenset
-
-    def tp_new_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # pyrefly: ignore[bad-argument-type]
-        return FrozensetVariable.tp_new_impl(self, tx, args, kwargs)
-
-    def call_function(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "frozenset() takes no keyword arguments")
-        if len(args) == 0:
-            return variables.FrozensetVariable(set(), mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(
-                tx, f"frozenset expected at most 1 argument, got {len(args)}"
-            )
-
-        if istype(args[0], variables.FrozensetVariable):
-            # CPython: frozenset(existing_frozenset) returns the same object.
-            return args[0]
-
-        # Reuse existing HashableTracker keys from a set/frozenset/dict operand
-        # instead of re-hashing, mirroring CPython's set_update_internal fast
-        # path (do-not-rehash-dict-keys).
-        if isinstance(
-            args[0],
-            (
-                variables.SetVariable,
-                variables.FrozensetVariable,
-                variables.DictKeySetVariable,
-                variables.OrderedSetVariable,
-                variables.ConstDictVariable,
-            ),
-        ):
-            items = list(args[0].items.keys())
-        else:
-            items = unpack_iterable(tx, args[0])
-        return FrozensetVariable(items, mutation_type=ValueMutationNew())
 
 
 # pyrefly: ignore [deprecated]

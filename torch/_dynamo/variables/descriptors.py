@@ -119,7 +119,7 @@ def _vt_cls_modeling(vt: VariableTracker, py_type: type) -> type | None:
         types = cpython_type if isinstance(cpython_type, tuple) else (cpython_type,)
         if py_type in types:
             return cls
-    return VariableTracker if py_type is object else None
+    return None
 
 
 class DescriptorVariable(VariableTracker):
@@ -237,7 +237,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
         # dict.__eq__ on an OrderedDict: its impl, not the subclass VT's.
         vt_cls = _vt_cls_modeling(obj, objclass)
         sd = _compute_slotdefs(objclass).get(name)
-        if sd is not None:
+        if vt_cls is not None and sd is not None:
             impl = getattr(vt_cls, sd.impl)
             return sd.wrapper(obj, tx, impl, rest, kwargs)
         return self.owner.call_method(
