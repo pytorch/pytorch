@@ -3,6 +3,7 @@
 import unittest
 
 import torch
+import torch.nn.functional as F
 from torch._inductor import config, ir
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.debug import DebugContext
@@ -256,6 +257,47 @@ class TestJaggedReductionIR(TestCase):
         # Eager checks lengths on the host unless unsafe=True.
         self.assertEqual("r0_bound" in "\n".join(codes), unsafe)
         self.assertEqual(actual, fn(data, lengths))
+
+    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+    @parametrize(
+        "reduce,initial,lowered",
+        [
+            ("sum", 0, True),
+            ("mean", 0, True),
+            ("prod", 1, True),
+            ("max", 0, True),
+            ("max", float("-inf"), True),
+            ("min", 0.5, True),
+            ("sum", 1.0, False),
+            ("prod", 2.0, False),
+        ],
+    )
+    def test_segment_reduce_initial(self, reduce, initial, lowered):
+        lengths = torch.tensor([2, 0, 1027, 1], device="cuda")
+        data = torch.randn(1030, 3, device="cuda")
+        if reduce == "prod":
+            data = 1 + 0.001 * data
+
+        def fn(data, lengths):
+            return torch.segment_reduce(
+                data, reduce, lengths=lengths, unsafe=True, initial=initial
+            )
+
+        actual, codes = run_and_get_code(torch.compile(fn), data, lengths)
+        self.assertEqual("r0_bound" in "\n".join(codes), lowered)
+        self.assertEqual(actual, fn(data, lengths))
+
+    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+    def test_segment_reduce_constant_offsets(self):
+        data = torch.randn(1030, 3, device="cuda")
+
+        def fn(data):
+            offsets = F.pad(torch.arange(10, 1031, 10, device=data.device), (1, 0))
+            return torch.segment_reduce(data, "sum", offsets=offsets)
+
+        actual, codes = run_and_get_code(torch.compile(fn), data)
+        self.assertIn("r0_bound", "\n".join(codes))
+        self.assertEqual(actual, fn(data))
 
     @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_segment_reduce_horizontal_fusion(self):
