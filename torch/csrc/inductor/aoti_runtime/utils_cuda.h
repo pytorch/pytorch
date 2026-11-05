@@ -125,9 +125,9 @@ inline void delete_cuda_graph(void* ptr) {
 
 // A non-blocking CUDA stream, created on a device; capture streams must not
 // synchronize with the legacy default stream.
-class AOTICudaStream {
+class AOTICudaStreamNonBlocking {
  public:
-  explicit AOTICudaStream(int32_t device_index)
+  explicit AOTICudaStreamNonBlocking(int32_t device_index)
       : stream_(nullptr, delete_cuda_stream) {
     AOTICudaGuard device_guard(device_index);
     cudaStream_t stream = nullptr;
@@ -145,9 +145,9 @@ class AOTICudaStream {
 };
 
 // A CUDA event without timing, created on a device.
-class AOTICudaEvent {
+class AOTICudaEventDisableTiming {
  public:
-  explicit AOTICudaEvent(int32_t device_index)
+  explicit AOTICudaEventDisableTiming(int32_t device_index)
       : event_(nullptr, delete_cuda_event) {
     AOTICudaGuard device_guard(device_index);
     cudaEvent_t event = nullptr;
