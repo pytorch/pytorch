@@ -47,8 +47,6 @@ def _stuck_function(rank, mp_queue):
 if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
 
     class LocalTimerExample(TestCase):
-        hw_classification = HardwareClassification.GENERIC
-
         """
         Demonstrates how to use LocalTimerServer and LocalTimerClient
         to enforce expiration of code-blocks.
@@ -60,6 +58,8 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
         API is changed in torch, then re-enable ``test_torch_mp_example``
         unittest. As of now this will SIGSEGV.
         """
+
+        hw_classification = HardwareClassification.GENERIC
 
         @skip_but_pass_in_sandcastle_if(
             TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible"

@@ -274,8 +274,8 @@ class TestPeephole(JitTestCase):
 
         run_peephole_and_check_const_value(foo.graph, "value=9")
         self.assertEqual(foo(gen_li(4), gen_li(5)), 9)
-        with self.assertRaises(RuntimeError):
-            foo(2, 4)
+        with self.assertRaises(torch.jit.Error):
+            foo(gen_li(2), gen_li(4))
 
         @torch.jit.script
         def foo(x: List[int], y: List[int]):
@@ -288,8 +288,8 @@ class TestPeephole(JitTestCase):
 
         run_peephole_and_check_const_value(foo.graph, "value=9")
         self.assertEqual(foo(gen_li(4), gen_li(5)), 9)
-        with self.assertRaises(RuntimeError):
-            foo(2, 4)
+        with self.assertRaises(torch.jit.Error):
+            foo(gen_li(2), gen_li(4))
 
         @torch.jit.script
         def foo(x: List[int], y: List[int], z: List[int]):
@@ -308,8 +308,8 @@ class TestPeephole(JitTestCase):
 
         run_peephole_and_check_const_value(foo.graph, "value=28")
         self.assertEqual(foo(gen_li(4), gen_li(8), gen_li(3)), 28)
-        with self.assertRaises(RuntimeError):
-            foo(1, 2, 3)
+        with self.assertRaises(torch.jit.Error):
+            foo(gen_li(1), gen_li(2), gen_li(3))
 
         # refinement should persist in second len(x) call
 
