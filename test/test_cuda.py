@@ -1440,8 +1440,7 @@ print(public_active, active, allocated)
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @serialTest()
     @parametrize("cache", (False, True))
-    @parametrize("unified", (None, "0", "1"))
-    def test_cublas_workspace_independence(self, cache, unified):
+    def test_cublas_workspace_independence(self, cache):
         skip_unless_blas_library_selectable("cublaslt")
         test_script = """
 import torch
@@ -1463,13 +1462,17 @@ print(torch.cuda.memory_allocated() - warmed_alloc)
         env["CUBLAS_WORKSPACE_CONFIG"] = ":1024:1"
         env["CUBLASLT_WORKSPACE_SIZE"] = "4096"
         env["TORCH_CUBLAS_WORKSPACE_CACHE"] = str(int(cache))
-        env.pop("TORCH_CUBLASLT_UNIFIED_WORKSPACE", None)
-        if unified is not None:
-            env["TORCH_CUBLASLT_UNIFIED_WORKSPACE"] = unified
-        output = subprocess.check_output(
-            [sys.executable, "-c", test_script], env=env, text=True
+        env["TORCH_CUBLASLT_UNIFIED_WORKSPACE"] = "1"
+        result = subprocess.run(
+            [sys.executable, "-c", test_script],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
         )
-        initial_size, updated_size, allocated = map(int, output.split())
+        warning = "TORCH_CUBLASLT_UNIFIED_WORKSPACE is no longer supported"
+        self.assertEqual(result.stderr.count(warning), 1)
+        initial_size, updated_size, allocated = map(int, result.stdout.split())
         self.assertEqual(initial_size, 4 * 1024 * 1024)
         self.assertEqual(updated_size, initial_size)
         if cache:

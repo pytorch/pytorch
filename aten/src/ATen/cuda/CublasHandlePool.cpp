@@ -364,8 +364,15 @@ size_t parseChosenWorkspaceSize() {
 #define TORCH_CUBLAS_WORKSPACE_CACHE "TORCH_CUBLAS_WORKSPACE_CACHE"
 bool isCUDABlasWorkspaceCachingEnabled() {
   // default false
-  static bool cache =
-      c10::utils::check_env(TORCH_CUBLAS_WORKSPACE_CACHE) == true;
+  static bool cache = [] {
+    if (c10::utils::has_env("TORCH_CUBLASLT_UNIFIED_WORKSPACE")) {
+      TORCH_WARN(
+          "TORCH_CUBLASLT_UNIFIED_WORKSPACE is no longer supported and has no effect. "
+          "cuBLASLt workspaces are allocated separately; use "
+          "torch.backends.cuda.cublaslt_workspace_size() to control their size.");
+    }
+    return c10::utils::check_env(TORCH_CUBLAS_WORKSPACE_CACHE) == true;
+  }();
   return cache;
 }
 
