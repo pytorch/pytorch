@@ -26,7 +26,9 @@ if TEST_CUPTI:
     from torch.profiler._cuspy.cupti_python import CUPTI_SUCCESS, CuptiError, pylibcupti
 
 
-@unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + a loaded libcupti >= 13.5")
+@unittest.skipIf(
+    not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + a loaded libcupti >= 13.5"
+)
 @instantiate_parametrized_tests
 class TestPyLibCuptiCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
