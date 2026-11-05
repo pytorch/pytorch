@@ -11,7 +11,12 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch._vmap_internals import vmap
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 FALLBACK_REGEX = r"There is a performance drop"
@@ -27,6 +32,8 @@ class EnableVmapFallbackWarnings:
 
 
 class TestVmapAPILegacy(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_non_tensor_output_raises(self):
         with self.assertRaisesRegex(
             ValueError, "got type <class 'float'> as the return"
@@ -1032,6 +1039,8 @@ class Namespace:
 
 
 class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
+    hw_classification = HardwareClassification.GENERIC
+
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -2552,7 +2561,9 @@ def _get_rand_no_zeros(*args, **kwargs):
     return result.clamp_min_(0.1).requires_grad_(requires_grad)
 
 
-class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
+class TestVmapBatchedGradientLegacyDevice(Namespace.TestVmapBaseLegacy):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -2843,7 +2854,9 @@ class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
         self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
 
 
-instantiate_device_type_tests(TestVmapBatchedGradientLegacy, globals(), None)
+instantiate_device_type_tests(
+    TestVmapBatchedGradientLegacyDevice, globals(), allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

@@ -9,10 +9,7 @@ from collections.abc import Callable, Iterator
 import torch
 from torch._C._profiler import _EventType, _TensorMetadata
 from torch.profiler import _memory_profiler, _utils
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    skipXPUIf,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_MACOS,
@@ -888,20 +885,25 @@ class TestMemoryProfilerE2E(TestCase):
 
             -- Backward ---------------------------------------------------------------------------------------------
             aten::ones_like                          8 (INPUT)                                     -> 9 (INPUT)
-            aten::sigmoid                            7 (INPUT)                                     -> 10 (TEMPORARY)
-            aten::sub.Tensor                         10 (TEMPORARY), 2 (INPUT)                     -> 11 (TEMPORARY)
-            aten::mul.Tensor                         11 (TEMPORARY), 9 (INPUT)                     -> 12 (AUTOGRAD_DETAIL)
-            aten::div_.Scalar                        12 (AUTOGRAD_DETAIL)                          -> 12 (AUTOGRAD_DETAIL)
-            aten::slice.Tensor                       12 (AUTOGRAD_DETAIL)                          -> 12 (AUTOGRAD_DETAIL)
-            aten::slice.Tensor                       12 (AUTOGRAD_DETAIL)                          -> 12 (AUTOGRAD_DETAIL)
-            aten::mul.Tensor                         12 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 13 (AUTOGRAD_DETAIL)
-            aten::sum.dim_IntList                    13 (AUTOGRAD_DETAIL)                          -> 14 (GRADIENT)
-            aten::view                               14 (GRADIENT)                                 -> 14 (GRADIENT)
-            aten::detach                             14 (GRADIENT)                                 -> ???
-            aten::mul.Tensor                         12 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 15 (AUTOGRAD_DETAIL)
-            aten::sum.dim_IntList                    15 (AUTOGRAD_DETAIL)                          -> 16 (GRADIENT)
-            aten::view                               16 (GRADIENT)                                 -> 16 (GRADIENT)
-            aten::detach                             16 (GRADIENT)                                 -> ???""",
+            aten::neg                                7 (INPUT)                                     -> 10 (TEMPORARY)
+            aten::sigmoid                            10 (TEMPORARY)                                -> 11 (TEMPORARY)
+            aten::mul.Tensor                         11 (TEMPORARY), 2 (INPUT)                     -> 12 (TEMPORARY)
+            aten::sigmoid                            7 (INPUT)                                     -> 13 (TEMPORARY)
+            aten::rsub.Scalar                        2 (INPUT)                                     -> 14 (TEMPORARY)
+            aten::mul.Tensor                         13 (TEMPORARY), 14 (TEMPORARY)                -> 15 (TEMPORARY)
+            aten::sub.Tensor                         15 (TEMPORARY), 12 (TEMPORARY)                -> 16 (TEMPORARY)
+            aten::mul.Tensor                         16 (TEMPORARY), 9 (INPUT)                     -> 17 (AUTOGRAD_DETAIL)
+            aten::div_.Scalar                        17 (AUTOGRAD_DETAIL)                          -> 17 (AUTOGRAD_DETAIL)
+            aten::slice.Tensor                       17 (AUTOGRAD_DETAIL)                          -> 17 (AUTOGRAD_DETAIL)
+            aten::slice.Tensor                       17 (AUTOGRAD_DETAIL)                          -> 17 (AUTOGRAD_DETAIL)
+            aten::mul.Tensor                         17 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 18 (AUTOGRAD_DETAIL)
+            aten::sum.dim_IntList                    18 (AUTOGRAD_DETAIL)                          -> 19 (GRADIENT)
+            aten::view                               19 (GRADIENT)                                 -> 19 (GRADIENT)
+            aten::detach                             19 (GRADIENT)                                 -> ???
+            aten::mul.Tensor                         17 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 20 (AUTOGRAD_DETAIL)
+            aten::sum.dim_IntList                    20 (AUTOGRAD_DETAIL)                          -> 21 (GRADIENT)
+            aten::view                               21 (GRADIENT)                                 -> 21 (GRADIENT)
+            aten::detach                             21 (GRADIENT)                                 -> ???""",
         )
 
     def test_categories_e2e_simple_fwd_bwd_step(self) -> None:
@@ -938,24 +940,29 @@ class TestMemoryProfilerE2E(TestCase):
 
             -- Backward ---------------------------------------------------------------------------------------------
             aten::ones_like                          8 (ACTIVATION)                                -> 9 (ACTIVATION)
-            aten::sigmoid                            7 (ACTIVATION)                                -> 10 (TEMPORARY)
-            aten::sub.Tensor                         10 (TEMPORARY), 2 (INPUT)                     -> 11 (TEMPORARY)
-            aten::mul.Tensor                         11 (TEMPORARY), 9 (ACTIVATION)                -> 12 (AUTOGRAD_DETAIL)
-            aten::div_.Scalar                        12 (AUTOGRAD_DETAIL)                          -> 12 (AUTOGRAD_DETAIL)
-            aten::slice.Tensor                       12 (AUTOGRAD_DETAIL)                          -> 12 (AUTOGRAD_DETAIL)
-            aten::slice.Tensor                       12 (AUTOGRAD_DETAIL)                          -> 12 (AUTOGRAD_DETAIL)
-            aten::mul.Tensor                         12 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 13 (AUTOGRAD_DETAIL)
-            aten::sum.dim_IntList                    13 (AUTOGRAD_DETAIL)                          -> 14 (GRADIENT)
-            aten::view                               14 (GRADIENT)                                 -> 14 (GRADIENT)
-            aten::detach                             14 (GRADIENT)                                 -> 14 (GRADIENT)
-            aten::mul.Tensor                         12 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 15 (AUTOGRAD_DETAIL)
-            aten::sum.dim_IntList                    15 (AUTOGRAD_DETAIL)                          -> 16 (GRADIENT)
-            aten::view                               16 (GRADIENT)                                 -> 16 (GRADIENT)
-            aten::detach                             16 (GRADIENT)                                 -> 16 (GRADIENT)
+            aten::neg                                7 (ACTIVATION)                                -> 10 (TEMPORARY)
+            aten::sigmoid                            10 (TEMPORARY)                                -> 11 (TEMPORARY)
+            aten::mul.Tensor                         11 (TEMPORARY), 2 (INPUT)                     -> 12 (TEMPORARY)
+            aten::sigmoid                            7 (ACTIVATION)                                -> 13 (TEMPORARY)
+            aten::rsub.Scalar                        2 (INPUT)                                     -> 14 (TEMPORARY)
+            aten::mul.Tensor                         13 (TEMPORARY), 14 (TEMPORARY)                -> 15 (TEMPORARY)
+            aten::sub.Tensor                         15 (TEMPORARY), 12 (TEMPORARY)                -> 16 (TEMPORARY)
+            aten::mul.Tensor                         16 (TEMPORARY), 9 (ACTIVATION)                -> 17 (AUTOGRAD_DETAIL)
+            aten::div_.Scalar                        17 (AUTOGRAD_DETAIL)                          -> 17 (AUTOGRAD_DETAIL)
+            aten::slice.Tensor                       17 (AUTOGRAD_DETAIL)                          -> 17 (AUTOGRAD_DETAIL)
+            aten::slice.Tensor                       17 (AUTOGRAD_DETAIL)                          -> 17 (AUTOGRAD_DETAIL)
+            aten::mul.Tensor                         17 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 18 (AUTOGRAD_DETAIL)
+            aten::sum.dim_IntList                    18 (AUTOGRAD_DETAIL)                          -> 19 (GRADIENT)
+            aten::view                               19 (GRADIENT)                                 -> 19 (GRADIENT)
+            aten::detach                             19 (GRADIENT)                                 -> 19 (GRADIENT)
+            aten::mul.Tensor                         17 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 20 (AUTOGRAD_DETAIL)
+            aten::sum.dim_IntList                    20 (AUTOGRAD_DETAIL)                          -> 21 (GRADIENT)
+            aten::view                               21 (GRADIENT)                                 -> 21 (GRADIENT)
+            aten::detach                             21 (GRADIENT)                                 -> 21 (GRADIENT)
 
             -- Optimizer --------------------------------------------------------------------------------------------
-            aten::add_.Tensor                        3 (PARAMETER), 16 (GRADIENT)                  -> 3 (PARAMETER)
-            aten::add_.Tensor                        5 (PARAMETER), 14 (GRADIENT)                  -> 5 (PARAMETER)""",
+            aten::add_.Tensor                        3 (PARAMETER), 21 (GRADIENT)                  -> 3 (PARAMETER)
+            aten::add_.Tensor                        5 (PARAMETER), 19 (GRADIENT)                  -> 5 (PARAMETER)""",
         )
 
     def test_categories_e2e_simple_module_fwd(self) -> None:
@@ -1113,8 +1120,8 @@ class TestMemoryProfilerE2E(TestCase):
 
             -- Backward ---------------------------------------------------------------------------------------------
             aten::ones_like                          13 (ACTIVATION)                               -> 14 (ACTIVATION)
-            aten::expand                             14 (ACTIVATION)                               -> 14 (ACTIVATION)
             aten::div.Scalar                         14 (ACTIVATION)                               -> 15 (AUTOGRAD_DETAIL)
+            aten::expand                             15 (AUTOGRAD_DETAIL)                          -> 15 (AUTOGRAD_DETAIL)
             aten::expand                             15 (AUTOGRAD_DETAIL)                          -> 15 (AUTOGRAD_DETAIL)
             aten::pow.Tensor_Scalar                  10 (ACTIVATION)                               -> 16 (TEMPORARY)
             aten::mul.Scalar                         16 (TEMPORARY)                                -> 17 (TEMPORARY)
@@ -1219,57 +1226,56 @@ class TestMemoryProfilerE2E(TestCase):
             create                     ACTIVATION                   7(v0)         2048 kB
             create                     ACTIVATION                   8(v0)         2048 kB
             destroy                    ACTIVATION                   7(v0)         2048 kB
-            create                     ACTIVATION                   9(v0)         2048 kB
-            create                     TEMPORARY                   10(v0)         2048 kB
-            destroy                    TEMPORARY                   10(v0)         2048 kB
+            create                     TEMPORARY                    9(v0)         2048 kB
+            destroy                    TEMPORARY                    9(v0)         2048 kB
+            create                     AUTOGRAD_DETAIL             10(v0)         2048 kB
             create                     AUTOGRAD_DETAIL             11(v0)         2048 kB
-            create                     AUTOGRAD_DETAIL             12(v0)         2048 kB
+            destroy                    AUTOGRAD_DETAIL             10(v0)         2048 kB
+            create                     GRADIENT                    12(v0)         1024 kB
+            create                     AUTOGRAD_DETAIL             13(v0)         2048 kB
             destroy                    AUTOGRAD_DETAIL             11(v0)         2048 kB
-            create                     GRADIENT                    13(v0)         1024 kB
             create                     AUTOGRAD_DETAIL             14(v0)         2048 kB
-            destroy                    AUTOGRAD_DETAIL             12(v0)         2048 kB
-            create                     AUTOGRAD_DETAIL             15(v0)         2048 kB
-            destroy                    AUTOGRAD_DETAIL             14(v0)         2048 kB
+            destroy                    AUTOGRAD_DETAIL             13(v0)         2048 kB
             destroy                    ACTIVATION                   6(v0)         2048 kB
-            create                     GRADIENT                    16(v0)          128 kB
-            create                     GRADIENT                    17(v0)            2 kB
-            destroy                    AUTOGRAD_DETAIL             15(v0)         2048 kB
+            create                     GRADIENT                    15(v0)          128 kB
+            create                     GRADIENT                    16(v0)            2 kB
+            destroy                    AUTOGRAD_DETAIL             14(v0)         2048 kB
+            create                     OPTIMIZER_STATE             17(v0)          128 kB
             create                     OPTIMIZER_STATE             18(v0)          128 kB
-            create                     OPTIMIZER_STATE             19(v0)          128 kB
+            create                     OPTIMIZER_STATE             19(v0)            2 kB
             create                     OPTIMIZER_STATE             20(v0)            2 kB
-            create                     OPTIMIZER_STATE             21(v0)            2 kB
+            create                     OPTIMIZER_STATE             21(v0)         1024 kB
             create                     OPTIMIZER_STATE             22(v0)         1024 kB
-            create                     OPTIMIZER_STATE             23(v0)         1024 kB
+            increment_version          OPTIMIZER_STATE             17(v0)          128 kB
             increment_version          OPTIMIZER_STATE             18(v0)          128 kB
-            increment_version          OPTIMIZER_STATE             19(v0)          128 kB
-            increment_version          OPTIMIZER_STATE             19(v1)          128 kB
+            increment_version          OPTIMIZER_STATE             18(v1)          128 kB
+            create                     ???                         23(v0)          128 kB
             create                     ???                         24(v0)          128 kB
-            create                     ???                         25(v0)          128 kB
-            destroy                    ???                         24(v0)          128 kB
-            increment_version          ???                         25(v0)          128 kB
+            destroy                    ???                         23(v0)          128 kB
+            increment_version          ???                         24(v0)          128 kB
             increment_version          PARAMETER                    0(v0)          128 kB
+            increment_version          OPTIMIZER_STATE             19(v0)            2 kB
             increment_version          OPTIMIZER_STATE             20(v0)            2 kB
-            increment_version          OPTIMIZER_STATE             21(v0)            2 kB
-            increment_version          OPTIMIZER_STATE             21(v1)            2 kB
+            increment_version          OPTIMIZER_STATE             20(v1)            2 kB
+            create                     ???                         25(v0)            2 kB
             create                     ???                         26(v0)            2 kB
-            create                     ???                         27(v0)            2 kB
-            destroy                    ???                         26(v0)            2 kB
-            increment_version          ???                         27(v0)            2 kB
-            destroy                    ???                         25(v1)          128 kB
+            destroy                    ???                         25(v0)            2 kB
+            increment_version          ???                         26(v0)            2 kB
+            destroy                    ???                         24(v1)          128 kB
             increment_version          PARAMETER                    1(v0)            2 kB
+            increment_version          OPTIMIZER_STATE             21(v0)         1024 kB
             increment_version          OPTIMIZER_STATE             22(v0)         1024 kB
-            increment_version          OPTIMIZER_STATE             23(v0)         1024 kB
-            increment_version          OPTIMIZER_STATE             23(v1)         1024 kB
+            increment_version          OPTIMIZER_STATE             22(v1)         1024 kB
+            create                     ???                         27(v0)         1024 kB
             create                     ???                         28(v0)         1024 kB
-            create                     ???                         29(v0)         1024 kB
-            destroy                    ???                         28(v0)         1024 kB
-            increment_version          ???                         29(v0)         1024 kB
-            destroy                    ???                         27(v1)            2 kB
+            destroy                    ???                         27(v0)         1024 kB
+            increment_version          ???                         28(v0)         1024 kB
+            destroy                    ???                         26(v1)            2 kB
             increment_version          PARAMETER                    2(v0)         1024 kB
-            destroy                    ???                         29(v1)         1024 kB
-            destroy                    GRADIENT                    16(v0)          128 kB
-            destroy                    GRADIENT                    17(v0)            2 kB
-            destroy                    GRADIENT                    13(v0)         1024 kB""",
+            destroy                    ???                         28(v1)         1024 kB
+            destroy                    GRADIENT                    15(v0)          128 kB
+            destroy                    GRADIENT                    16(v0)            2 kB
+            destroy                    GRADIENT                    12(v0)         1024 kB""",
         )
 
 
@@ -1507,10 +1513,6 @@ class TestMemoryProfilerE2EDeviceType(TestCase):
 class TestMemoryProfilerTimeline(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipXPUIf(
-        True,
-        "The XPU Profiler will not cover this case for now. Will support it in next period.",
-    )
     def test_memory_timeline_no_id(self, device) -> None:
         # On CPU the default behavior is to simply forward to malloc. That
         # means that when we free `x` the allocator doesn't actually know how

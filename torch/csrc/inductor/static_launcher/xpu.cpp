@@ -11,7 +11,9 @@
 #include <fmt/format.h>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
+#include <type_traits>
 
 #include <torch/csrc/utils/pythoncapi_compat.h>
 
@@ -50,6 +52,17 @@ const at::xpu::LevelZero& ze() {
 // 120 max args + 1 for global scratch size
 #define MAX_ARGS 121
 typedef void* syclDevicePtr_t;
+
+/**
+ * A loaded kernel and the launch properties that are fixed once it is loaded:
+ * the threads per warp used with num_warps to size the work-group, and its
+ * argument count.
+ */
+struct LoadedKernel {
+  sycl::kernel kernel;
+  uint32_t threadsPerWarp = 0;
+  uint32_t numArgs = 0;
+};
 
 syclDevicePtr_t getPointer(
     PyObject* obj,
@@ -204,7 +217,25 @@ void parseKernelArgs(
   }
 }
 
-inline ze_module_handle_t _createModule(
+// A Level Zero handle owns its resource until make_kernel_bundle/make_kernel
+// transfers it to SYCL. The ZE_CHECKs in between throw, and nothing else holds
+// the handle, so the load path keeps one of these over that window.
+struct ZeModuleDeleter {
+  void operator()(ze_module_handle_t module) const {
+    ze().zeModuleDestroy(module);
+  }
+};
+struct ZeKernelDeleter {
+  void operator()(ze_kernel_handle_t kernel) const {
+    ze().zeKernelDestroy(kernel);
+  }
+};
+using ZeModulePtr =
+    std::unique_ptr<std::remove_pointer_t<ze_module_handle_t>, ZeModuleDeleter>;
+using ZeKernelPtr =
+    std::unique_ptr<std::remove_pointer_t<ze_kernel_handle_t>, ZeKernelDeleter>;
+
+inline ZeModulePtr _createModule(
     const uint8_t* binaryPtr,
     size_t binarySize,
     const int device_idx) {
@@ -225,9 +256,12 @@ inline ze_module_handle_t _createModule(
   moduleDescription.pInputModule = binaryPtr;
   moduleDescription.pBuildFlags = buildFlags;
   ze_module_build_log_handle_t buildLog = nullptr;
-  ze_module_handle_t module = nullptr;
+  ze_module_handle_t rawModule = nullptr;
   ze_result_t error_no = ze().zeModuleCreate(
-      context, device, &moduleDescription, &module, &buildLog);
+      context, device, &moduleDescription, &rawModule, &buildLog);
+  // The spec leaves *phModule undefined on failure, so adopt it only on
+  // success.
+  ZeModulePtr module(error_no == ZE_RESULT_SUCCESS ? rawModule : nullptr);
 
   if (error_no != ZE_RESULT_SUCCESS) {
     // Retrieve the build log on a best-effort basis; failures here must not
@@ -250,44 +284,68 @@ inline ze_module_handle_t _createModule(
   return module;
 }
 
-inline sycl::kernel* _createKernel(
-    ze_module_handle_t module,
+inline LoadedKernel _createKernel(
+    ZeModulePtr module,
     const char* kernelName,
-    uint32_t* nSpillsPtr = nullptr) {
+    uint32_t& nSpills) {
   assert(module);
   assert(kernelName);
-  ze_kernel_handle_t kernel = nullptr;
+  auto& syclContext = c10::xpu::get_device_context();
+  // Hand the module to SYCL before creating a kernel from it. zeModuleDestroy
+  // requires every kernel handle created from the module to be destroyed first,
+  // so the bundle has to be declared ahead of the kernel guard to be torn down
+  // after it when anything below throws.
+  ze_module_handle_t rawModule = module.get();
+  auto mod = sycl::make_kernel_bundle<
+      sycl::backend::ext_oneapi_level_zero,
+      sycl::bundle_state::executable>(
+      {rawModule, sycl::ext::oneapi::level_zero::ownership::transfer},
+      syclContext);
+  module.release();
+
+  ze_kernel_handle_t rawKernel = nullptr;
   ze_kernel_desc_t kernelDescription = {};
   kernelDescription.stype = ZE_STRUCTURE_TYPE_KERNEL_DESC;
   kernelDescription.pNext = nullptr;
   kernelDescription.flags = ZE_KERNEL_FLAG_FORCE_RESIDENCY;
   kernelDescription.pKernelName = kernelName;
-  ZE_CHECK(ze().zeKernelCreate(module, &kernelDescription, &kernel));
-  if (nSpillsPtr) {
-    ze_kernel_properties_t props;
-    props.stype = ZE_STRUCTURE_TYPE_KERNEL_PROPERTIES;
-    props.pNext = nullptr;
-    ZE_CHECK(ze().zeKernelGetProperties(kernel, &props));
-    *nSpillsPtr = props.spillMemSize;
-  }
-  auto& syclContext = c10::xpu::get_device_context();
-  auto mod = sycl::make_kernel_bundle<
-      sycl::backend::ext_oneapi_level_zero,
-      sycl::bundle_state::executable>(
-      {module, sycl::ext::oneapi::level_zero::ownership::transfer},
+  ZE_CHECK(ze().zeKernelCreate(rawModule, &kernelDescription, &rawKernel));
+  ZeKernelPtr kernel(rawKernel);
+  ze_kernel_properties_t props{};
+  props.stype = ZE_STRUCTURE_TYPE_KERNEL_PROPERTIES;
+  props.pNext = nullptr;
+  ZE_CHECK(ze().zeKernelGetProperties(kernel.get(), &props));
+  // requiredSubgroupSize is the intel_reqd_sub_group_size attribute triton
+  // always emits. If a kernel declares none, the compiler picks its SIMD width;
+  // only for the work-group size do we assume triton's default warp size of 32.
+  const uint32_t requiredSimd = props.requiredSubgroupSize;
+  const uint32_t threadsPerWarp = requiredSimd != 0 ? requiredSimd : 32;
+  // Level Zero reports spillMemSize in bytes per hardware thread, while
+  // CUDA/HIP report n_spills as LOCAL_SIZE_BYTES / 4, i.e. dword-equivalents
+  // per lane. Inductor's spill thresholds are calibrated on the latter, so
+  // normalize the same way the Intel triton driver does; otherwise the
+  // statically launched kernel reports a value 4 * SIMD width too large.
+  // maxSubgroupSize is only a best-effort stand-in here: Level Zero documents
+  // it as a maximum, not as the compiled width. Truncating division matches
+  // CUDA/HIP, so a scratch allocation below one dword per lane reports 0. With
+  // an unknown SIMD width, report the raw bytes: over-reporting beats hiding an
+  // allocation.
+  const uint32_t spillSimd =
+      requiredSimd != 0 ? requiredSimd : props.maxSubgroupSize;
+  nSpills = spillSimd != 0 ? props.spillMemSize / (4 * spillSimd)
+                           : props.spillMemSize;
+  auto fun = sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
+      {mod, kernel.get(), sycl::ext::oneapi::level_zero::ownership::transfer},
       syclContext);
-  auto fun =
-      new sycl::kernel(sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
-          {mod, kernel, sycl::ext::oneapi::level_zero::ownership::transfer},
-          syclContext));
-  return fun;
+  kernel.release();
+  return LoadedKernel{std::move(fun), threadsPerWarp, props.numKernelArgs};
 }
 
-sycl::kernel* loadKernel(
+std::unique_ptr<LoadedKernel> loadKernel(
     const char* filePath,
     const char* funcName,
     uint32_t sharedMemBytes,
-    uint32_t* nSpillsPtr,
+    uint32_t& nSpills,
     int device_idx) {
   std::ifstream IFS(filePath, std::ios::binary);
   std::ostringstream OSS;
@@ -296,7 +354,8 @@ sycl::kernel* loadKernel(
   auto mod = _createModule(
       reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), device_idx);
 
-  return _createKernel(mod, funcName, nSpillsPtr);
+  return std::make_unique<LoadedKernel>(
+      _createKernel(std::move(mod), funcName, nSpills));
 }
 
 template <typename T>
@@ -349,7 +408,7 @@ void setKernelArg(
 }
 
 void launchKernel(
-    sycl::kernel* kernelPtr,
+    const LoadedKernel* loadedKernel,
     uint32_t gridX,
     uint32_t gridY,
     uint32_t gridZ,
@@ -358,14 +417,9 @@ void launchKernel(
     const char* argTypes,
     void** params,
     sycl::queue* queuePtr) {
-  uint32_t threadsPerWarp = kernelPtr->get_info<
-      sycl::info::kernel_device_specific::compile_sub_group_size>(
-      queuePtr->get_device());
-  if (threadsPerWarp == 0) {
-    threadsPerWarp = 32; // default to 32 if not set
-  }
-  const uint32_t kernelNumArgs =
-      kernelPtr->get_info<sycl::info::kernel::num_args>();
+  const sycl::kernel& kernel = loadedKernel->kernel;
+  const uint32_t threadsPerWarp = loadedKernel->threadsPerWarp;
+  const uint32_t kernelNumArgs = loadedKernel->numArgs;
   const uint32_t numParams = static_cast<uint32_t>(std::strlen(argTypes));
   size_t globalRangeX = static_cast<size_t>(gridX) * threadsPerWarp * numWarps;
   size_t globalRangeY = gridY;
@@ -394,9 +448,9 @@ void launchKernel(
       using share_mem_t = sycl::local_accessor<int8_t, 1>;
       share_mem_t localBuffer = share_mem_t(sharedMemBytes, cgh);
       cgh.set_arg(static_cast<int>(numParams), localBuffer);
-      cgh.parallel_for(parallelWorkSize, *kernelPtr);
+      cgh.parallel_for(parallelWorkSize, kernel);
     } else {
-      cgh.parallel_for(parallelWorkSize, *kernelPtr);
+      cgh.parallel_for(parallelWorkSize, kernel);
     }
   };
   queuePtr->submit(cgf);
@@ -421,21 +475,28 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   // Level-zero does not support get n_regs, so we return 0 here.
   uint32_t n_regs = 0;
   uint32_t n_spills = 0;
-  sycl::kernel* func =
-      loadKernel(filePath, funcName, sharedMemBytes, &n_spills, device);
+  std::unique_ptr<LoadedKernel> func =
+      loadKernel(filePath, funcName, sharedMemBytes, n_spills, device);
 
   PyObject* kernel_py = PyCapsule_New(
-      reinterpret_cast<void*>(func), "sycl_kernel", [](PyObject* cap) {
-        void* ptr = PyCapsule_GetPointer(cap, "sycl_kernel");
-        delete reinterpret_cast<sycl::kernel*>(ptr);
+      reinterpret_cast<void*>(func.get()),
+      "static_xpu_kernel",
+      [](PyObject* cap) {
+        void* ptr = PyCapsule_GetPointer(cap, "static_xpu_kernel");
+        delete reinterpret_cast<LoadedKernel*>(ptr);
       });
+  if (kernel_py == nullptr) {
+    return nullptr;
+  }
+  func.release();
 
-  return Py_BuildValue("(Oii)", kernel_py, n_regs, n_spills);
+  // "N": the tuple takes ownership of the capsule reference.
+  return Py_BuildValue("(Nii)", kernel_py, n_regs, n_spills);
   END_HANDLE_TH_ERRORS
 }
 
 PyObject* launch_kernel_inner(
-    sycl::kernel* func,
+    const LoadedKernel* func,
     int gridX,
     int gridY,
     int gridZ,
@@ -468,7 +529,7 @@ PyObject* launch_kernel_inner(
 }
 
 PyObject* launch_kernel_slow(
-    sycl::kernel* func,
+    const LoadedKernel* func,
     int gridX,
     int gridY,
     int gridZ,
@@ -542,8 +603,11 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
     Py_RETURN_NONE;
   }
 
-  sycl::kernel* func = reinterpret_cast<sycl::kernel*>(
-      PyCapsule_GetPointer(kernel_py, "sycl_kernel")); // NOLINT
+  const LoadedKernel* func = reinterpret_cast<const LoadedKernel*>(
+      PyCapsule_GetPointer(kernel_py, "static_xpu_kernel")); // NOLINT
+  if (func == nullptr) {
+    return nullptr;
+  }
   sycl::queue* queuePtr = reinterpret_cast<sycl::queue*>(stream); // NOLINT
   auto num_args = std::strlen(argTypes);
   // Kernels with no arguments should just pass nullptr to cuLaunchKernel

@@ -6,7 +6,7 @@ from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     make_gemm_param_and_validate,
 )
 from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
-    gemm_gfx950,
+    {% if IS_MXFP %}gemm_mxfp_gfx950{% else %}gemm_gfx950{% endif %} as _kernel,
 )
 from torch._inductor.runtime.flydsl_cache import (
     configure_flydsl_cache_dir,
@@ -25,23 +25,37 @@ def _inductor_tensor_arg(tensor):
     return flyc.from_torch_tensor(tensor).mark_layout_dynamic()
 
 
+{% if IS_MXFP and HAS_BIAS %}
+{{def_kernel("mat1", "mat2", "scale_a", "scale_b", "bias")}}
+{% elif IS_MXFP %}
+{{def_kernel("mat1", "mat2", "scale_a", "scale_b")}}
+{% else %}
 {{def_kernel("mat1", "mat2")}}
+{% endif %}
     output = {{get_output()}}
+{% if IS_MXFP %}
+    mat1 = mat1.view(torch.uint8)
+    mat2 = mat2.view(torch.uint8)
+    scale_a = scale_a.view(torch.uint8)
+    scale_b = scale_b.view(torch.uint8)
+{% endif %}
+
     global _gemm_param
     param = _gemm_param
     if param is None:
         with _gemm_param_lock:
             param = _gemm_param
             if param is None:
-                has_k_tail = infer_has_k_tail(GEMM_K, TILE_K, STAGES)
-                if USE_HALF_TILE_INTERLEAVED:
-                    has_k_tail = has_k_tail or (((GEMM_K + TILE_K - 1) // TILE_K) % 2 != 0)
+                has_k_tail = infer_has_k_tail(GEMM_K, TILE_K, STAGES, USE_HALF_TILE_INTERLEAVED)
                 param = make_gemm_param_and_validate(
                     GEMM_M,
                     GEMM_N,
                     GEMM_K,
                     {
                         "dtype_id": GEMM_DTYPE_ID,
+{% if IS_MXFP %}
+                        "out_dtype_id": OUT_DTYPE_ID,
+{% endif %}
                         "tile_m": TILE_M,
                         "tile_n": TILE_N,
                         "tile_k": TILE_K,
@@ -52,7 +66,7 @@ def _inductor_tensor_arg(tensor):
                         "use_half_tile_interleaved": USE_HALF_TILE_INTERLEAVED,
                         "a_is_transposed": A_IS_TRANSPOSED,
                         "b_is_transposed": B_IS_TRANSPOSED,
-                        "has_bias": False,
+                        "has_bias": {% if IS_MXFP and HAS_BIAS %}True{% else %}False{% endif %},
                         "has_k_tail": has_k_tail,
                     },
                 )
@@ -63,10 +77,15 @@ def _inductor_tensor_arg(tensor):
                     )
                 _gemm_param = param
     configure_flydsl_cache_dir()
-    compile_args = (
-        _inductor_tensor_arg(output),
-        _inductor_tensor_arg(mat1),
-        _inductor_tensor_arg(mat2),
+    tensor_args = (
+        output,
+        mat1,
+        mat2{% if IS_MXFP %},
+        scale_a,
+        scale_b,
+        {% if HAS_BIAS %}bias{% else %}output{% endif %}{% endif %}
+    )
+    compile_args = tuple(_inductor_tensor_arg(arg) for arg in tensor_args) + (
         param,
         stream,
     )
@@ -80,14 +99,14 @@ def _inductor_tensor_arg(tensor):
             "by the FlyDSL precompile path"
         )
     if flydsl_compile_only:
-        flyc.compile(gemm_gfx950, *compile_args)
+        flyc.compile(_kernel, *compile_args)
     else:
         run_cached_flydsl(
-            gemm_gfx950,
+            _kernel,
             *compile_args,
             constexpr_param=param,
             compiler=flyc.compile,
-            dispatch_args=(output, mat1, mat2, param, stream),
+            dispatch_args=(*tensor_args, param, stream),
         )
     return output
 
@@ -101,17 +120,6 @@ def {{kernel_name}}_precompile(
     flydsl_gpu_arch=None,
 ):
     """Warm FlyDSL's disk cache using metadata-only fake tensors."""
-    dtype_mat1 = getattr(torch, precompile_dtypes["mat1"])
-    dtype_mat2 = getattr(torch, precompile_dtypes["mat2"])
-    dtype_output = getattr(torch, precompile_dtypes["output"])
-
-    shape_mat1 = tuple(precompile_shapes["mat1"])
-    shape_mat2 = tuple(precompile_shapes["mat2"])
-    shape_output = tuple(precompile_shapes["output"])
-
-    stride_mat1 = tuple(precompile_strides["mat1"])
-    stride_mat2 = tuple(precompile_strides["mat2"])
-    stride_output = tuple(precompile_strides["output"])
 
     env_updates = {"COMPILE_ONLY": "1", "FLYDSL_COMPILE_ONLY": "1"}
     if flydsl_gpu_arch is not None:
@@ -122,10 +130,16 @@ def {{kernel_name}}_precompile(
 
         with FakeTensorMode():
 
-            def _fake_proxy(shape, stride, dtype):
-                return torch.empty_strided(shape, stride, dtype=dtype, device="cpu")
+            def _fake_proxy(name):
+                return torch.empty_strided(
+                    tuple(precompile_shapes[name]),
+                    tuple(precompile_strides[name]),
+                    dtype=getattr(torch, precompile_dtypes[name]),
+                    device="cpu",
+                )
 
-            mat1 = _fake_proxy(shape_mat1, stride_mat1, dtype_mat1)
-            mat2 = _fake_proxy(shape_mat2, stride_mat2, dtype_mat2)
-            output = _fake_proxy(shape_output, stride_output, dtype_output)
-            {{kernel_name}}_main(mat1, mat2, output, stream=0)
+            input_names = ("mat1", "mat2"{% if IS_MXFP %}, "scale_a", "scale_b"{% if HAS_BIAS %}, "bias"{% endif %}{% endif %})
+            args = tuple(_fake_proxy(name) for name in input_names) + (
+                _fake_proxy("output"),
+            )
+            {{kernel_name}}_main(*args, stream=0)

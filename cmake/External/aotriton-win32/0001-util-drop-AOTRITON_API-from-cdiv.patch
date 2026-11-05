@@ -1,0 +1,13 @@
+diff --git a/include/aotriton/util.h b/include/aotriton/util.h
+index f3b2483..60960de 100644
+--- a/include/aotriton/util.h
++++ b/include/aotriton/util.h
+@@ -37,7 +37,7 @@ TRICAT(uint16_t high, uint16_t mid, uint16_t low) {
+ }
+ 
+ template<typename T>
+-T AOTRITON_API
++T
+ cdiv(T numerator, T denominator) {
+   return (numerator + (denominator - 1)) / denominator;
+ }

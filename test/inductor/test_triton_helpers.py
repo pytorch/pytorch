@@ -14,18 +14,26 @@ Covers:
 import torch
 from torch._inductor.runtime.triton_helpers import (
     exclusive_scan_decoupled_lookback_64,
+    exp,
     max2,
     max2_strict,
     maximum,
     min2,
     min2_strict,
     minimum,
+    online_softmax_combine,
+    online_softmax_combine_with_sum,
     rand4x,
     randn4x,
     select_one,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_dtype import floating_types
+from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
@@ -151,6 +159,111 @@ if HAS_GPU:
         else:
             tl.store(min_ptr + row, min2(x, 0))
             tl.store(max_ptr + row, max2(x, 0))
+
+    @triton.jit
+    def test_kernel_online_softmax_combine(
+        a_ptr,
+        b_ptr,
+        sa_ptr,
+        sb_ptr,
+        actual_ptr,
+        expected_ptr,
+        N: tl.constexpr,
+        BLOCK_SIZE: tl.constexpr,
+        FAST: tl.constexpr,
+        STRICT: tl.constexpr,
+        WITH_SUM: tl.constexpr,
+    ):
+        offsets = tl.arange(0, BLOCK_SIZE)
+        mask = offsets < N
+        a = tl.load(a_ptr + offsets, mask, other=0)
+        b = tl.load(b_ptr + offsets, mask, other=0)
+        sa = tl.load(sa_ptr + offsets, mask, other=0)
+        sb = tl.load(sb_ptr + offsets, mask, other=0)
+        maximum_value = tl.maximum(a, b, propagate_nan=tl.PropagateNan.ALL)
+        if STRICT:
+            maximum_value = tl.where(a == b, b, maximum_value)
+        scale_a = tl.where(
+            maximum_value == -float("inf"), 1.0, exp(a - maximum_value, FAST)
+        )
+        scale_b = tl.where(
+            maximum_value == -float("inf"), 1.0, exp(b - maximum_value, FAST)
+        )
+        if WITH_SUM:
+            result_max, result_sum = online_softmax_combine_with_sum(
+                a, sa, b, sb, FAST, STRICT
+            )
+            expected_sum = sa * scale_a + sb * scale_b
+        else:
+            result_max, result_sum = online_softmax_combine(a, sa, b, FAST, STRICT)
+            expected_sum = sa * scale_a + scale_b
+        tl.store(actual_ptr + offsets, result_max, mask)
+        tl.store(actual_ptr + offsets + N, result_sum, mask)
+        tl.store(expected_ptr + offsets, maximum_value, mask)
+        tl.store(expected_ptr + offsets + N, expected_sum, mask)
+
+
+class OnlineSoftmaxCombineTest(TestCase):
+    @dtypes(*floating_types())
+    @parametrize("fast", (False, True))
+    @parametrize("strict", (False, True))
+    @parametrize("with_sum", (False, True))
+    @parametrize("fusion", (False, True))
+    def test_combine_special_values(
+        self, device, dtype, fast, strict, with_sum, fusion
+    ) -> None:
+        finfo = torch.finfo(dtype)
+        values = torch.tensor(
+            [
+                -float("inf"),
+                float("inf"),
+                float("nan"),
+                -0.0,
+                0.0,
+                -1e30,
+                1e30,
+                -90.0,
+                90.0,
+                -1.0,
+                1.0,
+                1e-30,
+                finfo.min,
+                finfo.max,
+                -finfo.tiny,
+                finfo.tiny,
+                -finfo.tiny * finfo.eps,
+                finfo.tiny * finfo.eps,
+            ],
+            dtype=dtype,
+            device=device,
+        )
+        a, b = torch.meshgrid(values, values, indexing="ij")
+        finite = torch.linspace(-80, 80, 256, device=device, dtype=dtype)
+        a = torch.cat((a.flatten(), finite))
+        b = torch.cat((b.flatten(), finite.flip(0)))
+        n = a.numel()
+        sa = torch.linspace(0, 16, n, device=device, dtype=dtype)
+        sb = sa.flip(0)
+        actual = torch.empty(2 * n, device=device, dtype=dtype)
+        expected = torch.empty_like(actual)
+        test_kernel_online_softmax_combine[(1,)](
+            a,
+            b,
+            sa,
+            sb,
+            actual,
+            expected,
+            N=n,
+            BLOCK_SIZE=triton.next_power_of_2(n),
+            FAST=fast,
+            STRICT=strict,
+            WITH_SUM=with_sum,
+            enable_fp_fusion=fusion,
+        )
+        self.assertEqual(actual.isnan(), expected.isnan())
+        mask = ~expected.isnan()
+        bits = torch.int32 if dtype == torch.float32 else torch.int64
+        self.assertEqual(actual.view(bits)[mask], expected.view(bits)[mask])
 
 
 class ExclusiveScanDecoupledLookback64Test(TestCase):
@@ -493,6 +606,9 @@ class MinimumMaximumTest(TestCase):
 
 
 if HAS_GPU:
+    instantiate_device_type_tests(
+        OnlineSoftmaxCombineTest, globals(), only_for=GPU_TYPE, allow_xpu=True
+    )
     instantiate_device_type_tests(MinimumMaximumTest, globals(), only_for=GPU_TYPE)
 
 

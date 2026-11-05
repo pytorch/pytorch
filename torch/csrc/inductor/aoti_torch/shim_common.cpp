@@ -1,3 +1,4 @@
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/native/quantized/cpu/qlinear.h>
 #include <ATen/record_function.h>
 #include <c10/core/DispatchKey.h>
@@ -38,6 +39,7 @@
 #include <ATen/ops/_addmm_activation.h>
 #include <ATen/ops/_embedding_bag.h>
 #include <ATen/ops/_fft_c2c.h>
+#include <ATen/ops/_foreach_copy.h>
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_mm.h>
@@ -219,7 +221,7 @@ bool aoti_torch_grad_mode_is_enabled() {
 }
 
 void aoti_torch_grad_mode_set_enabled(bool enabled) {
-  return c10::GradMode::set_enabled(enabled);
+  c10::GradMode::set_enabled(enabled);
 }
 
 size_t aoti_torch_dtype_element_size(int32_t dtype) {
@@ -495,7 +497,7 @@ AOTITorchError aoti_torch_empty_strided_pinned(
     const int64_t* strides_ptr,
     int32_t dtype,
     int32_t device_type,
-    int32_t device_index,
+    int32_t /*device_index*/,
     AtenTensorHandle* ret_new_tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::IntArrayRef sizes(sizes_ptr, ndim);
@@ -810,7 +812,7 @@ AOTITorchError aoti_torch__scaled_mm(
     AtenTensorHandle scale_result,
     int8_t use_fast_accum,
     AtenTensorHandle* ret0,
-    AtenTensorHandle* ret1) {
+    AtenTensorHandle* /*ret1*/) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
     at::Tensor* mat2_tensor = tensor_handle_to_tensor_pointer(mat2);
@@ -975,6 +977,30 @@ AOTITorchError aoti_torch_copy_(
   });
 }
 
+AOTITorchError aoti_torch__foreach_copy_(
+    const AtenTensorHandle* dst,
+    int64_t dst_len,
+    const AtenTensorHandle* src,
+    int64_t src_len,
+    int32_t non_blocking) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(
+        dst_len == src_len && dst_len > 0,
+        "aoti_torch__foreach_copy_: expected non-empty lists of equal length, got ",
+        dst_len,
+        " dst and ",
+        src_len,
+        " src tensors");
+    TORCH_CHECK(
+        dst != nullptr && src != nullptr,
+        "aoti_torch__foreach_copy_: null tensor handle array");
+    at::_foreach_copy_(
+        pointer_to_list<at::Tensor>(dst, dst_len),
+        pointer_to_list<at::Tensor>(src, src_len),
+        non_blocking != 0);
+  });
+}
+
 // TODO: implement a more efficient version instead of calling into aten
 AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle out,
@@ -1041,7 +1067,7 @@ AOTITorchError aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
     AtenTensorHandle input,
     AtenTensorHandle weight,
     AtenTensorHandle bias, // optional argument
-    int64_t out_channel,
+    int64_t /*out_channel*/,
     AtenTensorHandle* out) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* input_tensor = tensor_handle_to_tensor_pointer(input);
