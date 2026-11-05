@@ -175,6 +175,54 @@ class TestKernelColTile(TestCase):
         )
         self.assertEqual(out, x.var(dim=0), atol=1e-4, rtol=1e-4)
 
+    @parametrize(
+        "dtype,group,npar,shape,nouts",
+        [
+            # 513 rows in 32 blocks of q = 17 leave counts 17 (x30), 3 and 0.
+            (torch.float32, 4, 32, (513, 33), 1),
+            (torch.float32, 8, 32, (513, 33), 1),
+            (torch.float32, 16, 32, (513, 33), 1),
+            (torch.float32, 8, 1, (1024, 33), 1),
+            (torch.float32, 16, 1, (1025, 33), 1),
+            (torch.float32, 4, 16, (3, 1027, 33), 1),
+            (torch.bfloat16, 8, 32, (513, 33), 1),
+            (torch.float16, 16, 1, (3, 1027, 33), 1),
+            (torch.float32, 8, 32, (513, 33), 2),
+            (torch.bfloat16, 4, 16, (3, 1027, 33), 2),
+        ],
+        name_fn=lambda dtype, group, npar, shape, nouts: (
+            f"{str(dtype)[6:]}_g{group}_p{npar}_"
+            + "x".join(map(str, shape))
+            + "_var_mean" * (nouts == 2)
+        ),
+    )
+    def test_grouped_welford_columns(self, dtype, group, npar, shape, nouts):
+        """Equal-count column groups must preserve ragged tails, partials, and batches."""
+        x = torch.randn(shape, device="cuda").to(dtype)
+        welford = T.VarMeanOps if nouts == 2 else T.WelfordOps
+        trait = welford(correction=1, acc=cutlass.Float32)
+        dims = "x".join(map(str, shape))
+        key = f"grouped_welford_{dtype}_{group}_{npar}_{nouts}_{dims}"
+        out = [dtype] * nouts
+        cfg = ct.ColConfig("test_grouped", 64, npar, 1, "column", group=group)
+        with mock.patch.object(ct, "select_col_config", return_value=cfg):
+            if x.dim() == 3:
+                got = ct.reduce_batched_col_tile(trait, key, x, out, nouts)
+            elif nouts == 2:
+                got = ct.reduce_col_tile_2out(trait, key, x, out)
+            else:
+                got = (ct.reduce_col_tile(trait, key, x, dtype),)
+        # Plan keys end with TileReduce.cache_sig; locate col_group by varying only it.
+        op = (trait, cutlass.Float32, "col", 1)
+        sigs = [tile.TileReduce(*op, vec=1, col_group=g).cache_sig for g in (4, 8)]
+        (slot,) = (i - len(sigs[0]) for i, (a, b) in enumerate(zip(*sigs)) if a != b)
+        groups = {k[slot] for k in ct._CACHE if k[:2] == ("coltile", key)}
+        self.assertEqual(groups, {group})
+        with torch.backends.python_native.cutedsl.disabled():
+            want = torch.var_mean(x.double(), dim=-2)[:nouts]
+        for g, w in zip(got, want, strict=True):
+            torch.testing.assert_close(g, w.to(dtype), **_TOL[dtype])
+
     def test_dispatcher_routes_a_column_reduction(self):
         # Numerics cannot distinguish the column arm from K0; assert routing and reshape.
         trait = T.SumOps(acc=cutlass.Float32)
@@ -409,6 +457,31 @@ class TestColTileHost(TestCase):
         self.assertIsNone(col.tm)
         with self.assertRaisesRegex(AssertionError, "no tile"):
             col.tilemap
+
+    @parametrize(
+        "case",
+        [
+            dict(col_group=2),
+            dict(axis="row"),
+            dict(combine=True),
+            dict(vec=4),
+            dict(trait=T.SumOps(acc=cutlass.Float32)),
+        ],
+        name_fn=lambda case: "_".join(case),
+    )
+    def test_column_groups_need_scalar_welford_columns(self, case):
+        welford = T.WelfordOps(acc=cutlass.Float32)
+        kwargs = dict(trait=welford, axis="col", vec=1, col_group=4) | case
+        trait, axis = kwargs.pop("trait"), kwargs.pop("axis")
+        with self.assertRaisesRegex(ValueError, "column groups of 4, 8 or 16 need"):
+            tile.TileReduce(trait, cutlass.Float32, axis, 1024, **kwargs)
+
+    def test_column_groups_share_unroll_variants(self):
+        # The grouped fold ignores unroll, so configs differing only in it share a plan.
+        op = (T.WelfordOps(acc=cutlass.Float32), cutlass.Float32, "col", 1024)
+        kw = dict(vec=1, col_group=4)
+        sigs = {tile.TileReduce(*op, **kw, unroll=u).cache_sig for u in (2, 8)}
+        self.assertEqual(len(sigs), 1)
 
     def test_over_reported_split_stays_correct(self):
         # 64 chunks of ceil(65 / 64) = 2 rows leave the last 31 empty; they must load
