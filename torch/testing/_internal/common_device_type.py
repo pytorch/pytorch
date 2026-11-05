@@ -29,6 +29,8 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
+    _uses_default_test_setup,
+    add_skip_condition,
     clear_tracked_input,
     compose_parametrize_fns,
     dtype_name,
@@ -351,6 +353,10 @@ class Capability:
 
 
 class DeviceTypeTestBase(TestCase):
+    _device_type_at_collection: ClassVar[str | None] = None
+    _default_test_setup_at_collection: ClassVar[tuple[type, type, Any, Any] | None] = (
+        None
+    )
     device_type: str = "generic_device_type"
 
     # When True, @onlyOn-based decorators (@onlyCUDA, @onlyMPS, etc.) will not
@@ -713,9 +719,14 @@ class DeviceTypeTestBase(TestCase):
             # Add the device param kwarg if the test needs device or devices.
             param_kwargs = {} if param_kwargs is None else param_kwargs
             test_sig_params = inspect.signature(test).parameters
+            fresh_device_list = False
             if "device" in test_sig_params or "devices" in test_sig_params:
                 device_arg: str = cls._init_and_get_primary_device()
                 if hasattr(test, "num_required_devices"):
+                    getter = inspect.getattr_static(cls, "get_all_devices")
+                    fresh_device_list = any(
+                        getter is original for original in _NATIVE_DEVICE_GETTERS
+                    )
                     device_arg = cls.get_all_devices()
                 _update_param_kwargs(param_kwargs, "device", device_arg)
 
@@ -758,6 +769,14 @@ class DeviceTypeTestBase(TestCase):
                     self.rel_tol = guard_rel_tol
 
                 return result
+
+            if (
+                fresh_device_list
+                and generic_cls is not None
+                and _uses_default_test_setup(generic_cls)
+            ):
+                if _device_type_at_collection(cls) is not None:
+                    _record_device_count_skip(instantiated_test, test, param_kwargs)
 
             if hasattr(cls, name):
                 raise AssertionError(f"Redefinition of test {name}")
@@ -1307,6 +1326,27 @@ def requires_capabilities(*caps: str):
     return decorator
 
 
+_NATIVE_DEVICE_TEST_SETUPS = {
+    base: inspect.getattr_static(base, "setUpClass")
+    for base in (CPUTestBase, CUDATestBase, MPSTestBase, XPUTestBase, HPUTestBase)
+}
+_NATIVE_DEVICE_GETTERS = tuple(
+    inspect.getattr_static(base, "get_all_devices")
+    for base in _NATIVE_DEVICE_TEST_SETUPS
+)
+
+
+def preserves_device_selection(setup):
+    """Mark this class's setup hook as leaving device skip decisions unchanged.
+
+    The method must preserve device_type, bypass_device_restrictions, and test
+    methods. The guarantee applies only to this callable, not to wrappers or
+    subclasses that inherit it. Place beneath @classmethod for setUpClass.
+    """
+    setup._preserves_device_selection = setup
+    return setup
+
+
 # Adds 'instantiated' device-specific test cases to the given scope.
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class. This function should be used instead of
@@ -1332,6 +1372,24 @@ def instantiate_device_type_tests(
 
     generic_members = set(generic_test_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith("test")]
+    native = _NATIVE_DEVICE_TEST_SETUPS
+    default_setup = _uses_default_test_setup(generic_test_class)
+    static_device = inspect.getattr_static(
+        generic_test_class, "__init__"
+    ) is inspect.getattr_static(TestCase, "__init__")
+    for name in ("setUp", "setUpClass"):
+        if inspect.getattr_static(
+            generic_test_class, name, None
+        ) is inspect.getattr_static(TestCase, name):
+            continue
+        setup = vars(generic_test_class).get(name)
+        if isinstance(setup, classmethod):
+            setup = setup.__func__
+        static_device &= (
+            setup is not None
+            and getattr(setup, "_preserves_device_selection", None) is setup
+        )
+    default_setup_classes = []
 
     # Creates device-specific test cases
     for base in get_desired_device_type_test_bases(
@@ -1346,6 +1404,8 @@ def instantiate_device_type_tests(
         # type set to Any and suppressed due to unsupported runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
         device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
+        if base in (*native, LazyTestBase) and static_device:
+            device_type_test_class._device_type_at_collection = base.device_type
 
         # Arrange for setUpClass and tearDownClass methods defined both in the test template
         # class and in the generic base to be called. This allows device-parameterized test
@@ -1369,6 +1429,8 @@ def instantiate_device_type_tests(
 
         device_type_test_class.setUpClass = _setUpClass
         device_type_test_class.tearDownClass = _tearDownClass
+        if default_setup and base in native:
+            default_setup_classes.append(device_type_test_class)
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
@@ -1398,6 +1460,20 @@ def instantiate_device_type_tests(
         # This lets the instantiated class be discovered by unittest.
         device_type_test_class.__module__ = generic_test_class.__module__
         scope[class_name] = device_type_test_class
+
+    # The existing setup closures share the loop's final base binding.
+    if (
+        default_setup_classes
+        and base in native
+        and inspect.getattr_static(base, "setUpClass") is native[base]
+    ):
+        for cls in default_setup_classes:
+            cls._default_test_setup_at_collection = (
+                generic_test_class,
+                base,
+                vars(cls)["setUpClass"],
+                native[base],
+            )
 
     # Delete the generic form of the test functions (e.g. TestFoo.test_bar()) so they're
     # not discoverable. This mutates the original class (TestFoo), which was removed from
@@ -1698,10 +1774,12 @@ class ops(_TestParametrizer):
                         finally:
                             clear_tracked_input()
 
+                    test_wrapper._preserves_device_arguments = test_wrapper
                     if self.skip_if_dynamo and not TEST_WITH_TORCHINDUCTOR:
                         test_wrapper = skipIfTorchDynamo(
                             "Policy: we don't run OpInfo tests w/ Dynamo"
                         )(test_wrapper)
+                        test_wrapper._preserves_device_arguments = test_wrapper
 
                     # Initialize info for the last input seen. This is useful for tracking
                     # down which inputs caused a test failure. Note that TrackedInputIter is
@@ -1734,23 +1812,60 @@ class ops(_TestParametrizer):
 #       for the test to run. If you want to use a string argument you should
 #       probably define a new decorator instead (see below).
 #   (3) Prefer the existing decorators to defining the 'device_type' kwarg.
+def _device_type_at_collection(cls):
+    if not isinstance(cls, type) or not issubclass(cls, DeviceTypeTestBase):
+        return None
+    device_type = vars(cls).get("_device_type_at_collection")
+    return device_type if type(device_type) is str else None
+
+
+def _static_device_selection(devices):
+    return type(devices) is str or (
+        type(devices) in (tuple, frozenset) and all(type(d) is str for d in devices)
+    )
+
+
+def _skips_on_device_type(should_skip):
+    # Predicate for add_skip_condition when the decision only needs the device
+    # type, which device classes carry as a class attribute at collection.
+    def predicate(cls):
+        device_type = _device_type_at_collection(cls)
+        return None if device_type is None else should_skip(device_type)
+
+    return predicate
+
+
 class skipIf:
     def __init__(self, dep, reason, device_type=None):
         self.dep = dep
         self.reason = reason
         self.device_type = device_type
 
+    def _matches_device(self, device_type) -> bool:
+        return self.device_type == device_type or (
+            isinstance(self.device_type, Iterable) and device_type in self.device_type
+        )
+
+    def _would_skip(self, cls):
+        if self.device_type is not None:
+            if not _static_device_selection(self.device_type):
+                return None
+            device_type = _device_type_at_collection(cls)
+            if device_type is None:
+                return None
+            if not self._matches_device(device_type):
+                return False
+        if isinstance(self.dep, bool):
+            return self.dep
+        # A string dep names a class attribute (e.g. no_magma) that setUpClass sets.
+        return None
+
     def __call__(self, fn):
         @wraps(fn)
         def dep_fn(slf, *args, **kwargs):
-            if (
-                self.device_type is None
-                or self.device_type == slf.device_type
-                or (
-                    isinstance(self.device_type, Iterable)
-                    and slf.device_type in self.device_type
-                )
-            ):
+            # Plain TestCases have no device_type; only read it when the
+            # decorator is device-specific.
+            if self.device_type is None or self._matches_device(slf.device_type):
                 if (isinstance(self.dep, str) and getattr(slf, self.dep, True)) or (
                     isinstance(self.dep, bool) and self.dep
                 ):
@@ -1758,6 +1873,26 @@ class skipIf:
 
             return fn(slf, *args, **kwargs)
 
+        add_skip_condition(dep_fn, self._would_skip, self.reason)
+        if (
+            type(self)
+            in (
+                skipIf,
+                skipCPUIf,
+                skipCUDAIf,
+                skipXPUIf,
+                skipGPUIf,
+                skipLazyIf,
+                skipMetaIf,
+                skipMPSIf,
+                skipHPUIf,
+                skipXLAIf,
+                skipPRIVATEUSE1If,
+            )
+            and type(self.dep) is bool
+            and (self.device_type is None or _static_device_selection(self.device_type))
+        ):
+            dep_fn._preserves_device_arguments = dep_fn
         return dep_fn
 
 
@@ -2061,20 +2196,50 @@ class expectedFailure:
 
             return fn(slf, *args, **kwargs)
 
+        # SkipTest is an expected exception here, so inner skips must run.
+        efail_fn._skip_conditions = ()
         return efail_fn
+
+
+def _guard_inner_skip_conditions(fn):
+    # These restrictions can return without calling the test in internal CI.
+    fn._skip_conditions = tuple(
+        (lambda cls, p=p: not (IS_FBCODE or IS_SANDCASTLE) and p(cls), reason)
+        for p, reason in getattr(fn, "_skip_conditions", ())
+    )
 
 
 class onlyOn:
     def __init__(self, device_type: str | list):
         self.device_type = device_type
 
+    def _would_skip(self, cls):
+        if not _static_device_selection(self.device_type):
+            return None
+        device_type = _device_type_at_collection(cls)
+        if device_type is None:
+            return None
+        if device_type in self.device_type:
+            return False
+        # Out-of-tree backends opt into @onlyOn tests per instance in setUp
+        # (bypass_device_restrictions), which only run time can see.
+        if isinstance(cls, type) and issubclass(cls, PrivateUse1TestBase):
+            return None
+        # Mirrors only_fn: these cases pass silently instead of skipping.
+        return not (
+            getattr(cls, "bypass_device_restrictions", False)
+            or IS_SANDCASTLE
+            or IS_FBCODE
+        )
+
     def __call__(self, fn):
+        reason = f"Only runs on {self.device_type}"
+
         @wraps(fn)
         def only_fn(slf, *args, **kwargs):
             if slf.device_type not in self.device_type:
                 if getattr(slf, "bypass_device_restrictions", False):
                     return fn(slf, *args, **kwargs)
-                reason = f"Only runs on {self.device_type}"
                 if IS_SANDCASTLE or IS_FBCODE:
                     print(
                         f"Skipping {fn.__name__} on sandcastle for following reason: {reason}",
@@ -2085,7 +2250,51 @@ class onlyOn:
 
             return fn(slf, *args, **kwargs)
 
+        _guard_inner_skip_conditions(only_fn)
+        add_skip_condition(only_fn, self._would_skip, reason)
         return only_fn
+
+
+def _record_device_count_skip(instantiated_test, test, param_kwargs):
+    requirement = getattr(test, "_device_count_at_collection", None)
+    if requirement is None:
+        return
+    owner, count = requirement
+    wrapper = test
+    while wrapper is not owner:
+        if (
+            wrapper is None
+            or getattr(wrapper, "_preserves_device_arguments", None) is not wrapper
+        ):
+            return
+        wrapper = getattr(wrapper, "__wrapped__", None)
+    devices = param_kwargs.get("devices")
+    if (
+        type(devices) is not list
+        or type(count) is not deviceCountAtLeast
+        or type(count.num_required_devices) is not int
+    ):
+        return
+    add_skip_condition(
+        instantiated_test,
+        lambda cls: not (IS_SANDCASTLE or IS_FBCODE)
+        and _uses_default_test_setup(cls)
+        and all(
+            inspect.getattr_static(cls, name, None)
+            is inspect.getattr_static(DeviceTypeTestBase, name)
+            for name in (
+                "_apply_precision_override_for_test",
+                "_get_precision_override",
+                "_get_tolerance_override",
+                "precision",
+                "rel_tol",
+                "tearDown",
+                "_callTearDown",
+            )
+        )
+        and len(devices) < count.num_required_devices,
+        f"fewer than {count.num_required_devices} devices detected",
+    )
 
 
 # Decorator that provides all available devices of the device type to the test
@@ -2115,6 +2324,8 @@ class deviceCountAtLeast:
 
             return fn(slf, devices, *args, **kwargs)
 
+        _guard_inner_skip_conditions(multi_fn)
+        multi_fn._device_count_at_collection = (multi_fn, self)
         return multi_fn
 
 
@@ -2128,6 +2339,12 @@ def onlyNativeDeviceTypes(fn: Callable[_P, _T]) -> Callable[_P, _T]:
 
         return fn(self, *args, **kwargs)
 
+    add_skip_condition(
+        only_fn,
+        _skips_on_device_type(lambda device_type: device_type not in NATIVE_DEVICES),
+        "onlyNativeDeviceTypes: doesn't run on this device type",
+    )
+    only_fn._preserves_device_arguments = only_fn
     return only_fn
 
 
@@ -2145,6 +2362,15 @@ def onlyNativeDeviceTypesAnd(devices=None):
 
             return fn(self, *args, **kwargs)
 
+        if _static_device_selection(devices):
+            add_skip_condition(
+                only_fn,
+                _skips_on_device_type(
+                    lambda device_type: device_type not in NATIVE_DEVICES
+                    and device_type not in devices
+                ),
+                f"onlyNativeDeviceTypesAnd {devices} : doesn't run on this device type",
+            )
         return only_fn
 
     return decorator
@@ -2331,6 +2557,12 @@ def onlyAccelerator(fn):
             raise unittest.SkipTest(reason)
         return fn(self, *args, **kwargs)
 
+    add_skip_condition(
+        only_fn,
+        _skips_on_device_type(lambda device_type: device_type in ("cpu", "meta")),
+        "onlyAccelerator: doesn't run on CPU or meta devices",
+    )
+    only_fn._preserves_device_arguments = only_fn
     return only_fn
 
 
@@ -2343,6 +2575,14 @@ def onlyCUDAAndPRIVATEUSE1(fn):
 
         return fn(self, *args, **kwargs)
 
+    add_skip_condition(
+        only_fn,
+        _skips_on_device_type(
+            lambda device_type: device_type
+            not in ("cuda", torch._C._get_privateuse1_backend_name())
+        ),
+        "onlyCUDAAndPRIVATEUSE1: doesn't run on this device type",
+    )
     return only_fn
 
 
