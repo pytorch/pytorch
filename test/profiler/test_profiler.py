@@ -481,7 +481,7 @@ if not any(e.device_type == DeviceType.CUDA for e in prof.events()):
         with torch.autograd.profiler.profile(
             use_cpu=False, use_device="cuda", use_kineto=True
         ) as p:
-            with self.assertRaisesRegex(ValueError, "Cannot toggle CPU"):
+            with self.assertRaisesRegex(RuntimeError, "no running profiler session"):
                 p.toggle_collection_dynamic(True, [ProfilerActivity.CPU])
 
     @unittest.skipIf(TEST_WITH_ROCM, "not supported on ROCm")
@@ -2529,12 +2529,12 @@ with open(sys.argv[1], "w") as f:
         cpu = [ProfilerActivity.CPU]
         warmup_then_record = torch.profiler.schedule(wait=0, warmup=1, active=1)
         with profile(activities=cpu, schedule=warmup_then_record) as p:
-            with self.assertRaisesRegex(RuntimeError, "profiler is not running"):
+            with self.assertRaisesRegex(RuntimeError, "no running profiler session"):
                 p.toggle_collection_dynamic(False, cpu)
             p.step()
             p.toggle_collection_dynamic(False, cpu)
             p.toggle_collection_dynamic(True, cpu)
-        with self.assertRaisesRegex(RuntimeError, "profiler is not running"):
+        with self.assertRaisesRegex(RuntimeError, "no running profiler session"):
             p.toggle_collection_dynamic(False, cpu)
 
     def test_init_for_cuda_graphs_traces_cuda(self):
