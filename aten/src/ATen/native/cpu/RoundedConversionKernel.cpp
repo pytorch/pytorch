@@ -21,6 +21,8 @@ void to_dtype_rounded_loop(TensorIteratorBase& iter, c10::RoundingMode mode) {
     cpu_kernel(iter, [mode](src_t x) -> dst_t {
       return c10::convert_with_rounding<dst_t>(static_cast<wide_t>(x), mode);
     });
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "unsupported rounded conversion");
   }
 }
 
