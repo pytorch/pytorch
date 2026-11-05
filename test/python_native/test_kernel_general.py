@@ -68,6 +68,23 @@ class _DecodeProbe:
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestKernelGeneral(TestCase):
+    def test_plans_key_and_require_the_current_device(self):
+        trait = T.SumOps(acc=cutlass.Float32)
+        x = torch.randn(8, 16, 32, device="cuda")
+        before = (set(kg._PLAN), set(kg._COMPILE_CACHE))
+        # One GPU has no other device, so pretend another one is current.
+        other = x.get_device() + 1
+        with mock.patch.object(torch.cuda, "current_device", return_value=other):
+            with self.assertRaisesRegex(AssertionError, "is current"):
+                kg.reduce_dim(trait, "bydevice", x, [0, 2], torch.float32)
+        self.assertEqual((set(kg._PLAN), set(kg._COMPILE_CACHE)), before)
+        kg.reduce_dim(trait, "bydevice", x, [0, 2], torch.float32)
+        # Neither a row nor a column layout, so every route uses _launch, which keys
+        # plans with the device index first.
+        keys = [k[0] for k in kg._PLAN if k[0][2] == "bydevice"]
+        self.assertTrue(keys)
+        self.assertEqual({k[0] for k in keys}, {x.get_device()})
+
     def test_reduce_dim_general_path(self):
         x = torch.randn(8, 16, 32, device="cuda")
         out = kg.reduce_dim(

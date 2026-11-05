@@ -3,6 +3,7 @@
 
 import sys
 import unittest
+from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
@@ -39,6 +40,24 @@ class TestKernelXcta(TestCase):
             torch.float32,
         )
         self.assertEqual(out, x.double().sum(dim=1).float(), atol=2e-2, rtol=1e-4)
+
+    def test_plans_key_and_require_the_current_device(self):
+        trait = T.SumOps(acc=cutlass.Float32)
+        x = torch.randn(2, 1 << 20, device="cuda")
+        before = (set(kernel_xcta._GEOM), set(kernel_xcta._PLAN))
+        # One GPU has no other device, so pretend another one is current.
+        other = x.get_device() + 1
+        with mock.patch.object(torch.cuda, "current_device", return_value=other):
+            with self.assertRaisesRegex(AssertionError, "is current"):
+                kernel_xcta.reduce_row_xcta(trait, "bydevice", x, torch.float32)
+        self.assertEqual((set(kernel_xcta._GEOM), set(kernel_xcta._PLAN)), before)
+        kernel_xcta.reduce_row_xcta(trait, "bydevice", x, torch.float32)
+        # Geometry and plan keys both end with the device index.
+        geom = [k for k in kernel_xcta._GEOM if k[0] == "bydevice"]
+        plans = [k for k in kernel_xcta._PLAN if k[1] == "bydevice"]
+        self.assertEqual(len(geom), 1)
+        self.assertEqual(len(plans), 1)
+        self.assertEqual({k[-1] for k in geom + plans}, {x.get_device()})
 
     def test_two_output_split(self):
         # Stage 2 projects both outputs from one accumulator; this path rejects index traits.

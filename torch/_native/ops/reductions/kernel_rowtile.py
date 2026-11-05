@@ -13,6 +13,7 @@ import torch
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
+from ...utils.device import check_current
 from . import tile
 from .traits import WARP
 
@@ -394,13 +395,16 @@ def _launch_itree(
     operands: tuple[Sequence[Any], Sequence[Any]],
     N: int,
     tag: str,
+    *,
+    device: int,
     nouts: int = 1,
     dsts: Sequence[torch.dtype] = (),
     align: int = 0,
     compact: bool = True,
     strided_outs: Sequence[bool] = (),
 ) -> None:
-    """Launch one stage, keying descriptor layouts and baked alignment."""
+    """Launch one stage on `device`, which must be current, keying descriptor layouts
+    and baked alignment."""
     op = tile.TileReduce(
         trait,
         dt,
@@ -429,7 +433,7 @@ def _launch_itree(
             None,
             None,
             None,
-            _stream(),
+            _stream(device),
         )
 
     # Destination types are baked, so include them to prevent a wrong cached plan.
@@ -441,6 +445,7 @@ def _launch_itree(
         align,
         compact,
         tuple(strided_outs),
+        device,
     ) + op.cache_sig
     build = lambda: _compile(op, *_args(fakes))  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*_args(operands))
@@ -455,8 +460,10 @@ def _run_itree(
     nouts: int = 1,
     out: Sequence[torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, ...]:
-    """Launch each stage; split buffers are per field."""
+    """Launch each stage on x's device, which callers check is current; split buffers
+    are per field."""
     M, N = x.shape
+    device = x.get_device()
 
     def results():
         if out is not None:
@@ -506,11 +513,12 @@ def _run_itree(
             ([_L.read_only(x)], list(outs)),
             N,
             "rowitree",
-            nouts,
-            tuple(o.dtype for o in outs),
-            align,
-            compact,
-            strided_outs,
+            device=device,
+            nouts=nouts,
+            dsts=tuple(o.dtype for o in outs),
+            align=align,
+            compact=compact,
+            strided_outs=strided_outs,
         )
         return tuple(outs)
     # Split writes one field-typed partial per (row, batch), then folds them linearly.
@@ -528,10 +536,11 @@ def _run_itree(
         ([_L.read_only(x)], list(parts)),
         N,
         "rowitree1",
-        nouts,
-        tuple(p.dtype for p in parts),
-        align,
-        compact,
+        device=device,
+        nouts=nouts,
+        dsts=tuple(p.dtype for p in parts),
+        align=align,
+        compact=compact,
     )
     outs = results()
     strided_outs = tuple(o.stride(0) != 1 for o in outs)
@@ -547,9 +556,10 @@ def _run_itree(
         ([_L.read_only(p) for p in parts], list(outs)),
         N,
         "rowitree2",
-        nouts,
-        tuple(o.dtype for o in outs),
-        align,
+        device=device,
+        nouts=nouts,
+        dsts=tuple(o.dtype for o in outs),
+        align=align,
         strided_outs=strided_outs,
     )
     return tuple(outs)
@@ -561,7 +571,15 @@ def reduce_row_itree(
     x: torch.Tensor,
     out: torch.Tensor,
 ) -> bool:
-    """Write 2-D `x` rows to 1-D `out`; return False only when no inner-tree plan exists."""
+    """Write 2-D `x` rows to 1-D `out`; return False only when no inner-tree plan exists.
+
+    x's device must be current, and `out` must be on x's device.
+    """
+    if not x.is_cuda:
+        raise AssertionError(f"want a CUDA input, got {x.device}")
+    check_current(x.get_device())
+    if out.device != x.device:
+        raise AssertionError(f"out on {out.device}, but x on {x.device}")
     M, N = x.shape
     itree = itree_plan(N, M, x.element_size())
     if itree is None:
@@ -583,12 +601,17 @@ def reduce_row_tile(
     use_tma: bool | None = None,
     order: Literal["linear", "inner_tree"] | None = None,
 ) -> tuple[torch.Tensor, ...]:
-    """Reduce 2-D `x` rows, returning outputs or raw field partials when `final=False`."""
+    """Reduce 2-D `x` rows, returning outputs or raw field partials when `final=False`.
+
+    x's device must be current.
+    """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
     M, N = x.shape
     if M >= _INT32_LIMIT or N >= _INT32_LIMIT:
         raise AssertionError(f"row reduction needs M and N < 2^31, got M={M}, N={N}")
+    device = x.get_device()
+    check_current(device)
     # leaf/combine serves every trait and N. The opt-in gate leaves partial stages and
     # explicit launch shapes on the default order; explicit requests raise below.
     if order not in (None, "linear", "inner_tree"):
@@ -702,12 +725,19 @@ def reduce_row_tile(
             None,
             None,
             None,
-            _stream(),
+            _stream(device),
         )
 
     # Pointer-dependent alignment is compiled, so include it in the key.
     dts = tuple(out_dtypes[:ndst])
-    key = ("rowtile", trait_key, x.dtype, dts, align) + op.cache_sig
+    key = (
+        "rowtile",
+        trait_key,
+        x.dtype,
+        dts,
+        align,
+        device,
+    ) + op.cache_sig
     build = lambda: _compile(op, *_fake())  # noqa: E731
     fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
     # read_only avoids COW materialization; None omits unused-axis arguments.
@@ -725,6 +755,6 @@ def reduce_row_tile(
         None,
         None,
         None,
-        _stream(),
+        _stream(device),
     )
     return tuple(outs)

@@ -41,15 +41,3 @@ def device_ok(x: torch.Tensor, majors: tuple[int, ...]) -> bool:
     if x.device.type != "cuda" or torch.version.hip is not None:
         return False
     return _arch_ok(x.device.index, tuple(majors))
-
-
-def on_current_device(x: torch.Tensor) -> bool:
-    # Kernel and stream caches bind to the current device; cross-device launches can raise
-    # cudaErrorInvalidResourceHandle. Check non-CUDA first and guard current_device(), which
-    # raises for fake CUDA tensors on CPU-only systems.
-    if x.device.type != "cuda":
-        return False
-    try:
-        return x.device.index == torch.cuda.current_device()
-    except RuntimeError:
-        return False

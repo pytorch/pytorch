@@ -2,6 +2,7 @@
 # Torch-only tests for DSL-agnostic native-op utilities. Real architecture queries require
 # CUDA, not ROCm: is_available() is true on ROCm while device_ok intentionally declines HIP.
 
+import contextlib
 import sys
 import unittest
 
@@ -133,34 +134,85 @@ class TestNativeUtils(TestCase):
             self.assertFalse(cap.device_ok(x, (9, 10, 12)))
             self.assertTrue(cap.device_ok(x, (11,)), "the (9,10,12) answer was reused")
 
-    def test_on_current_device_never_raises(self):
-        # Conditions must return False rather than raise, or the dispatcher cannot fall back.
-        from torch._native.utils import capability as cap
-
-        self.assertFalse(cap.on_current_device(torch.empty(2)))
-        self.assertFalse(cap.on_current_device(torch.empty(2, device="meta")))
-        if torch.cuda.is_available():
-            self.assertTrue(cap.on_current_device(torch.empty(2, device="cuda")))
-
-    @unittest.skipUnless(TEST_CUDA, "needs a CUDA tensor to compare device indices")
-    @skipIfRocm
-    def test_on_current_device_declines_another_device(self):
-        # Reject non-current devices because kernel and stream caches bind to the current device.
-        # This case is needed because CPU and meta inputs short-circuit before that check.
+    def test_cuda_device_guard_passes_non_cuda_inputs(self):
         from unittest.mock import patch
 
-        from torch._native.utils import capability as cap
+        from torch._native.utils.device import cuda_device_guard
 
-        x = torch.empty(2, device="cuda")
-        self.assertTrue(cap.on_current_device(x))
-        with patch.object(
-            torch.cuda, "current_device", return_value=x.device.index + 1
+        # torch.cuda.device(-1) is a no-op, so only the patches show the guard skipped it.
+        x = torch.ones(2)
+        with (
+            patch.object(torch.cuda, "current_device", side_effect=AssertionError),
+            patch.object(torch.cuda, "device", side_effect=AssertionError),
         ):
-            self.assertFalse(cap.on_current_device(x))
+            self.assertIs(cuda_device_guard(lambda t: t)(x), x)
 
-    def test_conds_never_raise_without_a_usable_device(self):
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_cuda_device_guard_enters_the_inputs_device(self):
+        from unittest.mock import patch
+
+        from torch._native.utils.device import cuda_device_guard
+
+        # One GPU has no other device, so pretend another one is current and record the
+        # device contexts fn runs in.
+        active, seen = [], []
+
+        @contextlib.contextmanager
+        def device(index):
+            active.append(index)
+            try:
+                yield
+            finally:
+                active.pop()
+
+        def fn(t, fail=False):
+            seen.append(list(active))
+            if fail:
+                raise RuntimeError("fn failed")
+            return t
+
+        guarded = cuda_device_guard(fn)
+        x = torch.ones(2, device="cuda")
+        index = x.get_device()
+        # An input on the current device skips the context; any other input enters it.
+        for current, want in ((index, []), (index + 1, [index])):
+            with (
+                patch.object(torch.cuda, "current_device", return_value=current),
+                patch.object(torch.cuda, "device", device),
+            ):
+                self.assertIs(guarded(x), x)
+                with self.assertRaisesRegex(RuntimeError, "fn failed"):
+                    guarded(x, fail=True)
+            self.assertEqual(seen[-2:], [want, want])
+            # The context exits even when fn raises.
+            self.assertEqual(active, [])
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
+    def test_cuda_device_guard_switches_device(self):
+        from torch._native.utils.device import cuda_device_guard
+
+        seen = []
+
+        def fn(t, fail=False):
+            seen.append(torch.cuda.current_device())
+            if fail:
+                raise RuntimeError("fn failed")
+            return t
+
+        guarded = cuda_device_guard(fn)
+        with torch.cuda.device(0):
+            for index in (0, 1):
+                x = torch.ones(2, device=f"cuda:{index}")
+                self.assertIs(guarded(x), x)
+                with self.assertRaisesRegex(RuntimeError, "fn failed"):
+                    guarded(x, fail=True)
+                # fn ran on the input's device, which is restored even when fn raises.
+                self.assertEqual(torch.cuda.current_device(), 0)
+        self.assertEqual(seen, [0, 0, 1, 1])
+
+    def test_device_ok_never_raises_without_a_usable_device(self):
         # On CPU-only systems, fake CUDA tensors normalize to cuda:0 but device queries raise.
-        # Both conditions must return False to preserve the dispatcher's fallback.
+        # The condition must return False to preserve the dispatcher's fallback.
         from unittest.mock import patch
 
         from torch._native.utils import capability as cap
@@ -170,12 +222,8 @@ class TestNativeUtils(TestCase):
         self.addCleanup(cap._arch_ok.cache_clear)
         cap._arch_ok.cache_clear()
         boom = RuntimeError("No CUDA GPUs are available")
-        with (
-            patch.object(torch.cuda, "get_device_capability", side_effect=boom),
-            patch.object(torch.cuda, "current_device", side_effect=boom),
-        ):
+        with patch.object(torch.cuda, "get_device_capability", side_effect=boom):
             self.assertFalse(cap.device_ok(x, (9, 10, 12)))
-            self.assertFalse(cap.on_current_device(x))
 
 
 if __name__ == "__main__":
