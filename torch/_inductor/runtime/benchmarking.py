@@ -754,13 +754,17 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         _callable()
         device_interface.synchronize()
 
-        # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
+        # ROCm reads the buffer to avoid dirty lines whose writeback can affect
+        # the timed call. float32 avoids the int64 copy made by an int32 sum.
+        # Other devices retain https://github.com/triton-lang/triton/pull/840.
+        is_rocm = device_type == "cuda" and bool(torch.version.hip)
         buffer = torch.empty(
             self.get_device_cache_size(device_type) // 4,
-            dtype=torch.int,
+            dtype=torch.float32 if is_rocm else torch.int,
             device=device_type,
         )
         buffer.zero_()
+        flush = buffer.sum if is_rocm else buffer.zero_
 
         # estimate the runtime of `_callable`
         event_pairs = self.get_event_pairs(estimation_iters, device_type=device_type)
@@ -769,7 +773,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             if grad_to_none is not None:
                 for x in grad_to_none:
                     x.grad = None
-            buffer.zero_()
+            flush()
             start_event.record()
             _callable()
             end_event.record()
@@ -784,7 +788,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):
-            buffer.zero_()
+            flush()
 
         # benchmark `_callable`
         event_pairs = self.get_event_pairs(benchmark_iters, device_type=device_type)
@@ -793,7 +797,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             if grad_to_none is not None:
                 for x in grad_to_none:
                     x.grad = None
-            buffer.zero_()
+            flush()
             start_event.record()
             _callable()
             end_event.record()
@@ -801,7 +805,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
         # explicitly delete the buffer, sometimes helps memory
         # footprint metrics in OSS Inductor performance benchmarks
-        del buffer
+        del flush, buffer
 
         # Return based on the requested mode
         if return_mode == "all":

@@ -409,3 +409,5 @@ A value equal to L2 does not distinguish an absent cache from an unavailable
 query. When this value exceeds ``L2_cache_size``, Inductor sizes benchmark
 cache-flush buffers and CUDA-graph input pools for both levels; otherwise it
 uses the single reported size.
+Its regular GPU benchmark path reads a float32 flush buffer on ROCm to avoid
+repeatedly dirtying cache lines before the timed call.
