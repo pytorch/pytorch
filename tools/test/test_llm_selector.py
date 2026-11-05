@@ -494,6 +494,8 @@ g () {
             "test_fmath.py": "import test.test_math as test_math\n",
             "test_lmath.py": "import os, test_math\n",
             "test_smath.py": "import os; import test_math\n",
+            "test_tmath.py": "from os import path; import test_math\n",
+            "test_ymath.py": "try: import test_math\n",
             "test_pmath.py": "from test.inductor.ext.triton import device\n",
             # The CPython tests redirect test.mapping_tests to mapping_tests.
             "cpython/v3_13/mapping_tests.py": "",
@@ -515,6 +517,8 @@ g () {
             "test_fmath",
             "test_lmath",
             "test_smath",
+            "test_tmath",
+            "test_ymath",
             "test_pmath",
             "cpython/v3_13/test_dict",
             "cpython/v3_13/test_userdict",
@@ -532,7 +536,15 @@ g () {
             ),
             (
                 "test/test_math.py",
-                {"test_math", "test_cmath", "test_fmath", "test_lmath", "test_smath"},
+                {
+                    "test_math",
+                    "test_cmath",
+                    "test_fmath",
+                    "test_lmath",
+                    "test_smath",
+                    "test_tmath",
+                    "test_ymath",
+                },
             ),
             (
                 "test/cpython/v3_13/mapping_tests.py",
@@ -562,6 +574,8 @@ g () {
             "custom_operator/test_out_variant.py": "from pointwise import f\n",
             "jit/test_save_load_for_op_version.py": '"/cpp/jit/upgrader_models/test_versioned_div_tensor_v2.ptl"\n',
             "test_jit.py": "from cpp.jit import tests_setup\n",
+            "typing/test_python_operators.py": 'Path(__file__).parent / "pass/arithmetic_ops.py"\n',
+            "typing/fail/arithmetic_ops.py": "# See ../pass/arithmetic_ops.py\n",
         }
         drivers = {
             "test_cpp_extensions_aot_ninja",
@@ -591,6 +605,7 @@ g () {
                 "test_jit",
                 "test_cpp_api_parity",
                 "test_typing",
+                "typing/test_python_operators",
             }
             | inductor_lib
         )
@@ -646,7 +661,11 @@ g () {
             ("test/run_doctests.sh", set()),
             ("test/forward_backward_compatibility/dump_all_function_schemas.py", set()),
             ("test/scripts/run_cuda_memcheck.py", set()),
-            ("test/typing/pass/arithmetic_ops.py", {"test_typing"}),
+            # test_python_operators.py also reads it by its path.
+            (
+                "test/typing/pass/arithmetic_ops.py",
+                {"test_typing", "typing/test_python_operators"},
+            ),
             ("test/trailing.json", {"test_ops"}),
         ]:
             sel = self.select_in_tree(sources, candidates, [changed])
@@ -890,7 +909,7 @@ g () {
             sel = self.select_in_tree(sources, CANDIDATES, changed.split())
             self.assertFalse(sel.run_all, changed)
             self.assertEqual((sel.files, sel.sweeps), (files, sweeps), changed)
-        inductor = "an edited inductor failure list entry could not be resolved to the file defining its test class or was rejected"
+        inductor = "an edited inductor failure list entry was not resolved to the file defining its test class"
         for changed in (
             "test/inductor_expected_failures/TestGone.test_x",
             "test/inductor_skips/TestGone.test_x",
@@ -1113,6 +1132,10 @@ g () {
             ".github/actions/download-build-artifacts/action.yml",
             ".github/scripts/filter_test_configs.py",
             ".github/scripts/parse_ref.py",
+            ".github/scripts/pytest_cache.py",
+            ".github/scripts/pytest_caching_utils.py",
+            ".github/actions/pytest-cache-download/action.yml",
+            ".github/actions/pytest-cache-upload/action.yml",
             ".github/workflows/pull.yml",
             ".github/workflows/trunk.yml",
             ".github/workflows/periodic.yml",
@@ -1140,6 +1163,9 @@ g () {
             "torch/testing/_internal/common_dtype.py",
             "torch/testing/_internal/common_cuda.py",
             "torch/testing/_comparison.py",
+            "torch/testing/__init__.py",
+            "torch/testing/_creation.py",
+            "torch/testing/_utils.py",
             "scripts/onnx/test.sh",
             ".ci/docker/triton_version.txt",
             ".ci/docker/triton_xpu_version.txt",
@@ -1913,6 +1939,8 @@ class TestPrompt(unittest.TestCase):
             self.assertNotIn(flag, cmd)
         self.assertEqual(run.call_args.kwargs["input"], "p")
         self.assertEqual(run.call_args.kwargs["timeout"], 600)
+        self.assertIs(run.call_args.kwargs["capture_output"], True)
+        self.assertIs(run.call_args.kwargs["text"], True)
 
     def test_query_model_failures_are_error_envelopes(self) -> None:
         def completed(stdout: str, code: int = 0) -> mock.Mock:
@@ -2530,11 +2558,12 @@ class TestMain(unittest.TestCase):
 
     def test_git_readers_refuse_an_option_as_a_rev(self) -> None:
         with mock.patch.object(select_tests.subprocess, "run") as run:
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, "^not a revision: '-Ofalse'$"):
                 select_tests.git_grep("x", "-Ofalse")
-            with self.assertRaises(ValueError):
+            refused = "^not a revision: '--output=x'$"
+            with self.assertRaisesRegex(ValueError, refused):
                 select_tests.changed_files("--output=x", "HEAD")
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, refused):
                 select_tests.changed_files("HEAD", "--output=x")
         run.assert_not_called()
 
@@ -2570,6 +2599,7 @@ class TestMain(unittest.TestCase):
                 "GIT_AUTHOR_EMAIL": "a@b.c",
                 "GIT_COMMITTER_NAME": "a",
                 "GIT_COMMITTER_EMAIL": "a@b.c",
+                "LC_ALL": "C",
             }
             repo = Path(home) / "repo"
             repo.mkdir()
@@ -2602,6 +2632,8 @@ class TestMain(unittest.TestCase):
             failed = r"^git grep failed \(128\): fatal: "
             with self.assertRaisesRegex(RuntimeError, failed):
                 select_tests.git_grep("x", "no-such-rev")
+            with self.assertRaises(subprocess.CalledProcessError):
+                select_tests.changed_files("HEAD", "no-such-rev")
 
     def test_non_ascii_paths_are_unquoted(self) -> None:
         name = "test/test_caf\u00e9.py"
