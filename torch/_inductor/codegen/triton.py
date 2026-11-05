@@ -538,7 +538,7 @@ class BlockDescriptorOptions:
         )
 
         # Strip out dimensions of stride 0 for load descriptors.
-        # These will be restored with tl.broadcast_to. Non-singleton
+        # These will be restored with tl.broadcast_to. For stores non-singleton
         # Broadcasting dims cannot be removed as the descriptor block shape
         # needs to match the kernel block shape
         if for_store:
