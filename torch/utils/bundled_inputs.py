@@ -106,7 +106,7 @@ def bundle_inputs(
     Tensors in lists or tuples will not.
     """
     if not isinstance(model, torch.jit.ScriptModule):
-        raise RuntimeError("Only ScriptModule is supported.")
+        raise TypeError("Only ScriptModule is supported.")
 
     ignored_methods, ignored_attrs = _get_bundled_inputs_attributes_and_methods(model)
     clone = torch._C._hack_do_not_use_clone_module_with_class(  # type: ignore[attr-defined]
@@ -166,7 +166,7 @@ def augment_model_with_bundled_inputs(
         of each tuple are the args that make up one input.
     """
     if not isinstance(model, torch.jit.ScriptModule):
-        raise RuntimeError("Only ScriptModule is supported.")
+        raise TypeError("Only ScriptModule is supported.")
 
     forward: Callable = model.forward
 
@@ -239,10 +239,10 @@ def augment_many_model_functions_with_bundled_inputs(
     Tensors in lists or tuples will not.
     """
     if not isinstance(model, torch.jit.ScriptModule):
-        raise RuntimeError("Only ScriptModule is supported.")
+        raise TypeError("Only ScriptModule is supported.")
 
     if not inputs:
-        raise RuntimeError("Please provide inputs for at least 1 function")
+        raise ValueError("Please provide inputs for at least 1 function")
 
     if hasattr(model, "get_all_bundled_inputs") or hasattr(model, "get_bundled_inputs_functions_and_info"):
         raise RuntimeError(

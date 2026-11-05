@@ -11,15 +11,19 @@ from torch.ao.quantization.fake_quantize import FakeQuantizeBase
 
 
 class APoTFakeQuantize(FakeQuantizeBase):
-    alpha: Tensor
-    gamma: Tensor
-    quantization_levels: Tensor
-    level_indices: Tensor
+    alpha: Tensor | None
+    gamma: Tensor | None
+    quantization_levels: Tensor | None
+    level_indices: Tensor | None
 
     def __init__(self, observer: Callable = APoTObserver, **observer_kwargs: Any):
         super().__init__()
         self.activation_post_process = observer(**observer_kwargs)
         self.dtype = self.activation_post_process.dtype
+        self.alpha = None
+        self.gamma = None
+        self.quantization_levels = None
+        self.level_indices = None
 
     def calculate_qparams(  # type: ignore[override]
         self, signed: bool = False

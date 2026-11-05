@@ -285,7 +285,7 @@ class SelectiveBuilder:
                     break
             if not key_found:
                 if "default" not in kernel_key:
-                    raise Exception("Missing kernel for the model")  # noqa: TRY002
+                    raise RuntimeError("Missing kernel for the model")
                 else:
                     result_set.add("default")
 

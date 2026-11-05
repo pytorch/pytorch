@@ -55,9 +55,11 @@ if not INVALID_PLATFORMS:
             self.server.stop()
 
         def test_exception_propagation(self):
-            with self.assertRaises(RuntimeError, msg="foobar"):
+            # configure a client so expires() itself does not raise
+            timer.configure(timer.LocalTimerClient(self.mp_queue))
+            with self.assertRaisesRegex(ValueError, "foobar"):
                 with timer.expires(after=1):
-                    raise RuntimeError("foobar")
+                    raise ValueError("foobar")
 
         def test_no_client(self):
             # no timer client configured; exception expected

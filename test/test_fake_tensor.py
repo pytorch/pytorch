@@ -2487,8 +2487,10 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             x_conv = mode.from_tensor(x)
             y = torch.rand([4, 4], device=device)
             z = torch.rand([4, 4], device="cpu")
-            self.assertRaises(
-                FakeTensorDeviceMismatchError, lambda: torch.lerp(x_conv, y, z)
+            self.assertRaisesRegex(
+                (FakeTensorDeviceMismatchError, RuntimeError),
+                "Expected all tensors to be on the same device",
+                lambda: torch.lerp(x_conv, y, z),
             )
 
     @onlyAccelerator

@@ -61,7 +61,7 @@ class TestFakeQuantize(unittest.TestCase):
         apot_fake.enable_observer()
         apot_fake.enable_fake_quant()
 
-        X_reduced_precision_fp = apot_fake.forward(torch.clone(X), False)
+        X_reduced_precision_fp = apot_fake.forward(torch.clone(X))
 
         # get X_expected by converting fp -> apot -> fp to simulate quantize -> dequantize
         X_to_apot = quantize_APoT(X, alpha, gamma, quantization_levels, level_indices)
@@ -82,7 +82,7 @@ class TestFakeQuantize(unittest.TestCase):
         apot_fake.disable_observer()
         apot_fake.enable_fake_quant()
 
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(AssertionError, "Must set qparams"):
             apot_fake.forward(torch.clone(X))
 
     r""" Tests fake quantize helper backward() method

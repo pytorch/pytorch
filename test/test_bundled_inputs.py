@@ -221,15 +221,15 @@ class TestBundledInputs(TestCase):
         samples = [(torch.tensor([1]),)]
 
         # inputs defined 2 ways so should fail
-        with self.assertRaises(RuntimeError):
-            mm = torch.jit.script(MultipleMethodModel())
-            definition = textwrap.dedent(
-                """
-                def _generate_bundled_inputs_for_forward(self):
-                    return []
-                """
-            )
-            mm.define(definition)
+        mm = torch.jit.script(MultipleMethodModel())
+        definition = textwrap.dedent(
+            """
+            def _generate_bundled_inputs_for_forward(self):
+                return []
+            """
+        )
+        mm.define(definition)
+        with self.assertRaisesRegex(RuntimeError, "is already defined"):
             torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
                 mm,
                 inputs={
@@ -250,8 +250,8 @@ class TestBundledInputs(TestCase):
         samples = [(torch.tensor([1]),)]
 
         # inputs not defined so should fail
-        with self.assertRaises(RuntimeError):
-            mm = torch.jit.script(MultipleMethodModel())
+        mm = torch.jit.script(MultipleMethodModel())
+        with self.assertRaisesRegex(RuntimeError, "must be specified"):
             torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
                 mm,
                 inputs={

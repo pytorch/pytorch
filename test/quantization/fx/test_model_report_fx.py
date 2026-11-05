@@ -1092,7 +1092,7 @@ class TestFxModelReportClass(QuantizationTestCase):
             self.assertNotEqual(graph_observer_cnt, 0)
 
             # make sure error when try to rerun report generation for full report but not single report
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "already removed observers"):
                 model_full_report = model_report_full.generate_model_report(False)
 
             # make sure we don't run into error for single report
