@@ -520,8 +520,11 @@ class TestCalculateShards(unittest.TestCase):
         # order, the 3s test waits for a free proc and the shard takes 4s.
         test_times: dict[str, float] = {"t1": 1, "t2": 1, "t3": 1, "t4": 3}
         tests = [TestRun(name) for name in test_times]
-        with mock.patch.object(test_selections, "NUM_PROCS_FOR_SHARDING_CALC", 3):
-            for sort_by_time, expected in ((True, 3.0), (False, 4.0)):
+        for sort_by_time, expected in ((True, 3.0), (False, 4.0)):
+            with (
+                self.subTest(sort_by_time=sort_by_time),
+                mock.patch.object(test_selections, "NUM_PROCS_FOR_SHARDING_CALC", 3),
+            ):
                 [(time, _)] = calculate_shards(
                     1,
                     tests,
@@ -550,8 +553,16 @@ class TestCalculateShards(unittest.TestCase):
             ],
             shards,
         )
-        with self.assertRaisesRegex(AssertionError, "head_start has 1 entries"):
-            calculate_shards(2, [TestRun("t1")], test_times, None, head_start=[3])
+        for head_start in ([], [3], [3, 0, 0]):
+            with (
+                self.subTest(head_start=head_start),
+                self.assertRaisesRegex(
+                    AssertionError, f"head_start has {len(head_start)} entries"
+                ),
+            ):
+                calculate_shards(
+                    2, [TestRun("t1")], test_times, None, head_start=head_start
+                )
 
     def test_zero_tests(self) -> None:
         self.assertListEqual([(0.0, []), (0.0, [])], calculate_shards(2, [], {}, None))

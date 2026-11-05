@@ -254,11 +254,13 @@ def calculate_shards(
     `tests` (e.g. TD priority). head_start gives each shard's seconds of work
     outside these tests, which the assignment balances against but the returned
     times exclude; it counts as serial time when sizing the serial shards, an
-    approximation when a head-start shard is not one of them. See
-    get_with_pytest_shard for xdist_workers."""
+    approximation when a head-start shard is not one of them. Every shard must
+    pass the same head_start, since each computes the full plan and keeps its
+    own slice. Tests without a known time are dealt round robin after the timed
+    ones and ignore head_start. See get_with_pytest_shard for xdist_workers."""
     must_serial = must_serial or (lambda x: True)
     test_class_times = test_class_times or {}
-    head_start = list(head_start or [0.0] * num_shards)
+    head_start = [0.0] * num_shards if head_start is None else list(head_start)
     if len(head_start) != num_shards:
         raise AssertionError(
             f"head_start has {len(head_start)} entries for {num_shards} shards"
