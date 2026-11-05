@@ -342,6 +342,7 @@ if(USE_FLASH_ATTENTION)
       HIP_ARCHITECTURES "${AT_ROCM_CK_SDPA_ARCHS}")
     target_compile_definitions(ck_sdpa PUBLIC ${CK_SDPA_EXTRA_HIPCC_OPTIONS})
     target_compile_definitions(ck_sdpa PRIVATE AITER_EMBEDDED_HSA_HEADER="aiter_embedded_hsa.h")
+    target_compile_definitions(ck_sdpa PRIVATE CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=5)
     target_include_directories(ck_sdpa PUBLIC
                                ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include
                                ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include
