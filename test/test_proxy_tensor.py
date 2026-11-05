@@ -1041,12 +1041,12 @@ class TestSymbolicTracing(TestCase):
         return traced_f
 
     # The arg parser expands a scalar SymInt for an int[N] arg, but calling an OpOverload directly doesn't
-    @unittest.expectedFailure
     def test_op_overload_scalar_symint_for_int_list(self):
         def f(x, k):
             return torch.ops.aten.max_pool2d_with_indices.default(x, k)
 
-        make_fx(f, tracing_mode="symbolic")(torch.randn(2, 2, 6, 6), 3)
+        with self.assertRaisesRegex(RuntimeError, r"List\[int\].*SymInt"):
+            make_fx(f, tracing_mode="symbolic")(torch.randn(2, 2, 6, 6), 3)
 
 
     def test_debug_interpreter(self):
