@@ -237,7 +237,7 @@ def query_model(
             # Its message is mostly the claude argv, prompt included.
             why = f"model call timed out after {e.timeout}s"
             return {"is_error": True, "result": why}
-        except FileNotFoundError as e:
+        except (OSError, UnicodeError) as e:
             return {"is_error": True, "result": f"{type(e).__name__}: {e}"}
     try:
         result = json.loads(p.stdout)
@@ -249,20 +249,23 @@ def query_model(
 
 
 def git(*args: str) -> str:
+    """The output of git with `args`; CalledProcessError if git fails."""
     # Not text=True: universal newlines would turn a \r in a path into \n.
     return os.fsdecode(subprocess.check_output(["git", *args], cwd=REPO_ROOT))
 
 
 def git_paths(command: str, *args: str) -> list[str]:
     """The paths a git command lists, verbatim: -z keeps git from C-quoting
-    a path with a quote, backslash, control or non-ASCII character."""
+    a path with a quote, backslash, control or non-ASCII character.
+    CalledProcessError if git fails."""
     return git(command, "-z", *args).split("\0")[:-1]
 
 
 def git_grep(pattern: str, rev: str, *, timeout: float | None = None) -> list[str]:
-    """The paths under test/ at the commit `rev` with a line matching the extended regex `pattern`."""
+    """The paths under test/ at the commit `rev` with a line matching the extended regex `pattern`.
+    RuntimeError if git grep fails, TimeoutExpired if it outlives `timeout`."""
     p = subprocess.run(
-        ["git", "grep", "-lzE", "-e", pattern, rev, "--", "test/"],
+        ["git", "grep", "--no-color", "-lzE", "-e", pattern, rev, "--", "test/"],
         cwd=REPO_ROOT,
         capture_output=True,
         timeout=timeout,
