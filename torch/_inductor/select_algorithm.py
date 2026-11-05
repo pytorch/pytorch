@@ -4464,7 +4464,6 @@ class AlgorithmSelectorCache(PersistentCache):
         # generated inputs as whole buffers, while template kernels apply a view's
         # offset and strides to the base buffer.
         # TODO(jgong5): support multi-template on CPU C++ backend
-        gen_fn_inputs = [input_nodes[i] for i in input_gen_fns or {}]
         if return_multi_template and (
             (
                 input_gen_fns is not None
@@ -4472,7 +4471,8 @@ class AlgorithmSelectorCache(PersistentCache):
             )
             or any(
                 x.get_layout() != V.graph.get_buffer(x.get_name()).get_layout()
-                for x in gen_fn_inputs
+                for i, x in enumerate(input_nodes)
+                if i in (input_gen_fns or {})
             )
             or (layout.device.type == "cpu" and config.cpu_backend != "triton")
         ):

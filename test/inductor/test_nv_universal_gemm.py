@@ -5725,8 +5725,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         bench_results: list[tuple[float, str]] = []
         orig_bench = CUDACombinedScheduling._benchmark_nvgemm_module
 
-        def capturing_bench(self, module):
-            ms, path = orig_bench(self, module)
+        def capturing_bench(self, module, *args):
+            ms, path = orig_bench(self, module, *args)
             bench_results.append((ms, path))
             return ms, path
 
