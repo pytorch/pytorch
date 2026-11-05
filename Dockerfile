@@ -150,10 +150,7 @@ PY
 cat /torch.lock /deps-pinned.lock /deps-floating.lock
 EOF
 
-# Everything `official` and `dev` share. Neither the nightly build args
-# (PYTORCH_VERSION, TRITON_VERSION) nor anything else that changes every night is
-# declared here, so no RUN below, and none in `dev`, has them in its cache key.
-FROM ${BASE_IMAGE} as official-deps
+FROM ${BASE_IMAGE} as official
 ARG TARGETPLATFORM
 ARG CUDA_VERSION
 ARG CUDA_PATH=cu121
@@ -173,6 +170,28 @@ RUN if test -n "${CUDA_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
         DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc && \
         rm -rf /var/lib/apt/lists/*; \
     fi
+
+# Install CUDA toolkit for devel images
+# Only runs when building devel-image target (BUILD_TYPE != official)
+# Before the Python layers on purpose: a layer is rebuilt whenever one before it
+# changes, and the torch layers change every night.
+ARG BUILD_TYPE
+RUN if [ "${BUILD_TYPE}" = "dev" ] && [ -n "${CUDA_VERSION}" ]; then \
+    apt-get update && apt-get install -y --no-install-recommends \
+        wget gnupg2 ca-certificates && \
+    # Add NVIDIA repository
+    NVARCH=$(uname -m | sed 's/x86_64/x86_64/' | sed 's/aarch64/sbsa/') && \
+    wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/${NVARCH}/3bf863cc.pub | apt-key add - && \
+    echo "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/${NVARCH} /" > /etc/apt/sources.list.d/cuda.list && \
+    # Install CUDA toolkit
+    CUDA_PKG_VERSION=$(echo ${CUDA_VERSION} | cut -d'.' -f1,2 | tr '.' '-') && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        cuda-toolkit-${CUDA_PKG_VERSION} && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    # Configure LD
+    echo "/usr/local/cuda/lib64" >> /etc/ld.so.conf.d/cuda.conf && \
+    ldconfig; \
+fi
 
 # The Python environment is installed here, directly into the image, in layers
 # ordered from the one that changes least to the one that changes every night.
@@ -214,42 +233,18 @@ RUN IS_CUDA=$(python3 -c 'import torch ; print(torch.cuda._is_compiled())'); \
         exit 1; \
     fi
 
-ENV NVIDIA_VISIBLE_DEVICES all
-ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
-ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64
-ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
-WORKDIR /workspace
-
-FROM official-deps as official
 # Declared only now. A build arg that is in scope for a RUN can invalidate its
 # cache, and these change on every nightly build.
 ARG PYTORCH_VERSION
 ARG TRITON_VERSION
+ENV NVIDIA_VISIBLE_DEVICES all
+ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
+ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64
+ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 ENV PYTORCH_VERSION ${PYTORCH_VERSION}
+WORKDIR /workspace
 
-FROM official-deps as dev
-ARG CUDA_VERSION
-ARG BUILD_TYPE
-
-# Install CUDA toolkit for devel images
-# Only runs when building devel-image target (BUILD_TYPE != official)
-RUN if [ "${BUILD_TYPE}" = "dev" ] && [ -n "${CUDA_VERSION}" ]; then \
-    apt-get update && apt-get install -y --no-install-recommends \
-        wget gnupg2 ca-certificates && \
-    # Add NVIDIA repository
-    NVARCH=$(uname -m | sed 's/x86_64/x86_64/' | sed 's/aarch64/sbsa/') && \
-    wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/${NVARCH}/3bf863cc.pub | apt-key add - && \
-    echo "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/${NVARCH} /" > /etc/apt/sources.list.d/cuda.list && \
-    # Install CUDA toolkit
-    CUDA_PKG_VERSION=$(echo ${CUDA_VERSION} | cut -d'.' -f1,2 | tr '.' '-') && \
-    apt-get update && apt-get install -y --no-install-recommends \
-        cuda-toolkit-${CUDA_PKG_VERSION} && \
-    apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    # Configure LD
-    echo "/usr/local/cuda/lib64" >> /etc/ld.so.conf.d/cuda.conf && \
-    ldconfig; \
-fi
-
+FROM official as dev
 # Set CUDA environment (always set, needed even if CUDA already in base)
 ENV PATH=/usr/local/cuda/bin:${PATH}
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
@@ -259,10 +254,3 @@ ENV CUDA_HOME=/usr/local/cuda
 COPY --from=python-deps /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=python-deps /usr/local/bin /usr/local/bin
 COPY --from=submodule-update /opt/pytorch /opt/pytorch
-
-# Declared last, for the same reason as in `official`: in scope earlier they
-# would be part of the cache key of the CUDA toolkit install above (4+ GB), which
-# would then be redone, together with the COPYs after it, every night.
-ARG PYTORCH_VERSION
-ARG TRITON_VERSION
-ENV PYTORCH_VERSION ${PYTORCH_VERSION}
