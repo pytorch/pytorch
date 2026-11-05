@@ -69,6 +69,29 @@ static inline __m128i cvtfp32_bf16(const __m256& src) {
   return _mm256_castsi256_si128(t_value);
 }
 
+// Converts doubles to floats rounding to odd (truncate, then set the last bit
+// if inexact), so that converting the result to Half or BFloat16 rounds the
+// doubles once: float has enough extra precision and range.
+static inline __m128 cvtpd_ps_round_to_odd(const __m256d& x) {
+  const __m128 f = _mm256_cvtpd_ps(x);
+  const __m256d back = _mm256_cvtps_pd(f);
+  const __m256d abs = _mm256_castsi256_pd(_mm256_set1_epi64x(LLONG_MAX));
+  // Ordered comparisons, so NaN lanes are left alone. Where rounding to
+  // nearest went away from zero, f is one ulp too large in magnitude.
+  const __m256d away = _mm256_cmp_pd(
+      _mm256_and_pd(back, abs), _mm256_and_pd(x, abs), _CMP_GT_OQ);
+  const __m256d inexact = _mm256_cmp_pd(back, x, _CMP_NEQ_OQ);
+  // Narrows 64-bit lane masks to the 32-bit lanes of f.
+  const __m256i idx = _mm256_setr_epi32(0, 2, 4, 6, 0, 2, 4, 6);
+  const auto narrow = [&](__m256d mask) {
+    return _mm256_castsi256_si128(
+        _mm256_permutevar8x32_epi32(_mm256_castpd_si256(mask), idx));
+  };
+  const __m128i bits = _mm_add_epi32(_mm_castps_si128(f), narrow(away));
+  return _mm_castsi128_ps(
+      _mm_or_si128(bits, _mm_and_si128(narrow(inexact), _mm_set1_epi32(1))));
+}
+
 static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
   __m256i lo = _mm256_castps_si256(a);
   __m256i hi = _mm256_castps_si256(b);
