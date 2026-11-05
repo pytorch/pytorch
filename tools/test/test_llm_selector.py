@@ -355,6 +355,8 @@ g () {
             "test_cpp_extensions_aot.py": "",
             "test_nn.py": "from test_autoload import x\n",
             "test_ops.py": "import test_cpp_extensions_aot\n",
+            # No such file: the driver runs test_autoload.py.
+            "test_jit.py": "import test_autoload_enable\n",
         }
         drivers = {
             "test_autoload_enable",
@@ -363,7 +365,7 @@ g () {
             "test_cpp_extensions_aot_no_ninja",
         }
         changed = ["test/cpp_extensions/ext.cpp"]
-        sel = self.select_in_tree(sources, CANDIDATES | drivers, changed)
+        sel = self.select_in_tree(sources, CANDIDATES | drivers | {"test_jit"}, changed)
         self.assertEqual(sel.files, drivers | {"test_nn", "test_ops"})
 
     def test_importers_of_drivers_of_importers_are_selected(self) -> None:
@@ -416,7 +418,7 @@ g () {
 
         def grep(pattern: str) -> list[str]:
             patterns.append(pattern)
-            return [f"test/{t}.py" for t in ("test_nn", "test_ops") if t in pattern]
+            return []
 
         files = [f"test/m{i}.py" for i in range(5)]
         with mock.patch.object(selection, "MAX_GREP_MODULES", 2):
@@ -463,6 +465,9 @@ g () {
             "dynamo/test_misc.py": "import pkg.util\n",
             "test_autograd.py": "",
             "test_nn.py": 'test_autograd = load_test_module("test_autograd")\n',
+            "dynamo/test_hops.py": "",
+            "test_load_slash.py": 'm = load_test_module("dynamo/test_hops")\n',
+            "test_load_dot.py": 'm = load_test_module("dynamo.test_hops")\n',
             "inductor/custom_inductor_config.py": "",
             "dynamo/test_after_aot.py": '    c = importlib.import_module("custom_inductor_config")\n',
             "test_math.py": "",
@@ -473,13 +478,15 @@ g () {
             "cpython/v3_13/mapping_tests.py": "",
             "cpython/v3_13/test_dict.py": "from test import mapping_tests\n",
             "cpython/v3_13/test_userdict.py": "from test import mapping_tests, support\n",
-            "test_weak.py": "# Adapted from cpython/Lib/test/mapping_tests.py\n",
+            "test_weak.py": "# from test import mapping_tests\n",
         }
         candidates = CANDIDATES | {
             "inductor/test_ext",
             "onnx/test_onnx",
             "onnx/test_paren",
             "test_autograd",
+            "test_load_slash",
+            "test_load_dot",
             "dynamo/test_after_aot",
             "test_math",
             "test_cmath",
@@ -494,6 +501,7 @@ g () {
             ("test/onnx/defs/model.py", {"onnx/test_onnx", "onnx/test_paren"}),
             ("test/pkg/__init__.py", {"dynamo/test_misc"}),
             ("test/test_autograd.py", {"test_autograd", "test_nn"}),
+            ("test/dynamo/test_hops.py", {"test_load_slash", "test_load_dot"}),
             ("test/inductor/custom_inductor_config.py", {"dynamo/test_after_aot"}),
             ("test/test_math.py", {"test_math", "test_cmath", "test_fmath"}),
             (
@@ -537,7 +545,7 @@ g () {
         sources = {
             "test_nn.py": "class TestNN(TestCase):\n",
             "cpython/v3_13/test_set.py": "    class TestSet(unittest.TestCase):\n",
-            "inductor/test_torchinductor.py": "class TestSetCopy:\n",
+            "inductor/test_torchinductor.py": "class TestSetCopy:\nclass DynamicShapesCodegenCpuTests(TestCase):\n",
             "test_ops.py": "class Test:\n",
             "cpp/api/modules.cpp": "class TestModel {\n",
             "dynamo/test_misc.py": "class MiscTests(TestCase):\n",
@@ -566,6 +574,12 @@ g () {
             (
                 "test/dynamo_skips/InlineAndInstallMiscTests.test_x",
                 {"dynamo/test_misc"},
+                set(),
+            ),
+            # Defined under its full name.
+            (
+                "test/inductor_skips/DynamicShapesCodegenCpuTests.test_x",
+                {"inductor/test_torchinductor"},
                 set(),
             ),
             # Not a CPython test entry.
@@ -603,7 +617,7 @@ g () {
             sel = self.select_in_tree(sources, CANDIDATES, changed.split())
             self.assertFalse(sel.run_all, changed)
             self.assertEqual((sel.files, sel.sweeps), (files, sweeps), changed)
-        inductor = "an edited inductor failure list entry could not be resolved to the file defining its test class"
+        inductor = "an edited inductor failure list entry could not be resolved to the file defining its test class or was rejected"
         for changed in (
             "test/inductor_expected_failures/TestGone.test_x",
             "test/inductor_skips/TestGone.test_x",
@@ -709,6 +723,9 @@ g () {
                 {**valid, "files": ["test_ops"]},
                 {**valid, "error": "e"},
             ]
+            # run_all and no candidates leave only the type checks to reject these.
+            r = Selection(run_all=True).to_json()
+            bad += [{**r, "files": "test_nn"}, {**r, "files": [1]}, {**r, "error": 1}]
             bad += [
                 {k: v for k, v in valid.items() if k != key}
                 for key in ("version", "candidates", "enforce", "error")
@@ -759,6 +776,8 @@ g () {
         for f in [
             ".ci/docker/common/install_cuda.sh",
             ".ci/docker/requirements-ci.txt",
+            ".ci/docker/requirements-docs.txt",
+            ".ci/docker/java/jni.h",
             ".ci/docker/build.sh",
             ".ci/docker/ci_commit_pins/triton.txt",
             ".ci/docker/ubuntu/Dockerfile",
@@ -838,6 +857,9 @@ g () {
             "tools/testing/discover_tests.py",
             "tools/stats/import_test_stats.py",
             "tools/stats/upload_metrics.py",
+            "tools/stats/upload_test_stats.py",
+            "tools/stats/upload_stats_lib.py",
+            "tools/stats/test_dashboard.py",
             "test/cpp_extensions/open_registration_extension/torch_openreg/pyproject.toml",
         ]:
             self.assertTrue(needs_run_all([f]), f)
@@ -914,6 +936,20 @@ g () {
             out = answer(dirs=[d])
             sel = Selection.from_model_output(out, candidates | jit | {"test_fx"}, [])
             self.assertEqual((sel.files, sel.error), (expected, None), d)
+        # With grep, the drivers of the files under the directory.
+        paths = [
+            "test/jit/test_fuser_common.py",
+            "test/cpp_extensions/dangling_impl_extension.cpp",
+        ]
+        cands = candidates | jit | {"test_jit_fuser_te", "test_dispatch"}
+        for d, driver in [
+            ("jit", "test_jit_fuser_te"),
+            ("cpp_extensions", "test_dispatch"),
+        ]:
+            sel = Selection.from_model_output(
+                answer(dirs=[d]), cands, [], lambda p: paths
+            )
+            self.assertIn(driver, sel.files, d)
 
     def test_parse_model_output_rejects_malformed_answers(self) -> None:
         malformed: list[Any] = [
@@ -993,6 +1029,12 @@ g () {
             self.assertTrue((REPO_ROOT / path).exists(), path)
             self.assertNotIn(f, TESTS)
             self.assertEqual(selection.edited_tests([path], set(TESTS)), drivers, f)
+        # test_run runs bin/test_script.sh too.
+        sh = f"test/{launcher_bin}.sh"
+        self.assertTrue((REPO_ROOT / sh).exists(), sh)
+        self.assertEqual(
+            selection.edited_tests([sh], set(TESTS)), {"distributed/launcher/test_run"}
+        )
 
 
 class TestPrompt(unittest.TestCase):
@@ -1068,6 +1110,7 @@ class TestPrompt(unittest.TestCase):
 
         timeout = subprocess.TimeoutExpired(["claude", "-p", "<prompt>"], 600)
         missing = FileNotFoundError("claude")
+        denied = PermissionError("claude")
         for run, why in [
             (completed("not json"), "not jsone"),
             (completed("[]"), "[]e"),
@@ -1076,10 +1119,19 @@ class TestPrompt(unittest.TestCase):
             (completed('{"result": "r"}', code=1), '{"result": "r"}e'),
             (mock.Mock(side_effect=timeout), "model call timed out after 600s"),
             (mock.Mock(side_effect=missing), "FileNotFoundError: claude"),
+            (mock.Mock(side_effect=denied), "PermissionError: claude"),
         ]:
             with mock.patch.object(select_tests.subprocess, "run", run):
                 result = select_tests.query_model("p", "m", "medium")
             self.assertEqual(result, {"is_error": True, "result": why})
+
+    def test_query_model_cannot_encode_a_lone_surrogate(self) -> None:
+        real_run = subprocess.run
+        cat = mock.Mock(side_effect=lambda cmd, **kwargs: real_run(["cat"], **kwargs))
+        with mock.patch.object(select_tests.subprocess, "run", cat):
+            result = select_tests.query_model("p\ud800", "m", "medium")
+        self.assertTrue(result["is_error"])
+        self.assertTrue(result["result"].startswith("UnicodeEncodeError: "))
 
     def test_query_model_refuses_a_checkout_with_escaping_symlinks(self) -> None:
         run = mock.Mock(return_value=subprocess.CompletedProcess([], 0, "{}", ""))
@@ -1263,12 +1315,14 @@ class TestMain(unittest.TestCase):
             git("commit", "-qm", "add")
             git("mv", "test/test_a.py", "test/test_c.py")
             git("commit", "-qm", "move")
+            git("config", "color.ui", "always")
             moved = ["test/test_a.py", "test/test_c.py"]
             self.assertEqual(select_tests.changed_files("HEAD~1", "HEAD"), moved)
             self.assertEqual(select_tests.git_grep("import", "HEAD"), moved[1:])
             # The worktree matches, but the base commit has no files.
             self.assertEqual(select_tests.git_grep("import", "HEAD~2"), [])
             self.assertEqual(select_tests.git_grep("-v", "HEAD"), [])
+            self.assertEqual(select_tests.git_grep("import (y|x)", "HEAD"), moved[1:])
 
     def test_non_ascii_paths_are_unquoted(self) -> None:
         name = "test/test_caf\u00e9.py"
