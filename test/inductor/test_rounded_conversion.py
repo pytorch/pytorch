@@ -120,6 +120,32 @@ class _RoundedConversionTestMixin:
                 code = self._check(device, torch.float32, torch.float8_e5m3fnu, mode)
                 self.assertIn(FALLBACK, code)
 
+    def _check_float64_to_dtype_rounds_once(self, device):
+        # Like eager, rounding to float32 first (the compute type of Triton, or
+        # through float constructors in C++) must be avoided: test the
+        # neighbors of the midpoints between dst's values.
+        for dst in (
+            torch.float16,
+            torch.bfloat16,
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+        ):
+            int_dtype = torch.int16 if dst.itemsize == 2 else torch.uint8
+            bits = torch.arange(1 << (8 * dst.itemsize), dtype=torch.int32)
+            values = bits.to(int_dtype).view(dst).double()
+            values = values[values.isfinite()].unique()
+            mid = (values[1:] + values[:-1]) / 2
+            near = torch.cat([mid.nextafter(values[1:]), mid.nextafter(values[:-1])])
+            x = torch.cat([near, -near, _inputs(torch.float64)]).to(device)
+
+            def fn(x):
+                return x.to(dst)
+
+            with self.subTest(dst=dst):
+                torch._dynamo.reset()
+                actual = torch.compile(fn, fullgraph=True)(x)
+                self.assertSameValues(actual, fn(x))
+
 
 class TestRoundedConversionInductorCPU(_RoundedConversionTestMixin, TestCase):
     hw_classification = HardwareClassification.CPU
@@ -136,6 +162,10 @@ class TestRoundedConversionInductorCPU(_RoundedConversionTestMixin, TestCase):
     @unittest.skipIf(not HAS_CPU, "requires CPU")
     def test_cpu_e5m3fnu_falls_back(self):
         self._check_e5m3fnu_falls_back("cpu")
+
+    @unittest.skipIf(not HAS_CPU, "requires CPU")
+    def test_cpu_float64_to_dtype_rounds_once(self):
+        self._check_float64_to_dtype_rounds_once("cpu")
 
 
 @unittest.skipIf(not HAS_CUDA, "requires CUDA")
@@ -157,29 +187,7 @@ class TestRoundedConversionInductorCUDA(_RoundedConversionTestMixin, TestCase):
         self._check_e5m3fnu_falls_back("cuda")
 
     def test_cuda_float64_to_dtype_rounds_once(self):
-        # Like eager, rounding to the float32 compute type first must be
-        # avoided: test the neighbors of the midpoints between dst's values.
-        for dst in (
-            torch.float16,
-            torch.bfloat16,
-            torch.float8_e4m3fn,
-            torch.float8_e5m2,
-        ):
-            int_dtype = torch.int16 if dst.itemsize == 2 else torch.uint8
-            bits = torch.arange(1 << (8 * dst.itemsize), dtype=torch.int32)
-            values = bits.to(int_dtype).view(dst).double()
-            values = values[values.isfinite()].unique()
-            mid = (values[1:] + values[:-1]) / 2
-            near = torch.cat([mid.nextafter(values[1:]), mid.nextafter(values[:-1])])
-            x = torch.cat([near, -near, _inputs(torch.float64)]).cuda()
-
-            def fn(x):
-                return x.to(dst)
-
-            with self.subTest(dst=dst):
-                torch._dynamo.reset()
-                actual = torch.compile(fn, fullgraph=True)(x)
-                self.assertSameValues(actual, fn(x))
+        self._check_float64_to_dtype_rounds_once("cuda")
 
     def test_cuda_instructions(self):
         cc = _cuda_capability()
