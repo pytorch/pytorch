@@ -78,6 +78,7 @@ def _sanitize_kernel_options_for_triton(
     """
     sanitized = dict(kernel_options)
     backend = cast(_Backend, sanitized.pop("BACKEND", "AUTO"))
+    sanitized.pop("HELION_AUTOTUNE_EFFORT", None)
     return sanitized, backend
 
 
@@ -182,7 +183,22 @@ def flex_attention(
     2. Flex Decode Triton Template
     3. Cpu specific CPP template
     4. MPS specific Metal template
+    BACKEND="HELION" lowers to Helion kernels instead.
     """
+    if kernel_options.get("BACKEND") == "HELION":
+        from .flex_helion_attention import create_flex_helion_attention_kernel
+
+        return create_flex_helion_attention_kernel(
+            query,
+            key,
+            value,
+            subgraph,
+            block_mask,
+            scale,
+            kernel_options,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
     if query.get_device().type == "cpu":
         return lower_cpu(
             query,
@@ -848,6 +864,10 @@ def flex_attention_backward(*args, **kwargs):
         score_mod_other_buffers,
         mask_mod_other_buffers,
     ) = args
+    if kernel_options.get("BACKEND") == "HELION":
+        from .flex_helion_attention import create_flex_helion_attention_backward_kernel
+
+        return create_flex_helion_attention_backward_kernel(*args)
     if query.get_device().type == "mps":
         raise NotImplementedError(
             "flex_attention backward is not yet supported on MPS. "

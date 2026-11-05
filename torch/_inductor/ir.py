@@ -6341,7 +6341,7 @@ class TemplateBuffer(OperationBuffer):
                 template_buf._multi_output_children[mo.get_name()] = mo
                 if on_tensor_leaf is not None:
                     on_tensor_leaf(mo.get_name(), mo, indices, leaf_idx)
-                tb = TensorBox(mo)
+                tb = TensorBox.create(mo)
                 seen_outputs[tid] = tb
                 return [tb]
             # Non-tensor leaf (int, SymInt, None, etc.)
