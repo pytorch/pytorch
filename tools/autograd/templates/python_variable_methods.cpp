@@ -389,31 +389,50 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format, std::optional<std::string_view> round = std::nullopt) {
+static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
   // NOTE: this is where we record aten::to in the graph during tracing. However, the behavior of aten::to
   // is different with respect to TensorOptions fields that are not present: aten::to inherits fields that
   // are missing from the self argument while the tracer assumes that they should be populated with the
   // default values (eg. float for scalar type). By explicitly copying over the tensor options here we fully
   // specify all tensor options and thus record the proper trace
-  return self.to(self.options().device(device).memory_format(optional_memory_format), non_blocking, copy, std::nullopt, round);
+  return self.to(self.options().device(device).memory_format(optional_memory_format), non_blocking, copy);
 }
 
-static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format, std::optional<std::string_view> round = std::nullopt) {
+static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
-  return self.to(self.options().memory_format(optional_memory_format), non_blocking, copy, std::nullopt, round);
+  return self.to(self.options().memory_format(optional_memory_format), non_blocking, copy);
 }
 
-static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format, std::optional<std::string_view> round = std::nullopt) {
-  pybind11::gil_scoped_release no_gil;
-  // TODO: Make this call the TensorOptions version, maybe?
-  return self.to(dtype, non_blocking, copy, optional_memory_format, round);
-}
-
-static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format, std::optional<std::string_view> round = std::nullopt) {
+static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
   // TODO: Make this call the TensorOptions version, maybe?
-  return self.to(device, dtype, non_blocking, copy, optional_memory_format, round);
+  return self.to(dtype, non_blocking, copy, optional_memory_format);
+}
+
+static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
+  pybind11::gil_scoped_release no_gil;
+  // TODO: Make this call the TensorOptions version, maybe?
+  return self.to(device, dtype, non_blocking, copy, optional_memory_format);
+}
+
+// Tensor.to(..., round=...): round_to converts, and a device change is a separate
+// transfer, ordered so that the conversion runs on the accelerator.
+static Tensor dispatch_to_rounded(const Tensor & self, std::optional<Device> device, std::optional<ScalarType> dtype, bool non_blocking, std::optional<c10::MemoryFormat> optional_memory_format, std::string_view mode) {
+  pybind11::gil_scoped_release no_gil;
+  const auto convert = [&](const Tensor& t) {
+    return t.round_to(dtype.value_or(t.scalar_type()), mode, optional_memory_format);
+  };
+  if (!device.has_value()) {
+    return convert(self);
+  }
+  const auto move = [&](const Tensor& t) {
+    return t.to(t.options().device(*device), non_blocking);
+  };
+  if (device->is_cpu() && !self.is_cpu()) {
+    return move(convert(self));
+  }
+  return convert(move(self));
 }
 
 static PyObject * THPVariable_cpu(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -989,18 +1008,20 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   auto round = std::get<5>(parsed);
   auto& self_ = THPVariable_Unpack(self);
   torch::utils::maybe_initialize_device(device);
-  if (!device && !scalarType && !copy && !opt_memory_format.has_value() && !round.has_value()) {
+  if (round.has_value()) {
+    return THPVariable_Wrap(dispatch_to_rounded(self_, device, scalarType, non_blocking, opt_memory_format, *round));
+  } else if (!device && !scalarType && !copy && !opt_memory_format.has_value()) {
     Py_INCREF(self);
     return self;
   } else if (!device && !scalarType) {
     return THPVariable_Wrap(
-        dispatch_to(self_, non_blocking, copy, opt_memory_format, round));
+        dispatch_to(self_, non_blocking, copy, opt_memory_format));
   } else if (!device) {
-    return THPVariable_Wrap(dispatch_to(self_, *scalarType, non_blocking, copy, opt_memory_format, round));
+    return THPVariable_Wrap(dispatch_to(self_, *scalarType, non_blocking, copy, opt_memory_format));
   } else if (!scalarType) {
-    return THPVariable_Wrap(dispatch_to(self_, *device, non_blocking, copy, opt_memory_format, round));
+    return THPVariable_Wrap(dispatch_to(self_, *device, non_blocking, copy, opt_memory_format));
   } else {
-    return THPVariable_Wrap(dispatch_to(self_, *device, *scalarType, non_blocking, copy, opt_memory_format, round));
+    return THPVariable_Wrap(dispatch_to(self_, *device, *scalarType, non_blocking, copy, opt_memory_format));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

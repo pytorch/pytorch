@@ -304,7 +304,7 @@ void foreachTensorInplaceWithFlag(std::vector<IValue>& args, int64_t begin, int6
   TORCH_INTERNAL_ASSERT(begin >= 0);
   TORCH_INTERNAL_ASSERT(end >= 0);
   TORCH_INTERNAL_ASSERT(begin <= end);
-  for (int64_t relative_idx = 0; relative_idx < end - begin; relative_idx++) {
+  for (const auto relative_idx : c10::irange(end - begin)) {
     const bool flag = use_flag_relative[relative_idx] == 1;
 
     const auto idx = relative_idx + begin;
