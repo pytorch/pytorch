@@ -426,6 +426,7 @@ class GraphLowering(torch.fx.Interpreter):
         split_into_partitions: bool | None = None,
         cudagraphs_per_partition: bool | None = None,
         cudagraphs_top_level: bool | None = None,
+        cudagraph_partition_only_regions: bool = False,
         cudagraph_region_forced_partition: bool = False,
     ) -> None:
         super().__init__(gm)
@@ -642,6 +643,7 @@ class GraphLowering(torch.fx.Interpreter):
             if cudagraphs_top_level is None
             else cudagraphs_top_level
         )
+        self.cudagraph_partition_only_regions = cudagraph_partition_only_regions
         self.cudagraph_region_forced_partition = cudagraph_region_forced_partition
 
         # only keeping one node per device for stack trace purposes
@@ -1052,6 +1054,7 @@ class GraphLowering(torch.fx.Interpreter):
             name=self.qualify_name(subgraph_name),
             split_into_partitions=False,
             cudagraphs_per_partition=False,
+            cudagraph_partition_only_regions=False,
         )
 
     @property

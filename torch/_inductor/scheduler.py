@@ -79,6 +79,7 @@ from .runtime.hints import DeviceProperties, ReductionHint
 from .runtime.runtime_utils import green_text, is_power_of_2, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
+    _unstable_customized_partition_wrapper,
     cache_on_self,
     cache_on_self_and_args,
     cmp,
@@ -12215,7 +12216,13 @@ class Scheduler:
             )
             if cudagraphs_override is False:
                 return "invoke_subgraph opts out of cudagraphs"
-            if V.graph.cudagraphs_top_level:
+            if cudagraphs_override is True or (
+                not V.graph.cudagraph_partition_only_regions
+                and (
+                    V.graph.cudagraphs_top_level
+                    or _unstable_customized_partition_wrapper.wrapper is not None
+                )
+            ):
                 # invoke_subgraph is opaque to the outer scheduler, so the
                 # cudagraph checks run over the body, not the call node.
                 with config.patch(patches or {}):
@@ -12233,10 +12240,17 @@ class Scheduler:
                     )
                 return skip_reason
 
+        if V.graph.cudagraph_partition_only_regions:
+            return "partitioning is limited to annotated invoke_subgraph regions"
+
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings
-        # benefit to cudagraph
-        if not V.graph.cudagraphs_per_partition:
+        # benefit to cudagraph. Read the top-level setting: a region opting in
+        # asks for that region alone to be captured.
+        if (
+            not V.graph.cudagraphs_top_level
+            and _unstable_customized_partition_wrapper.wrapper is None
+        ):
             return "partition includes all ops when cudagraphs is disabled"
 
         if isinstance(node, FusedSchedulerNode):
