@@ -647,7 +647,7 @@ def arith_promoted(op, a, b):
 
 
 class CppOverrides(OpOverrides):
-    """Map element-wise ops to C++"""
+    """Map element-wise ops to scalar C++ expressions for the CPU backend."""
 
     @staticmethod
     def add(a, b):
@@ -737,6 +737,23 @@ class CppOverrides(OpOverrides):
         if dtype not in DTYPE_TO_CPP:
             raise AssertionError(f"{dtype} missing from {__name__}.DTYPE_TO_CPP")
         return f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({x})"
+
+    @staticmethod
+    def to_dtype_rounded(x, dtype, src_dtype, rounding):
+        mode = "".join(word.capitalize() for word in rounding.split("_"))
+        # Half and BFloat16 inputs widen to float exactly. Fused producers of
+        # such values pass their unrounded float result, unless
+        # config.emulate_precision_casts is set.
+        wide = "double" if src_dtype == torch.float64 else "float"
+        result = (
+            f"c10::convert_with_rounding<{DTYPE_TO_CPP[dtype]}>("
+            f"static_cast<{wide}>({x}), c10::RoundingMode::{mode})"
+        )
+        # Like other ops, Half and BFloat16 results are computed in float (see
+        # DtypePropagationOpsHandler.to_dtype_rounded); they are exact in it.
+        if dtype in DTYPE_LOWP_FP:
+            return f"static_cast<float>({result})"
+        return result
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -4151,6 +4168,10 @@ class TilingSelect:
         if not all_dtypes:
             raise AssertionError("expected all_dtypes")
         if any(dtype not in VECTORIZABLE_DTYPES for dtype in all_dtypes):
+            return [], [], KernelOpStats()
+        # The scalarized fallback of CppVecKernel assumes the same number of
+        # elements per vector for inputs and outputs, which narrowing breaks.
+        if any(body.has_op("to_dtype_rounded") for body in loop_bodies):
             return [], [], KernelOpStats()
         dtype = torch.float
         _lowp_fp_dtype = get_loop_body_lowp_fp(loop_bodies[0])[0]

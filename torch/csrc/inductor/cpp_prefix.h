@@ -32,6 +32,7 @@
 #include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
+#include <c10/util/FloatRounding.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 #include <c10/util/generic_math.h>

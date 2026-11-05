@@ -1039,6 +1039,7 @@ for _pointwise_name in (
     "isinf",
     "signbit",
     "to_dtype_bitcast",
+    "to_dtype_rounded",
 ):
     register_pointwise_op(_pointwise_name)
 
@@ -2955,6 +2956,8 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
             # MXFP8 grouped GEMM: the e8m0 scales are consumed by the kernel,
             # never read arithmetically by generated Triton.
             aten._scaled_grouped_mm_v2.default,
+            # Produces the e8m0 bits directly.
+            aten.round_to.default,
         ) or is_view(node.target):
             return False
         if node.target == torch.ops.prims.convert_element_type.default:
@@ -9889,6 +9892,34 @@ def prepare_softmax_online(x, dim):
         exp = lowerings[aten.exp](sub(x, amax))
         xsum = sum_(exp, dim, keepdims=True)
         return amax, xsum
+
+
+@register_lowering(aten.round_to, type_promotion_kind=None)
+def round_to(x: TensorBox, dtype: torch.dtype, mode: str, *, memory_format=None):
+    src_dtype = x.get_dtype()
+    device = x.get_device()
+    if device is not None and is_triton(device):
+        # The Triton codegen reduces float64 to float32 with PTX, which is
+        # only available on CUDA.
+        supported = (
+            device.type == "cuda" and torch.version.hip is None
+        ) or src_dtype != torch.float64
+        supported = supported and is_triton_fp8_dtype_supported(dtype, device)
+    else:
+        supported = ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+    # Inductor does not support float8_e5m3fnu yet.
+    supported = supported and dtype != torch.float8_e5m3fnu
+    if not supported:
+        return fallback_handler(aten.round_to.default, add_to_fallback_set=False)(
+            x, dtype, mode, memory_format=memory_format
+        )
+
+    def fn(value):
+        return ops.to_dtype_rounded(value, dtype, src_dtype, mode)
+
+    # Like clone, leave the layout to the scheduler rather than materializing
+    # memory_format here.
+    return make_pointwise(fn, override_return_dtype=dtype)(x)
 
 
 @register_lowering(inductor_prims.cvt_e8m0_rceil, type_promotion_kind=None)
