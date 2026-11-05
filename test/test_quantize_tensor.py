@@ -6,7 +6,10 @@ from unittest.mock import patch
 import torch
 from torch.nn import functional as F
 from torch.nn.functional import SwizzleType
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_MXFP8_CAST
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_MX_GEMM,
+    PLATFORM_SUPPORTS_MXFP8_CAST,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantized import (
     _f32_to_e8m0_rceil,
@@ -154,12 +157,6 @@ def _quantize_mxfp8_reference_nd(
         qdata, scales = outputs[0]
     # undo the axis order permutation
     return qdata.permute(inverse), scales.permute(inverse)
-
-
-# Only NVIDIA currently implements MXFP8 cast.
-PLATFORM_IMPLEMENTS_MXFP8_CAST = (
-    bool(PLATFORM_SUPPORTS_MXFP8_CAST) and not TEST_WITH_ROCM
-)
 
 
 _MXFP8_IMPLEMENTATIONS = (
@@ -366,7 +363,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     def test_mxfp8_corner_case_bytes(self, quantize_fn, input_dtype, device):
         if (
             quantize_fn is not _quantize_mxfp8_reference_nd
-            and not PLATFORM_IMPLEMENTS_MXFP8_CAST
+            and not PLATFORM_SUPPORTS_MXFP8_CAST
         ):
             self.skipTest("MXFP8 cast is not implemented on this platform")
         # copied from
@@ -408,7 +405,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     )
     @skipIfNoCuteDSL
     def test_to_mx_dim_k(self, swizzle_type, input_dtype, shape, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         if len(shape) == 3 and input_dtype != torch.bfloat16:
             # Run one batched fp32 case to keep the test count down.
@@ -459,7 +456,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     )
     @skipIfNoCuteDSL
     def test_to_mx_dim_m(self, input_dtype, shape, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         if len(shape) == 3 and input_dtype != torch.bfloat16:
             # Run one batched fp32 case to keep the test count down.
@@ -492,7 +489,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     )
     @skipIfNoCuteDSL
     def test_to_mx_rceil_dim_m_large_k_tile_boundary(self, input_dtype, shape, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         data_hp = torch.randn(*shape, device=device, dtype=input_dtype)
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
@@ -522,7 +519,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     )
     @skipIfNoCuteDSL
     def test_to_mx_rceil_dim_km(self, input_dtype, shape, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
         qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference_nd(
@@ -578,7 +575,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     )
     @skipIfNoCuteDSL
     def test_to_mx_rceil_dim_k_square(self, input_dtype, shape, transposed, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         if len(shape) == 3 and input_dtype != torch.bfloat16:
             self.skipTest("3D MXFP8 coverage uses only bfloat16")
@@ -602,7 +599,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
     @skipIfNoCuteDSL
     def test_to_mx_rceil_dim_k_square_nan(self, input_dtype, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         data_hp = torch.randn(64, 64, device=device, dtype=input_dtype)
         data_hp[0, 0] = float("nan")
@@ -643,7 +640,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     def test_to_mx_rceil_transposed_input(
         self, input_dtype, shape, dim, is_scale_swizzled, device
     ):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         if len(shape) == 3 and input_dtype != torch.bfloat16:
             self.skipTest("3D MXFP8 coverage uses only bfloat16")
@@ -685,7 +682,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     )
     @skipIfNoCuteDSL
     def test_to_mx_rceil_transposed_input_dual(self, shape, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         data_hp = torch.randn(shape, dtype=torch.bfloat16, device=device).transpose(
             -2, -1
@@ -724,7 +721,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
 
     @skipIfNoCuteDSL
     def test_to_mx_rceil_transposed_input_square(self, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         data_hp = torch.randn(64, 128, dtype=torch.bfloat16, device=device).t()
         qdata_ref, scales_ref = mxfp8_32x32_swizzle_f(data_hp.t())
@@ -758,7 +755,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     def test_to_mx_rceil_dim_m_recipe_fallback(
         self, shape, dim, is_square_scaling, is_scale_swizzled, device
     ):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         data_hp = torch.randn(shape, dtype=torch.bfloat16, device=device)
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
@@ -800,7 +797,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     def test_to_mx_rceil_dual_unsupported_recipe(
         self, is_square_scaling, is_scale_swizzled, error, device
     ):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         data_hp = torch.randn(64, 128, dtype=torch.bfloat16, device=device)
         # Copying cannot make both dual orientations use a dim-k-only recipe.
@@ -820,7 +817,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     @parametrize("mode", ("k_compact", "k_swizzled", "m_swizzled", "k_square"))
     @skipIfNoCuteDSL
     def test_to_mx_rceil_nd(self, layout, mode, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         data_hp, axes = _get_tensor_and_quant_dims(layout, device)
         dim = axes[::-1] if mode == "m_swizzled" else axes
@@ -897,7 +894,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     def test_to_mx_rceil_batch_axis_transpose_strides(
         self, dim, is_square_scaling, is_scale_swizzled, device
     ):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         input = torch.randn(2, 256, 128, 3, dtype=torch.bfloat16, device=device)
         swizzle = (
@@ -919,7 +916,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     @parametrize("layout", _MXFP8_DUAL_LAYOUTS)
     @skipIfNoCuteDSL
     def test_to_mx_rceil_nd_dual(self, layout, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         data_hp, axes = _get_tensor_and_quant_dims(layout, device)
         qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference_nd(
@@ -980,7 +977,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
 
     @skipIfNoCuteDSL
     def test_to_mx_rceil_strided_input_fallback(self, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         data_hp = torch.randn(64, 256, dtype=torch.bfloat16, device=device)[:, ::2]
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
@@ -998,7 +995,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     )
     @skipIfNoCuteDSL
     def test_to_mx_invalid_input_before_materialization(self, invalid, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         dim = (0, 1)
         from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
@@ -1050,7 +1047,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
 
     @skipIfNoCuteDSL
     def test_to_mx_rceil_nd_unaligned_fallback(self, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         data_hp = torch.randn(2, 64, 128, 33, dtype=torch.bfloat16, device=device)[
             ..., 1:
@@ -1068,7 +1065,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
 
     @skipIfNoCuteDSL
     def test_to_mx_rceil_nd_misaligned_contiguous_input(self, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         storage = torch.randn(2 * 64 * 128 + 1, dtype=torch.bfloat16, device=device)
         data_hp = storage[1:].view(2, 64, 128)
@@ -1087,7 +1084,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
 
     @skipIfNoCuteDSL
     def test_to_mx_rceil_nd_transposed_unaligned_pitch(self, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         data_hp = torch.randn(2, 64, 17, dtype=torch.bfloat16, device=device).transpose(
             -2, -1
@@ -1130,7 +1127,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     def test_to_mx_rceil_empty(
         self, dim, is_square_scaling, is_scale_swizzled, shape, device
     ):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         data_hp = torch.empty(shape, dtype=torch.bfloat16, device=device)
         M, K = shape[-2:]
@@ -1180,7 +1177,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     )
     @skipIfNoCuteDSL
     def test_to_mx_rceil_dual_empty(self, shape, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         data_hp = torch.empty(shape, dtype=torch.bfloat16, device=device)
         M, K = shape[-2:]
@@ -1215,7 +1212,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     @parametrize("mode", ("k", "m", "compact", "square", "m_compact", "m_square"))
     @skipIfNoCuteDSL
     def test_quantize_tensor_nd_meta(self, layout, mode, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         input, axes = _make_nd_quantize_input(layout, device)
         dim = (
@@ -1266,7 +1263,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     @parametrize("reversed_axes", (False, True))
     @skipIfNoCuteDSL
     def test_quantize_tensor_dual_nd_meta(self, layout, reversed_axes, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         input, axes = _make_nd_quantize_input(layout, device)
         dim = axes[::-1] if reversed_axes else axes
@@ -1295,7 +1292,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     @parametrize("transposed,square", ((False, False), (True, False), (False, True)))
     @skipIfNoCuteDSL
     def test_quantize_tensor_compile(self, transposed, square, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         data = torch.randn((160, 160), dtype=torch.bfloat16, device=device)
         api_input = data.t() if transposed else data
@@ -1315,8 +1312,10 @@ class TestMXFP8ReferenceNumerics(TestCase):
 
     @skipIfNoCuteDSL
     def test_quantize_tensor_scaled_mm(self, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
+        if TEST_WITH_ROCM or not PLATFORM_SUPPORTS_MX_GEMM:
+            self.skipTest("requires NVIDIA MX GEMM with SWIZZLE_32_4_4 support")
         mat_a = torch.randn((128, 256), dtype=torch.bfloat16, device=device)
         mat_b = torch.randn((256, 192), dtype=torch.bfloat16, device=device)
         swizzle = SwizzleType.SWIZZLE_32_4_4
@@ -1339,7 +1338,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
 
     @skipIfNoCuteDSL
     def test_quantize_tensor_dual_compile(self, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         input = torch.randn((160, 192), dtype=torch.bfloat16, device=device)
 
@@ -1355,7 +1354,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
 
     @skipIfNoCuteDSL
     def test_quantize_tensor_nd_compile(self, device):
-        if not PLATFORM_IMPLEMENTS_MXFP8_CAST:
+        if not PLATFORM_SUPPORTS_MXFP8_CAST:
             self.skipTest("MXFP8 cast is not implemented on this platform")
         input, _ = _make_nd_quantize_input("interleaved", device)
 
