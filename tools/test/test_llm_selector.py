@@ -29,6 +29,13 @@ class TestSelection(unittest.TestCase):
                 Selection(candidates={"test_nn"}),
                 Selection(run_all=True),
                 Selection(run_all=True, error="e"),
+                Selection(
+                    {"test_nn"},
+                    {"dynamo_wrapped", "crossref"},
+                    reason="r",
+                    enforce=True,
+                    candidates={"test_nn", "test_ops"},
+                ),
             ):
                 p.write_text(json.dumps(sel.to_json()))
                 self.assertEqual(Selection.load(p), sel)
@@ -48,13 +55,15 @@ class TestSelection(unittest.TestCase):
                 {**valid, "sweeps": ["default"]},
                 {**valid, "files": ["test_ops"]},
                 {**valid, "error": "e"},
+                {**valid, "extra": 1},
             ]
             # run_all and no candidates leave only the type checks to reject these.
             r = Selection(run_all=True).to_json()
             bad += [{**r, "files": "test_nn"}, {**r, "files": [1]}, {**r, "error": 1}]
             bad += [
                 {k: v for k, v in valid.items() if k != key}
-                for key in ("version", "candidates", "enforce", "error")
+                for key in ("version", "files", "sweeps", "run_all", "reason")
+                + ("enforce", "candidates", "error")
             ]
             for text in (
                 "{",
@@ -234,6 +243,8 @@ class TestSelection(unittest.TestCase):
             ".github/ci_commit_pins/vllm.txt",
         ]:
             self.assertFalse(needs_run_all([f]), f)
+        self.assertTrue(needs_run_all(["docs/source/index.rst", "test/run_test.py"]))
+        self.assertFalse(needs_run_all([]))
 
 
 if __name__ == "__main__":
