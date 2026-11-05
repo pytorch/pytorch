@@ -3807,7 +3807,7 @@ class _TestParamsMaxPoolBase:
         self.shapes = [
             [2, None],  # batch
             [2],  # channels
-            [3, 6]  # signal
+            [6, 3]  # signal; 6 first so the first sample has a partial ceil_mode window
         ]
 
     def _gen_shape(self):
@@ -10521,7 +10521,7 @@ def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwarg
         # windows (stride == kernel_size) always give unique indices.
         # gradcheck is expensive, so only the smallest input shape is kept.
         stride = sample.kwargs['stride']
-        if (stride is None or stride == sample.kwargs['kernel_size']) and sample.input.shape[2] == 3:
+        if (stride is None or stride == sample.kwargs['kernel_size']) and sample.kwargs['output_size'][2] == 3:
             yield sample
 
 def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_grad, **kwargs):
