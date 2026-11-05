@@ -1,8 +1,7 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = [
 #   "packaging==25.0",
-#   "tomli==2.2.1 ; python_version < '3.11'",
 # ]
 # ///
 from __future__ import annotations
@@ -15,18 +14,13 @@ import logging
 import os
 import re
 import sys
+import tomllib
 from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 
 from packaging.requirements import Requirement
 from packaging.version import Version
-
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib  # type: ignore[import-not-found]
 
 
 REPO_ROOT = Path(__file__).absolute().parents[3]

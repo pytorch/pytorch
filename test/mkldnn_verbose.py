@@ -6,7 +6,8 @@ import torch
 class Module(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        self.conv = torch.nn.Conv2d(1, 10, 5, 1)
+        # Grouped, as builds without ACL on aarch64 do not use oneDNN for ungrouped convolutions
+        self.conv = torch.nn.Conv2d(2, 10, 5, 1, groups=2)
 
     def forward(self, x):
         y = self.conv(x)
@@ -15,7 +16,7 @@ class Module(torch.nn.Module):
 
 def run_model(level):
     m = Module().eval()
-    d = torch.rand(1, 1, 112, 112)
+    d = torch.rand(1, 2, 112, 112)
     with torch.backends.mkldnn.verbose(level):
         m(d)
 

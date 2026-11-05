@@ -5,8 +5,8 @@ import functools
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast, Protocol, TypeAlias
-from typing_extensions import NotRequired, TypedDict
+from typing import Any, cast, NotRequired, Protocol, TypeAlias
+from typing_extensions import TypedDict
 
 import torch
 from torch._dynamo.utils import counters
