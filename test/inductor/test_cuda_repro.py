@@ -125,6 +125,7 @@ def _make_conv(dtype=None):
 @instantiate_parametrized_tests
 class CudaReproTests(TestCase):
     device = device_type
+    _device_at_collection = device_type
     common = check_model_cuda
 
     def test_mm_out_dtype_compile(self):
