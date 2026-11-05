@@ -1,6 +1,6 @@
 """The test selection an LLM makes for one change, and how CI applies it.
 
-A selection names test files (paths under test/ without .py), every file of the model's
+A selection names test files (paths under test/ without .py), never test
 directories, and wrapper sweeps (configs such as dynamo_wrapped that re-run
 ordinary test files in a special mode). A test file runs in a given CI config
 when the selection names the file, names that config as a sweep, or is run_all,
@@ -55,7 +55,8 @@ TEST_SH_GLOBS = (
     "inductor",
 )
 # The files the branches of those globs run with run_test.py --inductor, which
-# compiles every test, so like a sweep any change can break them.
+# compiles every test, so like a sweep any change can break them. A config gets
+# the set of the first TEST_SH_GLOBS entry it contains.
 ALWAYS_COVERED = {
     "inductor_cpp_wrapper": frozenset({"test_torch"}),
     "inductor": frozenset(
@@ -63,8 +64,10 @@ ALWAYS_COVERED = {
     ),
 }
 LLM_SELECTION_FILE = "llm_selection.json"
-# The selector runs from the default branch and run_test.py from the PR, so
-# bump this whenever an older reader would misread the selection file.
+# The selector, run by the default branch's workflow, writes this file into
+# ADDITIONAL_CI_FILES_FOLDER, and run_test.py reads it from the PR's checkout.
+# The reader requires exactly its own SELECTION_VERSION and SWEEPS, so a bump
+# or a new sweep turns selection off for unrebased PRs until they rebase.
 SELECTION_VERSION = 1
 
 # Tests that run the files a change matches although they do not import them:
@@ -107,7 +110,7 @@ DRIVER_MAPPINGS = {
     },
     "onnx/test_models_onnxruntime": [r"^test/onnx/test_models\.py$"],
     "distributed/launcher/test_run": [
-        r"^test/distributed/launcher/bin/test_script(_init_method|_is_torchelastic_launched)?\.py$"
+        r"^test/distributed/launcher/bin/test_script(\.sh|(_init_method|_is_torchelastic_launched)?\.py)$"
     ],
     "distributed/test_launcher": [r"^test/distributed/bin/test_script\.py$"],
     "test_package": [r"^test/package/"],
@@ -150,7 +153,7 @@ RUN_ALL_PATTERNS = [
     # Installed by .ci/pytorch/common_utils.sh, and torch_tpu by install_torch_tpu.sh, for the test jobs.
     r"^\.github/ci_commit_pins/(audio|vision|spmd_types|torch_tpu)\.txt$",
     # The CI test images: a new package version or toolchain can break any test.
-    r"^\.ci/docker/(build\.sh|requirements-ci\.txt|triton(_xpu)?_version\.txt|common/|ci_commit_pins/|ubuntu(-rocm|-xpu)?/)",
+    r"^\.ci/docker/(build\.sh|requirements-(ci|docs)\.txt|triton(_xpu)?_version\.txt|common/|ci_commit_pins/|java/|ubuntu(-rocm|-xpu)?/)",
 ]
 
 
@@ -171,7 +174,9 @@ def normalize_test_name(
 
 
 def edited_tests(changed_files: list[str], candidates: set[str]) -> set[str]:
-    """The candidates the change edits, and those that run an edited file, such as test_jit for test/jit/*."""
+    """The candidates the change edits, and their drivers: the DRIVER_MAPPINGS
+    tests that run an edited file, such as test_jit for test/jit/*, but not the
+    candidates that import one."""
     edited = {
         n
         for f in changed_files
@@ -226,7 +231,8 @@ def parse_model_output(
     if not isinstance(out["reason"], str):
         raise ValueError("reason is not a string")
     names = {t["file"]: normalize_test_name(t["file"], candidates) for t in tests}
-    if grep is not None and not all(names.values()):
+    paths: set[str] = set()
+    if grep is not None and (dirs or not all(names.values())):
         # Every file under test/ at the head.
         paths = set(grep("^"))
         names = {
@@ -242,7 +248,8 @@ def parse_model_output(
             .removeprefix("test/")
         )
         in_dir = {c for c in candidates if c.startswith(prefix + "/")}
-        in_dir |= edited_tests([f"test/{prefix}/"], candidates)
+        under = [p for p in paths if p.startswith(f"test/{prefix}/")]
+        in_dir |= edited_tests(under if grep else [f"test/{prefix}/"], candidates)
         if not in_dir:
             raise ValueError(f"dirs entry {d!r} matches no test file")
         files |= in_dir
