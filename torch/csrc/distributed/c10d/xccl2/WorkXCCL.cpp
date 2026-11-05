@@ -6,6 +6,7 @@
 #include <ATen/xpu/XPUContext.h>
 #include <c10/core/DeviceGuard.h>
 
+#include <iterator>
 #include <thread>
 
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
@@ -72,46 +73,72 @@ XcclCommInfo makeCommInfo(ProcessGroupXCCL* comm) {
 
 } // namespace
 
+WorkXCCL::InputTensorShelf::InputTensorShelf(std::vector<at::Tensor> tensors)
+    : tensors(std::move(tensors)) {}
+
+void WorkXCCL::InputTensorShelf::append(InputTensorShelf& other) {
+  std::scoped_lock lock(mutex, other.mutex);
+  tensors.insert(
+      tensors.end(),
+      std::make_move_iterator(other.tensors.begin()),
+      std::make_move_iterator(other.tensors.end()));
+  other.tensors.clear();
+}
+
+void WorkXCCL::InputTensorShelf::clear() {
+  std::lock_guard<std::mutex> lock(mutex);
+  tensors.clear();
+}
+
+WorkXCCL::State::State(
+    ProcessGroupXCCL* comm,
+    c10::xpu::XPUStream stream,
+    std::chrono::milliseconds timeout_ms)
+    : comm_info(makeCommInfo(comm)),
+      event_pool(comm->getEventPool()),
+      stream(stream),
+      timeout_ms(timeout_ms),
+      create_time(std::chrono::steady_clock::now()) {
+  const auto& pool = comm->getEventPool();
+  timing_enabled = pool->timingEnabled();
+  start_event = pool->get(timing_enabled);
+  end_event = pool->get(timing_enabled);
+  // Events are recorded around the actual XCCL operations by the backend.
+}
+
+WorkXCCL::State::~State() {
+  // If the backend and its pool are gone, the events are simply destroyed.
+  if (auto pool = event_pool.lock()) {
+    pool->put(std::move(start_event), timing_enabled);
+    pool->put(std::move(end_event), timing_enabled);
+  }
+}
+
 WorkXCCL::WorkXCCL(
     ProcessGroupXCCL* comm,
     c10::xpu::XPUStream stream,
     std::chrono::milliseconds timeout_ms,
     const std::vector<at::Tensor>& inputTensors)
-    : inputTensors_(inputTensors),
-      comm_info_(makeCommInfo(comm)),
-      event_pool_(comm->getEventPool()),
-      stream_(stream),
-      timeout_ms_(timeout_ms),
-      create_time_(std::chrono::steady_clock::now()) {
-  const auto& pool = comm->getEventPool();
-  timing_enabled_ = pool->timingEnabled();
-  start_event_ = pool->get(timing_enabled_);
-  end_event_ = pool->get(timing_enabled_);
-  // Events are recorded around the actual XCCL operations by the backend.
-}
+    : state_(std::make_shared<State>(comm, stream, timeout_ms)),
+      inputTensors_(std::make_shared<InputTensorShelf>(inputTensors)) {}
 
 WorkXCCL::WorkXCCL(
     ProcessGroupXCCL* comm,
     c10::xpu::XPUStream stream,
     std::chrono::milliseconds timeout_ms,
     at::Tensor inputTensor)
-    : inputTensor_(std::move(inputTensor)),
-      comm_info_(makeCommInfo(comm)),
-      event_pool_(comm->getEventPool()),
-      stream_(stream),
-      timeout_ms_(timeout_ms),
-      create_time_(std::chrono::steady_clock::now()) {
-  const auto& pool = comm->getEventPool();
-  timing_enabled_ = pool->timingEnabled();
-  start_event_ = pool->get(timing_enabled_);
-  end_event_ = pool->get(timing_enabled_);
-}
+    : state_(std::make_shared<State>(comm, stream, timeout_ms)),
+      inputTensors_(std::make_shared<InputTensorShelf>(
+          inputTensor.defined()
+              ? std::vector<at::Tensor>{std::move(inputTensor)}
+              : std::vector<at::Tensor>{})) {}
 
-WorkXCCL::~WorkXCCL() {
-  // If the backend and its pool are gone, the events are simply destroyed.
-  if (auto pool = event_pool_.lock()) {
-    pool->put(std::move(start_event_), timing_enabled_);
-    pool->put(std::move(end_event_), timing_enabled_);
+WorkXCCL::~WorkXCCL() = default;
+
+void WorkXCCL::setChildren(
+    const std::vector<c10::intrusive_ptr<WorkXCCL>>& children) {
+  for (const auto& child : children) {
+    inputTensors_->append(*child->inputTensors_);
   }
 }
 
@@ -123,42 +150,36 @@ void WorkXCCL::recordFunctionStart(std::string_view coll_name) {
 
   // Passing the input tensors to recordFunction allows for shape information in
   // the profiling output.
-  if (!inputTensors_.empty()) {
-    std::vector<c10::IValue> inputs;
-    inputs.reserve(inputTensors_.size());
-    for (const auto& tensor : inputTensors_) {
-      inputs.emplace_back(tensor);
-    }
-    recordFunction_->before(
-        coll_name,
-        c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
-  } else if (inputTensor_.defined()) {
-    recordFunction_->before(
-        coll_name, c10::ArrayRef<const c10::IValue>(inputTensor_));
-  } else {
-    recordFunction_->before(coll_name, c10::ArrayRef<const c10::IValue>{});
+  std::lock_guard<std::mutex> lock(inputTensors_->mutex);
+  std::vector<c10::IValue> inputs;
+  inputs.reserve(inputTensors_->tensors.size());
+  for (const auto& tensor : inputTensors_->tensors) {
+    inputs.emplace_back(tensor);
   }
+  recordFunction_->before(
+      coll_name,
+      c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
 }
 
 void WorkXCCL::recordStart(std::string_view coll_name) {
   recordFunctionStart(coll_name);
-  start_event_->record(stream_);
+  state_->start_event->record(state_->stream);
 }
 
 void WorkXCCL::recordEnd() {
-  end_event_->record(stream_);
+  state_->end_event->record(state_->stream);
 
   if (recordFunction_ && recordFunction_->isActive()) {
     recordFunction_->end();
   }
 }
 
-WorkXCCL::WorkStatus WorkXCCL::checkStatus(
+WorkXCCL::WorkStatus WorkXCCL::State::checkStatus(
     std::optional<std::chrono::milliseconds> timeout) {
   // The watchdog and a user calling isCompleted() can poll concurrently.
-  // Serialize them so start_completed_time_ has a single writer and the first
+  // Serialize them so start_completed_time has a single writer and the first
   // terminal status is never overwritten by a racing caller.
-  std::lock_guard<std::mutex> lock(check_status_mutex_);
+  std::lock_guard<std::mutex> lock(check_status_mutex);
   if (status() == WorkStatus::COMPLETED || status() == WorkStatus::ERROR ||
       status() == WorkStatus::TIMEDOUT) {
     return status();
@@ -168,14 +189,14 @@ WorkXCCL::WorkStatus WorkXCCL::checkStatus(
   // and remember when it did. The work's own timeout is measured from that
   // point, not from when the work was created, so time spent queued behind
   // other collectives is not charged against it.
-  if (!start_completed_time_.has_value()) {
+  if (!start_completed_time.has_value()) {
     try {
-      if (start_event_->query()) {
-        start_completed_time_ = std::chrono::steady_clock::now();
+      if (start_event->query()) {
+        start_completed_time = std::chrono::steady_clock::now();
         setStatus(WorkStatus::INPROGRESS);
       }
     } catch (const std::exception& e) {
-      TC_LOG(ERROR, &comm_info_)
+      TC_LOG(ERROR, &comm_info)
           << "XPU error during start event query: " << e.what();
       setStatus(WorkStatus::ERROR);
       return status();
@@ -185,12 +206,12 @@ WorkXCCL::WorkStatus WorkXCCL::checkStatus(
   // Step 2: once the collective has started, poll the end event.
   if (status() == WorkStatus::INPROGRESS) {
     try {
-      if (end_event_->query()) {
+      if (end_event->query()) {
         setStatus(WorkStatus::COMPLETED);
         return status();
       }
     } catch (const std::exception& e) {
-      TC_LOG(ERROR, &comm_info_)
+      TC_LOG(ERROR, &comm_info)
           << "XPU error during end event query: " << e.what();
       setStatus(WorkStatus::ERROR);
       return status();
@@ -202,15 +223,15 @@ WorkXCCL::WorkStatus WorkXCCL::checkStatus(
   auto now = std::chrono::steady_clock::now();
   std::optional<std::chrono::steady_clock::time_point> since;
   if (timeout.has_value()) {
-    since = create_time_;
-  } else if (start_completed_time_.has_value()) {
-    since = start_completed_time_;
+    since = create_time;
+  } else if (start_completed_time.has_value()) {
+    since = start_completed_time;
   }
   if (since.has_value()) {
     auto elapsed =
         std::chrono::duration_cast<std::chrono::milliseconds>(now - *since);
-    if (elapsed > timeout.value_or(timeout_ms_)) {
-      TC_LOG(ERROR, &comm_info_)
+    if (elapsed > timeout.value_or(timeout_ms)) {
+      TC_LOG(ERROR, &comm_info)
           << "Operation timed out after " << elapsed.count() << " ms";
       setStatus(WorkStatus::TIMEDOUT);
     }
@@ -218,10 +239,10 @@ WorkXCCL::WorkStatus WorkXCCL::checkStatus(
   return status();
 }
 
-void WorkXCCL::setStatus(WorkStatus status) {
+void WorkXCCL::State::setStatus(WorkStatus status) {
   if (status == WorkStatus::TIMEDOUT || status == WorkStatus::ERROR) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    exception_ = std::make_exception_ptr(
+    std::lock_guard<std::mutex> lock(exception_mutex);
+    exception_ptr = std::make_exception_ptr(
         status == WorkStatus::TIMEDOUT
             ? C10_BUILD_ERROR(
                   DistBackendError,
@@ -230,6 +251,15 @@ void WorkXCCL::setStatus(WorkStatus status) {
             : C10_BUILD_ERROR(DistBackendError, "XCCL operation failed"));
   }
   status_.store(status, std::memory_order_release);
+}
+
+std::exception_ptr WorkXCCL::State::exception() const {
+  std::lock_guard<std::mutex> lock(exception_mutex);
+  return exception_ptr;
+}
+
+std::exception_ptr WorkXCCL::exception() const {
+  return state_->exception();
 }
 
 bool WorkXCCL::isCompleted() {
@@ -249,27 +279,25 @@ void WorkXCCL::synchronizeInternal() {
   if (local_state == WorkStatus::COMPLETED) {
     // checkStatus() no longer releases the inputs (it runs on the watchdog), so
     // a work the watchdog already retired must drop them here.
-    inputTensors_.clear();
-    inputTensor_.reset();
+    inputTensors_->clear();
     return;
   }
   if (local_state == WorkStatus::ERROR || local_state == WorkStatus::TIMEDOUT) {
     return;
   }
 
+  const auto& comm_info = state_->comm_info;
   TracingGuard tracingGuard(
-      comm_info_.name, comm_info_.size, "wait", comm_info_.rank, seq_);
+      comm_info.name, comm_info.size, "wait", comm_info.rank, state_->seq);
 
   // Make the current stream wait for the end event recorded on the work's
   // stream, ordering subsequent current-stream ops after this collective.
-  auto current_stream =
-      c10::xpu::getCurrentXPUStream(comm_info_.device.index());
-  end_event_->block(current_stream);
+  auto current_stream = c10::xpu::getCurrentXPUStream(comm_info.device.index());
+  state_->end_event->block(current_stream);
 
   // Release tensor references. The XPU caching allocator manages stream
   // semantics and will not reclaim memory until the stream operations complete.
-  inputTensors_.clear();
-  inputTensor_.reset();
+  inputTensors_->clear();
 }
 
 bool WorkXCCL::wait(std::chrono::milliseconds timeout) {
@@ -310,14 +338,15 @@ std::vector<at::Tensor> WorkXCCL::result() {
 
 float WorkXCCL::getDuration() const {
   TORCH_CHECK(
-      timing_enabled_,
+      state_->timing_enabled,
       "getDuration only works if timing was enabled, see ProcessGroup::_enable_collectives_timing");
   // XPUEvent::elapsed_time() blocks until both events complete, so require
   // completion up front rather than stalling the caller.
   TORCH_CHECK(
-      end_event_->isCreated() && end_event_->query(),
+      state_->end_event->isCreated() && state_->end_event->query(),
       "getDuration only works after the work has completed");
-  return static_cast<float>(start_event_->elapsed_time(*end_event_));
+  return static_cast<float>(
+      state_->start_event->elapsed_time(*state_->end_event));
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> WorkXCCL::getFuture() {

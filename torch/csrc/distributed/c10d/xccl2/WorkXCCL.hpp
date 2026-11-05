@@ -74,6 +74,11 @@ struct XcclCommInfo {
 // folded in here (see setOutputs/getFuture). A work keeps no pointer to its
 // backend: it can outlive it, so it snapshots the identity it needs and holds
 // the event pool weakly.
+//
+// As in nccl2, the work queue tracks only the State and the input tensors, not
+// the WorkXCCL itself, so it never keeps the output tensors alive: once the
+// caller drops its handle, an output (e.g. an FSDP sharded gradient) is freed
+// even if no further collective is issued on this process group.
 class WorkXCCL : public c10d::Work {
  public:
   enum class WorkStatus {
@@ -104,21 +109,22 @@ class WorkXCCL : public c10d::Work {
   // c10d::Work overrides.
   bool isCompleted() override;
   bool isSuccess() const override;
+  std::exception_ptr exception() const override;
   bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
   void synchronize() override;
   std::vector<at::Tensor> result() override;
   c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
   float getDuration() const override;
   uint64_t getSequencenumber() const override {
-    return seq_;
+    return state_->seq;
   }
 
   std::chrono::milliseconds getTimeout() const override {
-    return timeout_ms_;
+    return state_->timeout_ms;
   }
 
   WorkStatus status() const {
-    return status_.load(std::memory_order_acquire);
+    return state_->status();
   }
 
   // Output tensors for result()/getFuture(). Set by the backend after issuing.
@@ -128,8 +134,13 @@ class WorkXCCL : public c10d::Work {
   // Per-process-group collective counter of the op this work tracks; set by
   // the backend's createWork().
   void setSequenceNumber(uint64_t seq) {
-    seq_ = seq;
+    state_->seq = seq;
   }
+
+  // A coalesced c10d op issues one work per tensor but returns a single handle.
+  // The children are already tracked by the queue; the last work only takes
+  // over their inputs so that waiting on it releases them.
+  void setChildren(const std::vector<c10::intrusive_ptr<WorkXCCL>>& children);
 
  protected:
   void recordStart(std::string_view coll_name);
@@ -139,39 +150,79 @@ class WorkXCCL : public c10d::Work {
   friend class WorkXCCLQueue;
 
  private:
-  // Also records the DistBackendError reported by exception() and wait().
-  void setStatus(WorkStatus status);
-  // Poll the XPU events and advance status; used by the GC queue + watchdog.
-  // timeout, if set, overrides the work's own timeout (see checkStatus).
+  struct InputTensorShelf {
+    explicit InputTensorShelf(std::vector<at::Tensor> tensors);
+    void append(InputTensorShelf& other);
+    void clear();
+
+    std::mutex mutex;
+    std::vector<at::Tensor> tensors;
+  };
+
+  // Everything the watchdog needs to track a work. Holds no tensors, so it is
+  // safe to release on the watchdog thread.
+  struct State {
+    State(
+        ProcessGroupXCCL* comm,
+        c10::xpu::XPUStream stream,
+        std::chrono::milliseconds timeout_ms);
+    ~State();
+
+    State(const State&) = delete;
+    State(State&&) = delete;
+    State& operator=(const State&) = delete;
+    State& operator=(State&&) = delete;
+
+    WorkStatus status() const {
+      return status_.load(std::memory_order_acquire);
+    }
+    std::exception_ptr exception() const;
+    // Also records the DistBackendError reported by exception() and wait().
+    void setStatus(WorkStatus status);
+    // Poll the XPU events and advance status; used by the GC queue + watchdog.
+    // timeout, if set, overrides the work's own timeout.
+    WorkStatus checkStatus(
+        std::optional<std::chrono::milliseconds> timeout = std::nullopt);
+
+    XcclCommInfo comm_info;
+    std::weak_ptr<XcclEventPool> event_pool;
+    // Fixed at construction so the events go back to the pool only if it is
+    // still in the same timing mode.
+    bool timing_enabled{false};
+    std::unique_ptr<at::xpu::XPUEvent> start_event;
+    std::unique_ptr<at::xpu::XPUEvent> end_event;
+    c10::xpu::XPUStream stream; // not owned by this class
+    std::chrono::milliseconds timeout_ms;
+    uint64_t seq{0};
+    const std::chrono::steady_clock::time_point create_time;
+
+    std::atomic<WorkStatus> status_{WorkStatus::NOT_STARTED};
+    // Guards checkStatus(), the only writer of status_ and
+    // start_completed_time.
+    std::mutex check_status_mutex;
+    std::optional<std::chrono::steady_clock::time_point> start_completed_time;
+    mutable std::mutex exception_mutex;
+    std::exception_ptr exception_ptr;
+  };
+
+  struct TrackedWork {
+    std::shared_ptr<State> state;
+    std::shared_ptr<InputTensorShelf> inputTensors;
+  };
+
   WorkStatus checkStatus(
-      std::optional<std::chrono::milliseconds> timeout = std::nullopt);
+      std::optional<std::chrono::milliseconds> timeout = std::nullopt) {
+    return state_->checkStatus(timeout);
+  }
   void recordFunctionStart(std::string_view coll_name);
   // Make the current stream wait on the work's end event (the c10d "wait"
   // semantics for accelerator work: order subsequent current-stream ops after
   // this collective).
   void synchronizeInternal();
 
-  std::vector<at::Tensor> inputTensors_;
-  at::Tensor inputTensor_;
+  std::shared_ptr<State> state_;
+  std::shared_ptr<InputTensorShelf> inputTensors_;
   std::vector<at::Tensor> outputs_;
-
-  XcclCommInfo comm_info_;
-  std::weak_ptr<XcclEventPool> event_pool_;
-  // Fixed at construction so the events go back to the pool only if it is
-  // still in the same timing mode.
-  bool timing_enabled_{false};
-  std::unique_ptr<at::xpu::XPUEvent> start_event_;
-  std::unique_ptr<at::xpu::XPUEvent> end_event_;
-  c10::xpu::XPUStream stream_; // not owned by this class
-
-  std::chrono::milliseconds timeout_ms_;
-  uint64_t seq_{0};
-  const std::chrono::steady_clock::time_point create_time_;
-
-  std::atomic<WorkStatus> status_{WorkStatus::NOT_STARTED};
-  // Guards checkStatus(), the only writer of status_ and start_completed_time_.
-  std::mutex check_status_mutex_;
-  std::optional<std::chrono::steady_clock::time_point> start_completed_time_;
   std::optional<at::RecordFunction> recordFunction_;
   c10::intrusive_ptr<c10::ivalue::Future> future_;
 };
@@ -191,14 +242,14 @@ class WorkXCCLQueue {
 
  private:
   WorkXCCL::WorkStatus garbageCollectLocked();
-  std::unordered_map<
-      c10::xpu::XPUStream,
-      std::queue<c10::intrusive_ptr<WorkXCCL>>>
+  void clearCompletedInputTensors();
+  std::unordered_map<c10::xpu::XPUStream, std::queue<WorkXCCL::TrackedWork>>
       stream_work_queues_;
-  // Completed work is parked here so that the tensor references it holds are
-  // released by a caller thread rather than by the watchdog that runs
+  // Inputs of completed work are parked here so that the tensor references
+  // are released by a caller thread rather than by the watchdog that runs
   // garbageCollect(); see WorkXCCLQueue.cpp.
-  std::queue<c10::intrusive_ptr<WorkXCCL>> completed_work_queue_;
+  std::queue<std::shared_ptr<WorkXCCL::InputTensorShelf>>
+      completedInputTensors_;
   std::mutex work_queues_mutex_;
 };
 
