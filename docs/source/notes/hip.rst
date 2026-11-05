@@ -350,13 +350,27 @@ location in parallel. It is used by default only on gfx1250, and only for
 calls it is eligible for: channels-last input that requests the input
 gradient with at least 3 channels, or other calls with at least 32 channels,
 except grid-gradient-only calls on non-channels-last input or in nearest
-mode, and launches beyond HIP limits. Other calls use the generic kernel.
-The two kernels combine channels in a different order, so the grid gradient
-can differ in rounding between them.
+mode, and launches beyond HIP limits. Nearest-mode calls that request the
+input gradient are eligible. Other calls use the generic kernel.
+
+Kernel choice depends on the output mask, the memory format, the channel
+count and the architecture. The two kernels combine channels in a different
+order, so the grid gradient can differ in rounding between them, in FP32 as
+well as in FP16 and BF16. Both kernels accumulate FP16 and BF16 gradients in
+FP32 on every ROCm GPU.
+
+When the channel-parallel kernel is selected for channels-last input that
+requests the input gradient and is not also contiguous, it accumulates into a
+temporary channels-last buffer the size of the input gradient, which is then
+copied into the returned contiguous gradient. Calls that use the generic
+kernel, including every call with the kernel disabled, and 1x1 inputs do not
+allocate this buffer.
 
 For debugging and testing, the ROCm-only environment variable
 ``PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE`` overrides the architecture
 default: ``1`` enables the channel-parallel kernel on any ROCm architecture
-and ``0`` disables it. Other values are ignored, with a warning issued once
-per process. The variable is read on each eligible call, and it never selects
-the channel-parallel kernel for an ineligible call.
+and ``0`` disables it. Other values are ignored with a warning. The variable
+is read on each eligible call, and it never selects the channel-parallel
+kernel for an ineligible call. ``0`` does not restore the accumulation used
+before the channel-parallel kernel was added, although kernel choice can
+change rounding. This variable may change or be removed without notice.

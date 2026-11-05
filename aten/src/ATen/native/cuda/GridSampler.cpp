@@ -48,7 +48,9 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
                               bool align_corners, std::array<bool, 2> output_mask) {
   auto input_requires_grad = output_mask[0];
 #ifdef USE_ROCM
-  // Decide the kernel once, so the allocation and the launch agree.
+  // Decide the kernel once, so the allocation and the launch agree. The
+  // channel-parallel launcher below receives that decision's buffer and does
+  // not repeat it.
   const auto dispatch =
       rocm_grid_sampler_2d_backward_dispatch(
           input, grid, interpolation_mode, input_requires_grad);
@@ -75,21 +77,25 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
     }
   })();
   auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  launch_grid_sampler_2d_backward_kernel(
 #ifdef USE_ROCM
-      grad_input_scratch.defined() ? grad_input_scratch :
-#endif
-      grad_input, grad_grid, grad_output, input,
-      grid, interpolation_mode, padding_mode, align_corners, output_mask
-#ifdef USE_ROCM
-      , dispatch
-#endif
-      );
-#ifdef USE_ROCM
-  if (grad_input_scratch.defined()) {
-    grad_input.copy_(grad_input_scratch);
+  if (dispatch.channel_lane) {
+    const Tensor& grad_input_arg =
+        dispatch.scratch ? grad_input_scratch : grad_input;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        !dispatch.scratch ||
+        grad_input_arg.is_contiguous(at::MemoryFormat::ChannelsLast));
+    launch_grid_sampler_2d_backward_channel_lane(
+        grad_input_arg, grad_grid, grad_output, input,
+        grid, interpolation_mode, padding_mode, align_corners, output_mask);
+    if (dispatch.scratch) {
+      grad_input.copy_(grad_input_scratch);
+    }
+    return std::make_tuple(std::move(grad_input), std::move(grad_grid));
   }
 #endif
+  launch_grid_sampler_2d_backward_kernel(
+      grad_input, grad_grid, grad_output, input,
+      grid, interpolation_mode, padding_mode, align_corners, output_mask);
   return std::make_tuple(std::move(grad_input), std::move(grad_grid));
 }
 

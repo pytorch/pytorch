@@ -8,7 +8,10 @@
 #ifdef USE_ROCM
 #include <ATen/ATen.h>
 #include <ATen/native/cuda/GridSampler.h>
+#include <c10/util/env.h>
 #include <limits>
+#include <optional>
+#include <string>
 #endif
 #define ASSERT_EQ_CUDA(X, Y) \
   {                          \
@@ -195,6 +198,60 @@ TEST(ApplyTest, GridSampler2dBackwardChannelLaneIndexWidth) {
   ASSERT_FALSE(canUse32BitIndexMath(strided));
   EXPECT_FALSE(rocm_grid_sampler_2d_backward_channel_lane_use_32bit_index(
       strided, grid, at::empty({1, 4, 1, 1}, meta)));
+}
+
+namespace {
+// Sets an environment variable for the guard's lifetime, then restores it.
+class ScopedEnv {
+ public:
+  ScopedEnv(const char* name, const char* value)
+      : name_(name), saved_(c10::utils::get_env(name)) {
+    c10::utils::set_env(name_, value);
+  }
+  ~ScopedEnv() {
+    if (saved_.has_value()) {
+      c10::utils::set_env(name_, saved_->c_str());
+    } else {
+      c10::utils::unset_env(name_);
+    }
+  }
+  ScopedEnv(const ScopedEnv&) = delete;
+  ScopedEnv& operator=(const ScopedEnv&) = delete;
+
+ private:
+  const char* name_;
+  std::optional<std::string> saved_;
+};
+} // namespace
+
+// Both sides of the channel-parallel kernel's launch bound: HIP limits
+// gridDim.x * blockDim.x to UINT32_MAX, and C = 5 uses 8 lanes, so
+// (2**32 - 1) / 8 output locations is the last eligible launch and one more is
+// the first ineligible one. Forcing the override selects the kernel for every
+// eligible call on any architecture; channels-last input that requests
+// grad_input is eligible from C = 3. Meta tensors need no storage and the
+// dispatch launches nothing.
+TEST(ApplyTest, GridSampler2dBackwardChannelLaneLaunchBound) {
+  const ScopedEnv force("PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE", "1");
+  const auto meta = at::TensorOptions().device(at::kMeta).dtype(at::kFloat);
+  const auto input = at::empty({1, 5, 8, 8}, meta)
+                         .contiguous(at::MemoryFormat::ChannelsLast);
+  ASSERT_TRUE(input.is_contiguous(at::MemoryFormat::ChannelsLast));
+  ASSERT_EQ(at::native::rocm_grid_sampler_2d_backward_lanes(5), 8);
+  const int64_t last_eligible =
+      int64_t{std::numeric_limits<uint32_t>::max()} / 8;
+  ASSERT_EQ(last_eligible, 536870911);
+  const auto select = [&](int64_t width) {
+    return at::native::rocm_grid_sampler_2d_backward_dispatch(
+        input, at::empty({1, 1, width, 2}, meta),
+        /*interpolation_mode=*/0, /*input_requires_grad=*/true);
+  };
+  const auto last = select(last_eligible);
+  EXPECT_TRUE(last.channel_lane);
+  EXPECT_TRUE(last.scratch);
+  const auto first_ineligible = select(last_eligible + 1);
+  EXPECT_FALSE(first_ineligible.channel_lane);
+  EXPECT_FALSE(first_ineligible.scratch);
 }
 #endif
 #endif

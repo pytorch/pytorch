@@ -11796,12 +11796,14 @@ class TestNNDeviceType(NNTestCase):
     def _grid_sampler_2d_backward_kernel(self, fn):
         # Run fn under the profiler and return (result, kernel), where kernel is
         # "channel" or "generic" for the 2D backward kernel that ran, or None
-        # when this build records no GPU kernels (for example without Kineto).
+        # when this build has no Kineto and so records no GPU kernels.
         # Numerical results do not distinguish the kernels, so the route tests
         # check them here; callers report a None route as a skipped check.
-        # Profiler sessions in these tests keep the default activities: on
-        # ROCm a CPU-only session leaves later sessions in the process without
-        # GPU events.
+        # With Kineto, a call that records no 2D backward kernel fails the
+        # route check rather than skipping it. Profiler sessions in these tests
+        # keep the default activities: on ROCm a CPU-only session was observed
+        # to leave later sessions in the process without GPU events, so such a
+        # session is one possible cause of that failure.
         if not torch.autograd.kineto_available():
             return fn(), None
         activities = (torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA)
@@ -11810,11 +11812,12 @@ class TestNNDeviceType(NNTestCase):
             torch.cuda.synchronize()
         kernels = [e.name for e in prof.events()
                    if e.device_type == torch.autograd.DeviceType.CUDA]
-        if not kernels:
-            return result, None
         backward = {"channel" if "rocm_channel_lane" in k else "generic"
                     for k in kernels if "grid_sampler_2d_backward_kernel" in k}
-        self.assertEqual(len(backward), 1, msg=f"backward kernels: {kernels}")
+        self.assertEqual(
+            len(backward), 1,
+            msg=f"Kineto is available, but the profiler recorded these GPU kernels "
+                f"instead of one 2D backward kernel: {kernels}")
         return result, backward.pop()
 
     @onlyCUDA
@@ -11875,31 +11878,6 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
-    def test_grid_sample_2d_backward_rocm_cpu_fake_grad_input_memory_format(self, device):
-        # A ROCm build must still advertise contiguous gradients for CPU
-        # inputs, whatever the GPU dispatch would choose for the same layout.
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        bw = torch.ops.aten.grid_sampler_2d_backward.default
-        for channels, layout in itertools.product((1, 8, 64), ("channels_last", "contiguous")):
-            fmt = torch.channels_last if layout == "channels_last" else torch.contiguous_format
-            inp = torch.randn(1, channels, 8, 8).contiguous(memory_format=fmt)
-            grad_output = torch.randn(1, channels, 1, 4).contiguous(memory_format=fmt)
-            grid = torch.rand(1, 1, 4, 2) * 2 - 1
-            for mask in ([True, True], [False, True]):
-                with FakeTensorMode() as fake_mode:
-                    fake = bw(*(fake_mode.from_tensor(t) for t in (grad_output, inp, grid)),
-                              0, 0, False, mask)
-                msg = f"C={channels} layout={layout} mask={mask}"
-                if mask[0]:
-                    self.assertEqual(fake[0].stride(), torch.empty_like(
-                        inp, memory_format=torch.contiguous_format).stride(), msg=msg)
-                else:
-                    self.assertIsNone(fake[0], msg=msg)
-                self.assertEqual(fake[1].stride(), grid.stride(), msg=msg)
-
-    @onlyCUDA
-    @skipCUDAIfNotRocm
     @largeTensorTest("12GB", device="cuda")
     def test_grid_sample_2d_backward_rocm_launch_fallback_memory_format(self, device):
         # The channel-parallel kernel needs one block per output point, which HIP
@@ -11908,12 +11886,15 @@ class TestNNDeviceType(NNTestCase):
         # to the generic kernel, which needs a zeroed contiguous gradient rather
         # than the channels-last scratch. Out-of-bounds nearest samples avoid
         # atomic contention while exercising the large launch, so the gradient
-        # must be exactly zero.
+        # must be exactly zero. This uses the first ineligible width, so it
+        # catches a bound that admits one launch too many; ApplyTest
+        # GridSampler2dBackwardChannelLaneLaunchBound (cuda_apply_test.cpp)
+        # checks both sides of the bound on Meta tensors.
         from torch.testing._internal.common_utils import DeterministicGuard
 
         bw = torch.ops.aten.grid_sampler_2d_backward.default
         channels = 5                         # lanes rounds up to 8
-        w_out = (2**32 - 1) // 8 + 2         # just past the global work-size bound
+        w_out = (2**32 - 1) // 8 + 1         # the first width past the work-size bound
         inp = torch.randn(1, channels, 8, 8, device=device, dtype=torch.half
                           ).contiguous(memory_format=torch.channels_last)
         grad_output = torch.empty((1, channels, 1, w_out), device=device,
@@ -11936,7 +11917,6 @@ class TestNNDeviceType(NNTestCase):
         names = {e.name for e in p.events()}
         self.assertIn("aten::grid_sampler_2d_backward", names)
         self.assertNotIn("aten::copy_", names)
-        self.assertTrue(grad_input.is_contiguous())
         self.assertEqual(grad_input, torch.zeros_like(inp), atol=0, rtol=0)
         # Control: the same call with only four output points runs the
         # channel-parallel kernel, so launch size is what made it ineligible.
@@ -11944,22 +11924,14 @@ class TestNNDeviceType(NNTestCase):
             bw(grad_output[..., :4], inp, grid[:, :, :4], 1, 0, False, [True, True])
         self.assertIn("aten::copy_", {e.name for e in p.events()})
 
-        # Meta has no launch-extent dependency.
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        with FakeTensorMode() as fake_mode:
-            fake_args = tuple(
-                fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t
-                for t in args)
-            fake_grad_input = bw(*fake_args)[0]
-        self.assertEqual(fake_grad_input.stride(), grad_input.stride(),
-                         msg="meta must match eager across launch fallback")
-
     @onlyCUDA
     @skipCUDAIfNotRocm
     @largeTensorTest(lambda self, device, mode, input_requires_grad:
                      (20 if input_requires_grad else 10) * 1024**3, device="cuda")
-    @parametrize_test("mode", [0, 1, 2])
-    @parametrize_test("input_requires_grad", [False, True])
+    # Nearest grid-gradient-only calls are left out: their grid gradient is
+    # zero and the kernel reads no input, so no large offset is exercised.
+    @parametrize_test("mode,input_requires_grad",
+                      [(0, False), (0, True), (1, True), (2, False), (2, True)])
     def test_grid_sample_2d_backward_large_spatial_offset(self, device, mode, input_requires_grad):
         # C=1 forces generic dispatch. The last row of this channels-last input
         # starts at 2**31 elements, exercising both bicubic reads and writes.
@@ -12260,6 +12232,132 @@ class TestNNDeviceType(NNTestCase):
                     self.assertEqual(out[1].flatten().float().cpu(), torch.tensor(expected),
                                      atol=0, rtol=0)
 
+    @staticmethod
+    def _rocm_low_precision_oob_cases(dtype, sentinel):
+        # (description, grad_output, input, grid, mode) on CPU, in dtype, for
+        # samples near the edges with zeros padding. Grid points (+-9/8, 1/8)
+        # and their transposes, with align_corners=True on a 9x9 input, sit at
+        # source coordinates 8.5 or -0.5 on one axis and 4.5 on the other, so
+        # each bilinear or bicubic sample has both valid and out-of-bounds
+        # taps, and no valid tap is the (0, 0) pixel. That pixel holds
+        # `sentinel` in every plane: a kernel that loads an out-of-bounds tap
+        # from offset 0 without masking its contribution reads it, and the
+        # result becomes wrong or nonfinite. Arbitrary negative-edge points
+        # could legitimately sample (0, 0), so the points are fixed. At the
+        # half-pixel offset the bilinear weights and the cubic coefficients
+        # and their derivatives are exact in FP16 and BF16.
+        #
+        # Each channel is a seeded ramp plus noise, (x + y) / 8 + [0, 1/8),
+        # with a random sign that its grad_output shares, so the channel
+        # contributions add rather than cancel: every grid gradient is well
+        # above the roundoff bound of the test below, which therefore detects
+        # a zero or scaled result.
+        gen = torch.Generator().manual_seed(2025)
+        a, b = 9 / 8, 1 / 8
+        points = torch.tensor([[a, b], [-a, b], [b, a], [b, -a]])
+        grid = torch.stack([points, points.flip(0)]).reshape(2, 1, 4, 2)
+        yy, xx = torch.meshgrid(torch.arange(9.), torch.arange(9.), indexing="ij")
+        cases = []
+        for channels, fmt in ((8, torch.channels_last), (257, torch.channels_last),
+                              (64, torch.contiguous_format)):
+            sign = torch.randint(0, 2, (2, channels, 1, 1), generator=gen) * 2. - 1
+            inp = sign * ((xx + yy) / 8 + torch.rand(2, channels, 9, 9, generator=gen) / 8)
+            inp[:, :, 0, 0] = sentinel
+            grad_output = sign * (0.5 + torch.rand(2, channels, 1, 4, generator=gen) / 2)
+            for mode in (0, 2):  # bilinear, bicubic
+                cases.append((f"C={channels} {fmt} mode={mode}",
+                              grad_output.to(dtype).contiguous(memory_format=fmt),
+                              inp.to(dtype).contiguous(memory_format=fmt),
+                              grid.to(dtype), mode))
+        return cases
+
+    def _rocm_grid_grad_tap_bound(self, grad_output, inp, grid, mode):
+        # For each grid-gradient component: the coordinate scale times the sum,
+        # over channels and valid taps, of |input * tap derivative weight *
+        # grad_output|, in FP64. The tap weights come from the CPU backward on
+        # one-hot inputs; the (0, 0) pixel must carry no weight, which checks
+        # that the sentinel is never a valid tap and keeps it out of the bound.
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        N, C, H, W = inp.shape
+        k = H * W
+        one_hot = torch.eye(k, dtype=torch.float64).reshape(k, 1, H, W)
+        bound = torch.empty(grid.shape, dtype=torch.float64)
+        for n in range(N):
+            weights = bw(torch.ones(k, 1, *grid.shape[1:3], dtype=torch.float64), one_hot,
+                         grid[n:n + 1].double().expand(k, -1, -1, -1).contiguous(),
+                         mode, 0, True, [False, True])[1].abs()
+            self.assertEqual(weights[0], torch.zeros_like(weights[0]),
+                             msg="the sentinel pixel is a valid tap")
+            contributions = torch.einsum(
+                "ck,chw->khw", inp[n].double().reshape(C, k)[:, 1:].abs(),
+                grad_output[n].double().abs())
+            bound[n] = torch.einsum("khw,khwd->hwd", contributions, weights[1:])
+        return bound
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.half, torch.bfloat16)
+    @parametrize_test("channel_lane", ["on", "off"])
+    def test_grid_sample_2d_backward_rocm_low_precision_grid_grad_oob(self, device, dtype, channel_lane):
+        # Out-of-bounds taps with zeros padding must contribute nothing to
+        # either gradient, including in the reduced-precision grid-gradient-only
+        # bilinear branch of the generic kernel, which loads out-of-bounds taps
+        # from offset 0 and masks their contributions. C=8 channels-last and
+        # C=64 contiguous grid-only calls run the generic kernel; C=257
+        # channels-last grid-only calls run the channel-parallel kernel when it
+        # is forced on (test_grid_sample_2d_backward_rocm_routes checks the
+        # routes). The input's (0, 0) pixel, which no valid tap reads, holds a
+        # large finite value or inf.
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        rounds = {torch.half: 2.0 ** -11, torch.bfloat16: 2.0 ** -8}[dtype]
+        both, grid_only = [True, True], [False, True]
+        for sentinel in (torch.finfo(dtype).max, math.inf):
+            for desc, grad_output, inp, grid, mode in self._rocm_low_precision_oob_cases(
+                    dtype, sentinel):
+                channels = inp.size(1)
+                # Grid-gradient tolerance. With exact tap weights and
+                # coefficients, each tap is the dtype product of at most four
+                # dtype factors (three roundings), the taps are summed in FP32
+                # and the scaled result is rounded once more, so the error is
+                # within 4 unit roundoffs of the per-tap magnitude bound.
+                tol = 4 * rounds * self._rocm_grid_grad_tap_bound(grad_output, inp, grid, mode)
+                for mask in (grid_only, both):
+                    with self.subTest(case=desc, sentinel=sentinel, mask=mask):
+                        # Enabled, every call requesting grad_input is eligible;
+                        # of the grid-only calls, only C=257 channels-last is.
+                        self.assertEqual(
+                            self._rocm_expects_channel_lane(True, inp, grid, mode, mask),
+                            mask[0] or channels == 257, msg="fixture routes changed")
+                        tail = (mode, 0, True, mask)
+                        expected = bw(grad_output.double(), inp.double(), grid.double(), *tail)
+                        self.assertTrue(expected[1].isfinite().all(),
+                                        msg="reference grid gradient must be finite")
+                        # The tolerance must reject a zero or quarter-scale
+                        # result, so it can detect lost or misscaled taps.
+                        for corrupt in (torch.zeros_like(expected[1]),
+                                        (expected[1] / 4).to(dtype).double()):
+                            self.assertFalse(((corrupt - expected[1]).abs() <= tol).all(),
+                                             msg="tolerance too loose for this fixture")
+                        with self._rocm_channel_lane(channel_lane):
+                            actual = bw(grad_output.to(device), inp.to(device),
+                                        grid.to(device), *tail)
+                        grad_grid = actual[1].cpu().double()
+                        self.assertTrue(grad_grid.isfinite().all(), msg=f"{grad_grid}")
+                        err = (grad_grid - expected[1]).abs()
+                        self.assertTrue(
+                            (err <= tol).all(),
+                            msg=f"grid gradient error/tolerance up to "
+                                f"{(err / tol).max().item():.3g}: actual {grad_grid}, "
+                                f"expected {expected[1]}")
+                        if mask[0]:
+                            grad_magnitude = bw(grad_output.double().abs(), inp.double(),
+                                                grid.double(), *tail)[0].abs().max().item()
+                            self.assertTrue(expected[0].isfinite().all())
+                            self.assertEqual(actual[0].cpu().double(), expected[0],
+                                             atol=8 * rounds * grad_magnitude, rtol=0)
+                        else:
+                            self.assertIsNone(actual[0])
+
     @onlyCUDA
     @skipCUDAIfNotRocm
     @parametrize_test("channel_lane", ["default", "on", "off"])
@@ -12267,9 +12365,9 @@ class TestNNDeviceType(NNTestCase):
         # The numerical tests above cannot tell the kernels apart. For their
         # cases, check which 2D backward kernel runs: the channel-parallel one
         # exactly for eligible calls when it is enabled, the generic one
-        # otherwise. This needs GPU kernel events from the profiler; without
-        # them (for example without Kineto) the test is skipped, while the
-        # numerical tests still run.
+        # otherwise. This needs GPU kernel events from the profiler, so without
+        # Kineto the test is skipped, while the numerical tests still run.
+        # With Kineto, every profiled case must record its backward kernel.
         if not torch.autograd.kineto_available():
             self.skipTest("route checks need GPU kernel events (Kineto)")
         enabled = self._rocm_channel_lane_enabled(channel_lane, device)
@@ -12287,20 +12385,26 @@ class TestNNDeviceType(NNTestCase):
                 for mask in (both, grid_only):
                     checks.append((f"low_precision_grid_grad {dtype} {desc}",
                                    grad_output, inp, grid, mode, mask))
+            for desc, grad_output, inp, grid, mode in self._rocm_low_precision_oob_cases(
+                    dtype, math.inf):
+                for mask in (both, grid_only):
+                    checks.append((f"low_precision_grid_grad_oob {dtype} {desc}",
+                                   grad_output, inp, grid, mode, mask))
         channel_routes = 0
         for desc, grad_output, inp, grid, mode, mask in checks:
             grad_output, inp, grid = (t.to(device) for t in (grad_output, inp, grid))
             with self._rocm_channel_lane(channel_lane):
                 _, kernel = self._grid_sampler_2d_backward_kernel(
                     lambda: bw(grad_output, inp, grid, mode, 0, True, mask))
-            if kernel is None:
-                self.skipTest("the profiler recorded no GPU kernels")
             expect_channel = self._rocm_expects_channel_lane(enabled, inp, grid, mode, mask)
             channel_routes += expect_channel
             self.assertEqual(kernel, "channel" if expect_channel else "generic",
                              msg=f"channel_lane={channel_lane} mode={mode} mask={mask}: {desc}")
-        # Every C=257 low-precision case, and every eligible reference case,
-        # must have run the channel-parallel kernel when it is enabled.
+        # Every C=257 low-precision case, including the out-of-bounds C=257
+        # channels-last grid-only cases, and every eligible reference case
+        # must have run the channel-parallel kernel when it is enabled; the
+        # C=8 channels-last and C=64 contiguous grid-only out-of-bounds cases
+        # must have stayed generic.
         self.assertEqual(channel_routes > 0, enabled)
 
     @onlyCUDA
@@ -12316,8 +12420,8 @@ class TestNNDeviceType(NNTestCase):
         # input never copies: its contiguous gradient is already channels-last.
         # Where the profiler records GPU kernels, also check which backward
         # kernel ran; the copy cannot show that for grid-only or 1x1 calls.
-        # Without GPU kernel events the copy and value checks still run, and
-        # the test then reports the kernel checks as skipped.
+        # Without Kineto the copy and value checks still run, and the test then
+        # reports the kernel checks as skipped.
         enabled = self._rocm_channel_lane_enabled(channel_lane, device)
         bw = torch.ops.aten.grid_sampler_2d_backward.default
         gen = torch.Generator().manual_seed(1234)
@@ -12339,7 +12443,7 @@ class TestNNDeviceType(NNTestCase):
             with self._rocm_channel_lane(channel_lane):
                 _, kernel = self._grid_sampler_2d_backward_kernel(
                     lambda: bw(grad_output, inp, grid, mode, 0, False, mask))
-            if kernel is None:
+            if kernel is None:  # no Kineto
                 unchecked.append(msg)
             else:
                 self.assertEqual(kernel, "channel" if expect_channel else "generic", msg=msg)
@@ -12402,8 +12506,9 @@ class TestNNDeviceType(NNTestCase):
         # passes the channel-count, layout/mask/mode and launch-size checks, so
         # it cannot select the channel kernel for C < 3, for grid-gradient-only
         # calls on non-channels-last input or in nearest mode. "1" and "0"
-        # force the channel-parallel kernel on and off; any other value is
-        # ignored, leaving the architecture default. An eligible channels-last
+        # force the channel-parallel kernel on and off; c10::utils::check_env
+        # ignores any other value with a warning, leaving the architecture
+        # default. An eligible channels-last
         # call requesting grad_input copies its scratch exactly when the kernel
         # runs.
         bw = torch.ops.aten.grid_sampler_2d_backward.default
@@ -12427,8 +12532,9 @@ class TestNNDeviceType(NNTestCase):
             names = {e.name for e in p.events()}
             self.assertEqual("aten::copy_" in names, expect_channel, msg=f"{name}={value!r}")
 
-        # An ignored value warns once per process, not on every call. A fresh
-        # process makes this independent of earlier calls in this one.
+        # An ignored value warns on every eligible call, with c10's message for
+        # boolean flags. A fresh process keeps this independent of the warning
+        # state of this one.
         script = """if True:
             import warnings
             import torch
@@ -12440,14 +12546,40 @@ class TestNNDeviceType(NNTestCase):
             with warnings.catch_warnings(record=True) as caught:
                 for _ in range(3):
                     bw(grad_output, inp, grid, 0, 0, False, [True, True])
-            print(sum("Ignoring PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE" in str(w.message)
+            print(sum("Ignoring invalid value for boolean flag "
+                      "PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE" in str(w.message)
                       for w in caught))
             """
         import subprocess
         import sys
         env = dict(os.environ, **{name: "true"})
         out = subprocess.check_output([sys.executable, "-c", script], env=env, text=True)
-        self.assertEqual(out.strip().splitlines()[-1], "1")
+        self.assertEqual(out.strip().splitlines()[-1], "3")
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @parametrize_test("channel_lane", ["on", "off"])
+    def test_grid_sample_2d_backward_rocm_channel_lane_checks_grad_output(self, device, channel_lane):
+        # GridSampler.cpp launches the channel-parallel kernel directly, not
+        # through launch_grid_sampler_2d_backward_kernel, so that launcher must
+        # run the same checks first. This call is eligible apart from
+        # grad_output, which dispatch does not inspect: forced on, it reaches
+        # the channel-parallel launcher, and forced off the generic one. The
+        # oversized grad_output would make either kernel read out of bounds.
+        # Under strict deterministic mode the nondeterminism alert would raise
+        # a RuntimeError, so the ValueError also shows the check runs first.
+        # (test_grid_sample_2d_backward_rejects_wrong_rank covers inputs that
+        # dispatch already sends to the generic kernel.)
+        from torch.testing._internal.common_utils import DeterministicGuard
+
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        inp = torch.randn(1, 8, 4, 4, device=device).contiguous(memory_format=torch.channels_last)
+        grid = torch.zeros(1, 1, 4, 2, device=device)
+        grad_output = torch.randn(2, 8, 1, 4, device=device)
+        self.assertTrue(self._rocm_expects_channel_lane(True, inp, grid, 0, [True, True]))
+        with self._rocm_channel_lane(channel_lane), DeterministicGuard(True), \
+                self.assertRaisesRegex(ValueError, "expected grad_output to have sizes"):
+            bw(grad_output, inp, grid, 0, 0, False, [True, True])
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)

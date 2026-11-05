@@ -13,9 +13,10 @@
 #include <c10/macros/Macros.h>
 #include <cmath>
 #ifdef USE_ROCM
+#include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
+#include <array>
 #include <limits>
-#include <optional>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -424,43 +425,33 @@ namespace {
         kHipMaxGlobalWorkSize / rocm_grid_sampler_2d_backward_lanes(num_channels);
   }
 
-  // Debug and test override of the architecture default:
-  // PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE=1 enables the channel-parallel
-  // kernel on any ROCm architecture and =0 disables it. Any other value is
-  // ignored with a warning issued once per process, rather than on every call.
-  // The value is read each time a call passes the channel-count, layout/mask
-  // and launch-size checks, so tests can change it within a process; it cannot
-  // select the channel kernel for calls those checks reject: C < 3, other
-  // layouts below C = 32, grid-gradient-only calls below C = 32, on
-  // non-channels-last input or in nearest mode, and launches beyond HIP
-  // limits.
-  std::optional<bool> rocm_grid_sampler_2d_backward_channel_lane_override() {
-    const auto value =
-        c10::utils::get_env("PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE");
-    if (!value.has_value()) {
-      return std::nullopt;
-    }
-    if (*value == "1") {
-      return true;
-    }
-    if (*value == "0") {
-      return false;
-    }
-    TORCH_WARN_ONCE(
-        "Ignoring PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE=\"", *value,
-        "\"; expected \"0\" or \"1\".");
-    return std::nullopt;
-  }
-
   // By default, enable the channel-parallel mapping only on the measured
-  // architecture; the override above takes precedence.
+  // architecture. For debugging and testing,
+  // PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE=1 enables it on any ROCm
+  // architecture and =0 disables it; c10::utils::check_env ignores any other
+  // value with a warning. The variable is read each time a call passes the
+  // channel-count, layout/mask and launch-size checks, so tests can change it
+  // within a process; it cannot select the channel kernel for calls those
+  // checks reject: C < 3, other layouts below C = 32, grid-gradient-only calls
+  // below C = 32, on non-channels-last input or in nearest mode, and launches
+  // beyond HIP limits. A forced value returns before the device lookup, so it
+  // also applies to tensors without a device index, such as Meta tensors.
+  // The architecture result is cached per device, as in is_gfx942_device
+  // (native/cuda/Blas.cpp).
   bool rocm_grid_sampler_2d_backward_arch_supported(c10::DeviceIndex device) {
     if (const auto forced =
-            rocm_grid_sampler_2d_backward_channel_lane_override()) {
+            c10::utils::check_env("PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE")) {
       return *forced;
     }
-    static const std::vector<std::string> supported_archs = {"gfx1250"};
-    return at::detail::getCUDAHooks().isGPUArch(supported_archs, device);
+    TORCH_INTERNAL_ASSERT(device >= 0 && device < C10_COMPILE_TIME_MAX_GPUS);
+    static std::array<c10::once_flag, C10_COMPILE_TIME_MAX_GPUS> once_flags;
+    static std::array<bool, C10_COMPILE_TIME_MAX_GPUS> results{};
+    c10::call_once(once_flags[device], [device] {
+      static const std::vector<std::string> supported_archs = {"gfx1250"};
+      results[device] =
+          at::detail::getCUDAHooks().isGPUArch(supported_archs, device);
+    });
+    return results[device];
   }
 
   // ROCm channel-lane mapping with a parallel grid-gradient reduction.
@@ -477,7 +468,7 @@ namespace {
   // Requires blockDim.x to be a power of two (the launcher guarantees it) so
   // the tree reduction below covers every lane.
   template <typename scalar_t, typename index_t>
-  C10_LAUNCH_BOUNDS_1(256)
+  C10_LAUNCH_BOUNDS_1(kRocmGridSampler2dMaxLanes)
   __global__ void grid_sampler_2d_backward_kernel_rocm_channel_lane(
       const index_t nblocks_nhw,  // N * out_H * out_W
       TensorInfo<const scalar_t, index_t> grad_output,
@@ -492,7 +483,7 @@ namespace {
       const bool input_requires_grad) {
     using opmath_t = at::opmath_type<scalar_t>;
     constexpr bool kChannelPartials = !std::is_same_v<opmath_t, scalar_t>;
-    constexpr int kMaxLanes = 256;
+    constexpr int kMaxLanes = kRocmGridSampler2dMaxLanes;
 
     const index_t C = input.sizes[1];
     const index_t inp_H = input.sizes[2];
@@ -1539,26 +1530,11 @@ void launch_grid_sampler_3d_forward_kernel(
   }
 }
 
-#ifdef USE_ROCM
-// Defined after rocm_grid_sampler_2d_backward_dispatch, below: instantiating
-// the channel-parallel kernels after the generic ones keeps the generic
-// kernels' placement in the code object, which affects their timing.
-static void launch_grid_sampler_2d_backward_channel_lane(
-    const TensorBase &grad_input, const TensorBase &grad_grid,
-    const TensorBase &grad_output, const TensorBase &input,
-    const TensorBase &grid, int64_t interpolation_mode, int64_t padding_mode,
-    bool align_corners, bool input_requires_grad, int64_t nblocks_nhw);
-#endif  // USE_ROCM
-
 void launch_grid_sampler_2d_backward_kernel(
     const TensorBase &grad_input, const TensorBase &grad_grid,
     const TensorBase &grad_output, const TensorBase &input,
     const TensorBase &grid, int64_t interpolation_mode, int64_t padding_mode,
-    bool align_corners, std::array<bool,2> output_mask
-#ifdef USE_ROCM
-    , const RocmGridSampler2dBackwardDispatch &dispatch
-#endif
-    ) {
+    bool align_corners, std::array<bool,2> output_mask) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
   check_grid_sampler_2d_backward(input, grid, grad_output);
@@ -1576,19 +1552,6 @@ void launch_grid_sampler_2d_backward_kernel(
   auto input_requires_grad = output_mask[0];
 
   int64_t count = N * H * W;
-#ifdef USE_ROCM
-  // rocm_grid_sampler_2d_backward_dispatch selects the channel-parallel
-  // kernel only for nonempty launches within HIP's limits.
-  if (dispatch.channel_lane) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        !dispatch.scratch ||
-        grad_input.is_contiguous(at::MemoryFormat::ChannelsLast));
-    launch_grid_sampler_2d_backward_channel_lane(
-        grad_input, grad_grid, grad_output, input, grid, interpolation_mode,
-        padding_mode, align_corners, input_requires_grad, count);
-    return;
-  }
-#endif
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
@@ -1633,10 +1596,10 @@ void launch_grid_sampler_2d_backward_kernel(
 RocmGridSampler2dBackwardDispatch rocm_grid_sampler_2d_backward_dispatch(
     const TensorBase &input, const TensorBase &grid,
     int64_t interpolation_mode, bool input_requires_grad) {
-  // The allocation in GridSampler.cpp calls this before the launcher validates
-  // shapes; leave malformed inputs to the launcher's checks, which report
-  // them. Checking the batch and the grid's last dimension first also keeps
-  // the block count below from overflowing on malformed zero-size inputs.
+  // GridSampler.cpp calls this before either launcher validates shapes; leave
+  // malformed inputs to the generic launcher's checks, which report them.
+  // Checking the batch and the grid's last dimension first also keeps the
+  // block count below from overflowing on malformed zero-size inputs.
   if (input.dim() != 4 || grid.dim() != 4 ||
       input.size(0) != grid.size(0) || grid.size(3) != 2) {
     return {};
@@ -1685,14 +1648,30 @@ RocmGridSampler2dBackwardDispatch rocm_grid_sampler_2d_backward_dispatch(
   return dispatch;
 }
 
-// Launches the ROCm channel-parallel kernel. Only
-// launch_grid_sampler_2d_backward_kernel calls this, after its checks, when
-// rocm_grid_sampler_2d_backward_dispatch selected the kernel.
-static void launch_grid_sampler_2d_backward_channel_lane(
+// Placement: defining this launcher, and so instantiating the
+// channel-parallel kernels, after rocm_grid_sampler_2d_backward_dispatch kept
+// the generic kernels' entry locations in the code object on the measured
+// builds. Defining it before launch_grid_sampler_2d_backward_kernel moved
+// byte-identical generic kernels and made gfx1250 FP16 bicubic
+// grid-gradient-only backward 6% slower. Source order does not guarantee
+// placement on every compiler, and the hardware cause is not known.
+//
+// See GridSampler.h for the caller's contract.
+void launch_grid_sampler_2d_backward_channel_lane(
     const TensorBase &grad_input, const TensorBase &grad_grid,
     const TensorBase &grad_output, const TensorBase &input,
     const TensorBase &grid, int64_t interpolation_mode, int64_t padding_mode,
-    bool align_corners, bool input_requires_grad, int64_t nblocks_nhw) {
+    bool align_corners, std::array<bool, 2> output_mask) {
+  // The same checks and alert as launch_grid_sampler_2d_backward_kernel.
+  // See NOTE [ grid_sampler Native Functions ].
+  check_grid_sampler_2d_backward(input, grid, grad_output);
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("grid_sampler_2d_backward_cuda");
+  const bool input_requires_grad = output_mask[0];
+  // N * out_H * out_W; rocm_grid_sampler_2d_backward_dispatch selected this
+  // kernel only for a nonempty launch within HIP's limits.
+  const int64_t nblocks_nhw = grid.numel() / 2;
   const int lanes =
       static_cast<int>(rocm_grid_sampler_2d_backward_lanes(input.size(1)));
   const auto blocks = static_cast<unsigned int>(nblocks_nhw);

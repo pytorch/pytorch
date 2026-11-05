@@ -1034,13 +1034,15 @@ if(USE_ROCM)
   # reads zero; the 2D BF16 bicubic backward then returns a zero grid gradient
   # and a wrong input gradient. A compiler version does not show whether a
   # given LLVM 23 build has the fix, so compile the smallest affected case and
-  # check for the fixed encoding (op_sel:[0,1]). Only without it, build the grid
-  # sampler without packed BF16 instructions. The flag covers every BF16 kernel
-  # in this file, including the 3D backward, which then use v_fma_mix and f32
-  # instructions; other dtypes, and architectures without the feature, compile
-  # unchanged. If the probe cannot run, the flag is applied. The host pass of
-  # this HIP compile ignores the feature with a "not a recognized feature"
-  # warning; -Xarch_device cannot carry the -Xclang pairs to the device only.
+  # check for the fixed encoding (op_sel:[0,1]). Only with it does the grid
+  # sampler keep packed BF16 instructions; otherwise, including when the probe
+  # cannot run or its output is inconclusive, it is built without them, and
+  # the configure message says which case applied. The flag covers every BF16
+  # kernel in this file, including the 3D backward, which then use v_fma_mix
+  # and f32 instructions; other dtypes, and architectures without the
+  # feature, compile unchanged. The host pass of this HIP compile ignores the
+  # feature with a "not a recognized feature" warning; -Xarch_device cannot
+  # carry the -Xclang pairs to the device only.
   # Match the base architecture so target IDs such as gfx1250:sramecc+ count.
   set(_gs_base_archs "")
   foreach(_gs_arch IN LISTS PYTORCH_ROCM_ARCH)
@@ -1060,15 +1062,31 @@ if(USE_ROCM)
               -O3 -S -x ir "${_gs_probe}" -o -
       RESULT_VARIABLE _gs_probe_result
       OUTPUT_VARIABLE _gs_probe_asm
-      ERROR_QUIET)
+      ERROR_VARIABLE _gs_probe_err)
     string(REGEX MATCH "v_pk_add_bf16[^\n]*" _gs_probe_insn "${_gs_probe_asm}")
-    if(_gs_probe_result EQUAL 0 AND _gs_probe_insn MATCHES "op_sel:\\[0,1\\]")
+    string(STRIP "${_gs_probe_err}" _gs_probe_err)
+    if(NOT _gs_probe_result EQUAL 0)
+      message(STATUS "gfx1250 packed BF16 probe could not run "
+                     "(${_gs_probe_result}): ${_gs_probe_err}; building "
+                     "GridSampler.hip without packed BF16 instructions")
+      set(_gs_no_bf16_pk ON)
+    elseif(_gs_probe_insn MATCHES "op_sel:\\[0,1\\]")
       message(STATUS "gfx1250 packed BF16 inline constants are encoded "
                      "correctly; GridSampler.hip keeps packed BF16")
-    else()
-      message(STATUS "gfx1250 packed BF16 inline constants lack op_sel "
-                     "(llvm/llvm-project#209861); building GridSampler.hip "
+      set(_gs_no_bf16_pk OFF)
+    elseif(_gs_probe_insn STREQUAL "")
+      message(STATUS "gfx1250 packed BF16 probe inconclusive: no "
+                     "v_pk_add_bf16 in its output; building GridSampler.hip "
                      "without packed BF16 instructions")
+      set(_gs_no_bf16_pk ON)
+    else()
+      message(STATUS "gfx1250 packed BF16 probe did not find the fixed "
+                     "encoding (llvm/llvm-project#209861) in "
+                     "\"${_gs_probe_insn}\"; building GridSampler.hip "
+                     "without packed BF16 instructions")
+      set(_gs_no_bf16_pk ON)
+    endif()
+    if(_gs_no_bf16_pk)
       set_property(SOURCE
           "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/hip/GridSampler.hip"
           APPEND PROPERTY COMPILE_OPTIONS
