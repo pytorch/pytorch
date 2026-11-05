@@ -279,16 +279,13 @@ class TestNCCL4PyBackendCollectives(MultiProcContinuousTest):
         backend.start_coalescing()
         coalesced = backend.allreduce([t1], dist.AllreduceOptions())
         backend.allreduce([t2], dist.AllreduceOptions())
+        # Through PyWork, as FlightRecorderHook calls it at issue.
+        coalesced_result = dist.Work.get_future_result(coalesced)
+        self.assertFalse(coalesced_result.done())
         work = backend.end_coalescing()
-        with self.assertRaisesRegex(NotImplementedError, "coalesced op"):
-            coalesced.get_future_result()
-        # Through PyWork, as FlightRecorderHook calls it.
-        with self.assertRaisesRegex(
-            NotImplementedError, "getFutureResult not implemented: coalesced op"
-        ):
-            dist.Work.get_future_result(coalesced)
         result = dist.Work.get_future_result(work)
         self.assertEqual(WorkResult(result.wait()), WorkResult.SUCCESS)
+        self.assertEqual(WorkResult(coalesced_result.wait()), WorkResult.SUCCESS)
         work.wait()
         torch.cuda.synchronize(device)
         self.assertEqual(t1, torch.full((4,), 3.0, device=device))
