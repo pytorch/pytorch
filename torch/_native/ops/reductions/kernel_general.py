@@ -48,7 +48,7 @@ class ReduceBlock:
         block: int = 128,
         order: Literal["linear", "inner_tree"] = "linear",
         itree: Any = None,
-        tree_count: int = 0,
+        uniform_tree: bool = False,
     ) -> None:
         self.trait = trait
         self.count = count  # elements reduced per output (= prod red exts)
@@ -98,7 +98,7 @@ class ReduceBlock:
             ragged_chunk=ragged_chunk,
             order=order,
             itree=itree,
-            general_tree_count=tree_count,
+            uniform_tree_count=count if uniform_tree else 0,
         )
 
     @property
@@ -380,7 +380,7 @@ def _ordered_col_route_ok(view: torch.Tensor, trait: Any) -> bool:
     """Whether the ordered column kernel beats the indexed tree at this view's shape and
     output count. Callers check _ORDERED_COL_CCS and _ORDERED_COL_DTYPES."""
     B, R, C = (1, *view.shape) if view.dim() == 2 else view.shape
-    # reduce_ordered_col tiles WARP columns, so narrower views decline anyway.
+    # reduce_ordered_col also declines views narrower than a warp.
     if C < WARP:
         return False
     min_outputs = _ORDERED_COL_MIN_OUTPUTS[min(trait.nfields, 3)]
@@ -408,7 +408,6 @@ class _GeneralConfig(NamedTuple):
     block: int = _K0_BLOCK
     kernel_order: Literal["linear", "inner_tree"] = "linear"
     rule: str = "general_default"
-    uniform_tree: bool = False
 
 
 def select_general_config(
@@ -710,8 +709,8 @@ def _combine_itree_partials(
         plan,
         max(p.element_size() for p in parts),
         parts[0].device,
-        nfields=trait.nfields,
         nrows=num_o,
+        trait=trait,
     )
     s2 = ReduceBlock(
         trait,
@@ -786,11 +785,7 @@ def _reduce(
                     from . import kernel_coltile as ct
 
                     ordered = ct.reduce_ordered_col(
-                        trait,
-                        trait_key,
-                        col_view,
-                        out_dtypes,
-                        nouts,
+                        trait, trait_key, col_view, out_dtypes, nouts, cc=cc
                     )
                 if ordered is None:
                     ordered = _try_indexed_itree(
@@ -906,7 +901,6 @@ def _reduce(
         in_base=cast(int, x.storage_offset()),
         nouts=nouts,
         block=block,
-        tree_count=count if config.uniform_tree else 0,
     )
     key = ("reduce", trait_key, x.dtype, tuple(out_dtypes)) + op.cache_sig
     _launch(op, key, [_flat(x)], _flat_outs(outs))
