@@ -67,8 +67,8 @@
 namespace sdp {
 namespace {
 
-#if AT_CUDNN_ENABLED() && defined(CUDNN_FRONTEND_VERSION)
 constexpr long kMinCuDNNFrontendVersionForD256 = 12400;
+#if AT_CUDNN_ENABLED() && defined(CUDNN_FRONTEND_VERSION)
 constexpr bool kCuDNNFrontendSupportsD256 =
     CUDNN_FRONTEND_VERSION >= kMinCuDNNFrontendVersionForD256;
 #else
