@@ -2439,6 +2439,16 @@ class triton:
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = os.environ.get("TORCHINDUCTOR_DIVISIBLE_BY_16", "1") == "1"
 
+    # With dynamic shapes, a symbolic size argument (e.g. xnumel) can't be proven
+    # divisible by 16, so Triton masks every access element by element and can't
+    # vectorize. When this is on and the size hint is divisible by 16, the kernel is
+    # compiled with the divisibility hint and the launcher checks the runtime value,
+    # compiling a copy without the hint the first time a call breaks it. This mirrors
+    # Triton's own JIT specialization and adds no guards. Python wrapper only.
+    runtime_divisibility_specialization = (
+        os.environ.get("TORCHINDUCTOR_RUNTIME_DIVISIBILITY_SPECIALIZATION", "1") == "1"
+    )
+
     # On AMD/HIP, annotate pointer args with tt.pointer_range=32 when the
     # tensor storage provably fits in 2 GB. This lets Triton emit efficient
     # buffer load/store ops. Disable if a Triton compiler bug is triggered.
