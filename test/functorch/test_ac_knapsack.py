@@ -1,4 +1,9 @@
 # Owner(s): ["module: functorch"]
+import math
+import random
+
+import networkx as nx
+
 from torch._functorch._activation_checkpointing.graph_info_provider import (
     GraphInfoProvider,
 )
@@ -9,9 +14,12 @@ from torch._functorch._activation_checkpointing.knapsack import (
 from torch._functorch._activation_checkpointing.knapsack_evaluator import (
     KnapsackEvaluator,
 )
+from torch._functorch._activation_checkpointing.min_cut import minimum_cut
 from torch.fx.graph import Graph
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TestCase,
 )
@@ -416,6 +424,121 @@ class TestActivationCheckpointingKnapsack(TestCase):
                     expected_saved,
                     expected_recomputable,
                 )
+
+
+@instantiate_parametrized_tests
+class TestMinimumCut(TestCase):
+    @parametrize(
+        "edges",
+        [
+            [("source", "a", 3), ("a", "sink", 2)],
+            [
+                ("source", "a", 5),
+                ("source", "b", 4),
+                ("a", "b", 2),
+                ("a", "sink", 3),
+                ("b", "sink", 6),
+            ],
+            [
+                ("source", "a", math.inf),
+                ("a", "b", 7),
+                ("b", "a", 11),
+                ("b", "sink", math.inf),
+            ],
+            [
+                ("source", "a", 3.5),
+                ("source", "b", 3.5),
+                ("a", "sink", 3.5),
+                ("b", "sink", 3.5),
+            ],
+        ],
+    )
+    def test_matches_networkx(self, edges: list[tuple[str, str, float]]) -> None:
+        graph = nx.DiGraph()
+        graph.add_weighted_edges_from(edges, weight="capacity")
+
+        expected_value, expected_partition = nx.minimum_cut(graph, "source", "sink")
+        actual_value, actual_partition = minimum_cut(graph, "source", "sink")
+        reachable, non_reachable = actual_partition
+        actual_capacity = sum(
+            data["capacity"]
+            for start, end, data in graph.edges(data=True)
+            if start in reachable and end in non_reachable
+        )
+
+        self.assertEqual(actual_value, expected_value)
+        self.assertEqual(actual_partition, expected_partition)
+        self.assertEqual(actual_capacity, expected_value)
+
+    def test_matches_networkx_on_seeded_random_graphs(self) -> None:
+        rng = random.Random(0)
+        node_count = 12
+        for case in range(100):
+            graph = nx.DiGraph()
+            graph.add_nodes_from(range(node_count))
+            for start in range(node_count):
+                for end in range(node_count):
+                    if rng.random() < 0.15:
+                        graph.add_edge(
+                            start,
+                            end,
+                            capacity=rng.choice((0, 1, 2, 5, math.inf)),
+                        )
+            graph.add_edge(0, 0, capacity=math.inf)
+            graph.add_edge(1, 2, capacity=0)
+            graph.add_edge(2, 3, capacity=math.inf)
+            graph.add_edge(3, 4, capacity=2)
+
+            with self.subTest(case=case):
+                try:
+                    expected = nx.minimum_cut(graph, 0, node_count - 1)
+                except nx.NetworkXUnbounded:
+                    with self.assertRaises(nx.NetworkXUnbounded):
+                        minimum_cut(graph, 0, node_count - 1)
+                else:
+                    self.assertEqual(minimum_cut(graph, 0, node_count - 1), expected)
+
+    def test_rejects_invalid_inputs(self) -> None:
+        graph = nx.DiGraph()
+        graph.add_edge("source", "sink", capacity=1)
+
+        invalid_inputs = [
+            (graph, "source", "source"),
+            (graph, "missing", "sink"),
+            (graph, "source", "missing"),
+            (nx.Graph(graph), "source", "sink"),
+            (nx.MultiDiGraph(graph), "source", "sink"),
+        ]
+        for invalid_graph, source, sink in invalid_inputs:
+            with self.subTest(graph_type=type(invalid_graph), source=source, sink=sink):
+                with self.assertRaises(nx.NetworkXError):
+                    minimum_cut(invalid_graph, source, sink)
+
+    def test_long_path_does_not_recurse(self) -> None:
+        graph = nx.DiGraph()
+        node_count = 5000
+        for node in range(node_count - 1):
+            capacity = 1 if node == node_count // 2 else math.inf
+            graph.add_edge(node, node + 1, capacity=capacity)
+
+        value, (reachable, non_reachable) = minimum_cut(graph, 0, node_count - 1)
+
+        self.assertEqual(value, 1)
+        self.assertEqual(len(reachable) + len(non_reachable), node_count)
+
+    @parametrize("missing_capacity", [False, True])
+    def test_unbounded(self, missing_capacity: bool) -> None:
+        graph = nx.DiGraph()
+        graph.add_edge("source", "a", capacity=math.inf)
+        if missing_capacity:
+            graph.add_edge("a", "sink")
+        else:
+            graph.add_edge("a", "sink", capacity=math.inf)
+
+        with self.assertRaises(nx.NetworkXUnbounded):
+            nx.minimum_cut(graph, "source", "sink")
+        with self.assertRaises(nx.NetworkXUnbounded):
+            minimum_cut(graph, "source", "sink")
 
 
 if __name__ == "__main__":

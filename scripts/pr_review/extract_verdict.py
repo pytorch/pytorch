@@ -2,10 +2,12 @@
 """Sanitize the hardened PR review's model output into a publishable verdict.
 
 The review job runs Claude against UNTRUSTED pull-request content with network
-egress locked down, no GitHub write token, and no S3 credentials. The only thing
-that leaves that job is the JSON this script produces, so this file is the egress
-boundary and every control here exists because that text is attacker-influenced
-and ends up somewhere a human or a dashboard reads.
+egress locked down, no GitHub write token, and an S3 credential that can write
+only under the private pr_review_traces/ prefix. Apart from token and cost
+numbers, the only thing that leaves that job for a public surface is the JSON
+this script produces, so this file is the egress boundary and every control here
+exists because that text is attacker-influenced and ends up somewhere a human or
+a dashboard reads.
 
 The model is given the output shape in the prompt, NOT as an enforced schema -
 the workflow passes no --json-schema - so shape, types, the verdict enum and the
@@ -31,9 +33,9 @@ even if one were enforced:
 None of this closes the channel, and it is not the thing keeping us safe. A few
 hundred characters of prose can still carry a secret via an acrostic or semantic
 encoding, and no output filter fixes that. The control that actually bounds the
-damage is upstream: a 15-minute, Bedrock-only role with no S3 and no GitHub
-write. This script raises the cost of the naive attempts and makes the
-deliberate ones narrow.
+damage is upstream: a one-hour role limited to Bedrock and S3 writes under
+pr_review_traces/, with no GitHub write. This script raises the cost of the
+naive attempts and makes the deliberate ones narrow.
 
 A well-formed file is written on every path where writing is possible, and the
 exit code is 0 — a rejected or malformed result is reported as a
@@ -58,7 +60,9 @@ VERDICTS = {"ready_for_human_review", "changes_requested"}
 SEVERITIES = {"info", "minor", "major"}
 
 MAX_FINDINGS = 25
-MAX_MESSAGE = 600
+# Stage B's prompt asks for at most 1200 characters, leaving room for the
+# escaping neutralize() adds; a message that still overflows ends in TRUNCATED.
+MAX_MESSAGE = 1500
 MAX_SUMMARY = 1500
 MAX_PATH = 400
 MAX_DROPPED_TRACKED = (
@@ -66,6 +70,14 @@ MAX_DROPPED_TRACKED = (
 )
 MAX_LINE = 10_000_000  # no source file has this many lines; bounds a published integer
 MAX_STRUCTURED_BYTES = 1024 * 1024  # whole-document ceiling, applied before parsing
+
+# CONTRIBUTING.md: stacks must have fewer than 10 PRs, so the 10th PR from the
+# bottom and everything above it get changes requested.
+STACK_POSITION_LIMIT = 10
+# One ghstack stack-list entry, "* #12345" or "* __->__ #12345" for the current
+# PR, as matched by .github/scripts/filter_test_configs.py.
+_GHSTACK_ENTRY = re.compile(r"\* (?:__->__ )?#\d+\s*")
+_GHSTACK_CURRENT = "__->__"
 
 # Printable ASCII plus tab and newline. Everything else — control characters,
 # zero-width joiners, variation selectors, RTL overrides, any non-ASCII — fails.
@@ -89,8 +101,8 @@ _BLOB = re.compile(r"[A-Za-z0-9+/=_-]{120,}")
 # hex digest is 128 characters, which is over the floor.
 # ACCEPTED COST: this leaves a hole exactly the width of a digest — an attacker
 # can hex-encode up to 64 bytes and shape it like one. That is far below a
-# session token, and the 15-minute Bedrock-only credential is what bounds the
-# damage anyway.
+# session token, and the one-hour credential (Bedrock, plus S3 writes under
+# pr_review_traces/) is what bounds the damage anyway.
 _DIGEST_LENGTHS = {32, 40, 56, 64, 96, 128}
 _HEX_ONLY = re.compile(r"^[0-9a-fA-F]+$")
 
@@ -153,6 +165,23 @@ _HTML_TAG = re.compile(r"<[^>]*>")
 # first: a tag that VANISHES is what lets `https:<i></i>//evil` reassemble, and
 # the blob check downstream is calibrated to see that reassembly happen.
 _HTML_ESCAPES = (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"))
+
+# The inverse of `neutralize` and `neutralize_path`: what their output may look
+# like. `build` holds its own result to it and the publish job re-checks the
+# artifact against it, so the producer and the check live here together.
+# neutralize() strips every backslash, then adds them only before `[`, `]` and
+# the `#` of a defused reference; neutralize_path() only before `[]()@#*_`.
+_STRAY_BACKSLASH = re.compile(r"\\(?![\[\]#])")
+_UNESCAPED_BRACKET = re.compile(r"(?<!\\)[\[\]]")
+# neutralize() caps AFTER escaping, so a capped string can end in a cut entity.
+_BARE_AMPERSAND = re.compile(r"&(?!amp;|lt;|gt;|(?:a(?:mp?)?|lt?|gt?)?\Z)")
+_FINDING_KEYS = ("path", "line", "severity", "message")
+# The space keeps the dots from completing a token, such as `www` into a URL.
+TRUNCATED = " ..."
+# A cut entity is allowed only at the very end; it must go before TRUNCATED.
+_PARTIAL_ENTITY = re.compile(r"&(?:a(?:mp?)?|lt?|gt?)?\Z")
+# Anchored at a token start: unanchored, each retry backtracks through long tokens.
+_PARTIAL_TOKEN = re.compile(r"(?<!\S)\S+\Z")
 
 
 class Rejected(Exception):
@@ -233,7 +262,8 @@ def check_no_encoded_blob(text: str, where: str) -> None:
     splitting a payload into sub-120-character runs, or base64ing text that
     decodes back to printable ASCII, both walk straight past it. It catches the
     careless case cheaply. What bounds the damage is that the review job's
-    credential is Bedrock-only and expires in fifteen minutes.
+    credential reaches only Bedrock and S3 writes under pr_review_traces/, and
+    expires within an hour.
     """
     # Scanned TWICE: a tag can keep each half under the floor, and stripping
     # rejoins them. Neither subsumes the other -- stripping eats a bracketed
@@ -363,12 +393,12 @@ def neutralize(text: str, cap: int = MAX_SUMMARY) -> str:
     bracket, so they cannot reconstitute the ``\\/\\/host`` case that strip
     exists for.
 
-    NOT DONE HERE, and it is a real gap: markdown STRUCTURE the attacker writes
-    is not escaped, so a summary can still forge a heading, a table, a
-    horizontal rule or a fenced block. Nothing renders these strings today — the
-    row carries no findings and Dr.CI rendering is unbuilt — so this is latent.
-    It has to be closed in the same change that starts rendering, and the right
-    escaping depends on that renderer.
+    NOT DONE HERE: markdown STRUCTURE the attacker writes is not escaped, so a
+    summary can still forge a heading, a table, a horizontal rule or a fenced
+    block. The renderer has to contain it. The Dr.CI renderer proposed in
+    pytorch/test-infra#8972 does, by putting the summary and findings inside a
+    code fence longer than any backtick run they hold. Any surface that renders
+    these strings needs its own containment.
     """
     text = "".join(c for c in text[:cap] if _ALLOWED_CHARS.match(c))
     text = text.replace("\\", "")
@@ -403,7 +433,12 @@ def neutralize(text: str, cap: int = MAX_SUMMARY) -> str:
     # meaning; `neutralize_path` already makes the same trade for paths.
     text = text.replace("[", "\\[").replace("]", "\\]")
     text = _URL.sub(_LINK_MARKER, text)
-    text = _XREF.sub(r"\1\\# \2", text)
+    # To a fixed point: one pass misses a chained `a/b#1/c#2`, because the
+    # `/c#2` match starts inside the `a/b#1` one. The defused `\# 1` then
+    # supplies the non-word character the next match needs, and it was left as
+    # a live `1/c#2`. Each pass defuses at least one `#`, so this terminates.
+    while (defused := _XREF.sub(r"\1\\# \2", text)) != text:
+        text = defused
     text = _MENTION.sub(r"@ \1", text)
     text = _ISSUE_REF.sub(r"\\# \1", text)
     for char, escaped in _HTML_ESCAPES:
@@ -411,6 +446,43 @@ def neutralize(text: str, cap: int = MAX_SUMMARY) -> str:
     # Capped on the way out as well as in: escaping GROWS the string, and one
     # place deciding the length beats every caller re-truncating.
     return _drop_dangling_escape(text[:cap])
+
+
+def neutralize_message(message: str) -> str:
+    """`neutralize` a finding message to MAX_MESSAGE, ending a cut in TRUNCATED.
+
+    The input is sliced to MAX_MESSAGE first, as `neutralize` would, so its
+    quadratic cost stays bounded; only the output is allowed to grow before the
+    cut, which escaping can make up to 5x longer.
+
+    A cut can leave text that fails a check the whole message passed: half a
+    128-hex digest is a blob, a cut entity mid-string is a bare `&`. So whole
+    tokens are dropped from the end until the result passes the publish check,
+    and a message with no passing prefix comes back empty, which `build` drops.
+    Only failures the cut causes are repaired this way: a message that fails the
+    check whole (a blob neutralize() joined, say) is returned whole, so `build`
+    drops it as `failed_publish_check`.
+    """
+    src = message[:MAX_MESSAGE]
+    if len(src) < len(message) and not message[MAX_MESSAGE].isspace():
+        # The input slice is a cut too: drop the token it split.
+        src = _PARTIAL_TOKEN.sub("", src) or src
+    full = neutralize(src, 5 * MAX_MESSAGE).strip()
+    if not full or (len(message.rstrip()) <= MAX_MESSAGE and len(full) <= MAX_MESSAGE):
+        return full
+    if not is_neutral_prose(full, len(full)):
+        return full
+    kept = full[: MAX_MESSAGE - len(TRUNCATED)]
+    if len(kept) < len(full) and not full[len(kept)].isspace():
+        # Back up to a word boundary, unless the text is one long token.
+        kept = _PARTIAL_TOKEN.sub("", kept) or kept
+    while kept.strip():
+        out = _drop_dangling_escape(kept.rstrip())
+        out = _PARTIAL_ENTITY.sub("", out).rstrip() + TRUNCATED
+        if is_neutral_prose(out, MAX_MESSAGE):
+            return out
+        kept = _PARTIAL_TOKEN.sub("", kept.rstrip())
+    return ""
 
 
 def unquote_git_path(path: str) -> str:
@@ -486,7 +558,9 @@ def _is_repo_path(path: str) -> bool:
     # the charset check on the assembled result, which rejects the ENTIRE
     # review rather than the one finding. Dropping it here costs that finding
     # alone and leaves the rest of the review publishable.
-    if not _PATH_CHARS.match(path):
+    # fullmatch: `$` also matches before a final newline, so `.match` let
+    # `x.py\n` through.
+    if not _PATH_CHARS.fullmatch(path):
         return False
     # Bound the ESCAPED length, so a published path is always the exact
     # validated name rather than a half-name cut mid-escape.
@@ -495,13 +569,95 @@ def _is_repo_path(path: str) -> bool:
     return not any(part in ("", ".", "..") for part in path.split("/"))
 
 
-def parse_diff(diff_text: str) -> dict[str, set[int]]:
-    """Map each changed file to the set of new-side line numbers the diff touches.
+def _is_published_text(value: object, cap: int) -> bool:
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= cap
+        and _ALLOWED_CHARS.fullmatch(value) is not None
+        and not _carries_blob(value)
+    )
 
-    Only the post-image (``+++ b/...``) side is recorded, because that is what a
-    finding's ``line`` refers to. Both added and context lines inside a hunk
-    count, so a reviewer may anchor a finding on an unchanged line next to the
-    change.
+
+def _carries_blob(text: str) -> bool:
+    # `build` refuses these in its result; the publish job has to as well.
+    try:
+        check_no_encoded_blob(text, "published string")
+    except Rejected:
+        return True
+    return False
+
+
+def is_neutral_prose(value: object, cap: int) -> bool:
+    """Whether `value` is text `neutralize` could have produced."""
+    return (
+        _is_published_text(value, cap)
+        and "<" not in value
+        and ">" not in value
+        and not _BARE_AMPERSAND.search(value)
+        and not _STRAY_BACKSLASH.search(value)
+        and not _UNESCAPED_BRACKET.search(value)
+        and not any(p.search(value) for p in (_URL, _XREF, _MENTION, _ISSUE_REF))
+    )
+
+
+def is_neutral_path(value: object) -> bool:
+    """Whether `value` is `neutralize_path` of a valid repo-relative path."""
+    if (
+        not isinstance(value, str)
+        or len(value) > MAX_PATH
+        or not _PATH_CHARS.fullmatch(value)
+        or _carries_blob(value)
+    ):
+        return False
+    raw = "".join(
+        c for i, c in enumerate(value) if not (c == "\\" and value[i + 1 : i + 2])
+    )
+    return _is_repo_path(raw) and neutralize_path(raw) == value
+
+
+def is_publishable_finding(item: object) -> bool:
+    """Whether `item` is one finding in exactly the shape `build` emits."""
+    if not isinstance(item, dict) or set(item) != set(_FINDING_KEYS):
+        return False
+    line = item["line"]
+    return (
+        is_neutral_path(item["path"])
+        and is_neutral_prose(item["message"], MAX_MESSAGE)
+        and isinstance(item["severity"], str)
+        and item["severity"] in SEVERITIES
+        and isinstance(line, int)
+        and not isinstance(line, bool)
+        and 0 < line <= MAX_LINE
+    )
+
+
+def published_findings(verdict: dict) -> list[dict]:
+    """The findings of a verdict that may be published, capped at MAX_FINDINGS.
+
+    A finding that does not match the shape is dropped, not repaired.
+    """
+    raw = verdict.get("findings")
+    if not isinstance(raw, list):
+        return []
+    kept: list[dict] = []
+    for item in raw:
+        if len(kept) >= MAX_FINDINGS:
+            break
+        if is_publishable_finding(item):
+            kept.append({key: item[key] for key in _FINDING_KEYS})
+    return kept
+
+
+def parse_diff(diff_text: str) -> dict[str, set[int]]:
+    """Map each changed file to the set of line numbers the diff touches.
+
+    For a file that still exists, the post-image (``+++ b/...``) side is
+    recorded, because that is what a finding's ``line`` refers to. Both added and
+    context lines inside a hunk count, so a reviewer may anchor a finding on an
+    unchanged line next to the change. A file the diff deletes has no post-image,
+    so its removed lines are recorded instead, numbered as in the deleted file;
+    the publish step posts those on the diff's left side. Without them a PR that
+    only deletes files has no anchor at all and can never be asked for changes.
 
     HEADERS ARE ONLY RECOGNISED OUTSIDE A HUNK BODY, and the hunk's own declared
     line counts are what say where the body ends. This is the anchoring
@@ -523,16 +679,24 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
     from the new side, ``-`` one from the old. While either budget is open every
     line is body, whatever it looks like.
 
-    KNOWN LIMITS, deliberate: pure renames, mode-only changes, binary files and
-    deletions have no new-side hunk lines, so findings about them can never
-    anchor and are dropped. Combined (merge) diffs are not parsed; a PR diff
-    against its base is never one. A malformed diff whose body is shorter than
-    its header declares leaves the budget open and swallows what follows — that
-    loses anchors, never invents them, which is the safe direction.
+    KNOWN LIMITS, deliberate: pure renames, mode-only changes and binary files
+    have no hunk lines, so findings about them can never anchor and are dropped.
+    Combined (merge) diffs are not parsed; a PR diff against its base is never
+    one. A malformed diff whose body is shorter than its header declares leaves
+    the budget open and swallows what follows — that loses anchors, never
+    invents them, which is the safe direction.
     """
     touched: dict[str, set[int]] = {}
+    deleted: dict[str, set[int]] = {}
     current: str | None = None
+    # The file a deletion stanza removes, from its `---` header.
+    old_path: str | None = None
+    deleting: str | None = None
+    stanza = ""  # the current stanza's `diff --git` line
+    last_deletion: tuple[str, str] | None = None  # (stanza, path)
+    recreated: str | None = None  # a deleted path whose header came round again
     new_line = 0
+    old_line = 0
     old_remaining = 0
     new_remaining = 0
     saw_git_header = False
@@ -559,6 +723,9 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
                 new_remaining -= 1
             elif raw.startswith("-"):
                 old_remaining -= 1
+                if deleting is not None:
+                    deleted[deleting].add(old_line)
+                old_line += 1
                 i += 1
                 continue  # deletions consume no new-side number
             elif raw == "" or raw.startswith(" "):
@@ -566,6 +733,7 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
                 # the trailing space from an empty context line.
                 old_remaining -= 1
                 new_remaining -= 1
+                old_line += 1
             else:
                 # DESYNC. An unprefixed line cannot occur inside a real hunk —
                 # a content line reading `diff --git ...` is emitted as
@@ -583,15 +751,31 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
 
         i += 1
         if raw.startswith("diff --git "):
+            # A type change is a deletion stanza followed by a creation stanza
+            # with the same header, which carries no `+++` when the new file is
+            # empty or binary. The path still exists, so it has no old side. The
+            # header alone does not prove it (unquoted spaces let a rename
+            # collide), so wait for the stanza's `new file mode`.
+            recreated = None
+            if last_deletion is not None and raw == last_deletion[0]:
+                recreated = last_deletion[1]
+            last_deletion = None
+            stanza = raw
             # A new stanza always closes the previous file, even if its hunks
             # were malformed.
-            current = None
+            current = deleting = old_path = None
             saw_git_header = True
             prev_was_old_header = False
             continue
+        if raw.startswith("new file mode ") and recreated is not None:
+            deleted.pop(recreated, None)
+            recreated = None
+            continue
         if raw.startswith("--- "):
             prev_was_old_header = True
-            current = None
+            current = deleting = None
+            old = _header_target(raw)
+            old_path = old if old != "/dev/null" and _is_repo_path(old) else None
             continue
         if raw.startswith("+++ ") and prev_was_old_header and saw_git_header:
             # `saw_git_header` is the third guard. Real `git diff` always emits
@@ -601,16 +785,14 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
             # attacker a header position.
             prev_was_old_header = False
             saw_git_header = False
-            # Cut at the TAB, do not strip: git delimits a trailing-whitespace
-            # path with one, so `victim.py ` recorded as the untouched
-            # `victim.py`.
-            header = raw[4:]
-            header = header.split("\t", 1)[0] if "\t" in header else header.strip()
-            target = unquote_git_path(header)
+            target = _header_target(raw)
             if target == "/dev/null":
                 current = None
+                deleting = old_path
+                if deleting is not None:
+                    deleted.setdefault(deleting, set())
+                    last_deletion = (stanza, deleting)
             else:
-                target = target[2:] if target.startswith(("a/", "b/")) else target
                 current = target if _is_repo_path(target) else None
             if current is not None:
                 touched.setdefault(current, set())
@@ -619,8 +801,9 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
 
         if raw.startswith("@@"):
             m = re.match(r"@@+ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", raw)
-            if m and current is not None:
+            if m and (current is not None or deleting is not None):
                 old_remaining = int(m.group(2)) if m.group(2) is not None else 1
+                old_line = int(m.group(1))
                 new_line = int(m.group(3))
                 new_remaining = int(m.group(4)) if m.group(4) is not None else 1
             else:
@@ -628,9 +811,25 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
                 # nothing rather than guess.
                 old_remaining = new_remaining = 0
                 new_line = 0
-                current = None
+                current = deleting = None
             continue
+    # A path deleted and re-added in one diff (a type change) keeps only its new
+    # side: the publish step could not tell which side a line meant.
+    for path, removed in deleted.items():
+        touched.setdefault(path, removed)
     return touched
+
+
+def _header_target(raw: str) -> str:
+    """The path a `--- `/`+++ ` header names, without its a/ or b/ prefix."""
+    # Cut at the TAB, do not strip: git delimits a trailing-whitespace path with
+    # one, so `victim.py ` recorded as the untouched `victim.py`.
+    header = raw[4:]
+    header = header.split("\t", 1)[0] if "\t" in header else header.strip()
+    target = unquote_git_path(header)
+    if target == "/dev/null":
+        return target
+    return target[2:] if target.startswith(("a/", "b/")) else target
 
 
 def sanitize_findings(  # noqa: C901
@@ -706,7 +905,7 @@ def sanitize_findings(  # noqa: C901
             drop({"path": path, "reason": "bad_severity"})
             continue
 
-        clean_message = neutralize(message, MAX_MESSAGE).strip()[:MAX_MESSAGE].strip()
+        clean_message = neutralize_message(message)
         if not clean_message:
             # e.g. a message consisting only of `<b></b>`: it survives the
             # non-empty check above but neutralizes to nothing, and an empty
@@ -714,25 +913,30 @@ def sanitize_findings(  # noqa: C901
             drop({"path": path, "reason": "message_empty_after_neutralize"})
             continue
 
-        kept.append(
-            {
-                # Neutralized like every other published string. It was the one
-                # that was not — `drop()` neutralized its copy while the KEPT
-                # copy was merely truncated, and the kept one is the copy that
-                # gets rendered. A path is attacker-chosen text: `@handle`,
-                # `[label](target)` and `#1234` are all legal in a filename, so
-                # `touch '@pytorchbot [rebase](//evil) #1.py'` @lint-ignore
-                # was enough to put a live mention and a live link into a
-                # bot-authored surface, with no diff trickery at all.
-                #
-                # `neutralize_path`, not `neutralize`: this one has to stay the
-                # NAME of the file it was validated against.
-                "path": neutralize_path(path)[:MAX_PATH],
-                "line": line,
-                "severity": severity.lower(),
-                "message": clean_message,
-            }
-        )
+        finding = {
+            # Neutralized like every other published string. It was the one
+            # that was not — `drop()` neutralized its copy while the KEPT
+            # copy was merely truncated, and the kept one is the copy that
+            # gets rendered. A path is attacker-chosen text: `@handle`,
+            # `[label](target)` and `#1234` are all legal in a filename, so
+            # `touch '@pytorchbot [rebase](//evil) #1.py'` @lint-ignore
+            # was enough to put a live mention and a live link into a
+            # bot-authored surface, with no diff trickery at all.
+            #
+            # `neutralize_path`, not `neutralize`: this one has to stay the
+            # NAME of the file it was validated against.
+            "path": neutralize_path(path)[:MAX_PATH],
+            "line": line,
+            "severity": severity.lower(),
+            "message": clean_message,
+        }
+        # The publish job drops a finding that fails this, so drop it HERE.
+        # It catches a message that fails uncut, which neutralize_message()
+        # returns whole, and any bug in the producer above.
+        if not is_publishable_finding(finding):
+            drop({"path": path, "line": line, "reason": "failed_publish_check"})
+            continue
+        kept.append(finding)
     return kept, dropped, dropped_total
 
 
@@ -766,6 +970,9 @@ def build(obj: dict, touched: dict[str, set[int]]) -> dict:
     summary = neutralize(summary_raw, MAX_SUMMARY).strip()[:MAX_SUMMARY].strip()
     if not summary:
         raise Rejected("summary is empty after neutralization")
+    # The publish job refuses the whole review on this, so refuse it here.
+    if not is_neutral_prose(summary, MAX_SUMMARY):
+        raise Rejected("summary fails the publish-side check")
 
     findings_raw = obj.get("findings")
     if not isinstance(findings_raw, list):
@@ -786,9 +993,9 @@ def build(obj: dict, touched: dict[str, set[int]]) -> dict:
 
     # And the other direction, which is the one an attacker wants. A clean
     # verdict alongside a `major` finding is a contradiction the rubric forbids
-    # ("say ready_for_human_review when no major finding is present"), and the
-    # publish job acts on the VERDICT, not on the findings — so it would move
-    # the PR to the terminal label while the artifact records a major problem
+    # ("say ready_for_human_review when no major finding is present"), and
+    # Dr. CI acts on the recorded VERDICT, not on the findings - so it would
+    # mark the PR ready for review while the artifact records a major problem
     # nothing downstream reads.
     #
     # Read off the CLAIM, not off `kept`, and that distinction is the whole
@@ -826,6 +1033,85 @@ def build(obj: dict, touched: dict[str, set[int]]) -> dict:
     check_value_charset(result, "sanitized result")
     check_value_blobs(result, "sanitized result")
     return result
+
+
+def ghstack_position(body: str) -> int:
+    """The PR's 1-based position from the bottom of its ghstack, 0 outside one.
+
+    ghstack lists the stack newest-first, so the PRs below this one are the
+    entries right after its `__->__` line. Counting stops at the first line
+    that is not an entry: a `* #N` bullet elsewhere in the body is not a PR in
+    the stack, and counting it could request changes on the bottom PR.
+    """
+    if not body or _GHSTACK_CURRENT not in body:
+        return 0
+    lines = body.split("\n")
+    for i, line in enumerate(lines):
+        if _GHSTACK_CURRENT in line and _GHSTACK_ENTRY.fullmatch(line):
+            below = 0
+            for after in lines[i + 1 :]:
+                if not _GHSTACK_ENTRY.fullmatch(after):
+                    break
+                below += 1
+            return below + 1
+    return 0
+
+
+def apply_stack_policy(result: dict, body: str, touched: dict[str, set[int]]) -> dict:
+    """Request changes on a PR at or above STACK_POSITION_LIMIT in its ghstack.
+
+    Decided here, from the PR body, rather than by the model: the rule is
+    mechanical, and a model reviewing the code can miss it or be argued out of
+    it. Only a succeeded review is touched; a failed one stays a failure.
+    """
+    position = ghstack_position(body)
+    if result.get("status") != "succeeded" or position < STACK_POSITION_LIMIT:
+        return result
+    policy = (
+        f"This PR is number {position} from the bottom of its ghstack. "
+        f"PyTorch requires stacks of fewer than {STACK_POSITION_LIMIT} PRs "
+        f"(CONTRIBUTING.md): land the PRs below it, then rebase and submit the "
+        f"stack again, or split the stack."
+    )
+    summary = _drop_dangling_escape(f"{policy} {result['summary']}"[:MAX_SUMMARY])
+    if not is_neutral_prose(summary, MAX_SUMMARY):
+        summary = policy
+    findings = list(result["findings"])
+    # post_review blocks on every finding of an objection with no major one.
+    # Keep such a model objection blocking next to the major policy finding.
+    if result["verdict"] == "changes_requested" and all(
+        f["severity"] != "major" for f in findings
+    ):
+        findings = [{**f, "severity": "major"} for f in findings]
+    for path in sorted(p for p, lines in touched.items() if lines):
+        finding = {
+            "path": neutralize_path(path)[:MAX_PATH],
+            "line": min(touched[path]),
+            "severity": "major",
+            "message": policy,
+        }
+        if is_publishable_finding(finding):
+            findings = [finding, *findings][:MAX_FINDINGS]
+            break
+    else:
+        # Like build(), never publish an objection with no finding to point at.
+        return result
+    return {
+        **result,
+        "verdict": "changes_requested",
+        "summary": summary,
+        "findings": findings,
+    }
+
+
+def load_pr_body(path: Path) -> str:
+    """The PR body from fetch_pr_comments.py's output, or "" if unreadable."""
+    try:
+        data = json.loads(path.read_bytes())
+    except (OSError, ValueError, RecursionError):
+        return ""
+    body = data.get("body") if isinstance(data, dict) else None
+    return body if isinstance(body, str) else ""
 
 
 def failure(status: str, reason: str) -> dict:
@@ -924,6 +1210,11 @@ def main() -> int:
         help="GitHub outcome of the step that produced the structured output; "
         "anything but 'success' downgrades the published status",
     )
+    ap.add_argument(
+        "--pr-comments-file",
+        help="fetch_pr_comments.py's output; its PR body places the PR in its "
+        "ghstack for the stack-size policy",
+    )
     args = ap.parse_args()
 
     try:
@@ -942,7 +1233,11 @@ def main() -> int:
                 result = failure("blocked", f"could not read the diff: {exc}")
             else:
                 try:
-                    result = build(obj, parse_diff(diff_text))
+                    touched = parse_diff(diff_text)
+                    result = build(obj, touched)
+                    if args.pr_comments_file:
+                        body = load_pr_body(Path(args.pr_comments_file))
+                        result = apply_stack_policy(result, body, touched)
                 except Rejected as exc:
                     result = failure("sanitizer_rejected", str(exc))
                 except RecursionError:
